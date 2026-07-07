@@ -297,6 +297,36 @@ pub struct ReadinessInput {
     pub observed_at: i64,
 }
 
+/// Neck-check illness classification (File 06). Encoded in a
+/// [`ReadinessInput`] whose `signal == ReadinessSignal::Illness`, this decodes
+/// the numeric `value` convention (0 = none, 1 = above-neck, ≥2 = below-neck /
+/// any fever) into a self-documenting category, the autoregulation layer
+/// branches on the enum, never on raw float literals.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IllnessSeverity {
+    /// No illness signal → no adjustment.
+    None,
+    /// Above-neck only (congestion, sore throat), no fever → downgrade session.
+    AboveNeck,
+    /// Below-neck symptoms or any fever → absolute no-train.
+    BelowNeckOrFever,
+}
+
+impl IllnessSeverity {
+    /// Decode the `ReadinessInput.value` convention via range checks (no float
+    /// equality): `value >= 2.0` → below-neck/fever, `>= 1.0` → above-neck,
+    /// else none. Intermediate values (e.g. `1.5`) round down to the milder tier.
+    pub fn from_value(value: f64) -> Self {
+        if value >= 2.0 {
+            IllnessSeverity::BelowNeckOrFever
+        } else if value >= 1.0 {
+            IllnessSeverity::AboveNeck
+        } else {
+            IllnessSeverity::None
+        }
+    }
+}
+
 /// Safety priority ladder (File 06 §5). Higher tier always overrides lower.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SafetyTier {
@@ -375,6 +405,22 @@ mod tests {
         assert!(SafetyTier::ObjectivePerformance > SafetyTier::SubjectiveMultiDay);
         assert!(SafetyTier::SubjectiveMultiDay > SafetyTier::HrvTrend);
         assert!(SafetyTier::HrvTrend > SafetyTier::SingleDayMarker);
+    }
+
+    #[test]
+    fn illness_severity_decodes_neck_check_convention() {
+        assert_eq!(IllnessSeverity::from_value(0.0), IllnessSeverity::None);
+        assert_eq!(IllnessSeverity::from_value(1.0), IllnessSeverity::AboveNeck);
+        // Intermediate rounds down to the milder tier.
+        assert_eq!(IllnessSeverity::from_value(1.5), IllnessSeverity::AboveNeck);
+        assert_eq!(
+            IllnessSeverity::from_value(2.0),
+            IllnessSeverity::BelowNeckOrFever
+        );
+        assert_eq!(
+            IllnessSeverity::from_value(3.0),
+            IllnessSeverity::BelowNeckOrFever
+        );
     }
 
     #[test]
