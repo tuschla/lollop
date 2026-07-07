@@ -1980,7 +1980,9 @@ name = "web-leptos"
 version = "0.1.0"
 dependencies = [
  "leptos",
+ "serde_json",
  "shared",
+ "web-sys",
 ]
 
 [[package]]
