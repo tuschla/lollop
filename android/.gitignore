@@ -1,0 +1,8 @@
+/build
+/app/build
+/.gradle
+/local.properties
+/app/src/main/assets/web/
+/captures
+*.iml
+.idea/
