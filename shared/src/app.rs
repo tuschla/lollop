@@ -11,7 +11,7 @@ use crux_core::{
 use serde::{Deserialize, Serialize};
 
 use crate::schema::{Adjustment, ReadinessInput, Recommended};
-use crate::{autoreg, strength};
+use crate::{autoreg, running, strength};
 
 #[derive(Clone)]
 struct LoggedSet {
@@ -21,12 +21,22 @@ struct LoggedSet {
     rpe: f64,
 }
 
+#[derive(Clone)]
+struct LoggedRun {
+    distance_km: f64,
+    duration_min: f64,
+    hr_pct_max: f64,
+    longest_recent_km: f64,
+}
+
 #[derive(Default)]
 pub struct Model {
     /// Observed readiness signals, in submission order.
     inputs: Vec<ReadinessInput>,
     /// Logged lift sets, in submission order.
     sets: Vec<LoggedSet>,
+    /// Logged runs, in submission order.
+    runs: Vec<LoggedRun>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -44,6 +54,16 @@ pub enum Event {
     },
     /// Drop all logged sets.
     ClearSets,
+    /// Log one run (distance km, duration min, average % HRmax, and the
+    /// longest run in the last 30 days for spike detection).
+    LogRun {
+        distance_km: f64,
+        duration_min: f64,
+        hr_pct_max: f64,
+        longest_recent_km: f64,
+    },
+    /// Drop all logged runs.
+    ClearRuns,
 }
 
 /// One adjustment flattened for shells: human summary + its evidence tag.
@@ -80,6 +100,21 @@ pub struct ViewModel {
     pub adjustments: Vec<AdjustmentView>,
     pub input_count: usize,
     pub lifts: Vec<LiftResultView>,
+    pub runs: Vec<RunResultView>,
+}
+
+/// One logged run with derived zone / pace / spike flag, flattened for shells.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct RunResultView {
+    /// 3-zone lactate classification from % HRmax, e.g. `"Z2"`.
+    pub zone: String,
+    /// Pace as `m:ss/km`.
+    pub pace: String,
+    /// True when this run's distance spikes >10% over the recent longest.
+    pub spike_flag: bool,
+    pub summary: String,
+    /// Evidence backing the spike gate.
+    pub citation: String,
 }
 
 #[effect]
@@ -113,6 +148,18 @@ impl App for Engine {
                 rpe,
             }),
             Event::ClearSets => model.sets.clear(),
+            Event::LogRun {
+                distance_km,
+                duration_min,
+                hr_pct_max,
+                longest_recent_km,
+            } => model.runs.push(LoggedRun {
+                distance_km,
+                duration_min,
+                hr_pct_max,
+                longest_recent_km,
+            }),
+            Event::ClearRuns => model.runs.clear(),
         }
         render()
     }
@@ -130,7 +177,34 @@ impl App for Engine {
             adjustments: recommended.iter().map(to_view).collect(),
             input_count: model.inputs.len(),
             lifts: model.sets.iter().map(to_lift_view).collect(),
+            runs: model.runs.iter().map(to_run_view).collect(),
         }
+    }
+}
+
+/// Derive zone + pace + distance-spike flag for one logged run.
+fn to_run_view(r: &LoggedRun) -> RunResultView {
+    let zone = running::classify_three_zone(r.hr_pct_max);
+    let spike = running::single_session_spike_flag(r.distance_km, r.longest_recent_km);
+
+    let pace = if r.distance_km > 0.0 {
+        let sec_per_km = (r.duration_min * 60.0) / r.distance_km;
+        format!("{}:{:02}/km", (sec_per_km as u32) / 60, (sec_per_km as u32) % 60)
+    } else {
+        "-".to_string()
+    };
+
+    RunResultView {
+        zone: format!("{zone:?}"),
+        pace: pace.clone(),
+        spike_flag: spike.value,
+        summary: format!(
+            "{:.1}km @ {} ({zone:?}){}",
+            r.distance_km,
+            pace,
+            if spike.value { " - distance spike >10%" } else { "" }
+        ),
+        citation: spike.evidence.citation.reference.clone(),
     }
 }
 
@@ -246,6 +320,48 @@ mod tests {
         assert!((vm.lifts[0].e1rm_kg - 116.7).abs() < 0.05);
         // RPE 8 → 2 RIR.
         assert!((vm.lifts[0].rir - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn logging_a_run_classifies_zone_and_pace() {
+        let app = Engine;
+        let mut model = Model::default();
+
+        app.update(
+            Event::LogRun {
+                distance_km: 10.0,
+                duration_min: 50.0,
+                hr_pct_max: 70.0,
+                longest_recent_km: 12.0,
+            },
+            &mut model,
+        )
+        .expect_only_render();
+
+        let vm = app.view(&model);
+        assert_eq!(vm.runs.len(), 1);
+        assert_eq!(vm.runs[0].pace, "5:00/km");
+        assert!(!vm.runs[0].spike_flag);
+        assert!(!vm.runs[0].zone.is_empty());
+    }
+
+    #[test]
+    fn run_distance_spike_is_flagged() {
+        let app = Engine;
+        let mut model = Model::default();
+
+        app.update(
+            Event::LogRun {
+                distance_km: 20.0,
+                duration_min: 100.0,
+                hr_pct_max: 75.0,
+                longest_recent_km: 12.0,
+            },
+            &mut model,
+        )
+        .expect_only_render();
+
+        assert!(app.view(&model).runs[0].spike_flag);
     }
 
     #[test]

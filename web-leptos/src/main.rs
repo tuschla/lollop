@@ -42,6 +42,26 @@ fn RootComponent() -> impl IntoView {
         }
     };
 
+    let dist = RwSignal::new(String::from("10"));
+    let dur = RwSignal::new(String::from("50"));
+    let hr = RwSignal::new(String::from("70"));
+    let longest = RwSignal::new(String::from("12"));
+
+    let log_run = move |_| {
+        let d = dist.get().parse::<f64>().unwrap_or(0.0);
+        let t = dur.get().parse::<f64>().unwrap_or(0.0);
+        let h = hr.get().parse::<f64>().unwrap_or(0.0);
+        let l = longest.get().parse::<f64>().unwrap_or(0.0);
+        if d > 0.0 && t > 0.0 {
+            set_event.set(Event::LogRun {
+                distance_km: d,
+                duration_min: t,
+                hr_pct_max: h,
+                longest_recent_km: l,
+            });
+        }
+    };
+
     view! {
         <section class="box container m-5">
             <h1 class="title is-4">"Readiness → Autoregulation"</h1>
@@ -113,6 +133,37 @@ fn RootComponent() -> impl IntoView {
             <ul>
                 {move || view.get().lifts.into_iter().map(|l| view! {
                     <li class="box p-3 mb-2">{l.summary}</li>
+                }).collect_view()}
+            </ul>
+
+            <hr/>
+            <h2 class="title is-5">"Log a run"</h2>
+            <div class="field is-grouped is-grouped-multiline">
+                <input class="input mr-2" style="width:6rem" type="number" placeholder="km"
+                    prop:value=move || dist.get()
+                    on:input=move |ev| dist.set(event_target_value(&ev)) />
+                <input class="input mr-2" style="width:6rem" type="number" placeholder="min"
+                    prop:value=move || dur.get()
+                    on:input=move |ev| dur.set(event_target_value(&ev)) />
+                <input class="input mr-2" style="width:6rem" type="number" placeholder="%HRmax"
+                    prop:value=move || hr.get()
+                    on:input=move |ev| hr.set(event_target_value(&ev)) />
+                <input class="input mr-2" style="width:7rem" type="number" placeholder="longest km"
+                    prop:value=move || longest.get()
+                    on:input=move |ev| longest.set(event_target_value(&ev)) />
+                <button class="button is-primary" on:click=log_run>{"Log run"}</button>
+                <button class="button ml-2" on:click=move |_| set_event.set(Event::ClearRuns)>
+                    {"Clear runs"}
+                </button>
+            </div>
+
+            <ul>
+                {move || view.get().runs.into_iter().map(|r| view! {
+                    <li class="box p-3 mb-2">
+                        <span class=move || if r.spike_flag { "has-text-danger" } else { "" }>
+                            {r.summary}
+                        </span>
+                    </li>
                 }).collect_view()}
             </ul>
         </section>
