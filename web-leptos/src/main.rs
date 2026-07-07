@@ -22,6 +22,26 @@ fn RootComponent() -> impl IntoView {
         core::update(&core, event.get(), render);
     });
 
+    let exercise = RwSignal::new(String::from("Back squat"));
+    let weight = RwSignal::new(String::from("100"));
+    let reps = RwSignal::new(String::from("5"));
+    let rpe = RwSignal::new(String::from("8"));
+
+    let log_set = move |_| {
+        let ex = exercise.get();
+        let w = weight.get().parse::<f64>().unwrap_or(0.0);
+        let r = reps.get().parse::<u32>().unwrap_or(0);
+        let e = rpe.get().parse::<f64>().unwrap_or(0.0);
+        if !ex.is_empty() && w > 0.0 && r > 0 {
+            set_event.set(Event::LogSet {
+                exercise: ex,
+                weight_kg: w,
+                reps: r,
+                rpe: e,
+            });
+        }
+    };
+
     view! {
         <section class="box container m-5">
             <h1 class="title is-4">"Readiness → Autoregulation"</h1>
@@ -66,6 +86,33 @@ fn RootComponent() -> impl IntoView {
                         </span>
                         <p class="is-size-7 has-text-grey">{a.citation}</p>
                     </li>
+                }).collect_view()}
+            </ul>
+
+            <hr/>
+            <h2 class="title is-5">"Log a lift set"</h2>
+            <div class="field is-grouped is-grouped-multiline">
+                <input class="input mr-2" style="width:10rem" placeholder="exercise"
+                    prop:value=move || exercise.get()
+                    on:input=move |ev| exercise.set(event_target_value(&ev)) />
+                <input class="input mr-2" style="width:6rem" type="number" placeholder="kg"
+                    prop:value=move || weight.get()
+                    on:input=move |ev| weight.set(event_target_value(&ev)) />
+                <input class="input mr-2" style="width:5rem" type="number" placeholder="reps"
+                    prop:value=move || reps.get()
+                    on:input=move |ev| reps.set(event_target_value(&ev)) />
+                <input class="input mr-2" style="width:5rem" type="number" step="0.5" placeholder="RPE"
+                    prop:value=move || rpe.get()
+                    on:input=move |ev| rpe.set(event_target_value(&ev)) />
+                <button class="button is-primary" on:click=log_set>{"Log set"}</button>
+                <button class="button ml-2" on:click=move |_| set_event.set(Event::ClearSets)>
+                    {"Clear sets"}
+                </button>
+            </div>
+
+            <ul>
+                {move || view.get().lifts.into_iter().map(|l| view! {
+                    <li class="box p-3 mb-2">{l.summary}</li>
                 }).collect_view()}
             </ul>
         </section>

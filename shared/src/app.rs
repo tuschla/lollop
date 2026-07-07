@@ -10,13 +10,23 @@ use crux_core::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::autoreg;
 use crate::schema::{Adjustment, ReadinessInput, Recommended};
+use crate::{autoreg, strength};
+
+#[derive(Clone)]
+struct LoggedSet {
+    exercise: String,
+    weight_kg: f64,
+    reps: u32,
+    rpe: f64,
+}
 
 #[derive(Default)]
 pub struct Model {
     /// Observed readiness signals, in submission order.
     inputs: Vec<ReadinessInput>,
+    /// Logged lift sets, in submission order.
+    sets: Vec<LoggedSet>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -25,6 +35,15 @@ pub enum Event {
     SubmitReadiness(ReadinessInput),
     /// Drop all accumulated inputs (new day / new session).
     ClearReadiness,
+    /// Log one completed lift set (weight in kg, reps, session RPE).
+    LogSet {
+        exercise: String,
+        weight_kg: f64,
+        reps: u32,
+        rpe: f64,
+    },
+    /// Drop all logged sets.
+    ClearSets,
 }
 
 /// One adjustment flattened for shells: human summary + its evidence tag.
@@ -41,6 +60,17 @@ pub struct AdjustmentView {
     pub contested: bool,
 }
 
+/// One logged set with its derived strength metrics, flattened for shells.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct LiftResultView {
+    pub exercise: String,
+    /// Estimated 1RM (Epley), kg, rounded to 0.1.
+    pub e1rm_kg: f64,
+    /// Reps in reserve implied by the session RPE.
+    pub rir: f64,
+    pub summary: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct ViewModel {
     /// Highest safety tier triggered, e.g. `"Pain"`; `None` when all clear.
@@ -49,6 +79,7 @@ pub struct ViewModel {
     pub train_blocked: bool,
     pub adjustments: Vec<AdjustmentView>,
     pub input_count: usize,
+    pub lifts: Vec<LiftResultView>,
 }
 
 #[effect]
@@ -70,6 +101,18 @@ impl App for Engine {
         match event {
             Event::SubmitReadiness(input) => model.inputs.push(input),
             Event::ClearReadiness => model.inputs.clear(),
+            Event::LogSet {
+                exercise,
+                weight_kg,
+                reps,
+                rpe,
+            } => model.sets.push(LoggedSet {
+                exercise,
+                weight_kg,
+                reps,
+                rpe,
+            }),
+            Event::ClearSets => model.sets.clear(),
         }
         render()
     }
@@ -86,7 +129,23 @@ impl App for Engine {
             train_blocked,
             adjustments: recommended.iter().map(to_view).collect(),
             input_count: model.inputs.len(),
+            lifts: model.sets.iter().map(to_lift_view).collect(),
         }
+    }
+}
+
+/// Derive strength metrics for one logged set (Epley e1RM, RIR from RPE).
+fn to_lift_view(s: &LoggedSet) -> LiftResultView {
+    let e1rm_kg = (strength::e1rm_epley(s.weight_kg, s.reps) * 10.0).round() / 10.0;
+    let rir = strength::rpe_to_rir(s.rpe);
+    LiftResultView {
+        exercise: s.exercise.clone(),
+        e1rm_kg,
+        rir,
+        summary: format!(
+            "{} {:.0}kg × {} @RPE{:.1} → e1RM {:.1}kg ({:.0} RIR)",
+            s.exercise, s.weight_kg, s.reps, s.rpe, e1rm_kg, rir
+        ),
     }
 }
 
@@ -163,6 +222,30 @@ mod tests {
         assert!(!vm.train_blocked);
         assert!(vm.adjustments.is_empty());
         assert_eq!(vm.input_count, 1);
+    }
+
+    #[test]
+    fn logging_a_set_derives_e1rm_and_rir() {
+        let app = Engine;
+        let mut model = Model::default();
+
+        app.update(
+            Event::LogSet {
+                exercise: "Back squat".into(),
+                weight_kg: 100.0,
+                reps: 5,
+                rpe: 8.0,
+            },
+            &mut model,
+        )
+        .expect_only_render();
+
+        let vm = app.view(&model);
+        assert_eq!(vm.lifts.len(), 1);
+        // Epley: 100 * (1 + 5/30) = 116.7
+        assert!((vm.lifts[0].e1rm_kg - 116.7).abs() < 0.05);
+        // RPE 8 → 2 RIR.
+        assert!((vm.lifts[0].rir - 2.0).abs() < f64::EPSILON);
     }
 
     #[test]
