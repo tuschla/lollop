@@ -65,6 +65,57 @@ fn rhr_stop(inputs: &[ReadinessInput]) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Medical-referral deferrals (File 08 §5). Absolute: override every training
+// adjustment, including training-pain. `value > 0` encodes "flag present".
+// ---------------------------------------------------------------------------
+
+/// RED-S / low-energy-availability red flag (safety-035/049): never a
+/// programming variable, reduce stress and defer to a professional.
+fn reds_defer(inputs: &[ReadinessInput]) -> bool {
+    latest(inputs, ReadinessSignal::RedS).is_some_and(|v| v > 0.0)
+}
+
+/// Cardiovascular red-flag symptom (safety-043): stop + defer for clearance.
+fn cardiac_defer(inputs: &[ReadinessInput]) -> bool {
+    latest(inputs, ReadinessSignal::CardiacRedFlag).is_some_and(|v| v > 0.0)
+}
+
+/// Bone-stress-injury signs (safety-040): stop impact + urgent referral.
+fn bone_stress_defer(inputs: &[ReadinessInput]) -> bool {
+    latest(inputs, ReadinessSignal::BoneStress).is_some_and(|v| v > 0.0)
+}
+
+/// The dominant medical-referral deferral, if any red flag is present.
+/// Deterministic priority: cardiovascular (acute) > bone stress > RED-S.
+/// Returns the `Recommended<Adjustment::Defer>` cited to its safety claim.
+fn medical_referral(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
+    if cardiac_defer(inputs) {
+        Some(recommend(
+            Adjustment::Defer {
+                reason: "Cardiovascular red-flag symptom - stop and seek medical clearance before training.".into(),
+            },
+            "SAFE-CVD-001",
+        ))
+    } else if bone_stress_defer(inputs) {
+        Some(recommend(
+            Adjustment::Defer {
+                reason: "Bone stress injury signs - stop impact loading immediately and seek urgent medical evaluation.".into(),
+            },
+            "SAFE-BSI-001",
+        ))
+    } else if reds_defer(inputs) {
+        Some(recommend(
+            Adjustment::Defer {
+                reason: "Low-energy-availability / RED-S red flag - reduce training stress and defer to a physician, registered dietitian, or mental-health professional.".into(),
+            },
+            "SAFE-REDS-001",
+        ))
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Rule-family helpers (thresholds verbatim from File 06)
 // ---------------------------------------------------------------------------
 
@@ -184,7 +235,12 @@ pub fn resolve_safety(inputs: &[ReadinessInput]) -> Option<SafetyTier> {
         });
     };
 
-    // Tier 1, pain overrides everything (autoreg-043).
+    // Tier 0, medical red flags: defer to a professional, overrides all
+    // training adjustments including pain (File 08 §5 safety-040/043/049).
+    if medical_referral(inputs).is_some() {
+        raise(SafetyTier::MedicalReferral);
+    }
+    // Tier 1, pain overrides everything else (autoreg-043).
     if pain_stop(inputs) {
         raise(SafetyTier::Pain);
     }
@@ -218,13 +274,17 @@ pub fn resolve_safety(inputs: &[ReadinessInput]) -> Option<SafetyTier> {
 /// RHR +10 bpm) it dominates: the returned vec contains only the safety stop.
 /// Otherwise every matching optimization rule contributes its adjustment.
 pub fn adjustments(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
-    // Safety override: a Stop-level condition suppresses all other output.
-    // autoreg-043 (pain) > autoreg-046 (illness/fever) > autoreg-041 (RHR +10).
+    // Safety override: a Stop/Defer-level condition suppresses all other output.
+    // medical referral (File 08) > pain (autoreg-043) > illness/fever
+    // (autoreg-046) > RHR +10 (autoreg-041).
+    if let Some(defer) = medical_referral(inputs) {
+        return vec![defer];
+    }
     if pain_stop(inputs) {
         return vec![recommend(Adjustment::Stop, "MYTH-NO-PAIN-JOINT")];
     }
     if illness_stop(inputs) {
-        return vec![recommend(Adjustment::Stop, "SAFE-REDS-001")];
+        return vec![recommend(Adjustment::Stop, "ILLNESS-NECK-001")];
     }
     if rhr_stop(inputs) {
         return vec![recommend(Adjustment::RestDay, "SAFE-OTS-001")];
@@ -249,7 +309,7 @@ pub fn adjustments(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
     }
     if illness_downgrade(inputs) {
         // autoreg-045: above-neck only → cut intensity ~50% (downgrade).
-        out.push(recommend(Adjustment::DowngradeSession, "SAFE-OTS-001"));
+        out.push(recommend(Adjustment::DowngradeSession, "ILLNESS-NECK-001"));
     }
     if let Some(r) = rhr_downgrade(inputs) {
         out.push(r);
@@ -311,6 +371,48 @@ mod tests {
         let adj = adjustments(&inputs);
         assert!(adj.iter().all(|r| r.value != Adjustment::Stop));
         assert!(adj.is_empty());
+    }
+
+    #[test]
+    fn reds_flag_defers_above_pain() {
+        // A RED-S flag alongside training pain: deferral is the sole output and
+        // the safety tier is MedicalReferral (above Pain).
+        let inputs = vec![
+            input(ReadinessSignal::RedS, 1.0),
+            input(ReadinessSignal::Pain, 1.0),
+        ];
+        assert_eq!(resolve_safety(&inputs), Some(SafetyTier::MedicalReferral));
+        let adj = adjustments(&inputs);
+        assert_eq!(adj.len(), 1, "defer must dominate even over pain");
+        assert!(matches!(adj[0].value, Adjustment::Defer { .. }));
+        assert!(adj[0].confidence.safety_critical);
+    }
+
+    #[test]
+    fn cardiac_flag_outranks_bone_stress_and_reds() {
+        let inputs = vec![
+            input(ReadinessSignal::RedS, 1.0),
+            input(ReadinessSignal::BoneStress, 1.0),
+            input(ReadinessSignal::CardiacRedFlag, 1.0),
+        ];
+        let adj = adjustments(&inputs);
+        assert_eq!(adj.len(), 1);
+        match &adj[0].value {
+            Adjustment::Defer { reason } => assert!(reason.contains("Cardiovascular")),
+            other => panic!("expected cardiac defer, got {other:?}"),
+        }
+        assert_eq!(adj[0].evidence.citation.claim_id.as_deref(), Some("SAFE-CVD-001"));
+    }
+
+    #[test]
+    fn bone_stress_defers_with_urgent_referral() {
+        let inputs = vec![input(ReadinessSignal::BoneStress, 1.0)];
+        let adj = adjustments(&inputs);
+        assert_eq!(adj.len(), 1);
+        match &adj[0].value {
+            Adjustment::Defer { reason } => assert!(reason.contains("urgent")),
+            other => panic!("expected bone-stress defer, got {other:?}"),
+        }
     }
 
     #[test]

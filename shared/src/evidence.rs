@@ -251,6 +251,16 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contested: None,
         review_months: 12,
     },
+    EvidenceEntry {
+        claim_id: "ILLNESS-NECK-001",
+        statement: "Febrile illness contraindicates strenuous exercise (myocarditis / sudden-cardiac-death risk): any fever or below-neck symptoms = no training. Above-neck-only symptoms without fever permit reduced-intensity training (neck-check operationalization).",
+        grade: Strong,
+        primary_citations: &["Sports-medicine consensus: exercise contraindicated during febrile illness (myocarditis risk)", "Meeusen et al. 2013 ECSS/ACSM", "Neck-check rule (File 06 §6E)"],
+        contradicting: &[],
+        safety_critical: true,
+        contested: None,
+        review_months: 12,
+    },
     // ---- Moderate ----
     EvidenceEntry {
         claim_id: "HYP-FAIL-001",

@@ -83,6 +83,9 @@ fn RootComponent() -> impl IntoView {
     let d_pain = dispatch.clone();
     let d_rpe_hi = dispatch.clone();
     let d_rpe_lo = dispatch.clone();
+    let d_reds = dispatch.clone();
+    let d_cardiac = dispatch.clone();
+    let d_bone = dispatch.clone();
     let d_clear_r = dispatch.clone();
     let d_clear_s = dispatch.clone();
     let d_clear_run = dispatch.clone();
@@ -115,6 +118,19 @@ fn RootComponent() -> impl IntoView {
                 <button class="button"
                     on:click=move |_| d_clear_r(Event::ClearReadiness)
                 >{"Clear"}</button>
+            </div>
+
+            <p class="is-size-7 has-text-grey mb-1">"Medical red flags → stop + refer:"</p>
+            <div class="buttons">
+                <button class="button is-danger is-outlined"
+                    on:click=move |_| d_cardiac(readiness(ReadinessSignal::CardiacRedFlag, 1.0))
+                >{"Cardiac symptom"}</button>
+                <button class="button is-danger is-outlined"
+                    on:click=move |_| d_bone(readiness(ReadinessSignal::BoneStress, 1.0))
+                >{"Bone stress"}</button>
+                <button class="button is-danger is-outlined"
+                    on:click=move |_| d_reds(readiness(ReadinessSignal::RedS, 1.0))
+                >{"RED-S / low energy"}</button>
             </div>
 
             <p class="is-size-7 mb-2">

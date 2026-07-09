@@ -169,7 +169,7 @@ impl App for Engine {
 
         let train_blocked = recommended
             .iter()
-            .any(|r| matches!(r.value, Adjustment::Stop | Adjustment::RestDay));
+            .any(|r| matches!(r.value, Adjustment::Stop | Adjustment::RestDay | Adjustment::Defer { .. }));
 
         ViewModel {
             safety_tier: autoreg::resolve_safety(&model.inputs).map(|t| format!("{t:?}")),
@@ -249,6 +249,7 @@ fn describe(a: &Adjustment) -> String {
         Adjustment::DowngradeSession => "Downgrade to an easier session".into(),
         Adjustment::RestDay => "Take a full rest day".into(),
         Adjustment::Stop => "Stop - do not train".into(),
+        Adjustment::Defer { reason } => reason.clone(),
     }
 }
 

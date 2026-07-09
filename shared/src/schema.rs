@@ -286,6 +286,17 @@ pub enum ReadinessSignal {
     Pain,
     /// Fever/illness report. Absolute rest.
     Illness,
+    /// RED-S / low-energy-availability red flag (amenorrhea, rapid weight loss,
+    /// compulsive exercise, recurrent BSI). Absolute deferral, never a
+    /// programming variable (File 08 safety-035/049).
+    RedS,
+    /// Cardiovascular red-flag symptom (chest pain, syncope, unexplained
+    /// dyspnea, palpitations). Stop + defer for medical clearance (File 08
+    /// safety-043).
+    CardiacRedFlag,
+    /// Bone-stress-injury signs (pinpoint tenderness, night pain, pain with
+    /// impact). Stop impact loading + urgent referral (File 08 safety-040).
+    BoneStress,
 }
 
 /// One observed readiness data point.
@@ -336,6 +347,10 @@ pub enum SafetyTier {
     ObjectivePerformance,
     Illness,
     Pain,
+    /// Medical red flag (RED-S, cardiovascular symptom, bone stress injury):
+    /// stop + defer to a professional. Overrides even training-pain adjustments
+    /// (File 08 §5 safety-040/043/049).
+    MedicalReferral,
 }
 
 /// Adjustments the autoregulation layer can emit (File 06 §4).
@@ -356,6 +371,12 @@ pub enum Adjustment {
     RestDay,
     /// Non-negotiable stop (pain, fever, RHR +10 bpm). Safety override.
     Stop,
+    /// Stop training and defer to a professional (physician / dietitian /
+    /// mental-health). Emitted for medical red flags; `reason` names the trigger
+    /// and referral target. Overrides all optimization output (File 08).
+    Defer {
+        reason: String,
+    },
 }
 
 #[cfg(test)]
