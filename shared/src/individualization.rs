@@ -39,7 +39,7 @@ pub enum TrainingAge {
 }
 
 /// Observed cadence at which the lifter can still add load (indiv-001).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ProgressionCadence {
     EverySession,
     WeekToWeek,
@@ -77,9 +77,21 @@ pub struct StrengthDefaults {
 /// Table 1.1; indiv-002/003/004; STR-TRAGE-001).
 pub fn strength_defaults(age: TrainingAge) -> Recommended<StrengthDefaults> {
     let d = match age {
-        TrainingAge::Novice => StrengthDefaults { intensity_pct_1rm: 60, freq_per_muscle: 3, sets_per_muscle: 4 },
-        TrainingAge::Intermediate => StrengthDefaults { intensity_pct_1rm: 80, freq_per_muscle: 2, sets_per_muscle: 4 },
-        TrainingAge::Advanced => StrengthDefaults { intensity_pct_1rm: 85, freq_per_muscle: 2, sets_per_muscle: 8 },
+        TrainingAge::Novice => StrengthDefaults {
+            intensity_pct_1rm: 60,
+            freq_per_muscle: 3,
+            sets_per_muscle: 4,
+        },
+        TrainingAge::Intermediate => StrengthDefaults {
+            intensity_pct_1rm: 80,
+            freq_per_muscle: 2,
+            sets_per_muscle: 4,
+        },
+        TrainingAge::Advanced => StrengthDefaults {
+            intensity_pct_1rm: 85,
+            freq_per_muscle: 2,
+            sets_per_muscle: 8,
+        },
     };
     recommend(d, "STR-TRAGE-001")
 }
@@ -169,15 +181,35 @@ pub struct ReEntry {
 /// intensity where possible, rebuild volume. DETRAIN-001.
 pub fn resistance_reentry(weeks_off: f64) -> Recommended<ReEntry> {
     let r = if weeks_off < 1.0 {
-        ReEntry { load_frac: 1.00, ramp_weeks: (0, 0), treat_as_novice: false }
+        ReEntry {
+            load_frac: 1.00,
+            ramp_weeks: (0, 0),
+            treat_as_novice: false,
+        }
     } else if weeks_off < 2.0 {
-        ReEntry { load_frac: 0.90, ramp_weeks: (1, 1), treat_as_novice: false }
+        ReEntry {
+            load_frac: 0.90,
+            ramp_weeks: (1, 1),
+            treat_as_novice: false,
+        }
     } else if weeks_off < 4.0 {
-        ReEntry { load_frac: 0.825, ramp_weeks: (1, 2), treat_as_novice: false }
+        ReEntry {
+            load_frac: 0.825,
+            ramp_weeks: (1, 2),
+            treat_as_novice: false,
+        }
     } else if weeks_off < 8.0 {
-        ReEntry { load_frac: 0.70, ramp_weeks: (2, 4), treat_as_novice: false }
+        ReEntry {
+            load_frac: 0.70,
+            ramp_weeks: (2, 4),
+            treat_as_novice: false,
+        }
     } else {
-        ReEntry { load_frac: 0.50, ramp_weeks: (4, 6), treat_as_novice: true }
+        ReEntry {
+            load_frac: 0.50,
+            ramp_weeks: (4, 6),
+            treat_as_novice: true,
+        }
     };
     recommend(r, "DETRAIN-001")
 }
@@ -199,10 +231,26 @@ pub struct DetrainRate {
 
 /// Detraining timelines, most-protected to least (File 08 Table 3.4a).
 pub static DETRAINING: &[DetrainRate] = &[
-    DetrainRate { quality: "strength", onset_weeks: 8.0, note: "~7-12% loss over 8-12wk; most protected (neural)" },
-    DetrainRate { quality: "hypertrophy", onset_weeks: 3.0, note: "slow loss; myonuclei aid re-gain (muscle memory)" },
-    DetrainRate { quality: "vo2max", onset_weeks: 2.0, note: "fastest; ~6-20% over ~4wk in highly trained" },
-    DetrainRate { quality: "power", onset_weeks: 1.0, note: "fades within ~1wk of zero exposure" },
+    DetrainRate {
+        quality: "strength",
+        onset_weeks: 8.0,
+        note: "~7-12% loss over 8-12wk; most protected (neural)",
+    },
+    DetrainRate {
+        quality: "hypertrophy",
+        onset_weeks: 3.0,
+        note: "slow loss; myonuclei aid re-gain (muscle memory)",
+    },
+    DetrainRate {
+        quality: "vo2max",
+        onset_weeks: 2.0,
+        note: "fastest; ~6-20% over ~4wk in highly trained",
+    },
+    DetrainRate {
+        quality: "power",
+        onset_weeks: 1.0,
+        note: "fades within ~1wk of zero exposure",
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -222,7 +270,13 @@ pub struct LoadIncrement {
 /// Novice linear-progression load bump when the session was completed
 /// (File 08 indiv-008; DBLPROG-001).
 pub fn novice_load_increment() -> Recommended<LoadIncrement> {
-    recommend(LoadIncrement { upper_kg: 2.5, lower_kg: 5.0 }, "DBLPROG-001")
+    recommend(
+        LoadIncrement {
+            upper_kg: 2.5,
+            lower_kg: 5.0,
+        },
+        "DBLPROG-001",
+    )
 }
 
 /// Double progression: once the top of the rep range is hit on every set, add
@@ -242,13 +296,23 @@ pub struct ProteinTarget {
 /// Masters (65+) protein target: 1.2-1.6 g/kg/day for anabolic resistance
 /// (File 08 indiv-013; MASTERS-001).
 pub fn masters_protein_target() -> Recommended<ProteinTarget> {
-    recommend(ProteinTarget { g_per_kg: (1.2, 1.6) }, "MASTERS-001")
+    recommend(
+        ProteinTarget {
+            g_per_kg: (1.2, 1.6),
+        },
+        "MASTERS-001",
+    )
 }
 
 /// Lean-mass-preserving deficit protein target: 1.8-2.7 g/kg/day, hold intensity
 /// and cut volume toward MEV (File 08 indiv-020; DEFICIT-001).
 pub fn deficit_protein_target() -> Recommended<ProteinTarget> {
-    recommend(ProteinTarget { g_per_kg: (1.8, 2.7) }, "DEFICIT-001")
+    recommend(
+        ProteinTarget {
+            g_per_kg: (1.8, 2.7),
+        },
+        "DEFICIT-001",
+    )
 }
 
 /// Masters (65+) per-meal protein dose in g/kg bodyweight to overcome anabolic
@@ -319,7 +383,10 @@ pub struct SubstitutionRule {
 /// (File 08 indiv-023; SUBST-001).
 pub fn substitution_rule() -> Recommended<SubstitutionRule> {
     recommend(
-        SubstitutionRule { match_movement_pattern: true, compensate_with_reps_near_failure: true },
+        SubstitutionRule {
+            match_movement_pattern: true,
+            compensate_with_reps_near_failure: true,
+        },
         "SUBST-001",
     )
 }
@@ -350,10 +417,26 @@ pub enum Environment {
 /// hard heat-illness stop.
 pub fn environment_modifier(env: Environment) -> Recommended<EnvironmentModifier> {
     let m = match env {
-        Environment::Heat => EnvironmentModifier { intensity_factor: 0.90, acclimatization_days: 14, stop_on_illness_signs: true },
-        Environment::Altitude => EnvironmentModifier { intensity_factor: 0.90, acclimatization_days: 7, stop_on_illness_signs: false },
-        Environment::Cold => EnvironmentModifier { intensity_factor: 1.00, acclimatization_days: 0, stop_on_illness_signs: false },
-        Environment::Neutral => EnvironmentModifier { intensity_factor: 1.00, acclimatization_days: 0, stop_on_illness_signs: false },
+        Environment::Heat => EnvironmentModifier {
+            intensity_factor: 0.90,
+            acclimatization_days: 14,
+            stop_on_illness_signs: true,
+        },
+        Environment::Altitude => EnvironmentModifier {
+            intensity_factor: 0.90,
+            acclimatization_days: 7,
+            stop_on_illness_signs: false,
+        },
+        Environment::Cold => EnvironmentModifier {
+            intensity_factor: 1.00,
+            acclimatization_days: 0,
+            stop_on_illness_signs: false,
+        },
+        Environment::Neutral => EnvironmentModifier {
+            intensity_factor: 1.00,
+            acclimatization_days: 0,
+            stop_on_illness_signs: false,
+        },
     };
     recommend(m, "ENV-001")
 }
@@ -364,21 +447,41 @@ mod tests {
 
     #[test]
     fn cadence_maps_to_training_age() {
-        assert_eq!(training_age_from_cadence(ProgressionCadence::EverySession).value, TrainingAge::Novice);
-        assert_eq!(training_age_from_cadence(ProgressionCadence::WeekToWeek).value, TrainingAge::Intermediate);
-        assert_eq!(training_age_from_cadence(ProgressionCadence::MonthToMonth).value, TrainingAge::Advanced);
+        assert_eq!(
+            training_age_from_cadence(ProgressionCadence::EverySession).value,
+            TrainingAge::Novice
+        );
+        assert_eq!(
+            training_age_from_cadence(ProgressionCadence::WeekToWeek).value,
+            TrainingAge::Intermediate
+        );
+        assert_eq!(
+            training_age_from_cadence(ProgressionCadence::MonthToMonth).value,
+            TrainingAge::Advanced
+        );
     }
 
     #[test]
     fn strength_defaults_match_table_1_1() {
         let n = strength_defaults(TrainingAge::Novice).value;
-        assert_eq!((n.intensity_pct_1rm, n.freq_per_muscle, n.sets_per_muscle), (60, 3, 4));
+        assert_eq!(
+            (n.intensity_pct_1rm, n.freq_per_muscle, n.sets_per_muscle),
+            (60, 3, 4)
+        );
         let i = strength_defaults(TrainingAge::Intermediate).value;
-        assert_eq!((i.intensity_pct_1rm, i.freq_per_muscle, i.sets_per_muscle), (80, 2, 4));
+        assert_eq!(
+            (i.intensity_pct_1rm, i.freq_per_muscle, i.sets_per_muscle),
+            (80, 2, 4)
+        );
         let a = strength_defaults(TrainingAge::Advanced).value;
-        assert_eq!((a.intensity_pct_1rm, a.freq_per_muscle, a.sets_per_muscle), (85, 2, 8));
+        assert_eq!(
+            (a.intensity_pct_1rm, a.freq_per_muscle, a.sets_per_muscle),
+            (85, 2, 8)
+        );
         // Defaults carry Strong evidence (Rhea 2003).
-        assert!((strength_defaults(TrainingAge::Novice).confidence.score - 0.90).abs() < f32::EPSILON);
+        assert!(
+            (strength_defaults(TrainingAge::Novice).confidence.score - 0.90).abs() < f32::EPSILON
+        );
     }
 
     #[test]
@@ -431,8 +534,20 @@ mod tests {
         assert!(novice_stall_action(2, true, false).value.is_none());
         assert!(novice_stall_action(3, false, false).value.is_none());
         let o = novice_stall_action(3, true, false).value.unwrap();
-        assert_eq!((o.deload_frac, o.scope_single_lift, o.transition_to_intermediate), (0.10, true, false));
-        assert!(novice_stall_action(3, true, true).value.unwrap().transition_to_intermediate);
+        assert_eq!(
+            (
+                o.deload_frac,
+                o.scope_single_lift,
+                o.transition_to_intermediate
+            ),
+            (0.10, true, false)
+        );
+        assert!(
+            novice_stall_action(3, true, true)
+                .value
+                .unwrap()
+                .transition_to_intermediate
+        );
     }
 
     #[test]
@@ -445,10 +560,24 @@ mod tests {
         assert_eq!(heat.intensity_factor, 0.90);
         assert!(heat.stop_on_illness_signs);
         // Altitude cuts intensity, no illness stop.
-        assert_eq!(environment_modifier(Environment::Altitude).value.intensity_factor, 0.90);
-        assert!(!environment_modifier(Environment::Altitude).value.stop_on_illness_signs);
+        assert_eq!(
+            environment_modifier(Environment::Altitude)
+                .value
+                .intensity_factor,
+            0.90
+        );
+        assert!(
+            !environment_modifier(Environment::Altitude)
+                .value
+                .stop_on_illness_signs
+        );
         // Neutral leaves prescription unchanged.
-        assert_eq!(environment_modifier(Environment::Neutral).value.intensity_factor, 1.00);
+        assert_eq!(
+            environment_modifier(Environment::Neutral)
+                .value
+                .intensity_factor,
+            1.00
+        );
     }
 
     #[test]

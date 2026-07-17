@@ -41,16 +41,33 @@ impl EvidenceEntry {
 
     /// Build the schema `Evidence` that a `Recommended<T>` carries.
     pub fn to_evidence(&self) -> Evidence {
+        // HARD RULE 2: a `MarketingMyth` claim must never reach a surfaced
+        // recommendation. Every `recommend`/`graded` wrapper funnels through
+        // here, so a debug guard at this choke point turns a future myth-id leak
+        // into a loud test failure instead of shipped advice (zero release cost).
+        debug_assert!(
+            !self.is_blocked(),
+            "MarketingMyth claim {} must never be surfaced as a recommendation",
+            self.claim_id,
+        );
         Evidence {
             grade: self.grade,
             citation: Citation {
                 claim_id: Some(self.claim_id.to_string()),
-                reference: self.primary_citations.first().copied().unwrap_or("unstated").to_string(),
+                reference: self
+                    .primary_citations
+                    .first()
+                    .copied()
+                    .unwrap_or("unstated")
+                    .to_string(),
             },
             contradicting: self
                 .contradicting
                 .iter()
-                .map(|r| Citation { claim_id: Some(self.claim_id.to_string()), reference: r.to_string() })
+                .map(|r| Citation {
+                    claim_id: Some(self.claim_id.to_string()),
+                    reference: r.to_string(),
+                })
                 .collect(),
         }
     }
@@ -94,8 +111,13 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "HYP-VOL-001",
         statement: "More weekly sets increase hypertrophy with diminishing returns (curvilinear dose-response).",
         grade: Strong,
-        primary_citations: &["Schoenfeld, Ogborn & Krieger 2017, J Sports Sci", "Pelland et al. 2025, Sports Med"],
-        contradicting: &["Undetectable superiority beyond ~31 fractional weekly sets (Pelland 2025)"],
+        primary_citations: &[
+            "Schoenfeld, Ogborn & Krieger 2017, J Sports Sci",
+            "Pelland et al. 2025, Sports Med",
+        ],
+        contradicting: &[
+            "Undetectable superiority beyond ~31 fractional weekly sets (Pelland 2025)",
+        ],
         safety_critical: false,
         contested: Some("CQ-01"),
         review_months: 6,
@@ -128,6 +150,20 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contradicting: &[],
         safety_critical: false,
         contested: None,
+        review_months: 12,
+    },
+    EvidenceEntry {
+        claim_id: "STR-PRILEPIN-001",
+        statement: "Cap per-session rep totals per %1RM zone using Prilepin's chart as a volume ceiling, verifying intensity via bar speed/technique.",
+        grade: Moderate,
+        primary_citations: &[
+            "A.S. Prilepin (Soviet weightlifting, >1,000 elite lifters, 1960s–70s)",
+        ],
+        contradicting: &[
+            "Derived from Olympic lifts/elite lifters; apply to powerlifts/novices with caution (CQ-03)",
+        ],
+        safety_critical: false,
+        contested: Some("CQ-03"),
         review_months: 12,
     },
     EvidenceEntry {
@@ -184,7 +220,11 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "FEEDBACK-001",
         statement: "How feedback is communicated matters (autonomy-supportive/informational/process-focused).",
         grade: Strong,
-        primary_citations: &["Deci, Koestner & Ryan 1999", "Carpentier & Mageau 2013", "Mouratidis 2010"],
+        primary_citations: &[
+            "Deci, Koestner & Ryan 1999",
+            "Carpentier & Mageau 2013",
+            "Mouratidis 2010",
+        ],
         contradicting: &[],
         safety_critical: false,
         contested: None,
@@ -255,7 +295,9 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "SAFE-PAIN-001",
         statement: "Sharp/localized/joint/tendon pain during exercise is a stop signal - cease loading and assess before continuing.",
         grade: Strong,
-        primary_citations: &["Musculoskeletal safety consensus - joint pain is a stop signal (File 06 §6C)"],
+        primary_citations: &[
+            "Musculoskeletal safety consensus - joint pain is a stop signal (File 06 §6C)",
+        ],
         contradicting: &[],
         safety_critical: true,
         contested: None,
@@ -265,7 +307,11 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "ILLNESS-NECK-001",
         statement: "Febrile illness contraindicates strenuous exercise (myocarditis / sudden-cardiac-death risk): any fever or below-neck symptoms = no training. Above-neck-only symptoms without fever permit reduced-intensity training (neck-check operationalization).",
         grade: Strong,
-        primary_citations: &["Sports-medicine consensus: exercise contraindicated during febrile illness (myocarditis risk)", "Meeusen et al. 2013 ECSS/ACSM", "Neck-check rule (File 06 §6E)"],
+        primary_citations: &[
+            "Sports-medicine consensus: exercise contraindicated during febrile illness (myocarditis risk)",
+            "Meeusen et al. 2013 ECSS/ACSM",
+            "Neck-check rule (File 06 §6E)",
+        ],
         contradicting: &[],
         safety_critical: true,
         contested: None,
@@ -276,7 +322,11 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "HYP-FAIL-001",
         statement: "Proximity to failure drives growth continuously; absolute failure not required.",
         grade: Moderate,
-        primary_citations: &["Grgic 2022", "Refalo 2023", "Robinson et al. 2024, Sports Med"],
+        primary_citations: &[
+            "Grgic 2022",
+            "Refalo 2023",
+            "Robinson et al. 2024, Sports Med",
+        ],
         contradicting: &["Marginal effect small near failure"],
         safety_critical: false,
         contested: Some("CQ-02"),
@@ -306,7 +356,11 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "HYP-FREQ-001",
         statement: "Train each muscle 2-3x/week; >=2x beats 1x by enabling more weekly volume, but frequency's independent effect is negligible when volume is equated.",
         grade: Strong,
-        primary_citations: &["Schoenfeld/Ogborn/Krieger 2016", "Schoenfeld/Grgic/Krieger 2019", "Pelland 2024/2025"],
+        primary_citations: &[
+            "Schoenfeld/Ogborn/Krieger 2016",
+            "Schoenfeld/Grgic/Krieger 2019",
+            "Pelland 2024/2025",
+        ],
         contradicting: &["3x specifically Moderate"],
         safety_critical: false,
         contested: None,
@@ -317,7 +371,9 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Rest 2-3 min on compounds, 1-2 min on isolation - long enough to keep >=90% of first-set reps on later sets.",
         grade: Moderate,
         primary_citations: &["Schoenfeld, Pope et al. 2016, JSCR 30(7):1805-1812"],
-        contradicting: &["Singer 2024 preprint: ~90s often sufficient, 60s still substantial growth"],
+        contradicting: &[
+            "Singer 2024 preprint: ~90s often sufficient, 60s still substantial growth",
+        ],
         safety_critical: false,
         contested: None,
         review_months: 12,
@@ -337,7 +393,9 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Velocity-loss thresholds are the best-evidenced volume-autoregulation tool.",
         grade: Moderate,
         primary_citations: &["Gonzalez-Badillo/Pareja-Blanco lineage"],
-        contradicting: &["File 02 graded both Moderate and Moderate-Strong; reconciled to Moderate"],
+        contradicting: &[
+            "File 02 graded both Moderate and Moderate-Strong; reconciled to Moderate",
+        ],
         safety_critical: false,
         contested: None,
         review_months: 12,
@@ -366,7 +424,11 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "RUN-DIST-001",
         statement: "Polarized beats threshold in trained runners; sequence matters.",
         grade: Moderate,
-        primary_citations: &["Stoggl & Sperlich 2014, Front Physiol", "Rosenblat 2019", "Filipas 2022"],
+        primary_citations: &[
+            "Stoggl & Sperlich 2014, Front Physiol",
+            "Rosenblat 2019",
+            "Filipas 2022",
+        ],
         contradicting: &["Phase-dependent; recreational responses mixed"],
         safety_critical: false,
         contested: Some("CQ-07"),
@@ -406,7 +468,12 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "HYB-CAP-001",
         statement: "Concurrent override caps: keep hard/long runs >=24h from heavy leg days both directions (CAP-3); cap endurance <=3 d/wk when strength/hypertrophy is co-primary (CAP-5); when running >=4 d/wk or >=40 km/wk, cap lower-body lifting <=2/wk and cut lower hypertrophy volume ~20-33% (CAP-1).",
         grade: Moderate,
-        primary_citations: &["Jones et al. 2013", "Wilson et al. 2012", "Doma, Deakin & Bentley 2017", "Baar 2014 synthesis"],
+        primary_citations: &[
+            "Jones et al. 2013",
+            "Wilson et al. 2012",
+            "Doma, Deakin & Bentley 2017",
+            "Baar 2014 synthesis",
+        ],
         contradicting: &[],
         safety_critical: false,
         contested: Some("CQ-15"),
@@ -486,7 +553,10 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "DETRAIN-001",
         statement: "Detraining is quality-specific (power fades ~1wk, VO2max fastest, strength most protected ~7-12%/8-12wk); adaptations are largely retained when intensity is held and volume cut. Scale down by shedding accessory volume first and removing intensity/main compounds last (keep >=2 exposures/muscle/wk); ramp re-entry by layoff length rather than restarting.",
         grade: Moderate,
-        primary_citations: &["Mujika & Padilla 2000, Sports Med 30(2):79-87", "Bosquet et al. 2013"],
+        primary_citations: &[
+            "Mujika & Padilla 2000, Sports Med 30(2):79-87",
+            "Bosquet et al. 2013",
+        ],
         contradicting: &["Re-entry brackets (Table 3.4b) are ExpertOpinion extrapolation"],
         safety_critical: false,
         contested: None,
@@ -496,7 +566,10 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "DEFICIT-001",
         statement: "In a caloric deficit preserving lean mass, set protein 1.8-2.7 g/kg bodyweight/day, hold training intensity high, and reduce volume toward MEV rather than cutting intensity.",
         grade: Strong,
-        primary_citations: &["Helms et al. 2014 systematic review", "Longland et al. 2016, Am J Clin Nutr"],
+        primary_citations: &[
+            "Helms et al. 2014 systematic review",
+            "Longland et al. 2016, Am J Clin Nutr",
+        ],
         contradicting: &["Volume-sparing ordering itself is Moderate"],
         safety_critical: false,
         contested: None,
@@ -506,7 +579,10 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         claim_id: "MASTERS-001",
         statement: "For masters (65+), target protein >=1.2-1.6 g/kg/day (~0.4 g/kg per meal) for anabolic resistance, include power/velocity work for function, and extend recovery when performance is unrestored.",
         grade: Moderate,
-        primary_citations: &["Fragala et al. 2019, JSCR 33(8):2019-2052 (NSCA position)", "Phillips"],
+        primary_citations: &[
+            "Fragala et al. 2019, JSCR 33(8):2019-2052 (NSCA position)",
+            "Phillips",
+        ],
         contradicting: &[],
         safety_critical: false,
         contested: None,
@@ -589,7 +665,9 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Grade-adjusted pace (downhill).",
         grade: Weak,
         primary_citations: &["Minetti et al. 2002, J Appl Physiol"],
-        contradicting: &["Errs up to ~3x on steep downhill; Strava switched to HR-equivalency 2017"],
+        contradicting: &[
+            "Errs up to ~3x on steep downhill; Strava switched to HR-equivalency 2017",
+        ],
         safety_critical: false,
         contested: Some("CQ-08"),
         review_months: 12,
@@ -629,7 +707,9 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Maffetone aerobic-base HR cap = 180 - age with adjustments (+5 elite/2+yr injury-free improving; -5 returning from injury-illness or 2+ colds/yr; -10 chronically overtrained/sedentary/on meds). Base-phase OPTION, not default; personalize toward measured LT1 when data exist.",
         grade: Weak,
         primary_citations: &["Maffetone (unstated year)"],
-        contradicting: &["Marathon Handbook; Strength Running (specific 180-age not individually validated)"],
+        contradicting: &[
+            "Marathon Handbook; Strength Running (specific 180-age not individually validated)",
+        ],
         safety_critical: false,
         contested: Some("CQ-03"),
         review_months: 12,
@@ -680,7 +760,10 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Acute:chronic workload ratio predicts injury risk with a 0.8-1.3 'sweet spot'.",
         grade: MarketingMyth,
         primary_citations: &["Gabbett 2016, BJSM"],
-        contradicting: &["Impellizzeri et al. 2019 (retraction request)", "Lolli et al. 2019 (mathematical coupling)"],
+        contradicting: &[
+            "Impellizzeri et al. 2019 (retraction request)",
+            "Lolli et al. 2019 (mathematical coupling)",
+        ],
         safety_critical: false,
         contested: Some("CQ-05"),
         review_months: 6,
@@ -889,21 +972,81 @@ pub static CLAIMS: &[EvidenceEntry] = &[
 
 /// Contested questions (File 09). Engine holds a default lean while open.
 pub static CONTESTED_QUESTIONS: &[ContestedQuestion] = &[
-    ContestedQuestion { id: "CQ-01", question: "Hypertrophy volume ceiling", engine_default: "10-20 sets/muscle/wk" },
-    ContestedQuestion { id: "CQ-02", question: "Train to failure?", engine_default: "0-3 RIR" },
-    ContestedQuestion { id: "CQ-03", question: "Periodization model superiority", engine_default: "Auto-DUP, any structured plan accepted" },
-    ContestedQuestion { id: "CQ-04", question: "HRV-guided training value", engine_default: "Gate hard/easy only" },
-    ContestedQuestion { id: "CQ-05", question: "ACWR validity", engine_default: "DO NOT use ACWR as injury predictor" },
-    ContestedQuestion { id: "CQ-06", question: "Interference real-world magnitude", engine_default: "Protect power/explosive only" },
-    ContestedQuestion { id: "CQ-07", question: "Runner intensity distribution", engine_default: "Pyramidal base -> polarized peak" },
-    ContestedQuestion { id: "CQ-08", question: "Grade-adjusted-pace downhill validity", engine_default: "Trust uphill; soften/flag downhill" },
-    ContestedQuestion { id: "CQ-09", question: "Menstrual-cycle periodization", engine_default: "Symptom-based optional adjustment" },
-    ContestedQuestion { id: "CQ-10", question: "Optimal interval length", engine_default: "Menu selected by goal/event" },
-    ContestedQuestion { id: "CQ-11", question: "Marathon philosophy", engine_default: "Aerobic base -> specific block" },
-    ContestedQuestion { id: "CQ-12", question: "MAF 180-formula vs measured LT1", engine_default: "Measured LT1 when available, else MAF fallback" },
-    ContestedQuestion { id: "CQ-13", question: "Running power / form-metric value", engine_default: "Display only, never prescribe" },
-    ContestedQuestion { id: "CQ-14", question: "Consumer readiness-score trust", engine_default: "3-band GO/CAUTION/REST" },
-    ContestedQuestion { id: "CQ-15", question: "Concurrent session order & separation", engine_default: "RT-first for strength; >=3h (ideally 6-24h) gap" },
+    ContestedQuestion {
+        id: "CQ-01",
+        question: "Hypertrophy volume ceiling",
+        engine_default: "10-20 sets/muscle/wk",
+    },
+    ContestedQuestion {
+        id: "CQ-02",
+        question: "Train to failure?",
+        engine_default: "0-3 RIR",
+    },
+    ContestedQuestion {
+        id: "CQ-03",
+        question: "Periodization model superiority",
+        engine_default: "Auto-DUP, any structured plan accepted",
+    },
+    ContestedQuestion {
+        id: "CQ-04",
+        question: "HRV-guided training value",
+        engine_default: "Gate hard/easy only",
+    },
+    ContestedQuestion {
+        id: "CQ-05",
+        question: "ACWR validity",
+        engine_default: "DO NOT use ACWR as injury predictor",
+    },
+    ContestedQuestion {
+        id: "CQ-06",
+        question: "Interference real-world magnitude",
+        engine_default: "Protect power/explosive only",
+    },
+    ContestedQuestion {
+        id: "CQ-07",
+        question: "Runner intensity distribution",
+        engine_default: "Pyramidal base -> polarized peak",
+    },
+    ContestedQuestion {
+        id: "CQ-08",
+        question: "Grade-adjusted-pace downhill validity",
+        engine_default: "Trust uphill; soften/flag downhill",
+    },
+    ContestedQuestion {
+        id: "CQ-09",
+        question: "Menstrual-cycle periodization",
+        engine_default: "Symptom-based optional adjustment",
+    },
+    ContestedQuestion {
+        id: "CQ-10",
+        question: "Optimal interval length",
+        engine_default: "Menu selected by goal/event",
+    },
+    ContestedQuestion {
+        id: "CQ-11",
+        question: "Marathon philosophy",
+        engine_default: "Aerobic base -> specific block",
+    },
+    ContestedQuestion {
+        id: "CQ-12",
+        question: "MAF 180-formula vs measured LT1",
+        engine_default: "Measured LT1 when available, else MAF fallback",
+    },
+    ContestedQuestion {
+        id: "CQ-13",
+        question: "Running power / form-metric value",
+        engine_default: "Display only, never prescribe",
+    },
+    ContestedQuestion {
+        id: "CQ-14",
+        question: "Consumer readiness-score trust",
+        engine_default: "3-band GO/CAUTION/REST",
+    },
+    ContestedQuestion {
+        id: "CQ-15",
+        question: "Concurrent session order & separation",
+        engine_default: "RT-first for strength; >=3h (ideally 6-24h) gap",
+    },
 ];
 
 #[cfg(test)]
@@ -915,7 +1058,11 @@ mod tests {
     fn claim_ids_are_unique() {
         let mut seen = HashSet::new();
         for c in CLAIMS {
-            assert!(seen.insert(c.claim_id), "duplicate claim_id: {}", c.claim_id);
+            assert!(
+                seen.insert(c.claim_id),
+                "duplicate claim_id: {}",
+                c.claim_id
+            );
         }
     }
 
@@ -940,7 +1087,10 @@ mod tests {
         // safety authority on weak evidence.
         for c in CLAIMS.iter().filter(|c| c.safety_critical) {
             assert!(
-                matches!(c.grade, EvidenceGrade::Strong | EvidenceGrade::MarketingMyth),
+                matches!(
+                    c.grade,
+                    EvidenceGrade::Strong | EvidenceGrade::MarketingMyth
+                ),
                 "{} is safety_critical but graded {:?}",
                 c.claim_id,
                 c.grade
@@ -964,6 +1114,14 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "must never be surfaced")]
+    fn surfacing_a_myth_trips_the_choke_point_guard() {
+        // HARD RULE 2: no `recommend`/`graded` wrapper may surface a myth. They
+        // all funnel through `to_evidence()`, whose debug guard must fire here.
+        let _ = claim("LOAD-ACWR-001").expect("present").to_evidence();
+    }
+
+    #[test]
     fn builds_schema_evidence_and_confidence() {
         let c = claim("RUN-DIST-001").expect("present");
         let ev = c.to_evidence();
@@ -979,7 +1137,11 @@ mod tests {
     #[test]
     fn fast_moving_topics_review_semiannually() {
         for id in ["HYP-VOL-001", "HRV-001", "LOAD-ACWR-001"] {
-            assert_eq!(claim(id).unwrap().review_months, 6, "{id} should review at 6mo");
+            assert_eq!(
+                claim(id).unwrap().review_months,
+                6,
+                "{id} should review at 6mo"
+            );
         }
     }
 }

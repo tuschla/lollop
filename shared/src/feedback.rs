@@ -101,13 +101,19 @@ pub fn safety_gate(s: SafetySignals) -> Option<Recommended<FeedbackCategory>> {
         return Some(recommend(FeedbackCategory::ConcernInjury, "SAFE-BSI-001"));
     }
     if s.compulsive_flag {
-        return Some(recommend(FeedbackCategory::ConcernBehavior, "SAFE-REDS-001"));
+        return Some(recommend(
+            FeedbackCategory::ConcernBehavior,
+            "SAFE-REDS-001",
+        ));
     }
     if s.overtraining_signal_count >= 2 {
         return Some(recommend(FeedbackCategory::ConcernRecovery, "SAFE-OTS-001"));
     }
     if s.single_session_spike_frac.is_some_and(|f| f > 0.10) {
-        return Some(recommend(FeedbackCategory::DangerousProgression, "RUN-SPIKE-001"));
+        return Some(recommend(
+            FeedbackCategory::DangerousProgression,
+            "RUN-SPIKE-001",
+        ));
     }
     None
 }
@@ -119,7 +125,11 @@ pub fn safety_gate(s: SafetySignals) -> Option<Recommended<FeedbackCategory>> {
 /// Categorize a completed lifting set from reps-met + RIR vs target
 /// (feedback-019/020/021/022; AUTOREG-RIR-001). Trust RIR most within 1-3 reps
 /// of failure and in experienced lifters.
-pub fn lifting_feedback(reps_met: bool, rir_actual: u8, rir_target: u8) -> Recommended<FeedbackCategory> {
+pub fn lifting_feedback(
+    reps_met: bool,
+    rir_actual: u8,
+    rir_target: u8,
+) -> Recommended<FeedbackCategory> {
     let cat = if !reps_met {
         // Missed reps: data, not failure, propose load adjustment.
         FeedbackCategory::CorrectiveProcess
@@ -150,7 +160,10 @@ pub fn bad_day_feedback() -> Recommended<FeedbackCategory> {
 /// (feedback-012/013/014; RUN-DECOUPLE-001). Gated to cool, steady sub-threshold
 /// efforts (feedback-043), `None` when the context is confounded (heat, surges,
 /// bad data) so no decoupling message fires.
-pub fn decoupling_feedback(drift_pct: f64, cool_steady_context: bool) -> Option<Recommended<FeedbackCategory>> {
+pub fn decoupling_feedback(
+    drift_pct: f64,
+    cool_steady_context: bool,
+) -> Option<Recommended<FeedbackCategory>> {
     if !cool_steady_context {
         return None;
     }
@@ -172,20 +185,36 @@ pub fn decoupling_feedback(drift_pct: f64, cool_steady_context: bool) -> Option<
 /// above the Zone-2/VT1 ceiling for more than ~25% of the duration, emit
 /// INTENSITY_DISCIPLINE, easy days build the aerobic base. `None` otherwise.
 /// RUN-DIST-001.
-pub fn easy_run_intensity_discipline(frac_time_above_vt1: f64) -> Option<Recommended<FeedbackCategory>> {
+pub fn easy_run_intensity_discipline(
+    frac_time_above_vt1: f64,
+) -> Option<Recommended<FeedbackCategory>> {
     if frac_time_above_vt1 > 0.25 {
-        Some(recommend(FeedbackCategory::IntensityDiscipline, "RUN-DIST-001"))
+        Some(recommend(
+            FeedbackCategory::IntensityDiscipline,
+            "RUN-DIST-001",
+        ))
     } else {
         None
     }
 }
 
+/// Percent a run's back half may slow before it counts as a positive split worth
+/// flagging. Shared so the coaching cue here and the descriptive run-summary note
+/// (`app::to_run_view`) draw the same line: a run exactly at the threshold must
+/// not show the note without the cue, or vice versa.
+pub const POSITIVE_SPLIT_FLAG_PCT: f64 = 3.0;
+
 /// Pacing discipline (feedback-016): a positive split beyond ~3% on an
 /// even-effort run emits INTENSITY_DISCIPLINE, advising an easier start toward an
 /// even-to-negative split. `None` when pacing was even/negative. FEEDBACK-001.
-pub fn positive_split_discipline(second_half_slower_pct: f64) -> Option<Recommended<FeedbackCategory>> {
-    if second_half_slower_pct > 3.0 {
-        Some(recommend(FeedbackCategory::IntensityDiscipline, "FEEDBACK-001"))
+pub fn positive_split_discipline(
+    second_half_slower_pct: f64,
+) -> Option<Recommended<FeedbackCategory>> {
+    if second_half_slower_pct > POSITIVE_SPLIT_FLAG_PCT {
+        Some(recommend(
+            FeedbackCategory::IntensityDiscipline,
+            "FEEDBACK-001",
+        ))
     } else {
         None
     }
@@ -232,14 +261,18 @@ pub fn default_goal_framing() -> Recommended<GoalFraming> {
 /// 2.9:1 "positivity ratio" is a retracted myth (feedback-007; MYTH-POSITIVITY
 /// hard-blocked). Bias positive but never hardcode a number.
 pub fn positivity_ratio_enforced() -> bool {
-    !evidence::claim("MYTH-POSITIVITY").expect("MYTH-POSITIVITY present").is_blocked()
+    !evidence::claim("MYTH-POSITIVITY")
+        .expect("MYTH-POSITIVITY present")
+        .is_blocked()
 }
 
 /// Whether ACWR may generate a hard injury-prediction claim. Always false -
 /// LOAD-ACWR-001 is a hard-blocked myth; ACWR informs soft load-trend framing
 /// only (feedback-030; §6.5).
 pub fn acwr_injury_claim_allowed() -> bool {
-    !evidence::claim("LOAD-ACWR-001").expect("LOAD-ACWR-001 present").is_blocked()
+    !evidence::claim("LOAD-ACWR-001")
+        .expect("LOAD-ACWR-001 present")
+        .is_blocked()
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +343,11 @@ pub enum ToneModifier {
 
 /// Tone modifier by planned session intensity (feedback-026). FEEDBACK-001.
 pub fn planned_intensity_tone(planned_hard: bool) -> Recommended<ToneModifier> {
-    let tone = if planned_hard { ToneModifier::PraiseEffort } else { ToneModifier::CelebrateRestraint };
+    let tone = if planned_hard {
+        ToneModifier::PraiseEffort
+    } else {
+        ToneModifier::CelebrateRestraint
+    };
     recommend(tone, "FEEDBACK-001")
 }
 
@@ -353,18 +390,36 @@ mod tests {
             TrendSummary::LoadExplainedDecline
         );
         // Improving.
-        assert_eq!(trend_summary(TrendDirection::Up, 0, false, false, false).value, TrendSummary::Improving);
+        assert_eq!(
+            trend_summary(TrendDirection::Up, 0, false, false, false).value,
+            TrendSummary::Improving
+        );
         // Plateau needs >=4 flat weeks.
-        assert_eq!(trend_summary(TrendDirection::Flat, 4, false, false, false).value, TrendSummary::Plateau);
-        assert_eq!(trend_summary(TrendDirection::Flat, 3, false, false, false).value, TrendSummary::Stable);
+        assert_eq!(
+            trend_summary(TrendDirection::Flat, 4, false, false, false).value,
+            TrendSummary::Plateau
+        );
+        assert_eq!(
+            trend_summary(TrendDirection::Flat, 3, false, false, false).value,
+            TrendSummary::Stable
+        );
         // Performance down but no load explanation -> not a recovery-first message.
-        assert_eq!(trend_summary(TrendDirection::Down, 0, true, false, false).value, TrendSummary::Stable);
+        assert_eq!(
+            trend_summary(TrendDirection::Down, 0, true, false, false).value,
+            TrendSummary::Stable
+        );
     }
 
     #[test]
     fn tone_and_provisional_framing() {
-        assert_eq!(planned_intensity_tone(false).value, ToneModifier::CelebrateRestraint);
-        assert_eq!(planned_intensity_tone(true).value, ToneModifier::PraiseEffort);
+        assert_eq!(
+            planned_intensity_tone(false).value,
+            ToneModifier::CelebrateRestraint
+        );
+        assert_eq!(
+            planned_intensity_tone(true).value,
+            ToneModifier::PraiseEffort
+        );
         assert!(provisional_until_baseline(0).value);
         assert!(provisional_until_baseline(13).value);
         assert!(!provisional_until_baseline(14).value);
@@ -379,26 +434,62 @@ mod tests {
             overtraining_signal_count: 5,
             single_session_spike_frac: Some(0.9),
         };
-        assert_eq!(safety_gate(all).unwrap().value, FeedbackCategory::ConcernInjury);
+        assert_eq!(
+            safety_gate(all).unwrap().value,
+            FeedbackCategory::ConcernInjury
+        );
 
         // Behavior outranks recovery + progression.
-        let behav = SafetySignals { bone_pain_red_flag: false, compulsive_flag: true, overtraining_signal_count: 5, single_session_spike_frac: Some(0.9) };
-        assert_eq!(safety_gate(behav).unwrap().value, FeedbackCategory::ConcernBehavior);
+        let behav = SafetySignals {
+            bone_pain_red_flag: false,
+            compulsive_flag: true,
+            overtraining_signal_count: 5,
+            single_session_spike_frac: Some(0.9),
+        };
+        assert_eq!(
+            safety_gate(behav).unwrap().value,
+            FeedbackCategory::ConcernBehavior
+        );
 
         // Recovery outranks progression.
-        let rec = SafetySignals { overtraining_signal_count: 2, single_session_spike_frac: Some(0.9), ..Default::default() };
-        assert_eq!(safety_gate(rec).unwrap().value, FeedbackCategory::ConcernRecovery);
+        let rec = SafetySignals {
+            overtraining_signal_count: 2,
+            single_session_spike_frac: Some(0.9),
+            ..Default::default()
+        };
+        assert_eq!(
+            safety_gate(rec).unwrap().value,
+            FeedbackCategory::ConcernRecovery
+        );
 
         // Spike alone.
-        let spike = SafetySignals { single_session_spike_frac: Some(0.11), ..Default::default() };
-        assert_eq!(safety_gate(spike).unwrap().value, FeedbackCategory::DangerousProgression);
+        let spike = SafetySignals {
+            single_session_spike_frac: Some(0.11),
+            ..Default::default()
+        };
+        assert_eq!(
+            safety_gate(spike).unwrap().value,
+            FeedbackCategory::DangerousProgression
+        );
 
         // Clear session.
         assert!(safety_gate(SafetySignals::default()).is_none());
         // A single NFOR signal does not fire (needs >=2).
-        assert!(safety_gate(SafetySignals { overtraining_signal_count: 1, ..Default::default() }).is_none());
+        assert!(
+            safety_gate(SafetySignals {
+                overtraining_signal_count: 1,
+                ..Default::default()
+            })
+            .is_none()
+        );
         // Spike at/below 10% does not fire.
-        assert!(safety_gate(SafetySignals { single_session_spike_frac: Some(0.10), ..Default::default() }).is_none());
+        assert!(
+            safety_gate(SafetySignals {
+                single_session_spike_frac: Some(0.10),
+                ..Default::default()
+            })
+            .is_none()
+        );
     }
 
     #[test]
@@ -415,7 +506,10 @@ mod tests {
             FeedbackCategory::ConcernBehavior,
             FeedbackCategory::DangerousProgression,
         ] {
-            assert!(c.suppresses_competing_praise(), "{c:?} must suppress praise");
+            assert!(
+                c.suppresses_competing_praise(),
+                "{c:?} must suppress praise"
+            );
         }
         for c in [
             FeedbackCategory::PositiveMastery,
@@ -426,18 +520,33 @@ mod tests {
             FeedbackCategory::IntensityDiscipline,
             FeedbackCategory::ContextualBadDay,
         ] {
-            assert!(!c.suppresses_competing_praise(), "{c:?} must not suppress praise");
+            assert!(
+                !c.suppresses_competing_praise(),
+                "{c:?} must not suppress praise"
+            );
         }
     }
 
     #[test]
     fn resolve_suppresses_praise_under_concern() {
-        let praise = Some(recommend(FeedbackCategory::PositiveMastery, "AUTOREG-RIR-001"));
-        let injury = SafetySignals { bone_pain_red_flag: true, ..Default::default() };
-        assert_eq!(resolve_feedback(injury, praise).value, FeedbackCategory::ConcernInjury);
+        let praise = Some(recommend(
+            FeedbackCategory::PositiveMastery,
+            "AUTOREG-RIR-001",
+        ));
+        let injury = SafetySignals {
+            bone_pain_red_flag: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_feedback(injury, praise).value,
+            FeedbackCategory::ConcernInjury
+        );
 
         // Safety-clear: execution passes through.
-        let praise = Some(recommend(FeedbackCategory::PositiveMastery, "AUTOREG-RIR-001"));
+        let praise = Some(recommend(
+            FeedbackCategory::PositiveMastery,
+            "AUTOREG-RIR-001",
+        ));
         assert_eq!(
             resolve_feedback(SafetySignals::default(), praise).value,
             FeedbackCategory::PositiveMastery
@@ -453,13 +562,25 @@ mod tests {
     #[test]
     fn lifting_branches() {
         // Missed reps.
-        assert_eq!(lifting_feedback(false, 2, 2).value, FeedbackCategory::CorrectiveProcess);
+        assert_eq!(
+            lifting_feedback(false, 2, 2).value,
+            FeedbackCategory::CorrectiveProcess
+        );
         // Reps met, RIR 0 vs 2-3 target, caution.
-        assert_eq!(lifting_feedback(true, 0, 3).value, FeedbackCategory::CorrectiveProcess);
+        assert_eq!(
+            lifting_feedback(true, 0, 3).value,
+            FeedbackCategory::CorrectiveProcess
+        );
         // Reps met, RIR 4 vs 1-2 target, nudge.
-        assert_eq!(lifting_feedback(true, 4, 1).value, FeedbackCategory::ProgressionNudge);
+        assert_eq!(
+            lifting_feedback(true, 4, 1).value,
+            FeedbackCategory::ProgressionNudge
+        );
         // Reps met at target cost, mastery.
-        assert_eq!(lifting_feedback(true, 2, 2).value, FeedbackCategory::PositiveMastery);
+        assert_eq!(
+            lifting_feedback(true, 2, 2).value,
+            FeedbackCategory::PositiveMastery
+        );
     }
 
     #[test]
@@ -467,11 +588,20 @@ mod tests {
         // Confounded context: no message.
         assert!(decoupling_feedback(3.0, false).is_none());
         // <5% durability.
-        assert_eq!(decoupling_feedback(3.0, true).unwrap().value, FeedbackCategory::PositiveExecution);
+        assert_eq!(
+            decoupling_feedback(3.0, true).unwrap().value,
+            FeedbackCategory::PositiveExecution
+        );
         // 5-10% neutral.
-        assert_eq!(decoupling_feedback(7.0, true).unwrap().value, FeedbackCategory::InformationalNeutral);
+        assert_eq!(
+            decoupling_feedback(7.0, true).unwrap().value,
+            FeedbackCategory::InformationalNeutral
+        );
         // >10% corrective.
-        assert_eq!(decoupling_feedback(12.0, true).unwrap().value, FeedbackCategory::CorrectiveProcess);
+        assert_eq!(
+            decoupling_feedback(12.0, true).unwrap().value,
+            FeedbackCategory::CorrectiveProcess
+        );
     }
 
     #[test]

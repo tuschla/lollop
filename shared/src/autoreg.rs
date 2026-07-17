@@ -128,13 +128,22 @@ fn medical_referral(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>
 fn rpe_load_adjust(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let delta = latest(inputs, ReadinessSignal::Rpe)?;
     if delta >= 2.0 {
-        Some(recommend(Adjustment::ReduceLoadPct(10.0), "AUTOREG-RIR-001"))
+        Some(recommend(
+            Adjustment::ReduceLoadPct(10.0),
+            "AUTOREG-RIR-001",
+        ))
     } else if delta >= 1.0 {
         Some(recommend(Adjustment::ReduceLoadPct(5.0), "AUTOREG-RIR-001"))
     } else if delta <= -2.0 {
-        Some(recommend(Adjustment::IncreaseLoadPct(7.5), "AUTOREG-RIR-001"))
+        Some(recommend(
+            Adjustment::IncreaseLoadPct(7.5),
+            "AUTOREG-RIR-001",
+        ))
     } else if delta <= -1.0 {
-        Some(recommend(Adjustment::IncreaseLoadPct(4.0), "AUTOREG-RIR-001"))
+        Some(recommend(
+            Adjustment::IncreaseLoadPct(4.0),
+            "AUTOREG-RIR-001",
+        ))
     } else {
         None
     }
@@ -160,7 +169,10 @@ fn e1rm_gate(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     } else if ratio < 0.95 {
         Some(recommend(Adjustment::ReduceLoadPct(5.0), "AUTOREG-PCT-001"))
     } else if ratio > 1.05 {
-        Some(recommend(Adjustment::IncreaseLoadPct(3.5), "AUTOREG-PCT-001"))
+        Some(recommend(
+            Adjustment::IncreaseLoadPct(3.5),
+            "AUTOREG-PCT-001",
+        ))
     } else {
         None
     }
@@ -454,7 +466,11 @@ pub fn apre_load_adjustment_lb(scheme: ApreScheme, reps: u8) -> Recommended<(f64
 /// The standard RP-framework 1-week deload used by the multi-session triggers
 /// (File 06 autoreg-023/024/025/026): volume −50%, load −10%.
 fn standard_deload() -> Adjustment {
-    Adjustment::Deload { volume_reduction_pct: 50.0, load_reduction_pct: 10.0, weeks: 1 }
+    Adjustment::Deload {
+        volume_reduction_pct: 50.0,
+        load_reduction_pct: 10.0,
+        weeks: 1,
+    }
 }
 
 /// Deload when planned RPE is only hit at loads ≥7% below plan for ≥2 sessions
@@ -485,7 +501,11 @@ pub fn deload_from_velocity_drop(weekly_mcv_drop_m_s: f64) -> Option<Recommended
 pub fn deload_from_failed_sessions(failed_key_sessions: u8) -> Option<Recommended<Adjustment>> {
     (failed_key_sessions >= 2).then(|| {
         recommend(
-            Adjustment::Deload { volume_reduction_pct: 25.0, load_reduction_pct: 0.0, weeks: 1 },
+            Adjustment::Deload {
+                volume_reduction_pct: 25.0,
+                load_reduction_pct: 0.0,
+                weeks: 1,
+            },
             "AUTOREG-PCT-001",
         )
     })
@@ -566,14 +586,21 @@ pub fn hrv_suppressed_recovery_day(consecutive_suppressed_days: u8) -> Recommend
 /// autoreg-035: multi-day suppressed wellness combined with a rising resting HR
 /// trend calls for 1–3 easy days or cross-training. Fires when wellness has been
 /// suppressed ≥2 days AND RHR is trending up. SAFE-OTS-001.
-pub fn wellness_rhr_multiday_easy(wellness_suppressed_days: u8, rhr_rising: bool) -> Recommended<bool> {
+pub fn wellness_rhr_multiday_easy(
+    wellness_suppressed_days: u8,
+    rhr_rising: bool,
+) -> Recommended<bool> {
     recommend_t(wellness_suppressed_days >= 2 && rhr_rising, "SAFE-OTS-001")
 }
 
 /// Generic `Recommended<T>` constructor for the scalar-input helpers above.
 fn recommend_t<T>(value: T, claim_id: &str) -> Recommended<T> {
     let e = evidence::claim(claim_id).expect("known claim");
-    Recommended { value, evidence: e.to_evidence(), confidence: e.to_confidence_tag() }
+    Recommended {
+        value,
+        evidence: e.to_evidence(),
+        confidence: e.to_confidence_tag(),
+    }
 }
 
 #[cfg(test)]
@@ -598,21 +625,67 @@ mod tests {
     }
 
     #[test]
+    fn above_neck_illness_downgrades_without_blocking_training() {
+        // autoreg-045: an above-neck illness cuts intensity but must NOT stop the
+        // session. Guards the invariant that the Illness tier is raised (so the
+        // shell shows the safety marker) while training stays permitted, i.e. the
+        // adjustment is a DowngradeSession, never a Stop/RestDay/Defer.
+        let inputs = vec![input(ReadinessSignal::Illness, 1.0)];
+        assert_eq!(resolve_safety(&inputs), Some(SafetyTier::Illness));
+        let adj = adjustments(&inputs);
+        assert!(
+            adj.iter().any(|r| r.value == Adjustment::DowngradeSession),
+            "above-neck illness must downgrade the session"
+        );
+        assert!(
+            !adj.iter().any(|r| matches!(
+                r.value,
+                Adjustment::Stop | Adjustment::RestDay | Adjustment::Defer { .. }
+            )),
+            "above-neck illness must not block training"
+        );
+    }
+
+    #[test]
+    fn rhr_plus_five_band_downgrades_at_single_day_tier() {
+        // autoreg-040: RHR +5..10 bpm downgrades intensity but does not stop -
+        // the lowest safety tier (single-day marker). Guards the band boundary so
+        // a future edit can't silently promote it to a RestDay stop.
+        let inputs = vec![input(ReadinessSignal::RestingHr, 7.0)];
+        assert_eq!(resolve_safety(&inputs), Some(SafetyTier::SingleDayMarker));
+        let adj = adjustments(&inputs);
+        assert!(adj.iter().any(|r| r.value == Adjustment::DowngradeSession));
+        assert!(!adj.iter().any(|r| r.value == Adjustment::RestDay));
+    }
+
+    #[test]
+    fn rhr_plus_ten_forces_rest_day() {
+        // autoreg-041: at +10 bpm the downgrade escalates to a full RestDay stop
+        // that dominates all other output.
+        let inputs = vec![input(ReadinessSignal::RestingHr, 10.0)];
+        let adj = adjustments(&inputs);
+        assert_eq!(adj.len(), 1, "rest-day stop must dominate");
+        assert_eq!(adj[0].value, Adjustment::RestDay);
+    }
+
+    #[test]
     fn high_rpe_over_target_reduces_load() {
         let inputs = vec![input(ReadinessSignal::Rpe, 2.0)];
         let adj = adjustments(&inputs);
-        assert!(adj
-            .iter()
-            .any(|r| matches!(r.value, Adjustment::ReduceLoadPct(p) if p == 10.0)));
+        assert!(
+            adj.iter()
+                .any(|r| matches!(r.value, Adjustment::ReduceLoadPct(p) if p == 10.0))
+        );
     }
 
     #[test]
     fn e1rm_drop_triggers_deload() {
         let inputs = vec![input(ReadinessSignal::EstimatedOneRm, 0.85)];
         let adj = adjustments(&inputs);
-        assert!(adj
-            .iter()
-            .any(|r| matches!(r.value, Adjustment::Deload { .. })));
+        assert!(
+            adj.iter()
+                .any(|r| matches!(r.value, Adjustment::Deload { .. }))
+        );
     }
 
     #[test]
@@ -657,7 +730,10 @@ mod tests {
             Adjustment::Defer { reason } => assert!(reason.contains("Cardiovascular")),
             other => panic!("expected cardiac defer, got {other:?}"),
         }
-        assert_eq!(adj[0].evidence.citation.claim_id.as_deref(), Some("SAFE-CVD-001"));
+        assert_eq!(
+            adj[0].evidence.citation.claim_id.as_deref(),
+            Some("SAFE-CVD-001")
+        );
     }
 
     #[test]
@@ -676,9 +752,10 @@ mod tests {
         // RPE two below target → +7.5% load, and no safety tier.
         let inputs = vec![input(ReadinessSignal::Rpe, -2.0)];
         let adj = adjustments(&inputs);
-        assert!(adj
-            .iter()
-            .any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(p) if p == 7.5)));
+        assert!(
+            adj.iter()
+                .any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(p) if p == 7.5))
+        );
         assert_eq!(resolve_safety(&inputs), None);
     }
 
@@ -687,9 +764,10 @@ mod tests {
         // e1RM ratio > 1.05 → add load; a load increase must NOT raise a tier.
         let inputs = vec![input(ReadinessSignal::EstimatedOneRm, 1.08)];
         let adj = adjustments(&inputs);
-        assert!(adj
-            .iter()
-            .any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(p) if p == 3.5)));
+        assert!(
+            adj.iter()
+                .any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(p) if p == 3.5))
+        );
         assert_eq!(resolve_safety(&inputs), None);
     }
 
@@ -749,15 +827,36 @@ mod tests {
     #[test]
     fn apre_tables_verbatim() {
         // APRE-6 bands.
-        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre6, 1).value, (-10.0, -5.0));
-        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre6, 6).value, (0.0, 0.0));
-        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre6, 20).value, (10.0, 15.0));
+        assert_eq!(
+            apre_load_adjustment_lb(ApreScheme::Apre6, 1).value,
+            (-10.0, -5.0)
+        );
+        assert_eq!(
+            apre_load_adjustment_lb(ApreScheme::Apre6, 6).value,
+            (0.0, 0.0)
+        );
+        assert_eq!(
+            apre_load_adjustment_lb(ApreScheme::Apre6, 20).value,
+            (10.0, 15.0)
+        );
         // APRE-10 bands.
-        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre10, 5).value, (-10.0, -5.0));
-        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre10, 14).value, (5.0, 10.0));
+        assert_eq!(
+            apre_load_adjustment_lb(ApreScheme::Apre10, 5).value,
+            (-10.0, -5.0)
+        );
+        assert_eq!(
+            apre_load_adjustment_lb(ApreScheme::Apre10, 14).value,
+            (5.0, 10.0)
+        );
         // APRE-3 bands.
-        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre3, 3).value, (0.0, 0.0));
-        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre3, 8).value, (10.0, 15.0));
+        assert_eq!(
+            apre_load_adjustment_lb(ApreScheme::Apre3, 3).value,
+            (0.0, 0.0)
+        );
+        assert_eq!(
+            apre_load_adjustment_lb(ApreScheme::Apre3, 8).value,
+            (10.0, 15.0)
+        );
     }
 
     #[test]
@@ -788,8 +887,14 @@ mod tests {
 
     #[test]
     fn hrv_availability_fallback() {
-        assert_eq!(autoreg_source(true, 0, false).value, AutoregSource::HrvRolling);
-        assert_eq!(autoreg_source(false, 4, false).value, AutoregSource::HrvRolling);
+        assert_eq!(
+            autoreg_source(true, 0, false).value,
+            AutoregSource::HrvRolling
+        );
+        assert_eq!(
+            autoreg_source(false, 4, false).value,
+            AutoregSource::HrvRolling
+        );
         assert_eq!(
             autoreg_source(false, 2, true).value,
             AutoregSource::SubjectivePlusPerformance

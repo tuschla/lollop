@@ -10,7 +10,7 @@
 //! muscle hypertrophy essentially spared. Every prescriptive value is wrapped in
 //! [`Recommended`] via [`recommend`] with evidence from `crate::evidence`.
 //! Claim ids: CONC-ORDER-001, CONC-SEP-001, CONC-INTERF-001, CONC-RE-001,
-//! HYB-CAP-001, SAFE-BSI-001.
+//! HYB-CAP-001, SAFE-BSI-001, RUN-PROGRESS-001, SAFE-OTS-001.
 
 use crate::evidence;
 use crate::schema::Recommended;
@@ -30,7 +30,7 @@ fn recommend<T>(value: T, claim_id: &str) -> Recommended<T> {
 // ---------------------------------------------------------------------------
 
 /// The co-primary goal governing a concurrent day's ordering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConcurrentGoal {
     Strength,
     Power,
@@ -80,7 +80,11 @@ pub struct SessionSpacing {
 /// CONC-SEP-001).
 pub fn session_spacing() -> Recommended<SessionSpacing> {
     recommend(
-        SessionSpacing { ideal_min_hours: 6, ideal_max_hours: 24, fallback_min_hours: 3 },
+        SessionSpacing {
+            ideal_min_hours: 6,
+            ideal_max_hours: 24,
+            fallback_min_hours: 3,
+        },
         "CONC-SEP-001",
     )
 }
@@ -103,7 +107,10 @@ pub fn endurance_frequency_cap() -> Recommended<u8> {
 
 /// True when weekly endurance days stay within the co-primary cap (≤3 d/wk).
 pub fn endurance_frequency_ok(days_per_week: u8) -> Recommended<bool> {
-    recommend(days_per_week <= endurance_frequency_cap().value, "HYB-CAP-001")
+    recommend(
+        days_per_week <= endurance_frequency_cap().value,
+        "HYB-CAP-001",
+    )
 }
 
 /// Lower-body lifting override when running is high (File 10 CAP-1 / hybrid-015).
@@ -118,10 +125,16 @@ pub struct LowerLiftCap {
 /// Apply the running-volume lower-lift cap when running ≥4 d/wk OR ≥40 km/wk
 /// (File 10 CAP-1 / hybrid-015): cap lower lifting ≤2/wk and cut lower
 /// hypertrophy volume ~20–33 %. `None` when neither trigger fires.
-pub fn lower_lift_cap(running_days_per_week: u8, running_km_per_week: f64) -> Option<Recommended<LowerLiftCap>> {
+pub fn lower_lift_cap(
+    running_days_per_week: u8,
+    running_km_per_week: f64,
+) -> Option<Recommended<LowerLiftCap>> {
     if running_days_per_week >= 4 || running_km_per_week >= 40.0 {
         Some(recommend(
-            LowerLiftCap { max_lower_sessions: 2, volume_reduction_frac: (0.20, 0.33) },
+            LowerLiftCap {
+                max_lower_sessions: 2,
+                volume_reduction_frac: (0.20, 0.33),
+            },
             "HYB-CAP-001",
         ))
     } else {
@@ -148,8 +161,8 @@ pub fn expect_lower_strength_interference(training_age_years: f64) -> Recommende
 }
 
 /// Expect strength/hypertrophy attenuation when endurance dosing is high
-/// (File 10 hybrid-014; CONC-INTERF-001): frequency > 3–4 d/wk OR intensity
-/// > 80 % VO2max. `true` = expect measurable interference; cap endurance or
+/// (File 10 hybrid-014; CONC-INTERF-001): frequency above 3–4 d/wk OR intensity
+/// above 80 % VO2max. `true` = expect measurable interference; cap endurance or
 /// lower lifting-gain expectations. Uses the >3 d/wk edge (the lower, more
 /// protective bound of the "3–4" range).
 pub fn interference_expected(
@@ -196,7 +209,10 @@ pub fn maintenance_dose_fraction() -> Recommended<f64> {
 /// Substitute a low-impact modality (cycling/rowing) for part of aerobic volume
 /// when interference symptoms appear AND running is not mandatory (File 10
 /// hybrid-018 / CAP-6; HYB-CAP-001). `true` = swap part of the run volume.
-pub fn substitute_modality(interference_symptoms: bool, running_optional: bool) -> Recommended<bool> {
+pub fn substitute_modality(
+    interference_symptoms: bool,
+    running_optional: bool,
+) -> Recommended<bool> {
     recommend(interference_symptoms && running_optional, "HYB-CAP-001")
 }
 
@@ -266,7 +282,10 @@ mod tests {
     #[test]
     fn spacing_defaults_are_6_24_fallback_3() {
         let s = session_spacing().value;
-        assert_eq!((s.ideal_min_hours, s.ideal_max_hours, s.fallback_min_hours), (6, 24, 3));
+        assert_eq!(
+            (s.ideal_min_hours, s.ideal_max_hours, s.fallback_min_hours),
+            (6, 24, 3)
+        );
         // CAP-3: 24h gap between heavy legs and hard runs.
         assert!(heavy_leg_run_gap_ok(24.0).value);
         assert!(!heavy_leg_run_gap_ok(20.0).value);

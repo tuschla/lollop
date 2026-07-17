@@ -18,6 +18,7 @@
 //! strongest injury signal we act on instead.
 
 use crate::schema::{MesoPhase, Recommended, RunSessionType, ThreeZone, VdotBand};
+use serde::{Deserialize, Serialize};
 
 /// Wrap a value with the evidence + confidence of a registry claim (File 09).
 ///
@@ -101,7 +102,10 @@ pub fn vdot_band_vo2max_pct(band: VdotBand) -> (f64, f64) {
 /// HR is a secondary check for E/M/T; pace/effort governs I and R because HR
 /// lags on short reps (running-002 declares hr_valid_for = {E, M, T}).
 pub fn vdot_band_uses_hr(band: VdotBand) -> bool {
-    matches!(band, VdotBand::Easy | VdotBand::Marathon | VdotBand::Threshold)
+    matches!(
+        band,
+        VdotBand::Easy | VdotBand::Marathon | VdotBand::Threshold
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +224,10 @@ pub fn single_session_spike(session_km: f64, longest_30d_km: f64) -> bool {
 /// `true` = block/flag. Wrapped in `Recommended` carrying RUN-SPIKE-001 evidence
 /// because it drives an action (block the session).
 pub fn single_session_spike_flag(session_km: f64, longest_30d_km: f64) -> Recommended<bool> {
-    recommend(single_session_spike(session_km, longest_30d_km), "RUN-SPIKE-001")
+    recommend(
+        single_session_spike(session_km, longest_30d_km),
+        "RUN-SPIKE-001",
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -294,8 +301,16 @@ pub struct IntensityDistribution {
 /// POPULATION optimum (Seiler), individualize ±5–10% via TT re-tests.
 pub fn intensity_distribution(model: DistributionModel) -> Recommended<IntensityDistribution> {
     let d = match model {
-        DistributionModel::Pyramidal => IntensityDistribution { easy_pct: 80, moderate_pct: 15, hard_pct: 5 },
-        DistributionModel::Polarized => IntensityDistribution { easy_pct: 80, moderate_pct: 5, hard_pct: 15 },
+        DistributionModel::Pyramidal => IntensityDistribution {
+            easy_pct: 80,
+            moderate_pct: 15,
+            hard_pct: 5,
+        },
+        DistributionModel::Polarized => IntensityDistribution {
+            easy_pct: 80,
+            moderate_pct: 5,
+            hard_pct: 15,
+        },
     };
     recommend(d, "RUN-DIST-001")
 }
@@ -328,18 +343,26 @@ pub struct QualityLimits {
 /// Canonical quality limits: ≤3/week, ≥48 h apart, no back-to-back Z3. Rule running-027.
 pub fn quality_limits() -> Recommended<QualityLimits> {
     recommend(
-        QualityLimits { max_per_week: 3, min_spacing_hours: 48, allow_consecutive_z3: false },
+        QualityLimits {
+            max_per_week: 3,
+            min_spacing_hours: 48,
+            allow_consecutive_z3: false,
+        },
         "RUN-DIST-001",
     )
 }
 
 /// True when a week's quality plan respects the caps: ≤3 sessions, ≥48 h gaps,
 /// and no consecutive-Z3 stacking (File 04 running-027).
-pub fn quality_plan_ok(sessions_per_week: u8, min_gap_hours: u8, has_consecutive_z3: bool) -> Recommended<bool> {
+pub fn quality_plan_ok(
+    sessions_per_week: u8,
+    min_gap_hours: u8,
+    has_consecutive_z3: bool,
+) -> Recommended<bool> {
     let limits = quality_limits().value;
     let ok = sessions_per_week <= limits.max_per_week
         && min_gap_hours >= limits.min_spacing_hours
-        && !(has_consecutive_z3 && !limits.allow_consecutive_z3);
+        && (!has_consecutive_z3 || limits.allow_consecutive_z3);
     recommend(ok, "RUN-DIST-001")
 }
 
@@ -357,7 +380,11 @@ pub fn weekly_increase_cap_frac(training_age_years: f64) -> Recommended<f64> {
 
 /// True when next week's volume stays within the training-age increase cap
 /// (File 04 running-043). A non-positive current volume cannot be ratioed → false.
-pub fn weekly_increase_ok(current_km: f64, next_km: f64, training_age_years: f64) -> Recommended<bool> {
+pub fn weekly_increase_ok(
+    current_km: f64,
+    next_km: f64,
+    training_age_years: f64,
+) -> Recommended<bool> {
     let cap = weekly_increase_cap_frac(training_age_years).value;
     let ok = if current_km <= 0.0 {
         false
@@ -400,7 +427,11 @@ pub struct DeloadCadence {
 pub fn deload_cadence(conservative: bool) -> Recommended<DeloadCadence> {
     let load_weeks = if conservative { 2 } else { 3 };
     recommend(
-        DeloadCadence { load_weeks, recovery_weeks: 1, reduction_frac: (0.20, 0.40) },
+        DeloadCadence {
+            load_weeks,
+            recovery_weeks: 1,
+            reduction_frac: (0.20, 0.40),
+        },
         "RUN-DELOAD-001",
     )
 }
@@ -551,7 +582,7 @@ pub fn hr_zone_recalc_due(weeks_since_recalc: u8) -> Recommended<bool> {
 // ---------------------------------------------------------------------------
 
 /// A training goal by target race distance (running-024 goal table).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GoalDistance {
     General,
     C25k,
@@ -595,11 +626,21 @@ pub struct GoalWeekPlan {
 pub fn goal_week_plan(goal: GoalDistance, advanced: bool) -> Recommended<GoalWeekPlan> {
     let lr = (0.20, 0.30);
     let plan = match goal {
-        GoalDistance::General => GoalWeekPlan { sessions_per_week: (3, 5), quality_per_week: (0, 1), long_run_share: lr },
-        GoalDistance::C25k => GoalWeekPlan { sessions_per_week: (3, 3), quality_per_week: (0, 0), long_run_share: lr },
-        GoalDistance::FiveK | GoalDistance::TenK | GoalDistance::HalfMarathon => {
-            GoalWeekPlan { sessions_per_week: (4, 6), quality_per_week: (2, 2), long_run_share: lr }
-        }
+        GoalDistance::General => GoalWeekPlan {
+            sessions_per_week: (3, 5),
+            quality_per_week: (0, 1),
+            long_run_share: lr,
+        },
+        GoalDistance::C25k => GoalWeekPlan {
+            sessions_per_week: (3, 3),
+            quality_per_week: (0, 0),
+            long_run_share: lr,
+        },
+        GoalDistance::FiveK | GoalDistance::TenK | GoalDistance::HalfMarathon => GoalWeekPlan {
+            sessions_per_week: (4, 6),
+            quality_per_week: (2, 2),
+            long_run_share: lr,
+        },
         GoalDistance::Marathon => GoalWeekPlan {
             sessions_per_week: if advanced { (5, 7) } else { (4, 6) },
             quality_per_week: (2, 2),
@@ -625,7 +666,12 @@ pub struct C25kPlan {
 /// The Couch-to-5K default plan (running-025). RUN-WORKOUT-001.
 pub fn c25k_plan() -> Recommended<C25kPlan> {
     recommend(
-        C25kPlan { runs_per_week: 3, weeks: (9, 12), rest_day_between: true, repeat_hard_week_allowed: true },
+        C25kPlan {
+            runs_per_week: 3,
+            weeks: (9, 12),
+            rest_day_between: true,
+            repeat_hard_week_allowed: true,
+        },
         "RUN-WORKOUT-001",
     )
 }
@@ -698,7 +744,11 @@ pub fn default_counting_method(for_plan_design: bool) -> Recommended<IntensityCo
 /// `Some((2, 3))` under one year of training age; `None` for experienced runners
 /// (the source specifies no fixed hold beyond a ~5%/absolute cap). RUN-PROGRESS-001.
 pub fn novice_volume_bump_hold_weeks(training_age_years: f64) -> Recommended<Option<(u8, u8)>> {
-    let hold = if training_age_years < 1.0 { Some((2, 3)) } else { None };
+    let hold = if training_age_years < 1.0 {
+        Some((2, 3))
+    } else {
+        None
+    };
     recommend(hold, "RUN-PROGRESS-001")
 }
 
@@ -711,12 +761,338 @@ pub fn unscheduled_deload(overtraining_signal_count: u8) -> Recommended<bool> {
 }
 
 // ---------------------------------------------------------------------------
+// GPS track geometry (pure geodesy, not a coached claim, no evidence tag)
+// ---------------------------------------------------------------------------
+
+/// Mean Earth radius (metres) for the haversine great-circle distance.
+const EARTH_RADIUS_M: f64 = 6_371_000.0;
+
+/// Fixes with worse horizontal accuracy than this (metres) are noise; they are
+/// dropped before deriving distance *and* duration so both are computed from the
+/// same usable slice (otherwise a noisy first/last fix skews derived pace).
+pub const MAX_GPS_ACCURACY_M: f32 = 30.0;
+
+/// One GPS fix from a run track. Deterministic core input: wall-clock time
+/// enters only as `observed_at` (unix seconds), never a live clock. Lat/lon in
+/// decimal degrees; `accuracy_m` is the shell provider's reported horizontal
+/// error, used to drop noisy fixes before summing distance.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GpsPoint {
+    pub lat: f64,
+    pub lon: f64,
+    pub observed_at: i64,
+    pub accuracy_m: f32,
+}
+
+/// Great-circle distance between two fixes, in metres (haversine).
+pub fn haversine_m(a: GpsPoint, b: GpsPoint) -> f64 {
+    let lat1 = a.lat.to_radians();
+    let lat2 = b.lat.to_radians();
+    let dlat = (b.lat - a.lat).to_radians();
+    let dlon = (b.lon - a.lon).to_radians();
+    let h = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
+    2.0 * EARTH_RADIUS_M * h.sqrt().asin()
+}
+
+/// The subset of fixes good enough to trust, in original order. Shared by
+/// distance, duration, and GPX export so all three describe the same track, an
+/// exported file opened in Strava/Garmin shows the same distance the app does.
+pub fn usable_track(points: &[GpsPoint], max_accuracy_m: f32) -> Vec<GpsPoint> {
+    points
+        .iter()
+        .copied()
+        .filter(|p| p.accuracy_m <= max_accuracy_m)
+        .collect()
+}
+
+/// Total track distance in km. Fixes whose reported horizontal accuracy is
+/// worse than `max_accuracy_m` are dropped first so GPS noise does not inflate
+/// distance. Pure and order-dependent (order = fix order from the shell).
+pub fn track_distance_km(points: &[GpsPoint], max_accuracy_m: f32) -> f64 {
+    usable_track(points, max_accuracy_m)
+        .windows(2)
+        .map(|w| haversine_m(w[0], w[1]))
+        .sum::<f64>()
+        / 1000.0
+}
+
+/// Elapsed wall time across a track, in minutes, from the first to the last
+/// *usable* fix (same accuracy gate as [track_distance_km], so derived pace is
+/// consistent). Returns 0.0 for an empty/single-fix or non-monotonic track.
+pub fn track_duration_min(points: &[GpsPoint], max_accuracy_m: f32) -> f64 {
+    let usable = usable_track(points, max_accuracy_m);
+    match (usable.first(), usable.last()) {
+        (Some(f), Some(l)) if l.observed_at > f.observed_at => {
+            (l.observed_at - f.observed_at) as f64 / 60.0
+        }
+        _ => 0.0,
+    }
+}
+
+/// Second-half-vs-first-half pace slowdown across a track, as a percent (a
+/// *positive split*: positive = the runner slowed in the back half). The track
+/// is split at its halfway distance and each half's pace (time ÷ distance) is
+/// compared; units cancel in the ratio. Purely descriptive, this is a
+/// measurement of the run, not a recommendation. Returns `None` when the track
+/// is too short, degenerate, or non-monotonic to split meaningfully (fewer than
+/// three usable fixes, a zero-distance/zero-duration half). Same accuracy gate
+/// as [track_distance_km]/[track_duration_min] so all three agree on the track.
+pub fn track_positive_split_pct(points: &[GpsPoint], max_accuracy_m: f32) -> Option<f64> {
+    let usable = usable_track(points, max_accuracy_m);
+    if usable.len() < 3 {
+        return None;
+    }
+    // Cumulative distance to each fix (cumulative[0] == 0.0).
+    let mut cumulative = Vec::with_capacity(usable.len());
+    let mut running_total = 0.0;
+    cumulative.push(0.0);
+    for w in usable.windows(2) {
+        running_total += haversine_m(w[0], w[1]);
+        cumulative.push(running_total);
+    }
+    let total = running_total;
+    if total <= 0.0 {
+        return None;
+    }
+    // First interior fix that reaches the halfway distance is the split point.
+    let half = total / 2.0;
+    let split = (1..usable.len() - 1).find(|&i| cumulative[i] >= half)?;
+
+    let (first, mid, last) = (usable[0], usable[split], usable[usable.len() - 1]);
+    let dist1 = cumulative[split];
+    let dist2 = total - dist1;
+    let dur1 = (mid.observed_at - first.observed_at) as f64;
+    let dur2 = (last.observed_at - mid.observed_at) as f64;
+    if dist1 <= 0.0 || dist2 <= 0.0 || dur1 <= 0.0 || dur2 <= 0.0 {
+        return None;
+    }
+    let pace1 = dur1 / dist1;
+    let pace2 = dur2 / dist2;
+    Some(((pace2 - pace1) / pace1 * 100.0 * 10.0).round() / 10.0)
+}
+
+/// Serialise a fix track to a GPX 1.1 document (the format Strava, Garmin
+/// Connect, Komoot, etc. import). Pure and deterministic: `observed_at` unix
+/// seconds are rendered as RFC 3339 UTC timestamps in-core, never from a live
+/// clock. Elevation is omitted: the shell does not yet capture altitude.
+pub fn export_gpx(points: &[GpsPoint], track_name: &str) -> String {
+    let mut s = String::with_capacity(256 + points.len() * 96);
+    s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    s.push_str(
+        "<gpx version=\"1.1\" creator=\"fitness_anlage\" \
+         xmlns=\"http://www.topografix.com/GPX/1/1\">\n",
+    );
+    s.push_str("  <trk>\n    <name>");
+    xml_escape_into(&mut s, track_name);
+    s.push_str("</name>\n    <trkseg>\n");
+    for p in points {
+        s.push_str("      <trkpt lat=\"");
+        s.push_str(&format!("{:.7}", p.lat));
+        s.push_str("\" lon=\"");
+        s.push_str(&format!("{:.7}", p.lon));
+        s.push_str("\"><time>");
+        s.push_str(&unix_to_rfc3339_utc(p.observed_at));
+        s.push_str("</time></trkpt>\n");
+    }
+    s.push_str("    </trkseg>\n  </trk>\n</gpx>\n");
+    s
+}
+
+/// Append `text` to `out`, escaping the five XML predefined entities so a track
+/// name can never break the document.
+fn xml_escape_into(out: &mut String, text: &str) {
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
+}
+
+/// Format unix seconds as `YYYY-MM-DDTHH:MM:SSZ` (UTC), pure integer math, no
+/// `chrono`, no clock. Uses Howard Hinnant's civil-from-days algorithm so it is
+/// correct across the whole proleptic Gregorian range.
+fn unix_to_rfc3339_utc(secs: i64) -> String {
+    let days = secs.div_euclid(86_400);
+    let tod = secs.rem_euclid(86_400);
+    let (h, m, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);
+    let (y, mo, d) = civil_from_days(days);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
+}
+
+/// Convert a count of days since the unix epoch (1970-01-01) to a civil
+/// `(year, month, day)`. Howard Hinnant, "chrono-Compatible Low-Level Date
+/// Algorithms" (public domain).
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pt(lat: f64, lon: f64, t: i64) -> GpsPoint {
+        GpsPoint {
+            lat,
+            lon,
+            observed_at: t,
+            accuracy_m: 5.0,
+        }
+    }
+
+    #[test]
+    fn haversine_one_degree_latitude_is_about_111km() {
+        // One degree of latitude ≈ R * (π/180) ≈ 111.19 km on a sphere.
+        let d = haversine_m(pt(0.0, 0.0, 0), pt(1.0, 0.0, 0));
+        assert!((d - 111_194.0).abs() < 50.0, "got {d}");
+    }
+
+    #[test]
+    fn positive_split_detects_back_half_slowdown() {
+        // Five equatorial fixes 0.001° apart → four equal ~111.3 m segments.
+        // First half covered in 20 s, second half in 40 s → back half is exactly
+        // twice as slow, i.e. a +100 % positive split.
+        let track = vec![
+            pt(0.0, 0.000, 0),
+            pt(0.0, 0.001, 10),
+            pt(0.0, 0.002, 20),
+            pt(0.0, 0.003, 40),
+            pt(0.0, 0.004, 60),
+        ];
+        let split = track_positive_split_pct(&track, 30.0).expect("split");
+        assert!((split - 100.0).abs() < 1.0, "got {split}");
+    }
+
+    #[test]
+    fn even_pace_run_reports_no_meaningful_split() {
+        let track = vec![
+            pt(0.0, 0.000, 0),
+            pt(0.0, 0.001, 10),
+            pt(0.0, 0.002, 20),
+            pt(0.0, 0.003, 30),
+            pt(0.0, 0.004, 40),
+        ];
+        let split = track_positive_split_pct(&track, 30.0).expect("split");
+        assert!(split.abs() < 1.0, "got {split}");
+    }
+
+    #[test]
+    fn positive_split_needs_three_usable_fixes() {
+        let track = vec![pt(0.0, 0.0, 0), pt(0.0, 0.001, 10)];
+        assert!(track_positive_split_pct(&track, 30.0).is_none());
+    }
+
+    #[test]
+    fn track_distance_sums_segments_and_drops_noisy_fixes() {
+        let clean = vec![pt(0.0, 0.0, 0), pt(0.0, 0.001, 10), pt(0.0, 0.002, 20)];
+        let d = track_distance_km(&clean, 30.0);
+        // Two equal ~111.3 m equatorial-lon segments ≈ 0.2226 km.
+        assert!((d - 0.2226).abs() < 0.001, "got {d}");
+
+        // A noisy middle fix (accuracy 50 m) is dropped, leaving one long segment.
+        let noisy = vec![
+            pt(0.0, 0.0, 0),
+            GpsPoint {
+                lat: 5.0,
+                lon: 5.0,
+                observed_at: 10,
+                accuracy_m: 50.0,
+            },
+            pt(0.0, 0.002, 20),
+        ];
+        let d2 = track_distance_km(&noisy, 30.0);
+        assert!((d2 - 0.2226).abs() < 0.001, "got {d2}");
+    }
+
+    #[test]
+    fn track_duration_is_first_to_last_span() {
+        let t = vec![pt(0.0, 0.0, 100), pt(0.0, 0.001, 400)];
+        assert!((track_duration_min(&t, 30.0) - 5.0).abs() < 1e-9);
+        assert_eq!(track_duration_min(&[], 30.0), 0.0);
+        assert_eq!(track_duration_min(&[pt(0.0, 0.0, 100)], 30.0), 0.0);
+    }
+
+    #[test]
+    fn track_duration_spans_only_usable_fixes() {
+        // A noisy first fix must not inflate duration past the usable segment,
+        // which would otherwise skew pace low against the accuracy-filtered
+        // distance.
+        let t = vec![
+            GpsPoint {
+                lat: 0.0,
+                lon: 0.0,
+                observed_at: 0,
+                accuracy_m: 99.0,
+            },
+            pt(0.0, 0.001, 120),
+            pt(0.0, 0.002, 300),
+        ];
+        // Usable span is 120..300 = 3 min, not 0..300 = 5 min.
+        assert!((track_duration_min(&t, 30.0) - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rfc3339_renders_known_epochs_utc() {
+        assert_eq!(unix_to_rfc3339_utc(0), "1970-01-01T00:00:00Z");
+        // 1_700_000_000 → 2023-11-14T22:13:20Z (verified against a UTC clock).
+        assert_eq!(unix_to_rfc3339_utc(1_700_000_000), "2023-11-14T22:13:20Z");
+    }
+
+    #[test]
+    fn export_gpx_wraps_fixes_and_escapes_name() {
+        let track = vec![
+            pt(52.52, 13.405, 1_700_000_000),
+            pt(52.521, 13.406, 1_700_000_030),
+        ];
+        let gpx = export_gpx(&track, "Tom & \"Jerry\" <run>'s");
+        assert!(gpx.starts_with("<?xml version=\"1.0\""));
+        assert!(gpx.contains("<gpx version=\"1.1\""));
+        // All five XML predefined entities are escaped so the name cannot break
+        // the document (& " < > ').
+        assert!(gpx.contains("<name>Tom &amp; &quot;Jerry&quot; &lt;run&gt;&apos;s</name>"));
+        // One trkpt per fix, with lat/lon and an RFC-3339 timestamp.
+        assert_eq!(gpx.matches("<trkpt ").count(), 2);
+        assert!(gpx.contains("lat=\"52.5200000\" lon=\"13.4050000\""));
+        assert!(gpx.contains("<time>2023-11-14T22:13:20Z</time>"));
+        assert!(gpx.trim_end().ends_with("</gpx>"));
+    }
+
+    #[test]
+    fn usable_track_drops_noisy_fixes() {
+        let track = vec![
+            pt(52.52, 13.405, 0),
+            GpsPoint {
+                lat: 52.60,
+                lon: 13.50,
+                observed_at: 30,
+                accuracy_m: 80.0, // beyond the gate → excluded
+            },
+            pt(52.521, 13.406, 60),
+        ];
+        // The GPX must carry the same fixes distance uses, the noisy one gone.
+        let usable = usable_track(&track, MAX_GPS_ACCURACY_M);
+        assert_eq!(usable.len(), 2);
+        let gpx = export_gpx(&usable, "run");
+        assert_eq!(gpx.matches("<trkpt ").count(), 2);
+        assert!(!gpx.contains("lat=\"52.6000000\""));
+    }
 
     #[test]
     fn tanaka_at_age_30_is_about_187() {
@@ -783,25 +1159,65 @@ mod tests {
 
     #[test]
     fn vdot_derate_and_goal_plan() {
-        assert_eq!(vdot_derate_points(GoalDistance::HalfMarathon, true).value, (1.0, 1.5));
-        assert_eq!(vdot_derate_points(GoalDistance::Marathon, true).value, (2.0, 3.0));
-        assert_eq!(vdot_derate_points(GoalDistance::FiveK, true).value, (0.0, 0.0));
-        assert_eq!(vdot_derate_points(GoalDistance::Marathon, false).value, (0.0, 0.0));
+        assert_eq!(
+            vdot_derate_points(GoalDistance::HalfMarathon, true).value,
+            (1.0, 1.5)
+        );
+        assert_eq!(
+            vdot_derate_points(GoalDistance::Marathon, true).value,
+            (2.0, 3.0)
+        );
+        assert_eq!(
+            vdot_derate_points(GoalDistance::FiveK, true).value,
+            (0.0, 0.0)
+        );
+        assert_eq!(
+            vdot_derate_points(GoalDistance::Marathon, false).value,
+            (0.0, 0.0)
+        );
         let c = goal_week_plan(GoalDistance::C25k, false).value;
         assert_eq!((c.sessions_per_week, c.quality_per_week), ((3, 3), (0, 0)));
-        assert_eq!(goal_week_plan(GoalDistance::FiveK, false).value.quality_per_week, (2, 2));
-        assert_eq!(goal_week_plan(GoalDistance::Marathon, true).value.sessions_per_week, (5, 7));
-        assert_eq!(goal_week_plan(GoalDistance::Marathon, false).value.sessions_per_week, (4, 6));
+        assert_eq!(
+            goal_week_plan(GoalDistance::FiveK, false)
+                .value
+                .quality_per_week,
+            (2, 2)
+        );
+        assert_eq!(
+            goal_week_plan(GoalDistance::Marathon, true)
+                .value
+                .sessions_per_week,
+            (5, 7)
+        );
+        assert_eq!(
+            goal_week_plan(GoalDistance::Marathon, false)
+                .value
+                .sessions_per_week,
+            (4, 6)
+        );
         let p = c25k_plan().value;
-        assert_eq!((p.runs_per_week, p.rest_day_between, p.repeat_hard_week_allowed), (3, true, true));
+        assert_eq!(
+            (
+                p.runs_per_week,
+                p.rest_day_between,
+                p.repeat_hard_week_allowed
+            ),
+            (3, true, true)
+        );
     }
 
     #[test]
     fn distribution_and_progression_guards() {
         assert!(easy_share_floor_ok(0.80).value);
         assert!(!easy_share_floor_ok(0.79).value);
-        assert_eq!(default_counting_method(true).value, IntensityCountingMethod::SessionGoal);
-        assert_eq!(default_counting_method(false).value, IntensityCountingMethod::TimeInZone);
+        assert_eq!(
+            default_counting_method(true).value,
+            IntensityCountingMethod::SessionGoal
+        );
+        assert_eq!(
+            default_counting_method(false).value,
+            IntensityCountingMethod::TimeInZone
+        );
         assert_eq!(novice_volume_bump_hold_weeks(0.5).value, Some((2, 3)));
         assert_eq!(novice_volume_bump_hold_weeks(3.0).value, None);
         assert!(unscheduled_deload(2).value);
@@ -811,7 +1227,10 @@ mod tests {
     #[test]
     fn maf_cap_adjusts() {
         assert_eq!(maf_cap_bpm(40.0, MafAdjustment::None).value, 140.0);
-        assert_eq!(maf_cap_bpm(40.0, MafAdjustment::EliteImproving).value, 145.0);
+        assert_eq!(
+            maf_cap_bpm(40.0, MafAdjustment::EliteImproving).value,
+            145.0
+        );
         assert_eq!(maf_cap_bpm(40.0, MafAdjustment::Returning).value, 135.0);
         assert_eq!(maf_cap_bpm(40.0, MafAdjustment::Overtrained).value, 130.0);
         // Weak + contested per CQ-03.

@@ -8,7 +8,7 @@
 //!
 //! Numbers transcribed verbatim from File 03. Every prescriptive value is
 //! wrapped in [`Recommended`] via [`recommend`], which forces attached evidence
-//! + confidence from the compile-time registry (`crate::evidence`). Claim ids:
+//! and confidence from the compile-time registry (`crate::evidence`). Claim ids:
 //! HYP-VOL-001, HYP-LANDMARKS-001, HYP-REPLOAD-001, HYP-FREQ-001, HYP-REST-001,
 //! HYP-RIR-RAMP-001.
 
@@ -48,22 +48,90 @@ pub struct VolumeLandmarks {
 /// Table 1, transcribed verbatim from File 03 (RP framework, ExpertOpinion).
 /// `mrv` uses the "N+" lower bound (e.g. "22+" → 22).
 pub static LANDMARKS: &[VolumeLandmarks] = &[
-    VolumeLandmarks { muscle: "chest", mv: 8, mev: 10, mav: (12, 20), mrv: 22 },
-    VolumeLandmarks { muscle: "back", mv: 8, mev: 10, mav: (14, 22), mrv: 25 },
-    VolumeLandmarks { muscle: "quads", mv: 6, mev: 8, mav: (12, 18), mrv: 20 },
-    VolumeLandmarks { muscle: "hamstrings", mv: 4, mev: 6, mav: (10, 16), mrv: 20 },
-    VolumeLandmarks { muscle: "glutes", mv: 0, mev: 0, mav: (4, 12), mrv: 16 },
-    VolumeLandmarks { muscle: "side delts", mv: 6, mev: 8, mav: (16, 22), mrv: 26 },
-    VolumeLandmarks { muscle: "rear delts", mv: 0, mev: 6, mav: (12, 18), mrv: 22 },
-    VolumeLandmarks { muscle: "biceps", mv: 4, mev: 6, mav: (14, 20), mrv: 26 },
-    VolumeLandmarks { muscle: "triceps", mv: 4, mev: 6, mav: (10, 14), mrv: 18 },
-    VolumeLandmarks { muscle: "calves", mv: 4, mev: 6, mav: (8, 16), mrv: 20 },
-    VolumeLandmarks { muscle: "abs", mv: 0, mev: 0, mav: (10, 16), mrv: 20 },
+    VolumeLandmarks {
+        muscle: "chest",
+        mv: 8,
+        mev: 10,
+        mav: (12, 20),
+        mrv: 22,
+    },
+    VolumeLandmarks {
+        muscle: "back",
+        mv: 8,
+        mev: 10,
+        mav: (14, 22),
+        mrv: 25,
+    },
+    VolumeLandmarks {
+        muscle: "quads",
+        mv: 6,
+        mev: 8,
+        mav: (12, 18),
+        mrv: 20,
+    },
+    VolumeLandmarks {
+        muscle: "hamstrings",
+        mv: 4,
+        mev: 6,
+        mav: (10, 16),
+        mrv: 20,
+    },
+    VolumeLandmarks {
+        muscle: "glutes",
+        mv: 0,
+        mev: 0,
+        mav: (4, 12),
+        mrv: 16,
+    },
+    VolumeLandmarks {
+        muscle: "side delts",
+        mv: 6,
+        mev: 8,
+        mav: (16, 22),
+        mrv: 26,
+    },
+    VolumeLandmarks {
+        muscle: "rear delts",
+        mv: 0,
+        mev: 6,
+        mav: (12, 18),
+        mrv: 22,
+    },
+    VolumeLandmarks {
+        muscle: "biceps",
+        mv: 4,
+        mev: 6,
+        mav: (14, 20),
+        mrv: 26,
+    },
+    VolumeLandmarks {
+        muscle: "triceps",
+        mv: 4,
+        mev: 6,
+        mav: (10, 14),
+        mrv: 18,
+    },
+    VolumeLandmarks {
+        muscle: "calves",
+        mv: 4,
+        mev: 6,
+        mav: (8, 16),
+        mrv: 20,
+    },
+    VolumeLandmarks {
+        muscle: "abs",
+        mv: 0,
+        mev: 0,
+        mav: (10, 16),
+        mrv: 20,
+    },
 ];
 
 /// Look up landmarks by muscle name (case-insensitive). `None` if unknown.
 pub fn landmarks_for(muscle: &str) -> Option<&'static VolumeLandmarks> {
-    LANDMARKS.iter().find(|l| l.muscle.eq_ignore_ascii_case(muscle))
+    LANDMARKS
+        .iter()
+        .find(|l| l.muscle.eq_ignore_ascii_case(muscle))
 }
 
 // ---------------------------------------------------------------------------
@@ -93,9 +161,18 @@ pub struct RepLoad {
 /// Rep/load prescription for an exercise class (File 03 Table 2; HYP-REPLOAD-001).
 pub fn rep_load(class: ExerciseClass) -> Recommended<RepLoad> {
     let rl = match class {
-        ExerciseClass::HeavyCompound => RepLoad { reps: (5, 10), pct_1rm: (75, 85) },
-        ExerciseClass::ModerateCompound => RepLoad { reps: (8, 15), pct_1rm: (65, 75) },
-        ExerciseClass::Isolation => RepLoad { reps: (12, 25), pct_1rm: (50, 70) },
+        ExerciseClass::HeavyCompound => RepLoad {
+            reps: (5, 10),
+            pct_1rm: (75, 85),
+        },
+        ExerciseClass::ModerateCompound => RepLoad {
+            reps: (8, 15),
+            pct_1rm: (65, 75),
+        },
+        ExerciseClass::Isolation => RepLoad {
+            reps: (12, 25),
+            pct_1rm: (50, 70),
+        },
     };
     recommend(rl, "HYP-REPLOAD-001")
 }
@@ -128,11 +205,20 @@ pub struct FrequencyRx {
 /// HYP-FREQ-001). Bands: ≤10 → 1–2×; 11–18 → 2–3×; >18 → 3×.
 pub fn frequency_for_weekly_sets(weekly_sets: u8) -> Recommended<FrequencyRx> {
     let rx = if weekly_sets <= 10 {
-        FrequencyRx { freq: (1, 2), per_session: (1, 8) }
+        FrequencyRx {
+            freq: (1, 2),
+            per_session: (1, 8),
+        }
     } else if weekly_sets <= 18 {
-        FrequencyRx { freq: (2, 3), per_session: (5, 8) }
+        FrequencyRx {
+            freq: (2, 3),
+            per_session: (5, 8),
+        }
     } else {
-        FrequencyRx { freq: (3, 3), per_session: (6, 9) }
+        FrequencyRx {
+            freq: (3, 3),
+            per_session: (6, 9),
+        }
     };
     recommend(rx, "HYP-FREQ-001")
 }
@@ -197,7 +283,10 @@ pub const WEEKLY_SPLIT_THRESHOLD: u8 = 12;
 /// Clamp a proposed weekly growth-target set count to the ~31-set ceiling
 /// (File 03 hypertrophy-003).
 pub fn cap_weekly_growth_target(weekly_sets: u8) -> Recommended<u8> {
-    recommend(weekly_sets.min(WEEKLY_FRACTIONAL_SET_CEILING), "HYP-VOL-001")
+    recommend(
+        weekly_sets.min(WEEKLY_FRACTIONAL_SET_CEILING),
+        "HYP-VOL-001",
+    )
 }
 
 /// MEV weekly-set band per muscle by training age (File 03 hypertrophy-007):
@@ -234,16 +323,26 @@ pub fn over_mrv_deload(
     performance_down: bool,
     joint_ache: bool,
 ) -> Recommended<bool> {
-    recommend(weekly_sets > 20 && (performance_down || joint_ache), "HYP-VOL-001")
+    recommend(
+        weekly_sets > 20 && (performance_down || joint_ache),
+        "HYP-VOL-001",
+    )
 }
 
 /// Recovery-adjusted weekly volume (File 03 hypertrophy-010/045): in a deficit
 /// or with poor sleep/high stress, scale weekly sets to 70–80% of the base and
 /// reduce failure frequency. Returns the `(lo, hi)` adjusted set counts; when
 /// recovery is high the base passes through unchanged.
-pub fn recovery_adjusted_volume(base_weekly_sets: u8, low_recovery: bool) -> Recommended<(f64, f64)> {
+pub fn recovery_adjusted_volume(
+    base_weekly_sets: u8,
+    low_recovery: bool,
+) -> Recommended<(f64, f64)> {
     let b = base_weekly_sets as f64;
-    let range = if low_recovery { (b * 0.70, b * 0.80) } else { (b, b) };
+    let range = if low_recovery {
+        (b * 0.70, b * 0.80)
+    } else {
+        (b, b)
+    };
     recommend(range, "HYP-VOL-001")
 }
 
@@ -251,7 +350,13 @@ pub fn recovery_adjusted_volume(base_weekly_sets: u8, low_recovery: bool) -> Rec
 /// move that muscle's work to 12–25 reps at lighter load (50–70% 1RM);
 /// hypertrophy is preserved via load interchangeability.
 pub fn joint_pain_rep_shift() -> Recommended<RepLoad> {
-    recommend(RepLoad { reps: (12, 25), pct_1rm: (50, 70) }, "HYP-REPLOAD-001")
+    recommend(
+        RepLoad {
+            reps: (12, 25),
+            pct_1rm: (50, 70),
+        },
+        "HYP-REPLOAD-001",
+    )
 }
 
 /// Whether a weekly-set target must be split across ≥2 sessions (File 03
@@ -289,7 +394,11 @@ pub struct DeloadRx {
 /// ~60–70% of working weight, movement patterns kept (File 03 hypertrophy-036).
 pub fn deload_rx() -> Recommended<DeloadRx> {
     recommend(
-        DeloadRx { sets_fraction: 0.50, rir: (2, 4), load_frac_of_working: (0.60, 0.70) },
+        DeloadRx {
+            sets_fraction: 0.50,
+            rir: (2, 4),
+            load_frac_of_working: (0.60, 0.70),
+        },
         "HYP-VOL-001",
     )
 }
@@ -365,8 +474,14 @@ mod tests {
     #[test]
     fn mev_scales_with_training_age() {
         assert_eq!(mev_sets_by_training_age(TrainingAge::Novice).value, (6, 10));
-        assert_eq!(mev_sets_by_training_age(TrainingAge::Intermediate).value, (10, 18));
-        assert_eq!(mev_sets_by_training_age(TrainingAge::Advanced).value, (12, 20));
+        assert_eq!(
+            mev_sets_by_training_age(TrainingAge::Intermediate).value,
+            (10, 18)
+        );
+        assert_eq!(
+            mev_sets_by_training_age(TrainingAge::Advanced).value,
+            (12, 20)
+        );
     }
 
     #[test]

@@ -11,9 +11,7 @@
 //! ids come from the canonical registry in `crate::evidence`.
 
 use crate::evidence::claim;
-use crate::schema::{
-    Citation, ConfidenceTag, Evidence, EvidenceGrade, Recommended,
-};
+use crate::schema::{Citation, ConfidenceTag, Evidence, EvidenceGrade, Recommended};
 
 // ---------------------------------------------------------------------------
 // Recommendation helper
@@ -73,22 +71,14 @@ pub fn e1rm_brzycki(weight: f64, reps: u32) -> f64 {
 /// = −1 RPE (File 02 strength-007; registry AUTOREG-RIR-001). Clamped at 0.
 pub fn rpe_to_rir(rpe: f64) -> f64 {
     let rir = 10.0 - rpe;
-    if rir < 0.0 {
-        0.0
-    } else {
-        rir
-    }
+    if rir < 0.0 { 0.0 } else { rir }
 }
 
 /// RPE from reps in reserve, inverse of [`rpe_to_rir`] (File 02 strength-007;
 /// registry AUTOREG-RIR-001). Clamped at 10.
 pub fn rir_to_rpe(rir: f64) -> f64 {
     let rpe = 10.0 - rir;
-    if rpe > 10.0 {
-        10.0
-    } else {
-        rpe
-    }
+    if rpe > 10.0 { 10.0 } else { rpe }
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +183,7 @@ pub fn prilepin_volume_ok(pct_1rm: f64, total_reps: u16) -> bool {
 // ---------------------------------------------------------------------------
 
 /// The training quality a loading prescription targets (File 02 §1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LiftGoal {
     MaxStrength,
     Power,
@@ -221,9 +211,27 @@ pub struct LoadingRx {
 /// well short of failure; hypertrophy 65-85% / 6-12 / 0-3 RIR.
 pub fn loading_rx(goal: LiftGoal) -> Recommended<LoadingRx> {
     let rx = match goal {
-        LiftGoal::MaxStrength => LoadingRx { pct_1rm: (80, 100), reps: (1, 5), sets: (3, 6), rest_sec: (180, 300), rir: (1, 3) },
-        LiftGoal::Power => LoadingRx { pct_1rm: (30, 70), reps: (1, 5), sets: (3, 6), rest_sec: (180, 300), rir: (3, 5) },
-        LiftGoal::Hypertrophy => LoadingRx { pct_1rm: (65, 85), reps: (6, 12), sets: (3, 6), rest_sec: (30, 90), rir: (0, 3) },
+        LiftGoal::MaxStrength => LoadingRx {
+            pct_1rm: (80, 100),
+            reps: (1, 5),
+            sets: (3, 6),
+            rest_sec: (180, 300),
+            rir: (1, 3),
+        },
+        LiftGoal::Power => LoadingRx {
+            pct_1rm: (30, 70),
+            reps: (1, 5),
+            sets: (3, 6),
+            rest_sec: (180, 300),
+            rir: (3, 5),
+        },
+        LiftGoal::Hypertrophy => LoadingRx {
+            pct_1rm: (65, 85),
+            reps: (6, 12),
+            sets: (3, 6),
+            rest_sec: (30, 90),
+            rir: (0, 3),
+        },
     };
     recommend(rx, "STR-INTENT-001")
 }
@@ -235,14 +243,21 @@ pub fn loading_rx(goal: LiftGoal) -> Recommended<LoadingRx> {
 /// 2-for-2 rule (File 02 strength-012): increase load once the athlete beats the
 /// goal by >=2 reps on the last set in 2 consecutive sessions. DBLPROG-001.
 pub fn two_for_two_met(reps_over_goal_last_set: u8, consecutive_sessions: u8) -> Recommended<bool> {
-    recommend(reps_over_goal_last_set >= 2 && consecutive_sessions >= 2, "DBLPROG-001")
+    recommend(
+        reps_over_goal_last_set >= 2 && consecutive_sessions >= 2,
+        "DBLPROG-001",
+    )
 }
 
 /// Percentage auto-progression per successful week (File 02 strength-014):
 /// lower-body +2.5-5%, upper-body +1-2.5% of load. Returns (min, max) fraction.
 /// DBLPROG-001.
 pub fn weekly_pct_increment(upper_body: bool) -> Recommended<(f64, f64)> {
-    let inc = if upper_body { (0.01, 0.025) } else { (0.025, 0.05) };
+    let inc = if upper_body {
+        (0.01, 0.025)
+    } else {
+        (0.025, 0.05)
+    };
     recommend(inc, "DBLPROG-001")
 }
 
@@ -273,7 +288,9 @@ pub enum PeriodizationModel {
 /// linear; intermediate → DUP or block; advanced → block or conjugate. No single
 /// model is hard-coded as superior (strength-009). Returns the primary default
 /// per level. PERIOD-001.
-pub fn periodization_model(level: crate::individualization::TrainingAge) -> Recommended<PeriodizationModel> {
+pub fn periodization_model(
+    level: crate::individualization::TrainingAge,
+) -> Recommended<PeriodizationModel> {
     use crate::individualization::TrainingAge;
     let model = match level {
         TrainingAge::Novice => PeriodizationModel::Linear,
@@ -302,7 +319,11 @@ pub struct TaperRx {
 /// while holding intensity and frequency (File 02 strength-026; TAPER-001).
 pub fn taper_rx() -> Recommended<TaperRx> {
     recommend(
-        TaperRx { volume_reduction_frac: (0.41, 0.60), duration_days: (8, 14), hold_intensity: true },
+        TaperRx {
+            volume_reduction_frac: (0.41, 0.60),
+            duration_days: (8, 14),
+            hold_intensity: true,
+        },
         "TAPER-001",
     )
 }
@@ -314,7 +335,9 @@ pub fn taper_rx() -> Recommended<TaperRx> {
 /// Foot-contact ceiling per plyometric session by training level (File 02
 /// strength-032; PLYO-001). Returns (min, max) foot contacts. Progress volume
 /// OR intensity, never both.
-pub fn plyo_foot_contact_cap(level: crate::individualization::TrainingAge) -> Recommended<(u16, u16)> {
+pub fn plyo_foot_contact_cap(
+    level: crate::individualization::TrainingAge,
+) -> Recommended<(u16, u16)> {
     use crate::individualization::TrainingAge;
     let cap = match level {
         TrainingAge::Novice => (80, 100),
@@ -347,7 +370,13 @@ pub fn pap_rest_window_min() -> Recommended<(u8, u8)> {
 /// STR-INTENT-001.
 pub fn olympic_derivative_rx() -> Recommended<LoadingRx> {
     recommend(
-        LoadingRx { pct_1rm: (85, 100), reps: (1, 3), sets: (3, 5), rest_sec: (180, 300), rir: (3, 5) },
+        LoadingRx {
+            pct_1rm: (85, 100),
+            reps: (1, 3),
+            sets: (3, 5),
+            rest_sec: (180, 300),
+            rir: (3, 5),
+        },
         "STR-INTENT-001",
     )
 }
@@ -378,7 +407,13 @@ pub struct BackOffRx {
 /// Top set at RPE ~8, back-off sets dropped 10–15% of the top-set load (File 02
 /// strength-015). AUTOREG-RIR-001 (RPE anchoring).
 pub fn rpe_anchored_back_off() -> Recommended<BackOffRx> {
-    recommend(BackOffRx { top_set_rpe: 8, drop_frac: (0.10, 0.15) }, "AUTOREG-RIR-001")
+    recommend(
+        BackOffRx {
+            top_set_rpe: 8,
+            drop_frac: (0.10, 0.15),
+        },
+        "AUTOREG-RIR-001",
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -432,10 +467,30 @@ pub enum LinearPhase {
 /// to [`taper_rx`] (pct/sets/reps `None`, maintain intensity). PERIOD-001.
 pub fn linear_phase_rx(phase: LinearPhase) -> Recommended<PhaseRx> {
     let rx = match phase {
-        LinearPhase::Base => PhaseRx { pct_1rm: Some((67, 75)), sets: Some((3, 5)), reps: Some((8, 12)), weeks: (1, 4) },
-        LinearPhase::Build => PhaseRx { pct_1rm: Some((80, 87)), sets: Some((4, 5)), reps: Some((4, 6)), weeks: (5, 8) },
-        LinearPhase::Peak => PhaseRx { pct_1rm: Some((90, 95)), sets: Some((3, 5)), reps: Some((1, 3)), weeks: (9, 11) },
-        LinearPhase::Taper => PhaseRx { pct_1rm: None, sets: None, reps: None, weeks: (12, 12) },
+        LinearPhase::Base => PhaseRx {
+            pct_1rm: Some((67, 75)),
+            sets: Some((3, 5)),
+            reps: Some((8, 12)),
+            weeks: (1, 4),
+        },
+        LinearPhase::Build => PhaseRx {
+            pct_1rm: Some((80, 87)),
+            sets: Some((4, 5)),
+            reps: Some((4, 6)),
+            weeks: (5, 8),
+        },
+        LinearPhase::Peak => PhaseRx {
+            pct_1rm: Some((90, 95)),
+            sets: Some((3, 5)),
+            reps: Some((1, 3)),
+            weeks: (9, 11),
+        },
+        LinearPhase::Taper => PhaseRx {
+            pct_1rm: None,
+            sets: None,
+            reps: None,
+            weeks: (12, 12),
+        },
     };
     recommend(rx, "PERIOD-001")
 }
@@ -457,9 +512,24 @@ pub enum BlockPhase {
 /// (CQ-02: no meta-analysis confirms block > traditional). PERIOD-001.
 pub fn block_phase_rx(phase: BlockPhase) -> Recommended<PhaseRx> {
     let rx = match phase {
-        BlockPhase::Accumulation => PhaseRx { pct_1rm: Some((65, 80)), sets: Some((3, 5)), reps: Some((6, 10)), weeks: (2, 4) },
-        BlockPhase::Transmutation => PhaseRx { pct_1rm: Some((80, 90)), sets: Some((3, 6)), reps: Some((3, 6)), weeks: (2, 4) },
-        BlockPhase::Realization => PhaseRx { pct_1rm: None, sets: None, reps: Some((1, 3)), weeks: (2, 4) },
+        BlockPhase::Accumulation => PhaseRx {
+            pct_1rm: Some((65, 80)),
+            sets: Some((3, 5)),
+            reps: Some((6, 10)),
+            weeks: (2, 4),
+        },
+        BlockPhase::Transmutation => PhaseRx {
+            pct_1rm: Some((80, 90)),
+            sets: Some((3, 6)),
+            reps: Some((3, 6)),
+            weeks: (2, 4),
+        },
+        BlockPhase::Realization => PhaseRx {
+            pct_1rm: None,
+            sets: None,
+            reps: Some((1, 3)),
+            weeks: (2, 4),
+        },
     };
     recommend(rx, "PERIOD-001")
 }
@@ -512,10 +582,16 @@ mod tests {
     #[test]
     fn periodization_phase_tables() {
         let base = linear_phase_rx(LinearPhase::Base).value;
-        assert_eq!((base.pct_1rm, base.sets, base.reps, base.weeks), (Some((67, 75)), Some((3, 5)), Some((8, 12)), (1, 4)));
+        assert_eq!(
+            (base.pct_1rm, base.sets, base.reps, base.weeks),
+            (Some((67, 75)), Some((3, 5)), Some((8, 12)), (1, 4))
+        );
         assert_eq!(linear_phase_rx(LinearPhase::Taper).value.pct_1rm, None);
         let acc = block_phase_rx(BlockPhase::Accumulation).value;
-        assert_eq!((acc.pct_1rm, acc.sets, acc.reps), (Some((65, 80)), Some((3, 5)), Some((6, 10))));
+        assert_eq!(
+            (acc.pct_1rm, acc.sets, acc.reps),
+            (Some((65, 80)), Some((3, 5)), Some((6, 10)))
+        );
         let real = block_phase_rx(BlockPhase::Realization).value;
         assert_eq!((real.pct_1rm, real.reps), (None, Some((1, 3))));
     }
@@ -543,9 +619,15 @@ mod tests {
         let s = loading_rx(LiftGoal::MaxStrength).value;
         assert_eq!((s.pct_1rm, s.reps, s.rir), ((80, 100), (1, 5), (1, 3)));
         let h = loading_rx(LiftGoal::Hypertrophy).value;
-        assert_eq!((h.pct_1rm, h.reps, h.rest_sec, h.rir), ((65, 85), (6, 12), (30, 90), (0, 3)));
+        assert_eq!(
+            (h.pct_1rm, h.reps, h.rest_sec, h.rir),
+            ((65, 85), (6, 12), (30, 90), (0, 3))
+        );
         // Strength intensity floor sits above hypertrophy's.
-        assert!(loading_rx(LiftGoal::MaxStrength).value.pct_1rm.0 > loading_rx(LiftGoal::Hypertrophy).value.pct_1rm.0);
+        assert!(
+            loading_rx(LiftGoal::MaxStrength).value.pct_1rm.0
+                > loading_rx(LiftGoal::Hypertrophy).value.pct_1rm.0
+        );
     }
 
     #[test]
@@ -563,11 +645,24 @@ mod tests {
     #[test]
     fn periodization_by_training_age() {
         use crate::individualization::TrainingAge;
-        assert_eq!(periodization_model(TrainingAge::Novice).value, PeriodizationModel::Linear);
-        assert_eq!(periodization_model(TrainingAge::Intermediate).value, PeriodizationModel::Dup);
-        assert_eq!(periodization_model(TrainingAge::Advanced).value, PeriodizationModel::Block);
+        assert_eq!(
+            periodization_model(TrainingAge::Novice).value,
+            PeriodizationModel::Linear
+        );
+        assert_eq!(
+            periodization_model(TrainingAge::Intermediate).value,
+            PeriodizationModel::Dup
+        );
+        assert_eq!(
+            periodization_model(TrainingAge::Advanced).value,
+            PeriodizationModel::Block
+        );
         // PERIOD-001 is contested (CQ-03): no model hard-coded as superior.
-        assert!(periodization_model(TrainingAge::Novice).confidence.contested);
+        assert!(
+            periodization_model(TrainingAge::Novice)
+                .confidence
+                .contested
+        );
     }
 
     #[test]
@@ -582,8 +677,14 @@ mod tests {
     fn plyo_caps_rise_with_level() {
         use crate::individualization::TrainingAge;
         assert_eq!(plyo_foot_contact_cap(TrainingAge::Novice).value, (80, 100));
-        assert_eq!(plyo_foot_contact_cap(TrainingAge::Advanced).value, (120, 140));
-        assert!(plyo_foot_contact_cap(TrainingAge::Advanced).value.1 > plyo_foot_contact_cap(TrainingAge::Novice).value.1);
+        assert_eq!(
+            plyo_foot_contact_cap(TrainingAge::Advanced).value,
+            (120, 140)
+        );
+        assert!(
+            plyo_foot_contact_cap(TrainingAge::Advanced).value.1
+                > plyo_foot_contact_cap(TrainingAge::Novice).value.1
+        );
     }
 
     #[test]

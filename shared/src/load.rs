@@ -185,7 +185,11 @@ pub fn decoupling_band(
         DecouplingBand::Insufficient
     };
     match crate::evidence::claim("RUN-DECOUPLE-001") {
-        Some(entry) => (band, Some(entry.to_evidence()), Some(entry.to_confidence_tag())),
+        Some(entry) => (
+            band,
+            Some(entry.to_evidence()),
+            Some(entry.to_confidence_tag()),
+        ),
         None => (band, None, None),
     }
 }
@@ -424,6 +428,35 @@ pub fn vdot(distance_m: f64, time_sec: f64) -> f64 {
     daniels_vo2(v) / pct
 }
 
+/// Daniels race-time prediction: the finish time (seconds) over `distance_m`
+/// that a runner of the given `vdot` would run. Inverts [`vdot`], for a fixed
+/// distance, `vdot(d, t)` is strictly decreasing in `t` (a slower time implies a
+/// lower VDOT), so a bisection on time converges to the unique matching finish.
+/// Pair with [`riegel_predict`] and combine via `running::race_equivalency` so a
+/// single method's false precision is never presented alone (File 07). `[Moderate]`
+///
+/// Guards non-positive inputs (returns 0.0) since VDOT/distance are undefined
+/// there. The search brackets 1 s … 6 h; a target VDOT outside a plausible human
+/// range is clamped to that bracket rather than diverging.
+pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
+    if vdot_target <= 0.0 || distance_m <= 0.0 {
+        return 0.0;
+    }
+    // vdot(d, t) decreases monotonically in t, so bisect: when the midpoint's
+    // VDOT still exceeds the target the time is too short (raise the low bound).
+    let mut lo = 1.0; // 1 s - faster than any real finish
+    let mut hi = 6.0 * 3600.0; // 6 h - slower than any race we predict
+    for _ in 0..100 {
+        let mid = 0.5 * (lo + hi);
+        if vdot(distance_m, mid) > vdot_target {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
 // ---------------------------------------------------------------------------
 // Zonal TRIMP variants & hrTSS (File 07)
 // ---------------------------------------------------------------------------
@@ -448,11 +481,18 @@ pub fn lucia_trimp(minutes_per_zone: [f64; 3]) -> f64 {
         .sum()
 }
 
-/// hrTSS fallback: `Σ(minutes_in_zone × zone_intensity_factor)` scaled so 60
-/// min at threshold (IF 1.0) = 100 (File 07: time-in-HR-zone weighted by each
-/// zone's IF). Pass paired (minutes, IF) per zone. `[Weak]`
+/// hrTSS fallback: `Σ(minutes_in_zone × IF²)` scaled so 60 min at threshold
+/// (IF 1.0) = 100 (File 07: time-in-HR-zone weighted by each zone's intensity
+/// factor). IF is squared, not linear, so the fallback lands on the same
+/// scale as TSS/rTSS, which are themselves quadratic in the intensity ratio
+/// (rTSS ∝ NGP²/FTPa²). A linear weighting would match only at threshold and
+/// systematically under-count time spent above it. Pass paired (minutes, IF)
+/// per zone. `[Weak]`
 pub fn hr_tss(zone_minutes_and_if: &[(f64, f64)]) -> f64 {
-    let weighted: f64 = zone_minutes_and_if.iter().map(|(m, if_)| m * if_ * if_).sum();
+    let weighted: f64 = zone_minutes_and_if
+        .iter()
+        .map(|(m, if_)| m * if_ * if_)
+        .sum();
     weighted / 60.0 * 100.0
 }
 
@@ -507,11 +547,9 @@ pub fn is_stopped(speed_m_s: f64) -> bool {
 
 /// DO NOT USE. Hard-blocked myth `LOAD-ACWR-001` (mathematical coupling;
 /// Impellizzeri/Lolli 2019). Present only to document the block; unused.
-#[deprecated(
-    note = "LOAD-ACWR-001 is a MarketingMyth (hard-blocked). ACWR is \
+#[deprecated(note = "LOAD-ACWR-001 is a MarketingMyth (hard-blocked). ACWR is \
             mathematically coupled and does not predict injury. Use \
-            week-to-week ramp <~10%/wk and RUN-SPIKE-001 instead."
-)]
+            week-to-week ramp <~10%/wk and RUN-SPIKE-001 instead.")]
 #[allow(dead_code)]
 pub fn acwr_do_not_use(acute_7day_load: f64, chronic_28day_load: f64) -> f64 {
     if chronic_28day_load.abs() < f64::EPSILON {
@@ -532,7 +570,10 @@ mod tests {
     fn riegel_predicts_longer_races_slower() {
         // 5 km in 20:00 (1200 s) → 10 km should take >2× (fatigue exponent >1).
         let t10 = riegel_predict(1200.0, 5.0, 10.0, 1.06);
-        assert!(t10 > 2400.0, "10k should exceed a doubled 5k pace, got {t10}");
+        assert!(
+            t10 > 2400.0,
+            "10k should exceed a doubled 5k pace, got {t10}"
+        );
         // Verbatim: 1200 * 2^1.06 ≈ 2502 s.
         assert!((t10 - 2502.0).abs() < 5.0, "got {t10}");
         // Exponent bands by weekly volume.
@@ -542,6 +583,24 @@ mod tests {
         assert!((riegel_exponent(10.0) - 1.12).abs() < 1e-9);
         // Non-positive inputs guarded.
         assert_eq!(riegel_predict(0.0, 5.0, 10.0, 1.06), 0.0);
+    }
+
+    #[test]
+    fn daniels_predict_inverts_vdot() {
+        // A known race defines a VDOT; predicting that same distance at that VDOT
+        // must reproduce the race time (the inverse round-trips).
+        let d = 5000.0;
+        let t = 1200.0; // 5 km in 20:00
+        let v = vdot(d, t);
+        let back = daniels_predict(v, d);
+        assert!((back - t).abs() < 1.0, "round-trip within 1 s, got {back}");
+        // Same fitness over a longer distance must take longer, and by more than
+        // a pure distance scaling (endurance fades with duration).
+        let t10 = daniels_predict(v, 10_000.0);
+        assert!(t10 > 2.0 * t, "10k must exceed doubled 5k time, got {t10}");
+        // Non-positive inputs guarded.
+        assert_eq!(daniels_predict(0.0, 5000.0), 0.0);
+        assert_eq!(daniels_predict(50.0, 0.0), 0.0);
     }
 
     #[test]
@@ -589,6 +648,28 @@ mod tests {
     }
 
     #[test]
+    fn quadratic_gap_matches_verbatim_formula() {
+        // File 07: adjustment(g%) = 1 + 0.033·g + 0.0025·g² (g in percent).
+        // Flat is exactly 1.0.
+        assert!(
+            (quadratic_gap_factor(0.0) - 1.0).abs() < 1e-9,
+            "flat must be 1.0"
+        );
+        // +10% grade: 1 + 0.33 + 0.25 = 1.58 (pins both coefficients).
+        assert!(
+            (quadratic_gap_factor(10.0) - 1.58).abs() < 1e-9,
+            "got {}",
+            quadratic_gap_factor(10.0)
+        );
+        // Uphill costs more than flat; the quadratic term keeps downhill (−g)
+        // above 1.0 too (it models energy cost, not a pace credit).
+        assert!(
+            quadratic_gap_factor(5.0) > 1.0,
+            "uphill factor must exceed 1.0"
+        );
+    }
+
+    #[test]
     fn tss_is_positive_for_real_session() {
         // 1 h at FTP (NP = FTP, IF = 1.0) is defined as exactly 100 TSS.
         let ftp = 250.0;
@@ -607,7 +688,10 @@ mod tests {
         // EF = normalized_output / avg_hr.
         let ef = efficiency_factor(180.0, 150.0);
         assert!((ef - 1.2).abs() < 1e-9, "EF should be 1.2, got {ef}");
-        assert!(efficiency_factor(180.0, 0.0).abs() < f64::EPSILON, "guard div0");
+        assert!(
+            efficiency_factor(180.0, 0.0).abs() < f64::EPSILON,
+            "guard div0"
+        );
 
         // Banister TRIMP positive and sex factors differ.
         let hrr = hr_reserve_fraction(150.0, 50.0, 190.0);
@@ -615,7 +699,10 @@ mod tests {
         let male = banister_trimp(60.0, hrr, SexFactor::Male);
         let female = banister_trimp(60.0, hrr, SexFactor::Female);
         assert!(male > 0.0 && female > 0.0, "TRIMP must be positive");
-        assert!((male - female).abs() > f64::EPSILON, "sex factors must differ");
+        assert!(
+            (male - female).abs() > f64::EPSILON,
+            "sex factors must differ"
+        );
     }
 
     #[test]

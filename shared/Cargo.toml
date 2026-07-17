@@ -9,8 +9,14 @@ license.workspace = true
 crate-type = ["cdylib", "lib", "staticlib"]
 
 [dependencies]
-crux_core = { workspace = true, features = ["typegen"] }
+crux_core = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+
+[features]
+# `#[effect(typegen)]` in app.rs emits shell-codegen type registration gated on
+# this feature. Runtime shells (Android JSON FFI, web) never need it, so keep it
+# off by default; enable with `--features typegen` when generating shell types.
+typegen = ["crux_core/typegen"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.21", default-features = false }

@@ -377,9 +377,7 @@ pub enum Adjustment {
     /// Stop training and defer to a professional (physician / dietitian /
     /// mental-health). Emitted for medical red flags; `reason` names the trigger
     /// and referral target. Overrides all optimization output (File 08).
-    Defer {
-        reason: String,
-    },
+    Defer { reason: String },
 }
 
 #[cfg(test)]
