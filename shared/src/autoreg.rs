@@ -119,27 +119,34 @@ fn medical_referral(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>
 // Rule-family helpers (thresholds verbatim from File 06)
 // ---------------------------------------------------------------------------
 
-/// RPE-based load cut when first work-set RPE overshoots target.
-/// autoreg-001: RPE ≥ target + 2 → −7 to 10% (uses 10% floor of the band).
+/// RPE-based load adjustment from first work-set RPE vs. target.
+/// autoreg-001: RPE ≥ target + 2 → −7 to 10% (uses 10% ceiling of the band).
 /// autoreg-002: RPE = target + 1 → −3 to 5% (uses 5%).
+/// autoreg-004: RPE = target − 1 → +3 to 5% (uses 4% midpoint).
+/// autoreg-005: RPE ≤ target − 2 → +5 to 10% (uses 7.5% midpoint).
 /// `value` is the signed RPE delta (actual − target).
-fn rpe_load_cut(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
+fn rpe_load_adjust(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let delta = latest(inputs, ReadinessSignal::Rpe)?;
     if delta >= 2.0 {
         Some(recommend(Adjustment::ReduceLoadPct(10.0), "AUTOREG-RIR-001"))
     } else if delta >= 1.0 {
         Some(recommend(Adjustment::ReduceLoadPct(5.0), "AUTOREG-RIR-001"))
+    } else if delta <= -2.0 {
+        Some(recommend(Adjustment::IncreaseLoadPct(7.5), "AUTOREG-RIR-001"))
+    } else if delta <= -1.0 {
+        Some(recommend(Adjustment::IncreaseLoadPct(4.0), "AUTOREG-RIR-001"))
     } else {
         None
     }
 }
 
-/// e1RM / velocity deload gate.
+/// e1RM-driven load gate (both directions).
 /// autoreg-022: e1RM at fixed RPE down >10% for ≥2 sessions → deload
 /// (volume −40–50%, load −5–10%, 1 wk). `EstimatedOneRm` carries the ratio
 /// today ÷ baseline; < 0.90 means a >10% drop.
 /// autoreg-006: e1RM < baseline − 5% (ratio < 0.95) → cap/reduce top-set ~5%.
-fn e1rm_deload_gate(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
+/// autoreg-007: e1RM > baseline + 5% (ratio > 1.05) → add load ~2.5–5% (uses 3.5%).
+fn e1rm_gate(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let ratio = latest(inputs, ReadinessSignal::EstimatedOneRm)?;
     if ratio < 0.90 {
         Some(recommend(
@@ -152,6 +159,8 @@ fn e1rm_deload_gate(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>
         ))
     } else if ratio < 0.95 {
         Some(recommend(Adjustment::ReduceLoadPct(5.0), "AUTOREG-PCT-001"))
+    } else if ratio > 1.05 {
+        Some(recommend(Adjustment::IncreaseLoadPct(3.5), "AUTOREG-PCT-001"))
     } else {
         None
     }
@@ -248,8 +257,14 @@ pub fn resolve_safety(inputs: &[ReadinessInput]) -> Option<SafetyTier> {
     if illness_stop(inputs) || illness_downgrade(inputs) {
         raise(SafetyTier::Illness);
     }
-    // Tier 3, objective within-session performance (e1RM / velocity).
-    if e1rm_deload_gate(inputs).is_some() || vl_stop(inputs).is_some() {
+    // Tier 3, objective within-session performance (e1RM drop / velocity loss).
+    // A load *increase* signals high readiness, never a safety concern, only
+    // reductions/deloads raise the tier.
+    let e1rm_concern = matches!(
+        e1rm_gate(inputs).map(|r| r.value),
+        Some(Adjustment::Deload { .. } | Adjustment::ReduceLoadPct(_))
+    );
+    if e1rm_concern || vl_stop(inputs).is_some() {
         raise(SafetyTier::ObjectivePerformance);
     }
     // Tier 4, persistent multi-day subjective suppression (autoreg-030).
@@ -281,7 +296,7 @@ pub fn adjustments(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
         return vec![defer];
     }
     if pain_stop(inputs) {
-        return vec![recommend(Adjustment::Stop, "MYTH-NO-PAIN-JOINT")];
+        return vec![recommend(Adjustment::Stop, "SAFE-PAIN-001")];
     }
     if illness_stop(inputs) {
         return vec![recommend(Adjustment::Stop, "ILLNESS-NECK-001")];
@@ -292,10 +307,10 @@ pub fn adjustments(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
 
     // Non-stop rules accumulate (deterministic order).
     let mut out = Vec::new();
-    if let Some(r) = rpe_load_cut(inputs) {
+    if let Some(r) = rpe_load_adjust(inputs) {
         out.push(r);
     }
-    if let Some(r) = e1rm_deload_gate(inputs) {
+    if let Some(r) = e1rm_gate(inputs) {
         out.push(r);
     }
     if let Some(r) = vl_stop(inputs) {
@@ -318,6 +333,247 @@ pub fn adjustments(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
         out.push(r);
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// Set-level & next-load prescriptions (scalar inputs, not readiness streams)
+//
+// These operate on a single lift's within-session observations (AMRAP reps,
+// first-set RPE, reference-load velocity) rather than the daily readiness
+// vector, so they take plain scalars and return small decision enums. All are
+// pure and deterministic. Thresholds verbatim from File 06.
+// ---------------------------------------------------------------------------
+
+/// Daily-1RM readiness verdict from mean concentric velocity at a reference
+/// load vs. baseline (File 06 autoreg-008/009; VBT). ±0.06 m/s is the
+/// reliability band (Weakley/Pearson 2020).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VbtReadiness {
+    /// MCV > baseline + 0.06 m/s → daily 1RM up → raise working loads.
+    IncreaseLoad,
+    /// Within the ±0.06 m/s reliability band → hold planned loads.
+    Hold,
+    /// MCV < baseline − 0.06 m/s → daily 1RM down → reduce working loads.
+    ReduceLoad,
+}
+
+/// Map a reference-load velocity delta (m/s, today − baseline) to a daily-1RM
+/// readiness verdict (File 06 autoreg-008/009).
+pub fn vbt_daily_readiness(mcv_delta_m_s: f64) -> Recommended<VbtReadiness> {
+    let v = if mcv_delta_m_s > 0.06 {
+        VbtReadiness::IncreaseLoad
+    } else if mcv_delta_m_s < -0.06 {
+        VbtReadiness::ReduceLoad
+    } else {
+        VbtReadiness::Hold
+    };
+    recommend_t(v, "AUTOREG-RIR-001")
+}
+
+/// Within-session set-volume decision (File 06 autoreg-011/012).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetVolumeAction {
+    /// First set strong (≥ target reps) AND RPE ≤ target−1 AND wellness normal
+    /// → add a set (progress toward MAV/MRV). autoreg-011.
+    AddSet,
+    /// First set short OR RPE ≥ target+1 → drop the last planned set. autoreg-012.
+    DropLastSet,
+    /// Neither trigger, run the planned sets.
+    HoldPlanned,
+}
+
+/// Decide whether to add/drop a set from the first work set (File 06
+/// autoreg-011/012). `rpe_delta` = first-set RPE − target RPE.
+pub fn set_volume_action(
+    first_set_reps_met: bool,
+    rpe_delta: f64,
+    wellness_normal: bool,
+) -> Recommended<SetVolumeAction> {
+    let a = if first_set_reps_met && rpe_delta <= -1.0 && wellness_normal {
+        SetVolumeAction::AddSet
+    } else if !first_set_reps_met || rpe_delta >= 1.0 {
+        SetVolumeAction::DropLastSet
+    } else {
+        SetVolumeAction::HoldPlanned
+    };
+    recommend_t(a, "AUTOREG-RIR-001")
+}
+
+/// RPE-stop: cut remaining sets once the target RPE is reached before the
+/// planned set count (File 06 autoreg-013). `true` = stop now.
+pub fn rpe_stop_reached(rpe_actual: f64, rpe_target: f64) -> bool {
+    rpe_actual >= rpe_target
+}
+
+/// Hold weekly volume (no add) after two consecutive sessions that both needed
+/// set cuts on the same lift (File 06 autoreg-014).
+pub fn hold_volume_after_two_cut_sessions(cut_last_two_sessions: bool) -> bool {
+    cut_last_two_sessions
+}
+
+/// Which APRE scheme's adjustment table applies (File 06 autoreg-015…021).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApreScheme {
+    /// 3RM strength emphasis.
+    Apre3,
+    /// 6RM strength/hypertrophy.
+    Apre6,
+    /// 10RM hypertrophy.
+    Apre10,
+}
+
+/// APRE next-load adjustment (lb) from the AMRAP-set rep count (File 06
+/// autoreg-015…021; Mann 2010). Returns the `(low, high)` lb delta to apply to
+/// the next set/session; negatives reduce load. `[Moderate]` (AUTOREG-APRE-001).
+pub fn apre_load_adjustment_lb(scheme: ApreScheme, reps: u8) -> Recommended<(f64, f64)> {
+    let range = match scheme {
+        ApreScheme::Apre6 => match reps {
+            0..=2 => (-10.0, -5.0),
+            3..=4 => (-5.0, 0.0),
+            5..=7 => (0.0, 0.0),
+            8..=12 => (5.0, 10.0),
+            _ => (10.0, 15.0),
+        },
+        ApreScheme::Apre10 => match reps {
+            0..=6 => (-10.0, -5.0),
+            7..=8 => (-5.0, 0.0),
+            9..=11 => (0.0, 0.0),
+            12..=16 => (5.0, 10.0),
+            _ => (10.0, 15.0),
+        },
+        ApreScheme::Apre3 => match reps {
+            0..=2 => (-10.0, -5.0),
+            3..=4 => (0.0, 0.0),
+            5..=6 => (5.0, 10.0),
+            _ => (10.0, 15.0),
+        },
+    };
+    recommend_t(range, "AUTOREG-APRE-001")
+}
+
+/// The standard RP-framework 1-week deload used by the multi-session triggers
+/// (File 06 autoreg-023/024/025/026): volume −50%, load −10%.
+fn standard_deload() -> Adjustment {
+    Adjustment::Deload { volume_reduction_pct: 50.0, load_reduction_pct: 10.0, weeks: 1 }
+}
+
+/// Deload when planned RPE is only hit at loads ≥7% below plan for ≥2 sessions
+/// (File 06 autoreg-023). `None` when the trigger has not fired.
+pub fn deload_from_rpe_load_gap(sessions_ge_7pct_below: u8) -> Option<Recommended<Adjustment>> {
+    (sessions_ge_7pct_below >= 2).then(|| recommend(standard_deload(), "AUTOREG-PCT-001"))
+}
+
+/// Deload when session RPE creeps +1 across the week at the same loads AND the
+/// wellness composite z ≤ −1 for ≥3 days (File 06 autoreg-024).
+pub fn deload_from_rpe_creep_and_wellness(
+    rpe_creep_plus_one: bool,
+    wellness_z_le_neg1_days: u8,
+) -> Option<Recommended<Adjustment>> {
+    (rpe_creep_plus_one && wellness_z_le_neg1_days >= 3)
+        .then(|| recommend(standard_deload(), "AUTOREG-PCT-001"))
+}
+
+/// Deload when reference-load velocity is down >0.06 m/s across the week
+/// (File 06 autoreg-026). Uses the lower bound of the 0.06–0.10 m/s band.
+pub fn deload_from_velocity_drop(weekly_mcv_drop_m_s: f64) -> Option<Recommended<Adjustment>> {
+    (weekly_mcv_drop_m_s > 0.06).then(|| recommend(standard_deload(), "AUTOREG-PCT-001"))
+}
+
+/// Reduce weekly volume 20–30% (defer hard work) after two failed key sessions
+/// in a week (File 06 autoreg-036). Encoded as a load-neutral volume deload
+/// (25% midpoint).
+pub fn deload_from_failed_sessions(failed_key_sessions: u8) -> Option<Recommended<Adjustment>> {
+    (failed_key_sessions >= 2).then(|| {
+        recommend(
+            Adjustment::Deload { volume_reduction_pct: 25.0, load_reduction_pct: 0.0, weeks: 1 },
+            "AUTOREG-PCT-001",
+        )
+    })
+}
+
+/// Interval-pace autoregulation (File 06 autoreg-031): when ≥2 reps land at
+/// RPE ≥ target+1 or above the HR cap, cut the remaining-rep pace target ~2–4%
+/// (returns the fractional pace reduction to apply, else `None`).
+pub fn interval_pace_autoreg(reps_over_target: u8) -> Option<Recommended<f64>> {
+    (reps_over_target >= 2).then(|| recommend_t(0.03, "RUN-VDOT-001"))
+}
+
+/// Easy-day pace is governed by the HR cap, not pace (File 06 autoreg-033):
+/// if the runner cannot hold the prescribed easy pace under the HR cap, slow
+/// the pace. `true` = slow the easy pace.
+pub fn slow_easy_pace_if_over_cap(can_hold_pace_under_cap: bool) -> Recommended<bool> {
+    recommend_t(!can_hold_pace_under_cap, "RUN-VDOT-001")
+}
+
+/// Which signal source drives autoregulation given data availability
+/// (File 06 autoreg-047/048; graceful fallback).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoregSource {
+    /// HRV available (today, or ≥4 recent readings) → 7-day rolling HRV gate.
+    HrvRolling,
+    /// No usable HRV but subjective wellness present → subjective + performance.
+    SubjectivePlusPerformance,
+    /// Neither HRV nor subjective → performance-only, and HOLD load (no
+    /// progression beyond plan). autoreg-048.
+    PerformanceOnlyHold,
+}
+
+/// Select the autoregulation signal source from availability (File 06
+/// autoreg-047/048). HRV is usable when a reading exists today or ≥4 recent
+/// readings back a 7-day rolling baseline.
+pub fn autoreg_source(
+    hrv_today: bool,
+    recent_hrv_count: u8,
+    has_subjective: bool,
+) -> Recommended<AutoregSource> {
+    let s = if hrv_today || recent_hrv_count >= 4 {
+        AutoregSource::HrvRolling
+    } else if has_subjective {
+        AutoregSource::SubjectivePlusPerformance
+    } else {
+        AutoregSource::PerformanceOnlyHold
+    };
+    recommend_t(s, "HRV-001")
+}
+
+/// Whether an HRV reading is reliable (File 06 autoreg-049): reject on high
+/// artifacts, a recording shorter than the standardized window, OR a >3 SD
+/// deviation from the rolling mean while the CV is already elevated. `true` =
+/// usable.
+pub fn hrv_reading_reliable(
+    high_artifacts: bool,
+    window_too_short: bool,
+    deviation_sd: f64,
+    cv_elevated: bool,
+) -> bool {
+    !(high_artifacts || window_too_short || (deviation_sd > 3.0 && cv_elevated))
+}
+
+/// Suspend HRV gating once ≥2 of the last 3 readings were flagged unreliable
+/// (File 06 autoreg-050); use subjective + performance until a clean baseline
+/// returns. `true` = suspend HRV gating.
+pub fn suspend_hrv_gating(unreliable_in_last_three: u8) -> bool {
+    unreliable_in_last_three >= 2
+}
+
+/// autoreg-034: a multi-day lnRMSSD suppression streak (≥3–4 consecutive days
+/// below the SWC band) warrants inserting a recovery day / easy block, beyond the
+/// single-day downgrade in [`hrv_downgrade`]. Fires at ≥3 days. HRV-001.
+pub fn hrv_suppressed_recovery_day(consecutive_suppressed_days: u8) -> Recommended<bool> {
+    recommend_t(consecutive_suppressed_days >= 3, "HRV-001")
+}
+
+/// autoreg-035: multi-day suppressed wellness combined with a rising resting HR
+/// trend calls for 1–3 easy days or cross-training. Fires when wellness has been
+/// suppressed ≥2 days AND RHR is trending up. SAFE-OTS-001.
+pub fn wellness_rhr_multiday_easy(wellness_suppressed_days: u8, rhr_rising: bool) -> Recommended<bool> {
+    recommend_t(wellness_suppressed_days >= 2 && rhr_rising, "SAFE-OTS-001")
+}
+
+/// Generic `Recommended<T>` constructor for the scalar-input helpers above.
+fn recommend_t<T>(value: T, claim_id: &str) -> Recommended<T> {
+    let e = evidence::claim(claim_id).expect("known claim");
+    Recommended { value, evidence: e.to_evidence(), confidence: e.to_confidence_tag() }
 }
 
 #[cfg(test)]
@@ -413,6 +669,152 @@ mod tests {
             Adjustment::Defer { reason } => assert!(reason.contains("urgent")),
             other => panic!("expected bone-stress defer, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rpe_under_target_increases_load() {
+        // RPE two below target → +7.5% load, and no safety tier.
+        let inputs = vec![input(ReadinessSignal::Rpe, -2.0)];
+        let adj = adjustments(&inputs);
+        assert!(adj
+            .iter()
+            .any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(p) if p == 7.5)));
+        assert_eq!(resolve_safety(&inputs), None);
+    }
+
+    #[test]
+    fn e1rm_over_baseline_increases_load_without_safety_tier() {
+        // e1RM ratio > 1.05 → add load; a load increase must NOT raise a tier.
+        let inputs = vec![input(ReadinessSignal::EstimatedOneRm, 1.08)];
+        let adj = adjustments(&inputs);
+        assert!(adj
+            .iter()
+            .any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(p) if p == 3.5)));
+        assert_eq!(resolve_safety(&inputs), None);
+    }
+
+    #[test]
+    fn e1rm_drop_still_raises_objective_tier() {
+        let inputs = vec![input(ReadinessSignal::EstimatedOneRm, 0.85)];
+        assert_eq!(
+            resolve_safety(&inputs),
+            Some(SafetyTier::ObjectivePerformance)
+        );
+    }
+
+    #[test]
+    fn vbt_daily_readiness_bands() {
+        assert_eq!(vbt_daily_readiness(0.08).value, VbtReadiness::IncreaseLoad);
+        assert_eq!(vbt_daily_readiness(-0.08).value, VbtReadiness::ReduceLoad);
+        assert_eq!(vbt_daily_readiness(0.03).value, VbtReadiness::Hold);
+        assert_eq!(vbt_daily_readiness(0.06).value, VbtReadiness::Hold); // band edge
+    }
+
+    #[test]
+    fn set_volume_action_add_drop_hold() {
+        // Strong first set, RPE 1 under target, wellness ok → add a set.
+        assert_eq!(
+            set_volume_action(true, -1.0, true).value,
+            SetVolumeAction::AddSet
+        );
+        // Short first set → drop last set regardless of RPE.
+        assert_eq!(
+            set_volume_action(false, 0.0, true).value,
+            SetVolumeAction::DropLastSet
+        );
+        // RPE over target → drop last set.
+        assert_eq!(
+            set_volume_action(true, 1.0, true).value,
+            SetVolumeAction::DropLastSet
+        );
+        // On-target → hold planned.
+        assert_eq!(
+            set_volume_action(true, 0.0, true).value,
+            SetVolumeAction::HoldPlanned
+        );
+        // Add blocked when wellness abnormal.
+        assert_eq!(
+            set_volume_action(true, -1.0, false).value,
+            SetVolumeAction::HoldPlanned
+        );
+    }
+
+    #[test]
+    fn rpe_stop_and_two_cut_hold() {
+        assert!(rpe_stop_reached(9.0, 8.0));
+        assert!(!rpe_stop_reached(7.0, 8.0));
+        assert!(hold_volume_after_two_cut_sessions(true));
+    }
+
+    #[test]
+    fn apre_tables_verbatim() {
+        // APRE-6 bands.
+        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre6, 1).value, (-10.0, -5.0));
+        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre6, 6).value, (0.0, 0.0));
+        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre6, 20).value, (10.0, 15.0));
+        // APRE-10 bands.
+        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre10, 5).value, (-10.0, -5.0));
+        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre10, 14).value, (5.0, 10.0));
+        // APRE-3 bands.
+        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre3, 3).value, (0.0, 0.0));
+        assert_eq!(apre_load_adjustment_lb(ApreScheme::Apre3, 8).value, (10.0, 15.0));
+    }
+
+    #[test]
+    fn multi_session_deload_triggers() {
+        assert!(deload_from_rpe_load_gap(2).is_some());
+        assert!(deload_from_rpe_load_gap(1).is_none());
+        assert!(deload_from_rpe_creep_and_wellness(true, 3).is_some());
+        assert!(deload_from_rpe_creep_and_wellness(true, 2).is_none());
+        assert!(deload_from_rpe_creep_and_wellness(false, 5).is_none());
+        assert!(deload_from_velocity_drop(0.08).is_some());
+        assert!(deload_from_velocity_drop(0.05).is_none());
+        // Failed-sessions deload is volume-only (load-neutral).
+        let d = deload_from_failed_sessions(2).expect("fires");
+        assert!(matches!(
+            d.value,
+            Adjustment::Deload { load_reduction_pct, .. } if load_reduction_pct == 0.0
+        ));
+        assert!(deload_from_failed_sessions(1).is_none());
+    }
+
+    #[test]
+    fn running_pace_autoreg() {
+        assert!(interval_pace_autoreg(2).is_some());
+        assert!(interval_pace_autoreg(1).is_none());
+        assert!(slow_easy_pace_if_over_cap(false).value); // cannot hold → slow
+        assert!(!slow_easy_pace_if_over_cap(true).value);
+    }
+
+    #[test]
+    fn hrv_availability_fallback() {
+        assert_eq!(autoreg_source(true, 0, false).value, AutoregSource::HrvRolling);
+        assert_eq!(autoreg_source(false, 4, false).value, AutoregSource::HrvRolling);
+        assert_eq!(
+            autoreg_source(false, 2, true).value,
+            AutoregSource::SubjectivePlusPerformance
+        );
+        assert_eq!(
+            autoreg_source(false, 0, false).value,
+            AutoregSource::PerformanceOnlyHold
+        );
+        // Reliability gate.
+        assert!(hrv_reading_reliable(false, false, 1.0, true));
+        assert!(!hrv_reading_reliable(true, false, 0.0, false)); // artifacts
+        assert!(!hrv_reading_reliable(false, false, 3.5, true)); // >3SD + high CV
+        assert!(hrv_reading_reliable(false, false, 3.5, false)); // big dev but CV ok
+        // Suspension.
+        assert!(suspend_hrv_gating(2));
+        assert!(!suspend_hrv_gating(1));
+    }
+
+    #[test]
+    fn multiday_hrv_and_wellness_streaks() {
+        assert!(!hrv_suppressed_recovery_day(2).value);
+        assert!(hrv_suppressed_recovery_day(3).value);
+        assert!(!wellness_rhr_multiday_easy(2, false).value);
+        assert!(!wellness_rhr_multiday_easy(1, true).value);
+        assert!(wellness_rhr_multiday_easy(2, true).value);
     }
 
     #[test]

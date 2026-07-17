@@ -359,6 +359,9 @@ pub enum SafetyTier {
 pub enum Adjustment {
     /// Reduce load for remaining sets by this % (e.g. RPE ≥ target + 2).
     ReduceLoadPct(f32),
+    /// Increase load by this % when readiness overshoots (RPE under target, or
+    /// e1RM above baseline). File 06 autoreg-004/005/007.
+    IncreaseLoadPct(f32),
     /// Deload: volume −40–50 %, load −5–10 %, typically 1 week.
     Deload {
         volume_reduction_pct: f32,

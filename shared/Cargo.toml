@@ -9,8 +9,12 @@ license.workspace = true
 crate-type = ["cdylib", "lib", "staticlib"]
 
 [dependencies]
-crux_core = { workspace = true }
+crux_core = { workspace = true, features = ["typegen"] }
 serde = { workspace = true, features = ["derive"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21", default-features = false }
 
 [dev-dependencies]
 crux_core = { workspace = true, features = ["testing"] }
+serde_json = "1"
