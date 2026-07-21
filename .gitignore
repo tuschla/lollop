@@ -1,2 +1,16 @@
 /target
-/web-leptos/dist
+
+# Built native libs, produced by `cargo ndk`, not source.
+/android/app/src/main/jniLibs/
+
+# Local, uncommitted working notes / scratch design references.
+*.local.md
+
+# Machine-local cargo config (absolute NDK/SDK paths, not portable).
+/.cargo/
+
+# Untracked local project files (instructions, CI drafts, design notes, research KB).
+/.github/
+/design/
+/knowledge-base/
+/schema/
