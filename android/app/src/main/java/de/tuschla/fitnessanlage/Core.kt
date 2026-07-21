@@ -47,38 +47,26 @@ object Core {
     /**
      * Point the core at [ctx]'s event log and replay it to rebuild state. Safe to
      * call on every Activity creation: replay runs only on the first call per
-     * process. Returns the number of events in the log so the caller can seed a
-     * default profile only when there is genuinely no prior state (returns 0).
+     * process. Returns true only on a genuinely FRESH INSTALL: the log file
+     * never existed, so the caller may seed a default profile + onboarding. A
+     * log that exists but compacts to zero surviving lines (a returning user who
+     * cleared everything) returns false: replaying "nothing left" is their real
+     * state and must not be re-seeded over. Read+compact live in [EventLog.load]
+     * (pure Kotlin, unit tested); this only replays the survivors.
      */
-    fun restore(ctx: Context): Int {
+    fun restore(ctx: Context): Boolean {
         val file = File(ctx.filesDir, "event-log.ndjson")
         log = file
-        if (restored) {
-            return if (file.exists()) file.useLines { seq -> seq.count { it.isNotBlank() } } else 0
-        }
+        // Already replayed this process (Activity recreation): the only way this
+        // is still a fresh install is if nothing was ever persisted.
+        if (restored) return !file.exists()
         restored = true
-        if (!file.exists()) return 0
-        val lines = file.readLines().filter { it.isNotBlank() }
-        if (lines.isEmpty()) return 0
-
-        // Compact before replaying: a run's GPS track (thousands of points) is the
-        // heaviest line in the log, and every `Clear*` supersedes its whole family,
-        // so a cleared LogRunTrack is pure dead weight on every future cold start.
-        // The rewrite is replay-equivalent, see [EventLog.compact], so the
-        // reconstructed model is byte-identical to replaying the full log.
-        val kept = EventLog.compact(lines)
-        if (kept.size < lines.size) {
-            // Write to a sibling temp file then rename over the log, so a crash or
-            // kill mid-write can never truncate the durable log: the original
-            // stays intact until the atomic rename lands.
-            val tmp = File(file.parentFile, "event-log.ndjson.tmp")
-            runCatching {
-                tmp.writeText(kept.joinToString("\n", postfix = "\n"))
-                if (!tmp.renameTo(file)) tmp.delete()
-            }
-        }
-        kept.forEach { update(it.toByteArray(Charsets.UTF_8)) }
-        return kept.size
+        // Compacting before replay matters here: a run's GPS track (thousands of
+        // points) is the heaviest line in the log, and every `Clear*` supersedes
+        // its whole family: the compacted replay is model-equivalent.
+        val loaded = EventLog.load(file)
+        loaded.lines.forEach { update(it.toByteArray(Charsets.UTF_8)) }
+        return loaded.freshInstall
     }
 
     /** Dispatch an event, persist it to the log, then return the fresh view model. */
@@ -165,18 +153,49 @@ data class LiftResultView(
     val e1rm_kg: Double = 0.0,
     val pct_1rm: Double = 0.0,
     val rir: Double = 0.0,
+    // e1RM change vs the previous set of the same exercise, kg (core-computed,
+    // app.rs LiftResultView.e1rm_delta_kg). Null for an exercise's first set.
+    // Factual measurement: the shell must NOT phrase it as improving/declining
+    // (that judgment belongs to the core's trend feedback, FB-TREND-001).
+    val e1rm_delta_kg: Double? = null,
+    // "up" / "down" / "flat" direction of the delta; null iff the delta is null.
+    val e1rm_direction: String? = null,
     val summary: String = "",
+    val observed_at: Long = 0,
+)
+
+/**
+ * Core-owned pacing verdict for a run's measured split (app.rs SplitVerdictView,
+ * feedback-016/017). Carries the chip label, coaching copy, and the full evidence
+ * tag, so the ~3% fade threshold never leaks into shell code.
+ */
+@Serializable
+data class SplitVerdictView(
+    val verdict: String = "", // "fade" | "even" | "negative"
+    val label: String = "",
+    val message: String = "",
+    val grade: String = "",
+    val citation: String = "",
+    val confidence: Float = 0f,
+    val safety_critical: Boolean = false,
+    val contested: Boolean = false,
 )
 
 @Serializable
 data class RunResultView(
     val zone: String = "",
     val pace: String = "",
+    val distance_km: Double = 0.0,
     val spike_flag: Boolean = false,
+    val spike_note: String = "",
     val split_pct: Double? = null,
+    // Pacing verdict + chip data for split_pct; null exactly when split_pct is
+    // null (hand-entered run or a track too short/degenerate to split).
+    val split: SplitVerdictView? = null,
     val summary: String = "",
     val citation: String = "",
     val gpx: String = "",
+    val observed_at: Long = 0,
 )
 
 @Serializable
@@ -279,6 +298,10 @@ sealed interface Event {
         val weightKg: Double,
         val reps: Int,
         val rpe: Double,
+        // Log time, unix seconds. Defaulted to now at construction so the history
+        // card can be dated; baked into the persisted line, so replay keeps the
+        // original stamp (the core never re-stamps on replay).
+        val observedAt: Long = System.currentTimeMillis() / 1000,
     ) : Event {
         override fun toJson() = buildJsonObject {
             put("LogSet", buildJsonObject {
@@ -286,6 +309,7 @@ sealed interface Event {
                 put("weight_kg", weightKg)
                 put("reps", reps)
                 put("rpe", rpe)
+                put("observed_at", observedAt)
             })
         }
     }
@@ -299,6 +323,7 @@ sealed interface Event {
         val durationMin: Double,
         val hrPctMax: Double,
         val longestRecentKm: Double,
+        val observedAt: Long = System.currentTimeMillis() / 1000,
     ) : Event {
         override fun toJson() = buildJsonObject {
             put("LogRun", buildJsonObject {
@@ -306,6 +331,7 @@ sealed interface Event {
                 put("duration_min", durationMin)
                 put("hr_pct_max", hrPctMax)
                 put("longest_recent_km", longestRecentKm)
+                put("observed_at", observedAt)
             })
         }
     }
@@ -314,6 +340,9 @@ sealed interface Event {
         val points: List<GpsPoint>,
         val hrPctMax: Double,
         val longestRecentKm: Double,
+        // The session's logged-at stamp for history display; distinct from each
+        // GPS fix's own per-point `observed_at`.
+        val observedAt: Long = System.currentTimeMillis() / 1000,
     ) : Event {
         override fun toJson() = buildJsonObject {
             put("LogRunTrack", buildJsonObject {
@@ -329,6 +358,7 @@ sealed interface Event {
                 }
                 put("hr_pct_max", hrPctMax)
                 put("longest_recent_km", longestRecentKm)
+                put("observed_at", observedAt)
             })
         }
     }

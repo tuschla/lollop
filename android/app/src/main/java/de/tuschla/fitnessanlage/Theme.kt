@@ -2,10 +2,13 @@ package de.tuschla.fitnessanlage
 
 import android.content.Context
 import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
@@ -77,11 +80,50 @@ internal val SignalPalette = Palette(
     onBgBody = Color(0xFFFAFAFA),
 )
 
-/** User-selectable visual themes (visual-design-system.md §1, §9). */
-enum class AppTheme(val label: String, val palette: Palette) {
-    Beton("Beton", BetonPalette),
-    Werkstatt("Werkstatt", WerkstattPalette),
-    Signal("Signal", SignalPalette);
+// Light variants (design import: "Light theme added"). Same near-neutral grounds
+// inverted to warm paper, with the accent darkened so it clears text contrast on a
+// light surface (an accent tuned for a dark ground is too pale on paper). The
+// semantic [StatusColors] stay fixed, only these decorative grounds/accent flip.
+// Chosen at the theme root by system light/dark, not a separate user setting.
+
+/** Beton, light (design import: bg #EDE7DD, surface #FBF7F0, accent #B85520). */
+internal val BetonLightPalette = Palette(
+    accent = Color(0xFFB85520),
+    bgTop = Color(0xFFEDE7DD),
+    bgElevated = Color(0xFFFBF7F0),
+    onBgMuted = Color(0xFF6E665B),
+    onBgFaint = Color(0xFF8A8172),
+    onBgBody = Color(0xFF221E18),
+)
+
+/** Werkstatt, light: warm paper, darkened brass accent. */
+internal val WerkstattLightPalette = Palette(
+    accent = Color(0xFF9A7A2E),
+    bgTop = Color(0xFFECE4D4),
+    bgElevated = Color(0xFFF7F1E3),
+    onBgMuted = Color(0xFF6E6552),
+    onBgFaint = Color(0xFF8A8064),
+    onBgBody = Color(0xFF241E14),
+)
+
+/** Signal, light: cool near-white, darkened cyan accent. */
+internal val SignalLightPalette = Palette(
+    accent = Color(0xFF0C7FB8),
+    bgTop = Color(0xFFF1F1F3),
+    bgElevated = Color(0xFFFFFFFF),
+    onBgMuted = Color(0xFF52525B),
+    onBgFaint = Color(0xFF71717A),
+    onBgBody = Color(0xFF0A0A0B),
+)
+
+/**
+ * User-selectable visual themes (visual-design-system.md §1, §9). Each carries a
+ * [dark] and [light] palette; the theme root picks between them by system setting.
+ */
+enum class AppTheme(val label: String, val dark: Palette, val light: Palette) {
+    Beton("Beton", BetonPalette, BetonLightPalette),
+    Werkstatt("Werkstatt", WerkstattPalette, WerkstattLightPalette),
+    Signal("Signal", SignalPalette, SignalLightPalette);
 
     companion object {
         fun from(name: String?): AppTheme = entries.firstOrNull { it.name == name } ?: Beton
@@ -218,10 +260,19 @@ fun FitnessAnlageTheme(
     val ctx = LocalContext.current
     val dynamicColor by ThemeSettings.dynamicAccent.collectAsState()
     val appTheme by ThemeSettings.theme.collectAsState()
-    val base = appTheme.palette
-    val scheme: ColorScheme = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        dynamicDarkColorScheme(ctx)
-    } else {
+    // Follow the system light/dark setting (design import: light theme added). The
+    // three named themes each supply both grounds; only the decorative palette flips,
+    // never the fixed semantic status colors.
+    val dark = isSystemInDarkTheme()
+    val base = if (dark) appTheme.dark else appTheme.light
+    // The selected theme ALWAYS supplies the full scheme, dialogs, menus,
+    // switches and every other M3 surface keep the chosen palette. When dynamic
+    // color (Material You) is on, only the accent role (primary + its on-color)
+    // is taken from the wallpaper-derived scheme (spec §8/§9, design-spec §2:
+    // "only the accent role follows the wallpaper color; the rest of the
+    // selected theme's palette still applies"). Swapping in the whole dynamic
+    // scheme here would wallpaper-tint every dialog/menu/switch surface.
+    val themed: ColorScheme = if (dark) {
         darkColorScheme(
             primary = base.accent,
             background = base.bgTop,
@@ -229,6 +280,20 @@ fun FitnessAnlageTheme(
             onBackground = base.onBgBody,
             onSurface = base.onBgBody,
         )
+    } else {
+        lightColorScheme(
+            primary = base.accent,
+            background = base.bgTop,
+            surface = base.bgElevated,
+            onBackground = base.onBgBody,
+            onSurface = base.onBgBody,
+        )
+    }
+    val scheme: ColorScheme = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val dynamic = if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+        themed.copy(primary = dynamic.primary, onPrimary = dynamic.onPrimary)
+    } else {
+        themed
     }
     // Accent follows the Material You primary when dynamic color is on; the rest of
     // the palette (grounds, text) is always the selected theme's.

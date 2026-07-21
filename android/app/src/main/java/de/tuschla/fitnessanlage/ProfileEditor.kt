@@ -1,5 +1,6 @@
 package de.tuschla.fitnessanlage
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -90,23 +91,24 @@ data class ProfileDraft(
 // Human-readable labels for the profile pickers. Display-only, the wire value is
 // still each variant's `.name` (see Event.SetProfile), so these strings can change
 // freely. Exhaustive `when` (no `else`) so a new variant fails to compile until it
-// is given a label rather than silently showing a cryptic raw name.
+// is given a label rather than silently showing a cryptic raw name. Internal, not
+// private: the Coach PROFILE summary card reuses the same strings.
 
-private val ProgressionCadence.label: String
+internal val ProgressionCadence.label: String
     get() = when (this) {
         ProgressionCadence.EverySession -> "Every session"
         ProgressionCadence.WeekToWeek -> "Week to week"
         ProgressionCadence.MonthToMonth -> "Month to month"
     }
 
-private val LiftGoal.label: String
+internal val LiftGoal.label: String
     get() = when (this) {
         LiftGoal.MaxStrength -> "Max strength"
         LiftGoal.Power -> "Power"
         LiftGoal.Hypertrophy -> "Hypertrophy"
     }
 
-private val GoalDistance.label: String
+internal val GoalDistance.label: String
     get() = when (this) {
         GoalDistance.General -> "General fitness"
         GoalDistance.C25k -> "Couch to 5K"
@@ -116,7 +118,7 @@ private val GoalDistance.label: String
         GoalDistance.Marathon -> "Marathon"
     }
 
-private val ConcurrentGoal.label: String
+internal val ConcurrentGoal.label: String
     get() = when (this) {
         ConcurrentGoal.Strength -> "Strength"
         ConcurrentGoal.Power -> "Power"
@@ -138,6 +140,11 @@ fun ProfileEditor(initial: ProfileDraft, onApply: (ProfileDraft) -> Unit) {
     // the autoSaver can bundle it.
     var draft by rememberSaveable { mutableStateOf(initial) }
 
+    // Which row's inline picker is open (design import: tap-rows, no dropdowns / no
+    // −+ steppers). One at a time; -1 = all collapsed. Saveable so an open picker
+    // survives scroll-away / rotation like the draft does.
+    var open by rememberSaveable { mutableStateOf(-1) }
+
     Card(
         colors = CardDefaults.cardColors(containerColor = BgElevated),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
@@ -148,34 +155,47 @@ fun ProfileEditor(initial: ProfileDraft, onApply: (ProfileDraft) -> Unit) {
             Modifier.padding(Space.Card.dp),
             verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
         ) {
-            SegmentedEnumRow("Progression", ProgressionCadence.entries, draft.progressionCadence, display = { it.label }) {
-                draft = draft.copy(progressionCadence = it)
+            ProfileRow(open == 0, { open = if (open == 0) -1 else 0 }, "Progression", draft.progressionCadence.label) {
+                EnumChips(ProgressionCadence.entries.toList(), draft.progressionCadence, { it.label }) {
+                    draft = draft.copy(progressionCadence = it)
+                }
             }
-            SegmentedEnumRow("Lift goal", LiftGoal.entries, draft.liftGoal, display = { it.label }) {
-                draft = draft.copy(liftGoal = it)
+            ProfileRow(open == 1, { open = if (open == 1) -1 else 1 }, "Lift goal", draft.liftGoal.label) {
+                EnumChips(LiftGoal.entries.toList(), draft.liftGoal, { it.label }) {
+                    draft = draft.copy(liftGoal = it)
+                }
             }
-            // Goal distance keeps the dropdown: 6 options exceed the segmented-button
-            // ceiling and its labels ("Half marathon") are too long to fit a segment.
-            EnumRow("Goal distance", GoalDistance.entries, draft.goalDistance, display = { it.label }) {
-                draft = draft.copy(goalDistance = it)
+            ProfileRow(open == 2, { open = if (open == 2) -1 else 2 }, "Goal distance", draft.goalDistance.label) {
+                EnumChips(GoalDistance.entries.toList(), draft.goalDistance, { it.label }) {
+                    draft = draft.copy(goalDistance = it)
+                }
             }
-            // Dropdown, not segmented: "Endurance priority" is too long to fit a
-            // quarter-width segment without truncating.
-            EnumRow("Concurrent goal", ConcurrentGoal.entries, draft.concurrentGoal, display = { it.label }) {
-                draft = draft.copy(concurrentGoal = it)
+            ProfileRow(open == 3, { open = if (open == 3) -1 else 3 }, "Concurrent goal", draft.concurrentGoal.label) {
+                EnumChips(ConcurrentGoal.entries.toList(), draft.concurrentGoal, { it.label }) {
+                    draft = draft.copy(concurrentGoal = it)
+                }
             }
-            IntStepperRow("Weekly sets", draft.weeklySets, 0, 30, 1) {
-                draft = draft.copy(weeklySets = it)
+            ProfileRow(open == 4, { open = if (open == 4) -1 else 4 }, "Weekly sets", "${draft.weeklySets}") {
+                ScrollableScaleRow((0..30).toList(), draft.weeklySets, { "$it" }) {
+                    draft = draft.copy(weeklySets = it)
+                }
             }
-            IntStepperRow("Running days/wk", draft.runningDaysPerWeek, 0, 7, 1) {
-                draft = draft.copy(runningDaysPerWeek = it)
+            ProfileRow(open == 5, { open = if (open == 5) -1 else 5 }, "Running days/wk", "${draft.runningDaysPerWeek}") {
+                ChoiceScaleRow((0..7).toList(), draft.runningDaysPerWeek, { "$it" }) {
+                    draft = draft.copy(runningDaysPerWeek = it)
+                }
             }
-            IntStepperRow("Running km/wk", draft.runningKmPerWeek.toInt(), 0, 150, 5) {
-                draft = draft.copy(runningKmPerWeek = it.toDouble())
+            ProfileRow(open == 6, { open = if (open == 6) -1 else 6 }, "Running km/wk", "${draft.runningKmPerWeek.toInt()}") {
+                ScrollableScaleRow((0..150 step 5).toList(), draft.runningKmPerWeek.toInt(), { "$it" }) {
+                    draft = draft.copy(runningKmPerWeek = it.toDouble())
+                }
             }
-            IntStepperRow("Endurance %VO2max", draft.enduranceIntensityPctVo2max.toInt(), 50, 95, 5) {
-                draft = draft.copy(enduranceIntensityPctVo2max = it.toDouble())
+            ProfileRow(open == 7, { open = if (open == 7) -1 else 7 }, "Endurance %VO2max", "${draft.enduranceIntensityPctVo2max.toInt()}%") {
+                ChoiceScaleRow((50..95 step 5).toList(), draft.enduranceIntensityPctVo2max.toInt(), { "$it" }) {
+                    draft = draft.copy(enduranceIntensityPctVo2max = it.toDouble())
+                }
             }
+            // Advanced stays a plain toggle row: no value to pick, so no chevron.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -192,5 +212,39 @@ fun ProfileEditor(initial: ProfileDraft, onApply: (ProfileDraft) -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Apply profile") }
         }
+    }
+}
+
+/**
+ * A profile field as a tap-row: label + current value + chevron; tapping toggles
+ * an inline [content] picker below it. The wire contract is untouched, the picker
+ * still mutates the same draft field the old dropdown/stepper did.
+ */
+@Composable
+private fun ProfileRow(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    label: String,
+    value: String,
+    content: @Composable () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onToggle() },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, color = OnBgBody, style = Type.Body)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(value, color = OnBgMuted, style = Type.Body.merge(TabularFigures))
+                Text(if (expanded) "⌄" else "›", color = OnBgFaint, style = Type.Body)
+            }
+        }
+        if (expanded) content()
     }
 }

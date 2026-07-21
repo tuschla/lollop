@@ -3,26 +3,37 @@ package de.tuschla.fitnessanlage
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.text.format.DateUtils
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
@@ -30,8 +41,6 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -48,6 +57,9 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -66,7 +78,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -93,12 +104,15 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun CoachScreen() {
     val ctx = LocalContext.current
-    // Replay the persisted event log; on a fresh install (nothing replayed) seed a
-    // representative profile so the engine still renders content on first frame.
-    // Remember whether this was a fresh install so onboarding can invite the user
-    // to personalize the seeded profile (see the Profile section below), the seed
-    // makes model.profile non-null, so that flag is the only first-run signal left.
-    val freshInstall = remember { Core.restore(ctx) == 0 }
+    // Replay the persisted event log; on a fresh install (the log file never
+    // existed) seed a representative profile so the engine still renders content
+    // on first frame. Core.restore distinguishes that from a log that exists but
+    // compacted to empty (a returning user who cleared everything), the latter
+    // must NOT be re-seeded through onboarding. The flag is remembered so
+    // onboarding can invite the user to personalize the seeded profile (see the
+    // Profile section below), the seed makes model.profile non-null, so this
+    // flag is the only first-run signal left.
+    val freshInstall = remember { Core.restore(ctx) }
     var model by remember {
         mutableStateOf(
             if (freshInstall) {
@@ -115,7 +129,10 @@ private fun CoachScreen() {
     // recording. The saveable flag keeps them on the map across recreation.
     var showTracker by rememberSaveable { mutableStateOf(false) }
     if (showTracker) {
-        RunTrackingScreen(onFinish = { vm ->
+        // The tracking screen replaces this whole scaffold, so it receives the
+        // live model and re-pins the SafetyBanner itself (spec §3: the banner is
+        // on EVERY screen, never scrollable or dismissable).
+        RunTrackingScreen(model = model, onFinish = { vm ->
             if (vm != null) model = vm
             showTracker = false
         })
@@ -147,7 +164,13 @@ private fun CoachScreen() {
         topBar = {
             TopAppBar(
                 title = {
-                    Text(stringResource(R.string.app_name), style = Type.Title)
+                    // Title per destination (usability spec §1), not the app name -
+                    // the bar tells the user where they are. Indices mirror the
+                    // NavigationBar items below.
+                    Text(
+                        listOf("Today", "Coach", "History", "Profile")[selected],
+                        style = Type.Title,
+                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = BgTop,
@@ -225,6 +248,7 @@ private fun CoachScreen() {
                     freshInstall = freshInstall,
                     onEvent = { model = Core.send(it) },
                     onTrackRun = { showTracker = true },
+                    onOpenLog = { mode -> sheetMode = mode; sheetOpen = true },
                     onGoToCoach = { selected = 1 },
                     onGoToHistory = { selected = 2 },
                 )
@@ -303,31 +327,23 @@ private fun LogSheetContent(
         }
         when (mode) {
             LogMode.Chooser -> {
-                val status = LocalStatusColors.current
                 // Pinned top + danger ground: the Pain fast-path must never be
                 // buried. Same event the old Today "Pain flag" button emitted.
-                Button(
-                    onClick = {
-                        onEvent(
-                            Event.SubmitReadiness(
-                                signal = ReadinessSignal.Pain,
-                                value = 1.0,
-                                observedAt = System.currentTimeMillis() / 1000,
-                            )
+                LogOptionRow("Report pain", "Fast-path - triggers a safety check", danger = true) {
+                    onEvent(
+                        Event.SubmitReadiness(
+                            signal = ReadinessSignal.Pain,
+                            value = 1.0,
+                            observedAt = System.currentTimeMillis() / 1000,
                         )
-                        onDismiss()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = status.dangerStrong,
-                    ),
-                ) { Text("Report pain", color = Color.White) }
-
-                LogChoice("Log set") { onMode(LogMode.Set) }
-                LogChoice("Log run") { onMode(LogMode.Run) }
-                LogChoice("Log readiness") { onMode(LogMode.Readiness) }
-                LogChoice("Session review") { onMode(LogMode.Review) }
-                LogChoice("Track run (GPS)") {
+                    )
+                    onDismiss()
+                }
+                LogOptionRow("Log set", "Exercise, weight, reps, RPE") { onMode(LogMode.Set) }
+                LogOptionRow("Log run", "Distance, duration, HR") { onMode(LogMode.Run) }
+                LogOptionRow("Log readiness", "Sleep, HRV, soreness, mood") { onMode(LogMode.Readiness) }
+                LogOptionRow("Session review", "Rate and note the session") { onMode(LogMode.Review) }
+                LogOptionRow("Track run (GPS)", "Live map + route") {
                     onTrackRun()
                     onDismiss()
                 }
@@ -340,13 +356,33 @@ private fun LogSheetContent(
     }
 }
 
-/** A large full-width tap target in the Log chooser list. */
+/**
+ * A log-chooser row: title + subtitle, a chevron for a routine action, or a
+ * danger ground for the pain fast-path. Full-width tap target.
+ */
 @Composable
-private fun LogChoice(label: String, onClick: () -> Unit) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-    ) { Text(label, color = OnBgBody) }
+private fun LogOptionRow(
+    title: String,
+    subtitle: String,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val status = LocalStatusColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Space.Card.dp))
+            .background(if (danger) status.danger else BgTop)
+            .clickable { onClick() }
+            .padding(horizontal = Space.Card.dp, vertical = Space.Card.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+            Text(title, color = if (danger) Color.White else OnBgBody, style = Type.Body)
+            Text(subtitle, color = if (danger) DangerOn else OnBgMuted, style = Type.Caption)
+        }
+        if (!danger) Text("›", color = OnBgFaint, style = Type.Title)
+    }
 }
 
 /**
@@ -356,10 +392,11 @@ private fun LogChoice(label: String, onClick: () -> Unit) {
  * links deeper into Coach / History.
  *
  * The "Latest" card is a SHELL-ONLY heuristic (no core change): it surfaces the
- * newest coaching signal: `model.feedback` if present, else the top readiness
- * adjustment by the same [byAdjustmentPriority] order Coach uses (falling back
- * to `review_adjustments` when `adjustments` is empty). It reuses [EvidenceCard]
- * verbatim so the grade / SAFETY / CONTESTED chips read identically to Coach.
+ * newest `model.feedback` AND the top readiness adjustment together (usability
+ * §3-Today), the adjustment picked by the same [byAdjustmentPriority] order
+ * Coach uses (falling back to `review_adjustments` when `adjustments` is
+ * empty). It reuses [EvidenceCard] verbatim so the grade / SAFETY / CONTESTED
+ * chips read identically to Coach.
  *
  * On a genuinely empty state (no feedback, no adjustments, no lifts, no runs)
  * nothing but a friendly hint renders, no empty cards.
@@ -370,6 +407,7 @@ private fun TodayDestination(
     freshInstall: Boolean,
     onEvent: (Event) -> Unit,
     onTrackRun: () -> Unit,
+    onOpenLog: (LogMode) -> Unit,
     onGoToCoach: () -> Unit,
     onGoToHistory: () -> Unit,
 ) {
@@ -379,16 +417,27 @@ private fun TodayDestination(
         ?: model.review_adjustments.byAdjustmentPriority().firstOrNull()
     // Last logged activity: the core appends new entries, so the lists are
     // oldest-first (History reverses them for display), lastOrNull() is the most
-    // recent of each. The two result views carry no timestamp, so the shell can't
-    // tell whether the last lift or the last run happened more recently; showing
-    // both (labelled) instead of picking one avoids hiding today's run behind an
-    // older lift while staying sparse (at most two lines).
-    val lastLift = model.lifts.lastOrNull()?.summary
-    val lastRun = model.runs.lastOrNull()?.summary
+    // recent of each. Both result views now carry a log time, so order the two
+    // labelled lines newest-first rather than always Lift-then-Run; that keeps
+    // the genuinely-latest action on top (an undated legacy entry has stamp 0 and
+    // sorts last). Showing both (at most two lines) stays sparse.
+    val lastLift = model.lifts.lastOrNull()
+    val lastRun = model.runs.lastOrNull()
+    val recentLines = listOfNotNull(
+        lastLift?.let { Triple(it.observed_at, "Lift", it.summary) },
+        lastRun?.let { Triple(it.observed_at, "Run", it.summary) },
+    ).sortedByDescending { it.first }
 
     val hasCoachSignal = model.feedback != null || topAdjustment != null
-    val hasActivity = lastLift != null || lastRun != null
+    val hasActivity = recentLines.isNotEmpty()
     val hasAnything = hasCoachSignal || hasActivity
+
+    // e1RM trend for the most-recently-logged exercise: a factual series of the
+    // core-derived e1RMs for that lift, oldest→newest. Pure visualization of what
+    // was logged, no coaching claim, no new derivation (the core computed each
+    // e1RM). Rendered only when there are ≥2 sets of that exercise to trend.
+    val trendExercise = lastLift?.exercise
+    val trendSeries = model.lifts.filter { it.exercise == trendExercise }.map { it.e1rm_kg }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -396,13 +445,24 @@ private fun TodayDestination(
         verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
     ) {
         if (hasCoachSignal) {
-            item { SectionTitle("Latest") }
+            // "Today's call" (usability §3-Today): the newest feedback AND the
+            // highest-priority readiness adjustment TOGETHER, not either/or, so a
+            // safety adjustment is never hidden behind a routine feedback message.
+            // Grade + SAFETY/CONTESTED + why? are each card's own (evidence
+            // invariant). A safety-critical adjustment renders first.
+            item { SectionTitle("Today's call") }
             item {
-                val fb = model.feedback
-                if (fb != null) {
-                    EvidenceCard(fb.message, fb.grade, fb.citation, fb.confidence, fb.safety_critical, fb.contested, fb.category)
-                } else if (topAdjustment != null) {
-                    EvidenceCard(topAdjustment.summary, topAdjustment.grade, topAdjustment.citation, topAdjustment.confidence, topAdjustment.safety_critical, topAdjustment.contested)
+                Column(verticalArrangement = Arrangement.spacedBy(Space.Card.dp)) {
+                    val fb = model.feedback
+                    val adjustmentCard: (@Composable () -> Unit)? = topAdjustment?.let {
+                        { EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested) }
+                    }
+                    val safetyFirst = topAdjustment?.safety_critical == true
+                    if (safetyFirst) adjustmentCard?.invoke()
+                    if (fb != null) {
+                        EvidenceCard(fb.message, fb.grade, fb.citation, fb.confidence, fb.safety_critical, fb.contested, fb.category)
+                    }
+                    if (!safetyFirst) adjustmentCard?.invoke()
                 }
             }
             item {
@@ -412,13 +472,20 @@ private fun TodayDestination(
             }
         }
 
+        if (trendExercise != null && trendSeries.size >= 2) {
+            item {
+                E1rmTrendCard(trendExercise, trendSeries, lastLift?.e1rm_delta_kg, lastLift?.e1rm_direction)
+            }
+        }
+
         if (hasActivity) {
             item { SectionTitle("Recent activity") }
             item {
                 PlainCard {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-                        lastLift?.let { Text("Lift · $it", color = OnBgBody, style = Type.Body) }
-                        lastRun?.let { Text("Run · $it", color = OnBgBody, style = Type.Body) }
+                        recentLines.forEach { (_, label, summary) ->
+                            Text("$label · $summary", color = OnBgBody, style = Type.Body)
+                        }
                     }
                 }
             }
@@ -430,13 +497,144 @@ private fun TodayDestination(
         }
 
         if (!hasAnything) {
+            // First-run / empty (design import): a "get started" hero + a 2×2 grid of
+            // quick log actions, replacing the lone one-line hint.
             item {
-                Text(
-                    "Log your first session with the ＋ Log button.",
-                    color = OnBgMuted,
-                    style = Type.Body,
-                )
+                PlainCard {
+                    Text("Log your first session", color = OnBgBody, style = Type.Title)
+                    Text(
+                        "Track a lift, a run, or how you feel. Every entry is scored and coached with graded evidence.",
+                        color = OnBgMuted,
+                        style = Type.Body,
+                    )
+                }
             }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                        QuickTile("Log set") { onOpenLog(LogMode.Set) }
+                        QuickTile("Log run") { onOpenLog(LogMode.Run) }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                        QuickTile("Readiness") { onOpenLog(LogMode.Readiness) }
+                        QuickTile("Report pain", danger = true) {
+                            onEvent(
+                                Event.SubmitReadiness(
+                                    signal = ReadinessSignal.Pain,
+                                    value = 1.0,
+                                    observedAt = System.currentTimeMillis() / 1000,
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A quick log-action tile for the Today empty state. A [RowScope] extension so a
+ * pair sits across a row with equal `weight`. The pain tile is danger-styled (its
+ * fast-path emits the same Pain readiness the chooser does), the rest surface.
+ */
+@Composable
+private fun RowScope.QuickTile(label: String, danger: Boolean = false, onClick: () -> Unit) {
+    val status = LocalStatusColors.current
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .height(76.dp)
+            .clip(RoundedCornerShape(Space.Card.dp))
+            .background(if (danger) status.danger.copy(alpha = 0.12f) else BgElevated)
+            .then(
+                if (danger) {
+                    Modifier.border(1.dp, status.danger.copy(alpha = 0.5f), RoundedCornerShape(Space.Card.dp))
+                } else {
+                    Modifier
+                },
+            )
+            .clickable { onClick() }
+            .padding(Space.Card.dp),
+        contentAlignment = Alignment.BottomStart,
+    ) {
+        Text(
+            label,
+            color = if (danger) status.dangerStrong else Accent,
+            style = Type.Body,
+        )
+    }
+}
+
+/**
+ * A Coach calculator launcher tile: label over its computed state (a value where
+ * the result is a single scalar, else `set`/`-`). Accent-outlined when its form is
+ * open. A [RowScope] extension so two sit across a row with equal `weight`.
+ */
+@Composable
+private fun RowScope.CoachToolTile(label: String, value: String, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(Space.Card.dp))
+            .background(BgElevated)
+            .then(
+                if (selected) Modifier.border(1.5.dp, Accent, RoundedCornerShape(Space.Card.dp)) else Modifier,
+            )
+            .clickable { onClick() }
+            .padding(Space.Card.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+    ) {
+        Text(label.uppercase(Locale.US), color = OnBgMuted, style = Type.Chip)
+        Text(value, color = OnBgBody, style = Type.Title.merge(TabularFigures), maxLines = 1)
+    }
+}
+
+/**
+ * e1RM trend card: the exercise name, its latest e1RM, the core's
+ * session-to-session delta badge, and a [Sparkline] of the series. Every number
+ * is a value the core already derived and returned in `model.lifts`, the delta
+ * and its direction now arrive on the wire (`e1rm_delta_kg`/`e1rm_direction`),
+ * no shell arithmetic. The badge is a factual measurement rendered NEUTRALLY
+ * (▲/▼/– on a valence-free slate): improving/declining is the core trend arm's
+ * judgment (FB-TREND-001), never implied here via evidence-green/warn coloring.
+ */
+@Composable
+private fun E1rmTrendCard(exercise: String, series: List<Double>, deltaKg: Double?, direction: String?) {
+    val latest = series.last()
+    PlainCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("$exercise · e1RM", color = OnBgMuted, style = Type.Body)
+            if (deltaKg != null && direction != null) {
+                val arrow = when (direction) {
+                    "up" -> "▲"
+                    "down" -> "▼"
+                    else -> "–" // "flat" or an unknown future direction
+                }
+                Chip("$arrow ${trimNum(Math.abs(deltaKg))} kg", ChipNeutral)
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Text(
+                "${trimNum(latest)} kg",
+                color = OnBgBody,
+                style = Type.Display.merge(TabularFigures),
+            )
+            Sparkline(
+                series.map { it.toFloat() },
+                color = Accent,
+                modifier = Modifier
+                    .width(140.dp)
+                    .height(40.dp),
+            )
         }
     }
 }
@@ -462,6 +660,9 @@ private fun List<GuidanceView>.byGuidancePriority(): List<GuidanceView> =
             .thenByDescending { it.confidence },
     )
 
+/** The four on-demand Coach calculators, launched from the tile grid. */
+private enum class CoachTool { Race, Volume, Protein, HrZones }
+
 /**
  * Coach, read-only evidence-graded output: programming guidance, readiness
  * adjustments, session feedback + deloads, and the collapsed reference section.
@@ -471,6 +672,9 @@ private fun CoachDestination(
     model: ViewModel,
     onEvent: (Event) -> Unit,
 ) {
+    // Which calculator's form is open below the tile grid (design import: the four
+    // stacked expandable tools de-densified into a 2×2 launcher). null = none open.
+    var activeTool by rememberSaveable { mutableStateOf<CoachTool?>(null) }
     // Destructive clears now live in this Coach-section overflow (⋮) menu instead
     // of inline section headers (spec §3 / roadmap #5). ClearReview and
     // ClearReadiness keep the exact confirm dialogs + Events they had inline; only
@@ -520,111 +724,32 @@ private fun CoachDestination(
             contentPadding = PaddingValues(Space.Screen.dp),
             verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
         ) {
-            // Goal-race predictor: an on-demand tool (not sticky coaching output),
-            // so it lives collapsed at the top of Coach. Submitting drives
-            // Event.PredictRace; the graded result renders just below from
-            // model.race_prediction until ClearRacePrediction drops it.
-            item {
-                ExpandableSection("Race predictor") {
-                    RacePredictorForm { onEvent(it) }
-                }
-            }
-            model.race_prediction?.let { rp ->
-                item {
-                    val headline = "${rp.goal_label}: ${rp.predicted}"
-                    EvidenceCard(
-                        summary = if (rp.summary.isNotBlank()) "$headline\n${rp.summary}" else headline,
-                        grade = rp.grade,
-                        citation = rp.citation,
-                        confidence = rp.confidence,
-                        safetyCritical = rp.safety_critical,
-                        contested = rp.contested,
-                    )
-                }
-                item {
-                    TextButton(onClick = { onEvent(Event.ClearRacePrediction) }) {
-                        Text("Clear prediction", style = Type.Body)
+            // Destination order per usability spec §3-Coach: programming guidance
+            // (the everyday output) first, then readiness adjustments, then the
+            // session feedback + deload lifecycle, then the on-demand calculators,
+            // then reference material (collapsed, lowest priority): closed by the
+            // profile-context summary the guidance rides on (design-spec §7).
+            if (model.guidance.isNotEmpty()) {
+                item { SectionTitle("Programming guidance") }
+                // Group by engine section so each block (Strength, Running, …) is a
+                // collapsible unit: a runner can fold away eight Strength cards
+                // without losing today's running coaching. Expanded by default:
+                // guidance is the live coaching output, so the screen still shows
+                // everything on open (unlike Reference, which is background material
+                // and starts collapsed). The section name now lives in the header,
+                // so the cards inside drop their own per-card section chip.
+                model.guidance.groupBy { it.section }.forEach { (section, rows) ->
+                    item(key = "guidance-$section") {
+                        ExpandableSection(section, initiallyExpanded = true) {
+                            Column(verticalArrangement = Arrangement.spacedBy(Space.Card.dp)) {
+                                // Sort WITHIN this section bucket only: the grouping by
+                                // section is preserved; priority orders the cards inside it.
+                                rows.byGuidancePriority().forEach {
+                                    EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested)
+                                }
+                            }
+                        }
                     }
-                }
-            }
-
-            // Hypertrophy volume planner: another on-demand tool. Submitting drives
-            // Event.PlanHypertrophyMeso; the graded per-week plan renders just below
-            // from model.hypertrophy_plan until ClearHypertrophyPlan drops it.
-            item {
-                ExpandableSection("Volume planner") {
-                    HypertrophyPlannerForm { onEvent(it) }
-                }
-            }
-            if (model.hypertrophy_plan.isNotEmpty()) {
-                items(model.hypertrophy_plan) {
-                    EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section)
-                }
-                item {
-                    TextButton(onClick = { onEvent(Event.ClearHypertrophyPlan) }) {
-                        Text("Clear plan", style = Type.Body)
-                    }
-                }
-            }
-
-            // Protein target: an on-demand tool. Submitting drives
-            // Event.ComputeProtein (bodyweight × graded g/kg → absolute g/day);
-            // the graded row(s) render just below from model.protein_targets
-            // until ClearProtein drops them.
-            item {
-                ExpandableSection("Protein target") {
-                    ProteinForm { bodyweight, masters, deficit ->
-                        onEvent(Event.ComputeProtein(bodyweight, masters, deficit))
-                    }
-                }
-            }
-            if (model.protein_targets.isNotEmpty()) {
-                items(model.protein_targets) {
-                    EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section)
-                }
-                item {
-                    TextButton(onClick = { onEvent(Event.ClearProtein) }) {
-                        Text("Clear protein", style = Type.Body)
-                    }
-                }
-            }
-
-            // HR-zone calculator: an on-demand tool. Submitting drives
-            // Event.ComputeHrZones (age → Tanaka HRmax + five Daniels %HRmax band
-            // bpm ranges); the graded rows render just below from model.hr_zones
-            // until ClearHrZones drops them.
-            item {
-                ExpandableSection("Heart-rate zones") {
-                    HrZonesForm { age -> onEvent(Event.ComputeHrZones(age)) }
-                }
-            }
-            if (model.hr_zones.isNotEmpty()) {
-                items(model.hr_zones) {
-                    EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section)
-                }
-                item {
-                    TextButton(onClick = { onEvent(Event.ClearHrZones) }) {
-                        Text("Clear zones", style = Type.Body)
-                    }
-                }
-            }
-
-            model.feedback?.let { fb ->
-                // Feedback comes from the last SubmitReview and is otherwise sticky
-                // (it also survives a restart via event-log replay). Its Clear now
-                // lives in the Coach overflow menu (ClearReview drops model.review
-                // and the card with it).
-                item { SectionTitle("Session feedback") }
-                item { FeedbackCard(fb) }
-            }
-
-            if (model.review_adjustments.isNotEmpty()) {
-                // Week-level deloads share the review's lifecycle, so their Clear is
-                // the same ClearReview in the overflow, not the readiness adjustments
-                // below, which ClearReadiness owns.
-                item { SectionTitle("Session deloads") }
-                items(model.review_adjustments.byAdjustmentPriority()) {
-                    EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested)
                 }
             }
 
@@ -654,63 +779,192 @@ private fun CoachDestination(
                 }
             }
 
-        if (model.guidance.isNotEmpty()) {
-            item { SectionTitle("Programming guidance") }
-            // Group by engine section so each block (Strength, Running, …) is a
-            // collapsible unit: a runner can fold away eight Strength cards
-            // without losing today's running coaching. Expanded by default:
-            // guidance is the live coaching output, so the screen still shows
-            // everything on open (unlike Reference, which is background material
-            // and starts collapsed). The section name now lives in the header,
-            // so the cards inside drop their own per-card section chip.
-            model.guidance.groupBy { it.section }.forEach { (section, rows) ->
-                item(key = "guidance-$section") {
-                    ExpandableSection(section, initiallyExpanded = true) {
-                        Column(verticalArrangement = Arrangement.spacedBy(Space.Card.dp)) {
-                            // Sort WITHIN this section bucket only: the grouping by
-                            // section is preserved; priority orders the cards inside it.
-                            rows.byGuidancePriority().forEach {
-                                EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested)
-                            }
-                        }
-                    }
-                }
+            model.feedback?.let { fb ->
+                // Feedback comes from the last SubmitReview and is otherwise sticky
+                // (it also survives a restart via event-log replay). Its Clear now
+                // lives in the Coach overflow menu (ClearReview drops model.review
+                // and the card with it).
+                item { SectionTitle("Session feedback") }
+                item { FeedbackCard(fb) }
             }
-        }
 
-        if (model.reference.isNotEmpty()) {
-            // Reference is background material, not today's action: collapse it
-            // by default so it stops padding the scroll below the live coaching
-            // output. One LazyColumn item wrapping the (short) list is fine; it
-            // trades virtualization the handful of reference cards never needed.
+            if (model.review_adjustments.isNotEmpty()) {
+                // Week-level deloads share the review's lifecycle, so their Clear is
+                // the same ClearReview in the overflow, not the readiness adjustments
+                // above, which ClearReadiness owns.
+                item { SectionTitle("Session deloads") }
+                items(model.review_adjustments.byAdjustmentPriority()) {
+                    EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested)
+                }
+            }
+
+            // The four on-demand calculators as a 2×2 launcher grid: each tile shows
+            // its computed state (a value where the result is one scalar, else set/-);
+            // tapping opens that tool's form just below. De-densifies the four tall
+            // stacked expandables. All the events/results below are unchanged.
+            item { SectionTitle("Calculators") }
             item {
-                ExpandableSection("Reference") {
-                    Column(verticalArrangement = Arrangement.spacedBy(Space.Card.dp)) {
-                        // Each reference card keeps its own section chip, so the cards
-                        // must stay grouped by section: a global priority sort would
-                        // interleave sections (Strength/Nutrition/Hybrid…) by grade and
-                        // scramble the chips. Group first (preserving the core's
-                        // section-contiguous order) and priority-sort only WITHIN each
-                        // section bucket, mirroring the guidance list above.
-                        model.reference.groupBy { it.section }.values.forEach { rows ->
-                            rows.byGuidancePriority().forEach {
-                                EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section)
+                Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                        CoachToolTile(
+                            "Race predictor",
+                            model.race_prediction?.predicted ?: "-",
+                            activeTool == CoachTool.Race,
+                        ) { activeTool = if (activeTool == CoachTool.Race) null else CoachTool.Race }
+                        CoachToolTile(
+                            "Volume planner",
+                            if (model.hypertrophy_plan.isNotEmpty()) "planned" else "-",
+                            activeTool == CoachTool.Volume,
+                        ) { activeTool = if (activeTool == CoachTool.Volume) null else CoachTool.Volume }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                        CoachToolTile(
+                            "Protein target",
+                            if (model.protein_targets.isNotEmpty()) "set" else "-",
+                            activeTool == CoachTool.Protein,
+                        ) { activeTool = if (activeTool == CoachTool.Protein) null else CoachTool.Protein }
+                        CoachToolTile(
+                            "HR zones",
+                            if (model.hr_zones.isNotEmpty()) "set" else "-",
+                            activeTool == CoachTool.HrZones,
+                        ) { activeTool = if (activeTool == CoachTool.HrZones) null else CoachTool.HrZones }
+                    }
+                }
+            }
+            // The selected tool's form (one at a time), driving the same events.
+            item {
+                when (activeTool) {
+                    CoachTool.Race -> RacePredictorForm { onEvent(it) }
+                    CoachTool.Volume -> HypertrophyPlannerForm { onEvent(it) }
+                    CoachTool.Protein -> ProteinForm { bodyweight, masters, deficit ->
+                        onEvent(Event.ComputeProtein(bodyweight, masters, deficit))
+                    }
+                    CoachTool.HrZones -> HrZonesForm { age -> onEvent(Event.ComputeHrZones(age)) }
+                    null -> {}
+                }
+            }
+
+            // Graded results render below the grid until each is cleared, unchanged
+            // events/wiring, only relocated together beneath the launcher.
+            model.race_prediction?.let { rp ->
+                item {
+                    // rp.summary already folds goal label + predicted time + method
+                    // note into one cited sentence; a "label: time" headline on top
+                    // of it just restates the same range twice.
+                    EvidenceCard(
+                        summary = rp.summary.ifBlank { "${rp.goal_label}: ${rp.predicted}" },
+                        grade = rp.grade,
+                        citation = rp.citation,
+                        confidence = rp.confidence,
+                        safetyCritical = rp.safety_critical,
+                        contested = rp.contested,
+                    )
+                }
+                item {
+                    TextButton(onClick = { onEvent(Event.ClearRacePrediction) }) {
+                        Text("Clear prediction", style = Type.Body)
+                    }
+                }
+            }
+            if (model.hypertrophy_plan.isNotEmpty()) {
+                items(model.hypertrophy_plan) {
+                    EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section)
+                }
+                item {
+                    TextButton(onClick = { onEvent(Event.ClearHypertrophyPlan) }) {
+                        Text("Clear plan", style = Type.Body)
+                    }
+                }
+            }
+            if (model.protein_targets.isNotEmpty()) {
+                items(model.protein_targets) {
+                    EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section)
+                }
+                item {
+                    TextButton(onClick = { onEvent(Event.ClearProtein) }) {
+                        Text("Clear protein", style = Type.Body)
+                    }
+                }
+            }
+            if (model.hr_zones.isNotEmpty()) {
+                items(model.hr_zones) {
+                    EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section)
+                }
+                item {
+                    TextButton(onClick = { onEvent(Event.ClearHrZones) }) {
+                        Text("Clear zones", style = Type.Body)
+                    }
+                }
+            }
+
+            if (model.reference.isNotEmpty()) {
+                // Reference is background material, not today's action: collapse it
+                // by default so it stops padding the scroll below the live coaching
+                // output. One LazyColumn item wrapping the (short) list is fine; it
+                // trades virtualization the handful of reference cards never needed.
+                item {
+                    ExpandableSection("Reference") {
+                        Column(verticalArrangement = Arrangement.spacedBy(Space.Card.dp)) {
+                            // Each reference card keeps its own section chip, so the cards
+                            // must stay grouped by section: a global priority sort would
+                            // interleave sections (Strength/Nutrition/Hybrid…) by grade and
+                            // scramble the chips. Group first (preserving the core's
+                            // section-contiguous order) and priority-sort only WITHIN each
+                            // section bucket, mirroring the guidance list above.
+                            model.reference.groupBy { it.section }.values.forEach { rows ->
+                                rows.byGuidancePriority().forEach {
+                                    EvidenceCard(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section)
+                                }
                             }
                         }
                     }
                 }
             }
-        }
+
+            model.profile?.let { p ->
+                // Coach PROFILE summary (design-spec §7): the profile context the
+                // guidance is computed against, as a plain factual card: a config
+                // echo, not a recommendation, so no evidence chrome. Training age
+                // maps the profile's `advanced` flag; enum labels reuse the
+                // ProfileEditor display strings via the same safe ProfileDraft
+                // hydration (unknown wire names fall back to SEED, never crash).
+                item { SectionTitle("Profile") }
+                item {
+                    val d = ProfileDraft.from(p)
+                    PlainCard {
+                        Text(
+                            "Training age: ${if (d.advanced) "Advanced" else "Intermediate"}",
+                            color = OnBgBody,
+                            style = Type.Body,
+                        )
+                        Text(
+                            "${d.liftGoal.label} · ${d.concurrentGoal.label} · ${d.goalDistance.label}",
+                            color = OnBgMuted,
+                            style = Type.Body,
+                        )
+                        Text(
+                            "${d.weeklySets} sets/wk · ${d.runningDaysPerWeek} run days/wk · ${trimNum(d.runningKmPerWeek)} km/wk",
+                            color = OnBgMuted,
+                            style = Type.Body.merge(TabularFigures),
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
+/** Which logged type History shows (usability §3-History: two-option segmented Lifts | Runs). */
+private enum class HistoryFilter { Lifts, Runs }
+
 /** History, the logged lifts and runs lists; bulk Clear lives in the ⋮ overflow. Per-item Export GPX stays on the RunCard. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HistoryDestination(
     model: ViewModel,
     onEvent: (Event) -> Unit,
 ) {
+    var filter by rememberSaveable { mutableStateOf(HistoryFilter.Lifts) }
     // Destructive bulk clears now live in this section's overflow (⋮) menu instead
     // of inline section headers (spec §3 / roadmap #5). The confirm dialogs + Events
     // are unchanged; only their trigger moved. Each clear owns a `confirming` flag
@@ -743,20 +997,91 @@ private fun HistoryDestination(
             onDismiss = { confirmRuns = false },
             onClear = { onEvent(Event.ClearRuns) },
         )
+        val hasAny = model.lifts.isNotEmpty() || model.runs.isNotEmpty()
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(Space.Screen.dp),
             verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
         ) {
-            if (model.lifts.isNotEmpty()) {
+            if (hasAny) {
+                // Activity heatmap: one cell per day, shaded by that day's session
+                // count. Local-day bucketing is done here in the shell (device
+                // timezone) so the core stays clock-free; the counts are a plain
+                // tally of observed_at stamps, not a score.
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+                        SectionTitle("Activity")
+                        val tz = java.util.TimeZone.getDefault()
+                        val counts = remember(model.lifts, model.runs) {
+                            val m = HashMap<Long, Int>()
+                            (model.lifts.map { it.observed_at } + model.runs.map { it.observed_at })
+                                .filter { it > 0 }
+                                .forEach { sec ->
+                                    val day = Math.floorDiv(sec + tz.getOffset(sec * 1000) / 1000, 86400L)
+                                    m[day] = (m[day] ?: 0) + 1
+                                }
+                            m
+                        }
+                        val nowSec = System.currentTimeMillis() / 1000
+                        val today = Math.floorDiv(nowSec + tz.getOffset(nowSec * 1000) / 1000, 86400L)
+                        ContributionHeatmap(counts, today)
+                        Text("Last 16 weeks · one cell per day", color = OnBgFaint, style = Type.Caption)
+                    }
+                }
+                // Week/summary strip: factual aggregates of what's logged, entry
+                // count, lifted tonnage (Σ weight×reps → tonnes), running distance.
+                // No coaching, just totals over the view's own numbers.
+                item {
+                    val tonnage = model.lifts.sumOf { it.weight_kg * it.reps } / 1000.0
+                    val runningKm = model.runs.sumOf { it.distance_km }
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                        StatTile("${model.lifts.size + model.runs.size}", null, "entries")
+                        StatTile(String.format(Locale.US, "%.1f", tonnage), "t", "tonnage")
+                        StatTile(String.format(Locale.US, "%.1f", runningKm), "km", "running")
+                    }
+                }
+                // Two-option segmented switch (usability §3-History): Lifts | Runs
+                // swaps the list rather than stacking both under three filter
+                // pills with a redundant "All".
+                item {
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        SegmentedButton(
+                            selected = filter == HistoryFilter.Lifts,
+                            onClick = { filter = HistoryFilter.Lifts },
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        ) { Text("Lifts · ${model.lifts.size}", style = Type.Body, maxLines = 1) }
+                        SegmentedButton(
+                            selected = filter == HistoryFilter.Runs,
+                            onClick = { filter = HistoryFilter.Runs },
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        ) { Text("Runs · ${model.runs.size}", style = Type.Body, maxLines = 1) }
+                    }
+                }
+            }
+
+            if (filter == HistoryFilter.Lifts && model.lifts.isNotEmpty()) {
                 item { SectionTitle("Lifts (${model.lifts.size})") }
                 // Most recent on top so the latest set is visible without scrolling.
                 items(model.lifts.asReversed()) { LiftCard(it) }
+            } else if (filter == HistoryFilter.Lifts && hasAny) {
+                item { Text("No lifts logged yet.", color = OnBgMuted, style = Type.Body) }
             }
 
-            if (model.runs.isNotEmpty()) {
+            if (filter == HistoryFilter.Runs && model.runs.isNotEmpty()) {
                 item { SectionTitle("Runs (${model.runs.size})") }
                 items(model.runs.asReversed()) { RunCard(it) }
+            } else if (filter == HistoryFilter.Runs && hasAny) {
+                item { Text("No runs logged yet.", color = OnBgMuted, style = Type.Body) }
+            }
+
+            if (!hasAny) {
+                item {
+                    Text(
+                        "No sessions logged yet. Log a lift or run from the Today tab and it shows up here.",
+                        color = OnBgMuted,
+                        style = Type.Body,
+                    )
+                }
             }
         }
     }
@@ -798,25 +1123,15 @@ private fun ProfileDestination(
                 SectionTitle("Appearance")
                 val currentTheme by ThemeSettings.theme.collectAsState()
                 Text("Theme", color = OnBgBody, style = Type.Body)
+                // Segmented swatch cards (design import): each previews its own accent
+                // + ground and outlines in the accent when selected.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
                 ) {
                     AppTheme.entries.forEach { t ->
-                        if (t == currentTheme) {
-                            Button(
-                                onClick = { ThemeSettings.setTheme(ctx, t) },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(t.label)
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = { ThemeSettings.setTheme(ctx, t) },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(t.label, color = OnBgBody)
-                            }
+                        ThemeSwatchCard(t, selected = t == currentTheme) {
+                            ThemeSettings.setTheme(ctx, t)
                         }
                     }
                 }
@@ -962,16 +1277,39 @@ private fun SectionBarWithOverflow(title: String, items: List<Pair<String, () ->
 }
 
 @Composable
-private fun SafetyBanner(model: ViewModel, modifier: Modifier = Modifier) {
+internal fun SafetyBanner(model: ViewModel, modifier: Modifier = Modifier) {
     val tier = model.safety_tier
     if (tier == null && !model.train_blocked) return
     val status = LocalStatusColors.current
     val bg = if (model.train_blocked) status.danger else status.warn
+    // A slow, gentle pulse ring on a DO-NOT-TRAIN hold so it reads as the most
+    // urgent, most dominant state on screen (safety invariant). Blocked-only, a
+    // non-blocking SAFETY CHECK (amber) stays static.
+    val pulse = if (model.train_blocked) {
+        val transition = rememberInfiniteTransition(label = "safety")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
+            label = "pulse",
+        ).value
+    } else {
+        0f
+    }
+    val pulseModifier = if (model.train_blocked) {
+        Modifier.border(
+            2.dp,
+            Color.White.copy(alpha = 0.15f + pulse * 0.4f),
+            RoundedCornerShape(Space.Card.dp),
+        )
+    } else {
+        Modifier
+    }
     Card(
         colors = CardDefaults.cardColors(containerColor = bg),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         shape = RoundedCornerShape(Space.Card.dp),
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().then(pulseModifier),
     ) {
         Column(Modifier.padding(Space.Card.dp)) {
             Text(
@@ -1010,7 +1348,7 @@ private fun safetyTierLabel(tier: String): String = when (tier) {
 @Composable
 private fun LiftCard(l: LiftResultView) {
     PlainCard {
-        Text(l.exercise, style = Type.Title, color = Color.White)
+        Text(l.exercise, style = Type.Title, color = OnBgBody)
         // Input as logged, then the core-derived metrics, each shown once. The
         // core's `summary` string folds both together (the web shell renders that);
         // here the structured fields let the card avoid repeating them.
@@ -1024,6 +1362,8 @@ private fun LiftCard(l: LiftResultView) {
             color = OnBgMuted,
             style = Type.Body.merge(TabularFigures),
         )
+        val logged = formatLogDate(l.observed_at)
+        if (logged.isNotEmpty()) Text(logged, color = OnBgFaint, style = Type.Caption)
     }
 }
 
@@ -1031,41 +1371,96 @@ private fun LiftCard(l: LiftResultView) {
 private fun trimNum(d: Double): String =
     if (d % 1.0 == 0.0) "${d.toInt()}" else String.format(Locale.US, "%.1f", d)
 
-// Mirrors `feedback::POSITIVE_SPLIT_FLAG_PCT` in the Rust core: the core's
-// `positive_split_discipline` fires its coaching cue only for a split strictly
-// beyond this percent, so the FADE / NEG SPLIT chips use the same bound -
-// otherwise a run at exactly the threshold would show a chip with no matching
-// coaching line. These two constants must stay in lockstep across the layers.
-private const val POSITIVE_SPLIT_FLAG_PCT = 3.0
+/**
+ * Friendly log date for a history card from a unix-seconds stamp: "2 hours ago",
+ * "Yesterday", "Jul 15", DateUtils switches to an absolute date past a day, so
+ * an old entry reads as a date, not "37 days ago". Empty for an undated entry
+ * (0 = a pre-timestamp persisted event, before the core carried a log time).
+ */
+private fun formatLogDate(epochSec: Long): String =
+    if (epochSec <= 0L) {
+        ""
+    } else {
+        DateUtils.getRelativeTimeSpanString(
+            epochSec * 1000L,
+            System.currentTimeMillis(),
+            DateUtils.DAY_IN_MILLIS,
+            DateUtils.FORMAT_ABBREV_RELATIVE,
+        ).toString()
+    }
+
+// Neutral informational chip ground: a plain slate that carries NO semantic
+// meaning. Used where a chip states a fact without valence (even/negative split,
+// e1RM direction). Deliberately not a `StatusColors` token, evidence colors carry
+// fixed evidence-grade meaning and warn/danger carry safety meaning (spec §2/§9),
+// so praise or neutral facts must not borrow any of them.
+private val ChipNeutral = Color(0xFF334155)
+
+/**
+ * Chip ground for the core's split verdict. Only a fade gets the semantic warn
+ * (it is a caution-toned coaching cue); even/negative splits are neutral facts -
+ * NOT evidence-green praise, per the fixed-meaning rule (spec §2/§9). An unknown
+ * future verdict falls back to neutral rather than inventing a valence.
+ */
+private fun splitVerdictColor(verdict: String, status: StatusColors): Color = when (verdict) {
+    "fade" -> status.warn
+    else -> ChipNeutral // "even", "negative", unknown
+}
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun RunCard(r: RunResultView) {
     val status = LocalStatusColors.current
     PlainCard {
+        // A GPS run with no usable fixes has no measurable zone/pace/distance -
+        // surface the core's plain-language reason instead of an empty structure.
+        if (r.distance_km <= 0.0) {
+            if (r.summary.isNotBlank()) Text(r.summary, color = OnBgBody, style = Type.Body)
+            if (r.citation.isNotBlank()) Text(r.citation, color = OnBgFaint, style = Type.Caption)
+            val logged = formatLogDate(r.observed_at)
+            if (logged.isNotEmpty()) Text(logged, color = OnBgFaint, style = Type.Caption)
+            return@PlainCard
+        }
+        // Structured fields, each shown once: the core's `summary` folds these
+        // together for the web shell, so rendering it here too would double them
+        // (as LiftCard's comment notes).
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(r.zone, style = Type.Title, color = status.hrZoneColor(r.zone, Accent))
             Spacer(Modifier.width(Space.Md.dp))
-            Text(r.pace, color = Color.White, style = Type.Body.merge(TabularFigures))
+            Text(
+                "${String.format(Locale.US, "%.1f", r.distance_km)} km · ${r.pace}",
+                color = OnBgBody,
+                style = Type.Body.merge(TabularFigures),
+            )
         }
-        // Flags flow onto a second line when a narrow screen can't fit both a SPIKE
-        // and a FADE chip beside each other: a plain Row would clip the trailing one.
-        // NEG SPLIT (praise, UI-only) is the symmetric negative case.
-        val split = r.split_pct
-        val hasFlag = r.spike_flag ||
-            (split != null && (split > POSITIVE_SPLIT_FLAG_PCT || split < -POSITIVE_SPLIT_FLAG_PCT))
-        if (hasFlag) {
+        // Flags flow onto a second line when a narrow screen can't fit every chip
+        // beside each other: a plain Row would clip the trailing ones.
+        // The split chip renders PURELY from the core's verdict (label/verdict);
+        // no shell-side threshold: the ~3% bound lives only in feedback.rs.
+        val split = r.split
+        if (r.spike_flag || split != null) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                 if (r.spike_flag) Chip("SPIKE", status.danger)
-                if (split != null && split > POSITIVE_SPLIT_FLAG_PCT) {
-                    Chip("+${trimNum(split)}% FADE", status.warn)
-                } else if (split != null && split < -POSITIVE_SPLIT_FLAG_PCT) {
-                    Chip("NEG SPLIT", status.evidenceStrong)
+                if (split != null) {
+                    Chip(split.label, splitVerdictColor(split.verdict, status))
+                    // Evidence badge for the verdict, like other evidence-bearing
+                    // rows; SAFETY/CONTESTED stay always-visible (honesty invariant).
+                    Chip(split.grade, status.gradeColor(split.grade))
+                    if (split.safety_critical) Chip("SAFETY", status.danger)
+                    if (split.contested) Chip("CONTESTED", status.warn)
                 }
             }
         }
-        if (r.summary.isNotBlank()) Text(r.summary, color = OnBgBody, style = Type.Body)
+        // Honest reason the SPIKE chip fired (first run vs a real >10% jump).
+        if (r.spike_note.isNotBlank()) Text(r.spike_note, color = OnBgMuted, style = Type.Caption)
+        // The core's evidence-cited pacing copy (fade cue or discipline praise).
+        if (split != null && split.message.isNotBlank()) {
+            Text(split.message, color = OnBgMuted, style = Type.Caption)
+            if (split.citation.isNotBlank()) Text(split.citation, color = OnBgFaint, style = Type.Caption)
+        }
         if (r.citation.isNotBlank()) Text(r.citation, color = OnBgFaint, style = Type.Caption)
+        val logged = formatLogDate(r.observed_at)
+        if (logged.isNotEmpty()) Text(logged, color = OnBgFaint, style = Type.Caption)
         if (r.gpx.isNotBlank()) {
             val ctx = LocalContext.current
             OutlinedButton(onClick = {
@@ -1125,7 +1520,7 @@ internal fun EvidenceCard(
                 Spacer(Modifier.weight(1f))
                 Chip(grade, status.gradeColor(grade))
             }
-            Text(summary, color = Color.White, style = Type.Body)
+            Text(summary, color = OnBgBody, style = Type.Body)
             // ALWAYS-VISIBLE safety signals (honesty invariant): grade above,
             // SAFETY/CONTESTED here. Only citation + confidence hide behind the tap.
             Row(

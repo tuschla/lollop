@@ -1,8 +1,18 @@
 package de.tuschla.fitnessanlage
 
+import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+
+/**
+ * Result of [EventLog.load]: the surviving replayable lines plus whether this is
+ * a genuinely fresh install. [freshInstall] is true ONLY when the log file never
+ * existed, a log that exists but compacted to zero surviving lines (the user
+ * cleared all their data) is a RETURNING user, and the caller must not re-seed
+ * the onboarding profile over their deliberate empty state.
+ */
+data class RestoredLog(val lines: List<String>, val freshInstall: Boolean)
 
 /**
  * Event-log compaction over raw serde wire lines. Lives outside [Core] (which
@@ -29,12 +39,15 @@ object EventLog {
         "ClearHypertrophyPlan" to setOf("PlanHypertrophyMeso"),
         "ClearProtein" to setOf("ComputeProtein"),
         "ClearHrZones" to setOf("ComputeHrZones"),
+        "ClearCooper" to setOf("ComputeCooper"),
+        "ClearCriticalSpeed" to setOf("ComputeCriticalSpeed"),
+        "ClearApre" to setOf("ComputeApre"),
     )
 
     /** Last-write-wins singleton variants (assign a scalar model field outright). */
     private val singletons = listOf(
         "SetProfile", "SubmitReview", "PredictRace", "PlanHypertrophyMeso", "ComputeProtein",
-        "ComputeHrZones",
+        "ComputeHrZones", "ComputeCooper", "ComputeCriticalSpeed", "ComputeApre",
     )
 
     /**
@@ -67,6 +80,27 @@ object EventLog {
             survivors.dropLast(1).forEach { remove[it] = true }
         }
         return lines.filterIndexed { i, _ -> !remove[i] }
+    }
+
+    /**
+     * Read + compact the persisted event log, rewriting [file] in place when
+     * compaction dropped lines (atomic tmp-file + rename, so a crash mid-write
+     * can never truncate the durable log). Pure file/JSON logic, no native
+     * library, so the fresh-install-vs-compacted-empty distinction is unit
+     * testable on the JVM (see EventLogTest); [Core.restore] replays the result.
+     */
+    fun load(file: File): RestoredLog {
+        if (!file.exists()) return RestoredLog(emptyList(), freshInstall = true)
+        val lines = file.readLines().filter { it.isNotBlank() }
+        val kept = compact(lines)
+        if (kept.size < lines.size) {
+            val tmp = File(file.parentFile, file.name + ".tmp")
+            runCatching {
+                tmp.writeText(kept.joinToString("\n", postfix = "\n"))
+                if (!tmp.renameTo(file)) tmp.delete()
+            }
+        }
+        return RestoredLog(kept, freshInstall = false)
     }
 
     /**

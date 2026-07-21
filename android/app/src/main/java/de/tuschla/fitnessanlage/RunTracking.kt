@@ -2,13 +2,16 @@ package de.tuschla.fitnessanlage
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Paint
+import android.location.LocationManager
 import android.os.Build
 import android.view.MotionEvent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +19,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedButton
@@ -31,6 +36,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +45,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
@@ -54,24 +64,29 @@ import org.osmdroid.views.overlay.Polyline
 @SuppressLint("ClickableViewAccessibility")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RunTrackingScreen(onFinish: (ViewModel?) -> Unit) {
+fun RunTrackingScreen(model: ViewModel, onFinish: (ViewModel?) -> Unit) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     // Follow mode keeps the map centred on the latest fix. A manual drag drops it
     // so the runner can inspect the route; the Recenter button re-arms it.
     var follow by remember { mutableStateOf(true) }
 
-    var hasPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
-        )
-    }
+    // FINE only: GPS tracking is unusable on a coarse-only grant (the platform
+    // GPS provider throws SecurityException without FINE), so a coarse-only
+    // result must NOT enable Start: it reads as "needs precise location" with a
+    // re-request path instead.
+    var hasPermission by remember { mutableStateOf(hasFineLocation(ctx)) }
+    // Degraded-but-not-blocking states the runner should know about before a
+    // long run silently loses its lockscreen notification or records no fixes.
+    var notifGranted by remember { mutableStateOf(notificationsAllowed(ctx)) }
+    var locationOn by remember { mutableStateOf(isLocationEnabled(ctx)) }
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
-        hasPermission = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        hasPermission = result[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        notifGranted = notificationsAllowed(ctx)
+        locationOn = isLocationEnabled(ctx)
     }
 
     fun requestPermissions() {
@@ -165,31 +180,46 @@ fun RunTrackingScreen(onFinish: (ViewModel?) -> Unit) {
             requestPermissions()
             return
         }
+        locationOn = isLocationEnabled(ctx)
         RunSession.reset()
         RunTrackingService.start(ctx)
     }
 
+    // Guards a double Stop tap while the coroutine below awaits the service's
+    // confirmation, a second pass would log the same run twice.
+    var stopping by remember { mutableStateOf(false) }
+
     fun stopAndLog() {
-        RunTrackingService.stop(ctx)
-        val captured = RunSession.points.value
-        val vm = if (captured.size >= 2) {
-            Core.send(
-                Event.LogRunTrack(
-                    // No paired HR sensor yet, and the spike baseline is derived
-                    // in-core from prior runs; the shell sends neither figure.
-                    points = captured,
-                    hrPctMax = 0.0,
-                    longestRecentKm = 0.0,
+        if (stopping) return
+        stopping = true
+        scope.launch {
+            RunTrackingService.stop(ctx)
+            // Snapshot the track only AFTER the service confirms the engine is
+            // unregistered (stopTracking flips `tracking` false once the last fix
+            // is delivered): the stop intent is asynchronous, so a snapshot taken
+            // immediately would drop tail fixes still in flight. The timeout
+            // covers a service that died without confirming.
+            withTimeoutOrNull(2_000L) { RunSession.tracking.first { !it } }
+            val captured = RunSession.points.value
+            val vm = if (captured.size >= 2) {
+                Core.send(
+                    Event.LogRunTrack(
+                        // No paired HR sensor yet, and the spike baseline is derived
+                        // in-core from prior runs; the shell sends neither figure.
+                        points = captured,
+                        hrPctMax = 0.0,
+                        longestRecentKm = 0.0,
+                    )
                 )
-            )
-        } else {
-            // Fewer than two fixes is not a route the core can derive pace/distance
-            // from: say so instead of silently dropping the tap.
-            Toast.makeText(ctx, "Run too short to log", Toast.LENGTH_SHORT).show()
-            null
+            } else {
+                // Fewer than two fixes is not a route the core can derive pace/distance
+                // from: say so instead of silently dropping the tap.
+                Toast.makeText(ctx, "Run too short to log", Toast.LENGTH_SHORT).show()
+                null
+            }
+            RunSession.reset()
+            onFinish(vm)
         }
-        RunSession.reset()
-        onFinish(vm)
     }
 
     Scaffold(
@@ -204,39 +234,101 @@ fun RunTrackingScreen(onFinish: (ViewModel?) -> Unit) {
         },
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad)) {
+            // Pinned safety banner (usability spec §3: on EVERY screen, never
+            // scrollable/dismissable). This screen replaces the root scaffold, so
+            // it must re-pin the banner itself: an active DO-NOT-TRAIN hold has
+            // to stay visible mid-run too. Renders nothing when no tier is active.
+            SafetyBanner(
+                model,
+                Modifier
+                    .padding(horizontal = Space.Screen.dp)
+                    .padding(top = Space.Sm.dp, bottom = Space.Sm.dp),
+            )
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
             }
             Column(Modifier.padding(Space.Screen.dp), verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-                Text(
-                    when {
-                        !hasPermission -> "Location permission needed to track."
-                        !tracking && points.isEmpty() -> "Press Start to begin recording."
-                        else -> {
-                            // Elapsed spans the first-to-last raw fix. The core
-                            // derives the logged duration from accuracy-filtered
-                            // fixes, so this live readout can run slightly long when
-                            // a start/end fix is GPS noise (dropped there, not here);
-                            // it is a progress indicator, not the of-record figure.
-                            // Distance/pace stay core-derived (post-Stop).
-                            val secs =
-                                if (points.size >= 2)
-                                    (points.last().observedAt - points.first().observedAt)
-                                        .coerceAtLeast(0L)
-                                else 0L
-                            val fixLabel = if (points.size == 1) "fix" else "fixes"
-                            "${formatElapsed(secs)} · ${points.size} $fixLabel"
+                when {
+                    !hasPermission -> Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                        Text(
+                            "Precise location (GPS) is needed to track a run - approximate-only location can't record a route.",
+                            color = OnBgMuted,
+                            style = Type.Body,
+                        )
+                        OutlinedButton(onClick = { requestPermissions() }) {
+                            Text("Grant precise location")
                         }
-                    },
-                    color = OnBgMuted,
-                    style = Type.Body.merge(TabularFigures),
-                )
+                    }
+                    !tracking && points.isEmpty() -> Text(
+                        "Press Start to begin recording.",
+                        color = OnBgMuted,
+                        style = Type.Body,
+                    )
+                    else -> {
+                        // Elapsed spans the first-to-last raw fix: a live progress
+                        // indicator, not the of-record figure. The core derives the
+                        // logged duration from accuracy-filtered fixes, so this can run
+                        // slightly long when a start/end fix is GPS noise. Distance /
+                        // pace / zone stay core-derived (post-Stop): no shell-side
+                        // haversine, so they are deliberately not shown live.
+                        val secs =
+                            if (points.size >= 2)
+                                (points.last().observedAt - points.first().observedAt)
+                                    .coerceAtLeast(0L)
+                            else 0L
+                        val fixLabel = if (points.size == 1) "fix" else "fixes"
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(Space.Card.dp))
+                                .background(BgElevated)
+                                .padding(Space.Card.dp),
+                            verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+                        ) {
+                            Text("ELAPSED", color = OnBgMuted, style = Type.Section)
+                            Text(
+                                formatElapsed(secs),
+                                color = OnBgBody,
+                                style = Type.Display.merge(TabularFigures),
+                            )
+                            Text(
+                                "${points.size} $fixLabel",
+                                color = OnBgFaint,
+                                style = Type.Caption.merge(TabularFigures),
+                            )
+                        }
+                    }
+                }
+                // Degraded-state surfacing (design-spec §9 run-tracking polish):
+                // location services off means zero fixes will ever arrive: loud,
+                // warn-ground row; a denied notification permission (API 33+) only
+                // hides the ongoing notification, so a muted caption suffices.
+                if (hasPermission && !locationOn) {
+                    Text(
+                        "Location services are off - no GPS fixes will be recorded. Enable location in system settings.",
+                        color = Color.White,
+                        style = Type.Body,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(Space.Card.dp))
+                            .background(LocalStatusColors.current.warn)
+                            .padding(Space.Card.dp),
+                    )
+                }
+                if (!notifGranted) {
+                    Text(
+                        "Notifications are off - tracking still works, but the ongoing lockscreen notification won't show.",
+                        color = OnBgMuted,
+                        style = Type.Caption,
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                     if (!tracking) {
                         Button(onClick = { startTracking() }) { Text("Start") }
                     } else {
                         Button(
                             onClick = { stopAndLog() },
+                            enabled = !stopping,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = LocalStatusColors.current.dangerStrong,
                             ),
@@ -259,4 +351,19 @@ fun RunTrackingScreen(onFinish: (ViewModel?) -> Unit) {
             }
         }
     }
+}
+
+/** True when the app may post notifications: below API 33 there is no runtime
+ *  gate; from 33 on, the POST_NOTIFICATIONS grant decides. */
+private fun notificationsAllowed(ctx: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+
+/** True when the system-wide location toggle is on. A fine-location grant alone
+ *  delivers no fixes while location services are disabled, so the tracking UI
+ *  surfaces this state instead of recording silence. */
+private fun isLocationEnabled(ctx: Context): Boolean {
+    val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    return LocationManagerCompat.isLocationEnabled(lm)
 }

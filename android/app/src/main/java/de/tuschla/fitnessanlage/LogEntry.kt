@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 
 /**
  * Manual lift-set entry. Emits a real [Event.LogSet] with the user's own
@@ -30,27 +31,48 @@ import androidx.compose.ui.unit.dp
 fun LogSetEditor(onLog: (Event.LogSet) -> Unit) {
     var exercise by rememberSaveable { mutableStateOf("Back Squat") }
     var weightKg by rememberSaveable { mutableStateOf(100.0) }
+    var weightValid by rememberSaveable { mutableStateOf(true) }
     var reps by rememberSaveable { mutableStateOf(5) }
     var rpe by rememberSaveable { mutableStateOf(8.0) }
 
     FormCard {
+        FieldLabel("Exercise")
         OutlinedTextField(
             value = exercise,
             onValueChange = { exercise = it },
-            label = { Text("Exercise") },
             singleLine = true,
+            placeholder = { Text("Search exercise") },
             modifier = Modifier.fillMaxWidth(),
         )
-        DoubleStepperRow("Weight (kg)", weightKg, 0.0, 400.0, 2.5) { weightKg = it }
-        IntStepperRow("Reps", reps, 1, 30, 1) { reps = it }
-        DoubleStepperRow("RPE", rpe, 5.0, 10.0, 0.5) { rpe = it }
+        PresetChipsRow(listOf("Back Squat", "Bench", "Deadlift", "OHP"), exercise) { exercise = it }
+        // Weight: big editable value + plate-jump quick-adjust (−2.5 / +2.5 / +5).
+        // The validity flag gates the submit button so what is logged is always
+        // exactly what the field shows (never a stale committed value behind an
+        // out-of-range or cleared display).
+        BigValueField(
+            "Weight", "kg", weightKg, "%.1f", 0.0, 400.0, listOf(-2.5, 2.5, 5.0),
+            onValidChange = { weightValid = it },
+        ) {
+            weightKg = it
+        }
+        // Reps: a tap-scale over 1–20 rather than a stepper.
+        FieldLabel("Reps", "$reps")
+        ScrollableScaleRow((1..20).toList(), reps, { "$it" }) { reps = it }
+        // RPE: fixed half-point scale; RIR is RPE's definition (10 − RPE), shown as
+        // a hint: the authoritative RIR is still derived in the core on log.
+        FieldLabel("RPE", "${fmtRpe(rpe)} · RIR ${(10.0 - rpe).toInt()}")
+        ChoiceScaleRow(listOf(6.0, 7.0, 7.5, 8.0, 8.5, 9.0, 10.0), rpe, { fmtRpe(it) }) { rpe = it }
         Button(
             onClick = { onLog(Event.LogSet(exercise.trim(), weightKg, reps, rpe)) },
-            enabled = exercise.isNotBlank(),
+            enabled = exercise.isNotBlank() && weightValid,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Log set") }
     }
 }
+
+/** `8` for a whole RPE, `7.5` otherwise, display only. */
+private fun fmtRpe(v: Double): String =
+    if (v % 1.0 == 0.0) "${v.toInt()}" else String.format(Locale.US, "%.1f", v)
 
 /**
  * Manual run entry for runs recorded without GPS tracking. `longestRecentKm` is
@@ -59,7 +81,9 @@ fun LogSetEditor(onLog: (Event.LogSet) -> Unit) {
 @Composable
 fun LogRunEditor(onLog: (Event.LogRun) -> Unit) {
     var distanceKm by rememberSaveable { mutableStateOf(10.0) }
+    var distanceValid by rememberSaveable { mutableStateOf(true) }
     var durationMin by rememberSaveable { mutableStateOf(50) }
+    var durationValid by rememberSaveable { mutableStateOf(true) }
     // The core treats hr_pct_max == 0 as "no HR sample" and reports zone "-"
     // rather than fabricating one. Gate HR behind a toggle so a run logged without
     // a monitor sends 0 instead of a made-up %, keeping the zone honest.
@@ -67,11 +91,24 @@ fun LogRunEditor(onLog: (Event.LogRun) -> Unit) {
     var hrPctMax by rememberSaveable { mutableStateOf(78) }
 
     FormCard {
-        DoubleStepperRow("Distance (km)", distanceKm, 0.0, 100.0, 0.5) { distanceKm = it }
-        IntStepperRow("Duration (min)", durationMin, 0, 600, 5) { durationMin = it }
+        // Both fields gate the submit on their validity flag so the logged run is
+        // always exactly the displayed numbers (see LogSetEditor's weight note).
+        BigValueField(
+            "Distance", "km", distanceKm, "%.2f", 0.0, 100.0, listOf(-0.5, 0.5, 1.0),
+            onValidChange = { distanceValid = it },
+        ) {
+            distanceKm = it
+        }
+        BigValueField(
+            "Duration", "min", durationMin.toDouble(), "%.0f", 0.0, 600.0, listOf(-1.0, 1.0, 5.0),
+            onValidChange = { durationValid = it },
+        ) {
+            durationMin = it.toInt()
+        }
         SwitchRow("Recorded HR", hasHr) { hasHr = it }
         if (hasHr) {
-            IntStepperRow("HR (% max)", hrPctMax, 50, 100, 1) { hrPctMax = it }
+            FieldLabel("HR", "% max")
+            ChoiceScaleRow(listOf(60, 65, 70, 75, 80, 85, 90, 95), hrPctMax, { "$it" }) { hrPctMax = it }
         }
         Button(
             onClick = {
@@ -84,7 +121,7 @@ fun LogRunEditor(onLog: (Event.LogRun) -> Unit) {
                     )
                 )
             },
-            enabled = distanceKm > 0.0 && durationMin > 0,
+            enabled = distanceKm > 0.0 && durationMin > 0 && distanceValid && durationValid,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Log run") }
     }
@@ -188,6 +225,16 @@ private fun defaultReadinessValue(signal: ReadinessSignal): Double = when {
  * ~0.9–1.05 ratio, [ReadinessSignal.Rpe] as a signed delta, RestingHr as a bpm
  * delta, others as z-scores or percents. Each maps to the thresholds in
  * autoreg.rs, so the stepper lands near where the signal actually triggers.
+ *
+ * On the threshold numbers in the hints (task-14 dedup review): the core now
+ * owns the run-split verdict and the e1RM history delta on the ViewModel, and
+ * the shell logic duplicating those was deleted (MainActivity). These hints are
+ * different, they cite autoreg.rs *input* thresholds that the core does not
+ * export on the bridge, shown BEFORE submission as a stepper affordance so the
+ * user knows where a value becomes meaningful. Nothing keys off them; the
+ * core's evidence-cited adjustment after submit stays authoritative. They stay
+ * until the core exports its readiness thresholds, at which point they should
+ * be rendered from the wire instead.
  */
 private data class ValueSpec(
     val min: Double,
@@ -318,7 +365,9 @@ fun ReviewEditor(onSubmit: (Event.SubmitReview) -> Unit) {
             IntStepperRow("Failed key sessions", failedKeySessions, 0, 7, 1) {
                 failedKeySessions = it
             }
-            IntStepperRow("Sessions RIR met ≥7% below plan", rpeLoadGapSessions, 0, 7, 1) {
+            // rpe_load_gap_sessions is an RPE-based metric (target RPE reached at
+            // a load ≥7% below plan): the label must say RPE, not RIR.
+            IntStepperRow("Sessions RPE met ≥7% below plan", rpeLoadGapSessions, 0, 7, 1) {
                 rpeLoadGapSessions = it
             }
             DoubleStepperRow(

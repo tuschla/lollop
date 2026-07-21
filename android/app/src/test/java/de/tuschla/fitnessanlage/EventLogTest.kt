@@ -1,6 +1,8 @@
 package de.tuschla.fitnessanlage
 
+import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,6 +24,18 @@ class EventLogTest {
         )
     )
     private fun protein(bw: Double) = line(Event.ComputeProtein(bw, masters = false, deficit = true))
+
+    // The Kotlin Event type has no variants for the dormant calculators yet, so
+    // these lines are raw serde wire shapes (struct variants = single-key object,
+    // unit variants = bare string) exactly as app.rs serializes them.
+    private fun cooper(distanceM: Double) = """{"ComputeCooper":{"distance_m_12min":$distanceM}}"""
+    private fun criticalSpeed(distanceM: Double) =
+        """{"ComputeCriticalSpeed":{"efforts":[{"distance_m":$distanceM,"time_sec":720.0}]}}"""
+    private fun apre(reps: Int) =
+        """{"ComputeApre":{"scheme":"Apre6","reps":$reps,"current_load_lb":225.0}}"""
+    private val clearCooper = "\"ClearCooper\""
+    private val clearCriticalSpeed = "\"ClearCriticalSpeed\""
+    private val clearApre = "\"ClearApre\""
 
     @Test
     fun clearDropsFamilyPrefixButKeepsLaterEntries() {
@@ -60,6 +74,56 @@ class EventLogTest {
         assertEquals(listOf(set("a"), protein(90.0)), out)
     }
 
+    // ── families 9–11: Cooper / CriticalSpeed / Apre (lockstep with log.rs) ──
+
+    @Test
+    fun onlyLastCooperSurvives() {
+        val out = EventLog.compact(listOf(cooper(2400.0), set("a"), cooper(2600.0)))
+        assertEquals(listOf(set("a"), cooper(2600.0)), out)
+    }
+
+    @Test
+    fun clearWipesTheCooperFamily() {
+        val out = EventLog.compact(listOf(cooper(2400.0), cooper(2600.0), clearCooper))
+        assertTrue(out.isEmpty())
+    }
+
+    @Test
+    fun onlyLastCriticalSpeedSurvives() {
+        val out = EventLog.compact(listOf(criticalSpeed(3000.0), set("a"), criticalSpeed(3200.0)))
+        assertEquals(listOf(set("a"), criticalSpeed(3200.0)), out)
+    }
+
+    @Test
+    fun clearWipesTheCriticalSpeedFamilyButKeepsLaterFit() {
+        val out = EventLog.compact(
+            listOf(criticalSpeed(3000.0), clearCriticalSpeed, criticalSpeed(3200.0))
+        )
+        assertEquals(listOf(criticalSpeed(3200.0)), out)
+    }
+
+    @Test
+    fun onlyLastApreSurvives() {
+        val out = EventLog.compact(listOf(apre(4), set("a"), apre(8)))
+        assertEquals(listOf(set("a"), apre(8)), out)
+    }
+
+    @Test
+    fun clearWipesTheApreFamily() {
+        val out = EventLog.compact(listOf(apre(4), apre(8), clearApre))
+        assertTrue(out.isEmpty())
+    }
+
+    @Test
+    fun calculatorClearsOnlyTouchTheirOwnFamily() {
+        // A ClearCooper must not disturb the CS fit or APRE adjustment (nor any
+        // other family): each calculator clears independently.
+        val out = EventLog.compact(
+            listOf(cooper(2400.0), criticalSpeed(3000.0), apre(6), clearCooper)
+        )
+        assertEquals(listOf(criticalSpeed(3000.0), apre(6)), out)
+    }
+
     @Test
     fun emptyLogStaysEmpty() {
         assertTrue(EventLog.compact(emptyList()).isEmpty())
@@ -76,5 +140,59 @@ class EventLogTest {
         assertEquals("ClearSets", EventLog.variantOf(line(Event.ClearSets)))
         assertEquals("LogSet", EventLog.variantOf(set("a")))
         assertEquals(null, EventLog.variantOf("not json"))
+    }
+
+    // ── load(): fresh-install vs compacted-empty (Core.restore's seed decision) ──
+
+    private fun tempLog(): File =
+        File.createTempFile("event-log", ".ndjson").apply { deleteOnExit() }
+
+    @Test
+    fun loadMissingFileIsFreshInstall() {
+        val file = tempLog().also { it.delete() }
+        val restored = EventLog.load(file)
+        assertTrue(restored.freshInstall)
+        assertTrue(restored.lines.isEmpty())
+    }
+
+    @Test
+    fun loadCompactedEmptyLogIsReturningUserNotFreshInstall() {
+        // A user who logged sets then cleared them: every line compacts away, but
+        // the log file exists: this must NOT read as a fresh install, or the
+        // caller would re-seed the SEED profile + onboarding over a deliberate
+        // empty state.
+        val file = tempLog()
+        file.writeText(
+            listOf(set("a"), set("b"), line(Event.ClearSets))
+                .joinToString("\n", postfix = "\n")
+        )
+        val restored = EventLog.load(file)
+        assertFalse(restored.freshInstall)
+        assertTrue(restored.lines.isEmpty())
+    }
+
+    @Test
+    fun loadBlankButExistingLogIsNotFreshInstall() {
+        // A previous compaction that emptied the log leaves "\n" behind; the file
+        // still exists, so this too is a returning user.
+        val file = tempLog()
+        file.writeText("\n")
+        val restored = EventLog.load(file)
+        assertFalse(restored.freshInstall)
+        assertTrue(restored.lines.isEmpty())
+    }
+
+    @Test
+    fun loadKeepsSurvivorsAndRewritesFileCompacted() {
+        val file = tempLog()
+        file.writeText(
+            listOf(set("a"), line(Event.ClearSets), run(5.0))
+                .joinToString("\n", postfix = "\n")
+        )
+        val restored = EventLog.load(file)
+        assertFalse(restored.freshInstall)
+        assertEquals(listOf(run(5.0)), restored.lines)
+        // The durable log was compacted in place (atomic rewrite).
+        assertEquals(listOf(run(5.0)), file.readLines().filter { it.isNotBlank() })
     }
 }

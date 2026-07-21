@@ -28,11 +28,14 @@ class EventJsonTest {
 
     @Test
     fun logSetHasSnakeCaseFields() {
-        val fields = obj(Event.LogSet("Back Squat", 100.0, 5, 8.0))["LogSet"]!!.jsonObject
+        val fields = obj(Event.LogSet("Back Squat", 100.0, 5, 8.0, 1_700_000_000L))["LogSet"]!!.jsonObject
         assertEquals("Back Squat", fields["exercise"]!!.jsonPrimitive.content)
         assertEquals(100.0, fields["weight_kg"]!!.jsonPrimitive.content.toDouble(), 1e-9)
         assertEquals(5, fields["reps"]!!.jsonPrimitive.content.toInt())
         assertEquals(8.0, fields["rpe"]!!.jsonPrimitive.content.toDouble(), 1e-9)
+        // Log time rides on the wire as snake_case unix seconds so the core can
+        // carry it back into the history view (LiftResultView.observed_at).
+        assertEquals(1_700_000_000L, fields["observed_at"]!!.jsonPrimitive.content.toLong())
     }
 
     @Test
@@ -91,14 +94,57 @@ class EventJsonTest {
     }
 
     @Test
+    fun viewModelDecodesCoreSplitVerdictAndE1rmDelta() {
+        // Rust→Kotlin side of the contract: the additive history fields
+        // (runs[i].split, lifts[i].e1rm_delta_kg/e1rm_direction) decode, and
+        // their absence (hand-entered run / first set) stays null: the shell
+        // renders these purely from the wire, no local thresholds/arithmetic.
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val vm = json.decodeFromString<ViewModel>(
+            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+                "review_adjustments":[],"input_count":2,
+                "lifts":[
+                  {"exercise":"Squat","weight_kg":100.0,"reps":5,"rpe":8.0,
+                   "e1rm_kg":116.7,"pct_1rm":86.0,"rir":2.0,"summary":"","observed_at":1},
+                  {"exercise":"Squat","weight_kg":102.5,"reps":5,"rpe":8.0,
+                   "e1rm_kg":119.6,"pct_1rm":86.0,"rir":2.0,
+                   "e1rm_delta_kg":2.9,"e1rm_direction":"up","summary":"","observed_at":2}],
+                "runs":[
+                  {"zone":"Z1","pace":"6:00/km","distance_km":8.0,"spike_flag":false,
+                   "spike_note":"","split_pct":5.2,
+                   "split":{"verdict":"fade","label":"FADE +5%",
+                     "message":"Start easier next time.","grade":"Moderate",
+                     "citation":"feedback-016","confidence":0.7,
+                     "safety_critical":false,"contested":false},
+                   "summary":"","citation":"","gpx":"","observed_at":3},
+                  {"zone":"Z2","pace":"5:30/km","distance_km":5.0,"spike_flag":false,
+                   "spike_note":"","split_pct":null,"split":null,
+                   "summary":"","citation":"","gpx":"","observed_at":4}],
+                "guidance":[],"feedback":null,"reference":[]}"""
+        )
+        assertEquals(null, vm.lifts[0].e1rm_delta_kg)
+        assertEquals(null, vm.lifts[0].e1rm_direction)
+        assertEquals(2.9, vm.lifts[1].e1rm_delta_kg!!, 1e-9)
+        assertEquals("up", vm.lifts[1].e1rm_direction)
+        val split = vm.runs[0].split!!
+        assertEquals("fade", split.verdict)
+        assertEquals("FADE +5%", split.label)
+        assertEquals("Moderate", split.grade)
+        assertEquals("feedback-016", split.citation)
+        assertEquals(null, vm.runs[1].split)
+    }
+
+    @Test
     fun logRunTrackNestsPointsWithSnakeCaseFields() {
         val fields = obj(
-            Event.LogRunTrack(listOf(GpsPoint(52.5, 13.4, 1000L, 4.5)), 80.0, 10.0)
+            Event.LogRunTrack(listOf(GpsPoint(52.5, 13.4, 1000L, 4.5)), 80.0, 10.0, 1_700_000_500L)
         )["LogRunTrack"]!!.jsonObject
         val pt = fields["points"]!!.let { (it as kotlinx.serialization.json.JsonArray)[0] }.jsonObject
         assertEquals(52.5, pt["lat"]!!.jsonPrimitive.content.toDouble(), 1e-9)
         assertEquals(1000L, pt["observed_at"]!!.jsonPrimitive.content.toLong())
         assertEquals(4.5, pt["accuracy_m"]!!.jsonPrimitive.content.toDouble(), 1e-9)
         assertEquals(80.0, fields["hr_pct_max"]!!.jsonPrimitive.content.toDouble(), 1e-9)
+        // Session log time is the run-level stamp, distinct from the per-fix one.
+        assertEquals(1_700_000_500L, fields["observed_at"]!!.jsonPrimitive.content.toLong())
     }
 }
