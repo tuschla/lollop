@@ -17,12 +17,12 @@
 //!    `model.profile` / `model.review` outright, and nothing else reads them at
 //!    update time, so only the last surviving one matters.
 //!
-//! This is the authoritative implementation: the pure-Rust web shell
-//! (`web-leptos`) calls it directly, and the replay-equivalence tests below pin
-//! its correctness. Because it is *not* exposed over the JSON FFI, the Kotlin
-//! Android shell reimplements the same two rules over raw wire lines in
-//! `android/.../Core.kt::compact()`. The two must stay in lockstep: any change
-//! to the families here (or a new `Event` variant) must be mirrored there.
+//! This is the authoritative implementation, and the replay-equivalence tests
+//! below pin its correctness. Because it is *not* exposed over the JSON FFI, the
+//! Kotlin Android shell reimplements the same two rules over raw wire lines in
+//! `android/.../EventLog.kt::compact` (called from `Core.kt`). The two must stay
+//! in lockstep: any change to the families here (or a new `Event` variant) must
+//! be mirrored there.
 
 use crate::app::Event;
 
@@ -49,14 +49,21 @@ fn classify(event: &Event) -> (u8, bool) {
         Event::ClearProtein => (7, true),
         Event::ComputeHrZones { .. } => (8, false),
         Event::ClearHrZones => (8, true),
+        Event::ComputeCooper { .. } => (9, false),
+        Event::ClearCooper => (9, true),
+        Event::ComputeCriticalSpeed { .. } => (10, false),
+        Event::ClearCriticalSpeed => (10, true),
+        Event::ComputeApre { .. } => (11, false),
+        Event::ClearApre => (11, true),
     }
 }
 
 /// Number of distinct families [`classify`] partitions events into.
-const FAMILIES: u8 = 9;
+const FAMILIES: u8 = 12;
 /// Singleton families whose members are last-write-wins (profile, review,
-/// race prediction, hypertrophy plan, protein target, HR-zone table).
-const SINGLETONS: [u8; 6] = [3, 4, 5, 6, 7, 8];
+/// race prediction, hypertrophy plan, protein target, HR-zone table, Cooper
+/// test, critical-speed fit, APRE adjustment).
+const SINGLETONS: [u8; 9] = [3, 4, 5, 6, 7, 8, 9, 10, 11];
 
 /// Drop provably-inert events from a persisted log, preserving replay order.
 pub fn compact_event_log(events: Vec<Event>) -> Vec<Event> {
@@ -113,6 +120,7 @@ mod tests {
             weight_kg: 100.0,
             reps: 5,
             rpe: 8.0,
+            observed_at: 0,
         }
     }
 
@@ -122,6 +130,7 @@ mod tests {
             duration_min: distance_km * 5.0,
             hr_pct_max: 75.0,
             longest_recent_km: 0.0,
+            observed_at: 0,
         }
     }
 
@@ -130,6 +139,9 @@ mod tests {
             signal: ReadinessSignal::WellnessZ,
             value,
             observed_at: 0,
+            streak: 0,
+            pain: None,
+            effort_min: None,
         })
     }
 
@@ -144,6 +156,14 @@ mod tests {
             running_km_per_week: 45.0,
             advanced: false,
             endurance_intensity_pct_vo2max: 75.0,
+            female: false,
+            high_load_block: false,
+            health: Default::default(),
+            environment: None,
+            env_temp_c: None,
+            env_altitude_m: None,
+            weeks_off: None,
+            bodyweight_kg: None,
         })
     }
 
@@ -247,6 +267,9 @@ mod tests {
                 signal: ReadinessSignal::Pain,
                 value: 1.0,
                 observed_at: 0,
+                streak: 0,
+                pain: None,
+                effort_min: None,
             }),
             Event::ClearReadiness,
             readiness(-1.5),
@@ -273,6 +296,7 @@ mod tests {
             recent_time_sec: 1200.0,
             goal_distance_m,
             weekly_km: 40.0,
+            weeks_since_race: None,
         }
     }
 
@@ -280,6 +304,8 @@ mod tests {
         Event::PlanHypertrophyMeso {
             muscle: muscle.into(),
             weeks: 4,
+            not_growing: false,
+            recovering_easily: false,
         }
     }
 
@@ -292,7 +318,12 @@ mod tests {
     }
 
     fn hr_zones(age_years: f64) -> Event {
-        Event::ComputeHrZones { age_years }
+        Event::ComputeHrZones {
+            age_years,
+            resting_hr_bpm: None,
+            weeks_since_recalc: None,
+            weeks_since_pace_test: None,
+        }
     }
 
     #[test]

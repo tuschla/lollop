@@ -11,16 +11,12 @@
 //! (scaling-028/029, load-036/037 → DETRAIN-001).
 
 use crate::evidence;
-use crate::schema::Recommended;
+use crate::schema::{Adjustment, HealthScreen, Recommended};
 
 /// Build a `Recommended<T>` from a registry claim id (must exist).
 fn recommend<T>(value: T, claim_id: &str) -> Recommended<T> {
     let e = evidence::claim(claim_id).expect("known individualization claim");
-    Recommended {
-        value,
-        evidence: e.to_evidence(),
-        confidence: e.to_confidence_tag(),
-    }
+    Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
 }
 
 // ---------------------------------------------------------------------------
@@ -47,14 +43,15 @@ pub enum ProgressionCadence {
 }
 
 /// Classify training age from the fastest cadence the lifter still progresses at
-/// (File 08 indiv-001; STR-TRAGE-001).
+/// (File 08 indiv-001; INDIV-TRAGE-001, ExpertOpinion, Rippetoe cadence
+/// heuristic, not the Strong dose-response claim).
 pub fn training_age_from_cadence(cadence: ProgressionCadence) -> Recommended<TrainingAge> {
     let age = match cadence {
         ProgressionCadence::EverySession => TrainingAge::Novice,
         ProgressionCadence::WeekToWeek => TrainingAge::Intermediate,
         ProgressionCadence::MonthToMonth => TrainingAge::Advanced,
     };
-    recommend(age, "STR-TRAGE-001")
+    recommend(age, "INDIV-TRAGE-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +101,7 @@ pub fn high_volume_sensitivity(age: TrainingAge) -> Recommended<bool> {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Scaling hierarchy (File 08 scaling-028/029; DETRAIN-001)
+// 3. Scaling hierarchy (File 08 scaling-028/029; SCALE-DOWN-001 / SCALE-UP-001)
 // ---------------------------------------------------------------------------
 
 /// A lever the engine manipulates when scaling training stress. Ordered from
@@ -125,7 +122,8 @@ pub enum ScaleLever {
 
 /// Ordered scale-DOWN hierarchy: shed accessory volume first, protect intensity
 /// and main compounds last (File 08 scaling-028; Mujika & Padilla 2000 -
-/// adaptations retained if intensity held while volume is cut). DETRAIN-001.
+/// adaptations retained if intensity held while volume is cut). SCALE-DOWN-001
+/// (Strong).
 pub fn scale_down_order() -> Recommended<[ScaleLever; 5]> {
     recommend(
         [
@@ -135,13 +133,14 @@ pub fn scale_down_order() -> Recommended<[ScaleLever; 5]> {
             ScaleLever::SecondaryQuality,
             ScaleLever::IntensityAndMainCompounds,
         ],
-        "DETRAIN-001",
+        "SCALE-DOWN-001",
     )
 }
 
 /// Ordered scale-UP hierarchy: add volume and frequency before intensity, add
 /// secondary quality only once the primary is progressing (File 08 scaling-029).
-/// The inverse priority to scale-down. DETRAIN-001.
+/// The inverse priority to scale-down. SCALE-UP-001 (ExpertOpinion ordering,
+/// unlike the Strong scale-down evidence).
 pub fn scale_up_order() -> Recommended<[ScaleLever; 5]> {
     recommend(
         [
@@ -151,18 +150,18 @@ pub fn scale_up_order() -> Recommended<[ScaleLever; 5]> {
             ScaleLever::IntensityAndMainCompounds,
             ScaleLever::SecondaryQuality,
         ],
-        "DETRAIN-001",
+        "SCALE-UP-001",
     )
 }
 
 /// Minimum weekly exposures per muscle to preserve when consolidating frequency
-/// (File 08 scaling-028). DETRAIN-001.
+/// (File 08 scaling-028). SCALE-DOWN-001.
 pub fn min_muscle_exposures_per_week() -> Recommended<u8> {
-    recommend(2, "DETRAIN-001")
+    recommend(2, "SCALE-DOWN-001")
 }
 
 // ---------------------------------------------------------------------------
-// 4. Re-entry after a layoff (File 08 Table 3.4b; DETRAIN-001)
+// 4. Re-entry after a layoff (File 08 Table 3.4b; REENTRY-001)
 // ---------------------------------------------------------------------------
 
 /// Conservative resistance re-entry prescription after a training gap.
@@ -178,7 +177,8 @@ pub struct ReEntry {
 
 /// Resistance re-entry bracket by weeks off (File 08 Table 3.4b, conservative
 /// ExpertOpinion default extrapolated from Mujika & Padilla 2000). Hold
-/// intensity where possible, rebuild volume. DETRAIN-001.
+/// intensity where possible, rebuild volume. REENTRY-001 (ExpertOpinion, not
+/// the Moderate detraining-timeline claim).
 pub fn resistance_reentry(weeks_off: f64) -> Recommended<ReEntry> {
     let r = if weeks_off < 1.0 {
         ReEntry {
@@ -211,7 +211,7 @@ pub fn resistance_reentry(weeks_off: f64) -> Recommended<ReEntry> {
             treat_as_novice: true,
         }
     };
-    recommend(r, "DETRAIN-001")
+    recommend(r, "REENTRY-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -306,13 +306,28 @@ pub fn masters_protein_target() -> Recommended<ProteinTarget> {
 
 /// Lean-mass-preserving deficit protein target: 1.8-2.7 g/kg/day, hold intensity
 /// and cut volume toward MEV (File 08 indiv-020; DEFICIT-001).
-pub fn deficit_protein_target() -> Recommended<ProteinTarget> {
-    recommend(
-        ProteinTarget {
-            g_per_kg: (1.8, 2.7),
-        },
-        "DEFICIT-001",
-    )
+///
+/// SAFETY GUARD (File 08 safety-022, safety-critical): "IF caloric deficit
+/// requested AND any RED-S/disordered-eating signal present THEN do NOT
+/// prescribe the deficit; route to RED-S deferral." (The KB's "safety-035"
+/// cross-ref is a numbering bug: the RED-S absolute rule is safety-049.)
+/// The refusal lives *inside* this function, not only in the global autoreg
+/// deferral, so no call path can obtain a deficit target past a RED-S flag:
+/// with `reds_signal_present` the value is `None` and the row is cited to the
+/// RED-S deferral claim (SAFE-REDS-001, Strong, safety-critical), reduce/rest
+/// training stress and defer to a physician / registered dietitian /
+/// mental-health professional.
+pub fn deficit_protein_target(reds_signal_present: bool) -> Recommended<Option<ProteinTarget>> {
+    if reds_signal_present {
+        recommend(None, "SAFE-REDS-001")
+    } else {
+        recommend(
+            Some(ProteinTarget {
+                g_per_kg: (1.8, 2.7),
+            }),
+            "DEFICIT-001",
+        )
+    }
 }
 
 /// Masters (65+) per-meal protein dose in g/kg bodyweight to overcome anabolic
@@ -392,53 +407,212 @@ pub fn substitution_rule() -> Recommended<SubstitutionRule> {
 }
 
 /// Environmental training modifier (File 08 §1.5 Table; safety-024/indiv-025).
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// Carries ONLY what the KB states (HARD RULE 1). The KB gives NO intensity/
+/// pace reduction factor or percentage for any environment, NO temperature/
+/// WBGT/humidity trigger, NO hydration quantity, and NO altitude
+/// acclimatization day count ("until acclimatized" only), so those are
+/// qualitative flags / `Option`s here, never invented numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EnvironmentModifier {
-    /// Multiply prescribed intensity/pace by this factor (1.0 = unchanged).
-    pub intensity_factor: f64,
-    /// Days of progressive acclimatization advised before full load.
-    pub acclimatization_days: u8,
-    /// True when heat-illness signs (confusion, no sweating, dizziness) mean STOP.
-    pub stop_on_illness_signs: bool,
+    /// Reduce absolute intensity/pace (qualitative, the KB states no factor).
+    pub reduce_intensity: bool,
+    /// Progressive acclimatization window in days, `(min, max)`. Stated only
+    /// for heat (~10–14 days, safety-024); altitude has NO stated day count
+    /// ("depressed performance until acclimatized") → `None`.
+    pub acclimatization_days: Option<(u8, u8)>,
+    /// Extend the warm-up (cold, indiv-025, the ONLY cold guidance stated).
+    pub extend_warm_up: bool,
+    /// Hard STOP on heat-illness signs: confusion, cessation of sweating,
+    /// dizziness (safety-024, safety-critical).
+    pub stop_on_heat_illness_signs: bool,
 }
 
 /// The training environment the session is performed in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Serde derives: crosses the JSON FFI as an optional profile field (bare
+/// variant name), so a shell can declare heat/altitude/cold context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Environment {
     Heat,
-    /// Altitude above ~2,500 m.
+    /// Altitude above the [`ALTITUDE_THRESHOLD_M`] trigger.
     Altitude,
     Cold,
     Neutral,
 }
 
-/// Environment-specific intensity/acclimatization modifier (File 08 §1.5;
-/// ENV-001). Heat and altitude reduce absolute intensity; heat carries a
-/// hard heat-illness stop.
+/// Altitude trigger threshold in metres (File 08 indiv-025: ">~2,500 m").
+/// The only altitude number the KB states (besides the pregnancy avoid-list's
+/// identical 2,500 m in safety-047).
+pub const ALTITUDE_THRESHOLD_M: f64 = 2_500.0;
+
+/// Environment-specific modifier (File 08 §1.5; ENV-001, ExpertOpinion -
+/// safety-critical via the heat-illness STOP branch). Heat: reduce intensity,
+/// acclimatize ~10–14 days, hydrate, shift to cooler time of day, STOP on
+/// heat-illness signs. Altitude (>~2,500 m): reduce absolute intensity until
+/// acclimatized (no day count stated). Cold: extend warm-up, nothing else.
 pub fn environment_modifier(env: Environment) -> Recommended<EnvironmentModifier> {
+    let none = EnvironmentModifier {
+        reduce_intensity: false,
+        acclimatization_days: None,
+        extend_warm_up: false,
+        stop_on_heat_illness_signs: false,
+    };
     let m = match env {
         Environment::Heat => EnvironmentModifier {
-            intensity_factor: 0.90,
-            acclimatization_days: 14,
-            stop_on_illness_signs: true,
+            reduce_intensity: true,
+            acclimatization_days: Some((10, 14)),
+            stop_on_heat_illness_signs: true,
+            ..none
         },
         Environment::Altitude => EnvironmentModifier {
-            intensity_factor: 0.90,
-            acclimatization_days: 7,
-            stop_on_illness_signs: false,
+            reduce_intensity: true,
+            ..none
         },
         Environment::Cold => EnvironmentModifier {
-            intensity_factor: 1.00,
-            acclimatization_days: 0,
-            stop_on_illness_signs: false,
+            extend_warm_up: true,
+            ..none
         },
-        Environment::Neutral => EnvironmentModifier {
-            intensity_factor: 1.00,
-            acclimatization_days: 0,
-            stop_on_illness_signs: false,
-        },
+        Environment::Neutral => none,
     };
     recommend(m, "ENV-001")
+}
+
+// ---------------------------------------------------------------------------
+// 8. Stage-0 onboarding gates (File 08 onboard-050; safety-011/044/045/046/048)
+// ---------------------------------------------------------------------------
+
+/// Verbatim pregnancy warning-sign list (File 08 safety-046): any of these →
+/// STOP and DEFER. Data for shells to display; the engine consumes the
+/// [`HealthScreen::pregnancy_warning_sign`] flag.
+pub static PREGNANCY_WARNING_SIGNS: &[&str] = &[
+    "vaginal bleeding",
+    "amniotic fluid leakage",
+    "regular painful contractions",
+    "dyspnea before exertion",
+    "dizziness/faintness",
+    "headache",
+    "chest pain",
+    "calf pain/swelling",
+    "muscle weakness affecting balance",
+    "decreased fetal movement",
+];
+
+/// Verbatim pregnancy contraindication conditions (File 08 safety-046) → DEFER.
+pub static PREGNANCY_CONTRAINDICATIONS: &[&str] = &[
+    "placenta previa after 26 wk",
+    "preeclampsia/gestational hypertension",
+    "incompetent cervix",
+    "severe anemia",
+];
+
+/// Pregnancy avoid-list (File 08 safety-047; SAFE-PREG-AVOID-001, Strong,
+/// safety-critical). Every flag is a verbatim KB item; the altitude bound is
+/// the only number stated.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PregnancyPrecautions {
+    pub avoid_prolonged_supine: bool,
+    pub avoid_overheating: bool,
+    pub avoid_contact_fall_risk: bool,
+    pub avoid_scuba: bool,
+    /// Avoid exercise at high altitude above this many metres (>2,500 m).
+    pub avoid_altitude_above_m: f64,
+    /// Avoid breath-holding (Valsalva) during strength work.
+    pub avoid_valsalva: bool,
+}
+
+/// The pregnancy avoid-list (File 08 safety-047; ACOG 804). Surfaced whenever
+/// the profile reports pregnancy, alongside the safety-045 deferral.
+pub fn pregnancy_precautions() -> Recommended<PregnancyPrecautions> {
+    recommend(
+        PregnancyPrecautions {
+            avoid_prolonged_supine: true,
+            avoid_overheating: true,
+            avoid_contact_fall_risk: true,
+            avoid_scuba: true,
+            avoid_altitude_above_m: 2_500.0,
+            avoid_valsalva: true,
+        },
+        "SAFE-PREG-AVOID-001",
+    )
+}
+
+/// Run the Stage-0 onboarding gates (File 08 onboard-050: screen → route →
+/// classify) over the health screen, returning EVERY deferral that fires, each
+/// cited to its own safety rule. An empty vec = screen clear, programming may
+/// proceed. Deterministic order: acute pregnancy warning first, then the
+/// onboard-050 route order (PAR-Q+ → pregnancy → injury → pediatric → RED-S).
+///
+/// safety-000 global precedence: none of these deferrals may ever be
+/// overridden to satisfy a user's stated goal, safety > goals (HARD RULE 3).
+pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
+    let mut out = Vec::new();
+    if s.pregnancy_warning_sign {
+        // safety-046: warning signs → STOP and DEFER.
+        out.push(recommend(
+            Adjustment::Defer {
+                reason: "Pregnancy warning sign reported - STOP exercising now and contact your obstetric provider."
+                    .into(),
+            },
+            "SAFE-PREG-WARN-001",
+        ));
+    }
+    if s.parq_positive && !s.medically_cleared {
+        // safety-044 + onboard-050: positive PAR-Q+/ACSM screen → medical
+        // clearance gate before any prescription.
+        out.push(recommend(
+            Adjustment::Defer {
+                reason: "Positive PAR-Q+/ACSM screen (cardiovascular, metabolic, or renal condition; uncontrolled hypertension; recent surgery; or acute illness) - medical clearance is required before programming."
+                    .into(),
+            },
+            "SAFE-CVD-001",
+        ));
+    }
+    if s.pregnant {
+        // safety-045: no autonomous prescription/progression in pregnancy;
+        // provider clearance + individualization. The ~150 min/wk moderate
+        // figure is the KB's reference target for uncomplicated pregnancy -
+        // surfaced as context, NOT an engine prescription.
+        out.push(recommend(
+            Adjustment::Defer {
+                reason: "Pregnancy - the engine does not autonomously prescribe or progress load; train under provider clearance and individual guidance (reference for uncomplicated pregnancy: ~150 min/wk moderate activity)."
+                    .into(),
+            },
+            "SAFE-PREG-001",
+        ));
+    }
+    if s.injury_or_rehab {
+        // safety-048: the engine never prescribes rehabilitation.
+        out.push(recommend(
+            Adjustment::Defer {
+                reason: "Current injury under care, recent surgery, or active rehab - defer to your physician/physiotherapist; general programming resumes on clearance."
+                    .into(),
+            },
+            "SAFE-INJURY-001",
+        ));
+    }
+    if s.youth {
+        // safety-011: pediatric/adolescent, supervision + technique-first;
+        // never autonomous maximal loading or 1RM testing.
+        out.push(recommend(
+            Adjustment::Defer {
+                reason: "Child/adolescent user - train only under qualified supervision, technique-first; the engine will not prescribe maximal loading or 1RM testing."
+                    .into(),
+            },
+            "SAFE-PEDS-001",
+        ));
+    }
+    if s.reds_signal {
+        // safety-049 absolute rule (via onboard-050 screening): never a
+        // programming variable: reduce/rest and defer.
+        out.push(recommend(
+            Adjustment::Defer {
+                reason: "RED-S / disordered-eating signal - reduce or rest training stress and defer to a physician, registered dietitian, or mental-health professional."
+                    .into(),
+            },
+            "SAFE-REDS-001",
+        ));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -523,10 +697,27 @@ mod tests {
         assert!(double_progression_add_load(true).value);
         assert!(!double_progression_add_load(false).value);
         assert_eq!(masters_protein_target().value.g_per_kg, (1.2, 1.6));
-        assert_eq!(deficit_protein_target().value.g_per_kg, (1.8, 2.7));
+        assert_eq!(
+            deficit_protein_target(false).value.expect("no RED-S").g_per_kg,
+            (1.8, 2.7)
+        );
         // Deficit protein guidance is Strong (Helms/Longland).
-        assert!((deficit_protein_target().confidence.score - 0.90).abs() < f32::EPSILON);
+        assert!((deficit_protein_target(false).confidence.score - 0.90).abs() < f32::EPSILON);
         assert_eq!(masters_protein_per_meal().value, 0.4);
+    }
+
+    #[test]
+    fn deficit_refused_inside_the_fn_when_reds_signal_present() {
+        // File 08 safety-022: deficit request + RED-S signal → the target fn
+        // itself refuses (no call path can obtain a deficit past the flag) and
+        // the refusal is cited to the RED-S deferral, safety-critical.
+        let blocked = deficit_protein_target(true);
+        assert!(blocked.value.is_none(), "no deficit target under RED-S");
+        assert_eq!(
+            blocked.evidence.citation.claim_id.as_deref(),
+            Some("SAFE-REDS-001")
+        );
+        assert!(blocked.confidence.safety_critical);
     }
 
     #[test]
@@ -555,29 +746,184 @@ mod tests {
         assert_eq!(maintenance_frequency_per_week().value, 1);
         let sub = substitution_rule().value;
         assert!(sub.match_movement_pattern && sub.compensate_with_reps_near_failure);
-        // Heat cuts intensity and carries a hard illness stop.
+        // Heat: reduce intensity (no KB factor), acclimatize 10–14 days, hard
+        // heat-illness stop.
         let heat = environment_modifier(Environment::Heat).value;
-        assert_eq!(heat.intensity_factor, 0.90);
-        assert!(heat.stop_on_illness_signs);
-        // Altitude cuts intensity, no illness stop.
-        assert_eq!(
-            environment_modifier(Environment::Altitude)
-                .value
-                .intensity_factor,
-            0.90
-        );
+        assert!(heat.reduce_intensity);
+        assert_eq!(heat.acclimatization_days, Some((10, 14)));
+        assert!(heat.stop_on_heat_illness_signs);
+        assert!(!heat.extend_warm_up);
+        // Altitude: reduce intensity until acclimatized; the KB states NO day
+        // count for altitude (unlike heat), and no illness stop.
+        let alt = environment_modifier(Environment::Altitude).value;
+        assert!(alt.reduce_intensity);
+        assert_eq!(alt.acclimatization_days, None, "no altitude day count in KB");
+        assert!(!alt.stop_on_heat_illness_signs);
+        assert_eq!(ALTITUDE_THRESHOLD_M, 2_500.0);
+        // Cold: extend warm-up only; the KB states nothing else for cold.
+        let cold = environment_modifier(Environment::Cold).value;
+        assert!(cold.extend_warm_up);
+        assert!(!cold.reduce_intensity);
+        assert_eq!(cold.acclimatization_days, None);
+        // Neutral leaves the prescription unchanged.
+        let neutral = environment_modifier(Environment::Neutral).value;
+        assert!(!neutral.reduce_intensity && !neutral.extend_warm_up);
+        // ENV-001 is safety-critical via the heat STOP branch.
         assert!(
-            !environment_modifier(Environment::Altitude)
-                .value
-                .stop_on_illness_signs
+            environment_modifier(Environment::Heat)
+                .confidence
+                .safety_critical
         );
-        // Neutral leaves prescription unchanged.
+    }
+
+    // --- Stage-0 onboarding gates (File 08 onboard-050) ---
+
+    #[test]
+    fn clear_health_screen_yields_no_gates() {
+        assert!(onboarding_gates(&HealthScreen::default()).is_empty());
+        assert!(!HealthScreen::default().any_gate());
+    }
+
+    #[test]
+    fn each_screen_flag_defers_with_its_own_safety_claim() {
+        let cases: &[(fn(&mut HealthScreen), &str)] = &[
+            (|s| s.youth = true, "SAFE-PEDS-001"),
+            (|s| s.parq_positive = true, "SAFE-CVD-001"),
+            (|s| s.pregnant = true, "SAFE-PREG-001"),
+            (|s| s.pregnancy_warning_sign = true, "SAFE-PREG-WARN-001"),
+            (|s| s.injury_or_rehab = true, "SAFE-INJURY-001"),
+            (|s| s.reds_signal = true, "SAFE-REDS-001"),
+        ];
+        for (set, claim_id) in cases {
+            let mut s = HealthScreen::default();
+            set(&mut s);
+            let gates = onboarding_gates(&s);
+            assert_eq!(gates.len(), 1, "{claim_id}: exactly one gate fires");
+            assert!(
+                matches!(gates[0].value, Adjustment::Defer { .. }),
+                "{claim_id}: gate must defer to a professional"
+            );
+            assert_eq!(
+                gates[0].evidence.citation.claim_id.as_deref(),
+                Some(*claim_id)
+            );
+            assert!(
+                gates[0].confidence.safety_critical,
+                "{claim_id}: every onboarding gate is safety-critical"
+            );
+            assert!(s.any_gate());
+        }
+    }
+
+    #[test]
+    fn medical_clearance_clears_only_the_parq_gate() {
+        // safety-044: clearance re-opens programming after a positive screen…
+        let cleared = HealthScreen {
+            parq_positive: true,
+            medically_cleared: true,
+            ..HealthScreen::default()
+        };
+        assert!(onboarding_gates(&cleared).is_empty());
+        // …but pregnancy keeps deferring autonomous prescription regardless
+        // (safety-045: provider clearance AND individualization, the engine
+        // still must not autonomously prescribe/progress load).
+        let pregnant_cleared = HealthScreen {
+            pregnant: true,
+            medically_cleared: true,
+            ..HealthScreen::default()
+        };
+        assert_eq!(onboarding_gates(&pregnant_cleared).len(), 1);
+    }
+
+    #[test]
+    fn pediatric_gate_names_the_prohibitions() {
+        // safety-011: no autonomous maximal loading or 1RM testing.
+        let s = HealthScreen {
+            youth: true,
+            ..HealthScreen::default()
+        };
+        let gates = onboarding_gates(&s);
+        match &gates[0].value {
+            Adjustment::Defer { reason } => {
+                assert!(reason.contains("supervision"));
+                assert!(reason.contains("1RM"));
+            }
+            other => panic!("expected Defer, got {other:?}"),
+        }
+        // Strong evidence (Lloyd/Faigenbaum consensus), never overstated.
+        assert!((gates[0].confidence.score - 0.90).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn pregnancy_gate_emits_safe_preg_001_with_reference_target() {
+        // safety-045: SAFE-PREG-001 actually emitted; the ~150 min/wk figure is
+        // a reference target only, phrased as such.
+        let s = HealthScreen {
+            pregnant: true,
+            ..HealthScreen::default()
+        };
+        let gates = onboarding_gates(&s);
         assert_eq!(
-            environment_modifier(Environment::Neutral)
-                .value
-                .intensity_factor,
-            1.00
+            gates[0].evidence.citation.claim_id.as_deref(),
+            Some("SAFE-PREG-001")
         );
+        match &gates[0].value {
+            Adjustment::Defer { reason } => {
+                assert!(reason.contains("150 min/wk"));
+                assert!(reason.contains("reference"));
+            }
+            other => panic!("expected Defer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn injury_gate_is_expert_opinion_yet_safety_critical() {
+        // safety-048 is the lowest-graded File 08 safety rule (ExpertOpinion,
+        // 0.30) but still safety-critical: the grade is never inflated to make
+        // the stop look better-evidenced.
+        let s = HealthScreen {
+            injury_or_rehab: true,
+            ..HealthScreen::default()
+        };
+        let g = &onboarding_gates(&s)[0];
+        assert!((g.confidence.score - 0.30).abs() < f32::EPSILON);
+        assert!(g.confidence.safety_critical);
+    }
+
+    #[test]
+    fn multiple_flags_all_surface_with_warning_sign_first() {
+        let s = HealthScreen {
+            pregnant: true,
+            pregnancy_warning_sign: true,
+            injury_or_rehab: true,
+            ..HealthScreen::default()
+        };
+        let gates = onboarding_gates(&s);
+        assert_eq!(gates.len(), 3, "every fired gate must surface");
+        assert_eq!(
+            gates[0].evidence.citation.claim_id.as_deref(),
+            Some("SAFE-PREG-WARN-001"),
+            "acute warning sign leads"
+        );
+    }
+
+    #[test]
+    fn pregnancy_precautions_verbatim_avoid_list() {
+        let p = pregnancy_precautions();
+        assert!(p.value.avoid_prolonged_supine);
+        assert!(p.value.avoid_overheating);
+        assert!(p.value.avoid_contact_fall_risk);
+        assert!(p.value.avoid_scuba);
+        assert_eq!(p.value.avoid_altitude_above_m, 2_500.0);
+        assert!(p.value.avoid_valsalva);
+        assert_eq!(
+            p.evidence.citation.claim_id.as_deref(),
+            Some("SAFE-PREG-AVOID-001")
+        );
+        assert!(p.confidence.safety_critical);
+        // Warning-sign / contraindication lists carry the verbatim KB items.
+        assert_eq!(PREGNANCY_WARNING_SIGNS.len(), 10);
+        assert_eq!(PREGNANCY_CONTRAINDICATIONS.len(), 4);
     }
 
     #[test]

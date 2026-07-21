@@ -21,11 +21,7 @@ use crate::schema::Recommended;
 /// Build a `Recommended<T>` from a registry claim id (must exist).
 fn recommend<T>(value: T, claim_id: &str) -> Recommended<T> {
     let e = evidence::claim(claim_id).expect("known feedback claim");
-    Recommended {
-        value,
-        evidence: e.to_evidence(),
-        confidence: e.to_confidence_tag(),
-    }
+    Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +84,12 @@ pub struct SafetySignals {
     pub compulsive_flag: bool,
     /// Count of co-occurring NFOR signals over >=1-2 wks (feedback-036; >=2 fires).
     pub overtraining_signal_count: u8,
+    /// How long the NFOR signals have co-occurred, in weeks (feedback-036
+    /// duration condition: ">=2 signals over >=1-2 wks; do not fire on a
+    /// single noisy night"). `None` = duration untracked by the shell, the
+    /// gate then errs protective and still fires on count alone (pre-duration
+    /// behavior); `Some(w)` requires w >= 1.
+    pub overtraining_weeks: Option<f64>,
     /// Single-session distance over the prior-30-day longest, as a fraction
     /// (feedback-037; >0.10 warns, never praises).
     pub single_session_spike_frac: Option<f64>,
@@ -101,18 +103,23 @@ pub fn safety_gate(s: SafetySignals) -> Option<Recommended<FeedbackCategory>> {
         return Some(recommend(FeedbackCategory::ConcernInjury, "SAFE-BSI-001"));
     }
     if s.compulsive_flag {
+        // feedback-039: ExpertOpinion, safety-critical (suppresses praise).
         return Some(recommend(
             FeedbackCategory::ConcernBehavior,
-            "SAFE-REDS-001",
+            "FB-BEHAVIOR-001",
         ));
     }
-    if s.overtraining_signal_count >= 2 {
-        return Some(recommend(FeedbackCategory::ConcernRecovery, "SAFE-OTS-001"));
+    if s.overtraining_signal_count >= 2 && s.overtraining_weeks.is_none_or(|w| w >= 1.0) {
+        // feedback-036: Moderate (Meeusen 2013), safety-critical. The >=1-2 wk
+        // duration condition keeps a single noisy night from firing; an
+        // untracked duration still fires on the signal count (protective).
+        return Some(recommend(FeedbackCategory::ConcernRecovery, "FB-RECOVERY-001"));
     }
     if s.single_session_spike_frac.is_some_and(|f| f > 0.10) {
+        // running-029 hard rule: block/flag, never praise (feedback-037).
         return Some(recommend(
             FeedbackCategory::DangerousProgression,
-            "RUN-SPIKE-001",
+            "RUN-SPIKE-BLOCK-001",
         ));
     }
     None
@@ -123,8 +130,14 @@ pub fn safety_gate(s: SafetySignals) -> Option<Recommended<FeedbackCategory>> {
 // ---------------------------------------------------------------------------
 
 /// Categorize a completed lifting set from reps-met + RIR vs target
-/// (feedback-019/020/021/022; AUTOREG-RIR-001). Trust RIR most within 1-3 reps
+/// (feedback-019/020/021/022; FB-RIR-001). Trust RIR most within 1-3 reps
 /// of failure and in experienced lifters.
+///
+/// feedback-019: PositiveMastery ONLY when reps are met AND `rir_actual >=
+/// rir_target`, the set cost no more than planned. feedback-020: reps met at
+/// RIR ~0 against a 2-3 target → CorrectiveProcess (hold or slightly drop
+/// load). In between (below-target RIR but not at failure) → neutral process
+/// tone, never praise-with-progression.
 pub fn lifting_feedback(
     reps_met: bool,
     rir_actual: u8,
@@ -139,17 +152,34 @@ pub fn lifting_feedback(
     } else if rir_actual >= 4 && rir_target <= 2 {
         // Well under target intensity: room to add load.
         FeedbackCategory::ProgressionNudge
-    } else {
-        // Reps met at/near target cost, mastery, cue planned progression.
+    } else if rir_actual >= rir_target {
+        // Reps met at/below planned cost, mastery, cue planned progression.
         FeedbackCategory::PositiveMastery
+    } else {
+        // Harder than planned but short of failure, neutral process note.
+        FeedbackCategory::InformationalNeutral
     };
-    recommend(cat, "AUTOREG-RIR-001")
+    recommend(cat, "FB-RIR-001")
+}
+
+/// Running interval/threshold mastery (feedback-015; FB-INTERVAL-MASTERY-001,
+/// Moderate): when every rep hit its target pace at or below the target RPE,
+/// emit POSITIVE_MASTERY confirming the intended adaptation ("You hit every
+/// rep at target and it cost RPE {rpe}. Exactly the adaptation we want.").
+/// `None` when either condition misses: other arms then evaluate the session.
+pub fn interval_mastery_feedback(
+    target_paces_met: bool,
+    rpe_at_or_below_target: bool,
+) -> Option<Recommended<FeedbackCategory>> {
+    (target_paces_met && rpe_at_or_below_target)
+        .then(|| recommend(FeedbackCategory::PositiveMastery, "FB-INTERVAL-MASTERY-001"))
 }
 
 /// A genuine off day: target pace missed but RPE was very high (feedback-018/025).
 /// Attributes to normal variation, never guilt; the stimulus still counts.
+/// FB-BADDAY-001 (ExpertOpinion).
 pub fn bad_day_feedback() -> Recommended<FeedbackCategory> {
-    recommend(FeedbackCategory::ContextualBadDay, "FEEDBACK-001")
+    recommend(FeedbackCategory::ContextualBadDay, "FB-BADDAY-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -204,19 +234,18 @@ pub fn easy_run_intensity_discipline(
 /// not show the note without the cue, or vice versa.
 pub const POSITIVE_SPLIT_FLAG_PCT: f64 = 3.0;
 
-/// Pacing discipline (feedback-016): a positive split beyond ~3% on an
-/// even-effort run emits INTENSITY_DISCIPLINE, advising an easier start toward an
-/// even-to-negative split. `None` when pacing was even/negative. FEEDBACK-001.
-pub fn positive_split_discipline(
-    second_half_slower_pct: f64,
-) -> Option<Recommended<FeedbackCategory>> {
+/// Pacing verdict for a measured split (feedback-016/017; FB-PACING-001,
+/// Moderate, Hanley 2016; Smyth 2018; Abbiss & Laursen 2008).
+///
+/// A positive split beyond ~3% on an even-effort run emits
+/// INTENSITY_DISCIPLINE, advising an easier start toward an even-to-negative
+/// split (feedback-016). An even or negative split (at/below the threshold)
+/// emits POSITIVE_EXECUTION, "textbook pacing discipline" (feedback-017).
+pub fn positive_split_discipline(second_half_slower_pct: f64) -> Recommended<FeedbackCategory> {
     if second_half_slower_pct > POSITIVE_SPLIT_FLAG_PCT {
-        Some(recommend(
-            FeedbackCategory::IntensityDiscipline,
-            "FEEDBACK-001",
-        ))
+        recommend(FeedbackCategory::IntensityDiscipline, "FB-PACING-001")
     } else {
-        None
+        recommend(FeedbackCategory::PositiveExecution, "FB-PACING-001")
     }
 }
 
@@ -236,6 +265,82 @@ pub fn resolve_feedback(
         return concern;
     }
     execution.unwrap_or_else(|| recommend(FeedbackCategory::InformationalNeutral, "FEEDBACK-001"))
+}
+
+// ---------------------------------------------------------------------------
+// 4b. Referral appendix & personalization (feedback-035/023/024/005)
+// ---------------------------------------------------------------------------
+
+/// Clinician-prompt copy appended to a female user's bone-stress referral
+/// (feedback-035). Gentle, no self-diagnosis, the referral itself stays the
+/// message; this only adds the menstrual/nutrition discussion prompt.
+pub const BSI_FEMALE_PROMPT: &str = "It's also worth discussing menstrual and nutrition status with the clinician - under-fueling and menstrual disturbance raise bone-stress risk.";
+
+/// Whether to append the menstrual/nutrition clinician prompt (feedback-035;
+/// FB-BSI-FEMALE-001, ExpertOpinion, safety-critical): fires only for a
+/// female user who was actually routed to a bone-stress referral
+/// (CONCERN_INJURY). Defers to the human professional, never a diagnosis.
+pub fn bsi_menstrual_nutrition_prompt(
+    female_user: bool,
+    bsi_referral_fired: bool,
+) -> Recommended<bool> {
+    recommend(female_user && bsi_referral_fired, "FB-BSI-FEMALE-001")
+}
+
+/// Message verbosity / metric-density personalization (feedback-023/024;
+/// FB-VERBOSITY-001, ExpertOpinion). The KB defines only the beginner and
+/// advanced profiles; everyone not advanced gets the beginner defaults
+/// (conservative: low jargon and a mandatory "why" never hurt).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FeedbackVerbosity {
+    /// Cap on takeaways per message (beginner: 1, feedback-023; advanced
+    /// messages also lead with a single biggest lever, feedback-024).
+    pub max_takeaways: u8,
+    /// Cap on metrics surfaced (advanced: 2–3, upper bound carried; the KB
+    /// states no beginner metric count, held at the one-takeaway floor).
+    pub max_metrics: u8,
+    /// Always explain the "why" (mandatory for beginners).
+    pub rationale_mandatory: bool,
+    /// Minimize jargon (beginners).
+    pub minimize_jargon: bool,
+    /// Lead with the single biggest lever (advanced, but true for both, since
+    /// beginners are capped at one takeaway anyway).
+    pub lead_with_single_lever: bool,
+}
+
+/// Verbosity/metric-density defaults by experience (feedback-023/024).
+pub fn verbosity_for_experience(advanced: bool) -> Recommended<FeedbackVerbosity> {
+    let v = if advanced {
+        FeedbackVerbosity {
+            max_takeaways: 1,
+            max_metrics: 3,
+            rationale_mandatory: false,
+            minimize_jargon: false,
+            lead_with_single_lever: true,
+        }
+    } else {
+        FeedbackVerbosity {
+            max_takeaways: 1,
+            max_metrics: 1,
+            rationale_mandatory: true,
+            minimize_jargon: true,
+            lead_with_single_lever: true,
+        }
+    };
+    recommend(v, "FB-VERBOSITY-001")
+}
+
+/// Whether praise copy must anchor to a concrete mastery experience, a named
+/// PR, completed session, or barrier overcome (feedback-005;
+/// FB-MASTERY-ANCHOR-001, Strong, Bandura 1997). True for the positive
+/// mastery/consistency categories; concern/corrective categories never
+/// receive it (praise is suppressed there anyway, feedback-042).
+pub fn mastery_anchor_required(category: FeedbackCategory) -> Recommended<bool> {
+    let anchored = matches!(
+        category,
+        FeedbackCategory::PositiveMastery | FeedbackCategory::PositiveExecution
+    );
+    recommend(anchored, "FB-MASTERY-ANCHOR-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -307,7 +412,7 @@ pub enum TrendSummary {
 /// decline (performance down + load spike or low recovery) takes precedence and
 /// routes to a recovery-first deload nudge; otherwise an improving rolling trend
 /// celebrates consistency, and a ≥4-week flat stretch is reframed as a plateau.
-/// FEEDBACK-001.
+/// FB-TREND-001 (ExpertOpinion, feedback-027/028/029).
 pub fn trend_summary(
     direction: TrendDirection,
     weeks_flat: u8,
@@ -324,7 +429,7 @@ pub fn trend_summary(
     } else {
         TrendSummary::Stable
     };
-    recommend(summary, "FEEDBACK-001")
+    recommend(summary, "FB-TREND-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -341,23 +446,24 @@ pub enum ToneModifier {
     PraiseEffort,
 }
 
-/// Tone modifier by planned session intensity (feedback-026). FEEDBACK-001.
+/// Tone modifier by planned session intensity (feedback-026). FB-TONE-001
+/// (ExpertOpinion).
 pub fn planned_intensity_tone(planned_hard: bool) -> Recommended<ToneModifier> {
     let tone = if planned_hard {
         ToneModifier::PraiseEffort
     } else {
         ToneModifier::CelebrateRestraint
     };
-    recommend(tone, "FEEDBACK-001")
+    recommend(tone, "FB-TONE-001")
 }
 
 /// Whether a recommendation must be framed as a provisional population default
 /// still converging on the user (feedback-040): true until a stable per-user
 /// baseline exists (~14 days of data). Callers should lower the surfaced
 /// `ConfidenceTag` and show "using population default until N days" copy.
-/// FEEDBACK-001.
+/// FB-PROVISIONAL-001 (ExpertOpinion, feedback-040).
 pub fn provisional_until_baseline(days_of_data: u16) -> Recommended<bool> {
-    recommend(days_of_data < 14, "FEEDBACK-001")
+    recommend(days_of_data < 14, "FB-PROVISIONAL-001")
 }
 
 #[cfg(test)]
@@ -371,11 +477,24 @@ mod tests {
             easy_run_intensity_discipline(0.26).unwrap().value,
             FeedbackCategory::IntensityDiscipline
         );
-        assert!(positive_split_discipline(3.0).is_none());
         assert_eq!(
-            positive_split_discipline(3.1).unwrap().value,
+            positive_split_discipline(3.1).value,
             FeedbackCategory::IntensityDiscipline
         );
+    }
+
+    #[test]
+    fn even_or_negative_split_earns_positive_execution() {
+        // feedback-017: an even/negative split is praised, not silently
+        // dropped, "textbook pacing discipline", cited per-rule.
+        for pct in [3.0, 0.0, -2.0] {
+            let f = positive_split_discipline(pct);
+            assert_eq!(f.value, FeedbackCategory::PositiveExecution, "{pct}%");
+            assert_eq!(
+                f.evidence.citation.claim_id.as_deref(),
+                Some("FB-PACING-001")
+            );
+        }
     }
 
     #[test]
@@ -433,6 +552,7 @@ mod tests {
             compulsive_flag: true,
             overtraining_signal_count: 5,
             single_session_spike_frac: Some(0.9),
+            ..Default::default()
         };
         assert_eq!(
             safety_gate(all).unwrap().value,
@@ -445,6 +565,7 @@ mod tests {
             compulsive_flag: true,
             overtraining_signal_count: 5,
             single_session_spike_frac: Some(0.9),
+            ..Default::default()
         };
         assert_eq!(
             safety_gate(behav).unwrap().value,
@@ -581,6 +702,35 @@ mod tests {
             lifting_feedback(true, 2, 2).value,
             FeedbackCategory::PositiveMastery
         );
+        // Above-target reserve is also mastery (feedback-019: RIR ≥ target).
+        assert_eq!(
+            lifting_feedback(true, 3, 3).value,
+            FeedbackCategory::PositiveMastery
+        );
+    }
+
+    #[test]
+    fn below_target_rir_is_never_mastery() {
+        // feedback-019 requires rir_actual >= rir_target for PositiveMastery;
+        // a set that cost more than planned (RIR 1 vs target 3) routes to a
+        // neutral process tone, not praise-with-progression.
+        let f = lifting_feedback(true, 1, 3);
+        assert_ne!(f.value, FeedbackCategory::PositiveMastery);
+        assert_eq!(f.value, FeedbackCategory::InformationalNeutral);
+        // Per-rule citation, graded Moderate per File 05, not the Strong
+        // File 09 autoregulation-backbone claim.
+        assert_eq!(f.evidence.citation.claim_id.as_deref(), Some("FB-RIR-001"));
+
+        // RIR 2 vs target 3, still short of plan, still not mastery.
+        assert_ne!(
+            lifting_feedback(true, 2, 3).value,
+            FeedbackCategory::PositiveMastery
+        );
+        // At failure against a 2-3 target → corrective (feedback-020).
+        assert_eq!(
+            lifting_feedback(true, 0, 2).value,
+            FeedbackCategory::CorrectiveProcess
+        );
     }
 
     #[test]
@@ -611,5 +761,116 @@ mod tests {
         assert!(!acwr_injury_claim_allowed());
         // Process framing is the default.
         assert_eq!(default_goal_framing().value, GoalFraming::Process);
+    }
+
+    // --- feedback-036: the >=1-2 wk duration condition ---
+
+    #[test]
+    fn recovery_concern_respects_duration_condition() {
+        // Two signals over half a week is a "single noisy night" territory -
+        // the gate must NOT fire (feedback-036 duration condition).
+        let short = SafetySignals {
+            overtraining_signal_count: 2,
+            overtraining_weeks: Some(0.5),
+            ..Default::default()
+        };
+        assert!(safety_gate(short).is_none());
+        // >=1 week satisfies the stated >=1-2 wk band.
+        let sustained = SafetySignals {
+            overtraining_signal_count: 2,
+            overtraining_weeks: Some(1.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            safety_gate(sustained).unwrap().value,
+            FeedbackCategory::ConcernRecovery
+        );
+        // Untracked duration errs protective: count alone still fires.
+        let untracked = SafetySignals {
+            overtraining_signal_count: 2,
+            overtraining_weeks: None,
+            ..Default::default()
+        };
+        assert!(safety_gate(untracked).is_some());
+    }
+
+    // --- feedback-015: interval/threshold mastery ---
+
+    #[test]
+    fn interval_mastery_needs_paces_and_rpe() {
+        let m = interval_mastery_feedback(true, true).expect("mastery fires");
+        assert_eq!(m.value, FeedbackCategory::PositiveMastery);
+        assert_eq!(
+            m.evidence.citation.claim_id.as_deref(),
+            Some("FB-INTERVAL-MASTERY-001")
+        );
+        assert!((m.confidence.score - 0.65).abs() < f32::EPSILON);
+        assert!(interval_mastery_feedback(true, false).is_none());
+        assert!(interval_mastery_feedback(false, true).is_none());
+    }
+
+    // --- feedback-035: female BSI clinician prompt ---
+
+    #[test]
+    fn female_bsi_prompt_gated_on_both_conditions() {
+        let p = bsi_menstrual_nutrition_prompt(true, true);
+        assert!(p.value);
+        assert!(p.confidence.safety_critical);
+        assert_eq!(
+            p.evidence.citation.claim_id.as_deref(),
+            Some("FB-BSI-FEMALE-001")
+        );
+        // ExpertOpinion: the linkage prompt has no direct trial evidence.
+        assert!((p.confidence.score - 0.30).abs() < f32::EPSILON);
+        assert!(!bsi_menstrual_nutrition_prompt(true, false).value);
+        assert!(!bsi_menstrual_nutrition_prompt(false, true).value);
+        // The copy defers to the clinician and diagnoses nothing.
+        assert!(BSI_FEMALE_PROMPT.contains("clinician"));
+    }
+
+    // --- feedback-023/024: verbosity personalization ---
+
+    #[test]
+    fn verbosity_defaults_by_experience() {
+        let b = verbosity_for_experience(false).value;
+        assert_eq!((b.max_takeaways, b.max_metrics), (1, 1));
+        assert!(b.rationale_mandatory && b.minimize_jargon && b.lead_with_single_lever);
+        let a = verbosity_for_experience(true).value;
+        assert_eq!((a.max_takeaways, a.max_metrics), (1, 3));
+        assert!(!a.minimize_jargon && a.lead_with_single_lever);
+        assert_eq!(
+            verbosity_for_experience(true)
+                .evidence
+                .citation
+                .claim_id
+                .as_deref(),
+            Some("FB-VERBOSITY-001")
+        );
+    }
+
+    // --- feedback-005: mastery anchoring in praise copy ---
+
+    #[test]
+    fn mastery_anchor_only_for_praise_categories() {
+        assert!(mastery_anchor_required(FeedbackCategory::PositiveMastery).value);
+        assert!(mastery_anchor_required(FeedbackCategory::PositiveExecution).value);
+        for c in [
+            FeedbackCategory::ConcernInjury,
+            FeedbackCategory::ConcernRecovery,
+            FeedbackCategory::CorrectiveProcess,
+            FeedbackCategory::InformationalNeutral,
+            FeedbackCategory::ContextualBadDay,
+        ] {
+            assert!(!mastery_anchor_required(c).value, "{c:?} never anchored");
+        }
+        // Strong (Bandura self-efficacy), the best-evidenced feedback rule.
+        assert!(
+            (mastery_anchor_required(FeedbackCategory::PositiveMastery)
+                .confidence
+                .score
+                - 0.90)
+                .abs()
+                < f32::EPSILON
+        );
     }
 }

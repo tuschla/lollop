@@ -14,7 +14,7 @@ serde = { workspace = true, features = ["derive"] }
 
 [features]
 # `#[effect(typegen)]` in app.rs emits shell-codegen type registration gated on
-# this feature. Runtime shells (Android JSON FFI, web) never need it, so keep it
+# this feature. The Android JSON FFI shell never needs it, so keep it
 # off by default; enable with `--features typegen` when generating shell types.
 typegen = ["crux_core/typegen"]
 

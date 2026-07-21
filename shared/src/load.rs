@@ -396,6 +396,134 @@ pub fn d_prime(distance_m: f64, critical_speed_ms: f64, time_sec: f64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
+// Critical Speed protocol validity (File 04 running-009, RUN-CS-PROTOCOL-001)
+// ---------------------------------------------------------------------------
+
+/// Wrap a value with the evidence + confidence of a registry claim.
+///
+/// Panics if `claim_id` is not in the registry: callers pass only canonical
+/// ids, so a miss is a programming error (same contract as `running::recommend`).
+fn recommend<T>(value: T, claim_id: &str) -> crate::schema::Recommended<T> {
+    let e = crate::evidence::claim(claim_id).expect("known claim");
+    crate::schema::Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
+}
+
+/// One maximal effort submitted to the Critical Speed protocol (running-009).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CsEffort {
+    pub distance_m: f64,
+    pub time_sec: f64,
+}
+
+/// The fitted 2-parameter linear model `D = CS·t + D′` (running-009):
+/// CS = slope (m/s), D′ = intercept (distance reserve, m).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CsFit {
+    pub cs_m_per_s: f64,
+    pub d_prime_m: f64,
+}
+
+/// Why a set of efforts fails the running-009 protocol validity gates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CsProtocolViolation {
+    /// Fewer than 2 efforts, the linear model needs at least two points.
+    TooFewEfforts,
+    /// More than 5 efforts (KB: "2–5 maximal efforts").
+    TooManyEfforts,
+    /// An effort shorter than 2 min or longer than 30 min. KB marks these
+    /// explicitly invalid ("invalid <2 min or >30 min"). Note the KB also
+    /// states a 2–20 min headline window yet an ideal pair of one 3–8 min +
+    /// one 12–30 min effort, and does not reconcile the 20- vs 30-min upper
+    /// bound; the gate rejects only the explicitly-invalid bounds.
+    DurationOutOfRange,
+    /// All efforts share the same duration, no slope can be fitted.
+    DegenerateDurations,
+    /// Fitted D′ < 0: the KB reads a negative distance reserve as evidence of
+    /// non-maximal trials, so the estimate is rejected.
+    NegativeDPrime,
+}
+
+/// Explicit KB-invalid duration bounds (running-009): "invalid <2 min or >30 min".
+pub const CS_EFFORT_MIN_SEC: f64 = 120.0;
+pub const CS_EFFORT_MAX_SEC: f64 = 1800.0;
+
+/// Ordinary least-squares fit of `D = CS·t + D′` over ≥2 efforts (running-009:
+/// "CS = slope; D′ = distance reserve"). Pure math, no protocol judgement -
+/// returns `None` when a slope is undefined (<2 points or all-equal durations).
+/// For exactly two efforts this reduces to [`critical_speed`] / [`d_prime`].
+pub fn cs_linear_fit(efforts: &[CsEffort]) -> Option<CsFit> {
+    if efforts.len() < 2 {
+        return None;
+    }
+    let n = efforts.len() as f64;
+    let mean_t = efforts.iter().map(|e| e.time_sec).sum::<f64>() / n;
+    let mean_d = efforts.iter().map(|e| e.distance_m).sum::<f64>() / n;
+    let mut sxx = 0.0;
+    let mut sxy = 0.0;
+    for e in efforts {
+        let dt = e.time_sec - mean_t;
+        sxx += dt * dt;
+        sxy += dt * (e.distance_m - mean_d);
+    }
+    if sxx.abs() < f64::EPSILON {
+        return None;
+    }
+    let cs = sxy / sxx;
+    Some(CsFit {
+        cs_m_per_s: cs,
+        d_prime_m: mean_d - cs * mean_t,
+    })
+}
+
+/// Advisory pairing check (running-009): the KB's ideal protocol has one
+/// effort of 3–8 min AND one of 12–30 min. Returns true when both windows are
+/// covered. The KB's other pairing cautions, too-similar (1500 m + mile) and
+/// too-spread (800 m + HM), carry NO numeric thresholds in the KB, only those
+/// examples, so this ideal-window predicate is the only implementable pairing
+/// gate; it is advisory (not a hard validity failure).
+pub fn cs_pairing_ideal(efforts: &[CsEffort]) -> bool {
+    let short = efforts
+        .iter()
+        .any(|e| (180.0..=480.0).contains(&e.time_sec));
+    let long = efforts
+        .iter()
+        .any(|e| (720.0..=1800.0).contains(&e.time_sec));
+    short && long
+}
+
+/// Validity-gated Critical Speed estimate (running-009 → `RUN-CS-PROTOCOL-001`,
+/// Moderate; Galbraith/Nicolò 2018). Wraps [`cs_linear_fit`] in the KB's
+/// protocol gates: 2–5 efforts, per-effort duration within the explicit
+/// invalid bounds (≥2 min, ≤30 min), a fittable slope, and a non-negative D′
+/// (negative D′ = non-maximal trials → estimate rejected). Returns the first
+/// violation found, in the order listed on [`CsProtocolViolation`].
+///
+/// The 2–20 min headline window vs 30-min ideal-pair upper bound is a KB
+/// discrepancy (documented on the claim); see [`cs_pairing_ideal`] for the
+/// advisory ideal-pair check.
+pub fn critical_speed_checked(
+    efforts: &[CsEffort],
+) -> crate::schema::Recommended<Result<CsFit, CsProtocolViolation>> {
+    let out = if efforts.len() < 2 {
+        Err(CsProtocolViolation::TooFewEfforts)
+    } else if efforts.len() > 5 {
+        Err(CsProtocolViolation::TooManyEfforts)
+    } else if efforts
+        .iter()
+        .any(|e| e.time_sec < CS_EFFORT_MIN_SEC || e.time_sec > CS_EFFORT_MAX_SEC)
+    {
+        Err(CsProtocolViolation::DurationOutOfRange)
+    } else {
+        match cs_linear_fit(efforts) {
+            None => Err(CsProtocolViolation::DegenerateDurations),
+            Some(fit) if fit.d_prime_m < 0.0 => Err(CsProtocolViolation::NegativeDPrime),
+            Some(fit) => Ok(fit),
+        }
+    };
+    recommend(out, "RUN-CS-PROTOCOL-001")
+}
+
+// ---------------------------------------------------------------------------
 // VDOT / Daniels & Gilbert (File 07)
 // ---------------------------------------------------------------------------
 
@@ -486,7 +614,12 @@ pub fn lucia_trimp(minutes_per_zone: [f64; 3]) -> f64 {
 /// factor). IF is squared, not linear, so the fallback lands on the same
 /// scale as TSS/rTSS, which are themselves quadratic in the intensity ratio
 /// (rTSS ∝ NGP²/FTPa²). A linear weighting would match only at threshold and
-/// systematically under-count time spent above it. Pass paired (minutes, IF)
+/// systematically under-count time spent above it.
+///
+/// ENGINE REFINEMENT beyond the KB text: File 07 states only a linear-sounding
+/// "weighted by each zone's intensity factor" and gives no formula; the IF²
+/// weighting is our engineering choice for scale-consistency with the File 07
+/// TSS/rTSS definitions, not a KB-stated equation. Pass paired (minutes, IF)
 /// per zone. `[Weak]`
 pub fn hr_tss(zone_minutes_and_if: &[(f64, f64)]) -> f64 {
     let weighted: f64 = zone_minutes_and_if
@@ -747,6 +880,101 @@ mod tests {
         assert!((dp - (1000.0 - cs * 200.0)).abs() < 1e-9);
         // Equal times guarded.
         assert_eq!(critical_speed(1.0, 5.0, 2.0, 5.0), 0.0);
+    }
+
+    // -- Critical Speed protocol validity (running-009 / RUN-CS-PROTOCOL-001) --
+
+    fn eff(distance_m: f64, time_sec: f64) -> CsEffort {
+        CsEffort {
+            distance_m,
+            time_sec,
+        }
+    }
+
+    #[test]
+    fn cs_fit_two_points_matches_two_point_formula() {
+        // 1000 m @ 200 s and 3000 m @ 660 s (both within 2–30 min? 200 s > 120 s ok,
+        // 660 s ok) → identical CS/D′ as the closed-form two-point version.
+        let efforts = [eff(1000.0, 200.0), eff(3000.0, 660.0)];
+        let fit = cs_linear_fit(&efforts).expect("fit");
+        let cs2 = critical_speed(1000.0, 200.0, 3000.0, 660.0);
+        assert!((fit.cs_m_per_s - cs2).abs() < 1e-9);
+        assert!((fit.d_prime_m - d_prime(1000.0, cs2, 200.0)).abs() < 1e-9);
+        // Gated path accepts it too.
+        let checked = critical_speed_checked(&efforts).value.expect("valid");
+        assert!((checked.cs_m_per_s - cs2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cs_gate_effort_count_bounds() {
+        // KB: 2–5 maximal efforts.
+        assert_eq!(
+            critical_speed_checked(&[eff(1000.0, 240.0)]).value,
+            Err(CsProtocolViolation::TooFewEfforts)
+        );
+        let six = [eff(1000.0, 240.0); 6];
+        assert_eq!(
+            critical_speed_checked(&six).value,
+            Err(CsProtocolViolation::TooManyEfforts)
+        );
+    }
+
+    #[test]
+    fn cs_gate_duration_bounds_verbatim() {
+        // KB explicit invalid bounds: <2 min or >30 min.
+        let too_short = [eff(500.0, 119.0), eff(3000.0, 660.0)];
+        assert_eq!(
+            critical_speed_checked(&too_short).value,
+            Err(CsProtocolViolation::DurationOutOfRange)
+        );
+        let too_long = [eff(1000.0, 240.0), eff(9000.0, 1801.0)];
+        assert_eq!(
+            critical_speed_checked(&too_long).value,
+            Err(CsProtocolViolation::DurationOutOfRange)
+        );
+        // Exactly 2 min and exactly 30 min are NOT in the invalid ranges.
+        let edges = [eff(700.0, 120.0), eff(7000.0, 1800.0)];
+        assert!(critical_speed_checked(&edges).value.is_ok());
+    }
+
+    #[test]
+    fn cs_gate_rejects_negative_d_prime_and_degenerate() {
+        // Same duration twice: no slope.
+        let flat = [eff(1000.0, 300.0), eff(1100.0, 300.0)];
+        assert_eq!(
+            critical_speed_checked(&flat).value,
+            Err(CsProtocolViolation::DegenerateDurations)
+        );
+        // First trial non-maximal (way too slow for its duration) → fitted
+        // line has negative intercept (D′ < 0) → rejected per KB.
+        let non_maximal = [eff(600.0, 200.0), eff(3000.0, 660.0)];
+        let fit = cs_linear_fit(&non_maximal).expect("fit exists");
+        assert!(fit.d_prime_m < 0.0, "premise: D′ negative, got {}", fit.d_prime_m);
+        assert_eq!(
+            critical_speed_checked(&non_maximal).value,
+            Err(CsProtocolViolation::NegativeDPrime)
+        );
+    }
+
+    #[test]
+    fn cs_pairing_ideal_windows() {
+        // Ideal: one 3–8 min + one 12–30 min effort.
+        assert!(cs_pairing_ideal(&[eff(1200.0, 300.0), eff(5000.0, 1200.0)]));
+        // Two short efforts: not ideal.
+        assert!(!cs_pairing_ideal(&[eff(1200.0, 300.0), eff(1500.0, 400.0)]));
+        // Two long efforts: not ideal.
+        assert!(!cs_pairing_ideal(&[eff(5000.0, 1200.0), eff(6000.0, 1500.0)]));
+    }
+
+    #[test]
+    fn cs_checked_carries_moderate_evidence() {
+        let r = critical_speed_checked(&[eff(1000.0, 200.0), eff(3000.0, 660.0)]);
+        assert_eq!(
+            r.evidence.citation.claim_id.as_deref(),
+            Some("RUN-CS-PROTOCOL-001")
+        );
+        assert!((r.confidence.score - 0.65).abs() < f32::EPSILON);
+        assert!(!r.confidence.safety_critical);
     }
 
     #[test]

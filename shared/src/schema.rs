@@ -74,11 +74,77 @@ pub struct ConfidenceTag {
 }
 
 /// Wrapper forcing evidence + confidence onto any recommendation-bearing value.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+///
+/// Constructible **only** via [`Recommended::new`]: the private zero-sized
+/// `_sanctioned` field blocks struct literals (and functional-record updates)
+/// outside this module, so every recommendation funnels through the one
+/// constructor, which rejects `MarketingMyth` evidence unconditionally, in
+/// release builds too (HARD RULE 2). Fields stay publicly *readable*; the
+/// marker is `#[serde(skip)]`, so the serialized shape is unchanged
+/// (`value`/`evidence`/`confidence`). `Deserialize` is hand-written below -
+/// a derive would let wire JSON construct one without passing the myth check.
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct Recommended<T> {
     pub value: T,
     pub evidence: Evidence,
     pub confidence: ConfidenceTag,
+    #[serde(skip)]
+    _sanctioned: Sanctioned,
+}
+
+/// Private construction token for [`Recommended`]. Being private, it makes
+/// `Recommended { .. }` literals impossible outside `schema`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Sanctioned;
+
+impl<T> Recommended<T> {
+    /// Sole sanctioned constructor for a recommendation-bearing value.
+    ///
+    /// # Panics
+    /// Unconditionally (release builds included) if `evidence` carries a
+    /// [`EvidenceGrade::MarketingMyth`] grade: myth-graded claims are
+    /// hard-blocked and must never be surfaced as advice (HARD RULE 2).
+    pub fn new(value: T, evidence: Evidence, confidence: ConfidenceTag) -> Self {
+        assert!(
+            evidence.grade != EvidenceGrade::MarketingMyth,
+            "MarketingMyth evidence must never back a recommendation (HARD RULE 2)"
+        );
+        Recommended {
+            value,
+            evidence,
+            confidence,
+            _sanctioned: Sanctioned,
+        }
+    }
+}
+
+/// Hand-written so the wire cannot smuggle a `MarketingMyth`-graded value past
+/// the [`Recommended::new`] choke point: deserialization re-runs the same
+/// check and fails with an error (not a panic) on myth-graded input.
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Recommended<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Raw<T> {
+            value: T,
+            evidence: Evidence,
+            confidence: ConfidenceTag,
+        }
+        let raw = Raw::<T>::deserialize(deserializer)?;
+        if raw.evidence.grade == EvidenceGrade::MarketingMyth {
+            return Err(serde::de::Error::custom(
+                "MarketingMyth evidence must never back a recommendation (HARD RULE 2)",
+            ));
+        }
+        Ok(Recommended {
+            value: raw.value,
+            evidence: raw.evidence,
+            confidence: raw.confidence,
+            _sanctioned: Sanctioned,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -282,13 +348,20 @@ pub enum ReadinessSignal {
     AerobicDecoupling,
     /// Morning resting HR vs. baseline, bpm.
     RestingHr,
-    /// Joint/sharp pain report. Highest safety priority.
+    /// Pain report. Highest training-safety priority. A bare report (no
+    /// [`ReadinessInput::pain`] detail) is treated as sharp/joint pain →
+    /// conservative hard stop. With detail attached, the graded File 08
+    /// Table 4.1 model applies (DOMS/tendon/structural).
     Pain,
+    /// Single wellness soreness item on the 1–7 Hooper scale (File 06
+    /// autoreg-030 second clause: ≥6/7 → downgrade intensity one level).
+    Soreness,
     /// Fever/illness report. Absolute rest.
     Illness,
     /// RED-S / low-energy-availability red flag (amenorrhea, rapid weight loss,
     /// compulsive exercise, recurrent BSI). Absolute deferral, never a
-    /// programming variable (File 08 safety-035/049).
+    /// programming variable (File 08 safety-049; the KB's "safety-035"
+    /// cross-refs are a numbering bug, no such block exists).
     RedS,
     /// Cardiovascular red-flag symptom (chest pain, syncope, unexplained
     /// dyspnea, palpitations). Stop + defer for medical clearance (File 08
@@ -306,6 +379,64 @@ pub struct ReadinessInput {
     pub value: f64,
     /// Unix seconds.
     pub observed_at: i64,
+    /// Consecutive days/sessions (including this one) the signal's condition
+    /// has held, shell-tallied. `0` (the wire default for shells that predate
+    /// the field) means "not tracked" and is treated like a single observation.
+    /// Multi-day rules (File 06): e1RM deload needs ≥2 sessions (autoreg-022),
+    /// RHR downgrade needs ≥2 days (autoreg-040), the SubjectiveMultiDay tier
+    /// needs ≥3 days of wellness suppression (§5 tier 4).
+    #[serde(default)]
+    pub streak: u8,
+    /// Pain characterization for `signal == Pain` (File 08 Table 4.1,
+    /// safety-038/039). `None`, the wire default, keeps the conservative
+    /// pre-existing behavior: any pain report is a hard stop.
+    #[serde(default)]
+    pub pain: Option<PainDetail>,
+    /// Duration in minutes of the continuous effort backing this observation,
+    /// for signals derived from one effort. File 06 signal spec: aerobic
+    /// decoupling is *valid only for efforts >20 min*. `None`, the wire
+    /// default, means "duration not tracked" and keeps the pre-existing
+    /// behavior; an explicitly short effort invalidates the decoupling signal.
+    #[serde(default)]
+    pub effort_min: Option<f64>,
+}
+
+/// Pain character/context per File 08 Table 4.1 (Silbernagel monitoring model).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PainKind {
+    /// Sharp, localized, or joint-line pain; alters movement/gait; or occurs
+    /// with swelling → possible structural injury (safety-038). Hard stop.
+    SharpJoint,
+    /// Load-related tendon pain → graded by severity/trend per the Silbernagel
+    /// pain-monitoring model (safety-039). "Avoid complete rest."
+    TendonLoadRelated,
+    /// Muscle burn during a set / DOMS 24–72 h easing with movement → normal
+    /// training discomfort; continue.
+    Doms,
+    /// Uncharacterized pain → conservative hard stop (same as a bare report).
+    Other,
+}
+
+/// Week-to-week / post-session pain trajectory (File 08 Table 4.1).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PainTrend {
+    /// Stable during & 24 h after; returns to baseline next morning.
+    Stable,
+    /// Worsening after sessions or rising week-to-week → reactive.
+    Rising,
+}
+
+/// A characterized pain report attached to a `Pain` readiness input.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PainDetail {
+    pub kind: PainKind,
+    /// 0–10 numeric rating scale. Tendon tolerable band ≤5/10 (safety-039).
+    pub severity: u8,
+    pub trend: PainTrend,
+    /// True when the pain has persisted across sessions despite modification -
+    /// escalates STOP/REDUCE responses to DEFER (safety-038/039 "if persists").
+    #[serde(default)]
+    pub persists: bool,
 }
 
 /// Neck-check illness classification (File 06). Encoded in a
@@ -335,6 +466,70 @@ impl IllnessSeverity {
         } else {
             IllnessSeverity::None
         }
+    }
+}
+
+/// Stage-0 onboarding health screen (File 08 onboard-050): deferral-relevant
+/// flags collected BEFORE any prescription. All fields are self/shell-reported
+/// booleans with serde defaults, so profiles persisted before this screen
+/// existed parse unchanged (every flag `false` = no gate).
+///
+/// The KB defines the *gates*, not questionnaires: it does not enumerate the
+/// PAR-Q+ question list (only that positive answers trigger the gate), gives no
+/// numeric age cutoff for "child/adolescent" (safety-011), and no week-window
+/// for "recent surgery" (safety-044/048), hence plain flags, no thresholds.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+pub struct HealthScreen {
+    /// Child/adolescent user (File 08 safety-011). No autonomous maximal
+    /// loading or 1RM testing; qualified supervision, technique-first.
+    #[serde(default)]
+    pub youth: bool,
+    /// PAR-Q+/ACSM preparticipation screen positive: known cardiovascular,
+    /// metabolic (diabetes), or renal disease while inactive and/or seeking
+    /// vigorous intensity; or uncontrolled hypertension, recent surgery, or
+    /// acute illness (File 08 safety-044).
+    #[serde(default)]
+    pub parq_positive: bool,
+    /// Medical clearance obtained after a positive PAR-Q+/ACSM screen -
+    /// clears the safety-044 gate only ("require medical clearance"). Other
+    /// gates are cleared by unsetting their own flag once resolved (e.g.
+    /// safety-048 injury: "resume general programming only upon clearance" →
+    /// the shell clears `injury_or_rehab`); pregnancy (safety-045) requires
+    /// provider clearance AND individualization, so the engine keeps deferring
+    /// autonomous prescription for the whole pregnancy.
+    #[serde(default)]
+    pub medically_cleared: bool,
+    /// Currently pregnant (File 08 safety-045/046/047).
+    #[serde(default)]
+    pub pregnant: bool,
+    /// A pregnancy warning sign is present (File 08 safety-046, e.g. vaginal
+    /// bleeding, dyspnea before exertion, chest pain, decreased fetal
+    /// movement) → STOP and DEFER.
+    #[serde(default)]
+    pub pregnancy_warning_sign: bool,
+    /// Current injury under care, recent surgery, or active rehab
+    /// (File 08 safety-048). The engine never prescribes rehabilitation.
+    #[serde(default)]
+    pub injury_or_rehab: bool,
+    /// RED-S / disordered-eating signal reported at screening (File 08
+    /// safety-049 signal enum: amenorrhea/menstrual disturbance, rapid or
+    /// excessive weight loss, compulsive exercise, chronic low intake,
+    /// recurrent BSI, unexplained fatigue/underperformance, disordered-eating
+    /// statements).
+    #[serde(default)]
+    pub reds_signal: bool,
+}
+
+impl HealthScreen {
+    /// True when any deferral-relevant flag is raised (a positive PAR-Q+ that
+    /// has since been medically cleared no longer gates, safety-044).
+    pub fn any_gate(&self) -> bool {
+        self.youth
+            || (self.parq_positive && !self.medically_cleared)
+            || self.pregnant
+            || self.pregnancy_warning_sign
+            || self.injury_or_rehab
+            || self.reds_signal
     }
 }
 
@@ -368,8 +563,17 @@ pub enum Adjustment {
         load_reduction_pct: f32,
         weeks: u8,
     },
+    /// Cap today's session at planned RPE minus this many points (File 06
+    /// autoreg-006 second clause: e1RM < baseline − 5 % → "cap session at
+    /// planned RPE − 1" alongside the ~5 % top-set load cut).
+    CapRpe(f32),
     /// Swap a hard session for an easy one.
     DowngradeSession,
+    /// Modify the provoking exercise (reduce tendon load / compressive
+    /// positions) and continue with monitoring, tolerable tendon pain ≤3–5/10,
+    /// stable (Silbernagel model, File 08 safety-039). Explicitly NOT a rest:
+    /// "avoid complete rest".
+    ModifyAndMonitor,
     /// Insert a full rest day.
     RestDay,
     /// Non-negotiable stop (pain, fever, RHR +10 bpm). Safety override.
@@ -396,9 +600,33 @@ mod tests {
     }
 
     #[test]
+    fn deserializing_a_myth_graded_recommended_is_rejected() {
+        let valid = Recommended::new(
+            1.0_f64,
+            strong_evidence(),
+            ConfidenceTag {
+                score: EvidenceGrade::Strong.default_confidence(),
+                contested: false,
+                contested_question_ref: None,
+                safety_critical: false,
+            },
+        );
+        let mut json = serde_json::to_value(&valid).unwrap();
+
+        // Round-trips while the grade is legitimate…
+        let ok: Result<Recommended<f64>, _> = serde_json::from_value(json.clone());
+        assert!(ok.is_ok());
+
+        // …but the wire cannot smuggle a myth past the choke point.
+        json["evidence"]["grade"] = serde_json::json!("MarketingMyth");
+        let err = serde_json::from_value::<Recommended<f64>>(json).unwrap_err();
+        assert!(err.to_string().contains("MarketingMyth"), "{err}");
+    }
+
+    #[test]
     fn recommended_wrapper_carries_evidence_and_confidence() {
-        let rx = Recommended {
-            value: Prescription::Lift(LiftPrescription {
+        let rx = Recommended::new(
+            Prescription::Lift(LiftPrescription {
                 exercise: "Back squat".into(),
                 sets: 5,
                 reps: 5,
@@ -407,17 +635,42 @@ mod tests {
                 tempo: None,
                 velocity_loss_pct: Some(20),
             }),
-            evidence: strong_evidence(),
-            confidence: ConfidenceTag {
+            strong_evidence(),
+            ConfidenceTag {
                 score: EvidenceGrade::Strong.default_confidence(),
                 contested: false,
                 contested_question_ref: None,
                 safety_critical: false,
             },
-        };
+        );
 
         assert_eq!(rx.evidence.grade, EvidenceGrade::Strong);
         assert!((rx.confidence.score - 0.90).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    #[should_panic(expected = "MarketingMyth evidence must never back a recommendation")]
+    fn recommended_new_rejects_marketing_myths_unconditionally() {
+        // HARD RULE 2 at the constructor choke point: deliberately NOT gated
+        // on `debug_assertions` must also pass under `cargo test --release`.
+        let myth = Evidence {
+            grade: EvidenceGrade::MarketingMyth,
+            citation: Citation {
+                claim_id: Some("LOAD-ACWR-001".into()),
+                reference: "Gabbett 2016, BJSM".into(),
+            },
+            contradicting: vec![],
+        };
+        let _ = Recommended::new(
+            0u8,
+            myth,
+            ConfidenceTag {
+                score: EvidenceGrade::MarketingMyth.default_confidence(),
+                contested: true,
+                contested_question_ref: Some("CQ-05".into()),
+                safety_critical: false,
+            },
+        );
     }
 
     #[test]
