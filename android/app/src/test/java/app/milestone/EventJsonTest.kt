@@ -1,4 +1,4 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -132,6 +132,56 @@ class EventJsonTest {
         assertEquals("Moderate", split.grade)
         assertEquals("feedback-016", split.citation)
         assertEquals(null, vm.runs[1].split)
+    }
+
+    @Test
+    fun submitReviewCarriesObservedAt() {
+        // Backdating: the review's log stamp always rides the wire (serde
+        // default on the Rust side keeps old logs replayable without it).
+        val fields = obj(
+            Event.SubmitReview(overtrainingSignalCount = 0, observedAt = 1_700_000_777L)
+        )["SubmitReview"]!!.jsonObject
+        assertEquals(1_700_000_777L, fields["observed_at"]!!.jsonPrimitive.content.toLong())
+    }
+
+    @Test
+    fun viewModelDecodesReadinessSummaryHeadlineAndSignalGroups() {
+        // Rust→Kotlin contract for the KB-honest readiness rework: per-signal
+        // states (+ their judging rule's evidence), the core-owned today
+        // headline, and the static signal→group fence metadata all decode.
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val vm = json.decodeFromString<ViewModel>(
+            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+                "review_adjustments":[],"input_count":1,"lifts":[],"runs":[],
+                "guidance":[],"feedback":null,"reference":[],
+                "readiness_summary":[
+                  {"signal":"HrvLnRmssd","group":"metric","value":-1.0,"streak":0,
+                   "state":"suppressed","grade":"Moderate","citation":"Kiviniemi 2007",
+                   "confidence":0.65,"safety_critical":false,"contested":false},
+                  {"signal":"Pain","group":"red_flag","value":1.0,"streak":0,
+                   "state":"red flag - stop","grade":"Strong","citation":"safety",
+                   "confidence":0.9,"safety_critical":true,"contested":false}],
+                "today_headline":{"kind":"safety_hold","summary":"Stop - do not train",
+                  "grade":"Strong","citation":"safety","confidence":0.9,
+                  "safety_critical":true,"contested":false},
+                "signal_groups":[
+                  {"signal":"Rpe","group":"metric"},
+                  {"signal":"Pain","group":"red_flag"}]}"""
+        )
+        assertEquals("suppressed", vm.readiness_summary[0].state)
+        assertEquals("metric", vm.readiness_summary[0].group)
+        assertTrue(vm.readiness_summary[1].safety_critical)
+        assertEquals("safety_hold", vm.today_headline!!.kind)
+        assertEquals("red_flag", vm.signal_groups.first { it.signal == "Pain" }.group)
+        // Pre-headline core (fields absent) must still decode: null/empty.
+        val old = json.decodeFromString<ViewModel>(
+            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+                "review_adjustments":[],"input_count":0,"lifts":[],"runs":[],
+                "guidance":[],"feedback":null,"reference":[]}"""
+        )
+        assertEquals(null, old.today_headline)
+        assertTrue(old.readiness_summary.isEmpty())
+        assertTrue(old.signal_groups.isEmpty())
     }
 
     @Test

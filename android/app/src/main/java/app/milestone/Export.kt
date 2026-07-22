@@ -1,4 +1,4 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import android.content.Context
 import android.content.Intent

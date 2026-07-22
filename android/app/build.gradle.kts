@@ -6,12 +6,12 @@ plugins {
 }
 
 android {
-    namespace = "de.tuschla.fitnessanlage"
+    namespace = "app.milestone"
     compileSdk = 36
     buildToolsVersion = "36.1.0"
 
     defaultConfig {
-        applicationId = "de.tuschla.fitnessanlage"
+        applicationId = "app.milestone"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

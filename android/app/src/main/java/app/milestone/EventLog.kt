@@ -1,9 +1,11 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Result of [EventLog.load]: the surviving replayable lines plus whether this is
@@ -30,7 +32,7 @@ object EventLog {
 
     /** Clear-variant → the member variants its clear supersedes. */
     private val families = mapOf(
-        "ClearReadiness" to setOf("SubmitReadiness"),
+        "ClearReadiness" to setOf("SubmitReadiness", "RemoveReadiness"),
         "ClearSets" to setOf("LogSet"),
         "ClearRuns" to setOf("LogRun", "LogRunTrack"),
         "ClearProfile" to setOf("SetProfile"),
@@ -67,6 +69,21 @@ object EventLog {
     fun compact(lines: List<String>): List<String> {
         val variant = lines.map(::variantOf)
         val remove = BooleanArray(lines.size)
+
+        // Rule 0 (mirrors log.rs): a RemoveReadiness cancels the latest
+        // not-yet-cancelled prior SubmitReadiness with the same signal; an
+        // unmatched remove replays as a no-op and is dropped alone.
+        for (j in lines.indices) {
+            if (variant[j] != "RemoveReadiness") continue
+            // Unparsable line → never removable, same contract as variantOf.
+            val signal = readinessSignalOf(lines[j], "RemoveReadiness") ?: continue
+            val i = (j - 1 downTo 0).firstOrNull {
+                !remove[it] && variant[it] == "SubmitReadiness" &&
+                    readinessSignalOf(lines[it], "SubmitReadiness") == signal
+            }
+            if (i != null) remove[i] = true
+            remove[j] = true
+        }
 
         for ((clear, members) in families) {
             val lastClear = variant.indexOfLast { it == clear }
@@ -115,5 +132,14 @@ object EventLog {
             is JsonObject -> el.keys.singleOrNull()
             else -> null
         }
+    }.getOrNull()
+
+    /** The `signal` field of a readiness wire line, or null if it doesn't parse
+     *  (an unparsable pair then never cancels, conservative, like [variantOf]). */
+    private fun readinessSignalOf(line: String, variant: String): String? = runCatching {
+        json.parseToJsonElement(line)
+            .jsonObject[variant]!!
+            .jsonObject["signal"]!!
+            .jsonPrimitive.content
     }.getOrNull()
 }

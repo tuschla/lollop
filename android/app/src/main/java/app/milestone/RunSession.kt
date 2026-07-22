@@ -1,4 +1,4 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow

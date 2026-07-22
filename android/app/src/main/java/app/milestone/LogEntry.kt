@@ -1,39 +1,82 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 /**
- * Manual lift-set entry. Emits a real [Event.LogSet] with the user's own
- * exercise / weight / reps / RPE, the e1RM + RIR derivation lives in the Rust
- * core, so this form carries no coaching logic.
+ * Manual lift-set entry (keypad rework, design import). Emits a real
+ * [Event.LogSet] with the user's own exercise / weight / reps / RPE, the
+ * e1RM + RIR derivation lives in the Rust core, so this form carries no
+ * coaching logic. Weight is typed on the in-form [NumericKeypad]; the buffer
+ * text is what gets parsed at submit, so the display-committed invariant holds
+ * (an invalid buffer blocks the button). [recentExercises] are the user's own
+ * most recent lifts (newest first), padded with common defaults, quick-pick
+ * chips over the free-text field.
+ *
+ * NOTE (shell-thinness): the mockup's live "→ e1RM …" preview is deliberately
+ * NOT rendered, e1RM is derived only in the core, after submit. Rendering it
+ * live would require the core to expose a preview query; noted as future core
+ * work, never computed in Kotlin.
  */
 @Composable
-fun LogSetEditor(onLog: (Event.LogSet) -> Unit) {
-    var exercise by rememberSaveable { mutableStateOf("Back Squat") }
-    var weightKg by rememberSaveable { mutableStateOf(100.0) }
-    var weightValid by rememberSaveable { mutableStateOf(true) }
+fun LogSetEditor(
+    recentExercises: List<String> = emptyList(),
+    onLog: (Event.LogSet) -> Unit,
+) {
+    val quickPicks = remember(recentExercises) {
+        (recentExercises + listOf("Back Squat", "Bench", "Deadlift", "OHP"))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .take(6)
+    }
+    var exercise by rememberSaveable { mutableStateOf(quickPicks.first()) }
+    var weightText by rememberSaveable { mutableStateOf("100.0") }
+    // Calculator-style entry: the first digit after opening replaces the
+    // prefill instead of appending to it.
+    var weightFresh by rememberSaveable { mutableStateOf(true) }
     var reps by rememberSaveable { mutableStateOf(5) }
     var rpe by rememberSaveable { mutableStateOf(8.0) }
+    var observedAt by rememberSaveable { mutableStateOf(System.currentTimeMillis() / 1000) }
+
+    val weightParsed = weightText.replace(',', '.').toDoubleOrNull()
+    val weightValid = weightParsed != null && weightParsed in 0.0..400.0
 
     FormCard {
         FieldLabel("Exercise")
@@ -44,17 +87,16 @@ fun LogSetEditor(onLog: (Event.LogSet) -> Unit) {
             placeholder = { Text("Search exercise") },
             modifier = Modifier.fillMaxWidth(),
         )
-        PresetChipsRow(listOf("Back Squat", "Bench", "Deadlift", "OHP"), exercise) { exercise = it }
-        // Weight: big editable value + plate-jump quick-adjust (−2.5 / +2.5 / +5).
-        // The validity flag gates the submit button so what is logged is always
-        // exactly what the field shows (never a stale committed value behind an
-        // out-of-range or cleared display).
-        BigValueField(
-            "Weight", "kg", weightKg, "%.1f", 0.0, 400.0, listOf(-2.5, 2.5, 5.0),
-            onValidChange = { weightValid = it },
-        ) {
-            weightKg = it
-        }
+        PresetChipsRow(quickPicks, exercise) { exercise = it }
+        KeypadValueField(
+            "Weight", "kg", weightText,
+            active = true,
+            invalid = !weightValid,
+            min = 0.0, max = 400.0, format = "%.1f",
+            adjustments = listOf(-2.5, 2.5, 5.0),
+            onActivate = {},
+            onText = { weightText = it; weightFresh = false },
+        )
         // Reps: a tap-scale over 1–20 rather than a stepper.
         FieldLabel("Reps", "$reps")
         ScrollableScaleRow((1..20).toList(), reps, { "$it" }) { reps = it }
@@ -62,8 +104,23 @@ fun LogSetEditor(onLog: (Event.LogSet) -> Unit) {
         // a hint: the authoritative RIR is still derived in the core on log.
         FieldLabel("RPE", "${fmtRpe(rpe)} · RIR ${(10.0 - rpe).toInt()}")
         ChoiceScaleRow(listOf(6.0, 7.0, 7.5, 8.0, 8.5, 9.0, 10.0), rpe, { fmtRpe(it) }) { rpe = it }
+        ObservedAtRow(observedAt, withTime = true) { observedAt = it }
+        NumericKeypad(
+            onKey = { key ->
+                weightText = editNumericBuffer(weightText, key, weightFresh)
+                weightFresh = false
+            },
+            onBackspace = {
+                weightText = weightText.dropLast(1)
+                weightFresh = false
+            },
+        )
         Button(
-            onClick = { onLog(Event.LogSet(exercise.trim(), weightKg, reps, rpe)) },
+            onClick = {
+                weightParsed?.let { w ->
+                    onLog(Event.LogSet(exercise.trim(), w, reps, rpe, observedAt))
+                }
+            },
             enabled = exercise.isNotBlank() && weightValid,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Log set") }
@@ -74,54 +131,89 @@ fun LogSetEditor(onLog: (Event.LogSet) -> Unit) {
 private fun fmtRpe(v: Double): String =
     if (v % 1.0 == 0.0) "${v.toInt()}" else String.format(Locale.US, "%.1f", v)
 
+/** Which numeric field the run editor's shared keypad currently edits. */
+private enum class RunField { Distance, Duration }
+
 /**
- * Manual run entry for runs recorded without GPS tracking. `longestRecentKm` is
- * left at 0, the core derives the spike baseline from prior logged runs.
+ * Manual run entry for runs recorded without GPS tracking (keypad rework).
+ * `longestRecentKm` is left at 0, the core derives the spike baseline from
+ * prior logged runs. Distance and duration share one in-form [NumericKeypad];
+ * tapping a field switches the keypad's target. Both buffers are parsed at
+ * submit exactly as displayed (display-committed invariant); an invalid buffer
+ * blocks the button.
  */
 @Composable
 fun LogRunEditor(onLog: (Event.LogRun) -> Unit) {
-    var distanceKm by rememberSaveable { mutableStateOf(10.0) }
-    var distanceValid by rememberSaveable { mutableStateOf(true) }
-    var durationMin by rememberSaveable { mutableStateOf(50) }
-    var durationValid by rememberSaveable { mutableStateOf(true) }
+    var distText by rememberSaveable { mutableStateOf("10.00") }
+    var durText by rememberSaveable { mutableStateOf("50") }
+    var active by rememberSaveable { mutableStateOf(RunField.Distance) }
+    // First key after (re)targeting a field starts a fresh number.
+    var fresh by rememberSaveable { mutableStateOf(true) }
     // The core treats hr_pct_max == 0 as "no HR sample" and reports zone "-"
     // rather than fabricating one. Gate HR behind a toggle so a run logged without
     // a monitor sends 0 instead of a made-up %, keeping the zone honest.
     var hasHr by rememberSaveable { mutableStateOf(false) }
     var hrPctMax by rememberSaveable { mutableStateOf(78) }
+    var observedAt by rememberSaveable { mutableStateOf(System.currentTimeMillis() / 1000) }
+
+    val distParsed = distText.replace(',', '.').toDoubleOrNull()
+    val durParsed = durText.replace(',', '.').toDoubleOrNull()
+    val distValid = distParsed != null && distParsed in 0.0..100.0
+    val durValid = durParsed != null && durParsed in 0.0..600.0
+
+    fun buffer() = if (active == RunField.Distance) distText else durText
+    fun setBuffer(v: String) = if (active == RunField.Distance) distText = v else durText = v
 
     FormCard {
-        // Both fields gate the submit on their validity flag so the logged run is
-        // always exactly the displayed numbers (see LogSetEditor's weight note).
-        BigValueField(
-            "Distance", "km", distanceKm, "%.2f", 0.0, 100.0, listOf(-0.5, 0.5, 1.0),
-            onValidChange = { distanceValid = it },
-        ) {
-            distanceKm = it
-        }
-        BigValueField(
-            "Duration", "min", durationMin.toDouble(), "%.0f", 0.0, 600.0, listOf(-1.0, 1.0, 5.0),
-            onValidChange = { durationValid = it },
-        ) {
-            durationMin = it.toInt()
-        }
+        KeypadValueField(
+            "Distance", "km", distText,
+            active = active == RunField.Distance,
+            invalid = !distValid,
+            min = 0.0, max = 100.0, format = "%.2f",
+            adjustments = listOf(-0.5, 0.5, 1.0),
+            onActivate = { active = RunField.Distance; fresh = true },
+            onText = { distText = it; fresh = false },
+        )
+        KeypadValueField(
+            "Duration", "min", durText,
+            active = active == RunField.Duration,
+            invalid = !durValid,
+            min = 0.0, max = 600.0, format = "%.0f",
+            adjustments = listOf(-1.0, 1.0, 5.0),
+            onActivate = { active = RunField.Duration; fresh = true },
+            onText = { durText = it; fresh = false },
+        )
         SwitchRow("Recorded HR", hasHr) { hasHr = it }
         if (hasHr) {
             FieldLabel("HR", "% max")
             ChoiceScaleRow(listOf(60, 65, 70, 75, 80, 85, 90, 95), hrPctMax, { "$it" }) { hrPctMax = it }
         }
+        ObservedAtRow(observedAt, withTime = true) { observedAt = it }
+        NumericKeypad(
+            onKey = { key ->
+                setBuffer(editNumericBuffer(buffer(), key, fresh))
+                fresh = false
+            },
+            onBackspace = {
+                setBuffer(buffer().dropLast(1))
+                fresh = false
+            },
+        )
         Button(
             onClick = {
-                onLog(
-                    Event.LogRun(
-                        distanceKm = distanceKm,
-                        durationMin = durationMin.toDouble(),
-                        hrPctMax = if (hasHr) hrPctMax.toDouble() else 0.0,
-                        longestRecentKm = 0.0,
+                if (distParsed != null && durParsed != null) {
+                    onLog(
+                        Event.LogRun(
+                            distanceKm = distParsed,
+                            durationMin = durParsed,
+                            hrPctMax = if (hasHr) hrPctMax.toDouble() else 0.0,
+                            longestRecentKm = 0.0,
+                            observedAt = observedAt,
+                        )
                     )
-                )
+                }
             },
-            enabled = distanceKm > 0.0 && durationMin > 0 && distanceValid && durationValid,
+            enabled = distValid && durValid && (distParsed ?: 0.0) > 0.0 && (durParsed ?: 0.0) > 0.0,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Log run") }
     }
@@ -135,11 +227,30 @@ fun LogRunEditor(onLog: (Event.LogRun) -> Unit) {
  * value stepper spans a deliberately wide range; the core interprets it.
  */
 @Composable
-fun ReadinessEditor(onSubmit: (Event.SubmitReadiness) -> Unit) {
+fun ReadinessEditor(
+    // Core-exported signal→group map (ViewModel.signal_groups): the red-flag
+    // fence in the picker is drawn where the core says the block starts, not
+    // from a shell-side predicate. Empty map (old core) falls back to Pain.
+    signalGroups: Map<String, String> = emptyMap(),
+    onSubmit: (Event.SubmitReadiness) -> Unit,
+) {
     var signal by rememberSaveable { mutableStateOf(ReadinessSignal.WellnessZ) }
     var value by rememberSaveable { mutableStateOf(defaultReadinessValue(ReadinessSignal.WellnessZ)) }
+    var observedAt by rememberSaveable { mutableStateOf(System.currentTimeMillis() / 1000) }
+    val firstRedFlag = remember(signalGroups) {
+        ReadinessSignal.entries.firstOrNull { signalGroups[it.name] == "red_flag" }
+            ?: ReadinessSignal.Pain
+    }
 
     FormCard {
+        // Plain-language framing so the picker isn't a wall of jargon: what a
+        // readiness signal IS and what submitting one does. Generic UI copy -
+        // the coaching interpretation stays entirely in the core.
+        Text(
+            "Readiness signals feed today's coaching call. Report only what you actually measured or felt - one signal at a time.",
+            color = OnBgMuted,
+            style = Type.Caption,
+        )
         // Reset the value to the newly-selected signal's sensible default: the core
         // reads a flag signal as "present" only when value > 0 (Pain/RED-S/cardiac/
         // bone-stress) and an Illness by severity band, so carrying over a 0.0 or a
@@ -150,13 +261,18 @@ fun ReadinessEditor(onSubmit: (Event.SubmitReadiness) -> Unit) {
             ReadinessSignal.entries,
             signal,
             display = { it.label },
-            // Fence the medical red-flag block (Pain onward) off from the routine
-            // metrics above it; Pain is the first such signal in enum order.
-            divideBefore = { it == ReadinessSignal.Pain },
+            // Fence the medical red-flag block off from the routine metrics
+            // above it: where the block starts comes from the core's
+            // signal_groups metadata (fallback: Pain, the first red flag).
+            divideBefore = { it == firstRedFlag },
         ) {
             signal = it
             value = defaultReadinessValue(it)
         }
+        // One-line neutral explainer for the selected signal: what it is, not
+        // what number triggers what (thresholds live in the core; the stepper
+        // hints below cite them separately, see the ValueSpec note).
+        Text(signal.explainer, color = OnBgMuted, style = Type.Caption)
         when {
             signal.isBinaryFlag ->
                 SwitchRow("Present", value > 0.0) { value = if (it) 1.0 else 0.0 }
@@ -180,13 +296,14 @@ fun ReadinessEditor(onSubmit: (Event.SubmitReadiness) -> Unit) {
                 Text(spec.hint, color = OnBgMuted, style = Type.Caption)
             }
         }
+        ObservedAtRow(observedAt, withTime = false) { observedAt = it }
         Button(
             onClick = {
                 onSubmit(
                     Event.SubmitReadiness(
                         signal = signal,
                         value = value,
-                        observedAt = System.currentTimeMillis() / 1000,
+                        observedAt = observedAt,
                     )
                 )
             },
@@ -324,6 +441,7 @@ fun ReviewEditor(onSubmit: (Event.SubmitReview) -> Unit) {
     var failedKeySessions by rememberSaveable { mutableStateOf(0) }
     var rpeLoadGapSessions by rememberSaveable { mutableStateOf(0) }
     var velocityDropMs by rememberSaveable { mutableStateOf(0.0) }
+    var observedAt by rememberSaveable { mutableStateOf(System.currentTimeMillis() / 1000) }
 
     FormCard {
         SwitchRow("Bad day", badDay) { badDay = it }
@@ -359,7 +477,15 @@ fun ReviewEditor(onSubmit: (Event.SubmitReview) -> Unit) {
                 ) { positiveSplitPct = it }
             }
         }
-        SwitchRow("Week-level fatigue review", hasWeekFatigue) { hasWeekFatigue = it }
+        // Plain-language name (was "Week-level fatigue review", which read as
+        // jargon): this is the whole-week check-in whose counts drive the
+        // core's deload / volume calls.
+        SwitchRow("Weekly check-in - how did the week go?", hasWeekFatigue) { hasWeekFatigue = it }
+        Text(
+            "Counts across the whole week, not just this session - they drive deload and volume calls.",
+            color = OnBgMuted,
+            style = Type.Caption,
+        )
         if (hasWeekFatigue) {
             // ≥2 of any one trigger prompts a deload (autoreg-023/026/036).
             IntStepperRow("Failed key sessions", failedKeySessions, 0, 7, 1) {
@@ -378,6 +504,7 @@ fun ReviewEditor(onSubmit: (Event.SubmitReview) -> Unit) {
                 format = "%.2f",
             ) { velocityDropMs = it }
         }
+        ObservedAtRow(observedAt, withTime = false) { observedAt = it }
         Button(
             onClick = {
                 onSubmit(
@@ -411,6 +538,7 @@ fun ReviewEditor(onSubmit: (Event.SubmitReview) -> Unit) {
                         rpeLoadGapSessions = if (hasWeekFatigue) rpeLoadGapSessions else null,
                         weeklyVelocityDropMs = if (hasWeekFatigue) velocityDropMs else null,
                         badDay = badDay,
+                        observedAt = observedAt,
                     )
                 )
             },
@@ -595,7 +723,31 @@ fun HrZonesForm(onCompute: (Double) -> Unit) {
  * fails to compile until it is given a label rather than silently showing a
  * cryptic raw name.
  */
-private val ReadinessSignal.label: String
+/**
+ * One-line neutral explainer for the readiness picker: says what the signal IS
+ * (and, for the medical flags, the core-documented consequence of reporting
+ * it). Deliberately no shell-side thresholds, the numbers that trigger
+ * adjustments live only in the core (see the ValueSpec note above).
+ */
+private val ReadinessSignal.explainer: String
+    get() = when (this) {
+        ReadinessSignal.Rpe -> "How hard training felt compared to the plan."
+        ReadinessSignal.EstimatedOneRm -> "Today's estimated single-rep max relative to your baseline."
+        ReadinessSignal.BarVelocity -> "Measured bar speed on a reference lift."
+        ReadinessSignal.VelocityLoss -> "How much bar speed dropped within a set."
+        ReadinessSignal.WellnessZ -> "Sleep, soreness, stress and mood combined, versus your normal."
+        ReadinessSignal.HrvLnRmssd -> "Heart-rate variability compared to your rolling baseline."
+        ReadinessSignal.HrvCv -> "How much your HRV readings vary day to day."
+        ReadinessSignal.AerobicDecoupling -> "Heart-rate drift versus pace during a steady run."
+        ReadinessSignal.RestingHr -> "This morning's resting heart rate versus your baseline."
+        ReadinessSignal.Pain -> "Sharp or joint pain - a red flag that pauses training."
+        ReadinessSignal.Illness -> "Feeling sick - the severity decides the training call."
+        ReadinessSignal.RedS -> "Signs of under-fueling (RED-S) - routes to a medical referral."
+        ReadinessSignal.CardiacRedFlag -> "Chest pain, fainting or palpitations - routes to a professional."
+        ReadinessSignal.BoneStress -> "Focal bone pain - possible bone-stress injury, routes to a professional."
+    }
+
+internal val ReadinessSignal.label: String
     get() = when (this) {
         ReadinessSignal.Rpe -> "RPE"
         ReadinessSignal.EstimatedOneRm -> "Estimated 1RM"
@@ -612,6 +764,146 @@ private val ReadinessSignal.label: String
         ReadinessSignal.CardiacRedFlag -> "Cardiac red flag"
         ReadinessSignal.BoneStress -> "Bone stress"
     }
+
+/**
+ * Backdating control for every log editor: a compact chip stating when the
+ * entry is logged ("Today · 14:32" / "Jul 15 · 09:10"), defaulting to now.
+ * Tapping opens an M3 date picker (future dates unselectable); [withTime]
+ * (sets/runs) chains a time picker after the date. The result is clamped to
+ * now so a future stamp can never be submitted. Date-only editors
+ * (readiness/review) keep the current time-of-day on the chosen date, so
+ * same-day ordering vs other inputs stays sensible. The value rides the
+ * wire's existing `observed_at` unix seconds, the core holds no clock.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ObservedAtRow(epochSec: Long, withTime: Boolean, onChange: (Long) -> Unit) {
+    var showDate by remember { mutableStateOf(false) }
+    var showTime by remember { mutableStateOf(false) }
+    var pendingDayUtcMillis by remember { mutableStateOf<Long?>(null) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Logged", color = OnBgBody, style = Type.Body)
+        Text(
+            formatObservedAt(epochSec, withTime),
+            color = Accent,
+            style = Type.Body.merge(TabularFigures),
+            modifier = Modifier
+                .clip(RoundedCornerShape(Space.Md.dp))
+                .background(BgTop)
+                .clickable { showDate = true }
+                .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
+        )
+    }
+
+    if (showDate) {
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = epochSec * 1000L,
+            selectableDates = object : SelectableDates {
+                // Future dates blocked. DatePicker days are UTC-midnight stamps;
+                // allow through "today" in the most permissive zone (UTC+14) and
+                // let the final clamp-to-now catch the rest.
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                    utcTimeMillis <= System.currentTimeMillis() + 14 * 3_600_000L
+
+                override fun isSelectableYear(year: Int): Boolean =
+                    year <= Calendar.getInstance().get(Calendar.YEAR)
+            },
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDate = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    val sel = state.selectedDateMillis
+                    showDate = false
+                    if (sel != null) {
+                        if (withTime) {
+                            pendingDayUtcMillis = sel
+                            showTime = true
+                        } else {
+                            // Keep the entry's current local time-of-day.
+                            val cur = Calendar.getInstance().apply { timeInMillis = epochSec * 1000L }
+                            onChange(
+                                combineDayAndTime(
+                                    sel,
+                                    cur.get(Calendar.HOUR_OF_DAY),
+                                    cur.get(Calendar.MINUTE),
+                                ),
+                            )
+                        }
+                    }
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDate = false }) { Text("Cancel") }
+            },
+        ) { DatePicker(state) }
+    }
+
+    if (showTime) {
+        val cur = Calendar.getInstance().apply { timeInMillis = epochSec * 1000L }
+        val tState = rememberTimePickerState(
+            initialHour = cur.get(Calendar.HOUR_OF_DAY),
+            initialMinute = cur.get(Calendar.MINUTE),
+            is24Hour = true,
+        )
+        AlertDialog(
+            onDismissRequest = { showTime = false },
+            title = { Text("Logged at") },
+            text = { TimePicker(tState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showTime = false
+                    pendingDayUtcMillis?.let { day ->
+                        onChange(combineDayAndTime(day, tState.hour, tState.minute))
+                    }
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTime = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+/**
+ * Combine a DatePicker day (UTC-midnight millis: its Y/M/D are the *picked*
+ * calendar date) with a local wall-clock time into local unix seconds, clamped
+ * to now so a future stamp can never be logged.
+ */
+private fun combineDayAndTime(utcDayMillis: Long, hour: Int, minute: Int): Long {
+    val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcDayMillis }
+    val local = Calendar.getInstance().apply {
+        clear()
+        set(
+            utc.get(Calendar.YEAR),
+            utc.get(Calendar.MONTH),
+            utc.get(Calendar.DAY_OF_MONTH),
+            hour,
+            minute,
+            0,
+        )
+    }
+    return minOf(local.timeInMillis / 1000L, System.currentTimeMillis() / 1000L)
+}
+
+/** "Today · 14:32" / "Jul 15 · 09:10" / date-only variants for the chip. */
+private fun formatObservedAt(epochSec: Long, withTime: Boolean): String {
+    val now = Calendar.getInstance()
+    val then = Calendar.getInstance().apply { timeInMillis = epochSec * 1000L }
+    val sameDay = now.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
+        now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
+    val day = if (sameDay) "Today" else SimpleDateFormat("MMM d", Locale.US).format(Date(epochSec * 1000L))
+    return if (withTime) {
+        "$day · ${SimpleDateFormat("HH:mm", Locale.US).format(Date(epochSec * 1000L))}"
+    } else {
+        day
+    }
+}
 
 @Composable
 private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {

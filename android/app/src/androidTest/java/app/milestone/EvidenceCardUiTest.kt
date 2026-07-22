@@ -1,4 +1,4 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -31,7 +31,7 @@ class EvidenceCardUiTest {
         contested: Boolean = false,
         section: String? = null,
     ) = rule.setContent {
-        FitnessAnlageTheme {
+        MilestoneTheme {
             EvidenceCard(
                 summary = summary,
                 grade = grade,

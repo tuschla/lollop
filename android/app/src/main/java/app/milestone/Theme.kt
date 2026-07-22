@@ -1,4 +1,4 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import android.content.Context
 import android.os.Build
@@ -130,7 +130,7 @@ enum class AppTheme(val label: String, val dark: Palette, val light: Palette) {
     }
 }
 
-/** Active decorative palette, provided at the theme root by [FitnessAnlageTheme]. */
+/** Active decorative palette, provided at the theme root by [MilestoneTheme]. */
 val LocalPalette = staticCompositionLocalOf { BetonPalette }
 
 // Bare token accessors kept for the many call sites that read them directly. Each
@@ -196,7 +196,7 @@ object Space {
 /**
  * UI theme preferences persisted outside the crux core (they are shell chrome,
  * not coaching state, so they do not belong in the event log). Backed by
- * SharedPreferences; exposed as a flow so [FitnessAnlageTheme] recomposes when
+ * SharedPreferences; exposed as a flow so [MilestoneTheme] recomposes when
  * the user flips the toggle.
  */
 object ThemeSettings {
@@ -254,7 +254,7 @@ fun StatusColors.hrZoneColor(zone: String, accent: Color): Color = when (zone) {
  * themes so safety and evidence signaling remain unambiguous.
  */
 @Composable
-fun FitnessAnlageTheme(
+fun MilestoneTheme(
     content: @Composable () -> Unit,
 ) {
     val ctx = LocalContext.current

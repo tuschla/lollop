@@ -1,10 +1,13 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Paint
+import android.graphics.drawable.LayerDrawable
+import android.graphics.drawable.ShapeDrawable
+import android.graphics.drawable.shapes.OvalShape
 import android.location.LocationManager
 import android.os.Build
 import android.view.MotionEvent
@@ -38,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -52,6 +56,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 
 /**
@@ -117,12 +122,16 @@ fun RunTrackingScreen(model: ViewModel, onFinish: (ViewModel?) -> Unit) {
     // route stays legible on both light and dark tiles and never blends into the
     // basemap. Casing is added first so the accent core draws on top of it. The
     // palette is read here (in composition) because the remember lambdas below run
-    // outside it and cannot touch the composition-local tokens.
+    // outside it and cannot touch the composition-local tokens. osmdroid Paint
+    // widths are raw px, so the token dp values (Space.Sm accent / Space.Md
+    // casing) are density-scaled here, a fixed px width would render thinner
+    // on denser screens.
     val palette = LocalPalette.current
+    val strokeDensity = ctx.resources.displayMetrics.density
     val casing = remember {
         Polyline().apply {
             outlinePaint.color = palette.bgTop.toArgb()
-            outlinePaint.strokeWidth = 18f
+            outlinePaint.strokeWidth = Space.Md * strokeDensity
             outlinePaint.strokeCap = Paint.Cap.ROUND
             outlinePaint.strokeJoin = Paint.Join.ROUND
         }
@@ -130,9 +139,30 @@ fun RunTrackingScreen(model: ViewModel, onFinish: (ViewModel?) -> Unit) {
     val track = remember {
         Polyline().apply {
             outlinePaint.color = palette.accent.toArgb()
-            outlinePaint.strokeWidth = 10f
+            outlinePaint.strokeWidth = Space.Sm * strokeDensity
             outlinePaint.strokeCap = Paint.Cap.ROUND
             outlinePaint.strokeJoin = Paint.Join.ROUND
+        }
+    }
+    // Self-location blip: an accent dot with a ground-toned casing ring, pinned
+    // to the LATEST fix (the same stream the route is drawn from, no second
+    // location client). Added to the overlays lazily on the first fix so no dot
+    // ever renders at the (0,0) default position.
+    val locationDot = remember {
+        val den = ctx.resources.displayMetrics.density
+        fun circle(color: Int, sizeDp: Float) = ShapeDrawable(OvalShape()).apply {
+            paint.color = color
+            intrinsicWidth = (sizeDp * den).toInt()
+            intrinsicHeight = (sizeDp * den).toInt()
+        }
+        val inset = (4 * den).toInt()
+        val icon = LayerDrawable(
+            arrayOf(circle(palette.bgTop.toArgb(), 20f), circle(palette.accent.toArgb(), 12f)),
+        ).apply { setLayerInset(1, inset, inset, inset, inset) }
+        Marker(mapView).apply {
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            this.icon = icon
+            setInfoWindow(null)
         }
     }
     DisposableEffect(Unit) {
@@ -140,7 +170,10 @@ fun RunTrackingScreen(model: ViewModel, onFinish: (ViewModel?) -> Unit) {
         mapView.overlays.add(track)
         // A user drag (not a programmatic setCenter, which dispatches no touch)
         // means they want to look around: stop yanking the map back.
-        mapView.setOnTouchListener { _, ev ->
+        mapView.setOnTouchListener { v, ev ->
+            // The map owns its gestures: without this, a parent can intercept
+            // mid-pinch and the surrounding chrome judders in and out.
+            v.parent?.requestDisallowInterceptTouchEvent(true)
             if (ev.actionMasked == MotionEvent.ACTION_MOVE) follow = false
             false
         }
@@ -169,8 +202,10 @@ fun RunTrackingScreen(model: ViewModel, onFinish: (ViewModel?) -> Unit) {
         val geo = points.map { GeoPoint(it.lat, it.lon) }
         casing.setPoints(geo)
         track.setPoints(geo)
-        if (follow) {
-            points.lastOrNull()?.let { mapView.controller.setCenter(GeoPoint(it.lat, it.lon)) }
+        geo.lastOrNull()?.let { last ->
+            locationDot.position = last
+            if (!mapView.overlays.contains(locationDot)) mapView.overlays.add(locationDot)
+            if (follow) mapView.controller.setCenter(last)
         }
         mapView.invalidate()
     }
@@ -242,10 +277,39 @@ fun RunTrackingScreen(model: ViewModel, onFinish: (ViewModel?) -> Unit) {
                 model,
                 Modifier
                     .padding(horizontal = Space.Screen.dp)
-                    .padding(top = Space.Sm.dp, bottom = Space.Sm.dp),
+                    .padding(top = Space.Sm.dp, bottom = Space.Md.dp),
             )
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            // The map sits in its own rounded, clipped inset: the banner ends,
+            // gutter, map begins: nothing folds into or under the map, and the
+            // rounded clip keeps map tiles from butting against screen chrome.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = Space.Screen.dp)
+                    .clip(RoundedCornerShape(Space.Card.dp)),
+            ) {
                 AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+                // Map-view control pinned BOTTOM-RIGHT as an overlay: appearing /
+                // disappearing never resizes the map (the old inline button row
+                // grew and shrank the layout mid-pinch, glitching the chrome).
+                if (!follow) {
+                    Button(
+                        onClick = {
+                            follow = true
+                            points.lastOrNull()?.let {
+                                mapView.controller.animateTo(GeoPoint(it.lat, it.lon))
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BgElevated,
+                            contentColor = Accent,
+                        ),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(Space.Md.dp),
+                    ) { Text("Recenter") }
+                }
             }
             Column(Modifier.padding(Space.Screen.dp), verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                 when {
@@ -322,7 +386,22 @@ fun RunTrackingScreen(model: ViewModel, onFinish: (ViewModel?) -> Unit) {
                         style = Type.Caption,
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                // Actions bottom-RIGHT (user feedback #19), primary outermost.
+                // Back never kills a live run: the foreground service keeps
+                // recording and the Today "run in progress" chip (or the
+                // notification tap) returns here with full live state: only a
+                // non-tracking exit tears the session down.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Space.Md.dp, Alignment.End),
+                ) {
+                    OutlinedButton(onClick = {
+                        if (!tracking) {
+                            RunTrackingService.stop(ctx)
+                            RunSession.reset()
+                        }
+                        onFinish(null)
+                    }) { Text(if (tracking) "Back · keeps recording" else "Back") }
                     if (!tracking) {
                         Button(onClick = { startTracking() }) { Text("Start") }
                     } else {
@@ -334,19 +413,6 @@ fun RunTrackingScreen(model: ViewModel, onFinish: (ViewModel?) -> Unit) {
                             ),
                         ) { Text("Stop & log", color = Color.White) }
                     }
-                    if (!follow) {
-                        OutlinedButton(onClick = {
-                            follow = true
-                            points.lastOrNull()?.let {
-                                mapView.controller.animateTo(GeoPoint(it.lat, it.lon))
-                            }
-                        }) { Text("Recenter") }
-                    }
-                    OutlinedButton(onClick = {
-                        RunTrackingService.stop(ctx)
-                        RunSession.reset()
-                        onFinish(null)
-                    }) { Text("Back") }
                 }
             }
         }

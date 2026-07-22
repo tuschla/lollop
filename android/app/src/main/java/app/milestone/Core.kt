@@ -1,4 +1,4 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import android.content.Context
 import java.io.File
@@ -102,6 +102,54 @@ data class ViewModel(
     val hypertrophy_plan: List<GuidanceView> = emptyList(),
     val protein_targets: List<GuidanceView> = emptyList(),
     val hr_zones: List<GuidanceView> = emptyList(),
+    // KB-honest per-signal readiness summary (app.rs readiness_summary): the
+    // latest state of each observed signal judged by the core's own KB
+    // thresholds. Deliberately NO composite 0–100 score exists on the wire.
+    val readiness_summary: List<ReadinessSignalView> = emptyList(),
+    // Core-owned "today's call": safety hold > adjustment > feedback >
+    // all-clear. Null only against a pre-headline core build.
+    val today_headline: TodayHeadlineView? = null,
+    // Static signal→group metadata ("metric" | "red_flag") driving the
+    // readiness picker's red-flag fence from the core.
+    val signal_groups: List<SignalGroupView> = emptyList(),
+)
+
+/** One readiness signal's latest state (app.rs ReadinessSignalView). The
+ *  evidence fields cite the rule whose threshold judged `state`; grade is
+ *  empty for plain factual rows ("recorded"/"clear") that judge nothing. */
+@Serializable
+data class ReadinessSignalView(
+    val signal: String = "",
+    val group: String = "", // "metric" | "red_flag"
+    val value: Double = 0.0,
+    val streak: Int = 0,
+    val state: String = "",
+    val grade: String = "",
+    val citation: String = "",
+    val confidence: Float = 0f,
+    val safety_critical: Boolean = false,
+    val contested: Boolean = false,
+)
+
+/** The core's single highest-priority call for today (app.rs TodayHeadlineView).
+ *  `kind`: "safety_hold" | "adjustment" | "feedback" | "all_clear". The
+ *  all-clear default carries an empty evidence tag (it asserts no claim). */
+@Serializable
+data class TodayHeadlineView(
+    val kind: String = "",
+    val summary: String = "",
+    val grade: String = "",
+    val citation: String = "",
+    val confidence: Float = 0f,
+    val safety_critical: Boolean = false,
+    val contested: Boolean = false,
+)
+
+/** Signal→group row for the static readiness-picker fence metadata. */
+@Serializable
+data class SignalGroupView(
+    val signal: String = "",
+    val group: String = "",
 )
 
 /** Goal-race finish prediction (app.rs RacePredictionView). Daniels+Riegel. */
@@ -263,6 +311,13 @@ sealed interface Event {
         override fun toJson(): JsonElement = JsonPrimitive("ClearReadiness")
     }
 
+    /** Undo one accidental report: core drops its most recent input carrying [signal]. */
+    data class RemoveReadiness(val signal: ReadinessSignal) : Event {
+        override fun toJson() = buildJsonObject {
+            put("RemoveReadiness", buildJsonObject { put("signal", signal.name) })
+        }
+    }
+
     data class SetProfile(
         val progressionCadence: ProgressionCadence,
         val liftGoal: LiftGoal,
@@ -380,6 +435,9 @@ sealed interface Event {
         val weeklyVelocityDropMs: Double? = null,
         val failedKeySessions: Int? = null,
         val badDay: Boolean = false,
+        // When the review was submitted, unix seconds (backdatable). Baked into
+        // the persisted line so replay keeps the original stamp.
+        val observedAt: Long = System.currentTimeMillis() / 1000,
     ) : Event {
         override fun toJson() = buildJsonObject {
             put("SubmitReview", buildJsonObject {
@@ -408,6 +466,7 @@ sealed interface Event {
                 if (failedKeySessions != null)
                     put("failed_key_sessions", failedKeySessions)
                 put("bad_day", badDay)
+                put("observed_at", observedAt)
             })
         }
     }

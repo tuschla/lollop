@@ -1,4 +1,4 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -144,9 +144,17 @@ class RunTrackingService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        // Tapping the ongoing notification reopens MainActivity ONTO the live
+        // tracking screen (EXTRA_OPEN_TRACKING is consumed by CoachScreen).
+        // SINGLE_TOP so an already-running Activity gets onNewIntent instead of
+        // a duplicate instance; UPDATE_CURRENT so the extra survives re-notify.
         val tap = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE,
+            this,
+            0,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(MainActivity.EXTRA_OPEN_TRACKING, true),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setContentTitle("Tracking run")
@@ -166,8 +174,8 @@ class RunTrackingService : Service() {
     }
 
     companion object {
-        private const val ACTION_START = "de.tuschla.fitnessanlage.action.START"
-        private const val ACTION_STOP = "de.tuschla.fitnessanlage.action.STOP"
+        private const val ACTION_START = "app.milestone.action.START"
+        private const val ACTION_STOP = "app.milestone.action.STOP"
         private const val CHANNEL = "run_tracking"
         private const val NOTIF_ID = 1
 

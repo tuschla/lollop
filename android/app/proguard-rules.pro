@@ -2,9 +2,9 @@
 
 # --- JNI bridge -------------------------------------------------------------
 # libshared.so resolves callbacks by their fully-qualified JNI symbol name
-# (Java_de_tuschla_fitnessanlage_Core_update). Renaming or removing the Core
+# (Java_app_milestone_Core_update). Renaming or removing the Core
 # class or its native methods breaks symbol resolution → UnsatisfiedLinkError.
--keep class de.tuschla.fitnessanlage.Core {
+-keep class app.milestone.Core {
     native <methods>;
 }
 -keepclasseswithmembernames,includedescriptorclasses class * {
@@ -16,13 +16,13 @@
 # `$$serializer` classes and a synthetic `serializer()` method; R8 must keep
 # both plus the annotations the serializer reflects on.
 -keepattributes RuntimeVisibleAnnotations,AnnotationDefault,InnerClasses
--keepclassmembers class de.tuschla.fitnessanlage.** {
+-keepclassmembers class app.milestone.** {
     *** Companion;
 }
--keepclasseswithmembers class de.tuschla.fitnessanlage.** {
+-keepclasseswithmembers class app.milestone.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
--keep,includedescriptorclasses class de.tuschla.fitnessanlage.**$$serializer {
+-keep,includedescriptorclasses class app.milestone.**$$serializer {
     *;
 }
 

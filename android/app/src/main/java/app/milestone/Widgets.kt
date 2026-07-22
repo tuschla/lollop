@@ -1,4 +1,4 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -8,25 +8,20 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
@@ -37,16 +32,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,19 +48,64 @@ import java.util.Locale
 private val OnAccent = Color(0xFF141210)
 
 /**
- * Label + dropdown enum picker. Tapping the anchor opens a menu showing every
- * option at once, so the choice is a direct selection rather than a blind
- * tap-to-cycle (which hid all but the current value and forced N-1 taps to reach
- * a distant option).
+ * Full-width list of exclusive options: one comfortable (≥48dp) whole-row tap
+ * target per option, the selected row tinted + check-marked so the current state
+ * is unmissable. Replaces the old anchored dropdown-menu pickers, which were
+ * tiny, easy to fumble, and clipped long option lists.
  *
  * [display] only affects the on-screen text; callers that serialize the choice
- * still key off the variant itself (`.name`), so a friendly label here never
- * touches the wire contract.
+ * still key off the value itself (e.g. an enum's `.name`), so a friendly label
+ * here never touches the wire contract.
  *
- * [divideBefore] draws a divider above the first option for which it returns true,
- * so a caller can visually separate a subgroup, e.g. the readiness picker fences
- * off the medical red-flag signals from the routine metrics, since mis-tapping a
- * red flag has outsized (safety) consequences.
+ * [divideBefore] draws a divider above the first option for which it returns
+ * true, so a caller can visually fence a subgroup, e.g. the readiness picker
+ * separates the medical red-flag signals from the routine metrics, since
+ * mis-tapping a red flag has outsized (safety) consequences.
+ */
+@Composable
+fun <T> OptionList(
+    options: List<T>,
+    current: T,
+    display: (T) -> String,
+    divideBefore: (T) -> Boolean = { false },
+    onSelect: (T) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Space.Md.dp))
+            .background(BgTop),
+    ) {
+        options.forEach { value ->
+            if (divideBefore(value)) HorizontalDivider(color = OnBgFaint.copy(alpha = 0.3f))
+            val selected = value == current
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .background(if (selected) Accent.copy(alpha = 0.14f) else Color.Transparent)
+                    .clickable { onSelect(value) }
+                    .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    display(value),
+                    color = if (selected) Accent else OnBgBody,
+                    style = Type.Body,
+                    modifier = Modifier.weight(1f),
+                )
+                if (selected) Text("✓", color = Accent, style = Type.Body)
+            }
+        }
+    }
+}
+
+/**
+ * Label + enum picker as a tap-row that expands into a full-width [OptionList].
+ * The header row (label left, current value + chevron right) is a ≥48dp
+ * whole-row tap target; opening it reveals every option at once with the same
+ * generous targets, and picking one collapses the list. Same wire contract as
+ * ever, only the value's `.name` is serialized by callers.
  */
 @Composable
 fun <T : Enum<T>> EnumRow(
@@ -80,30 +116,33 @@ fun <T : Enum<T>> EnumRow(
     divideBefore: (T) -> Boolean = { false },
     onSelect: (T) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Row(
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
-        Text(label, color = OnBgBody, style = Type.Body)
-        // Box anchors the DropdownMenu to the button; the menu lists every option
-        // so a distant choice is one tap, not N-1 cycles through the others.
-        Box {
-            OutlinedButton(onClick = { expanded = true }) {
-                Text(display(current), style = Type.Body)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clip(RoundedCornerShape(Space.Md.dp))
+                .clickable { expanded = !expanded },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, color = OnBgBody, style = Type.Body)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(display(current), color = Accent, style = Type.Body)
+                Text(if (expanded) "⌄" else "›", color = OnBgFaint, style = Type.Body)
             }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                values.forEach { value ->
-                    if (divideBefore(value)) HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text(display(value), style = Type.Body) },
-                        onClick = {
-                            onSelect(value)
-                            expanded = false
-                        },
-                    )
-                }
+        }
+        if (expanded) {
+            OptionList(values, current, display, divideBefore) {
+                onSelect(it)
+                expanded = false
             }
         }
     }
@@ -258,124 +297,6 @@ fun FieldLabel(label: String, trailing: String? = null) {
 }
 
 /**
- * A big, directly-editable numeric value (device decimal keypad) plus a few
- * one-tap relative-adjust chips, the redesign's replacement for the weight/
- * distance/duration steppers. The typed text is the display source; every parse
- * that lands in `[min, max]` is pushed up via [onChange], and an adjust chip
- * commits `current ± delta` clamped. Locale-forced `.` decimal so the value means
- * the same to the '.'-formatted core on the same screen.
- *
- * Display and committed state must never diverge at submit time: an out-of-range
- * or unparseable (including cleared) entry flags the field invalid, danger
- * border + range hint here, and [onValidChange] tells the caller so it can block
- * its submit button. Leaving the field reconciles: a parseable entry clamps and
- * commits; garbage/empty snaps the display back to the committed value.
- */
-@Composable
-fun BigValueField(
-    label: String,
-    unit: String,
-    value: Double,
-    format: String,
-    min: Double,
-    max: Double,
-    adjustments: List<Double>,
-    onValidChange: (Boolean) -> Unit = {},
-    onChange: (Double) -> Unit,
-) {
-    var text by rememberSaveable { mutableStateOf(String.format(Locale.US, format, value)) }
-    var valid by rememberSaveable { mutableStateOf(true) }
-    val status = LocalStatusColors.current
-    fun setValid(v: Boolean) {
-        if (valid != v) {
-            valid = v
-            onValidChange(v)
-        }
-    }
-    fun commit(v: Double) {
-        val c = v.coerceIn(min, max)
-        text = String.format(Locale.US, format, c)
-        setValid(true)
-        onChange(c)
-    }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-        FieldLabel(label, unit)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(Space.Card.dp))
-                .background(BgElevated)
-                .then(
-                    if (!valid) {
-                        Modifier.border(1.dp, status.danger, RoundedCornerShape(Space.Card.dp))
-                    } else {
-                        Modifier
-                    },
-                )
-                .padding(Space.Card.dp),
-            horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            BasicTextField(
-                value = text,
-                onValueChange = { raw ->
-                    text = raw
-                    val parsed = raw.replace(',', '.').toDoubleOrNull()
-                    if (parsed != null && parsed in min..max) {
-                        setValid(true)
-                        onChange(parsed)
-                    } else {
-                        // The display now shows something the committed state does
-                        // not hold: flag it so the caller's submit stays blocked
-                        // until the field is corrected or loses focus (which
-                        // reconciles below).
-                        setValid(false)
-                    }
-                },
-                textStyle = Type.Display.copy(color = OnBgBody),
-                singleLine = true,
-                cursorBrush = SolidColor(Accent),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier
-                    .weight(1f)
-                    .onFocusChanged { st ->
-                        if (!st.isFocused && !valid) {
-                            val parsed = text.replace(',', '.').toDoubleOrNull()
-                            if (parsed != null) {
-                                // Parseable but out of range: clamp on commit.
-                                commit(parsed)
-                            } else {
-                                // Cleared/garbage: snap back to the committed value.
-                                text = String.format(Locale.US, format, value)
-                                setValid(true)
-                            }
-                        }
-                    },
-            )
-            adjustments.forEach { adj ->
-                Text(
-                    adjLabel(adj),
-                    color = OnBgMuted,
-                    style = Type.Caption.merge(TabularFigures),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(BgTop)
-                        .clickable { commit((text.replace(',', '.').toDoubleOrNull() ?: value) + adj) }
-                        .padding(horizontal = Space.Md.dp, vertical = Space.Md.dp),
-                )
-            }
-        }
-        if (!valid) {
-            Text(
-                "Enter ${String.format(Locale.US, format, min)}–${String.format(Locale.US, format, max)} $unit",
-                color = status.danger,
-                style = Type.Caption.merge(TabularFigures),
-            )
-        }
-    }
-}
-
-/**
  * Width-filling row of discrete choices, every option visible, one tap to pick,
  * the selection filled with the accent. For small fixed sets (RPE, HR%) where the
  * whole scale fits the screen. Use [ScrollableScaleRow] when the set is longer.
@@ -396,6 +317,7 @@ fun <T> ChoiceScaleRow(
             Box(
                 modifier = Modifier
                     .weight(1f)
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (selected) Accent else BgElevated)
                     .clickable { onSelect(opt) }
@@ -435,10 +357,11 @@ fun <T> ScrollableScaleRow(
             val selected = opt == current
             Box(
                 modifier = Modifier
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (selected) Accent else BgElevated)
                     .clickable { onSelect(opt) }
-                    .widthIn(min = 42.dp)
+                    .widthIn(min = 48.dp)
                     .padding(vertical = Space.Md.dp, horizontal = Space.Md.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -482,6 +405,151 @@ fun PresetChipsRow(options: List<String>, current: String, onPick: (String) -> U
     }
 }
 
+/**
+ * Big numeric value driven by the in-sheet [NumericKeypad] instead of the IME
+ * (design import: keypad log editors). The text buffer IS the display AND the
+ * submit source, the caller parses exactly what is shown, so the
+ * display-committed invariant holds structurally: an unparseable or
+ * out-of-range buffer flags [invalid] (danger border + range hint) and the
+ * caller blocks its submit. The one-tap relative-adjust chips stay.
+ * [active] outlines the field the shared keypad currently edits; tapping the
+ * field calls [onActivate] so a multi-field form can switch targets.
+ */
+@Composable
+fun KeypadValueField(
+    label: String,
+    unit: String,
+    text: String,
+    active: Boolean,
+    invalid: Boolean,
+    min: Double,
+    max: Double,
+    format: String,
+    adjustments: List<Double>,
+    onActivate: () -> Unit,
+    onText: (String) -> Unit,
+) {
+    val status = LocalStatusColors.current
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+        FieldLabel(label, unit)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(Space.Card.dp))
+                .background(BgElevated)
+                .then(
+                    when {
+                        invalid -> Modifier.border(1.dp, status.danger, RoundedCornerShape(Space.Card.dp))
+                        active -> Modifier.border(1.dp, Accent.copy(alpha = 0.6f), RoundedCornerShape(Space.Card.dp))
+                        else -> Modifier
+                    },
+                )
+                .clickable { onActivate() }
+                .padding(Space.Card.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text.ifEmpty { "0" },
+                color = if (text.isEmpty()) OnBgFaint else OnBgBody,
+                style = Type.Display.merge(TabularFigures),
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            adjustments.forEach { adj ->
+                Text(
+                    adjLabel(adj),
+                    color = OnBgMuted,
+                    style = Type.Caption.merge(TabularFigures),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(BgTop)
+                        .clickable {
+                            // Adjust from what is DISPLAYED (or the range floor when
+                            // the buffer is unparseable), clamped and re-formatted -
+                            // the display stays the single source of truth.
+                            val base = text.replace(',', '.').toDoubleOrNull() ?: min
+                            onActivate()
+                            onText(
+                                String.format(
+                                    Locale.US,
+                                    format,
+                                    (base + adj).coerceIn(min, max),
+                                ),
+                            )
+                        }
+                        .padding(horizontal = Space.Md.dp, vertical = Space.Md.dp),
+                )
+            }
+        }
+        if (invalid) {
+            Text(
+                "Enter ${String.format(Locale.US, format, min)}–${String.format(Locale.US, format, max)} $unit",
+                color = status.danger,
+                style = Type.Caption.merge(TabularFigures),
+            )
+        }
+    }
+}
+
+/**
+ * In-form 3×4 numeric keypad (1–9, decimal point, 0, backspace) for the log
+ * editors, big fixed targets that never scroll away under an IME. Emits raw
+ * keys; the caller owns the buffer (and its validation), so the keypad itself
+ * carries no numeric logic at all.
+ */
+@Composable
+fun NumericKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+    ) {
+        val rows = listOf("123", "456", "789", ".0⌫")
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+            ) {
+                row.forEach { key ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(Space.Md.dp))
+                            .background(BgTop)
+                            .clickable { if (key == '⌫') onBackspace() else onKey(key) }
+                            .padding(vertical = Space.Md.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "$key",
+                            color = if (key == '⌫' || key == '.') OnBgMuted else OnBgBody,
+                            style = Type.Title.merge(TabularFigures),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Apply one keypad key to a numeric text buffer. `replaceAll` implements
+ * calculator-style entry: the first digit after (re)activating a field starts
+ * a fresh number instead of appending to the old one. A second decimal point
+ * is ignored; a leading '.' becomes "0."; length is capped so the display
+ * can't overflow. Pure string editing, parsing/validation stay with the caller.
+ */
+fun editNumericBuffer(text: String, key: Char, replaceAll: Boolean): String {
+    val base = if (replaceAll) "" else text
+    if (key == '.') {
+        if (base.contains('.')) return base
+        return if (base.isEmpty()) "0." else "$base."
+    }
+    if (base.length >= 6) return base
+    return base + key
+}
+
 /** `+2.5` / `−5` label for a relative-adjust chip; trims a whole-number `.0`. */
 private fun adjLabel(a: Double): String {
     val mag = Math.abs(a)
@@ -521,55 +589,33 @@ fun Sparkline(values: List<Float>, color: Color, modifier: Modifier = Modifier) 
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.stroke(dp: Float): Float = dp * density
 
+/** Fixed tile height shared by every small tile in the app (Coach tool tiles,
+ *  History stat tiles, Today quick tiles) so mixed tile rows read as one grid. */
+val TileHeight = 84.dp
+
 /**
- * One compact stat cell for a horizontal summary strip (History week header):
- * a big tabular value with an optional small unit, over a muted caption. A
- * [RowScope] extension so callers place several across a row with `weight`.
+ * One compact stat cell for a horizontal summary strip (History week header),
+ * using the app-wide tile anatomy: overline label top-left, big tabular value
+ * (with optional small unit) bottom-left, fixed [TileHeight]. A [RowScope]
+ * extension so callers place several across a row with `weight`.
  */
 @Composable
 fun RowScope.StatTile(value: String, unit: String?, label: String) {
     Column(
         modifier = Modifier
             .weight(1f)
+            .height(TileHeight)
             .clip(RoundedCornerShape(Space.Card.dp))
             .background(BgElevated)
-            .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
-        verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+            .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp + Space.Xs.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
+        Text(label.uppercase(Locale.US), color = OnBgMuted, style = Type.Chip)
         Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, color = OnBgBody, style = Type.Title.merge(TabularFigures))
+            Text(value, color = OnBgBody, style = Type.Title.merge(TabularFigures), maxLines = 1)
             if (unit != null) {
                 Text(" $unit", color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
             }
-        }
-        Text(label, color = OnBgMuted, style = Type.Caption)
-    }
-}
-
-/**
- * A wrapping row of exclusive choice chips over an enum, every option visible,
- * the current one accent-filled, one tap selects. The tap-row picker uses this to
- * replace a dropdown/segmented control with recognition-first chips.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun <T> EnumChips(options: List<T>, current: T, label: (T) -> String, onSelect: (T) -> Unit) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
-        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
-    ) {
-        options.forEach { opt ->
-            val selected = opt == current
-            Text(
-                label(opt),
-                color = if (selected) OnAccent else OnBgMuted,
-                style = Type.Caption,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(100))
-                    .background(if (selected) Accent else BgTop)
-                    .clickable { onSelect(opt) }
-                    .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
-            )
         }
     }
 }

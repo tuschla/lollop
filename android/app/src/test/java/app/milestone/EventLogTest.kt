@@ -1,4 +1,4 @@
-package de.tuschla.fitnessanlage
+package app.milestone
 
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -36,6 +36,57 @@ class EventLogTest {
     private val clearCooper = "\"ClearCooper\""
     private val clearCriticalSpeed = "\"ClearCriticalSpeed\""
     private val clearApre = "\"ClearApre\""
+
+    private fun readiness(signal: ReadinessSignal, value: Double = 1.0) =
+        line(Event.SubmitReadiness(signal, value, observedAt = 0))
+
+    private fun removeReadiness(signal: ReadinessSignal) =
+        line(Event.RemoveReadiness(signal))
+
+    @Test
+    fun removeReadinessCancelsItsSubmitPairwise() {
+        // Mirrors log.rs Rule 0: pain + its undo are inert; the wellness input
+        // logged in between survives untouched.
+        val out = EventLog.compact(
+            listOf(
+                readiness(ReadinessSignal.Pain),
+                readiness(ReadinessSignal.WellnessZ, -1.5),
+                removeReadiness(ReadinessSignal.Pain),
+            ),
+        )
+        assertEquals(listOf(readiness(ReadinessSignal.WellnessZ, -1.5)), out)
+    }
+
+    @Test
+    fun removeReadinessCancelsOnlyTheLatestMatchingSubmit() {
+        val out = EventLog.compact(
+            listOf(
+                readiness(ReadinessSignal.Pain),
+                readiness(ReadinessSignal.Pain),
+                removeReadiness(ReadinessSignal.Pain),
+            ),
+        )
+        assertEquals(listOf(readiness(ReadinessSignal.Pain)), out)
+    }
+
+    @Test
+    fun unmatchedRemoveReadinessIsDroppedAlone() {
+        // Across a clear the remove has nothing left to cancel; before a
+        // submit it replays as a no-op, both drop just the remove itself.
+        val acrossClear = EventLog.compact(
+            listOf(
+                readiness(ReadinessSignal.Pain),
+                line(Event.ClearReadiness),
+                removeReadiness(ReadinessSignal.Pain),
+            ),
+        )
+        assertTrue(acrossClear.isEmpty())
+
+        val beforeSubmit = EventLog.compact(
+            listOf(removeReadiness(ReadinessSignal.Pain), readiness(ReadinessSignal.Pain)),
+        )
+        assertEquals(listOf(readiness(ReadinessSignal.Pain)), beforeSubmit)
+    }
 
     @Test
     fun clearDropsFamilyPrefixButKeepsLaterEntries() {
