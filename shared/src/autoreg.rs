@@ -1003,6 +1003,277 @@ fn recommend_t<T>(value: T, claim_id: &str) -> Recommended<T> {
     Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
 }
 
+// ---------------------------------------------------------------------------
+// Per-signal readiness states (KB-honest readiness summary; NO composite score)
+// ---------------------------------------------------------------------------
+
+/// Which picker/summary group a readiness signal belongs to. `"red_flag"` is
+/// the medical-referral / hard-stop block (Pain, Illness, RED-S, cardiac, bone
+/// stress) that shells must visually fence off from the routine `"metric"`
+/// signals, the fence is data-driven from here, not a shell-side predicate.
+pub fn signal_group(signal: ReadinessSignal) -> &'static str {
+    match signal {
+        ReadinessSignal::Pain
+        | ReadinessSignal::Illness
+        | ReadinessSignal::RedS
+        | ReadinessSignal::CardiacRedFlag
+        | ReadinessSignal::BoneStress => "red_flag",
+        _ => "metric",
+    }
+}
+
+/// Every readiness signal in summary order: routine metrics first, then the
+/// red-flag block, so a shell can divide exactly where the group changes.
+pub const ALL_SIGNALS: [ReadinessSignal; 15] = [
+    ReadinessSignal::Rpe,
+    ReadinessSignal::EstimatedOneRm,
+    ReadinessSignal::BarVelocity,
+    ReadinessSignal::VelocityLoss,
+    ReadinessSignal::WellnessZ,
+    ReadinessSignal::HrvLnRmssd,
+    ReadinessSignal::HrvCv,
+    ReadinessSignal::AerobicDecoupling,
+    ReadinessSignal::RestingHr,
+    ReadinessSignal::Soreness,
+    ReadinessSignal::Pain,
+    ReadinessSignal::Illness,
+    ReadinessSignal::RedS,
+    ReadinessSignal::CardiacRedFlag,
+    ReadinessSignal::BoneStress,
+];
+
+/// One readiness signal's latest observation with a qualitative state judged
+/// by the SAME File 06/08 thresholds the adjustment rules above use, never a
+/// new number, never a composite score (no 0–100 readiness index exists in the
+/// KB, so none is emitted; HARD RULE 1).
+pub struct SignalState {
+    pub signal: ReadinessSignal,
+    pub value: f64,
+    pub streak: u8,
+    /// Qualitative state, e.g. `"suppressed"` / `"elevated +10 bpm - rest"`.
+    pub state: String,
+    /// Registry claim id of the rule whose threshold judged the state. `None`
+    /// when the row is a plain factual echo (a recorded-only signal with no
+    /// gating rule, or an explicit all-clear), those judge nothing, so they
+    /// carry no evidence tag.
+    pub claim: Option<&'static str>,
+}
+
+/// Latest state of every signal that has at least one observation, in
+/// [`ALL_SIGNALS`] order. Pure re-statement of the rule layer: each state
+/// string is decided by the same predicate/threshold that drives the matching
+/// adjustment, and cites the same claim.
+pub fn signal_states(
+    inputs: &[ReadinessInput],
+    goal: Option<&Goal>,
+    high_load_block: bool,
+) -> Vec<SignalState> {
+    let mut out = Vec::new();
+    for &signal in ALL_SIGNALS.iter() {
+        let Some(input) = latest_input(inputs, signal) else {
+            continue;
+        };
+        let v = input.value;
+        let streak = input.streak;
+        let (state, claim): (String, Option<&'static str>) = match signal {
+            // autoreg-001/002/004/005: signed RPE delta vs target.
+            ReadinessSignal::Rpe => {
+                let s = if v >= 2.0 {
+                    "well above target"
+                } else if v >= 1.0 {
+                    "above target"
+                } else if v <= -2.0 {
+                    "well below target"
+                } else if v <= -1.0 {
+                    "below target"
+                } else {
+                    "on target"
+                };
+                (s.into(), Some("AUTOREG-RIR-001"))
+            }
+            // autoreg-022/006/007: e1RM ratio vs baseline.
+            ReadinessSignal::EstimatedOneRm => {
+                if v < 0.90 && streak >= 2 {
+                    ("down >10% for 2+ sessions".into(), Some("AUTOREG-PCT-001"))
+                } else if v < 0.95 {
+                    ("down".into(), Some("AUTOREG-E1RM-GATE-001"))
+                } else if v > 1.05 {
+                    ("up".into(), Some("AUTOREG-PCT-001"))
+                } else {
+                    ("stable".into(), Some("AUTOREG-E1RM-GATE-001"))
+                }
+            }
+            // Recorded only: no autoregulation gate exists in the KB yet.
+            ReadinessSignal::BarVelocity | ReadinessSignal::HrvCv => ("recorded".into(), None),
+            // autoreg-010: goal-dependent velocity-loss termination band.
+            ReadinessSignal::VelocityLoss => {
+                if v >= vl_threshold_pct(goal) {
+                    ("over threshold".into(), Some("AUTOREG-VL-001"))
+                } else {
+                    ("within threshold".into(), Some("AUTOREG-VL-001"))
+                }
+            }
+            // autoreg-030 + §5 tier 4.
+            ReadinessSignal::WellnessZ => {
+                if v <= -1.5 || (v <= -1.0 && streak >= 3) {
+                    ("suppressed".into(), Some("WELLNESS-001"))
+                } else if v <= -1.0 {
+                    ("low (single day)".into(), Some("WELLNESS-001"))
+                } else {
+                    ("normal".into(), Some("WELLNESS-001"))
+                }
+            }
+            // autoreg-028 SWC band; autoreg-029 saturation in a high-load block.
+            ReadinessSignal::HrvLnRmssd => {
+                if v < -0.5 {
+                    ("suppressed".into(), Some("HRV-001"))
+                } else if v > 0.5 && high_load_block {
+                    (
+                        "above band - hold load adds".into(),
+                        Some("AUTOREG-HRV-SAT-001"),
+                    )
+                } else if v > 0.5 {
+                    ("above band".into(), Some("HRV-001"))
+                } else {
+                    ("in band".into(), Some("HRV-001"))
+                }
+            }
+            // autoreg-037, valid only for efforts >20 min (File 06 signal spec).
+            ReadinessSignal::AerobicDecoupling => {
+                if input
+                    .effort_min
+                    .is_some_and(|d| d <= DECOUPLING_MIN_EFFORT_MIN)
+                {
+                    ("not valid (effort ≤20 min)".into(), Some("RUN-DECOUPLE-001"))
+                } else if v > 10.0 {
+                    ("high".into(), Some("RUN-DECOUPLE-001"))
+                } else {
+                    ("normal".into(), Some("RUN-DECOUPLE-001"))
+                }
+            }
+            // autoreg-041 stop / autoreg-040 two-day downgrade.
+            ReadinessSignal::RestingHr => {
+                if v >= 10.0 {
+                    ("elevated +10 bpm - rest".into(), Some("AUTOREG-RHR-STOP-001"))
+                } else if (5.0..10.0).contains(&v) && streak >= 2 {
+                    ("elevated 2+ days".into(), Some("AUTOREG-RHR-DOWN-001"))
+                } else if (5.0..10.0).contains(&v) {
+                    (
+                        "elevated (single day - likely noise)".into(),
+                        Some("AUTOREG-RHR-DOWN-001"),
+                    )
+                } else {
+                    ("normal".into(), Some("AUTOREG-RHR-DOWN-001"))
+                }
+            }
+            // autoreg-030 second clause: soreness item ≥6/7.
+            ReadinessSignal::Soreness => {
+                if v >= 6.0 {
+                    ("high".into(), Some("WELLNESS-001"))
+                } else {
+                    ("normal".into(), Some("WELLNESS-001"))
+                }
+            }
+            // File 08 Table 4.1 graded pain model (mirrors pain_gate).
+            ReadinessSignal::Pain => {
+                if v <= 0.0 {
+                    ("clear".into(), None)
+                } else {
+                    match input.pain {
+                        None => ("red flag - stop".into(), Some("SAFE-PAIN-001")),
+                        Some(d) => match d.kind {
+                            PainKind::SharpJoint => {
+                                if d.persists {
+                                    (
+                                        "red flag - defer to a professional".into(),
+                                        Some("SAFE-PAIN-STRUCT-001"),
+                                    )
+                                } else {
+                                    ("red flag - stop".into(), Some("SAFE-PAIN-STRUCT-001"))
+                                }
+                            }
+                            PainKind::TendonLoadRelated => {
+                                if tendon_reactive(&d) {
+                                    if d.persists {
+                                        (
+                                            "reactive, persisting - defer".into(),
+                                            Some("SAFE-TENDON-001"),
+                                        )
+                                    } else {
+                                        ("reactive - reduce load".into(), Some("SAFE-TENDON-001"))
+                                    }
+                                } else {
+                                    (
+                                        "tolerable - modify & monitor".into(),
+                                        Some("SAFE-TENDON-001"),
+                                    )
+                                }
+                            }
+                            PainKind::Doms => {
+                                ("DOMS - normal training discomfort".into(), None)
+                            }
+                            PainKind::Other => {
+                                if d.persists {
+                                    (
+                                        "red flag - defer to a professional".into(),
+                                        Some("SAFE-PAIN-001"),
+                                    )
+                                } else {
+                                    ("red flag - stop".into(), Some("SAFE-PAIN-001"))
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+            // autoreg-045/046 neck check.
+            ReadinessSignal::Illness => match IllnessSeverity::from_value(v) {
+                IllnessSeverity::BelowNeckOrFever => (
+                    "below-neck / fever - do not train".into(),
+                    Some("ILLNESS-NECK-001"),
+                ),
+                IllnessSeverity::AboveNeck => {
+                    ("above-neck - downgrade".into(), Some("ILLNESS-NECK-001"))
+                }
+                IllnessSeverity::None => ("clear".into(), None),
+            },
+            // File 08 medical-referral red flags (safety-049/043/040).
+            ReadinessSignal::RedS => {
+                if v > 0.0 {
+                    ("red flag - defer to a professional".into(), Some("SAFE-REDS-001"))
+                } else {
+                    ("clear".into(), None)
+                }
+            }
+            ReadinessSignal::CardiacRedFlag => {
+                if v > 0.0 {
+                    ("red flag - seek medical clearance".into(), Some("SAFE-CVD-001"))
+                } else {
+                    ("clear".into(), None)
+                }
+            }
+            ReadinessSignal::BoneStress => {
+                if v > 0.0 {
+                    (
+                        "red flag - stop impact, urgent referral".into(),
+                        Some("SAFE-BSI-001"),
+                    )
+                } else {
+                    ("clear".into(), None)
+                }
+            }
+        };
+        out.push(SignalState {
+            signal,
+            value: v,
+            streak,
+            state,
+            claim,
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

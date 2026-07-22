@@ -288,6 +288,12 @@ pub struct SessionReview {
     pub weeks_flat: Option<u8>,
     /// Target missed on a genuine high-RPE off day.
     pub bad_day: bool,
+    /// When the review was submitted, unix seconds; shell-supplied (the core
+    /// holds no clock), `#[serde(default)]` keeps pre-timestamp persisted
+    /// events replayable (decode as 0 = undated). Provenance only, no rule
+    /// consumes it yet.
+    #[serde(default)]
+    pub observed_at: i64,
 }
 
 #[derive(Default)]
@@ -403,6 +409,10 @@ pub enum Event {
     SubmitReadiness(ReadinessInput),
     /// Drop all accumulated inputs (new day / new session).
     ClearReadiness,
+    /// Undo for one accidental report: drop the most recent input carrying
+    /// `signal` (e.g. a mis-tapped Pain red flag), leaving unrelated inputs
+    /// intact. No-op when no such input exists.
+    RemoveReadiness { signal: ReadinessSignal },
     /// Log one completed lift set (weight in kg, reps, session RPE).
     LogSet {
         exercise: String,
@@ -710,6 +720,70 @@ pub struct ViewModel {
     /// readiness input exists.
     #[serde(default)]
     pub autoreg_source: Option<AdjustmentView>,
+    /// KB-honest per-signal readiness summary: the latest state of every
+    /// observed readiness signal, judged by the SAME File 06/08 thresholds the
+    /// adjustment rules use, each citing the rule's evidence. Deliberately NO
+    /// composite 0–100 readiness score, the KB defines none (HARD RULE 1).
+    /// Metrics first, then the red-flag block (see `signal_groups`).
+    #[serde(default)]
+    pub readiness_summary: Vec<ReadinessSignalView>,
+    /// The single highest-priority call for today (usability-ia-spec §7):
+    /// safety hold > deload/adjustment > session feedback > all-clear default.
+    /// Prioritization is coaching logic, so it lives here, not in shells.
+    #[serde(default)]
+    pub today_headline: TodayHeadlineView,
+    /// Static signal→group metadata for every readiness signal (in picker
+    /// order, metrics before red flags), so the shell's red-flag fence in the
+    /// readiness picker is data-driven from the core, not a shell predicate.
+    #[serde(default)]
+    pub signal_groups: Vec<SignalGroupView>,
+}
+
+/// One readiness signal's latest observation, flattened for shells: the raw
+/// value plus a qualitative state string decided by the same KB threshold that
+/// drives the matching adjustment rule (autoreg.rs `signal_states`). The
+/// evidence fields cite that rule; they are empty (grade `""`) for the plain
+/// factual rows ("recorded"/"clear") that judge nothing.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct ReadinessSignalView {
+    /// Wire name of the signal, e.g. `"HrvLnRmssd"` (serde unit-variant name).
+    pub signal: String,
+    /// `"metric"` or `"red_flag"` (medical-referral / hard-stop block).
+    pub group: String,
+    pub value: f64,
+    pub streak: u8,
+    /// Qualitative state, e.g. `"suppressed"`, `"elevated 2+ days"`.
+    pub state: String,
+    pub grade: String,
+    pub citation: String,
+    pub confidence: f32,
+    pub safety_critical: bool,
+    pub contested: bool,
+}
+
+/// The core-owned "today's call" headline (usability-ia-spec §7 PROPOSED item,
+/// now shipped): one field carrying the highest-priority call for today so no
+/// shell re-implements the ranking. `kind` is the priority bucket that won:
+/// `"safety_hold"` > `"adjustment"` > `"feedback"` > `"all_clear"`. The
+/// all-clear default states the ABSENCE of any triggered rule: it makes no
+/// evidence-bearing claim, so its evidence fields are empty.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct TodayHeadlineView {
+    pub kind: String,
+    pub summary: String,
+    pub grade: String,
+    pub citation: String,
+    pub confidence: f32,
+    pub safety_critical: bool,
+    pub contested: bool,
+}
+
+/// Signal→group row for the static readiness-picker metadata (`signal_groups`).
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct SignalGroupView {
+    pub signal: String,
+    /// `"metric"` or `"red_flag"`.
+    pub group: String,
 }
 
 /// A goal-race finish prediction, flattened for shells. Combines a Daniels VDOT
@@ -885,6 +959,11 @@ impl App for Engine {
         match event {
             Event::SubmitReadiness(input) => model.inputs.push(input),
             Event::ClearReadiness => model.inputs.clear(),
+            Event::RemoveReadiness { signal } => {
+                if let Some(pos) = model.inputs.iter().rposition(|i| i.signal == signal) {
+                    model.inputs.remove(pos);
+                }
+            }
             Event::LogSet {
                 exercise,
                 weight_kg,
@@ -1109,28 +1188,50 @@ impl App for Engine {
             .map(|r| review_views(r, &review_recs, model.profile.as_ref()))
             .unwrap_or_default();
 
+        let adjustments: Vec<AdjustmentView> = recommended.iter().map(to_view).collect();
+        let feedback = model.review.as_ref().map(|r| {
+            build_feedback(
+                r,
+                latest_track_split(model),
+                latest_run_spike_frac(model),
+                advanced_user,
+                female_user,
+            )
+        });
+        let today_headline = build_headline(
+            train_blocked,
+            &gates,
+            &recommended,
+            &review_recs,
+            &adjustments,
+            &review_adjustments,
+            feedback.as_ref(),
+        );
+
+        // History views in chronological (observed_at) order, stable for ties
+        // and undated (0) legacy entries, so a backdated log slots into its
+        // true position, the e1RM delta chain (lift_views) and the shells'
+        // oldest→newest rendering follow log TIME, not submission order.
+        let runs = {
+            let mut ordered: Vec<&LoggedRun> = model.runs.iter().collect();
+            ordered.sort_by_key(|r| r.observed_at);
+            ordered.into_iter().map(to_run_view).collect()
+        };
+
         ViewModel {
             safety_tier: safety_tier.map(|t| format!("{t:?}")),
             train_blocked,
-            adjustments: recommended.iter().map(to_view).collect(),
+            adjustments,
             review_adjustments,
             input_count: model.inputs.len(),
             lifts: lift_views(&model.sets),
-            runs: model.runs.iter().map(to_run_view).collect(),
+            runs,
             guidance: model
                 .profile
                 .as_ref()
                 .map(build_guidance)
                 .unwrap_or_default(),
-            feedback: model.review.as_ref().map(|r| {
-                build_feedback(
-                    r,
-                    latest_track_split(model),
-                    latest_run_spike_frac(model),
-                    advanced_user,
-                    female_user,
-                )
-            }),
+            feedback,
             reference: build_reference(),
             profile: model.profile.clone(),
             race_prediction: model
@@ -1168,6 +1269,9 @@ impl App for Engine {
             trend: model.review.as_ref().and_then(build_trend),
             provisional: build_provisional(model),
             autoreg_source: build_autoreg_source(model),
+            readiness_summary: build_readiness_summary(model, goal.as_ref(), high_load_block),
+            today_headline,
+            signal_groups: build_signal_groups(),
         }
     }
 }
@@ -1935,12 +2039,15 @@ fn review_views(
 /// not carry an explicit figure: the measurement is descriptive (like pace or
 /// zone), so feeding it to the resolver introduces no unevidenced claim.
 fn latest_track_split(model: &Model) -> Option<f64> {
+    // Chronologically latest tracked run (ties → most recently logged), so a
+    // backdated GPS run never masquerades as "the latest session" here.
     model
         .runs
         .iter()
-        .rev()
-        .find(|r| !r.track.is_empty())
-        .and_then(|r| running::track_positive_split_pct(&r.track, running::MAX_GPS_ACCURACY_M))
+        .enumerate()
+        .filter(|(_, r)| !r.track.is_empty())
+        .max_by_key(|(i, r)| (r.observed_at, *i))
+        .and_then(|(_, r)| running::track_positive_split_pct(&r.track, running::MAX_GPS_ACCURACY_M))
 }
 
 /// Fraction by which the most recent logged run's distance exceeds the athlete's
@@ -1950,7 +2057,13 @@ fn latest_track_split(model: &Model) -> Option<f64> {
 /// Lets a logged over-distance run drive the safety gate even when the review
 /// omits an explicit figure, mirroring the positive-split fallback.
 fn latest_run_spike_frac(model: &Model) -> Option<f64> {
-    let r = model.runs.last()?;
+    // Chronologically latest run (ties → most recently logged): with
+    // backdating, "the most recent logged run" means log TIME, not log order.
+    let (_, r) = model
+        .runs
+        .iter()
+        .enumerate()
+        .max_by_key(|(i, r)| (r.observed_at, *i))?;
     if r.longest_recent_km <= 0.0 {
         return None;
     }
@@ -4606,13 +4719,162 @@ fn build_hr_zones(q: &HrZoneQuery) -> Vec<GuidanceView> {
 /// same exercise (exact name match), the core holds no session boundary for
 /// sets, so set-over-set is the deterministic proxy for session-over-session.
 fn lift_views(sets: &[LoggedSet]) -> Vec<LiftResultView> {
+    // Chronological (observed_at) order, stable for ties and undated (0)
+    // legacy entries: a backdated set slots into its true position, so the
+    // per-exercise e1RM delta chain compares against the chronologically
+    // previous set, not whatever happened to be logged before it.
+    let mut ordered: Vec<&LoggedSet> = sets.iter().collect();
+    ordered.sort_by_key(|s| s.observed_at);
     let mut last_e1rm: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
-    sets.iter()
+    ordered
+        .into_iter()
         .map(|s| {
             let prev = last_e1rm.get(s.exercise.as_str()).copied();
             let view = to_lift_view(s, prev);
             last_e1rm.insert(s.exercise.as_str(), view.e1rm_kg);
             view
+        })
+        .collect()
+}
+
+/// Evidence-grade rank for headline priority (mirrors `EvidenceGrade` order in
+/// schema.rs: Strong > Moderate > Weak > ExpertOpinion > MarketingMyth). Works
+/// on the flattened wire string; an unknown grade sorts last.
+fn grade_rank(grade: &str) -> i32 {
+    match grade {
+        "Strong" => 4,
+        "Moderate" => 3,
+        "Weak" => 2,
+        "ExpertOpinion" => 1,
+        "MarketingMyth" => 0,
+        _ => -1,
+    }
+}
+
+/// The single highest-priority call for today (usability-ia-spec §7): a
+/// train-blocking safety hold wins outright; else the strongest triggered
+/// adjustment (safety-critical first, then grade, then confidence, the same
+/// ranking shells previously re-implemented); else the session feedback; else
+/// the all-clear default, which asserts no claim and carries no evidence tag.
+fn build_headline(
+    train_blocked: bool,
+    gates: &[Recommended<Adjustment>],
+    recommended: &[Recommended<Adjustment>],
+    review_recs: &[Recommended<Adjustment>],
+    adjustments: &[AdjustmentView],
+    review_adjustments: &[AdjustmentView],
+    feedback: Option<&FeedbackView>,
+) -> TodayHeadlineView {
+    let from_adjustment = |kind: &str, v: &AdjustmentView| TodayHeadlineView {
+        kind: kind.to_string(),
+        summary: v.summary.clone(),
+        grade: v.grade.clone(),
+        citation: v.citation.clone(),
+        confidence: v.confidence,
+        safety_critical: v.safety_critical,
+        contested: v.contested,
+    };
+    if train_blocked {
+        let blocks = |r: &&Recommended<Adjustment>| {
+            matches!(
+                r.value,
+                Adjustment::Stop | Adjustment::RestDay | Adjustment::Defer { .. }
+            )
+        };
+        // Same dominance order view() uses for the tier: onboarding gates
+        // (medical referral), then readiness stops, then review deferrals.
+        if let Some(stop) = gates
+            .iter()
+            .find(blocks)
+            .or_else(|| recommended.iter().find(blocks))
+            .or_else(|| review_recs.iter().find(blocks))
+        {
+            return from_adjustment("safety_hold", &to_view(stop));
+        }
+    }
+    let best = adjustments
+        .iter()
+        .chain(review_adjustments.iter())
+        .max_by(|a, b| {
+            (a.safety_critical, grade_rank(&a.grade))
+                .cmp(&(b.safety_critical, grade_rank(&b.grade)))
+                .then(
+                    a.confidence
+                        .partial_cmp(&b.confidence)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+        });
+    if let Some(v) = best {
+        return from_adjustment("adjustment", v);
+    }
+    if let Some(fb) = feedback {
+        return TodayHeadlineView {
+            kind: "feedback".to_string(),
+            summary: fb.message.clone(),
+            grade: fb.grade.clone(),
+            citation: fb.citation.clone(),
+            confidence: fb.confidence,
+            safety_critical: fb.safety_critical,
+            contested: fb.contested,
+        };
+    }
+    TodayHeadlineView {
+        kind: "all_clear".to_string(),
+        // States the absence of any triggered rule, not a graded claim, so
+        // no evidence tag is attached (empty grade; shells render no chip).
+        summary: "Train as planned - no adjustment triggered.".to_string(),
+        ..TodayHeadlineView::default()
+    }
+}
+
+/// Flatten the autoreg per-signal states into wire rows, resolving each row's
+/// judging claim to its registry evidence (rows with no judging rule keep an
+/// empty tag, they state facts, not recommendations).
+fn build_readiness_summary(
+    model: &Model,
+    goal: Option<&Goal>,
+    high_load_block: bool,
+) -> Vec<ReadinessSignalView> {
+    autoreg::signal_states(&model.inputs, goal, high_load_block)
+        .into_iter()
+        .map(|s| {
+            let (grade, citation, confidence, safety_critical, contested) = match s.claim {
+                Some(id) => {
+                    let g = graded((), id);
+                    (
+                        format!("{:?}", g.evidence.grade),
+                        g.evidence.citation.reference.clone(),
+                        g.confidence.score,
+                        g.confidence.safety_critical,
+                        g.confidence.contested,
+                    )
+                }
+                None => (String::new(), String::new(), 0.0, false, false),
+            };
+            ReadinessSignalView {
+                signal: format!("{:?}", s.signal),
+                group: autoreg::signal_group(s.signal).to_string(),
+                value: s.value,
+                streak: s.streak,
+                state: s.state,
+                grade,
+                citation,
+                confidence,
+                safety_critical,
+                contested,
+            }
+        })
+        .collect()
+}
+
+/// Static signal→group metadata for every readiness signal, in picker order
+/// (metrics before the red-flag block).
+fn build_signal_groups() -> Vec<SignalGroupView> {
+    autoreg::ALL_SIGNALS
+        .iter()
+        .map(|&s| SignalGroupView {
+            signal: format!("{s:?}"),
+            group: autoreg::signal_group(s).to_string(),
         })
         .collect()
 }
@@ -5306,13 +5568,17 @@ mod tests {
         assert_eq!(vm.runs[0].observed_at, 1_700_000_500);
 
         // Absent from the wire (old persisted event) → 0, not a decode failure.
+        // The view lists are chronological by observed_at, so the undated (0)
+        // entry sorts BEFORE the dated set, not after it in append order.
         let undated: Event = serde_json::from_str(
             r#"{"LogSet":{"exercise":"Bench","weight_kg":60.0,"reps":8,"rpe":7.0}}"#,
         )
         .expect("pre-timestamp LogSet still decodes");
         app.update(undated, &mut model).expect_only_render();
         let vm = app.view(&model);
-        assert_eq!(vm.lifts[1].observed_at, 0);
+        assert_eq!(vm.lifts[0].observed_at, 0);
+        assert_eq!(vm.lifts[0].exercise, "Bench");
+        assert_eq!(vm.lifts[1].observed_at, 1_700_000_000);
     }
 
     #[test]
@@ -8682,5 +8948,332 @@ mod tests {
             "{:#?}",
             vm.review_adjustments
         );
+    }
+
+    // ── Today headline (usability-ia-spec §7: core-owned "today's call") ──
+
+    #[test]
+    fn headline_defaults_to_train_as_planned_with_no_evidence_claim() {
+        let app = Engine;
+        let model = Model::default();
+        let vm = app.view(&model);
+        assert_eq!(vm.today_headline.kind, "all_clear");
+        assert!(vm.today_headline.summary.contains("Train as planned"));
+        // The all-clear asserts the ABSENCE of a triggered rule: no evidence
+        // tag may be fabricated for it (HARD RULE 1/2).
+        assert!(vm.today_headline.grade.is_empty());
+        assert!(vm.today_headline.citation.is_empty());
+    }
+
+    #[test]
+    fn headline_prioritizes_safety_hold_over_adjustments_and_feedback() {
+        let app = Engine;
+        let mut model = Model::default();
+        // A routine adjustment trigger AND a hard stop: the stop must win.
+        app.update(
+            Event::SubmitReadiness(input(ReadinessSignal::HrvLnRmssd, -1.0)),
+            &mut model,
+        )
+        .expect_only_render();
+        app.update(
+            Event::SubmitReadiness(input(ReadinessSignal::Pain, 1.0)),
+            &mut model,
+        )
+        .expect_only_render();
+        app.update(
+            Event::SubmitReview(SessionReview {
+                lift: Some(LiftExec {
+                    reps_met: true,
+                    rir_actual: 2,
+                    rir_target: 2,
+                }),
+                ..SessionReview::default()
+            }),
+            &mut model,
+        )
+        .expect_only_render();
+        let vm = app.view(&model);
+        assert!(vm.train_blocked);
+        assert_eq!(vm.today_headline.kind, "safety_hold");
+        assert!(
+            vm.today_headline.summary.contains("Stop"),
+            "{}",
+            vm.today_headline.summary
+        );
+        assert!(vm.today_headline.safety_critical);
+        assert!(!vm.today_headline.grade.is_empty());
+    }
+
+    #[test]
+    fn headline_falls_to_adjustment_then_feedback() {
+        let app = Engine;
+        let mut model = Model::default();
+        // Non-blocking readiness trigger → adjustment headline.
+        app.update(
+            Event::SubmitReadiness(input(ReadinessSignal::HrvLnRmssd, -1.0)),
+            &mut model,
+        )
+        .expect_only_render();
+        let vm = app.view(&model);
+        assert_eq!(vm.today_headline.kind, "adjustment");
+        assert!(
+            vm.today_headline.summary.contains("easier session"),
+            "{}",
+            vm.today_headline.summary
+        );
+        assert!(!vm.today_headline.grade.is_empty());
+
+        // Readiness cleared, review present → the session feedback leads.
+        app.update(Event::ClearReadiness, &mut model)
+            .expect_only_render();
+        app.update(
+            Event::SubmitReview(SessionReview {
+                lift: Some(LiftExec {
+                    reps_met: true,
+                    rir_actual: 2,
+                    rir_target: 2,
+                }),
+                ..SessionReview::default()
+            }),
+            &mut model,
+        )
+        .expect_only_render();
+        let vm = app.view(&model);
+        assert_eq!(vm.today_headline.kind, "feedback");
+        assert_eq!(
+            vm.today_headline.summary,
+            vm.feedback.as_ref().unwrap().message
+        );
+    }
+
+    // ── Per-signal readiness summary (KB-honest; no composite score) ──
+
+    #[test]
+    fn readiness_summary_states_cite_the_judging_rule() {
+        let app = Engine;
+        let mut model = Model::default();
+        app.update(
+            Event::SubmitReadiness(input(ReadinessSignal::HrvLnRmssd, -1.0)),
+            &mut model,
+        )
+        .expect_only_render();
+        app.update(
+            Event::SubmitReadiness(input(ReadinessSignal::RestingHr, 12.0)),
+            &mut model,
+        )
+        .expect_only_render();
+        app.update(
+            Event::SubmitReadiness(input(ReadinessSignal::Pain, 1.0)),
+            &mut model,
+        )
+        .expect_only_render();
+        let vm = app.view(&model);
+        assert_eq!(vm.readiness_summary.len(), 3);
+
+        let hrv = vm
+            .readiness_summary
+            .iter()
+            .find(|s| s.signal == "HrvLnRmssd")
+            .unwrap();
+        assert_eq!(hrv.state, "suppressed");
+        assert_eq!(hrv.group, "metric");
+        assert!(!hrv.grade.is_empty(), "state judged by a rule carries its evidence");
+        assert!(!hrv.citation.is_empty());
+
+        let rhr = vm
+            .readiness_summary
+            .iter()
+            .find(|s| s.signal == "RestingHr")
+            .unwrap();
+        assert!(rhr.state.contains("+10 bpm"), "{}", rhr.state);
+        assert!(rhr.safety_critical);
+
+        let pain = vm
+            .readiness_summary
+            .iter()
+            .find(|s| s.signal == "Pain")
+            .unwrap();
+        assert_eq!(pain.group, "red_flag");
+        assert!(pain.state.contains("red flag"), "{}", pain.state);
+    }
+
+    #[test]
+    fn readiness_summary_all_clear_rows_carry_no_fabricated_evidence() {
+        let app = Engine;
+        let mut model = Model::default();
+        // A withdrawn/absent pain report ("clear") and a recorded-only signal
+        // judge nothing: their evidence fields must stay empty rather than
+        // borrowing a rule's citation they did not run through.
+        app.update(
+            Event::SubmitReadiness(input(ReadinessSignal::Pain, 0.0)),
+            &mut model,
+        )
+        .expect_only_render();
+        app.update(
+            Event::SubmitReadiness(input(ReadinessSignal::BarVelocity, 0.5)),
+            &mut model,
+        )
+        .expect_only_render();
+        let vm = app.view(&model);
+        let pain = vm
+            .readiness_summary
+            .iter()
+            .find(|s| s.signal == "Pain")
+            .unwrap();
+        assert_eq!(pain.state, "clear");
+        assert!(pain.grade.is_empty());
+        let bv = vm
+            .readiness_summary
+            .iter()
+            .find(|s| s.signal == "BarVelocity")
+            .unwrap();
+        assert_eq!(bv.state, "recorded");
+        assert!(bv.grade.is_empty());
+    }
+
+    #[test]
+    fn signal_groups_metadata_fences_the_red_flag_block() {
+        let app = Engine;
+        let vm = app.view(&Model::default());
+        assert_eq!(vm.signal_groups.len(), 15);
+        for red in ["Pain", "Illness", "RedS", "CardiacRedFlag", "BoneStress"] {
+            assert_eq!(
+                vm.signal_groups
+                    .iter()
+                    .find(|g| g.signal == red)
+                    .unwrap()
+                    .group,
+                "red_flag"
+            );
+        }
+        // Order contract: every metric precedes every red flag, so a shell can
+        // divide exactly where the group changes.
+        let first_red = vm
+            .signal_groups
+            .iter()
+            .position(|g| g.group == "red_flag")
+            .unwrap();
+        assert!(vm.signal_groups[..first_red].iter().all(|g| g.group == "metric"));
+        assert!(vm.signal_groups[first_red..].iter().all(|g| g.group == "red_flag"));
+    }
+
+    // ── Backdating: out-of-order logging is ordered by observed_at ──
+
+    #[test]
+    fn backdated_set_slots_into_the_e1rm_chain_chronologically() {
+        let app = Engine;
+        let mut model = Model::default();
+        // Today's set first, then a BACKDATED earlier set of the same lift.
+        app.update(
+            Event::LogSet {
+                exercise: "Back Squat".into(),
+                weight_kg: 100.0,
+                reps: 5,
+                rpe: 8.0,
+                observed_at: 2_000_000,
+            },
+            &mut model,
+        )
+        .expect_only_render();
+        app.update(
+            Event::LogSet {
+                exercise: "Back Squat".into(),
+                weight_kg: 95.0,
+                reps: 5,
+                rpe: 8.0,
+                observed_at: 1_000_000,
+            },
+            &mut model,
+        )
+        .expect_only_render();
+        let vm = app.view(&model);
+        // Chronological view order: the backdated set renders first…
+        assert_eq!(vm.lifts[0].observed_at, 1_000_000);
+        assert_eq!(vm.lifts[0].weight_kg, 95.0);
+        assert!(vm.lifts[0].e1rm_delta_kg.is_none(), "first in time has no baseline");
+        // …and the later set's delta compares against it (95→100 kg ⇒ up).
+        assert_eq!(vm.lifts[1].observed_at, 2_000_000);
+        assert_eq!(vm.lifts[1].e1rm_direction.as_deref(), Some("up"));
+        let expected = ((strength::e1rm_epley(100.0, 5) * 10.0).round()
+            - (strength::e1rm_epley(95.0, 5) * 10.0).round())
+            / 10.0;
+        assert!(
+            (vm.lifts[1].e1rm_delta_kg.unwrap() - expected).abs() < 1e-9,
+            "delta {:?} vs expected {expected}",
+            vm.lifts[1].e1rm_delta_kg
+        );
+    }
+
+    #[test]
+    fn backdated_run_weekly_report_matches_in_order_logging() {
+        let app = Engine;
+        // Reference: two runs logged oldest-first.
+        let mut in_order = Model::default();
+        let prev_week_at = 10 * WEEK_SEC + 1000;
+        let cur_week_at = 11 * WEEK_SEC + 1000;
+        for (at, km) in [(prev_week_at, 10.0), (cur_week_at, 11.0)] {
+            app.update(
+                Event::LogRun {
+                    distance_km: km,
+                    duration_min: km * 6.0,
+                    hr_pct_max: 70.0,
+                    longest_recent_km: 12.0,
+                    observed_at: at,
+                },
+                &mut in_order,
+            )
+            .expect_only_render();
+        }
+        // Same data, backdated: current week logged first.
+        let mut backdated = Model::default();
+        for (at, km) in [(cur_week_at, 11.0), (prev_week_at, 10.0)] {
+            app.update(
+                Event::LogRun {
+                    distance_km: km,
+                    duration_min: km * 6.0,
+                    hr_pct_max: 70.0,
+                    longest_recent_km: 12.0,
+                    observed_at: at,
+                },
+                &mut backdated,
+            )
+            .expect_only_render();
+        }
+        let a = app.view(&in_order);
+        let b = app.view(&backdated);
+        let wow = |vm: &ViewModel| {
+            vm.weekly_report
+                .iter()
+                .find(|r| r.summary.contains("Week-over-week"))
+                .map(|r| r.summary.clone())
+                .expect("week-over-week row")
+        };
+        assert_eq!(wow(&a), wow(&b), "weekly aggregation must not depend on log order");
+        assert!(wow(&a).contains("10.0 → 11.0 km"), "{}", wow(&a));
+        // And the run history renders chronologically in both.
+        assert_eq!(b.runs[0].observed_at, prev_week_at);
+        assert_eq!(b.runs[1].observed_at, cur_week_at);
+    }
+
+    #[test]
+    fn review_observed_at_decodes_and_defaults() {
+        // New wire form carries the stamp…
+        let with: Event = serde_json::from_str(
+            r#"{"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":0,"bad_day":false,"observed_at":424242}}"#,
+        )
+        .expect("review with observed_at parses");
+        match with {
+            Event::SubmitReview(r) => assert_eq!(r.observed_at, 424_242),
+            other => panic!("expected SubmitReview, got {other:?}"),
+        }
+        // …and the old persisted form still replays (defaults to 0).
+        let without: Event = serde_json::from_str(
+            r#"{"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":0,"bad_day":false}}"#,
+        )
+        .expect("pre-timestamp review parses");
+        match without {
+            Event::SubmitReview(r) => assert_eq!(r.observed_at, 0),
+            other => panic!("expected SubmitReview, got {other:?}"),
+        }
     }
 }

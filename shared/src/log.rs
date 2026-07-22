@@ -4,10 +4,13 @@
 //!
 //! [`compact_event_log`] drops lines whose effect on the replayed model is
 //! provably nil, returning a shorter but **replay-equivalent** stream (same
-//! relative order of survivors). Two rules, both grounded in [`crate::app`]'s
+//! relative order of survivors). Three rules, all grounded in [`crate::app`]'s
 //! `update`, where the model stores only raw inputs and no event's `update`
 //! reads another family's state:
 //!
+//! 0. **A `RemoveReadiness` cancels its submit.** It drops exactly the latest
+//!    prior `SubmitReadiness` with the same signal, so the pair is inert;
+//!    an unmatched remove replays as a no-op and is dropped alone.
 //! 1. **A `Clear<F>` supersedes its family.** It empties family `F`'s vec, so
 //!    every `F` event (and the clear) at or before the *last* `Clear<F>` leaves
 //!    no residue, `F` events after it replay against an already-empty vec.
@@ -32,6 +35,7 @@ use crate::app::Event;
 fn classify(event: &Event) -> (u8, bool) {
     match event {
         Event::SubmitReadiness(_) => (0, false),
+        Event::RemoveReadiness { .. } => (0, false),
         Event::ClearReadiness => (0, true),
         Event::LogSet { .. } => (1, false),
         Event::ClearSets => (1, true),
@@ -69,6 +73,26 @@ const SINGLETONS: [u8; 9] = [3, 4, 5, 6, 7, 8, 9, 10, 11];
 pub fn compact_event_log(events: Vec<Event>) -> Vec<Event> {
     let kinds: Vec<(u8, bool)> = events.iter().map(classify).collect();
     let mut remove = vec![false; events.len()];
+
+    // Rule 0: a RemoveReadiness cancels the latest not-yet-cancelled prior
+    // SubmitReadiness carrying the same signal, replay-equivalent because
+    // `update` drops exactly that input (rposition). An unmatched remove
+    // replays as a no-op, so it is dropped either way. Runs before Rule 1;
+    // the outcomes agree in every interleaving with ClearReadiness because
+    // both reductions preserve the replayed `inputs` vec.
+    for j in 0..events.len() {
+        let Event::RemoveReadiness { signal } = &events[j] else {
+            continue;
+        };
+        let matched = (0..j).rev().find(|&i| {
+            !remove[i]
+                && matches!(&events[i], Event::SubmitReadiness(input) if input.signal == *signal)
+        });
+        if let Some(i) = matched {
+            remove[i] = true;
+        }
+        remove[j] = true;
+    }
 
     // Rule 1: everything in family F at or before its last clear.
     for fam in 0..FAMILIES {
@@ -274,6 +298,54 @@ mod tests {
             Event::ClearReadiness,
             readiness(-1.5),
         ]);
+    }
+
+    fn pain() -> Event {
+        Event::SubmitReadiness(ReadinessInput {
+            signal: ReadinessSignal::Pain,
+            value: 1.0,
+            observed_at: 0,
+            streak: 0,
+            pain: None,
+            effort_min: None,
+        })
+    }
+
+    fn remove(signal: ReadinessSignal) -> Event {
+        Event::RemoveReadiness { signal }
+    }
+
+    #[test]
+    fn remove_readiness_cancels_its_submit_pairwise() {
+        // The mis-tap undo: pain + its removal are inert; the wellness input
+        // logged in between must survive untouched.
+        let out = compact_event_log(vec![pain(), readiness(-1.5), remove(ReadinessSignal::Pain)]);
+        assert_eq!(out, vec![readiness(-1.5)]);
+        assert_replay_equivalent(vec![pain(), readiness(-1.5), remove(ReadinessSignal::Pain)]);
+    }
+
+    #[test]
+    fn remove_readiness_cancels_only_the_latest_matching_submit() {
+        // Two pain reports, one undo: the earlier report must still replay
+        // (and still hard-stop training).
+        let events = vec![pain(), pain(), remove(ReadinessSignal::Pain)];
+        let out = compact_event_log(events.clone());
+        assert_eq!(out, vec![pain()]);
+        assert_replay_equivalent(events);
+        assert!(replay(&[pain()]).train_blocked);
+    }
+
+    #[test]
+    fn unmatched_remove_readiness_is_dropped_alone() {
+        // A remove with no prior matching submit replays as a no-op: dropping
+        // it (and nothing else) is replay-equivalent, also across a clear.
+        let across_clear = vec![pain(), Event::ClearReadiness, remove(ReadinessSignal::Pain)];
+        assert!(compact_event_log(across_clear.clone()).is_empty());
+        assert_replay_equivalent(across_clear);
+
+        let before_submit = vec![remove(ReadinessSignal::Pain), pain()];
+        assert_eq!(compact_event_log(before_submit.clone()), vec![pain()]);
+        assert_replay_equivalent(before_submit);
     }
 
     #[test]

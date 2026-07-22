@@ -1475,7 +1475,7 @@ pub fn export_gpx(points: &[GpsPoint], track_name: &str) -> String {
     let mut s = String::with_capacity(256 + points.len() * 96);
     s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     s.push_str(
-        "<gpx version=\"1.1\" creator=\"fitness_anlage\" \
+        "<gpx version=\"1.1\" creator=\"milestone\" \
          xmlns=\"http://www.topografix.com/GPX/1/1\">\n",
     );
     s.push_str("  <trk>\n    <name>");

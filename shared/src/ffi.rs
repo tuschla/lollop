@@ -136,6 +136,13 @@ fn current_view() -> Vec<u8> {
 mod tests {
     use super::{current_view, process_event};
 
+    /// The ffi tests share ONE global bridge, so the two tests that submit a
+    /// `Pain` readiness input race: if the graded-tendon report lands between
+    /// the undo test's submit and its RemoveReadiness, the remove drops the
+    /// tendon input (most recent) and the bare stop stays, a false failure.
+    /// Serialize just those two; the rest keep running in parallel.
+    static PAIN_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn json_event_updates_json_view() {
         // A profile event drives evidence-cited guidance into the view model.
@@ -340,6 +347,7 @@ mod tests {
         // for a pain signal is a safety regression. The exact Table 4.1
         // adjustment mapping is pinned in autoreg.rs/app.rs against isolated
         // models; the shared global bridge here only proves acceptance.
+        let _pain_lock = PAIN_TESTS.lock().unwrap_or_else(|p| p.into_inner());
         let event = serde_json::json!({
             "SubmitReadiness": {
                 "signal": "Pain",
@@ -366,6 +374,35 @@ mod tests {
         assert!(
             view["adjustments"].is_array(),
             "view still renders an adjustments array after a graded pain report"
+        );
+    }
+
+    #[test]
+    fn remove_readiness_wire_shape_round_trips_the_bridge() {
+        // Pins the undo event's JSON shape ({"RemoveReadiness":{"signal":...}})
+        // end-to-end: a bare pain report hard-blocks, its removal lifts the
+        // hold: the shell's mis-tap undo depends on exactly this sequence.
+        let _pain_lock = PAIN_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let submit = serde_json::json!({
+            "SubmitReadiness": {
+                "signal": "Pain", "value": 1.0, "observed_at": 424_242
+            }
+        });
+        process_event(submit.to_string().as_bytes());
+        let view: serde_json::Value = serde_json::from_slice(&current_view()).unwrap();
+        assert!(view["train_blocked"].as_bool().unwrap());
+
+        let remove = serde_json::json!({ "RemoveReadiness": { "signal": "Pain" } });
+        let requests = process_event(remove.to_string().as_bytes());
+        let requests: serde_json::Value = serde_json::from_slice(&requests).unwrap();
+        assert!(
+            requests.as_array().is_some_and(|a| !a.is_empty()),
+            "RemoveReadiness must parse and emit a Render request"
+        );
+        let view: serde_json::Value = serde_json::from_slice(&current_view()).unwrap();
+        assert!(
+            !view["train_blocked"].as_bool().unwrap(),
+            "removing the mis-tapped pain report must lift the hold"
         );
     }
 
@@ -782,6 +819,69 @@ mod tests {
     }
 
     #[test]
+    fn readiness_summary_headline_and_signal_groups_serialize() {
+        // Pins the additive KB-honest readiness wire shape: the per-signal
+        // summary array, the core-owned today headline (always an object with
+        // a kind), and the static signal→group metadata the shell's red-flag
+        // picker fence consumes. Shared global bridge → shape checks only.
+        let view = current_view();
+        let view: serde_json::Value = serde_json::from_slice(&view).unwrap();
+        assert!(view["readiness_summary"].is_array(), "readiness_summary key");
+        let headline = view["today_headline"]
+            .as_object()
+            .expect("today_headline object");
+        assert!(
+            !headline["kind"].as_str().unwrap().is_empty(),
+            "headline always carries a kind"
+        );
+        for key in ["summary", "grade", "citation", "confidence"] {
+            assert!(headline.contains_key(key), "headline key {key}");
+        }
+        let groups = view["signal_groups"].as_array().expect("signal_groups");
+        assert_eq!(groups.len(), 15, "one row per readiness signal");
+        assert!(
+            groups
+                .iter()
+                .any(|g| g["signal"] == "Pain" && g["group"] == "red_flag"),
+            "pain fenced as red_flag: {groups:?}"
+        );
+        assert!(
+            groups
+                .iter()
+                .any(|g| g["signal"] == "HrvLnRmssd" && g["group"] == "metric"),
+            "hrv grouped as metric: {groups:?}"
+        );
+    }
+
+    #[test]
+    fn android_shaped_backdated_readiness_surfaces_in_the_summary() {
+        // A readiness submission with an explicit past stamp (the shell's new
+        // backdating control) must round-trip into a per-signal summary row
+        // with the judged state + evidence tag. Distinctive signal (Soreness -
+        // no other ffi test submits it) so the shared bridge cannot collide.
+        let event = serde_json::json!({
+            "SubmitReadiness": {
+                "signal": "Soreness", "value": 6.0, "observed_at": 1_600_000_000
+            }
+        });
+        let requests = process_event(event.to_string().as_bytes());
+        let requests: serde_json::Value = serde_json::from_slice(&requests).unwrap();
+        assert!(requests.as_array().is_some_and(|a| !a.is_empty()));
+
+        let view = current_view();
+        let view: serde_json::Value = serde_json::from_slice(&view).unwrap();
+        let row = view["readiness_summary"]
+            .as_array()
+            .expect("summary array")
+            .iter()
+            .find(|s| s["signal"] == "Soreness")
+            .expect("soreness row present");
+        assert_eq!(row["state"], "high");
+        assert_eq!(row["group"], "metric");
+        assert!(!row["grade"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
     fn malformed_event_is_dropped_without_panicking() {
         // Simulates a stale/forward-incompatible log line hitting replay: an
         // unknown variant must not unwind across the FFI boundary, and the view
@@ -806,7 +906,7 @@ mod android {
     use jni::sys::jbyteArray;
 
     #[unsafe(no_mangle)]
-    pub extern "system" fn Java_de_tuschla_fitnessanlage_Core_update(
+    pub extern "system" fn Java_app_milestone_Core_update(
         env: JNIEnv,
         _class: JClass,
         event: JByteArray,
@@ -821,7 +921,7 @@ mod android {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "system" fn Java_de_tuschla_fitnessanlage_Core_view(
+    pub extern "system" fn Java_app_milestone_Core_view(
         env: JNIEnv,
         _class: JClass,
     ) -> jbyteArray {
