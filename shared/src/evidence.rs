@@ -551,7 +551,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Structure loading in a 3:1 load:recovery cycle (2:1 for older / injury-prone / low training-age), cutting both volume and intensity 20-40% on the recovery week.",
         grade: Moderate,
         primary_citations: &[
-            "Daniels 2021, Daniels' Running Formula (4th ed., Human Kinetics)",
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
             "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
             "RCT protocol NCT06111144 (3:1 load:recovery structure)",
         ],
@@ -565,6 +565,28 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "VDOT / critical-speed fitness estimates.",
         grade: Moderate,
         primary_citations: &["Daniels & Gilbert", "Jones & Vanhatalo"],
+        contradicting: &[],
+        safety_critical: false,
+        contested: None,
+        review_months: 12,
+    },
+    EvidenceEntry {
+        // File 04 running-039: goal-time equivalency via BOTH Riegel and Daniels
+        // VDOT, midpoint when they agree within ~2%, a range when they diverge.
+        // This is the Riegel/Daniels equivalency combiner, NOT the VDOT-fitness
+        // estimate (RUN-VDOT-001); `running::race_equivalency` cites this.
+        claim_id: "RUN-EQUIV-001",
+        statement: "Compute goal-time equivalency via both Riegel and Daniels VDOT; use the midpoint when they agree within ~2%, present a range when they diverge.",
+        grade: Moderate,
+        primary_citations: &[
+            "Riegel 1981, American Scientist 69(3):285-290",
+            // "Cameron" removed: the Cameron race-predictor is real as a formula but
+            // has NO verifiable primary publication (grey literature) and is not
+            // load-bearing here: Riegel + Daniels VDOT carry the equivalency. Per
+            // the citation ruling (design/user-decisions.md), a non-findable named
+            // reference is dropped rather than shipped.
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
+        ],
         contradicting: &[],
         safety_critical: false,
         contested: None,
@@ -604,6 +626,47 @@ pub static CLAIMS: &[EvidenceEntry] = &[
             "Coggan & Allen 2019, Training and Racing with a Power Meter (3rd ed., VeloPress) (CTL/ATL/TSB implementation)",
         ],
         contradicting: &["[Weak] for prediction (File 07)"],
+        safety_critical: false,
+        contested: None,
+        review_months: 12,
+    },
+    EvidenceEntry {
+        // knowledge-base/interval-vs-steady-training-load.md (deep-research
+        // 2026-07-30, 25 claims confirmed 3-0). The NEGATIVE result is the strong
+        // one: by Jensen's inequality any average-only scalar (mean-HR TRIMP,
+        // average %HRmax, sRPE) is mathematically incapable of separating an
+        // interval session from a steady run of equal average intensity, and this
+        // is empirically confirmed (mean-HR methods under-rate intermittent work).
+        claim_id: "RUN-INTERVAL-AVG-FAIL-001",
+        statement: "A single average pace or average %HRmax cannot distinguish an interval session from a steady run of equal average intensity; only a convex weighting over a per-sample time-series can. Mean-HR load methods empirically under-estimate and misrank intermittent/high-intensity work.",
+        grade: Moderate,
+        primary_citations: &[
+            "Akubat & Abt 2011, J Sci Med Sport 14(3):249-253 (PMID 21237707)",
+            "Sanders, Abt, Hesselink, Myers, Akubat 2017, Int J Sports Physiol Perform 12(5):668-675 (PMID 28095061)",
+            "Desgorces et al. 2020, PLoS ONE 15(8):e0237027 (PMC7398532)",
+        ],
+        contradicting: &["Small samples (n=8-15) with wide, overlapping CIs; team-sport/cycling cohorts generalized to running by analogy"],
+        safety_critical: false,
+        contested: None,
+        review_months: 12,
+    },
+    EvidenceEntry {
+        // The deployable, HR-free differentiator that fits the app's existing GPS
+        // track: a flat-ground GOVSS / Normalized-Graded-Pace simplification. The
+        // convex 4th-power step makes an interval session score above its own
+        // average speed (variability index > 1). Graded WEAK/ExpertOpinion
+        // honestly: Skiba's GOVSS is a self-published, non-peer-reviewed white
+        // paper, and the app has no elevation → no grade adjustment (normalized
+        // *speed*, not power). `running::normalized_speed_mps` /
+        // `track_variability_index` compute it. See the KB file's caveats.
+        claim_id: "RUN-INTERVAL-VI-001",
+        statement: "A time-weighted 4th-power-mean of GPS segment speed (normalized speed) divided by average speed - the variability index - rises above 1.0 for interval-like runs and stays ~1.0 for steady runs, differentiating them from the GPS track alone with no heart-rate stream. Flat-ground simplification of GOVSS/Normalized Graded Pace; no grade adjustment.",
+        grade: Weak,
+        primary_citations: &[
+            "Skiba 2006, Calculation of Power Output and Quantification of Training Stress in Distance Runners: The GOVSS Algorithm (self-published white paper)",
+            "TrainingPeaks, Running Training Stress Score (rTSS) / Normalized Graded Pace",
+        ],
+        contradicting: &["Self-published, non-peer-reviewed source; no elevation/grade adjustment in this implementation; 30 s fixed rolling-window smoothing (GoldenCheetah value)"],
         safety_critical: false,
         contested: None,
         review_months: 12,
@@ -1388,7 +1451,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Cap quality sessions at 2-3/week spaced >=48 h; never two Z3 sessions on consecutive days for non-elites.",
         grade: ExpertOpinion,
         primary_citations: &[
-            "Daniels 2021, Daniels' Running Formula (4th ed., Human Kinetics)",
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
             "Seiler & Kjerland 2006, Scand J Med Sci Sports 16(1):49-56 (polarized hard-easy distribution)",
         ],
         contradicting: &[],
@@ -2271,7 +2334,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Easy/General-Aerobic runs: E pace 15-25% slower than marathon pace, 65-79%HRmax, RPE 3-4, 30-90 min.",
         grade: ExpertOpinion,
         primary_citations: &[
-            "Daniels 2021, Daniels' Running Formula (4th ed., Human Kinetics)",
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
             "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
         ],
         contradicting: &[],
@@ -2284,7 +2347,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Long runs: E to E+ pace (MP minus 10-20%), 65-80%HRmax, RPE 3-5; LR share 25-30% of weekly volume (Daniels: single run <=25%, time-cap ~2:00-2:30, no duration floor stated); low-mileage guardrail: LR <= 2x average daily run.",
         grade: ExpertOpinion,
         primary_citations: &[
-            "Daniels 2021, Daniels' Running Formula (4th ed., Human Kinetics)",
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
             "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
         ],
         contradicting: &[
@@ -2324,7 +2387,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Strides: 15-30 s x 4-8 controlled-fast (not sprint) efforts, RPE 6-7, near-full recovery 45 s-2 min, 1-3x/week, introduced a few weeks into base (no numeric week count stated).",
         grade: ExpertOpinion,
         primary_citations: &[
-            "Daniels 2021, Daniels' Running Formula (4th ed., Human Kinetics)",
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
         ],
         contradicting: &[],
         safety_critical: false,
@@ -2364,7 +2427,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Progress only ONE variable at a time - volume OR intensity, not both in the same week.",
         grade: ExpertOpinion,
         primary_citations: &[
-            "Daniels 2021, Daniels' Running Formula (4th ed., Human Kinetics)",
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
             "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
         ],
         contradicting: &[],
@@ -2390,7 +2453,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Set training paces from CURRENT fitness (not goal) and re-test every 4-6 weeks, recomputing paces as VDOT/CS improves; race input must be recent (<=6-8 wk), honest, flat/cool; apply corrections for heat >~15 C and altitude >~900 m (trigger thresholds only - correction magnitudes unstated).",
         grade: Moderate,
         primary_citations: &[
-            "Daniels 2021, Daniels' Running Formula (4th ed., Human Kinetics) (train off current VDOT; retest every 4-6 wk)",
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics) (train off current VDOT; retest every 4-6 wk)",
         ],
         contradicting: &[],
         safety_critical: false,
@@ -2499,10 +2562,56 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         statement: "Pace at target HR improved by at least a smallest-worthwhile amount sustained over 2-3 weeks -> re-test / raise threshold pace (SWC magnitude unstated).",
         grade: Moderate,
         primary_citations: &[
-            "Daniels 2021, Daniels' Running Formula (4th ed., Human Kinetics)",
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
             "Hopkins 2004, Sportscience 8:1-7 (smallest worthwhile change)",
         ],
         contradicting: &[],
+        safety_critical: false,
+        contested: None,
+        review_months: 12,
+    },
+    EvidenceEntry {
+        claim_id: "AUTOREG-INTERVAL-PACE-001",
+        statement: "Interval reps landing at RPE >= target+1 or above the HR cap for >=2 reps -> cut remaining-rep target pace ~2-4% (or reduce reps).",
+        // File 06 autoreg-031 (Moderate). Provenance resolved 2026-07-30 via
+        // verified deep research + the GRADE "good practice statement" model: the
+        // PRINCIPLE (govern interval quality by pace/HR; scale the session down
+        // rather than push through) is backed by Daniels' I-pace governance and
+        // Billat's intermittent-vVO2max work, which now replace the old internal-
+        // file "§3B unstated" reference (citation ruling: real findable work). The
+        // specific ~2-4% MAGNITUDE has NO published source (contrarian search
+        // confirmed none exists): it is a KB practitioner heuristic / expert-
+        // opinion parameter, NOT claimed to come from the cited studies. Grade
+        // stays the KB's Moderate (the principle is Moderate-supported).
+        grade: Moderate,
+        primary_citations: &[
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics), ISBN 9781718203662 (interval I-pace governance)",
+            "Billat et al. 2000, Eur J Appl Physiol 81(3):188-196 (intermittent runs at vVO2max sustain VO2max longer)",
+        ],
+        contradicting: &["The ~2-4% pace-cut magnitude is a practitioner heuristic with no direct study - an expert-opinion parameter, not from the cited works"],
+        safety_critical: false,
+        contested: None,
+        review_months: 12,
+    },
+    EvidenceEntry {
+        claim_id: "AUTOREG-EASY-CAP-001",
+        statement: "Cannot hold the prescribed easy pace under the HR cap -> slow the easy pace (HR governs easy days, not pace).",
+        // File 06 autoreg-033 (Moderate). Provenance resolved 2026-07-30 via
+        // verified deep research: the PRINCIPLE (easy days governed by an
+        // intensity ceiling below threshold, so slow down to stay under it rather
+        // than hold pace) is backed by Daniels' E-pace ceiling and Seiler's
+        // polarized-distribution work (~75% of training below the first
+        // threshold), which replace the old internal-file "§3B unstated"
+        // reference. Honest caveat: the literature caps easy intensity by a
+        // PHYSIOLOGICAL threshold (VT1 / <2 mmol·L⁻¹); using an HR ceiling as the
+        // field proxy for that threshold is a practitioner operationalization, not
+        // a directly-studied HR-percentage cutoff.
+        grade: Moderate,
+        primary_citations: &[
+            "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics), ISBN 9781718203662 (Easy-pace intensity ceiling)",
+            "Seiler & Kjerland 2006, Scand J Med Sci Sports 16(1):49-56, PMID 16430681 (polarized distribution; ~75% below the first threshold)",
+        ],
+        contradicting: &["Low-intensity is defined in the literature by a physiological threshold (VT1 / <2 mmol·L⁻¹), not a specific HR-% cap - the HR ceiling is a field proxy"],
         safety_critical: false,
         contested: None,
         review_months: 12,
@@ -2602,7 +2711,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         // File 10 rule entry grades Weak (0.40); the CAP-8 table row says
         // Weak-Moderate, registered at the rule entry's Weak floor.
         grade: Weak,
-        primary_citations: &["Baar 2014 (CAP-8)"],
+        primary_citations: &["Baar 2014, Sports Med 44(Suppl 2):S117-S125"],
         contradicting: &[],
         safety_critical: false,
         contested: None,
@@ -2765,6 +2874,27 @@ mod tests {
                 "duplicate claim_id: {}",
                 c.claim_id
             );
+        }
+    }
+
+    #[test]
+    fn citations_name_real_published_work_not_internal_refs() {
+        // design/user-decisions.md: citations must name real, internet-findable
+        // published work: never internal file/KB-index references. Guard every
+        // primary_citations string against internal-ref markers.
+        const MARKERS: &[&str] = &["(CAP-", "File 0", "§"];
+        for c in CLAIMS {
+            for cite in c.primary_citations {
+                for marker in MARKERS {
+                    assert!(
+                        !cite.contains(marker),
+                        "{} primary_citation contains internal-ref marker {:?}: {:?}",
+                        c.claim_id,
+                        marker,
+                        cite
+                    );
+                }
+            }
         }
     }
 

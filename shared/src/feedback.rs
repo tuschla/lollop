@@ -197,9 +197,14 @@ pub fn decoupling_feedback(
     if !cool_steady_context {
         return None;
     }
+    // The upper boundary MUST match `load::decoupling_band` exactly, which flags
+    // the ">=10%" Insufficient band at `< 10.0 - 1e-9` (a float 9.9999…% from an
+    // EF ratio still counts as the flag band). A bare `<= 10.0` here disagreed at
+    // ~10%: the feedback card said "neutral" while the base-fitness band row said
+    // "insufficient" for the identical drift. One boundary, one place.
     let cat = if drift_pct < 5.0 {
         FeedbackCategory::PositiveExecution
-    } else if drift_pct <= 10.0 {
+    } else if drift_pct < 10.0 - 1e-9 {
         FeedbackCategory::InformationalNeutral
     } else {
         FeedbackCategory::CorrectiveProcess
@@ -752,6 +757,23 @@ mod tests {
             decoupling_feedback(12.0, true).unwrap().value,
             FeedbackCategory::CorrectiveProcess
         );
+        // Boundary must agree with `load::decoupling_band`: exactly 10% and a
+        // float 9.9999…% both land in the flag band, so the feedback card and the
+        // base-fitness band row never contradict each other at ~10%.
+        assert_eq!(
+            decoupling_feedback(10.0, true).unwrap().value,
+            FeedbackCategory::CorrectiveProcess
+        );
+        let just_under = 10.0 - 1e-12;
+        assert_eq!(
+            decoupling_feedback(just_under, true).unwrap().value,
+            FeedbackCategory::CorrectiveProcess,
+            "9.9999…% must flag, matching load::decoupling_band"
+        );
+        assert!(matches!(
+            crate::load::decoupling_band(just_under).0,
+            crate::load::DecouplingBand::Insufficient
+        ));
     }
 
     #[test]

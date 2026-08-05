@@ -401,6 +401,42 @@ pub struct ReadinessInput {
     pub effort_min: Option<f64>,
 }
 
+/// One morning (or pre-session) check-in: raw *human* observations only. Every
+/// scored field is optional: the user answers what they know and the core never
+/// fabricates an unanswered item (HARD RULE 1). The core normalizes these into
+/// the z-scores / deltas the autoregulation rules already consume (Phase 2 /
+/// B1): the user no longer supplies a z-score they cannot know.
+///
+/// The 1–5 wellness items are the KB's 5-item wellness composite
+/// (`ReadinessSignal::WellnessZ`: sleep/soreness/mood, direction-normalized in
+/// the core), no new instrument is invented. Additive on the wire: every field
+/// is `#[serde(default)]` so a check-in written by any app version replays.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct CheckinInput {
+    /// Unix seconds, shell-supplied (the core holds no clock). Day-buckets the
+    /// rolling baseline; `<= 0` readings are ignored by the derivation.
+    #[serde(default)]
+    pub observed_at: i64,
+    /// Sleep quality, 1–5 (5 = slept great). Higher = better.
+    #[serde(default)]
+    pub sleep_quality: Option<u8>,
+    /// Muscle soreness today, 1–5 (5 = very sore). Higher = worse, the core
+    /// reverse-scores it into the "higher = better" wellness composite.
+    #[serde(default)]
+    pub soreness: Option<u8>,
+    /// Mood / stress, 1–5 (5 = great mood, low stress). Higher = better.
+    #[serde(default)]
+    pub mood: Option<u8>,
+    /// Morning resting HR, bpm (from a watch/manual pulse). The core computes
+    /// the vs-baseline delta the RHR rules read (autoreg-040/041).
+    #[serde(default)]
+    pub resting_hr_bpm: Option<f64>,
+    /// Morning HRV as raw rMSSD in ms (from a watch/app). The core takes
+    /// `ln(rmssd)` and the rolling-baseline z the HRV rule reads (autoreg-028).
+    #[serde(default)]
+    pub hrv_rmssd_ms: Option<f64>,
+}
+
 /// Pain character/context per File 08 Table 4.1 (Silbernagel monitoring model).
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PainKind {
@@ -427,7 +463,7 @@ pub enum PainTrend {
 }
 
 /// A characterized pain report attached to a `Pain` readiness input.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct PainDetail {
     pub kind: PainKind,
     /// 0–10 numeric rating scale. Tendon tolerable band ≤5/10 (safety-039).
@@ -437,6 +473,13 @@ pub struct PainDetail {
     /// escalates STOP/REDUCE responses to DEFER (safety-038/039 "if persists").
     #[serde(default)]
     pub persists: bool,
+    /// Free-text body-part location (e.g. `"Left knee"`) for display context on
+    /// the safety banner sub-line and pain history. Display-only: **no rule
+    /// branches on it**, the KB (File 08 Table 4.1) defines no location-graded
+    /// response (HARD RULE 1). `None`, the wire default, keeps every existing
+    /// log replaying unchanged and simply omits the body part from the sub-line.
+    #[serde(default)]
+    pub location: Option<String>,
 }
 
 /// Neck-check illness classification (File 06). Encoded in a
@@ -582,6 +625,32 @@ pub enum Adjustment {
     /// mental-health). Emitted for medical red flags; `reason` names the trigger
     /// and referral target. Overrides all optimization output (File 08).
     Defer { reason: String },
+}
+
+/// A user-declared factual label for a logged run's intent (steady, interval,
+/// tempo, long, recovery). This is **USER DATA**, like an exercise name: it is
+/// NOT a knowledge-base claim and carries NO [`Evidence`]. It is deliberately
+/// *not* wrapped in [`Recommended`]: nothing here recommends anything, and per
+/// HARD RULE 1 no coaching output may branch on it. It exists for storage and
+/// display only (history rendering); anything that would consume it to shape
+/// programming needs its own KB backing first. `None`/unset is always valid -
+/// the label is never fabricated for a run the user did not tag.
+///
+/// Serializes to its bare variant name (external form), so the Kotlin shell can
+/// mirror the strings by `WorkoutType.name`; renaming a variant is a wire break.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkoutType {
+    /// Continuous even-effort run.
+    Steady,
+    /// Reps-plus-recovery structure (hand-entered/treadmill intervals have no
+    /// GPS track, so the measured VI verdict cannot see them, this labels them).
+    Interval,
+    /// Sustained comfortably-hard effort.
+    Tempo,
+    /// The week's long endurance run.
+    LongRun,
+    /// Easy recovery / regeneration run.
+    Recovery,
 }
 
 #[cfg(test)]

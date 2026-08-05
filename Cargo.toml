@@ -10,3 +10,13 @@ license = "AGPL-3.0-only"
 [workspace.dependencies]
 crux_core = "0.19"
 serde = "1.0.228"
+
+# Shipped .so size: fitparser's generated FIT-profile tables roughly doubled the
+# cdylib, so the release profile trades compile time for size. NO `panic="abort"`:
+# the JNI bridge's catch_unwind panic firewall (shared/src/ffi.rs) needs
+# unwinding to turn core panics into JSON error payloads.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

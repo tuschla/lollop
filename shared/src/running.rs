@@ -1115,7 +1115,9 @@ pub fn race_equivalency(riegel_sec: f64, daniels_sec: f64) -> Recommended<Equiva
     } else {
         Equivalency::Range(lo, hi)
     };
-    recommend(out, "RUN-VDOT-001")
+    // running-039: the Riegel/Daniels equivalency combiner (RUN-EQUIV-001), not
+    // the VDOT-fitness estimate (RUN-VDOT-001).
+    recommend(out, "RUN-EQUIV-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1201,6 +1203,38 @@ pub fn vdot_derate_points(goal: GoalDistance, under_mileaged: bool) -> Recommend
         (0.0, 0.0)
     };
     recommend(d, "RUN-VDOT-001")
+}
+
+/// Derate an optimistic marathon finish-time band for an under-mileaged runner
+/// (running-008/040, option B, "flag AND derate"). The prediction band
+/// `(low_sec, high_sec)` is shifted SLOWER by the same VDOT-point derate that
+/// [`vdot_derate_points`] cites for the marathon: the fast bound is slowed by
+/// the *minimum* derate and the slow bound by the *maximum*, so the displayed
+/// range moves later (pace easier) and widens by the derate's own uncertainty.
+/// `base_vdot` (from the runner's recent race) anchors the point→time
+/// conversion through [`load::daniels_predict`] at the marathon distance, no
+/// new magnitude is invented, it is the same 2–3 VDOT points the caveat states.
+/// Carries RUN-VDOT-001 so the adjusted number still travels with its grade
+/// (HARD RULE 2). A degenerate band or non-positive VDOT is returned unchanged.
+pub fn marathon_derated_band(
+    low_sec: f64,
+    high_sec: f64,
+    base_vdot: f64,
+) -> Recommended<(f64, f64)> {
+    let derate = vdot_derate_points(GoalDistance::Marathon, true);
+    let (min_pts, max_pts) = derate.value;
+    let base_time = crate::load::daniels_predict(base_vdot, 42_195.0);
+    // Translate the VDOT-point derate into a time slowdown factor via the same
+    // Daniels marathon prediction the band is built from; guard degenerate
+    // inputs (no valid race → no prediction) by leaving the band untouched.
+    let (lo, hi) = if base_vdot <= 0.0 || base_time <= 0.0 || low_sec <= 0.0 {
+        (low_sec, high_sec)
+    } else {
+        let f_min = crate::load::daniels_predict(base_vdot - min_pts, 42_195.0) / base_time;
+        let f_max = crate::load::daniels_predict(base_vdot - max_pts, 42_195.0) / base_time;
+        (low_sec * f_min, high_sec * f_max)
+    };
+    Recommended::new((lo, hi), derate.evidence, derate.confidence)
 }
 
 /// Weekly session/quality budget for a goal distance (running-024 goal table).
@@ -1387,7 +1421,11 @@ pub fn haversine_m(a: GpsPoint, b: GpsPoint) -> f64 {
     let dlat = (b.lat - a.lat).to_radians();
     let dlon = (b.lon - a.lon).to_radians();
     let h = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
-    2.0 * EARTH_RADIUS_M * h.sqrt().asin()
+    // Clamp `h` to `1.0` before `asin`: for near-antipodal (valid) coordinates
+    // rounding can push `h` a hair above 1.0, making `sqrt(h) > 1` and
+    // `asin` return NaN. The clamp is standard haversine insurance, cheap for
+    // any future non-`qc_track` caller that doesn't already drop NaN-speed legs.
+    2.0 * EARTH_RADIUS_M * h.min(1.0).sqrt().asin()
 }
 
 /// The subset of fixes good enough to trust, in original order. Shared by
@@ -1401,28 +1439,118 @@ pub fn usable_track(points: &[GpsPoint], max_accuracy_m: f32) -> Vec<GpsPoint> {
         .collect()
 }
 
+/// Split `points` into recording SEGMENTS at `segment_starts`, the indices that
+/// BEGIN a new segment (the first fix captured after a pause/resume or a long
+/// gap in fixes). The leg from `points[i-1]` to `points[i]` at such an index is a
+/// PAUSE BRIDGE the runner may have relocated across, so no track metric may sum
+/// distance or time across it (I15/B2). An EMPTY `segment_starts`, every legacy
+/// (re-anchored) log and every hand-logged run, yields the WHOLE track as a
+/// single segment, so every metric routed through this is BIT-IDENTICAL to the
+/// pre-segment behaviour. Out-of-range, zero, and duplicate indices are ignored,
+/// so a malformed boundary list can only under-split, never panic.
+pub(crate) fn segments<'a>(points: &'a [GpsPoint], segment_starts: &[u32]) -> Vec<&'a [GpsPoint]> {
+    let mut bounds: Vec<usize> = segment_starts
+        .iter()
+        .map(|&i| i as usize)
+        .filter(|&i| i > 0 && i < points.len())
+        .collect();
+    bounds.sort_unstable();
+    bounds.dedup();
+    if bounds.is_empty() {
+        return vec![points];
+    }
+    let mut out = Vec::with_capacity(bounds.len() + 1);
+    let mut prev = 0usize;
+    for b in bounds {
+        out.push(&points[prev..b]);
+        prev = b;
+    }
+    out.push(&points[prev..]);
+    out
+}
+
+/// The usable fixes of every segment, flattened in order, each paired with a flag
+/// that is `true` for the FIRST usable fix of its segment, i.e. the leg ENTERING
+/// that fix is a pause bridge and must contribute neither distance nor time.
+/// Accuracy filtering happens PER segment, which yields the same usable set as
+/// filtering the whole track. For an empty `segment_starts` the flag is `true`
+/// only at index 0 (which has no entering leg), so every downstream cumulative
+/// walk is bit-identical to the single-track behaviour it replaces.
+fn usable_segments(
+    points: &[GpsPoint],
+    segment_starts: &[u32],
+    max_accuracy_m: f32,
+) -> (Vec<GpsPoint>, Vec<bool>) {
+    let mut pts = Vec::with_capacity(points.len());
+    let mut is_start = Vec::with_capacity(points.len());
+    for seg in segments(points, segment_starts) {
+        let mut first = true;
+        for p in usable_track(seg, max_accuracy_m) {
+            pts.push(p);
+            is_start.push(first);
+            first = false;
+        }
+    }
+    (pts, is_start)
+}
+
 /// Total track distance in km. Fixes whose reported horizontal accuracy is
 /// worse than `max_accuracy_m` are dropped first so GPS noise does not inflate
-/// distance. Pure and order-dependent (order = fix order from the shell).
+/// distance. Pure and order-dependent (order = fix order from the shell). The
+/// bare form treats the whole track as one segment; see [`track_distance_km_seg`]
+/// for the pause-bridge-aware form.
 pub fn track_distance_km(points: &[GpsPoint], max_accuracy_m: f32) -> f64 {
-    usable_track(points, max_accuracy_m)
-        .windows(2)
-        .map(|w| haversine_m(w[0], w[1]))
-        .sum::<f64>()
-        / 1000.0
+    track_distance_km_seg(points, max_accuracy_m, &[])
+}
+
+/// [`track_distance_km`] that excludes each pause-bridge leg (a leg entering a
+/// [`segments`] boundary) so a paused relocation contributes no distance, the
+/// true coordinates stay put (no re-anchoring shift). Empty `segment_starts` is
+/// bit-identical to [`track_distance_km`].
+pub fn track_distance_km_seg(
+    points: &[GpsPoint],
+    max_accuracy_m: f32,
+    segment_starts: &[u32],
+) -> f64 {
+    let (usable, is_start) = usable_segments(points, segment_starts, max_accuracy_m);
+    let mut total = 0.0;
+    for i in 1..usable.len() {
+        if is_start[i] {
+            continue;
+        }
+        total += haversine_m(usable[i - 1], usable[i]);
+    }
+    total / 1000.0
 }
 
 /// Elapsed wall time across a track, in minutes, from the first to the last
 /// *usable* fix (same accuracy gate as [track_distance_km], so derived pace is
 /// consistent). Returns 0.0 for an empty/single-fix or non-monotonic track.
 pub fn track_duration_min(points: &[GpsPoint], max_accuracy_m: f32) -> f64 {
-    let usable = usable_track(points, max_accuracy_m);
-    match (usable.first(), usable.last()) {
-        (Some(f), Some(l)) if l.observed_at > f.observed_at => {
-            (l.observed_at - f.observed_at) as f64 / 60.0
-        }
-        _ => 0.0,
-    }
+    track_duration_min_seg(points, max_accuracy_m, &[])
+}
+
+/// [`track_duration_min`] that sums each segment's own first-to-last span, so the
+/// pause GAP between segments (a runner stopped, then resumed elsewhere) is not
+/// counted as run time. Empty `segment_starts` is bit-identical to
+/// [`track_duration_min`].
+pub fn track_duration_min_seg(
+    points: &[GpsPoint],
+    max_accuracy_m: f32,
+    segment_starts: &[u32],
+) -> f64 {
+    segments(points, segment_starts)
+        .into_iter()
+        .map(|seg| {
+            let usable = usable_track(seg, max_accuracy_m);
+            match (usable.first(), usable.last()) {
+                (Some(f), Some(l)) if l.observed_at > f.observed_at => {
+                    (l.observed_at - f.observed_at) as f64 / 60.0
+                }
+                _ => 0.0,
+            }
+        })
+        .sum()
 }
 
 /// Second-half-vs-first-half pace slowdown across a track, as a percent (a
@@ -1434,16 +1562,35 @@ pub fn track_duration_min(points: &[GpsPoint], max_accuracy_m: f32) -> f64 {
 /// three usable fixes, a zero-distance/zero-duration half). Same accuracy gate
 /// as [track_distance_km]/[track_duration_min] so all three agree on the track.
 pub fn track_positive_split_pct(points: &[GpsPoint], max_accuracy_m: f32) -> Option<f64> {
-    let usable = usable_track(points, max_accuracy_m);
+    track_positive_split_pct_seg(points, max_accuracy_m, &[])
+}
+
+/// [`track_positive_split_pct`] that treats each pause-bridge leg as zero distance
+/// and zero time (exactly as the old re-anchored zero-length bridge did), so the
+/// halfway split and each half's moving pace are measured over the true route
+/// without the relocation displacement. Empty `segment_starts` is bit-identical
+/// to [`track_positive_split_pct`].
+pub fn track_positive_split_pct_seg(
+    points: &[GpsPoint],
+    max_accuracy_m: f32,
+    segment_starts: &[u32],
+) -> Option<f64> {
+    let (usable, is_start) = usable_segments(points, segment_starts, max_accuracy_m);
     if usable.len() < 3 {
         return None;
     }
-    // Cumulative distance to each fix (cumulative[0] == 0.0).
+    // Cumulative distance to each fix (cumulative[0] == 0.0); a leg ENTERING a
+    // segment start (pause bridge) adds nothing.
     let mut cumulative = Vec::with_capacity(usable.len());
     let mut running_total = 0.0;
     cumulative.push(0.0);
-    for w in usable.windows(2) {
-        running_total += haversine_m(w[0], w[1]);
+    for i in 1..usable.len() {
+        let leg = if is_start[i] {
+            0.0
+        } else {
+            haversine_m(usable[i - 1], usable[i])
+        };
+        running_total += leg;
         cumulative.push(running_total);
     }
     let total = running_total;
@@ -1454,11 +1601,27 @@ pub fn track_positive_split_pct(points: &[GpsPoint], max_accuracy_m: f32) -> Opt
     let half = total / 2.0;
     let split = (1..usable.len() - 1).find(|&i| cumulative[i] >= half)?;
 
-    let (first, mid, last) = (usable[0], usable[split], usable[usable.len() - 1]);
     let dist1 = cumulative[split];
     let dist2 = total - dist1;
-    let dur1 = (mid.observed_at - first.observed_at) as f64;
-    let dur2 = (last.observed_at - mid.observed_at) as f64;
+    // Each half's time is MOVING seconds only: legs below the auto-pause floor
+    // (`load::is_stopped`, <0.5 m/s) AND pause-bridge legs contribute distance-or-
+    // relocation but no time, so a mid-run café stop or a paused relocation can't
+    // produce a false "FADE" verdict. This matches the moving-time base of the
+    // run's displayed pace, its km-splits, and its VI; wall-clock halves used to
+    // disagree with all three on any run with a pause.
+    let moving_leg = |i: usize| -> f64 {
+        if is_start[i] {
+            return 0.0;
+        }
+        let dt = (usable[i].observed_at - usable[i - 1].observed_at) as f64;
+        if dt > 0.0 && !crate::load::is_stopped(haversine_m(usable[i - 1], usable[i]) / dt) {
+            dt
+        } else {
+            0.0
+        }
+    };
+    let dur1: f64 = (1..=split).map(moving_leg).sum();
+    let dur2: f64 = (split + 1..usable.len()).map(moving_leg).sum();
     if dist1 <= 0.0 || dist2 <= 0.0 || dur1 <= 0.0 || dur2 <= 0.0 {
         return None;
     }
@@ -1467,11 +1630,359 @@ pub fn track_positive_split_pct(points: &[GpsPoint], max_accuracy_m: f32) -> Opt
     Some(((pace2 - pace1) / pace1 * 100.0 * 10.0).round() / 10.0)
 }
 
+/// One kilometre in metres, the per-km split unit.
+pub const KM_M: f64 = 1000.0;
+
+/// One international mile in metres (exact), the per-mile split unit.
+pub const MILE_M: f64 = 1609.344;
+
+/// One completed (or final partial) split of a run track. Purely descriptive -
+/// a measurement of the run, not a recommendation, so it carries no evidence tag
+/// (same standing as [`track_positive_split_pct`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RunSplit {
+    /// 1-based split index (1 = first km/mile).
+    pub index: u32,
+    /// Pace over this split, seconds per unit distance (per km, or per mile),
+    /// timed in MOVING seconds (stopped legs excluded, see [`track_splits`])
+    /// so it lines up with the run's moving-time headline pace.
+    /// For the final partial split the pace is normalized to a full unit
+    /// (`duration / covered_distance × unit`) so it stays comparable to the full
+    /// splits rather than looking artificially fast over a short remainder.
+    pub pace_sec_per_unit: f64,
+    /// Cumulative track distance at the END of this split, metres.
+    pub cumulative_m: f64,
+    /// Distance actually covered by this split, metres. Equals the unit distance
+    /// for a full split; smaller for the final partial split.
+    pub distance_m: f64,
+    /// True only for a final split shorter than a full unit (`distance_m < unit`).
+    pub partial: bool,
+}
+
+/// Per-unit run splits from a GPS track: one [`RunSplit`] per completed
+/// `unit_m`-metre interval (pass [`KM_M`] for kilometre splits, [`MILE_M`] for
+/// miles), plus a final PARTIAL split when the track ends mid-unit (so a 5.4 km
+/// run yields 5 full km splits + 1 partial). Split boundaries fall at exact unit
+/// distances (apportioned within the crossing leg at its constant speed), so a
+/// split's pace does not depend on where GPS fixes happened to land, but each
+/// split is TIMED in MOVING seconds only: a leg whose ground speed is below the
+/// auto-pause floor (`load::is_stopped`, <0.5 m/s) or whose timestamps don't
+/// advance contributes its distance but NO time, exactly as `moving_duration_min`
+/// excludes it from the run's headline pace. A mid-split café/traffic stop
+/// therefore cannot make that split read minutes slower than the run's own
+/// moving-pace average on the same detail sheet. (Degenerate escape hatch: a
+/// split covered entirely below the stop floor has zero moving time and falls
+/// back to its wall-clock time so its pace stays finite.) Same accuracy gate as
+/// [`track_distance_km`], and the same cumulative-distance walk as
+/// [`track_positive_split_pct`]. Pure and order-dependent. Returns an empty vec
+/// for a non-positive unit, an empty / single-fix / zero-distance track
+/// (nothing to split).
+pub fn track_splits(points: &[GpsPoint], max_accuracy_m: f32, unit_m: f64) -> Vec<RunSplit> {
+    track_splits_seg(points, max_accuracy_m, unit_m, &[])
+}
+
+/// [`track_splits`] whose cumulative walk skips each pause-bridge leg (zero
+/// distance, so no split boundary falls inside a paused relocation), letting km
+/// splits continue seamlessly across a pause on the true route. Empty
+/// `segment_starts` is bit-identical to [`track_splits`].
+pub fn track_splits_seg(
+    points: &[GpsPoint],
+    max_accuracy_m: f32,
+    unit_m: f64,
+    segment_starts: &[u32],
+) -> Vec<RunSplit> {
+    if unit_m <= 0.0 {
+        return Vec::new();
+    }
+    let (usable, is_start) = usable_segments(points, segment_starts, max_accuracy_m);
+    if usable.len() < 2 {
+        return Vec::new();
+    }
+    // Cumulative distance to each fix (cumulative[0] == 0.0), the same walk as
+    // `track_positive_split_pct`; a pause-bridge leg adds zero distance, so it
+    // behaves downstream exactly like the re-anchored zero-length bridge did.
+    let mut cumulative = Vec::with_capacity(usable.len());
+    let mut running_total = 0.0;
+    cumulative.push(0.0);
+    for i in 1..usable.len() {
+        let leg = if is_start[i] {
+            0.0
+        } else {
+            haversine_m(usable[i - 1], usable[i])
+        };
+        running_total += leg;
+        cumulative.push(running_total);
+    }
+    let total = running_total;
+    if total <= 0.0 {
+        return Vec::new();
+    }
+
+    let mut splits = Vec::new();
+    let mut index = 1u32;
+    let mut boundary = unit_m;
+    // Time accumulated into the CURRENT split since the last unit boundary.
+    let mut moving_s = 0.0; // moving legs only - the split's pace clock
+    let mut wall_s = 0.0; // every leg - fallback for an all-stopped split
+    for i in 1..usable.len() {
+        let leg_d = cumulative[i] - cumulative[i - 1];
+        let dt = ((usable[i].observed_at - usable[i - 1].observed_at) as f64).max(0.0);
+        // Same pause gate as `moving_legs` / `moving_duration_min`: legs with
+        // non-advancing time or speed below the stop floor are paused time.
+        let moving = dt > 0.0 && !crate::load::is_stopped(leg_d / dt);
+        // Distance already consumed within this leg (start of unconsumed part).
+        let mut pos = cumulative[i - 1];
+        // Emit every unit boundary that falls inside this leg; the leg's time
+        // is apportioned to each side at the leg's constant speed.
+        while boundary <= cumulative[i] + 1e-6 {
+            let sub = if leg_d > 0.0 {
+                dt * ((boundary - pos) / leg_d)
+            } else {
+                0.0
+            };
+            wall_s += sub;
+            if moving {
+                moving_s += sub;
+            }
+            let dur = if moving_s > 0.0 { moving_s } else { wall_s };
+            splits.push(RunSplit {
+                index,
+                // Full split: distance == unit, so pace IS the (moving) time.
+                pace_sec_per_unit: dur,
+                cumulative_m: boundary,
+                distance_m: unit_m,
+                partial: false,
+            });
+            pos = boundary;
+            moving_s = 0.0;
+            wall_s = 0.0;
+            index += 1;
+            boundary = unit_m * index as f64;
+        }
+        // Remainder of the leg past the last boundary feeds the next split.
+        let sub = if leg_d > 0.0 {
+            dt * ((cumulative[i] - pos) / leg_d)
+        } else {
+            dt // zero-distance leg (standstill): all of it is this split's time
+        };
+        wall_s += sub;
+        if moving {
+            moving_s += sub;
+        }
+    }
+    // Final partial split: whatever remains after the last full unit.
+    let remaining = total - unit_m * (index - 1) as f64;
+    if remaining > 1e-6 {
+        let dur = if moving_s > 0.0 { moving_s } else { wall_s };
+        splits.push(RunSplit {
+            index,
+            // Normalize the short remainder to a full unit so it is comparable.
+            pace_sec_per_unit: dur / remaining * unit_m,
+            cumulative_m: total,
+            distance_m: remaining,
+            partial: true,
+        });
+    }
+    splits
+}
+
+/// A GPS ground speed above this is jitter, not a real running segment, and is
+/// clamped before the convex weighting so a single noisy fix cannot inflate the
+/// normalized speed. Re-exports the ONE plausible-runner-speed threshold from
+/// `load` (File-07 QC value, 12.0 m/s) so the ingest gate, this clamp, and the
+/// shell live-jitter guard all agree. (On the real path `qc_track` already drops
+/// legs above it, so the clamp is a belt-and-braces guard for raw callers.)
+pub use crate::load::MAX_PLAUSIBLE_SPEED_MPS;
+
+/// Variability-index cutoff at or above which a run reads as interval-like rather
+/// than steady (the verdict is `vi >= INTERVAL_VI_THRESHOLD`). With the rolling
+/// [`INTERVAL_WINDOW_SEC`] smoothing, a steady run, even one with ordinary pace
+/// drift (hills / a negative split, ±~15% swing), sits at ~1.00–1.01, while
+/// genuine reps-plus-recovery sessions sit ~1.11–1.21 (degrading toward the low
+/// end only under heavy GPS noise). 1.10 sits in that gap with margin on BOTH
+/// sides: it no longer misses noisy real intervals (the old 1.15 did) and steady
+/// runs stay comfortably clear. An ENGINE HEURISTIC, not a cited threshold (the
+/// KB source, Skiba GOVSS, gives no boundary), hence the RUN-INTERVAL-VI-001 chip
+/// is graded Weak and its copy measures rather than prescribes.
+pub const INTERVAL_VI_THRESHOLD: f64 = 1.10;
+
+/// Graded verdict for whether a run's variability index marks it interval-like
+/// (`true`) or steady (`false`). Carries the RUN-INTERVAL-VI-001 evidence so a
+/// shell renders it with the same grade chip / why? chrome as any other
+/// recommendation, the differentiation is descriptive but still evidence-cited.
+pub fn interval_verdict(variability_index: f64) -> Recommended<bool> {
+    recommend(
+        variability_index >= INTERVAL_VI_THRESHOLD,
+        "RUN-INTERVAL-VI-001",
+    )
+}
+
+/// Rolling-average window (seconds) applied to the speed series BEFORE the
+/// 4th-power weighting. This is the crux of the GOVSS/Normalized-Graded-Pace
+/// algorithm and the KB's stated pre-implementation requirement (Skiba 120 s,
+/// GoldenCheetah 30 s): at a 1 Hz GPS cadence the raw per-second leg speed is
+/// dominated by position noise (±a few metres over a ~1–4 m move), and the convex
+/// 4th power AMPLIFIES that noise, so without smoothing a steady run scores high
+/// (false "interval") while genuine rep structure is drowned out. A 30 s window
+/// averages the jitter away (≈30 samples/bin) yet preserves real reps: 800 m reps
+/// (~2.5–3.5 min) and 400 m reps (~1.5–2 min) are many windows long. 30 s (the
+/// GoldenCheetah value) is chosen over Skiba's 120 s so shorter reps still survive.
+pub const INTERVAL_WINDOW_SEC: f64 = 30.0;
+
+/// The MOVING legs of a track as `(dt_seconds, distance_m)`, in order. A leg is
+/// dropped when its timestamps don't advance (`dt <= 0`) or its ground speed is
+/// below the auto-pause floor (`load::is_stopped`, <0.5 m/s), so a café/traffic
+/// stop (the Pause button leaves a ~0-speed bridge leg spanning the gap) is
+/// excluded exactly as `moving_duration_min` excludes it from the displayed pace.
+/// Distance is capped so the implied speed never exceeds [`MAX_PLAUSIBLE_SPEED_MPS`]
+/// (GPS jitter rejection). Same accuracy gate as [`track_distance_km`].
+fn moving_legs(points: &[GpsPoint], max_accuracy_m: f32, segment_starts: &[u32]) -> Vec<(f64, f64)> {
+    // Moving legs are computed WITHIN each segment, so the pause-bridge leg
+    // between segments is never formed (a paused relocation is neither moving
+    // time nor moving distance). Empty `segment_starts` → one segment → the
+    // legs of the whole track, bit-identical to the pre-segment behaviour.
+    segments(points, segment_starts)
+        .into_iter()
+        .flat_map(|seg| {
+            usable_track(seg, max_accuracy_m)
+                .windows(2)
+                .filter_map(|w| {
+                    let dt = (w[1].observed_at - w[0].observed_at) as f64;
+                    if dt <= 0.0 {
+                        return None;
+                    }
+                    let leg_m = haversine_m(w[0], w[1]);
+                    if crate::load::is_stopped(leg_m / dt) {
+                        return None;
+                    }
+                    // Cap distance so speed ≤ the plausible-runner ceiling (jitter).
+                    Some((dt, leg_m.min(MAX_PLAUSIBLE_SPEED_MPS * dt)))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Resample moving legs into fixed [`INTERVAL_WINDOW_SEC`] bins along the moving
+/// timeline (the pause gaps are already removed), returning each bin's
+/// `(mean_speed, duration)`. A leg is split across bin boundaries at its own
+/// constant speed, so the bins are a proper rolling average of speed over the
+/// window, the smoothing that makes the 4th-power step respond to real pace
+/// structure instead of per-second GPS noise. The final short bin keeps its true
+/// (sub-window) duration so it is weighted correctly.
+fn windowed_bin_speeds(legs: &[(f64, f64)], window_s: f64) -> Vec<(f64, f64)> {
+    let mut bins = Vec::new();
+    let mut bin_time = 0.0;
+    let mut bin_dist = 0.0;
+    for &(dt, dist) in legs {
+        let speed = if dt > 0.0 { dist / dt } else { 0.0 };
+        let mut rem = dt;
+        while rem > 0.0 {
+            let take = rem.min(window_s - bin_time);
+            bin_time += take;
+            bin_dist += speed * take;
+            rem -= take;
+            if bin_time >= window_s - 1e-9 {
+                bins.push((bin_dist / bin_time, bin_time));
+                bin_time = 0.0;
+                bin_dist = 0.0;
+            }
+        }
+    }
+    if bin_time > 0.0 {
+        bins.push((bin_dist / bin_time, bin_time));
+    }
+    bins
+}
+
+/// Normalized speed (m/s): the duration-weighted 4th-power-mean of the
+/// WINDOW-AVERAGED speed series, GOVSS / Normalized-Graded-Pace, flat-ground
+/// (no elevation → normalized *speed*, not grade-adjusted power). The convex
+/// 4th power is what lets a 6×800 m session score above its own average while a
+/// steady run does not (Jensen's inequality). Smoothing over
+/// [`INTERVAL_WINDOW_SEC`] first is essential, see that constant. Returns `None`
+/// for fewer than two usable fixes or no moving time.
+pub fn normalized_speed_mps(points: &[GpsPoint], max_accuracy_m: f32) -> Option<f64> {
+    normalized_speed_mps_seg(points, max_accuracy_m, &[])
+}
+
+/// [`normalized_speed_mps`] over the segment-aware moving legs (pause bridges
+/// excluded). Empty `segment_starts` is bit-identical to [`normalized_speed_mps`].
+pub fn normalized_speed_mps_seg(
+    points: &[GpsPoint],
+    max_accuracy_m: f32,
+    segment_starts: &[u32],
+) -> Option<f64> {
+    if usable_track(points, max_accuracy_m).len() < 2 {
+        return None;
+    }
+    let bins = windowed_bin_speeds(
+        &moving_legs(points, max_accuracy_m, segment_starts),
+        INTERVAL_WINDOW_SEC,
+    );
+    let (mut p4_sum, mut weight_sum) = (0.0, 0.0);
+    for &(speed, dur) in &bins {
+        p4_sum += dur * speed.powi(4);
+        weight_sum += dur;
+    }
+    if weight_sum <= 0.0 {
+        return None;
+    }
+    Some((p4_sum / weight_sum).powf(0.25))
+}
+
+/// Variability Index = normalized speed ÷ average MOVING speed for a track.
+/// About 1.0 for an evenly-paced steady run (window smoothing removes GPS noise);
+/// rises above 1.0 as a run becomes more interval-like (hard reps separated by
+/// JOG recovery), because the convex normalized speed weights the fast reps far
+/// above the moving-time average. Both numerator and denominator use the SAME
+/// moving-leg base (paused legs excluded), so a stop can't inflate it. This is
+/// the scalar that lets the engine tell a 6×800 m session from a steady run of
+/// the *same average pace*.
+///
+/// Purely descriptive (a MEASUREMENT of the run, not a recommendation, and not a
+/// load input). Returns `None` when the track has no moving legs or a
+/// non-positive average speed.
+pub fn track_variability_index(points: &[GpsPoint], max_accuracy_m: f32) -> Option<f64> {
+    track_variability_index_seg(points, max_accuracy_m, &[])
+}
+
+/// [`track_variability_index`] over the segment-aware moving legs (both the
+/// normalized speed and the average speed use the same pause-bridge-excluded
+/// base). Empty `segment_starts` is bit-identical to [`track_variability_index`].
+pub fn track_variability_index_seg(
+    points: &[GpsPoint],
+    max_accuracy_m: f32,
+    segment_starts: &[u32],
+) -> Option<f64> {
+    let ns = normalized_speed_mps_seg(points, max_accuracy_m, segment_starts)?;
+    let legs = moving_legs(points, max_accuracy_m, segment_starts);
+    let dur: f64 = legs.iter().map(|&(dt, _)| dt).sum();
+    let dist: f64 = legs.iter().map(|&(_, d)| d).sum();
+    if dur <= 0.0 {
+        return None;
+    }
+    let avg = dist / dur; // moving distance ÷ moving time
+    if avg <= 0.0 {
+        return None;
+    }
+    Some(((ns / avg) * 100.0).round() / 100.0)
+}
+
 /// Serialise a fix track to a GPX 1.1 document (the format Strava, Garmin
 /// Connect, Komoot, etc. import). Pure and deterministic: `observed_at` unix
 /// seconds are rendered as RFC 3339 UTC timestamps in-core, never from a live
 /// clock. Elevation is omitted: the shell does not yet capture altitude.
 pub fn export_gpx(points: &[GpsPoint], track_name: &str) -> String {
+    export_gpx_seg(points, track_name, &[])
+}
+
+/// [`export_gpx`] that emits one `<trkseg>` per recording segment, using the TRUE
+/// coordinates (no re-anchoring shift), so a paused + relocated run opens in
+/// Strava/Garmin as the real route with a visible gap at each pause instead of a
+/// single continuous line drawn through wrong coordinates (I15/B2). Empty
+/// `segment_starts` is a single `<trkseg>`, byte-identical to [`export_gpx`].
+pub fn export_gpx_seg(points: &[GpsPoint], track_name: &str, segment_starts: &[u32]) -> String {
     let mut s = String::with_capacity(256 + points.len() * 96);
     s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     s.push_str(
@@ -1480,17 +1991,24 @@ pub fn export_gpx(points: &[GpsPoint], track_name: &str) -> String {
     );
     s.push_str("  <trk>\n    <name>");
     xml_escape_into(&mut s, track_name);
-    s.push_str("</name>\n    <trkseg>\n");
-    for p in points {
-        s.push_str("      <trkpt lat=\"");
-        s.push_str(&format!("{:.7}", p.lat));
-        s.push_str("\" lon=\"");
-        s.push_str(&format!("{:.7}", p.lon));
-        s.push_str("\"><time>");
-        s.push_str(&unix_to_rfc3339_utc(p.observed_at));
-        s.push_str("</time></trkpt>\n");
+    s.push_str("</name>\n");
+    for seg in segments(points, segment_starts) {
+        if seg.is_empty() {
+            continue;
+        }
+        s.push_str("    <trkseg>\n");
+        for p in seg {
+            s.push_str("      <trkpt lat=\"");
+            s.push_str(&format!("{:.7}", p.lat));
+            s.push_str("\" lon=\"");
+            s.push_str(&format!("{:.7}", p.lon));
+            s.push_str("\"><time>");
+            s.push_str(&unix_to_rfc3339_utc(p.observed_at));
+            s.push_str("</time></trkpt>\n");
+        }
+        s.push_str("    </trkseg>\n");
     }
-    s.push_str("    </trkseg>\n  </trk>\n</gpx>\n");
+    s.push_str("  </trk>\n</gpx>\n");
     s
 }
 
@@ -1561,6 +2079,17 @@ mod tests {
     }
 
     #[test]
+    fn haversine_stays_finite_for_near_antipodal_coords() {
+        // A demonstrated valid coordinate pair whose rounded haversine `h`
+        // exceeds 1.0, so an unclamped `sqrt(h).asin()` returns NaN. The
+        // `h.min(1.0)` clamp must keep the distance finite (and ≈ half the
+        // Earth's circumference for an antipodal pair).
+        let d = haversine_m(pt(-59.13, 0.0, 0), pt(59.1300000000043, 180.0, 0));
+        assert!(d.is_finite(), "near-antipodal haversine must be finite, got {d}");
+        assert!(d > 0.0, "distance should be positive, got {d}");
+    }
+
+    #[test]
     fn positive_split_detects_back_half_slowdown() {
         // Five equatorial fixes 0.001° apart → four equal ~111.3 m segments.
         // First half covered in 20 s, second half in 40 s → back half is exactly
@@ -1590,9 +2119,425 @@ mod tests {
     }
 
     #[test]
+    fn mid_run_pause_does_not_produce_a_false_positive_split() {
+        // Evenly paced ~3.7 m/s throughout, but with a 10-min standstill in the
+        // SECOND half (the app's Pause button leaves a ~0-speed bridge leg). With
+        // wall-clock halves this read a massive "FADE" (back half ~11× slower);
+        // moving-time halves must see it as the even run it is.
+        let track = vec![
+            pt(0.0, 0.000, 0),
+            pt(0.0, 0.001, 30),
+            pt(0.0, 0.002, 60),   // ~halfway
+            pt(0.0, 0.002, 660),  // 10-min stop, 0 m → excluded
+            pt(0.0, 0.003, 690),
+            pt(0.0, 0.004, 720),
+        ];
+        let split = track_positive_split_pct(&track, 30.0).expect("split");
+        assert!(split.abs() < 1.0, "paused steady run falsely split: {split}");
+    }
+
+    #[test]
     fn positive_split_needs_three_usable_fixes() {
         let track = vec![pt(0.0, 0.0, 0), pt(0.0, 0.001, 10)];
         assert!(track_positive_split_pct(&track, 30.0).is_none());
+    }
+
+    /// Even-pace straight track along the equator: constant longitude step +
+    /// constant time step ⇒ constant ground speed, so every FULL split must
+    /// carry the same per-unit pace regardless of where fixes land relative to
+    /// the km/mile boundaries. `legs` × ~111 m each.
+    fn even_equator_track(legs: usize, dlon_deg: f64, dt_s: i64) -> Vec<GpsPoint> {
+        (0..=legs)
+            .map(|i| pt(0.0, i as f64 * dlon_deg, i as i64 * dt_s))
+            .collect()
+    }
+
+    #[test]
+    fn splits_even_pace_all_full_splits_equal_pace() {
+        // 50 legs × ~111.19 m ≈ 5.56 km at a constant ~3.71 m/s.
+        let track = even_equator_track(50, 0.001, 30);
+        let km = track_splits(&track, 30.0, KM_M);
+        let full: Vec<_> = km.iter().filter(|s| !s.partial).collect();
+        assert_eq!(full.len(), 5, "≈5.56 km → 5 full km splits");
+        let p0 = full[0].pace_sec_per_unit;
+        for s in &full {
+            assert!(
+                (s.pace_sec_per_unit - p0).abs() < 0.5,
+                "full split {} pace {} vs {p0}",
+                s.index,
+                s.pace_sec_per_unit
+            );
+            assert!((s.distance_m - KM_M).abs() < 1e-6);
+        }
+        // Indices are 1-based and contiguous.
+        assert_eq!(
+            km.iter().map(|s| s.index).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5, 6]
+        );
+    }
+
+    #[test]
+    fn splits_mid_run_stop_does_not_inflate_split_pace() {
+        // Even-pace equator track (~111.19 m / 30 s legs, ~3.71 m/s) with a
+        // 300 s standstill spliced in mid-first-km (after ~556 m): the stopped
+        // leg (0 m over 300 s, below the 0.5 m/s auto-pause floor) must be
+        // excluded from split 1's TIME, so its pace matches the other full
+        // splits (the run's moving pace) instead of reading ~5 min slower -
+        // consistent with `moving_duration_min` on the same detail sheet.
+        let mut track: Vec<GpsPoint> = (0..=5).map(|i| pt(0.0, i as f64 * 0.001, i * 30)).collect();
+        // Standstill: same position as fix 5, 300 s later.
+        track.push(pt(0.0, 0.005, 5 * 30 + 300));
+        track.extend((6..=50).map(|i| pt(0.0, i as f64 * 0.001, i * 30 + 300)));
+
+        let km = track_splits(&track, 30.0, KM_M);
+        let full: Vec<_> = km.iter().filter(|s| !s.partial).collect();
+        assert_eq!(full.len(), 5, "≈5.56 km → 5 full km splits");
+        // Moving average: 1000 m at ~3.7065 m/s ≈ 269.8 s/km.
+        let moving_avg = KM_M / (0.001f64.to_radians() * super::EARTH_RADIUS_M / 30.0);
+        for s in &full {
+            assert!(
+                (s.pace_sec_per_unit - moving_avg).abs() < 2.0,
+                "split {} pace {} should sit at the moving average {moving_avg}, \
+                 not be inflated by the stop",
+                s.index,
+                s.pace_sec_per_unit
+            );
+        }
+        // Explicitly: split 1 (which contains the stop) equals split 2.
+        assert!(
+            (full[0].pace_sec_per_unit - full[1].pace_sec_per_unit).abs() < 0.5,
+            "stop split {} vs clean split {}",
+            full[0].pace_sec_per_unit,
+            full[1].pace_sec_per_unit
+        );
+    }
+
+    #[test]
+    fn splits_all_stopped_split_falls_back_to_wall_clock() {
+        // A track covered entirely below the 0.5 m/s stop floor (~111.19 m legs
+        // over 300 s each, ~0.37 m/s) has zero moving time; the partial split
+        // must fall back to wall-clock so its pace stays finite and non-zero.
+        let track: Vec<GpsPoint> = (0..=4).map(|i| pt(0.0, i as f64 * 0.001, i * 300)).collect();
+        let km = track_splits(&track, 30.0, KM_M);
+        assert_eq!(km.len(), 1);
+        assert!(km[0].partial);
+        assert!(
+            km[0].pace_sec_per_unit > 0.0 && km[0].pace_sec_per_unit.is_finite(),
+            "got {}",
+            km[0].pace_sec_per_unit
+        );
+    }
+
+    #[test]
+    fn splits_final_partial_is_flagged() {
+        // ≈5.56 km → the 6th km split is partial (~0.56 km).
+        let track = even_equator_track(50, 0.001, 30);
+        let km = track_splits(&track, 30.0, KM_M);
+        let last = km.last().expect("a split");
+        assert!(last.partial, "final split flagged partial");
+        assert!(last.distance_m < KM_M, "partial covers < 1 km");
+        assert!(
+            km[..km.len() - 1].iter().all(|s| !s.partial),
+            "only the last split is partial"
+        );
+    }
+
+    #[test]
+    fn splits_km_and_mi_counts_differ_for_same_track() {
+        // Same ≈5.56 km track: 5 full + 1 partial km (6) vs 3 full + 1 partial mi
+        // (4), since 5.56 km ≈ 3.45 mi.
+        let track = even_equator_track(50, 0.001, 30);
+        let km = track_splits(&track, 30.0, KM_M);
+        let mi = track_splits(&track, 30.0, MILE_M);
+        assert_eq!(km.len(), 6, "km splits");
+        assert_eq!(mi.len(), 4, "mile splits");
+        assert_eq!(mi.iter().filter(|s| !s.partial).count(), 3, "3 full miles");
+        assert!(mi.last().unwrap().partial);
+    }
+
+    #[test]
+    fn splits_under_one_unit_is_single_partial() {
+        // ~445 m: under a km → one partial split, index 1.
+        let track = even_equator_track(4, 0.001, 30);
+        let km = track_splits(&track, 30.0, KM_M);
+        assert_eq!(km.len(), 1);
+        assert_eq!(km[0].index, 1);
+        assert!(km[0].partial);
+        assert!(km[0].distance_m < KM_M);
+    }
+
+    #[test]
+    fn splits_degenerate_tracks_are_empty() {
+        assert!(track_splits(&[], 30.0, KM_M).is_empty(), "empty track");
+        assert!(
+            track_splits(&[pt(0.0, 0.0, 0)], 30.0, KM_M).is_empty(),
+            "single fix"
+        );
+        // Zero-distance track (all fixes stacked) → nothing to split.
+        let stacked = vec![pt(0.0, 0.0, 0), pt(0.0, 0.0, 10), pt(0.0, 0.0, 20)];
+        assert!(track_splits(&stacked, 30.0, KM_M).is_empty(), "zero distance");
+        // Non-positive unit.
+        assert!(track_splits(&even_equator_track(50, 0.001, 30), 30.0, 0.0).is_empty());
+    }
+
+    #[test]
+    fn variability_index_separates_interval_from_steady_same_average() {
+        // Two runs with the SAME total distance (0.004° lon ≈ 445 m) and the SAME
+        // duration (120 s) → identical average pace. The current engine rates them
+        // the same; the variability index must not.
+        // Steady: four equal ~111 m / 30 s segments (~3.71 m/s throughout).
+        let steady = vec![
+            pt(0.0, 0.000, 0),
+            pt(0.0, 0.001, 30),
+            pt(0.0, 0.002, 60),
+            pt(0.0, 0.003, 90),
+            pt(0.0, 0.004, 120),
+        ];
+        // Interval with JOG recovery (recovery legs stay ABOVE the 0.5 m/s
+        // auto-pause floor, so they count as moving time, matching the app's
+        // moving-pace base; and the same 445 m / 120 s average holds): two
+        // ~200 m / 30 s hard reps (~6.7 m/s) each followed by a ~22 m / 30 s jog
+        // (~0.74 m/s). Standing (0 m/s) recovery would be excluded as a pause.
+        let interval = vec![
+            pt(0.0, 0.0000, 0),
+            pt(0.0, 0.0018, 30),
+            pt(0.0, 0.0020, 60),
+            pt(0.0, 0.0038, 90),
+            pt(0.0, 0.0040, 120),
+        ];
+
+        // Same average by construction: sanity-check that first.
+        let ds = track_distance_km(&steady, 30.0);
+        let di = track_distance_km(&interval, 30.0);
+        assert!((ds - di).abs() < 0.001, "distances differ: {ds} vs {di}");
+        assert_eq!(
+            track_duration_min(&steady, 30.0),
+            track_duration_min(&interval, 30.0),
+        );
+
+        let vi_steady = track_variability_index(&steady, 30.0).expect("steady VI");
+        let vi_interval = track_variability_index(&interval, 30.0).expect("interval VI");
+
+        // Steady ≈ 1.0; interval well above it (jog-recovery 4th-power mean ~1.5).
+        assert!((vi_steady - 1.0).abs() < 0.03, "steady VI {vi_steady}");
+        assert!(vi_interval > 1.4, "interval VI {vi_interval}");
+        assert!(
+            vi_interval > vi_steady + 0.3,
+            "interval {vi_interval} not clearly above steady {vi_steady}",
+        );
+
+        // Normalized speed exceeds the plain average for the interval run.
+        let ns = normalized_speed_mps(&interval, 30.0).expect("interval NS");
+        let avg = di * 1000.0 / (track_duration_min(&interval, 30.0) * 60.0);
+        assert!(ns > avg, "NS {ns} should exceed avg {avg}");
+    }
+
+    #[test]
+    fn variability_index_needs_two_usable_fixes() {
+        assert!(normalized_speed_mps(&[pt(0.0, 0.0, 0)], 30.0).is_none());
+        assert!(track_variability_index(&[pt(0.0, 0.0, 0)], 30.0).is_none());
+    }
+
+    /// Build a DENSE (1 Hz) GPS track from a speed profile `(speed_mps,
+    /// duration_s)`, with deterministic lateral position jitter to mimic a real
+    /// consumer GPS at ~a few metres accuracy. Forward motion runs along lon at
+    /// the equator (1° ≈ 111 320 m); the lateral wobble is `jitter_deg·sin(i·1.3)`
+    /// on lat, which makes consecutive per-second leg lengths swing (exactly the
+    /// noise that, un-smoothed, blows up the 4th-power mean).
+    fn noisy_track(profile: &[(f64, i64)], jitter_deg: f64) -> Vec<GpsPoint> {
+        let mut pts = Vec::new();
+        let mut lon = 0.0f64;
+        let mut t = 0i64;
+        let deg_per_m = 1.0 / 111_320.0;
+        // Seed the first fix.
+        pts.push(GpsPoint { lat: 0.0, lon: 0.0, observed_at: 0, accuracy_m: 5.0 });
+        for &(speed, dur) in profile {
+            for _ in 0..dur {
+                lon += speed * deg_per_m; // advance ~speed metres this second
+                t += 1;
+                let lat = jitter_deg * (t as f64 * 1.3).sin();
+                pts.push(GpsPoint { lat, lon, observed_at: t, accuracy_m: 5.0 });
+            }
+        }
+        pts
+    }
+
+    #[test]
+    fn steady_noisy_1hz_run_is_not_flagged_interval() {
+        // A genuinely STEADY 5-min run at ~3 m/s, sampled 1 Hz with ~3 m lateral
+        // GPS jitter. Per-second leg speeds swing wildly; without the rolling
+        // window the 4th-power mean reads this as an "interval" (the reported
+        // bug). With the window, jitter averages out → VI must stay steady.
+        let track = noisy_track(&[(3.0, 300)], 0.000_03);
+        let vi = track_variability_index(&track, 30.0).expect("vi");
+        assert!(
+            vi < INTERVAL_VI_THRESHOLD,
+            "steady noisy run wrongly flagged interval: VI {vi}"
+        );
+    }
+
+    #[test]
+    fn short_noisy_1hz_run_is_not_flagged_interval() {
+        // The exact failure the user reported: a short ~1 km steady run (≈5.5 min
+        // at 3 m/s) sampled 1 Hz with jitter must NOT read as interval.
+        let track = noisy_track(&[(3.0, 330)], 0.000_03);
+        let vi = track_variability_index(&track, 30.0).expect("vi");
+        assert!(vi < INTERVAL_VI_THRESHOLD, "short steady run wrongly flagged: VI {vi}");
+    }
+
+    #[test]
+    fn interval_noisy_1hz_run_is_flagged() {
+        // A real 1 Hz interval session at realistic (~1 m) GPS jitter: 4× (90 s
+        // hard @ ~5 m/s, then 90 s jog @ ~2 m/s). The rep structure spans many
+        // 30 s windows, so it survives smoothing and flags interval. (Under
+        // pathologically heavy high-frequency noise VI can still fall under the
+        // cutoff: the metric is Weak-graded; this guards the realistic case.)
+        let mut profile = Vec::new();
+        for _ in 0..4 {
+            profile.push((5.0, 90));
+            profile.push((2.0, 90));
+        }
+        let track = noisy_track(&profile, 0.000_01);
+        let vi = track_variability_index(&track, 30.0).expect("vi");
+        assert!(
+            vi >= INTERVAL_VI_THRESHOLD,
+            "interval run not flagged: VI {vi}"
+        );
+    }
+
+    /// Save-time GPS decimation (shell `RunSession.decimatedTrackForCore`): keep
+    /// every `stride`-th fix plus the endpoints. These tests prove the core's
+    /// of-record figures survive that lossy thinning at strides 2 and 3: the
+    /// shell may hand the core fewer points, and the verdicts must not move.
+    fn decimate(points: &[GpsPoint], stride: usize) -> Vec<GpsPoint> {
+        assert!(stride >= 1);
+        if points.len() < 3 {
+            return points.to_vec();
+        }
+        let mut out: Vec<GpsPoint> = points.iter().step_by(stride).copied().collect();
+        let last = *points.last().unwrap();
+        if out.last() != Some(&last) {
+            out.push(last);
+        }
+        out
+    }
+
+    #[test]
+    fn decimation_preserves_the_steady_vi_verdict() {
+        // A genuinely steady noisy run reads steady (VI < threshold); thinning it
+        // ×2 and ×3 must keep that verdict, fewer points, same call.
+        let full = noisy_track(&[(3.0, 300)], 0.000_03);
+        for stride in [2usize, 3] {
+            let thinned = decimate(&full, stride);
+            let vi = track_variability_index(&thinned, 30.0).expect("vi");
+            assert!(
+                vi < INTERVAL_VI_THRESHOLD,
+                "steady run flipped to interval after ×{stride} decimation: VI {vi}"
+            );
+        }
+    }
+
+    #[test]
+    fn decimation_preserves_the_interval_vi_verdict() {
+        // A real interval session (4× 90 s hard / 90 s jog) flags interval; the
+        // 30 s rolling window still gets ~10–15 samples/bin at a 2–3 s cadence,
+        // so the verdict survives ×2 and ×3 thinning.
+        let mut profile = Vec::new();
+        for _ in 0..4 {
+            profile.push((5.0, 90));
+            profile.push((2.0, 90));
+        }
+        let full = noisy_track(&profile, 0.000_01);
+        for stride in [2usize, 3] {
+            let thinned = decimate(&full, stride);
+            let vi = track_variability_index(&thinned, 30.0).expect("vi");
+            assert!(
+                vi >= INTERVAL_VI_THRESHOLD,
+                "interval run lost its verdict after ×{stride} decimation: VI {vi}"
+            );
+        }
+    }
+
+    #[test]
+    fn decimation_preserves_distance_within_one_percent() {
+        // Total distance is the storage-heaviest figure users see; thinning must
+        // not move it more than ±1 % at strides 2 and 3. Uses realistic sub-metre
+        // GPS jitter (0.000_004 ≈ 0.44 m), a real good-fix running track barely
+        // wanders between 1 s samples, so thinning to a 2–3 s cadence keeps the
+        // path length. (The heavier 0.000_03/0.000_01 wobble the VI fixtures use
+        // is a deliberate per-second speed-swing stress case, whose fixed-freq
+        // sine ALIASES under decimation, an artifact of the generator, not a
+        // real track shape, so it is not the right fixture for distance parity.)
+        let mut profile = Vec::new();
+        for _ in 0..4 {
+            profile.push((5.0, 90));
+            profile.push((2.0, 90));
+        }
+        for track in [noisy_track(&[(3.0, 600)], 0.000_004), noisy_track(&profile, 0.000_004)] {
+            let full_km = track_distance_km(&track, 30.0);
+            for stride in [2usize, 3] {
+                let thinned_km = track_distance_km(&decimate(&track, stride), 30.0);
+                let err = (thinned_km - full_km).abs() / full_km;
+                assert!(
+                    err <= 0.01,
+                    "×{stride} decimation moved distance {err:.4} (>1%): {full_km} → {thinned_km}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn decimation_preserves_the_positive_split_sign() {
+        // A run that clearly slows in the back half is a POSITIVE split; one that
+        // speeds up is NEGATIVE. Decimation must not flip that sign: the split
+        // verdict a runner reads stays the same.
+        let positive = noisy_track(&[(4.0, 150), (2.5, 150)], 0.000_01);
+        let negative = noisy_track(&[(2.5, 150), (4.0, 150)], 0.000_01);
+        for stride in [2usize, 3] {
+            let ps_pos = track_positive_split_pct(&decimate(&positive, stride), 30.0).expect("pos");
+            let ps_neg = track_positive_split_pct(&decimate(&negative, stride), 30.0).expect("neg");
+            assert!(
+                ps_pos > 0.0,
+                "positive-split run lost its sign after ×{stride}: {ps_pos}"
+            );
+            assert!(
+                ps_neg < 0.0,
+                "negative-split run lost its sign after ×{stride}: {ps_neg}"
+            );
+        }
+    }
+
+    #[test]
+    fn steady_run_with_a_mid_run_pause_stays_steady() {
+        // A steady ~3.7 m/s run with one long standing pause in the middle: the
+        // paused leg (a ~0 m/s bridge spanning the stop, exactly what the app's
+        // Pause button leaves) must be EXCLUDED, so the run reads steady, not a
+        // false "interval" from the depressed elapsed-time average.
+        let steady_paused = vec![
+            pt(0.0, 0.000, 0),
+            pt(0.0, 0.001, 30),   // ~3.7 m/s
+            pt(0.0, 0.002, 60),   // ~3.7 m/s
+            pt(0.0, 0.002, 660),  // 10-min stop, ~0 m/s → excluded
+            pt(0.0, 0.003, 690),  // ~3.7 m/s
+            pt(0.0, 0.004, 720),  // ~3.7 m/s
+        ];
+        let vi = track_variability_index(&steady_paused, 30.0).expect("vi");
+        assert!(vi < INTERVAL_VI_THRESHOLD, "paused steady wrongly flagged: VI {vi}");
+        assert!((vi - 1.0).abs() < 0.05, "VI {vi} should be ~1.0");
+    }
+
+    #[test]
+    fn normalized_speed_clamps_gps_jitter_spike() {
+        // A single teleport fix (huge distance in 1 s) must be clamped, not allowed
+        // to blow up the 4th-power mean. Two clean 30 s segments plus one spike.
+        let spiky = vec![
+            pt(0.0, 0.000, 0),
+            pt(0.0, 0.001, 30),
+            pt(5.0, 5.000, 31), // ~780 km in 1 s → clamp to MAX_PLAUSIBLE_SPEED_MPS
+            pt(5.0, 5.001, 61),
+        ];
+        let ns = normalized_speed_mps(&spiky, 30.0).expect("ns");
+        assert!(ns <= MAX_PLAUSIBLE_SPEED_MPS + 1e-9, "NS {ns} not clamped");
     }
 
     #[test]
@@ -1791,6 +2736,34 @@ mod tests {
                 .sessions_per_week,
             (4, 6)
         );
+        // marathon_derated_band (running-040/008, option B): the optimistic
+        // band is shifted SLOWER, the fast bound by the min derate and the slow
+        // bound by the max, so the range moves later and widens, and the
+        // result carries the same RUN-VDOT-001 evidence as the derate itself.
+        let vdot = crate::load::vdot(10_000.0, 2_520.0); // a real 42:00 10K
+        let base_low = 12_000.0;
+        let base_high = 12_600.0;
+        let band = marathon_derated_band(base_low, base_high, vdot);
+        assert!(
+            band.value.0 > base_low && band.value.1 > base_high,
+            "both bounds slow down: {:?} vs ({base_low}, {base_high})",
+            band.value
+        );
+        assert!(
+            band.value.1 - band.value.0 > base_high - base_low,
+            "the derate widens the span by its own uncertainty: {:?}",
+            band.value
+        );
+        assert_eq!(
+            band.evidence.citation.claim_id.as_deref(),
+            Some("RUN-VDOT-001"),
+            "the derated number still cites running-040/008 (HARD RULE 2)"
+        );
+        // A degenerate prediction (no valid race → VDOT 0) is left untouched,
+        // never fabricated slower.
+        let degen = marathon_derated_band(0.0, 0.0, 0.0);
+        assert_eq!(degen.value, (0.0, 0.0));
+
         let p = c25k_plan().value;
         assert_eq!(
             (
@@ -2224,4 +3197,169 @@ mod tests {
             other => panic!("expected Range, got {other:?}"),
         }
     }
+
+    #[test]
+    fn equivalency_cites_the_equivalency_claim_not_vdot() {
+        // running-039 is the Riegel/Daniels equivalency combiner (RUN-EQUIV-001),
+        // NOT the VDOT-fitness estimate (RUN-VDOT-001). Guards the citation fix.
+        let r = race_equivalency(3600.0, 3636.0);
+        assert_eq!(
+            r.evidence.citation.claim_id.as_deref(),
+            Some("RUN-EQUIV-001"),
+        );
+        assert_eq!(r.evidence.grade, crate::schema::EvidenceGrade::Moderate);
+    }
+
+    // ── I15/B2: segment-aware track fns (pause + relocation) ──────────────────
+
+    /// A pause + relocation: segment 1 is four ~111 m legs at the equator, then
+    /// the runner relocates ~111 km east and runs segment 2 (four more ~111 m
+    /// legs). Index 5 begins segment 2, so the bridge leg (seg1 end → seg2 start)
+    /// is a pause bridge. Segment 2 stays at the equator, so re-anchoring it back
+    /// onto segment 1 is a pure-longitude translation that preserves haversine
+    /// EXACTLY, the parity oracle for the VI/split verdicts.
+    fn relocation_fixture() -> Vec<GpsPoint> {
+        vec![
+            pt(0.0, 0.000, 0),
+            pt(0.0, 0.001, 10),
+            pt(0.0, 0.002, 20),
+            pt(0.0, 0.003, 30),
+            pt(0.0, 0.004, 40),
+            // 60 s pause + ~111 km relocation east.
+            pt(0.0, 1.000, 100),
+            pt(0.0, 1.001, 110),
+            pt(0.0, 1.002, 120),
+            pt(0.0, 1.003, 130),
+            pt(0.0, 1.004, 140),
+        ]
+    }
+
+    /// The equivalent track the OLD shell stored: segment 2 re-anchored onto
+    /// segment 1's end (pure-longitude shift at the equator), collapsing the
+    /// bridge to zero length. Empty `segment_starts` reproduces the legacy metric.
+    fn reanchored_equivalent() -> Vec<GpsPoint> {
+        let full = relocation_fixture();
+        let off_lon = full[4].lon - full[5].lon; // 0.004 - 1.000
+        let mut out = full[..5].to_vec();
+        for p in &full[5..] {
+            out.push(pt(p.lat, p.lon + off_lon, p.observed_at));
+        }
+        out
+    }
+
+    #[test]
+    fn empty_starts_is_bit_identical_to_the_single_track_metrics() {
+        // Every track fn's segment-aware form must reduce EXACTLY to the legacy
+        // whole-track form when there is no interior boundary, the regression net
+        // for legacy re-anchored logs and hand-logged runs. A start of 0 (index 0
+        // never has an entering leg) and an out-of-range index are both no-ops.
+        let t = reanchored_equivalent(); // one continuous run with slight structure
+        for starts in [&[][..], &[0][..], &[999][..]] {
+            assert_eq!(
+                track_distance_km(&t, 30.0),
+                track_distance_km_seg(&t, 30.0, starts),
+                "distance parity, starts={starts:?}",
+            );
+            assert_eq!(
+                track_duration_min(&t, 30.0),
+                track_duration_min_seg(&t, 30.0, starts),
+                "duration parity, starts={starts:?}",
+            );
+            assert_eq!(
+                track_positive_split_pct(&t, 30.0),
+                track_positive_split_pct_seg(&t, 30.0, starts),
+                "split parity, starts={starts:?}",
+            );
+            assert_eq!(
+                track_splits(&t, 30.0, KM_M),
+                track_splits_seg(&t, 30.0, KM_M, starts),
+                "km-splits parity, starts={starts:?}",
+            );
+            assert_eq!(
+                normalized_speed_mps(&t, 30.0),
+                normalized_speed_mps_seg(&t, 30.0, starts),
+                "NS parity, starts={starts:?}",
+            );
+            assert_eq!(
+                track_variability_index(&t, 30.0),
+                track_variability_index_seg(&t, 30.0, starts),
+                "VI parity, starts={starts:?}",
+            );
+            assert_eq!(
+                export_gpx(&t, "run"),
+                export_gpx_seg(&t, "run", starts),
+                "gpx parity, starts={starts:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn segmented_distance_excludes_the_pause_bridge() {
+        let t = relocation_fixture();
+        // Without boundaries the ~111 km bridge dominates the sum.
+        let naive = track_distance_km(&t, 30.0);
+        assert!(naive > 100.0, "bridge should dominate the naive sum: {naive}");
+        // With the boundary at index 5 the bridge contributes nothing → only the
+        // two ~445 m segments remain (~0.89 km).
+        let seg = track_distance_km_seg(&t, 30.0, &[5]);
+        assert!((seg - 0.889).abs() < 0.05, "segmented distance {seg}");
+        // And it equals the distance of the re-anchored equivalent the old shell
+        // stored (bit-identical route length, no shift needed).
+        assert!(
+            (seg - track_distance_km(&reanchored_equivalent(), 30.0)).abs() < 1e-9,
+            "segmented == re-anchored distance",
+        );
+        // The pause gap (60 s) is not run time: two 40 s segments → 80 s = 4/3 min.
+        let dur = track_duration_min_seg(&t, 30.0, &[5]);
+        assert!((dur - 80.0 / 60.0).abs() < 1e-9, "segmented duration {dur}");
+    }
+
+    #[test]
+    fn segmented_vi_and_split_match_the_reanchored_equivalent() {
+        let t = relocation_fixture();
+        let re = reanchored_equivalent();
+        // The re-anchored track is the legacy oracle: the segment-aware metrics on
+        // the TRUE coords must equal it (equatorial relocation ⇒ exact).
+        assert_eq!(
+            track_variability_index_seg(&t, 30.0, &[5]),
+            track_variability_index(&re, 30.0),
+            "VI parity vs re-anchored",
+        );
+        assert_eq!(
+            track_positive_split_pct_seg(&t, 30.0, &[5]),
+            track_positive_split_pct(&re, 30.0),
+            "split parity vs re-anchored",
+        );
+        // Raw splits agree to f64 rounding (the equatorial re-anchor translation is
+        // exact only up to the last ULP, so compare per field with a tolerance).
+        let seg_splits = track_splits_seg(&t, 30.0, KM_M, &[5]);
+        let re_splits = track_splits(&re, 30.0, KM_M);
+        assert_eq!(seg_splits.len(), re_splits.len(), "same split count");
+        for (a, b) in seg_splits.iter().zip(&re_splits) {
+            assert_eq!(a.index, b.index);
+            assert_eq!(a.partial, b.partial);
+            assert!((a.pace_sec_per_unit - b.pace_sec_per_unit).abs() < 1e-6);
+            assert!((a.cumulative_m - b.cumulative_m).abs() < 1e-6);
+            assert!((a.distance_m - b.distance_m).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn gpx_emits_one_trkseg_per_segment_with_true_coords() {
+        let t = relocation_fixture();
+        let gpx = export_gpx_seg(&t, "paused run", &[5]);
+        // Two recording segments → two <trkseg> blocks with a gap between.
+        assert_eq!(gpx.matches("<trkseg>").count(), 2, "two segments\n{gpx}");
+        assert_eq!(gpx.matches("</trkseg>").count(), 2);
+        // TRUE coordinates: segment 2's real relocated longitude (1.000…) is
+        // present, NOT re-anchored back onto segment 1 (0.004…).
+        assert!(gpx.contains("lon=\"1.0000000\""), "true seg-2 coord\n{gpx}");
+        // Every real fix is still emitted (10 points across the two segments).
+        assert_eq!(gpx.matches("<trkpt").count(), 10);
+        // Empty starts → a single <trkseg>, byte-identical to the bare export.
+        let flat = export_gpx_seg(&t, "paused run", &[]);
+        assert_eq!(flat.matches("<trkseg>").count(), 1);
+        assert_eq!(flat, export_gpx(&t, "paused run"));
+    }
 }
+

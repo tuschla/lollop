@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#201C17</color>
+    <color name="ic_launcher_background">#FFFFFF</color>
+
+    <!-- Launch/splash grounds. Light theme → white ground (dark logo); dark
+         theme → black ground (white logo). Unqualified/explicit so the in-app
+         DarkMode override can force either regardless of the OS night setting. -->
+    <color name="splash_bg_light">#FFFFFFFF</color>
+    <color name="splash_bg_dark">#FF000000</color>
 </resources>

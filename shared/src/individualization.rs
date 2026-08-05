@@ -237,6 +237,13 @@ pub static DETRAINING: &[DetrainRate] = &[
         note: "~7-12% loss over 8-12wk; most protected (neural)",
     },
     DetrainRate {
+        // D3 (documented, non-KB number): KB Table 3.4a describes hypertrophy
+        // detraining only qualitatively ("slower loss; beginners retain gains
+        // for weeks; retained myonuclei aid re-gain") and gives NO week figure.
+        // 3.0 is an editorial ordering value chosen only to place hypertrophy
+        // BETWEEN strength (8 wk, KB) and VO2max (2 wk, KB); it is not a KB
+        // claim and must not be surfaced as a prescription (it drives no graded
+        // recommendation: this struct prescribes nothing, per the type doc).
         quality: "hypertrophy",
         onset_weeks: 3.0,
         note: "slow loss; myonuclei aid re-gain (muscle memory)",

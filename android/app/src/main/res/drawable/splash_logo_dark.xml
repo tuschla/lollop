@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash mark for a DARK (black) ground: milestone route-trace drawn WHITE.
+     Geometry from ic_brand_mark (design/icons README, 100x100 grid): start ring
+     (never filled), trace, filled goal dot. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <path
+        android:pathData="M20,80 a4,4 0 1 1 8,0 a4,4 0 1 1 -8,0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.5" />
+    <path
+        android:pathData="M24,80 C34,52 58,66 66,34"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M60,26 a10,10 0 1 1 20,0 a10,10 0 1 1 -20,0 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

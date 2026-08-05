@@ -16,12 +16,14 @@ private const val MAX_KEPT_EXPORTS = 20
  * built in the Rust core ([RunResultView.gpx]); the shell only persists + shares.
  *
  * The filename the user sees in the share target / saves to Drive is a readable
- * local timestamp (`run-2026-07-14-143205.gpx`), not an opaque epoch. Seconds are
- * included so two runs exported within the same minute get distinct files rather
- * than the second overwriting the first before the chooser reads it.
+ * local timestamp (`run-2026-07-14-143205-812.gpx`), not an opaque epoch.
+ * Milliseconds are appended so two runs exported within the same SECOND get
+ * distinct files rather than the second overwriting the first before the chooser
+ * reads it (a second-resolution stamp collided on rapid successive exports). The
+ * zero-padded millis keep the name lexically sortable for the pruning below.
  */
 fun shareGpx(ctx: Context, gpx: String) {
-    val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss"))
+    val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss-SSS"))
     val dir = File(ctx.cacheDir, "exports").apply { mkdirs() }
     // These are share-temp files the OS only evicts under cache pressure, so a
     // heavy exporter would otherwise let them pile up indefinitely. Keep the most

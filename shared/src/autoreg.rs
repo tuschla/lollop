@@ -61,6 +61,49 @@ fn tendon_reactive(d: &PainDetail) -> bool {
     d.severity > 5 || d.trend == PainTrend::Rising
 }
 
+/// The reported body-part location, trimmed, if present and non-empty. Never
+/// fabricated, `None`/blank stays `None` (display-only context, HARD RULE 1).
+fn pain_location(d: &PainDetail) -> Option<&str> {
+    d.location
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+/// Human display string for a characterized pain report, the safety-banner
+/// sub-line context, e.g. `"Left knee · sharp/joint · 6/10"` or, with no
+/// location reported, `"tendon · 3/10"`. Location is included only when the
+/// user supplied one. Empty for a bare (detail-less) report; the caller renders
+/// that generic case itself.
+pub fn pain_context(d: &PainDetail) -> String {
+    let kind = match d.kind {
+        PainKind::SharpJoint => "sharp/joint",
+        PainKind::TendonLoadRelated => "tendon",
+        PainKind::Doms => "DOMS",
+        PainKind::Other => "unspecified",
+    };
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(loc) = pain_location(d) {
+        parts.push(loc.to_string());
+    }
+    parts.push(kind.to_string());
+    parts.push(format!("{}/10", d.severity));
+    if d.trend == PainTrend::Rising {
+        parts.push("worsening".to_string());
+    }
+    parts.join(" · ")
+}
+
+/// Append the reported body-part location to a Defer reason so the headline can
+/// name it, e.g. `"… defer to a physician/physiotherapist. (Left knee)"`. The
+/// base message is preserved verbatim when no location was reported.
+fn with_location(reason: String, d: &PainDetail) -> String {
+    match pain_location(d) {
+        Some(loc) => format!("{reason} ({loc})"),
+        None => reason,
+    }
+}
+
 /// Resolve a reported pain input against File 08 Table 4.1.
 ///
 /// Backward compatibility: a bare `Pain` report (`value > 0`, no detail) keeps
@@ -79,7 +122,7 @@ fn pain_gate(inputs: &[ReadinessInput]) -> PainGate {
     if input.value <= 0.0 {
         return PainGate::None;
     }
-    let Some(detail) = input.pain else {
+    let Some(detail) = &input.pain else {
         // Generic pain report, conservative hard stop (autoreg-043).
         return PainGate::Block(recommend(Adjustment::Stop, "SAFE-PAIN-001"));
     };
@@ -89,7 +132,7 @@ fn pain_gate(inputs: &[ReadinessInput]) -> PainGate {
             if detail.persists {
                 PainGate::Block(recommend(
                     Adjustment::Defer {
-                        reason: "Persistent sharp/joint-line pain - stop that exercise and defer to a physician/physiotherapist.".into(),
+                        reason: with_location("Persistent sharp/joint-line pain - stop that exercise and defer to a physician/physiotherapist.".into(), detail),
                     },
                     "SAFE-PAIN-STRUCT-001",
                 ))
@@ -99,11 +142,11 @@ fn pain_gate(inputs: &[ReadinessInput]) -> PainGate {
         }
         // Tendon pain graded per Silbernagel (safety-039).
         PainKind::TendonLoadRelated => {
-            if tendon_reactive(&detail) {
+            if tendon_reactive(detail) {
                 if detail.persists {
                     PainGate::Block(recommend(
                         Adjustment::Defer {
-                            reason: "Reactive tendon pain persisting despite reduced load - defer to a physician/physiotherapist.".into(),
+                            reason: with_location("Reactive tendon pain persisting despite reduced load - defer to a physician/physiotherapist.".into(), detail),
                         },
                         "SAFE-TENDON-001",
                     ))
@@ -125,7 +168,7 @@ fn pain_gate(inputs: &[ReadinessInput]) -> PainGate {
             if detail.persists {
                 PainGate::Block(recommend(
                     Adjustment::Defer {
-                        reason: "Persistent uncharacterized pain - stop and defer to a professional for assessment.".into(),
+                        reason: with_location("Persistent uncharacterized pain - stop and defer to a professional for assessment.".into(), detail),
                     },
                     "SAFE-PAIN-001",
                 ))
@@ -529,11 +572,22 @@ pub fn adjustments_with_context(
         PainGate::Adjust(r) => pain_adjust = Some(r),
         PainGate::Continue | PainGate::None => {}
     }
+    // LOW (label consistency): a non-blocking pain response (PainGate::Adjust)
+    // raises `SafetyTier::Pain` (:486-489, Pain outranks Illness), so it must
+    // also appear in the output, otherwise the headline would cite illness/RHR
+    // while `safety_tier` reads Pain. It leads the list (pain outranks), then
+    // the illness/RHR stop; training stays blocked either way.
     if illness_stop(inputs) {
-        return vec![recommend(Adjustment::Stop, "ILLNESS-NECK-001")];
+        let mut out = Vec::new();
+        out.extend(pain_adjust.take());
+        out.push(recommend(Adjustment::Stop, "ILLNESS-NECK-001"));
+        return out;
     }
     if rhr_stop(inputs) {
-        return vec![recommend(Adjustment::RestDay, "AUTOREG-RHR-STOP-001")];
+        let mut out = Vec::new();
+        out.extend(pain_adjust.take());
+        out.push(recommend(Adjustment::RestDay, "AUTOREG-RHR-STOP-001"));
+        return out;
     }
 
     // Non-stop rules accumulate (deterministic order). A non-blocking pain
@@ -575,17 +629,42 @@ pub fn adjustments_with_context(
     // single-day flag: §5 conflict table "proceed, cap top-end, do NOT add
     // load"), soreness item, HRV below SWC, or corroborated elevated RHR -
     // strips every IncreaseLoadPct from the output.
+    // A2 (wrong-safety, HARD RULE 3): a load increase must never survive an
+    // active pain or above-neck illness report. A non-blocking pain response
+    // (PainGate::Adjust, tolerable tendon pain, Table 4.1) and an above-neck
+    // illness downgrade (autoreg-045) are recovery-suppression signals too, so
+    // they join the wellness/HRV/soreness/RHR set that strips IncreaseLoadPct.
     let suppressed = hrv_downgrade(inputs).is_some()
         || wellness_downgrade(inputs).is_some()
         || latest(inputs, ReadinessSignal::WellnessZ).is_some_and(|z| z <= -1.0)
         || soreness_downgrade(inputs).is_some()
-        || rhr_downgrade(inputs).is_some();
+        || rhr_downgrade(inputs).is_some()
+        || matches!(pain_gate(inputs), PainGate::Adjust(_))
+        || illness_downgrade(inputs);
+    // H2 (safety-adjacent, autoreg-044): the guardrail's own doc says "when
+    // performance is DOWN and/or wellness is suppressed, never auto-increase".
+    // The `suppressed` set above only covered the wellness/recovery half: the
+    // objective-performance half was missing, so a low first-set RPE could add
+    // load in the same breath the session was being cut for a velocity/e1RM
+    // drop. Any objective within-session decline, a velocity-loss set-stop
+    // (autoreg-010), an e1RM gate resolving to a Deload/ReduceLoadPct
+    // (autoreg-006/022), or an aerobic-decoupling downgrade (autoreg-037) -
+    // now strips IncreaseLoadPct too. (An e1RM *increase*, ratio > 1.05, is not
+    // a decline and does not suppress, mirrors the tier-3 test at :501-507.)
+    let objective_perf_down = vl_stop(inputs, goal).is_some()
+        || decoupling_downgrade(inputs).is_some()
+        || e1rm_gate(inputs).iter().any(|r| {
+            matches!(
+                r.value,
+                Adjustment::Deload { .. } | Adjustment::ReduceLoadPct(_)
+            )
+        });
     // autoreg-029 (parasympathetic saturation): in a high-load block, lnRMSSD
     // ABOVE the SWC upper limit (z > +0.5) also blocks auto load-adds, hold
     // and weigh with wellness (AUTOREG-HRV-SAT-001, Moderate, Plews).
     let saturation_hold = latest(inputs, ReadinessSignal::HrvLnRmssd)
         .is_some_and(|z| hrv_saturation_hold(z, high_load_block).value);
-    if suppressed || saturation_hold {
+    if suppressed || saturation_hold || objective_perf_down {
         out.retain(|r| !matches!(r.value, Adjustment::IncreaseLoadPct(_)));
     }
     out
@@ -684,6 +763,14 @@ pub enum ApreScheme {
 /// APRE next-load adjustment (lb) from the AMRAP-set rep count (File 06
 /// autoreg-015…021; Mann 2010). Returns the `(low, high)` lb delta to apply to
 /// the next set/session; negatives reduce load. `[Moderate]` (AUTOREG-APRE-001).
+///
+/// D3 (documented): the Mann 2010 tables are stated for a rep window centred on
+/// each scheme's target RM. The `0..=N` low arms and the open-ended `_` high arm
+/// EXTEND the table's own lowest/highest published rows to cover reps below/above
+/// that window (e.g. an APRE-6 AMRAP of 0–2 reps or 13+ reps). This is a
+/// conservative saturation of the KB band's endpoints, not an invented new
+/// band, so far-out rep counts clamp to the nearest published adjustment rather
+/// than extrapolating a fabricated larger jump/cut.
 pub fn apre_load_adjustment_lb(scheme: ApreScheme, reps: u8) -> Recommended<(f64, f64)> {
     let range = match scheme {
         ApreScheme::Apre6 => match reps {
@@ -762,14 +849,17 @@ pub fn deload_from_failed_sessions(failed_key_sessions: u8) -> Option<Recommende
 /// RPE ≥ target+1 or above the HR cap, cut the remaining-rep pace target ~2–4%
 /// (returns the fractional pace reduction to apply, else `None`).
 pub fn interval_pace_autoreg(reps_over_target: u8) -> Option<Recommended<f64>> {
-    (reps_over_target >= 2).then(|| recommend_t(0.03, "RUN-VDOT-001"))
+    // D3: cite the autoreg-031 interval-pace rule itself, not RUN-VDOT-001 (the
+    // VDOT *estimator* claim, unrelated to this within-session pace autoreg).
+    (reps_over_target >= 2).then(|| recommend_t(0.03, "AUTOREG-INTERVAL-PACE-001"))
 }
 
 /// Easy-day pace is governed by the HR cap, not pace (File 06 autoreg-033):
 /// if the runner cannot hold the prescribed easy pace under the HR cap, slow
 /// the pace. `true` = slow the easy pace.
 pub fn slow_easy_pace_if_over_cap(can_hold_pace_under_cap: bool) -> Recommended<bool> {
-    recommend_t(!can_hold_pace_under_cap, "RUN-VDOT-001")
+    // D3: cite the autoreg-033 easy-day HR-cap rule, not RUN-VDOT-001.
+    recommend_t(!can_hold_pace_under_cap, "AUTOREG-EASY-CAP-001")
 }
 
 /// Which signal source drives autoregulation given data availability
@@ -893,6 +983,12 @@ pub fn apre_load_adjustment_capped_lb(
     current_load_lb: f64,
 ) -> Recommended<(f64, f64)> {
     let (lo, hi) = apre_load_adjustment_lb(scheme, reps).value;
+    // B7: a non-positive current load has no meaningful proportional cap -
+    // `current_load_lb × band/100` would flip a positive jump negative (a
+    // fabricated load *cut*). Reject it: fall back to the uncapped KB flat band.
+    if !(current_load_lb > 0.0) {
+        return recommend_t((lo, hi), "AUTOREG-APRE-001");
+    }
     let cap = |bound_lb: f64| -> f64 {
         if bound_lb > 0.0 {
             bound_lb.min(current_load_lb * bound_lb / 100.0)
@@ -1052,6 +1148,10 @@ pub struct SignalState {
     pub streak: u8,
     /// Qualitative state, e.g. `"suppressed"` / `"elevated +10 bpm - rest"`.
     pub state: String,
+    /// Extra display context for the shell, e.g. the pain sub-line
+    /// `"Left knee · sharp/joint · 6/10"`. Empty for signals that carry no
+    /// characterizing detail. Display-only, never a graded claim.
+    pub detail: String,
     /// Registry claim id of the rule whose threshold judged the state. `None`
     /// when the row is a plain factual echo (a recorded-only signal with no
     /// gating rule, or an explicit all-clear), those judge nothing, so they
@@ -1179,7 +1279,7 @@ pub fn signal_states(
                 if v <= 0.0 {
                     ("clear".into(), None)
                 } else {
-                    match input.pain {
+                    match &input.pain {
                         None => ("red flag - stop".into(), Some("SAFE-PAIN-001")),
                         Some(d) => match d.kind {
                             PainKind::SharpJoint => {
@@ -1193,7 +1293,7 @@ pub fn signal_states(
                                 }
                             }
                             PainKind::TendonLoadRelated => {
-                                if tendon_reactive(&d) {
+                                if tendon_reactive(d) {
                                     if d.persists {
                                         (
                                             "reactive, persisting - defer".into(),
@@ -1263,15 +1363,354 @@ pub fn signal_states(
                 }
             }
         };
+        // Display-only sub-line context. Only a characterized pain report
+        // carries one today (e.g. "Left knee · sharp/joint · 6/10"); every
+        // other signal leaves it empty.
+        let detail = match (signal, &input.pain) {
+            (ReadinessSignal::Pain, Some(d)) if v > 0.0 => pain_context(d),
+            _ => String::new(),
+        };
         out.push(SignalState {
             signal,
             value: v,
             streak,
             state,
+            detail,
             claim,
         });
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// Check-in → derived readiness signals (Phase 2: humanized readiness, B1)
+// ---------------------------------------------------------------------------
+//
+// The user reports raw human observations (sleep/soreness/mood 1–5, optional
+// resting HR bpm, optional HRV rMSSD ms). The CORE, not the user, computes the
+// rolling baselines, z-scores, deltas and streaks the autoregulation rules
+// above already consume. No threshold changes: derivation only *feeds* the
+// existing rules synthetic [`ReadinessInput`]s, so every emitted judgement still
+// travels with the rule's own registry evidence via the normal path.
+//
+// Pure + deterministic: time enters only through each check-in's `observed_at`
+// (day-bucketed); a bad stamp is skipped, never a panic (BUGS.md HIGH #2 gate).
+
+use crate::schema::CheckinInput;
+
+// Day-bucketing is by LOCAL calendar day: `(observed_at + utc_offset_sec)`
+// before `.div_euclid(DERIVE_DAY_SEC)`, threaded from the app.rs call site
+// (`derive_readiness(&model.checkins, model.today_utc_offset_sec)`) exactly like
+// `session_logged` / `build_run_anchors` (the H1 fix pattern). This stops a
+// late-evening + next-morning LOCAL pair (e.g. 23:30 then 07:00 Berlin) from
+// collapsing into one UTC bucket and silently breaking a multi-day streak.
+// Offset 0 is byte-identical to the former UTC bucketing.
+//
+// Rule-4 compaction safety (log.rs, do NOT change there): `compact_event_log`
+// drops a `SubmitCheckin` only when its raw `observed_at < anchor − 45 days`
+// (`RETAIN_CHECKIN_DAYS`), where `anchor` is the MIN over present channels of
+// that channel's newest raw `observed_at`. That cutoff is computed on RAW UTC
+// seconds and is entirely independent of `utc_offset_sec`, so this change does
+// not move it. Derivation reads a day only when `newest_day − day ≤ 30`
+// (`BASELINE_WINDOW_DAYS`); applying the SAME offset to both `newest_day` and
+// `day` cancels in their difference except for a floor-rounding boundary, so the
+// offset can widen the window's RAW-second reach by at most one day (≈31→≈32
+// days back from the newest reading). 45 − 32 = 13 days of slack remain over the
+// derivation reach, so a line old enough to have been compacted away (>45 days)
+// can never re-enter the 30-day derivation window: the 15-day retention margin
+// absorbs the ±1-day bucket shift with room to spare.
+const DERIVE_DAY_SEC: i64 = 86_400;
+
+/// Minimum number of distinct check-in days before a rolling baseline is
+/// trustworthy enough to emit a z-score / delta. Below this the core reports an
+/// honest "collecting baseline" state instead of a fabricated number (HARD RULE
+/// 1). Grounded in the KB's autoreg-028 7-day rolling HRV window and the
+/// wellness SWC band (baseline ± 0.5 SD), both need ~a week of readings.
+pub const MIN_BASELINE_CHECKINS: usize = 7;
+
+/// Trailing window (days) the rolling baseline spans, measured back from the
+/// newest check-in (deterministic; no clock). Bounds how far a baseline reaches
+/// without dropping any log line, so replay stays exact.
+const BASELINE_WINDOW_DAYS: i64 = 30;
+
+/// Absolute floor for the wellness composite (1–5 goodness scale, 5 = best): a
+/// morning at/below this, e.g. sleep 1 / soreness 5 / mood 1 → composite 1.0;
+/// is catastrophic on its face and downgrades intensity regardless of the
+/// z-score. It closes the flat-baseline blind spot (M10): 7 identical days give
+/// SD ≈ 0 → z 0 "normal", so a z-only rule can never see the dip. It is ALSO the
+/// compensating path for a structural gap, a check-in's soreness is a 1–5 item
+/// that feeds only this composite, so it can never reach the `Soreness ≥ 6`
+/// (7-point) gate in [`soreness_downgrade`]; the floor is how a maxed-out sore /
+/// poor morning still cuts intensity from the check-in path.
+///
+/// Heuristic parameter (no KB entry sets an absolute composite floor): the
+/// emitted signal is an ordinary `WellnessZ` input, so the downgrade still
+/// travels with the wellness rule's own `WELLNESS-001` evidence, no invented
+/// citation. The constant itself is expert-opinion, following the
+/// AUTOREG-EASY-CAP precedent for a KB-silent number. Conservative direction
+/// (HARD RULE 3): it can only ADD a downgrade, never remove one or add load.
+const WELLNESS_ABS_FLOOR: f64 = 2.0;
+
+/// Normalized value forced onto a catastrophic-floor reading: the single-day
+/// wellness downgrade trigger (`WellnessZ ≤ −1.5`, autoreg-030), so a floored
+/// morning drives the SAME downgrade a genuine z ≤ −1.5 would, no new rule.
+const WELLNESS_FLOOR_Z: f64 = -1.5;
+
+/// How the core normalizes a channel's raw daily value against its baseline.
+#[derive(Clone, Copy)]
+enum Normalize {
+    /// z-score = (today − baseline mean) / baseline SD (wellness composite, HRV).
+    Z,
+    /// signed delta = today − baseline mean (resting-HR bpm over baseline).
+    DeltaFromMean,
+}
+
+/// One channel that has some check-in data but not yet a trustworthy baseline -
+/// surfaced honestly ("collecting your baseline") rather than as a fabricated z.
+pub struct BaselineStatus {
+    pub signal: ReadinessSignal,
+    pub have: usize,
+    pub need: usize,
+}
+
+/// Result of [`derive_readiness`]: synthetic `ReadinessInput`s to feed the
+/// existing rules, plus the honest still-collecting status of any channel that
+/// has readings but hasn't reached [`MIN_BASELINE_CHECKINS`].
+pub struct DerivedReadiness {
+    pub inputs: Vec<ReadinessInput>,
+    pub collecting: Vec<BaselineStatus>,
+}
+
+/// Clamp a 1–5 human scale item to its range as f64.
+fn scale5(v: u8) -> f64 {
+    (v as f64).clamp(1.0, 5.0)
+}
+
+/// Wellness "goodness" for one check-in on a 1–5 → 1–5 scale where 5 = best,
+/// direction-normalized (soreness is reverse-scored so higher soreness lowers
+/// the composite). `None` when no wellness item was answered.
+fn wellness_goodness(c: &CheckinInput) -> Option<f64> {
+    let mut sum = 0.0;
+    let mut n = 0.0;
+    if let Some(s) = c.sleep_quality {
+        sum += scale5(s); // higher = better
+        n += 1.0;
+    }
+    if let Some(s) = c.soreness {
+        sum += 6.0 - scale5(s); // higher soreness = worse → reverse-score
+        n += 1.0;
+    }
+    if let Some(m) = c.mood {
+        sum += scale5(m); // higher = better
+        n += 1.0;
+    }
+    if n == 0.0 { None } else { Some(sum / n) }
+}
+
+/// Latest raw value per LOCAL epoch-day for one channel, sorted ascending by day
+/// and bounded to the trailing [`BASELINE_WINDOW_DAYS`] of the newest reading.
+/// Each tuple is `(day, raw_value, observed_at)`. `utc_offset_sec` shifts each
+/// stamp to the device's local day before bucketing (see [`DERIVE_DAY_SEC`]).
+/// Readings with `observed_at <= 0` are skipped (they can't be day-bucketed; the
+/// skip is on the RAW stamp, matching log.rs Rule 4); the most recent check-in
+/// per local day wins so re-doing a check-in the same day overwrites, never
+/// double-counts.
+fn per_day_series(
+    checkins: &[CheckinInput],
+    utc_offset_sec: i64,
+    extract: impl Fn(&CheckinInput) -> Option<f64>,
+) -> Vec<(i64, f64, i64)> {
+    use std::collections::BTreeMap;
+    let mut by_day: BTreeMap<i64, (i64, f64)> = BTreeMap::new();
+    for c in checkins {
+        if c.observed_at <= 0 {
+            continue;
+        }
+        let Some(v) = extract(c) else {
+            continue;
+        };
+        let day = c
+            .observed_at
+            .saturating_add(utc_offset_sec)
+            .div_euclid(DERIVE_DAY_SEC);
+        let slot = by_day.entry(day).or_insert((i64::MIN, v));
+        if c.observed_at >= slot.0 {
+            *slot = (c.observed_at, v);
+        }
+    }
+    let Some(&newest) = by_day.keys().max() else {
+        return Vec::new();
+    };
+    by_day
+        .into_iter()
+        .filter(|(day, _)| newest - day <= BASELINE_WINDOW_DAYS)
+        .map(|(day, (at, v))| (day, v, at))
+        .collect()
+}
+
+/// Derive one channel: below the minimum → a `collecting` status; at/above →
+/// a synthetic `ReadinessInput` carrying the normalized today-value + a
+/// core-computed multi-day `streak` (consecutive calendar days the rule's own
+/// predicate held). `streak_predicate` runs over the *normalized* value.
+fn derive_channel(
+    series: &[(i64, f64, i64)],
+    signal: ReadinessSignal,
+    mode: Normalize,
+    abs_floor: Option<f64>,
+    streak_predicate: impl Fn(f64) -> bool,
+    inputs: &mut Vec<ReadinessInput>,
+    collecting: &mut Vec<BaselineStatus>,
+) {
+    if series.is_empty() {
+        return;
+    }
+    if series.len() < MIN_BASELINE_CHECKINS {
+        collecting.push(BaselineStatus {
+            signal,
+            have: series.len(),
+            need: MIN_BASELINE_CHECKINS,
+        });
+        return;
+    }
+    let n = series.len();
+
+    // Leave-one-out baseline stats (LOW self-inclusion fix): mean (and, for Z,
+    // SD) over every reading EXCEPT the day being scored. Historical dip days
+    // were previously normalized against a baseline that included themselves,
+    // diluting the dip and making the multi-day tier-4 streak marginally harder
+    // to reach; scoring each day against the rest of the window removes that
+    // self-reference. Today (the last reading) still excludes exactly itself, so
+    // its emitted value equals the old `series[..len−1]` baseline computation.
+    let baseline_stats = |skip: usize| -> (f64, f64) {
+        let count = (n - 1) as f64;
+        let mean = series
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != skip)
+            .map(|(_, (_, v, _))| *v)
+            .sum::<f64>()
+            / count;
+        let sd = match mode {
+            Normalize::Z => {
+                let var = series
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != skip)
+                    .map(|(_, (_, v, _))| (v - mean).powi(2))
+                    .sum::<f64>()
+                    / count;
+                var.sqrt()
+            }
+            Normalize::DeltaFromMean => 0.0,
+        };
+        (mean, sd)
+    };
+
+    // Normalize the reading at `idx` against its leave-one-out baseline, then
+    // apply the wellness absolute-floor rung (M10).
+    let normalize_at = |idx: usize| -> f64 {
+        let raw = series[idx].1;
+        let (mean, sd) = baseline_stats(idx);
+        let base = match mode {
+            Normalize::DeltaFromMean => raw - mean,
+            // A ~flat baseline can't detect a dip via z; report in-band (z 0)
+            // rather than a divide-by-zero or a false trigger (HR3-safe).
+            Normalize::Z if sd < 1e-6 => 0.0,
+            Normalize::Z => (raw - mean) / sd,
+        };
+        // M10: a catastrophic raw reading (wellness composite ≤ WELLNESS_ABS_FLOOR)
+        // downgrades regardless of z, closing the flat-baseline blind spot and
+        // the unreachable 7-point soreness gate. Never relaxes a worse z (min).
+        match abs_floor {
+            Some(floor) if raw <= floor => base.min(WELLNESS_FLOOR_Z),
+            _ => base,
+        }
+    };
+
+    // Streak: consecutive most-recent *calendar* days whose normalized value
+    // satisfies the predicate. A day-gap breaks it (autoreg-040 "≥2 days",
+    // autoreg-030 §5 tier-4 "≥3 days" both mean consecutive days).
+    let mut streak: u8 = 0;
+    let mut expected_day = series[n - 1].0;
+    for idx in (0..n).rev() {
+        let day = series[idx].0;
+        if day != expected_day || !streak_predicate(normalize_at(idx)) {
+            break;
+        }
+        streak = streak.saturating_add(1);
+        expected_day -= 1;
+    }
+
+    inputs.push(ReadinessInput {
+        signal,
+        value: normalize_at(n - 1),
+        observed_at: series[n - 1].2,
+        streak,
+        pain: None,
+        effort_min: None,
+    });
+}
+
+/// Normalize a check-in history into the synthetic readiness signals the
+/// autoregulation rules consume (Phase 2 / B1). Three channels:
+/// - `WellnessZ`: composite z of the answered 1–5 items (autoreg-030).
+/// - `HrvLnRmssd`: z of `ln(rMSSD)` vs baseline (autoreg-028).
+/// - `RestingHr`: bpm delta vs baseline mean (autoreg-040/041).
+///
+/// Streaks are core-computed (finally powering the multi-day rules the shell
+/// never sent). Below [`MIN_BASELINE_CHECKINS`] a channel emits nothing and
+/// reports a `collecting` status instead of a fabricated number.
+///
+/// `utc_offset_sec` is the device's local UTC offset (the shell's
+/// `today_utc_offset_sec`): check-ins bucket by LOCAL calendar day so a
+/// late-evening + next-morning pair spans two days and keeps a streak intact
+/// (see [`DERIVE_DAY_SEC`]). Offset 0 is byte-identical to the former behaviour.
+pub fn derive_readiness(checkins: &[CheckinInput], utc_offset_sec: i64) -> DerivedReadiness {
+    let mut inputs = Vec::new();
+    let mut collecting = Vec::new();
+
+    // Wellness composite: multi-day streak counts consecutive days z ≤ −1
+    // (autoreg-030 second clause / §5 tier 4).
+    derive_channel(
+        &per_day_series(checkins, utc_offset_sec, wellness_goodness),
+        ReadinessSignal::WellnessZ,
+        Normalize::Z,
+        Some(WELLNESS_ABS_FLOOR),
+        |z| z <= -1.0,
+        &mut inputs,
+        &mut collecting,
+    );
+
+    // HRV rolling baseline: single-day gate (autoreg-028), so no streak rule
+    // keys off the emitted input, predicate never holds (streak stays 0).
+    derive_channel(
+        &per_day_series(checkins, utc_offset_sec, |c| {
+            c.hrv_rmssd_ms.filter(|v| *v > 0.0).map(|v| v.ln())
+        }),
+        ReadinessSignal::HrvLnRmssd,
+        Normalize::Z,
+        None,
+        |_| false,
+        &mut inputs,
+        &mut collecting,
+    );
+
+    // Resting-HR delta: streak counts consecutive elevated days (delta ≥ 5),
+    // which arms autoreg-040's ≥2-day downgrade (autoreg-041 ≥10 stops on its
+    // own regardless of streak).
+    derive_channel(
+        &per_day_series(checkins, utc_offset_sec, |c| {
+            c.resting_hr_bpm.filter(|v| *v > 0.0)
+        }),
+        ReadinessSignal::RestingHr,
+        Normalize::DeltaFromMean,
+        None,
+        |d| d >= 5.0,
+        &mut inputs,
+        &mut collecting,
+    );
+
+    DerivedReadiness { inputs, collecting }
 }
 
 #[cfg(test)]
@@ -1297,14 +1736,103 @@ mod tests {
     }
 
     fn pain_input(kind: PainKind, severity: u8, trend: PainTrend, persists: bool) -> ReadinessInput {
+        pain_input_loc(kind, severity, trend, persists, None)
+    }
+
+    fn pain_input_loc(
+        kind: PainKind,
+        severity: u8,
+        trend: PainTrend,
+        persists: bool,
+        location: Option<&str>,
+    ) -> ReadinessInput {
         ReadinessInput {
             pain: Some(PainDetail {
                 kind,
                 severity,
                 trend,
                 persists,
+                location: location.map(str::to_string),
             }),
             ..input(ReadinessSignal::Pain, 1.0)
+        }
+    }
+
+    #[test]
+    fn pain_location_surfaces_in_signal_detail_and_none_omits_it() {
+        // A reported body-part location must reach the shell as display context
+        // on the Pain row's `detail` sub-line; absent one, `detail` names no
+        // body part (never fabricated, HARD RULE 1).
+        let with_loc = vec![pain_input_loc(
+            PainKind::SharpJoint,
+            6,
+            PainTrend::Stable,
+            false,
+            Some("Left knee"),
+        )];
+        let row = signal_states(&with_loc, None, false)
+            .into_iter()
+            .find(|s| s.signal == ReadinessSignal::Pain)
+            .expect("pain row present");
+        assert!(
+            row.detail.contains("Left knee"),
+            "location must surface in the sub-line detail, got {:?}",
+            row.detail
+        );
+        assert!(row.detail.contains("sharp/joint") && row.detail.contains("6/10"));
+
+        let no_loc = vec![pain_input_loc(
+            PainKind::SharpJoint,
+            6,
+            PainTrend::Stable,
+            false,
+            None,
+        )];
+        let row = signal_states(&no_loc, None, false)
+            .into_iter()
+            .find(|s| s.signal == ReadinessSignal::Pain)
+            .expect("pain row present");
+        assert!(
+            !row.detail.to_lowercase().contains("knee"),
+            "no location must be fabricated when None, got {:?}",
+            row.detail
+        );
+        assert_eq!(row.detail, "sharp/joint · 6/10");
+    }
+
+    #[test]
+    fn pain_location_names_the_body_part_in_a_defer_reason() {
+        // The persistent (Defer) branch carries a message field, so the location
+        // rides along into the headline; the base reason is preserved verbatim.
+        let inputs = vec![pain_input_loc(
+            PainKind::SharpJoint,
+            6,
+            PainTrend::Stable,
+            true,
+            Some("Left knee"),
+        )];
+        match &adjustments(&inputs)[0].value {
+            Adjustment::Defer { reason } => {
+                assert!(reason.contains("Persistent sharp/joint-line pain"));
+                assert!(reason.contains("(Left knee)"), "reason: {reason}");
+            }
+            other => panic!("expected a Defer, got {other:?}"),
+        }
+
+        // No location → the Defer reason is exactly the base message.
+        let inputs = vec![pain_input_loc(
+            PainKind::SharpJoint,
+            6,
+            PainTrend::Stable,
+            true,
+            None,
+        )];
+        match &adjustments(&inputs)[0].value {
+            Adjustment::Defer { reason } => assert!(
+                !reason.contains('('),
+                "no parenthetical location when None, got {reason}"
+            ),
+            other => panic!("expected a Defer, got {other:?}"),
         }
     }
 
@@ -2201,5 +2729,433 @@ mod tests {
         // File 06 grades the cluster ExpertOpinion: safety-critical anyway.
         assert!((d.confidence.score - 0.30).abs() < f32::EPSILON);
         assert!(d.confidence.safety_critical);
+    }
+
+    // --- Phase 2 / B1: check-in → derived readiness signals ---
+
+    const D: i64 = 86_400;
+
+    fn checkin(day: i64, sleep: Option<u8>, sore: Option<u8>, mood: Option<u8>) -> CheckinInput {
+        CheckinInput {
+            observed_at: day * D + 100,
+            sleep_quality: sleep,
+            soreness: sore,
+            mood,
+            resting_hr_bpm: None,
+            hrv_rmssd_ms: None,
+        }
+    }
+
+    fn derived(inputs: &[ReadinessInput], signal: ReadinessSignal) -> Option<ReadinessInput> {
+        inputs.iter().find(|i| i.signal == signal).cloned()
+    }
+
+    #[test]
+    fn below_minimum_checkins_emits_no_signal_only_a_collecting_status() {
+        // A fresh user: 4 check-in days < MIN (7). No fabricated z: an honest
+        // "collecting baseline - 4 of 7" status instead (HR1).
+        let checkins: Vec<CheckinInput> = (0..4)
+            .map(|d| checkin(d, Some(3), Some(3), Some(3)))
+            .collect();
+        let out = derive_readiness(&checkins, 0);
+        assert!(out.inputs.is_empty(), "no derived signal below the minimum");
+        let wellness = out
+            .collecting
+            .iter()
+            .find(|b| b.signal == ReadinessSignal::WellnessZ)
+            .expect("wellness collecting status");
+        assert_eq!(wellness.have, 4);
+        assert_eq!(wellness.need, MIN_BASELINE_CHECKINS);
+    }
+
+    #[test]
+    fn wellness_composite_z_is_derived_from_history_and_feeds_the_rule() {
+        // Six good baseline days that VARY a little (so the baseline SD is real,
+        // like actual data), then a rough morning (sleep 2 / soreness 4 / mood
+        // 3): goodness = (2 + (6−4) + 3)/3 = 2.33, well below the ~4 baseline →
+        // a strong negative z computed by the CORE, no user z entry.
+        // Baseline composites alternate 4.33 (5/2/4) and 3.67 (4/3/4): mean 4.0.
+        let mut checkins: Vec<CheckinInput> = (0..6)
+            .map(|d| {
+                if d % 2 == 0 {
+                    checkin(d, Some(5), Some(2), Some(4)) // (5 + 4 + 4)/3 = 4.33
+                } else {
+                    checkin(d, Some(4), Some(3), Some(4)) // (4 + 3 + 4)/3 = 3.67
+                }
+            })
+            .collect();
+        checkins.push(checkin(6, Some(2), Some(4), Some(3)));
+        let out = derive_readiness(&checkins, 0);
+        let w = derived(&out.inputs, ReadinessSignal::WellnessZ).expect("derived wellness z");
+        assert_eq!(w.observed_at, 6 * D + 100, "stamped at the latest check-in");
+        // The derived z must feed the EXISTING rule unchanged: ≤ −1.5 downgrades.
+        assert!(w.value <= -1.5, "rough morning vs baseline z ≤ −1.5, got {}", w.value);
+        assert!(
+            wellness_downgrade(&out.inputs).is_some(),
+            "derived z drives the autoreg-030 downgrade"
+        );
+    }
+
+    #[test]
+    fn hrv_rmssd_becomes_a_baseline_z_that_trips_autoreg_028() {
+        // Seven mornings of rMSSD: six around 60 ms, today suppressed to 35 ms.
+        // The core takes ln + baseline z; a suppression must clear autoreg-028's
+        // −0.5 gate, computed in the core, never entered by the user.
+        let vals = [60.0, 62.0, 58.0, 61.0, 59.0, 60.0, 35.0];
+        let checkins: Vec<CheckinInput> = vals
+            .iter()
+            .enumerate()
+            .map(|(d, &ms)| CheckinInput {
+                observed_at: d as i64 * D + 100,
+                hrv_rmssd_ms: Some(ms),
+                ..Default::default()
+            })
+            .collect();
+        let out = derive_readiness(&checkins, 0);
+        let h = derived(&out.inputs, ReadinessSignal::HrvLnRmssd).expect("derived hrv z");
+        assert!(h.value < -0.5, "suppressed HRV z < −0.5, got {}", h.value);
+        assert!(hrv_downgrade(&out.inputs).is_some(), "derived HRV z drives autoreg-028");
+    }
+
+    #[test]
+    fn resting_hr_delta_and_two_day_streak_arm_autoreg_040() {
+        // Six baseline mornings ~50 bpm, then two consecutive elevated days
+        // (+6 bpm). The core computes the delta AND the ≥2-day streak the shell
+        // never sent, arming the autoreg-040 downgrade (5–9 bpm for ≥2 days).
+        let mut checkins: Vec<CheckinInput> = (0..6)
+            .map(|d| CheckinInput {
+                observed_at: d * D + 100,
+                resting_hr_bpm: Some(50.0),
+                ..Default::default()
+            })
+            .collect();
+        checkins.push(CheckinInput {
+            observed_at: 6 * D + 100,
+            resting_hr_bpm: Some(56.0),
+            ..Default::default()
+        });
+        checkins.push(CheckinInput {
+            observed_at: 7 * D + 100,
+            resting_hr_bpm: Some(56.0),
+            ..Default::default()
+        });
+        let out = derive_readiness(&checkins, 0);
+        let r = derived(&out.inputs, ReadinessSignal::RestingHr).expect("derived rhr delta");
+        // The elevated days sit in the baseline too, so the delta is ~+5 bpm -
+        // the point is it lands in autoreg-040's 5–9 downgrade band, not ≥10.
+        assert!((5.0..10.0).contains(&r.value), "delta in the 5–9 band, got {}", r.value);
+        assert!(r.streak >= 2, "two elevated days → streak ≥ 2, got {}", r.streak);
+        // The full ladder now resolves the corroborated-RHR downgrade (autoreg-040).
+        let states = signal_states(&out.inputs, None, false);
+        let rhr = states
+            .iter()
+            .find(|s| s.signal == ReadinessSignal::RestingHr)
+            .unwrap();
+        assert_eq!(rhr.state, "elevated 2+ days");
+    }
+
+    #[test]
+    fn local_offset_splits_an_evening_morning_pair_that_utc_would_collapse() {
+        // Residual (BUGS fix-batch): a late-evening + next-morning LOCAL check-in
+        // must bucket into TWO local days so a streak survives. Six baseline days
+        // at 50 bpm (noon UTC), then an elevated pair straddling the Berlin (+2h)
+        // local-midnight boundary: 21:30 UTC = 23:30 local (day 6) and 22:30 UTC =
+        // 00:30 local (day 7). In UTC both sit on day 6 and collapse to one bucket
+        // → streak 1; in local +2h they split → streak 2 (arms autoreg-040).
+        const BERLIN: i64 = 2 * 3600;
+        let mut checkins: Vec<CheckinInput> = (0..6)
+            .map(|d| CheckinInput {
+                observed_at: d * D + 12 * 3600, // noon UTC, unambiguous
+                resting_hr_bpm: Some(50.0),
+                ..Default::default()
+            })
+            .collect();
+        checkins.push(CheckinInput {
+            observed_at: 6 * D + 21 * 3600 + 30 * 60, // 21:30 UTC → 23:30 Berlin, local day 6
+            resting_hr_bpm: Some(56.0),
+            ..Default::default()
+        });
+        checkins.push(CheckinInput {
+            observed_at: 6 * D + 22 * 3600 + 30 * 60, // 22:30 UTC → 00:30 Berlin, local day 7
+            resting_hr_bpm: Some(56.0),
+            ..Default::default()
+        });
+
+        // Local +2h: the pair is two distinct days → streak ≥ 2 → downgrade fires.
+        let local = derive_readiness(&checkins, BERLIN);
+        let r = derived(&local.inputs, ReadinessSignal::RestingHr).expect("derived rhr delta");
+        assert!(r.streak >= 2, "local pair spans two days → streak ≥ 2, got {}", r.streak);
+        assert!((5.0..10.0).contains(&r.value), "delta in the 5–9 band, got {}", r.value);
+        assert!(
+            rhr_downgrade(&local.inputs).is_some(),
+            "the preserved 2-day streak arms the autoreg-040 downgrade"
+        );
+
+        // Same stamps under UTC bucketing: the pair collapses to one day → the
+        // streak breaks (this is exactly the bug the offset threading fixes).
+        let utc = derive_readiness(&checkins, 0);
+        let r0 = derived(&utc.inputs, ReadinessSignal::RestingHr).expect("derived rhr delta");
+        assert!(r0.streak < 2, "UTC collapse loses a day → streak < 2, got {}", r0.streak);
+        assert!(
+            rhr_downgrade(&utc.inputs).is_none(),
+            "collapsed to a single elevated day, autoreg-040 needs ≥2"
+        );
+    }
+
+    #[test]
+    fn derived_signal_never_fires_what_the_same_value_entered_manually_would_not() {
+        // Property: a derived WellnessZ and the same z entered manually must
+        // produce the identical adjustment set: derivation only supplies inputs.
+        let mut checkins: Vec<CheckinInput> = (0..6)
+            .map(|d| {
+                if d % 2 == 0 {
+                    checkin(d, Some(5), Some(2), Some(4))
+                } else {
+                    checkin(d, Some(4), Some(2), Some(5))
+                }
+            })
+            .collect();
+        checkins.push(checkin(6, Some(1), Some(5), Some(1)));
+        let out = derive_readiness(&checkins, 0);
+        let w = derived(&out.inputs, ReadinessSignal::WellnessZ).unwrap();
+        let manual = vec![ReadinessInput {
+            observed_at: w.observed_at,
+            ..input_streak(ReadinessSignal::WellnessZ, w.value, w.streak)
+        }];
+        assert_eq!(
+            adjustments(&out.inputs),
+            adjustments(&manual),
+            "derived and manually-entered identical z must autoregulate identically"
+        );
+    }
+
+    #[test]
+    fn a_flat_baseline_does_not_fabricate_a_dip() {
+        // Seven identical neutral days: SD ≈ 0. The core must report z 0 (in
+        // band), never a divide-by-zero or a false downgrade (HR3-safe).
+        let checkins: Vec<CheckinInput> = (0..7)
+            .map(|d| checkin(d, Some(3), Some(3), Some(3)))
+            .collect();
+        let out = derive_readiness(&checkins, 0);
+        let w = derived(&out.inputs, ReadinessSignal::WellnessZ).unwrap();
+        assert_eq!(w.value, 0.0);
+        assert!(wellness_downgrade(&out.inputs).is_none());
+    }
+
+    #[test]
+    fn same_day_recheck_overwrites_rather_than_double_counting() {
+        // Two check-ins on the same day only count once (latest wins), so a
+        // corrected morning entry never skews the baseline day count.
+        let mut checkins: Vec<CheckinInput> = (0..6)
+            .map(|d| checkin(d, Some(3), Some(3), Some(3)))
+            .collect();
+        // Re-do day 0 with a different value.
+        checkins.push(CheckinInput {
+            observed_at: 100 + 50, // still day 0, later instant
+            sleep_quality: Some(5),
+            soreness: Some(1),
+            mood: Some(5),
+            ..Default::default()
+        });
+        // 6 distinct days < MIN → still collecting (proves no double count).
+        let out = derive_readiness(&checkins, 0);
+        assert!(out.inputs.is_empty());
+        let w = out
+            .collecting
+            .iter()
+            .find(|b| b.signal == ReadinessSignal::WellnessZ)
+            .unwrap();
+        assert_eq!(w.have, 6, "same-day recheck did not inflate the day count");
+    }
+
+    // ── A2: a load increase must never survive an active pain/illness report ──
+    #[test]
+    fn a2_no_load_increase_while_tolerable_pain_active() {
+        // Repro from BUGS.md A2: tolerable tendon pain (sev 3, stable) → a
+        // ModifyAndMonitor (PainGate::Adjust), plus RPE −2.0 → IncreaseLoadPct(7.5).
+        // The reconciliation pass MUST strip the increase while pain is active.
+        let inputs = vec![
+            pain_input(PainKind::TendonLoadRelated, 3, PainTrend::Stable, false),
+            input(ReadinessSignal::Rpe, -2.0),
+        ];
+        let out = adjustments_with_context(&inputs, None, false);
+        assert!(
+            out.iter().any(|r| matches!(r.value, Adjustment::ModifyAndMonitor)),
+            "tolerable tendon pain should still surface modify-and-monitor"
+        );
+        assert!(
+            !out.iter().any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(_))),
+            "no IncreaseLoadPct may surface while a pain signal is active"
+        );
+    }
+
+    #[test]
+    fn a2_no_load_increase_while_above_neck_illness() {
+        // Above-neck illness (downgrade) + RPE −2.0 (would raise load) → no increase.
+        let inputs = vec![
+            input(ReadinessSignal::Illness, 1.0),
+            input(ReadinessSignal::Rpe, -2.0),
+        ];
+        let out = adjustments_with_context(&inputs, None, false);
+        assert!(
+            !out.iter().any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(_))),
+            "no IncreaseLoadPct may surface while an illness signal is active"
+        );
+    }
+
+    // ── B7: APRE must reject a non-positive current load (no negative "increase") ──
+    #[test]
+    fn b7_apre_rejects_nonpositive_current_load() {
+        // reps 14 on APRE-6 → the flat +10..15 lb band. A 0 (or negative) current
+        // load must NOT flip the positive jump negative via the proportional cap.
+        let (lo, hi) = apre_load_adjustment_capped_lb(ApreScheme::Apre6, 14, 0.0).value;
+        assert!(lo >= 0.0 && hi >= 0.0, "0 kg load must not yield a negative increase");
+        assert_eq!((lo, hi), apre_load_adjustment_lb(ApreScheme::Apre6, 14).value);
+        let (lo, hi) = apre_load_adjustment_capped_lb(ApreScheme::Apre6, 14, -50.0).value;
+        assert!(lo >= 0.0 && hi >= 0.0, "negative load must not yield a negative increase");
+    }
+
+    // ── D3: autoreg-031/033 cite their OWN claims, not RUN-VDOT-001 ──
+    #[test]
+    fn d3_interval_and_easy_pace_cite_their_own_claims() {
+        let iv = interval_pace_autoreg(2).expect("fires at >=2 reps over target");
+        assert_eq!(
+            iv.evidence.citation.claim_id.as_deref(),
+            Some("AUTOREG-INTERVAL-PACE-001")
+        );
+        let easy = slow_easy_pace_if_over_cap(false);
+        assert_eq!(
+            easy.evidence.citation.claim_id.as_deref(),
+            Some("AUTOREG-EASY-CAP-001")
+        );
+    }
+
+    // ── H2: objective-performance decline strips a coexisting load increase ──
+    #[test]
+    fn objective_performance_decline_strips_load_increase() {
+        // Control: RPE −2.0 alone still raises load (no over-suppression).
+        let rpe_only = vec![input(ReadinessSignal::Rpe, -2.0)];
+        assert!(
+            adjustments(&rpe_only)
+                .iter()
+                .any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(_))),
+            "RPE −2 alone must still raise load"
+        );
+
+        // RPE −2.0 (IncreaseLoadPct 7.5) + within-set VL 25% (> the 20% no-goal
+        // ceiling) → the objective set-stop strips the increase (autoreg-044).
+        let rpe_vl = vec![
+            input(ReadinessSignal::Rpe, -2.0),
+            input(ReadinessSignal::VelocityLoss, 25.0),
+        ];
+        let out = adjustments(&rpe_vl);
+        assert!(
+            !out.iter().any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(_))),
+            "VL set-stop is objective decline → no load increase survives"
+        );
+        assert!(out.iter().any(|r| r.value == Adjustment::DowngradeSession));
+
+        // RPE −1 (IncreaseLoadPct 4.0) + e1RM ratio 0.93 (< 0.95 → ReduceLoadPct)
+        // → the e1RM reduction strips the increase.
+        let rpe_e1rm = vec![
+            input(ReadinessSignal::Rpe, -1.0),
+            input(ReadinessSignal::EstimatedOneRm, 0.93),
+        ];
+        assert!(
+            !adjustments(&rpe_e1rm)
+                .iter()
+                .any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(_))),
+            "e1RM ratio 0.93 → ReduceLoadPct is objective decline → no increase"
+        );
+    }
+
+    // ── LOW: illness/RHR stop keeps a coexisting pain adjustment (tier label) ──
+    #[test]
+    fn illness_stop_keeps_a_coexisting_pain_adjustment_in_output() {
+        // Below-neck illness (Stop) coexists with tolerable tendon pain
+        // (PainGate::Adjust → ModifyAndMonitor), which raises SafetyTier::Pain.
+        // The output must include the pain response so the headline/tier agree;
+        // the illness Stop still blocks training.
+        let inputs = vec![
+            input(ReadinessSignal::Illness, 2.0), // below-neck / fever
+            pain_input(PainKind::TendonLoadRelated, 3, PainTrend::Stable, false),
+        ];
+        assert_eq!(resolve_safety(&inputs), Some(SafetyTier::Pain));
+        let out = adjustments(&inputs);
+        assert!(
+            out.iter().any(|r| matches!(r.value, Adjustment::ModifyAndMonitor)),
+            "the pain response that set the Pain tier must be in the output"
+        );
+        assert!(
+            out.iter().any(|r| r.value == Adjustment::Stop),
+            "the illness Stop still blocks training"
+        );
+    }
+
+    // ── M10: catastrophic morning on a FLAT baseline downgrades via the floor ──
+    #[test]
+    fn flat_baseline_catastrophic_morning_downgrades_via_absolute_floor() {
+        // Seven identical days (SD ≈ 0 → z 0), then sleep 1 / soreness 5 / mood 1
+        // → composite 1.0. The z-only rule reads "normal"; the absolute floor
+        // (composite ≤ 2) forces the single-day downgrade.
+        let mut checkins: Vec<CheckinInput> = (0..7)
+            .map(|d| checkin(d, Some(4), Some(2), Some(4))) // composite 4.0
+            .collect();
+        checkins.push(checkin(7, Some(1), Some(5), Some(1))); // composite 1.0
+        let out = derive_readiness(&checkins, 0);
+        let w = derived(&out.inputs, ReadinessSignal::WellnessZ).expect("derived wellness z");
+        assert!(
+            w.value <= -1.5,
+            "floored catastrophic morning must present as a downgrade z, got {}",
+            w.value
+        );
+        assert!(
+            wellness_downgrade(&out.inputs).is_some(),
+            "the absolute floor drives the autoreg-030 downgrade despite z ≈ 0"
+        );
+    }
+
+    #[test]
+    fn flat_baseline_normal_morning_stays_normal_despite_floor() {
+        // The floor must not fire on an ordinary morning above it.
+        let mut checkins: Vec<CheckinInput> = (0..7)
+            .map(|d| checkin(d, Some(4), Some(2), Some(4))) // composite 4.0
+            .collect();
+        checkins.push(checkin(7, Some(4), Some(2), Some(4))); // composite 4.0 > floor
+        let out = derive_readiness(&checkins, 0);
+        let w = derived(&out.inputs, ReadinessSignal::WellnessZ).unwrap();
+        assert_eq!(w.value, 0.0, "normal morning on a flat baseline stays z 0");
+        assert!(wellness_downgrade(&out.inputs).is_none());
+    }
+
+    // ── LOW (#4): three consecutive dip days reach the multi-day tier. Each dip
+    // day is scored against the rest of the window (leave-one-out), not a
+    // baseline that includes itself. ──
+    #[test]
+    fn three_consecutive_dip_days_reach_the_multiday_tier() {
+        // mood-only check-ins so composite = mood exactly: four strong days
+        // (mood 5) then three consecutive dips (mood 3), today being a dip.
+        let mood = |d: i64, m: u8| checkin(d, None, None, Some(m));
+        let checkins = vec![
+            mood(0, 5),
+            mood(1, 5),
+            mood(2, 5),
+            mood(3, 5),
+            mood(4, 3),
+            mood(5, 3),
+            mood(6, 3),
+        ];
+        let out = derive_readiness(&checkins, 0);
+        let w = derived(&out.inputs, ReadinessSignal::WellnessZ).expect("derived wellness z");
+        assert!(
+            w.streak >= 3,
+            "three consecutive dip days → streak ≥ 3, got {}",
+            w.streak
+        );
+        assert_eq!(
+            resolve_safety(&out.inputs),
+            Some(SafetyTier::SubjectiveMultiDay),
+            "≥3 days of z ≤ −1 raises the multi-day tier"
+        );
     }
 }

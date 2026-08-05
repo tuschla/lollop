@@ -9,10 +9,12 @@ import org.junit.Test
 
 /**
  * Instrumented Compose UI tests for [EvidenceCard], the honesty-invariant card
- * that every recommendation renders through. These assert the always-visible
- * signals (grade chip, SAFETY/CONTESTED markers) stay on screen and that the
- * citation/confidence only appear behind the disclosure tap, the visual
- * contract that keeps a weak or contested claim from masquerading as strong.
+ * that every recommendation renders through. Owner ruling 2026-07-31: the
+ * collapsed face shows ONLY the summary + the always-visible SAFETY/CONTESTED
+ * markers + a single unified "?" disclosure; the grade badge, confidence figure
+ * and citation ALL live behind the "?". These tests assert that contract, no
+ * grade/confidence/citation leaks onto the face, but the SAFETY/CONTESTED
+ * honesty signals never hide.
  *
  * Runs on device/emulator (needs the real theme + composition locals), so it
  * complements the JVM-only wire-shape tests rather than duplicating them.
@@ -45,33 +47,41 @@ class EvidenceCardUiTest {
     }
 
     @Test
-    fun summaryAndGradeChipAlwaysVisible() {
+    fun summaryOnFaceGradeBehindDisclosure() {
         setCard(summary = "Deload week: cut volume 40%", grade = "Strong")
         rule.onNodeWithText("Deload week: cut volume 40%").assertIsDisplayed()
-        rule.onNodeWithText("Strong").assertIsDisplayed()
+        // Grade badge is NO LONGER on the collapsed face: it lives behind the "?".
+        rule.onNodeWithText("STRONG").assertDoesNotExist()
+        rule.onNodeWithText("?").performClick()
+        rule.onNodeWithText("STRONG").assertIsDisplayed()
     }
 
     @Test
-    fun safetyAndContestedChipsShowWithoutTapping() {
+    fun safetyStaysOnFaceContestedMovesBehindDisclosure() {
         setCard(safetyCritical = true, contested = true)
-        // Honesty invariant: these are never hidden behind the disclosure.
+        // SAFETY is a HARD-RULE signal: never hidden.
         rule.onNodeWithText("SAFETY").assertIsDisplayed()
+        // CONTESTED is an evidence-quality tag (declutter, owner 2026-07-31) → it
+        // lives behind the "?" now, not on the collapsed face.
+        rule.onNodeWithText("CONTESTED").assertDoesNotExist()
+        rule.onNodeWithText("?").performClick()
         rule.onNodeWithText("CONTESTED").assertIsDisplayed()
     }
 
     @Test
-    fun citationHiddenUntilDisclosureTap() {
-        setCard(citation = "STR-PROG-001", confidence = 0.72f)
-        // Collapsed: reference detail absent, affordance invites the tap.
+    fun gradeAndCitationHiddenUntilDisclosureTap() {
+        setCard(citation = "STR-PROG-001", confidence = 0.72f, grade = "Moderate")
+        // Collapsed: grade badge + citation are BOTH behind the disclosure now;
+        // the unified trigger is a "?" (not the old "why?"/"less" text links).
+        rule.onNodeWithText("MODERATE").assertDoesNotExist()
         rule.onNodeWithText("STR-PROG-001").assertDoesNotExist()
-        rule.onNodeWithText("conf 0.72").assertDoesNotExist()
-        rule.onNodeWithText("why?").assertIsDisplayed()
+        rule.onNodeWithText("why?").assertDoesNotExist()
+        rule.onNodeWithText("?").assertIsDisplayed()
 
-        rule.onNodeWithText("why?").performClick()
+        rule.onNodeWithText("?").performClick()
 
-        // Expanded: citation + confidence revealed, label flips to "less".
+        // Expanded: grade badge + citation revealed.
+        rule.onNodeWithText("MODERATE").assertIsDisplayed()
         rule.onNodeWithText("STR-PROG-001").assertIsDisplayed()
-        rule.onNodeWithText("conf 0.72").assertIsDisplayed()
-        rule.onNodeWithText("less").assertIsDisplayed()
     }
 }

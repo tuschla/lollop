@@ -357,7 +357,9 @@ pub fn next_meso_weekly_sets(
     recovering_easily: bool,
 ) -> Recommended<u8> {
     let next = if not_growing && recovering_easily {
-        (current_weekly_sets + 2).min(WEEKLY_FRACTIONAL_SET_CEILING)
+        // B7: saturating add, a caller-supplied current-set count near u8::MAX
+        // must not debug-overflow (it is capped at the ceiling below anyway).
+        current_weekly_sets.saturating_add(2).min(WEEKLY_FRACTIONAL_SET_CEILING)
     } else {
         current_weekly_sets
     };

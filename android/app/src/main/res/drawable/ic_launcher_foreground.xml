@@ -16,20 +16,20 @@
         android:scaleY="0.648"
         android:translateX="4"
         android:translateY="4">
-        <!-- start dot: circle cx=24 cy=80 r=4, stroke #E8E4DC w4 -->
+        <!-- start dot: circle cx=24 cy=80 r=4, stroke #000000 w4 -->
         <path
             android:pathData="M20,80 a4,4 0 1 1 8,0 a4,4 0 1 1 -8,0 Z"
-            android:strokeColor="#E8E4DC"
+            android:strokeColor="#000000"
             android:strokeWidth="4" />
         <!-- route trace -->
         <path
             android:pathData="M24,80 C34,52 58,66 66,34"
-            android:strokeColor="#E8E4DC"
+            android:strokeColor="#000000"
             android:strokeWidth="5.5"
             android:strokeLineCap="round" />
         <!-- goal dot: circle cx=70 cy=26 r=9.5 -->
         <path
             android:pathData="M60.5,26 a9.5,9.5 0 1 1 19,0 a9.5,9.5 0 1 1 -19,0 Z"
-            android:fillColor="#C67A3C" />
+            android:fillColor="#000000" />
     </group>
 </vector>

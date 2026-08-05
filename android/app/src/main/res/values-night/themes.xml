@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark (system night) overrides. Only the SYSTEM-default themes need a
+         night variant: black ground + WHITE logo. The Forced.Light / Forced.Dark
+         themes (values/themes.xml) reference explicit colors + logos, so they are
+         intentionally NOT overridden here and hold under any night setting. -->
+    <style name="Theme.Milestone.App" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/splash_bg_dark</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+    <style name="Theme.Milestone" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_bg_dark</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo_dark</item>
+        <item name="postSplashScreenTheme">@style/Theme.Milestone.App</item>
+    </style>
+</resources>

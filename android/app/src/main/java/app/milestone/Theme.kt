@@ -86,9 +86,11 @@ internal val SignalPalette = Palette(
 // semantic [StatusColors] stay fixed, only these decorative grounds/accent flip.
 // Chosen at the theme root by system light/dark, not a separate user setting.
 
-/** Beton, light (design import: bg #EDE7DD, surface #FBF7F0, accent #B85520). */
+/** Beton, light (design import: bg #EDE7DD, surface #FBF7F0). Accent darkened
+ *  #B85520 → #9A4318 so the on-accent text tone (onPrimary = bgTop #EDE7DD) clears
+ *  WCAG AA on accent fills: 3.92:1 (fail) → 5.35:1 (pass). */
 internal val BetonLightPalette = Palette(
-    accent = Color(0xFFB85520),
+    accent = Color(0xFF9A4318),
     bgTop = Color(0xFFEDE7DD),
     bgElevated = Color(0xFFFBF7F0),
     onBgMuted = Color(0xFF6E665B),
@@ -96,9 +98,11 @@ internal val BetonLightPalette = Palette(
     onBgBody = Color(0xFF221E18),
 )
 
-/** Werkstatt, light: warm paper, darkened brass accent. */
+/** Werkstatt, light: warm paper, darkened brass accent. Accent darkened
+ *  #9A7A2E → #7C5F22 so on-accent text (onPrimary = bgTop #ECE4D4) clears WCAG
+ *  AA on accent fills: 3.20:1 (fail) → 4.72:1 (pass). */
 internal val WerkstattLightPalette = Palette(
-    accent = Color(0xFF9A7A2E),
+    accent = Color(0xFF7C5F22),
     bgTop = Color(0xFFECE4D4),
     bgElevated = Color(0xFFF7F1E3),
     onBgMuted = Color(0xFF6E6552),
@@ -106,14 +110,42 @@ internal val WerkstattLightPalette = Palette(
     onBgBody = Color(0xFF241E14),
 )
 
-/** Signal, light: cool near-white, darkened cyan accent. */
+/** Signal, light: cool near-white, darkened cyan accent. Accent darkened
+ *  #0C7FB8 → #08618C so on-accent text (onPrimary = bgTop #F1F1F3) clears WCAG
+ *  AA on accent fills: 3.92:1 (fail) → 6.01:1 (pass). */
 internal val SignalLightPalette = Palette(
-    accent = Color(0xFF0C7FB8),
+    accent = Color(0xFF08618C),
     bgTop = Color(0xFFF1F1F3),
     bgElevated = Color(0xFFFFFFFF),
     onBgMuted = Color(0xFF52525B),
     onBgFaint = Color(0xFF71717A),
     onBgBody = Color(0xFF0A0A0B),
+)
+
+/**
+ * Paper, minimal monochrome (owner request 2026-07-28): white ground, black
+ * foreground, no chroma at all. The accent is near-black (not a color), so the UI
+ * reads as pure ink-on-paper; interactive/selected states use tone, not hue. Like
+ * the others it inverts with system dark. Semantic [StatusColors] still apply, so
+ * safety/evidence remain colored even in this monochrome theme.
+ */
+internal val PaperLightPalette = Palette(
+    accent = Color(0xFF1A1A1A),
+    bgTop = Color(0xFFFFFFFF),
+    bgElevated = Color(0xFFF3F3F1),
+    onBgMuted = Color(0xFF5C5C5A),
+    onBgFaint = Color(0xFF8C8C8A),
+    onBgBody = Color(0xFF0A0A0A),
+)
+
+/** Paper, dark (inverted): black ground, near-white ink accent. */
+internal val PaperDarkPalette = Palette(
+    accent = Color(0xFFF0F0EE),
+    bgTop = Color(0xFF0A0A0A),
+    bgElevated = Color(0xFF1B1B1A),
+    onBgMuted = Color(0xFFA0A09E),
+    onBgFaint = Color(0xFF6A6A68),
+    onBgBody = Color(0xFFF5F5F3),
 )
 
 /**
@@ -123,7 +155,8 @@ internal val SignalLightPalette = Palette(
 enum class AppTheme(val label: String, val dark: Palette, val light: Palette) {
     Beton("Beton", BetonPalette, BetonLightPalette),
     Werkstatt("Werkstatt", WerkstattPalette, WerkstattLightPalette),
-    Signal("Signal", SignalPalette, SignalLightPalette);
+    Signal("Signal", SignalPalette, SignalLightPalette),
+    Paper("Paper", PaperDarkPalette, PaperLightPalette);
 
     companion object {
         fun from(name: String?): AppTheme = entries.firstOrNull { it.name == name } ?: Beton
@@ -181,6 +214,10 @@ object Type {
     val Body = TextStyle(fontSize = 15.sp)
     val Caption = TextStyle(fontSize = 12.sp)
     val Chip = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+    /** Tile-scale overline (chrome §3): 11sp Bold, FieldLabel letter-spacing,
+     *  UPPERCASE at the call site, color `OnBgFaint`. Top-left of every tile. */
+    val Overline = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
 }
 
 /** Beton spacing scale in dp (design spec §4). */
@@ -199,16 +236,46 @@ object Space {
  * SharedPreferences; exposed as a flow so [MilestoneTheme] recomposes when
  * the user flips the toggle.
  */
+/** Light/dark selection: follow the OS, or force one (owner request 2026-07-28). */
+enum class DarkMode { System, Light, Dark }
+
 object ThemeSettings {
     private const val PREFS = "theme"
     private const val KEY_DYNAMIC = "dynamic_accent"
     private const val KEY_THEME = "app_theme"
-    val dynamicAccent = MutableStateFlow(true)
+    private const val KEY_DARKMODE = "dark_mode"
+    private const val KEY_PACE_BUCKET = "pace_bucket_minutes"
+    private const val KEY_DISTANCE_UNIT = "distance_unit_override"
+
+    // Dynamic (Material You) accent is OPT-IN, default OFF: first run boots
+    // into Beton, the board identity, and the wallpaper accent only applies
+    // once the user flips the Profile toggle (see DEVIATIONS).
+    val dynamicAccent = MutableStateFlow(false)
     val theme = MutableStateFlow(AppTheme.Beton)
 
+    // Dark-mode source: default System (respect the OS setting). Light/Dark force
+    // a fixed appearance regardless of the OS, the "respect system dark mode"
+    // toggle in Profile flips between System and a manual choice.
+    val darkMode = MutableStateFlow(DarkMode.System)
+
+    // Live-tracking pace-bucket size in minutes (consumed by the live run tracker):
+    // the moving window over which instantaneous pace is smoothed/quantized. Default 4.
+    val paceBucketMinutes = MutableStateFlow(4)
+
+    // Distance/pace unit source: default System (defer to the device locale via
+    // Units.localeDistanceUnit); Km/Mi force a fixed unit. Feeds Units.resolveDistanceUnit.
+    val distanceUnitOverride = MutableStateFlow(DistanceUnitOverride.System)
+
     fun load(ctx: Context) {
-        dynamicAccent.value = prefs(ctx).getBoolean(KEY_DYNAMIC, true)
+        dynamicAccent.value = prefs(ctx).getBoolean(KEY_DYNAMIC, false)
         theme.value = AppTheme.from(prefs(ctx).getString(KEY_THEME, null))
+        darkMode.value = runCatching {
+            DarkMode.valueOf(prefs(ctx).getString(KEY_DARKMODE, null) ?: "System")
+        }.getOrDefault(DarkMode.System)
+        paceBucketMinutes.value = prefs(ctx).getInt(KEY_PACE_BUCKET, 4)
+        distanceUnitOverride.value = runCatching {
+            DistanceUnitOverride.valueOf(prefs(ctx).getString(KEY_DISTANCE_UNIT, null) ?: "System")
+        }.getOrDefault(DistanceUnitOverride.System)
     }
 
     fun setDynamicAccent(ctx: Context, enabled: Boolean) {
@@ -219,6 +286,21 @@ object ThemeSettings {
     fun setTheme(ctx: Context, selected: AppTheme) {
         theme.value = selected
         prefs(ctx).edit().putString(KEY_THEME, selected.name).apply()
+    }
+
+    fun setDarkMode(ctx: Context, mode: DarkMode) {
+        darkMode.value = mode
+        prefs(ctx).edit().putString(KEY_DARKMODE, mode.name).apply()
+    }
+
+    fun setPaceBucketMinutes(ctx: Context, n: Int) {
+        paceBucketMinutes.value = n
+        prefs(ctx).edit().putInt(KEY_PACE_BUCKET, n).apply()
+    }
+
+    fun setDistanceUnitOverride(ctx: Context, override: DistanceUnitOverride) {
+        distanceUnitOverride.value = override
+        prefs(ctx).edit().putString(KEY_DISTANCE_UNIT, override.name).apply()
     }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -260,10 +342,15 @@ fun MilestoneTheme(
     val ctx = LocalContext.current
     val dynamicColor by ThemeSettings.dynamicAccent.collectAsState()
     val appTheme by ThemeSettings.theme.collectAsState()
-    // Follow the system light/dark setting (design import: light theme added). The
-    // three named themes each supply both grounds; only the decorative palette flips,
-    // never the fixed semantic status colors.
-    val dark = isSystemInDarkTheme()
+    val darkMode by ThemeSettings.darkMode.collectAsState()
+    // Light/dark source: respect the OS by default, or honor a forced override
+    // (owner "respect system dark mode" toggle). Each theme supplies both grounds;
+    // only the decorative palette flips, never the fixed semantic status colors.
+    val dark = when (darkMode) {
+        DarkMode.System -> isSystemInDarkTheme()
+        DarkMode.Light -> false
+        DarkMode.Dark -> true
+    }
     val base = if (dark) appTheme.dark else appTheme.light
     // The selected theme ALWAYS supplies the full scheme, dialogs, menus,
     // switches and every other M3 surface keep the chosen palette. When dynamic
@@ -275,18 +362,55 @@ fun MilestoneTheme(
     val themed: ColorScheme = if (dark) {
         darkColorScheme(
             primary = base.accent,
+            // Owner ruling / spec "Accent fill + BgTop text": M3 Buttons read
+            // onPrimary, so pin it to the ground tone (dark OnAccent here -
+            // the mid-tone dark accents fail AA under light text).
+            onPrimary = base.bgTop,
             background = base.bgTop,
             surface = base.bgElevated,
             onBackground = base.onBgBody,
             onSurface = base.onBgBody,
+            // Pin M3's surface-container / variant / outline roles to the
+            // palette's own grounds so dialogs, bottom sheets and dropdown
+            // menus (which draw on surfaceContainer*/surfaceVariant, not
+            // `surface`) render in the selected palette instead of M3's
+            // baseline tones. Container tiers all map to the app's elevated
+            // surface (dialogs read as raised cards); the lowest tier sits on
+            // the ground.
+            surfaceVariant = base.bgElevated,
+            onSurfaceVariant = base.onBgMuted,
+            surfaceContainerLowest = base.bgTop,
+            surfaceContainerLow = base.bgElevated,
+            surfaceContainer = base.bgElevated,
+            surfaceContainerHigh = base.bgElevated,
+            surfaceContainerHighest = base.bgElevated,
+            outline = base.onBgFaint,
+            // Also pin outlineVariant: M3 HorizontalDividers/menus draw on it, so
+            // leaving it baseline let a stray divider tone leak through the palette.
+            outlineVariant = base.onBgFaint.copy(alpha = 0.3f),
         )
     } else {
         lightColorScheme(
             primary = base.accent,
+            onPrimary = base.bgTop,
             background = base.bgTop,
             surface = base.bgElevated,
             onBackground = base.onBgBody,
             onSurface = base.onBgBody,
+            // Same surface-container / variant / outline pinning as the dark
+            // scheme: keep dialogs/sheets/menus in the selected palette rather
+            // than M3's baseline tones (see dark branch for role rationale).
+            surfaceVariant = base.bgElevated,
+            onSurfaceVariant = base.onBgMuted,
+            surfaceContainerLowest = base.bgTop,
+            surfaceContainerLow = base.bgElevated,
+            surfaceContainer = base.bgElevated,
+            surfaceContainerHigh = base.bgElevated,
+            surfaceContainerHighest = base.bgElevated,
+            outline = base.onBgFaint,
+            // Also pin outlineVariant: M3 HorizontalDividers/menus draw on it, so
+            // leaving it baseline let a stray divider tone leak through the palette.
+            outlineVariant = base.onBgFaint.copy(alpha = 0.3f),
         )
     }
     val scheme: ColorScheme = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

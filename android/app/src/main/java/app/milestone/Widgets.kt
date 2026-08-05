@@ -7,10 +7,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -20,10 +20,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -37,15 +40,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
-/** Dark ground tone used for text/icons sitting on the [Accent] fill, so a
- *  selected chip reads clearly in every theme (accents are all mid-tone). */
-private val OnAccent = Color(0xFF141210)
+/** Tone for text/icons sitting on the [Accent] fill (owner ruling + spec
+ *  "Accent fill + BgTop text"): the active theme's `bgTop`, the dark
+ *  #141210 on the dark palettes (white fails AA on the mid-tone accents,
+ *  3.1:1 on Beton's #E0733A vs 5.9:1 for this) and warm paper on the light
+ *  palettes, whose accents are darkened for contrast on paper. */
+internal val OnAccent: Color @Composable get() = LocalPalette.current.bgTop
 
 /**
  * Full-width list of exclusive options: one comfortable (≥48dp) whole-row tap
@@ -94,7 +109,14 @@ fun <T> OptionList(
                     style = Type.Body,
                     modifier = Modifier.weight(1f),
                 )
-                if (selected) Text("✓", color = Accent, style = Type.Body)
+                if (selected) {
+                    Icon(
+                        painterResource(R.drawable.ic_ui_check),
+                        contentDescription = "Selected",
+                        tint = Accent,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
     }
@@ -136,7 +158,7 @@ fun <T : Enum<T>> EnumRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(display(current), color = Accent, style = Type.Body)
-                Text(if (expanded) "⌄" else "›", color = OnBgFaint, style = Type.Body)
+                RowChevron(expanded)
             }
         }
         if (expanded) {
@@ -173,10 +195,22 @@ fun <T : Enum<T>> SegmentedEnumRow(
     ) {
         Text(label, color = OnBgBody, style = Type.Body)
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            // Clay accent for the selected segment, not Material3's default
+            // secondaryContainer lavender (owner rule: short enums = segmented
+            // buttons, selected = Accent fill + BgTop text). Matches TwoSegmentRow.
+            val segColors = SegmentedButtonDefaults.colors(
+                activeContainerColor = Accent,
+                activeContentColor = OnAccent,
+                activeBorderColor = Accent,
+                inactiveContainerColor = BgTop,
+                inactiveContentColor = OnBgMuted,
+                inactiveBorderColor = OnBgFaint.copy(alpha = 0.3f),
+            )
             values.forEachIndexed { index, value ->
                 SegmentedButton(
                     selected = value == current,
                     onClick = { onSelect(value) },
+                    colors = segColors,
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = values.size),
                 ) {
                     Text(display(value), style = Type.Chip, maxLines = 1)
@@ -500,8 +534,16 @@ fun KeypadValueField(
  */
 @Composable
 fun NumericKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit) {
+    // Keypad ground (spec 05-log §2): a hair below BgElevated in the dark
+    // themes; the plain screen ground on paper. C6: keyed off the RESOLVED palette
+    // (a forced-Light-on-dark-OS sheet must not get the dark ground), not the OS.
+    val ground = if (LocalPalette.current.bgTop.luminance() < 0.5f) Color(0xFF1A1815) else BgTop
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Space.Card.dp))
+            .background(ground)
+            .padding(Space.Sm.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
         val rows = listOf("123", "456", "789", ".0⌫")
@@ -515,17 +557,26 @@ fun NumericKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit) {
                         modifier = Modifier
                             .weight(1f)
                             .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(Space.Md.dp))
-                            .background(BgTop)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(BgElevated)
                             .clickable { if (key == '⌫') onBackspace() else onKey(key) }
                             .padding(vertical = Space.Md.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            "$key",
-                            color = if (key == '⌫' || key == '.') OnBgMuted else OnBgBody,
-                            style = Type.Title.merge(TabularFigures),
-                        )
+                        if (key == '⌫') {
+                            Icon(
+                                painterResource(R.drawable.ic_ui_backspace),
+                                contentDescription = "Backspace",
+                                tint = OnBgMuted,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        } else {
+                            Text(
+                                "$key",
+                                color = if (key == '.') OnBgMuted else OnBgBody,
+                                style = Type.Title.copy(fontSize = 22.sp).merge(TabularFigures),
+                            )
+                        }
                     }
                 }
             }
@@ -566,16 +617,19 @@ private fun adjLabel(a: Double): String {
  * a series shorter than two points.
  */
 @Composable
-fun Sparkline(values: List<Float>, color: Color, modifier: Modifier = Modifier) {
+fun Sparkline(values: List<Float>, color: Color, modifier: Modifier = Modifier, endDot: Boolean = false) {
     if (values.size < 2) return
     Canvas(modifier) {
         val minV = values.min()
         val maxV = values.max()
         val range = (maxV - minV).takeIf { it > 0f } ?: 1f
-        val stepX = size.width / (values.size - 1)
+        // End-point dot (spec 01-today §3: r3.2) needs its own inset so it isn't
+        // clipped at the right/top edge.
+        val dotR = if (endDot) stroke(3.2f) else 0f
+        val stepX = (size.width - dotR) / (values.size - 1)
         // Leave a hair of vertical inset so the stroke's round cap isn't clipped at
         // the exact top/bottom of the canvas on a new min/max point.
-        val inset = stroke(2.4f) / 2f
+        val inset = maxOf(stroke(2.4f) / 2f, dotR)
         val usableH = (size.height - inset * 2f).coerceAtLeast(1f)
         fun y(v: Float) = inset + (usableH - (v - minV) / range * usableH)
         var prev = Offset(0f, y(values[0]))
@@ -584,6 +638,7 @@ fun Sparkline(values: List<Float>, color: Color, modifier: Modifier = Modifier) 
             drawLine(color, prev, cur, strokeWidth = stroke(2.4f), cap = StrokeCap.Round)
             prev = cur
         }
+        if (endDot) drawCircle(color, radius = dotR, center = prev)
     }
 }
 
@@ -600,22 +655,33 @@ val TileHeight = 84.dp
  * extension so callers place several across a row with `weight`.
  */
 @Composable
-fun RowScope.StatTile(value: String, unit: String?, label: String) {
+fun RowScope.StatTile(value: String, unit: String?, label: String, glossaryKey: String? = null) {
+    // History week-strip anatomy (spec 03-history §1): value ABOVE (19sp
+    // ExtraBold, tabular) with the unit inline muted, label below-left.
     Column(
         modifier = Modifier
             .weight(1f)
-            .height(TileHeight)
-            .clip(RoundedCornerShape(Space.Card.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(BgElevated)
             .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp + Space.Xs.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
     ) {
-        Text(label.uppercase(Locale.US), color = OnBgMuted, style = Type.Chip)
         Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, color = OnBgBody, style = Type.Title.merge(TabularFigures), maxLines = 1)
+            Text(
+                value,
+                color = OnBgBody,
+                style = Type.Title.copy(fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                    .merge(TabularFigures),
+                maxLines = 1,
+            )
             if (unit != null) {
                 Text(" $unit", color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
             }
+        }
+        // Label, with an optional glossary affordance (m2) for jargon tiles.
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+            Text(label, color = OnBgFaint, style = Type.Caption)
+            glossaryKey?.let { GlossaryInfo(it) }
         }
     }
 }
@@ -638,7 +704,8 @@ fun ContributionHeatmap(
     modifier: Modifier = Modifier,
 ) {
     val accent = Accent
-    val track = OnBgFaint.copy(alpha = 0.15f)
+    // 0-count track per spec 03-history §3: `OnBgBody @6%`, ramping to full Accent.
+    val track = OnBgBody.copy(alpha = 0.06f)
     fun cellColor(count: Int): Color = when {
         count <= 0 -> track
         count == 1 -> accent.copy(alpha = 0.40f)
@@ -650,31 +717,299 @@ fun ContributionHeatmap(
     fun dow(day: Long): Int = (((day % 7) + 4) % 7).toInt()
     val lastSunday = todayLocalDay - dow(todayLocalDay)
     val firstSunday = lastSunday - (weeks - 1) * 7L
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp),
-    ) {
-        for (col in 0 until weeks) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
-            ) {
-                for (row in 0..6) {
-                    val day = firstSunday + col * 7L + row
-                    val cell = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(2.dp))
-                    if (day > todayLocalDay) {
-                        // Future day in the current week: leave the slot empty.
-                        Box(cell)
-                    } else {
-                        Box(cell.background(cellColor(countsByDay[day] ?: 0)))
+
+    // m5: axis labels. Weekday initials down the left gutter (Sun top), month
+    // ticks along the bottom at each column where the month first changes.
+    val weekdayInitials = listOf("S", "M", "T", "W", "T", "F", "S")
+    val monthFmt = SimpleDateFormat("MMM", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+    fun monthOf(day: Long): String = monthFmt.format(Date(day * 86_400_000L))
+    // First column of each distinct month → its label (blank elsewhere).
+    val monthTicks = (0 until weeks).map { col ->
+        val colMonth = monthOf(firstSunday + col * 7L)
+        val prevMonth = if (col == 0) "" else monthOf(firstSunday + (col - 1) * 7L)
+        if (colMonth != prevMonth) colMonth else ""
+    }
+
+    val gutter = 14.dp
+    val gap = Space.Xs.dp
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        // Square cells sized to fill the width after the gutter + inter-column gaps.
+        val cell = (maxWidth - gutter - gap * weeks) / weeks
+        Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                // Weekday gutter.
+                Column(
+                    modifier = Modifier.width(gutter),
+                    verticalArrangement = Arrangement.spacedBy(gap),
+                ) {
+                    for (row in 0..6) {
+                        Box(Modifier.height(cell), contentAlignment = Alignment.CenterEnd) {
+                            // Label alternate rows (Mon/Wed/Fri) to avoid crowding.
+                            if (row % 2 == 1) {
+                                Text(weekdayInitials[row], color = OnBgFaint, style = Type.Chip)
+                            }
+                        }
+                    }
+                }
+                for (col in 0 until weeks) {
+                    Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                        for (row in 0..6) {
+                            val day = firstSunday + col * 7L + row
+                            val cellMod = Modifier
+                                .size(cell)
+                                .clip(RoundedCornerShape(2.dp))
+                            if (day > todayLocalDay) {
+                                Box(cellMod)
+                            } else {
+                                Box(cellMod.background(cellColor(countsByDay[day] ?: 0)))
+                            }
+                        }
+                    }
+                }
+            }
+            // Month ticks aligned under their column.
+            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                Box(Modifier.width(gutter))
+                for (col in 0 until weeks) {
+                    Box(Modifier.width(cell)) {
+                        if (monthTicks[col].isNotEmpty()) {
+                            Text(monthTicks[col], color = OnBgFaint, style = Type.Chip)
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/**
+ * Garmin-style per-day running-distance bar chart: one accent bar per local day
+ * over the last [days] days, height ∝ that day's summed km ([kmByDay], keyed by
+ * local-day index). A purely factual layout of logged distance, no coaching,
+ * no goals, no target lines; empty days read as the faint baseline. Day indices
+ * are local-day numbers (days since the Unix epoch in the device timezone), so
+ * the caller keeps timezone bucketing out of the deterministic core. Uses the
+ * decorative [Accent] ramp, never a semantic status color. The y-max label and
+ * a couple of date ticks orient the eye; today's bar carries an accent underline.
+ */
+@Composable
+fun RunDistanceBars(
+    kmByDay: Map<Long, Double>,
+    todayLocalDay: Long,
+    days: Int = 14,
+    modifier: Modifier = Modifier,
+) {
+    val firstDay = todayLocalDay - (days - 1)
+    val vals = (0 until days).map { kmByDay[firstDay + it] ?: 0.0 }
+    val maxKm = vals.maxOrNull()?.takeIf { it > 0.0 } ?: 0.0
+    val totalKm = vals.sum()
+    // Nice round y-max ceiling so the axis label reads cleanly (e.g. 8/10/15 km).
+    val yMax = when {
+        maxKm <= 0.0 -> 0.0
+        maxKm <= 5.0 -> kotlin.math.ceil(maxKm)
+        maxKm <= 20.0 -> kotlin.math.ceil(maxKm / 2.0) * 2.0
+        else -> kotlin.math.ceil(maxKm / 5.0) * 5.0
+    }
+
+    val accent = Accent
+    val baseline = OnBgBody.copy(alpha = 0.06f)
+    val todayTick = Accent.copy(alpha = 0.55f)
+
+    fun dayLabel(day: Long): String =
+        SimpleDateFormat("MMM d", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date(day * 86_400_000L))
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+    ) {
+        // Header: y-max on the left, factual window total on the right.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                if (yMax > 0.0) "${fmtKm(yMax)} km" else "-",
+                color = OnBgFaint,
+                style = Type.Caption.merge(TabularFigures),
+            )
+            Text(
+                "${fmtKm(totalKm)} km · $days days",
+                color = OnBgFaint,
+                style = Type.Caption.merge(TabularFigures),
+            )
+        }
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(96.dp),
+        ) {
+            val n = days
+            val slot = size.width / n
+            val barW = slot * 0.58f
+            val corner = CornerRadius(stroke(2f), stroke(2f))
+            // Reserve a hair at the bottom for the baseline + today underline.
+            val underline = stroke(2.5f)
+            val usableH = (size.height - underline - stroke(2f)).coerceAtLeast(1f)
+            for (i in 0 until n) {
+                val km = vals[i]
+                val cx = slot * i + slot / 2f
+                val left = cx - barW / 2f
+                val barTop = if (yMax > 0.0) {
+                    (usableH - (km / yMax).toFloat().coerceIn(0f, 1f) * usableH)
+                } else {
+                    usableH
+                }
+                val isToday = (firstDay + i) == todayLocalDay
+                if (km > 0.0) {
+                    drawRoundRect(
+                        color = accent,
+                        topLeft = Offset(left, barTop),
+                        size = Size(barW, usableH - barTop),
+                        cornerRadius = corner,
+                    )
+                } else {
+                    // Empty day: a faint baseline stub so the day still reads.
+                    drawRoundRect(
+                        color = baseline,
+                        topLeft = Offset(left, usableH - stroke(2f)),
+                        size = Size(barW, stroke(2f)),
+                        cornerRadius = corner,
+                    )
+                }
+                if (isToday) {
+                    drawRoundRect(
+                        color = todayTick,
+                        topLeft = Offset(left, usableH + stroke(1.5f)),
+                        size = Size(barW, underline),
+                        cornerRadius = corner,
+                    )
+                }
+            }
+        }
+        // A couple of date ticks: window start, and today on the right.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(dayLabel(firstDay), color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
+            Text("Today", color = OnBgFaint, style = Type.Caption)
+        }
+    }
+}
+
+/** Trim a whole-number `.0` off a km figure; one decimal otherwise. */
+private fun fmtKm(km: Double): String =
+    if (km % 1.0 == 0.0) "${km.toInt()}" else String.format(Locale.US, "%.1f", km)
+
+/** Row-disclosure chevron (`ui-chevron-right`, 16dp, `OnBgFaint`); rotates 90°
+ *  when the row is expanded. One shared affordance for every tappable row. */
+@Composable
+fun RowChevron(expanded: Boolean = false) {
+    Icon(
+        painterResource(R.drawable.ic_ui_chevron_right),
+        contentDescription = null,
+        tint = OnBgFaint,
+        modifier = Modifier
+            .size(16.dp)
+            .rotate(if (expanded) 90f else 0f),
+    )
+}
+
+/** The ONE tile/card overline (chrome §3): 11sp Bold UPPERCASE, `OnBgFaint`,
+ *  top-left. Every data tile and card label goes through this. */
+@Composable
+fun TileOverline(text: String, color: Color = OnBgFaint) {
+    Text(text.uppercase(Locale.US), color = color, style = Type.Overline)
+}
+
+/** Section overline with an optional trailing accent action ("History →"). */
+@Composable
+fun SectionOverline(text: String, trailing: String? = null, onTrailing: (() -> Unit)? = null) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = Space.Sm.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text.uppercase(Locale.US), color = Accent, style = Type.Section)
+        if (trailing != null) {
+            Text(
+                trailing,
+                color = Accent,
+                style = Type.Body,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(Space.Md.dp))
+                    .clickable(enabled = onTrailing != null) { onTrailing?.invoke() }
+                    .padding(horizontal = Space.Sm.dp),
+            )
+        }
+    }
+}
+
+/** A rounded icon ground (36/38/44dp) holding a tinted 24-grid symbol, the
+ *  leading tile on chooser rows, activity rows and history cards. */
+@Composable
+fun IconTile(painter: Painter, tint: Color, ground: Color, size: Dp = 36.dp, iconSize: Dp = 20.dp) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(10.dp))
+            .background(ground),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painter, contentDescription = null, tint = tint, modifier = Modifier.size(iconSize))
+    }
+}
+
+/**
+ * Two-option segmented control (spec 03-history §2, INVARIANT 4): exactly two
+ * segments, selected = `Accent` fill + dark [OnAccent] text (owner AA ruling on
+ * accent fills), unselected = `OnBgMuted` on `BgElevated`. No third option, no
+ * counts in the labels.
+ */
+@Composable
+fun TwoSegmentRow(left: String, right: String, selectedIndex: Int, onSelect: (Int) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Space.Md.dp))
+            .background(BgElevated)
+            .padding(Space.Xs.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+    ) {
+        listOf(left, right).forEachIndexed { i, label ->
+            val selected = i == selectedIndex
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 40.dp)
+                    .clip(RoundedCornerShape(Space.Md.dp - Space.Xs.dp))
+                    .background(if (selected) Accent else Color.Transparent)
+                    .clickable { onSelect(i) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, color = if (selected) OnAccent else OnBgMuted, style = Type.Chip)
+            }
+        }
+    }
+}
+
+/** Small date badge for history cards: `OnBgFaint` on `BgTop`, chip radius. */
+@Composable
+fun DateBadge(text: String) {
+    if (text.isEmpty()) return
+    Text(
+        text,
+        color = OnBgFaint,
+        style = Type.Chip,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(BgTop)
+            .padding(horizontal = Space.Md.dp, vertical = Space.Sm.dp),
+    )
 }
 
 /**

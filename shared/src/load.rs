@@ -260,12 +260,17 @@ pub fn riegel_exponent(weekly_km: f64) -> f64 {
 /// `t1` over `d1` (same distance units; times in seconds). Default exponent
 /// 1.06; use [`riegel_exponent`] to pick by weekly volume. `[Moderate]`
 ///
-/// Guards non-positive inputs (returns 0.0) since ratios/powers are undefined.
+/// Guards non-positive inputs (returns 0.0) since ratios/powers are undefined,
+/// and non-finite outputs: an absurd goal distance (`d2` ~1e280 m) overflows the
+/// power to `±inf`/`NaN`, so a non-finite prediction is collapsed to the same
+/// degenerate `0.0` sentinel. Callers route a `<= 0.0` prediction to the "need a
+/// valid recent race" path rather than leaking `Inf` into the view.
 pub fn riegel_predict(t1_sec: f64, d1: f64, d2: f64, exponent: f64) -> f64 {
     if t1_sec <= 0.0 || d1 <= 0.0 || d2 <= 0.0 {
         return 0.0;
     }
-    t1_sec * (d2 / d1).powf(exponent)
+    let t2 = t1_sec * (d2 / d1).powf(exponent);
+    if t2.is_finite() { t2 } else { 0.0 }
 }
 
 // ---------------------------------------------------------------------------
@@ -633,10 +638,17 @@ pub fn hr_tss(zone_minutes_and_if: &[(f64, f64)]) -> f64 {
 // Ingest data-quality gates (File 07 "Sanity / QC")
 // ---------------------------------------------------------------------------
 
-/// GPS speed sanity gate: reject samples implying >12 m/s for a runner
-/// (File 07). Returns true when the speed is plausible (≤ 12 m/s).
+/// A GPS ground speed above this (m/s) is impossible for a runner and is treated
+/// as jitter (File 07 "reject samples implying >12 m/s"). SINGLE SOURCE OF TRUTH
+/// for the ingest QC gate here, the core normalized-speed clamp
+/// (`running::MAX_PLAUSIBLE_SPEED_MPS` re-exports this), and the shell live-jitter
+/// guard, all three gate the same physical thing, so they share the KB value.
+pub const MAX_PLAUSIBLE_SPEED_MPS: f64 = 12.0;
+
+/// GPS speed sanity gate: reject samples implying an implausible runner speed
+/// (File 07). Returns true when the speed is plausible (≤ [`MAX_PLAUSIBLE_SPEED_MPS`]).
 pub fn gps_speed_plausible(speed_m_s: f64) -> bool {
-    speed_m_s <= 12.0
+    speed_m_s <= MAX_PLAUSIBLE_SPEED_MPS
 }
 
 /// GPS point-acceptance gate (Apple pattern, File 07): accept a new fix only if
@@ -716,6 +728,11 @@ mod tests {
         assert!((riegel_exponent(10.0) - 1.12).abs() < 1e-9);
         // Non-positive inputs guarded.
         assert_eq!(riegel_predict(0.0, 5.0, 10.0, 1.06), 0.0);
+        // A finite prediction round-trips normally.
+        assert!(riegel_predict(1200.0, 5000.0, 10_000.0, 1.06).is_finite());
+        // An absurd goal distance overflows the power to ±inf → collapse to the
+        // degenerate 0.0 sentinel, never leak Inf/NaN to the caller (LOW bug).
+        assert_eq!(riegel_predict(1200.0, 5000.0, 1e300, 1.06), 0.0);
     }
 
     #[test]

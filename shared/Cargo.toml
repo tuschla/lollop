@@ -10,6 +10,7 @@ crate-type = ["cdylib", "lib", "staticlib"]
 
 [dependencies]
 crux_core = { workspace = true }
+fitparser = "0.11.0"
 serde = { workspace = true, features = ["derive"] }
 
 [features]

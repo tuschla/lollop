@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- milestone route-trace mark (design/icons/README.md geometry, 100x100 grid):
+     start ring (never filled), trace (control points fixed), goal dot (filled).
+     Drawn white; tint at the call site (top bar = Accent). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <path
+        android:pathData="M20,80 a4,4 0 1 1 8,0 a4,4 0 1 1 -8,0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.5" />
+    <path
+        android:pathData="M24,80 C34,52 58,66 66,34"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M60,26 a10,10 0 1 1 20,0 a10,10 0 1 1 -20,0 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

@@ -132,6 +132,54 @@ fn current_view() -> Vec<u8> {
     })
 }
 
+/// Parse Garmin/ANT `.fit` activity bytes ([`crate::fit::parse_fit`]) into a
+/// JSON payload for the Android shell's tracker import. This is deliberately
+/// NOT routed through the bridge/model/event log, it is pure data ingestion
+/// (mirrors how `running.rs` treats an already-decoded `GpsPoint` track), so
+/// the shell converts the result into its own `LogRunTrack` event itself.
+/// Nothing here is recommendation-bearing, so no `Evidence` is attached
+/// (evidence gating covers coaching claims, not raw sensor ingest).
+///
+/// Success: `{"segments":[[{"lat":..,"lon":..,"time_sec":..,"hr_bpm":123}, ...], ...]}`
+/// (`hr_bpm` omitted when absent, never a fabricated 0/null placeholder).
+/// Failure: `{"error":"<plain-language message>"}`.
+///
+/// Hand-built JSON rather than `serde_json::to_string`, for the same reason
+/// [`escape_json`] above is hand-rolled: `serde_json` is a dev-dependency
+/// only, and this crate must not gain a runtime dependency just to
+/// serialise a handful of floats.
+#[allow(dead_code)]
+fn parse_fit_json(bytes: &[u8]) -> Vec<u8> {
+    catch_panic("parseFit", || match crate::fit::parse_fit(bytes) {
+        Ok(track) => {
+            let mut out = String::from(r#"{"segments":["#);
+            for (si, segment) in track.segments.iter().enumerate() {
+                if si > 0 {
+                    out.push(',');
+                }
+                out.push('[');
+                for (fi, fix) in segment.iter().enumerate() {
+                    if fi > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&format!(
+                        r#"{{"lat":{},"lon":{},"time_sec":{}"#,
+                        fix.lat, fix.lon, fix.time_sec
+                    ));
+                    if let Some(hr) = fix.hr_bpm {
+                        out.push_str(&format!(r#","hr_bpm":{hr}"#));
+                    }
+                    out.push('}');
+                }
+                out.push(']');
+            }
+            out.push_str("]}");
+            out.into_bytes()
+        }
+        Err(msg) => format!(r#"{{"error":"{}"}}"#, escape_json(&msg)).into_bytes(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{current_view, process_event};
@@ -142,6 +190,11 @@ mod tests {
     /// tendon input (most recent) and the bare stop stays, a false failure.
     /// Serialize just those two; the rest keep running in parallel.
     static PAIN_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Same shared-bridge hazard for the calculator-echo tests: both submit a
+    /// `ComputeHrZones` with a different age, so their `hr_zone_input` reads
+    /// race. Serialize just these two.
+    static CALC_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn json_event_updates_json_view() {
@@ -358,7 +411,8 @@ mod tests {
                     "kind": "TendonLoadRelated",
                     "severity": 3,
                     "trend": "Stable",
-                    "persists": false
+                    "persists": false,
+                    "location": "Left knee"
                 }
             }
         });
@@ -375,6 +429,14 @@ mod tests {
             view["adjustments"].is_array(),
             "view still renders an adjustments array after a graded pain report"
         );
+
+        // Clean up the Pain we submitted into the shared global bridge before
+        // releasing PAIN_TESTS: otherwise, depending on parallel scheduling order,
+        // a leftover Pain keeps `train_blocked` set and flakes the sibling
+        // `remove_readiness_wire_shape_round_trips_the_bridge` test (which removes
+        // only its OWN Pain and then asserts the hold is lifted).
+        let remove = serde_json::json!({ "RemoveReadiness": { "signal": "Pain" } });
+        process_event(remove.to_string().as_bytes());
     }
 
     #[test]
@@ -659,6 +721,7 @@ mod tests {
 
     #[test]
     fn hr_zone_event_accepts_both_old_and_extended_wire_forms() {
+        let _guard = CALC_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         // Old persisted form (no optional fields) must stay replayable…
         let old = serde_json::json!({ "ComputeHrZones": { "age_years": 30.0 } });
         let requests = process_event(old.to_string().as_bytes());
@@ -686,6 +749,58 @@ mod tests {
                 .any(|z| z["summary"].as_str().unwrap().contains("Karvonen")),
             "karvonen rows: {zones:?}"
         );
+    }
+
+    #[test]
+    fn calculator_views_echo_their_inputs_in_json_for_form_rehydration() {
+        let _guard = CALC_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        // The shell rehydrates each calculator form from these echoed input
+        // fields after process death: pin their JSON wire shape.
+        let race = serde_json::json!({
+            "PredictRace": {
+                "recent_distance_m": 10000.0,
+                "recent_time_sec": 2520.0,
+                "goal_distance_m": 21097.5,
+                "weekly_km": 55.0,
+                "weeks_since_race": 3
+            }
+        });
+        process_event(race.to_string().as_bytes());
+        let hr = serde_json::json!({
+            "ComputeHrZones": { "age_years": 47.0, "resting_hr_bpm": 52.0 }
+        });
+        process_event(hr.to_string().as_bytes());
+        let protein = serde_json::json!({
+            "ComputeProtein": { "bodyweight_kg": 82.5, "masters": true, "deficit": false }
+        });
+        process_event(protein.to_string().as_bytes());
+        let hyper = serde_json::json!({
+            "PlanHypertrophyMeso": { "muscle": "back", "weeks": 6 }
+        });
+        process_event(hyper.to_string().as_bytes());
+
+        let view = current_view();
+        let view: serde_json::Value = serde_json::from_slice(&view).unwrap();
+
+        let rp = &view["race_prediction"];
+        assert_eq!(rp["recent_distance_m"], 10000.0);
+        assert_eq!(rp["recent_time_sec"], 2520.0);
+        assert_eq!(rp["goal_distance_m"], 21097.5);
+        assert_eq!(rp["weekly_km"], 55.0);
+        assert_eq!(rp["weeks_since_race"], 3);
+
+        let hz = &view["hr_zone_input"];
+        assert_eq!(hz["age_years"], 47.0);
+        assert_eq!(hz["resting_hr_bpm"], 52.0);
+
+        let pr = &view["protein_input"];
+        assert_eq!(pr["bodyweight_kg"], 82.5);
+        assert_eq!(pr["masters"], true);
+        assert_eq!(pr["deficit"], false);
+
+        let hy = &view["hypertrophy_input"];
+        assert_eq!(hy["muscle"], "back");
+        assert_eq!(hy["weeks"], 6);
     }
 
     #[test]
@@ -882,6 +997,87 @@ mod tests {
     }
 
     #[test]
+    fn android_shaped_checkin_round_trips_and_surfaces_baseline_status() {
+        // Phase 2 / B1: the morning check-in wire shape (raw human items +
+        // optional watch numbers) must survive the JNI Bridge exactly as Core.kt
+        // emits it: a field drift would silently drop the check-in on replay.
+        // One check-in is far below the baseline minimum, so the view must carry
+        // an honest "collecting baseline" status, never a fabricated z.
+        let event = serde_json::json!({
+            "SubmitCheckin": {
+                "observed_at": 1_700_000_000,
+                "sleep_quality": 2,
+                "soreness": 4,
+                "mood": 3,
+                "resting_hr_bpm": 52.0,
+                "hrv_rmssd_ms": 41.0
+            }
+        });
+        let requests = process_event(event.to_string().as_bytes());
+        let requests: serde_json::Value = serde_json::from_slice(&requests).unwrap();
+        assert!(
+            requests.as_array().is_some_and(|a| !a.is_empty()),
+            "a morning check-in must emit a Render request, not be dropped"
+        );
+
+        let view = current_view();
+        let view: serde_json::Value = serde_json::from_slice(&view).unwrap();
+        // The check-in is echoed for rehydration.
+        let echo = view["checkin_today"].as_object().expect("checkin_today object");
+        assert_eq!(echo["sleep_quality"], 2);
+        assert_eq!(echo["soreness"], 4);
+        // Honest collecting-baseline status is present (no z was fabricated).
+        let status = view["baseline_status"].as_array().expect("baseline_status array");
+        assert!(
+            status
+                .iter()
+                .any(|b| b["signal"] == "WellnessZ"
+                    && b["note"].as_str().unwrap().contains("Collecting your baseline")),
+            "wellness baseline is collecting: {status:?}"
+        );
+
+        // Clean up the shared global bridge so this check-in doesn't perturb the
+        // sibling readiness/summary tests.
+        process_event(b"\"ClearCheckins\"");
+    }
+
+    #[test]
+    fn parse_fit_json_reports_a_plain_error_for_garbage_bytes() {
+        // No FIT/model/event-log involvement at all: prove the panic-firewalled
+        // JSON wrapper around `crate::fit::parse_fit` shapes a plain `{"error":...}`
+        // rather than propagating a Rust `Result` or panicking across the future
+        // JNI boundary.
+        let out = super::parse_fit_json(b"not a fit file");
+        let v: serde_json::Value = serde_json::from_slice(&out).expect("error JSON parses");
+        assert_eq!(v["error"], "Not a FIT file");
+    }
+
+    #[test]
+    fn parse_fit_json_round_trips_a_real_device_file() {
+        // Same fixture the `fit` module's own happy-path test uses (a real
+        // Garmin Fenix 5 bike ride) to prove the JSON wrapper end-to-end:
+        // segments/lat/lon/time_sec/hr_bpm all present under the documented keys.
+        let path = format!(
+            "{}/tests/fixtures/garmin-fenix-5-bike.fit",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let bytes = std::fs::read(&path).expect("fixture should read");
+        let out = super::parse_fit_json(&bytes);
+        let v: serde_json::Value = serde_json::from_slice(&out).expect("success JSON parses");
+
+        let segments = v["segments"].as_array().expect("segments array");
+        assert_eq!(segments.len(), 1);
+        let fixes = segments[0].as_array().expect("fixes array");
+        assert_eq!(fixes.len(), 19);
+
+        let first = &fixes[0];
+        assert!((first["lat"].as_f64().unwrap() - 37.41116).abs() < 1e-4);
+        assert!((first["lon"].as_f64().unwrap() - (-122.06907)).abs() < 1e-4);
+        assert_eq!(first["time_sec"], 1_497_283_762);
+        assert_eq!(first["hr_bpm"], 77);
+    }
+
+    #[test]
     fn malformed_event_is_dropped_without_panicking() {
         // Simulates a stale/forward-incompatible log line hitting replay: an
         // unknown variant must not unwind across the FFI boundary, and the view
@@ -900,10 +1096,10 @@ mod tests {
 
 #[cfg(target_os = "android")]
 mod android {
-    use super::{current_view, process_event};
+    use super::{current_view, parse_fit_json, process_event};
     use jni::JNIEnv;
     use jni::objects::{JByteArray, JClass};
-    use jni::sys::jbyteArray;
+    use jni::sys::{jbyteArray, jstring};
 
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_app_milestone_Core_update(
@@ -929,5 +1125,47 @@ mod android {
         env.byte_array_from_slice(&out)
             .expect("view byte array should build")
             .into_raw()
+    }
+
+    /// Pure FIT-file parsing helper, deliberately NOT wired through
+    /// `update`/`view`: no model, no event log. Takes the raw `.fit` file
+    /// bytes, returns the [`parse_fit_json`] JSON string (segments of fixes
+    /// on success, `{"error":...}` on failure). The shell converts a success
+    /// payload into its existing `LogRunTrack` event itself.
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_app_milestone_Core_parseFit(
+        env: JNIEnv,
+        _class: JClass,
+        fit_bytes: JByteArray,
+    ) -> jstring {
+        // Every fallible step here, reading the JNI byte array, parsing the
+        // FIT, and allocating the return JNI string must degrade to the
+        // shell's `{"error":…}` envelope rather than `.expect()`-panic across
+        // this `extern "system"` boundary (unwinding is UB → a process abort
+        // the shell can't intercept). A very large FIT → huge JSON string is a
+        // realistic JNI allocation-failure trigger. Mirrors the [`catch_panic`]
+        // firewall the update/view exports rely on (`parse_fit_json` is itself
+        // already firewalled, so a FIT-parser panic is caught inside it).
+        const FALLBACK_ERR: &str = r#"{"error":"Couldn't read this FIT file"}"#;
+        let json: String = match env.convert_byte_array(&fit_bytes) {
+            Ok(bytes) => {
+                // `parse_fit_json` hand-builds ASCII/escaped JSON, so this is
+                // infallible in practice; degrade to the error envelope rather
+                // than unwrap so no future non-UTF-8 path can abort the process.
+                String::from_utf8(parse_fit_json(&bytes))
+                    .unwrap_or_else(|_| FALLBACK_ERR.to_string())
+            }
+            Err(_) => FALLBACK_ERR.to_string(),
+        };
+        // A JNI string allocation failure (e.g. OOM on a huge payload) returns
+        // a null jstring, a defined return the shell handles, instead of a
+        // panic. Best effort: retry with the compact error envelope first.
+        match env.new_string(&json) {
+            Ok(js) => js.into_raw(),
+            Err(_) => match env.new_string(FALLBACK_ERR) {
+                Ok(js) => js.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+        }
     }
 }
