@@ -15,12 +15,6 @@
 use crate::evidence;
 use crate::schema::Recommended;
 
-/// Build a `Recommended<T>` from a registry claim id (must exist).
-fn recommend<T>(value: T, claim_id: &str) -> Recommended<T> {
-    let e = evidence::claim(claim_id).expect("known hybrid claim");
-    Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
-}
-
 // ---------------------------------------------------------------------------
 // 1. Intra-session ordering (File 10 hybrid-005/006/008; CONC-ORDER-001)
 // ---------------------------------------------------------------------------
@@ -54,7 +48,7 @@ pub fn same_session_order(goal: ConcurrentGoal) -> Recommended<SessionOrder> {
         ConcurrentGoal::Strength | ConcurrentGoal::Hypertrophy => SessionOrder::LiftFirst,
         ConcurrentGoal::EndurancePriority => SessionOrder::RunFirst,
     };
-    recommend(order, "CONC-ORDER-001")
+    evidence::graded(order, "CONC-ORDER-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -75,20 +69,18 @@ pub struct SessionSpacing {
 /// Default acute spacing: 6–24 h ideal, ≥3 h fallback (File 10 hybrid-007;
 /// CONC-SEP-001).
 pub fn session_spacing() -> Recommended<SessionSpacing> {
-    recommend(
-        SessionSpacing {
-            ideal_min_hours: 6,
-            ideal_max_hours: 24,
-            fallback_min_hours: 3,
-        },
-        "CONC-SEP-001",
-    )
+    evidence::graded(SessionSpacing {
+        ideal_min_hours: 6,
+        ideal_max_hours: 24,
+        fallback_min_hours: 3,
+    },
+    "CONC-SEP-001",)
 }
 
 /// True when a heavy leg day and a hard/long run are ≥24 h apart, both
 /// directions (File 10 CAP-3 / hybrid-012; residual fatigue 24–48 h).
 pub fn heavy_leg_run_gap_ok(hours_between: f64) -> Recommended<bool> {
-    recommend(hours_between >= 24.0, "HYB-CAP-001")
+    evidence::graded(hours_between >= 24.0, "HYB-CAP-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -98,15 +90,13 @@ pub fn heavy_leg_run_gap_ok(hours_between: f64) -> Recommended<bool> {
 /// Endurance frequency ceiling when strength/hypertrophy is co-primary:
 /// ≤3 d/wk (File 10 CAP-5 / hybrid-013). Each day beyond 3 raises attenuation.
 pub fn endurance_frequency_cap() -> Recommended<u8> {
-    recommend(3, "HYB-CAP-001")
+    evidence::graded(3, "HYB-CAP-001")
 }
 
 /// True when weekly endurance days stay within the co-primary cap (≤3 d/wk).
 pub fn endurance_frequency_ok(days_per_week: u8) -> Recommended<bool> {
-    recommend(
-        days_per_week <= endurance_frequency_cap().value,
-        "HYB-CAP-001",
-    )
+    evidence::graded(days_per_week <= endurance_frequency_cap().value,
+    "HYB-CAP-001",)
 }
 
 /// Lower-body lifting override when running is high (File 10 CAP-1 / hybrid-015).
@@ -126,13 +116,11 @@ pub fn lower_lift_cap(
     running_km_per_week: f64,
 ) -> Option<Recommended<LowerLiftCap>> {
     if running_days_per_week >= 4 || running_km_per_week >= 40.0 {
-        Some(recommend(
-            LowerLiftCap {
-                max_lower_sessions: 2,
-                volume_reduction_frac: (0.20, 0.33),
-            },
-            "HYB-CAP-001",
-        ))
+        Some(evidence::graded(LowerLiftCap {
+            max_lower_sessions: 2,
+            volume_reduction_frac: (0.20, 0.33),
+        },
+        "HYB-CAP-001",))
     } else {
         None
     }
@@ -146,15 +134,17 @@ pub fn lower_lift_cap(
 /// hybrid-010; CONC-RE-001). Strength training improves running economy 2–8 %
 /// and does not harm VO2max, keep 2–3 sessions/week. Returns (min, max).
 pub fn maintenance_lift_sessions() -> Recommended<(u8, u8)> {
-    recommend((2, 3), "CONC-RE-001")
+    evidence::graded((2, 3), "CONC-RE-001")
 }
 
 /// Whether to expect lower-body strength interference for this athlete (File 10
 /// hybrid-009; HYB-TRAINED-001, Moderate, Petré 2021, contested CQ-06). Only
 /// trained lifters (>1 yr) show the small trained-lower-body 1RM decrement;
 /// moderately/untrained show none.
+/// Uses the >1 yr edge, the protective lower bound of the KB's ~1-2 yr trained
+/// threshold (mirrors `interference_expected`'s ">3 d/wk" edge choice).
 pub fn expect_lower_strength_interference(training_age_years: f64) -> Recommended<bool> {
-    recommend(training_age_years > 1.0, "HYB-TRAINED-001")
+    evidence::graded(training_age_years > 1.0, "HYB-TRAINED-001")
 }
 
 /// Expect strength/hypertrophy attenuation when endurance dosing is high
@@ -168,7 +158,7 @@ pub fn interference_expected(
     endurance_intensity_pct_vo2max: f64,
 ) -> Recommended<bool> {
     let hit = endurance_days_per_week > 3 || endurance_intensity_pct_vo2max > 80.0;
-    recommend(hit, "HYB-THRESH-001")
+    evidence::graded(hit, "HYB-THRESH-001")
 }
 
 /// Peak strength/power mesocycle running override (File 10 hybrid-016 / CAP-2).
@@ -186,14 +176,12 @@ pub struct PeakPhaseRunCap {
 /// remove hard intervals, and keep long runs ≥24 h from heavy-lower days
 /// (File 10 hybrid-016 / CAP-2; HYB-CAP-001).
 pub fn peak_phase_run_cap() -> Recommended<PeakPhaseRunCap> {
-    recommend(
-        PeakPhaseRunCap {
-            max_easy_runs_per_week: (2, 3),
-            allow_intervals: false,
-            long_run_min_gap_hours: 24,
-        },
-        "HYB-CAP-001",
-    )
+    evidence::graded(PeakPhaseRunCap {
+        max_easy_runs_per_week: (2, 3),
+        allow_intervals: false,
+        long_run_min_gap_hours: 24,
+    },
+    "HYB-CAP-001",)
 }
 
 /// Maintenance dose as a fraction of the improvement dose (File 10 hybrid-017 /
@@ -202,7 +190,7 @@ pub fn peak_phase_run_cap() -> Recommended<PeakPhaseRunCap> {
 /// priority. Returns the multiplier to apply to the improvement dose.
 /// HYB-MAINT-001 (ExpertOpinion, CAP-7 has no named primary source).
 pub fn maintenance_dose_fraction() -> Recommended<f64> {
-    recommend(1.0 / 3.0, "HYB-MAINT-001")
+    evidence::graded(1.0 / 3.0, "HYB-MAINT-001")
 }
 
 /// Substitute a low-impact modality (cycling/rowing) for part of aerobic volume
@@ -212,7 +200,7 @@ pub fn substitute_modality(
     interference_symptoms: bool,
     running_optional: bool,
 ) -> Recommended<bool> {
-    recommend(interference_symptoms && running_optional, "HYB-CAP-001")
+    evidence::graded(interference_symptoms && running_optional, "HYB-CAP-001")
 }
 
 /// Raise bone-stress-injury surveillance when weekly running exceeds ~64 km
@@ -221,7 +209,7 @@ pub fn substitute_modality(
 /// deferral once a BSI is suspected). Resistance training is protective when
 /// energy availability is adequate. `true` = heighten monitoring.
 pub fn bsi_surveillance_flag(running_km_per_week: f64) -> Recommended<bool> {
-    recommend(running_km_per_week > 64.0, "HYB-BSI-001")
+    evidence::graded(running_km_per_week > 64.0, "HYB-BSI-001")
 }
 
 /// Combined-load running progression guard (File 10 hybrid-021, safety layer):
@@ -238,7 +226,7 @@ pub fn combined_load_progression_ok(current_km: f64, next_km: f64) -> Recommende
     } else {
         (next_km - current_km) / current_km <= 0.10 + 1e-9
     };
-    recommend(ok, "HYB-PROG-001")
+    evidence::graded(ok, "HYB-PROG-001")
 }
 
 /// Combined systemic + mechanical overreaching thresholds (File 10 hybrid-026).
@@ -255,7 +243,7 @@ pub const HYBRID_HRV_FLAG_DROP_FRAC: f64 = 0.15;
 /// contested CQ-04, Bellenger 2016: resting HRV may not reliably detect
 /// overreaching), not the Strong OTS deferral.
 pub fn combined_fatigue_deload(red_flag_count: u8, weeks_persisted: u8) -> Recommended<bool> {
-    recommend(red_flag_count >= 2 && weeks_persisted >= 1, "HYB-DELOAD-001")
+    evidence::graded(red_flag_count >= 2 && weeks_persisted >= 1, "HYB-DELOAD-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -282,14 +270,12 @@ pub struct InterferenceModerators {
 /// per-session duration (File 10 hybrid-004). Prefer shortening endurance
 /// sessions over cutting frequency when protecting lifting adaptations.
 pub fn interference_moderators() -> Recommended<InterferenceModerators> {
-    recommend(
-        InterferenceModerators {
-            frequency_r: (-0.35, -0.26),
-            duration_r: (-0.75, -0.29),
-            duration_is_strongest: true,
-        },
-        "HYB-DURATION-001",
-    )
+    evidence::graded(InterferenceModerators {
+        frequency_r: (-0.35, -0.26),
+        duration_r: (-0.75, -0.29),
+        duration_is_strongest: true,
+    },
+    "HYB-DURATION-001",)
 }
 
 /// Schedule the highest-priority quality when freshest, at the start of the
@@ -300,7 +286,7 @@ pub fn priority_quality_when_freshest(
     week_start: bool,
     after_rest_day: bool,
 ) -> Recommended<bool> {
-    recommend(week_start || after_rest_day, "HYB-SCHED-001")
+    evidence::graded(week_start || after_rest_day, "HYB-SCHED-001")
 }
 
 /// Double (AM/PM) day carbohydrate rule (File 10 hybrid-019 / CAP-8;
@@ -308,7 +294,7 @@ pub fn priority_quality_when_freshest(
 /// lifting sessions, because low glycogen amplifies AMPK activation and
 /// interference. `true` = the refuel note applies to this day.
 pub fn double_day_cho_refuel(am_pm_double_day: bool) -> Recommended<bool> {
-    recommend(am_pm_double_day, "HYB-CHO-001")
+    evidence::graded(am_pm_double_day, "HYB-CHO-001")
 }
 
 /// Training phase for interference policy (File 10 hybrid-020).
@@ -350,7 +336,7 @@ pub fn phase_interference_policy(phase: HybridPhase) -> Recommended<PhaseInterfe
             weekly_split: Some(((2, 3), (3, 4))),
         },
     };
-    recommend(p, "HYB-PHASE-001")
+    evidence::graded(p, "HYB-PHASE-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +354,7 @@ pub fn energy_availability_guard(
     lean: bool,
     female: bool,
 ) -> Recommended<bool> {
-    recommend(high_volume_endurance || lean || female, "HYB-EA-001")
+    evidence::graded(high_volume_endurance || lean || female, "HYB-EA-001")
 }
 
 /// Conservative dual-progression guard (File 10 hybrid-025; HYB-TENDON-001,
@@ -380,10 +366,8 @@ pub fn conservative_dual_progression(
     progressing_running_volume: bool,
     progressing_heavy_lifting: bool,
 ) -> Recommended<bool> {
-    recommend(
-        progressing_running_volume && progressing_heavy_lifting,
-        "HYB-TENDON-001",
-    )
+    evidence::graded(progressing_running_volume && progressing_heavy_lifting,
+    "HYB-TENDON-001",)
 }
 
 #[cfg(test)]

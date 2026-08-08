@@ -27,7 +27,9 @@
 //! `knowledge-base/extracted/09-evidence-map.md`. Verify DOIs against primary
 //! sources before production use.
 
-use crate::schema::{Citation, ConfidenceTag, Evidence, EvidenceGrade};
+use crate::schema::{Citation, ConfidenceTag, Evidence, EvidenceGrade, Recommended};
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 /// One graded claim in the registry.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,7 +65,8 @@ impl EvidenceEntry {
         // recommendation. Every `recommend`/`graded` wrapper funnels through
         // here, so an UNCONDITIONAL guard at this choke point (release builds
         // included) turns a myth-id leak into a loud panic instead of shipped
-        // advice. `Recommended::new` enforces the same invariant structurally.
+        // advice. The other half of this guard lives at `Recommended::new`
+        // (schema.rs), which enforces the same invariant structurally.
         assert!(
             !self.is_blocked(),
             "MarketingMyth claim {} must never be surfaced as a recommendation",
@@ -109,11 +112,39 @@ pub struct ContestedQuestion {
     pub question: &'static str,
     /// Current engine default / lean while the question stays open.
     pub engine_default: &'static str,
+    /// One credible OPPOSING view from the literature, the side the engine's
+    /// `engine_default` does NOT take, in plain language, with its KB citation
+    /// (#4: "experts differ … one view: {cite}"). `None` when the KB names no
+    /// attributable opposing reference for this question (the dissenting camp is
+    /// only "some coaches" / vendor marketing / unattributed); NEVER fabricated -
+    /// every populated string is sourced verbatim-in-substance from the
+    /// contested-question tables in `knowledge-base/extracted/` (File 09 global
+    /// table + Files 02/03 local lists). HARD RULE 1.
+    pub other_side: Option<&'static str>,
 }
 
-/// Look up a claim by id.
+/// Once-initialized `claim_id → entry` index. `claim` is called for every
+/// recommendation on every `view()`; a linear `find` over the whole registry
+/// each time is O(n). Building this map once (on first lookup) turns each call
+/// into an O(1) hash probe. Deterministic, no clock/rand, so it does not
+/// break the side-effect-free core contract.
+static CLAIM_INDEX: OnceLock<HashMap<&'static str, &'static EvidenceEntry>> = OnceLock::new();
+
+/// Look up a claim by id (O(1) through the once-built [`CLAIM_INDEX`]).
 pub fn claim(claim_id: &str) -> Option<&'static EvidenceEntry> {
-    CLAIMS.iter().find(|c| c.claim_id == claim_id)
+    CLAIM_INDEX
+        .get_or_init(|| CLAIMS.iter().map(|c| (c.claim_id, c)).collect())
+        .get(claim_id)
+        .copied()
+}
+
+/// Wrap a raw value in a [`Recommended`] carrying a registry claim's evidence
+/// and confidence tag, the sole claim-id constructor every engine module
+/// funnels through. Panics only on a missing claim id (a compile-time
+/// constant), so the panic path is unreachable for registered ids.
+pub(crate) fn graded<T>(value: T, claim_id: &str) -> Recommended<T> {
+    let e = claim(claim_id).expect("known claim");
+    Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
 }
 
 /// Look up a contested question by id.
@@ -726,13 +757,25 @@ pub static CLAIMS: &[EvidenceEntry] = &[
     },
     EvidenceEntry {
         claim_id: "PLYO-001",
-        statement: "Cap plyometric volume by training level: beginner 80-100, intermediate 100-120, advanced 120-140 foot contacts/session; progress volume OR intensity, not both. Require landing competence and ~1.5x bodyweight back-squat before high-intensity depth jumps.",
+        statement: "Cap plyometric volume by training level: beginner 80-100, intermediate 100-120, advanced 120-140 foot contacts/session; progress volume OR intensity, not both.",
         grade: Moderate,
         primary_citations: &["Potash & Chu 2008 (NSCA/UKSCA)", "Verkhoshansky"],
         contradicting: &["Low-dose 40-60 contacts also effective"],
         // File 02 strength-032 marks the contact caps safety_critical.
         safety_critical: true,
         contested: None,
+        review_months: 12,
+    },
+    EvidenceEntry {
+        claim_id: "PLYO-PREREQ-001",
+        statement: "Require landing competence and ~1.5x bodyweight back-squat before high-intensity depth jumps.",
+        grade: ExpertOpinion,
+        primary_citations: &["Potash & Chu 2008 (NSCA/UKSCA)"],
+        contradicting: &[],
+        // File 02 strength-033: ExpertOpinion prerequisite, contested (CQ-F02-05),
+        // but safety_critical: depth-jump landing loads injure without the base.
+        safety_critical: true,
+        contested: Some("CQ-F02-05"),
         review_months: 12,
     },
     EvidenceEntry {
@@ -757,6 +800,19 @@ pub static CLAIMS: &[EvidenceEntry] = &[
             "Rippetoe & Kilgore 2011, Starting Strength: Basic Barbell Training (3rd ed., Aasgaard) (novice linear increments)",
             "Rippetoe & Baker 2013, Practical Programming for Strength Training (3rd ed., Aasgaard) (double progression)",
         ],
+        contradicting: &[],
+        safety_critical: false,
+        contested: None,
+        review_months: 12,
+    },
+    EvidenceEntry {
+        claim_id: "STR-PCTPROG-001",
+        statement: "For percentage auto-progression add +2.5-5% lower / +1-2.5% upper per successful week.",
+        grade: ExpertOpinion,
+        // File 02 strength-014 lists citation "unstated"; `to_evidence` renders
+        // an empty citation list as "unstated" (faithful to the KB, no number
+        // or reference invented).
+        primary_citations: &[],
         contradicting: &[],
         safety_critical: false,
         contested: None,
@@ -1151,6 +1207,62 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contested: None,
         review_months: 12,
     },
+    // knowledge-base/weekly-set-volume-to-prescription-mapping.md (deep-research
+    // 2026-08-06, 22/25 claims confirmed 3-vote). The dose-response PRINCIPLE
+    // ("more weekly volume -> more growth, diminishing returns") is citable at
+    // Moderate; the weekly-target -> per-session/per-exercise ALLOCATION has no
+    // validated formula and is an expert-opinion heuristic. This entry follows
+    // the GRADE good-practice-statement precedent (see
+    // knowledge-base/autoreg-citation-provenance-resolution.md): keep the Moderate
+    // principle grade and flag the unstudied allocation parameter as expert-opinion
+    // in `contradicting`, rather than overstate the split or drop the rule. Sizing
+    // per-session sets from a stated weekly-sets-per-muscle target (`plan::sized_sets`)
+    // cites this.
+    EvidenceEntry {
+        claim_id: "HYP-VOL-DOSE-001",
+        statement: "Weekly per-muscle set volume drives hypertrophy (and strength) monotonically with diminishing returns; a plan may size per-session sets from a stated weekly-sets-per-muscle target, bounded by the volume landmarks.",
+        grade: Moderate,
+        primary_citations: &[
+            "Pelland, Remmert, Robinson, Hinson & Zourdos 2026, Sports Med 56(2):481-505 (PMID 41343037; Bayesian multilevel meta-regression, 67 studies / 2,058 participants)",
+            "Schoenfeld, Ogborn & Krieger 2017, J Sports Sci 35(11):1073-1082 (PMID 27433992; weekly-volume dose-response meta-analysis)",
+        ],
+        contradicting: &[
+            "Allocation is expert-opinion: no validated weekly-target -> per-exercise/per-day split formula exists (Schoenfeld, Grgic, Haun, Itagaki & Helms 2019, Sports 7(7):177, PMID 31336594: count 1:1 plus logical rationale and personal expertise)",
+            "100% posterior slope means the SIGN is near-certain, NOT a magnitude license or unbounded extrapolation; diminishing returns more pronounced for strength",
+            "Numeric landmarks (MEV possibly <5, optimal 10+ weekly sets/muscle) are Weak-Moderate; the MEV/MAV/MRV framework itself is expert-opinion, not a validated construct",
+        ],
+        safety_critical: false,
+        contested: None,
+        review_months: 6,
+    },
+    // knowledge-base/hybrid-lift-session-composition.md (deep-research 2026-08-07,
+    // 22 claims confirmed 3-0, two load-bearing citations orchestrator-verified).
+    // Same two-layer discipline as HYP-VOL-DOSE-001: the coverage PRINCIPLE is
+    // citable at Moderate (multi-joint compounds do NOT fully activate every
+    // muscle -> a session must COVER distinct movement patterns rather than stack
+    // one), while the exact exercise COUNT and the movement-pattern TAXONOMY are
+    // expert-opinion practitioner frameworks (no RCT prescribes a specific N or
+    // pattern list) flagged in `contradicting` per the GRADE good-practice-
+    // statement precedent (knowledge-base/autoreg-citation-provenance-resolution.md).
+    // `plan::main_lifts` (pattern-balanced exercise selection) cites this.
+    EvidenceEntry {
+        claim_id: "STR-SESSION-BALANCE-001",
+        statement: "A lift day should COVER distinct movement patterns (squat / hinge / horizontal push / horizontal pull) rather than stacking one, because multi-joint compounds do not fully activate every muscle; session STRUCTURE (full-body vs split, exact exercise count) is not itself the adaptation driver at equated volume, so balance is a sensible default, not a mandate.",
+        grade: Moderate,
+        primary_citations: &[
+            "Schoenfeld, Grgic, Haun, Itagaki & Helms 2019, Sports 7(7):177 (PMID 31336594; multi-joint EMG under-activates some muscles -> cover the patterns)",
+            "Evangelista et al. 2024, J Strength Cond Res 38(7):e363-e373 (split vs full-body equivalent for strength/hypertrophy at equated volume)",
+            "12-week concurrent-training RCT in recreational runners, PMC9518107 (a small ~3-exercise lower-body-dominant strength set alongside running)",
+        ],
+        contradicting: &[
+            "Exercise COUNT (~3-4/day) and the movement-pattern TAXONOMY are expert-opinion practitioner frameworks - no RCT prescribes a specific N or pattern list (GRADE good-practice-statement precedent; Schoenfeld et al. 2019 counts sets 1:1 plus logical rationale and personal expertise)",
+            "Balance is a DEFAULT, not a mandate: a running-focused hybrid may legitimately keep a compound/leg emphasis (concurrent RCT PMC9518107 used a small lower-body-dominant strength set for a running-performance goal)",
+            "Frequency is negligible at equated volume, so this adds pattern coverage within ~2 lift days, not more lift days (consistent with HYP-VOL-DOSE-001 / HYP-FREQ-001)",
+        ],
+        safety_critical: false,
+        contested: None,
+        review_months: 12,
+    },
     EvidenceEntry {
         claim_id: "HYP-PAIN-SHIFT-001",
         statement: "On joint pain at heavy loads, shift that muscle's work to higher reps (12-25) at lighter load; hypertrophy is preserved (load interchangeability).",
@@ -1161,7 +1273,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contested: None,
         review_months: 12,
     },
-    // File 03 rule claims, task 17
+    // File 03 (hypertrophy) rule claims
     EvidenceEntry {
         claim_id: "HYP-LOADRANGE-001",
         statement: "Hypertrophy is equivalent across ~30-85% 1RM (~5-30+ reps) when sets are taken close to failure; load is interchangeable for growth (heavy favors strength).",
@@ -1406,7 +1518,6 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contested: None,
         review_months: 12,
     },
-    // end File 03 rule claims, task 17
     // -- File 04 (running) --
     EvidenceEntry {
         claim_id: "RUN-HRRECALC-001",
@@ -2003,7 +2114,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contested: None,
         review_months: 12,
     },
-    // File 02 rule claims, task 16
+    // File 02 (strength/power) rule claims
     // Per-rule entries for File 02 rules newly wired into `strength.rs`
     // (strength-006/008/016/017/019/023/024/025/027/030/032-schedule/035/036/
     // 037/038/040). Grades/citations transcribed from the KB rule blocks;
@@ -2097,6 +2208,16 @@ pub static CLAIMS: &[EvidenceEntry] = &[
             "Zatsiorsky & Kraemer 2020, Science and Practice of Strength Training (3rd ed., Human Kinetics) (potentiation)",
             "Simmons 2007, The Westside Barbell Book of Methods",
         ],
+        contradicting: &[],
+        safety_critical: false,
+        contested: None,
+        review_months: 12,
+    },
+    EvidenceEntry {
+        claim_id: "STR-PWR-RIR-001",
+        statement: "Power work is never taken to failure; sets stop well short of it at high reps in reserve. The 3-5 RIR band is an expert-opinion encoding of the KB's qualitative 'high RIR' instruction, not a KB-stated number.",
+        grade: ExpertOpinion,
+        primary_citations: &["Cormie et al. 2011"],
         contradicting: &[],
         safety_critical: false,
         contested: None,
@@ -2209,8 +2330,6 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contested: None,
         review_months: 12,
     },
-    // end File 02 rule claims, task 16
-    // Task 2-4 additions
     // Per-rule claims for the autoreg/feedback/pain fixes: File 06 autoreg-041
     // (RHR +10 stop), File 08 safety-038/039 (graded pain, Table 4.1), and
     // File 05 feedback-019/020 (RIR-vs-target lifting feedback). Grades and
@@ -2268,9 +2387,8 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contested: None,
         review_months: 12,
     },
-    // end Task 2-4 additions
     // ------------------------------------------------------------------
-    // File 04 rule claims, task 18
+    // File 04 (running) rule claims
     // Per-rule entries for File 04 rules newly wired into `running.rs` /
     // `load.rs` (running-005/009/010/014/015/016/017/020/021/026/032/033/041
     // plus the VDOT R row). Grades/citations transcribed verbatim from the KB
@@ -2460,9 +2578,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contested: None,
         review_months: 12,
     },
-    // end File 04 rule claims, task 18
     // ------------------------------------------------------------------
-    // Task 5 additions
     // File 08 safety-gate per-rule claims (safety-011/046/047/048). Rules whose
     // grade/citation match an existing File 09 referral claim REUSE it instead:
     // safety-044/onboard-050 → SAFE-CVD-001; safety-045 → SAFE-PREG-001;
@@ -2519,9 +2635,7 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contested: None,
         review_months: 12,
     },
-    // end Task 5 additions
     // ------------------------------------------------------------------
-    // Task 19 additions
     // Per-rule claims for Files 05/06/10 rules newly wired (autoreg-006/025/
     // 029/032/042; feedback-005/015/023/024/035; hybrid-004/011/019/020/024/
     // 025). Contested ids follow the module-doc convention (File 10 local
@@ -2753,7 +2867,6 @@ pub static CLAIMS: &[EvidenceEntry] = &[
         contested: None,
         review_months: 12,
     },
-    // end Task 19 additions
 ];
 
 /// Contested questions (File 09). Engine holds a default lean while open.
@@ -2762,76 +2875,123 @@ pub static CONTESTED_QUESTIONS: &[ContestedQuestion] = &[
         id: "CQ-01",
         question: "Hypertrophy volume ceiling",
         engine_default: "10-20 sets/muscle/wk",
+        other_side: Some(
+            "Others argue more weekly sets keep adding growth with no clear ceiling (Schoenfeld & Krieger).",
+        ),
     },
     ContestedQuestion {
         id: "CQ-02",
         question: "Train to failure?",
         engine_default: "0-3 RIR",
+        // KB Position A ("failure maximizes stimulus") is an older coaching
+        // position with no attributable published reference, left None.
+        other_side: None,
     },
     ContestedQuestion {
         id: "CQ-03",
         question: "Periodization model superiority",
         engine_default: "Auto-DUP, any structured plan accepted",
+        // KB Position A ("DUP/undulating superior") is held by "some S&C
+        // coaches" with no attributable reference, left None.
+        other_side: None,
     },
     ContestedQuestion {
         id: "CQ-04",
         question: "HRV-guided training value",
         engine_default: "Gate hard/easy only",
+        other_side: Some(
+            "Others find HRV-guided training improves adaptation and reduces poor responders (Vesterinen; Kiviniemi; Granero-Gallegos 2020).",
+        ),
     },
     ContestedQuestion {
         id: "CQ-05",
         question: "ACWR validity",
         engine_default: "DO NOT use ACWR as injury predictor",
+        other_side: Some(
+            "Others hold that an acute:chronic workload ratio predicts injury, with a 0.8-1.3 'sweet spot' and danger above 1.5 (Gabbett 2016).",
+        ),
     },
     ContestedQuestion {
         id: "CQ-06",
         question: "Interference real-world magnitude",
         engine_default: "Protect power/explosive only",
+        // KB Position A ("large in high-volume real training") names no holder
+        // or reference, left None.
+        other_side: None,
     },
     ContestedQuestion {
         id: "CQ-07",
         question: "Runner intensity distribution",
         engine_default: "Pyramidal base -> polarized peak",
+        other_side: Some(
+            "Others favor a strictly polarized intensity distribution for trained runners (Stoggl & Sperlich 2014; Seiler).",
+        ),
     },
     ContestedQuestion {
         id: "CQ-08",
         question: "Grade-adjusted-pace downhill validity",
         engine_default: "Trust uphill; soften/flag downhill",
+        other_side: Some(
+            "Others treat the Minetti grade-adjustment model as valid across all slopes, including downhill.",
+        ),
     },
     ContestedQuestion {
         id: "CQ-09",
         question: "Menstrual-cycle periodization",
         engine_default: "Symptom-based optional adjustment",
+        // KB Position A ("phase-based programming helps") is held by "some
+        // coaches" with no attributable reference, left None. (The well-cited
+        // side, McNulty 2020, is the engine's own cautious lean.)
+        other_side: None,
     },
     ContestedQuestion {
         id: "CQ-10",
         question: "Optimal interval length",
         engine_default: "Menu selected by goal/event",
+        other_side: Some(
+            "Coaches differ on interval length - some favor short 30/30s (Ronnestad), others long threshold reps (Canova).",
+        ),
     },
     ContestedQuestion {
         id: "CQ-11",
         question: "Marathon philosophy",
         engine_default: "Aerobic base -> specific block",
+        other_side: Some(
+            "Others prioritize race-pace specificity from the start rather than an aerobic base first (Canova).",
+        ),
     },
     ContestedQuestion {
         id: "CQ-12",
         question: "MAF 180-formula vs measured LT1",
         engine_default: "Measured LT1 when available, else MAF fallback",
+        other_side: Some(
+            "Others prefer the simple MAF 180-minus-age heart-rate formula over lab-measured thresholds (Maffetone).",
+        ),
     },
     ContestedQuestion {
         id: "CQ-13",
         question: "Running power / form-metric value",
         engine_default: "Display only, never prescribe",
+        // KB Position A ("actionable coaching metric") is a vendor claim with no
+        // published reference, left None.
+        other_side: None,
     },
     ContestedQuestion {
         id: "CQ-14",
         question: "Consumer readiness-score trust",
         engine_default: "3-band GO/CAUTION/REST",
+        // KB Position A ("actionable daily guidance") is Whoop/Oura vendor
+        // marketing with no published reference, left None.
+        other_side: None,
     },
     ContestedQuestion {
         id: "CQ-15",
         question: "Concurrent session order & separation",
         engine_default: "RT-first for strength; >=3h (ideally 6-24h) gap",
+        // KB Position B ("effect small once separated >=3h") names no holder or
+        // reference; the cited side (Eddens 2018) matches the engine lean -
+        // left None.
+        other_side: None,
     },
     // File-local contested questions with no File 09 global counterpart
     // (namespaced CQ-F<file>-<local>; see module docs).
@@ -2839,25 +2999,45 @@ pub static CONTESTED_QUESTIONS: &[ContestedQuestion] = &[
         id: "CQ-F03-04",
         question: "Set-addition vs double progression within a hypertrophy block (File 03 local CQ-04)",
         engine_default: "Either accepted; set-addition optional (Enes 2024: no difference vs constant sets)",
+        // KB opposing side ("set-addition boosts hypertrophy") is an
+        // unattributed RP coaching claim; the cited study (Enes 2024) backs the
+        // engine's own lean, left None.
+        other_side: None,
     },
-    // File 03 rule claims, task 17
+    // File 03 (hypertrophy) contested questions
     ContestedQuestion {
         id: "CQ-F03-02",
         question: "Fixed \"hypertrophy rep range\" vs 5-30 wide spectrum (File 03 local CQ-02)",
         engine_default: "Wide spectrum: ~5-30+ reps at ~30-85% 1RM near failure; <~30% 1RM avoided",
+        other_side: Some(
+            "A traditional view uses a narrower hypertrophy rep range (older ACSM 6-12 reps at 70-85% 1RM guidance).",
+        ),
     },
-    // File 02 rule claims, task 16
+    // File 02 (strength/power) contested questions
     ContestedQuestion {
         id: "CQ-F02-01",
         question: "Fixed % vs RPE/RIR autoregulation superiority (File 02 local CQ-01) - both effective; RPE small non-significant edge",
         engine_default: "Fixed % for novices/teaching/no monitoring; RPE/RIR for intermediate/advanced and fatigue-sensitive phases",
+        other_side: Some(
+            "Head-to-head, fixed-% and RPE/RIR loading come out effectively equal when effort is matched - RPE only a small, non-significant edge (Helms 2018; Graham & Cleather 2019/2021).",
+        ),
     },
     ContestedQuestion {
         id: "CQ-F02-04",
         question: "Conjugate/Westside efficacy (File 02 local CQ-04) - strong practice record, weak controlled evidence",
         engine_default: "Advanced-only option (>=2-3 yr barbell training); never a default model",
+        other_side: Some(
+            "The conjugate/Westside method has a strong competitive track record among elite powerlifters (Louie Simmons, Westside Barbell), despite little direct trial evidence.",
+        ),
     },
-    // end File 02 rule claims, task 16
+    ContestedQuestion {
+        id: "CQ-F02-05",
+        question: "Strength prerequisite for high-intensity depth jumps (File 02 local CQ-05) - the ~1.5x bodyweight back-squat threshold is expert convention, not trial-established",
+        engine_default: "Require ~1.5x bodyweight back-squat + landing competence before high-intensity depth jumps",
+        other_side: Some(
+            "The 1.5x multiple is a widely-cited coaching heuristic; some argue landing mechanics and progressive exposure matter more than any fixed squat ratio.",
+        ),
+    },
 ];
 
 #[cfg(test)]
@@ -2899,6 +3079,23 @@ mod tests {
     }
 
     #[test]
+    fn claim_index_agrees_with_linear_scan() {
+        // P2: `claim` now looks up through a once-built HashMap instead of a
+        // linear scan. Guard that the index returns exactly what a linear scan
+        // would for every registered id plus a miss.
+        for c in CLAIMS {
+            let indexed = claim(c.claim_id);
+            let linear = CLAIMS.iter().find(|e| e.claim_id == c.claim_id);
+            assert!(
+                std::ptr::eq(indexed.unwrap(), linear.unwrap()),
+                "index disagrees with linear scan for {}",
+                c.claim_id
+            );
+        }
+        assert!(claim("NO-SUCH-CLAIM-ID").is_none());
+    }
+
+    #[test]
     fn every_contested_ref_resolves() {
         for c in CLAIMS {
             if let Some(cq) = c.contested {
@@ -2930,6 +3127,7 @@ mod tests {
             "ILLNESS-NECK-001",
             "ENV-001",
             "PLYO-001",
+            "PLYO-PREREQ-001",
             "STR-2FOR2-001",
             "STR-DLPEAK-001",
             "STR-CONJ-001",
@@ -2954,20 +3152,20 @@ mod tests {
             "HYB-PROG-001",
             "HYB-DELOAD-001",
             "MYTH-NO-PAIN-JOINT",
-            // Task 2-4 additions: File 06 autoreg-041 (RHR +10 stop, KB marks
+            // File 06 autoreg-041 (RHR +10 stop, KB marks
             // safety_critical) + File 08 safety-038/039 (graded pain rules).
             "AUTOREG-RHR-STOP-001",
             "SAFE-PAIN-STRUCT-001",
             "SAFE-TENDON-001",
-            // Task 5 additions: File 08 safety-011 (pediatric), safety-046
+            // File 08 safety-011 (pediatric), safety-046
             // (pregnancy warning signs), safety-047 (pregnancy avoid-list),
-            // safety-048 (injury/rehab deferral, ExpertOpinion yet
+            // safety-048 (injury/rehab deferral: ExpertOpinion yet
             // safety-critical, conservative by design).
             "SAFE-PEDS-001",
             "SAFE-PREG-WARN-001",
             "SAFE-PREG-AVOID-001",
             "SAFE-INJURY-001",
-            // Task 19 additions: File 06 autoreg-042 (NFOR cluster), File 05
+            // File 06 autoreg-042 (NFOR cluster), File 05
             // feedback-035 (female BSI clinician prompt), File 10 hybrid-024
             // (energy-availability guard) + hybrid-025 (tendon-stiffness
             // conservative dual progression).

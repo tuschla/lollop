@@ -15,7 +15,7 @@
 //! wrapped in [`Recommended`] via [`recommend`], which forces attached evidence
 //! and confidence from the compile-time registry (`crate::evidence`). Claim ids:
 //! HYP-VOL-001, HYP-LANDMARKS-001, HYP-REPLOAD-001, HYP-FREQ-001, HYP-REST-001,
-//! HYP-RIR-RAMP-001, plus the "File 03 rule claims - task 17" block in
+//! HYP-RIR-RAMP-001, plus the "File 03 (hypertrophy) rule claims" block in
 //! `crate::evidence` (HYP-LOADRANGE/VOLRAMP-SAFE/SKILL-RIR/RIR-DEFAULT/RIR-ACC/
 //! FAIL-SAFE/CUT-OBJ/VEL-CHECK/SFR/LENGTHSEL/SUBST/PAIN-SWAP/MESO-STRUCT/
 //! DOUBLEPROG/LAYOFF/TEMPO/SUPERSET/DEFAULT-PROG/SPEC-BLOCK-001).
@@ -23,12 +23,6 @@
 use crate::evidence;
 use crate::individualization::TrainingAge;
 use crate::schema::Recommended;
-
-/// Build a `Recommended<T>` from a registry claim id (must exist).
-fn recommend<T>(value: T, claim_id: &str) -> Recommended<T> {
-    let e = evidence::claim(claim_id).expect("known hypertrophy claim");
-    Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
-}
 
 // ---------------------------------------------------------------------------
 // 1. Per-muscle weekly volume landmarks (File 03 Table 1; HYP-LANDMARKS-001)
@@ -178,7 +172,7 @@ pub fn rep_load(class: ExerciseClass) -> Recommended<RepLoad> {
             pct_1rm: (50, 70),
         },
     };
-    recommend(rl, "HYP-REPLOAD-001")
+    evidence::graded(rl, "HYP-REPLOAD-001")
 }
 
 /// Between-set rest window in seconds for an exercise class (File 03 Table 5;
@@ -194,7 +188,7 @@ pub fn rest_sec_for(class: ExerciseClass) -> Recommended<(u16, u16)> {
         ExerciseClass::HeavyCompound => (120, 180),
         ExerciseClass::ModerateCompound | ExerciseClass::Isolation => (60, 120),
     };
-    recommend(window, "HYP-REST-001")
+    evidence::graded(window, "HYP-REST-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +210,8 @@ pub fn frequency_for_weekly_sets(weekly_sets: u8) -> Recommended<FrequencyRx> {
     let rx = if weekly_sets <= 10 {
         FrequencyRx {
             freq: (1, 2),
+            // per_session floor of 1 is inferred: KB Table 3 gives only the
+            // "≤6-8" per-session ceiling for this band, no floor.
             per_session: (1, 8),
         }
     } else if weekly_sets <= 18 {
@@ -224,12 +220,14 @@ pub fn frequency_for_weekly_sets(weekly_sets: u8) -> Recommended<FrequencyRx> {
             per_session: (5, 8),
         }
     } else {
+        // Table 3 tops out at 26 weekly sets; 27-31 (fractional-ceiling volumes)
+        // reuse this top 18-26 row, extrapolated, not KB-stated.
         FrequencyRx {
             freq: (3, 3),
             per_session: (6, 9),
         }
     };
-    recommend(rx, "HYP-FREQ-001")
+    evidence::graded(rx, "HYP-FREQ-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -270,7 +268,7 @@ pub fn weekly_set_ramp(mev: u8, mrv: u8, weeks: u8) -> Recommended<Vec<u8>> {
             })
             .collect()
     };
-    recommend(ramp, "HYP-SETRAMP-001")
+    evidence::graded(ramp, "HYP-SETRAMP-001")
 }
 
 /// hyp-011 no-abrupt-jump guard (HYP-VOLRAMP-SAFE-001, ExpertOpinion, SAFETY):
@@ -279,10 +277,8 @@ pub fn weekly_set_ramp(mev: u8, mrv: u8, weeks: u8) -> Recommended<Vec<u8>> {
 /// rejected. The KB states no numeric bound of its own; the +4 cap is
 /// hyp-001's upper increment.
 pub fn abrupt_volume_jump(prev_weekly_sets: u8, next_weekly_sets: u8) -> Recommended<bool> {
-    recommend(
-        next_weekly_sets.saturating_sub(prev_weekly_sets) > MAX_WEEKLY_SET_INCREMENT,
-        "HYP-VOLRAMP-SAFE-001",
-    )
+    evidence::graded(next_weekly_sets.saturating_sub(prev_weekly_sets) > MAX_WEEKLY_SET_INCREMENT,
+    "HYP-VOLRAMP-SAFE-001",)
 }
 
 /// Highest RIR the KB schedule ever prescribes: the hyp-019 ramp starts at 4,
@@ -302,7 +298,7 @@ pub fn rir_for_week(week: u8, block_weeks: u8) -> Option<Recommended<u8>> {
         return None;
     }
     let rir = (block_weeks - week + 1).min(MAX_SCHEDULED_RIR);
-    Some(recommend(rir, "HYP-RIR-RAMP-001"))
+    Some(evidence::graded(rir, "HYP-RIR-RAMP-001"))
 }
 
 // ---------------------------------------------------------------------------
@@ -330,10 +326,8 @@ pub const WEEKLY_SPLIT_THRESHOLD: u8 = 12;
 /// Clamp a proposed weekly growth-target set count to the ~31-set ceiling
 /// (File 03 hypertrophy-003).
 pub fn cap_weekly_growth_target(weekly_sets: u8) -> Recommended<u8> {
-    recommend(
-        weekly_sets.min(WEEKLY_FRACTIONAL_SET_CEILING),
-        "HYP-VOL-001",
-    )
+    evidence::graded(weekly_sets.min(WEEKLY_FRACTIONAL_SET_CEILING),
+    "HYP-VOL-001",)
 }
 
 /// MEV weekly-set band per muscle by training age (File 03 hypertrophy-007;
@@ -345,7 +339,7 @@ pub fn mev_sets_by_training_age(age: TrainingAge) -> Recommended<(u8, u8)> {
         TrainingAge::Intermediate => (10, 18),
         TrainingAge::Advanced => (12, 20),
     };
-    recommend(band, "HYP-MEV-AGE-001")
+    evidence::graded(band, "HYP-MEV-AGE-001")
 }
 
 /// Next-mesocycle weekly-set target given growth/recovery signals (File 03
@@ -357,13 +351,13 @@ pub fn next_meso_weekly_sets(
     recovering_easily: bool,
 ) -> Recommended<u8> {
     let next = if not_growing && recovering_easily {
-        // B7: saturating add, a caller-supplied current-set count near u8::MAX
+        // Saturating add: a caller-supplied current-set count near u8::MAX
         // must not debug-overflow (it is capped at the ceiling below anyway).
         current_weekly_sets.saturating_add(2).min(WEEKLY_FRACTIONAL_SET_CEILING)
     } else {
         current_weekly_sets
     };
-    recommend(next, "HYP-MESO-ADD-001")
+    evidence::graded(next, "HYP-MESO-ADD-001")
 }
 
 /// At/over-MRV deload gate (File 03 hypertrophy-009; HYP-MRV-DELOAD-001,
@@ -374,10 +368,8 @@ pub fn over_mrv_deload(
     performance_down: bool,
     joint_ache: bool,
 ) -> Recommended<bool> {
-    recommend(
-        weekly_sets > 20 && (performance_down || joint_ache),
-        "HYP-MRV-DELOAD-001",
-    )
+    evidence::graded(weekly_sets > 20 && (performance_down || joint_ache),
+    "HYP-MRV-DELOAD-001",)
 }
 
 /// Recovery-adjusted weekly volume (File 03 hypertrophy-010/045;
@@ -395,7 +387,7 @@ pub fn recovery_adjusted_volume(
     } else {
         (b, b)
     };
-    recommend(range, "HYP-RECOVOL-001")
+    evidence::graded(range, "HYP-RECOVOL-001")
 }
 
 /// Joint-pain rep shift (File 03 hypertrophy-016; HYP-PAIN-SHIFT-001, Strong,
@@ -403,27 +395,25 @@ pub fn recovery_adjusted_volume(
 /// 12–25 reps at lighter load (50–70% 1RM); hypertrophy is preserved via load
 /// interchangeability.
 pub fn joint_pain_rep_shift() -> Recommended<RepLoad> {
-    recommend(
-        RepLoad {
-            reps: (12, 25),
-            pct_1rm: (50, 70),
-        },
-        "HYP-PAIN-SHIFT-001",
-    )
+    evidence::graded(RepLoad {
+        reps: (12, 25),
+        pct_1rm: (50, 70),
+    },
+    "HYP-PAIN-SHIFT-001",)
 }
 
 /// Whether a weekly-set target must be split across ≥2 sessions (File 03
 /// hypertrophy-025; HYP-SPLIT-001, Moderate): true once weekly sets exceed
 /// ~12/muscle.
 pub fn needs_session_split(weekly_sets: u8) -> Recommended<bool> {
-    recommend(weekly_sets > WEEKLY_SPLIT_THRESHOLD, "HYP-SPLIT-001")
+    evidence::graded(weekly_sets > WEEKLY_SPLIT_THRESHOLD, "HYP-SPLIT-001")
 }
 
 /// Whether per-session volume exceeds the ~11-set cap and warrants adding a
 /// session rather than more sets (File 03 hypertrophy-004; HYP-SESSCAP-001,
 /// Moderate).
 pub fn per_session_over_cap(session_sets: u8) -> Recommended<bool> {
-    recommend(session_sets > PER_SESSION_SET_CEILING, "HYP-SESSCAP-001")
+    evidence::graded(session_sets > PER_SESSION_SET_CEILING, "HYP-SESSCAP-001")
 }
 
 /// Deload gate from accumulated overreaching triggers (File 03 hypertrophy-035;
@@ -432,7 +422,7 @@ pub fn per_session_over_cap(session_sets: u8) -> Recommended<bool> {
 /// persistent joint/tendon aches, disrupted sleep, elevated RHR, mood drop) -
 /// otherwise follow the preplanned 4–8 week schedule.
 pub fn deload_indicated(trigger_count: u8) -> Recommended<bool> {
-    recommend(trigger_count >= 2, "HYP-DELOAD-TRIG-001")
+    evidence::graded(trigger_count >= 2, "HYP-DELOAD-TRIG-001")
 }
 
 /// A one-week hypertrophy deload prescription (File 03 hypertrophy-036).
@@ -450,21 +440,19 @@ pub struct DeloadRx {
 /// ~60–70% of working weight, movement patterns kept (File 03 hypertrophy-036;
 /// HYP-DELOAD-RX-001, ExpertOpinion).
 pub fn deload_rx() -> Recommended<DeloadRx> {
-    recommend(
-        DeloadRx {
-            sets_fraction: 0.50,
-            rir: (2, 4),
-            load_frac_of_working: (0.60, 0.70),
-        },
-        "HYP-DELOAD-RX-001",
-    )
+    evidence::graded(DeloadRx {
+        sets_fraction: 0.50,
+        rir: (2, 4),
+        load_frac_of_working: (0.60, 0.70),
+    },
+    "HYP-DELOAD-RX-001",)
 }
 
 /// Increase rest when per-set reps fall > ~10% set-to-set (File 03
 /// hypertrophy-039): the mechanism is preserving per-set volume, not rest
 /// duration itself. `true` = lengthen the rest interval.
 pub fn increase_rest_on_rep_drop(rep_drop_frac: f64) -> Recommended<bool> {
-    recommend(rep_drop_frac > 0.10, "HYP-REST-001")
+    evidence::graded(rep_drop_frac > 0.10, "HYP-REST-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -477,19 +465,17 @@ pub fn increase_rest_on_rep_drop(rep_drop_frac: f64) -> Recommended<bool> {
 /// (~5–30+ reps) when sets are taken close to failure. The rep upper bound is
 /// the KB's "30+" lower bound; heavy loading still favors strength.
 pub fn interchangeable_load_range() -> Recommended<RepLoad> {
-    recommend(
-        RepLoad {
-            reps: (5, 30),
-            pct_1rm: (30, 85),
-        },
-        "HYP-LOADRANGE-001",
-    )
+    evidence::graded(RepLoad {
+        reps: (5, 30),
+        pct_1rm: (30, 85),
+    },
+    "HYP-LOADRANGE-001",)
 }
 
 /// `true` when a load sits below the ~30% 1RM floor under which hypertrophy
 /// underperforms (File 03 hypertrophy-012; HYP-LOADRANGE-001).
 pub fn load_below_effective_floor(pct_1rm: u8) -> Recommended<bool> {
-    recommend(pct_1rm < 30, "HYP-LOADRANGE-001")
+    evidence::graded(pct_1rm < 30, "HYP-LOADRANGE-001")
 }
 
 /// Technique-protecting floors for high-skill/high-stability exercises
@@ -505,13 +491,11 @@ pub struct HighSkillGuard {
 /// High-skill exercise guard (File 03 hypertrophy-017; HYP-SKILL-RIR-001,
 /// ExpertOpinion, SAFETY): reps ≥5 and stop at ≥1–2 RIR to protect technique.
 pub fn high_skill_guard() -> Recommended<HighSkillGuard> {
-    recommend(
-        HighSkillGuard {
-            min_reps: 5,
-            min_rir: (1, 2),
-        },
-        "HYP-SKILL-RIR-001",
-    )
+    evidence::graded(HighSkillGuard {
+        min_reps: 5,
+        min_rir: (1, 2),
+    },
+    "HYP-SKILL-RIR-001",)
 }
 
 /// Default working proximity to failure (File 03 hypertrophy-018;
@@ -519,7 +503,7 @@ pub fn high_skill_guard() -> Recommended<HighSkillGuard> {
 /// at 1–3 RIR; true failure neither required nor superior enough to justify
 /// its fatigue. Returns `(min, max)` RIR.
 pub fn default_rir_band() -> Recommended<(u8, u8)> {
-    recommend((1, 3), "HYP-RIR-DEFAULT-001")
+    evidence::graded((1, 3), "HYP-RIR-DEFAULT-001")
 }
 
 /// RPE from RIR via the KB identity `RPE = 10 − RIR` (File 03 hypertrophy-018
@@ -545,13 +529,13 @@ pub fn rir_reliability(reported_rir: u8) -> Recommended<RirReliability> {
     } else {
         RirReliability::ErrorOverTwoReps
     };
-    recommend(r, "HYP-RIR-ACC-001")
+    evidence::graded(r, "HYP-RIR-ACC-001")
 }
 
 /// Novice starting proximity (File 03 hypertrophy-020; HYP-RIR-ACC-001):
 /// start at 3–4 RIR and calibrate against actual failure. Returns `(min, max)`.
 pub fn novice_start_rir() -> Recommended<(u8, u8)> {
-    recommend((3, 4), "HYP-RIR-ACC-001")
+    evidence::graded((3, 4), "HYP-RIR-ACC-001")
 }
 
 /// Whether training to true failure (0 RIR) is permitted (File 03
@@ -560,17 +544,15 @@ pub fn novice_start_rir() -> Recommended<(u8, u8)> {
 /// compounds (e.g. unspotted squat/bench). Anything that is neither a machine
 /// nor isolation is conservatively denied.
 pub fn failure_allowed(class: ExerciseClass, machine: bool) -> Recommended<bool> {
-    recommend(
-        machine || matches!(class, ExerciseClass::Isolation),
-        "HYP-FAIL-SAFE-001",
-    )
+    evidence::graded(machine || matches!(class, ExerciseClass::Isolation),
+    "HYP-FAIL-SAFE-001",)
 }
 
 /// Effort-signal weighting on a cut (File 03 hypertrophy-022; HYP-CUT-OBJ-001,
 /// Moderate): `true` = weight objective rep count and bar speed over perceived
 /// effort, because RPE inflates in a deficit. No numeric thresholds stated.
 pub fn trust_objective_over_rpe(cutting: bool) -> Recommended<bool> {
-    recommend(cutting, "HYP-CUT-OBJ-001")
+    evidence::graded(cutting, "HYP-CUT-OBJ-001")
 }
 
 /// Velocity cross-check on failure proximity (File 03 hypertrophy-023;
@@ -578,7 +560,7 @@ pub fn trust_objective_over_rpe(cutting: bool) -> Recommended<bool> {
 /// signal of nearing failure. The KB states no numeric velocity threshold, so
 /// the shell/caller decides what counts as a slowdown; `true` = near failure.
 pub fn near_failure_from_last_rep_slowdown(last_rep_slowed: bool) -> Recommended<bool> {
-    recommend(last_rep_slowed, "HYP-VEL-CHECK-001")
+    evidence::graded(last_rep_slowed, "HYP-VEL-CHECK-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -808,7 +790,7 @@ pub fn exercise_entry(name: &str) -> Option<&'static ExerciseEntry> {
 /// HYP-LENGTHSEL-001, Moderate, Wolf 2025 notes the effect shrinks in
 /// trained subjects). `None` if the exercise is not in Table 4.
 pub fn long_length_bias(exercise: &str) -> Option<Recommended<LongLengthBias>> {
-    exercise_entry(exercise).map(|e| recommend(e.long_length, "HYP-LENGTHSEL-001"))
+    exercise_entry(exercise).map(|e| evidence::graded(e.long_length, "HYP-LENGTHSEL-001"))
 }
 
 /// Bodyweight fallbacks when no equipment match exists (File 03
@@ -838,7 +820,7 @@ pub fn substitute_exercise(
         .first()
         .map(|e| e.name)
         .or_else(|| bodyweight_fallback(muscle));
-    recommend(pick, "HYP-SUBST-001")
+    evidence::graded(pick, "HYP-SUBST-001")
 }
 
 /// Shared filter+rank used by hyp-029 substitution and the hyp-030 pain swap:
@@ -896,7 +878,7 @@ pub fn pain_driven_swap(
         ranked.sort_by_key(|e| std::cmp::Reverse(e.stable_with(available)));
         ranked.first().map(|e| e.name)
     });
-    recommend(pick, "HYP-PAIN-SWAP-001")
+    evidence::graded(pick, "HYP-PAIN-SWAP-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -919,14 +901,12 @@ pub struct MesoStructure {
 /// Moderate): 4–6 weeks accumulation + 1 deload week (3:1 to 6:1), deloading
 /// every 4–8 weeks.
 pub fn meso_structure() -> Recommended<MesoStructure> {
-    recommend(
-        MesoStructure {
-            accumulation_weeks: (4, 6),
-            deload_weeks: 1,
-            deload_cadence_weeks: (4, 8),
-        },
-        "HYP-MESO-STRUCT-001",
-    )
+    evidence::graded(MesoStructure {
+        accumulation_weeks: (4, 6),
+        deload_weeks: 1,
+        deload_cadence_weeks: (4, 8),
+    },
+    "HYP-MESO-STRUCT-001",)
 }
 
 /// Smallest practical load increment for double progression (File 03
@@ -964,13 +944,13 @@ pub fn double_progression_next(
             load_increased: false,
         }
     };
-    recommend(step, "HYP-DOUBLEPROG-001")
+    evidence::graded(step, "HYP-DOUBLEPROG-001")
 }
 
 /// The KB's worked double-progression RIR band (File 03 hypertrophy-033
 /// example: 10–15 reps @ 2–0 RIR). Returns `(min, max)` RIR.
 pub fn double_progression_rir() -> Recommended<(u8, u8)> {
-    recommend((0, 2), "HYP-DOUBLEPROG-001")
+    evidence::graded((0, 2), "HYP-DOUBLEPROG-001")
 }
 
 /// Post-layoff MEV reduction flag (File 03 hypertrophy-037; HYP-LAYOFF-001,
@@ -978,7 +958,7 @@ pub fn double_progression_rir() -> Recommended<(u8, u8)> {
 /// are temporarily reduced. The KB states no numeric reduction factor -
 /// documented gap; the engine only flags that MEV must be lowered.
 pub fn layoff_reduces_mev(returning_from_layoff: bool) -> Recommended<bool> {
-    recommend(returning_from_layoff, "HYP-LAYOFF-001")
+    evidence::graded(returning_from_layoff, "HYP-LAYOFF-001")
 }
 
 /// Weekly-set plateau at which an advanced trainee qualifies for a
@@ -993,12 +973,10 @@ pub fn specialization_indicated(
     weekly_sets: u8,
     not_growing: bool,
 ) -> Recommended<bool> {
-    recommend(
-        matches!(age, TrainingAge::Advanced)
-            && weekly_sets >= SPECIALIZATION_STALL_WEEKLY_SETS
-            && not_growing,
-        "HYP-SPEC-BLOCK-001",
-    )
+    evidence::graded(matches!(age, TrainingAge::Advanced)
+        && weekly_sets >= SPECIALIZATION_STALL_WEEKLY_SETS
+        && not_growing,
+    "HYP-SPEC-BLOCK-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,20 +998,18 @@ pub struct TempoRx {
 /// controlled ~0.5–8 s/rep (1–2 s concentric, 2–3 s eccentric); tempo has
 /// minimal effect on hypertrophy within this window.
 pub fn tempo_rx() -> Recommended<TempoRx> {
-    recommend(
-        TempoRx {
-            rep_duration_s: (0.5, 8.0),
-            concentric_s: (1.0, 2.0),
-            eccentric_s: (2.0, 3.0),
-        },
-        "HYP-TEMPO-001",
-    )
+    evidence::graded(TempoRx {
+        rep_duration_s: (0.5, 8.0),
+        concentric_s: (1.0, 2.0),
+        eccentric_s: (2.0, 3.0),
+    },
+    "HYP-TEMPO-001",)
 }
 
 /// Superslow gate (File 03 hypertrophy-040; HYP-TEMPO-001): `true` for rep
 /// durations >10 s, which force load reduction and are inferior, avoid.
 pub fn tempo_is_superslow(rep_duration_s: f64) -> Recommended<bool> {
-    recommend(rep_duration_s > 10.0, "HYP-TEMPO-001")
+    evidence::graded(rep_duration_s > 10.0, "HYP-TEMPO-001")
 }
 
 /// Time-saving superset prescription (File 03 hypertrophy-041).
@@ -1054,7 +1030,7 @@ pub fn time_limited_superset(time_limited: bool) -> Recommended<Option<SupersetR
         antagonist_pairing: true,
         min_rest_sec: 90,
     });
-    recommend(rx, "HYP-SUPERSET-001")
+    evidence::graded(rx, "HYP-SUPERSET-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1095,22 +1071,20 @@ pub struct DefaultProgramRx {
 /// tempo (see [`tempo_rx`]), 1–2 high-SFR long-length exercises per muscle,
 /// deload week 5–6.
 pub fn intermediate_default_program() -> Recommended<DefaultProgramRx> {
-    recommend(
-        DefaultProgramRx {
-            frequency_per_week: 2,
-            weekly_sets: (8, 10),
-            max_session_sets: 8,
-            compound_reps: (5, 10),
-            isolation_reps: (10, 20),
-            week1_rir: 3,
-            final_rir: 1,
-            compound_rest_sec: (120, 180),
-            isolation_rest_sec: (60, 120),
-            exercises_per_muscle: (1, 2),
-            deload_week: (5, 6),
-        },
-        "HYP-DEFAULT-PROG-001",
-    )
+    evidence::graded(DefaultProgramRx {
+        frequency_per_week: 2,
+        weekly_sets: (8, 10),
+        max_session_sets: 8,
+        compound_reps: (5, 10),
+        isolation_reps: (10, 20),
+        week1_rir: 3,
+        final_rir: 1,
+        compound_rest_sec: (120, 180),
+        isolation_rest_sec: (60, 120),
+        exercises_per_muscle: (1, 2),
+        deload_week: (5, 6),
+    },
+    "HYP-DEFAULT-PROG-001",)
 }
 
 #[cfg(test)]

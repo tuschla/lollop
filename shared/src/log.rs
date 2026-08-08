@@ -13,7 +13,7 @@
 //!    an unmatched remove replays as a no-op and is dropped alone.
 //! 3. **A `DeleteEntry` cancels its entry; an `AmendSet`/`AmendRun` supersedes a
 //!    prior edit but keeps the entry's base log.** Amend is a STRICT update in
-//!    `update` (B8): it replaces a matching row and is a NO-OP on a miss, so an
+//!    `update`: it replaces a matching row and is a NO-OP on a miss, so an
 //!    amend whose target was already deleted can no longer resurrect it. To stay
 //!    replay-equivalent, a surviving amend must keep its base log line (it drops
 //!    only a *superseded prior amend*), so a Log→Amend→Amend chain collapses to
@@ -93,17 +93,17 @@ fn classify(event: &Event) -> (u8, bool) {
         Event::ClearCriticalSpeed => (10, true),
         Event::ComputeApre { .. } => (11, false),
         Event::ClearApre => (11, true),
-        // Morning check-ins (Phase 2 / B1): a RETAINED multi-day history the
+        // Morning check-ins: a RETAINED multi-day history the
         // core normalizes into z-scores/deltas. Deliberately NOT day-scoped like
-        // readiness family 0: the whole point is a rolling baseline, so its
+        // readiness family 0; the whole point is a rolling baseline, so its
         // only reducer is a wholesale `ClearCheckins` (Rule 1). No per-entry undo
         // family-0 analog: check-ins carry no red-flag hold to mis-tap.
         Event::SubmitCheckin(_) => (12, false),
         Event::ClearCheckins => (12, true),
-        // Coach-as-planner (Phase 6 / B3). Family 13: the accepted plan request
+        // Coach-as-planner. Family 13: the accepted plan request
         // is a last-write-wins singleton (like the profile) with a ClearPlan
         // reset. Family 14: SetToday is a last-write-wins singleton (the shell's
-        // clock, sent on every foreground) with no clear: compaction keeps
+        // clock, sent on every foreground) with no clear; compaction keeps
         // exactly one line so it never bloats the log.
         Event::GeneratePlan { .. } => (13, false),
         Event::ClearPlan => (13, true),
@@ -235,7 +235,7 @@ pub fn compact_event_log(events: Vec<Event>) -> Vec<Event> {
     // identity matches (id if nonzero, else `observed_at` for a legacy row), the
     // same predicate `update` uses (`find_set`/`find_run`, newest-match).
     //
-    // B8 full prevention: `update`'s amend is a STRICT update (replace-on-match,
+    // Full prevention: `update`'s amend is a STRICT update (replace-on-match,
     // NO-OP on miss), so a lone amend with no base row replays to nothing. Two
     // consequences, both replay-equivalent:
     //   * A matched Amend telescopes away a *superseded prior amend* but KEEPS the
@@ -265,7 +265,7 @@ pub fn compact_event_log(events: Vec<Event>) -> Vec<Event> {
                 entry_id,
                 observed_at_fallback,
             } => (entry_kind_family(*kind), *entry_id, *observed_at_fallback, true),
-            // B8: an amend targets its OLD row, for a legacy (`id == 0`) row whose
+            // An amend targets its OLD row: for a legacy (`id == 0`) row whose
             // date CHANGED, that is `observed_at_fallback` (the old timestamp),
             // not the amend's new `observed_at`. Mirrors `update`'s `find_set`/
             // `find_run` match key so replay and compaction agree.
@@ -306,7 +306,7 @@ pub fn compact_event_log(events: Vec<Event>) -> Vec<Event> {
             .find(|&i| !remove[i] && entry_line_matches(&events[i], fam, id, time))
         else {
             // Unmatched delete OR amend: replays as a no-op under `update`'s strict
-            // find-then-act (B8), so drop it alone.
+            // find-then-act, so drop it alone.
             remove[j] = true;
             continue;
         };
@@ -1002,7 +1002,7 @@ mod tests {
         ]);
     }
 
-    // ── Rule 3: DeleteEntry / AmendSet / AmendRun (Phase 4 / M4) ──────────────
+    // ── Rule 3: DeleteEntry / AmendSet / AmendRun ──────────────
 
     fn set_id(exercise: &str, id: u64, observed_at: i64) -> Event {
         Event::LogSet {
@@ -1076,7 +1076,7 @@ mod tests {
 
     #[test]
     fn amend_supersedes_the_prior_set_but_survives() {
-        // B8: a strict amend needs its base row on replay, so Log→Amend keeps BOTH
+        // A strict amend needs its base row on replay, so Log→Amend keeps BOTH
         // the base log AND the amend (replay-equivalent to editing the set in
         // place). The amend keeps the entry's id for later edits.
         let events = vec![set_id("Bench", 5, 0), amend_set(5, 120.0)];
@@ -1091,7 +1091,7 @@ mod tests {
 
     #[test]
     fn amend_chain_collapses_to_log_plus_last_amend() {
-        // B8: a Log→Amend→Amend chain (no delete) collapses to `[log, last amend]`
+        // A Log→Amend→Amend chain (no delete) collapses to `[log, last amend]`;
         // the superseded middle amend is dropped, the base log is retained so the
         // strict final amend has a row to replace on replay.
         let events = vec![set_id("Bench", 9, 0), amend_set(9, 110.0), amend_set(9, 130.0)];
@@ -1106,10 +1106,10 @@ mod tests {
 
     #[test]
     fn amend_after_delete_never_resurrects_the_entry() {
-        // B8 core prevention: Log→Delete→Amend, where the amend targets the row the
+        // Core prevention: Log→Delete→Amend, where the amend targets the row the
         // delete already removed. The delete cancels the entry (log + itself); the
-        // amend then matches nothing and is dropped: the entry STAYS deleted, both
-        // in a live `update` replay and after compaction. Before B8, the amend
+        // amend then matches nothing and is dropped; the entry STAYS deleted, both
+        // in a live `update` replay and after compaction. Previously, the amend
         // replayed as a push and RESURRECTED the deleted row.
         let events = vec![set_id("Bench", 5, 0), del_set(5), amend_set(5, 120.0)];
         // Live replay: the amend is a no-op on the missing row → nothing survives.
@@ -1193,7 +1193,7 @@ mod tests {
 
     #[test]
     fn legacy_row_without_id_is_matched_on_observed_at() {
-        // A pre-Phase-4 set (entry_id 0) is deleted by its observed_at fallback.
+        // A legacy set (entry_id 0) is deleted by its observed_at fallback.
         let events = vec![
             set_id("Old", 0, 5 * DAY),
             Event::DeleteEntry {
@@ -1225,13 +1225,13 @@ mod tests {
                 workout_type: None,
             },
         ];
-        // B8: the base run log is KEPT (the strict amend replaces it on replay);
+        // The base run log is KEPT (the strict amend replaces it on replay);
         // the amend survives too, so `[log, amend]` both remain.
         assert_eq!(compact_event_log(amended.clone()).len(), 2);
         assert_replay_equivalent(amended);
     }
 
-    // A legacy (pre-Phase-4, entry_id 0) set log + amend, matched on observed_at.
+    // A legacy (entry_id 0) set log + amend, matched on observed_at.
     fn legacy_set(observed_at: i64, weight_kg: f64) -> Event {
         Event::LogSet {
             exercise: "Bench".into(),

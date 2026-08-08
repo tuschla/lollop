@@ -186,27 +186,68 @@ data class ViewModel(
     // Static signal→group metadata ("metric" | "red_flag") driving the
     // readiness picker's red-flag fence from the core.
     val signal_groups: List<SignalGroupView> = emptyList(),
-    // Phase 2 / B1: the most recent morning check-in echoed for rehydration +
+    // The most recent morning check-in echoed for rehydration +
     // a "checked in today" cue. Null until a check-in exists / on an old core.
     val checkin_today: CheckinEchoView? = null,
     // Honest "collecting your baseline" rows for each check-in channel that has
     // data but not yet enough history to emit a z-score/delta. Empty otherwise.
     val baseline_status: List<BaselineStatusView> = emptyList(),
-    // Phase 3 / M2: evidence-grade legend exported from core data (File 09) so
+    // Evidence-grade legend exported from core data (File 09) so
     // the "How evidence grading works" sheet renders KB definitions, not
     // hardcoded shell copy. Empty on an old core (falls back to shell copy).
     val grade_definitions: List<GradeDefView> = emptyList(),
-    // Phase 6 / B3: Coach-as-planner. The concrete next session (the Coach hero),
+    // Coach-as-planner. The concrete next session (the Coach hero),
     // the current week strip, and the program summary. Null/empty until the user
     // accepts a plan / on an old core.
     val next_session: SessionPlanView? = null,
     val week_plan: List<SessionPlanView> = emptyList(),
     val program: ProgramSummaryView? = null,
+    // Structured HRmax figure (bpm + measured/estimate + Tanaka
+    // split) for the last HR-zone query, so the shell reads it instead of
+    // regex-scraping the hr_zones rows. Null on an old core / until a query is
+    // made / when the age is out of range.
+    val hr_max: HrMaxView? = null,
+    // Structured protein g/day figures paralleling protein_targets,
+    // so the shell reads them instead of regex-scraping those rows. Empty on an
+    // old core / until a protein query is made.
+    val protein_figures: List<ProteinFigureView> = emptyList(),
+)
+
+/**
+ * The structured HRmax figure the shell used to regex-scrape out of
+ * the hr_zones summary rows (incl. the "208 − 0.7 × age" Tanaka split). Field
+ * names mirror the Rust HrMaxView (app.rs) serde names exactly; all defaulted so
+ * an old wire blob (without hr_max) still decodes. `bpm` is core-rounded.
+ * `tanaka_intercept`/`tanaka_slope` are 208/0.7 for the age estimate, 0 when
+ * `measured` (a logged maximum, which needs no age).
+ */
+@Serializable
+data class HrMaxView(
+    val bpm: Double = 0.0,
+    val measured: Boolean = false,
+    val age_years: Double = 0.0,
+    val tanaka_intercept: Double = 0.0,
+    val tanaka_slope: Double = 0.0,
+)
+
+/**
+ * One structured protein g/day target paralleling a protein_targets
+ * row, so the shell reads it instead of regex-scraping the prose. Field names
+ * mirror the Rust ProteinFigureView (app.rs) serde names exactly; all defaulted
+ * for wire back-compat. `kind` is "masters" or "deficit"; g/day figures are
+ * core-rounded and 0 when `refused` (a RED-S deficit refusal carries no number).
+ */
+@Serializable
+data class ProteinFigureView(
+    val kind: String = "",
+    val low_g_per_day: Double = 0.0,
+    val high_g_per_day: Double = 0.0,
+    val refused: Boolean = false,
 )
 
 /**
  * The three-part "why?" disclosure carried by every action-bearing card
- * (app.rs WhyView, MIGRATION-PLAN Phase 3 / M2): basis (what it's based on) →
+ * (app.rs WhyView): basis (what it's based on) →
  * grade_note (why this grade) → improves (what data would sharpen it). All
  * fields serde-default empty, so an old core simply yields an empty block and
  * the card falls back to the legacy evidence restatement.
@@ -218,8 +259,8 @@ data class WhyView(
     val improves: String = "",
 )
 
-/** One prescribed exercise, core-flattened (app.rs PrescriptionView, Phase 6 /
- *  B3): the concrete do-X contract. `load_kg` is set only when anchored to the
+/** One prescribed exercise, core-flattened (app.rs PrescriptionView): the
+ *  concrete do-X contract. `load_kg` is set only when anchored to the
  *  user's logged e1RM; otherwise `intensity_label` carries the RIR/pace target
  *  (no invented load, HARD RULE 1). Carries the full evidence block + why?. */
 @Serializable
@@ -242,7 +283,7 @@ data class PrescriptionView(
     val why: WhyView = WhyView(),
 )
 
-/** One planned day in the week (app.rs SessionPlanView, Phase 6). Rendered
+/** One planned day in the week (app.rs SessionPlanView). Rendered
  *  strictly downstream of the safety gates: a hold sets status "blocked" and
  *  empties items. status ∈ next|planned|done|missed|adjusted|blocked|rest. */
 @Serializable
@@ -255,7 +296,7 @@ data class SessionPlanView(
     val adjustment: AdjustmentView? = null,
 )
 
-/** The active program summary card (app.rs ProgramSummaryView, Phase 6). */
+/** The active program summary card (app.rs ProgramSummaryView). */
 @Serializable
 data class ProgramSummaryView(
     val name: String = "",
@@ -412,7 +453,7 @@ data class ProfileView(
     val running_km_per_week: Double = 0.0,
     val advanced: Boolean = false,
     val endurance_intensity_pct_vo2max: Double = 0.0,
-    // Consolidated person data (Phase 5 / M5). Entered once on the profile; the
+    // Consolidated person data. Entered once on the profile; the
     // Coach protein/HR-zone calculators prefill from these. All optional so a
     // pre-Phase-5 profile decodes with them absent (null).
     val female: Boolean = false,
@@ -484,9 +525,9 @@ data class LiftResultView(
     val e1rm_direction: String? = null,
     val summary: String = "",
     val observed_at: Long = 0,
-    // Stable per-entry id (Phase 4 / M4) the shell sends back in AmendSet/
+    // Stable per-entry id the shell sends back in AmendSet/
     // DeleteEntry to edit or delete THIS set. 0 for a legacy row (pre-Phase-4
-    // log), the shell then targets it by observed_at.
+    // log): the shell then targets it by observed_at.
     val entry_id: Long = 0,
 )
 
@@ -524,8 +565,8 @@ data class IntervalVerdictView(
 )
 
 /**
- * User-declared run-intent label (I16). Mirrors app.rs `schema::WorkoutType`.
- * USER DATA, like an exercise name, carries NO evidence and drives NO coaching
+ * User-declared run-intent label. Mirrors app.rs `schema::WorkoutType`.
+ * USER DATA, like an exercise name: carries NO evidence and drives NO coaching
  * output (storage + display only). Entry NAMES are the exact serde wire strings
  * (`WorkoutType.name` ⇒ "Steady"/"Interval"/…); [label] is the display text.
  */
@@ -549,7 +590,7 @@ data class RunResultView(
     val zone: String = "",
     val pace: String = "",
     val distance_km: Double = 0.0,
-    // Raw duration + HR echoed for the manual-run edit prefill (Phase 4 / M4).
+    // Raw duration + HR echoed for the manual-run edit prefill.
     val duration_min: Double = 0.0,
     val hr_pct_max: Double = 0.0,
     val spike_flag: Boolean = false,
@@ -561,7 +602,7 @@ data class RunResultView(
     // Interval-vs-steady verdict from the track's variability index; null for a
     // hand-entered run or a track too short to derive it.
     val interval: IntervalVerdictView? = null,
-    // User-declared run-intent label echoed for history display (I16). Held as
+    // User-declared run-intent label echoed for history display. Held as
     // the raw wire string (decode-safe: an unknown future variant simply decodes
     // as a string and is ignored by WorkoutType.fromWire). null = untagged.
     val workout_type: String? = null,
@@ -569,15 +610,21 @@ data class RunResultView(
     val citation: String = "",
     val gpx: String = "",
     val observed_at: Long = 0,
-    // Stable per-entry id (Phase 4 / M4); see LiftResultView.entry_id. 0 = legacy.
+    // Stable per-entry id; see LiftResultView.entry_id. 0 = legacy.
     val entry_id: Long = 0,
-    // Per-km / per-mi splits derived from the GPS track (Phase 7 / TASK C). Both
+    // Per-km / per-mi splits derived from the GPS track. Both
     // lists carry the SAME cumulative distance_km at each split end; the shell
     // picks km vs mi by the user's distance-unit override. serde-default so a
     // hand-entered run (no track) or an old core simply decodes to empty → no
     // split section rendered.
     val splits_km: List<RunSplitView> = emptyList(),
     val splits_mi: List<RunSplitView> = emptyList(),
+    // Structured spike-baseline provenance the shell used to scrape
+    // from spike_note (contains("no prior run")). true when a prior 30-day
+    // baseline distance exists to gauge this run against; false for a first run
+    // with no baseline. Only meaningful when spike_flag. Defaulted for wire
+    // back-compat (old core / old logged runs decode to false).
+    val spike_has_baseline: Boolean = false,
 )
 
 // One km-or-mi split of a GPS run. `pace` is pre-formatted "m:ss" (render
@@ -607,6 +654,7 @@ data class GuidanceView(
 @Serializable
 data class FeedbackView(
     val category: String = "",
+    val category_label: String = "",
     val message: String = "",
     val suppresses_praise: Boolean = false,
     val grade: String = "",
@@ -681,12 +729,17 @@ sealed interface Event {
         // the conservative bare-report hard stop; a full detail reaches the graded
         // File-08 pain gate.
         val pain: PainDetail? = null,
+        // Effort duration (minutes) for a duration-gated signal (AerobicDecoupling
+        // is valid only for efforts >20 min, File 06). null → the core cannot
+        // validate it and discards it (ReadinessInput.effort_min serde-defaults None).
+        val effortMin: Double? = null,
     ) : Event {
         override fun toJson() = buildJsonObject {
             put("SubmitReadiness", buildJsonObject {
                 put("signal", signal.name)
                 put("value", value)
                 put("observed_at", observedAt)
+                if (effortMin != null) put("effort_min", effortMin)
                 put("streak", streak)
                 if (pain != null) put("pain", buildJsonObject {
                     put("kind", pain.kind.name)
@@ -713,9 +766,9 @@ sealed interface Event {
     }
 
     /**
-     * One morning check-in (Phase 2 / B1): raw HUMAN observations only. The core
+     * One morning check-in: raw HUMAN observations only. The core
      * normalizes the retained history into the z-scores/deltas the autoreg rules
-     * consume: the user never enters a z-score. Every scored field is optional;
+     * consume; the user never enters a z-score. Every scored field is optional;
      * only the answered items ride the wire (serde default None on the Rust side),
      * so a check-in written by any app version replays. Mirrors schema.rs::CheckinInput.
      */
@@ -754,7 +807,7 @@ sealed interface Event {
         val runningKmPerWeek: Double,
         val advanced: Boolean,
         val enduranceIntensityPctVo2max: Double,
-        // Consolidated person data (Phase 5 / M5), sent on EVERY SetProfile so
+        // Consolidated person data: sent on EVERY SetProfile so
         // the last-write-wins profile keeps them (an omitted field defaults to
         // None/false on the core, so the draft must always re-emit them). Absent
         // person data is omitted from the wire (serde default), keeping the line
@@ -765,8 +818,8 @@ sealed interface Event {
         val restingHrBpm: Double? = null,
         val measuredHrMax: Double? = null,
         // Stage-0 onboarding health screen (schema.rs HealthScreen). Sent so the
-        // pediatric/PAR-Q+/pregnancy/injury/RED-S deferral gates are reachable
-        // (A1). Emitted only when a flag is raised, so an all-clear profile keeps
+        // pediatric/PAR-Q+/pregnancy/injury/RED-S deferral gates are reachable.
+        // Emitted only when a flag is raised, so an all-clear profile keeps
         // the byte-identical pre-health wire; the core serde-defaults the rest.
         val health: HealthScreen = HealthScreen(),
     ) : Event {
@@ -819,7 +872,7 @@ sealed interface Event {
         // card can be dated; baked into the persisted line, so replay keeps the
         // original stamp (the core never re-stamps on replay).
         val observedAt: Long = System.currentTimeMillis() / 1000,
-        // Stable per-entry id (Phase 4 / M4): epoch-millis at log, so it survives
+        // Stable per-entry id: epoch-millis at log, so it survives
         // edits and never collides with a backdated observed_at. Sent back in
         // AmendSet/DeleteEntry to target this exact set.
         val entryId: Long = System.currentTimeMillis(),
@@ -847,7 +900,7 @@ sealed interface Event {
         val longestRecentKm: Double,
         val observedAt: Long = System.currentTimeMillis() / 1000,
         val entryId: Long = System.currentTimeMillis(),
-        // User-declared run-intent label (I16); null = untagged. Omitted from the
+        // User-declared run-intent label; null = untagged. Omitted from the
         // wire when null so the event matches serde's `#[serde(default)]` shape.
         val workoutType: WorkoutType? = null,
     ) : Event {
@@ -872,13 +925,13 @@ sealed interface Event {
         // GPS fix's own per-point `observed_at`.
         val observedAt: Long = System.currentTimeMillis() / 1000,
         val entryId: Long = System.currentTimeMillis(),
-        // User-declared run-intent label (I16); null = untagged, omitted from wire.
+        // User-declared run-intent label; null = untagged, omitted from wire.
         val workoutType: WorkoutType? = null,
         // Indices into [points] that begin a new recording segment: the pause +
-        // relocation boundaries (I15/B2). The core skips each pause-bridge leg
+        // relocation boundaries. The core skips each pause-bridge leg
         // (no distance, no time) and breaks the GPX <trkseg> there, keeping the
         // TRUE coordinates. Empty (the common, un-paused run) is OMITTED from the
-        // wire so it matches serde's `#[serde(default)]` shape, old-shape parity.
+        // wire so it matches serde's `#[serde(default)]` shape; old-shape parity.
         val segmentStarts: List<Int> = emptyList(),
     ) : Event {
         override fun toJson() = buildJsonObject {
@@ -913,7 +966,7 @@ sealed interface Event {
     enum class EntryKind { Set, Run }
 
     /**
-     * Delete one logged set or run (Phase 4 / M4). The core removes the newest
+     * Delete one logged set or run. The core removes the newest
      * entry whose `entry_id` matches, or, for a legacy row with no id, whose
      * `observed_at` matches [observedAtFallback]. A no-op when nothing matches.
      */
@@ -931,7 +984,7 @@ sealed interface Event {
         }
     }
 
-    /** Edit one logged set's fields in place (Phase 4 / M4). The core deletes the
+    /** Edit one logged set's fields in place. The core deletes the
      *  matched set and re-pushes it carrying the SAME [entryId]. */
     data class AmendSet(
         val entryId: Long,
@@ -941,7 +994,7 @@ sealed interface Event {
         val rpe: Double,
         val observedAt: Long,
         // The row's ORIGINAL observed_at (before any date change), so a legacy
-        // (entry_id == 0) row is matched and REPLACED rather than duplicated (B8).
+        // (entry_id == 0) row is matched and REPLACED rather than duplicated.
         val observedAtFallback: Long = 0,
     ) : Event {
         override fun toJson() = buildJsonObject {
@@ -957,7 +1010,7 @@ sealed interface Event {
         }
     }
 
-    /** Edit one hand-entered run's fields (Phase 4 / M4). GPS-tracked runs are
+    /** Edit one hand-entered run's fields. GPS-tracked runs are
      *  delete-only, so amending one replaces it with a manual run. */
     data class AmendRun(
         val entryId: Long,
@@ -967,9 +1020,9 @@ sealed interface Event {
         val longestRecentKm: Double = 0.0,
         val observedAt: Long,
         // The row's ORIGINAL observed_at (before any date change), so a legacy
-        // (entry_id == 0) row is matched and REPLACED rather than duplicated (B8).
+        // (entry_id == 0) row is matched and REPLACED rather than duplicated.
         val observedAtFallback: Long = 0,
-        // User-declared run-intent label (I16); null = untagged, omitted from wire.
+        // User-declared run-intent label; null = untagged, omitted from wire.
         val workoutType: WorkoutType? = null,
     ) : Event {
         override fun toJson() = buildJsonObject {
@@ -1115,7 +1168,7 @@ sealed interface Event {
         override fun toJson(): JsonElement = JsonPrimitive("ClearHrZones")
     }
 
-    /** Accept a synthesized plan (Phase 6 / B3): "Plan my training". */
+    /** Accept a synthesized plan: "Plan my training". */
     data class GeneratePlan(val startEpochDay: Long) : Event {
         override fun toJson(): JsonElement = buildJsonObject {
             put("GeneratePlan", buildJsonObject { put("start_epoch_day", startEpochDay) })
@@ -1127,9 +1180,9 @@ sealed interface Event {
         override fun toJson(): JsonElement = JsonPrimitive("ClearPlan")
     }
 
-    /** The shell's clock as event data (Phase 6): today's epoch-day, sent on
+    /** The shell's clock as event data: today's epoch-day, sent on
      *  foreground so the core dates the week + picks the next session. Also carries
-     *  the device's current UTC offset in seconds EAST of UTC (B5) so the core can
+     *  the device's current UTC offset in seconds EAST of UTC so the core can
      *  match a logged session's UTC `observed_at` to the correct LOCAL day. */
     data class SetToday(val epochDay: Long, val utcOffsetSec: Int = 0) : Event {
         override fun toJson(): JsonElement = buildJsonObject {

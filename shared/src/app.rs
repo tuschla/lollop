@@ -9,6 +9,7 @@ use crux_core::{
     render::{RenderOperation, render},
 };
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 use crate::feedback::FeedbackCategory;
 use crate::hybrid::ConcurrentGoal;
@@ -20,6 +21,7 @@ use crate::schema::{
     RunIntensity, RunSessionType, RunVolume, SafetyTier, Session, SessionType, ThreeZone, VdotBand,
     WorkoutType,
 };
+use crate::evidence::graded;
 use crate::strength::LiftGoal;
 use crate::{autoreg, feedback, hybrid, hypertrophy, individualization, load, running, strength};
 
@@ -31,10 +33,10 @@ struct LoggedSet {
     rpe: f64,
     /// Log time, unix seconds; 0 when undated (pre-timestamp persisted event).
     observed_at: i64,
-    /// Stable per-entry identity (Phase 4): a shell-assigned monotonic id
+    /// Stable per-entry identity: a shell-assigned monotonic id
     /// (epoch-millis at first log) that survives edits so `AmendSet`/`DeleteEntry`
     /// target THIS row even when its `observed_at` was backdated to collide with
-    /// another. 0 = legacy/absent (pre-Phase-4 log), those fall back to matching
+    /// another. 0 = legacy/absent; those fall back to matching
     /// on `observed_at`.
     entry_id: u64,
 }
@@ -47,14 +49,14 @@ struct LoggedRun {
     duration_min: f64,
     hr_pct_max: f64,
     /// Spike baseline baked at ingest (max of the caller-supplied paired-history
-    /// value and the 30-day-longest at log time, A4). Still drives the run
+    /// value and the 30-day-longest at log time). Still drives the run
     /// CARD's descriptive spike chip; the SAFETY GATE now derives its baseline
     /// fresh from `model.runs` at view() time so a deleted baseline run re-arms it
-    /// (M6, see `latest_run_spike_frac`).
+    /// (see `latest_run_spike_frac`).
     longest_recent_km: f64,
     /// GPS fixes for a tracked run; empty for a hand-entered run.
     track: Vec<GpsPoint>,
-    /// Indices into `track` that BEGIN a new recording segment (I15/B2): the first
+    /// Indices into `track` that BEGIN a new recording segment: the first
     /// fix captured after a pause + possible relocation. Every track metric skips
     /// the pause-bridge leg entering such an index (no distance, no time), and the
     /// GPX export breaks a `<trkseg>` there. Empty = one continuous segment, the
@@ -62,11 +64,11 @@ struct LoggedRun {
     track_segment_starts: Vec<u32>,
     /// Log time, unix seconds; 0 when undated (pre-timestamp persisted event).
     observed_at: i64,
-    /// Stable per-entry identity (Phase 4); see [`LoggedSet::entry_id`]. 0 =
+    /// Stable per-entry identity; see [`LoggedSet::entry_id`]. 0 =
     /// legacy/absent → matched on `observed_at` instead.
     entry_id: u64,
-    /// User-declared run-intent label (I16). USER DATA, carries no evidence and
-    /// drives no coaching, storage + history display only (HARD RULE 1). `None`
+    /// User-declared run-intent label. USER DATA, carries no evidence and
+    /// drives no coaching: storage + history display only (HARD RULE 1). `None`
     /// = untagged; never fabricated. (Model-internal struct, not wire-decoded.)
     workout_type: Option<WorkoutType>,
 }
@@ -129,12 +131,12 @@ pub struct Profile {
     /// Bodyweight, kg (optional): arms the strength-plyo depth-jump
     /// readiness gate (needs squat 1RM ≥ 1.5× bodyweight). `None` = no gate.
     /// Also the consolidated person-data source the protein calculator prefills
-    /// from (Phase 5 / M5): person data is entered once, on the profile.
+    /// from: person data is entered once, on the profile.
     #[serde(default)]
     pub bodyweight_kg: Option<f64>,
-    /// Age in years (optional), consolidated person data (Phase 5 / M5). The
+    /// Age in years (optional): consolidated person data. The
     /// HR-zone calculator prefills its age input from here; no rule branches on
-    /// it (display/prefill only, HARD RULE 1, invents no claim). `None` =
+    /// it (display/prefill only, HARD RULE 1; invents no claim). `None` =
     /// unstated (old profiles parse unchanged).
     #[serde(default)]
     pub age_years: Option<f64>,
@@ -345,8 +347,8 @@ pub struct Model {
     /// Observed readiness signals, in submission order. Day-scoped: cleared by
     /// `ClearReadiness` (the raw-signal / advanced path + red-flag reports).
     inputs: Vec<ReadinessInput>,
-    /// Morning check-ins (Phase 2 / B1): a RETAINED multi-day history of raw
-    /// human observations. NOT cleared by `ClearReadiness`, the whole point is
+    /// Morning check-ins: a RETAINED multi-day history of raw
+    /// human observations. NOT cleared by `ClearReadiness`; the whole point is
     /// a rolling baseline the core normalizes into z-scores/deltas/streaks.
     checkins: Vec<CheckinInput>,
     /// Logged lift sets, in submission order.
@@ -377,23 +379,23 @@ pub struct Model {
     cs_query: Option<Vec<CsEffortIn>>,
     /// The last APRE next-load query, if requested.
     apre_query: Option<ApreQuery>,
-    /// The accepted "Plan my training" request (Phase 6 / B3). Present once the
+    /// The accepted "Plan my training" request. Present once the
     /// user accepts a generated plan; the `Program` itself is re-derived in
     /// `view()` from profile + anchors + this request (deterministic, like every
     /// calculator). `None` → no plan surfaced.
     plan_request: Option<PlanRequest>,
-    /// The shell's clock, entering as event data (Phase 6): the current
+    /// The shell's clock, entering as event data: the current
     /// epoch-day, sent on foreground so `view()` can date the week and pick the
     /// next session without reading a clock. `None`
     /// → the plan anchors to the request's `start_epoch_day`.
     today_epoch_day: Option<i64>,
-    /// B5: the shell's UTC offset (seconds east of UTC) that accompanied the last
+    /// The shell's UTC offset (seconds east of UTC) that accompanied the last
     /// `SetToday`, used to bucket UTC `observed_at` timestamps into the shell's
     /// LOCAL calendar day for session-done matching. 0 = UTC (default).
     today_utc_offset_sec: i64,
 }
 
-/// Inputs for a synthesized training plan (Phase 6): the epoch-day the user
+/// Inputs for a synthesized training plan: the epoch-day the user
 /// accepted the plan. Retained so the `Program` is re-derived in `view()`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PlanRequest {
@@ -492,8 +494,8 @@ pub enum Event {
     /// intact. No-op when no such input exists.
     RemoveReadiness { signal: ReadinessSignal },
     /// Record one morning check-in (raw human observations). Appended to the
-    /// RETAINED check-in history the core normalizes into z-scores/deltas -
-    /// unlike `SubmitReadiness`, this is not day-cleared (Phase 2 / B1).
+    /// RETAINED check-in history the core normalizes into z-scores/deltas;
+    /// unlike `SubmitReadiness`, this is not day-cleared.
     SubmitCheckin(CheckinInput),
     /// Drop the entire check-in history (part of "Clear all data"). Not tied to
     /// `ClearReadiness`, the two stores have different lifecycles.
@@ -509,9 +511,9 @@ pub enum Event {
         /// field existed replayable, they decode as 0 ("undated").
         #[serde(default)]
         observed_at: i64,
-        /// Stable per-entry id (Phase 4): a shell-assigned monotonic value
+        /// Stable per-entry id: a shell-assigned monotonic value
         /// (epoch-millis at log) so `AmendSet`/`DeleteEntry` can target this exact
-        /// set. `#[serde(default)]` → 0 for pre-Phase-4 logs (matched on
+        /// set. `#[serde(default)]` → 0 for legacy logs (matched on
         /// `observed_at` instead).
         #[serde(default)]
         entry_id: u64,
@@ -529,10 +531,10 @@ pub enum Event {
         /// back-compat with pre-timestamp persisted events (decode as 0).
         #[serde(default)]
         observed_at: i64,
-        /// Stable per-entry id (Phase 4); see [`Event::LogSet`]. 0 = legacy.
+        /// Stable per-entry id; see [`Event::LogSet`]. 0 = legacy.
         #[serde(default)]
         entry_id: u64,
-        /// User-declared run-intent label (I16). USER DATA, no evidence, no
+        /// User-declared run-intent label. USER DATA: no evidence, no
         /// coaching consumes it (HARD RULE 1). `#[serde(default)]` → `None` so
         /// old logs / shells that never sent it replay unchanged (back-compat).
         #[serde(default)]
@@ -545,8 +547,8 @@ pub enum Event {
         points: Vec<GpsPoint>,
         hr_pct_max: f64,
         longest_recent_km: f64,
-        /// Indices into `points` that begin a new recording segment, the shell's
-        /// pause/relocation boundaries (I15/B2). `#[serde(default)]` → empty for
+        /// Indices into `points` that begin a new recording segment: the shell's
+        /// pause/relocation boundaries. `#[serde(default)]` → empty for
         /// old logs and shells that never sent it (they pre-collapsed the geometry
         /// by re-anchoring), which replay as one continuous segment, unchanged.
         #[serde(default)]
@@ -557,10 +559,10 @@ pub enum Event {
         /// session's logged-at stamp for history display.
         #[serde(default)]
         observed_at: i64,
-        /// Stable per-entry id (Phase 4); see [`Event::LogSet`]. 0 = legacy.
+        /// Stable per-entry id; see [`Event::LogSet`]. 0 = legacy.
         #[serde(default)]
         entry_id: u64,
-        /// User-declared run-intent label (I16). USER DATA, no evidence, no
+        /// User-declared run-intent label. USER DATA: no evidence, no
         /// coaching consumes it (HARD RULE 1). `#[serde(default)]` → `None` so
         /// old logs / shells that never sent it replay unchanged (back-compat).
         #[serde(default)]
@@ -568,7 +570,7 @@ pub enum Event {
     },
     /// Drop all logged runs.
     ClearRuns,
-    /// Delete one logged set or run (Phase 4 / M4). Targets the newest entry
+    /// Delete one logged set or run. Targets the newest entry
     /// whose `entry_id` matches (or, for a legacy row with no id, whose
     /// `observed_at` matches `observed_at_fallback`). A no-op when nothing
     /// matches. Compaction cancels it against its matched log line (Rule 3).
@@ -580,7 +582,7 @@ pub enum Event {
         #[serde(default)]
         observed_at_fallback: i64,
     },
-    /// Edit one logged set's fields (Phase 4 / M4): delete the matched set and
+    /// Edit one logged set's fields: delete the matched set and
     /// push the replacement carrying the SAME `entry_id`, so the derivation in
     /// `view()` (e1RM chain, ordering) is untouched. Matches like `DeleteEntry`.
     AmendSet {
@@ -593,15 +595,15 @@ pub enum Event {
         /// when the user re-dates a set).
         #[serde(default)]
         observed_at: i64,
-        /// B8: the OLD `observed_at` of the row being amended. For a legacy row
+        /// The OLD `observed_at` of the row being amended. For a legacy row
         /// (`entry_id == 0`) whose date the user CHANGED, the original entry can
-        /// only be located by its old timestamp, matching on the new one would
+        /// only be located by its old timestamp; matching on the new one would
         /// find nothing and push a DUPLICATE. `#[serde(default)]` → 0 (old logs;
         /// the handler falls back to `observed_at` then).
         #[serde(default)]
         observed_at_fallback: i64,
     },
-    /// Edit one hand-entered run's fields (Phase 4 / M4). GPS-tracked runs are
+    /// Edit one hand-entered run's fields. GPS-tracked runs are
     /// delete-only in this phase (their measured track is not field-editable), so
     /// amending one replaces it with a manual run. Matches like `DeleteEntry`.
     AmendRun {
@@ -614,10 +616,10 @@ pub enum Event {
         /// The NEW timestamp for the amended entry.
         #[serde(default)]
         observed_at: i64,
-        /// B8: the OLD `observed_at` of the row being amended, see [`Event::AmendSet`].
+        /// The OLD `observed_at` of the row being amended; see [`Event::AmendSet`].
         #[serde(default)]
         observed_at_fallback: i64,
-        /// User-declared run-intent label (I16). USER DATA, no evidence, no
+        /// User-declared run-intent label. USER DATA: no evidence, no
         /// coaching consumes it (HARD RULE 1). `#[serde(default)]` → `None` so
         /// old logs / shells that never sent it replay unchanged (back-compat).
         #[serde(default)]
@@ -707,17 +709,17 @@ pub enum Event {
     },
     /// Drop the APRE adjustment (clears the section).
     ClearApre,
-    /// Accept a synthesized training plan (Phase 6 / B3): the user tapped "Plan
+    /// Accept a synthesized training plan: the user tapped "Plan
     /// my training". `start_epoch_day` anchors the block; the `Program` is
     /// re-derived in `view()` from profile + logged anchors (determinism).
     GeneratePlan { start_epoch_day: i64 },
     /// Drop the plan (Coach returns to no-plan state).
     ClearPlan,
-    /// The shell's clock as event data (Phase 6): today's LOCAL epoch-day, sent
+    /// The shell's clock as event data: today's LOCAL epoch-day, sent
     /// on foreground so `view()` dates the week + picks the next session with no
     /// clock in-core. Last-write-wins singleton (compaction keeps one line).
     ///
-    /// B5 (local/UTC day convention): `epoch_day` is the shell's LOCAL calendar
+    /// Local/UTC day convention: `epoch_day` is the shell's LOCAL calendar
     /// day (days since 1970-01-01 in the device's timezone). `utc_offset_sec` is
     /// the device's current offset east of UTC in seconds (e.g. Berlin summer =
     /// +7200); the core buckets a run/set's UTC `observed_at` into the SAME local
@@ -957,7 +959,7 @@ pub struct ViewModel {
     pub signal_groups: Vec<SignalGroupView>,
     /// The most recent morning check-in, echoed back so the shell can rehydrate
     /// the check-in sheet and show that today's check-in is recorded. `None`
-    /// until any check-in exists. Additive/serde-default (Phase 2 / B1).
+    /// until any check-in exists. Additive/serde-default.
     #[serde(default)]
     pub checkin_today: Option<CheckinEchoView>,
     /// Honest "collecting your baseline" status for each check-in channel that
@@ -969,11 +971,11 @@ pub struct ViewModel {
     pub baseline_status: Vec<BaselineStatusView>,
     /// The evidence-grade legend, core-provided so the "How evidence grading
     /// works" sheet renders the File 09 definitions from core data rather than
-    /// hardcoded shell copy (MIGRATION-PLAN Phase 3). Static; always populated.
+    /// hardcoded shell copy. Static; always populated.
     #[serde(default)]
     pub grade_definitions: Vec<GradeDefView>,
-    /// Today's concrete next session, the hero of the inverted Coach (Phase 6 /
-    /// B3). `None` until the user accepts a plan. Rendered strictly downstream of
+    /// Today's concrete next session: the hero of the inverted Coach.
+    /// `None` until the user accepts a plan. Rendered strictly downstream of
     /// the safety gates: a `train_blocked` hold sets `status = "blocked"` and
     /// empties its items (HARD RULE 3).
     #[serde(default)]
@@ -984,6 +986,15 @@ pub struct ViewModel {
     /// The active program summary card (name/goal/phase/week), when a plan is set.
     #[serde(default)]
     pub program: Option<ProgramSummaryView>,
+    /// #6: structured HRmax figure (bpm + measured/estimate + Tanaka split) for
+    /// the last HR-zone query, so the shell stops regex-scraping `hr_zones`.
+    /// `None` until an HR-zone query is made (or the age is out of range).
+    #[serde(default)]
+    pub hr_max: Option<HrMaxView>,
+    /// #6: structured protein g/day figures paralleling `protein_targets`, so the
+    /// shell stops regex-scraping those rows. Empty until a protein query is made.
+    #[serde(default)]
+    pub protein_figures: Vec<ProteinFigureView>,
 }
 
 /// The most recent check-in echoed for rehydration + a "checked in today" cue
@@ -1070,26 +1081,13 @@ pub struct TodayHeadlineView {
     pub why: WhyView,
 }
 
-/// The three-part "why?" disclosure carried by every action-bearing card
-/// (M2 / MIGRATION-PLAN Phase 3). Replaces the old bare "Evidence: <grade> -
-/// NN% · <citation>" restatement with an explanation the user can act on:
-///
-/// - `basis`: plain-language statement of the rule/method behind the call
-///   and, where the core holds it, the user's datum that tripped it (e.g.
-///   "Estimated from your age (30) with the Tanaka formula, 208 − 0.7 × age").
-///   Built from values the core already holds and from the backing claim's own
-///   registered statement, no new training claim is invented (HARD RULE 1).
-/// - `grade_note`: a one-sentence human gloss of what THIS evidence grade
-///   means for THIS claim, with the contested question appended when the claim
-///   is under active debate.
-/// - `improves`: what data would raise the confidence or replace an estimate
-///   (the engagement loop, e.g. "Log a measured max HR …"). This describes the
-///   ENGINE's own data needs, not training advice, so it carries no evidence
-///   tag and invents no claim (HR1-safe by construction). `"-"` when there is
-///   genuinely nothing that would sharpen it.
-///
-/// All fields serde-default: old shells ignore the block, old logs replay, and
-/// a new shell on an old core renders empty strings (no why? detail).
+/// The three-part "why?" disclosure carried by every action-bearing card:
+/// `basis` (the rule/method and the user datum behind the call), `grade_note`
+/// (a one-sentence gloss of this claim's evidence grade, contested question
+/// appended when relevant), and `improves` (what data would sharpen the call).
+/// `basis` and `improves` describe the engine's own reasoning and data needs,
+/// never new training advice, so they invent no claim (HARD RULE 1). All fields
+/// serde-default, so old shells ignore the block and old logs replay.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct WhyView {
     pub basis: String,
@@ -1097,7 +1095,7 @@ pub struct WhyView {
     pub improves: String,
 }
 
-/// One prescribed exercise, flattened for shells (MIGRATION-PLAN Phase 6 / B3).
+/// One prescribed exercise, flattened for shells.
 /// The concrete "do X" contract: sets/reps + either a load (from the user's
 /// logged e1RM) or a proximity-to-failure target when no anchor exists, plus the
 /// same evidence block every action-bearing view carries (HARD RULE 2). Every
@@ -1121,13 +1119,13 @@ pub struct PrescriptionView {
     /// Rest between sets, seconds (0 for runs).
     #[serde(default)]
     pub rest_sec: u16,
-    /// For an interval/repetition run, the rep count (H5). `0` for a continuous
-    /// run or a lift, the `summary` then carries the whole-session volume. When
+    /// For an interval/repetition run, the rep count. `0` for a continuous
+    /// run or a lift: the `summary` then carries the whole-session volume. When
     /// nonzero the `summary` already reads as "N × <rep_volume> · <pace>".
     #[serde(default)]
     pub rep_count: u8,
     /// For an interval/repetition run, the per-rep volume label, e.g. `"4 min"`
-    /// or `"800 m"` (H5). Empty for a continuous run or a lift.
+    /// or `"800 m"`. Empty for a continuous run or a lift.
     #[serde(default)]
     pub rep_volume: String,
     /// The honesty line for a load, e.g. `"e1RM 120.0 kg (your logged best)"`.
@@ -1147,7 +1145,7 @@ pub struct PrescriptionView {
     pub why: WhyView,
 }
 
-/// One planned day in the week, flattened for shells (MIGRATION-PLAN Phase 6).
+/// One planned day in the week, flattened for shells.
 /// The plan renders strictly downstream of the safety gates: a `train_blocked`
 /// hold empties `items` and sets `status = "blocked"` (HARD RULE 3).
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -1167,7 +1165,7 @@ pub struct SessionPlanView {
     pub adjustment: Option<AdjustmentView>,
 }
 
-/// The program summary card (MIGRATION-PLAN Phase 6): what the plan IS, plus its
+/// The program summary card: what the plan IS, plus its
 /// representative evidence chip. Serde-default throughout.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct ProgramSummaryView {
@@ -1178,9 +1176,9 @@ pub struct ProgramSummaryView {
     pub phase: String,
     pub week: u8,
     pub weeks_total: u8,
-    /// M13: once the athlete passes the last block week, the plan is a repeated
+    /// Once the athlete passes the last block week, the plan is a repeated
     /// maintenance cycle rather than fresh progression (the synthesizer emits a
-    /// single static block, plan.rs owns real progression/deload/taper). `week`
+    /// single static block; plan.rs owns real progression/deload/taper). `week`
     /// then cycles 1..weeks_total instead of pinning at the last week, and this
     /// flag is set so a shell can say "maintenance" honestly. `false` while the
     /// original block is still running.
@@ -1197,7 +1195,7 @@ pub struct ProgramSummaryView {
 
 /// One row of the evidence-grade legend ("How evidence grading works"),
 /// exported from core data so the shell renders the KB definitions rather than
-/// hardcoding them (MIGRATION-PLAN Phase 3 §2). Carries no per-claim evidence -
+/// hardcoding them. Carries no per-claim evidence;
 /// it defines the grading scale itself (File 09).
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct GradeDefView {
@@ -1283,6 +1281,42 @@ pub struct ProteinInputView {
     pub deficit: bool,
 }
 
+/// #6: structured form of the HRmax figure the shell otherwise regex-scraped out
+/// of the `hr_zones` summary rows (incl. the "208 − 0.7 × age" Tanaka split). All
+/// additive / serde-default so the wire stays backward compatible.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct HrMaxView {
+    /// Resolved max heart rate, bpm, the measured value when available, else the
+    /// age-based Tanaka estimate. Drives the %HRmax band targets in `hr_zones`.
+    pub bpm: f64,
+    /// `true` when `bpm` is the user's logged measured maximum; `false` when it
+    /// is the Tanaka estimate (the `tanaka_*` fields then describe it).
+    pub measured: bool,
+    /// Age used for the estimate. `0.0` when a measured max bypassed age entirely.
+    pub age_years: f64,
+    /// Tanaka intercept (208) so the shell renders `208 − 0.7 × age` from data,
+    /// not by paren-scraping the summary. `0.0` when `measured`.
+    pub tanaka_intercept: f64,
+    /// Tanaka slope (0.7). `0.0` when `measured`.
+    pub tanaka_slope: f64,
+}
+
+/// #6: structured form of a protein target the shell otherwise regex-scraped out
+/// of the `protein_targets` summary rows. One per emitted row (masters and/or
+/// deficit). Additive / serde-default.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+pub struct ProteinFigureView {
+    /// Which target this is: `"masters"` or `"deficit"`.
+    pub kind: String,
+    /// Low end of the daily target, grams. `0.0` when `refused`.
+    pub low_g_per_day: f64,
+    /// High end of the daily target, grams. `0.0` when `refused`.
+    pub high_g_per_day: f64,
+    /// `true` when a deficit target was refused (RED-S / low-energy-availability
+    /// signal present, safety-022), no g/day figure is offered.
+    pub refused: bool,
+}
+
 /// The raw hypertrophy-plan query echoed back so a shell rehydrates its form
 /// (app.rs `hypertrophy_input`). Sibling to the `hypertrophy_plan` result rows.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -1308,6 +1342,8 @@ pub struct ApreInputView {
 pub struct FeedbackView {
     /// Category name, e.g. `"ConcernInjury"`.
     pub category: String,
+    /// Human overline for the card face; render verbatim.
+    pub category_label: String,
     /// Human-readable coaching copy for the category.
     pub message: String,
     /// True when this message suppresses all competing praise this cycle.
@@ -1334,11 +1370,6 @@ pub struct FeedbackView {
     /// completed session, or barrier overcome (feedback-005).
     #[serde(default)]
     pub anchor_mastery: bool,
-    /// feedback-026 tone modifier from the session's planned intent:
-    /// `"PraiseEffort"` (planned-hard) or `"CelebrateRestraint"`
-    /// (planned-easy). `None` when the review states no plan.
-    #[serde(default)]
-    pub tone: Option<String>,
     /// The three-part "why?" disclosure (basis → why this grade → what would
     /// improve it). Serde-default so old shells ignore it and old logs replay.
     #[serde(default)]
@@ -1435,12 +1466,12 @@ pub struct RunResultView {
     /// shell render the run's structured fields without re-parsing `summary`.
     pub distance_km: f64,
     /// Duration in minutes (moving time for a GPS run). Echoed so the shell can
-    /// prefill the run editor for a manual-run amend (Phase 4 / M4). 0.0 when
+    /// prefill the run editor for a manual-run amend. 0.0 when
     /// unmeasurable. Serde-default so old shells ignore it.
     #[serde(default)]
     pub duration_min: f64,
     /// The run's average % HRmax as logged (0.0 = no HR sample). Echoed for the
-    /// manual-run edit prefill (Phase 4 / M4). Serde-default.
+    /// manual-run edit prefill. Serde-default.
     #[serde(default)]
     pub hr_pct_max: f64,
     /// True when this run's distance spikes >10% over the recent longest.
@@ -1461,11 +1492,16 @@ pub struct RunResultView {
     /// to derive a variability index. Serde-default so old shells ignore it.
     #[serde(default)]
     pub interval: Option<IntervalVerdictView>,
-    /// User-declared run-intent label echoed for history display (I16). USER
-    /// DATA, no evidence, no coaching branches on it (HARD RULE 1). `None` =
+    /// User-declared run-intent label echoed for history display. USER
+    /// DATA: no evidence, no coaching branches on it (HARD RULE 1). `None` =
     /// untagged. Serde-default so old shells ignore it and old views decode.
     #[serde(default)]
     pub workout_type: Option<WorkoutType>,
+    /// One-line run recap. For a MEASURED run this is internal/citation-only -
+    /// never rendered; the shell builds unit-aware labels (`runDistLabel` /
+    /// `runPaceLabel`), so the hardcoded `km` here never reaches a mi-preferring
+    /// user. Only the zero-distance fallback ("GPS signal too poor to measure
+    /// this run", no unit) is surfaced, in `RunCard`.
     pub summary: String,
     /// Evidence backing the spike gate.
     pub citation: String,
@@ -1507,6 +1543,13 @@ pub struct RunResultView {
     /// unit = one international mile). Empty for a hand-entered run.
     #[serde(default)]
     pub splits_mi: Vec<RunSplitView>,
+    /// #6: structured form of the spike-baseline provenance the shell otherwise
+    /// scraped from `spike_note` (`contains("no prior run")`). `true` when a
+    /// prior 30-day baseline distance exists to gauge this run against; `false`
+    /// for a first run with no baseline (the spike gate then errs safe). Only
+    /// meaningful when `spike_flag`. Serde-default so old shells/logs are fine.
+    #[serde(default)]
+    pub spike_has_baseline: bool,
 }
 
 #[effect(typegen)]
@@ -1560,9 +1603,9 @@ impl App for Engine {
                 entry_id,
                 workout_type,
             } => {
-                // A4: floor the spike baseline to the longest run in the trailing
+                // Floor the spike baseline to the longest run in the trailing
                 // 30-day window (not all-time), so a manual entry gets the same
-                // RUN-SPIKE-001 gate a GPS-tracked one does: an explicit caller
+                // RUN-SPIKE-001 gate a GPS-tracked one does; an explicit caller
                 // value (paired 30-day history) still wins when larger.
                 let prior_longest = spike_baseline_km(&model.runs, observed_at);
                 model.runs.push(LoggedRun {
@@ -1588,7 +1631,7 @@ impl App for Engine {
                 workout_type,
                 segment_starts,
             } => {
-                // A4: spike baseline = longest run in the trailing 30-day window,
+                // Spike baseline = longest run in the trailing 30-day window,
                 // so the gate works without the shell fabricating a recent-longest
                 // figure. An explicit caller value (paired history from a tracker)
                 // still wins when larger.
@@ -1622,8 +1665,8 @@ impl App for Engine {
                 });
             }
             Event::ClearRuns => model.runs.clear(),
-            // Delete/amend of a logged set or run (Phase 4 / M4). Both target the
-            // NEWEST matching row, id first, else `observed_at` for a legacy row
+            // Delete/amend of a logged set or run. Both target the
+            // NEWEST matching row (id first, else `observed_at` for a legacy row)
             // mirroring the compaction Rule 3 matcher exactly. Amend = remove +
             // push carrying the SAME id, so `view()`'s derivation stays untouched.
             Event::DeleteEntry {
@@ -1653,13 +1696,13 @@ impl App for Engine {
                 observed_at,
                 observed_at_fallback,
             } => {
-                // B8: locate the row to replace by its OLD identity, the id
+                // Locate the row to replace by its OLD identity: the id
                 // (nonzero), or a legacy row's OLD timestamp (`observed_at_fallback`,
                 // else the new `observed_at` for old logs that predate this field).
                 // Matching the OLD row is what fixes the duplicate: a re-dated
                 // legacy row is now FOUND (and removed) before the replacement is
                 // pushed, instead of the removal silently missing on the new date.
-                // B8 full prevention: this is a STRICT update; the push happens
+                // Full prevention: this is a STRICT update; the push happens
                 // ONLY when a matching row is found. An amend that matches nothing
                 // (e.g. its target was already deleted) is a NO-OP, so a
                 // Log→Delete→Amend sequence can no longer RESURRECT the deleted
@@ -1692,8 +1735,8 @@ impl App for Engine {
                 observed_at_fallback,
                 workout_type,
             } => {
-                // B8: match the OLD identity (see `AmendSet`) so a re-dated legacy
-                // run is replaced, not duplicated. B8 full prevention: STRICT update
+                // Match the OLD identity (see `AmendSet`) so a re-dated legacy
+                // run is replaced, not duplicated. Full prevention: STRICT update;
                 // the push happens ONLY when a matching row is found, so an amend
                 // whose target was already deleted is a no-op (no resurrection).
                 let match_at = if observed_at_fallback != 0 {
@@ -1703,7 +1746,7 @@ impl App for Engine {
                 };
                 if let Some(pos) = find_run(&model.runs, entry_id, match_at) {
                     model.runs.remove(pos);
-                    // A4: spike-baseline flooring over the trailing 30-day window
+                    // Spike-baseline flooring over the trailing 30-day window
                     // (the amended run is a fresh manual entry); an explicit caller
                     // value still wins when larger.
                     let prior_longest = spike_baseline_km(&model.runs, observed_at);
@@ -1722,7 +1765,7 @@ impl App for Engine {
                 }
             }
             Event::SetProfile(mut profile) => {
-                // B7 class: sanitize every wire float BEFORE any branch reads it,
+                // Sanitize every wire float BEFORE any branch reads it,
                 // so a poisoned `NaN`/`1e300` can't render "inf km" or slip past a
                 // gate. `running_km_per_week` also floors at 0 (a negative weekly
                 // volume is nonsense and would break the plan's volume math).
@@ -1742,7 +1785,7 @@ impl App for Engine {
                         *v = sanitize_f64(*v);
                     }
                 }
-                // A1 (HARD RULE 3): auto-derive the pediatric gate from age alone
+                // HARD RULE 3: auto-derive the pediatric gate from age alone
                 // so it fires even when the health screen is skipped. The KB gives
                 // no numeric cutoff for "child/adolescent" (safety-011); 18 y is
                 // used. Never CLEARS the flag: a shell that set it explicitly (or
@@ -1871,7 +1914,7 @@ impl App for Engine {
         });
         let high_load_block = model.profile.as_ref().is_some_and(|p| p.high_load_block);
 
-        // Phase 2 / B1: normalize the retained check-in history into the synthetic
+        // Normalize the retained check-in history into the synthetic
         // readiness signals (WellnessZ / HrvLnRmssd / RestingHr) the autoreg rules
         // already consume, then MERGE with the manual/advanced inputs. One merge
         // point, zero rule changes: derivation only supplies inputs. Manual inputs
@@ -1881,7 +1924,7 @@ impl App for Engine {
         let mut readiness_inputs: Vec<ReadinessInput> = derived.inputs.clone();
         readiness_inputs.extend(model.inputs.iter().cloned());
 
-        // M7: a "felt easy" performance signal goes stale, a three-week-old
+        // A "felt easy" performance signal goes stale: a three-week-old
         // RPE −2 must not keep proposing IncreaseLoadPct today. Expire ONLY the
         // performance signals that can drive a load INCREASE (RPE / e1RM /
         // bar-velocity), and only when the shell has supplied "today" (no clock in
@@ -1981,12 +2024,24 @@ impl App for Engine {
                 female_user,
             )
         });
-        // Coach-as-planner (Phase 6 / B3): synthesize + date the week, then apply
+        // Coach-as-planner: synthesize + date the week, then apply
         // readiness/safety INSIDE the rendered session (strictly downstream of the
-        // gates: HARD RULE 3). The prescription becomes the top non-safety
+        // gates; HARD RULE 3). The prescription becomes the top non-safety
         // headline rung.
         let (next_session, week_plan, program) =
             build_plan_views(model, train_blocked, &recommended, &review_recs);
+
+        // #6: protein + HRmax calculators now return their prose rows AND a
+        // structured figure, so the shell consumes numbers instead of scraping
+        // the summary strings. Computed here so both halves land in the literal.
+        let (protein_targets, protein_figures) = match model.protein_query.as_ref() {
+            Some(q) => build_protein_targets(q, reds_present),
+            None => (Vec::new(), Vec::new()),
+        };
+        let (hr_zones, hr_max) = match model.hr_zone_query.as_ref() {
+            Some(q) => build_hr_zones(q, model.profile.as_ref().and_then(|p| p.measured_hr_max)),
+            None => (Vec::new(), None),
+        };
         let today_headline = build_headline(
             train_blocked,
             &gates,
@@ -2033,21 +2088,8 @@ impl App for Engine {
                 .as_ref()
                 .map(|q| build_hypertrophy_plan(q, model.profile.as_ref()))
                 .unwrap_or_default(),
-            protein_targets: model
-                .protein_query
-                .as_ref()
-                .map(|q| build_protein_targets(q, reds_present))
-                .unwrap_or_default(),
-            hr_zones: model
-                .hr_zone_query
-                .as_ref()
-                .map(|q| {
-                    build_hr_zones(
-                        q,
-                        model.profile.as_ref().and_then(|p| p.measured_hr_max),
-                    )
-                })
-                .unwrap_or_default(),
+            protein_targets,
+            hr_zones,
             training_load: build_training_load(model),
             weekly_report: build_weekly_report(model),
             lift_audit: build_lift_audit(model),
@@ -2107,6 +2149,8 @@ impl App for Engine {
             next_session,
             week_plan,
             program,
+            hr_max,
+            protein_figures,
         }
     }
 }
@@ -2138,7 +2182,7 @@ fn to_baseline_status_view(s: &autoreg::BaselineStatus) -> BaselineStatusView {
         have: s.have as u32,
         need: s.need as u32,
         note: format!(
-            "Collecting your baseline - {} of {} check-ins",
+            "Collecting your baseline: {} of {} check-ins",
             s.have, s.need
         ),
     }
@@ -2147,6 +2191,15 @@ fn to_baseline_status_view(s: &autoreg::BaselineStatus) -> BaselineStatusView {
 /// Profile-independent evidence-cited reference defaults, surfaced always so a
 /// shell can show coaching rationale without a full profile set.
 fn build_reference() -> Vec<GuidanceView> {
+    // P2: the reference rows are profile-independent and byte-identical every
+    // call, yet each rebuild re-runs the evidence-registry lookups behind ~30
+    // `push_guidance` rows on every `view()`. Compute once, then hand back a
+    // cheap clone. Deterministic (no clock/rand), a lazy constant, not state.
+    static CACHE: OnceLock<Vec<GuidanceView>> = OnceLock::new();
+    CACHE.get_or_init(build_reference_impl).clone()
+}
+
+fn build_reference_impl() -> Vec<GuidanceView> {
     let mut rows = Vec::new();
 
     let sp = hybrid::session_spacing();
@@ -2198,7 +2251,7 @@ fn build_reference() -> Vec<GuidanceView> {
     push_guidance(
         &mut rows,
         "Hybrid",
-        "Schedule the highest-priority quality when freshest - start of the week or right after a rest day".to_string(),
+        "Schedule the highest-priority quality when freshest: start of the week or right after a rest day".to_string(),
         &sched,
     );
 
@@ -2207,7 +2260,7 @@ fn build_reference() -> Vec<GuidanceView> {
     push_guidance(
         &mut rows,
         "Hybrid",
-        "Double (AM/PM) days: fully refuel carbohydrate between the endurance session and the lift - low glycogen amplifies interference".to_string(),
+        "Double (AM/PM) days: fully refuel carbohydrate between the endurance session and the lift. Low glycogen amplifies interference".to_string(),
         &cho,
     );
 
@@ -2225,7 +2278,7 @@ fn build_reference() -> Vec<GuidanceView> {
     push_guidance(
         &mut rows,
         "Safety",
-        "Never progress high running volume and heavy lifting aggressively in the same week - the concurrent effect on tendon stiffness is unstudied; progress one, hold the other".to_string(),
+        "Never progress high running volume and heavy lifting aggressively in the same week. The concurrent effect on tendon stiffness is unstudied; progress one, hold the other".to_string(),
         &dual,
     );
 
@@ -2234,7 +2287,7 @@ fn build_reference() -> Vec<GuidanceView> {
     push_guidance(
         &mut rows,
         "Safety",
-        "Keep energy availability adequate (RED-S/LEA guard) - especially for high-volume endurance, leaner, and female athletes".to_string(),
+        "Keep energy availability adequate (RED-S/LEA guard), especially for high-volume endurance, leaner, and female athletes".to_string(),
         &ea,
     );
 
@@ -2503,7 +2556,7 @@ fn build_reference() -> Vec<GuidanceView> {
     let framing = feedback::default_goal_framing();
     let framing_text = match framing.value {
         feedback::GoalFraming::Process => {
-            "Goals are framed as controllable process targets (cadence, pacing discipline, RIR) - you steer the process, the outcome follows"
+            "Goals are framed as controllable process targets (cadence, pacing discipline, RIR). You steer the process, the outcome follows"
         }
         feedback::GoalFraming::Outcome => {
             "Outcome/result framing (only where an individual goal-efficacy signal supports it)"
@@ -2630,7 +2683,7 @@ fn review_views(
         let retest = autoreg::threshold_retest_due(true, weeks);
         if retest.value {
             out.push(to_view_with(
-                "Pace at target HR has improved for 2+ weeks - re-test and raise the threshold pace".to_string(),
+                "Pace at target HR has improved for 2+ weeks. Re-test and raise the threshold pace".to_string(),
                 &retest,
             ));
         }
@@ -2640,7 +2693,7 @@ fn review_views(
     let down = running::unscheduled_deload(r.overtraining_signal_count);
     if down.value {
         out.push(to_view_with(
-            "2+ overtraining signals - insert an unscheduled down week now".to_string(),
+            "2+ overtraining signals: insert an unscheduled down week now".to_string(),
             &down,
         ));
     }
@@ -2650,13 +2703,13 @@ fn review_views(
         let v = autoreg::vbt_daily_readiness(delta);
         let text = match v.value {
             autoreg::VbtReadiness::IncreaseLoad => {
-                "Bar speed up >0.06 m/s at the reference load - daily 1RM is up, raise working loads"
+                "Bar speed up >0.06 m/s at the reference load: daily 1RM is up, raise working loads"
             }
             autoreg::VbtReadiness::Hold => {
-                "Bar speed within the ±0.06 m/s reliability band - hold planned loads"
+                "Bar speed within the ±0.06 m/s reliability band: hold planned loads"
             }
             autoreg::VbtReadiness::ReduceLoad => {
-                "Bar speed down >0.06 m/s at the reference load - daily 1RM is down, reduce working loads"
+                "Bar speed down >0.06 m/s at the reference load: daily 1RM is down, reduce working loads"
             }
         };
         out.push(to_view_with(text.to_string(), &v));
@@ -2668,12 +2721,12 @@ fn review_views(
         let a = autoreg::set_volume_action(met, rpe_delta, !r.low_recovery);
         let text = match a.value {
             autoreg::SetVolumeAction::AddSet => {
-                "Strong first set at low cost with normal wellness - add a set today"
+                "Strong first set at low cost with normal wellness: add a set today"
             }
             autoreg::SetVolumeAction::DropLastSet => {
-                "First set short or over target RPE - drop the last planned set"
+                "First set short or over target RPE: drop the last planned set"
             }
-            autoreg::SetVolumeAction::HoldPlanned => "Run the planned sets - no set-count change",
+            autoreg::SetVolumeAction::HoldPlanned => "Run the planned sets: no set-count change",
         };
         out.push(to_view_with(text.to_string(), &a));
     }
@@ -2686,7 +2739,7 @@ fn review_views(
         let rpe_target = strength::rir_to_rpe(f64::from(l.rir_target));
         if autoreg::rpe_stop_reached(rpe_actual, rpe_target) && !l.reps_met {
             out.push(to_view_with(
-                "Target RPE reached before the planned rep count - stop the exercise here (RPE-stop)"
+                "Target RPE reached before the planned rep count: stop the exercise here (RPE-stop)"
                     .to_string(),
                 &graded((), "AUTOREG-RIR-001"),
             ));
@@ -2696,7 +2749,7 @@ fn review_views(
     // autoreg-014: two consecutive sessions needing set cuts → hold volume.
     if autoreg::hold_volume_after_two_cut_sessions(r.cut_last_two_sessions) {
         out.push(to_view_with(
-            "Set cuts in two straight sessions on this lift - hold weekly volume, no adds"
+            "Set cuts in two straight sessions on this lift: hold weekly volume, no adds"
                 .to_string(),
             &graded((), "AUTOREG-RIR-001"),
         ));
@@ -2708,7 +2761,7 @@ fn review_views(
     {
         out.push(to_view_with(
             format!(
-                "2+ interval reps over target - slow the remaining reps ~{:.0}%",
+                "2+ interval reps over target: slow the remaining reps ~{:.0}%",
                 cut.value * 100.0
             ),
             &cut,
@@ -2720,7 +2773,7 @@ fn review_views(
         let slow = autoreg::slow_easy_pace_if_over_cap(can_hold);
         if slow.value {
             out.push(to_view_with(
-                "Easy pace pushes HR over the cap - slow down; the HR cap governs easy days"
+                "Easy pace pushes HR over the cap. Slow down; the HR cap governs easy days"
                     .to_string(),
                 &slow,
             ));
@@ -2732,7 +2785,7 @@ fn review_views(
         && autoreg::suspend_hrv_gating(n)
     {
         out.push(to_view_with(
-            "2 of the last 3 HRV readings unreliable - suspend HRV gating; use subjective + performance until a clean baseline returns".to_string(),
+            "2 of the last 3 HRV readings unreliable: suspend HRV gating; use subjective + performance until a clean baseline returns".to_string(),
             &graded((), "AUTOREG-FALLBACK-001"),
         ));
     }
@@ -2742,7 +2795,7 @@ fn review_views(
         let rec = autoreg::hrv_suppressed_recovery_day(days);
         if rec.value {
             out.push(to_view_with(
-                "HRV suppressed 3+ consecutive days - insert a recovery day / easy block"
+                "HRV suppressed 3+ consecutive days: insert a recovery day / easy block"
                     .to_string(),
                 &rec,
             ));
@@ -2754,7 +2807,7 @@ fn review_views(
         let easy = autoreg::wellness_rhr_multiday_easy(days, r.rhr_rising);
         if easy.value {
             out.push(to_view_with(
-                "Wellness suppressed 2+ days with resting HR trending up - take 1–3 easy days or cross-train".to_string(),
+                "Wellness suppressed 2+ days with resting HR trending up: take 1–3 easy days or cross-train".to_string(),
                 &easy,
             ));
         }
@@ -2770,15 +2823,15 @@ fn review_views(
         if let (Some(ev), Some(tag)) = (evidence, tag) {
             let text = match band {
                 load::DecouplingBand::SoundBase => format!(
-                    "Decoupling {:.1}% (<5%) - sound aerobic base",
+                    "Decoupling {:.1}% (<5%): sound aerobic base",
                     d.drift_pct
                 ),
                 load::DecouplingBand::BuildBase => format!(
-                    "Decoupling {:.1}% (5–10%) - build the aerobic base another 3–6 weeks",
+                    "Decoupling {:.1}% (5–10%): build the aerobic base another 3–6 weeks",
                     d.drift_pct
                 ),
                 load::DecouplingBand::Insufficient => format!(
-                    "Decoupling {:.1}% (≥10%) - effort sat above aerobic threshold; endurance base not yet sufficient",
+                    "Decoupling {:.1}% (≥10%): effort sat above aerobic threshold; endurance base not yet sufficient",
                     d.drift_pct
                 ),
             };
@@ -2809,7 +2862,7 @@ fn review_views(
         let d = hypertrophy::deload_indicated(n);
         if d.value {
             out.push(to_view_with(
-                "2+ overreaching triggers accumulated - take the deload week now rather than waiting for the scheduled one".to_string(),
+                "2+ overreaching triggers accumulated: take the deload week now rather than waiting for the scheduled one".to_string(),
                 &d,
             ));
         }
@@ -2820,7 +2873,7 @@ fn review_views(
         let rest = hypertrophy::increase_rest_on_rep_drop(frac);
         if rest.value {
             out.push(to_view_with(
-                "Reps fell >10% set-to-set - lengthen the rest interval to protect per-set volume"
+                "Reps fell >10% set-to-set. Lengthen the rest interval to protect per-set volume"
                     .to_string(),
                 &rest,
             ));
@@ -2835,7 +2888,7 @@ fn review_views(
         if over.value {
             out.push(to_view_with(
                 format!(
-                    "{} weekly sets with {} - treat as over MRV and deload",
+                    "{} weekly sets with {}: treat as over MRV and deload",
                     p.weekly_sets,
                     if r.joint_ache {
                         "aching joints"
@@ -2852,7 +2905,7 @@ fn review_views(
             let adj = hypertrophy::recovery_adjusted_volume(p.weekly_sets, true);
             out.push(to_view_with(
                 format!(
-                    "Recovery is compromised - scale this week to {:.0}–{:.0} sets (70–80% of {}) and cut failure frequency",
+                    "Recovery is compromised. Scale this week to {:.0}–{:.0} sets (70–80% of {}) and cut failure frequency",
                     adj.value.0, adj.value.1, p.weekly_sets
                 ),
                 &adj,
@@ -2869,7 +2922,7 @@ fn review_views(
             );
             if hyb.value {
                 out.push(to_view_with(
-                    "Combined-training red flags persisting a week or more - insert a deload / recovery block".to_string(),
+                    "Combined-training red flags persisting a week or more: insert a deload / recovery block".to_string(),
                     &hyb,
                 ));
             }
@@ -2882,7 +2935,7 @@ fn review_views(
         let sub = hybrid::substitute_modality(r.interference_symptoms, running_optional);
         if sub.value {
             out.push(to_view_with(
-                "Interference symptoms with no race commitment - swap part of the run volume for cycling/rowing".to_string(),
+                "Interference symptoms with no race commitment: swap part of the run volume for cycling/rowing".to_string(),
                 &sub,
             ));
         }
@@ -2899,10 +2952,10 @@ fn review_views(
         );
         if let Some(o) = stall.value {
             let text = if o.transition_to_intermediate {
-                "Stalled again after the re-ramp - transition this lift to intermediate (weekly) progression".to_string()
+                "Stalled again after the re-ramp: transition this lift to intermediate (weekly) progression".to_string()
             } else {
                 format!(
-                    "3 straight failed sessions with recovery in order - deload this lift {:.0}% and re-ramp",
+                    "3 straight failed sessions with recovery in order: deload this lift {:.0}% and re-ramp",
                     o.deload_frac * 100.0
                 )
             };
@@ -2938,21 +2991,21 @@ fn latest_track_split(model: &Model) -> Option<f64> {
         })
 }
 
-/// M7: readiness window (days) after which a performance signal that can drive a
-/// load INCREASE is treated as stale and dropped. An engine heuristic, the KB
-/// gives no expiry parameter, chosen conservatively (a fortnight). Only the
+/// Readiness window (days) after which a performance signal that can drive a
+/// load INCREASE is treated as stale and dropped. An engine heuristic (the KB
+/// gives no expiry parameter), chosen conservatively (a fortnight). Only the
 /// increase-driving signals expire (see [`is_expirable_perf_signal`]); protective
 /// signals never do (HARD RULE 3).
 const PERF_SIGNAL_EXPIRY_DAYS: i64 = 14;
 
 /// Whether a readiness signal is a performance signal that can only drive (or is
-/// adjacent to) a load INCREASE, so expiring a stale one is CONSERVATIVE (M7).
+/// adjacent to) a load INCREASE, so expiring a stale one is CONSERVATIVE.
 /// Deliberately narrow: `Rpe`/`EstimatedOneRm` are the two `IncreaseLoadPct`
-/// producers, `BarVelocity` is the VBT-increase input. Everything else, the
+/// producers, `BarVelocity` is the VBT-increase input. Everything else (the
 /// velocity-loss stop, aerobic decoupling, wellness/HRV/RHR suppression, and all
-/// pain/illness/RED-S/soreness safety flags is protective, and dropping a
+/// pain/illness/RED-S/soreness safety flags) is protective, and dropping a
 /// protective signal is anti-conservative, so it is NEVER expired.
-/// M4: end-of-local-today boundary, unix seconds, a row with `observed_at`
+/// End-of-local-today boundary, unix seconds: a row with `observed_at`
 /// beyond it is FUTURE-dated (a mis-imported 2030 GPX) and must not anchor
 /// "current" windows (weekly-report cur-week, CTL/ATL last day). Same local-day
 /// boundary the run anchors / `session_logged` use. `None` when the shell has not
@@ -2982,9 +3035,9 @@ fn is_expirable_perf_signal(s: ReadinessSignal) -> bool {
 /// fills in the spike fraction the review omits, mirroring the positive-split
 /// fallback, it does NOT arm the gate on its own without a review.
 ///
-/// M6: the baseline is DERIVED at view() time from the current run history, the
+/// The baseline is DERIVED at view() time from the current run history (the
 /// longest OTHER run in the trailing 30-day window ending at this run's
-/// `observed_at`, NOT the per-row `longest_recent_km` baked at ingest. Deleting
+/// `observed_at`), NOT the per-row `longest_recent_km` baked at ingest. Deleting
 /// the run that seeded the baseline therefore re-arms the gate on the next view
 /// (the stored field stayed at, e.g., 30 km and silently disarmed it before).
 fn latest_run_spike_frac(model: &Model) -> Option<f64> {
@@ -3089,7 +3142,7 @@ fn build_training_load(model: &Model) -> Option<TrainingLoadView> {
     let mut daily: BTreeMap<i64, f64> = BTreeMap::new();
     let mut counted = 0u32;
     let mut skipped = 0u32;
-    // M4: a future-dated run (mis-imported 2030 GPX) would set the chain's `last`
+    // A future-dated run (mis-imported 2030 GPX) would set the chain's `last`
     // day into the future, sliding the whole MAX_LOAD_DAYS window off the real
     // history so CTL/ATL/TSB reflect only that phantom run. Drop it here.
     let cutoff = end_of_local_today_sec(model);
@@ -3143,9 +3196,9 @@ fn build_training_load(model: &Model) -> Option<TrainingLoadView> {
         days: span_days as u32,
         sessions_counted: counted,
         sessions_skipped: skipped,
-        method: "Lucia TRIMP (3-zone avg-HR) → EWMA CTL τ=42 d / ATL τ=7 d".to_string(),
+        method: "Heart-rate training load (Lucía 3-zone TRIMP), smoothed into a 42-day fitness average (CTL) and a 7-day fatigue average (ATL)".to_string(),
         summary: format!(
-            "Fitness (CTL) {:.1} · Fatigue (ATL) {:.1} · Form (TSB) {:+.1} over {} days - bookkeeping, not a performance predictor",
+            "Fitness (CTL) {:.1} · Fatigue (ATL) {:.1} · Form (TSB) {:+.1} over {} days: bookkeeping, not a performance predictor",
             round1(ctl),
             round1(atl),
             round1(tsb),
@@ -3180,7 +3233,7 @@ fn training_age_years(profile: Option<&Profile>) -> f64 {
 fn build_weekly_report(model: &Model) -> Vec<GuidanceView> {
     let mut rows = Vec::new();
     let runs = dated_runs(model);
-    // M4: anchor "this week" on the most recent NON-future logged week, so a
+    // Anchor "this week" on the most recent NON-future logged week, so a
     // mis-imported 2030 run can't hijack the weekly guidance until it's deleted.
     let cutoff = end_of_local_today_sec(model);
     let Some(cur_week) = runs
@@ -3215,7 +3268,7 @@ fn build_weekly_report(model: &Model) -> Vec<GuidanceView> {
             &mut rows,
             "Weekly volume",
             format!(
-                "Week-over-week {prev_km:.1} → {weekly_km:.1} km ({pct:+.0}%) - {}",
+                "Week-over-week {prev_km:.1} → {weekly_km:.1} km ({pct:+.0}%): {}",
                 if ok.value {
                     "within the increase cap"
                 } else {
@@ -3234,7 +3287,7 @@ fn build_weekly_report(model: &Model) -> Vec<GuidanceView> {
                 &mut rows,
                 "Weekly volume",
                 format!(
-                    "Volume up >30% over two weeks ({baseline2_km:.1} → {weekly_km:.1} km) - elevated injury risk, flatten the ramp"
+                    "Volume up >30% over two weeks ({baseline2_km:.1} → {weekly_km:.1} km): elevated injury risk, flatten the ramp"
                 ),
                 &flag,
             );
@@ -3248,7 +3301,7 @@ fn build_weekly_report(model: &Model) -> Vec<GuidanceView> {
         push_guidance(
             &mut rows,
             "Weekly volume",
-            "Shares below are counted by time-in-zone (avg HR) - the reporting default"
+            "Shares below are counted by time-in-zone (avg HR), the reporting default"
                 .to_string(),
             &method,
         );
@@ -3272,7 +3325,7 @@ fn build_weekly_report(model: &Model) -> Vec<GuidanceView> {
                 "Weekly shares within caps ({weekly_km:.1} km: long {long_run_km:.1}, T {threshold_km:.1}, I {interval_km:.1})"
             ),
             Some(running::CapViolation::LongRun) => format!(
-                "Long run {long_run_km:.1} km is {:.0}% of the week - over the ≤25% single-run cap",
+                "Long run {long_run_km:.1} km is {:.0}% of the week: over the ≤25% single-run cap",
                 long_run_km / weekly_km * 100.0
             ),
             Some(running::CapViolation::Threshold) => format!(
@@ -3296,7 +3349,7 @@ fn build_weekly_report(model: &Model) -> Vec<GuidanceView> {
                 &mut rows,
                 "Weekly volume",
                 format!(
-                    "Long run {long_run_km:.1} km exceeds 2× your average daily distance ({:.1} km) - outsized relative to the week",
+                    "Long run {long_run_km:.1} km exceeds 2× your average daily distance ({:.1} km): outsized relative to the week",
                     weekly_km / 7.0
                 ),
                 &daily_avg,
@@ -3337,7 +3390,7 @@ fn build_weekly_report(model: &Model) -> Vec<GuidanceView> {
             &mut rows,
             "Intensity",
             format!(
-                "Easy (Z1) share {:.0}% of run time - {}",
+                "Easy (Z1) share {:.0}% of run time: {}",
                 frac * 100.0,
                 if floor.value {
                     "≥80% floor met"
@@ -3371,7 +3424,7 @@ fn build_weekly_report(model: &Model) -> Vec<GuidanceView> {
             &mut rows,
             "Intensity",
             format!(
-                "{} hard (Z3) session{} this week - {}",
+                "{} hard (Z3) session{} this week: {}",
                 quality.len(),
                 if quality.len() == 1 { "" } else { "s" },
                 if ok.value {
@@ -3396,7 +3449,7 @@ fn build_weekly_report(model: &Model) -> Vec<GuidanceView> {
                 &mut rows,
                 "Hybrid",
                 format!(
-                    "Running volume up >10% ({prev_km:.1} → {weekly_km:.1} km) while lifting - cap the combined ramp"
+                    "Running volume up >10% ({prev_km:.1} → {weekly_km:.1} km) while lifting: cap the combined ramp"
                 ),
                 &ok,
             );
@@ -3444,7 +3497,7 @@ fn build_weekly_report(model: &Model) -> Vec<GuidanceView> {
                     &mut rows,
                     "Hybrid",
                     format!(
-                        "Heavy leg work and a hard/long run only {h:.0} h apart - keep ≥24 h between them (residual fatigue lasts 24–48 h)"
+                        "Heavy leg work and a hard/long run only {h:.0} h apart: keep ≥24 h between them (residual fatigue lasts 24–48 h)"
                     ),
                     &gap_ok,
                 );
@@ -3503,7 +3556,7 @@ fn build_lift_audit(model: &Model) -> Vec<GuidanceView> {
                 &mut rows,
                 "Session audit",
                 format!(
-                    "{exercise}: {total_reps} total reps @ ~{mean_pct:.0}%1RM - {}",
+                    "{exercise}: {total_reps} total reps @ ~{mean_pct:.0}%1RM: {}",
                     if ok.value {
                         "within Prilepin's optimal range"
                     } else {
@@ -3521,7 +3574,7 @@ fn build_lift_audit(model: &Model) -> Vec<GuidanceView> {
                     &mut rows,
                     "Session audit",
                     format!(
-                        "{exercise}: ~{mean_pct:.0}%1RM sits below the ~30%1RM effective floor - add load"
+                        "{exercise}: ~{mean_pct:.0}%1RM sits below the ~30%1RM effective floor. Add load"
                     ),
                     &floor,
                 );
@@ -3543,7 +3596,7 @@ fn build_lift_audit(model: &Model) -> Vec<GuidanceView> {
                     &mut rows,
                     "Session audit",
                     format!(
-                        "A set was logged at ~{worst_rir} RIR - beyond 5 RIR the estimate is unreliable (error >2 reps); train closer to failure to calibrate"
+                        "A set was logged at ~{worst_rir} RIR. Beyond 5 RIR the estimate is unreliable (error >2 reps); train closer to failure to calibrate"
                     ),
                     &rel,
                 );
@@ -3564,7 +3617,7 @@ fn build_lift_audit(model: &Model) -> Vec<GuidanceView> {
                 &mut rows,
                 "Session audit",
                 format!(
-                    "High-rep sets make e1RM formulas unreliable - prefer a {}–{}-rep test set to gauge strength",
+                    "High-rep sets make e1RM formulas unreliable. Prefer a {}–{}-rep test set to gauge strength",
                     test.value.0, test.value.1
                 ),
                 &test,
@@ -3588,7 +3641,7 @@ fn build_lift_audit(model: &Model) -> Vec<GuidanceView> {
                 &mut rows,
                 "Session audit",
                 format!(
-                    "Depth jumps: squat e1RM {squat_e1rm:.0} kg vs {bw:.0} kg BW - {}",
+                    "Depth jumps: squat e1RM {squat_e1rm:.0} kg vs {bw:.0} kg BW: {}",
                     if ready.value {
                         "≥1.5× bodyweight, cleared for depth jumps"
                     } else {
@@ -3613,7 +3666,7 @@ fn build_cooper(distance_m_12min: f64) -> Vec<GuidanceView> {
         push_guidance(
             &mut rows,
             "Cooper test",
-            "12-minute distance too short to estimate VO2max - the formula floor is ~505 m"
+            "12-minute distance too short to estimate VO2max: the formula floor is ~505 m"
                 .to_string(),
             &g,
         );
@@ -3693,7 +3746,7 @@ fn build_critical_speed(efforts: &[CsEffortIn]) -> Vec<GuidanceView> {
                     "efforts must differ in duration to fit a slope"
                 }
                 load::CsProtocolViolation::NegativeDPrime => {
-                    "fitted D′ is negative - a trial was likely not maximal; re-test"
+                    "fitted D′ is negative. A trial was likely not maximal; re-test"
                 }
             };
             push_guidance(
@@ -3720,12 +3773,12 @@ fn build_apre(q: &ApreQuery) -> Vec<GuidanceView> {
     };
     let text = if lo == 0.0 && hi == 0.0 {
         format!(
-            "{label}: {} reps on the AMRAP set at {:.0} lb - hold the load",
+            "{label}: {} reps on the AMRAP set at {:.0} lb: hold the load",
             q.reps, q.current_load_lb
         )
     } else {
         format!(
-            "{label}: {} reps on the AMRAP set at {:.0} lb - adjust next load {lo:+.0} to {hi:+.0} lb",
+            "{label}: {} reps on the AMRAP set at {:.0} lb: adjust next load {lo:+.0} to {hi:+.0} lb",
             q.reps, q.current_load_lb
         )
     };
@@ -3751,15 +3804,15 @@ fn build_trend(r: &SessionReview) -> Option<AdjustmentView> {
     );
     let text = match t.value {
         feedback::TrendSummary::Improving => {
-            "Rolling trend is up - consistency is paying off; set the next process goal"
+            "Rolling trend is up. Consistency is paying off; set the next process goal"
         }
         feedback::TrendSummary::Plateau => {
-            "Flat 4+ weeks - normal consolidation; change ONE variable and protect the routine"
+            "Flat 4+ weeks: normal consolidation; change ONE variable and protect the routine"
         }
         feedback::TrendSummary::LoadExplainedDecline => {
-            "The dip lines up with load/recovery, not lost fitness - recovery first; consider a deload week"
+            "The dip lines up with load/recovery, not lost fitness. Recovery first; consider a deload week"
         }
-        feedback::TrendSummary::Stable => "Trend steady - keep stacking consistent weeks",
+        feedback::TrendSummary::Stable => "Trend steady: keep stacking consistent weeks",
     };
     Some(to_view_with(text.to_string(), &t))
 }
@@ -3823,10 +3876,10 @@ fn build_autoreg_source(inputs: &[ReadinessInput]) -> Option<AdjustmentView> {
     let text = match src.value {
         autoreg::AutoregSource::HrvRolling => "Autoregulating on the 7-day rolling HRV gate",
         autoreg::AutoregSource::SubjectivePlusPerformance => {
-            "No usable HRV - autoregulating on subjective wellness + performance"
+            "No usable HRV: autoregulating on subjective wellness + performance"
         }
         autoreg::AutoregSource::PerformanceOnlyHold => {
-            "No HRV or wellness data - performance-only mode: hold loads, no progression beyond plan"
+            "No HRV or wellness data: performance-only mode: hold loads, no progression beyond plan"
         }
     };
     Some(to_view_with(text.to_string(), &src))
@@ -3871,11 +3924,6 @@ fn build_feedback(
     let verbosity = feedback::verbosity_for_experience(advanced_user).value;
     let anchor = feedback::mastery_anchor_required(resolved.value).value;
 
-    // feedback-026 tone-by-planned-intent, when the review states the plan.
-    let tone = r
-        .planned_hard
-        .map(|hard| format!("{:?}", feedback::planned_intensity_tone(hard).value));
-
     // Myth guards (HARD RULE 2): the retracted 2.9:1 positivity ratio and any
     // hard ACWR injury-prediction claim are blocked in the registry: the
     // feedback pipeline consults the guards so neither can ever shape copy.
@@ -3890,6 +3938,7 @@ fn build_feedback(
 
     FeedbackView {
         category: format!("{:?}", resolved.value),
+        category_label: feedback_category_label(resolved.value).to_string(),
         message,
         suppresses_praise: resolved.value.suppresses_competing_praise(),
         grade: format!("{:?}", resolved.evidence.grade),
@@ -3902,8 +3951,26 @@ fn build_feedback(
         rationale_mandatory: verbosity.rationale_mandatory,
         minimize_jargon: verbosity.minimize_jargon,
         anchor_mastery: anchor,
-        tone,
         why: why_from(None, &resolved),
+    }
+}
+
+/// Human overline for the feedback card face (File 05 category naming). Exported
+/// from core so a new [`FeedbackCategory`] variant can never silently lose its
+/// overline in the shell (the labels used to be hand-maintained in Kotlin).
+fn feedback_category_label(cat: FeedbackCategory) -> &'static str {
+    match cat {
+        FeedbackCategory::ConcernInjury => "Injury concern",
+        FeedbackCategory::ConcernRecovery => "Recovery concern",
+        FeedbackCategory::ConcernBehavior => "Training pattern",
+        FeedbackCategory::DangerousProgression => "Progression warning",
+        FeedbackCategory::IntensityDiscipline => "Intensity",
+        FeedbackCategory::PositiveExecution => "Pacing",
+        FeedbackCategory::InformationalNeutral => "Note",
+        FeedbackCategory::CorrectiveProcess => "Adjustment",
+        FeedbackCategory::PositiveMastery => "Mastery",
+        FeedbackCategory::ContextualBadDay => "Off day",
+        FeedbackCategory::ProgressionNudge => "Progression",
     }
 }
 
@@ -3912,32 +3979,32 @@ fn build_feedback(
 fn feedback_message(cat: FeedbackCategory) -> &'static str {
     match cat {
         FeedbackCategory::ConcernInjury => {
-            "Stop training this area and see a professional - this looks like a bone-stress red flag."
+            "Stop training this area and see a professional. This looks like a bone-stress red flag."
         }
         FeedbackCategory::ConcernRecovery => {
             "Several overtraining signals are stacking up. Back off and prioritize recovery this week."
         }
         FeedbackCategory::ConcernBehavior => {
-            "This pattern looks compulsive. A rest day is not lost progress - consider stepping back."
+            "This pattern looks compulsive. A rest day is not lost progress. Consider stepping back."
         }
         FeedbackCategory::DangerousProgression => {
             "That was a large single-session jump. Rein in the progression to protect connective tissue."
         }
         FeedbackCategory::IntensityDiscipline => {
-            "Easy days should stay easy - dial the effort back to build the aerobic base."
+            "Easy days should stay easy. Dial the effort back to build the aerobic base."
         }
         FeedbackCategory::PositiveExecution => "Well-paced, durable effort. Nicely controlled.",
         FeedbackCategory::InformationalNeutral => {
-            "Mild aerobic fatigue noted - nothing to correct."
+            "Mild aerobic fatigue noted: nothing to correct."
         }
         FeedbackCategory::CorrectiveProcess => {
-            "Missed target is data, not failure. Here's an adjustment for next time - your call."
+            "Missed target is data, not failure. Here's an adjustment for next time, your call."
         }
         FeedbackCategory::PositiveMastery => {
             "Target hit at planned cost. You've earned the next planned progression."
         }
         FeedbackCategory::ContextualBadDay => {
-            "Off day - normal variation. The stimulus still counts; no guilt."
+            "Off day: normal variation. The stimulus still counts; no guilt."
         }
         FeedbackCategory::ProgressionNudge => {
             "That was well under target effort. Room to add load next session."
@@ -3982,21 +4049,114 @@ fn push_guidance_basis<T>(
     });
 }
 
+/// Human label for a running goal distance, mirroring the Kotlin
+/// `GoalDistance.label` (ProfileEditor.kt) exactly. Used in guidance copy so the
+/// row never leaks the raw Debug enum name (e.g. "FiveK", "C25k").
+fn goal_distance_label(g: GoalDistance) -> &'static str {
+    match g {
+        GoalDistance::General => "General fitness",
+        GoalDistance::C25k => "Couch to 5K",
+        GoalDistance::FiveK => "5K",
+        GoalDistance::TenK => "10K",
+        GoalDistance::HalfMarathon => "Half marathon",
+        GoalDistance::Marathon => "Marathon",
+    }
+}
+
+/// Human label for a lift goal, mirroring the Kotlin `LiftGoal.label`
+/// (ProfileEditor.kt) exactly. Used in guidance copy so the row never leaks the
+/// raw Debug enum name (e.g. "MaxStrength").
+fn lift_goal_label(g: LiftGoal) -> &'static str {
+    match g {
+        LiftGoal::MaxStrength => "Max strength",
+        LiftGoal::Power => "Power",
+        LiftGoal::Hypertrophy => "Hypertrophy",
+    }
+}
+
+/// Human label for a training age, so guidance copy never leaks the raw Debug
+/// enum name (e.g. a future `LateIntermediate` would render as PascalCase).
+fn training_age_label(ta: individualization::TrainingAge) -> &'static str {
+    match ta {
+        individualization::TrainingAge::Novice => "Novice",
+        individualization::TrainingAge::Intermediate => "Intermediate",
+        individualization::TrainingAge::Advanced => "Advanced",
+    }
+}
+
 /// Run the programming engine over the profile, producing evidence-cited rows.
 fn build_guidance(p: &Profile) -> Vec<GuidanceView> {
     let mut rows = Vec::new();
 
+    build_safety_guidance(p, &mut rows);
+
+    let lifting = p.weekly_sets > 0;
+    let running = p.running_days_per_week > 0;
+
+    let age_r = individualization::training_age_from_cadence(p.progression_cadence);
+    let age = age_r.value;
+    push_guidance(
+        &mut rows,
+        "Profile",
+        format!("Training age: {}", training_age_label(age)),
+        &age_r,
+    );
+
+    if lifting {
+        build_strength_guidance(p, age, &mut rows);
+    }
+
+    let hvs = individualization::high_volume_sensitivity(age);
+    push_guidance(
+        &mut rows,
+        "Individualization",
+        format!(
+            "High-volume sensitivity: {}",
+            if hvs.value {
+                "yes: cap added volume"
+            } else {
+                "no"
+            }
+        ),
+        &hvs,
+    );
+
+    // Representative training-age->years count, reused by the running weekly
+    // volume-increase cap and the hybrid lower-body interference check. The KB
+    // caps only distinguish sub-1-year runners, so no precise figure is needed.
+    let age_years = match age {
+        individualization::TrainingAge::Novice => 0.5,
+        _ => 2.0,
+    };
+
+    if running {
+        build_running_guidance(p, age, age_years, &mut rows);
+    }
+
+    build_environment_guidance(p, &mut rows);
+    build_reentry_guidance(p, &mut rows);
+
+    if lifting && running {
+        build_hybrid_guidance(p, age_years, &mut rows);
+    }
+
+    rows
+}
+
+/// Leading Safety block: onboarding gates, pregnancy avoid-list, and the
+/// high-mileage bone-stress / energy-availability guards (all `p`-gated).
+fn build_safety_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
     // Stage-0 onboarding gates lead every guidance list (File 08 onboard-050:
     // screen BEFORE any prescription; safety-000: never overridden by goals).
     // Each fired gate renders as a Safety row with its deferral reason.
     for gate in individualization::onboarding_gates(&p.health) {
-        push_guidance(&mut rows, "Safety", describe(&gate.value), &gate);
+        push_guidance(rows, "Safety", describe(&gate.value), &gate);
     }
     // Pregnancy avoid-list (safety-047) travels with the safety-045 deferral.
     if p.health.pregnant {
         let pre = individualization::pregnancy_precautions();
         push_guidance(
-            &mut rows,
+            rows,
             "Safety",
             format!(
                 "Pregnancy: avoid prolonged supine positioning, overheating, contact/fall-risk activities, scuba diving, altitude above {:.0} m, and breath-holding (Valsalva) during strength work",
@@ -4013,10 +4173,10 @@ fn build_guidance(p: &Profile) -> Vec<GuidanceView> {
     let bsi = hybrid::bsi_surveillance_flag(p.running_km_per_week);
     if bsi.value {
         push_guidance(
-            &mut rows,
+            rows,
             "Safety",
             format!(
-                "Bone-stress-injury surveillance: {:.0} km/wk exceeds ~64 km - monitor for focal bone pain; keep energy availability adequate",
+                "Bone-stress-injury surveillance: {:.0} km/wk exceeds ~64 km. Monitor for focal bone pain; keep energy availability adequate",
                 p.running_km_per_week
             ),
             &bsi,
@@ -4026,645 +4186,650 @@ fn build_guidance(p: &Profile) -> Vec<GuidanceView> {
         let ea = hybrid::energy_availability_guard(true, false, p.female);
         if ea.value {
             push_guidance(
-                &mut rows,
+                rows,
                 "Safety",
-                "Energy-availability guard (RED-S/LEA): high endurance volume raises under-fueling risk - keep intake matched to load".to_string(),
+                "Energy-availability guard (RED-S/LEA): high endurance volume raises under-fueling risk. Keep intake matched to load".to_string(),
                 &ea,
             );
         }
     }
+}
 
-    let lifting = p.weekly_sets > 0;
-    let running = p.running_days_per_week > 0;
-
-    let age_r = individualization::training_age_from_cadence(p.progression_cadence);
-    let age = age_r.value;
+/// Strength + Hypertrophy rows for a lifting profile.
+fn build_strength_guidance(
+    p: &Profile,
+    age: individualization::TrainingAge,
+    rows: &mut Vec<GuidanceView>,
+) {
+    let sd = individualization::strength_defaults(age);
     push_guidance(
-        &mut rows,
-        "Profile",
-        format!("Training age: {age:?}"),
-        &age_r,
+        rows,
+        "Strength",
+        format!(
+            "Defaults: {}%1RM, {}×/muscle/wk, {} sets/muscle",
+            sd.value.intensity_pct_1rm, sd.value.freq_per_muscle, sd.value.sets_per_muscle
+        ),
+        &sd,
     );
 
-    if lifting {
-        let sd = individualization::strength_defaults(age);
-        push_guidance(
-            &mut rows,
-            "Strength",
-            format!(
-                "Defaults: {}%1RM, {}×/muscle/wk, {} sets/muscle",
-                sd.value.intensity_pct_1rm, sd.value.freq_per_muscle, sd.value.sets_per_muscle
-            ),
-            &sd,
-        );
-
-        let lr = strength::loading_rx(p.lift_goal);
-        push_guidance(
-            &mut rows,
-            "Strength",
-            format!(
-                "{:?} loading: {}-{}%1RM, {}-{} reps, {}-{} sets, RIR {}-{}",
-                p.lift_goal,
-                lr.value.pct_1rm.0,
-                lr.value.pct_1rm.1,
-                lr.value.reps.0,
-                lr.value.reps.1,
-                lr.value.sets.0,
-                lr.value.sets.1,
-                lr.value.rir.0,
-                lr.value.rir.1
-            ),
-            &lr,
-        );
-
-        let vlt = strength::vl_termination_threshold(p.lift_goal);
-        push_guidance(
-            &mut rows,
-            "Strength",
-            format!(
-                "Velocity-loss set cutoff for {:?}: end the set at ~{:.0}% bar-speed loss",
-                p.lift_goal,
-                vlt.value * 100.0
-            ),
-            &vlt,
-        );
-
-        // strength-040 1RM-test gate, stated educationally (the all-clear call
-        // only inherits the safety-critical citation; the conditions are the row).
-        let novice = matches!(age, individualization::TrainingAge::Novice);
-        let test_gate = strength::one_rm_test_allowed(strength::OneRmTestContext {
-            technically_proficient: true,
-            adequately_recovered: true,
-            warmed_up: true,
-            is_novice: novice,
-            supervised: true,
-            spinal_loading: true,
-            bracing_competent: true,
-        });
-        push_guidance(
-            &mut rows,
-            "Strength",
-            format!(
-                "Test a true 1RM only when technically proficient, recovered, and warmed up{}; spinal lifts need bracing competence",
-                if novice {
-                    " - as a novice, only supervised (prefer the estimated 1RM)"
-                } else {
-                    ""
-                }
-            ),
-            &test_gate,
-        );
-
-        // strength-040 novice progression-jump caps between attempts.
-        if novice {
-            let upper = strength::novice_load_jump_cap_frac(true);
-            let lower = strength::novice_load_jump_cap_frac(false);
-            push_guidance(
-                &mut rows,
-                "Strength",
-                format!(
-                    "Novice load jumps: upper body +{:.1}–{:.0}%, lower body +{:.0}–{:.0}% per step",
-                    upper.value.0 * 100.0,
-                    upper.value.1 * 100.0,
-                    lower.value.0 * 100.0,
-                    lower.value.1 * 100.0
-                ),
-                &upper,
-            );
-        }
-
-        let pm = strength::periodization_model(age);
-        push_guidance(
-            &mut rows,
-            "Strength",
-            format!("Periodization model: {:?}", pm.value),
-            &pm,
-        );
-
-        // Surface the actual phase-by-phase prescription for the athlete's model, so
-        // the periodization label above becomes an actionable mesocycle plan. Only
-        // Linear and Block have phase tables in the source; DUP does not, so it is
-        // left as the label only.
-        let fmt_phase = |rx: &strength::PhaseRx| -> String {
-            let mut parts = Vec::new();
-            if let Some((lo, hi)) = rx.pct_1rm {
-                parts.push(format!("{lo}-{hi}%1RM"));
-            }
-            if let (Some((slo, shi)), Some((rlo, rhi))) = (rx.sets, rx.reps) {
-                parts.push(format!("{slo}-{shi}×{rlo}-{rhi}"));
-            } else if let Some((rlo, rhi)) = rx.reps {
-                parts.push(format!("{rlo}-{rhi} reps"));
-            }
-            if parts.is_empty() {
-                parts.push("maintain intensity (taper template)".to_string());
-            }
-            format!("{} · wk {}-{}", parts.join(", "), rx.weeks.0, rx.weeks.1)
-        };
-        match pm.value {
-            strength::PeriodizationModel::Linear => {
-                use strength::LinearPhase::*;
-                for (name, phase) in [
-                    ("Base", Base),
-                    ("Build", Build),
-                    ("Peak", Peak),
-                    ("Taper", Taper),
-                ] {
-                    let ph = strength::linear_phase_rx(phase);
-                    push_guidance(
-                        &mut rows,
-                        "Strength",
-                        format!("Linear {name}: {}", fmt_phase(&ph.value)),
-                        &ph,
-                    );
-                }
-            }
-            strength::PeriodizationModel::Block => {
-                use strength::BlockPhase::*;
-                for (name, phase) in [
-                    ("Accumulation", Accumulation),
-                    ("Transmutation", Transmutation),
-                    ("Realization", Realization),
-                ] {
-                    let ph = strength::block_phase_rx(phase);
-                    push_guidance(
-                        &mut rows,
-                        "Strength",
-                        format!("Block {name}: {}", fmt_phase(&ph.value)),
-                        &ph,
-                    );
-                }
-            }
-            strength::PeriodizationModel::Dup | strength::PeriodizationModel::Conjugate => {}
-        }
-
-        // Double-progression load jump, only actionable for a novice on linear
-        // progression; intermediate/advanced lifters no longer add fixed load every
-        // session, so showing it to them would misdescribe their programming.
-        if matches!(age, individualization::TrainingAge::Novice) {
-            let inc = individualization::novice_load_increment();
-            push_guidance(
-                &mut rows,
-                "Strength",
-                format!(
-                    "Novice load jump: +{:.1} kg upper / +{:.1} kg lower per session (double progression)",
-                    inc.value.upper_kg, inc.value.lower_kg
-                ),
-                &inc,
-            );
-        } else {
-            // Past the novice phase the fixed per-session jump no longer applies;
-            // progression moves to a per-week percentage of load. Surface both body
-            // regions since the bands differ (upper is more conservative).
-            let upper = strength::weekly_pct_increment(true);
-            let lower = strength::weekly_pct_increment(false);
-            // Render each bound faithfully: some bands carry a half-percent (e.g.
-            // 2.5%), so a whole-number format would understate the cited value. Drop
-            // the decimal only when the bound is whole.
-            let pct = |frac: f64| -> String {
-                let v = frac * 100.0;
-                if v.fract().abs() < 1e-9 {
-                    format!("{v:.0}")
-                } else {
-                    format!("{v:.1}")
-                }
-            };
-            push_guidance(
-                &mut rows,
-                "Strength",
-                format!(
-                    "Weekly load increment: +{}-{}% upper / +{}-{}% lower per successful week",
-                    pct(upper.value.0),
-                    pct(upper.value.1),
-                    pct(lower.value.0),
-                    pct(lower.value.1)
-                ),
-                &upper,
-            );
-        }
-
-        // Prilepin volume ceiling at the midpoint of the goal's loading intensity -
-        // the reps/set + optimal-total governor that keeps quality high per zone.
-        // Kept adjacent to the other Strength rows (before the Power block below) so
-        // the section stays contiguous: the shell suppresses a repeated section
-        // header only for consecutive same-section rows.
-        let pct_mid = f64::from(lr.value.pct_1rm.0 + lr.value.pct_1rm.1) / 2.0;
-        if let Some(pr) = strength::prilepin_for(pct_mid) {
-            let pr = strength::recommend(*pr, "STR-PRILEPIN-001");
-            push_guidance(
-                &mut rows,
-                "Strength",
-                format!(
-                    "Prilepin @~{:.0}%1RM: {}-{} reps/set, optimal {} total ({}-{} range)",
-                    pct_mid,
-                    pr.value.reps_per_set.0,
-                    pr.value.reps_per_set.1,
-                    pr.value.optimal_total,
-                    pr.value.total_range.0,
-                    pr.value.total_range.1
-                ),
-                &pr,
-            );
-        }
-
-        // Plyometric foot-contact ceiling, only relevant when the goal is Power.
-        // Placed after all Strength rows so the "Power" section forms its own
-        // contiguous block rather than splitting Strength in two.
-        if p.lift_goal == LiftGoal::Power {
-            let plyo = strength::plyo_foot_contact_cap(age);
-            push_guidance(
-                &mut rows,
-                "Power",
-                format!(
-                    "Plyo foot-contact cap: {}-{}/session (progress volume OR intensity, not both)",
-                    plyo.value.0, plyo.value.1
-                ),
-                &plyo,
-            );
-        }
-
-        let fr = hypertrophy::frequency_for_weekly_sets(p.weekly_sets);
-        push_guidance(
-            &mut rows,
-            "Hypertrophy",
-            format!(
-                "{} weekly sets → {}×/wk, {} sets/session",
-                p.weekly_sets,
-                fmt_u8_range(fr.value.freq.0, fr.value.freq.1),
-                fmt_u8_range(fr.value.per_session.0, fr.value.per_session.1)
-            ),
-            &fr,
-        );
-
-        let split = hypertrophy::needs_session_split(p.weekly_sets);
-        push_guidance(
-            &mut rows,
-            "Hypertrophy",
-            format!(
-                "{} weekly sets/muscle: {}",
-                p.weekly_sets,
-                if split.value {
-                    "split across ≥2 sessions/wk to keep per-session quality"
-                } else {
-                    "fit in one weekly session"
-                }
-            ),
-            &split,
-        );
-
-        // Rep/load prescription by exercise class. The frequency/volume rows above
-        // answer "how many sets"; this answers "how many reps and what load": the
-        // per-set target that was otherwise absent from the hypertrophy guidance.
-        // All three classes share one evidence source, so surface them together.
-        let heavy = hypertrophy::rep_load(hypertrophy::ExerciseClass::HeavyCompound);
-        let moderate = hypertrophy::rep_load(hypertrophy::ExerciseClass::ModerateCompound);
-        let iso = hypertrophy::rep_load(hypertrophy::ExerciseClass::Isolation);
-        push_guidance(
-            &mut rows,
-            "Hypertrophy",
-            format!(
-                "Rep/load: heavy compound {}-{} @{}-{}%1RM, moderate {}-{} @{}-{}%, isolation {}-{} @{}-{}%",
-                heavy.value.reps.0,
-                heavy.value.reps.1,
-                heavy.value.pct_1rm.0,
-                heavy.value.pct_1rm.1,
-                moderate.value.reps.0,
-                moderate.value.reps.1,
-                moderate.value.pct_1rm.0,
-                moderate.value.pct_1rm.1,
-                iso.value.reps.0,
-                iso.value.reps.1,
-                iso.value.pct_1rm.0,
-                iso.value.pct_1rm.1
-            ),
-            &heavy,
-        );
-
-        let cap = hypertrophy::cap_weekly_growth_target(p.weekly_sets);
-        push_guidance(
-            &mut rows,
-            "Hypertrophy",
-            format!("Growth-target weekly sets capped at {}", cap.value),
-            &cap,
-        );
-
-        let mev = hypertrophy::mev_sets_by_training_age(age);
-        push_guidance(
-            &mut rows,
-            "Hypertrophy",
-            format!(
-                "MEV for {age:?}: {}-{} sets/muscle/wk",
-                mev.value.0, mev.value.1
-            ),
-            &mev,
-        );
-    }
-
-    let hvs = individualization::high_volume_sensitivity(age);
+    let lr = strength::loading_rx(p.lift_goal);
+    // The Power band's numeric RIR (3-5) is an expert-opinion encoding
+    // (STR-PWR-RIR-001), not a KB number; this row cites STR-PWR-001
+    // (Moderate), so state only the KB's qualitative power instruction.
+    let rir_clause = if p.lift_goal == LiftGoal::Power {
+        "never to failure; stop before bar speed drops".to_string()
+    } else {
+        format!("RIR {}-{}", lr.value.rir.0, lr.value.rir.1)
+    };
     push_guidance(
-        &mut rows,
-        "Individualization",
+        rows,
+        "Strength",
         format!(
-            "High-volume sensitivity: {}",
-            if hvs.value {
-                "yes - cap added volume"
+            "{} loading: {}-{}%1RM, {}-{} reps, {}-{} sets, {}",
+            lift_goal_label(p.lift_goal),
+            lr.value.pct_1rm.0,
+            lr.value.pct_1rm.1,
+            lr.value.reps.0,
+            lr.value.reps.1,
+            lr.value.sets.0,
+            lr.value.sets.1,
+            rir_clause
+        ),
+        &lr,
+    );
+
+    let vlt = strength::vl_termination_threshold(p.lift_goal);
+    push_guidance(
+        rows,
+        "Strength",
+        format!(
+            "Velocity-loss set cutoff for {}: end the set at ~{:.0}% bar-speed loss",
+            lift_goal_label(p.lift_goal),
+            vlt.value * 100.0
+        ),
+        &vlt,
+    );
+
+    // strength-040 1RM-test gate, stated educationally (the all-clear call
+    // only inherits the safety-critical citation; the conditions are the row).
+    let novice = matches!(age, individualization::TrainingAge::Novice);
+    let test_gate = strength::one_rm_test_allowed(strength::OneRmTestContext {
+        technically_proficient: true,
+        adequately_recovered: true,
+        warmed_up: true,
+        is_novice: novice,
+        supervised: true,
+        spinal_loading: true,
+        bracing_competent: true,
+    });
+    push_guidance(
+        rows,
+        "Strength",
+        format!(
+            "Test a true 1RM only when technically proficient, recovered, and warmed up{}; spinal lifts need bracing competence",
+            if novice {
+                ", as a novice, only supervised (prefer the estimated 1RM)"
             } else {
-                "no"
+                ""
             }
         ),
-        &hvs,
+        &test_gate,
     );
 
-    // Representative training-age->years count, reused by the running weekly
-    // volume-increase cap and the hybrid lower-body interference check. The KB
-    // caps only distinguish sub-1-year runners, so no precise figure is needed.
-    let age_years = match age {
-        individualization::TrainingAge::Novice => 0.5,
-        _ => 2.0,
-    };
-    if running {
-        let gp = running::goal_week_plan(p.goal_distance, p.advanced);
+    // strength-040 novice progression-jump caps between attempts.
+    if novice {
+        let upper = strength::novice_load_jump_cap_frac(true);
+        let lower = strength::novice_load_jump_cap_frac(false);
         push_guidance(
-            &mut rows,
+            rows,
+            "Strength",
+            format!(
+                "Novice load jumps: upper body +{:.1}–{:.0}%, lower body +{:.0}–{:.0}% per step",
+                upper.value.0 * 100.0,
+                upper.value.1 * 100.0,
+                lower.value.0 * 100.0,
+                lower.value.1 * 100.0
+            ),
+            &upper,
+        );
+    }
+
+    let pm = strength::periodization_model(age);
+    // Human label instead of the raw Debug enum (which leaked "Dup" etc.).
+    let pm_label = match pm.value {
+        strength::PeriodizationModel::Linear => "linear",
+        strength::PeriodizationModel::Dup => "daily undulating (DUP)",
+        strength::PeriodizationModel::Block => "block",
+        strength::PeriodizationModel::Conjugate => "conjugate",
+    };
+    push_guidance(
+        rows,
+        "Strength",
+        format!("Periodization model: {pm_label}"),
+        &pm,
+    );
+
+    // Surface the actual phase-by-phase prescription for the athlete's model, so
+    // the periodization label above becomes an actionable mesocycle plan. Only
+    // Linear and Block have phase tables in the source; DUP does not, so it is
+    // left as the label only.
+    let fmt_phase = |rx: &strength::PhaseRx| -> String {
+        let mut parts = Vec::new();
+        if let Some((lo, hi)) = rx.pct_1rm {
+            parts.push(format!("{lo}-{hi}%1RM"));
+        }
+        if let (Some((slo, shi)), Some((rlo, rhi))) = (rx.sets, rx.reps) {
+            parts.push(format!("{slo}-{shi}×{rlo}-{rhi}"));
+        } else if let Some((rlo, rhi)) = rx.reps {
+            parts.push(format!("{rlo}-{rhi} reps"));
+        }
+        if parts.is_empty() {
+            parts.push("maintain intensity (taper template)".to_string());
+        }
+        format!("{} · wk {}-{}", parts.join(", "), rx.weeks.0, rx.weeks.1)
+    };
+    match pm.value {
+        strength::PeriodizationModel::Linear => {
+            use strength::LinearPhase::*;
+            for (name, phase) in [
+                ("Base", Base),
+                ("Build", Build),
+                ("Peak", Peak),
+                ("Taper", Taper),
+            ] {
+                let ph = strength::linear_phase_rx(phase);
+                push_guidance(
+                    rows,
+                    "Strength",
+                    format!("Linear {name}: {}", fmt_phase(&ph.value)),
+                    &ph,
+                );
+            }
+        }
+        strength::PeriodizationModel::Block => {
+            use strength::BlockPhase::*;
+            for (name, phase) in [
+                ("Accumulation", Accumulation),
+                ("Transmutation", Transmutation),
+                ("Realization", Realization),
+            ] {
+                let ph = strength::block_phase_rx(phase);
+                push_guidance(
+                    rows,
+                    "Strength",
+                    format!("Block {name}: {}", fmt_phase(&ph.value)),
+                    &ph,
+                );
+            }
+        }
+        strength::PeriodizationModel::Dup | strength::PeriodizationModel::Conjugate => {}
+    }
+
+    // Double-progression load jump, only actionable for a novice on linear
+    // progression; intermediate/advanced lifters no longer add fixed load every
+    // session, so showing it to them would misdescribe their programming.
+    if matches!(age, individualization::TrainingAge::Novice) {
+        let inc = individualization::novice_load_increment();
+        push_guidance(
+            rows,
+            "Strength",
+            format!(
+                "Novice load jump: +{:.1} kg upper / +{:.1} kg lower per session (double progression)",
+                inc.value.upper_kg, inc.value.lower_kg
+            ),
+            &inc,
+        );
+    } else {
+        // Past the novice phase the fixed per-session jump no longer applies;
+        // progression moves to a per-week percentage of load. Surface both body
+        // regions since the bands differ (upper is more conservative).
+        let upper = strength::weekly_pct_increment(true);
+        let lower = strength::weekly_pct_increment(false);
+        // Render each bound faithfully: some bands carry a half-percent (e.g.
+        // 2.5%), so a whole-number format would understate the cited value. Drop
+        // the decimal only when the bound is whole.
+        let pct = |frac: f64| -> String {
+            let v = frac * 100.0;
+            if v.fract().abs() < 1e-9 {
+                format!("{v:.0}")
+            } else {
+                format!("{v:.1}")
+            }
+        };
+        push_guidance(
+            rows,
+            "Strength",
+            format!(
+                "Weekly load increment: +{}-{}% upper / +{}-{}% lower per successful week",
+                pct(upper.value.0),
+                pct(upper.value.1),
+                pct(lower.value.0),
+                pct(lower.value.1)
+            ),
+            &upper,
+        );
+    }
+
+    // Prilepin volume ceiling at the midpoint of the goal's loading intensity -
+    // the reps/set + optimal-total governor that keeps quality high per zone.
+    // Kept adjacent to the other Strength rows (before the Power block below) so
+    // the section stays contiguous: the shell suppresses a repeated section
+    // header only for consecutive same-section rows.
+    let pct_mid = f64::from(lr.value.pct_1rm.0 + lr.value.pct_1rm.1) / 2.0;
+    if let Some(pr) = strength::prilepin_for(pct_mid) {
+        let pr = graded(*pr, "STR-PRILEPIN-001");
+        push_guidance(
+            rows,
+            "Strength",
+            format!(
+                "Prilepin @~{:.0}%1RM: {}-{} reps/set, optimal {} total ({}-{} range)",
+                pct_mid,
+                pr.value.reps_per_set.0,
+                pr.value.reps_per_set.1,
+                pr.value.optimal_total,
+                pr.value.total_range.0,
+                pr.value.total_range.1
+            ),
+            &pr,
+        );
+    }
+
+    // Plyometric foot-contact ceiling, only relevant when the goal is Power.
+    // Placed after all Strength rows so the "Power" section forms its own
+    // contiguous block rather than splitting Strength in two.
+    if p.lift_goal == LiftGoal::Power {
+        let plyo = strength::plyo_foot_contact_cap(age);
+        push_guidance(
+            rows,
+            "Power",
+            format!(
+                "Plyo foot-contact cap: {}-{}/session (progress volume OR intensity, not both)",
+                plyo.value.0, plyo.value.1
+            ),
+            &plyo,
+        );
+    }
+
+    let fr = hypertrophy::frequency_for_weekly_sets(p.weekly_sets);
+    push_guidance(
+        rows,
+        "Hypertrophy",
+        format!(
+            "{} weekly sets → {}×/wk, {} sets/session",
+            p.weekly_sets,
+            fmt_u8_range(fr.value.freq.0, fr.value.freq.1),
+            fmt_u8_range(fr.value.per_session.0, fr.value.per_session.1)
+        ),
+        &fr,
+    );
+
+    let split = hypertrophy::needs_session_split(p.weekly_sets);
+    push_guidance(
+        rows,
+        "Hypertrophy",
+        format!(
+            "{} weekly sets/muscle: {}",
+            p.weekly_sets,
+            if split.value {
+                "split across ≥2 sessions/wk to keep per-session quality"
+            } else {
+                "fit in one weekly session"
+            }
+        ),
+        &split,
+    );
+
+    // Rep/load prescription by exercise class. The frequency/volume rows above
+    // answer "how many sets"; this answers "how many reps and what load", the
+    // per-set target that was otherwise absent from the hypertrophy guidance.
+    // All three classes share one evidence source, so surface them together.
+    let heavy = hypertrophy::rep_load(hypertrophy::ExerciseClass::HeavyCompound);
+    let moderate = hypertrophy::rep_load(hypertrophy::ExerciseClass::ModerateCompound);
+    let iso = hypertrophy::rep_load(hypertrophy::ExerciseClass::Isolation);
+    push_guidance(
+        rows,
+        "Hypertrophy",
+        format!(
+            "Rep/load: heavy compound {}-{} @{}-{}%1RM, moderate {}-{} @{}-{}%, isolation {}-{} @{}-{}%",
+            heavy.value.reps.0,
+            heavy.value.reps.1,
+            heavy.value.pct_1rm.0,
+            heavy.value.pct_1rm.1,
+            moderate.value.reps.0,
+            moderate.value.reps.1,
+            moderate.value.pct_1rm.0,
+            moderate.value.pct_1rm.1,
+            iso.value.reps.0,
+            iso.value.reps.1,
+            iso.value.pct_1rm.0,
+            iso.value.pct_1rm.1
+        ),
+        &heavy,
+    );
+
+    let cap = hypertrophy::cap_weekly_growth_target(p.weekly_sets);
+    push_guidance(
+        rows,
+        "Hypertrophy",
+        format!("Growth-target weekly sets capped at {}", cap.value),
+        &cap,
+    );
+
+    let mev = hypertrophy::mev_sets_by_training_age(age);
+    push_guidance(
+        rows,
+        "Hypertrophy",
+        format!(
+            "MEV for {}: {}-{} sets/muscle/wk",
+            training_age_label(age), mev.value.0, mev.value.1
+        ),
+        &mev,
+    );
+}
+
+/// Running rows for a profile that runs.
+fn build_running_guidance(
+    p: &Profile,
+    age: individualization::TrainingAge,
+    age_years: f64,
+    rows: &mut Vec<GuidanceView>,
+) {
+    let gp = running::goal_week_plan(p.goal_distance, p.advanced);
+    // A4: C25K carries no long-run share (running-025 defines no long run for
+    // C25K), so drop the "long run …%" fragment when the share is zero rather
+    // than printing a misleading "long run 0-0% of volume". B2: the goal
+    // distance renders as a human label, not the raw Debug enum name.
+    let summary = if gp.value.long_run_share.1 > 0.0 {
+        format!(
+            "{}: {}-{} sessions/wk, {}-{} quality, long run {:.0}-{:.0}% of volume",
+            goal_distance_label(p.goal_distance),
+            gp.value.sessions_per_week.0,
+            gp.value.sessions_per_week.1,
+            gp.value.quality_per_week.0,
+            gp.value.quality_per_week.1,
+            gp.value.long_run_share.0 * 100.0,
+            gp.value.long_run_share.1 * 100.0
+        )
+    } else {
+        format!(
+            "{}: {}-{} sessions/wk, {}-{} quality",
+            goal_distance_label(p.goal_distance),
+            gp.value.sessions_per_week.0,
+            gp.value.sessions_per_week.1,
+            gp.value.quality_per_week.0,
+            gp.value.quality_per_week.1
+        )
+    };
+    push_guidance(rows, "Running", summary, &gp);
+
+    // Quality-session governance caps, the guardrail behind the "quality/wk"
+    // count above. Only relevant to someone who actually runs, so a pure lifter
+    // is not shown running caps.
+    {
+        let ql = running::quality_limits();
+        push_guidance(
+            rows,
             "Running",
             format!(
-                "{:?}: {}-{} sessions/wk, {}-{} quality, long run {:.0}-{:.0}% of volume",
-                p.goal_distance,
-                gp.value.sessions_per_week.0,
-                gp.value.sessions_per_week.1,
-                gp.value.quality_per_week.0,
-                gp.value.quality_per_week.1,
-                gp.value.long_run_share.0 * 100.0,
-                gp.value.long_run_share.1 * 100.0
+                "Quality-session caps: ≤{}/wk, ≥{} h apart, no back-to-back Z3",
+                ql.value.max_per_week, ql.value.min_spacing_hours
             ),
-            &gp,
+            &ql,
+        );
+    }
+
+    // Default to the base-phase distribution (pyramidal), the sound starting
+    // point before a mesocycle phase is chosen.
+    let id = running::distribution_for_phase(MesoPhase::Base);
+    push_guidance(
+        rows,
+        "Running",
+        format!(
+            "Base-phase intensity: {}/{}/{} easy/moderate/hard %time",
+            id.value.easy_pct, id.value.moderate_pct, id.value.hard_pct
+        ),
+        &id,
+    );
+
+    let ef = hybrid::endurance_frequency_ok(p.running_days_per_week);
+    push_guidance(
+        rows,
+        "Running",
+        format!(
+            "{} running days/wk within endurance-frequency guidance: {}",
+            p.running_days_per_week, ef.value
+        ),
+        &ef,
+    );
+
+    let conservative = matches!(age, individualization::TrainingAge::Novice);
+    let dc = running::deload_cadence(conservative);
+    push_guidance(
+        rows,
+        "Running",
+        format!(
+            "Deload cadence: {}:{} load:recovery, cut {:.0}-{:.0}%",
+            dc.value.load_weeks,
+            dc.value.recovery_weeks,
+            dc.value.reduction_frac.0 * 100.0,
+            dc.value.reduction_frac.1 * 100.0
+        ),
+        &dc,
+    );
+
+    let wc = running::weekly_increase_cap_frac(age_years);
+    push_guidance(
+        rows,
+        "Running",
+        format!(
+            "Weekly volume increase cap: +{:.0}% max week-to-week",
+            wc.value * 100.0
+        ),
+        &wc,
+    );
+
+    // Session-type prescriptions (running-014…020) for an athlete who runs:
+    // the easy-run band, cruise-interval and VO2max-interval structure, and
+    // strides. Each row is built from the Rx struct so no number is retyped.
+    {
+        let easy = running::workout_rx(running::RunWorkout::EasyGeneralAerobic);
+        let mut parts: Vec<String> = Vec::new();
+        if let (Some(lo), Some(hi)) = easy.value.pct_hr_max {
+            parts.push(format!("{:.0}–{:.0} %HRmax", lo * 100.0, hi * 100.0));
+        }
+        if let Some((lo, hi)) = easy.value.rpe {
+            parts.push(format!("RPE {lo}–{hi}"));
+        }
+        if let (Some(lo), Some(hi)) = easy.value.duration_min {
+            parts.push(format!("{lo}–{hi} min"));
+        }
+        push_guidance(
+            rows,
+            "Running",
+            format!("Easy / general-aerobic runs: {}", parts.join(", ")),
+            &easy,
         );
 
-        // Quality-session governance caps, the guardrail behind the "quality/wk"
-        // count above. Only relevant to someone who actually runs, so a pure lifter
-        // is not shown running caps.
-        {
-            let ql = running::quality_limits();
+        // running-016/018 session Rx from the schema session types.
+        let long = running::run_workout_rx(crate::schema::RunSessionType::LongRun);
+        let mut long_parts: Vec<String> = Vec::new();
+        if let (Some(lo), Some(hi)) = long.value.pct_hr_max {
+            long_parts.push(format!("{:.0}–{:.0} %HRmax", lo * 100.0, hi * 100.0));
+        }
+        if let (Some(lo), Some(hi)) = long.value.pct_slower_than_mp {
+            long_parts.push(format!("{lo:.0}–{hi:.0}% slower than MP"));
+        }
+        if let Some((lo, hi)) = long.value.rpe {
+            long_parts.push(format!("RPE {lo}–{hi}"));
+        }
+        if let (None, Some(hi)) = long.value.duration_min {
+            long_parts.push(format!("≤{hi} min"));
+        }
+        push_guidance(
+            rows,
+            "Running",
+            format!("Long runs: {}", long_parts.join(", ")),
+            &long,
+        );
+
+        let cruise = running::cruise_interval_rx();
+        push_guidance(
+            rows,
+            "Running",
+            format!(
+                "Cruise intervals (T pace): {}–{} min reps, ~{:.0} min rest, ≤{:.0}% of weekly volume",
+                cruise.value.rep_duration_min.0,
+                cruise.value.rep_duration_min.1,
+                cruise.value.rest_approx_min,
+                cruise.value.weekly_cap_frac * 100.0
+            ),
+            &cruise,
+        );
+
+        let vo2 = running::vo2max_interval_rx();
+        push_guidance(
+            rows,
+            "Running",
+            format!(
+                "VO2max intervals (I pace): {}–{} min reps ({}–{} m), recovery ≈ rep time, ≤{:.0}% of weekly volume",
+                vo2.value.rep_duration_min.0,
+                vo2.value.rep_duration_min.1,
+                vo2.value.rep_distance_m.0,
+                vo2.value.rep_distance_m.1,
+                vo2.value.weekly_cap_frac * 100.0
+            ),
+            &vo2,
+        );
+
+        // running-021 hill sprints, strength-flavoured running work, most
+        // relevant to a power-goal athlete who runs.
+        if matches!(p.lift_goal, LiftGoal::Power) {
+            let hills = running::hill_sprint_rx();
             push_guidance(
-                &mut rows,
+                rows,
                 "Running",
                 format!(
-                    "Quality-session caps: ≤{}/wk, ≥{} h apart, no back-to-back Z3",
-                    ql.value.max_per_week, ql.value.min_spacing_hours
+                    "Hill sprints: {}–{} × {}–{} s at {:.0}–{:.0}% effort on a {:.0}–{:.0}% grade, full (~{} s) recovery, on easy days",
+                    hills.value.reps.0,
+                    hills.value.reps.1,
+                    hills.value.rep_sec.0,
+                    hills.value.rep_sec.1,
+                    hills.value.effort_pct.0,
+                    hills.value.effort_pct.1,
+                    hills.value.grade_pct.0,
+                    hills.value.grade_pct.1,
+                    hills.value.recovery_approx_sec
                 ),
-                &ql,
+                &hills,
             );
         }
 
-        // Default to the base-phase distribution (pyramidal), the sound starting
-        // point before a mesocycle phase is chosen.
-        let id = running::distribution_for_phase(MesoPhase::Base);
+        let strides = running::strides_rx();
         push_guidance(
-            &mut rows,
+            rows,
             "Running",
             format!(
-                "Base-phase intensity: {}/{}/{} easy/moderate/hard %time",
-                id.value.easy_pct, id.value.moderate_pct, id.value.hard_pct
+                "Strides: {}–{} × {}–{} s controlled-fast (RPE {}–{}), {}–{} s recovery, {}–{}×/wk",
+                strides.value.reps.0,
+                strides.value.reps.1,
+                strides.value.rep_sec.0,
+                strides.value.rep_sec.1,
+                strides.value.rpe.0,
+                strides.value.rpe.1,
+                strides.value.recovery_sec.0,
+                strides.value.recovery_sec.1,
+                strides.value.per_week.0,
+                strides.value.per_week.1
             ),
-            &id,
+            &strides,
         );
 
-        let ef = hybrid::endurance_frequency_ok(p.running_days_per_week);
+        // running-033 depth: the KB names no mileage threshold separating the
+        // bands, so the general 20–40 % band is stated (never a guess).
+        let rw = running::recovery_week_rx(running::MileageBand::Unspecified);
         push_guidance(
-            &mut rows,
+            rows,
             "Running",
             format!(
-                "{} running days/wk within endurance-frequency guidance: {}",
-                p.running_days_per_week, ef.value
+                "Recovery week: cut volume {:.0}–{:.0}%, reduce intensity, drop a quality session",
+                rw.value.volume_reduction_frac.0.unwrap_or(0.0) * 100.0,
+                rw.value.volume_reduction_frac.1 * 100.0
             ),
-            &ef,
+            &rw,
         );
 
-        let conservative = matches!(age, individualization::TrainingAge::Novice);
-        let dc = running::deload_cadence(conservative);
-        push_guidance(
-            &mut rows,
-            "Running",
-            format!(
-                "Deload cadence: {}:{} load:recovery, cut {:.0}-{:.0}%",
-                dc.value.load_weeks,
-                dc.value.recovery_weeks,
-                dc.value.reduction_frac.0 * 100.0,
-                dc.value.reduction_frac.1 * 100.0
-            ),
-            &dc,
-        );
-
-        let wc = running::weekly_increase_cap_frac(age_years);
-        push_guidance(
-            &mut rows,
-            "Running",
-            format!(
-                "Weekly volume increase cap: +{:.0}% max week-to-week",
-                wc.value * 100.0
-            ),
-            &wc,
-        );
-
-        // Session-type prescriptions (running-014…020) for an athlete who runs:
-        // the easy-run band, cruise-interval and VO2max-interval structure, and
-        // strides. Each row is built from the Rx struct so no number is retyped.
-        {
-            let easy = running::workout_rx(running::RunWorkout::EasyGeneralAerobic);
-            let mut parts: Vec<String> = Vec::new();
-            if let (Some(lo), Some(hi)) = easy.value.pct_hr_max {
-                parts.push(format!("{:.0}–{:.0} %HRmax", lo * 100.0, hi * 100.0));
-            }
-            if let Some((lo, hi)) = easy.value.rpe {
-                parts.push(format!("RPE {lo}–{hi}"));
-            }
-            if let (Some(lo), Some(hi)) = easy.value.duration_min {
-                parts.push(format!("{lo}–{hi} min"));
-            }
+        // running-038 distance-specific taper for race goals.
+        if let Some(taper) = running::distance_taper(p.goal_distance) {
+            let t = taper.value;
             push_guidance(
-                &mut rows,
-                "Running",
-                format!("Easy / general-aerobic runs: {}", parts.join(", ")),
-                &easy,
-            );
-
-            // running-016/018 session Rx from the schema session types.
-            let long = running::run_workout_rx(crate::schema::RunSessionType::LongRun);
-            let mut long_parts: Vec<String> = Vec::new();
-            if let (Some(lo), Some(hi)) = long.value.pct_hr_max {
-                long_parts.push(format!("{:.0}–{:.0} %HRmax", lo * 100.0, hi * 100.0));
-            }
-            if let (Some(lo), Some(hi)) = long.value.pct_slower_than_mp {
-                long_parts.push(format!("{lo:.0}–{hi:.0}% slower than MP"));
-            }
-            if let Some((lo, hi)) = long.value.rpe {
-                long_parts.push(format!("RPE {lo}–{hi}"));
-            }
-            if let (None, Some(hi)) = long.value.duration_min {
-                long_parts.push(format!("≤{hi} min"));
-            }
-            push_guidance(
-                &mut rows,
-                "Running",
-                format!("Long runs: {}", long_parts.join(", ")),
-                &long,
-            );
-
-            let cruise = running::cruise_interval_rx();
-            push_guidance(
-                &mut rows,
+                rows,
                 "Running",
                 format!(
-                    "Cruise intervals (T pace): {}–{} min reps, ~{:.0} min rest, ≤{:.0}% of weekly volume",
-                    cruise.value.rep_duration_min.0,
-                    cruise.value.rep_duration_min.1,
-                    cruise.value.rest_approx_min,
-                    cruise.value.weekly_cap_frac * 100.0
+                    "Race taper ({}): {}–{} days, cut volume {:.0}–{:.0}%{}. Hold intensity and frequency",
+                    goal_distance_label(p.goal_distance),
+                    t.days.0,
+                    t.days.1,
+                    t.volume_cut_frac.0 * 100.0,
+                    t.volume_cut_frac.1 * 100.0,
+                    if t.keep_mp_touches_and_short_tempo {
+                        ", keep MP touches + short tempo"
+                    } else if t.keep_sharp_sessions.is_some() {
+                        ", keep 1–2 short sharp sessions"
+                    } else {
+                        ""
+                    }
                 ),
-                &cruise,
+                &taper,
             );
+        }
 
-            let vo2 = running::vo2max_interval_rx();
-            push_guidance(
-                &mut rows,
-                "Running",
-                format!(
-                    "VO2max intervals (I pace): {}–{} min reps ({}–{} m), recovery ≈ rep time, ≤{:.0}% of weekly volume",
-                    vo2.value.rep_duration_min.0,
-                    vo2.value.rep_duration_min.1,
-                    vo2.value.rep_distance_m.0,
-                    vo2.value.rep_distance_m.1,
-                    vo2.value.weekly_cap_frac * 100.0
-                ),
-                &vo2,
+        // running-032 single-variable rule, stated educationally (the call's
+        // both-true arguments only inherit the citation, same pattern as the
+        // two-for-two reference row).
+        let onevar = running::single_variable_progression_ok(true, true);
+        push_guidance(
+            rows,
+            "Running",
+            "Progress ONE variable at a time. Never raise weekly volume and intensity in the same week"
+                .to_string(),
+            &onevar,
+        );
+
+        // running-041 environment pace-correction triggers, when the profile
+        // states conditions. Only trigger flags are evidence-stated, no
+        // correction magnitudes exist in the KB, so none are shown.
+        if p.env_temp_c.is_some() || p.env_altitude_m.is_some() {
+            let pc = running::pace_correction_triggers(
+                p.env_temp_c.unwrap_or(0.0),
+                p.env_altitude_m.unwrap_or(0.0),
             );
-
-            // running-021 hill sprints, strength-flavoured running work, most
-            // relevant to a power-goal athlete who runs.
-            if matches!(p.lift_goal, LiftGoal::Power) {
-                let hills = running::hill_sprint_rx();
+            if pc.value.heat || pc.value.altitude {
+                let what = match (pc.value.heat, pc.value.altitude) {
+                    (true, true) => "heat (>15 °C) and altitude (>900 m)",
+                    (true, false) => "heat (>15 °C)",
+                    _ => "altitude (>900 m)",
+                };
                 push_guidance(
-                    &mut rows,
+                    rows,
                     "Running",
                     format!(
-                        "Hill sprints: {}–{} × {}–{} s at {:.0}–{:.0}% effort on a {:.0}–{:.0}% grade, full (~{} s) recovery, on easy days",
-                        hills.value.reps.0,
-                        hills.value.reps.1,
-                        hills.value.rep_sec.0,
-                        hills.value.rep_sec.1,
-                        hills.value.effort_pct.0,
-                        hills.value.effort_pct.1,
-                        hills.value.grade_pct.0,
-                        hills.value.grade_pct.1,
-                        hills.value.recovery_approx_sec
+                        "Conditions trigger pace correction for {what}. Expect slower paces at the same effort; anchor to HR/RPE"
                     ),
-                    &hills,
+                    &pc,
                 );
-            }
-
-            let strides = running::strides_rx();
-            push_guidance(
-                &mut rows,
-                "Running",
-                format!(
-                    "Strides: {}–{} × {}–{} s controlled-fast (RPE {}–{}), {}–{} s recovery, {}–{}×/wk",
-                    strides.value.reps.0,
-                    strides.value.reps.1,
-                    strides.value.rep_sec.0,
-                    strides.value.rep_sec.1,
-                    strides.value.rpe.0,
-                    strides.value.rpe.1,
-                    strides.value.recovery_sec.0,
-                    strides.value.recovery_sec.1,
-                    strides.value.per_week.0,
-                    strides.value.per_week.1
-                ),
-                &strides,
-            );
-
-            // running-033 depth: the KB names no mileage threshold separating the
-            // bands, so the general 20–40 % band is stated (never a guess).
-            let rw = running::recovery_week_rx(running::MileageBand::Unspecified);
-            push_guidance(
-                &mut rows,
-                "Running",
-                format!(
-                    "Recovery week: cut volume {:.0}–{:.0}%, reduce intensity, drop a quality session",
-                    rw.value.volume_reduction_frac.0.unwrap_or(0.0) * 100.0,
-                    rw.value.volume_reduction_frac.1 * 100.0
-                ),
-                &rw,
-            );
-
-            // running-038 distance-specific taper for race goals.
-            if let Some(taper) = running::distance_taper(p.goal_distance) {
-                let t = taper.value;
-                push_guidance(
-                    &mut rows,
-                    "Running",
-                    format!(
-                        "Race taper ({:?}): {}–{} days, cut volume {:.0}–{:.0}%{} - hold intensity and frequency",
-                        p.goal_distance,
-                        t.days.0,
-                        t.days.1,
-                        t.volume_cut_frac.0 * 100.0,
-                        t.volume_cut_frac.1 * 100.0,
-                        if t.keep_mp_touches_and_short_tempo {
-                            ", keep MP touches + short tempo"
-                        } else if t.keep_sharp_sessions.is_some() {
-                            ", keep 1–2 short sharp sessions"
-                        } else {
-                            ""
-                        }
-                    ),
-                    &taper,
-                );
-            }
-
-            // running-032 single-variable rule, stated educationally (the call's
-            // both-true arguments only inherit the citation, same pattern as the
-            // two-for-two reference row).
-            let onevar = running::single_variable_progression_ok(true, true);
-            push_guidance(
-                &mut rows,
-                "Running",
-                "Progress ONE variable at a time - never raise weekly volume and intensity in the same week"
-                    .to_string(),
-                &onevar,
-            );
-
-            // running-041 environment pace-correction triggers, when the profile
-            // states conditions. Only trigger flags are evidence-stated: no
-            // correction magnitudes exist in the KB, so none are shown.
-            if p.env_temp_c.is_some() || p.env_altitude_m.is_some() {
-                let pc = running::pace_correction_triggers(
-                    p.env_temp_c.unwrap_or(0.0),
-                    p.env_altitude_m.unwrap_or(0.0),
-                );
-                if pc.value.heat || pc.value.altitude {
-                    let what = match (pc.value.heat, pc.value.altitude) {
-                        (true, true) => "heat (>15 °C) and altitude (>900 m)",
-                        (true, false) => "heat (>15 °C)",
-                        _ => "altitude (>900 m)",
-                    };
-                    push_guidance(
-                        &mut rows,
-                        "Running",
-                        format!(
-                            "Conditions trigger pace correction for {what} - expect slower paces at the same effort; anchor to HR/RPE"
-                        ),
-                        &pc,
-                    );
-                }
             }
         }
     }
+}
 
+/// Environment modifier row, when the profile declares one.
+fn build_environment_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
     // File 08 indiv-025 / safety-024 environment modifiers, when declared.
     if let Some(env) = p.environment {
         let m = individualization::environment_modifier(env);
         let text = match env {
             Environment::Heat => format!(
-                "Heat: reduce intensity, acclimatize progressively (~{}–{} days), hydrate - STOP on heat-illness signs (confusion, cessation of sweating, dizziness)",
+                "Heat: reduce intensity, acclimatize progressively (~{}–{} days), hydrate. STOP on heat-illness signs (confusion, cessation of sweating, dizziness)",
                 m.value.acclimatization_days.map(|d| d.0).unwrap_or(10),
                 m.value.acclimatization_days.map(|d| d.1).unwrap_or(14)
             ),
@@ -4674,127 +4839,141 @@ fn build_guidance(p: &Profile) -> Vec<GuidanceView> {
             Environment::Neutral => "Neutral environment: no modifier".to_string(),
         };
         if env != Environment::Neutral {
-            push_guidance(&mut rows, "Environment", text, &m);
+            push_guidance(rows, "Environment", text, &m);
         }
     }
+}
 
+/// Layoff re-entry ramp + post-layoff MEV reduction, when a layoff is declared.
+fn build_reentry_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
     // REENTRY-001 layoff re-entry ramp + the post-layoff MEV reduction.
     if let Some(weeks_off) = p.weeks_off
         && weeks_off > 0.0
     {
         let re = individualization::resistance_reentry(weeks_off);
-        push_guidance(
-            &mut rows,
-            "Return to training",
-            format!(
+        // A1: the >8 wk bracket carries NO KB load fraction (`load_frac == None`),
+        // so render a fresh-start message with no invented percentage (KB Table
+        // 3.4b language). The 1-8 wk numeric brackets keep the derate sentence.
+        let summary = match re.value.load_frac {
+            Some(frac) => format!(
                 "After {weeks_off:.0} wk off: restart at ~{:.0}% of prior loads, ramp back over {}{}",
-                re.value.load_frac * 100.0,
+                frac * 100.0,
                 fmt_u8_range(re.value.ramp_weeks.0, re.value.ramp_weeks.1),
                 if re.value.treat_as_novice {
-                    " wk - progress like a novice until loads return"
+                    " wk. Progress like a novice until loads return"
                 } else {
                     " wk"
                 }
             ),
-            &re,
-        );
+            None => format!(
+                "After {weeks_off:.0} wk off: treat it as a fresh start. Re-establish technique and rebuild over 4-6+ wk, progressing like a novice."
+            ),
+        };
+        push_guidance(rows, "Return to training", summary, &re);
         let mev = hypertrophy::layoff_reduces_mev(true);
         if mev.value {
             push_guidance(
-                &mut rows,
+                rows,
                 "Return to training",
-                "Post-layoff MEV is reduced - less volume regrows muscle at re-entry; restart below the old set counts".to_string(),
+                "Post-layoff MEV is reduced. Less volume regrows muscle at re-entry; restart below the old set counts".to_string(),
                 &mev,
             );
         }
     }
+}
 
-    if lifting && running {
-        let so = hybrid::same_session_order(p.concurrent_goal);
+/// Hybrid (concurrent lift + run) rows, gated on the athlete doing both.
+fn build_hybrid_guidance(p: &Profile, age_years: f64, rows: &mut Vec<GuidanceView>) {
+    let so = hybrid::same_session_order(p.concurrent_goal);
+    // Full-sentence copy keyed on the ordering (the goal is implied by the
+    // sentence), instead of leaking the raw Debug enum names.
+    let so_text = match so.value {
+        hybrid::SessionOrder::LiftFirst => {
+            "Combined days: lift first, run after (strength and muscle goals)."
+        }
+        hybrid::SessionOrder::RunFirst => {
+            "Combined days: running first is fine (endurance priority)."
+        }
+        hybrid::SessionOrder::ForbidSameSession => {
+            "Power goal: keep lifting and running in separate sessions."
+        }
+    };
+    push_guidance(rows, "Hybrid", so_text.to_string(), &so);
+
+    // Peak strength/power block running override (File 10 CAP-2): only relevant
+    // when the lifting goal is a maximal quality, so a hypertrophy or endurance
+    // athlete is not shown a cap that does not apply to their block.
+    if matches!(p.lift_goal, LiftGoal::MaxStrength | LiftGoal::Power) {
+        let pk = hybrid::peak_phase_run_cap();
         push_guidance(
-            &mut rows,
+            rows,
             "Hybrid",
-            format!("{:?} same-session order: {:?}", p.concurrent_goal, so.value),
-            &so,
+            format!(
+                "Peak block: cap running to {}-{} easy runs/wk, no hard intervals, long runs ≥{} h from heavy-lower days",
+                pk.value.max_easy_runs_per_week.0,
+                pk.value.max_easy_runs_per_week.1,
+                pk.value.long_run_min_gap_hours
+            ),
+            &pk,
         );
-
-        // Peak strength/power block running override (File 10 CAP-2): only relevant
-        // when the lifting goal is a maximal quality, so a hypertrophy or endurance
-        // athlete is not shown a cap that does not apply to their block.
-        if matches!(p.lift_goal, LiftGoal::MaxStrength | LiftGoal::Power) {
-            let pk = hybrid::peak_phase_run_cap();
-            push_guidance(
-                &mut rows,
-                "Hybrid",
-                format!(
-                    "Peak block: cap running to {}-{} easy runs/wk, no hard intervals, long runs ≥{} h from heavy-lower days",
-                    pk.value.max_easy_runs_per_week.0,
-                    pk.value.max_easy_runs_per_week.1,
-                    pk.value.long_run_min_gap_hours
-                ),
-                &pk,
-            );
-        }
-
-        if let Some(llc) = hybrid::lower_lift_cap(p.running_days_per_week, p.running_km_per_week) {
-            push_guidance(
-                &mut rows,
-                "Hybrid",
-                format!(
-                    "Lower-lift cap: ≤{}/wk, cut lower-hyp volume {:.0}-{:.0}%",
-                    llc.value.max_lower_sessions,
-                    llc.value.volume_reduction_frac.0 * 100.0,
-                    llc.value.volume_reduction_frac.1 * 100.0
-                ),
-                &llc,
-            );
-        }
-
-        let ie =
-            hybrid::interference_expected(p.running_days_per_week, p.endurance_intensity_pct_vo2max);
-        push_guidance(
-            &mut rows,
-            "Hybrid",
-            format!("Interference expected: {}", ie.value),
-            &ie,
-        );
-
-        // hybrid-004: when interference is on the table, name the strongest lever -
-        // continuous per-session duration outweighs frequency (Wilson 2012), so
-        // shorten endurance sessions before cutting days.
-        if ie.value {
-            let im = hybrid::interference_moderators();
-            push_guidance(
-                &mut rows,
-                "Hybrid",
-                "Interference scales most with continuous session duration (strongest moderator), then frequency - shorten endurance sessions before cutting days".to_string(),
-                &im,
-            );
-        }
-
-        // Whether *this* athlete's training age makes them susceptible to the small
-        // trained-lower-body 1RM decrement (File 10 hybrid-009): only trained lifters
-        // (>1 yr) show it. Reuses the representative `age_years` above and is only
-        // relevant when the athlete actually runs, so a pure lifter is not shown it.
-        {
-            let li = hybrid::expect_lower_strength_interference(age_years);
-            push_guidance(
-                &mut rows,
-                "Hybrid",
-                format!(
-                    "Lower-body strength interference susceptibility: {}",
-                    if li.value {
-                        "yes - trained lifter, expect a small lower-body 1RM decrement"
-                    } else {
-                        "no - novice/untrained lower body is spared"
-                    }
-                ),
-                &li,
-            );
-        }
     }
 
-    rows
+    if let Some(llc) = hybrid::lower_lift_cap(p.running_days_per_week, p.running_km_per_week) {
+        push_guidance(
+            rows,
+            "Hybrid",
+            format!(
+                "Lower-lift cap: ≤{}/wk, cut lower-hyp volume {:.0}-{:.0}%",
+                llc.value.max_lower_sessions,
+                llc.value.volume_reduction_frac.0 * 100.0,
+                llc.value.volume_reduction_frac.1 * 100.0
+            ),
+            &llc,
+        );
+    }
+
+    let ie =
+        hybrid::interference_expected(p.running_days_per_week, p.endurance_intensity_pct_vo2max);
+    push_guidance(
+        rows,
+        "Hybrid",
+        format!("Interference expected: {}", ie.value),
+        &ie,
+    );
+
+    // hybrid-004: when interference is on the table, name the strongest lever -
+    // continuous per-session duration outweighs frequency (Wilson 2012), so
+    // shorten endurance sessions before cutting days.
+    if ie.value {
+        let im = hybrid::interference_moderators();
+        push_guidance(
+            rows,
+            "Hybrid",
+            "Interference scales most with continuous session duration (strongest moderator), then frequency. Shorten endurance sessions before cutting days".to_string(),
+            &im,
+        );
+    }
+
+    // Whether *this* athlete's training age makes them susceptible to the small
+    // trained-lower-body 1RM decrement (File 10 hybrid-009): only trained lifters
+    // (>1 yr) show it. Reuses the representative `age_years` above and is only
+    // relevant when the athlete actually runs, so a pure lifter is not shown it.
+    {
+        let li = hybrid::expect_lower_strength_interference(age_years);
+        push_guidance(
+            rows,
+            "Hybrid",
+            format!(
+                "Lower-body strength interference susceptibility: {}",
+                if li.value {
+                    "yes: trained lifter, expect a small lower-body 1RM decrement"
+                } else {
+                    "no: novice/untrained lower body is spared"
+                }
+            ),
+            &li,
+        );
+    }
 }
 
 /// One run's realised distance in km: derived from the GPS track when present,
@@ -4808,7 +4987,7 @@ fn run_distance_km(r: &LoggedRun) -> f64 {
     }
 }
 
-/// A4 (RUN-SPIKE-001): the spike baseline is the longest run in the TRAILING
+/// RUN-SPIKE-001: the spike baseline is the longest run in the TRAILING
 /// 30-day window ending at `at`, NOT all-time. An old long run before a layoff
 /// must not permanently suppress a genuine load spike after the layoff. Runs
 /// with `observed_at` in `[at − 30 d, at]` count (a future-dated row is excluded
@@ -4862,7 +5041,7 @@ fn qc_track(points: &[GpsPoint], segment_starts: &[u32]) -> (Vec<GpsPoint>, u32,
     // Segment-start indices REMAPPED to positions in the QC'd output, a boundary
     // fix may itself be dropped, so the first survivor at/after it opens the new
     // segment. Passed on to the segment-aware `running::*_seg` fns and the GPX
-    // export so a pause + relocation is neither summed nor drawn across (I15/B2).
+    // export so a pause + relocation is neither summed nor drawn across.
     let mut out_starts: Vec<u32> = Vec::new();
     // A boundary seen in the raw stream but not yet committed (its fix and any
     // until the next survivor may be dropped). While pending, the inter-fix QC
@@ -4916,7 +5095,7 @@ fn qc_run_track(r: &LoggedRun) -> (Vec<GpsPoint>, u32, Vec<u32>) {
 fn moving_duration_min(track: &[GpsPoint], segment_starts: &[u32]) -> f64 {
     let mut sec = 0.0;
     // Sum moving legs WITHIN each segment: the pause-bridge leg between segments
-    // is never formed, so a paused relocation adds no moving time (I15/B2). Empty
+    // is never formed, so a paused relocation adds no moving time. Empty
     // `segment_starts` → one segment → the whole-track sum, unchanged.
     for seg in running::segments(track, segment_starts) {
         for w in seg.windows(2) {
@@ -4956,12 +5135,91 @@ fn run_split_views(track: &[GpsPoint], unit_m: f64, segment_starts: &[u32]) -> V
         .collect()
 }
 
-/// Derive zone + pace + distance-spike flag for one logged run. The run CARD's
-/// spike chip judges against the per-row `longest_recent_km` baked at ingest
-/// (which honors a tracker's caller-supplied paired history, A4). The SAFETY
-/// GATE that can defer training derives its baseline fresh at view() time from
-/// `model.runs` instead (see [`latest_run_spike_frac`], M6).
+/// Cap on the per-run view memo (see [`to_run_view`]). Deleting a run leaves a
+/// stale entry behind; clearing the whole map at the cap bounds growth WITHOUT
+/// tracking access order (LRU eviction would make the cache observable). No real
+/// history approaches this many distinct runs.
+const RUN_VIEW_CACHE_CAP: usize = 4096;
+
+thread_local! {
+    /// P1: [`to_run_view_uncached`] re-derives every logged run on EVERY `view()`
+    /// after every event, even though a run is immutable once written. Each
+    /// derivation is ≈6 haversine (trig) passes, per-km AND per-mile split
+    /// tables, the variability index, plus a ~0.5 MB GPX string built with two
+    /// `format!`s per fix. Memoize the finished `RunResultView` keyed by a
+    /// content fingerprint so the heavy work runs once per distinct run and every
+    /// later `view()` serves a clone. Referentially transparent, identical run
+    /// content → identical view, no clock/rand, so the core stays deterministic
+    /// and the ViewModel wire shape is unchanged (gpx stays populated for the
+    /// shell's list label + detail map). Thread-local, so no lock and no
+    /// cross-thread poisoning; a fingerprint change (an amend) misses and
+    /// recomputes.
+    static RUN_VIEW_CACHE: std::cell::RefCell<std::collections::HashMap<u64, RunResultView>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+thread_local! {
+    /// Test-only counter of UNCACHED run-view builds, thread-local so a laziness
+    /// test measures a race-free delta around two `view()` calls (see the P1
+    /// test). Not compiled into shipping builds.
+    #[cfg(test)]
+    static RUN_VIEW_BUILDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// A content fingerprint of a logged run, every field the derived view depends
+/// on. Cheap integer hashing (bit patterns for the floats) versus the trig +
+/// string allocation the cached derivation avoids. Collision probability is
+/// ~n²/2⁶⁴ (negligible for a personal history); a collision would only swap one
+/// display view, never a safety decision.
+fn run_content_key(r: &LoggedRun) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    r.entry_id.hash(&mut h);
+    r.observed_at.hash(&mut h);
+    r.distance_km.to_bits().hash(&mut h);
+    r.duration_min.to_bits().hash(&mut h);
+    r.hr_pct_max.to_bits().hash(&mut h);
+    r.longest_recent_km.to_bits().hash(&mut h);
+    // Small enum-or-None; Debug form is a cheap, stable discriminator.
+    format!("{:?}", r.workout_type).hash(&mut h);
+    r.track_segment_starts.hash(&mut h);
+    for p in &r.track {
+        p.lat.to_bits().hash(&mut h);
+        p.lon.to_bits().hash(&mut h);
+        p.observed_at.hash(&mut h);
+        p.accuracy_m.to_bits().hash(&mut h);
+    }
+    h.finish()
+}
+
+/// Derive zone + pace + distance-spike flag for one logged run, memoized (P1).
+/// The heavy derivation lives in [`to_run_view_uncached`]; this wrapper serves a
+/// cached clone whenever the run's content fingerprint is unchanged, so a run is
+/// derived once rather than on every `view()`.
 fn to_run_view(r: &LoggedRun) -> RunResultView {
+    let key = run_content_key(r);
+    if let Some(cached) = RUN_VIEW_CACHE.with(|c| c.borrow().get(&key).cloned()) {
+        return cached;
+    }
+    let view = to_run_view_uncached(r);
+    RUN_VIEW_CACHE.with(|c| {
+        let mut m = c.borrow_mut();
+        if m.len() >= RUN_VIEW_CACHE_CAP {
+            m.clear();
+        }
+        m.insert(key, view.clone());
+    });
+    view
+}
+
+/// The uncached run-view derivation. The run CARD's spike chip judges against the
+/// per-row `longest_recent_km` baked at ingest (which honors a tracker's
+/// caller-supplied paired history). The SAFETY GATE that can defer training
+/// derives its baseline fresh at view() time from `model.runs` instead (see
+/// [`latest_run_spike_frac`]).
+fn to_run_view_uncached(r: &LoggedRun) -> RunResultView {
+    #[cfg(test)]
+    RUN_VIEW_BUILDS.with(|c| c.set(c.get() + 1));
     let recent_longest_km = r.longest_recent_km;
     // A GPS track derives its own distance/duration; a manual run uses scalars.
     let gps = !r.track.is_empty();
@@ -5004,6 +5262,7 @@ fn to_run_view(r: &LoggedRun) -> RunResultView {
             entry_id: r.entry_id,
             splits_km: Vec::new(),
             splits_mi: Vec::new(),
+            spike_has_baseline: recent_longest_km > 0.0,
         };
     }
 
@@ -5101,7 +5360,7 @@ fn to_run_view(r: &LoggedRun) -> RunResultView {
     let spike_seg = if spike_note.is_empty() {
         String::new()
     } else {
-        format!(" - {spike_note}")
+        format!(": {spike_note}")
     };
 
     RunResultView {
@@ -5147,6 +5406,7 @@ fn to_run_view(r: &LoggedRun) -> RunResultView {
         },
         observed_at: r.observed_at,
         entry_id: r.entry_id,
+        spike_has_baseline: recent_longest_km > 0.0,
     }
 }
 
@@ -5165,19 +5425,19 @@ fn split_verdict_view(split_pct: f64) -> SplitVerdictView {
             "fade",
             format!("FADE +{split_pct:.0}%"),
             format!(
-                "Back half {split_pct:.0}% slower - start easier and aim for an even-to-negative split."
+                "Back half {split_pct:.0}% slower: start easier and aim for an even-to-negative split."
             ),
         ),
         // feedback-017: even or negative split → pacing-discipline praise.
         _ if split_pct < -feedback::POSITIVE_SPLIT_FLAG_PCT => (
             "negative",
             format!("NEG SPLIT {:.0}%", split_pct.abs()),
-            "Negative split - textbook pacing discipline.".to_string(),
+            "Negative split: textbook pacing discipline.".to_string(),
         ),
         _ => (
             "even",
             "EVEN SPLIT".to_string(),
-            "Even split - textbook pacing discipline.".to_string(),
+            "Even split: textbook pacing discipline.".to_string(),
         ),
     };
     SplitVerdictView {
@@ -5208,7 +5468,7 @@ fn interval_verdict_view(vi: f64) -> IntervalVerdictView {
         (
             "interval",
             format!("INTERVAL · VI {vi:.2}"),
-            "Hard efforts split by recovery - this run's pace varied well above its \
+            "Hard efforts split by recovery: this run's pace varied well above its \
              average (variability index measures the spread; a steady run sits near 1.0)."
                 .to_string(),
         )
@@ -5216,7 +5476,7 @@ fn interval_verdict_view(vi: f64) -> IntervalVerdictView {
         (
             "steady",
             format!("STEADY · VI {vi:.2}"),
-            "Evenly paced - its average pace reflects the whole run.".to_string(),
+            "Evenly paced: its average pace reflects the whole run.".to_string(),
         )
     };
     IntervalVerdictView {
@@ -5344,13 +5604,13 @@ fn to_race_view(q: &RaceQuery, longest_logged_km: Option<f64>) -> RacePrediction
             running::RaceInputFreshness::Marginal => push_guidance(
                 &mut notes,
                 "Prediction",
-                format!("Input race is {weeks} weeks old - at the edge of the 6–8-week freshness window"),
+                format!("Input race is {weeks} weeks old: at the edge of the 6–8-week freshness window"),
                 &fresh,
             ),
             running::RaceInputFreshness::Stale => push_guidance(
                 &mut notes,
                 "Prediction",
-                format!("Input race is {weeks} weeks old (>8) - re-test before trusting these paces"),
+                format!("Input race is {weeks} weeks old (>8). Re-test before trusting these paces"),
                 &fresh,
             ),
         }
@@ -5368,7 +5628,7 @@ fn to_race_view(q: &RaceQuery, longest_logged_km: Option<f64>) -> RacePrediction
             &mut notes,
             "Prediction",
             format!(
-                "Longest logged run {longest:.1} km - marathon predictions run optimistic without long-run support (derate ~{:.0}–{:.0} VDOT points)",
+                "Longest logged run {longest:.1} km: marathon predictions run optimistic without long-run support (derate ~{:.0}–{:.0} VDOT points)",
                 derate.value.0, derate.value.1
             ),
             opt,
@@ -5396,15 +5656,6 @@ fn to_race_view(q: &RaceQuery, longest_logged_km: Option<f64>) -> RacePrediction
     }
 }
 
-/// Wrap a raw value in a `Recommended` carrying a registry claim's evidence +
-/// confidence, the same mechanism `hypertrophy::recommend` uses, so a
-/// non-`Recommended` engine value (the volume landmarks) still surfaces graded
-/// (HARD RULE 2). Panics only on a missing claim id (a compile-time constant).
-fn graded<T>(value: T, claim_id: &str) -> Recommended<T> {
-    let c = crate::evidence::claim(claim_id).expect("known claim id");
-    Recommended::new(value, c.to_evidence(), c.to_confidence_tag())
-}
-
 /// Build a graded per-week hypertrophy accumulation plan for one muscle. Every
 /// row carries its own evidence + confidence via [`push_guidance`] (HARD RULE 2);
 /// no training numbers are invented: all come from [`hypertrophy`]. An unknown
@@ -5422,7 +5673,7 @@ fn build_hypertrophy_plan(q: &HypertrophyPlanQuery, profile: Option<&Profile>) -
             &mut rows,
             &section,
             format!(
-                "\"{}\" is not a known muscle - pick one of: chest, back, quads, hamstrings, glutes, side delts, rear delts, biceps, triceps, calves, abs",
+                "\"{}\" is not a known muscle. Pick one of: chest, back, quads, hamstrings, glutes, side delts, rear delts, biceps, triceps, calves, abs",
                 q.muscle
             ),
             &note,
@@ -5437,7 +5688,7 @@ fn build_hypertrophy_plan(q: &HypertrophyPlanQuery, profile: Option<&Profile>) -
         &mut rows,
         &section,
         format!(
-            "Landmarks - MEV {} · MAV {}–{} · MRV {} sets/wk",
+            "Landmarks: MEV {} · MAV {}–{} · MRV {} sets/wk",
             lm.mev, lm.mav.0, lm.mav.1, lm.mrv
         ),
         &landmarks,
@@ -5504,7 +5755,7 @@ fn build_hypertrophy_plan(q: &HypertrophyPlanQuery, profile: Option<&Profile>) -
             &mut rows,
             &section,
             format!(
-                "{} sets in one session exceeds the ~11-set per-session cap - add a session instead of stacking sets",
+                "{} sets in one session exceeds the ~11-set per-session cap. Add a session instead of stacking sets",
                 freq.value.per_session.1
             ),
             &over_cap,
@@ -5553,7 +5804,7 @@ fn build_hypertrophy_plan(q: &HypertrophyPlanQuery, profile: Option<&Profile>) -
         &mut rows,
         &section,
         format!(
-            "Work most sets at {}–{} RIR - true failure is not required and costs recovery",
+            "Work most sets at {}–{} RIR. True failure is not required and costs recovery",
             rir_band.value.0, rir_band.value.1
         ),
         &rir_band,
@@ -5566,7 +5817,7 @@ fn build_hypertrophy_plan(q: &HypertrophyPlanQuery, profile: Option<&Profile>) -
     push_guidance(
         &mut rows,
         &section,
-        "Take sets to failure only on machines/isolation - never on heavy free-weight compounds"
+        "Take sets to failure only on machines/isolation, never on heavy free-weight compounds"
             .to_string(),
         &fail,
     );
@@ -5601,7 +5852,7 @@ fn build_hypertrophy_plan(q: &HypertrophyPlanQuery, profile: Option<&Profile>) -
         &mut rows,
         &section,
         format!(
-            "Tempo: controlled {}–{} s/rep ({}–{} s up, {}–{} s down) - superslow (>10 s) is inferior",
+            "Tempo: controlled {}–{} s/rep ({}–{} s up, {}–{} s down). Superslow (>10 s) is inferior",
             tempo.value.rep_duration_s.0,
             tempo.value.rep_duration_s.1,
             tempo.value.concentric_s.0,
@@ -5622,7 +5873,7 @@ fn build_hypertrophy_plan(q: &HypertrophyPlanQuery, profile: Option<&Profile>) -
         &section,
         if next.value > current {
             format!(
-                "Not growing while recovering easily - raise next mesocycle to {} sets/wk (from {current})",
+                "Not growing while recovering easily: raise next mesocycle to {} sets/wk (from {current})",
                 next.value
             )
         } else {
@@ -5642,7 +5893,7 @@ fn build_hypertrophy_plan(q: &HypertrophyPlanQuery, profile: Option<&Profile>) -
                 &mut rows,
                 &section,
                 format!(
-                    "Plan starts at {first_week} sets/wk vs your current {} - too abrupt; step volume up gradually",
+                    "Plan starts at {first_week} sets/wk vs your current {}: too abrupt; step volume up gradually",
                     p.weekly_sets
                 ),
                 &jump,
@@ -5706,13 +5957,18 @@ fn build_hypertrophy_plan(q: &HypertrophyPlanQuery, profile: Option<&Profile>) -
 /// onboarding screen: with it set, a requested deficit target is REFUSED inside
 /// `individualization::deficit_protein_target` (File 08 safety-022) and the row
 /// becomes the safety-critical deferral instead of a number.
-fn build_protein_targets(q: &ProteinQuery, reds_present: bool) -> Vec<GuidanceView> {
+fn build_protein_targets(
+    q: &ProteinQuery,
+    reds_present: bool,
+) -> (Vec<GuidanceView>, Vec<ProteinFigureView>) {
     let mut rows = Vec::new();
+    // #6: structured g/day figures paralleling the prose rows (see `ProteinFigureView`).
+    let mut figures = Vec::new();
 
     // Cannot derive g/day from a non-positive bodyweight, say nothing rather
     // than emit a nonsensical or zero target.
     if q.bodyweight_kg <= 0.0 {
-        return rows;
+        return (rows, figures);
     }
 
     if q.masters {
@@ -5729,6 +5985,12 @@ fn build_protein_targets(q: &ProteinQuery, reds_present: bool) -> Vec<GuidanceVi
             ),
             &r,
         );
+        figures.push(ProteinFigureView {
+            kind: "masters".to_string(),
+            low_g_per_day: (q.bodyweight_kg * lo).round(),
+            high_g_per_day: (q.bodyweight_kg * hi).round(),
+            refused: false,
+        });
     }
 
     if q.deficit {
@@ -5747,6 +6009,12 @@ fn build_protein_targets(q: &ProteinQuery, reds_present: bool) -> Vec<GuidanceVi
                     ),
                     &r,
                 );
+                figures.push(ProteinFigureView {
+                    kind: "deficit".to_string(),
+                    low_g_per_day: (q.bodyweight_kg * lo).round(),
+                    high_g_per_day: (q.bodyweight_kg * hi).round(),
+                    refused: false,
+                });
             }
             None => {
                 // safety-022: the deficit is refused, not silently omitted -
@@ -5754,14 +6022,20 @@ fn build_protein_targets(q: &ProteinQuery, reds_present: bool) -> Vec<GuidanceVi
                 push_guidance(
                     &mut rows,
                     "Protein",
-                    "Deficit not prescribed - a RED-S / low-energy-availability signal is present. Reduce training stress and consult a physician or registered dietitian before any caloric deficit.".to_string(),
+                    "Deficit not prescribed: a RED-S / low-energy-availability signal is present. Reduce training stress and consult a physician or registered dietitian before any caloric deficit.".to_string(),
                     &r,
                 );
+                figures.push(ProteinFigureView {
+                    kind: "deficit".to_string(),
+                    low_g_per_day: 0.0,
+                    high_g_per_day: 0.0,
+                    refused: true,
+                });
             }
         }
     }
 
-    rows
+    (rows, figures)
 }
 
 /// Build a graded heart-rate-zone table from age: the Tanaka HRmax estimate plus
@@ -5772,7 +6046,10 @@ fn build_protein_targets(q: &ProteinQuery, reds_present: bool) -> Vec<GuidanceVi
 /// Daniels tables (RUN-VDOT-001, Moderate). No training numbers are invented
 /// (HARD RULE 1/2). A non-positive or implausible age yields a single
 /// explanatory row rather than a bogus HRmax.
-fn build_hr_zones(q: &HrZoneQuery, measured_hr_max: Option<f64>) -> Vec<GuidanceView> {
+fn build_hr_zones(
+    q: &HrZoneQuery,
+    measured_hr_max: Option<f64>,
+) -> (Vec<GuidanceView>, Option<HrMaxView>) {
     let mut rows = Vec::new();
 
     // Wire contract: a MEASURED HRmax (from the profile, logged off an all-out
@@ -5792,7 +6069,7 @@ fn build_hr_zones(q: &HrZoneQuery, measured_hr_max: Option<f64>) -> Vec<Guidance
             "Enter an age between 5 and 100 to estimate HRmax and training zones.".to_string(),
             &note,
         );
-        return rows;
+        return (rows, None);
     }
 
     // running::hr_max_tanaka is the same Tanaka 208 − 0.7·age estimator the
@@ -5804,7 +6081,7 @@ fn build_hr_zones(q: &HrZoneQuery, measured_hr_max: Option<f64>) -> Vec<Guidance
         (
             format!("Measured HRmax: {m:.0} bpm (your logged maximum)"),
             format!(
-                "Using your measured HRmax ({m:.0} bpm) from an all-out effort - this replaces the \
+                "Using your measured HRmax ({m:.0} bpm) from an all-out effort: this replaces the \
                  age-based Tanaka estimate and drives the %HRmax band targets below."
             ),
         )
@@ -5816,7 +6093,7 @@ fn build_hr_zones(q: &HrZoneQuery, measured_hr_max: Option<f64>) -> Vec<Guidance
             ),
             format!(
                 "Estimated from your age ({:.0}) with the Tanaka formula (208 − 0.7 × age = {hr_max:.0} bpm). \
-                 It is a population average, not your measured maximum - individuals vary by roughly ±10 bpm.",
+                 It is a population average, not your measured maximum. Individuals vary by roughly ±10 bpm.",
                 q.age_years
             ),
         )
@@ -5837,17 +6114,17 @@ fn build_hr_zones(q: &HrZoneQuery, measured_hr_max: Option<f64>) -> Vec<Guidance
         let (text, use_karvonen) = match pref.value {
             running::HrMethodPreference::PreferKarvonen => (
                 format!(
-                    "Resting HR {rhr:.0} < 55 - %HRmax and %HRR diverge; Karvonen (%HRR) targets shown per band"
+                    "Resting HR {rhr:.0} < 55: %HRmax and %HRR diverge; Karvonen (%HRR) targets shown per band"
                 ),
                 true,
             ),
             running::HrMethodPreference::EitherConverged => (
-                format!("Resting HR {rhr:.0} ≥ 70 - the two HR methods converge; either works"),
+                format!("Resting HR {rhr:.0} ≥ 70: the two HR methods converge; either works"),
                 false,
             ),
             running::HrMethodPreference::Unstated => (
                 format!(
-                    "Resting HR {rhr:.0} is in the 55–69 range, where the source states no method rule - %HRmax shown"
+                    "Resting HR {rhr:.0} is in the 55–69 range, where the source states no method rule: %HRmax shown"
                 ),
                 false,
             ),
@@ -5912,7 +6189,7 @@ fn build_hr_zones(q: &HrZoneQuery, measured_hr_max: Option<f64>) -> Vec<Guidance
         &mut rows,
         "Heart-rate zones",
         format!(
-            "MAF aerobic cap (base-phase option): 180 − age = {:.0} bpm - personalize toward measured LT1 when data exist",
+            "MAF aerobic cap (base-phase option): 180 − age = {:.0} bpm. Personalize toward measured LT1 when data exist",
             maf.value
         ),
         &maf,
@@ -5922,10 +6199,11 @@ fn build_hr_zones(q: &HrZoneQuery, measured_hr_max: Option<f64>) -> Vec<Guidance
     if let Some(weeks) = q.weeks_since_recalc {
         let due = running::hr_zone_recalc_due(weeks);
         if due.value {
+            let noun = if weeks == 1 { "week" } else { "weeks" };
             push_guidance(
                 &mut rows,
                 "Heart-rate zones",
-                format!("Zones last recalculated {weeks} weeks ago - recompute from a measured HRmax (every 4–6 weeks)"),
+                format!("Zones last recalculated {weeks} {noun} ago. Recompute from a measured HRmax (every 4–6 weeks)"),
                 &due,
             );
         }
@@ -5935,16 +6213,39 @@ fn build_hr_zones(q: &HrZoneQuery, measured_hr_max: Option<f64>) -> Vec<Guidance
     if let Some(weeks) = q.weeks_since_pace_test {
         let due = running::pace_retest_due(weeks);
         if due.value {
+            let noun = if weeks == 1 { "week" } else { "weeks" };
             push_guidance(
                 &mut rows,
                 "Heart-rate zones",
-                format!("Paces last tested {weeks} weeks ago - re-test to set paces from CURRENT fitness"),
+                format!("Paces last tested {weeks} {noun} ago. Re-test to set paces from CURRENT fitness"),
                 &due,
             );
         }
     }
 
-    rows
+    // #6: the same resolved figure as the prose HRmax row above, structured so
+    // the shell reads bpm / measured-vs-estimate / the Tanaka split from data.
+    // The 208 / 0.7 constants mirror `running::hr_max_tanaka` (208 − 0.7·age);
+    // they apply only to the age-based estimate, so they are 0 when measured.
+    let hr_max_view = if measured.is_some() {
+        HrMaxView {
+            bpm: hr_max.round(),
+            measured: true,
+            age_years: 0.0,
+            tanaka_intercept: 0.0,
+            tanaka_slope: 0.0,
+        }
+    } else {
+        HrMaxView {
+            bpm: hr_max.round(),
+            measured: false,
+            age_years: q.age_years,
+            tanaka_intercept: 208.0,
+            tanaka_slope: 0.7,
+        }
+    };
+
+    (rows, Some(hr_max_view))
 }
 
 /// Flatten every logged set, threading each exercise's previous e1RM through so
@@ -5990,21 +6291,21 @@ fn grade_rank(grade: &str) -> i32 {
 /// adjustment (safety-critical first, then grade, then confidence, the same
 /// ranking shells previously re-implemented); else the session feedback; else
 /// the all-clear default, which asserts no claim and carries no evidence tag.
-// ── Coach-as-planner (MIGRATION-PLAN Phase 6 / B3) ────────────────────────────
+// ── Coach-as-planner ────────────────────────────
 
 /// Monday-indexed weekday of an epoch-day (epoch day 0 = 1970-01-01 = Thursday).
 /// `rem_euclid` handles pre-epoch (negative) days too.
 ///
-/// B7: reduce BEFORE adding so a wire `epoch_day` near `i64::MAX` (a corrupt
-/// `SetToday`) can't debug-overflow on `+ 3`: the panic would cross the FFI
+/// Reduce BEFORE adding so a wire `epoch_day` near `i64::MAX` (a corrupt
+/// `SetToday`) can't debug-overflow on `+ 3`; the panic would cross the FFI
 /// firewall as an error object and brick every later `view()`.
 fn mon0_weekday(epoch_day: i64) -> i64 {
     (epoch_day.rem_euclid(7) + 3).rem_euclid(7)
 }
 
-/// B7: clamp a wire float to a finite, bounded domain on ingest. `serde_json`
+/// Clamp a wire float to a finite, bounded domain on ingest. `serde_json`
 /// already refuses NaN/Inf *tokens*, but a huge FINITE magnitude (e.g. 1e300)
-/// can multiply/accumulate to `inf` in `view()`, which then serializes to
+/// can multiply/accumulate to `inf` in `view()`; which then serializes to
 /// `null` and breaks a non-null Kotlin decode (a persistent view-brick). NaN
 /// maps to 0.0; the ±1e12 bound keeps any downstream product well inside f64
 /// range while comfortably covering every real kg / km / min / bpm value.
@@ -6017,7 +6318,7 @@ fn sanitize_f64(x: f64) -> f64 {
 }
 
 /// Round a load to the nearest 2.5 kg plate increment (honest arithmetic; the
-/// grade still travels with the underlying %1RM claim, Phase 6 §5.1).
+/// grade still travels with the underlying %1RM claim).
 fn round_2_5(x: f64) -> f64 {
     (x / 2.5).round() * 2.5
 }
@@ -6031,22 +6332,38 @@ fn fmt_kg(kg: f64) -> String {
     }
 }
 
-/// Best logged e1RM per exercise (0.1-rounded), most-recent-first, the plan
-/// anchors loads to these (Phase 6 §5.1). Deterministic despite the HashMap:
+/// Best logged e1RM per exercise (0.1-rounded), most-recent-first; the plan
+/// anchors loads to these. Deterministic despite the HashMap:
 /// the output is sorted by (observed_at desc, name asc).
 ///
-/// B3: a set with a non-positive e1RM (a 0 kg / bodyweight or garbage entry)
+/// A set with a non-positive e1RM (a 0 kg / bodyweight or garbage entry)
 /// NEVER becomes an anchor; otherwise the plan would prescribe "@ 0 kg". Only
 /// exercises with a positive best e1RM are emitted; the exercise key is bucketed
 /// case-INSENSITIVELY (the lookup in `plan::Anchors::e1rm_for` is), so "Squat"
 /// and "squat" merge into one anchor (the first-seen display casing kept).
-fn build_plan_anchors(sets: &[LoggedSet]) -> crate::plan::Anchors {
+fn build_plan_anchors(sets: &[LoggedSet], weeks_off: Option<f64>) -> crate::plan::Anchors {
     // key = lowercased name; value = (best e1RM, latest observed_at, display name).
     let mut best: std::collections::HashMap<String, (f64, i64, String)> =
         std::collections::HashMap::new();
+    // 2c REENTRY-001: after a declared layoff the anchored %1RM working LOAD is
+    // derated by the KB-cited resistance re-entry fraction (`resistance_reentry`,
+    // File 08 Table 3.4b) for the 1-8 wk brackets. Carry the fraction here and
+    // apply it to the LOAD in `flatten_prescription`; the e1RM anchor itself stays
+    // the true logged best, so the "your logged best" line never lies. Beyond
+    // 8 wk the KB gives NO fraction and directs a fresh-novice re-entry, so
+    // `reentry_novice` is set instead and `flatten_prescription` drops the e1RM
+    // anchor entirely (no invented number). Keys ONLY on declared `weeks_off`; no
+    // age-based decay is invented. `None`/`false` = full loads.
+    let (reentry_load_frac, reentry_novice) = match weeks_off {
+        Some(w) if w > 0.0 => {
+            let re = individualization::resistance_reentry(w).value;
+            (re.load_frac.filter(|f| *f < 1.0), re.treat_as_novice)
+        }
+        _ => (None, false),
+    };
     for s in sets {
         let e1 = strength::e1rm_epley(s.weight_kg, s.reps);
-        // B3: ignore a set that yields no positive e1RM; it can't anchor a load.
+        // Ignore a set that yields no positive e1RM; it can't anchor a load.
         if !(e1 > 0.0) {
             continue;
         }
@@ -6071,6 +6388,8 @@ fn build_plan_anchors(sets: &[LoggedSet]) -> crate::plan::Anchors {
             .into_iter()
             .map(|(k, e1, _)| (k, (e1 * 10.0).round() / 10.0))
             .collect(),
+        reentry_load_frac,
+        reentry_novice,
         ..Default::default()
     }
 }
@@ -6095,43 +6414,97 @@ fn build_plan_anchors(sets: &[LoggedSet]) -> crate::plan::Anchors {
 /// Both are `None` when the window holds no runs, so a log-less profile's plan is
 /// unchanged (byte-identical to the pre-anchor behaviour).
 ///
-/// H1: runs are bucketed by their LOCAL calendar day (`observed_at` shifted by
+/// Runs are bucketed by their LOCAL calendar day (`observed_at` shifted by
 /// the shell's `today_utc_offset_sec`, exactly like [`session_logged`]) so the
-/// window ends at the end of LOCAL today and a run logged earlier TODAY counts -
+/// window ends at the end of LOCAL today and a run logged earlier TODAY counts;
 /// the earlier `observed_at <= today*86400` predicate treated the local epoch
 /// day as a UTC instant at midnight and dropped any same-day (and, west of UTC,
 /// yesterday-evening) run. For an offset-0 history stamped at local midnight this
 /// is byte-identical to the old boundary; a future-dated row (local day past
 /// today) is still excluded.
+///
+/// Detraining taper (no window-expiry cliff): past the 30-day full-credit
+/// window the demonstrated longest-run anchor does NOT vanish in one step (the
+/// old bug: a 21 km race holder dropped to the volume-only floor overnight at
+/// day 31, e.g. 10 km → 4 km). Instead its credit decays LINEARLY to zero over a
+/// further `DETRAIN_TAPER_DAYS`, reflecting the KB detraining timeline
+/// (`DETRAIN-001` / File 08 load-037, Moderate: trained aerobic capacity is
+/// retained ~2 wk and declines only ~6–20 % over ~4 wk, a gradual loss, not a
+/// cliff; Mujika & Padilla 2000, Bosquet et al. 2013). Reaching zero credit at
+/// day 30 + 28 = 58 (≈ 8 wk) aligns with the KB's re-entry bracket
+/// (Table 3.4b: 4–8 wk off → "treat near-novice for spike caps"), beyond which
+/// no demonstrated-capacity credit remains. The LINEAR shape + 28-day length are
+/// an expert-opinion PARAMETER the KB does not state, flagged as such per the
+/// GRADE good-practice-statement precedent (see
+/// `knowledge-base/autoreg-citation-provenance-resolution.md`): the PRINCIPLE is
+/// graded (Moderate), the exact taper is a heuristic. The winning run being
+/// OLDER than the full-credit window sets the returned `detrained` flag so
+/// `plan.rs` re-points the long-run citation to `DETRAIN-001`. All existing
+/// guardrails (≤2×daily-average, spike ceiling, ≤25 % share) still bound the
+/// resulting long run downstream. The separate LOG-TIME spike gate
+/// (`spike_baseline_km`) keeps its strict hard-30-day window: the taper is a
+/// planning-capacity concept only, never a loosening of the safety gate.
 fn build_run_anchors(
     runs: &[LoggedRun],
     today_epoch_day: i64,
     utc_offset_sec: i64,
-) -> (Option<f64>, Option<f64>) {
-    // Longest recent run over the trailing 30 days; measured volume over 28.
+) -> (Option<f64>, Option<f64>, bool) {
+    // Longest recent run over the trailing 30 days (then tapered); measured
+    // volume over 28 (no taper, volume is a plain sum, not a capacity ceiling).
     const LONGEST_WINDOW_DAYS: i64 = 30;
     const WEEKLY_WINDOW_DAYS: i64 = 28;
+    const DETRAIN_TAPER_DAYS: i64 = 28;
+    const DECAY_END_DAYS: i64 = LONGEST_WINDOW_DAYS + DETRAIN_TAPER_DAYS; // 58
     let local_day = |t: i64| t.saturating_add(utc_offset_sec).div_euclid(86_400);
-    let in_window = |r: &&LoggedRun, days: i64| {
-        let d = local_day(r.observed_at);
-        d <= today_epoch_day && today_epoch_day.saturating_sub(d) <= days
+    // Detraining credit factor for a run of the given age in days: full credit
+    // through the 30-day window, then a linear taper to 0 by day 58.
+    let decay = |age_days: i64| -> f64 {
+        if age_days <= LONGEST_WINDOW_DAYS {
+            1.0
+        } else if age_days >= DECAY_END_DAYS {
+            0.0
+        } else {
+            1.0 - (age_days - LONGEST_WINDOW_DAYS) as f64 / DETRAIN_TAPER_DAYS as f64
+        }
     };
 
-    let longest = runs
-        .iter()
-        .filter(|r| in_window(r, LONGEST_WINDOW_DAYS))
-        .map(run_distance_km)
-        .fold(0.0_f64, f64::max);
-    let longest_recent = (longest > 0.0).then_some(longest);
+    // Longest recent run, detraining-adjusted: max over every non-future run
+    // within the decay horizon of `distance × decay(age)`. A run within the
+    // full-credit window contributes at factor 1.0, so a history whose longest
+    // run is ≤30 days old is byte-identical to the pre-taper behaviour (an older,
+    // decayed run can only WIN when it was longer than every in-window run, the
+    // exact cliff case the taper exists to smooth).
+    let mut best: f64 = 0.0;
+    let mut best_detrained = false;
+    for r in runs.iter() {
+        let d = local_day(r.observed_at);
+        if d > today_epoch_day {
+            continue; // future-dated row excluded, like spike_baseline_km
+        }
+        let age = today_epoch_day.saturating_sub(d);
+        if age >= DECAY_END_DAYS {
+            continue; // fully detrained → no capacity credit
+        }
+        let eff = run_distance_km(r) * decay(age);
+        if eff > best {
+            best = eff;
+            best_detrained = age > LONGEST_WINDOW_DAYS;
+        }
+    }
+    let longest_recent = (best > 0.0).then_some(best);
+    let detrained = longest_recent.is_some() && best_detrained;
 
     let total_km: f64 = runs
         .iter()
-        .filter(|r| in_window(r, WEEKLY_WINDOW_DAYS))
+        .filter(|r| {
+            let d = local_day(r.observed_at);
+            d <= today_epoch_day && today_epoch_day.saturating_sub(d) <= WEEKLY_WINDOW_DAYS
+        })
         .map(run_distance_km)
         .sum();
     let recent_weekly = (total_km > 0.0).then_some(total_km / 4.0);
 
-    (longest_recent, recent_weekly)
+    (longest_recent, recent_weekly, detrained)
 }
 
 /// Human title for a session type ("Heavy day", "Long run", "Rest").
@@ -6167,7 +6540,7 @@ fn human_goal(goal: &Goal) -> String {
 }
 
 /// Whether a logged entry of the session's discipline exists on `epoch_day`
-/// (a LOCAL calendar day). B5: a UTC `observed_at` is shifted by the shell's
+/// (a LOCAL calendar day). A UTC `observed_at` is shifted by the shell's
 /// `today_utc_offset_sec` before bucketing, so it lands on the SAME local day
 /// the plan is dated against (a set logged 00:30 Berlin isn't attributed to
 /// "yesterday UTC").
@@ -6202,7 +6575,7 @@ fn refresh_lift_summary(it: &mut PrescriptionView) {
     }
     it.summary = match it.load_kg {
         Some(kg) => format!(
-            "{} - {}×{} @ {} kg · {}",
+            "{}: {}×{} @ {} kg · {}",
             it.exercise,
             it.sets,
             it.reps_low,
@@ -6210,18 +6583,18 @@ fn refresh_lift_summary(it: &mut PrescriptionView) {
             it.intensity_label
         ),
         None => format!(
-            "{} - {}×{} · {}",
+            "{}: {}×{} · {}",
             it.exercise, it.sets, it.reps_low, it.intensity_label
         ),
     };
 }
 
-/// A3: cap a RUN item to an easy target, keep the bounded volume (the text
+/// Cap a RUN item to an easy target: keep the bounded volume (the text
 /// before the ` · ` in the summary) but replace the hard intensity with an easy
 /// zone. Used by DowngradeSession / ModifyAndMonitor so a run prescription is
 /// actually modified, not merely annotated.
 fn cap_run_item_easy(it: &mut PrescriptionView, r: &Recommended<Adjustment>, note: &str) {
-    // Downgraded to a continuous easy run, the original rep structure (H5) is
+    // Downgraded to a continuous easy run: the original rep structure is
     // deferred, not prescribed, so drop it (and any "N × …" leading token that
     // would otherwise read as an interval on an easy card).
     it.rep_count = 0;
@@ -6234,7 +6607,7 @@ fn cap_run_item_easy(it: &mut PrescriptionView, r: &Recommended<Adjustment>, not
         .trim()
         .to_string();
     let vol = if vol.contains('×') { String::new() } else { vol };
-    it.intensity_label = "Easy - Zone 1-2".into();
+    it.intensity_label = "Easy: Zone 1-2".into();
     it.summary = if vol.is_empty() {
         it.intensity_label.clone()
     } else {
@@ -6254,7 +6627,7 @@ fn cap_run_item_easy(it: &mut PrescriptionView, r: &Recommended<Adjustment>, not
     it.contested = r.confidence.contested;
     it.why = why_from(
         Some(format!(
-            "Downgraded to an easy Zone 1-2 run - {note}. The original session's \
+            "Downgraded to an easy Zone 1-2 run: {note}. The original session's \
              harder band is deferred, not prescribed today."
         )),
         r,
@@ -6274,166 +6647,247 @@ fn flatten_prescription(
     let contested = rx.confidence.contested;
 
     match &rx.value {
-        Prescription::Lift(l) => {
-            // The 5th tuple slot is the "why?" `improves` line: an honest ENGINE
-            // data-need (which input would sharpen this load), never a training
-            // claim (HARD RULE 1). It overrides the claim-keyed default so a
-            // prescription card carries the full 3-part disclosure like
-            // adjustment/guidance cards do.
-            let (load_kg, intensity_label, anchored_on, basis, improves) = match l.intensity {
-                LiftIntensity::PercentOneRm(p) => {
-                    let e1 = anchors.e1rm_for(&l.exercise);
-                    let load = e1.map(|e| round_2_5(e * p as f64 / 100.0));
-                    let label = format!("{p:.0}% e1RM");
-                    let anchored_on = e1
-                        .map(|e| format!("e1RM {e:.1} kg (your logged best)"))
-                        .unwrap_or_default();
-                    let (basis, improves) = match (load, e1) {
-                        (Some(kg), Some(e)) => (
-                            Some(format!(
-                                "{}×{} at {:.0}% of your logged e1RM ({:.1} kg) → {} kg.",
-                                l.sets,
-                                l.reps,
-                                p,
-                                e,
-                                fmt_kg(kg)
-                            )),
-                            // Anchored: the load is only as fresh as the e1RM
-                            // behind it: a new logged session keeps it current.
-                            Some("Log this session to keep your e1RM anchor current.".to_string()),
+        Prescription::Lift(l) => flatten_lift_prescription(
+            l, anchors, rx, grade, citation, confidence, safety_critical, contested,
+        ),
+        Prescription::Run(r) => {
+            flatten_run_prescription(r, rx, grade, citation, confidence, safety_critical, contested)
+        }
+    }
+}
+
+/// Flatten a `Prescription::Lift` arm: resolves the load from the anchor for a
+/// %1RM target and re-points the evidence triad for a declared layoff. The
+/// header vars are threaded in by value so the re-entry re-point can override
+/// them before they land in the `PrescriptionView`.
+fn flatten_lift_prescription(
+    l: &crate::schema::LiftPrescription,
+    anchors: &crate::plan::Anchors,
+    rx: &Recommended<Prescription>,
+    mut grade: String,
+    mut citation: String,
+    mut confidence: f32,
+    mut safety_critical: bool,
+    mut contested: bool,
+) -> PrescriptionView {
+    // The 5th tuple slot is the "why?" `improves` line: an honest ENGINE
+    // data-need (which input would sharpen this load), never a training
+    // claim (HARD RULE 1). It overrides the claim-keyed default so a
+    // prescription card carries the full 3-part disclosure like
+    // adjustment/guidance cards do.
+    let mut reentry_repoint: Option<Recommended<()>> = None;
+    let (load_kg, intensity_label, anchored_on, basis, improves) = match l.intensity {
+        LiftIntensity::PercentOneRm(p) => {
+            // 2c: a 1-8 wk layoff derates the working LOAD by the KB-cited
+            // re-entry fraction while keeping the e1RM anchor honest. A >8 wk
+            // layoff (`reentry_novice`) never reaches this arm: `plan.rs::
+            // lift_prescription` prescribes it by RIR instead (KB Table 3.4b:
+            // treat as novice), handled in the `Rir` arm below.
+            let e1 = anchors.e1rm_for(&l.exercise);
+            // 2c: derate the working LOAD for a declared layoff; the e1RM
+            // anchor stays the true logged best (honest `anchored_on`).
+            let frac = anchors.reentry_load_frac.unwrap_or(1.0);
+            let load = e1.map(|e| round_2_5(e * p as f64 / 100.0 * frac));
+            let label = format!("{p:.0}% e1RM");
+            let anchored_on = e1
+                .map(|e| format!("e1RM {e:.1} kg (your logged best)"))
+                .unwrap_or_default();
+            let reentry_pct = anchors.reentry_load_frac.map(|f| f * 100.0);
+            let (basis, improves) = match (load, e1) {
+                (Some(kg), Some(e)) => (
+                    Some(match reentry_pct {
+                        Some(pct) => format!(
+                            "{}×{} at {:.0}% of your logged e1RM ({:.1} kg), scaled to {:.0}% for your layoff → {} kg.",
+                            l.sets, l.reps, p, e, pct, fmt_kg(kg)
                         ),
-                        _ => (
-                            Some(format!(
-                                "{}×{} at {:.0}% of your estimated 1RM.",
-                                l.sets, l.reps, p
-                            )),
-                            // No anchor yet: a logged set replaces the estimate
-                            // with a measured e1RM the load can key off.
-                            Some(
-                                "Log a set of this lift so loads can anchor to your measured e1RM instead of an estimate."
-                                    .to_string(),
-                            ),
+                        None => format!(
+                            "{}×{} at {:.0}% of your logged e1RM ({:.1} kg) → {} kg.",
+                            l.sets, l.reps, p, e, fmt_kg(kg)
                         ),
-                    };
-                    (load, label, anchored_on, basis, improves)
-                }
-                LiftIntensity::Rir(n) => (
-                    None,
-                    format!("RIR {n}"),
-                    String::new(),
+                    }),
+                    // Anchored: the load is only as fresh as the e1RM
+                    // behind it. A new logged session keeps it current.
+                    Some("Log this session to keep your e1RM anchor current.".to_string()),
+                ),
+                _ => (
                     Some(format!(
-                        "{}×{} keeping {} reps in reserve - log a set to anchor a working load.",
-                        l.sets, l.reps, n
+                        "{}×{} at {:.0}% of your estimated 1RM.",
+                        l.sets, l.reps, p
                     )),
-                    // No e1RM anchor: loads are RIR-based until a set is logged.
+                    // No anchor yet: a logged set replaces the estimate
+                    // with a measured e1RM the load can key off.
                     Some(
-                        "Log a set of this lift so loads can anchor to your measured e1RM instead of RIR."
+                        "Log a set of this lift so loads can anchor to your measured e1RM instead of an estimate."
                             .to_string(),
                     ),
                 ),
-                LiftIntensity::Rpe(r) => (None, format!("RPE {r:.1}"), String::new(), None, None),
-                LiftIntensity::VelocityMs(v) => {
-                    (None, format!("{v:.2} m/s"), String::new(), None, None)
-                }
             };
-            let mut why = why_from(basis, rx);
-            if let Some(imp) = improves {
-                why.improves = imp;
+            // 2c REENTRY re-point: a load derated for a declared layoff is
+            // driven by the re-entry ramp, not the loading band, so re-point the
+            // card's whole evidence + why triad after the match (mirrors
+            // cap_run_item_easy / the run DETRAIN-001 re-point).
+            if load.is_some() && anchors.reentry_load_frac.is_some() {
+                reentry_repoint = Some(graded((), "REENTRY-001"));
             }
-            let mut it = PrescriptionView {
-                summary: String::new(),
-                exercise: l.exercise.clone(),
-                sets: l.sets,
-                reps_low: l.reps,
-                reps_high: l.reps,
-                load_kg,
-                intensity_label,
-                rest_sec: l.rest_sec,
-                rep_count: 0,
-                rep_volume: String::new(),
-                anchored_on,
-                adjusted_note: String::new(),
-                grade,
-                citation,
-                confidence,
-                safety_critical,
-                contested,
-                why,
-            };
-            refresh_lift_summary(&mut it);
-            it
+            (load, label, anchored_on, basis, improves)
         }
-        Prescription::Run(r) => {
-            let vol = match r.volume {
-                RunVolume::DurationMin(m) => format!("{m} min"),
-                RunVolume::DistanceKm(k) => format!("{k:.0} km"),
-            };
-            // H5: an interval/repetition run carries per-rep structure, surface
-            // it so the card reads "4 × 4 min · Interval pace", not a misleading
-            // "16 min · Interval pace" that looks like one continuous VO2max run.
-            let rep_volume = r.repeats.map(|(_, rv)| match rv {
-                RunVolume::DurationMin(m) => format!("{m} min"),
-                RunVolume::DistanceKm(k) => format!("{:.0} m", (k as f64) * 1000.0),
-            });
-            let rep_count = r.repeats.map(|(n, _)| n).unwrap_or(0);
-            // A long run re-pointed to RUN-SPIKE-001 (plan.rs) is anchored to the
-            // athlete's demonstrated recent distance, so its share can exceed the
-            // RUN-LONGRUN-001 ≤25% guideline. State that honestly (HARD RULE 2)
-            // instead of the generic claim statement, no invented numbers, only
-            // what the two KB entries state.
-            let run_basis = (rx.evidence.citation.claim_id.as_deref() == Some("RUN-SPIKE-001"))
-                .then(|| {
-                    "Distance is anchored to your longest recent run, so the long run stays at \
-                     a distance you have already trained (no single-session spike). This exceeds \
-                     the 25% weekly-share guideline for now - adding easy midweek volume would \
-                     bring the long-run share back down."
-                        .to_string()
-                });
-            let label = match r.intensity {
-                // A %HRmax run target is a band CEILING (easy/recovery/long runs
-                // are capped, not held at a point): render it as "≤ X% HRmax" so
-                // it never reads as an exact-point prescription.
-                RunIntensity::HrPercentMax(p) => format!("≤ {p:.0}% HRmax"),
-                RunIntensity::Vdot(b) => format!("{b:?} pace"),
-                RunIntensity::ThreeZone(ThreeZone::Z1) => "Zone 1 (easy)".into(),
-                RunIntensity::ThreeZone(ThreeZone::Z2) => "Zone 2".into(),
-                RunIntensity::ThreeZone(ThreeZone::Z3) => "Zone 3 (hard)".into(),
-                RunIntensity::PaceSecPerKm(s) => format!("{}:{:02}/km", s / 60, s % 60),
-                RunIntensity::PowerPercentCp(p) => format!("{p:.0}% CP"),
-            };
-            // Rep-structured runs lead with the honest "N × <rep> · <pace>";
-            // continuous runs keep the whole-session "<vol> · <pace>".
-            let summary = match &rep_volume {
-                Some(rv) => format!("{rep_count} × {rv} · {label}"),
-                None => format!("{vol} · {label}"),
-            };
-            PrescriptionView {
-                summary,
-                exercise: String::new(),
-                sets: 0,
-                reps_low: 0,
-                reps_high: 0,
-                load_kg: None,
-                intensity_label: label,
-                rest_sec: 0,
-                rep_count,
-                rep_volume: rep_volume.unwrap_or_default(),
-                anchored_on: String::new(),
-                adjusted_note: String::new(),
-                grade,
-                citation,
-                confidence,
-                safety_critical,
-                contested,
-                why: why_from(run_basis, rx),
+        LiftIntensity::Rir(n) => {
+            // A >8 wk novice re-entry (`reentry_novice`) is prescribed by RIR,
+            // not a %1RM anchor (KB Table 3.4b: treat as novice, technique
+            // first). It has no load to derate but still cites the re-entry
+            // reason so the card explains why the anchor is set aside.
+            if anchors.reentry_novice {
+                reentry_repoint = Some(graded((), "REENTRY-001"));
             }
+            (
+                None,
+                format!("RIR {n}"),
+                String::new(),
+                Some(format!(
+                    "{}×{} keeping {} reps in reserve: log a set to anchor a working load.",
+                    l.sets, l.reps, n
+                )),
+                // No e1RM anchor: loads are RIR-based until a set is logged.
+                Some(
+                    "Log a set of this lift so loads can anchor to your measured e1RM instead of RIR."
+                        .to_string(),
+                ),
+            )
         }
+        LiftIntensity::Rpe(r) => (None, format!("RPE {r:.1}"), String::new(), None, None),
+        LiftIntensity::VelocityMs(v) => {
+            (None, format!("{v:.2} m/s"), String::new(), None, None)
+        }
+    };
+    let mut why = why_from(basis, rx);
+    if let Some(imp) = improves {
+        why.improves = imp;
+    }
+    if let Some(re) = &reentry_repoint {
+        grade = format!("{:?}", re.evidence.grade);
+        citation = re.evidence.citation.reference.clone();
+        confidence = re.confidence.score;
+        safety_critical = re.confidence.safety_critical;
+        contested = re.confidence.contested;
+        why.grade_note = grade_note_str(
+            &format!("{:?}", re.evidence.grade),
+            re.confidence.contested,
+            re.confidence.contested_question_ref.as_deref(),
+        );
+    }
+    let mut it = PrescriptionView {
+        summary: String::new(),
+        exercise: l.exercise.clone(),
+        sets: l.sets,
+        reps_low: l.reps,
+        reps_high: l.reps,
+        load_kg,
+        intensity_label,
+        rest_sec: l.rest_sec,
+        rep_count: 0,
+        rep_volume: String::new(),
+        anchored_on,
+        adjusted_note: String::new(),
+        grade,
+        citation,
+        confidence,
+        safety_critical,
+        contested,
+        why,
+    };
+    refresh_lift_summary(&mut it);
+    it
+}
+
+/// Flatten a `Prescription::Run` arm into its `PrescriptionView`.
+fn flatten_run_prescription(
+    r: &crate::schema::RunPrescription,
+    rx: &Recommended<Prescription>,
+    grade: String,
+    citation: String,
+    confidence: f32,
+    safety_critical: bool,
+    contested: bool,
+) -> PrescriptionView {
+    let vol = match r.volume {
+        RunVolume::DurationMin(m) => format!("{m} min"),
+        RunVolume::DistanceKm(k) => format!("{k:.0} km"),
+    };
+    // An interval/repetition run carries per-rep structure; surface
+    // it so the card reads "4 × 4 min · Interval pace", not a misleading
+    // "16 min · Interval pace" that looks like one continuous VO2max run.
+    let rep_volume = r.repeats.map(|(_, rv)| match rv {
+        RunVolume::DurationMin(m) => format!("{m} min"),
+        RunVolume::DistanceKm(k) => format!("{:.0} m", (k as f64) * 1000.0),
+    });
+    let rep_count = r.repeats.map(|(n, _)| n).unwrap_or(0);
+    // A long run re-pointed to RUN-SPIKE-001 (plan.rs) is anchored to the
+    // athlete's demonstrated recent distance, so its share can exceed the
+    // RUN-LONGRUN-001 ≤25% guideline. State that honestly (HARD RULE 2)
+    // instead of the generic claim statement, no invented numbers, only
+    // what the two KB entries state.
+    let run_basis = match rx.evidence.citation.claim_id.as_deref() {
+        Some("RUN-SPIKE-001") => Some(
+            "Distance is anchored to your longest recent run, so the long run stays at \
+             a distance you have already trained (no single-session spike). This exceeds \
+             the 25% weekly-share guideline for now. Adding easy midweek volume would \
+             bring the long-run share back down."
+                .to_string(),
+        ),
+        // The anchoring run is now older than the 30-day window, so its
+        // credit is tapering (DETRAIN-001) rather than dropping off a cliff.
+        Some("DETRAIN-001") => Some(
+            "Distance is held near your recent demonstrated long run, then tapered \
+             gradually as that run ages instead of dropping off overnight. Trained \
+             endurance is retained for a couple of weeks and fades slowly, not all at \
+             once. Log a new long run to refresh the anchor."
+                .to_string(),
+        ),
+        _ => None,
+    };
+    let label = match r.intensity {
+        // A %HRmax run target is a band CEILING (easy/recovery/long runs
+        // are capped, not held at a point): render it as "≤ X% HRmax" so
+        // it never reads as an exact-point prescription.
+        RunIntensity::HrPercentMax(p) => format!("≤ {p:.0}% HRmax"),
+        RunIntensity::Vdot(b) => format!("{b:?} pace"),
+        RunIntensity::ThreeZone(ThreeZone::Z1) => "Zone 1 (easy)".into(),
+        RunIntensity::ThreeZone(ThreeZone::Z2) => "Zone 2".into(),
+        RunIntensity::ThreeZone(ThreeZone::Z3) => "Zone 3 (hard)".into(),
+        RunIntensity::PaceSecPerKm(s) => format!("{}:{:02}/km", s / 60, s % 60),
+        RunIntensity::PowerPercentCp(p) => format!("{p:.0}% CP"),
+    };
+    // Rep-structured runs lead with the honest "N × <rep> · <pace>";
+    // continuous runs keep the whole-session "<vol> · <pace>".
+    let summary = match &rep_volume {
+        Some(rv) => format!("{rep_count} × {rv} · {label}"),
+        None => format!("{vol} · {label}"),
+    };
+    PrescriptionView {
+        summary,
+        exercise: String::new(),
+        sets: 0,
+        reps_low: 0,
+        reps_high: 0,
+        load_kg: None,
+        intensity_label: label,
+        rest_sec: 0,
+        rep_count,
+        rep_volume: rep_volume.unwrap_or_default(),
+        anchored_on: String::new(),
+        adjusted_note: String::new(),
+        grade,
+        citation,
+        confidence,
+        safety_critical,
+        contested,
+        why: why_from(run_basis, rx),
     }
 }
 
 /// Flatten one plan session onto a calendar day, judging its past status.
 /// `start` is the plan's start epoch-day: a day BEFORE the plan existed is never
-/// scored "missed" (B6, a mid-week plan must not back-date the week's earlier
+/// scored "missed" (a mid-week plan must not back-date the week's earlier
 /// days as missed adherence).
 fn flatten_session(
     s: &Session,
@@ -6460,6 +6914,10 @@ fn flatten_session(
         } else {
             "missed".to_string()
         }
+    } else if epoch_day == today && session_logged(s.session_type, epoch_day, model) {
+        // Today, already logged (any matching-discipline entry that local day):
+        // the session is accomplished, same semantics as a past logged day.
+        "done".to_string()
     } else {
         "planned".to_string()
     };
@@ -6474,7 +6932,7 @@ fn flatten_session(
 }
 
 /// Fold the active (non-blocking) readiness adjustments INTO today's session
-/// (Phase 6 §5.4, the key safety composition): a load cut, an RPE cap, or a
+/// (the key safety composition): a load cut, an RPE cap, or a
 /// downgrade modifies the shown items so the plan never renders a top-end above
 /// what readiness allows. Blocking holds never reach here (handled upstream by
 /// `train_blocked`). Each applied adjustment carries its own evidence.
@@ -6488,7 +6946,7 @@ fn apply_adjustments_to_session(ns: &mut SessionPlanView, recommended: &[Recomme
                     if let Some(kg) = it.load_kg {
                         it.load_kg = Some(round_2_5(kg * (1.0 - frac)));
                         it.adjusted_note =
-                            format!("load −{p:.0}% - readiness ({})", claim_id_of(r));
+                            format!("load −{p:.0}%: readiness ({})", claim_id_of(r));
                         refresh_lift_summary(it);
                     }
                 }
@@ -6516,10 +6974,10 @@ fn apply_adjustments_to_session(ns: &mut SessionPlanView, recommended: &[Recomme
                     {
                         let capped = (n + *d as i32).clamp(0, 10);
                         it.intensity_label = format!("RIR {capped}");
+                        if it.adjusted_note.is_empty() {
+                            it.adjusted_note = format!("cap RPE −{d:.0}");
+                        }
                         refresh_lift_summary(it);
-                    }
-                    if it.adjusted_note.is_empty() {
-                        it.adjusted_note = format!("cap RPE −{d:.0}");
                     }
                 }
                 applied.get_or_insert_with(|| to_view(r));
@@ -6527,36 +6985,36 @@ fn apply_adjustments_to_session(ns: &mut SessionPlanView, recommended: &[Recomme
             Adjustment::DowngradeSession => {
                 for it in ns.items.iter_mut() {
                     if it.exercise.is_empty() {
-                        // A3: actually CAP the run target, swap the hard
+                        // Actually CAP the run target: swap the hard
                         // intensity for an easy zone (keeping the bounded volume),
                         // not just add a note. The plan never renders a hard run
                         // above readiness.
-                        cap_run_item_easy(it, r, "downgraded to an easier run - readiness");
+                        cap_run_item_easy(it, r, "downgraded to an easier run: readiness");
                     } else {
                         // Cap the top-end: drop the heavy load, prescribe an easy
                         // proximity-to-failure day (never program above readiness).
                         it.load_kg = None;
-                        it.intensity_label = "Easy - keep 3+ reps in reserve".into();
+                        it.intensity_label = "Easy: keep 3+ reps in reserve".into();
                         it.anchored_on.clear();
-                        it.adjusted_note = "downgraded to an easier session - readiness".into();
+                        it.adjusted_note = "downgraded to an easier session: readiness".into();
                         refresh_lift_summary(it);
                     }
                 }
                 applied.get_or_insert_with(|| to_view(r));
             }
             Adjustment::ModifyAndMonitor => {
-                // A3: tolerable, stable pain (Table 4.1 / safety-039), "modify
+                // Tolerable, stable pain (Table 4.1 / safety-039): "modify
                 // the provoking movement & monitor; avoid complete rest". Never
                 // program a top-end into active pain (HARD RULE 3): pull the heavy
                 // load off every lift and keep it light/pain-free, and cap runs to
                 // easy. No fabricated % (the KB states none for this response).
-                let note = format!("modify & monitor - pain ({})", claim_id_of(r));
+                let note = format!("modify & monitor: pain ({})", claim_id_of(r));
                 for it in ns.items.iter_mut() {
                     if it.exercise.is_empty() {
-                        cap_run_item_easy(it, r, "modify & monitor - keep it easy and pain-free");
+                        cap_run_item_easy(it, r, "modify & monitor: keep it easy and pain-free");
                     } else {
                         it.load_kg = None;
-                        it.intensity_label = "Light - modify the movement, keep it pain-free".into();
+                        it.intensity_label = "Light: modify the movement, keep it pain-free".into();
                         it.anchored_on.clear();
                         it.adjusted_note = note.clone();
                         refresh_lift_summary(it);
@@ -6583,7 +7041,7 @@ fn claim_id_of(r: &Recommended<Adjustment>) -> String {
 }
 
 /// The program summary card, graded with the plan's representative claim. `week`
-/// is the current program week (B6, advances with `SetToday`), 1-based.
+/// is the current program week (advances with `SetToday`), 1-based.
 fn build_program_summary(
     profile: &Profile,
     meso: &Mesocycle,
@@ -6633,17 +7091,18 @@ fn build_plan_views(
     };
     let start = req.start_epoch_day;
     let today = model.today_epoch_day.unwrap_or(start);
-    let mut anchors = build_plan_anchors(&model.sets);
+    let mut anchors = build_plan_anchors(&model.sets, profile.weeks_off);
     // Make the plan reactive to logged run history: anchor the long run to
     // demonstrated recent capacity and size weekly volume to measured mileage.
-    let (longest_recent, recent_weekly) =
+    let (longest_recent, recent_weekly, detrained) =
         build_run_anchors(&model.runs, today, model.today_utc_offset_sec);
     anchors.longest_recent_run_km = longest_recent;
     anchors.recent_weekly_km = recent_weekly;
+    anchors.longest_run_detrained = detrained;
     let Some(program) = crate::plan::synthesize(profile, &anchors, req.start_epoch_day) else {
         return (None, Vec::new(), None);
     };
-    // B7: saturating so a corrupt wire `today`/`start` near i64::MIN/MAX can't
+    // Saturating so a corrupt wire `today`/`start` near i64::MIN/MAX can't
     // debug-overflow (a panic would brick every later view via the FFI firewall).
     let week_monday = today.saturating_sub(mon0_weekday(today));
     let meso = &program.mesocycles[0];
@@ -6662,7 +7121,7 @@ fn build_plan_views(
     // week's first training day.
     let mut next_session = match week
         .iter()
-        .find(|s| s.epoch_day >= today && !s.items.is_empty())
+        .find(|s| s.epoch_day >= today && !s.items.is_empty() && s.status != "done")
     {
         Some(s) => {
             let mut n = s.clone();
@@ -6684,7 +7143,7 @@ fn build_plan_views(
             ns.items.clear();
             ns.adjustment = None;
         } else if ns.epoch_day <= today {
-            // M8: fold BOTH the readiness adjustments AND the non-blocking
+            // Fold BOTH the readiness adjustments AND the non-blocking
             // review-channel deloads/downgrades (rpe-load-gap / velocity /
             // failed-session / MRV deloads, HRV downgrade) into the rendered
             // session, so the NextSessionCard loads match a headline that says
@@ -6712,9 +7171,9 @@ fn build_plan_views(
         }
     }
 
-    // B6: the program week ADVANCES with the shell's clock: week N = whole weeks
+    // The program week ADVANCES with the shell's clock: week N = whole weeks
     // elapsed since the plan's start, 1-based (no week 0). Driven by SetToday, not
-    // hardcoded to 1. M13: once past the last block week the plan is a repeated
+    // hardcoded to 1. Once past the last block week the plan is a repeated
     // maintenance cycle (plan.rs owns real progression/deload/taper), so the week
     // number CYCLES 1..weeks (via `rem_euclid`) instead of pinning at "week N of
     // N" forever, and `maintenance` is flagged so a shell can say so. Inside the
@@ -6768,7 +7227,7 @@ fn build_headline(
             return from_adjustment("safety_hold", &to_view(stop));
         }
     }
-    // A3: the safety/adjustment call OUTRANKS the prescription rung. When any
+    // The safety/adjustment call OUTRANKS the prescription rung. When any
     // readiness/pain adjustment is active (e.g. a tolerable-pain day), the
     // headline IS that call, "modify & monitor", "easier session", never the
     // full-load next session. The adjustment is still folded INTO the rendered
@@ -6789,7 +7248,7 @@ fn build_headline(
     if let Some(v) = best {
         return from_adjustment("adjustment", v);
     }
-    // Prescription rung (Phase 6 §5.4): with no active adjustment, the highest
+    // Prescription rung: with no active adjustment, the highest
     // non-safety call is the concrete next session. Only when a plan is set and
     // not blocked; otherwise fall through to feedback/all-clear. Old shells that
     // don't know the "prescription" kind still render `summary`, a correct
@@ -6799,7 +7258,7 @@ fn build_headline(
             if let Some(first) = ns.items.first() {
                 return TodayHeadlineView {
                     kind: "prescription".to_string(),
-                    summary: format!("Next: {} - {}", ns.title, first.summary),
+                    summary: format!("Next: {}. {}", ns.title, first.summary),
                     grade: first.grade.clone(),
                     citation: first.citation.clone(),
                     confidence: first.confidence,
@@ -6826,7 +7285,7 @@ fn build_headline(
         kind: "all_clear".to_string(),
         // States the absence of any triggered rule, not a graded claim, so
         // no evidence tag is attached (empty grade; shells render no chip).
-        summary: "Train as planned - no adjustment triggered.".to_string(),
+        summary: "Train as planned: no adjustment triggered.".to_string(),
         ..TodayHeadlineView::default()
     }
 }
@@ -6875,6 +7334,13 @@ fn build_readiness_summary(
 /// Static signal→group metadata for every readiness signal, in picker order
 /// (metrics before the red-flag block).
 fn build_signal_groups() -> Vec<SignalGroupView> {
+    // P2: static signal→group metadata, identical every call, memoize (see
+    // `build_reference`).
+    static CACHE: OnceLock<Vec<SignalGroupView>> = OnceLock::new();
+    CACHE.get_or_init(build_signal_groups_impl).clone()
+}
+
+fn build_signal_groups_impl() -> Vec<SignalGroupView> {
     autoreg::ALL_SIGNALS
         .iter()
         .map(|&s| SignalGroupView {
@@ -6977,6 +7443,13 @@ fn to_view_with<T>(summary: String, r: &Recommended<T>) -> AdjustmentView {
 /// legend sheet. `MarketingMyth` is included so the legend can name the
 /// hard-blocked bottom of the scale, but it is never emitted on a card.
 fn grade_definitions() -> Vec<GradeDefView> {
+    // P2: the File 09 grade legend is a fixed five-row table, memoize (see
+    // `build_reference`).
+    static CACHE: OnceLock<Vec<GradeDefView>> = OnceLock::new();
+    CACHE.get_or_init(grade_definitions_impl).clone()
+}
+
+fn grade_definitions_impl() -> Vec<GradeDefView> {
     [
         EvidenceGrade::Strong,
         EvidenceGrade::Moderate,
@@ -6993,7 +7466,7 @@ fn grade_definitions() -> Vec<GradeDefView> {
             ),
             EvidenceGrade::Moderate => (
                 "Moderate",
-                "Mixed or limited randomized trials - promising but not yet settled.",
+                "Mixed or limited randomized trials: promising but not yet settled.",
             ),
             EvidenceGrade::Weak => (
                 "Weak",
@@ -7005,7 +7478,7 @@ fn grade_definitions() -> Vec<GradeDefView> {
             ),
             EvidenceGrade::MarketingMyth => (
                 "Marketing myth",
-                "Contradicted or retracted - hard-blocked, never programmed.",
+                "Contradicted or retracted: hard-blocked, never programmed.",
             ),
         };
         GradeDefView {
@@ -7056,15 +7529,15 @@ fn why_from<T>(basis_override: Option<String>, r: &Recommended<T>) -> WhyView {
 fn grade_note_str(grade: &str, contested: bool, contested_ref: Option<&str>) -> String {
     let base = match grade {
         "Strong" => {
-            "Strong evidence - backed by well-replicated meta-analyses or randomized trials."
+            "Strong evidence: backed by well-replicated meta-analyses or randomized trials."
         }
         "Moderate" => {
-            "Moderate evidence - mixed or limited randomized trials; promising but not settled."
+            "Moderate evidence: mixed or limited randomized trials; promising but not settled."
         }
         "Weak" => {
-            "Weak evidence - from mechanism or observation, not direct trials on this outcome."
+            "Weak evidence: from mechanism or observation, not direct trials on this outcome."
         }
-        "ExpertOpinion" => "Expert opinion - a practice heuristic with no direct trial evidence yet.",
+        "ExpertOpinion" => "Expert opinion: a practice heuristic with no direct trial evidence yet.",
         _ => "",
     };
     if base.is_empty() {
@@ -7072,14 +7545,48 @@ fn grade_note_str(grade: &str, contested: bool, contested_ref: Option<&str>) -> 
     }
     if contested {
         match contested_ref.and_then(crate::evidence::contested_question) {
-            Some(cq) => format!("{base} This is a contested question - {}", cq.question),
+            // #4: honour the deck's "here's both sides" promise, name the open
+            // question in plain prose AND show the engine's current lean, rather
+            // than dangling a bare topic label. `strip_file_ref` defensively
+            // removes any trailing internal "(File 0x local CQ-NN)" shorthand so
+            // doc-speak never reaches the user even if a future KB edit adds it.
+            Some(cq) => {
+                let mut s = format!(
+                    "{base} This one is genuinely contested: experts differ on {}. Our current lean: {}.",
+                    strip_file_ref(cq.question),
+                    cq.engine_default
+                );
+                // #4: when the KB supplies an attributable opposing reference,
+                // show one contradicting side so the disclosure honours the
+                // deck's "here's both sides" promise. Left off entirely when the
+                // CQ has no KB-sourced opposing cite (`other_side` is None) -
+                // never a fabricated "other view".
+                if let Some(other) = cq.other_side {
+                    s.push_str(&format!(" One view on the other side: {other}"));
+                }
+                s
+            }
             None => format!(
-                "{base} This claim is contested; the engine holds a default lean while it is debated."
+                "{base} This one is genuinely contested. We follow the best available evidence and will update as it settles."
             ),
         }
     } else {
         base.to_string()
     }
+}
+
+/// Defensively strip a trailing internal doc reference like ` (File 03 local
+/// CQ-04)` from a contested-question label before it reaches a user. The KB
+/// question strings are plain today; this keeps a future edit from leaking
+/// file/CQ shorthand into the disclosure (#4).
+fn strip_file_ref(s: &str) -> &str {
+    let trimmed = s.trim_end();
+    if trimmed.ends_with(')') {
+        if let Some(open) = trimmed.rfind(" (File ") {
+            return trimmed[..open].trim_end();
+        }
+    }
+    trimmed
 }
 
 /// The engagement-loop line for the "why?" disclosure: which input the rule
@@ -7096,7 +7603,7 @@ fn improves_for(claim_id: Option<&str>) -> String {
             "Add a recent race time so these zones anchor to your own VDOT instead of a default."
         }
         Some("HRV-001") | Some("AUTOREG-HRV-SAT-001") => {
-            "Keep logging morning check-ins - more readings tighten the HRV baseline this compares against."
+            "Keep logging morning check-ins. More readings tighten the HRV baseline this compares against."
         }
         Some("WELLNESS-001") | Some("AUTOREG-WELLNESS-RHR-001") => {
             "A couple more weeks of morning check-ins tighten your wellness baseline."
@@ -7125,7 +7632,7 @@ fn describe(a: &Adjustment) -> String {
         // Never folded into the rendered session (the safe choice, an increase is
         // opt-in, unlike a safety cut), so the copy tells the user to apply it.
         Adjustment::IncreaseLoadPct(p) => {
-            format!("Increase load {p:.0}% - readiness is high; add it manually next session")
+            format!("Increase load {p:.0}%. Readiness is high; add it manually next session")
         }
         Adjustment::Deload {
             volume_reduction_pct,
@@ -7139,11 +7646,11 @@ fn describe(a: &Adjustment) -> String {
         }
         Adjustment::DowngradeSession => "Downgrade to an easier session".into(),
         Adjustment::ModifyAndMonitor => {
-            "Modify the provoking exercise and continue with monitoring - avoid complete rest"
+            "Modify the provoking exercise and continue with monitoring. Avoid complete rest"
                 .into()
         }
         Adjustment::RestDay => "Take a full rest day".into(),
-        Adjustment::Stop => "Stop - do not train".into(),
+        Adjustment::Stop => "Stop: do not train".into(),
         Adjustment::Defer { reason } => reason.clone(),
     }
 }
@@ -7168,7 +7675,7 @@ mod tests {
     // The `LogRun`/`LogRunTrack`/`AmendRun` struct-enum variants have no
     // `Default`, so every literal construction site breaks when a field is
     // added. Routing all test construction through these helpers isolates that
-    // churn to one place (I16): adding an optional field edits only the helper
+    // churn to one place: adding an optional field edits only the helper
     // body, never the ~30 call sites. Positional args mirror the variant fields.
     fn log_run(
         distance_km: f64,
@@ -7207,7 +7714,7 @@ mod tests {
         }
     }
 
-    /// [`log_run_track`] with explicit pause-bridge boundaries (I15/B2).
+    /// [`log_run_track`] with explicit pause-bridge boundaries.
     #[allow(dead_code)]
     fn log_run_track_seg(
         points: Vec<GpsPoint>,
@@ -7275,7 +7782,7 @@ mod tests {
         let profile = r#"{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"TenK","concurrent_goal":"Strength","weekly_sets":14,"running_days_per_week":4,"running_km_per_week":45.0,"advanced":false,"endurance_intensity_pct_vo2max":75.0}}"#;
         match serde_json::from_str::<Event>(profile).expect("profile wire form must parse") {
             Event::SetProfile(p) => {
-                // Phase-5 person fields are additive: a pre-Phase-5 profile line
+                // The person fields are additive: an older profile line
                 // (nine fields, no person data) must replay with them absent.
                 assert_eq!(p.age_years, None, "old profile must default age to None");
                 assert_eq!(p.resting_hr_bpm, None);
@@ -7287,7 +7794,7 @@ mod tests {
         }
     }
 
-    /// Phase 5 / M5: the consolidated person fields (age, bodyweight, sex, resting
+    /// The consolidated person fields (age, bodyweight, sex, resting
     /// HR, measured HRmax) round-trip through the `SetProfile` wire exactly as
     /// Core.kt's guided setup / profile editor emit them. All are `#[serde(default)]`
     /// so the shell omits absent ones (previous test) and sends present ones here.
@@ -7406,7 +7913,7 @@ mod tests {
         let adj = vm
             .adjustments
             .iter()
-            .find(|a| a.summary.contains("avoid complete rest"))
+            .find(|a| a.summary.contains("Avoid complete rest"))
             .expect("modify-and-monitor adjustment surfaces");
         assert!(adj.safety_critical);
         assert_eq!(adj.grade, "Moderate");
@@ -7427,10 +7934,10 @@ mod tests {
         assert_eq!(vm.safety_tier.as_deref(), Some("Pain"));
         assert!(vm.train_blocked);
         assert_eq!(vm.adjustments.len(), 1);
-        assert_eq!(vm.adjustments[0].summary, "Stop - do not train");
+        assert_eq!(vm.adjustments[0].summary, "Stop: do not train");
     }
 
-    // --- Phase 2 / B1: humanized readiness via the morning check-in ---
+    // --- Humanized readiness via the morning check-in ---
 
     fn checkin_ev(day: i64, sleep: u8, sore: u8, mood: u8) -> Event {
         Event::SubmitCheckin(CheckinInput {
@@ -7445,7 +7952,7 @@ mod tests {
 
     #[test]
     fn a_single_checkin_shows_building_baseline_not_a_fabricated_z() {
-        // The B1 acceptance path: a fresh user does one morning check-in (sleep 2
+        // The acceptance path: a fresh user does one morning check-in (sleep 2
         // / soreness 4 / mood 3). Today must show an honest "collecting baseline"
         // state and NO derived readiness signal, never a made-up z-score, and
         // the user is never asked to enter one.
@@ -7752,7 +8259,7 @@ mod tests {
         assert!((vm.lifts[0].rir - 2.0).abs() < f64::EPSILON);
     }
 
-    // ── Phase 4 / M4: entry ids + DeleteEntry / AmendSet / AmendRun ──────────
+    // ── Entry ids + DeleteEntry / AmendSet / AmendRun ──────────
 
     fn log_set_id(exercise: &str, weight_kg: f64, id: u64, observed_at: i64) -> Event {
         Event::LogSet {
@@ -7825,9 +8332,9 @@ mod tests {
 
     #[test]
     fn amend_after_delete_is_a_no_op_never_resurrects() {
-        // B8 full prevention: amend is a STRICT update. Log→Delete→Amend must leave
-        // the set deleted, an amend whose target no longer exists adds nothing
-        // (before B8 it pushed a fresh row, resurrecting the deleted entry).
+        // Full prevention: amend is a STRICT update. Log→Delete→Amend must leave
+        // the set deleted; an amend whose target no longer exists adds nothing
+        // (previously it pushed a fresh row, resurrecting the deleted entry).
         let app = Engine;
         let mut model = Model::default();
         app.update(log_set_id("Bench", 100.0, 5, 0), &mut model)
@@ -7922,7 +8429,7 @@ mod tests {
 
     #[test]
     fn delete_entry_falls_back_to_observed_at_for_a_legacy_row() {
-        // A pre-Phase-4 set has entry_id 0; the shell targets it by observed_at.
+        // A legacy set has entry_id 0; the shell targets it by observed_at.
         let app = Engine;
         let mut model = Model::default();
         app.update(log_set_id("Old", 100.0, 0, 5000), &mut model)
@@ -8196,7 +8703,7 @@ mod tests {
         assert_eq!(vm.lifts[0].observed_at, 0);
         assert_eq!(vm.lifts[0].exercise, "Bench");
         assert_eq!(vm.lifts[1].observed_at, 1_700_000_000);
-        // entry_id is likewise serde-default: a pre-Phase-4 LogSet decodes with
+        // entry_id is likewise serde-default: a legacy LogSet decodes with
         // id 0 (the shell then targets it by observed_at).
         assert_eq!(vm.lifts[0].entry_id, 0);
     }
@@ -8246,15 +8753,15 @@ mod tests {
 
     #[test]
     fn workout_type_tag_round_trips_and_is_back_compat() {
-        // I16: the user-declared workout-type label is an additive
+        // The user-declared workout-type label is an additive
         // `#[serde(default)] Option<WorkoutType>` on LogRun/LogRunTrack/AmendRun.
         // (1) A tagged run decodes the label AND echoes it on the run view. (2) An
         // OLD-shape event with NO `workout_type` key still decodes (→ None), so
-        // pre-I16 persisted logs and older shells replay unchanged (HARD RULE 1:
+        // older persisted logs and shells replay unchanged (HARD RULE 1:
         // storage + display only, nothing here branches coaching on the tag).
         let app = Engine;
 
-        // (2) back-compat: the exact pre-I16 wire shape (no workout_type key) parses.
+        // (2) back-compat: the exact old wire shape (no workout_type key) parses.
         let old_shape: Event = serde_json::from_str(
             r#"{"LogRun":{"distance_km":10.0,"duration_min":50.0,"hr_pct_max":70.0,"longest_recent_km":12.0,"observed_at":0,"entry_id":0}}"#,
         )
@@ -8664,6 +9171,84 @@ mod tests {
     }
 
     #[test]
+    fn power_guidance_row_states_kb_language_not_the_rir_number() {
+        // The Power loading row is cited to STR-PWR-001 (Moderate). The numeric
+        // RIR 3-5 band is an expert-opinion encoding (STR-PWR-RIR-001), so it
+        // must NOT print under this row; the row states the KB's qualitative
+        // "never to failure" instruction instead.
+        let mut p = sample_profile();
+        p.lift_goal = LiftGoal::Power;
+        let rows = build_guidance(&p);
+        let loading = rows
+            .iter()
+            .find(|r| r.summary.contains("Power loading:"))
+            .expect("a Power loading guidance row exists");
+        assert!(
+            loading.summary.contains("never to failure"),
+            "row states the KB power instruction: {}",
+            loading.summary
+        );
+        assert!(
+            !loading.summary.contains("RIR "),
+            "no expert-opinion RIR digits under the STR-PWR-001 row: {}",
+            loading.summary
+        );
+    }
+
+    #[test]
+    fn c25k_running_guidance_row_has_no_long_run_fragment() {
+        // A4: C25K carries no long-run share (running-025 is run/walk to 30 min),
+        // so the Running guidance row must not print a "long run …%" fragment.
+        // B2: the goal distance renders as the human label "Couch to 5K", never
+        // the raw Debug enum name "C25k".
+        let mut p = sample_profile();
+        p.goal_distance = GoalDistance::C25k;
+        let rows = build_guidance(&p);
+        let running = rows
+            .iter()
+            .find(|r| r.summary.starts_with("Couch to 5K:"))
+            .expect("a C25K running guidance row exists");
+        assert!(
+            !running.summary.contains("long run"),
+            "C25K has no long-run share, so no long-run fragment: {}",
+            running.summary
+        );
+        assert!(
+            running.summary.contains("3-3 sessions/wk"),
+            "the C25K session budget still renders: {}",
+            running.summary
+        );
+        // The raw Debug enum name never leaks into any guidance summary.
+        assert!(
+            !rows.iter().any(|r| r.summary.contains("C25k")),
+            "no PascalCase enum name in the guidance copy"
+        );
+    }
+
+    #[test]
+    fn guidance_copy_uses_human_labels_not_debug_enums() {
+        // B2: the periodization, goal-distance and same-session-order rows render
+        // human labels, never the raw Debug enum names ("Dup"/"FiveK"/"RunFirst").
+        let mut p = sample_profile(); // WeekToWeek cadence → DUP; EndurancePriority.
+        p.goal_distance = GoalDistance::FiveK;
+        let rows = build_guidance(&p);
+        let any = |needle: &str| rows.iter().any(|r| r.summary.contains(needle));
+        assert!(
+            any("Periodization model: daily undulating (DUP)"),
+            "periodization human label"
+        );
+        assert!(any("5K: "), "goal-distance human label in the running row");
+        assert!(
+            any("Combined days: running first is fine (endurance priority)."),
+            "same-session-order full sentence"
+        );
+        // No PascalCase enum name leaks into any guidance summary.
+        for bad in ["Dup", "FiveK", "RunFirst", "EndurancePriority"] {
+            assert!(!any(bad), "raw Debug enum name '{bad}' leaked into guidance copy");
+        }
+    }
+
+    #[test]
     fn predict_race_produces_graded_two_method_estimate() {
         let app = Engine;
         let mut model = Model::default();
@@ -8970,7 +9555,7 @@ mod tests {
         assert!(app.view(&model).hr_zones.is_empty());
     }
 
-    // --- Phase 3 / M2: the three-part "why?" disclosure + grade legend ---
+    // --- The three-part "why?" disclosure + grade legend ---
 
     #[test]
     fn why_disclosure_on_hr_zones_carries_basis_grade_note_and_improves() {
@@ -9051,6 +9636,33 @@ mod tests {
                 g.why.grade_note
             );
         }
+    }
+
+    #[test]
+    fn contested_render_shows_one_opposing_side_when_kb_supplies_it() {
+        // #4: CQ-01 carries a KB-sourced opposing citation → the disclosure shows
+        // it as "one view on the other side"; CQ-02 has none → the render stops
+        // at the engine lean and fabricates no opposing view.
+        let with = grade_note_str("Strong", true, Some("CQ-01"));
+        assert!(
+            with.contains("genuinely contested") && with.contains("Our current lean:"),
+            "contested render carries the lean: {with}"
+        );
+        assert!(
+            with.contains("One view on the other side:")
+                && with.to_lowercase().contains("schoenfeld"),
+            "CQ-01's KB opposing cite surfaces: {with}"
+        );
+
+        let without = grade_note_str("Moderate", true, Some("CQ-02"));
+        assert!(
+            without.contains("genuinely contested"),
+            "CQ-02 still flags the debate: {without}"
+        );
+        assert!(
+            !without.contains("One view on the other side:"),
+            "CQ-02 has no KB opposing cite → no fabricated other side: {without}"
+        );
     }
 
     #[test]
@@ -9533,7 +10145,7 @@ mod tests {
                                 deficit: d,
                             },
                             reds,
-                        ));
+                        ).0);
                     }
                 }
             }
@@ -9550,7 +10162,7 @@ mod tests {
                     weeks_since_pace_test: None,
                 },
                 None,
-            ));
+            ).0);
         }
     }
 
@@ -9875,6 +10487,25 @@ mod tests {
     }
 
     #[test]
+    fn review_even_split_run_carries_human_category_label() {
+        // An even-effort run (no positive split) resolves to PositiveExecution;
+        // the core ships the human overline verbatim so the shell renders it
+        // without a hand-maintained parallel label map.
+        let app = Engine;
+        let mut model = Model::default();
+        let review = SessionReview {
+            positive_split_pct: Some(0.0),
+            ..Default::default()
+        };
+        app.update(Event::SubmitReview(review), &mut model)
+            .expect_only_render();
+
+        let fb = app.view(&model).feedback.expect("feedback present");
+        assert_eq!(fb.category, "PositiveExecution");
+        assert_eq!(fb.category_label, "Pacing");
+    }
+
+    #[test]
     fn review_week_level_deloads_surface_as_adjustments() {
         // Two failed key sessions is a week-level fatigue deload trigger
         // (autoreg-036) carried on the review, not a single-session readiness
@@ -10034,6 +10665,122 @@ mod tests {
             "note should show magnitude, not a signed number: {}",
             view.summary
         );
+    }
+
+    /// A distinctive GPS run whose content is unlikely to be pre-cached by any
+    /// other test on this thread, so the P1 memo counter delta is meaningful.
+    fn p1_probe_run(entry_id: u64) -> LoggedRun {
+        LoggedRun {
+            distance_km: 0.0,
+            duration_min: 0.0,
+            hr_pct_max: 71.0,
+            longest_recent_km: 3.3,
+            track: vec![
+                GpsPoint { lat: 12.5, lon: 34.5000, observed_at: 1_000, accuracy_m: 4.0 },
+                GpsPoint { lat: 12.5, lon: 34.5010, observed_at: 1_050, accuracy_m: 4.0 },
+                GpsPoint { lat: 12.5, lon: 34.5020, observed_at: 1_100, accuracy_m: 4.0 },
+                GpsPoint { lat: 12.5, lon: 34.5030, observed_at: 1_150, accuracy_m: 4.0 },
+            ],
+            track_segment_starts: Vec::new(),
+            observed_at: 1_000,
+            entry_id,
+            workout_type: None,
+        }
+    }
+
+    #[test]
+    fn p1_run_view_derivation_is_memoized_and_gpx_built_once() {
+        // P1: the heavy per-run derivation (≈6 haversine passes + km/mile splits
+        // + VI + a GPX string) must run ONCE per distinct run, not on every
+        // view(). A second identical derivation serves a cached clone, zero
+        // rebuilds, while the wire shape (incl. the populated gpx) is unchanged.
+        let run = p1_probe_run(918_273);
+
+        let before = RUN_VIEW_BUILDS.with(|c| c.get());
+        let first = to_run_view(&run);
+        let after_first = RUN_VIEW_BUILDS.with(|c| c.get());
+        let second = to_run_view(&run);
+        let after_second = RUN_VIEW_BUILDS.with(|c| c.get());
+
+        assert_eq!(after_first - before, 1, "the first derivation builds once");
+        assert_eq!(after_second - after_first, 0, "the second is served from cache");
+        assert_eq!(first, second, "the cached view is identical");
+        // The heavy GPX string is still populated (the shell's list label +
+        // detail map depend on it): memoization did not drop it.
+        assert!(first.gpx.contains("<trkseg>"), "gpx stays populated: {}", first.gpx);
+
+        // A content change (an amend) must MISS the cache and rebuild.
+        let mut amended = run.clone();
+        amended.longest_recent_km = 99.0;
+        let before_amend = RUN_VIEW_BUILDS.with(|c| c.get());
+        let _ = to_run_view(&amended);
+        assert_eq!(
+            RUN_VIEW_BUILDS.with(|c| c.get()) - before_amend,
+            1,
+            "a changed fingerprint recomputes"
+        );
+    }
+
+    #[test]
+    fn p6_run_view_carries_structured_spike_baseline_flag() {
+        // #6: the spike-baseline provenance the shell scraped from `spike_note`
+        // ("no prior run") is now a structured bool. A first run (no baseline)
+        // flags with has_baseline=false; a run with a prior baseline is true.
+        let mut no_baseline = p1_probe_run(1);
+        no_baseline.longest_recent_km = 0.0;
+        let v = to_run_view(&no_baseline);
+        assert!(v.spike_flag && !v.spike_has_baseline, "first run: no baseline");
+        assert!(v.spike_note.contains("no prior run"), "prose kept for compat");
+
+        let mut with_baseline = p1_probe_run(2);
+        with_baseline.longest_recent_km = 3.0; // a short run vs a 3 km baseline
+        let v2 = to_run_view(&with_baseline);
+        assert!(v2.spike_has_baseline, "a prior baseline exists");
+    }
+
+    #[test]
+    fn p6_protein_and_hr_wire_fields_are_additive_and_serde_default() {
+        // #6 + wire compat: the new ViewModel fields (hr_max, protein_figures)
+        // and RunResultView.spike_has_baseline are additive with serde defaults -
+        // an old ViewModel JSON lacking them still decodes.
+        let app = Engine;
+        let mut model = Model::default();
+        model.profile = Some(sample_profile());
+        // Request both calculators so the structured figures populate.
+        app.update(
+            Event::ComputeProtein { bodyweight_kg: 80.0, masters: true, deficit: false },
+            &mut model,
+        )
+        .expect_only_render();
+        app.update(
+            Event::ComputeHrZones {
+                age_years: 40.0,
+                resting_hr_bpm: None,
+                weeks_since_recalc: None,
+                weeks_since_pace_test: None,
+            },
+            &mut model,
+        )
+        .expect_only_render();
+
+        let vm = app.view(&model);
+        // Structured protein figure mirrors the prose row (80 kg × masters band).
+        let pf = vm.protein_figures.iter().find(|f| f.kind == "masters").expect("masters figure");
+        assert!(pf.low_g_per_day > 0.0 && pf.high_g_per_day >= pf.low_g_per_day && !pf.refused);
+        // Structured HRmax: Tanaka(40) = 180, with the 208 − 0.7 split exposed.
+        let hm = vm.hr_max.as_ref().expect("hr_max figure");
+        assert!(!hm.measured && hm.bpm == 180.0 && hm.tanaka_intercept == 208.0);
+
+        // Round-trip through JSON with the three new fields stripped: still decodes.
+        let mut json: serde_json::Value = serde_json::to_value(&vm).unwrap();
+        let obj = json.as_object_mut().unwrap();
+        obj.remove("hr_max");
+        obj.remove("protein_figures");
+        for run in obj.get_mut("runs").and_then(|r| r.as_array_mut()).into_iter().flatten() {
+            run.as_object_mut().unwrap().remove("spike_has_baseline");
+        }
+        let decoded: ViewModel = serde_json::from_value(json).expect("old-shape JSON decodes");
+        assert!(decoded.hr_max.is_none() && decoded.protein_figures.is_empty());
     }
 
     #[test]
@@ -10286,7 +11033,7 @@ mod tests {
 
     #[test]
     fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx(){
-        // I15/B2 end-to-end over the real event path: a run with a pause +
+        // End-to-end over the real event path: a run with a pause +
         // ~111 km relocation. Segment 1 (indices 0–4) then segment 2 (indices
         // 5–9), boundary at index 5. The bridge fix (index 5) is a 1853 m/s
         // "teleport" the QC gate would normally drop: the segment boundary must
@@ -10393,9 +11140,9 @@ mod tests {
         // A logged run 20 % over the recent-longest baseline is the strongest
         // running injury signal (RUN-SPIKE-001). A plain review that carries no
         // explicit spike figure must still trip the safety gate off the logged
-        // run, so the deferral is reachable from ordinary logging. M6: the gate
+        // run, so the deferral is reachable from ordinary logging. The gate
         // now derives its baseline from LOGGED history (`model.runs`), so the
-        // spike must be demonstrable against a real prior run, a 10 km baseline
+        // spike must be demonstrable against a real prior run: a 10 km baseline
         // run, then a 12 km run (+20 %).
         let app = Engine;
         let mut model = Model::default();
@@ -10894,7 +11641,7 @@ mod tests {
         assert!(
             vm.review_adjustments
                 .iter()
-                .any(|a| a.summary.contains("re-test")),
+                .any(|a| a.summary.contains("Re-test")),
             "autoreg-032 threshold re-test cue surfaces"
         );
         // Neither blocks training.
@@ -11248,7 +11995,10 @@ mod tests {
         // Fresh loading: acute fatigue outruns chronic fitness → negative form.
         assert!(tl.atl > tl.ctl, "ATL {} vs CTL {}", tl.atl, tl.ctl);
         assert!((tl.tsb - (tl.ctl - tl.atl)).abs() < 0.11, "TSB = CTL − ATL");
-        assert!(tl.method.contains("Lucia TRIMP"), "{}", tl.method);
+        // #7: plain-language method, TRIMP + CTL/ATL kept, but the raw τ/EWMA
+        // formula-speak is gone (the shell glossary defines the abbreviations).
+        assert!(tl.method.contains("TRIMP") && tl.method.contains("CTL"), "{}", tl.method);
+        assert!(!tl.method.contains('τ') && !tl.method.contains("EWMA"), "{}", tl.method);
         assert!(tl.summary.contains("not a performance predictor"));
         assert_eq!(tl.grade, "Moderate");
         assert!(!tl.citation.is_empty());
@@ -11647,8 +12397,8 @@ mod tests {
         assert!(has("recovery day / easy block"), "HRV suppression streak");
         assert!(has("1–3 easy days"), "wellness+RHR");
         assert!(has("take the deload week now"), "hypertrophy triggers");
-        assert!(has("lengthen the rest interval"), "rep-drop rest");
-        assert!(has("scale this week to"), "recovery-adjusted volume");
+        assert!(has("Lengthen the rest interval"), "rep-drop rest");
+        assert!(has("Scale this week to"), "recovery-adjusted volume");
         // Every review row is graded (HARD RULE 2).
         for a in &vm.review_adjustments {
             assert!(!a.grade.is_empty() && !a.citation.is_empty(), "{}", a.summary);
@@ -11777,8 +12527,7 @@ mod tests {
         let src = app.view(&model).autoreg_source.expect("source row");
         assert!(src.summary.contains("rolling HRV gate"), "{}", src.summary);
 
-        // A load-explained decline routes to the recovery-first trend message,
-        // and a planned-hard session gets the praise-effort tone.
+        // A load-explained decline routes to the recovery-first trend message.
         app.update(
             Event::SubmitReview(SessionReview {
                 trend_direction: Some("down".into()),
@@ -11792,11 +12541,7 @@ mod tests {
         .expect_only_render();
         let vm = app.view(&model);
         let trend = vm.trend.expect("trend row");
-        assert!(trend.summary.contains("recovery first"), "{}", trend.summary);
-        assert_eq!(
-            vm.feedback.expect("feedback present").tone.as_deref(),
-            Some("PraiseEffort")
-        );
+        assert!(trend.summary.contains("Recovery first"), "{}", trend.summary);
 
         // 14 distinct dated days of logging ends the provisional window.
         for i in 1..=14 {
@@ -11846,8 +12591,8 @@ mod tests {
             .expect("repetition row");
         assert!(rep.summary.contains("pace-governed"), "{}", rep.summary);
         assert!(has("MAF aerobic cap"), "MAF row");
-        assert!(has("recompute from a measured HRmax"), "recalc-due row");
-        assert!(has("re-test to set paces"), "pace-retest row");
+        assert!(has("Recompute from a measured HRmax"), "recalc-due row");
+        assert!(has("Re-test to set paces"), "pace-retest row");
     }
 
     #[test]
@@ -11898,7 +12643,7 @@ mod tests {
         .expect_only_render();
         let pred = app.view(&model).race_prediction.expect("prediction");
         assert_eq!(pred.notes.len(), 2, "stale + optimism: {:#?}", pred.notes);
-        assert!(pred.notes.iter().any(|n| n.summary.contains("re-test")));
+        assert!(pred.notes.iter().any(|n| n.summary.contains("Re-test")));
         assert!(
             pred.notes
                 .iter()
@@ -12512,7 +13257,7 @@ mod tests {
         }
     }
 
-    // ── Coach-as-planner (MIGRATION-PLAN Phase 6 / B3) ────────────────────────
+    // ── Coach-as-planner ────────────────────────
 
     /// A pure-strength profile with no running (guided-setup shape).
     fn strength_profile() -> Profile {
@@ -12547,8 +13292,23 @@ mod tests {
         app.update(Event::SetProfile(strength_profile()), &mut model)
             .expect_only_render();
         if with_set {
-            app.update(logset("Back Squat", 120.0, 3), &mut model)
-                .expect_only_render();
+            // A pre-plan baseline set (dated the day BEFORE the plan starts): it
+            // seeds the e1RM anchor (day-independent) WITHOUT logging today's
+            // session, so `today` (MON) stays the unlogged upcoming session the
+            // next-session/readiness tests exercise. Tests that need TODAY logged
+            // (done-day advancement) log it explicitly.
+            app.update(
+                Event::LogSet {
+                    exercise: "Back Squat".into(),
+                    weight_kg: 120.0,
+                    reps: 3,
+                    rpe: 8.0,
+                    observed_at: (MON - 1) * 86_400,
+                    entry_id: 0,
+                },
+                &mut model,
+            )
+            .expect_only_render();
         }
         app.update(Event::GeneratePlan { start_epoch_day: MON }, &mut model)
             .expect_only_render();
@@ -12621,7 +13381,7 @@ mod tests {
         assert!(!sq.anchored_on.is_empty(), "the honesty line names the e1RM");
         assert!(!sq.grade.is_empty(), "HARD RULE 2: evidence travels with it");
 
-        // The headline leads with the prescription (Phase 6 §5.4 ladder).
+        // The headline leads with the prescription.
         assert_eq!(vm.today_headline.kind, "prescription");
         assert!(vm.today_headline.summary.starts_with("Next:"));
     }
@@ -12767,6 +13527,40 @@ mod tests {
     }
 
     #[test]
+    fn cap_rpe_notes_only_the_items_it_relabels() {
+        // CapRpe relabels only RIR-prescribed lifts. A run (or a %1RM lift) it
+        // never touches must NOT get a spurious "cap RPE" note: that note is the
+        // item-level explanation of a change that, for those items, didn't happen.
+        let lift = PrescriptionView {
+            exercise: "Back Squat".into(),
+            intensity_label: "RIR 3".into(),
+            ..Default::default()
+        };
+        let run = PrescriptionView {
+            exercise: String::new(),
+            intensity_label: "Easy pace".into(),
+            ..Default::default()
+        };
+        let mut ns = SessionPlanView {
+            items: vec![lift, run],
+            ..Default::default()
+        };
+        let recs = vec![graded(Adjustment::CapRpe(1.0), "AUTOREG-E1RM-GATE-001")];
+        apply_adjustments_to_session(&mut ns, &recs);
+
+        assert_eq!(ns.items[0].intensity_label, "RIR 4", "the RIR lift is capped");
+        assert!(
+            !ns.items[0].adjusted_note.is_empty(),
+            "the relabeled lift carries the cap note"
+        );
+        assert!(
+            ns.items[1].adjusted_note.is_empty(),
+            "the untouched run must not get a false cap note"
+        );
+        assert_eq!(ns.items[1].intensity_label, "Easy pace", "the run is unchanged");
+    }
+
+    #[test]
     fn a_do_not_train_hold_blocks_the_prescription() {
         let (app, mut model) = planned_strength_model(true);
         app.update(
@@ -12844,7 +13638,7 @@ mod tests {
     #[test]
     fn the_long_run_anchors_to_logged_recent_distance_not_a_stale_profile() {
         // Profile claims 16 km/wk over 3 run days, but the athlete has logged two
-        // recent 21 km runs. The plan reacts to logged capacity, but the H4
+        // recent 21 km runs. The plan reacts to logged capacity, but the
         // rework treats the demonstrated run as a CAPACITY CEILING bounded by the
         // ≤2×-daily-average and ≤10%-spike guardrails (running.rs), NOT a weekly
         // target: floor(2 × 16 / 3) = 10 km binds, so the long run is 10 km (never
@@ -12912,23 +13706,26 @@ mod tests {
 
     #[test]
     fn a_stale_run_outside_the_window_does_not_raise_the_long_run() {
-        // A 40-day-old 21 km run is outside both the 30-day (longest) and 28-day
-        // (weekly) windows → the plan falls back to the stated-volume rule.
+        // A FULLY-detrained 60-day-old 21 km run is past the 30 + 28 = 58-day decay
+        // horizon → zero capacity credit → the plan falls back to the stated-volume
+        // rule (the KB "> 8 wk off → rebuild base" regime). Within the horizon the
+        // anchor TAPERS instead of vanishing (covered by the taper tests); this guards
+        // the far end where it is finally gone.
         let app = Engine;
         let mut model = Model::default();
         app.update(Event::SetProfile(running_profile()), &mut model)
             .expect_only_render();
-        app.update(logrun(21.0, MON - 40), &mut model).expect_only_render();
+        app.update(logrun(21.0, MON - 60), &mut model).expect_only_render();
         app.update(Event::GeneratePlan { start_epoch_day: MON }, &mut model)
             .expect_only_render();
         app.update(Event::SetToday { epoch_day: MON, utc_offset_sec: 0 }, &mut model)
             .expect_only_render();
 
         let summary = planned_long_run_summary(&app, &model);
-        // Stale run ignored → floor(0.25 × 16) = 4 km (byte-identical to no-history).
+        // Fully-detrained run ignored → floor(0.25 × 16) = 4 km (as with no history).
         assert!(
             summary.starts_with("4 km"),
-            "an out-of-window run must not raise the long run, got {summary:?}"
+            "a fully-detrained run must not raise the long run, got {summary:?}"
         );
     }
 
@@ -12977,15 +13774,144 @@ mod tests {
         // Stale: 30 km 40 d ago, outside both the 30-day and 28-day windows.
         app.update(logrun(30.0, today - 40), &mut model).expect_only_render();
 
-        let (longest, weekly) = build_run_anchors(&model.runs, today, 0);
+        let (longest, weekly, _) = build_run_anchors(&model.runs, today, 0);
         assert_eq!(longest, Some(21.0), "the stale 30 km run must not anchor");
         // recent_weekly = (21 + 10) / 4 = 7.75.
         assert_eq!(weekly, Some(7.75));
 
         // A future-dated row (after `today`) is excluded, like `spike_baseline_km`.
         app.update(logrun(99.0, today + 5), &mut model).expect_only_render();
-        let (longest2, _) = build_run_anchors(&model.runs, today, 0);
+        let (longest2, _, _) = build_run_anchors(&model.runs, today, 0);
         assert_eq!(longest2, Some(21.0), "a future-dated run must not anchor");
+    }
+
+    #[test]
+    fn declared_layoff_derates_the_lift_load_not_the_logged_best() {
+        // 2c: after a declared layoff the WORKING LOAD is derated (REENTRY-001),
+        // but the e1RM anchor stays the true logged best so the honesty line
+        // never lies. build_plan_anchors keeps the true e1RM + carries the frac.
+        let sets = vec![LoggedSet {
+            exercise: "Back Squat".into(),
+            weight_kg: 140.0,
+            reps: 5,
+            rpe: 8.0,
+            observed_at: 1_000,
+            entry_id: 1,
+        }];
+        let fresh = build_plan_anchors(&sets, None);
+        let returning = build_plan_anchors(&sets, Some(6.0));
+        assert_eq!(
+            fresh.lift_e1rm[0].1, returning.lift_e1rm[0].1,
+            "the e1RM anchor is the true logged best either way"
+        );
+        assert_eq!(fresh.reentry_load_frac, None);
+        assert_eq!(returning.reentry_load_frac, Some(0.70), "6 wk off → 0.70 re-entry fraction");
+
+        // Flatten an anchored %1RM prescription with vs without the derate.
+        let pres = Prescription::Lift(crate::schema::LiftPrescription {
+            exercise: "Back Squat".into(),
+            sets: 3,
+            reps: 5,
+            intensity: LiftIntensity::PercentOneRm(80.0),
+            rest_sec: 180,
+            tempo: None,
+            velocity_loss_pct: None,
+        });
+        let rx = graded(pres, "STR-INTENT-001");
+        let anchors_full = crate::plan::Anchors {
+            lift_e1rm: vec![("Back Squat".into(), 100.0)],
+            ..Default::default()
+        };
+        let anchors_re = crate::plan::Anchors {
+            lift_e1rm: vec![("Back Squat".into(), 100.0)],
+            reentry_load_frac: Some(0.70),
+            ..Default::default()
+        };
+        let full = flatten_prescription(&rx, &anchors_full);
+        let re = flatten_prescription(&rx, &anchors_re);
+        assert_eq!(full.load_kg, Some(round_2_5(100.0 * 0.80)));
+        assert_eq!(re.load_kg, Some(round_2_5(100.0 * 0.80 * 0.70)));
+        assert!(re.load_kg.unwrap() < full.load_kg.unwrap(), "the layoff load is lighter");
+        assert!(
+            re.anchored_on.contains("100.0 kg (your logged best)"),
+            "the logged best stays honest: {}",
+            re.anchored_on
+        );
+        assert_eq!(re.grade, "ExpertOpinion", "derated load re-points to REENTRY-001");
+        assert_eq!(full.grade, "Strong", "the full load keeps its loading-band grade");
+        // The why-panel note must match the re-pointed chip, not the stale band.
+        assert!(
+            re.why.grade_note.contains("Expert opinion"),
+            "grade_note follows the re-pointed chip: {}",
+            re.why.grade_note
+        );
+        assert!(
+            !re.why.grade_note.contains("Strong evidence"),
+            "no stale Strong note on a derated card"
+        );
+        assert!(
+            full.why.grade_note.contains("Strong evidence"),
+            "the full card keeps its band note: {}",
+            full.why.grade_note
+        );
+    }
+
+    #[test]
+    fn long_layoff_drops_the_anchor_and_represcribes_as_novice() {
+        // A1: a >8 wk layoff carries NO KB load fraction (Table 3.4b) and directs
+        // a fresh-novice re-entry, so `build_plan_anchors` sets `reentry_novice`
+        // (not a fraction) and `flatten_prescription` drops the e1RM anchor
+        // entirely: `plan.rs::lift_prescription` prescribes it by RIR (treat as
+        // novice, technique first), never a scaled %e1RM load (HARD RULE 1). The
+        // card still cites REENTRY-001 so it explains the re-entry reason.
+        let sets = vec![LoggedSet {
+            exercise: "Back Squat".into(),
+            weight_kg: 140.0,
+            reps: 5,
+            rpe: 8.0,
+            observed_at: 1_000,
+            entry_id: 1,
+        }];
+        let anchors = build_plan_anchors(&sets, Some(12.0));
+        assert!(anchors.reentry_novice, "12 wk off → treat as a fresh novice");
+        assert_eq!(
+            anchors.reentry_load_frac, None,
+            "no invented load fraction beyond 8 wk"
+        );
+        // The e1RM anchor itself is still the true logged best (never lost).
+        assert!(anchors.lift_e1rm[0].1 > 0.0);
+
+        // >8 wk re-entry: the pipeline prescribes by RIR, not a %1RM anchor.
+        let pres = Prescription::Lift(crate::schema::LiftPrescription {
+            exercise: "Back Squat".into(),
+            sets: 3,
+            reps: 5,
+            intensity: LiftIntensity::Rir(3),
+            rest_sec: 180,
+            tempo: None,
+            velocity_loss_pct: None,
+        });
+        let rx = graded(pres, "STR-INTENT-001");
+        let item = flatten_prescription(&rx, &anchors);
+        // No anchor-derived %e1RM load: a novice re-entry trains by RIR (HARD RULE 1).
+        assert_eq!(item.load_kg, None, "no %e1RM load on a novice re-entry");
+        assert!(
+            item.intensity_label.starts_with("RIR"),
+            "novice re-entry is prescribed by RIR, not % e1RM: {}",
+            item.intensity_label
+        );
+        assert!(
+            item.anchored_on.is_empty(),
+            "no logged-best load line when the anchor is set aside: {}",
+            item.anchored_on
+        );
+        // The card re-points to REENTRY-001 (ExpertOpinion), citing the reason.
+        assert_eq!(item.grade, "ExpertOpinion", "re-points to REENTRY-001");
+        assert!(
+            item.why.grade_note.contains("Expert opinion"),
+            "grade_note follows the re-pointed chip: {}",
+            item.why.grade_note
+        );
     }
 
     /// Build a run history via the real ingest path with explicit timestamps.
@@ -12999,7 +13925,7 @@ mod tests {
         m.runs
     }
 
-    // ── H1: run anchors bucket by LOCAL day, so a run logged today counts ──
+    // ── Run anchors bucket by LOCAL day, so a run logged today counts ──
     #[test]
     fn run_anchors_count_a_same_day_run_by_local_day_h1() {
         let today = 500i64;
@@ -13009,7 +13935,7 @@ mod tests {
         let berlin = 2 * 3600;
         let berlin_0800 = today * DAY_SEC + 8 * 3600 - berlin;
         let runs_b = runs_via_log(&[(12.0, berlin_0800)]);
-        let (longest_b, weekly_b) = build_run_anchors(&runs_b, today, berlin);
+        let (longest_b, weekly_b, _) = build_run_anchors(&runs_b, today, berlin);
         assert_eq!(longest_b, Some(12.0), "an 08:00-today run (Berlin) must count");
         assert_eq!(weekly_b, Some(3.0));
 
@@ -13017,31 +13943,95 @@ mod tests {
         let west = -5 * 3600;
         let west_2000 = today * DAY_SEC + 20 * 3600 - west;
         let runs_w = runs_via_log(&[(9.0, west_2000)]);
-        let (longest_w, _) = build_run_anchors(&runs_w, today, west);
+        let (longest_w, _, _) = build_run_anchors(&runs_w, today, west);
         assert_eq!(longest_w, Some(9.0), "a 20:00-today run (UTC−5) must count");
 
         // A run on local TOMORROW is future-dated and excluded.
         let tomorrow_0030 = (today + 1) * DAY_SEC + 30 * 60 - berlin;
         let runs_f = runs_via_log(&[(30.0, tomorrow_0030)]);
-        let (longest_f, weekly_f) = build_run_anchors(&runs_f, today, berlin);
+        let (longest_f, weekly_f, _) = build_run_anchors(&runs_f, today, berlin);
         assert_eq!(longest_f, None, "a local-tomorrow run must not anchor");
         assert_eq!(weekly_f, None);
     }
 
     #[test]
     fn run_anchors_offset_zero_midnight_history_is_byte_identical_h1() {
-        // The window edge for an offset-0, midnight-stamped history is unchanged:
-        // a run exactly 30 days ago counts; 31 days ago does not.
+        // The FULL-CREDIT window edge for an offset-0, midnight-stamped history is
+        // unchanged: a run exactly 30 days ago still anchors at full distance and
+        // is NOT flagged detrained (byte-identical to the pre-taper behaviour).
         let today = 500i64;
         let at_30 = (today - 30) * DAY_SEC;
+        let (l30, _, det30) = build_run_anchors(&runs_via_log(&[(8.0, at_30)]), today, 0);
+        assert_eq!(l30, Some(8.0), "a run exactly 30 days ago still anchors at full");
+        assert!(!det30, "a run at the window edge is full-credit, not detrained");
+        // A run 31 days ago no longer VANISHES (the old cliff); its credit is
+        // tapered by one day of the 28-day detraining slope: 8 × 27/28 = 7.714…
         let at_31 = (today - 31) * DAY_SEC;
-        let (l30, _) = build_run_anchors(&runs_via_log(&[(8.0, at_30)]), today, 0);
-        assert_eq!(l30, Some(8.0), "a run exactly 30 days ago still anchors");
-        let (l31, _) = build_run_anchors(&runs_via_log(&[(8.0, at_31)]), today, 0);
-        assert_eq!(l31, None, "a run 31 days ago is out of window");
+        let (l31, _, det31) = build_run_anchors(&runs_via_log(&[(8.0, at_31)]), today, 0);
+        let expected_31 = 8.0 * 27.0 / 28.0;
+        assert!(
+            (l31.unwrap() - expected_31).abs() < 1e-9,
+            "day-31 taper: got {l31:?}, want {expected_31}"
+        );
+        assert!(det31, "a beyond-window anchor is flagged detraining-adjusted");
     }
 
-    // ── M4: a future-dated run must not hijack weekly report or CTL/ATL ──
+    // ── The window-expiry cliff is now a detraining slope ──
+    #[test]
+    fn h4_longest_run_anchor_tapers_past_the_window_instead_of_a_cliff() {
+        // Flagship: a lone 21.1 km race is the only logged run. Across the 30-day
+        // full-credit edge the anchor must SLOPE (retained then decaying) rather
+        // than drop from 21.1 to None in one overnight step.
+        let today = 1_000i64;
+        let race_at = |age: i64| (today - age) * DAY_SEC;
+        let anchor = |age: i64| build_run_anchors(&runs_via_log(&[(21.1, race_at(age))]), today, 0);
+
+        // Day 30: full credit, not detrained (byte-identical to the old rule).
+        let (l30, _, d30) = anchor(30);
+        assert!((l30.unwrap() - 21.1).abs() < 1e-9, "day 30 full: {l30:?}");
+        assert!(!d30);
+
+        // Day 31: retained, tapered by one slope-day (21.1 × 27/28 = 20.346…) -
+        // a ~0.75 km step, NOT the old 21.1 → None cliff. Detraining-adjusted.
+        let (l31, _, d31) = anchor(31);
+        let want31 = 21.1 * 27.0 / 28.0;
+        assert!((l31.unwrap() - want31).abs() < 1e-9, "day 31: {l31:?} want {want31}");
+        assert!(d31, "beyond-window anchor is detraining-adjusted");
+        assert!(l31.unwrap() > 20.0, "the step off the window is small, not a cliff");
+
+        // Day 45: 15 slope-days in → 21.1 × 13/28 = 9.796… (still a real anchor).
+        let (l45, _, d45) = anchor(45);
+        let want45 = 21.1 * 13.0 / 28.0;
+        assert!((l45.unwrap() - want45).abs() < 1e-9, "day 45: {l45:?} want {want45}");
+        assert!(d45);
+
+        // The trajectory is monotonically decreasing across the boundary, a slope.
+        assert!(l30.unwrap() > l31.unwrap() && l31.unwrap() > l45.unwrap());
+
+        // Day 58 (30 + 28): fully detrained → no capacity credit (aligns with the
+        // KB "4–8 wk off → treat near-novice" bracket). Day 57 still carries a sliver.
+        let (l58, _, _) = anchor(58);
+        assert_eq!(l58, None, "at day 58 the demonstrated-capacity credit is gone");
+        let (l57, _, _) = anchor(57);
+        assert!(l57.unwrap() > 0.0 && l57.unwrap() < 1.0, "day 57 is a sliver: {l57:?}");
+    }
+
+    #[test]
+    fn h4_a_fresh_run_overrides_a_decayed_older_run_no_change() {
+        // A fresh in-window run that is longer than any decayed older run keeps the
+        // anchor at full credit and NOT detrained, byte-identical to the old rule,
+        // so the taper only ever RAISES the cliff case, never perturbs live history.
+        let today = 1_000i64;
+        let runs = runs_via_log(&[
+            (21.1, (today - 40) * DAY_SEC), // old race, decays to 21.1×18/28 = 13.56
+            (16.0, (today - 3) * DAY_SEC),  // fresh 16 km run beats the decayed race
+        ]);
+        let (l, _, det) = build_run_anchors(&runs, today, 0);
+        assert_eq!(l, Some(16.0), "the fresh run wins");
+        assert!(!det, "a fresh winning anchor is not detraining-adjusted");
+    }
+
+    // ── A future-dated run must not hijack weekly report or CTL/ATL ──
     #[test]
     fn a_future_dated_run_does_not_hijack_weekly_report_or_training_load_m4() {
         let app = Engine;
@@ -13083,7 +14073,7 @@ mod tests {
         assert_eq!(tl.sessions_counted, tl2.sessions_counted);
     }
 
-    // ── M6: deleting the baseline run re-arms the derived spike gate ──
+    // ── Deleting the baseline run re-arms the derived spike gate ──
     #[test]
     fn deleting_the_baseline_run_re_arms_the_spike_gate_m6() {
         let app = Engine;
@@ -13119,7 +14109,7 @@ mod tests {
         );
     }
 
-    // ── M7: stale performance signals expire; safety signals never do ──
+    // ── Stale performance signals expire; safety signals never do ──
     fn rpe_input_at(value: f64, observed_at: i64) -> ReadinessInput {
         ReadinessInput {
             signal: ReadinessSignal::Rpe,
@@ -13185,7 +14175,7 @@ mod tests {
         );
     }
 
-    // ── M8: a review-channel deload folds into the rendered next session ──
+    // ── A review-channel deload folds into the rendered next session ──
     #[test]
     fn a_review_deload_reduces_the_rendered_next_session_load_m8() {
         let (app, mut model) = planned_strength_model(true);
@@ -13216,7 +14206,7 @@ mod tests {
         assert_eq!(vm.next_session.as_ref().unwrap().status, "adjusted");
     }
 
-    // ── M13: past the block, the week number cycles (maintenance), not pins ──
+    // ── Past the block, the week number cycles (maintenance), not pins ──
     #[test]
     fn program_week_cycles_into_maintenance_past_the_block_m13() {
         let (app, mut model) = planned_strength_model(true);
@@ -13237,7 +14227,7 @@ mod tests {
         assert!(prog.week >= 1 && prog.week <= prog.weeks_total);
     }
 
-    // ── H5 + L3: interval rep structure + HR band ceiling copy ──
+    // ── Interval rep structure + HR band ceiling copy ──
     #[test]
     fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling_h5_l3() {
         use crate::schema::RunPrescription;
@@ -13282,7 +14272,7 @@ mod tests {
         );
     }
 
-    // ── L1: SetProfile sanitizes poison floats on ingest ──
+    // ── SetProfile sanitizes poison floats on ingest ──
     #[test]
     fn set_profile_sanitizes_poison_floats_l1() {
         let app = Engine;
@@ -13313,7 +14303,7 @@ mod tests {
         );
     }
 
-    // ── L2: a negative LogRun distance is clamped at ingest ──
+    // ── A negative LogRun distance is clamped at ingest ──
     #[test]
     fn negative_log_run_distance_is_clamped_l2() {
         let app = Engine;
@@ -13326,18 +14316,42 @@ mod tests {
             model.runs[0].distance_km
         );
         // The measured weekly anchor is never driven negative by it.
-        let (_, weekly) = build_run_anchors(&model.runs, 2, 0);
+        let (_, weekly, _) = build_run_anchors(&model.runs, 2, 0);
         assert!(weekly.is_none_or(|w| w >= 0.0), "weekly anchor must not go negative");
     }
 
     #[test]
     fn week_plan_marks_a_logged_day_done() {
-        let (app, model) = planned_strength_model(true);
+        // Today = MON; log today's (MON) Heavy session. A logged TODAY reads
+        // "done" (accomplished), and the hero advances past it to the next
+        // upcoming session.
+        let app = Engine;
+        let mut model = Model::default();
+        app.update(Event::SetProfile(strength_profile()), &mut model)
+            .expect_only_render();
+        app.update(Event::GeneratePlan { start_epoch_day: MON }, &mut model)
+            .expect_only_render();
+        app.update(Event::SetToday { epoch_day: MON, utc_offset_sec: 0 }, &mut model)
+            .expect_only_render();
+        // A Back Squat set observed on MON = today logs today's session.
+        app.update(logset("Back Squat", 120.0, 3), &mut model)
+            .expect_only_render();
         let vm = app.view(&model);
-        // The set was logged on MON (a Heavy day). Since today is also MON, that
-        // day is the "next" session, not "done": assert a PAST logged day is
-        // "done" by moving today forward two days (to Wed) instead.
-        let _ = vm;
+        let mon_row = vm
+            .week_plan
+            .iter()
+            .find(|s| s.epoch_day == MON)
+            .expect("Monday is in the week strip");
+        assert_eq!(mon_row.status, "done", "a logged TODAY reads done");
+        let ns = vm.next_session.as_ref().expect("a next session after today");
+        assert!(
+            ns.epoch_day > MON,
+            "the hero advances past a done today, got epoch_day {}",
+            ns.epoch_day
+        );
+
+        // A PAST logged day is also "done": move today forward two days (to Wed)
+        // so Monday's logged Heavy day sits in the past.
         let app2 = Engine;
         let mut m2 = Model::default();
         app2.update(Event::SetProfile(strength_profile()), &mut m2)
@@ -13355,10 +14369,27 @@ mod tests {
             .iter()
             .find(|s| s.epoch_day == MON)
             .expect("Monday is in the week strip");
-        assert_eq!(mon_row.status, "done", "a logged training day reads done");
+        assert_eq!(mon_row.status, "done", "a past logged training day reads done");
     }
 
-    // ── A1: youth derived from age alone gates the view + blocks the plan ──
+    #[test]
+    fn week_plan_unlogged_today_stays_next() {
+        // Today = MON, plan generated but NO set logged: today's training day is
+        // still the "next" session, dated today.
+        let (app, model) = planned_strength_model(false);
+        let vm = app.view(&model);
+        let mon_row = vm
+            .week_plan
+            .iter()
+            .find(|s| s.epoch_day == MON)
+            .expect("Monday is in the week strip");
+        assert_ne!(mon_row.status, "done", "an unlogged today is not done");
+        let ns = vm.next_session.as_ref().expect("a next session on today");
+        assert_eq!(ns.status, "next", "an unlogged today's session is next");
+        assert_eq!(ns.epoch_day, MON, "the next session is dated today");
+    }
+
+    // ── Youth derived from age alone gates the view + blocks the plan ──
     #[test]
     fn a1_age_15_gates_even_with_empty_health_screen() {
         let app = Engine;
@@ -13410,7 +14441,7 @@ mod tests {
         assert!(!m2.profile.as_ref().unwrap().health.youth, "18 is not youth");
     }
 
-    // ── A3: a tolerable-pain day's headline is the pain call, and the session
+    // ── A tolerable-pain day's headline is the pain call, and the session
     //        prescription is actually capped (ModifyAndMonitor), not full-load ──
     #[test]
     fn a3_tolerable_pain_headline_is_the_pain_call_and_caps_the_session() {
@@ -13585,7 +14616,7 @@ mod tests {
         }
     }
 
-    // ── A4: the run-spike baseline is a trailing 30-day window, not all-time ──
+    // ── The run-spike baseline is a trailing 30-day window, not all-time ──
     #[test]
     fn a4_old_long_run_does_not_suppress_a_current_spike() {
         let app = Engine;
@@ -13611,7 +14642,7 @@ mod tests {
         );
     }
 
-    // ── B3: a 0 kg set never anchors the plan (no "@ 0 kg") ──
+    // ── A 0 kg set never anchors the plan (no "@ 0 kg") ──
     #[test]
     fn b3_zero_weight_set_does_not_anchor_a_load() {
         let app = Engine;
@@ -13637,7 +14668,7 @@ mod tests {
         }
     }
 
-    // ── B5: session-done matching buckets by the shell's LOCAL day ──
+    // ── Session-done matching buckets by the shell's LOCAL day ──
     #[test]
     fn b5_session_done_matches_by_local_day() {
         let app = Engine;
@@ -13681,7 +14712,7 @@ mod tests {
         );
     }
 
-    // ── B6: the program week advances with SetToday; a mid-week plan does not
+    // ── The program week advances with SetToday; a mid-week plan does not
     //        back-date the week's earlier days as missed ──
     #[test]
     fn b6_week_advances_and_pre_start_days_are_not_missed() {
@@ -13721,7 +14752,7 @@ mod tests {
         );
     }
 
-    // ── B7: overflow-safe epoch math + non-finite/huge float clamp on ingest ──
+    // ── Overflow-safe epoch math + non-finite/huge float clamp on ingest ──
     #[test]
     fn b7_extreme_wire_values_do_not_panic_or_poison_the_view() {
         let app = Engine;
@@ -13764,7 +14795,7 @@ mod tests {
         let _ = mon0_weekday(i64::MIN);
     }
 
-    // ── B8: amending a legacy (id 0) row whose DATE changed does not duplicate ──
+    // ── Amending a legacy (id 0) row whose DATE changed does not duplicate ──
     #[test]
     fn b8_amend_legacy_date_change_replaces_not_duplicates() {
         let app = Engine;
@@ -13818,7 +14849,7 @@ mod tests {
             weeks_since_pace_test: None,
         };
         // Tanaka(30) = 187; a measured 200 must drive the table instead.
-        let rows = build_hr_zones(&q, Some(200.0));
+        let (rows, hr_max) = build_hr_zones(&q, Some(200.0));
         let hrmax_row = rows
             .iter()
             .find(|r| r.summary.contains("HRmax"))
@@ -13828,13 +14859,19 @@ mod tests {
             "the measured max must be shown: {}",
             hrmax_row.summary
         );
+        // #6: the structured figure mirrors the prose, measured, no Tanaka split.
+        let m = hr_max.expect("structured hr_max present");
+        assert!(m.measured && m.bpm == 200.0 && m.tanaka_intercept == 0.0);
         // Implausible measured values fall back to the age estimate.
-        let rows = build_hr_zones(&q, Some(9999.0));
+        let (rows, hr_max) = build_hr_zones(&q, Some(9999.0));
         let hrmax_row = rows.iter().find(|r| r.summary.contains("HRmax")).unwrap();
         assert!(
             hrmax_row.summary.contains("187"),
             "an implausible measured max falls back to Tanaka: {}",
             hrmax_row.summary
         );
+        // #6: fell back to Tanaka → estimate carries the 208 − 0.7 × age split.
+        let e = hr_max.expect("structured hr_max present");
+        assert!(!e.measured && e.bpm == 187.0 && e.tanaka_intercept == 208.0 && e.tanaka_slope == 0.7);
     }
 }

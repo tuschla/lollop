@@ -18,12 +18,6 @@
 use crate::evidence;
 use crate::schema::Recommended;
 
-/// Build a `Recommended<T>` from a registry claim id (must exist).
-fn recommend<T>(value: T, claim_id: &str) -> Recommended<T> {
-    let e = evidence::claim(claim_id).expect("known feedback claim");
-    Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
-}
-
 // ---------------------------------------------------------------------------
 // Category taxonomy (File 05 §6.1)
 // ---------------------------------------------------------------------------
@@ -100,27 +94,23 @@ pub struct SafetySignals {
 /// the session is safety-clear and execution evaluation may proceed.
 pub fn safety_gate(s: SafetySignals) -> Option<Recommended<FeedbackCategory>> {
     if s.bone_pain_red_flag {
-        return Some(recommend(FeedbackCategory::ConcernInjury, "SAFE-BSI-001"));
+        return Some(evidence::graded(FeedbackCategory::ConcernInjury, "SAFE-BSI-001"));
     }
     if s.compulsive_flag {
         // feedback-039: ExpertOpinion, safety-critical (suppresses praise).
-        return Some(recommend(
-            FeedbackCategory::ConcernBehavior,
-            "FB-BEHAVIOR-001",
-        ));
+        return Some(evidence::graded(FeedbackCategory::ConcernBehavior,
+        "FB-BEHAVIOR-001",));
     }
     if s.overtraining_signal_count >= 2 && s.overtraining_weeks.is_none_or(|w| w >= 1.0) {
         // feedback-036: Moderate (Meeusen 2013), safety-critical. The >=1-2 wk
         // duration condition keeps a single noisy night from firing; an
         // untracked duration still fires on the signal count (protective).
-        return Some(recommend(FeedbackCategory::ConcernRecovery, "FB-RECOVERY-001"));
+        return Some(evidence::graded(FeedbackCategory::ConcernRecovery, "FB-RECOVERY-001"));
     }
     if s.single_session_spike_frac.is_some_and(|f| f > 0.10) {
         // running-029 hard rule: block/flag, never praise (feedback-037).
-        return Some(recommend(
-            FeedbackCategory::DangerousProgression,
-            "RUN-SPIKE-BLOCK-001",
-        ));
+        return Some(evidence::graded(FeedbackCategory::DangerousProgression,
+        "RUN-SPIKE-BLOCK-001",));
     }
     None
 }
@@ -159,7 +149,7 @@ pub fn lifting_feedback(
         // Harder than planned but short of failure, neutral process note.
         FeedbackCategory::InformationalNeutral
     };
-    recommend(cat, "FB-RIR-001")
+    evidence::graded(cat, "FB-RIR-001")
 }
 
 /// Running interval/threshold mastery (feedback-015; FB-INTERVAL-MASTERY-001,
@@ -172,14 +162,14 @@ pub fn interval_mastery_feedback(
     rpe_at_or_below_target: bool,
 ) -> Option<Recommended<FeedbackCategory>> {
     (target_paces_met && rpe_at_or_below_target)
-        .then(|| recommend(FeedbackCategory::PositiveMastery, "FB-INTERVAL-MASTERY-001"))
+        .then(|| evidence::graded(FeedbackCategory::PositiveMastery, "FB-INTERVAL-MASTERY-001"))
 }
 
 /// A genuine off day: target pace missed but RPE was very high (feedback-018/025).
 /// Attributes to normal variation, never guilt; the stimulus still counts.
 /// FB-BADDAY-001 (ExpertOpinion).
 pub fn bad_day_feedback() -> Recommended<FeedbackCategory> {
-    recommend(FeedbackCategory::ContextualBadDay, "FB-BADDAY-001")
+    evidence::graded(FeedbackCategory::ContextualBadDay, "FB-BADDAY-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +199,7 @@ pub fn decoupling_feedback(
     } else {
         FeedbackCategory::CorrectiveProcess
     };
-    Some(recommend(cat, "RUN-DECOUPLE-001"))
+    Some(evidence::graded(cat, "RUN-DECOUPLE-001"))
 }
 
 // ---------------------------------------------------------------------------
@@ -224,10 +214,8 @@ pub fn easy_run_intensity_discipline(
     frac_time_above_vt1: f64,
 ) -> Option<Recommended<FeedbackCategory>> {
     if frac_time_above_vt1 > 0.25 {
-        Some(recommend(
-            FeedbackCategory::IntensityDiscipline,
-            "RUN-DIST-001",
-        ))
+        Some(evidence::graded(FeedbackCategory::IntensityDiscipline,
+        "RUN-DIST-001",))
     } else {
         None
     }
@@ -248,9 +236,9 @@ pub const POSITIVE_SPLIT_FLAG_PCT: f64 = 3.0;
 /// emits POSITIVE_EXECUTION, "textbook pacing discipline" (feedback-017).
 pub fn positive_split_discipline(second_half_slower_pct: f64) -> Recommended<FeedbackCategory> {
     if second_half_slower_pct > POSITIVE_SPLIT_FLAG_PCT {
-        recommend(FeedbackCategory::IntensityDiscipline, "FB-PACING-001")
+        evidence::graded(FeedbackCategory::IntensityDiscipline, "FB-PACING-001")
     } else {
-        recommend(FeedbackCategory::PositiveExecution, "FB-PACING-001")
+        evidence::graded(FeedbackCategory::PositiveExecution, "FB-PACING-001")
     }
 }
 
@@ -269,7 +257,7 @@ pub fn resolve_feedback(
     if let Some(concern) = safety_gate(safety) {
         return concern;
     }
-    execution.unwrap_or_else(|| recommend(FeedbackCategory::InformationalNeutral, "FEEDBACK-001"))
+    execution.unwrap_or_else(|| evidence::graded(FeedbackCategory::InformationalNeutral, "FEEDBACK-001"))
 }
 
 // ---------------------------------------------------------------------------
@@ -279,7 +267,7 @@ pub fn resolve_feedback(
 /// Clinician-prompt copy appended to a female user's bone-stress referral
 /// (feedback-035). Gentle, no self-diagnosis, the referral itself stays the
 /// message; this only adds the menstrual/nutrition discussion prompt.
-pub const BSI_FEMALE_PROMPT: &str = "It's also worth discussing menstrual and nutrition status with the clinician - under-fueling and menstrual disturbance raise bone-stress risk.";
+pub const BSI_FEMALE_PROMPT: &str = "It's also worth discussing menstrual and nutrition status with the clinician. Under-fueling and menstrual disturbance raise bone-stress risk.";
 
 /// Whether to append the menstrual/nutrition clinician prompt (feedback-035;
 /// FB-BSI-FEMALE-001, ExpertOpinion, safety-critical): fires only for a
@@ -289,7 +277,7 @@ pub fn bsi_menstrual_nutrition_prompt(
     female_user: bool,
     bsi_referral_fired: bool,
 ) -> Recommended<bool> {
-    recommend(female_user && bsi_referral_fired, "FB-BSI-FEMALE-001")
+    evidence::graded(female_user && bsi_referral_fired, "FB-BSI-FEMALE-001")
 }
 
 /// Message verbosity / metric-density personalization (feedback-023/024;
@@ -332,7 +320,7 @@ pub fn verbosity_for_experience(advanced: bool) -> Recommended<FeedbackVerbosity
             lead_with_single_lever: true,
         }
     };
-    recommend(v, "FB-VERBOSITY-001")
+    evidence::graded(v, "FB-VERBOSITY-001")
 }
 
 /// Whether praise copy must anchor to a concrete mastery experience, a named
@@ -345,7 +333,7 @@ pub fn mastery_anchor_required(category: FeedbackCategory) -> Recommended<bool> 
         category,
         FeedbackCategory::PositiveMastery | FeedbackCategory::PositiveExecution
     );
-    recommend(anchored, "FB-MASTERY-ANCHOR-001")
+    evidence::graded(anchored, "FB-MASTERY-ANCHOR-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +352,7 @@ pub enum GoalFraming {
 /// Default all goal framing to controllable process goals (feedback-003;
 /// GOAL-PROCESS-001).
 pub fn default_goal_framing() -> Recommended<GoalFraming> {
-    recommend(GoalFraming::Process, "GOAL-PROCESS-001")
+    evidence::graded(GoalFraming::Process, "GOAL-PROCESS-001")
 }
 
 /// Whether a fixed positive:corrective ratio is enforced. Always false, the
@@ -434,7 +422,7 @@ pub fn trend_summary(
     } else {
         TrendSummary::Stable
     };
-    recommend(summary, "FB-TREND-001")
+    evidence::graded(summary, "FB-TREND-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -459,7 +447,7 @@ pub fn planned_intensity_tone(planned_hard: bool) -> Recommended<ToneModifier> {
     } else {
         ToneModifier::CelebrateRestraint
     };
-    recommend(tone, "FB-TONE-001")
+    evidence::graded(tone, "FB-TONE-001")
 }
 
 /// Whether a recommendation must be framed as a provisional population default
@@ -468,7 +456,7 @@ pub fn planned_intensity_tone(planned_hard: bool) -> Recommended<ToneModifier> {
 /// `ConfidenceTag` and show "using population default until N days" copy.
 /// FB-PROVISIONAL-001 (ExpertOpinion, feedback-040).
 pub fn provisional_until_baseline(days_of_data: u16) -> Recommended<bool> {
-    recommend(days_of_data < 14, "FB-PROVISIONAL-001")
+    evidence::graded(days_of_data < 14, "FB-PROVISIONAL-001")
 }
 
 #[cfg(test)]
@@ -620,7 +608,7 @@ mod tests {
 
     #[test]
     fn concern_injury_is_safety_critical() {
-        let c = recommend(FeedbackCategory::ConcernInjury, "SAFE-BSI-001");
+        let c = evidence::graded(FeedbackCategory::ConcernInjury, "SAFE-BSI-001");
         assert!(c.confidence.safety_critical);
     }
 
@@ -655,10 +643,8 @@ mod tests {
 
     #[test]
     fn resolve_suppresses_praise_under_concern() {
-        let praise = Some(recommend(
-            FeedbackCategory::PositiveMastery,
-            "AUTOREG-RIR-001",
-        ));
+        let praise = Some(evidence::graded(FeedbackCategory::PositiveMastery,
+        "AUTOREG-RIR-001",));
         let injury = SafetySignals {
             bone_pain_red_flag: true,
             ..Default::default()
@@ -669,10 +655,8 @@ mod tests {
         );
 
         // Safety-clear: execution passes through.
-        let praise = Some(recommend(
-            FeedbackCategory::PositiveMastery,
-            "AUTOREG-RIR-001",
-        ));
+        let praise = Some(evidence::graded(FeedbackCategory::PositiveMastery,
+        "AUTOREG-RIR-001",));
         assert_eq!(
             resolve_feedback(SafetySignals::default(), praise).value,
             FeedbackCategory::PositiveMastery

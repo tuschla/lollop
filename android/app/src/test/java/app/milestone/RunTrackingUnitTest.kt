@@ -477,6 +477,96 @@ class RunTrackingUnitTest {
         RunSession.reset()
     }
 
+    // ── External review (2026-08-06) P3: append-only storage + incremental pace ──
+    // ── buckets. The saved track must stay byte-identical, and the incremental  ──
+    // ── accumulator must equal a from-scratch recompute over the whole track.   ──
+
+    @Test
+    fun incrementalPaceBucketsMatchTheReferenceFunctionAcrossBoundaryAndJitter() {
+        // The pace buckets are now folded in one leg at a time as fixes arrive
+        // (O(1) amortised) instead of RunSession.paceBuckets() rescanning the whole
+        // track each fix. This proves the incremental output (paceBucketsFlow) is
+        // bit-identical to the retained reference function over a run that exercises
+        // every path: normal legs, a pause boundary (dropped), a jitter spike
+        // (capped), multiple completed slices + a partial tail.
+        RunSession.reset()
+        RunSession.setPaceBucketMinutes(1) // 1-min slices from the default 4
+        val degPerM = 1.0 / 111_320.0
+        var lon = 0.0
+        RunSession.add(GpsPoint(0.0, lon, 0, 5.0), 0L)
+        for (t in 1..100) {
+            lon += 3.0 * degPerM
+            RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
+        }
+        // Pause boundary: a 40 s gap (> MAX_FIX_GAP_SEC) in BOTH timebases, the
+        // bridge leg is dropped from the buckets exactly as paceBuckets skips it.
+        lon += 3.0 * degPerM
+        RunSession.add(GpsPoint(0.0, lon, 140, 5.0), 140_000_000_000L)
+        for (t in 141..170) {
+            lon += 3.0 * degPerM
+            RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
+        }
+        // Jitter spike: a teleport in 1 s, distance capped at MAX_PLAUSIBLE·dt in
+        // both the incremental feed and the reference, so the bucket pace agrees.
+        RunSession.add(GpsPoint(0.0, lon + 5.0, 171, 5.0), 171_000_000_000L)
+
+        assertEquals(
+            "incremental buckets equal a from-scratch recompute",
+            RunSession.paceBuckets(1),
+            RunSession.paceBucketsFlow.value,
+        )
+        // A mid-run bucket-size change rebuilds the accumulator to match the
+        // reference at the new size.
+        RunSession.setPaceBucketMinutes(2)
+        assertEquals(
+            "rebuild after a size change equals the reference at the new size",
+            RunSession.paceBuckets(2),
+            RunSession.paceBucketsFlow.value,
+        )
+        RunSession.reset()
+    }
+
+    @Test
+    fun savedTrackIsByteIdenticalToTheAppendedFixes() {
+        // The append-only backing store must expose EXACTLY the surviving fixes (a
+        // dropped non-monotonic fix never appears; a pause boundary is reported),
+        // and the of-record saved forms (trackForCore / decimatedTrackForCore /
+        // segmentStartIndices) are pure functions of that list, so a run built
+        // through add() is byte-identical to the old prev+p semantics.
+        RunSession.reset()
+        val expected = ArrayList<GpsPoint>()
+        val degPerM = 1.0 / 111_320.0
+        var lon = 0.0
+        fun feed(p: GpsPoint, nanos: Long, survives: Boolean) {
+            RunSession.add(p, nanos)
+            if (survives) expected.add(p)
+        }
+        feed(GpsPoint(0.0, lon, 0, 5.0), 0L, true) // index 0
+        for (t in 1..50) {
+            lon += 3.0 * degPerM
+            feed(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L, true) // 1..50
+        }
+        // A non-monotonic fix (monotonic stamp EARLIER than the last) is DROPPED -
+        // never appended, so it must not appear in the saved track.
+        feed(GpsPoint(0.0, lon + degPerM, 51, 5.0), 25_000_000_000L, false)
+        // Pause boundary at index 51 (50 s monotonic gap), then more legs.
+        lon += 3.0 * degPerM
+        feed(GpsPoint(0.0, lon, 100, 5.0), 100_000_000_000L, true) // index 51 (boundary)
+        for (t in 101..150) {
+            lon += 3.0 * degPerM
+            feed(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L, true) // 52..101
+        }
+        // The published track is exactly the surviving fixes.
+        assertEquals("points expose the surviving fixes", expected, RunSession.points.value)
+        assertEquals("trackForCore is the full surviving list", expected, RunSession.trackForCore())
+        // Decimation with a cap above the size is the identity, so it equals the
+        // oracle list, confirming the of-record path reads the same content.
+        assertEquals(expected, RunSession.decimatedTrackForCore(10_000))
+        // The pause boundary is reported at the true index.
+        assertEquals("boundary reported at index 51", listOf(51), RunSession.segmentStartIndices())
+        RunSession.reset()
+    }
+
     @Test
     fun thinForRecoveryCapsLongTrackAndKeepsEndpoints() {
         // A very long interrupted run must thin to the save-time cap on recovery so it

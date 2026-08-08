@@ -60,7 +60,7 @@ pub fn hr_reserve_fraction(hr_avg: f64, hr_rest: f64, hr_max: f64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// TSS / rTSS / hrTSS (Coggan)
+// TSS / rTSS (Coggan)
 // ---------------------------------------------------------------------------
 
 /// Coggan power TSS. Claim: `LOAD-TRIMP-001`.
@@ -404,15 +404,6 @@ pub fn d_prime(distance_m: f64, critical_speed_ms: f64, time_sec: f64) -> f64 {
 // Critical Speed protocol validity (File 04 running-009, RUN-CS-PROTOCOL-001)
 // ---------------------------------------------------------------------------
 
-/// Wrap a value with the evidence + confidence of a registry claim.
-///
-/// Panics if `claim_id` is not in the registry: callers pass only canonical
-/// ids, so a miss is a programming error (same contract as `running::recommend`).
-fn recommend<T>(value: T, claim_id: &str) -> crate::schema::Recommended<T> {
-    let e = crate::evidence::claim(claim_id).expect("known claim");
-    crate::schema::Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
-}
-
 /// One maximal effort submitted to the Critical Speed protocol (running-009).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CsEffort {
@@ -525,7 +516,7 @@ pub fn critical_speed_checked(
             Some(fit) => Ok(fit),
         }
     };
-    recommend(out, "RUN-CS-PROTOCOL-001")
+    crate::evidence::graded(out, "RUN-CS-PROTOCOL-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -591,7 +582,7 @@ pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// Zonal TRIMP variants & hrTSS (File 07)
+// Zonal TRIMP variants (File 07)
 // ---------------------------------------------------------------------------
 
 /// Edwards (zonal) TRIMP: `Σ(minutes_in_zone_i × i)` for 5 zones weighted 1–5
@@ -612,26 +603,6 @@ pub fn lucia_trimp(minutes_per_zone: [f64; 3]) -> f64 {
         .enumerate()
         .map(|(i, m)| m * (i as f64 + 1.0))
         .sum()
-}
-
-/// hrTSS fallback: `Σ(minutes_in_zone × IF²)` scaled so 60 min at threshold
-/// (IF 1.0) = 100 (File 07: time-in-HR-zone weighted by each zone's intensity
-/// factor). IF is squared, not linear, so the fallback lands on the same
-/// scale as TSS/rTSS, which are themselves quadratic in the intensity ratio
-/// (rTSS ∝ NGP²/FTPa²). A linear weighting would match only at threshold and
-/// systematically under-count time spent above it.
-///
-/// ENGINE REFINEMENT beyond the KB text: File 07 states only a linear-sounding
-/// "weighted by each zone's intensity factor" and gives no formula; the IF²
-/// weighting is our engineering choice for scale-consistency with the File 07
-/// TSS/rTSS definitions, not a KB-stated equation. Pass paired (minutes, IF)
-/// per zone. `[Weak]`
-pub fn hr_tss(zone_minutes_and_if: &[(f64, f64)]) -> f64 {
-    let weighted: f64 = zone_minutes_and_if
-        .iter()
-        .map(|(m, if_)| m * if_ * if_)
-        .sum();
-    weighted / 60.0 * 100.0
 }
 
 // ---------------------------------------------------------------------------
@@ -1003,13 +974,11 @@ mod tests {
     }
 
     #[test]
-    fn zonal_trimp_and_hrtss() {
+    fn zonal_trimp() {
         // Edwards: 10 min in each of 5 zones → 10*(1+2+3+4+5) = 150.
         assert!((edwards_trimp([10.0; 5]) - 150.0).abs() < 1e-9);
         // Lucia: 10 min each of 3 zones → 10*(1+2+3) = 60.
         assert!((lucia_trimp([10.0; 3]) - 60.0).abs() < 1e-9);
-        // hrTSS: 60 min at threshold IF 1.0 → 100.
-        assert!((hr_tss(&[(60.0, 1.0)]) - 100.0).abs() < 1e-9);
     }
 
     #[test]

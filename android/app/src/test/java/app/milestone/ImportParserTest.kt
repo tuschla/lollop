@@ -2,6 +2,7 @@ package app.milestone
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -99,5 +100,59 @@ class ImportParserTest {
         assertNull("NaN rejected", parseHrBpm("NaN"))
         assertNull("empty rejected", parseHrBpm(""))
         assertNull("non-numeric rejected", parseHrBpm("abc"))
+    }
+
+    // --- Imported-run accuracy (BUGS.md "Imported-run accuracy assumption") -----
+
+    @Test
+    fun hdopConvertsToMetresViaNominalUere() {
+        // accuracy ≈ hdop × 5 m (nominal 1-sigma UERE). An HONEST estimate, not
+        // a device measurement, but a real signal, unlike the old fixed 5.0.
+        assertEquals(5.0, hdopToAccuracyM("1.0")!!, 1e-9)
+        assertEquals(12.5, hdopToAccuracyM("2.5")!!, 1e-9)
+        assertEquals(4.0, hdopToAccuracyM(" 0.8 ")!!, 1e-9)
+    }
+
+    @Test
+    fun garbageOrNonPositiveHdopIsUnknownNotZero() {
+        assertNull("missing/blank hdop is unknown", hdopToAccuracyM(""))
+        assertNull("non-numeric hdop is unknown", hdopToAccuracyM("abc"))
+        assertNull("zero hdop is not a real fix quality", hdopToAccuracyM("0"))
+        assertNull("negative hdop rejected", hdopToAccuracyM("-1"))
+        assertNull("NaN rejected", hdopToAccuracyM("NaN"))
+        assertNull("Infinity rejected", hdopToAccuracyM("Infinity"))
+    }
+
+    // importedRunEvent is a pure function (no android.util.Xml), so its accuracy
+    // handling is unit-testable directly. Build fixes with distinct positions/times
+    // so they survive the core-facing QC the event feeds.
+    private fun fixAt(t: Long, lon: Double, accuracyM: Double?) =
+        GpxFix(lat = 0.0, lon = lon, timeSec = t, hrBpm = null, accuracyM = accuracyM)
+
+    @Test
+    fun unknownAccuracyGetsQcPassingSentinelNotFabricatedFive() {
+        // No source accuracy (TCX / GPX-without-hdop) → the 30 m sentinel, which
+        // must clear the core's 30 m QC gate (never a fabricated 5.0 that reads
+        // as a great fix).
+        val ev = importedRunEvent(
+            listOf(listOf(fixAt(1000, 0.000, null), fixAt(1010, 0.001, null))),
+            measuredHrMax = null,
+        )
+        assertEquals(2, ev.points.size)
+        ev.points.forEach { assertEquals(30.0, it.accuracyM, 1e-9) }
+        // Whatever the sentinel is, it must not be rejected by the 30 m gate.
+        assertTrue("sentinel must pass the 30 m QC gate", ev.points.all { it.accuracyM <= 30.0 })
+    }
+
+    @Test
+    fun realAccuracyPassesThroughUnchanged() {
+        // A real recorded/derived figure (FIT gps_accuracy or GPX hdop) survives
+        // to the core untouched, not overwritten by the sentinel.
+        val ev = importedRunEvent(
+            listOf(listOf(fixAt(1000, 0.000, 8.0), fixAt(1010, 0.001, 12.5))),
+            measuredHrMax = null,
+        )
+        assertEquals(8.0, ev.points[0].accuracyM, 1e-9)
+        assertEquals(12.5, ev.points[1].accuracyM, 1e-9)
     }
 }

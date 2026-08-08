@@ -165,11 +165,11 @@ private fun ExerciseSearchField(value: String, onChange: (String) -> Unit) {
 @Composable
 fun LogSetEditor(
     recentExercises: List<String> = emptyList(),
-    // Non-null → EDIT mode (Phase 4 / M4): prefill from this logged set and emit
+    // Non-null → EDIT mode: prefill from this logged set and emit
     // an AmendSet targeting its entry_id instead of a fresh LogSet.
     initial: LiftResultView? = null,
     onClose: () -> Unit = {},
-    // C3: report unsaved-edits state so a host sheet's swipe-down can guard it.
+    // Report unsaved-edits state so a host sheet's swipe-down can guard it.
     onDirtyChange: (Boolean) -> Unit = {},
     onSave: (Event) -> Unit,
 ) {
@@ -188,7 +188,7 @@ fun LogSetEditor(
     // Calculator-style entry: the first digit after opening replaces the
     // prefill instead of appending to it.
     var weightFresh by rememberSaveable { mutableStateOf(true) }
-    // B9: don't coerce a logged >20-rep set down to 20 on prefill, an untouched
+    // Don't coerce a logged >20-rep set down to 20 on prefill; an untouched
     // Save would silently rewrite the count. Keep the original; the scale row just
     // won't highlight an out-of-range value (still editable within 1–20 on tap).
     var reps by rememberSaveable { mutableStateOf((initial?.reps ?: 5).coerceAtLeast(1)) }
@@ -199,10 +199,10 @@ fun LogSetEditor(
         )
     }
     var dirty by rememberSaveable { mutableStateOf(false) }
-    // C3: mirror dirty up to a host so its swipe-down dismissal can guard it.
+    // Mirror dirty up to a host so its swipe-down dismissal can guard it.
     LaunchedEffect(dirty) { onDirtyChange(dirty) }
-    // B9: a legacy row (entry_id == 0) is amended by matching its original stamp,
-    // so its date can't be changed without orphaning it, lock the date chip.
+    // A legacy row (entry_id == 0) is amended by matching its original stamp,
+    // so its date can't be changed without orphaning it; lock the date chip.
     val dateEditable = initial == null || initial.entry_id != 0L
 
     val weightParsed = weightText.replace(',', '.').toDoubleOrNull()
@@ -257,14 +257,12 @@ fun LogSetEditor(
 }
 
 /** `8` for a whole RPE, `7.5` otherwise, display only. */
-private fun fmtRpe(v: Double): String =
-    if (v % 1.0 == 0.0) "${v.toInt()}" else String.format(Locale.US, "%.1f", v)
+private fun fmtRpe(v: Double): String = trimDecimal(v)
 
-/** B9: lossless minutes prefill for the run editor. A whole value shows as "50";
+/** Lossless minutes prefill for the run editor. A whole value shows as "50";
  *  a fractional one keeps a decimal ("50.5") so an untouched Save doesn't round a
  *  logged 50.5-min run up to 51 (the old `%.0f` prefill did). */
-private fun fmtDurationPrefill(min: Double): String =
-    if (min % 1.0 == 0.0) "${min.toLong()}" else String.format(Locale.US, "%.1f", min)
+private fun fmtDurationPrefill(min: Double): String = trimDecimal(min)
 
 /**
  * Lossless prefill for the weight/distance keypad buffers. The old fixed-decimal
@@ -291,7 +289,7 @@ private fun setEditEvent(
 ): Event = when {
     initial == null -> Event.LogSet(exercise, weightKg, reps, rpe, observedAt)
     // observedAtFallback is the row's ORIGINAL stamp, so the core replaces the
-    // matched row instead of duplicating it (B8), especially a legacy row (id 0).
+    // matched row instead of duplicating it; especially a legacy row (id 0).
     initial.entry_id != 0L ->
         Event.AmendSet(initial.entry_id, exercise, weightKg, reps, rpe, observedAt, observedAtFallback = initial.observed_at)
     else -> Event.AmendSet(0L, exercise, weightKg, reps, rpe, initial.observed_at, observedAtFallback = initial.observed_at)
@@ -304,11 +302,11 @@ private fun runEditEvent(
     durationMin: Double,
     hrPctMax: Double,
     observedAt: Long,
-    // User-declared run-intent label (I16); null = untagged (never fabricated).
+    // User-declared run-intent label; null = untagged (never fabricated).
     workoutType: WorkoutType?,
 ): Event = when {
     initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, 0.0, observedAt, workoutType = workoutType)
-    // observedAtFallback = the row's ORIGINAL stamp → replace, don't duplicate (B8).
+    // observedAtFallback = the row's ORIGINAL stamp → replace, don't duplicate.
     initial.entry_id != 0L ->
         Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, 0.0, observedAt, observedAtFallback = initial.observed_at, workoutType = workoutType)
     else -> Event.AmendRun(0L, distanceKm, durationMin, hrPctMax, 0.0, initial.observed_at, observedAtFallback = initial.observed_at, workoutType = workoutType)
@@ -327,11 +325,11 @@ private enum class RunField { Distance, Duration }
  */
 @Composable
 fun LogRunEditor(
-    // Non-null → EDIT mode (Phase 4 / M4) for a MANUAL run: prefill and emit an
+    // Non-null → EDIT mode for a MANUAL run: prefill and emit an
     // AmendRun. GPS-tracked runs are delete-only (their track isn't editable).
     initial: RunResultView? = null,
     onClose: () -> Unit = {},
-    // C3: report unsaved-edits state so a host sheet's swipe-down can guard it.
+    // Report unsaved-edits state so a host sheet's swipe-down can guard it.
     onDirtyChange: (Boolean) -> Unit = {},
     onSave: (Event) -> Unit,
 ) {
@@ -340,7 +338,7 @@ fun LogRunEditor(
         mutableStateOf(initial?.let { fmtLosslessPrefill(it.distance_km) } ?: "10.00")
     }
     var durText by rememberSaveable {
-        // B9: lossless prefill, `%.0f` used to round a logged 50.5 → 51 on an
+        // Lossless prefill: `%.0f` used to round a logged 50.5 → 51 on an
         // untouched Save.
         mutableStateOf(initial?.let { fmtDurationPrefill(it.duration_min) } ?: "50")
     }
@@ -362,12 +360,12 @@ fun LogRunEditor(
         )
     }
     var dirty by rememberSaveable { mutableStateOf(false) }
-    // C3: mirror dirty up to a host so its swipe-down dismissal can guard it.
+    // Mirror dirty up to a host so its swipe-down dismissal can guard it.
     LaunchedEffect(dirty) { onDirtyChange(dirty) }
-    // B9: a legacy row (entry_id == 0) is amended by matching its original stamp,
-    // so its date can't be changed without orphaning it, lock the date chip.
+    // A legacy row (entry_id == 0) is amended by matching its original stamp,
+    // so its date can't be changed without orphaning it; lock the date chip.
     val dateEditable = initial == null || initial.entry_id != 0L
-    // User-declared run-intent label (I16). Optional, null = untagged, which the
+    // User-declared run-intent label. Optional; null = untagged, which the
     // editor never fabricates. Prefilled from the row when editing (decode-safe:
     // an unknown wire string maps to null via WorkoutType.fromWire).
     var workoutType by rememberSaveable {
@@ -382,7 +380,7 @@ fun LogRunEditor(
     // 0-kg set, which logs fine), so it doesn't mark the fields red. But the core
     // won't take a zero-distance/duration run, so Save is gated on >0. When BOTH
     // parse as valid numbers yet one is still zero, the gate silently kills Save;
-    // surface a run-specific caption so the dead button has a reason (I9).
+    // surface a run-specific caption so the dead button has a reason.
     val positive = (distParsed ?: 0.0) > 0.0 && (durParsed ?: 0.0) > 0.0
     val zeroBlocksSave = distValid && durValid && !positive
 
@@ -429,8 +427,8 @@ fun LogRunEditor(
                 onText = { durText = it; fresh = false; dirty = true },
             )
             // Explain the >0 Save gate when the numbers are valid but still zero, so
-            // the disabled Save pill isn't a mystery (I9). Muted caption, matching the
-            // other editors' hint styling: the fields stay un-reddened.
+            // the disabled Save pill isn't a mystery. Muted caption, matching the
+            // other editors' hint styling; the fields stay un-reddened.
             if (zeroBlocksSave) {
                 Text(
                     "Enter a distance and duration above zero to save.",
@@ -443,7 +441,7 @@ fun LogRunEditor(
                 FieldLabel("HR", "% max")
                 ChoiceScaleRow(listOf(60, 65, 70, 75, 80, 85, 90, 95), hrPctMax, { "$it" }) { hrPctMax = it; dirty = true }
             }
-            // I16: optional user-declared run type. USER DATA only: no coaching
+            // Optional user-declared run type. USER DATA only; no coaching
             // reads it. Tapping the active chip clears it back to untagged; the
             // editor never fabricates a label the user didn't pick.
             WorkoutTypeSelector(workoutType) { picked ->
@@ -468,8 +466,8 @@ fun LogRunEditor(
 }
 
 /**
- * Optional run-type picker (I16). A labeled row of toggle chips over the short
- * [WorkoutType] enum, every option visible, "recognition over recall" (owner
+ * Optional run-type picker. A labeled row of toggle chips over the short
+ * [WorkoutType] enum: every option visible, "recognition over recall" (owner
  * Controls rule for short enums). This is USER DATA only: nothing coaching-side
  * reads the result. [current] `null` = untagged; the caller toggles the label
  * back off when the active chip is tapped again, so a run is never forced to
@@ -513,6 +511,10 @@ fun ReadinessEditor(
     var signal by rememberSaveable { mutableStateOf(initialSignal) }
     var value by rememberSaveable { mutableStateOf(defaultReadinessValue(initialSignal)) }
     var observedAt by rememberSaveable { mutableStateOf(System.currentTimeMillis() / 1000) }
+    // Effort minutes for the duration-gated AerobicDecoupling signal (valid only
+    // >20 min, File 06). Defaults to a validating 30 min; sent only for that
+    // signal so the core can validate the reading instead of silently discarding it.
+    var effortMin by rememberSaveable { mutableStateOf(30.0) }
     var dirty by rememberSaveable { mutableStateOf(false) }
     val firstRedFlag = remember(signalGroups) {
         ReadinessSignal.entries.firstOrNull { signalGroups[it.name] == "red_flag" }
@@ -530,6 +532,7 @@ fun ReadinessEditor(
                     signal = signal,
                     value = value,
                     observedAt = observedAt,
+                    effortMin = if (signal == ReadinessSignal.AerobicDecoupling) effortMin else null,
                 )
             )
         },
@@ -538,9 +541,11 @@ fun ReadinessEditor(
             signal = signal,
             value = value,
             observedAt = observedAt,
+            effortMin = effortMin,
             firstRedFlag = firstRedFlag,
             onSignal = { signal = it; value = defaultReadinessValue(it); dirty = true },
             onValue = { value = it; dirty = true },
+            onEffortMin = { effortMin = it; dirty = true },
             onObservedAt = { observedAt = it; dirty = true },
         )
     }
@@ -550,10 +555,10 @@ fun ReadinessEditor(
 private enum class CheckinField { RestingHr, Hrv }
 
 /**
- * Morning check-in (Phase 2 / B1): the PRIMARY readiness entry point. The user
+ * Morning check-in: the PRIMARY readiness entry point. The user
  * answers three human questions (sleep / soreness / mood-stress, 1–5 with word
  * anchors) plus two optional watch numbers (resting HR, HRV rMSSD). The CORE
- * normalizes the retained history into z-scores/deltas/streaks: the user never
+ * normalizes the retained history into z-scores/deltas/streaks; the user never
  * enters a z-score. One Submit → one [Event.SubmitCheckin]. The old raw-signal
  * editor survives behind "Advanced / lab data".
  */
@@ -624,7 +629,7 @@ fun MorningCheckinSheet(
     ) {
         FormCard {
             Text(
-                "How are you this morning? Answer what you know - the app learns your normal and does the maths.",
+                "How are you this morning? Answer what you know. The app learns your normal and does the maths.",
                 color = OnBgMuted,
                 style = Type.Caption,
             )
@@ -636,7 +641,7 @@ fun MorningCheckinSheet(
                 hasRhr = it; dirty = true
                 // Toggle-off must also re-route the shared keypad: leaving
                 // `active` on the now-hidden field would silently type into it
-                // while the visible one never updates (review 2026-08-04).
+                // while the visible one never updates.
                 if (it) {
                     active = CheckinField.RestingHr; fresh = true
                 } else if (active == CheckinField.RestingHr && hasHrv) {
@@ -656,7 +661,7 @@ fun MorningCheckinSheet(
                     onText = { rhrText = it; fresh = false; dirty = true },
                 )
             }
-            SwitchRow("Add HRV - rMSSD ms (from your watch/app)", hasHrv) {
+            SwitchRow("Add HRV: rMSSD ms (from your watch/app)", hasHrv) {
                 hasHrv = it; dirty = true
                 if (it) {
                     active = CheckinField.Hrv; fresh = true
@@ -739,10 +744,10 @@ private val painBodyAreas = listOf(
 )
 
 /**
- * Pain triage sheet (Phase 1 / B2): a ~10-second characterization that opens
+ * Pain triage sheet: a ~10-second characterization that opens
  * BEFORE any hold is set, so an accidental tap can't freeze the app. It captures
  * exactly what the File-08 pain gate needs: body area (display-only), character
- * (→ [PainKind]), severity 0–10, and whether it's worsening (→ [PainTrend]) -
+ * (→ [PainKind]), severity 0–10, and whether it's worsening (→ [PainTrend]);
  * then "Report pain" sends a full [PainDetail] via [Event.SubmitReadiness] and
  * the core decides hold vs modify-and-monitor. The escape hatch is never weaker
  * than before: "Not sure" (→ Other) and an unspecified area still hard-stop,
@@ -760,6 +765,14 @@ fun PainTriageSheet(
     var severity by rememberSaveable { mutableStateOf(5) }
     var rising by rememberSaveable { mutableStateOf(false) }
     val observedAt = remember { System.currentTimeMillis() / 1000 }
+    // In-flight latch, same as EditorScaffold's Save pill: onSubmit is
+    // `{ ev -> onEvent(ev); onDismiss() }` and the sheet takes ~300 ms to hide, so
+    // a second tap in that window fires a second SubmitReadiness and double-reports
+    // the pain. This button isn't an EditorScaffold pill (it's the danger commit),
+    // so it needs its own latch. Plain `remember` boolean, it resets when the sheet
+    // is disposed and re-mounted, and we DON'T disable the button (HR3: the pain
+    // escape hatch must never look blocked), we just swallow re-taps below.
+    var submitted by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -795,7 +808,7 @@ fun PainTriageSheet(
             // Honest for BOTH core outcomes: a red-flag report becomes a hold, a
             // tolerable one a modify-and-monitor adjustment. The core decides the
             // tier from what's reported, so the copy must not assert a hold up-front.
-            "About 10 seconds. The coach pauses or adjusts training based on what you report - answer what you can.",
+            "About 10 seconds. The coach pauses or adjusts training based on what you report. Answer what you can.",
             color = OnBgMuted,
             style = Type.Caption,
         )
@@ -830,21 +843,26 @@ fun PainTriageSheet(
                 .clip(RoundedCornerShape(Space.Card.dp))
                 .background(status.danger)
                 .clickable {
-                    onSubmit(
-                        Event.SubmitReadiness(
-                            signal = ReadinessSignal.Pain,
-                            value = 1.0,
-                            observedAt = observedAt,
-                            streak = 0,
-                            pain = PainDetail(
-                                kind = character.kind,
-                                severity = severity,
-                                trend = if (rising) PainTrend.Rising else PainTrend.Stable,
-                                persists = false,
-                                location = location,
-                            ),
+                    // Swallow re-taps: the first commit is the only commit, so a
+                    // double-tap in the sheet's dismiss window can't send two reports.
+                    if (!submitted) {
+                        submitted = true
+                        onSubmit(
+                            Event.SubmitReadiness(
+                                signal = ReadinessSignal.Pain,
+                                value = 1.0,
+                                observedAt = observedAt,
+                                streak = 0,
+                                pain = PainDetail(
+                                    kind = character.kind,
+                                    severity = severity,
+                                    trend = if (rising) PainTrend.Rising else PainTrend.Stable,
+                                    persists = false,
+                                    location = location,
+                                ),
+                            )
                         )
-                    )
+                    }
                 }
                 .padding(Space.Card.dp),
             contentAlignment = Alignment.Center,
@@ -887,9 +905,11 @@ private fun ReadinessEditorBody(
     signal: ReadinessSignal,
     value: Double,
     observedAt: Long,
+    effortMin: Double,
     firstRedFlag: ReadinessSignal,
     onSignal: (ReadinessSignal) -> Unit,
     onValue: (Double) -> Unit,
+    onEffortMin: (Double) -> Unit,
     onObservedAt: (Long) -> Unit,
 ) {
     FormCard {
@@ -897,7 +917,7 @@ private fun ReadinessEditorBody(
         // readiness signal IS and what submitting one does. Generic UI copy -
         // the coaching interpretation stays entirely in the core.
         Text(
-            "Readiness signals feed today's coaching call. Report only what you actually measured or felt - one signal at a time.",
+            "Readiness signals feed today's coaching call. Report only what you actually measured or felt. One signal at a time.",
             color = OnBgMuted,
             style = Type.Caption,
         )
@@ -924,7 +944,10 @@ private fun ReadinessEditorBody(
         Text(signal.explainer, color = OnBgMuted, style = Type.Caption)
         when {
             signal.isBinaryFlag ->
-                SwitchRow("Present", value > 0.0) { onValue(if (it) 1.0 else 0.0) }
+                // A bare "Present" reads as a neutral status; this is a yes/no answer to
+                // a red-flag symptom question (the signal + its explainer sit right
+                // above), so label the switch as the affirmative it is.
+                SwitchRow("Yes, I have this", value > 0.0) { onValue(if (it) 1.0 else 0.0) }
             signal == ReadinessSignal.Illness -> {
                 val level = IllnessLevel.entries.lastOrNull { value >= it.value } ?: IllnessLevel.None
                 // Whole-row option list, not segmented: the triage labels ("Above-neck
@@ -951,6 +974,17 @@ private fun ReadinessEditorBody(
                 // so spell out the unit and the point where it starts to matter.
                 Text(spec.hint, color = OnBgMuted, style = Type.Caption)
             }
+        }
+        // AerobicDecoupling is duration-gated (valid only >20 min, File 06): the
+        // core discards a reading with no duration, so capture the run length here
+        // and send it, rather than submitting a reading the engine silently drops.
+        if (signal == ReadinessSignal.AerobicDecoupling) {
+            DoubleStepperRow("Run duration (min)", effortMin, 0.0, 180.0, 5.0) { onEffortMin(it) }
+            Text(
+                "Decoupling only counts for a steady effort over 20 minutes.",
+                color = OnBgMuted,
+                style = Type.Caption,
+            )
         }
         ObservedAtRow(observedAt, withTime = false) { onObservedAt(it) }
     }
@@ -1027,7 +1061,7 @@ private fun continuousSpec(signal: ReadinessSignal): ValueSpec = when (signal) {
         ValueSpec(0.70, 1.15, 0.01, 1.0, "e1RM ÷ baseline · <0.95 caps load, >1.05 adds", "%.2f")
     // Mean concentric velocity, m/s (dormant, no autoreg gate yet).
     ReadinessSignal.BarVelocity ->
-        ValueSpec(0.0, 2.0, 0.05, 0.5, "Mean concentric velocity (m/s) · recorded, no auto-adjustment yet", "%.2f")
+        ValueSpec(0.0, 2.0, 0.05, 0.5, "Mean concentric velocity (m/s)", "%.2f")
     // Within-set velocity-loss %; ≥20 terminates the set.
     ReadinessSignal.VelocityLoss ->
         ValueSpec(0.0, 50.0, 5.0, 0.0, "Within-set velocity drop (%) · ≥20 ends set", "%.0f")
@@ -1039,7 +1073,7 @@ private fun continuousSpec(signal: ReadinessSignal): ValueSpec = when (signal) {
         ValueSpec(-3.0, 3.0, 0.5, 0.0, "lnRMSSD z vs baseline · < −0.5 downgrades")
     // HRV coefficient of variation % (dormant, no autoreg gate yet).
     ReadinessSignal.HrvCv ->
-        ValueSpec(0.0, 15.0, 0.5, 0.0, "HRV coefficient of variation (%) · recorded, no auto-adjustment yet")
+        ValueSpec(0.0, 15.0, 0.5, 0.0, "HRV coefficient of variation (%)")
     // Aerobic-decoupling drift %; >10 keeps the run easy.
     ReadinessSignal.AerobicDecoupling ->
         ValueSpec(0.0, 30.0, 1.0, 0.0, "Aerobic decoupling (%) · >10 keeps run easy", "%.0f")
@@ -1066,12 +1100,12 @@ private enum class IllnessLevel(val value: Double, val label: String) {
 }
 
 /**
- * Post-session review (M7): the per-session feedback items ONLY; did the lift go
+ * Post-session review: the per-session feedback items ONLY; did the lift go
  * to plan (reps / RIR), or how the run felt (decoupling / easy-run intensity /
  * split). Contextual: offered after logging a session and from the Log menu. Emits
  * [Event.SubmitReview] with the whole-week and clinical fields left at their
  * defaults; the weekly qualitative + medical screens live in the separate
- * [WeeklyCheckinSheet]. (Same singleton wire, this is a UI decomposition, not a
+ * [WeeklyCheckinSheet]. (Same singleton wire; this is a UI decomposition, not a
  * new event.)
  */
 @Composable
@@ -1179,8 +1213,8 @@ fun SessionReviewSheet(onClose: () -> Unit = {}, onSubmit: (Event.SubmitReview) 
 }
 
 /**
- * Weekly check-in (M7): the whole-week qualitative counts plus the two medical
- * screens, now with HUMANE framing, not bare toggles. Each clinical item
+ * Weekly check-in: the whole-week qualitative counts plus the two medical
+ * screens; now with HUMANE framing, not bare toggles. Each clinical item
  * (disordered-exercise, bone pain) is a plain question with a sentence of context,
  * because both are File-08 medical-deferral triggers. They still flow into the same
  * [Event.SubmitReview] and reach the core's safety gates unchanged (HARD RULE 3);
@@ -1220,7 +1254,7 @@ fun WeeklyCheckinSheet(onClose: () -> Unit = {}, onSubmit: (Event.SubmitReview) 
     ) {
         FormCard {
             Text(
-                "A quick look back at the whole week - not one session.",
+                "A quick look back at the whole week, not one session.",
                 color = OnBgMuted,
                 style = Type.Caption,
             )
@@ -1257,11 +1291,11 @@ fun WeeklyCheckinSheet(onClose: () -> Unit = {}, onSubmit: (Event.SubmitReview) 
         FormCard {
             ClinicalQuestion(
                 question = "Over the last few weeks, have you felt you must exercise even when ill or injured, or anxious when you can't?",
-                context = "If yes, we'll gently suggest talking it over with a professional. There's no penalty - this just helps keep training healthy.",
+                context = "If yes, we'll gently suggest talking it over with a professional. There's no penalty. This just helps keep training healthy.",
                 checked = compulsive,
             ) { compulsive = it; dirty = true }
             ClinicalQuestion(
-                question = "Any deep, localised, worsening bone pain - pain in one spot that hurts on impact or at rest?",
+                question = "Any deep, localised, worsening bone pain: pain in one spot that hurts on impact or at rest?",
                 context = "This can be an early stress-injury sign. If yes, we'll pause loading and point you to a clinician. Ordinary muscle soreness doesn't count here.",
                 checked = bonePain,
             ) { bonePain = it; dirty = true }
@@ -1271,7 +1305,7 @@ fun WeeklyCheckinSheet(onClose: () -> Unit = {}, onSubmit: (Event.SubmitReview) 
 }
 
 /**
- * A humanely-framed clinical screen (M7): the question as the primary line, a
+ * A humanely-framed clinical screen: the question as the primary line, a
  * sentence explaining what a "yes" means (so a medical-deferral trigger never reads
  * as a cryptic toggle), and a Yes/No switch. The wire value is the same boolean the
  * core's File-08 gates consume.
@@ -1286,7 +1320,7 @@ private fun ClinicalQuestion(
     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
         Text(question, color = OnBgBody, style = Type.Body)
         Text(context, color = OnBgMuted, style = Type.Caption)
-        SwitchRow(if (checked) "Yes" else "No - all good", checked) { onCheck(it) }
+        SwitchRow(if (checked) "Yes" else "No, all good", checked) { onCheck(it) }
     }
 }
 
@@ -1365,7 +1399,7 @@ fun RacePredictorForm(initial: RacePredictionView? = null, onPredict: (Event.Pre
             recent = it
         }
         KeypadValueField(
-            "Recent time - minutes", "min", minText,
+            "Recent time: minutes", "min", minText,
             active = active == RaceField.Minutes,
             invalid = !minValid,
             min = 1.0, max = 359.0, format = "%.0f",
@@ -1374,7 +1408,7 @@ fun RacePredictorForm(initial: RacePredictionView? = null, onPredict: (Event.Pre
             onText = { minText = it; fresh = false },
         )
         KeypadValueField(
-            "Recent time - seconds", "sec", secText,
+            "Recent time: seconds", "sec", secText,
             active = active == RaceField.Seconds,
             invalid = !secValid,
             min = 0.0, max = 59.0, format = "%.0f",
@@ -1510,8 +1544,8 @@ fun ProteinForm(
 ) {
     // Keypad-driven bodyweight (Log-set primitives, owner stepper ban). The
     // buffer text is exactly what is parsed at submit (display-committed).
-    // Seed order (M5): the core's echoed query (last calc) first, then the
-    // profile's consolidated person bodyweight, then the plain default, so a
+    // Seed order: the core's echoed query (last calc) first, then the
+    // profile's consolidated person bodyweight, then the plain default; so a
     // user who set bodyweight in Profile never re-types it here (override still
     // allowed). Absent both, the neutral 75 kg starter.
     var bwText by rememberSaveable {
@@ -1537,7 +1571,7 @@ fun ProteinForm(
         )
         if (initial == null && profileBodyweightKg != null) {
             Text(
-                "Prefilled from your profile - edit to override.",
+                "Prefilled from your profile. Edit to override.",
                 color = OnBgMuted,
                 style = Type.Caption,
             )
@@ -1550,7 +1584,7 @@ fun ProteinForm(
             // button would look actionable yet render no result on tap: say why
             // and gate the button, matching the other forms' validity idiom.
             Text(
-                "Pick a context above - no general target is evidence-backed.",
+                "Pick a context above. No general target is evidence-backed.",
                 color = OnBgMuted,
                 style = Type.Caption,
             )
@@ -1590,8 +1624,8 @@ fun HrZonesForm(
     onCompute: (Double, Double?) -> Unit,
 ) {
     // Keypad-driven age entry (Log-set primitives, owner stepper ban).
-    // Seed order (M5): the echoed query first, then the profile's consolidated
-    // age, then the plain default, enter your age once on Profile, prefilled here.
+    // Seed order: the echoed query first, then the profile's consolidated
+    // age, then the plain default; enter your age once on Profile, prefilled here.
     var ageText by rememberSaveable {
         val seed = initial?.age_years ?: profileAgeYears
         mutableStateOf(seed?.let { String.format(Locale.US, "%.0f", it) } ?: "30")
@@ -1619,7 +1653,7 @@ fun HrZonesForm(
         )
         if (initial == null && (profileAgeYears != null || profileRestingHrBpm != null)) {
             Text(
-                "Prefilled from your profile - edit to override.",
+                "Prefilled from your profile. Edit to override.",
                 color = OnBgMuted,
                 style = Type.Caption,
             )
@@ -1673,12 +1707,12 @@ private val ReadinessSignal.explainer: String
         ReadinessSignal.HrvCv -> "How much your HRV readings vary day to day."
         ReadinessSignal.AerobicDecoupling -> "Heart-rate drift versus pace during a steady run."
         ReadinessSignal.RestingHr -> "This morning's resting heart rate versus your baseline."
-        ReadinessSignal.Soreness -> "Muscle soreness today on a 1–7 scale - 6+ eases intensity."
-        ReadinessSignal.Pain -> "Sharp or joint pain - a red flag that pauses training."
-        ReadinessSignal.Illness -> "Feeling sick - the severity decides the training call."
-        ReadinessSignal.RedS -> "Signs of under-fueling (RED-S) - routes to a medical referral."
-        ReadinessSignal.CardiacRedFlag -> "Chest pain, fainting or palpitations - routes to a professional."
-        ReadinessSignal.BoneStress -> "Focal bone pain - possible bone-stress injury, routes to a professional."
+        ReadinessSignal.Soreness -> "Muscle soreness today on a 1–7 scale: 6+ eases intensity."
+        ReadinessSignal.Pain -> "Sharp or joint pain: a red flag that pauses training."
+        ReadinessSignal.Illness -> "Feeling sick: the severity decides the training call."
+        ReadinessSignal.RedS -> "Signs of under-fueling (RED-S): routes to a medical referral."
+        ReadinessSignal.CardiacRedFlag -> "Chest pain, fainting or palpitations: routes to a professional."
+        ReadinessSignal.BoneStress -> "Focal bone pain: possible bone-stress injury, routes to a professional."
     }
 
 internal val ReadinessSignal.label: String
@@ -1691,7 +1725,11 @@ internal val ReadinessSignal.label: String
         ReadinessSignal.HrvLnRmssd -> "HRV (ln rMSSD)"
         ReadinessSignal.HrvCv -> "HRV (CV)"
         ReadinessSignal.AerobicDecoupling -> "Aerobic decoupling"
-        ReadinessSignal.RestingHr -> "Resting HR"
+        // This raw-signal field submits a DELTA versus baseline (grid −5..+20; the core
+        // reads it as a bpm delta, +5 downgrades / +10 stops), NOT an absolute bpm, so
+        // the pill has to say "vs baseline" to match the helper below it and the
+        // explainer. (Absolute resting HR is entered in the morning check-in instead.)
+        ReadinessSignal.RestingHr -> "Resting HR vs baseline"
         ReadinessSignal.Soreness -> "Soreness"
         ReadinessSignal.Pain -> "Pain"
         ReadinessSignal.Illness -> "Illness"
@@ -1715,8 +1753,8 @@ internal val ReadinessSignal.label: String
 fun ObservedAtRow(
     epochSec: Long,
     withTime: Boolean,
-    // B9: legacy entries (entry_id == 0) are amended by matching their ORIGINAL
-    // observed_at, so a changed date can't be honored without orphaning the row -
+    // Legacy entries (entry_id == 0) are amended by matching their ORIGINAL
+    // observed_at, so a changed date can't be honored without orphaning the row;
     // rather than silently discard the edit, the caller disables the chip.
     enabled: Boolean = true,
     onChange: (Long) -> Unit,

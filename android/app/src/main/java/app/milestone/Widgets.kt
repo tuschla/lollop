@@ -535,7 +535,7 @@ fun KeypadValueField(
 @Composable
 fun NumericKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit) {
     // Keypad ground (spec 05-log §2): a hair below BgElevated in the dark
-    // themes; the plain screen ground on paper. C6: keyed off the RESOLVED palette
+    // themes; the plain screen ground on paper. Keyed off the RESOLVED palette
     // (a forced-Light-on-dark-OS sheet must not get the dark ground), not the OS.
     val ground = if (LocalPalette.current.bgTop.luminance() < 0.5f) Color(0xFF1A1815) else BgTop
     Column(
@@ -603,8 +603,7 @@ fun editNumericBuffer(text: String, key: Char, replaceAll: Boolean): String {
 
 /** `+2.5` / `−5` label for a relative-adjust chip; trims a whole-number `.0`. */
 private fun adjLabel(a: Double): String {
-    val mag = Math.abs(a)
-    val s = if (mag % 1.0 == 0.0) "${mag.toInt()}" else String.format(Locale.US, "%.1f", mag)
+    val s = trimDecimal(Math.abs(a))
     return (if (a < 0) "−" else "+") + s
 }
 
@@ -678,7 +677,7 @@ fun RowScope.StatTile(value: String, unit: String?, label: String, glossaryKey: 
                 Text(" $unit", color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
             }
         }
-        // Label, with an optional glossary affordance (m2) for jargon tiles.
+        // Label, with an optional glossary affordance for jargon tiles.
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
             Text(label, color = OnBgFaint, style = Type.Caption)
             glossaryKey?.let { GlossaryInfo(it) }
@@ -718,7 +717,7 @@ fun ContributionHeatmap(
     val lastSunday = todayLocalDay - dow(todayLocalDay)
     val firstSunday = lastSunday - (weeks - 1) * 7L
 
-    // m5: axis labels. Weekday initials down the left gutter (Sun top), month
+    // Axis labels. Weekday initials down the left gutter (Sun top), month
     // ticks along the bottom at each column where the month first changes.
     val weekdayInitials = listOf("S", "M", "T", "W", "T", "F", "S")
     val monthFmt = SimpleDateFormat("MMM", Locale.US).apply {
@@ -902,8 +901,7 @@ fun RunDistanceBars(
 }
 
 /** Trim a whole-number `.0` off a km figure; one decimal otherwise. */
-private fun fmtKm(km: Double): String =
-    if (km % 1.0 == 0.0) "${km.toInt()}" else String.format(Locale.US, "%.1f", km)
+private fun fmtKm(km: Double): String = trimDecimal(km)
 
 /** Row-disclosure chevron (`ui-chevron-right`, 16dp, `OnBgFaint`); rotates 90°
  *  when the row is expanded. One shared affordance for every tappable row. */

@@ -10,38 +10,37 @@
 //! strength-007, strength-011 and the Prilepin's-chart verbatim table). Claim
 //! ids come from the canonical registry in `crate::evidence`.
 
-use crate::evidence::claim;
-use crate::schema::{Citation, ConfidenceTag, Evidence, EvidenceGrade, Recommended};
-
-// ---------------------------------------------------------------------------
-// Recommendation helper
-// ---------------------------------------------------------------------------
-
-/// Wrap a prescriptive value with evidence + confidence pulled from the
-/// registry (File 02 claim ids).
-///
-/// Panics if `claim_id` is not in the registry: callers pass only the
-/// canonical ids documented per function, so a miss is a programming error
-/// (same contract as every other engine module; no fabricated fallback
-/// evidence).
-pub fn recommend<T>(value: T, claim_id: &str) -> Recommended<T> {
-    let entry = claim(claim_id).expect("known strength claim");
-    Recommended::new(value, entry.to_evidence(), entry.to_confidence_tag())
-}
+use crate::evidence::graded;
+use crate::schema::Recommended;
 
 // ---------------------------------------------------------------------------
 // 1. Estimated 1RM (File 02 strength-005)
 // ---------------------------------------------------------------------------
 
 /// Epley estimated 1RM: `weight * (1 + reps/30)` (File 02 strength-005).
+/// Domain: reps >= 1 (the e1RM formulas are undefined below one rep).
 pub fn e1rm_epley(weight: f64, reps: u32) -> f64 {
+    debug_assert!(reps >= 1, "e1RM formulas are defined for reps >= 1");
     weight * (1.0 + reps as f64 / 30.0)
 }
 
+/// Highest rep count for which the Brzycki denominator `37 − reps` stays
+/// positive. At 37 reps it is zero (division by zero → +∞) and above it goes
+/// negative (a negative 1RM); the estimator is only defined below 37 reps.
+const BRZYCKI_MAX_REPS: u32 = 36;
+
 /// Brzycki estimated 1RM: `weight * 36 / (37 - reps)` (File 02 strength-005).
-/// Undefined at 37 reps (division by zero); callers should keep reps in the
-/// 1–10 accuracy window noted in strength-005/strength-006.
+///
+/// Domain-gated: the raw formula is undefined at 37 reps and returns +∞ / a
+/// negative 1RM at or above it, and this is a `pub` fn callable with an
+/// unvalidated rep count. Reps are clamped into the formula's valid domain
+/// ([`BRZYCKI_MAX_REPS`]) so the return is always finite and positive; the
+/// estimate is only *accurate* in the 1–10 window noted in
+/// strength-005/strength-006. Results at reps ≤ 36 are unchanged.
+/// Domain: reps >= 1 (the e1RM formulas are undefined below one rep).
 pub fn e1rm_brzycki(weight: f64, reps: u32) -> f64 {
+    debug_assert!(reps >= 1, "e1RM formulas are defined for reps >= 1");
+    let reps = reps.min(BRZYCKI_MAX_REPS);
     weight * 36.0 / (37.0 - reps as f64)
 }
 
@@ -49,18 +48,23 @@ pub fn e1rm_brzycki(weight: f64, reps: u32) -> f64 {
 // 2. RPE ↔ RIR mapping (File 02 strength-007; registry AUTOREG-RIR-001)
 // ---------------------------------------------------------------------------
 
+/// Zourdos RPE↔RIR anchor: RPE 10 = 0 RIR, each RIR = −1 RPE (File 02
+/// strength-007). Single source for both directions of the mapping so they
+/// cannot desync.
+const RPE_RIR_ANCHOR: f64 = 10.0;
+
 /// Reps in reserve from RPE via the Zourdos anchor: RPE 10 = 0 RIR, each RIR
 /// = −1 RPE (File 02 strength-007; registry AUTOREG-RIR-001). Clamped at 0.
 pub fn rpe_to_rir(rpe: f64) -> f64 {
-    let rir = 10.0 - rpe;
+    let rir = RPE_RIR_ANCHOR - rpe;
     if rir < 0.0 { 0.0 } else { rir }
 }
 
 /// RPE from reps in reserve, inverse of [`rpe_to_rir`] (File 02 strength-007;
 /// registry AUTOREG-RIR-001). Clamped at 10.
 pub fn rir_to_rpe(rir: f64) -> f64 {
-    let rpe = 10.0 - rir;
-    if rpe > 10.0 { 10.0 } else { rpe }
+    let rpe = RPE_RIR_ANCHOR - rir;
+    if rpe > RPE_RIR_ANCHOR { RPE_RIR_ANCHOR } else { rpe }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +170,7 @@ pub fn prilepin_volume_ok(pct_1rm: f64, total_reps: u16) -> Recommended<bool> {
         Some(row) => total_reps >= row.total_range.0 && total_reps <= row.total_range.1,
         None => false,
     };
-    recommend(ok, "STR-PRILEPIN-001")
+    graded(ok, "STR-PRILEPIN-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +211,15 @@ pub struct LoadingRx {
 /// overall). Per-exercise-class bands come from [`power_load_spectrum`]
 /// (strength-030); never prescribe the whole envelope to one exercise. The
 /// KB states only "never to failure; high RIR" for power: the numeric `rir`
-/// band here is an engine encoding of "high RIR", not a KB number.
+/// band here is an expert-opinion encoding of "high RIR" (claim STR-PWR-RIR-001),
+/// not a KB number.
+///
+/// Hypertrophy `rest_sec` is `(30, 120)`: strength-003's `parameters:` line
+/// gives `rest_sec 30-120`, and the statement's headline "30-90 s" carries the
+/// KB's own "up to 2 min" extension.
+///
+/// MaxStrength/Power `sets: (3, 6)` truncates the KB's open-ended "3-6+" (the
+/// file's `pct_top_open` convention is not extended to `LoadingRx`).
 pub fn loading_rx(goal: LiftGoal) -> Recommended<LoadingRx> {
     let rx = match goal {
         LiftGoal::MaxStrength => LoadingRx {
@@ -228,7 +240,7 @@ pub fn loading_rx(goal: LiftGoal) -> Recommended<LoadingRx> {
             pct_1rm: (65, 85),
             reps: (6, 12),
             sets: (3, 6),
-            rest_sec: (30, 90),
+            rest_sec: (30, 120),
             rir: (0, 3),
         },
     };
@@ -236,39 +248,37 @@ pub fn loading_rx(goal: LiftGoal) -> Recommended<LoadingRx> {
         LiftGoal::Power => "STR-PWR-001",
         LiftGoal::MaxStrength | LiftGoal::Hypertrophy => "STR-INTENT-001",
     };
-    recommend(rx, claim_id)
+    graded(rx, claim_id)
 }
 
 // ---------------------------------------------------------------------------
-// 6. Load progression (File 02 strength-012/014; STR-2FOR2-001 / DBLPROG-001)
+// 6. Load progression (File 02 strength-012/014; STR-2FOR2-001 / STR-PCTPROG-001)
 // ---------------------------------------------------------------------------
 
 /// 2-for-2 rule (File 02 strength-012): increase load once the athlete beats the
 /// goal by >=2 reps on the last set in 2 consecutive sessions. STR-2FOR2-001
 /// (safety-critical per the KB: caps how fast load may ramp).
 pub fn two_for_two_met(reps_over_goal_last_set: u8, consecutive_sessions: u8) -> Recommended<bool> {
-    recommend(
-        reps_over_goal_last_set >= 2 && consecutive_sessions >= 2,
-        "STR-2FOR2-001",
-    )
+    graded(reps_over_goal_last_set >= 2 && consecutive_sessions >= 2,
+    "STR-2FOR2-001",)
 }
 
 /// Percentage auto-progression per successful week (File 02 strength-014):
 /// lower-body +2.5-5%, upper-body +1-2.5% of load. Returns (min, max) fraction.
-/// DBLPROG-001.
+/// STR-PCTPROG-001.
 pub fn weekly_pct_increment(upper_body: bool) -> Recommended<(f64, f64)> {
     let inc = if upper_body {
         (0.01, 0.025)
     } else {
         (0.025, 0.05)
     };
-    recommend(inc, "DBLPROG-001")
+    graded(inc, "STR-PCTPROG-001")
 }
 
 /// Whether a stall triggers a deload / model switch (File 02 strength-039):
 /// (estimated) 1RM flat for >=2 weeks despite adequate recovery. STR-STALL-001.
 pub fn stall_triggers_deload(weeks_stalled: u8, recovery_adequate: bool) -> Recommended<bool> {
-    recommend(weeks_stalled >= 2 && recovery_adequate, "STR-STALL-001")
+    graded(weeks_stalled >= 2 && recovery_adequate, "STR-STALL-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -301,7 +311,7 @@ pub fn periodization_model(
         TrainingAge::Intermediate => PeriodizationModel::Dup,
         TrainingAge::Advanced => PeriodizationModel::Block,
     };
-    recommend(model, "STR-MODEL-001")
+    graded(model, "STR-MODEL-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -322,14 +332,12 @@ pub struct TaperRx {
 /// Best-evidenced peaking taper: cut volume 41-60% exponentially over ~2 weeks
 /// while holding intensity and frequency (File 02 strength-026; TAPER-001).
 pub fn taper_rx() -> Recommended<TaperRx> {
-    recommend(
-        TaperRx {
-            volume_reduction_frac: (0.41, 0.60),
-            duration_days: (8, 14),
-            hold_intensity: true,
-        },
-        "TAPER-001",
-    )
+    graded(TaperRx {
+        volume_reduction_frac: (0.41, 0.60),
+        duration_days: (8, 14),
+        hold_intensity: true,
+    },
+    "TAPER-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -348,7 +356,7 @@ pub fn plyo_foot_contact_cap(
         TrainingAge::Intermediate => (100, 120),
         TrainingAge::Advanced => (120, 140),
     };
-    recommend(cap, "PLYO-001")
+    graded(cap, "PLYO-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -359,7 +367,7 @@ pub fn plyo_foot_contact_cap(
 /// its high systemic fatigue cost (File 02 strength-029). Returns (min, max)
 /// days out. STR-DLPEAK-001 (safety-critical per the KB).
 pub fn deadlift_peak_days_out() -> Recommended<(u8, u8)> {
-    recommend((10, 14), "STR-DLPEAK-001")
+    graded((10, 14), "STR-DLPEAK-001")
 }
 
 /// The conditioning activity opening a PAP/PAPE contrast pair (File 02
@@ -378,7 +386,7 @@ pub enum ConditioningActivity {
 /// is slower than baseline. STR-PAP-001 (Moderate; Seitz & Haff). For the
 /// plyometric-CA window use [`pap_rest_window_min_for`].
 pub fn pap_rest_window_min() -> Recommended<(u8, u8)> {
-    recommend((5, 7), "STR-PAP-001")
+    graded((5, 7), "STR-PAP-001")
 }
 
 /// PAP/PAPE contrast rest window in minutes by conditioning-activity type
@@ -389,7 +397,7 @@ pub fn pap_rest_window_min_for(ca: ConditioningActivity) -> Recommended<(f64, f6
         ConditioningActivity::HeavyLift => (5.0, 7.0),
         ConditioningActivity::Plyometric => (0.3, 4.0),
     };
-    recommend(window, "STR-PAP-001")
+    graded(window, "STR-PAP-001")
 }
 
 /// Olympic-lift pulling-derivative prescription (File 02 strength-031). Only
@@ -425,19 +433,17 @@ pub struct OlympicDerivativeRx {
 /// velocity-biased variants), placed early in the session. STR-OLY-001
 /// (Moderate; Suchomel).
 pub fn olympic_derivative_rx() -> Recommended<OlympicDerivativeRx> {
-    recommend(
-        OlympicDerivativeRx {
-            pct_1rm: (85, 100),
-            pct_top_open: true,
-            reps: (1, 3),
-            sets: (3, 5),
-            rest_sec: (180, 300),
-            early_in_session: true,
-            velocity_variant_pcts_1rm: &[30, 45, 65, 80],
-            jump_shrug_pct_bodymass: 30,
-        },
-        "STR-OLY-001",
-    )
+    graded(OlympicDerivativeRx {
+        pct_1rm: (85, 100),
+        pct_top_open: true,
+        reps: (1, 3),
+        sets: (3, 5),
+        rest_sec: (180, 300),
+        early_in_session: true,
+        velocity_variant_pcts_1rm: &[30, 45, 65, 80],
+        jump_shrug_pct_bodymass: 30,
+    },
+    "STR-OLY-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -446,7 +452,9 @@ pub fn olympic_derivative_rx() -> Recommended<OlympicDerivativeRx> {
 
 /// Lombardi estimated 1RM: `weight * reps^0.10` (File 02 strength-005). Same
 /// 1–10 rep accuracy window (±5%) as Epley/Brzycki; treat as approximate.
+/// Domain: reps >= 1 (the e1RM formulas are undefined below one rep).
 pub fn e1rm_lombardi(weight: f64, reps: u32) -> f64 {
+    debug_assert!(reps >= 1, "e1RM formulas are defined for reps >= 1");
     weight * (reps as f64).powf(0.10)
 }
 
@@ -466,13 +474,11 @@ pub struct BackOffRx {
 /// Top set at RPE ~8, back-off sets dropped 10–15% of the top-set load (File 02
 /// strength-015). STR-BACKOFF-001 (Moderate).
 pub fn rpe_anchored_back_off() -> Recommended<BackOffRx> {
-    recommend(
-        BackOffRx {
-            top_set_rpe: 8,
-            drop_frac: (0.10, 0.15),
-        },
-        "STR-BACKOFF-001",
-    )
+    graded(BackOffRx {
+        top_set_rpe: 8,
+        drop_frac: (0.10, 0.15),
+    },
+    "STR-BACKOFF-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -487,7 +493,7 @@ pub fn vl_termination_threshold(goal: LiftGoal) -> Recommended<f64> {
         LiftGoal::MaxStrength | LiftGoal::Power => 0.20,
         LiftGoal::Hypertrophy => 0.40,
     };
-    recommend(vl, "AUTOREG-VL-001")
+    graded(vl, "AUTOREG-VL-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -559,7 +565,7 @@ pub fn linear_phase_rx(phase: LinearPhase) -> Recommended<PhaseRx> {
             weeks: (12, 12),
         },
     };
-    recommend(rx, "STR-LINEAR-001")
+    graded(rx, "STR-LINEAR-001")
 }
 
 /// Block periodization phase (File 02 strength-022 verbatim bands).
@@ -602,7 +608,7 @@ pub fn block_phase_rx(phase: BlockPhase) -> Recommended<PhaseRx> {
             weeks: (2, 4),
         },
     };
-    recommend(rx, "STR-BLOCK-001")
+    graded(rx, "STR-BLOCK-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -610,29 +616,14 @@ pub fn block_phase_rx(phase: BlockPhase) -> Recommended<PhaseRx> {
 // ---------------------------------------------------------------------------
 
 /// SAFETY gate: require a ~1.5× bodyweight back-squat before high-intensity
-/// depth jumps (File 02 strength-033). ExpertOpinion prerequisite, contested
-/// (CQ-05), but `safety_critical`, landing loads are injurious without the
-/// strength/mechanics base. Also requires landing-mechanics competence, which
-/// this numeric gate does not capture; callers must verify it separately.
+/// depth jumps (File 02 strength-033; claim PLYO-PREREQ-001). ExpertOpinion
+/// prerequisite, contested (CQ-F02-05), but `safety_critical`, landing loads
+/// are injurious without the strength/mechanics base. Also requires
+/// landing-mechanics competence, which this numeric gate does not capture;
+/// callers must verify it separately.
 pub fn depth_jump_ready(squat_1rm: f64, bodyweight: f64) -> Recommended<bool> {
     let ready = bodyweight > 0.0 && squat_1rm >= 1.5 * bodyweight;
-    Recommended::new(
-        ready,
-        Evidence {
-            grade: EvidenceGrade::ExpertOpinion,
-            citation: Citation {
-                claim_id: None,
-                reference: "File 02 strength-033 (depth-jump readiness gate)".to_string(),
-            },
-            contradicting: vec![],
-        },
-        ConfidenceTag {
-            score: EvidenceGrade::ExpertOpinion.default_confidence(),
-            contested: true,
-            contested_question_ref: Some("CQ-05".to_string()),
-            safety_critical: true,
-        },
-    )
+    graded(ready, "PLYO-PREREQ-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -649,10 +640,8 @@ pub const E1RM_MIN_CROSS_CHECK_FORMULAS: usize = 2;
 /// unreliable above 10 reps or on isolation lifts. STR-E1RM-CHECK-001
 /// (Moderate; DiStasio 2014).
 pub fn e1rm_reliable(reps: u32, isolation_lift: bool) -> Recommended<bool> {
-    recommend(
-        reps >= 1 && reps <= E1RM_RELIABLE_REP_CAP && !isolation_lift,
-        "STR-E1RM-CHECK-001",
-    )
+    graded(reps >= 1 && reps <= E1RM_RELIABLE_REP_CAP && !isolation_lift,
+    "STR-E1RM-CHECK-001",)
 }
 
 /// A cross-checked e1RM: agreement band across >=2 formulas (File 02
@@ -694,13 +683,13 @@ pub fn e1rm_cross_check(
     } else {
         None
     };
-    recommend(check, "STR-E1RM-CHECK-001")
+    graded(check, "STR-E1RM-CHECK-001")
 }
 
 /// Preferred test-set rep range when e1RM is unreliable (File 02 strength-006:
 /// "prefer 3-6 rep test sets"). STR-E1RM-CHECK-001.
 pub fn e1rm_test_set_reps() -> Recommended<(u8, u8)> {
-    recommend((3, 6), "STR-E1RM-CHECK-001")
+    graded((3, 6), "STR-E1RM-CHECK-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -731,7 +720,7 @@ pub fn load_prescription_mode(
     } else {
         LoadPrescriptionMode::RpeRir
     };
-    recommend(mode, "STR-LOADSEL-001")
+    graded(mode, "STR-LOADSEL-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -805,7 +794,7 @@ pub fn velocity_zone_rx(zone: VelocityZone) -> Recommended<VelocityZoneRow> {
         .iter()
         .find(|r| r.zone == zone)
         .expect("every VelocityZone has a table row");
-    recommend(row, "STR-VZONE-001")
+    graded(row, "STR-VZONE-001")
 }
 
 /// A lift with a KB-stated minimum velocity threshold (File 02 strength-016).
@@ -824,7 +813,7 @@ pub fn mvt_ms(lift: MvtLift) -> Recommended<f64> {
         MvtLift::BenchPress => 0.15,
         MvtLift::BackSquat => 0.30,
     };
-    recommend(mvt, "STR-VZONE-001")
+    graded(mvt, "STR-VZONE-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -867,7 +856,7 @@ pub const LVP_PROFILE_LOADS_PREFERRED: (u8, u8) = (5, 7);
 /// tested max. STR-LVP-001 (Moderate; Jovanovic & Flanagan; Greig 2023).
 pub fn lvp_e1rm(lift: LvpLift, points: &[(f64, f64)]) -> Recommended<Option<f64>> {
     let estimate = lvp_e1rm_inner(lift, points);
-    recommend(estimate, "STR-LVP-001")
+    graded(estimate, "STR-LVP-001")
 }
 
 fn lvp_e1rm_inner(lift: LvpLift, points: &[(f64, f64)]) -> Option<f64> {
@@ -952,7 +941,7 @@ pub fn first_rep_load_adjustment(
     } else {
         DailyLoadAdjustment::Hold
     };
-    recommend(adj, "STR-VBT-DAILY-001")
+    graded(adj, "STR-VBT-DAILY-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1011,13 +1000,13 @@ pub fn dup_day_rx(day: DupDay) -> Recommended<DupDayRx> {
             max_velocity_intent: false,
         },
     };
-    recommend(rx, "STR-DUP-001")
+    graded(rx, "STR-DUP-001")
 }
 
 /// Per-lift weekly frequency DUP is best supported at (File 02 strength-023:
 /// ">=2-3×/wk"); (min, max) of the KB band, min being the floor. STR-DUP-001.
 pub fn dup_lift_frequency_per_week() -> Recommended<(u8, u8)> {
-    recommend((2, 3), "STR-DUP-001")
+    graded((2, 3), "STR-DUP-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1088,7 +1077,7 @@ pub fn conjugate_rx(barbell_training_years: f64) -> Recommended<Option<Conjugate
     } else {
         None
     };
-    recommend(rx, "STR-CONJ-001")
+    graded(rx, "STR-CONJ-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1112,14 +1101,12 @@ pub struct WaveLoadingRx {
 /// example ("e.g."), not a fixed prescription. STR-WAVE-001
 /// (ExpertOpinion/Weak; unstated citation).
 pub fn wave_loading_rx() -> Recommended<WaveLoadingRx> {
-    recommend(
-        WaveLoadingRx {
-            wave_reps: (3, 2, 1),
-            waves: 2,
-            load_rises_per_wave: true,
-        },
-        "STR-WAVE-001",
-    )
+    graded(WaveLoadingRx {
+        wave_reps: (3, 2, 1),
+        waves: 2,
+        load_rises_per_wave: true,
+    },
+    "STR-WAVE-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -1151,17 +1138,15 @@ pub struct PeakingRx {
 /// ([`taper_rx`], strength-026) with strength-specific bands. STR-PEAK-001
 /// (Moderate; Pritchard 2015, Travis 2020/2021).
 pub fn peaking_rx() -> Recommended<PeakingRx> {
-    recommend(
-        PeakingRx {
-            volume_reduction_frac: (0.30, 0.70),
-            intensity_pct_1rm_min: 85,
-            taper_weeks: (1, 2),
-            cessation_days: (2, 7),
-            freq_frac_min_highly_trained: 0.80,
-            freq_reduction_frac_moderately_trained: (0.30, 0.50),
-        },
-        "STR-PEAK-001",
-    )
+    graded(PeakingRx {
+        volume_reduction_frac: (0.30, 0.70),
+        intensity_pct_1rm_min: 85,
+        taper_weeks: (1, 2),
+        cessation_days: (2, 7),
+        freq_frac_min_highly_trained: 0.80,
+        freq_reduction_frac_moderately_trained: (0.30, 0.50),
+    },
+    "STR-PEAK-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -1199,7 +1184,7 @@ pub fn power_load_spectrum(class: PowerExerciseClass) -> Recommended<(u8, u8)> {
         PowerExerciseClass::PowerClean => (40, 80),
         PowerExerciseClass::WeightliftingPulls => (90, 95),
     };
-    recommend(band, "STR-PWRSPEC-001")
+    graded(band, "STR-PWRSPEC-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1228,16 +1213,14 @@ pub struct PlyoScheduleRx {
 /// never both (see [`plyo_foot_contact_cap`] for the contact caps).
 /// STR-PLYO-SCHED-001 (Moderate; Potash & Chu 2008).
 pub fn plyo_schedule_rx() -> Recommended<PlyoScheduleRx> {
-    recommend(
-        PlyoScheduleRx {
-            sessions_per_week: (1, 3),
-            session_spacing_hours: (48, 72),
-            rest_between_sets_sec: (120, 180),
-            depth_jump_work_rest_denominator: 10,
-            depth_jump_inter_rep_rest_sec: (5, 10),
-        },
-        "STR-PLYO-SCHED-001",
-    )
+    graded(PlyoScheduleRx {
+        sessions_per_week: (1, 3),
+        session_spacing_hours: (48, 72),
+        rest_between_sets_sec: (120, 180),
+        depth_jump_work_rest_denominator: 10,
+        depth_jump_inter_rep_rest_sec: (5, 10),
+    },
+    "STR-PLYO-SCHED-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -1264,7 +1247,7 @@ pub fn competition_lifts(sport: StrengthSport) -> Recommended<&'static [&'static
         StrengthSport::Powerlifting => &["squat", "bench press", "deadlift"],
         StrengthSport::Weightlifting => &["snatch", "clean & jerk"],
     };
-    recommend(lifts, "STR-COMP-ANCHOR-001")
+    graded(lifts, "STR-COMP-ANCHOR-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1298,10 +1281,8 @@ pub fn variation_carryover_best(
     grip_matches: bool,
     rom_matches: bool,
 ) -> Recommended<bool> {
-    recommend(
-        stance_matches && grip_matches && rom_matches,
-        "STR-VARIATION-001",
-    )
+    graded(stance_matches && grip_matches && rom_matches,
+    "STR-VARIATION-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -1364,7 +1345,7 @@ pub fn weak_point_fix(sticking_point: StickingPoint) -> Recommended<WeakPointFix
             accessories: &["glute", "hamstring", "upper back"],
         },
     };
-    recommend(fix, "STR-WEAKPOINT-001")
+    graded(fix, "STR-WEAKPOINT-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1395,15 +1376,13 @@ pub struct SubstitutionPrinciples {
 /// tests. See [`SubstitutionPrinciples`] for the documented table gap.
 /// STR-SUBST-EQUIP-001 (ExpertOpinion).
 pub fn equipment_substitution_principles() -> Recommended<SubstitutionPrinciples> {
-    recommend(
-        SubstitutionPrinciples {
-            preserve_movement_pattern: true,
-            preserve_velocity_load_intent: true,
-            order_by_specificity: true,
-            prefer_free_weight_over_machine: true,
-        },
-        "STR-SUBST-EQUIP-001",
-    )
+    graded(SubstitutionPrinciples {
+        preserve_movement_pattern: true,
+        preserve_velocity_load_intent: true,
+        order_by_specificity: true,
+        prefer_free_weight_over_machine: true,
+    },
+    "STR-SUBST-EQUIP-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -1442,7 +1421,7 @@ pub fn one_rm_test_allowed(ctx: OneRmTestContext) -> Recommended<bool> {
         && ctx.warmed_up
         && (!ctx.is_novice || ctx.supervised)
         && (!ctx.spinal_loading || ctx.bracing_competent);
-    recommend(allowed, "STR-1RMTEST-001")
+    graded(allowed, "STR-1RMTEST-001")
 }
 
 /// Novice load-jump cap between 1RM-test attempts / progression steps, as a
@@ -1454,12 +1433,13 @@ pub fn novice_load_jump_cap_frac(upper_body: bool) -> Recommended<(f64, f64)> {
     } else {
         (0.05, 0.10)
     };
-    recommend(cap, "STR-1RMTEST-001")
+    graded(cap, "STR-1RMTEST-001")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::EvidenceGrade;
 
     #[test]
     fn lombardi_and_backoff_and_vl() {
@@ -1545,7 +1525,7 @@ mod tests {
         let h = loading_rx(LiftGoal::Hypertrophy).value;
         assert_eq!(
             (h.pct_1rm, h.reps, h.rest_sec, h.rir),
-            ((65, 85), (6, 12), (30, 90), (0, 3))
+            ((65, 85), (6, 12), (30, 120), (0, 3))
         );
         // Strength intensity floor sits above hypertrophy's.
         assert!(
@@ -1644,6 +1624,24 @@ mod tests {
     }
 
     #[test]
+    fn brzycki_high_reps_stay_finite() {
+        // At/above 37 reps the raw denominator (37 − reps) is zero/negative,
+        // which would return +∞ or a negative 1RM. The domain clamp keeps every
+        // rep count finite and positive (BUGS: e1rm_brzycki unbounded).
+        let at_cap = e1rm_brzycki(100.0, BRZYCKI_MAX_REPS); // reps = 36
+        assert!(at_cap.is_finite() && at_cap > 0.0, "got {at_cap}");
+        for reps in [37u32, 40, 100] {
+            let b = e1rm_brzycki(100.0, reps);
+            assert!(b.is_finite() && b > 0.0, "reps {reps} gave {b}");
+            // Above the domain the estimate saturates at the cap value rather
+            // than exploding.
+            assert_eq!(b, at_cap, "reps {reps} should clamp to the cap");
+        }
+        // The clamp must not perturb results inside the valid domain.
+        assert!((e1rm_brzycki(100.0, 5) - 112.5).abs() < 1e-6);
+    }
+
+    #[test]
     fn rpe_to_rir_anchor() {
         assert_eq!(rpe_to_rir(8.0), 2.0);
         assert_eq!(rpe_to_rir(10.0), 0.0);
@@ -1720,7 +1718,7 @@ mod tests {
 
     #[test]
     fn recommend_attaches_registered_evidence() {
-        let rx = recommend(LiftDummy, "AUTOREG-RIR-001");
+        let rx = graded(LiftDummy, "AUTOREG-RIR-001");
         assert_eq!(rx.evidence.grade, EvidenceGrade::Strong);
         assert_eq!(
             rx.evidence.citation.claim_id.as_deref(),
@@ -1729,11 +1727,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "known strength claim")]
+    #[should_panic(expected = "known claim")]
     fn recommend_panics_on_unregistered_claim_id() {
         // HARD RULE 2: no fabricated fallback evidence, an unregistered id is
         // a programming error, same contract as every other engine module.
-        let _ = recommend(LiftDummy, "NOT-A-REAL-ID");
+        let _ = graded(LiftDummy, "NOT-A-REAL-ID");
     }
 
     #[derive(Debug, PartialEq)]

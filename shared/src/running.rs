@@ -20,15 +20,6 @@
 use crate::schema::{MesoPhase, Recommended, RunSessionType, ThreeZone, VdotBand};
 use serde::{Deserialize, Serialize};
 
-/// Wrap a value with the evidence + confidence of a registry claim (File 09).
-///
-/// Panics if `claim_id` is not in the registry: callers pass only the
-/// canonical ids documented per function, so a miss is a programming error.
-fn recommend<T>(value: T, claim_id: &str) -> Recommended<T> {
-    let e = crate::evidence::claim(claim_id).expect("known claim");
-    Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
-}
-
 // ---------------------------------------------------------------------------
 // 1. HRmax (pure calculation)
 // ---------------------------------------------------------------------------
@@ -196,7 +187,7 @@ pub fn check_volume_caps(
     } else {
         None
     };
-    recommend(violation, "RUN-VOLCAP-001")
+    crate::evidence::graded(violation, "RUN-VOLCAP-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -221,10 +212,8 @@ pub fn single_session_spike(session_km: f64, longest_30d_km: f64) -> bool {
 /// `true` = block/flag. Wrapped in `Recommended` carrying RUN-SPIKE-BLOCK-001
 /// evidence because it drives an action (block the session).
 pub fn single_session_spike_flag(session_km: f64, longest_30d_km: f64) -> Recommended<bool> {
-    recommend(
-        single_session_spike(session_km, longest_30d_km),
-        "RUN-SPIKE-BLOCK-001",
-    )
+    crate::evidence::graded(single_session_spike(session_km, longest_30d_km),
+    "RUN-SPIKE-BLOCK-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -267,7 +256,7 @@ pub fn taper(weeks_out: u8) -> Option<Recommended<TaperRx>> {
         hold_frequency: true,
         add_new_stimulus: false,
     };
-    Some(recommend(rx, "RUN-TAPER-001"))
+    Some(crate::evidence::graded(rx, "RUN-TAPER-001"))
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +300,7 @@ pub fn intensity_distribution(model: DistributionModel) -> Recommended<Intensity
             hard_pct: 15,
         },
     };
-    recommend(d, "RUN-DIST-001")
+    crate::evidence::graded(d, "RUN-DIST-001")
 }
 
 /// Distribution model for a mesocycle phase: pyramidal early, polarized near
@@ -342,14 +331,12 @@ pub struct QualityLimits {
 /// Canonical quality limits: ≤3/week, ≥48 h apart, no back-to-back Z3. Rule
 /// running-023 → RUN-QUALITY-001 (ExpertOpinion, safety-critical).
 pub fn quality_limits() -> Recommended<QualityLimits> {
-    recommend(
-        QualityLimits {
-            max_per_week: 3,
-            min_spacing_hours: 48,
-            allow_consecutive_z3: false,
-        },
-        "RUN-QUALITY-001",
-    )
+    crate::evidence::graded(QualityLimits {
+        max_per_week: 3,
+        min_spacing_hours: 48,
+        allow_consecutive_z3: false,
+    },
+    "RUN-QUALITY-001",)
 }
 
 /// True when a week's quality plan respects the caps: ≤3 sessions, ≥48 h gaps,
@@ -363,7 +350,7 @@ pub fn quality_plan_ok(
     let ok = sessions_per_week <= limits.max_per_week
         && min_gap_hours >= limits.min_spacing_hours
         && (!has_consecutive_z3 || limits.allow_consecutive_z3);
-    recommend(ok, "RUN-QUALITY-001")
+    crate::evidence::graded(ok, "RUN-QUALITY-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -375,7 +362,7 @@ pub fn quality_plan_ok(
 /// runners are held to ~+5 %. NOT the discredited hard "10 % rule", a ceiling.
 pub fn weekly_increase_cap_frac(training_age_years: f64) -> Recommended<f64> {
     let cap = if training_age_years < 1.0 { 0.10 } else { 0.05 };
-    recommend(cap, "RUN-PROGRESS-001")
+    crate::evidence::graded(cap, "RUN-PROGRESS-001")
 }
 
 /// True when next week's volume stays within the training-age increase cap
@@ -391,7 +378,7 @@ pub fn weekly_increase_ok(
     } else {
         (next_km - current_km) / current_km <= cap + 1e-9
     };
-    recommend(ok, "RUN-PROGRESS-001")
+    crate::evidence::graded(ok, "RUN-PROGRESS-001")
 }
 
 /// Flag elevated injury risk when weekly distance rises >30 % across two weeks
@@ -403,7 +390,7 @@ pub fn two_week_increase_flag(baseline_km: f64, current_km: f64) -> Recommended<
     } else {
         current_km > baseline_km * 1.30
     };
-    recommend(flag, "RUN-PROGRESS-001")
+    crate::evidence::graded(flag, "RUN-PROGRESS-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -427,14 +414,12 @@ pub struct DeloadCadence {
 /// drop-a-quality-session directive live in [`recovery_week_rx`]).
 pub fn deload_cadence(conservative: bool) -> Recommended<DeloadCadence> {
     let load_weeks = if conservative { 2 } else { 3 };
-    recommend(
-        DeloadCadence {
-            load_weeks,
-            recovery_weeks: 1,
-            reduction_frac: (0.20, 0.40),
-        },
-        "RUN-DELOAD-001",
-    )
+    crate::evidence::graded(DeloadCadence {
+        load_weeks,
+        recovery_weeks: 1,
+        reduction_frac: (0.20, 0.40),
+    },
+    "RUN-DELOAD-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -623,7 +608,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
             "RUN-WORKOUT-001",
         ),
     };
-    recommend(rx, claim_id)
+    crate::evidence::graded(rx, claim_id)
 }
 
 /// Prescription band for a schema run session type. Delegates to
@@ -654,15 +639,13 @@ pub struct CruiseIntervalRx {
 /// Cruise intervals (running-018): 3–15 min reps at T pace with ~1 min or
 /// 20–25 % rest, total ≤10 % of weekly volume. Moderate (Daniels; Pfitzinger).
 pub fn cruise_interval_rx() -> Recommended<CruiseIntervalRx> {
-    recommend(
-        CruiseIntervalRx {
-            rep_duration_min: (3, 15),
-            rest_approx_min: 1.0,
-            rest_frac: (0.20, 0.25),
-            weekly_cap_frac: 0.10,
-        },
-        "RUN-TEMPO-001",
-    )
+    crate::evidence::graded(CruiseIntervalRx {
+        rep_duration_min: (3, 15),
+        rest_approx_min: 1.0,
+        rest_frac: (0.20, 0.25),
+        weekly_cap_frac: 0.10,
+    },
+    "RUN-TEMPO-001",)
 }
 
 /// VO2max-interval structure (running-019 → RUN-INTERVAL-001, contested CQ-10
@@ -683,15 +666,13 @@ pub struct Vo2maxIntervalRx {
 /// 800–1600 m), recovery ≈ rep time (slightly less), total ≤8 % weekly.
 /// Rep count per session is NOT stated in the KB.
 pub fn vo2max_interval_rx() -> Recommended<Vo2maxIntervalRx> {
-    recommend(
-        Vo2maxIntervalRx {
-            rep_duration_min: (3, 5),
-            rep_distance_m: (800, 1600),
-            recovery_max_ratio_of_rep: 1.0,
-            weekly_cap_frac: 0.08,
-        },
-        "RUN-INTERVAL-001",
-    )
+    crate::evidence::graded(Vo2maxIntervalRx {
+        rep_duration_min: (3, 5),
+        rep_distance_m: (800, 1600),
+        recovery_max_ratio_of_rep: 1.0,
+        weekly_cap_frac: 0.08,
+    },
+    "RUN-INTERVAL-001",)
 }
 
 /// True when an interval rep's recovery respects running-019: recovery ≈ rep
@@ -699,12 +680,12 @@ pub fn vo2max_interval_rx() -> Recommended<Vo2maxIntervalRx> {
 /// states no lower recovery bound, so none is enforced (a non-positive
 /// recovery passes the stated rule; the KB is silent on it).
 pub fn interval_recovery_ok(rep_sec: f64, recovery_sec: f64) -> Recommended<bool> {
-    recommend(recovery_sec <= rep_sec, "RUN-INTERVAL-001")
+    crate::evidence::graded(recovery_sec <= rep_sec, "RUN-INTERVAL-001")
 }
 
 /// True when an interval rep distance sits in the 800–1600 m band (running-019).
 pub fn interval_rep_distance_ok(rep_m: f64) -> Recommended<bool> {
-    recommend((800.0..=1600.0).contains(&rep_m), "RUN-INTERVAL-001")
+    crate::evidence::graded((800.0..=1600.0).contains(&rep_m), "RUN-INTERVAL-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -731,16 +712,14 @@ pub struct StridesRx {
 /// numeric week count for the introduction, and no pace band beyond
 /// "controlled-fast (not sprint)" / RPE 6–7).
 pub fn strides_rx() -> Recommended<StridesRx> {
-    recommend(
-        StridesRx {
-            rep_sec: (15, 30),
-            reps: (4, 8),
-            recovery_sec: (45, 120),
-            per_week: (1, 3),
-            rpe: (6, 7),
-        },
-        "RUN-STRIDES-001",
-    )
+    crate::evidence::graded(StridesRx {
+        rep_sec: (15, 30),
+        reps: (4, 8),
+        recovery_sec: (45, 120),
+        per_week: (1, 3),
+        rpe: (6, 7),
+    },
+    "RUN-STRIDES-001",)
 }
 
 /// Hill-sprint prescription (running-021 → RUN-HILLSPRINT-001, ExpertOpinion;
@@ -770,19 +749,17 @@ pub struct HillSprintRx {
 /// 6–10 % grade, full recovery (walk down / ~2 min), RPE 9, treated as
 /// strength work on easy days. Weekly frequency is unstated in the KB.
 pub fn hill_sprint_rx() -> Recommended<HillSprintRx> {
-    recommend(
-        HillSprintRx {
-            rep_sec: (8, 20),
-            reps: (4, 10),
-            effort_pct: (90.0, 95.0),
-            grade_pct: (6.0, 10.0),
-            recovery_approx_sec: 120,
-            rpe: 9,
-            per_week: None,
-            on_easy_days: true,
-        },
-        "RUN-HILLSPRINT-001",
-    )
+    crate::evidence::graded(HillSprintRx {
+        rep_sec: (8, 20),
+        reps: (4, 10),
+        effort_pct: (90.0, 95.0),
+        grade_pct: (6.0, 10.0),
+        recovery_approx_sec: 120,
+        rpe: 9,
+        per_week: None,
+        on_easy_days: true,
+    },
+    "RUN-HILLSPRINT-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -794,7 +771,7 @@ pub fn hill_sprint_rx() -> Recommended<HillSprintRx> {
 /// real long run fails the guardrail).
 pub fn long_run_within_daily_avg(long_run_km: f64, avg_daily_run_km: f64) -> Recommended<bool> {
     let ok = avg_daily_run_km > 0.0 && long_run_km <= 2.0 * avg_daily_run_km;
-    recommend(ok, "RUN-LONGRUN-001")
+    crate::evidence::graded(ok, "RUN-LONGRUN-001")
 }
 
 /// Default weekly long-run share band (running-016 + volume-caps section):
@@ -803,7 +780,7 @@ pub fn long_run_within_daily_avg(long_run_km: f64, avg_daily_run_km: f64) -> Rec
 /// 25–30 %; the KB does not reconcile, so each rule keeps its own figure -
 /// this is running-016's, `goal_week_plan` carries running-024's.
 pub fn long_run_share_default() -> Recommended<(f64, f64)> {
-    recommend((0.25, 0.30), "RUN-LONGRUN-001")
+    crate::evidence::graded((0.25, 0.30), "RUN-LONGRUN-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -847,12 +824,12 @@ pub fn coggan_power_zone(pct_ftp: f64) -> Recommended<Option<CogganPowerZone>> {
     } else {
         None
     };
-    recommend(z, "RUN-POWER-001")
+    crate::evidence::graded(z, "RUN-POWER-001")
 }
 
 /// Coggan sweet-spot band: 88–94 %FTP (running-010, verbatim).
 pub fn coggan_sweet_spot(pct_ftp: f64) -> Recommended<bool> {
-    recommend((88.0..=94.0).contains(&pct_ftp), "RUN-POWER-001")
+    crate::evidence::graded((88.0..=94.0).contains(&pct_ftp), "RUN-POWER-001")
 }
 
 /// Stryd 5-zone %CP model (running-010). CP ≈ 40-min power per Stryd docs.
@@ -885,7 +862,7 @@ pub fn stryd_power_zone(pct_cp: f64) -> Recommended<Option<StrydPowerZone>> {
     } else {
         None
     };
-    recommend(z, "RUN-POWER-001")
+    crate::evidence::graded(z, "RUN-POWER-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -899,7 +876,7 @@ pub fn stryd_power_zone(pct_cp: f64) -> Recommended<Option<StrydPowerZone>> {
 /// BMI/fitness threshold, the flag is qualitative by design (the adjacent
 /// C25K rule already allows 9 → 10–12 weeks for the general case).
 pub fn extend_run_walk_phase(obese_or_very_deconditioned: bool) -> Recommended<bool> {
-    recommend(obese_or_very_deconditioned, "RUN-RUNWALK-EXT-001")
+    crate::evidence::graded(obese_or_very_deconditioned, "RUN-RUNWALK-EXT-001")
 }
 
 /// running-032: progress only ONE variable at a time, volume OR intensity,
@@ -908,7 +885,7 @@ pub fn single_variable_progression_ok(
     volume_increased: bool,
     intensity_increased: bool,
 ) -> Recommended<bool> {
-    recommend(!(volume_increased && intensity_increased), "RUN-ONEVAR-001")
+    crate::evidence::graded(!(volume_increased && intensity_increased), "RUN-ONEVAR-001")
 }
 
 /// Mileage band for recovery-week depth (running-033). The KB gives NO numeric
@@ -944,14 +921,12 @@ pub fn recovery_week_rx(band: MileageBand) -> Recommended<RecoveryWeekRx> {
         MileageBand::Lower => (None, 0.50),
         MileageBand::Unspecified => (Some(0.20), 0.40),
     };
-    recommend(
-        RecoveryWeekRx {
-            volume_reduction_frac,
-            reduce_intensity: true,
-            drop_quality_session: true,
-        },
-        "RUN-DELOAD-DEPTH-001",
-    )
+    crate::evidence::graded(RecoveryWeekRx {
+        volume_reduction_frac,
+        reduce_intensity: true,
+        drop_quality_session: true,
+    },
+    "RUN-DELOAD-DEPTH-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -1016,7 +991,7 @@ pub fn distance_taper(goal: GoalDistance) -> Option<Recommended<DistanceTaperRx>
         },
         GoalDistance::General | GoalDistance::C25k => return None,
     };
-    Some(recommend(rx, "RUN-TAPER-001"))
+    Some(crate::evidence::graded(rx, "RUN-TAPER-001"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,7 +1003,7 @@ pub fn distance_taper(goal: GoalDistance) -> Option<Recommended<DistanceTaperRx>
 /// weeks. Due once ≥4 weeks have elapsed (same convention as
 /// [`hr_zone_recalc_due`]'s 4–6-week window).
 pub fn pace_retest_due(weeks_since_test: u8) -> Recommended<bool> {
-    recommend(weeks_since_test >= 4, "RUN-RETEST-001")
+    crate::evidence::graded(weeks_since_test >= 4, "RUN-RETEST-001")
 }
 
 /// Freshness of the race result feeding a VDOT/CS pace computation
@@ -1052,7 +1027,7 @@ pub fn race_input_freshness(weeks_since_race: u8) -> Recommended<RaceInputFreshn
     } else {
         RaceInputFreshness::Stale
     };
-    recommend(f, "RUN-RETEST-001")
+    crate::evidence::graded(f, "RUN-RETEST-001")
 }
 
 /// Environment-correction triggers for prescribed paces (running-041).
@@ -1069,13 +1044,11 @@ pub struct PaceCorrectionTriggers {
 /// correction magnitudes (sec/km or %), so this returns flags, never adjusted
 /// paces.
 pub fn pace_correction_triggers(temp_c: f64, altitude_m: f64) -> Recommended<PaceCorrectionTriggers> {
-    recommend(
-        PaceCorrectionTriggers {
-            heat: temp_c > 15.0,
-            altitude: altitude_m > 900.0,
-        },
-        "RUN-RETEST-001",
-    )
+    crate::evidence::graded(PaceCorrectionTriggers {
+        heat: temp_c > 15.0,
+        altitude: altitude_m > 900.0,
+    },
+    "RUN-RETEST-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -1087,7 +1060,7 @@ pub fn pace_correction_triggers(temp_c: f64, altitude_m: f64) -> Recommended<Pac
 /// often finish 10–15% slower than a Riegel-from-5K projection, so the estimate
 /// should be derated (~2–3 VDOT points). Returns `true` when the gate trips.
 pub fn marathon_prediction_optimistic(longest_run_km: f64) -> Recommended<bool> {
-    recommend(longest_run_km < 30.0, "RUN-VDOT-001")
+    crate::evidence::graded(longest_run_km < 30.0, "RUN-VDOT-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,7 +1090,7 @@ pub fn race_equivalency(riegel_sec: f64, daniels_sec: f64) -> Recommended<Equiva
     };
     // running-039: the Riegel/Daniels equivalency combiner (RUN-EQUIV-001), not
     // the VDOT-fitness estimate (RUN-VDOT-001).
-    recommend(out, "RUN-EQUIV-001")
+    crate::evidence::graded(out, "RUN-EQUIV-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1149,7 +1122,7 @@ pub fn hr_method_preference(resting_hr_bpm: f64) -> Recommended<HrMethodPreferen
     } else {
         HrMethodPreference::Unstated
     };
-    recommend(p, "RUN-KARVONEN-001")
+    crate::evidence::graded(p, "RUN-KARVONEN-001")
 }
 
 /// Prefer Karvonen (%HRR) over %HRmax when resting HR is low, where the two
@@ -1170,7 +1143,7 @@ pub fn prefer_karvonen(resting_hr_bpm: f64) -> Recommended<bool> {
 /// RUN-HRRECALC-001 (Strong, safety-critical, stale zones misplace every
 /// prescription).
 pub fn hr_zone_recalc_due(weeks_since_recalc: u8) -> Recommended<bool> {
-    recommend(weeks_since_recalc >= 4, "RUN-HRRECALC-001")
+    crate::evidence::graded(weeks_since_recalc >= 4, "RUN-HRRECALC-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1202,7 +1175,7 @@ pub fn vdot_derate_points(goal: GoalDistance, under_mileaged: bool) -> Recommend
     } else {
         (0.0, 0.0)
     };
-    recommend(d, "RUN-VDOT-001")
+    crate::evidence::graded(d, "RUN-VDOT-001")
 }
 
 /// Derate an optimistic marathon finish-time band for an under-mileaged runner
@@ -1250,7 +1223,8 @@ pub struct GoalWeekPlan {
 
 /// Sessions + quality per week by goal distance (running-024). Marathon
 /// `advanced` runners extend to 5–7 sessions. Long-run share is 20–30% of
-/// weekly volume across goals. RUN-WORKOUT-001.
+/// weekly volume for the distance-race rows; C25K carries no long run
+/// (running-025 is run/walk to 30 min), so its share is 0. RUN-WORKOUT-001.
 pub fn goal_week_plan(goal: GoalDistance, advanced: bool) -> Recommended<GoalWeekPlan> {
     let lr = (0.20, 0.30);
     let plan = match goal {
@@ -1262,7 +1236,9 @@ pub fn goal_week_plan(goal: GoalDistance, advanced: bool) -> Recommended<GoalWee
         GoalDistance::C25k => GoalWeekPlan {
             sessions_per_week: (3, 3),
             quality_per_week: (0, 0),
-            long_run_share: lr,
+            // running-025 defines no long run for C25K (run/walk to 30 min); the
+            // 20-30% long-run share belongs to the distance-race rows only.
+            long_run_share: (0.0, 0.0),
         },
         GoalDistance::FiveK | GoalDistance::TenK | GoalDistance::HalfMarathon => GoalWeekPlan {
             sessions_per_week: (4, 6),
@@ -1275,7 +1251,7 @@ pub fn goal_week_plan(goal: GoalDistance, advanced: bool) -> Recommended<GoalWee
             long_run_share: lr,
         },
     };
-    recommend(plan, "RUN-WORKOUT-001")
+    crate::evidence::graded(plan, "RUN-WORKOUT-001")
 }
 
 /// Couch-to-5K beginner protocol (running-025): 3 run/walk sessions per week at
@@ -1294,15 +1270,13 @@ pub struct C25kPlan {
 /// The Couch-to-5K default plan (running-025). RUN-C25K-001 (ExpertOpinion,
 /// safety-critical beginner guardrail).
 pub fn c25k_plan() -> Recommended<C25kPlan> {
-    recommend(
-        C25kPlan {
-            runs_per_week: 3,
-            weeks: (9, 12),
-            rest_day_between: true,
-            repeat_hard_week_allowed: true,
-        },
-        "RUN-C25K-001",
-    )
+    crate::evidence::graded(C25kPlan {
+        runs_per_week: 3,
+        weeks: (9, 12),
+        rest_day_between: true,
+        repeat_hard_week_allowed: true,
+    },
+    "RUN-C25K-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -1333,7 +1307,7 @@ pub fn maf_cap_bpm(age_years: f64, adj: MafAdjustment) -> Recommended<f64> {
         MafAdjustment::Returning => -5.0,
         MafAdjustment::Overtrained => -10.0,
     };
-    recommend(180.0 - age_years + delta, "RUN-MAF-001")
+    crate::evidence::graded(180.0 - age_years + delta, "RUN-MAF-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1343,7 +1317,7 @@ pub fn maf_cap_bpm(age_years: f64, adj: MafAdjustment) -> Recommended<f64> {
 /// Enforce the architectural invariant that ~80% of running time is easy
 /// (running-011): true when the easy (Z1) time share is at least 80%. RUN-DIST-001.
 pub fn easy_share_floor_ok(easy_frac_by_time: f64) -> Recommended<bool> {
-    recommend(easy_frac_by_time >= 0.80, "RUN-DIST-001")
+    crate::evidence::graded(easy_frac_by_time >= 0.80, "RUN-DIST-001")
 }
 
 /// Intensity-counting method (running-012). Pick ONE per athlete and declare it.
@@ -1363,7 +1337,7 @@ pub fn default_counting_method(for_plan_design: bool) -> Recommended<IntensityCo
     } else {
         IntensityCountingMethod::TimeInZone
     };
-    recommend(m, "RUN-DIST-001")
+    crate::evidence::graded(m, "RUN-DIST-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1379,7 +1353,7 @@ pub fn novice_volume_bump_hold_weeks(training_age_years: f64) -> Recommended<Opt
     } else {
         None
     };
-    recommend(hold, "RUN-PROGRESS-001")
+    crate::evidence::graded(hold, "RUN-PROGRESS-001")
 }
 
 /// Insert an unscheduled down week when ≥2 overtraining signals fire
@@ -1387,7 +1361,7 @@ pub fn novice_volume_bump_hold_weeks(training_age_years: f64) -> Recommended<Opt
 /// disrupted sleep/soreness/mood, or standard-workout performance down >3–5%.
 /// RUN-DOWNWEEK-001 (ExpertOpinion, safety-critical recovery guard).
 pub fn unscheduled_deload(overtraining_signal_count: u8) -> Recommended<bool> {
-    recommend(overtraining_signal_count >= 2, "RUN-DOWNWEEK-001")
+    crate::evidence::graded(overtraining_signal_count >= 2, "RUN-DOWNWEEK-001")
 }
 
 // ---------------------------------------------------------------------------
@@ -1443,7 +1417,7 @@ pub fn usable_track(points: &[GpsPoint], max_accuracy_m: f32) -> Vec<GpsPoint> {
 /// BEGIN a new segment (the first fix captured after a pause/resume or a long
 /// gap in fixes). The leg from `points[i-1]` to `points[i]` at such an index is a
 /// PAUSE BRIDGE the runner may have relocated across, so no track metric may sum
-/// distance or time across it (I15/B2). An EMPTY `segment_starts`, every legacy
+/// distance or time across it. An EMPTY `segment_starts`, every legacy
 /// (re-anchored) log and every hand-logged run, yields the WHOLE track as a
 /// single segment, so every metric routed through this is BIT-IDENTICAL to the
 /// pre-segment behaviour. Out-of-range, zero, and duplicate indices are ignored,
@@ -1675,11 +1649,15 @@ pub struct RunSplit {
 /// back to its wall-clock time so its pace stays finite.) Same accuracy gate as
 /// [`track_distance_km`], and the same cumulative-distance walk as
 /// [`track_positive_split_pct`]. Pure and order-dependent. Returns an empty vec
-/// for a non-positive unit, an empty / single-fix / zero-distance track
+/// for a sub-metre unit, an empty / single-fix / zero-distance track
 /// (nothing to split).
 pub fn track_splits(points: &[GpsPoint], max_accuracy_m: f32, unit_m: f64) -> Vec<RunSplit> {
     track_splits_seg(points, max_accuracy_m, unit_m, &[])
 }
+
+/// Hard cap on emitted splits (see [`track_splits_seg`]), bounding per-`view()`
+/// work against a corrupt track. 10 k km/mile splits is far past any real run.
+const MAX_SPLITS: usize = 10_000;
 
 /// [`track_splits`] whose cumulative walk skips each pause-bridge leg (zero
 /// distance, so no split boundary falls inside a paused relocation), letting km
@@ -1691,7 +1669,10 @@ pub fn track_splits_seg(
     unit_m: f64,
     segment_starts: &[u32],
 ) -> Vec<RunSplit> {
-    if unit_m <= 0.0 {
+    // P4: reject a sub-metre unit. The boundary loop below emits one split per
+    // `unit_m` of distance, so a tiny unit (a caller bug / corrupt input) would
+    // spin for millions of iterations. Every real caller passes km/mile.
+    if unit_m < 1.0 {
         return Vec::new();
     }
     let (usable, is_start) = usable_segments(points, segment_starts, max_accuracy_m);
@@ -1753,6 +1734,13 @@ pub fn track_splits_seg(
                 distance_m: unit_m,
                 partial: false,
             });
+            // P4: even at a legitimate unit, a corrupt track (a mis-unit'd
+            // coordinate inflating cumulative distance to thousands of km) could
+            // emit millions of splits in `view()`. Bound the list: a genuine
+            // run never approaches this many.
+            if splits.len() >= MAX_SPLITS {
+                return splits;
+            }
             pos = boundary;
             moving_s = 0.0;
             wall_s = 0.0;
@@ -1811,10 +1799,8 @@ pub const INTERVAL_VI_THRESHOLD: f64 = 1.10;
 /// shell renders it with the same grade chip / why? chrome as any other
 /// recommendation, the differentiation is descriptive but still evidence-cited.
 pub fn interval_verdict(variability_index: f64) -> Recommended<bool> {
-    recommend(
-        variability_index >= INTERVAL_VI_THRESHOLD,
-        "RUN-INTERVAL-VI-001",
-    )
+    crate::evidence::graded(variability_index >= INTERVAL_VI_THRESHOLD,
+    "RUN-INTERVAL-VI-001",)
 }
 
 /// Rolling-average window (seconds) applied to the speed series BEFORE the
@@ -1872,6 +1858,10 @@ fn moving_legs(points: &[GpsPoint], max_accuracy_m: f32, segment_starts: &[u32])
 /// (sub-window) duration so it is weighted correctly.
 fn windowed_bin_speeds(legs: &[(f64, f64)], window_s: f64) -> Vec<(f64, f64)> {
     let mut bins = Vec::new();
+    // A non-positive window would make `take` zero and spin forever; refuse it.
+    if window_s <= 0.0 {
+        return bins;
+    }
     let mut bin_time = 0.0;
     let mut bin_dist = 0.0;
     for &(dt, dist) in legs {
@@ -1886,6 +1876,14 @@ fn windowed_bin_speeds(legs: &[(f64, f64)], window_s: f64) -> Vec<(f64, f64)> {
                 bins.push((bin_dist / bin_time, bin_time));
                 bin_time = 0.0;
                 bin_dist = 0.0;
+                // P4: a corrupt `dt` (e.g. a mis-unit'd timestamp yielding a
+                // multi-week "leg") would otherwise drive this resampling loop
+                // for millions of iterations inside `view()`. A real run never
+                // approaches this many windows; past it the series is corrupt
+                // and the truncated (still deterministic) VI is good enough.
+                if bins.len() >= MAX_WINDOW_BINS {
+                    return bins;
+                }
             }
         }
     }
@@ -1894,6 +1892,11 @@ fn windowed_bin_speeds(legs: &[(f64, f64)], window_s: f64) -> Vec<(f64, f64)> {
     }
     bins
 }
+
+/// Hard cap on smoothing bins produced by [`windowed_bin_speeds`], bounding the
+/// per-`view()` work against a corrupt GPS timeline (see the early return there).
+/// ~50 k × 30 s ≈ 17 days of moving time, unreachable for any genuine run.
+const MAX_WINDOW_BINS: usize = 50_000;
 
 /// Normalized speed (m/s): the duration-weighted 4th-power-mean of the
 /// WINDOW-AVERAGED speed series, GOVSS / Normalized-Graded-Pace, flat-ground
@@ -1980,7 +1983,7 @@ pub fn export_gpx(points: &[GpsPoint], track_name: &str) -> String {
 /// [`export_gpx`] that emits one `<trkseg>` per recording segment, using the TRUE
 /// coordinates (no re-anchoring shift), so a paused + relocated run opens in
 /// Strava/Garmin as the real route with a visible gap at each pause instead of a
-/// single continuous line drawn through wrong coordinates (I15/B2). Empty
+/// single continuous line drawn through wrong coordinates. Empty
 /// `segment_starts` is a single `<trkseg>`, byte-identical to [`export_gpx`].
 pub fn export_gpx_seg(points: &[GpsPoint], track_name: &str, segment_starts: &[u32]) -> String {
     let mut s = String::with_capacity(256 + points.len() * 96);
@@ -2069,6 +2072,40 @@ mod tests {
             observed_at: t,
             accuracy_m: 5.0,
         }
+    }
+
+    #[test]
+    fn p4_windowed_bins_correct_normally_and_bounded_when_dt_is_corrupt() {
+        // Fix (normal): a 90 s leg at 3 m/s resamples into three full 30 s bins,
+        // each averaging 3 m/s: the smoothing behaviour is unchanged.
+        let normal = windowed_bin_speeds(&[(90.0, 270.0)], INTERVAL_WINDOW_SEC);
+        assert_eq!(normal.len(), 3, "90 s / 30 s window = 3 bins");
+        for (speed, dur) in &normal {
+            assert!((speed - 3.0).abs() < 1e-9 && (*dur - 30.0).abs() < 1e-9);
+        }
+        // Corrupt: a single leg with a mis-unit'd dt (~4e7 s ≈ a millisecond
+        // timestamp mistaken for seconds) would drive the resampling loop for
+        // ~1.3M iterations; the cap bounds it to MAX_WINDOW_BINS and returns.
+        let corrupt = windowed_bin_speeds(&[(4.0e7, 4.0e7)], INTERVAL_WINDOW_SEC);
+        assert_eq!(corrupt.len(), MAX_WINDOW_BINS, "bin count is clamped");
+        // A non-positive window can never spin forever.
+        assert!(windowed_bin_speeds(&[(90.0, 270.0)], 0.0).is_empty());
+    }
+
+    #[test]
+    fn p4_track_splits_reject_sub_metre_unit_and_bound_a_corrupt_track() {
+        // A normal km split still works (fix half of the pair).
+        let track = vec![pt(0.0, 0.0, 0), pt(0.0, 0.02, 300)]; // ~2.2 km, 5 min
+        assert!(!track_splits(&track, 30.0, KM_M).is_empty(), "km splits still work");
+        // A sub-metre unit is rejected up front: the boundary loop below emits
+        // one split per unit, so a tiny unit would iterate millions of times.
+        assert!(track_splits(&track, 30.0, 0.5).is_empty(), "sub-metre unit rejected");
+        assert!(track_splits(&track, 30.0, 0.0).is_empty(), "zero unit rejected");
+        // Even at a legit unit, a corrupt long track cannot emit unbounded splits:
+        // a ~13 000 km leg (120° of longitude) would be >13 000 km splits but the
+        // cap stops it at MAX_SPLITS.
+        let corrupt = vec![pt(0.0, 0.0, 0), pt(0.0, 120.0, 3600)];
+        assert_eq!(track_splits(&corrupt, 30.0, KM_M).len(), MAX_SPLITS, "splits capped");
     }
 
     #[test]
@@ -2718,6 +2755,8 @@ mod tests {
         );
         let c = goal_week_plan(GoalDistance::C25k, false).value;
         assert_eq!((c.sessions_per_week, c.quality_per_week), ((3, 3), (0, 0)));
+        // running-025 defines no long run for C25K: the share is 0, not 20-30%.
+        assert_eq!(c.long_run_share, (0.0, 0.0));
         assert_eq!(
             goal_week_plan(GoalDistance::FiveK, false)
                 .value
@@ -3210,7 +3249,7 @@ mod tests {
         assert_eq!(r.evidence.grade, crate::schema::EvidenceGrade::Moderate);
     }
 
-    // ── I15/B2: segment-aware track fns (pause + relocation) ──────────────────
+    // ── Segment-aware track fns (pause + relocation) ──────────────────
 
     /// A pause + relocation: segment 1 is four ~111 m legs at the equator, then
     /// the runner relocates ~111 km east and runs segment 2 (four more ~111 m

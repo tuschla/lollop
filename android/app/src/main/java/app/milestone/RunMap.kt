@@ -203,7 +203,11 @@ fun RunRouteMap(gpx: String, modifier: Modifier = Modifier) {
                 map.overlays.add(marker(map, finish, makeMarkerDrawable(res, finishArgb, accentArgb, density)))
             }
 
-            val bbox = BoundingBox.fromGeoPointsSafe(allGeo)
+            // NOT BoundingBox.fromGeoPointsSafe: its naive min/max longitude frames
+            // the whole globe for a track crossing ±180° (e.g. Fiji, Chukotka), since
+            // −179 and +179 look 358° apart. frameRoute normalizes across the dateline
+            // so the box stays tight (osmdroid reads west>east as a crossing box).
+            val bbox = frameRoute(allGeo.map { it.latitude }, allGeo.map { it.longitude })
             val frame = { map.zoomToBoundingBox(bbox, false, (12 * density).toInt()) }
             if (map.width > 0) frame() else map.addOnFirstLayoutListener { _, _, _, _, _ -> frame() }
             map.invalidate()
@@ -266,4 +270,54 @@ private fun makeLoopMarkerDrawable(
     c.drawCircle(cx, cx, rOuter, stroke) // contrasting outline
     c.drawCircle(cx, cx, rOuter * 0.42f, dot) // finish dot
     return BitmapDrawable(res, bmp)
+}
+
+/** West/east longitude pair for a framed route. `west > east` is legal and means
+ *  the box crosses the antimeridian, osmdroid's zoom/center math adds 360 to a
+ *  negative span, so it frames such a box tightly (verified against 6.1.20). */
+internal data class LonBounds(val west: Double, val east: Double)
+
+/**
+ * Antimeridian-safe longitude framing (pure, so it is unit-testable without a
+ * MapView). Naive min/max is wrong for a track straddling ±180°: −179° and +179°
+ * are one degree apart on the ground but look 358° apart, so a plain bounding box
+ * stretches the "long way" around the globe and zooms out to the whole world.
+ *
+ * A run is a local effort, so its true longitude span is small. When the raw span
+ * exceeds 180° the box has almost certainly wrapped the long way, so re-measure
+ * with every negative longitude shifted +360 (−179 → 181, one degree from 179) and
+ * keep whichever framing is tighter. The tighter shifted bounds are then wrapped
+ * back into [−180, 180); if the shifted span isn't actually smaller the track
+ * genuinely covers a huge range (not a dateline artefact) and the honest naive box
+ * is kept, never a broken zoom.
+ */
+internal fun frameLongitudes(lons: List<Double>): LonBounds {
+    if (lons.isEmpty()) return LonBounds(0.0, 0.0)
+    val minRaw = lons.min()
+    val maxRaw = lons.max()
+    val rawSpan = maxRaw - minRaw
+    if (rawSpan <= 180.0) return LonBounds(minRaw, maxRaw)
+    // Shift the western (negative) hemisphere up by 360 so a dateline-straddling
+    // track becomes contiguous, then re-measure.
+    val shifted = lons.map { if (it < 0.0) it + 360.0 else it }
+    val minShift = shifted.min()
+    val maxShift = shifted.max()
+    // Shifting didn't tighten it → the run really is that wide; keep the honest box.
+    if (maxShift - minShift >= rawSpan) return LonBounds(minRaw, maxRaw)
+    // Wrap each bound back into range. west = smaller normalized value, east =
+    // larger; the larger one is the one that can exceed 180 and wraps to negative,
+    // yielding the west>east pair osmdroid reads as a crossing box.
+    fun wrap(v: Double) = if (v > 180.0) v - 360.0 else v
+    return LonBounds(west = wrap(minShift), east = wrap(maxShift))
+}
+
+/**
+ * Build the auto-frame [BoundingBox] for a route. Latitude has no wrap hazard for
+ * a ground track (a run never spans a pole), so plain min/max; longitude goes
+ * through [frameLongitudes] for the antimeridian case. Constructor order is
+ * `(north, east, south, west)` (osmdroid 6.1.20).
+ */
+internal fun frameRoute(lats: List<Double>, lons: List<Double>): BoundingBox {
+    val lon = frameLongitudes(lons)
+    return BoundingBox(lats.max(), lon.east, lats.min(), lon.west)
 }

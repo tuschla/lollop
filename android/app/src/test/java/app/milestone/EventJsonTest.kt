@@ -179,6 +179,28 @@ class EventJsonTest {
     }
 
     @Test
+    fun submitReadinessEmitsEffortMinOnlyWhenPresent() {
+        // A6 fix: AerobicDecoupling is duration-gated (valid only >20 min); the
+        // editor now sends the run length so the core can validate it instead of
+        // silently discarding a None-duration reading. effort_min is snake_case,
+        // matching ReadinessInput's serde field, and OMITTED when not supplied.
+        val withDuration = obj(
+            Event.SubmitReadiness(
+                signal = ReadinessSignal.AerobicDecoupling,
+                value = 12.0,
+                observedAt = 7L,
+                effortMin = 30.0,
+            )
+        )["SubmitReadiness"]!!.jsonObject
+        assertEquals(30.0, withDuration["effort_min"]!!.jsonPrimitive.content.toDouble(), 0.0)
+        // A signal without a duration omits the field (serde default None).
+        val bare = obj(
+            Event.SubmitReadiness(ReadinessSignal.WellnessZ, -1.5, 7L)
+        )["SubmitReadiness"]!!.jsonObject
+        assertFalse(bare.containsKey("effort_min"))
+    }
+
+    @Test
     fun viewModelDecodesCoreSplitVerdictAndE1rmDelta() {
         // Rust→Kotlin side of the contract: the additive history fields
         // (runs[i].split, lifts[i].e1rm_delta_kg/e1rm_direction) decode, and
@@ -512,5 +534,67 @@ class EventJsonTest {
     @Test
     fun clearPlanIsABareString() {
         assertEquals("\"ClearPlan\"", Event.ClearPlan.toJson().toString())
+    }
+
+    // ── Wave 2 / #6: structured HRmax / protein / spike-baseline fields ───────
+
+    @Test
+    fun oldShapeViewModelDecodesWithoutWave2Fields() {
+        // Back-compat: a ViewModel blob from an OLD core (before hr_max,
+        // protein_figures, runs[i].spike_has_baseline existed) must still decode,
+        // with the new fields falling to their defaults (null / empty / false) -
+        // no crash, so a stale replay or a mixed core/shell build stays safe.
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val vm = json.decodeFromString<ViewModel>(
+            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+                "review_adjustments":[],"input_count":1,
+                "runs":[
+                  {"zone":"Z2","pace":"5:30/km","distance_km":5.0,"spike_flag":true,
+                   "spike_note":"First run logged - no prior run to gauge a spike against.",
+                   "summary":"","citation":"","gpx":"","observed_at":4}],
+                "guidance":[],"feedback":null,"reference":[],
+                "protein_targets":[],"hr_zones":[]}"""
+        )
+        assertEquals(null, vm.hr_max)
+        assertTrue(vm.protein_figures.isEmpty())
+        // The run decodes and spike_has_baseline defaults to false (a first run
+        // with no baseline), the shell reads this instead of scraping spike_note.
+        assertFalse(vm.runs[0].spike_has_baseline)
+        assertTrue(vm.runs[0].spike_flag)
+    }
+
+    @Test
+    fun wave2ViewModelDecodesStructuredFields() {
+        // Rust→Kotlin: the Wave 2 structured fields decode with the core's exact
+        // serde names, replacing the deleted prose scrapes (hrMaxRegex,
+        // proteinPerDayRegex, spike_note.contains).
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val vm = json.decodeFromString<ViewModel>(
+            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
+                "review_adjustments":[],"input_count":1,
+                "runs":[
+                  {"zone":"Z2","pace":"5:30/km","distance_km":5.0,"spike_flag":true,
+                   "spike_note":"","summary":"","citation":"","gpx":"",
+                   "observed_at":4,"spike_has_baseline":true}],
+                "guidance":[],"feedback":null,"reference":[],
+                "protein_figures":[
+                  {"kind":"masters","low_g_per_day":120.0,"high_g_per_day":140.0,"refused":false},
+                  {"kind":"deficit","low_g_per_day":0.0,"high_g_per_day":0.0,"refused":true}],
+                "hr_max":{"bpm":187.0,"measured":false,"age_years":30.0,
+                   "tanaka_intercept":208.0,"tanaka_slope":0.7}}"""
+        )
+        val hm = vm.hr_max!!
+        assertEquals(187, hm.bpm.toInt())
+        assertFalse(hm.measured)
+        assertEquals(30, hm.age_years.toInt())
+        assertEquals(208.0, hm.tanaka_intercept, 1e-9)
+        assertEquals(0.7, hm.tanaka_slope, 1e-9)
+        // The tile reads the first non-refused figure as "120–140".
+        val figure = vm.protein_figures.first { !it.refused }
+        assertEquals("masters", figure.kind)
+        assertEquals(120, figure.low_g_per_day.toInt())
+        assertEquals(140, figure.high_g_per_day.toInt())
+        assertTrue(vm.protein_figures.last().refused)
+        assertTrue(vm.runs[0].spike_has_baseline)
     }
 }

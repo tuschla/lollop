@@ -1,4 +1,4 @@
-//! Program synthesis (MIGRATION-PLAN Phase 6 / B3): compose the dormant graded
+//! Program synthesis: compose the dormant graded
 //! band functions (`strength::dup_day_rx`, `strength::loading_rx`,
 //! `hypertrophy::intermediate_default_program`, `running::workout_rx`,
 //! `running::goal_week_plan`, `hypertrophy::meso_structure`) into a concrete,
@@ -6,7 +6,7 @@
 //!
 //! Pure and deterministic: no clock, no IO, no randomness. Time enters `view()`
 //! as `observed_at`/`epoch_day` event data; this module only lays out a generic
-//! Mon..Sun microcycle at 0-based `day` offsets, `app.rs` maps those offsets to
+//! Mon..Sun microcycle at 0-based `day` offsets; `app.rs` maps those offsets to
 //! calendar days and applies readiness/safety downstream (HARD RULE 3).
 //!
 //! HARD RULE 1/2: every prescription is graded with the SAME registry claim id
@@ -58,11 +58,37 @@ pub struct Anchors {
     /// long-run share rule, never as a claim itself. KB: RUN-LONGRUN-001
     /// (running-016 single-run ≤25 % of weekly volume).
     pub recent_weekly_km: Option<f64>,
+    /// `true` when `longest_recent_run_km` is a DETRAINING-ADJUSTED value:
+    /// the run that set it is older than the 30-day full-credit window and its
+    /// distance has been tapered by `app.rs::build_run_anchors` per the KB
+    /// detraining timeline (`DETRAIN-001`), rather than dropping off the old
+    /// one-step cliff at day 31. When this holds and the demonstrated anchor is
+    /// what elevates the long run above the plain 25 % volume share, the long-run
+    /// prescription cites `DETRAIN-001` (the principle keeping the anchor alive)
+    /// instead of `RUN-SPIKE-001`. Default `false` → byte-identical behaviour for
+    /// in-window / log-less anchors.
+    pub longest_run_detrained: bool,
+    /// 2c: re-entry LOAD derate fraction (`< 1.0`) for anchored %1RM lift LOADS
+    /// after a declared layoff (`profile.weeks_off = Some(w > 0)`), from the
+    /// KB-cited resistance re-entry brackets (`resistance_reentry`, REENTRY-001).
+    /// `None` = no layoff, full loads. The e1RM anchor itself stays the true
+    /// logged best; only the prescribed working load is scaled (and re-pointed to
+    /// REENTRY-001 in `flatten_prescription`), so the "your logged best" line
+    /// never lies. Mirrors the run side's `longest_run_detrained` flag.
+    pub reentry_load_frac: Option<f64>,
+    /// 2c: `true` when the declared layoff is long enough (>8 wk) that the KB
+    /// gives NO load fraction and directs treating the lifter as a fresh novice
+    /// (`resistance_reentry(w).treat_as_novice`). When set, `flatten_prescription`
+    /// drops the e1RM anchor entirely (rather than scaling it) and prescribes the
+    /// session from the no-anchor RIR/estimate fallback, still re-pointed to
+    /// REENTRY-001. `reentry_load_frac` is `None` in this case (there is no number
+    /// to scale by); the two never carry conflicting instructions.
+    pub reentry_novice: bool,
 }
 
 impl Anchors {
-    /// Best logged e1RM for an exercise, if any (case-insensitive). B3: only a
-    /// POSITIVE e1RM counts as an anchor, a 0/negative value never anchors a
+    /// Best logged e1RM for an exercise, if any (case-insensitive). Only a
+    /// POSITIVE e1RM counts as an anchor; a 0/negative value never anchors a
     /// load (it would render "@ 0 kg").
     pub fn e1rm_for(&self, exercise: &str) -> Option<f64> {
         self.lift_e1rm
@@ -71,13 +97,6 @@ impl Anchors {
             .map(|(_, v)| *v)
             .filter(|v| *v > 0.0)
     }
-}
-
-/// Grade a synthesized value with an existing registry claim (HARD RULE 2). The
-/// claim id is always one the band function already carried, never invented.
-fn graded<T>(value: T, claim_id: &str) -> Recommended<T> {
-    let c = crate::evidence::claim(claim_id).expect("known plan claim id");
-    Recommended::new(value, c.to_evidence(), c.to_confidence_tag())
 }
 
 /// Grade with an explicit evidence/confidence pair reused from a band function.
@@ -95,15 +114,29 @@ pub fn synthesize(profile: &Profile, anchors: &Anchors, _start_epoch_day: i64) -
         return None;
     }
     let ta = training_age_from_cadence(profile.progression_cadence).value;
-    // `weekly_sets` (planned weekly sets PER MUSCLE, the guided-setup answer) only
-    // gates whether lifting is programmed at all; it deliberately does NOT resize
-    // the per-session `sets` band. A KB-honest wire from a per-muscle weekly target
-    // to per-EXERCISE per-session sets would need a muscle→exercise volume-split
-    // model (which muscles each catalog lift trains, and a weekly frequency to
-    // divide by) that the knowledge base does not provide (HARD RULE 1). Absent
-    // that, sets stay on the graded `loading_rx`/`dup_day_rx` bands; `weekly_sets`
-    // is a presence flag only. (`age_years` is likewise unused here, display/
-    // prefill-only per the Profile doc, owner-scope, no rule branches on it.)
+    // `weekly_sets` (planned weekly sets PER MUSCLE, the guided-setup answer) gates
+    // whether lifting is programmed at all AND, for the intermediate/advanced DUP
+    // path, sizes the per-session working sets (`sized_sets`, threaded into
+    // `lift_prescription` below). The KB resolves the previously-deferred mapping
+    // (knowledge-base/weekly-set-volume-to-prescription-mapping.md) as a two-layer
+    // construction: (1) the volume dose-response PRINCIPLE is citable at Moderate
+    // (`HYP-VOL-DOSE-001`, Pelland 2026 / Schoenfeld 2017) and (2) the split of a
+    // weekly target across specific days/exercises has NO validated formula, so the
+    // divide-by-lift-days arithmetic is an EXPERT-OPINION heuristic marked as such
+    // in `sized_sets`. The result is always clamped INTO the day's own cited
+    // intensity band, so the band claim still sanctions the number and the landmark
+    // entries it anchors are never overwritten (it only chooses WHERE in the band
+    // volume lands). The DUP week still undulates INTENSITY (Heavy/Power/
+    // Hypertrophy); frequency is NOT forced up on hypertrophy grounds (the KB
+    // refutes the volume-confounded ">=2x/week for hypertrophy" claim), so the
+    // existing day-count logic is untouched.
+    //
+    // `age_years`: used ONLY to select the conservative running deload cadence for
+    // masters athletes (see the `weeks` computation below), `RUN-DELOAD-001`
+    // states "2:1 for older", operationalized at the KB's masters threshold
+    // (`MASTERS-001`, 65+, which itself directs "extend recovery between hard
+    // sessions"). No other age branch exists here: the KB states no further
+    // age-based load/intensity modification (HARD RULE 1), so none is invented.
     let lifting = profile.weekly_sets > 0;
     let running = profile.running_days_per_week > 0;
     if !lifting && !running {
@@ -128,13 +161,14 @@ pub fn synthesize(profile: &Profile, anchors: &Anchors, _start_epoch_day: i64) -
     };
     let lift_names = main_lifts(anchors);
     for (i, &day) in lift_days.iter().enumerate() {
-        sessions.push(lift_session(profile, anchors, ta, &lift_names, i, day));
+        sessions.push(lift_session(profile, anchors, ta, &lift_names, i, day, n_lift));
     }
 
     // Running days on the remaining slots, long run late in the week.
     if running {
         let weekly_km = effective_weekly_km(profile, anchors);
         let longest_recent = anchors.longest_recent_run_km;
+        let detrained = anchors.longest_run_detrained;
         let slots = run_week_slots(profile, &lift_days, weekly_km);
         let n_run_days = slots.len();
         for (day, kind) in slots {
@@ -143,6 +177,7 @@ pub fn synthesize(profile: &Profile, anchors: &Anchors, _start_epoch_day: i64) -
                 day,
                 weekly_km,
                 longest_recent,
+                detrained,
                 n_run_days,
             ));
         }
@@ -164,7 +199,19 @@ pub fn synthesize(profile: &Profile, anchors: &Anchors, _start_epoch_day: i64) -
     let (goal, name) = program_goal_name(profile, lifting, running);
     // Accumulation block shape from the KB meso structure (HYP-MESO-STRUCT-001).
     let meso = hypertrophy::meso_structure().value;
-    let weeks = meso.accumulation_weeks.0.max(1);
+    let mut weeks = meso.accumulation_weeks.0.max(1);
+    // Age wiring (smallest honest change): a MASTERS runner (age ≥ 65, MASTERS-001)
+    // takes the conservative 2:1 load:recovery running cadence, RUN-DELOAD-001
+    // states "2:1 for older / injury-prone / low training-age", so the
+    // accumulation block is shortened to that cadence's load-week count (2) before
+    // a recovery week, rather than the default hypertrophy accumulation length.
+    // Gated on age ≥ 65 AND running only: an age-less, non-masters, or lifting-only
+    // profile is byte-identical (the conservative branch of `deload_cadence` was
+    // previously dead code). A masters LIFTER is left unchanged, the KB gives no
+    // masters-specific STRENGTH deload cadence to honestly apply here.
+    if running && is_masters(profile.age_years) {
+        weeks = running::deload_cadence(true).value.load_weeks.max(1);
+    }
     Some(Program {
         id: "current".into(),
         name,
@@ -175,6 +222,15 @@ pub fn synthesize(profile: &Profile, anchors: &Anchors, _start_epoch_day: i64) -
             sessions,
         }],
     })
+}
+
+/// KB masters threshold: the NSCA masters bracket begins at 65 (`MASTERS-001`,
+/// Fragala et al. 2019; File 08 indiv-013/014 "masters (65+)"). Used only to
+/// operationalize `RUN-DELOAD-001`'s "older" basis for selecting the conservative
+/// 2:1 running deload cadence. No further age branch exists (HARD RULE 1, the KB
+/// states no other age-based load/intensity modification).
+fn is_masters(age_years: Option<f64>) -> bool {
+    age_years.map_or(false, |a| a >= 65.0)
 }
 
 /// The top-level goal + program name shown in the summary card.
@@ -205,31 +261,165 @@ fn program_goal_name(profile: &Profile, lifting: bool, running: bool) -> (Goal, 
     }
 }
 
-/// Main lift slots, leading with the user's own logged exercises (each carrying
-/// an e1RM anchor → a load), filled with File-03 catalog defaults (→ RIR) when
-/// history is thin. Up to 3 to keep the hero card readable.
+/// The core movement patterns a lift day should COVER (STR-SESSION-BALANCE-001):
+/// squat / hinge / horizontal push / horizontal pull. Vertical presses and
+/// vertical pulls are folded into `Push` / `Pull` for COVERAGE purposes (an
+/// overhead press still trains the push musculature), while the catalog FILLS in
+/// [`CORE_PATTERN_FILLS`] use the KB's named horizontal defaults.
+///
+/// This pattern TAXONOMY is an EXPERT-OPINION practitioner framework, no RCT
+/// validates a specific movement-pattern list (flagged in the claim's
+/// `contradicting`, GRADE good-practice-statement precedent). The CITABLE part is
+/// the PRINCIPLE that a session must cover distinct patterns because multi-joint
+/// compounds do NOT fully activate every muscle (Schoenfeld et al. 2019, Sports
+/// 7(7):177, PMID 31336594 → STR-SESSION-BALANCE-001, Moderate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MovementPattern {
+    Squat,
+    Hinge,
+    Push,
+    Pull,
+}
+
+/// Classify an exercise NAME into a core movement pattern, CONSERVATIVELY: only
+/// names that map confidently return `Some`; anything ambiguous (most isolation
+/// work, curls, raises, calf work) returns `None` and is treated as
+/// unclassifiable (a logged unclassifiable lift is still scheduled, never
+/// dropped). Case-insensitive substring matching over a small keyword set, this
+/// keyword taxonomy is EXPERT-OPINION (see [`MovementPattern`]); the principle it
+/// serves is cited (STR-SESSION-BALANCE-001).
+fn movement_pattern(name: &str) -> Option<MovementPattern> {
+    let n = name.to_ascii_lowercase();
+    let has = |kw: &str| n.contains(kw);
+    // Order matters: hinge before squat (a "Romanian deadlift" is a hinge, not a
+    // squat), and both before push (so "leg press" reads as squat, not press).
+    if has("deadlift")
+        || has("rdl")
+        || has("good morning")
+        || has("hip thrust")
+        || has("hip hinge")
+        || has("leg curl")
+        || has("hamstring curl")
+        || has("nordic")
+        || has("kettlebell swing")
+        || has("back extension")
+        || has("hyperextension")
+    {
+        return Some(MovementPattern::Hinge);
+    }
+    if has("squat")
+        || has("leg press")
+        || has("lunge")
+        || has("leg extension")
+        || has("step-up")
+        || has("step up")
+        || has("hack")
+    {
+        return Some(MovementPattern::Squat);
+    }
+    // Rows + vertical pulls (folded into Pull). Checked before Push so nothing
+    // here needs to contain "press".
+    if has("row")
+        || has("pulldown")
+        || has("pull-down")
+        || has("lat pull")
+        || has("pull-up")
+        || has("pull up")
+        || has("pullup")
+        || has("chin-up")
+        || has("chin up")
+        || has("chinup")
+    {
+        return Some(MovementPattern::Pull);
+    }
+    // Horizontal + vertical presses and their bodyweight analogues.
+    if has("bench")
+        || has("press")
+        || has("push-up")
+        || has("push up")
+        || has("pushup")
+        || has("dip")
+        || has("chest fly")
+        || has("pec deck")
+    {
+        return Some(MovementPattern::Push);
+    }
+    None
+}
+
+/// KB core movement patterns + the File-03 catalog compound that FILLS each when
+/// the user's log leaves it uncovered (exercise_entry-known names → real long-
+/// length / SFR lookups). These are the KB's named horizontal defaults; using
+/// them turns a one-pattern (e.g. leg-heavy) log into a balanced week
+/// (STR-SESSION-BALANCE-001).
+const CORE_PATTERN_FILLS: &[(MovementPattern, &str)] = &[
+    (MovementPattern::Squat, "Barbell back squat"),
+    (MovementPattern::Hinge, "Romanian deadlift"),
+    (MovementPattern::Push, "Bench press"),
+    (MovementPattern::Pull, "Row (barbell/cable/machine)"),
+];
+
+/// Exercises per lift day (STR-SESSION-BALANCE-001): the DUP-undulated primary
+/// compound + accessories covering the other core patterns. ~3-4 is enough
+/// compounds to span squat/hinge/push/pull in a full-body day; the EXACT count is
+/// EXPERT-OPINION (no RCT prescribes a specific N, flagged in the claim's
+/// `contradicting`). The old cap of 2 (primary + one rotating accessory) was the
+/// on-device sparsity defect this resolves, for pure lifting as well as hybrid.
+const MAX_LIFTS_PER_DAY: usize = 4;
+
+/// Main lift slots, PATTERN-BALANCED (STR-SESSION-BALANCE-001, Moderate): the day
+/// spans distinct movement patterns rather than stacking one, so a leg-heavy log
+/// (or the squat-led catalog default) still yields a balanced week. Leads with
+/// the user's own logged exercises (each carrying an e1RM anchor → a load, the
+/// owner quick-pick rule), then FILLS the missing core patterns from the File-03
+/// catalog (→ RIR). The coverage PRINCIPLE is cited (compounds under-activate
+/// some muscles, Schoenfeld 2019); the pattern TAXONOMY + the ~3-4 count are
+/// EXPERT-OPINION, flagged on the claim.
 fn main_lifts(anchors: &Anchors) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+    let mut covered: Vec<MovementPattern> = Vec::new();
+    // 1. Lead with the user's OWN logged lifts (owner quick-pick → anchored
+    //    load), but keep PATTERN BALANCE: schedule a logged lift when it opens a
+    //    NEW core pattern (or is unclassifiable, never dropped), and SKIP a
+    //    second logged lift that only repeats an already-covered pattern (that
+    //    repeat is exactly the leg-heavy-log defect this resolves). `same_movement`
+    //    dedup still applies (never the same lift twice on one day).
     for (name, _) in &anchors.lift_e1rm {
-        if !out.iter().any(|n| same_movement(n, name)) {
-            out.push(name.clone());
-        }
-        if out.len() >= 3 {
+        if out.len() >= MAX_LIFTS_PER_DAY {
             break;
         }
+        if out.iter().any(|n| same_movement(n, name)) {
+            continue;
+        }
+        match movement_pattern(name) {
+            Some(pat) => {
+                if covered.contains(&pat) {
+                    continue; // don't stack a pattern - balance by default
+                }
+                covered.push(pat);
+                out.push(name.clone());
+            }
+            // Unclassifiable logged lift: conservative classification never drops
+            // it (it covers no core pattern, so it can't clash with one).
+            None => out.push(name.clone()),
+        }
     }
-    // File-03 catalog compound names (exercise_entry-known) as fallbacks. Use
-    // `same_movement` (not exact-case) so a logged "Back squat" isn't scheduled
-    // AGAIN as the catalog "Barbell back squat", the same lift twice on one day.
-    for def in ["Barbell back squat", "Bench press", "Romanian deadlift"] {
-        if out.len() >= 3 {
+    // 2. FILL the missing core patterns from the File-03 catalog. Use
+    //    `same_movement` (not exact-case) so a logged "Back squat" isn't scheduled
+    //    AGAIN as the catalog "Barbell back squat", the same lift twice on one day.
+    for (pat, def) in CORE_PATTERN_FILLS {
+        if out.len() >= MAX_LIFTS_PER_DAY {
             break;
         }
-        if !out.iter().any(|n| same_movement(n, def)) {
-            out.push(def.to_string());
+        if covered.contains(pat) {
+            continue;
         }
+        if out.iter().any(|n| same_movement(n, def)) {
+            continue;
+        }
+        out.push((*def).to_string());
+        covered.push(*pat);
     }
-    out.truncate(3);
     out
 }
 
@@ -255,7 +445,7 @@ fn same_movement(a: &str, b: &str) -> bool {
     norm(a) == norm(b)
 }
 
-/// The DUP emphasis for a lift day, GOAL-AWARE (M12). The classic DUP week
+/// The DUP emphasis for a lift day, GOAL-AWARE. The classic DUP week
 /// undulates Heavy → Power → Hypertrophy (File 02 strength-023), but a hybrid
 /// athlete has only 2 lift days, so a naive `[Heavy, Power, Hypertrophy][i % 3]`
 /// gives a HYPERTROPHY-goal lifter Heavy + Power and ZERO 6–12-rep work. Lead
@@ -274,12 +464,12 @@ fn dup_emphasis(goal: LiftGoal, day_index: usize) -> DupDay {
 }
 
 /// The loading goal a DUP emphasis targets, so its inter-set REST comes from the
-/// band the day actually prescribes (M12). File 02 strength-023's Heavy day is a
+/// band the day actually prescribes. File 02 strength-023's Heavy day is a
 /// max-strength quality (85–90 %), the Power day a power quality (50–70 % fast),
-/// the Hypertrophy day a hypertrophy quality (70–75 %), each has its own rest
-/// (`loading_rx`): 180–300 s for heavy/power, 30–90 s for hypertrophy. Attaching
+/// the Hypertrophy day a hypertrophy quality (70–75 %); each has its own rest
+/// (`loading_rx`): 180–300 s for heavy/power, 30–120 s for hypertrophy. Attaching
 /// the *goal's* band minimum to every day (the old bug) put 30 s rest on 85 %
-/// triples for a hypertrophy-goal lifter, wrong data.
+/// triples for a hypertrophy-goal lifter; wrong data.
 fn emphasis_goal(emphasis: DupDay) -> LiftGoal {
     match emphasis {
         DupDay::Heavy => LiftGoal::MaxStrength,
@@ -298,6 +488,7 @@ fn lift_session(
     lift_names: &[String],
     day_index: usize,
     day: u16,
+    n_lift_days: usize,
 ) -> Session {
     let goal = profile.lift_goal;
     let emphasis = dup_emphasis(goal, day_index);
@@ -306,17 +497,39 @@ fn lift_session(
         DupDay::Power => LiftSessionType::DynamicEffort,
         DupDay::Hypertrophy => LiftSessionType::Repetition,
     };
-    // DUP undulates the SAME primary lift across the week (Mon heavy, Wed power,
-    // Fri hypertrophy, File 02 strength-023), so every lift day leads with the
-    // user's top lift (the anchored one, when logged); a rotating accessory fills
-    // the second slot.
+    // DUP undulates the SAME primary lift across the week (File 02
+    // strength-023); day order comes from `dup_emphasis` (a Hypertrophy goal
+    // leads with its hypertrophy day).
     let mut prescriptions = Vec::new();
     let primary = &lift_names[0];
-    prescriptions.push(lift_prescription(goal, ta, emphasis, primary, anchors));
-    if lift_names.len() >= 2 {
-        let rest = &lift_names[1..];
-        let secondary = &rest[day_index % rest.len()];
-        prescriptions.push(lift_prescription(goal, ta, emphasis, secondary, anchors));
+    prescriptions.push(lift_prescription(
+        goal,
+        ta,
+        emphasis,
+        primary,
+        anchors,
+        profile.weekly_sets,
+        n_lift_days,
+    ));
+    // Accessories COVER the other core movement patterns on the same full-body
+    // day (STR-SESSION-BALANCE-001, Moderate): ~3-4 exercises total spanning
+    // squat/hinge/push/pull, rather than the old primary + single rotating
+    // accessory that read as "all legs". `lift_names[1..]` was built
+    // pattern-balanced by `main_lifts`, so scheduling ALL of it (not one rotating
+    // pick) is what guarantees each session, not just the week, is balanced. The
+    // exact count is EXPERT-OPINION (flagged on the claim); each accessory still
+    // carries its own honest set-face via `lift_prescription` (HYP-VOL-DOSE-001
+    // when anchored + DUP-sized, else its loading band, never an invented load).
+    for secondary in &lift_names[1..] {
+        prescriptions.push(lift_prescription(
+            goal,
+            ta,
+            emphasis,
+            secondary,
+            anchors,
+            profile.weekly_sets,
+            n_lift_days,
+        ));
     }
     Session {
         session_type: SessionType::Lift(lift_type),
@@ -325,19 +538,78 @@ fn lift_session(
     }
 }
 
+/// Per-session working sets sized from the stated weekly per-muscle target
+/// (`weekly_sets`), the honest resolution of the previously-deferred
+/// weekly-sets → prescription mapping
+/// (knowledge-base/weekly-set-volume-to-prescription-mapping.md). TWO LAYERS:
+///
+/// 1. Volume dose-response: CITABLE (Moderate, `HYP-VOL-DOSE-001`, Pelland 2026 /
+///    Schoenfeld 2017): more weekly volume → more growth with diminishing returns.
+///    So the weekly target is first BOUNDED to the cited landmark range, floored
+///    at the training-age MEV low (`HYP-MEV-AGE-001`; below MEV growth is
+///    negligible, so a sub-MEV answer is raised to the floor rather than programmed
+///    as ineffective volume) and ceilinged at MRV ~20 (`HYP-MRV-DELOAD-001`; past
+///    the optimal anchor returns diminish and beyond MRV is deload territory, not a
+///    sizing target, so we never scale linearly to absurd volumes).
+///
+/// 2. Allocation / split: EXPERT-OPINION (no validated weekly-target →
+///    per-session/per-exercise formula exists; the KB's authoritative source counts
+///    1:1 plus "logical rationale and personal expertise"). The primary lift
+///    undulates the SAME movement every lift day, so its muscle is trained
+///    `n_lift_days` times: the honest even split is
+///    `round(bounded_weekly / n_lift_days)`. This arithmetic is the expert-opinion
+///    heuristic flagged in `HYP-VOL-DOSE-001`'s `contradicting` note.
+///
+/// The result is clamped to `[MIN_SETS_PER_EXERCISE, PER_SESSION_SET_CEILING]`
+/// (`HYP-SESSCAP-001` ~11) AND into the day's own cited intensity `band` [lo,hi],
+/// so a heavy-strength day never inflates past the set ceiling its own claim
+/// sanctions, volume only chooses WHERE within the already-cited band it lands.
+///
+/// ACCESSORIES (documented, not a bypass): with the pattern-balanced full-body
+/// day (STR-SESSION-BALANCE-001) every exercise, primary AND accessory, recurs
+/// on each lift day, so each is trained `n_lift_days`/week and the even split
+/// `weekly/n_lift_days` is the honest per-session count for any ANCHORED lift (it
+/// runs the DUP path below). An UNANCHORED accessory (a catalog pattern-fill) is
+/// prescribed by RIR at its loading band's own set count, NOT a fabricated
+/// per-fill volume attribution the KB does not support (HARD RULE 1), the stated
+/// weekly-set target is the PER-MUSCLE figure the user gave for their primary
+/// emphasis, not a per-fill quantity.
+fn sized_sets(weekly_sets: u8, ta: TrainingAge, n_lift_days: usize, band: (u8, u8)) -> u8 {
+    // Layer 1: bound the weekly per-muscle target to the cited landmark range.
+    let mev_floor = hypertrophy::mev_sets_by_training_age(ta).value.0;
+    const MRV_CEILING: u8 = 20; // HYP-MRV-DELOAD-001: > ~20/muscle = at/over MRV.
+    let bounded_weekly = weekly_sets.clamp(mev_floor, MRV_CEILING);
+    // Layer 2 (EXPERT-OPINION): even split across the lift days that train the
+    // primary muscle. No validated formula, a practitioner heuristic.
+    let n = n_lift_days.max(1) as f64;
+    let per_session = (bounded_weekly as f64 / n).round() as u8;
+    // Per-session saturation cap + minimum, then into the day's own intensity band.
+    per_session
+        .clamp(hypertrophy::MIN_SETS_PER_EXERCISE, hypertrophy::PER_SESSION_SET_CEILING)
+        .clamp(band.0, band.1)
+}
+
 /// One lift's evidence-cited prescription. DUP (%1RM) when anchored + non-novice;
-/// linear `loading_rx` (%1RM anchored, RIR unanchored) otherwise.
+/// linear `loading_rx` (%1RM anchored, RIR unanchored) otherwise. On the DUP path
+/// the per-session `sets` are volume-sized from `weekly_sets` (`sized_sets`).
 fn lift_prescription(
     goal: LiftGoal,
     ta: TrainingAge,
     emphasis: DupDay,
     exercise: &str,
     anchors: &Anchors,
+    weekly_sets: u8,
+    n_lift_days: usize,
 ) -> Recommended<Prescription> {
-    let anchored = anchors.e1rm_for(exercise).is_some();
+    // A >8 wk layoff (`reentry_novice`, REENTRY-001 / KB Table 3.4b) directs a
+    // fresh-novice re-entry: prescribe by RIR/technique, NOT the retained e1RM
+    // anchor, so the card never hands a %1RM target to someone told to restart
+    // like a novice. The true logged e1RM stays in `anchors` (honest history),
+    // just unused for the working target here.
+    let anchored = !anchors.reentry_novice && anchors.e1rm_for(exercise).is_some();
     let dup = anchored && ta != TrainingAge::Novice;
     let load = strength::loading_rx(goal);
-    // Rest comes from the band the day ACTUALLY prescribes (M12): a DUP day rests
+    // Rest comes from the band the day ACTUALLY prescribes: a DUP day rests
     // per its emphasis (Heavy/Power = 180 s, Hypertrophy = 30 s), never per the
     // goal band minimum. A linear (non-DUP) day IS the goal's `loading_rx`, so
     // its rest is that band's.
@@ -348,17 +620,23 @@ fn lift_prescription(
     };
 
     let (intensity, sets, reps) = if dup {
-        // Daily-undulating heavy/power/hypertrophy day (STR-DUP-001): higher
-        // sets, lower reps, %1RM at the conservative low end of the band.
+        // Daily-undulating heavy/power/hypertrophy day: %1RM/reps come from the
+        // STR-DUP-001 band (conservative low end of %1RM); the per-session `sets`
+        // are now VOLUME-SIZED from the user's stated weekly per-muscle target
+        // (`sized_sets`), clamped INTO this day's own STR-DUP-001 sets band so the
+        // band claim still sanctions the number. Because the sets figure is the
+        // volume-driven quantity, the evidence face below re-points to
+        // HYP-VOL-DOSE-001 (Moderate, same grade as STR-DUP-001) with the
+        // expert-opinion allocation flagged there.
         let d = strength::dup_day_rx(emphasis);
         (
             LiftIntensity::PercentOneRm(d.value.pct_1rm.0 as f32),
-            d.value.sets.1,
+            sized_sets(weekly_sets, ta, n_lift_days, d.value.sets),
             d.value.reps.0,
         )
     } else if anchored && load.value.pct_1rm.0 > 0 {
         // Novice linear day, anchored → %1RM at the conservative LOW end of the
-        // band (B1: never the ceiling; matches the DUP path's low-end choice).
+        // band (never the ceiling; matches the DUP path's low-end choice).
         (
             LiftIntensity::PercentOneRm(load.value.pct_1rm.0 as f32),
             load.value.sets.0,
@@ -366,8 +644,8 @@ fn lift_prescription(
         )
     } else {
         // No anchor (or a band whose low end is 0 %, e.g. the Power band's
-        // (0, 95): never prescribe "@ 0 kg", B3) → RIR at the conservative HIGH
-        // end of the band (more reps in reserve = the safer end; B1: was the
+        // (0, 95); never prescribe "@ 0 kg") → RIR at the conservative HIGH
+        // end of the band (more reps in reserve = the safer end; was the
         // aggressive `rir.0`).
         (
             LiftIntensity::Rir(load.value.rir.1),
@@ -386,9 +664,21 @@ fn lift_prescription(
         velocity_loss_pct: None,
     });
 
-    // Evidence travels with the claim that produced the band actually used.
+    // Evidence travels with the claim that produced the band actually used. On the
+    // DUP path the per-session `sets` figure is volume-sized from `weekly_sets`, so
+    // the honest face is HYP-VOL-DOSE-001 (Moderate volume dose-response principle,
+    // with the expert-opinion weekly→per-session split flagged in its own
+    // `contradicting` note, the GRADE good-practice-statement precedent). Same
+    // grade as STR-DUP-001, which still supplies the day's %1RM/rep structure and
+    // remains the program `summary_claim`. The novice linear path keeps its own
+    // loading-band evidence (its sets are NOT volume-sized).
     if dup {
-        graded(pres, "STR-DUP-001")
+        crate::evidence::graded(pres, "HYP-VOL-DOSE-001")
+    } else if goal == LiftGoal::Power {
+        // The Power band's RIR (3-5) is an expert-opinion encoding of the KB's
+        // qualitative "high RIR, never to failure" (strength-002), not a KB
+        // number: grade it honestly instead of inheriting STR-PWR-001 (Moderate).
+        crate::evidence::graded(pres, "STR-PWR-RIR-001")
     } else {
         graded_with(pres, load.evidence.clone(), load.confidence.clone())
     }
@@ -404,7 +694,7 @@ fn lift_prescription(
 /// reality, while a runner who logs less than their (aspirational) profile is
 /// still served their intended volume (the profile is a floor).
 ///
-/// M13 exception, post-layoff decay: when the profile says the athlete is
+/// Post-layoff decay exception: when the profile says the athlete is
 /// RETURNING from a break (`weeks_off = Some(w > 0)`, the REENTRY-001 signal),
 /// the stated figure is a stale PRE-layoff (aspirational) number and must NOT
 /// floor the re-entry plan: a 40 km/wk profile after a month off should not
@@ -469,7 +759,7 @@ fn run_week_slots(
     for q in 0..quality {
         // First quality slot = Tempo (threshold). A second quality slot is a
         // VO2max Interval ONLY when the weekly volume actually SUPPORTS >=3 reps
-        // within the cited <=8% weekly-volume cap (M11): below that the interval
+        // within the cited <=8% weekly-volume cap: below that the interval
         // rep-floor would break its own RUN-INTERVAL-001 cap, so substitute an
         // easy (Recovery) run instead of emitting a cap-violating interval.
         let k = if q == 0 {
@@ -483,6 +773,10 @@ fn run_week_slots(
     }
     while kinds.len() < n {
         kinds.push(RunSessionType::Recovery);
+    }
+
+    if chosen.is_empty() {
+        return Vec::new();
     }
 
     // Place: long run on the LAST chosen day; SPREAD the quality (hard) days
@@ -535,7 +829,7 @@ fn interval_reps_natural(weekly_km: f64) -> i64 {
 }
 
 /// True when the weekly volume supports a real VO2max-interval session, i.e.
-/// at least 3 reps fit WITHIN the cited <=8% weekly-volume cap (M11). Below this
+/// at least 3 reps fit WITHIN the cited <=8% weekly-volume cap. Below this
 /// the plan must not prescribe intervals (the rep-floor would exceed the cap the
 /// card cites); it substitutes an easy run.
 fn interval_supported(weekly_km: f64) -> bool {
@@ -551,6 +845,7 @@ fn run_session(
     day: u16,
     weekly_km: f64,
     longest_recent_km: Option<f64>,
+    detrained: bool,
     n_run_days: usize,
 ) -> Session {
     let rx = running::run_workout_rx(kind);
@@ -571,12 +866,24 @@ fn run_session(
     // `app.rs::flatten_prescription`, keyed off the RUN-SPIKE-001 claim id.
     // (Precedent: `cap_run_item_easy` re-points evidence to the decision that
     // drove the figure.)
-    let session = if kind == RunSessionType::LongRun
-        && long_run_decision(weekly_km, longest_recent_km, n_run_days)
-            .1
-            .cites_spike()
-    {
-        graded(pres, "RUN-SPIKE-001")
+    //
+    // Detraining override: when the anchor is a DETRAINING-ADJUSTED (tapered)
+    // value AND it is what elevates the long run above the plain 25 % volume
+    // share (`bind != Volume`), the reason the long run is longer than the volume
+    // rule alone would give is the RETAINED-but-decaying demonstrated capacity,
+    // so cite `DETRAIN-001` (Moderate; the linear-taper parameter is an
+    // expert-opinion heuristic flagged in `build_run_anchors`). When the anchor
+    // did not raise anything (`bind == Volume`) the long run is pure volume →
+    // keep RUN-LONGRUN-001; a fresh (in-window) anchor keeps RUN-SPIKE-001.
+    let session = if kind == RunSessionType::LongRun {
+        let bind = long_run_decision(weekly_km, longest_recent_km, n_run_days).1;
+        if detrained && bind != LongRunBind::Volume {
+            crate::evidence::graded(pres, "DETRAIN-001")
+        } else if bind.cites_spike() {
+            crate::evidence::graded(pres, "RUN-SPIKE-001")
+        } else {
+            graded_with(pres, rx.evidence.clone(), rx.confidence.clone())
+        }
     } else {
         graded_with(pres, rx.evidence.clone(), rx.confidence.clone())
     };
@@ -587,10 +894,10 @@ fn run_session(
     }
 }
 
-/// Conservative target from a `u16` band: the MIDPOINT of a two-sided band (B1:
-/// never the ceiling) or the low value of a low-only band. A ceiling-only band
+/// Conservative target from a `u16` band: the MIDPOINT of a two-sided band
+/// (never the ceiling) or the low value of a low-only band. A ceiling-only band
 /// gives no defensible interior target (no floor to average against), so it
-/// propagates `None`: the caller falls back to a safe default rather than an
+/// propagates `None`; the caller falls back to a safe default rather than an
 /// invented fraction of the ceiling. `None` for an open band.
 fn mid_u16(band: (Option<u16>, Option<u16>)) -> Option<u16> {
     match band {
@@ -601,17 +908,22 @@ fn mid_u16(band: (Option<u16>, Option<u16>)) -> Option<u16> {
     }
 }
 
-/// Conservative target from an `f64` band (km): band midpoint / low value.
+/// Conservative target from an `f64` band (km): the MIDPOINT of a two-sided band
+/// (never the ceiling) or the low value of a low-only band. Mirrors `mid_u16`:
+/// a ceiling-only band gives no defensible interior target (no floor to average
+/// against), so it propagates `None`; the caller falls back to a safe default
+/// (a conservative duration) rather than an invented fraction of the ceiling
+/// (HARD RULE 1). `None` for an open band.
 fn mid_f64(band: (Option<f64>, Option<f64>)) -> Option<f64> {
     match band {
         (Some(lo), Some(hi)) => Some((lo + hi) / 2.0),
         (Some(lo), None) => Some(lo),
-        (None, Some(hi)) => Some(hi * 0.4),
+        (None, Some(_)) => None,
         (None, None) => None,
     }
 }
 
-/// Conservative %HRmax target: the LOW end of a two-sided band (B1: never the
+/// Conservative %HRmax target: the LOW end of a two-sided band (never the
 /// ceiling); a ceiling-only band's ceiling IS its "stay under" target.
 fn hr_low(band: (Option<f64>, Option<f64>)) -> Option<f64> {
     match band {
@@ -632,7 +944,7 @@ fn conservative_intensity(kind: RunSessionType, rx: &RunWorkoutRx) -> RunIntensi
     RunIntensity::Vdot(vdot_band_for(kind))
 }
 
-/// Turn a `RunWorkoutRx` band into a concrete `RunPrescription` (B1). Intervals
+/// Turn a `RunWorkoutRx` band into a concrete `RunPrescription`. Intervals
 /// emit per-rep structure (`repeats`), the long run scales to the user's weekly
 /// volume, and continuous runs take conservative/midpoint band values, never a
 /// band ceiling.
@@ -651,7 +963,7 @@ fn translate_run(
         _ => {
             // Continuous run (Recovery / Tempo / RacePace / Hills): conservative
             // volume + conservative intensity, no repeats. Any DISTANCE volume is
-            // capped at the spike threshold over the demonstrated baseline (H3)
+            // capped at the spike threshold over the demonstrated baseline
             // so the plan never prescribes a run its own RUN-SPIKE-001 gate would
             // flag as a dangerous progression.
             let capped_km = mid_f64(rx.distance_km).and_then(|km| cap_km_to_spike(km, longest_recent_km));
@@ -674,8 +986,16 @@ fn translate_run(
     }
 }
 
+/// The RUN-SPIKE-001 plan-time ceiling: at most 10 % over the demonstrated
+/// 30-day-longest baseline, floored to whole km. Single source for every
+/// session type so the long run is never capped tighter than the rest: the
+/// log-time gate (`running::single_session_spike`) tests the same raw baseline.
+fn spike_ceiling_km(baseline: f64) -> f64 {
+    (1.10 * baseline).floor()
+}
+
 /// Cap a prescribed run DISTANCE (km) at the RUN-SPIKE-001 threshold over the
-/// demonstrated 30-day-longest baseline (H3): never prescribe more than 10 % over
+/// demonstrated 30-day-longest baseline: never prescribe more than 10 % over
 /// the athlete's longest recent run, floored to whole km so the shell's
 /// `"{:.0} km"` render also stays at/under the ≤10 % gate.
 ///
@@ -691,7 +1011,7 @@ fn translate_run(
 fn cap_km_to_spike(km: f64, longest_recent_km: Option<f64>) -> Option<f64> {
     match longest_recent_km {
         Some(baseline) if baseline > 0.0 => {
-            let ceiling = (1.10 * baseline).floor();
+            let ceiling = spike_ceiling_km(baseline);
             (ceiling >= 1.0).then(|| km.min(ceiling))
         }
         _ => Some(km),
@@ -724,7 +1044,7 @@ impl LongRunBind {
     }
 }
 
-/// Decide the long-run distance (km, floored) and which KB rule binds it (H3/H4).
+/// Decide the long-run distance (km, floored) and which KB rule binds it.
 ///
 /// The demonstrated longest recent run is a capacity CEILING, not a weekly
 /// target: it may justify a long run ABOVE the plain 25 % weekly share, but only
@@ -752,10 +1072,10 @@ fn long_run_decision(
     // The log-time RUN-SPIKE-001 gate flags any session >10 % over ANY POSITIVE
     // 30-day longest, so the spike ceiling must bind for any positive baseline -
     // including a sub-1 km post-injury walk-jog history the demonstrated-capacity
-    // path below exempts. Floored on the floored baseline to match the gate's
-    // whole-km basis and the shell render (identical to the old `(1.10 × dem)`
-    // for a >=1 km baseline, since `dem = baseline.floor()`).
-    let spike_ceiling = (1.10 * baseline.floor()).floor();
+    // path below exempts. Shared with `cap_km_to_spike` via `spike_ceiling_km`,
+    // so every session type (the long run included) uses the SAME raw-baseline
+    // ceiling the log-time gate applies, no tighter pre-floor on the baseline.
+    let spike_ceiling = spike_ceiling_km(baseline);
 
     // Demonstrated CAPACITY (a ceiling that may RAISE the run above the 25 %
     // share) is only meaningful at >=1 km: a sub-1 km run demonstrates no
@@ -825,17 +1145,17 @@ fn long_run_prescription(
     }
 }
 
-/// VO2max intervals emitted as PER-REP structure (B1: not a whole-session
+/// VO2max intervals emitted as PER-REP structure (not a whole-session
 /// 100%-HRmax block). Rep duration/distance are the KB band midpoints; the rep
 /// COUNT is unstated in the KB (HARD RULE 1), so it is DERIVED from the stated
 /// <=8% weekly-volume cap and the mid rep distance (honest arithmetic), clamped
-/// 3-8. Intensity is the Interval VDOT band (interval work is pace-governed -
+/// 3-8. Intensity is the Interval VDOT band (interval work is pace-governed;
 /// HR lags, so no %HRmax target).
 fn interval_prescription(weekly_km: f64) -> RunPrescription {
     let s = running::vo2max_interval_rx().value;
     let rep_min = ((s.rep_duration_min.0 + s.rep_duration_min.1) / 2).max(1);
     // Only ever reached when `interval_supported(weekly_km)` (>=3 natural reps
-    // fit within the <=8% cap, M11), so the lower clamp never forces a
+    // fit within the <=8% cap), so the lower clamp never forces a
     // cap-violating floor; the upper clamp (8) only trims below the cap.
     let reps = interval_reps_natural(weekly_km).clamp(3, 8) as u8;
     RunPrescription {
@@ -1017,7 +1337,7 @@ mod tests {
         );
     }
 
-    // ── B1: prescriptions must not take band CEILINGS or violate the KB caps ──
+    // ── Prescriptions must not take band CEILINGS or violate the KB caps ──
     #[test]
     fn b1_tempo_is_not_the_band_ceiling() {
         let mut p = base_profile();
@@ -1131,6 +1451,82 @@ mod tests {
         assert!(saw, "an unanchored strength plan should prescribe by RIR");
     }
 
+    #[test]
+    fn unanchored_power_prescription_cites_expert_opinion_rir() {
+        // Power's RIR band (3-5) is an expert-opinion encoding of the KB's
+        // qualitative "high RIR", not a KB number, so an unanchored Power
+        // prescription must cite STR-PWR-RIR-001 (ExpertOpinion), NOT the
+        // Moderate STR-PWR-001 that `loading_rx` still carries.
+        let rx = lift_prescription(
+            LiftGoal::Power,
+            TrainingAge::Novice,
+            DupDay::Heavy,
+            "Back Squat",
+            &Anchors::default(),
+            0,
+            3,
+        );
+        match &rx.value {
+            Prescription::Lift(l) => assert!(
+                matches!(l.intensity, LiftIntensity::Rir(_)),
+                "unanchored power is RIR-prescribed"
+            ),
+            _ => panic!("expected a lift prescription"),
+        }
+        assert_eq!(
+            rx.evidence.citation.claim_id.as_deref(),
+            Some("STR-PWR-RIR-001")
+        );
+        assert_eq!(rx.evidence.grade, crate::schema::EvidenceGrade::ExpertOpinion);
+    }
+
+    #[test]
+    fn reentry_novice_prescribes_rir_despite_a_retained_e1rm_anchor() {
+        // A1: after a >8 wk layoff (`reentry_novice`) the retained e1RM anchor is
+        // set aside and the lift is prescribed by RIR (KB Table 3.4b: treat as
+        // novice), so the card never hands a %1RM target to a returning lifter.
+        // The same anchor WITHOUT the flag drives the normal %1RM (DUP) path.
+        let anchor = |novice: bool| Anchors {
+            lift_e1rm: vec![("Back Squat".into(), 100.0)],
+            reentry_novice: novice,
+            ..Anchors::default()
+        };
+        let re = lift_prescription(
+            LiftGoal::Hypertrophy,
+            TrainingAge::Intermediate,
+            DupDay::Hypertrophy,
+            "Back Squat",
+            &anchor(true),
+            12,
+            3,
+        );
+        match &re.value {
+            Prescription::Lift(l) => assert!(
+                matches!(l.intensity, LiftIntensity::Rir(_)),
+                "a >8 wk re-entry is RIR-prescribed, not %1RM: {:?}",
+                l.intensity
+            ),
+            _ => panic!("expected a lift prescription"),
+        }
+        let normal = lift_prescription(
+            LiftGoal::Hypertrophy,
+            TrainingAge::Intermediate,
+            DupDay::Hypertrophy,
+            "Back Squat",
+            &anchor(false),
+            12,
+            3,
+        );
+        match &normal.value {
+            Prescription::Lift(l) => assert!(
+                matches!(l.intensity, LiftIntensity::PercentOneRm(_)),
+                "the same anchor without the layoff flag drives the %1RM path: {:?}",
+                l.intensity
+            ),
+            _ => panic!("expected a lift prescription"),
+        }
+    }
+
     // ── Run history reactivity (long run anchored to demonstrated capacity) ──
 
     /// Distance (km) of the long run in a synthesized program, if it is prescribed
@@ -1199,7 +1595,7 @@ mod tests {
 
     #[test]
     fn h4_full_demonstrated_distance_is_not_prescribed_weekly_when_it_dwarfs_volume() {
-        // H4 flagship: a 21 km race logged, but only 16 km/wk of running (stated,
+        // A 21 km race logged, but only 16 km/wk of running (stated,
         // no higher measurement) over 3 run days. The old rule pinned the long run
         // AT 21 km every week (131% of weekly volume). The demonstrated run is a
         // CEILING, not a weekly target: the ≤2×-daily-average guardrail caps it.
@@ -1272,8 +1668,8 @@ mod tests {
 
     #[test]
     fn a_low_demonstrated_run_caps_a_higher_volume_target_at_the_spike_ceiling() {
-        // H3: measured volume wants a 15 km long run (25% of 60 km/wk), but the
-        // athlete's longest recent run is only 12 km: prescribing 15 would be a
+        // Measured volume wants a 15 km long run (25% of 60 km/wk), but the
+        // athlete's longest recent run is only 12 km; prescribing 15 would be a
         // +25% single-session spike over the 12 km baseline. The RUN-SPIKE-001
         // ceiling caps it and re-points the citation.
         // 60 km/wk, 3 run days, demonstrated 12 km:
@@ -1413,10 +1809,23 @@ mod tests {
     }
 
     #[test]
+    fn spike_ceiling_is_identical_across_long_run_and_continuous_run() {
+        // A5: both plan-time RUN-SPIKE-001 ceilings share `spike_ceiling_km`, so
+        // a FRACTIONAL baseline yields ONE ceiling. 3.9 km → floor(1.10×3.9) =
+        // floor(4.29) = 4 km. The old long-run path pre-floored the baseline
+        // (floor(1.10×3) = 3 km), capping the long run tighter than every other
+        // session type; they now agree.
+        assert_eq!(cap_km_to_spike(10.0, Some(3.9)), Some(4.0));
+        let (target, bind) = long_run_decision(40.0, Some(3.9), 3);
+        assert_eq!(target, 4.0, "long run uses the same 4 km ceiling as the cap");
+        assert_eq!(bind, LongRunBind::SpikeCeiling);
+    }
+
+    #[test]
     fn a_high_volume_target_is_still_capped_by_a_low_demonstrated_run() {
         // A high measured volume wants a 20 km long run (25% of 80 km/wk), but the
         // demonstrated longest recent run is only 12 km. The demonstrated run is a
-        // capacity CEILING (H3/H4): prescribing 20 would spike +67% over the 12 km
+        // capacity CEILING: prescribing 20 would spike +67% over the 12 km
         // baseline, so the RUN-SPIKE-001 ceiling caps it at floor(1.10×12) = 13.
         // (The old max()-only rule handed out the unsafe 20 km here.)
         let mut p = half_marathoner();
@@ -1431,6 +1840,109 @@ mod tests {
         assert_eq!(long_run_claim(&prog).as_deref(), Some("RUN-SPIKE-001"));
     }
 
+    // ── A detraining-adjusted anchor slopes the long run, no cliff ──
+
+    /// Anchors carrying a detraining-adjusted longest-run value.
+    fn detrained_anchor(km: f64) -> Anchors {
+        Anchors {
+            longest_recent_run_km: Some(km),
+            longest_run_detrained: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn h4_detrained_anchor_keeps_a_long_run_instead_of_collapsing_to_the_volume_floor() {
+        // Flagship across the 30-day boundary. Half-marathoner, stated 16 km/wk,
+        // 3 run days, whose 21.1 km race is aging out.
+        let p = half_marathoner();
+
+        // OLD cliff (anchor gone at day 31): long run collapses to the volume-only
+        // floor = floor(0.25 × 16) = 4 km, cites RUN-LONGRUN-001.
+        let cliff = synthesize(&p, &Anchors::default(), 0).unwrap();
+        assert_eq!(long_run_km(&cliff), Some(4.0));
+        assert_eq!(long_run_claim(&cliff).as_deref(), Some("RUN-LONGRUN-001"));
+
+        // NEW day-31: anchor tapered to 21.1×27/28 = 20.346… The long run is held
+        // at the ≤2×-daily-average bound (floor(2×16/3) = 10), NOT the 4 km cliff.
+        // Because the retained (decaying) demonstrated capacity is what raises it
+        // above the 4 km volume share, the card cites DETRAIN-001.
+        let d31 = synthesize(&p, &detrained_anchor(21.1 * 27.0 / 28.0), 0).unwrap();
+        assert_eq!(long_run_km(&d31), Some(10.0), "held at 10, not the 4 km cliff");
+        assert_eq!(long_run_claim(&d31).as_deref(), Some("DETRAIN-001"));
+
+        // NEW day-45: anchor tapered to 21.1×13/28 = 9.796… Now the demonstrated
+        // ceiling itself (floor 9) governs → long run 9, still DETRAIN-001.
+        //   volume_share=4; dem=9; daily_avg_cap=floor(2×16/3)=10; spike_ceiling=
+        //   floor(1.10×9.796)=10; raised=min(9,10)=9; want=max(4,9)=9; target=min(9,10)=9.
+        let d45 = synthesize(&p, &detrained_anchor(21.1 * 13.0 / 28.0), 0).unwrap();
+        assert_eq!(long_run_km(&d45), Some(9.0));
+        assert_eq!(long_run_claim(&d45).as_deref(), Some("DETRAIN-001"));
+
+        // The step became a slope: 10 (day 31) > 9 (day 45) > 4 (fully decayed),
+        // instead of 10 → 4 overnight.
+        assert!(long_run_km(&d31) > long_run_km(&d45));
+        assert!(long_run_km(&d45) > long_run_km(&cliff));
+    }
+
+    #[test]
+    fn h4_detrained_flag_does_not_relabel_a_pure_volume_long_run() {
+        // Honesty guard: when the (detrained) anchor does NOT elevate the long run
+        // above the plain 25 % volume share (bind == Volume), the card keeps the
+        // RUN-LONGRUN-001 share citation: DETRAIN-001 is used ONLY when retained
+        // capacity is what carries the elevated distance.
+        //   stated 40 km/wk, 4 run days, anchor exactly at the share (dem = 10):
+        //   volume_share=10; daily_avg_cap=floor(2×40/4)=20; raised=min(10,20)=10;
+        //   want=max(10,10)=10; spike_ceiling=floor(1.10×10)=11; target=10 → Volume.
+        let mut p = half_marathoner();
+        p.running_days_per_week = 4;
+        p.running_km_per_week = 40.0;
+        let prog = synthesize(&p, &detrained_anchor(10.0), 0).unwrap();
+        assert_eq!(long_run_km(&prog), Some(10.0));
+        assert_eq!(
+            long_run_claim(&prog).as_deref(),
+            Some("RUN-LONGRUN-001"),
+            "a detrained flag must not relabel a pure-volume long run"
+        );
+    }
+
+    // ── age_years → conservative running deload cadence (masters) ──
+
+    fn program_weeks(prog: &Program) -> u8 {
+        prog.mesocycles[0].weeks
+    }
+
+    #[test]
+    fn masters_runner_takes_the_conservative_two_week_load_cadence() {
+        // is_masters threshold (MASTERS-001, 65+).
+        assert!(!is_masters(None));
+        assert!(!is_masters(Some(64.0)));
+        assert!(is_masters(Some(65.0)));
+
+        // A masters (age 70) RUNNER shortens the accumulation block to the 2:1
+        // running deload cadence (RUN-DELOAD-001 "2:1 for older") = 2 load weeks.
+        let mut masters = half_marathoner();
+        masters.age_years = Some(70.0);
+        assert_eq!(program_weeks(&synthesize(&masters, &Anchors::default(), 0).unwrap()), 2);
+
+        // Byte-identical elsewhere: an age-less runner, a younger runner, and a
+        // masters LIFTER (no running) all keep the default accumulation length (4).
+        let ageless = half_marathoner();
+        assert_eq!(program_weeks(&synthesize(&ageless, &Anchors::default(), 0).unwrap()), 4);
+
+        let mut young = half_marathoner();
+        young.age_years = Some(40.0);
+        assert_eq!(program_weeks(&synthesize(&young, &Anchors::default(), 0).unwrap()), 4);
+
+        let mut masters_lifter = base_profile(); // weekly_sets=12, no running
+        masters_lifter.age_years = Some(70.0);
+        assert_eq!(
+            program_weeks(&synthesize(&masters_lifter, &anchored("Back Squat", 100.0), 0).unwrap()),
+            4,
+            "a masters lifter has no KB strength deload cadence to shorten to"
+        );
+    }
+
     #[test]
     fn a_week_is_exactly_seven_days() {
         let prog = synthesize(&base_profile(), &anchored("Back Squat", 100.0), 0).unwrap();
@@ -1442,7 +1954,7 @@ mod tests {
         assert_eq!(days, (0u16..7).collect::<BTreeSet<u16>>());
     }
 
-    // ── Helpers for the M11/M12/LOW placement tests ──────────────────────────
+    // ── Helpers for the placement tests ──────────────────────────
 
     fn run_kinds_of(prog: &Program) -> Vec<RunSessionType> {
         prog.mesocycles[0]
@@ -1492,7 +2004,7 @@ mod tests {
         p
     }
 
-    // ── M11: interval rep-floor must not break its own ≤8% cap ────────────────
+    // ── Interval rep-floor must not break its own ≤8% cap ────────────────
 
     #[test]
     fn m11_interval_dropped_below_the_volume_that_supports_three_reps() {
@@ -1544,7 +2056,7 @@ mod tests {
         );
     }
 
-    // ── M12: DUP must respect lift_goal + rest must match the day prescribed ──
+    // ── DUP must respect lift_goal + rest must match the day prescribed ──
 
     #[test]
     fn m12_hypertrophy_goal_hybrid_gets_a_hypertrophy_range_day() {
@@ -1664,5 +2176,319 @@ mod tests {
         assert_eq!(mid_u16((Some(20), Some(40))), Some(30));
         assert_eq!(mid_u16((Some(20), None)), Some(20));
         assert_eq!(mid_u16((None, None)), None);
+    }
+
+    #[test]
+    fn mid_f64_ceiling_only_band_propagates_none() {
+        // #5: a ceiling-only DISTANCE band has no defensible interior target, so
+        // mid_f64 must return None (mirroring mid_u16), never the old fabricated
+        // 0.4×ceiling, which had no KB basis and fed prescribed run distances.
+        assert_eq!(mid_f64((None, Some(10.0))), None);
+        assert_eq!(mid_f64((Some(4.0), Some(8.0))), Some(6.0));
+        assert_eq!(mid_f64((Some(5.0), None)), Some(5.0));
+        assert_eq!(mid_f64((None, None)), None);
+    }
+
+    #[test]
+    fn continuous_run_ceiling_only_distance_degrades_to_duration() {
+        // With mid_f64 returning None for a ceiling-only distance band, the
+        // continuous-run path must degrade to a conservative DURATION rather than
+        // panic or emit a 0 km distance.
+        let base = RunWorkoutRx {
+            pct_hr_max: (Some(0.7), Some(0.8)),
+            pct_hrr_max: None,
+            pct_slower_than_mp: (None, None),
+            rpe: Some((3, 4)),
+            duration_min: (None, None),
+            distance_km: (None, Some(12.0)),
+            hr_governed: true,
+        };
+        // No duration band either → conservative 30 min default.
+        let p = translate_run(RunSessionType::Recovery, &base, 40.0, None, 4);
+        assert_eq!(p.volume, RunVolume::DurationMin(30));
+
+        // A duration band present → that conservative duration is used.
+        let with_dur = RunWorkoutRx {
+            duration_min: (Some(30), Some(60)),
+            ..base
+        };
+        let p2 = translate_run(RunSessionType::Recovery, &with_dur, 40.0, None, 4);
+        assert_eq!(p2.volume, RunVolume::DurationMin(45));
+    }
+
+    // ── weekly_sets → per-session sets (volume dose-response + expert-opinion split) ──
+
+    /// (exercise, sets, claim_id) for every LIFT prescription in a program.
+    fn lift_sets_and_claims(prog: &Program) -> Vec<(String, u8, Option<String>)> {
+        let mut out = Vec::new();
+        for s in &prog.mesocycles[0].sessions {
+            for rx in &s.prescriptions {
+                if let Prescription::Lift(l) = &rx.value {
+                    out.push((
+                        l.exercise.clone(),
+                        l.sets,
+                        rx.evidence.citation.claim_id.clone(),
+                    ));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn sized_sets_two_layers_hand_computed() {
+        use crate::individualization::TrainingAge;
+        // Intermediate MEV floor = 10, MRV ceiling = 20 (HYP-MRV-DELOAD-001).
+        // Layer 2 split = round(bounded_weekly / n_lift_days), clamped to
+        // [MIN_SETS_PER_EXERCISE=2, PER_SESSION_SET_CEILING=11] then into the band.
+
+        // Headline: 12 sets/muscle/week, 3 lift days → 12/3 = 4/session (in band).
+        assert_eq!(sized_sets(12, TrainingAge::Intermediate, 3, (3, 5)), 4);
+
+        // Below MEV: a stated 6 is raised to the intermediate MEV floor 10 first,
+        // 10/3 = 3.33 → round 3, in band (3,5) → 3 (never sub-MEV volume).
+        assert_eq!(sized_sets(6, TrainingAge::Intermediate, 3, (3, 5)), 3);
+
+        // Above MRV: a stated 30 is capped to MRV 20 (diminishing returns), 20/3 =
+        // 6.67 → round 7, then the day's own hypertrophy band (3,4) caps it at 4 -
+        // never scaled to an absurd per-session count.
+        assert_eq!(sized_sets(30, TrainingAge::Intermediate, 3, (3, 4)), 4);
+
+        // 2 lift days (hybrid): 12/2 = 6, band (3,6) → 6.
+        assert_eq!(sized_sets(12, TrainingAge::Intermediate, 2, (3, 6)), 6);
+
+        // Per-session cap (HYP-SESSCAP-001 ~11) binds before a huge open band:
+        // MRV 20 over 1 lift day = 20 → clamped to 11 → band (3, 15) → 11.
+        assert_eq!(sized_sets(30, TrainingAge::Intermediate, 1, (3, 15)), 11);
+    }
+
+    #[test]
+    fn default_12_sets_dup_primary_is_four_and_cites_volume_dose_response() {
+        // base_profile: MaxStrength, Intermediate (WeekToWeek), weekly_sets = 12,
+        // no running → 3 lift days [Heavy, Power, Hypertrophy]. The anchored primary
+        // (Back Squat) is DUP + volume-sized: 12/3 = 4/session on every lift day,
+        // and the badge cites the Moderate volume dose-response principle.
+        let prog = synthesize(&base_profile(), &anchored("Back Squat", 100.0), 0).unwrap();
+        let primary: Vec<_> = lift_sets_and_claims(&prog)
+            .into_iter()
+            .filter(|(ex, _, _)| ex.eq_ignore_ascii_case("Back Squat"))
+            .collect();
+        assert!(!primary.is_empty(), "the DUP primary must be scheduled");
+        for (ex, sets, claim) in &primary {
+            assert_eq!(*sets, 4, "{ex} DUP sets = 12/3 = 4");
+            assert_eq!(
+                claim.as_deref(),
+                Some("HYP-VOL-DOSE-001"),
+                "a volume-sized DUP prescription cites the dose-response principle"
+            );
+        }
+    }
+
+    #[test]
+    fn low_weekly_sets_is_raised_to_the_mev_floor_not_programmed_below() {
+        // Intermediate lifter states only 6 sets/muscle/week (below the MEV floor
+        // 10). The primary DUP sets are sized from the floored 10, not 6:
+        // 10/3 = 3.33 → 3/session (never sub-MEV, HYP-MEV-AGE-001).
+        let mut p = base_profile();
+        p.weekly_sets = 6;
+        let prog = synthesize(&p, &anchored("Back Squat", 100.0), 0).unwrap();
+        for (ex, sets, _) in lift_sets_and_claims(&prog) {
+            if ex.eq_ignore_ascii_case("Back Squat") {
+                assert_eq!(sets, 3, "sub-MEV weekly is raised to the MEV floor first");
+            }
+        }
+    }
+
+    #[test]
+    fn high_weekly_sets_never_scales_to_an_absurd_per_session_count() {
+        // A stated 40 sets/muscle/week is bounded to MRV 20; split over 3 lift days
+        // = 6.67 → 7, then each day's own band caps it: Heavy (3,5)→5, Power
+        // (3,6)→6, Hypertrophy (3,4)→4. No lift ever exceeds its band or the
+        // per-session cap.
+        let mut p = base_profile();
+        p.weekly_sets = 40;
+        let prog = synthesize(&p, &anchored("Back Squat", 100.0), 0).unwrap();
+        for (ex, sets, _) in lift_sets_and_claims(&prog) {
+            assert!(sets <= crate::hypertrophy::PER_SESSION_SET_CEILING, "{ex} over the ~11 cap");
+            assert!(sets <= 6, "{ex} exceeded its intensity band ceiling: {sets}");
+        }
+    }
+
+    #[test]
+    fn hyp_vol_dose_claim_is_registered_moderate() {
+        let c = crate::evidence::claim("HYP-VOL-DOSE-001").expect("HYP-VOL-DOSE-001 registered");
+        assert_eq!(c.grade, crate::schema::EvidenceGrade::Moderate);
+        // The expert-opinion allocation caveat rides in its contradicting note
+        // (GRADE good-practice-statement precedent).
+        assert!(
+            c.contradicting.iter().any(|s| s.contains("no validated")),
+            "the no-validated-split-formula caveat must be recorded"
+        );
+    }
+
+    // ── STR-SESSION-BALANCE-001: movement-pattern coverage + ~3-4 exercises ──
+
+    /// Exercise names on the first lift day of a synthesized program, in order.
+    fn first_lift_day_exercises(prog: &Program) -> Vec<String> {
+        prog.mesocycles[0]
+            .sessions
+            .iter()
+            .find(|s| matches!(s.session_type, SessionType::Lift(_)))
+            .map(|s| {
+                s.prescriptions
+                    .iter()
+                    .filter_map(|rx| match &rx.value {
+                        Prescription::Lift(l) => Some(l.exercise.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn leg_only_anchors() -> Anchors {
+        // Three logged lifts, ALL squat-pattern (the on-device "all legs" defect).
+        Anchors {
+            lift_e1rm: vec![
+                ("Back squat".into(), 140.0),
+                ("Front squat".into(), 110.0),
+                ("Leg press".into(), 200.0),
+            ],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn movement_pattern_classifies_the_core_set_conservatively() {
+        use MovementPattern::*;
+        // Hinge before squat: a deadlift variant is a hinge, not a squat.
+        assert_eq!(movement_pattern("Romanian deadlift"), Some(Hinge));
+        assert_eq!(movement_pattern("Barbell back squat"), Some(Squat));
+        assert_eq!(movement_pattern("Front squat"), Some(Squat));
+        // "leg press" reads as squat (not the "press" push keyword).
+        assert_eq!(movement_pattern("Leg press"), Some(Squat));
+        assert_eq!(movement_pattern("Bench press"), Some(Push));
+        // A vertical press folds into Push for coverage.
+        assert_eq!(movement_pattern("Overhead press"), Some(Push));
+        assert_eq!(movement_pattern("Row (barbell/cable/machine)"), Some(Pull));
+        assert_eq!(movement_pattern("Pull-up / lat pulldown"), Some(Pull));
+        // Ambiguous / isolation → None (unclassifiable, never mis-mapped).
+        assert_eq!(movement_pattern("Lateral raise"), None);
+        assert_eq!(movement_pattern("Standing calf raise"), None);
+        assert_eq!(movement_pattern("Incline DB curl"), None);
+    }
+
+    #[test]
+    fn a_leg_only_log_still_covers_push_and_pull_with_three_to_four_exercises() {
+        // Hybrid (2 lift days) whose log is ALL squat-pattern. The day must cover
+        // push + pull (not all legs) and carry 3-4 exercises.
+        let mut p = base_profile();
+        p.goal_distance = GoalDistance::HalfMarathon;
+        p.running_days_per_week = 3; // → 2 lift days
+        let prog = synthesize(&p, &leg_only_anchors(), 0).unwrap();
+        let names = first_lift_day_exercises(&prog);
+        assert!(
+            (3..=4).contains(&names.len()),
+            "3-4 exercises per lift day, got {names:?}"
+        );
+        // Covers push and pull, the fix for the "only leg exercises" report.
+        assert!(
+            names.iter().any(|n| movement_pattern(n) == Some(MovementPattern::Push)),
+            "the balanced day must cover a push: {names:?}"
+        );
+        assert!(
+            names.iter().any(|n| movement_pattern(n) == Some(MovementPattern::Pull)),
+            "the balanced day must cover a pull: {names:?}"
+        );
+        // The anchored primary is still the user's OWN squat (owner quick-pick).
+        assert!(
+            names[0].eq_ignore_ascii_case("Back squat"),
+            "the logged lift still leads: {names:?}"
+        );
+        // Exactly ONE squat-pattern lift: front squat / leg press are dropped for
+        // balance, not stacked into a leg pile.
+        let squats = names
+            .iter()
+            .filter(|n| movement_pattern(n) == Some(MovementPattern::Squat))
+            .count();
+        assert_eq!(squats, 1, "only one squat-pattern lift, not a leg pile: {names:?}");
+    }
+
+    #[test]
+    fn a_log_less_hybrid_gets_a_balanced_default_day() {
+        // No history at all: the catalog default must itself span all 4 core
+        // patterns (never the old squat-led 2-exercise default).
+        let mut p = base_profile();
+        p.goal_distance = GoalDistance::HalfMarathon;
+        p.running_days_per_week = 3;
+        let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
+        let names = first_lift_day_exercises(&prog);
+        assert_eq!(names.len(), 4, "a log-less day fills to 4: {names:?}");
+        let mut pats: Vec<MovementPattern> =
+            names.iter().filter_map(|n| movement_pattern(n)).collect();
+        pats.sort_by_key(|p| format!("{p:?}"));
+        pats.dedup();
+        assert_eq!(pats.len(), 4, "the default day spans all 4 core patterns: {names:?}");
+    }
+
+    #[test]
+    fn pure_lifting_day_is_no_longer_the_sparse_two_exercise_session() {
+        // The 2-exercise sparsity hit pure lifting too (KB): a pure lifter's day
+        // now carries 3-4 exercises, balanced.
+        let prog = synthesize(&base_profile(), &anchored("Back squat", 120.0), 0).unwrap();
+        let names = first_lift_day_exercises(&prog);
+        assert!((3..=4).contains(&names.len()), "pure lifting day 3-4 exercises: {names:?}");
+        assert!(
+            names.iter().any(|n| movement_pattern(n) == Some(MovementPattern::Pull)),
+            "a pure lifter's day is balanced, not squat-only: {names:?}"
+        );
+    }
+
+    #[test]
+    fn every_prescribed_lift_still_gets_sized_sets_in_a_balanced_day() {
+        // The 2→4-exercise change must not leave any exercise unsized: every lift
+        // prescription carries a sets count within [MIN, PER_SESSION_SET_CEILING],
+        // and the anchored primary is still volume-sized (12/3 = 4) + dose-cited.
+        let prog = synthesize(&base_profile(), &anchored("Back squat", 120.0), 0).unwrap();
+        let lifts = lift_sets_and_claims(&prog);
+        assert!(
+            lifts.len() >= 4,
+            "a balanced 3-lift-day pure-lifting week has many prescriptions: {}",
+            lifts.len()
+        );
+        for (ex, sets, _) in &lifts {
+            assert!(
+                *sets >= crate::hypertrophy::MIN_SETS_PER_EXERCISE,
+                "{ex} sized below the minimum: {sets}"
+            );
+            assert!(
+                *sets <= crate::hypertrophy::PER_SESSION_SET_CEILING,
+                "{ex} sized over the per-session cap: {sets}"
+            );
+        }
+        assert!(
+            lifts.iter().any(|(ex, sets, claim)| ex.eq_ignore_ascii_case("Back squat")
+                && *sets == 4
+                && claim.as_deref() == Some("HYP-VOL-DOSE-001")),
+            "the anchored primary is volume-sized (4) and cites the dose-response"
+        );
+    }
+
+    #[test]
+    fn str_session_balance_claim_is_registered_moderate() {
+        let c = crate::evidence::claim("STR-SESSION-BALANCE-001")
+            .expect("STR-SESSION-BALANCE-001 registered");
+        assert_eq!(c.grade, crate::schema::EvidenceGrade::Moderate);
+        // The expert-opinion count/taxonomy caveat AND the running-emphasis caveat
+        // must both ride in the contradicting notes (GRADE good-practice-statement
+        // precedent: cite the principle, flag the unstudied parameters).
+        assert!(
+            c.contradicting.iter().any(|s| s.contains("expert-opinion")),
+            "the count/taxonomy expert-opinion caveat must be recorded"
+        );
+        assert!(
+            c.contradicting.iter().any(|s| s.contains("running-focused hybrid")),
+            "the running-emphasis (balance-is-a-default) caveat must be recorded"
+        );
     }
 }

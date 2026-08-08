@@ -48,11 +48,11 @@ object EventLog {
         "ClearCooper" to setOf("ComputeCooper"),
         "ClearCriticalSpeed" to setOf("ComputeCriticalSpeed"),
         "ClearApre" to setOf("ComputeApre"),
-        // Family 12 (Phase 2 / B1): retained morning check-ins. NOT day-scoped -
+        // Family 12: retained morning check-ins. NOT day-scoped;
         // multiple across days all survive (they ARE the rolling baseline); only
         // a ClearCheckins supersedes them. Lockstep with log.rs classify.
         "ClearCheckins" to setOf("SubmitCheckin"),
-        // Family 13 (Phase 6 / B3): the accepted plan request, a last-write-wins
+        // Family 13: the accepted plan request, a last-write-wins
         // singleton with a ClearPlan reset. Lockstep with log.rs classify.
         "ClearPlan" to setOf("GeneratePlan"),
     )
@@ -61,8 +61,8 @@ object EventLog {
     private val singletons = listOf(
         "SetProfile", "SubmitReview", "PredictRace", "PlanHypertrophyMeso", "ComputeProtein",
         "ComputeHrZones", "ComputeCooper", "ComputeCriticalSpeed", "ComputeApre",
-        // Phase 6 / B3: plan request (family 13) + SetToday (family 14, the
-        // shell's clock sent every foreground, keep exactly one line).
+        // Plan request (family 13) + SetToday (family 14, the
+        // shell's clock sent every foreground; keep exactly one line).
         "GeneratePlan", "SetToday",
     )
 
@@ -315,7 +315,7 @@ object EventLog {
             .jsonPrimitive.content
     }.getOrNull()
 
-    // ── Rule 3 helpers (Phase 4 / M4, lockstep with log.rs) ──────────────────
+    // ── Rule 3 helpers (lockstep with log.rs) ──────────────────
 
     /** Whether `clear` supersedes a [DeleteEntry] line by its `kind` (the one
      *  member whose family is line-dependent, so not in the static [families]). */

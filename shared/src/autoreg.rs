@@ -16,12 +16,6 @@ use crate::schema::{
     ReadinessSignal, Recommended, SafetyTier,
 };
 
-/// Build a `Recommended<Adjustment>` from a registry claim id (must exist).
-fn recommend(value: Adjustment, claim_id: &str) -> Recommended<Adjustment> {
-    let e = evidence::claim(claim_id).expect("known claim");
-    Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
-}
-
 /// Latest observation for a signal, if present (deterministic: max `observed_at`).
 fn latest_input(inputs: &[ReadinessInput], signal: ReadinessSignal) -> Option<&ReadinessInput> {
     inputs
@@ -124,41 +118,37 @@ fn pain_gate(inputs: &[ReadinessInput]) -> PainGate {
     }
     let Some(detail) = &input.pain else {
         // Generic pain report, conservative hard stop (autoreg-043).
-        return PainGate::Block(recommend(Adjustment::Stop, "SAFE-PAIN-001"));
+        return PainGate::Block(evidence::graded(Adjustment::Stop, "SAFE-PAIN-001"));
     };
     match detail.kind {
         // Possible structural injury (safety-038): STOP; DEFER if it persists.
         PainKind::SharpJoint => {
             if detail.persists {
-                PainGate::Block(recommend(
-                    Adjustment::Defer {
-                        reason: with_location("Persistent sharp/joint-line pain - stop that exercise and defer to a physician/physiotherapist.".into(), detail),
-                    },
-                    "SAFE-PAIN-STRUCT-001",
-                ))
+                PainGate::Block(evidence::graded(Adjustment::Defer {
+                    reason: with_location("Persistent sharp/joint-line pain. Stop that exercise and defer to a physician/physiotherapist.".into(), detail),
+                },
+                "SAFE-PAIN-STRUCT-001",))
             } else {
-                PainGate::Block(recommend(Adjustment::Stop, "SAFE-PAIN-STRUCT-001"))
+                PainGate::Block(evidence::graded(Adjustment::Stop, "SAFE-PAIN-STRUCT-001"))
             }
         }
         // Tendon pain graded per Silbernagel (safety-039).
         PainKind::TendonLoadRelated => {
             if tendon_reactive(detail) {
                 if detail.persists {
-                    PainGate::Block(recommend(
-                        Adjustment::Defer {
-                            reason: with_location("Reactive tendon pain persisting despite reduced load - defer to a physician/physiotherapist.".into(), detail),
-                        },
-                        "SAFE-TENDON-001",
-                    ))
+                    PainGate::Block(evidence::graded(Adjustment::Defer {
+                        reason: with_location("Reactive tendon pain persisting despite reduced load. Defer to a physician/physiotherapist.".into(), detail),
+                    },
+                    "SAFE-TENDON-001",))
                 } else {
                     // REDUCE load & compressive positions: an easier session,
                     // not a stop (the KB states no reduction percentage).
-                    PainGate::Adjust(recommend(Adjustment::DowngradeSession, "SAFE-TENDON-001"))
+                    PainGate::Adjust(evidence::graded(Adjustment::DowngradeSession, "SAFE-TENDON-001"))
                 }
             } else {
                 // Tolerable band: modify/continue with monitoring; avoid
                 // complete rest.
-                PainGate::Adjust(recommend(Adjustment::ModifyAndMonitor, "SAFE-TENDON-001"))
+                PainGate::Adjust(evidence::graded(Adjustment::ModifyAndMonitor, "SAFE-TENDON-001"))
             }
         }
         // Normal training discomfort → continue (see deferral note above).
@@ -166,14 +156,12 @@ fn pain_gate(inputs: &[ReadinessInput]) -> PainGate {
         // Uncharacterized → conservative hard stop; DEFER once persistent.
         PainKind::Other => {
             if detail.persists {
-                PainGate::Block(recommend(
-                    Adjustment::Defer {
-                        reason: with_location("Persistent uncharacterized pain - stop and defer to a professional for assessment.".into(), detail),
-                    },
-                    "SAFE-PAIN-001",
-                ))
+                PainGate::Block(evidence::graded(Adjustment::Defer {
+                    reason: with_location("Persistent uncharacterized pain. Stop and defer to a professional for assessment.".into(), detail),
+                },
+                "SAFE-PAIN-001",))
             } else {
-                PainGate::Block(recommend(Adjustment::Stop, "SAFE-PAIN-001"))
+                PainGate::Block(evidence::graded(Adjustment::Stop, "SAFE-PAIN-001"))
             }
         }
     }
@@ -194,9 +182,10 @@ fn illness_downgrade(inputs: &[ReadinessInput]) -> bool {
 }
 
 /// True when morning RHR is ≥ +10 bpm over baseline: rest / neck-check.
-/// autoreg-041: RHR > baseline + 10 bpm (safety_critical) → `Adjustment::RestDay`.
+/// autoreg-041: fires AT +10 (deliberate >=, conservative reading of
+/// autoreg-041's ">"); safety_critical → `Adjustment::RestDay`.
 fn rhr_stop(inputs: &[ReadinessInput]) -> bool {
-    latest(inputs, ReadinessSignal::RestingHr).is_some_and(|v| v >= 10.0)
+    latest(inputs, ReadinessSignal::RestingHr).is_some_and(|v| v >= RHR_STOP_BPM)
 }
 
 // ---------------------------------------------------------------------------
@@ -226,26 +215,20 @@ fn bone_stress_defer(inputs: &[ReadinessInput]) -> bool {
 /// Returns the `Recommended<Adjustment::Defer>` cited to its safety claim.
 fn medical_referral(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     if cardiac_defer(inputs) {
-        Some(recommend(
-            Adjustment::Defer {
-                reason: "Cardiovascular red-flag symptom - stop and seek medical clearance before training.".into(),
-            },
-            "SAFE-CVD-001",
-        ))
+        Some(evidence::graded(Adjustment::Defer {
+            reason: "Cardiovascular red-flag symptom. Stop and seek medical clearance before training.".into(),
+        },
+        "SAFE-CVD-001",))
     } else if bone_stress_defer(inputs) {
-        Some(recommend(
-            Adjustment::Defer {
-                reason: "Bone stress injury signs - stop impact loading immediately and seek urgent medical evaluation.".into(),
-            },
-            "SAFE-BSI-001",
-        ))
+        Some(evidence::graded(Adjustment::Defer {
+            reason: "Bone stress injury signs. Stop impact loading immediately and seek urgent medical evaluation.".into(),
+        },
+        "SAFE-BSI-001",))
     } else if reds_defer(inputs) {
-        Some(recommend(
-            Adjustment::Defer {
-                reason: "Low-energy-availability / RED-S red flag - reduce training stress and defer to a physician, registered dietitian, or mental-health professional.".into(),
-            },
-            "SAFE-REDS-001",
-        ))
+        Some(evidence::graded(Adjustment::Defer {
+            reason: "Low-energy-availability / RED-S red flag. Reduce training stress and defer to a physician, registered dietitian, or mental-health professional.".into(),
+        },
+        "SAFE-REDS-001",))
     } else {
         None
     }
@@ -255,6 +238,45 @@ fn medical_referral(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>
 // Rule-family helpers (thresholds verbatim from File 06)
 // ---------------------------------------------------------------------------
 
+// Threshold constants: the SINGLE SOURCE OF TRUTH for every numeric band in
+// this module. Both the adjustment rules AND `signal_states` (the displayed
+// "why") read these named constants, so an applied adjustment and the text
+// that explains it can never silently desync. Values are verbatim
+// from File 06; changing a value here moves the rule and its explanation
+// together. Do not re-inline these literals on either side.
+
+/// RPE delta (actual − target) bands (autoreg-001/002/004/005).
+const RPE_DELTA_WELL_ABOVE: f64 = 2.0;
+const RPE_DELTA_ABOVE: f64 = 1.0;
+const RPE_DELTA_WELL_BELOW: f64 = -2.0;
+const RPE_DELTA_BELOW: f64 = -1.0;
+
+/// e1RM ratio (today ÷ baseline) gates (autoreg-022/006/007).
+const E1RM_DELOAD_RATIO: f64 = 0.90;
+const E1RM_DELOAD_STREAK: u8 = 2;
+const E1RM_REDUCE_RATIO: f64 = 0.95;
+const E1RM_INCREASE_RATIO: f64 = 1.05;
+
+/// Subjective-wellness composite z-score bands (autoreg-030 + §5 tier 4).
+const WELLNESS_SINGLE_DAY_Z: f64 = -1.5;
+const WELLNESS_MULTIDAY_Z: f64 = -1.0;
+const WELLNESS_MULTIDAY_STREAK: u8 = 3;
+
+/// HRV lnRMSSD z-score SWC band, ± around rolling baseline (autoreg-028/029).
+const HRV_SWC_LOWER_Z: f64 = -0.5;
+const HRV_SWC_UPPER_Z: f64 = 0.5;
+
+/// Resting-HR elevation bands, bpm above baseline (autoreg-040/041).
+const RHR_STOP_BPM: f64 = 10.0;
+const RHR_DOWNGRADE_FLOOR_BPM: f64 = 5.0;
+const RHR_DOWNGRADE_STREAK: u8 = 2;
+
+/// Soreness-item downgrade floor on the 7-point scale (autoreg-030).
+const SORENESS_HIGH: f64 = 6.0;
+
+/// Aerobic-decoupling downgrade ceiling, % efficiency drift (autoreg-037).
+const DECOUPLING_HIGH_PCT: f64 = 10.0;
+
 /// RPE-based load adjustment from first work-set RPE vs. target.
 /// autoreg-001: RPE ≥ target + 2 → −7 to 10% (uses 10% ceiling of the band).
 /// autoreg-002: RPE = target + 1 → −3 to 5% (uses 5%).
@@ -263,23 +285,17 @@ fn medical_referral(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>
 /// `value` is the signed RPE delta (actual − target).
 fn rpe_load_adjust(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let delta = latest(inputs, ReadinessSignal::Rpe)?;
-    if delta >= 2.0 {
-        Some(recommend(
-            Adjustment::ReduceLoadPct(10.0),
-            "AUTOREG-RIR-001",
-        ))
-    } else if delta >= 1.0 {
-        Some(recommend(Adjustment::ReduceLoadPct(5.0), "AUTOREG-RIR-001"))
-    } else if delta <= -2.0 {
-        Some(recommend(
-            Adjustment::IncreaseLoadPct(7.5),
-            "AUTOREG-RIR-001",
-        ))
-    } else if delta <= -1.0 {
-        Some(recommend(
-            Adjustment::IncreaseLoadPct(4.0),
-            "AUTOREG-RIR-001",
-        ))
+    if delta >= RPE_DELTA_WELL_ABOVE {
+        Some(evidence::graded(Adjustment::ReduceLoadPct(10.0),
+        "AUTOREG-RIR-001",))
+    } else if delta >= RPE_DELTA_ABOVE {
+        Some(evidence::graded(Adjustment::ReduceLoadPct(5.0), "AUTOREG-RIR-001"))
+    } else if delta <= RPE_DELTA_WELL_BELOW {
+        Some(evidence::graded(Adjustment::IncreaseLoadPct(7.5),
+        "AUTOREG-RIR-001",))
+    } else if delta <= RPE_DELTA_BELOW {
+        Some(evidence::graded(Adjustment::IncreaseLoadPct(4.0),
+        "AUTOREG-RIR-001",))
     } else {
         None
     }
@@ -300,8 +316,8 @@ fn e1rm_gate(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
         return Vec::new();
     };
     let ratio = input.value;
-    if ratio < 0.90 && input.streak >= 2 {
-        vec![recommend(
+    if ratio < E1RM_DELOAD_RATIO && input.streak >= E1RM_DELOAD_STREAK {
+        vec![evidence::graded(
             Adjustment::Deload {
                 volume_reduction_pct: 45.0,
                 load_reduction_pct: 7.5,
@@ -309,18 +325,18 @@ fn e1rm_gate(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
             },
             "AUTOREG-PCT-001",
         )]
-    } else if ratio < 0.95 {
+    } else if ratio < E1RM_REDUCE_RATIO {
         // Includes a single-session >10% drop: File 06 §5 conflict table -
         // "performance down >10% → trust performance → reduce load" (one
         // session reduces; only the ≥2-session streak deloads). autoreg-006's
         // second clause caps today's session at planned RPE − 1 alongside the
         // ~5% top-set cut.
         vec![
-            recommend(Adjustment::ReduceLoadPct(5.0), "AUTOREG-E1RM-GATE-001"),
-            recommend(Adjustment::CapRpe(1.0), "AUTOREG-E1RM-GATE-001"),
+            evidence::graded(Adjustment::ReduceLoadPct(5.0), "AUTOREG-E1RM-GATE-001"),
+            evidence::graded(Adjustment::CapRpe(1.0), "AUTOREG-E1RM-GATE-001"),
         ]
-    } else if ratio > 1.05 {
-        vec![recommend(
+    } else if ratio > E1RM_INCREASE_RATIO {
+        vec![evidence::graded(
             Adjustment::IncreaseLoadPct(3.5),
             "AUTOREG-PCT-001",
         )]
@@ -349,7 +365,7 @@ fn vl_threshold_pct(goal: Option<&Goal>) -> f64 {
 fn vl_stop(inputs: &[ReadinessInput], goal: Option<&Goal>) -> Option<Recommended<Adjustment>> {
     let vl = latest(inputs, ReadinessSignal::VelocityLoss)?;
     if vl >= vl_threshold_pct(goal) {
-        Some(recommend(Adjustment::DowngradeSession, "AUTOREG-VL-001"))
+        Some(evidence::graded(Adjustment::DowngradeSession, "AUTOREG-VL-001"))
     } else {
         None
     }
@@ -361,8 +377,8 @@ fn vl_stop(inputs: &[ReadinessInput], goal: Option<&Goal>) -> Option<Recommended
 /// lower band (baseline ± 0.5 SD).
 fn hrv_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let z = latest(inputs, ReadinessSignal::HrvLnRmssd)?;
-    if z < -0.5 {
-        Some(recommend(Adjustment::DowngradeSession, "HRV-001"))
+    if z < HRV_SWC_LOWER_Z {
+        Some(evidence::graded(Adjustment::DowngradeSession, "HRV-001"))
     } else {
         None
     }
@@ -375,8 +391,10 @@ fn hrv_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
 /// (conflict table). `WellnessZ` carries the individual composite z-score.
 fn wellness_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let input = latest_input(inputs, ReadinessSignal::WellnessZ)?;
-    if input.value <= -1.5 || (input.value <= -1.0 && input.streak >= 3) {
-        Some(recommend(Adjustment::DowngradeSession, "WELLNESS-001"))
+    if input.value <= WELLNESS_SINGLE_DAY_Z
+        || (input.value <= WELLNESS_MULTIDAY_Z && input.streak >= WELLNESS_MULTIDAY_STREAK)
+    {
+        Some(evidence::graded(Adjustment::DowngradeSession, "WELLNESS-001"))
     } else {
         None
     }
@@ -387,7 +405,7 @@ fn wellness_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustmen
 /// stays an intensity downgrade without raising that tier.
 fn wellness_multiday(inputs: &[ReadinessInput]) -> bool {
     latest_input(inputs, ReadinessSignal::WellnessZ)
-        .is_some_and(|i| i.value <= -1.0 && i.streak >= 3)
+        .is_some_and(|i| i.value <= WELLNESS_MULTIDAY_Z && i.streak >= WELLNESS_MULTIDAY_STREAK)
 }
 
 /// Wellness soreness-item downgrade (autoreg-030 second clause): a single
@@ -397,8 +415,8 @@ fn wellness_multiday(inputs: &[ReadinessInput]) -> bool {
 /// the sore muscle's high-eccentric work").
 fn soreness_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let v = latest(inputs, ReadinessSignal::Soreness)?;
-    if v >= 6.0 {
-        Some(recommend(Adjustment::DowngradeSession, "WELLNESS-001"))
+    if v >= SORENESS_HIGH {
+        Some(evidence::graded(Adjustment::DowngradeSession, "WELLNESS-001"))
     } else {
         None
     }
@@ -413,8 +431,10 @@ fn soreness_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustmen
 /// convention, not the Strong OTS deferral).
 fn rhr_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let input = latest_input(inputs, ReadinessSignal::RestingHr)?;
-    if (5.0..10.0).contains(&input.value) && input.streak >= 2 {
-        Some(recommend(Adjustment::DowngradeSession, "AUTOREG-RHR-DOWN-001"))
+    if (RHR_DOWNGRADE_FLOOR_BPM..RHR_STOP_BPM).contains(&input.value)
+        && input.streak >= RHR_DOWNGRADE_STREAK
+    {
+        Some(evidence::graded(Adjustment::DowngradeSession, "AUTOREG-RHR-DOWN-001"))
     } else {
         None
     }
@@ -429,19 +449,19 @@ pub const DECOUPLING_MIN_EFFORT_MIN: f64 = 20.0;
 /// `AerobicDecoupling` carries the % efficiency drift.
 ///
 /// Validity gate (File 06 signal spec): decoupling is valid only for efforts
-/// >20 min, an observation whose `effort_min` is at or under the floor is
-/// discarded, never acted on. `effort_min == None` (duration untracked, the
-/// wire default) keeps the pre-existing behavior.
+/// >20 min. The downgrade fires only when duration is KNOWN valid; an
+/// observation whose `effort_min` is at/under the floor OR `None` (duration
+/// untracked, the wire default) is discarded, never acted on.
 fn decoupling_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
     let input = latest_input(inputs, ReadinessSignal::AerobicDecoupling)?;
-    if input
+    if !input
         .effort_min
-        .is_some_and(|d| d <= DECOUPLING_MIN_EFFORT_MIN)
+        .is_some_and(|d| d > DECOUPLING_MIN_EFFORT_MIN)
     {
         return None;
     }
-    if input.value > 10.0 {
-        Some(recommend(Adjustment::DowngradeSession, "RUN-DECOUPLE-001"))
+    if input.value > DECOUPLING_HIGH_PCT {
+        Some(evidence::graded(Adjustment::DowngradeSession, "RUN-DECOUPLE-001"))
     } else {
         None
     }
@@ -572,6 +592,7 @@ pub fn adjustments_with_context(
         PainGate::Adjust(r) => pain_adjust = Some(r),
         PainGate::Continue | PainGate::None => {}
     }
+    let pain_is_adjust = pain_adjust.is_some();
     // LOW (label consistency): a non-blocking pain response (PainGate::Adjust)
     // raises `SafetyTier::Pain` (:486-489, Pain outranks Illness), so it must
     // also appear in the output, otherwise the headline would cite illness/RHR
@@ -580,18 +601,31 @@ pub fn adjustments_with_context(
     if illness_stop(inputs) {
         let mut out = Vec::new();
         out.extend(pain_adjust.take());
-        out.push(recommend(Adjustment::Stop, "ILLNESS-NECK-001"));
+        out.push(evidence::graded(Adjustment::Stop, "ILLNESS-NECK-001"));
         return out;
     }
     if rhr_stop(inputs) {
         let mut out = Vec::new();
         out.extend(pain_adjust.take());
-        out.push(recommend(Adjustment::RestDay, "AUTOREG-RHR-STOP-001"));
+        out.push(evidence::graded(Adjustment::RestDay, "AUTOREG-RHR-STOP-001"));
         return out;
     }
 
     // Non-stop rules accumulate (deterministic order). A non-blocking pain
     // response (tendon modify/reduce, Table 4.1) leads the list.
+    //
+    // P2: each gate below is consumed twice, once to build `out`, once in the
+    // suppression/objective-decline booleans. Evaluate each once here (pure
+    // functions, so this is behavior-identical) and reuse the bindings.
+    let e1rm = e1rm_gate(inputs);
+    let vl = vl_stop(inputs, goal);
+    let hrv = hrv_downgrade(inputs);
+    let wellness = wellness_downgrade(inputs);
+    let soreness = soreness_downgrade(inputs);
+    let illness_down = illness_downgrade(inputs);
+    let rhr = rhr_downgrade(inputs);
+    let decoupling = decoupling_downgrade(inputs);
+
     let mut out = Vec::new();
     if let Some(r) = pain_adjust {
         out.push(r);
@@ -599,27 +633,27 @@ pub fn adjustments_with_context(
     if let Some(r) = rpe_load_adjust(inputs) {
         out.push(r);
     }
-    out.extend(e1rm_gate(inputs));
-    if let Some(r) = vl_stop(inputs, goal) {
+    out.extend(e1rm.iter().cloned());
+    if let Some(r) = vl.clone() {
         out.push(r);
     }
-    if let Some(r) = hrv_downgrade(inputs) {
+    if let Some(r) = hrv.clone() {
         out.push(r);
     }
-    if let Some(r) = wellness_downgrade(inputs) {
+    if let Some(r) = wellness.clone() {
         out.push(r);
     }
-    if let Some(r) = soreness_downgrade(inputs) {
+    if let Some(r) = soreness.clone() {
         out.push(r);
     }
-    if illness_downgrade(inputs) {
+    if illness_down {
         // autoreg-045: above-neck only → cut intensity ~50% (downgrade).
-        out.push(recommend(Adjustment::DowngradeSession, "ILLNESS-NECK-001"));
+        out.push(evidence::graded(Adjustment::DowngradeSession, "ILLNESS-NECK-001"));
     }
-    if let Some(r) = rhr_downgrade(inputs) {
+    if let Some(r) = rhr.clone() {
         out.push(r);
     }
-    if let Some(r) = decoupling_downgrade(inputs) {
+    if let Some(r) = decoupling.clone() {
         out.push(r);
     }
 
@@ -629,19 +663,19 @@ pub fn adjustments_with_context(
     // single-day flag: §5 conflict table "proceed, cap top-end, do NOT add
     // load"), soreness item, HRV below SWC, or corroborated elevated RHR -
     // strips every IncreaseLoadPct from the output.
-    // A2 (wrong-safety, HARD RULE 3): a load increase must never survive an
+    // Wrong-safety (HARD RULE 3): a load increase must never survive an
     // active pain or above-neck illness report. A non-blocking pain response
     // (PainGate::Adjust, tolerable tendon pain, Table 4.1) and an above-neck
     // illness downgrade (autoreg-045) are recovery-suppression signals too, so
     // they join the wellness/HRV/soreness/RHR set that strips IncreaseLoadPct.
-    let suppressed = hrv_downgrade(inputs).is_some()
-        || wellness_downgrade(inputs).is_some()
-        || latest(inputs, ReadinessSignal::WellnessZ).is_some_and(|z| z <= -1.0)
-        || soreness_downgrade(inputs).is_some()
-        || rhr_downgrade(inputs).is_some()
-        || matches!(pain_gate(inputs), PainGate::Adjust(_))
-        || illness_downgrade(inputs);
-    // H2 (safety-adjacent, autoreg-044): the guardrail's own doc says "when
+    let suppressed = hrv.is_some()
+        || wellness.is_some()
+        || latest(inputs, ReadinessSignal::WellnessZ).is_some_and(|z| z <= WELLNESS_MULTIDAY_Z)
+        || soreness.is_some()
+        || rhr.is_some()
+        || pain_is_adjust
+        || illness_down;
+    // Safety-adjacent (autoreg-044): the guardrail's own doc says "when
     // performance is DOWN and/or wellness is suppressed, never auto-increase".
     // The `suppressed` set above only covered the wellness/recovery half: the
     // objective-performance half was missing, so a low first-set RPE could add
@@ -651,9 +685,9 @@ pub fn adjustments_with_context(
     // (autoreg-006/022), or an aerobic-decoupling downgrade (autoreg-037) -
     // now strips IncreaseLoadPct too. (An e1RM *increase*, ratio > 1.05, is not
     // a decline and does not suppress, mirrors the tier-3 test at :501-507.)
-    let objective_perf_down = vl_stop(inputs, goal).is_some()
-        || decoupling_downgrade(inputs).is_some()
-        || e1rm_gate(inputs).iter().any(|r| {
+    let objective_perf_down = vl.is_some()
+        || decoupling.is_some()
+        || e1rm.iter().any(|r| {
             matches!(
                 r.value,
                 Adjustment::Deload { .. } | Adjustment::ReduceLoadPct(_)
@@ -703,7 +737,7 @@ pub fn vbt_daily_readiness(mcv_delta_m_s: f64) -> Recommended<VbtReadiness> {
     } else {
         VbtReadiness::Hold
     };
-    recommend_t(v, "AUTOREG-VBT-001")
+    evidence::graded(v, "AUTOREG-VBT-001")
 }
 
 /// Within-session set-volume decision (File 06 autoreg-011/012).
@@ -732,7 +766,7 @@ pub fn set_volume_action(
     } else {
         SetVolumeAction::HoldPlanned
     };
-    recommend_t(a, "AUTOREG-RIR-001")
+    evidence::graded(a, "AUTOREG-RIR-001")
 }
 
 /// RPE-stop: cut remaining sets once the target RPE is reached before the
@@ -794,7 +828,7 @@ pub fn apre_load_adjustment_lb(scheme: ApreScheme, reps: u8) -> Recommended<(f64
             _ => (10.0, 15.0),
         },
     };
-    recommend_t(range, "AUTOREG-APRE-001")
+    evidence::graded(range, "AUTOREG-APRE-001")
 }
 
 /// The standard RP-framework 1-week deload used by the multi-session triggers
@@ -810,7 +844,7 @@ fn standard_deload() -> Adjustment {
 /// Deload when planned RPE is only hit at loads ≥7% below plan for ≥2 sessions
 /// (File 06 autoreg-023). `None` when the trigger has not fired.
 pub fn deload_from_rpe_load_gap(sessions_ge_7pct_below: u8) -> Option<Recommended<Adjustment>> {
-    (sessions_ge_7pct_below >= 2).then(|| recommend(standard_deload(), "AUTOREG-PCT-001"))
+    (sessions_ge_7pct_below >= 2).then(|| evidence::graded(standard_deload(), "AUTOREG-PCT-001"))
 }
 
 /// Deload when session RPE creeps +1 across the week at the same loads AND the
@@ -820,13 +854,13 @@ pub fn deload_from_rpe_creep_and_wellness(
     wellness_z_le_neg1_days: u8,
 ) -> Option<Recommended<Adjustment>> {
     (rpe_creep_plus_one && wellness_z_le_neg1_days >= 3)
-        .then(|| recommend(standard_deload(), "AUTOREG-PCT-001"))
+        .then(|| evidence::graded(standard_deload(), "AUTOREG-PCT-001"))
 }
 
 /// Deload when reference-load velocity is down >0.06 m/s across the week
 /// (File 06 autoreg-026). Uses the lower bound of the 0.06–0.10 m/s band.
 pub fn deload_from_velocity_drop(weekly_mcv_drop_m_s: f64) -> Option<Recommended<Adjustment>> {
-    (weekly_mcv_drop_m_s > 0.06).then(|| recommend(standard_deload(), "AUTOREG-PCT-001"))
+    (weekly_mcv_drop_m_s > 0.06).then(|| evidence::graded(standard_deload(), "AUTOREG-PCT-001"))
 }
 
 /// Reduce weekly volume 20–30% (defer hard work) after two failed key sessions
@@ -834,14 +868,12 @@ pub fn deload_from_velocity_drop(weekly_mcv_drop_m_s: f64) -> Option<Recommended
 /// (25% midpoint).
 pub fn deload_from_failed_sessions(failed_key_sessions: u8) -> Option<Recommended<Adjustment>> {
     (failed_key_sessions >= 2).then(|| {
-        recommend(
-            Adjustment::Deload {
-                volume_reduction_pct: 25.0,
-                load_reduction_pct: 0.0,
-                weeks: 1,
-            },
-            "AUTOREG-PCT-001",
-        )
+        evidence::graded(Adjustment::Deload {
+            volume_reduction_pct: 25.0,
+            load_reduction_pct: 0.0,
+            weeks: 1,
+        },
+        "AUTOREG-PCT-001",)
     })
 }
 
@@ -851,7 +883,7 @@ pub fn deload_from_failed_sessions(failed_key_sessions: u8) -> Option<Recommende
 pub fn interval_pace_autoreg(reps_over_target: u8) -> Option<Recommended<f64>> {
     // D3: cite the autoreg-031 interval-pace rule itself, not RUN-VDOT-001 (the
     // VDOT *estimator* claim, unrelated to this within-session pace autoreg).
-    (reps_over_target >= 2).then(|| recommend_t(0.03, "AUTOREG-INTERVAL-PACE-001"))
+    (reps_over_target >= 2).then(|| evidence::graded(0.03, "AUTOREG-INTERVAL-PACE-001"))
 }
 
 /// Easy-day pace is governed by the HR cap, not pace (File 06 autoreg-033):
@@ -859,7 +891,7 @@ pub fn interval_pace_autoreg(reps_over_target: u8) -> Option<Recommended<f64>> {
 /// the pace. `true` = slow the easy pace.
 pub fn slow_easy_pace_if_over_cap(can_hold_pace_under_cap: bool) -> Recommended<bool> {
     // D3: cite the autoreg-033 easy-day HR-cap rule, not RUN-VDOT-001.
-    recommend_t(!can_hold_pace_under_cap, "AUTOREG-EASY-CAP-001")
+    evidence::graded(!can_hold_pace_under_cap, "AUTOREG-EASY-CAP-001")
 }
 
 /// Which signal source drives autoregulation given data availability
@@ -892,7 +924,7 @@ pub fn autoreg_source(
     } else {
         AutoregSource::PerformanceOnlyHold
     };
-    recommend_t(s, "AUTOREG-FALLBACK-001")
+    evidence::graded(s, "AUTOREG-FALLBACK-001")
 }
 
 /// Whether an HRV reading is reliable (File 06 autoreg-049): reject on high
@@ -919,7 +951,7 @@ pub fn suspend_hrv_gating(unreliable_in_last_three: u8) -> bool {
 /// below the SWC band) warrants inserting a recovery day / easy block, beyond the
 /// single-day downgrade in [`hrv_downgrade`]. Fires at ≥3 days. HRV-001.
 pub fn hrv_suppressed_recovery_day(consecutive_suppressed_days: u8) -> Recommended<bool> {
-    recommend_t(consecutive_suppressed_days >= 3, "HRV-001")
+    evidence::graded(consecutive_suppressed_days >= 3, "HRV-001")
 }
 
 /// autoreg-035: multi-day suppressed wellness combined with a rising resting HR
@@ -930,7 +962,7 @@ pub fn wellness_rhr_multiday_easy(
     wellness_suppressed_days: u8,
     rhr_rising: bool,
 ) -> Recommended<bool> {
-    recommend_t(wellness_suppressed_days >= 2 && rhr_rising, "AUTOREG-WELLNESS-RHR-001")
+    evidence::graded(wellness_suppressed_days >= 2 && rhr_rising, "AUTOREG-WELLNESS-RHR-001")
 }
 
 /// autoreg-029: parasympathetic-saturation guard. `true` = do NOT auto-add
@@ -939,7 +971,7 @@ pub fn wellness_rhr_multiday_easy(
 /// high-load block*, unusually high HRV under heavy loading can be
 /// saturation, not readiness. AUTOREG-HRV-SAT-001 (Moderate, Plews).
 pub fn hrv_saturation_hold(hrv_z: f64, high_load_block: bool) -> Recommended<bool> {
-    recommend_t(high_load_block && hrv_z > 0.5, "AUTOREG-HRV-SAT-001")
+    evidence::graded(high_load_block && hrv_z > HRV_SWC_UPPER_Z, "AUTOREG-HRV-SAT-001")
 }
 
 /// autoreg-028 second trigger: a SINGLE-DAY lnRMSSD reading more than 1 SD
@@ -952,7 +984,7 @@ pub fn hrv_single_day_downgrade(
     downtrend_days: u8,
 ) -> Option<Recommended<Adjustment>> {
     (single_day_z < -1.0 && downtrend_days >= 2)
-        .then(|| recommend(Adjustment::DowngradeSession, "HRV-001"))
+        .then(|| evidence::graded(Adjustment::DowngradeSession, "HRV-001"))
 }
 
 /// autoreg-025: the at/above-MRV sign cluster (joint aches, performance stall,
@@ -962,7 +994,7 @@ pub fn hrv_single_day_downgrade(
 /// magnitude per the rule's RP-framework mapping: volume −50%, load −10%,
 /// 1 week. AUTOREG-MRV-001 (ExpertOpinion, Israetel et al. 2021).
 pub fn mrv_signs_deload(sign_cluster_present: bool) -> Option<Recommended<Adjustment>> {
-    sign_cluster_present.then(|| recommend(standard_deload(), "AUTOREG-MRV-001"))
+    sign_cluster_present.then(|| evidence::graded(standard_deload(), "AUTOREG-MRV-001"))
 }
 
 /// APRE next-load adjustment with the autoreg-019 small-lifter cap applied.
@@ -983,11 +1015,11 @@ pub fn apre_load_adjustment_capped_lb(
     current_load_lb: f64,
 ) -> Recommended<(f64, f64)> {
     let (lo, hi) = apre_load_adjustment_lb(scheme, reps).value;
-    // B7: a non-positive current load has no meaningful proportional cap -
+    // A non-positive current load has no meaningful proportional cap:
     // `current_load_lb × band/100` would flip a positive jump negative (a
     // fabricated load *cut*). Reject it: fall back to the uncapped KB flat band.
     if !(current_load_lb > 0.0) {
-        return recommend_t((lo, hi), "AUTOREG-APRE-001");
+        return evidence::graded((lo, hi), "AUTOREG-APRE-001");
     }
     let cap = |bound_lb: f64| -> f64 {
         if bound_lb > 0.0 {
@@ -996,7 +1028,7 @@ pub fn apre_load_adjustment_capped_lb(
             bound_lb
         }
     };
-    recommend_t((cap(lo), cap(hi)), "AUTOREG-APRE-001")
+    evidence::graded((cap(lo), cap(hi)), "AUTOREG-APRE-001")
 }
 
 /// autoreg-032: pace at target HR improved by at least a smallest-worthwhile
@@ -1005,10 +1037,8 @@ pub fn apre_load_adjustment_capped_lb(
 /// the caller judges "improved ≥ SWC"; the ≥2-week duration bound is the
 /// stated number. AUTOREG-PACE-RETEST-001 (Moderate, File 06 §3B).
 pub fn threshold_retest_due(improved_ge_swc: bool, weeks_sustained: u8) -> Recommended<bool> {
-    recommend_t(
-        improved_ge_swc && weeks_sustained >= 2,
-        "AUTOREG-PACE-RETEST-001",
-    )
+    evidence::graded(improved_ge_swc && weeks_sustained >= 2,
+    "AUTOREG-PACE-RETEST-001",)
 }
 
 // ---------------------------------------------------------------------------
@@ -1037,15 +1067,15 @@ pub enum OvertrainingState {
 pub fn overtraining_response(state: OvertrainingState) -> Vec<Recommended<Adjustment>> {
     match state {
         OvertrainingState::FunctionalOverreach => {
-            vec![recommend(Adjustment::RestDay, "SAFE-OTS-001")]
+            vec![evidence::graded(Adjustment::RestDay, "SAFE-OTS-001")]
         }
         OvertrainingState::NonFunctionalOverreach => vec![
-            recommend(Adjustment::DowngradeSession, "SAFE-OTS-001"),
-            recommend(Adjustment::RestDay, "SAFE-OTS-001"),
+            evidence::graded(Adjustment::DowngradeSession, "SAFE-OTS-001"),
+            evidence::graded(Adjustment::RestDay, "SAFE-OTS-001"),
         ],
-        OvertrainingState::OvertrainingSyndrome => vec![recommend(
+        OvertrainingState::OvertrainingSyndrome => vec![evidence::graded(
             Adjustment::Defer {
-                reason: "Suspected overtraining syndrome - stop structured training and defer to a physician (diagnosis by exclusion; no reliable biomarker)."
+                reason: "Suspected overtraining syndrome. Stop structured training and defer to a physician (diagnosis by exclusion; no reliable biomarker)."
                     .into(),
             },
             "SAFE-OTS-001",
@@ -1063,13 +1093,11 @@ pub fn unexplained_decline_rest_defer(
     despite_deload: bool,
 ) -> Option<Recommended<Adjustment>> {
     (decline_weeks >= 2 && wellness_disturbed && despite_deload).then(|| {
-        recommend(
-            Adjustment::Defer {
-                reason: "≥2 weeks of unexplained performance decline with fatigue/mood/sleep disturbance despite a deload - rest and defer to a professional to rule out NFOR/OTS/RED-S or a medical cause."
-                    .into(),
-            },
-            "SAFE-OTS-001",
-        )
+        evidence::graded(Adjustment::Defer {
+            reason: "≥2 weeks of unexplained performance decline with fatigue/mood/sleep disturbance despite a deload. Rest and defer to a professional to rule out NFOR/OTS/RED-S or a medical cause."
+                .into(),
+        },
+        "SAFE-OTS-001",)
     })
 }
 
@@ -1083,20 +1111,12 @@ pub fn nfor_cluster_defer(
     suppressed_wellness_domains: u8,
 ) -> Option<Recommended<Adjustment>> {
     (decrement_weeks >= 2 && suppressed_wellness_domains >= 2).then(|| {
-        recommend(
-            Adjustment::Defer {
-                reason: "Possible non-functional overreaching: ≥2 weeks of unexplained performance decrement with ≥2 wellness domains suppressed - take a mandatory recovery block and consult a professional if it persists."
-                    .into(),
-            },
-            "AUTOREG-NFOR-001",
-        )
+        evidence::graded(Adjustment::Defer {
+            reason: "Possible non-functional overreaching: ≥2 weeks of unexplained performance decrement with ≥2 wellness domains suppressed. Take a mandatory recovery block and consult a professional if it persists."
+                .into(),
+        },
+        "AUTOREG-NFOR-001",)
     })
-}
-
-/// Generic `Recommended<T>` constructor for the scalar-input helpers above.
-fn recommend_t<T>(value: T, claim_id: &str) -> Recommended<T> {
-    let e = evidence::claim(claim_id).expect("known claim");
-    Recommended::new(value, e.to_evidence(), e.to_confidence_tag())
 }
 
 // ---------------------------------------------------------------------------
@@ -1178,13 +1198,13 @@ pub fn signal_states(
         let (state, claim): (String, Option<&'static str>) = match signal {
             // autoreg-001/002/004/005: signed RPE delta vs target.
             ReadinessSignal::Rpe => {
-                let s = if v >= 2.0 {
+                let s = if v >= RPE_DELTA_WELL_ABOVE {
                     "well above target"
-                } else if v >= 1.0 {
+                } else if v >= RPE_DELTA_ABOVE {
                     "above target"
-                } else if v <= -2.0 {
+                } else if v <= RPE_DELTA_WELL_BELOW {
                     "well below target"
-                } else if v <= -1.0 {
+                } else if v <= RPE_DELTA_BELOW {
                     "below target"
                 } else {
                     "on target"
@@ -1193,11 +1213,11 @@ pub fn signal_states(
             }
             // autoreg-022/006/007: e1RM ratio vs baseline.
             ReadinessSignal::EstimatedOneRm => {
-                if v < 0.90 && streak >= 2 {
+                if v < E1RM_DELOAD_RATIO && streak >= E1RM_DELOAD_STREAK {
                     ("down >10% for 2+ sessions".into(), Some("AUTOREG-PCT-001"))
-                } else if v < 0.95 {
+                } else if v < E1RM_REDUCE_RATIO {
                     ("down".into(), Some("AUTOREG-E1RM-GATE-001"))
-                } else if v > 1.05 {
+                } else if v > E1RM_INCREASE_RATIO {
                     ("up".into(), Some("AUTOREG-PCT-001"))
                 } else {
                     ("stable".into(), Some("AUTOREG-E1RM-GATE-001"))
@@ -1215,9 +1235,11 @@ pub fn signal_states(
             }
             // autoreg-030 + §5 tier 4.
             ReadinessSignal::WellnessZ => {
-                if v <= -1.5 || (v <= -1.0 && streak >= 3) {
+                if v <= WELLNESS_SINGLE_DAY_Z
+                    || (v <= WELLNESS_MULTIDAY_Z && streak >= WELLNESS_MULTIDAY_STREAK)
+                {
                     ("suppressed".into(), Some("WELLNESS-001"))
-                } else if v <= -1.0 {
+                } else if v <= WELLNESS_MULTIDAY_Z {
                     ("low (single day)".into(), Some("WELLNESS-001"))
                 } else {
                     ("normal".into(), Some("WELLNESS-001"))
@@ -1225,41 +1247,41 @@ pub fn signal_states(
             }
             // autoreg-028 SWC band; autoreg-029 saturation in a high-load block.
             ReadinessSignal::HrvLnRmssd => {
-                if v < -0.5 {
+                if v < HRV_SWC_LOWER_Z {
                     ("suppressed".into(), Some("HRV-001"))
-                } else if v > 0.5 && high_load_block {
+                } else if v > HRV_SWC_UPPER_Z && high_load_block {
                     (
-                        "above band - hold load adds".into(),
+                        "above band: hold load adds".into(),
                         Some("AUTOREG-HRV-SAT-001"),
                     )
-                } else if v > 0.5 {
+                } else if v > HRV_SWC_UPPER_Z {
                     ("above band".into(), Some("HRV-001"))
                 } else {
                     ("in band".into(), Some("HRV-001"))
                 }
             }
             // autoreg-037, valid only for efforts >20 min (File 06 signal spec).
-            ReadinessSignal::AerobicDecoupling => {
-                if input
-                    .effort_min
-                    .is_some_and(|d| d <= DECOUPLING_MIN_EFFORT_MIN)
-                {
+            ReadinessSignal::AerobicDecoupling => match input.effort_min {
+                // Duration unknown → cannot validate (the downgrade path discards
+                // it too); never render 'high' for an unvalidatable reading.
+                None => ("not valid (duration unknown)".into(), Some("RUN-DECOUPLE-001")),
+                Some(d) if d <= DECOUPLING_MIN_EFFORT_MIN => {
                     ("not valid (effort ≤20 min)".into(), Some("RUN-DECOUPLE-001"))
-                } else if v > 10.0 {
-                    ("high".into(), Some("RUN-DECOUPLE-001"))
-                } else {
-                    ("normal".into(), Some("RUN-DECOUPLE-001"))
                 }
-            }
+                _ if v > DECOUPLING_HIGH_PCT => ("high".into(), Some("RUN-DECOUPLE-001")),
+                _ => ("normal".into(), Some("RUN-DECOUPLE-001")),
+            },
             // autoreg-041 stop / autoreg-040 two-day downgrade.
             ReadinessSignal::RestingHr => {
-                if v >= 10.0 {
-                    ("elevated +10 bpm - rest".into(), Some("AUTOREG-RHR-STOP-001"))
-                } else if (5.0..10.0).contains(&v) && streak >= 2 {
+                if v >= RHR_STOP_BPM {
+                    ("elevated +10 bpm: rest".into(), Some("AUTOREG-RHR-STOP-001"))
+                } else if (RHR_DOWNGRADE_FLOOR_BPM..RHR_STOP_BPM).contains(&v)
+                    && streak >= RHR_DOWNGRADE_STREAK
+                {
                     ("elevated 2+ days".into(), Some("AUTOREG-RHR-DOWN-001"))
-                } else if (5.0..10.0).contains(&v) {
+                } else if (RHR_DOWNGRADE_FLOOR_BPM..RHR_STOP_BPM).contains(&v) {
                     (
-                        "elevated (single day - likely noise)".into(),
+                        "elevated (single day, likely noise)".into(),
                         Some("AUTOREG-RHR-DOWN-001"),
                     )
                 } else {
@@ -1268,7 +1290,7 @@ pub fn signal_states(
             }
             // autoreg-030 second clause: soreness item ≥6/7.
             ReadinessSignal::Soreness => {
-                if v >= 6.0 {
+                if v >= SORENESS_HIGH {
                     ("high".into(), Some("WELLNESS-001"))
                 } else {
                     ("normal".into(), Some("WELLNESS-001"))
@@ -1280,46 +1302,46 @@ pub fn signal_states(
                     ("clear".into(), None)
                 } else {
                     match &input.pain {
-                        None => ("red flag - stop".into(), Some("SAFE-PAIN-001")),
+                        None => ("red flag: stop".into(), Some("SAFE-PAIN-001")),
                         Some(d) => match d.kind {
                             PainKind::SharpJoint => {
                                 if d.persists {
                                     (
-                                        "red flag - defer to a professional".into(),
+                                        "red flag: defer to a professional".into(),
                                         Some("SAFE-PAIN-STRUCT-001"),
                                     )
                                 } else {
-                                    ("red flag - stop".into(), Some("SAFE-PAIN-STRUCT-001"))
+                                    ("red flag: stop".into(), Some("SAFE-PAIN-STRUCT-001"))
                                 }
                             }
                             PainKind::TendonLoadRelated => {
                                 if tendon_reactive(d) {
                                     if d.persists {
                                         (
-                                            "reactive, persisting - defer".into(),
+                                            "reactive, persisting: defer".into(),
                                             Some("SAFE-TENDON-001"),
                                         )
                                     } else {
-                                        ("reactive - reduce load".into(), Some("SAFE-TENDON-001"))
+                                        ("reactive: reduce load".into(), Some("SAFE-TENDON-001"))
                                     }
                                 } else {
                                     (
-                                        "tolerable - modify & monitor".into(),
+                                        "tolerable: modify & monitor".into(),
                                         Some("SAFE-TENDON-001"),
                                     )
                                 }
                             }
                             PainKind::Doms => {
-                                ("DOMS - normal training discomfort".into(), None)
+                                ("DOMS: normal training discomfort".into(), None)
                             }
                             PainKind::Other => {
                                 if d.persists {
                                     (
-                                        "red flag - defer to a professional".into(),
+                                        "red flag: defer to a professional".into(),
                                         Some("SAFE-PAIN-001"),
                                     )
                                 } else {
-                                    ("red flag - stop".into(), Some("SAFE-PAIN-001"))
+                                    ("red flag: stop".into(), Some("SAFE-PAIN-001"))
                                 }
                             }
                         },
@@ -1329,25 +1351,25 @@ pub fn signal_states(
             // autoreg-045/046 neck check.
             ReadinessSignal::Illness => match IllnessSeverity::from_value(v) {
                 IllnessSeverity::BelowNeckOrFever => (
-                    "below-neck / fever - do not train".into(),
+                    "below-neck / fever: do not train".into(),
                     Some("ILLNESS-NECK-001"),
                 ),
                 IllnessSeverity::AboveNeck => {
-                    ("above-neck - downgrade".into(), Some("ILLNESS-NECK-001"))
+                    ("above-neck: downgrade".into(), Some("ILLNESS-NECK-001"))
                 }
                 IllnessSeverity::None => ("clear".into(), None),
             },
             // File 08 medical-referral red flags (safety-049/043/040).
             ReadinessSignal::RedS => {
                 if v > 0.0 {
-                    ("red flag - defer to a professional".into(), Some("SAFE-REDS-001"))
+                    ("red flag: defer to a professional".into(), Some("SAFE-REDS-001"))
                 } else {
                     ("clear".into(), None)
                 }
             }
             ReadinessSignal::CardiacRedFlag => {
                 if v > 0.0 {
-                    ("red flag - seek medical clearance".into(), Some("SAFE-CVD-001"))
+                    ("red flag: seek medical clearance".into(), Some("SAFE-CVD-001"))
                 } else {
                     ("clear".into(), None)
                 }
@@ -1355,7 +1377,7 @@ pub fn signal_states(
             ReadinessSignal::BoneStress => {
                 if v > 0.0 {
                     (
-                        "red flag - stop impact, urgent referral".into(),
+                        "red flag: stop impact, urgent referral".into(),
                         Some("SAFE-BSI-001"),
                     )
                 } else {
@@ -1383,7 +1405,7 @@ pub fn signal_states(
 }
 
 // ---------------------------------------------------------------------------
-// Check-in → derived readiness signals (Phase 2: humanized readiness, B1)
+// Check-in → derived readiness signals
 // ---------------------------------------------------------------------------
 //
 // The user reports raw human observations (sleep/soreness/mood 1–5, optional
@@ -1401,7 +1423,7 @@ use crate::schema::CheckinInput;
 // Day-bucketing is by LOCAL calendar day: `(observed_at + utc_offset_sec)`
 // before `.div_euclid(DERIVE_DAY_SEC)`, threaded from the app.rs call site
 // (`derive_readiness(&model.checkins, model.today_utc_offset_sec)`) exactly like
-// `session_logged` / `build_run_anchors` (the H1 fix pattern). This stops a
+// `session_logged` / `build_run_anchors` (the fix pattern). This stops a
 // late-evening + next-morning LOCAL pair (e.g. 23:30 then 07:00 Berlin) from
 // collapsing into one UTC bucket and silently breaking a multi-day streak.
 // Offset 0 is byte-identical to the former UTC bucketing.
@@ -1436,7 +1458,7 @@ const BASELINE_WINDOW_DAYS: i64 = 30;
 /// Absolute floor for the wellness composite (1–5 goodness scale, 5 = best): a
 /// morning at/below this, e.g. sleep 1 / soreness 5 / mood 1 → composite 1.0;
 /// is catastrophic on its face and downgrades intensity regardless of the
-/// z-score. It closes the flat-baseline blind spot (M10): 7 identical days give
+/// z-score. It closes the flat-baseline blind spot: 7 identical days give
 /// SD ≈ 0 → z 0 "normal", so a z-only rule can never see the dip. It is ALSO the
 /// compensating path for a structural gap, a check-in's soreness is a 1–5 item
 /// that feeds only this composite, so it can never reach the `Soreness ≥ 6`
@@ -1607,7 +1629,7 @@ fn derive_channel(
     };
 
     // Normalize the reading at `idx` against its leave-one-out baseline, then
-    // apply the wellness absolute-floor rung (M10).
+    // apply the wellness absolute-floor rung.
     let normalize_at = |idx: usize| -> f64 {
         let raw = series[idx].1;
         let (mean, sd) = baseline_stats(idx);
@@ -1618,7 +1640,7 @@ fn derive_channel(
             Normalize::Z if sd < 1e-6 => 0.0,
             Normalize::Z => (raw - mean) / sd,
         };
-        // M10: a catastrophic raw reading (wellness composite ≤ WELLNESS_ABS_FLOOR)
+        // A catastrophic raw reading (wellness composite ≤ WELLNESS_ABS_FLOOR)
         // downgrades regardless of z, closing the flat-baseline blind spot and
         // the unreachable 7-point soreness gate. Never relaxes a worse z (min).
         match abs_floor {
@@ -1652,7 +1674,7 @@ fn derive_channel(
 }
 
 /// Normalize a check-in history into the synthetic readiness signals the
-/// autoregulation rules consume (Phase 2 / B1). Three channels:
+/// autoregulation rules consume. Three channels:
 /// - `WellnessZ`: composite z of the answered 1–5 items (autoreg-030).
 /// - `HrvLnRmssd`: z of `ln(rMSSD)` vs baseline (autoreg-028).
 /// - `RestingHr`: bpm delta vs baseline mean (autoreg-040/041).
@@ -1676,7 +1698,7 @@ pub fn derive_readiness(checkins: &[CheckinInput], utc_offset_sec: i64) -> Deriv
         ReadinessSignal::WellnessZ,
         Normalize::Z,
         Some(WELLNESS_ABS_FLOOR),
-        |z| z <= -1.0,
+        |z| z <= WELLNESS_MULTIDAY_Z,
         &mut inputs,
         &mut collecting,
     );
@@ -1705,7 +1727,7 @@ pub fn derive_readiness(checkins: &[CheckinInput], utc_offset_sec: i64) -> Deriv
         ReadinessSignal::RestingHr,
         Normalize::DeltaFromMean,
         None,
-        |d| d >= 5.0,
+        |d| d >= RHR_DOWNGRADE_FLOOR_BPM,
         &mut inputs,
         &mut collecting,
     );
@@ -1756,6 +1778,111 @@ mod tests {
             }),
             ..input(ReadinessSignal::Pain, 1.0)
         }
+    }
+
+    fn state_str(states: &[SignalState], signal: ReadinessSignal) -> String {
+        states
+            .iter()
+            .find(|s| s.signal == signal)
+            .unwrap_or_else(|| panic!("signal {signal:?} present"))
+            .state
+            .clone()
+    }
+
+    /// Locks the displayed "why" (`signal_states`) to the SAME named thresholds
+    /// the adjustment rules fire on. Both sides now read one set of constants,
+    /// so they cannot desync; this test additionally pins the state text to the
+    /// rule outcome at each band boundary, so re-inlining a literal on either
+    /// side (reintroducing the drift hazard) breaks a build.
+    #[test]
+    fn signal_states_track_rule_thresholds() {
+        // --- RPE delta bands vs rpe_load_adjust ---
+        for (v, want_state) in [
+            (RPE_DELTA_WELL_ABOVE, "well above target"),
+            (RPE_DELTA_ABOVE, "above target"),
+            (0.0, "on target"),
+            (RPE_DELTA_BELOW, "below target"),
+            (RPE_DELTA_WELL_BELOW, "well below target"),
+        ] {
+            let ins = vec![input(ReadinessSignal::Rpe, v)];
+            assert_eq!(state_str(&signal_states(&ins, None, false), ReadinessSignal::Rpe), want_state);
+        }
+        // On-target is the only band that yields no load change.
+        assert!(rpe_load_adjust(&[input(ReadinessSignal::Rpe, 0.0)]).is_none());
+        assert!(rpe_load_adjust(&[input(ReadinessSignal::Rpe, RPE_DELTA_ABOVE)]).is_some());
+        assert!(rpe_load_adjust(&[input(ReadinessSignal::Rpe, RPE_DELTA_BELOW)]).is_some());
+
+        // --- e1RM ratio gates vs e1rm_gate ---
+        let deload = vec![input_streak(ReadinessSignal::EstimatedOneRm, E1RM_DELOAD_RATIO - 0.01, E1RM_DELOAD_STREAK)];
+        assert_eq!(state_str(&signal_states(&deload, None, false), ReadinessSignal::EstimatedOneRm), "down >10% for 2+ sessions");
+        assert!(e1rm_gate(&deload).iter().any(|r| matches!(r.value, Adjustment::Deload { .. })));
+
+        let reduce = vec![input(ReadinessSignal::EstimatedOneRm, E1RM_REDUCE_RATIO - 0.01)];
+        assert_eq!(state_str(&signal_states(&reduce, None, false), ReadinessSignal::EstimatedOneRm), "down");
+        assert!(e1rm_gate(&reduce).iter().any(|r| matches!(r.value, Adjustment::ReduceLoadPct(_))));
+
+        let up = vec![input(ReadinessSignal::EstimatedOneRm, E1RM_INCREASE_RATIO + 0.01)];
+        assert_eq!(state_str(&signal_states(&up, None, false), ReadinessSignal::EstimatedOneRm), "up");
+        assert!(e1rm_gate(&up).iter().any(|r| matches!(r.value, Adjustment::IncreaseLoadPct(_))));
+
+        let stable = vec![input(ReadinessSignal::EstimatedOneRm, 1.0)];
+        assert_eq!(state_str(&signal_states(&stable, None, false), ReadinessSignal::EstimatedOneRm), "stable");
+        assert!(e1rm_gate(&stable).is_empty());
+
+        // --- Wellness z bands vs wellness_downgrade ---
+        let single_suppressed = vec![input(ReadinessSignal::WellnessZ, WELLNESS_SINGLE_DAY_Z)];
+        assert_eq!(state_str(&signal_states(&single_suppressed, None, false), ReadinessSignal::WellnessZ), "suppressed");
+        assert!(wellness_downgrade(&single_suppressed).is_some());
+
+        let multiday = vec![input_streak(ReadinessSignal::WellnessZ, WELLNESS_MULTIDAY_Z, WELLNESS_MULTIDAY_STREAK)];
+        assert_eq!(state_str(&signal_states(&multiday, None, false), ReadinessSignal::WellnessZ), "suppressed");
+        assert!(wellness_downgrade(&multiday).is_some());
+
+        let low_single = vec![input(ReadinessSignal::WellnessZ, WELLNESS_MULTIDAY_Z)];
+        assert_eq!(state_str(&signal_states(&low_single, None, false), ReadinessSignal::WellnessZ), "low (single day)");
+        assert!(wellness_downgrade(&low_single).is_none());
+
+        // --- HRV SWC band vs hrv_downgrade / hrv_saturation_hold ---
+        let hrv_low = vec![input(ReadinessSignal::HrvLnRmssd, HRV_SWC_LOWER_Z - 0.1)];
+        assert_eq!(state_str(&signal_states(&hrv_low, None, false), ReadinessSignal::HrvLnRmssd), "suppressed");
+        assert!(hrv_downgrade(&hrv_low).is_some());
+
+        let hrv_high = HRV_SWC_UPPER_Z + 0.1;
+        assert_eq!(state_str(&signal_states(&[input(ReadinessSignal::HrvLnRmssd, hrv_high)], None, true), ReadinessSignal::HrvLnRmssd), "above band: hold load adds");
+        assert!(hrv_saturation_hold(hrv_high, true).value);
+        assert!(!hrv_saturation_hold(hrv_high, false).value);
+
+        // --- RHR bands vs rhr_stop / rhr_downgrade ---
+        let rhr_stop_in = vec![input(ReadinessSignal::RestingHr, RHR_STOP_BPM)];
+        assert_eq!(state_str(&signal_states(&rhr_stop_in, None, false), ReadinessSignal::RestingHr), "elevated +10 bpm: rest");
+        assert!(rhr_stop(&rhr_stop_in));
+
+        let rhr_down = vec![input_streak(ReadinessSignal::RestingHr, RHR_DOWNGRADE_FLOOR_BPM, RHR_DOWNGRADE_STREAK)];
+        assert_eq!(state_str(&signal_states(&rhr_down, None, false), ReadinessSignal::RestingHr), "elevated 2+ days");
+        assert!(rhr_downgrade(&rhr_down).is_some());
+
+        let rhr_single = vec![input(ReadinessSignal::RestingHr, RHR_DOWNGRADE_FLOOR_BPM)];
+        assert_eq!(state_str(&signal_states(&rhr_single, None, false), ReadinessSignal::RestingHr), "elevated (single day, likely noise)");
+        assert!(rhr_downgrade(&rhr_single).is_none());
+        assert!(!rhr_stop(&rhr_single));
+
+        // --- Soreness floor vs soreness_downgrade ---
+        let sore = vec![input(ReadinessSignal::Soreness, SORENESS_HIGH)];
+        assert_eq!(state_str(&signal_states(&sore, None, false), ReadinessSignal::Soreness), "high");
+        assert!(soreness_downgrade(&sore).is_some());
+
+        // --- Decoupling ceiling vs decoupling_downgrade ---
+        let decouple = vec![ReadinessInput {
+            effort_min: Some(45.0),
+            ..input(ReadinessSignal::AerobicDecoupling, DECOUPLING_HIGH_PCT + 0.1)
+        }];
+        assert_eq!(state_str(&signal_states(&decouple, None, false), ReadinessSignal::AerobicDecoupling), "high");
+        assert!(decoupling_downgrade(&decouple).is_some());
+
+        // --- Velocity-loss band vs vl_stop (already shared via vl_threshold_pct) ---
+        let vl = vec![input(ReadinessSignal::VelocityLoss, vl_threshold_pct(None))];
+        assert_eq!(state_str(&signal_states(&vl, None, false), ReadinessSignal::VelocityLoss), "over threshold");
+        assert!(vl_stop(&vl, None).is_some());
     }
 
     #[test]
@@ -2658,12 +2785,14 @@ mod tests {
                 .iter()
                 .any(|r| r.value == Adjustment::DowngradeSession)
         );
-        // Untracked duration (wire default) keeps the pre-existing behavior.
+        // Untracked duration (wire default, effort_min None) is not KNOWN-valid,
+        // so the validity gate discards it, no downgrade.
         let untracked = vec![input(ReadinessSignal::AerobicDecoupling, 14.0)];
         assert!(
-            adjustments(&untracked)
+            !adjustments(&untracked)
                 .iter()
-                .any(|r| r.value == Adjustment::DowngradeSession)
+                .any(|r| r.value == Adjustment::DowngradeSession),
+            "untracked-duration decoupling is not known-valid - never acted on"
         );
     }
 
@@ -2731,7 +2860,7 @@ mod tests {
         assert!(d.confidence.safety_critical);
     }
 
-    // --- Phase 2 / B1: check-in → derived readiness signals ---
+    // --- Check-in → derived readiness signals ---
 
     const D: i64 = 86_400;
 
@@ -2968,10 +3097,10 @@ mod tests {
         assert_eq!(w.have, 6, "same-day recheck did not inflate the day count");
     }
 
-    // ── A2: a load increase must never survive an active pain/illness report ──
+    // ── A load increase must never survive an active pain/illness report ──
     #[test]
     fn a2_no_load_increase_while_tolerable_pain_active() {
-        // Repro from BUGS.md A2: tolerable tendon pain (sev 3, stable) → a
+        // Repro: tolerable tendon pain (sev 3, stable) → a
         // ModifyAndMonitor (PainGate::Adjust), plus RPE −2.0 → IncreaseLoadPct(7.5).
         // The reconciliation pass MUST strip the increase while pain is active.
         let inputs = vec![
@@ -3003,7 +3132,7 @@ mod tests {
         );
     }
 
-    // ── B7: APRE must reject a non-positive current load (no negative "increase") ──
+    // ── APRE must reject a non-positive current load (no negative "increase") ──
     #[test]
     fn b7_apre_rejects_nonpositive_current_load() {
         // reps 14 on APRE-6 → the flat +10..15 lb band. A 0 (or negative) current
@@ -3030,7 +3159,7 @@ mod tests {
         );
     }
 
-    // ── H2: objective-performance decline strips a coexisting load increase ──
+    // ── Objective-performance decline strips a coexisting load increase ──
     #[test]
     fn objective_performance_decline_strips_load_increase() {
         // Control: RPE −2.0 alone still raises load (no over-suppression).
@@ -3092,7 +3221,7 @@ mod tests {
         );
     }
 
-    // ── M10: catastrophic morning on a FLAT baseline downgrades via the floor ──
+    // ── Catastrophic morning on a FLAT baseline downgrades via the floor ──
     #[test]
     fn flat_baseline_catastrophic_morning_downgrades_via_absolute_floor() {
         // Seven identical days (SD ≈ 0 → z 0), then sleep 1 / soreness 5 / mood 1

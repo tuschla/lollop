@@ -17,6 +17,14 @@ pub struct FitFix {
     pub lon: f64,
     pub time_sec: i64,
     pub hr_bpm: Option<u16>,
+    /// Horizontal position accuracy in metres, as recorded by the device in the
+    /// FIT `record.gps_accuracy` field (field 31, `UInt8`, scale 1 / offset 0,
+    /// units "m" per the FIT profile, verified in fitparser 0.11's generated
+    /// `record_message_gps_accuracy_field`). `None` when the file carries no
+    /// such field: NOT a fabricated stand-in. The shell decides what accuracy
+    /// to hand the core's QC gate for a `None` fix (see the sentinel in
+    /// `Gpx.kt`'s `importedRunEvent`); this module never invents one.
+    pub accuracy_m: Option<f32>,
 }
 
 /// A parsed FIT activity: fixes grouped into segments by the recorder's
@@ -112,22 +120,46 @@ fn is_timer_event(record: &FitDataRecord, event_type: &str) -> bool {
     is_timer && matches_type
 }
 
+/// A FIT `SInt32` field's value, or `None` if it is the `i32::MAX` "invalid"
+/// sentinel. fitparser normally drops invalid-valued fields before we see
+/// them, but guard it anyway so a stray sentinel never becomes a phantom
+/// value, e.g. a ~180° position fix injecting a multi-thousand-km jump into
+/// distance/pace/splits.
+fn valid_i32(v: &Value) -> Option<i32> {
+    match v {
+        Value::SInt32(v) if *v != i32::MAX => Some(*v),
+        _ => None,
+    }
+}
+
+/// A FIT `UInt8` field's value, or `None` if it is the `0xFF` "invalid"
+/// sentinel (same rationale as [`valid_i32`]), so a dropped strap read never
+/// surfaces as a fake "255 bpm" and a missing reading never becomes a fake
+/// "255 m".
+fn valid_u8(v: &Value) -> Option<u8> {
+    match v {
+        Value::UInt8(v) if *v != u8::MAX => Some(*v),
+        _ => None,
+    }
+}
+
 fn fix_from_record(record: &FitDataRecord) -> Option<FitFix> {
     let mut lat_raw: Option<i32> = None;
     let mut lon_raw: Option<i32> = None;
     let mut time_sec: Option<i64> = None;
     let mut hr_bpm: Option<u16> = None;
+    let mut accuracy_m: Option<f32> = None;
 
     for field in record.fields() {
         match field.name() {
             "position_lat" => {
-                if let Value::SInt32(v) = field.value() {
-                    lat_raw = Some(*v);
+                if let Some(v) = valid_i32(field.value()) {
+                    lat_raw = Some(v);
                 }
             }
             "position_long" => {
-                if let Value::SInt32(v) = field.value() {
-                    lon_raw = Some(*v);
+                if let Some(v) = valid_i32(field.value()) {
+                    lon_raw = Some(v);
                 }
             }
             "timestamp" => {
@@ -140,8 +172,14 @@ fn fix_from_record(record: &FitDataRecord) -> Option<FitFix> {
                 }
             }
             "heart_rate" => {
-                if let Value::UInt8(v) = field.value() {
-                    hr_bpm = Some(u16::from(*v));
+                if let Some(v) = valid_u8(field.value()) {
+                    hr_bpm = Some(u16::from(v));
+                }
+            }
+            "gps_accuracy" => {
+                // A real device measurement in metres (scale 1, offset 0).
+                if let Some(v) = valid_u8(field.value()) {
+                    accuracy_m = Some(f32::from(v));
                 }
             }
             _ => {}
@@ -153,6 +191,7 @@ fn fix_from_record(record: &FitDataRecord) -> Option<FitFix> {
         lon: semicircles_to_degrees(lon_raw?),
         time_sec: time_sec?,
         hr_bpm,
+        accuracy_m,
     })
 }
 
@@ -228,6 +267,15 @@ mod tests {
         assert_eq!(first.time_sec, 1_497_283_762);
         assert_eq!(first.hr_bpm, Some(77));
 
+        // This real device file records NO `gps_accuracy` field on its record
+        // messages, so accuracy is honestly unknown, `None`, never a
+        // fabricated figure. (See `synthetic_gps_accuracy_field_flows_through`
+        // for the present-field path.)
+        assert!(
+            fixes.iter().all(|f| f.accuracy_m.is_none()),
+            "fenix-5 fixture carries no gps_accuracy → must stay None, not a stand-in"
+        );
+
         // Timestamps are monotonic non-decreasing across the whole segment -
         // a sanity check that we read `timestamp`, not some other field.
         assert!(fixes.windows(2).all(|w| w[1].time_sec >= w[0].time_sec));
@@ -245,5 +293,156 @@ mod tests {
             track.segments.iter().flatten().all(|f| f.hr_bpm.is_none()),
             "this fixture has no HR strap data"
         );
+        assert!(
+            track.segments.iter().flatten().all(|f| f.accuracy_m.is_none()),
+            "this fixture has no gps_accuracy field → accuracy stays None"
+        );
+    }
+
+    /// FIT CRC-16 (ANT variant) over a byte slice, mirrors fitparser's own
+    /// `de::crc::get_crc`. Needed to hand-encode a valid FIT file below (the
+    /// trailing 2-byte data CRC is validated by `from_bytes` by default).
+    fn fit_crc(data: &[u8]) -> u16 {
+        const TABLE: [u16; 16] = [
+            0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401, 0xA001, 0x6C00,
+            0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
+        ];
+        let mut crc: u16 = 0;
+        for &byte in data {
+            let mut tmp = TABLE[(crc & 0xF) as usize];
+            crc = (crc >> 4) & 0x0FFF;
+            crc = crc ^ tmp ^ TABLE[(byte & 0xF) as usize];
+            tmp = TABLE[(crc & 0xF) as usize];
+            crc = (crc >> 4) & 0x0FFF;
+            crc = crc ^ tmp ^ TABLE[((byte >> 4) & 0xF) as usize];
+        }
+        crc
+    }
+
+    #[test]
+    fn synthetic_gps_accuracy_field_flows_through() {
+        // Neither real-device fixture in shared/tests/fixtures/ records
+        // `gps_accuracy`, so hand-encode a minimal valid FIT that DOES: the
+        // only way to prove the field is read and surfaced (not fabricated).
+        //
+        // One `record` definition (global mesg 20, little-endian) with fields
+        // timestamp(253,u32) position_lat(0,i32) position_long(1,i32)
+        // gps_accuracy(31,u8), then two data records carrying 8 m and 12 m.
+        const FIT_EPOCH_OFFSET: i64 = 631_065_600; // unix secs at 1989-12-31Z
+        let to_semi = |deg: f64| -> i32 { (deg * 2_147_483_648.0 / 180.0) as i32 };
+
+        let mut data: Vec<u8> = Vec::new();
+        // --- definition message (local type 0) ---
+        data.push(0x40); // definition, local type 0
+        data.push(0x00); // reserved
+        data.push(0x00); // architecture: little-endian
+        data.extend_from_slice(&20u16.to_le_bytes()); // global mesg num = record
+        data.push(4); // field count
+        data.extend_from_slice(&[253, 4, 0x86]); // timestamp: u32
+        data.extend_from_slice(&[0, 4, 0x85]); // position_lat: i32
+        data.extend_from_slice(&[1, 4, 0x85]); // position_long: i32
+        data.extend_from_slice(&[31, 1, 0x02]); // gps_accuracy: u8
+
+        let push_record = |unix: i64, lat: f64, lon: f64, acc: u8, out: &mut Vec<u8>| {
+            out.push(0x00); // data message, local type 0
+            out.extend_from_slice(&((unix - FIT_EPOCH_OFFSET) as u32).to_le_bytes());
+            out.extend_from_slice(&to_semi(lat).to_le_bytes());
+            out.extend_from_slice(&to_semi(lon).to_le_bytes());
+            out.push(acc);
+        };
+        push_record(1_500_000_000, 52.5200, 13.4050, 8, &mut data);
+        push_record(1_500_000_030, 52.5210, 13.4060, 12, &mut data);
+
+        // --- 12-byte header (no header CRC → header bytes join the data CRC) ---
+        let mut file: Vec<u8> = Vec::new();
+        file.push(12); // header size
+        file.push(0x10); // protocol version 1.0
+        file.extend_from_slice(&100u16.to_le_bytes()); // profile version (arbitrary)
+        file.extend_from_slice(&(data.len() as u32).to_le_bytes()); // data size
+        file.extend_from_slice(b".FIT");
+        file.extend_from_slice(&data);
+        // Trailing data CRC covers header + all messages.
+        let crc = fit_crc(&file);
+        file.extend_from_slice(&crc.to_le_bytes());
+
+        let track = parse_fit(&file).expect("hand-encoded FIT should parse");
+        let fixes: Vec<FitFix> = track.segments.into_iter().flatten().collect();
+        assert_eq!(fixes.len(), 2);
+        // The device's real recorded accuracy comes through unchanged, in metres.
+        assert_eq!(fixes[0].accuracy_m, Some(8.0));
+        assert_eq!(fixes[1].accuracy_m, Some(12.0));
+        assert!((fixes[0].lat - 52.5200).abs() < 1e-4, "lat: {:?}", fixes[0]);
+    }
+
+    /// Build a raw `record` `FitDataField` (name-matched by `fix_from_record`).
+    fn field(name: &str, number: u8, value: Value) -> fitparser::FitDataField {
+        fitparser::FitDataField::new(name.to_string(), number, None, value, String::new())
+    }
+
+    /// Assemble a `record` message from raw fields. `timestamp` is encoded as a
+    /// plain `UInt32` of unix seconds, `fix_from_record` matches on field NAME
+    /// and `TryInto<i64>` accepts any integer variant, so this needs no chrono.
+    fn record(fields: Vec<fitparser::FitDataField>) -> FitDataRecord {
+        let mut r = FitDataRecord::new(MesgNum::Record);
+        for f in fields {
+            r.push(f);
+        }
+        r
+    }
+
+    #[test]
+    fn sentinel_position_value_yields_no_fix() {
+        // fitparser normally strips FIT invalid sentinels before we see them,
+        // but `fix_from_record` guards defensively (like the gps_accuracy
+        // guard). Feed it a raw record directly: a `position_lat`/`position_long`
+        // carrying the SInt32 invalid sentinel (`i32::MAX`) must yield NO fix -
+        // without the guard it converts to ~180° and injects a multi-thousand-km
+        // phantom fix into distance/pace/splits.
+        let sentinel_lat = record(vec![
+            field("timestamp", 253, Value::UInt32(1_500_000_000)),
+            field("position_lat", 0, Value::SInt32(i32::MAX)),
+            field("position_long", 1, Value::SInt32(157_000_000)),
+        ]);
+        assert_eq!(fix_from_record(&sentinel_lat), None, "sentinel lat drops the fix");
+
+        let sentinel_lon = record(vec![
+            field("timestamp", 253, Value::UInt32(1_500_000_000)),
+            field("position_lat", 0, Value::SInt32(626_000_000)),
+            field("position_long", 1, Value::SInt32(i32::MAX)),
+        ]);
+        assert_eq!(fix_from_record(&sentinel_lon), None, "sentinel lon drops the fix");
+
+        // A valid pair still yields a fix: the guard must not over-reject.
+        let good = record(vec![
+            field("timestamp", 253, Value::UInt32(1_500_000_000)),
+            field("position_lat", 0, Value::SInt32(626_000_000)),
+            field("position_long", 1, Value::SInt32(157_000_000)),
+        ]);
+        assert!(fix_from_record(&good).is_some(), "a valid record still yields a fix");
+    }
+
+    #[test]
+    fn invalid_heart_rate_sentinel_drops_hr_but_keeps_fix() {
+        // `heart_rate == 0xFF` is the FIT UInt8 invalid sentinel (a dropped
+        // strap read). The fix survives on its valid position, but `hr_bpm`
+        // must be None, never a fabricated 255 bpm.
+        let sentinel_hr = record(vec![
+            field("timestamp", 253, Value::UInt32(1_500_000_000)),
+            field("position_lat", 0, Value::SInt32(626_000_000)),
+            field("position_long", 1, Value::SInt32(157_000_000)),
+            field("heart_rate", 3, Value::UInt8(u8::MAX)),
+        ]);
+        let fix = fix_from_record(&sentinel_hr).expect("valid position keeps the fix");
+        assert_eq!(fix.hr_bpm, None, "0xFF sentinel must not surface as 255 bpm");
+
+        // A real strap reading comes through.
+        let good_hr = record(vec![
+            field("timestamp", 253, Value::UInt32(1_500_000_000)),
+            field("position_lat", 0, Value::SInt32(626_000_000)),
+            field("position_long", 1, Value::SInt32(157_000_000)),
+            field("heart_rate", 3, Value::UInt8(150)),
+        ]);
+        let fix = fix_from_record(&good_hr).expect("valid record");
+        assert_eq!(fix.hr_bpm, Some(150));
     }
 }

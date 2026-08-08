@@ -104,6 +104,9 @@ impl<T> Recommended<T> {
     /// Unconditionally (release builds included) if `evidence` carries a
     /// [`EvidenceGrade::MarketingMyth`] grade: myth-graded claims are
     /// hard-blocked and must never be surfaced as advice (HARD RULE 2).
+    ///
+    /// The other half of this guard lives at `EvidenceEntry::to_evidence`
+    /// (evidence.rs), which blocks myth ids at the recommendation choke point.
     pub fn new(value: T, evidence: Evidence, confidence: ConfidenceTag) -> Self {
         assert!(
             evidence.grade != EvidenceGrade::MarketingMyth,
@@ -394,22 +397,23 @@ pub struct ReadinessInput {
     pub pain: Option<PainDetail>,
     /// Duration in minutes of the continuous effort backing this observation,
     /// for signals derived from one effort. File 06 signal spec: aerobic
-    /// decoupling is *valid only for efforts >20 min*. `None`, the wire
-    /// default, means "duration not tracked" and keeps the pre-existing
-    /// behavior; an explicitly short effort invalidates the decoupling signal.
+    /// decoupling is *valid only for efforts >20 min*, so the downgrade fires
+    /// only when duration is KNOWN valid. `None`, the wire default, means
+    /// "duration not tracked": it is not known-valid, so the decoupling signal
+    /// is discarded (no downgrade), as is an explicitly short effort.
     #[serde(default)]
     pub effort_min: Option<f64>,
 }
 
 /// One morning (or pre-session) check-in: raw *human* observations only. Every
-/// scored field is optional: the user answers what they know and the core never
+/// scored field is optional; the user answers what they know and the core never
 /// fabricates an unanswered item (HARD RULE 1). The core normalizes these into
-/// the z-scores / deltas the autoregulation rules already consume (Phase 2 /
-/// B1): the user no longer supplies a z-score they cannot know.
+/// the z-scores / deltas the autoregulation rules already consume: the user
+/// no longer supplies a z-score they cannot know.
 ///
 /// The 1–5 wellness items are the KB's 5-item wellness composite
 /// (`ReadinessSignal::WellnessZ`: sleep/soreness/mood, direction-normalized in
-/// the core), no new instrument is invented. Additive on the wire: every field
+/// the core); no new instrument is invented. Additive on the wire: every field
 /// is `#[serde(default)]` so a check-in written by any app version replays.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct CheckinInput {

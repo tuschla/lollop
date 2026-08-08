@@ -91,7 +91,7 @@ data class ProfileDraft(
     val runningKmPerWeek: Double,
     val advanced: Boolean,
     val enduranceIntensityPctVo2max: Double,
-    // Consolidated person data (Phase 5 / M5). Carried on the draft so every
+    // Consolidated person data. Carried on the draft so every
     // SetProfile the editor emits re-sends it; otherwise a training-field edit
     // would last-write-wins away the person data set in the guided setup.
     val female: Boolean = false,
@@ -99,9 +99,9 @@ data class ProfileDraft(
     val ageYears: Double? = null,
     val restingHrBpm: Double? = null,
     val measuredHrMax: Double? = null,
-    // Stage-0 onboarding health screen (A1). Carried on the draft so every
+    // Stage-0 onboarding health screen. Carried on the draft so every
     // SetProfile re-sends it (else a training-field edit would last-write-wins
-    // away the health gates). youth is core-derived from age, never set here.
+    // away the health gates). youth is core-derived from age; never set here.
     val health: HealthScreen = HealthScreen(),
 ) : Serializable {
     fun toEvent() = Event.SetProfile(
@@ -155,8 +155,8 @@ data class ProfileDraft(
 
         /**
          * Fallback starting point for the full editor only (rehydration when no
-         * profile is echoed). NOT auto-seeded on fresh install anymore: first run
-         * goes through the guided setup (M5), which writes user-asserted values
+         * profile is echoed). NOT auto-seeded on fresh install anymore; first run
+         * goes through the guided setup, which writes user-asserted values
          * rather than these opinionated defaults.
          */
         val SEED = ProfileDraft(
@@ -407,7 +407,16 @@ fun ProfileEditor(initial: ProfileDraft, onApply: (ProfileDraft) -> Unit) {
                     // kmPerRunDay (e.g. 3×8 = 24, 4×11 = 44), which a coarse
                     // 5-multiple grid can neither highlight nor preserve: a tap would
                     // silently snap the user's setup volume to the nearest 5.
-                    ScrollableScaleRow((0..150).toList(), draft.runningKmPerWeek.toInt(), { "$it" }) {
+                    //
+                    // Starts at 1, not 0 (same 0-endpoint rationale as Weekly sets /
+                    // Running days above): this row only shows while running is in the
+                    // plan (`run` = runningDaysPerWeek > 0), so 0 km would contradict a
+                    // non-zero run-day count: days say run, volume says none. Dropping
+                    // running entirely is the Focus row's job (Run→Lift), which stashes
+                    // days AND km first so switching back restores them; zeroing km here
+                    // would discard it un-stashed. Guided-setup values are days × 5/8/11
+                    // (all ≥5), so the 1-floor never clips a written value.
+                    ScrollableScaleRow((1..150).toList(), draft.runningKmPerWeek.toInt(), { "$it" }) {
                         commit(draft.copy(runningKmPerWeek = it.toDouble()))
                     }
                 }
@@ -449,7 +458,7 @@ fun ProfileEditor(initial: ProfileDraft, onApply: (ProfileDraft) -> Unit) {
                 }
             }
 
-            // You, consolidated person data (Phase 5 / M5). Entered once here;
+            // You: consolidated person data. Entered once here;
             // the Coach protein / HR-zone calculators prefill from it instead of
             // asking again. All optional: "Not set" until you pick a value.
             RowHairline()
@@ -490,10 +499,10 @@ fun ProfileEditor(initial: ProfileDraft, onApply: (ProfileDraft) -> Unit) {
                 }
             }
 
-            // Health & safety screen (A1). These arm the core's medical-deferral
+            // Health & safety screen. These arm the core's medical-deferral
             // gates (File 08: PAR-Q+, pregnancy, injury/rehab, RED-S). A raised
             // gate makes the engine defer to a professional rather than program a
-            // plan: SAFETY overrides goals (HARD RULE 3). Age drives the youth
+            // plan; SAFETY overrides goals (HARD RULE 3). Age drives the youth
             // gate core-side, so it isn't repeated here.
             RowHairline()
             Text(
@@ -503,8 +512,8 @@ fun ProfileEditor(initial: ProfileDraft, onApply: (ProfileDraft) -> Unit) {
                 modifier = Modifier.padding(top = Space.Sm.dp),
             )
             HealthSwitchRow(
-                "Positive health screen (PAR-Q+)",
-                "Known heart, metabolic or kidney condition, uncontrolled blood pressure, recent surgery, or a doctor told you to check before vigorous exercise.",
+                HealthScreenCopy.PARQ_LABEL,
+                HealthScreenCopy.PARQ_BODY,
                 draft.health.parq_positive,
             ) {
                 // Turning the parent OFF must also clear its dependent child -
@@ -525,15 +534,15 @@ fun ProfileEditor(initial: ProfileDraft, onApply: (ProfileDraft) -> Unit) {
             if (draft.health.parq_positive) {
                 RowHairline()
                 HealthSwitchRow(
-                    "Cleared by a doctor",
-                    "A clinician has cleared you to train since that positive screen.",
+                    HealthScreenCopy.CLEARED_LABEL,
+                    HealthScreenCopy.CLEARED_BODY,
                     draft.health.medically_cleared,
                 ) { commit(draft.copy(health = draft.health.copy(medically_cleared = it))) }
             }
             RowHairline()
             HealthSwitchRow(
-                "Currently pregnant",
-                "The engine defers autonomous prescription during pregnancy and individualises with your provider.",
+                HealthScreenCopy.PREGNANT_LABEL,
+                HealthScreenCopy.PREGNANT_BODY,
                 draft.health.pregnant,
             ) {
                 // Same stale-child hazard as PAR-Q+ above, but this one pins an
@@ -552,21 +561,21 @@ fun ProfileEditor(initial: ProfileDraft, onApply: (ProfileDraft) -> Unit) {
             if (draft.health.pregnant) {
                 RowHairline()
                 HealthSwitchRow(
-                    "Pregnancy warning sign present",
-                    "Bleeding, breathlessness before exertion, chest pain, or reduced fetal movement - stop and seek care.",
+                    HealthScreenCopy.PREGNANCY_WARNING_LABEL,
+                    HealthScreenCopy.PREGNANCY_WARNING_BODY,
                     draft.health.pregnancy_warning_sign,
                 ) { commit(draft.copy(health = draft.health.copy(pregnancy_warning_sign = it))) }
             }
             RowHairline()
             HealthSwitchRow(
-                "Injury, recent surgery, or in rehab",
-                "The engine never prescribes rehabilitation - resume general programming only once cleared.",
+                HealthScreenCopy.INJURY_LABEL,
+                HealthScreenCopy.INJURY_BODY,
                 draft.health.injury_or_rehab,
             ) { commit(draft.copy(health = draft.health.copy(injury_or_rehab = it))) }
             RowHairline()
             HealthSwitchRow(
-                "Under-fuelling / disordered-eating signal",
-                "Missed periods, rapid weight loss, compulsive exercise, or persistent unexplained fatigue - routes to a professional (RED-S).",
+                HealthScreenCopy.REDS_LABEL,
+                HealthScreenCopy.REDS_BODY,
                 draft.health.reds_signal,
             ) { commit(draft.copy(health = draft.health.copy(reds_signal = it))) }
 

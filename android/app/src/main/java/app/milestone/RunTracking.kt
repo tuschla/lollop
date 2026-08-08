@@ -156,7 +156,7 @@ fun RunTrackingScreen(
     // first→last wall-clock span, so an NTP correction mid-run can't make it jump or
     // go negative.
     val elapsedSec by RunSession.elapsedSec.collectAsState()
-    // Locate-only preview (Phase 4 / M4): the service acquires GPS on open but
+    // Locate-only preview: the service acquires GPS on open but
     // records nothing until Start. `lastFix` drives the lock readout + preview
     // dot; a fix within `GPS_LOCK_ACCURACY_M` counts as a usable lock that
     // enables Start.
@@ -172,10 +172,10 @@ fun RunTrackingScreen(
     // Set the moment the user leaves (Discard / Back / after save) so the
     // locate-restart effect can't re-launch the service into a disposing screen.
     var exiting by remember { mutableStateOf(false) }
-    // Short-run keep/discard confirmation (Phase 4 / M4) before an implausible run
+    // Short-run keep/discard confirmation before an implausible run
     // is logged. `rememberSaveable` so a rotation while the prompt is up doesn't
     // strand the captured run (the `Double?` is Bundle-safe). Dismissing it just
-    // clears this: the derived `unsavedCapture` keeps the Save/Discard row up, no
+    // clears this; the derived `unsavedCapture` keeps the Save/Discard row up, no
     // separate held-track state needed.
     var shortRunKm by rememberSaveable { mutableStateOf<Double?>(null) }
 
@@ -321,7 +321,7 @@ fun RunTrackingScreen(
         }
     }
 
-    // Phase 4 / M4 explicit Start: opening the tracker starts the service in
+    // Explicit Start: opening the tracker starts the service in
     // LOCATE mode; it acquires GPS to preview fix quality but records NOTHING
     // until Start. Recording (tracking) or a pending exit suppresses it.
     LaunchedEffect(hasPermission, locationOn, tracking, locating, exiting, unsavedCapture) {
@@ -382,7 +382,7 @@ fun RunTrackingScreen(
             requestPermissions()
             return
         }
-        // Refuse-guard (C5, defense in depth): never begin recording while an
+        // Refuse-guard (defense in depth): never begin recording while an
         // unsaved capture is held. `ActiveRunStore.begin()` truncates the crash
         // sidecar and this fn deliberately doesn't reset(), so appending onto an old
         // stopped track would merge two runs and lose the sidecar. The derived
@@ -400,7 +400,7 @@ fun RunTrackingScreen(
         RunTrackingService.start(ctx)
     }
 
-    // Discard the current session (Phase 4 / M4): stop the service, delete the
+    // Discard the current session: stop the service, delete the
     // crash-recovery sidecar, and leave without logging anything.
     fun discardRun() {
         exiting = true
@@ -430,39 +430,32 @@ fun RunTrackingScreen(
         // away via onFinish.
         stopping = true
         scope.launch {
-            try {
-                // M1: send→clearSync→reset is a CRITICAL SECTION that must run to
-                // completion once the persist begins, even if this job's scope
-                // (`rememberCoroutineScope`, tied to composition) is cancelled by a
-                // rotation mid-save. The JNI `Core.send` is non-cancellable and has
-                // already APPENDED the run to the event log by the time a plain
-                // withContext would resume; a rotation there would rethrow
-                // CancellationException, skip clear/reset, and (via the catch below)
-                // flip `stopping` back and re-show the Save/Discard row for an
-                // already-logged run → duplicate on retry / phantom on discard.
-                // NonCancellable defers the cancellation until AFTER send+clear+reset
-                // (and the navigation) complete. clearSync orders the sidecar delete
-                // against the just-returned event-log append (LOW: a crash in that
-                // gap would otherwise resurrect the saved run via the B4 prompt).
-                val vm = withContext(Dispatchers.IO + NonCancellable) {
-                    // Date the saved run at its LAST GPS fix, NOT "now": a
-                    // crash-recovery save can run hours after the run actually
-                    // happened, and the of-record History day / weekly-km window /
-                    // acute-load spike window must land on WHEN the run occurred, not
-                    // when it was persisted. Mirrors the GPX import path, which stamps
-                    // observedAt = last fix (Gpx.kt). Falls back to now only for the
-                    // impossible-here empty track (this send is gated on ≥2 points).
+            // The send→clearSync→reset(→onFinish) orchestration lives in the
+            // pure-ish [runSaveCriticalSection] so it can be unit-tested against a
+            // real coroutine cancellation (the JVM harness can drive that, the UI
+            // can't). This call site only supplies the real effects; the exact
+            // NonCancellable / re-throw semantics are enforced there.
+            runSaveCriticalSection(
+                // The non-cancellable JNI persist. Dates the saved run at its LAST
+                // GPS fix, NOT "now": a crash-recovery save can run hours after the
+                // run actually happened, and the of-record History day / weekly-km
+                // window / acute-load spike window must land on WHEN the run
+                // occurred, not when it was persisted. Mirrors the GPX import path,
+                // which stamps observedAt = last fix (Gpx.kt). Falls back to now only
+                // for the impossible-here empty track (this send is gated on ≥2
+                // points).
+                send = {
                     val runObservedAt = RunSession.points.value.lastOrNull()?.observedAt
                         ?: (System.currentTimeMillis() / 1000)
-                    val result = Core.send(
+                    Core.send(
                         // No paired HR sensor yet, and the spike baseline is derived
                         // in-core from prior runs; the shell sends neither figure.
                         // decimatedTrackForCore() sends the TRUE coordinates thinned
                         // to ~TRACK_DECIMATION_CAP fixes (endpoints + every pause
                         // boundary always kept) so one saved run can't bloat the
                         // append-only log; the paired decimatedSegmentStarts() tells
-                        // the core where the pauses are (B2/I15) so it excludes each
-                        // pause-bridge leg itself and breaks the GPX <trkseg> there -
+                        // the core where the pauses are so it excludes each
+                        // pause-bridge leg itself and breaks the GPX <trkseg> there;
                         // the of-record figures move negligibly (running.rs tests).
                         Event.LogRunTrack(
                             points = RunSession.decimatedTrackForCore(),
@@ -477,32 +470,24 @@ fun RunTrackingScreen(
                             segmentStarts = RunSession.decimatedSegmentStarts(),
                         )
                     )
-                    // Ordered against the append above (see clearSync), then clear the
-                    // in-memory session: both inside NonCancellable so a cancellation
-                    // can't tear them off a persisted run.
-                    ActiveRunStore.clearSync()
-                    RunSession.reset()
-                    result
-                }
-                // Navigate away non-cancellably too, so the happy path always leaves
-                // the tracker after a successful save; reset() already emptied the
-                // session so even a skipped onFinish leaves a clean (non-unsaved) screen.
-                withContext(NonCancellable) { onFinish(vm) }
-            } catch (e: CancellationException) {
-                // NEVER treat a cancellation as a failed save: the NonCancellable
-                // block above already persisted, cleared, and reset. Re-throw so it
-                // is not swallowed by the catch below (which would flip `stopping`
-                // and re-show Save/Discard for a run that is already in the log).
-                throw e
-            } catch (e: Exception) {
-                // Save failed: KEEP the captured run + its crash-recovery sidecar and
-                // surface a Save/Discard affordance (C5): never drop to Start (which
-                // would truncate the sidecar) and never lose the run. The captured
-                // fixes stay in RunSession.points, so the derived `unsavedCapture`
-                // holds the Save/Discard row up without any remembered state.
-                stopping = false
-                Toast.makeText(ctx, "Couldn't save run - tap Save to retry", Toast.LENGTH_SHORT).show()
-            }
+                },
+                // clearSync orders the sidecar delete against the just-returned
+                // event-log append (LOW: a crash in that gap would otherwise
+                // resurrect the saved run via the B4 prompt).
+                clearSidecar = { ActiveRunStore.clearSync() },
+                resetSession = { RunSession.reset() },
+                finish = { vm -> onFinish(vm) },
+                onFailure = {
+                    // Save failed: KEEP the captured run + its crash-recovery sidecar
+                    // and surface a Save/Discard affordance; never drop to Start
+                    // (which would truncate the sidecar) and never lose the run. The
+                    // captured fixes stay in RunSession.points, so the derived
+                    // `unsavedCapture` holds the Save/Discard row up without any
+                    // remembered state.
+                    stopping = false
+                    Toast.makeText(ctx, "Couldn't save run. Tap Save to retry", Toast.LENGTH_SHORT).show()
+                },
+            )
         }
     }
 
@@ -521,13 +506,17 @@ fun RunTrackingScreen(
                 withTimeoutOrNull(2_000L) { RunSession.tracking.first { !it } }
                 val captured = RunSession.points.value
                 if (captured.size < 2) {
-                    Toast.makeText(ctx, "Run too short to log", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        ctx,
+                        "Not enough GPS recorded to save. A run needs to reach 0.5 km or 3 minutes.",
+                        Toast.LENGTH_LONG,
+                    ).show()
                     ActiveRunStore.clear()
                     RunSession.reset()
                     onFinish(null)
                     return@launch
                 }
-                // Plausibility gate (Phase 4 / M4): a sub-threshold run (drift, an
+                // Plausibility gate: a sub-threshold run (drift, an
                 // accidental record) prompts keep/discard before it pollutes the
                 // log. `distanceKm` is the shell-side live haversine; the service is
                 // stopped so it won't change while the dialog is up. Both a too-short
@@ -551,17 +540,17 @@ fun RunTrackingScreen(
                 // A rotation cancelling the snapshot wait is not a save failure -
                 // nothing was persisted here (Core.send lives in logCaptured). The
                 // captured fixes stay in RunSession.points, so on recomposition the
-                // derived `unsavedCapture` re-shows Save/Discard (C5). Re-throw rather
+                // derived `unsavedCapture` re-shows Save/Discard. Re-throw rather
                 // than fall into the failure toast below.
                 throw e
             } catch (e: Exception) {
                 // Stop/snapshot failed before logging: don't brick or lose the run.
                 // The service is already stopped and the captured fixes stay in
                 // RunSession.points, so the derived `unsavedCapture` shows a
-                // Save/Discard affordance (C5): Start (which truncates the sidecar)
+                // Save/Discard affordance; Start (which truncates the sidecar)
                 // is never what appears. Nothing to remember.
                 stopping = false
-                Toast.makeText(ctx, "Couldn't save run - tap Save to retry", Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, "Couldn't save run. Tap Save to retry", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -572,7 +561,7 @@ fun RunTrackingScreen(
         when {
             // A captured-but-unsaved run (failed save / dismissed short-run prompt):
             // leave WITHOUT clearing the sidecar so the run stays recoverable on next
-            // launch: never silently drop the track the save path promised to keep (C5).
+            // launch; never silently drop the track the save path promised to keep.
             unsavedCapture -> {}
             !tracking -> {
                 exiting = true
@@ -592,11 +581,15 @@ fun RunTrackingScreen(
     val avgPaceMinPerKm = if (liveKm >= 0.05 && elapsedSec > 0) elapsedSec / 60.0 / liveKm else Double.NaN
     val paceText = if (avgPaceMinPerKm.isFinite()) formatPaceMinutes(paceInUnit(avgPaceMinPerKm, unit)) else "-"
 
-    // Per-N-minute pace slices (RunSession.paceBuckets is O(n); recomputed on each
-    // new fix, keyed on the fix list + the live bucket size). Canonical min/km -
-    // the unit conversion is applied per-cell at render, so a unit flip needs no
-    // recompute. Only the most recent few are shown (see the primary row below).
-    val paceBuckets = remember(points, paceBucketN) { RunSession.paceBuckets(paceBucketN) }
+    // Per-N-minute pace slices, accumulated INCREMENTALLY in RunSession as fixes
+    // arrive (O(1) amortised per fix) and observed here, not recomputed from
+    // scratch every fix, which was a full O(n) synchronized scan in composition (the
+    // second half of the P3 O(n²)). Canonical min/km; the unit conversion is applied
+    // per-cell at render, so a unit flip needs no recompute. Only the most recent
+    // few are shown (see the primary row below). Changing the bucket size rebuilds
+    // the accumulator once for the new size.
+    val paceBuckets by RunSession.paceBucketsFlow.collectAsState()
+    LaunchedEffect(paceBucketN) { RunSession.setPaceBucketMinutes(paceBucketN) }
 
     // Banner action state: the fallback clear-readiness confirm (chrome §6)
     // and the Add-details readiness sheet, both reachable DURING a run so the
@@ -607,12 +600,12 @@ fun RunTrackingScreen(
     ClearConfirmDialog(
         visible = confirmReadiness,
         title = "Clear readiness inputs?",
-        message = "This clears today's readiness inputs and every adjustment they produced - including any safety hold that blocks training. Re-log your readiness to restore it.",
+        message = "This clears today's readiness inputs and every adjustment they produced, including any safety hold that blocks training. Re-log your readiness to restore it.",
         confirmLabel = "Clear",
         onDismiss = { confirmReadiness = false },
         onClear = { onEvent(Event.ClearReadiness) },
     )
-    // Phase 1: removing a pain hold confirms first, symmetric with triage.
+    // Removing a pain hold confirms first, symmetric with triage.
     ClearConfirmDialog(
         visible = confirmRemovePain,
         title = "Remove the pain report?",
@@ -621,23 +614,24 @@ fun RunTrackingScreen(
         onDismiss = { confirmRemovePain = false },
         onClear = { onEvent(Event.RemoveReadiness(ReadinessSignal.Pain)) },
     )
-    // Phase 4 / M4: a sub-threshold run prompts keep/discard before it is logged.
+    // A sub-threshold run prompts keep/discard before it is logged.
     shortRunKm?.let { km ->
         val status = LocalStatusColors.current
         androidx.compose.material3.AlertDialog(
             // Outside-tap / back dismiss must NOT drop to the Start UI (which would
             // truncate the sidecar). The service is already stopped and the fixes stay
             // in RunSession.points, so clearing the prompt leaves the derived
-            // `unsavedCapture` true: the Save/Discard affordance stays (C5).
+            // `unsavedCapture` true; the Save/Discard affordance stays.
             onDismissRequest = {
                 shortRunKm = null
             },
             shape = RoundedCornerShape(Space.Card.dp),
             containerColor = BgElevated,
-            title = { Text("Only ${String.format(Locale.US, "%.2f", km)} km") },
+            title = { Text("This run was ${String.format(Locale.US, "%.2f", km)} km") },
             text = {
                 Text(
-                    "That's a very short run - keep it in your history, or discard it? Discarding logs nothing.",
+                    "That's under the 0.5 km / 3 minute mark milestone uses to filter out accidental recordings. " +
+                        "Keep it in your history, or discard it. Discarding saves nothing.",
                     color = OnBgMuted,
                     style = Type.Body,
                 )
@@ -697,8 +691,12 @@ fun RunTrackingScreen(
             ) {
                 Text("© OpenStreetMap", color = Color.White.copy(alpha = 0.85f), style = Type.Caption)
                 when {
+                    // Human status a runner can act on, not an internal fix counter
+                    // ("GPS · N fixes" meant nothing to them). The elapsed + distance
+                    // are already the sheet's big readouts; the map pill just states
+                    // whether the route is being recorded or is paused.
                     tracking -> Text(
-                        if (paused) "Paused · ${points.size} fixes" else "GPS · ${points.size} fixes",
+                        if (paused) "Paused" else "Recording",
                         color = Color.White,
                         style = Type.Caption.merge(TabularFigures),
                     )
@@ -761,7 +759,7 @@ fun RunTrackingScreen(
             when {
                 !hasPermission -> Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                     Text(
-                        "Precise location (GPS) is needed to track a run - approximate-only location can't record a route.",
+                        "Precise location (GPS) is needed to track a run. Approximate-only location can't record a route.",
                         color = OnBgMuted,
                         style = Type.Body,
                     )
@@ -876,7 +874,7 @@ fun RunTrackingScreen(
                     // denied notifications = muted caption.
                     if (!locationOn) {
                         Text(
-                            "Location services are off - no GPS fixes will be recorded. Enable location in system settings.",
+                            "Location services are off. No GPS fixes will be recorded. Enable location in system settings.",
                             color = Color.White,
                             style = Type.Body,
                             modifier = Modifier
@@ -888,7 +886,7 @@ fun RunTrackingScreen(
                     }
                     if (!notifGranted) {
                         Text(
-                            "Notifications are off - tracking still works, but the ongoing lockscreen notification won't show.",
+                            "Notifications are off. Tracking still works, but the ongoing lockscreen notification won't show.",
                             color = OnBgMuted,
                             style = Type.Caption,
                         )
@@ -900,9 +898,9 @@ fun RunTrackingScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (unsavedCapture) {
-                            // Captured-but-unsaved run (C5): the save failed or the
+                            // Captured-but-unsaved run: the save failed or the
                             // short-run prompt was dismissed. Offer Discard + Save
-                            // (retry), NEVER Start, which would truncate the sidecar.
+                            // (retry); NEVER Start, which would truncate the sidecar.
                             Box(
                                 modifier = Modifier
                                     .size(56.dp)
@@ -942,7 +940,7 @@ fun RunTrackingScreen(
                         } else if (!tracking) {
                             // Not recording (locate preview): Back circle + Start
                             // pill. Start is disabled until a usable GPS fix lands
-                            // (Phase 4 / M4 explicit-Start-after-lock).
+                            // (explicit-Start-after-lock).
                             ControlCircle(R.drawable.ic_ui_close, "Back") {
                                 exiting = true
                                 RunTrackingService.stop(ctx)
@@ -1058,12 +1056,12 @@ fun RunTrackingScreen(
 }
 
 /** A preview fix at or under this accuracy (m) counts as a usable GPS lock that
- *  enables Start (Phase 4 / M4). The live-fix plausibility gate already rejects
+ *  enables Start. The live-fix plausibility gate already rejects
  *  fixes worse than ~50 m, so this is the "good enough to begin" line. */
 private const val GPS_LOCK_ACCURACY_M = 50.0
 
 /**
- * A captured-but-not-yet-saved run exists (C5) when the foreground service is no
+ * A captured-but-not-yet-saved run exists when the foreground service is no
  * longer recording yet raw fixes are still held in [RunSession]. The locate-only
  * preview records NO points: it only reads `lastFix`, so a stopped session with
  * a non-empty point list can ONLY be a captured track awaiting save (after a failed
@@ -1080,12 +1078,57 @@ private const val GPS_LOCK_ACCURACY_M = 50.0
 internal fun hasUnsavedCapture(tracking: Boolean, pointCount: Int): Boolean =
     !tracking && pointCount > 0
 
+/**
+ * Critical section for saving a captured run: persist the run, then tear down
+ * the in-memory session; as ONE unit that must survive the caller's scope being
+ * cancelled mid-save (a rotation cancels `rememberCoroutineScope`).
+ *
+ * [send] is the non-cancellable JNI persist; by the time it returns, `Core.send`
+ * has already APPENDED the run to the event log. [clearSidecar] then drops the
+ * crash-recovery sidecar and [resetSession] empties the session; both ORDERED
+ * after the append and run inside the SAME `NonCancellable` block as [send], so a
+ * rotation can never tear the clear/reset off an already-persisted run (which is
+ * exactly the double-log: skipped clear/reset + the failure path re-showing
+ * Save/Discard for a run that is already in the log → duplicate on retry / phantom
+ * on discard). [finish] (navigation) runs in its own `NonCancellable` block; if the
+ * caller was cancelled it may be skipped, which is harmless; [resetSession]
+ * already emptied the session, so the recomposed screen is clean (non-unsaved).
+ *
+ * A [CancellationException] is RE-THROWN, never routed to [onFailure]: the persist
+ * + clear + reset already completed inside `NonCancellable`, so treating the cancel
+ * as a failed save would resurrect the Save/Discard affordance for a logged run.
+ * Any OTHER exception means the persist itself failed BEFORE clear/reset ran (they
+ * are sequenced after [send] inside the same block), so [onFailure] fires with the
+ * captured run + sidecar still intact for a retry.
+ */
+internal suspend fun <T> runSaveCriticalSection(
+    send: suspend () -> T,
+    clearSidecar: () -> Unit,
+    resetSession: () -> Unit,
+    finish: (T) -> Unit,
+    onFailure: () -> Unit,
+) {
+    try {
+        val result = withContext(Dispatchers.IO + NonCancellable) {
+            val r = send()
+            clearSidecar()
+            resetSession()
+            r
+        }
+        withContext(NonCancellable) { finish(result) }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        onFailure()
+    }
+}
+
 /** Below this measured distance (km) a Stop & save prompts keep/discard, so a
- *  drift/accidental "run" doesn't silently pollute weekly km / spikes (M4). */
+ *  drift/accidental "run" doesn't silently pollute weekly km / spikes. */
 internal const val MIN_RUN_KM = 0.5
 
-/** Below this measured duration (seconds) a Stop & save also prompts keep/discard
- *  - the migration-plan A/C duration prong: a ≥0.5 km blip logged over ~90 s is
+/** Below this measured duration (seconds) a Stop & save also prompts keep/discard:
+ *  a ≥0.5 km blip logged over ~90 s is
  *  as likely to be noise as a sub-0.5 km one, so a run under ~3 min is gated too. */
 internal const val MIN_RUN_SEC = 180L
 

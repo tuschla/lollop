@@ -9,6 +9,13 @@
 //! Flow for the shell:
 //!   1. `update(eventJson)` → JSON array of effect requests (only `Render`).
 //!   2. `view()` → JSON `ViewModel` reflecting the new state.
+//!
+//! Panic firewall: these exports are called across a JNI `extern "system"`
+//! boundary, where a Rust unwind is undefined behaviour and, since Rust 1.81,
+//! aborts the whole process: an app crash the shell can never intercept. So
+//! every core call is wrapped such that no shell input (a poisoned lock, a
+//! malformed event, a core panic) unwinds across that boundary; it degrades to
+//! a dropped event or a structured error object instead.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -33,13 +40,10 @@ fn bridge() -> &'static Mutex<JsonBridge> {
 
 /// Lock the bridge, recovering the guard even if the mutex was poisoned.
 ///
-/// The whole point of the FFI layer (see [`process_event`]) is that no shell
-/// input turns into an unrecoverable crash-loop. A plain `.expect()` on the lock
-/// would betray that: if any prior call ever panicked while holding the lock, the
-/// mutex is poisoned and *every* subsequent `update`/`view` would panic across the
-/// JNI `extern "system"` boundary (UB), a permanent brick, not a dropped event.
-/// The bridge holds plain serde model data with no cross-field lock invariant, so
-/// reusing the inner value after a poison is safe; recover it rather than crash.
+/// Panicking on a poisoned lock would unwind across the JNI boundary (see the
+/// module-level panic-firewall note). The bridge holds plain serde model data
+/// with no cross-field lock invariant, so reusing the inner value after a
+/// poison is safe; recover it rather than crash.
 #[allow(dead_code)]
 fn lock_bridge() -> std::sync::MutexGuard<'static, JsonBridge> {
     bridge()
@@ -52,12 +56,19 @@ fn lock_bridge() -> std::sync::MutexGuard<'static, JsonBridge> {
 /// only, the error path must not add a runtime dependency to the core crate.
 #[allow(dead_code)]
 fn escape_json(s: &str) -> String {
+    use std::fmt::Write as _;
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            // `write!` into a String is infallible; the `Result` only exists
+            // for the generic `fmt::Write` trait, so discard it. Writes the
+            // `\uXXXX` escape straight into the buffer instead of a throwaway
+            // `format!` allocation, matching `parse_fit_json`'s pattern.
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
             c => out.push(c),
         }
     }
@@ -65,18 +76,16 @@ fn escape_json(s: &str) -> String {
 }
 
 /// Run a core call with a panic firewall: any panic is caught and converted to
-/// a structured error JSON object instead of unwinding across the JNI
-/// `extern "system"` boundary (which since Rust 1.81 aborts the whole process -
-/// a hard app crash the shell can never intercept).
+/// a structured error JSON object instead of unwinding across the JNI boundary
+/// (see the module-level panic-firewall note).
 ///
-/// Shape: `{"error":{"kind":"panic","context":"update","message":"..."}}`, an
+/// Shape: `{"error":{"kind":"panic","context":"update","message":"..."}}`: an
 /// object, never an array, so a shell distinguishes it from the effect-request
 /// array / `ViewModel` object by its top-level `"error"` key.
 ///
 /// `AssertUnwindSafe` is sound here: the only state crossing the boundary is
 /// the global bridge `Mutex`, whose poison [`lock_bridge`] deliberately
-/// recovers (the model is plain serde data with no cross-field lock
-/// invariant), so a caught panic leaves no poisoned state and the next call
+/// recovers, so a caught panic leaves no poisoned state and the next call
 /// proceeds on the last consistent-enough model rather than crash-looping.
 #[allow(dead_code)]
 fn catch_panic(context: &str, f: impl FnOnce() -> Vec<u8>) -> Vec<u8> {
@@ -100,12 +109,11 @@ fn catch_panic(context: &str, f: impl FnOnce() -> Vec<u8>) -> Vec<u8> {
 
 /// Process a JSON-encoded event, returning the JSON effect-request array.
 ///
-/// A malformed or unknown-variant event is dropped rather than propagated as a
-/// panic: these functions are called across a JNI `extern "system"` boundary,
-/// where unwinding is undefined behaviour. The realistic trigger is log replay -
+/// A malformed or unknown-variant event is dropped rather than propagated (see
+/// the module-level panic-firewall note). The realistic trigger is log replay:
 /// the shell re-feeds every persisted event on launch, so a line written by a
 /// future app version (a renamed/removed `Event` variant) must be skipped, not
-/// turned into an unrecoverable startup crash-loop. Core state is simply left
+/// turned into an unrecoverable startup crash-loop. Core state is left
 /// unchanged and the shell renders the prior view.
 ///
 /// A *panic* inside the core (as opposed to a serde error) is caught by
@@ -140,8 +148,11 @@ fn current_view() -> Vec<u8> {
 /// Nothing here is recommendation-bearing, so no `Evidence` is attached
 /// (evidence gating covers coaching claims, not raw sensor ingest).
 ///
-/// Success: `{"segments":[[{"lat":..,"lon":..,"time_sec":..,"hr_bpm":123}, ...], ...]}`
-/// (`hr_bpm` omitted when absent, never a fabricated 0/null placeholder).
+/// Success: `{"segments":[[{"lat":..,"lon":..,"time_sec":..,"hr_bpm":123,"accuracy_m":8}, ...], ...]}`
+/// (`hr_bpm` and `accuracy_m` are each omitted when absent, never a fabricated
+/// 0/null placeholder, `accuracy_m` is present only when the FIT file actually
+/// recorded `record.gps_accuracy`, so the shell can tell a real device figure
+/// from "unknown" and apply its own sentinel; see `Gpx.kt`'s `importedRunEvent`).
 /// Failure: `{"error":"<plain-language message>"}`.
 ///
 /// Hand-built JSON rather than `serde_json::to_string`, for the same reason
@@ -150,9 +161,23 @@ fn current_view() -> Vec<u8> {
 /// serialise a handful of floats.
 #[allow(dead_code)]
 fn parse_fit_json(bytes: &[u8]) -> Vec<u8> {
+    use std::fmt::Write as _;
     catch_panic("parseFit", || match crate::fit::parse_fit(bytes) {
         Ok(track) => {
-            let mut out = String::from(r#"{"segments":["#);
+            // Pre-reserve one contiguous buffer and `write!` each fix straight
+            // into it, instead of a fresh `format!` heap allocation per fix (a
+            // long run is tens of thousands of fixes → tens of thousands of
+            // throwaway Strings + repeated buffer regrowth, tens of MB of churn
+            // for a big file). ~64 bytes/fix comfortably covers lat/lon/time_sec
+            // plus the optional hr_bpm/accuracy_m and punctuation, so the buffer
+            // rarely regrows. The emitted bytes are byte-identical to the old
+            // per-fix `format!` path: `write!`/`push_str` share the exact same
+            // `Display` formatting the Kotlin `fitSegments` parser + the JSON
+            // tests depend on: only *how* the string is assembled changed.
+            let total_fixes: usize = track.segments.iter().map(Vec::len).sum();
+            let mut out =
+                String::with_capacity(total_fixes * 64 + track.segments.len() * 2 + 16);
+            out.push_str(r#"{"segments":["#);
             for (si, segment) in track.segments.iter().enumerate() {
                 if si > 0 {
                     out.push(',');
@@ -162,12 +187,23 @@ fn parse_fit_json(bytes: &[u8]) -> Vec<u8> {
                     if fi > 0 {
                         out.push(',');
                     }
-                    out.push_str(&format!(
+                    // `write!` into a String is infallible; the `Result` only
+                    // exists for the generic `fmt::Write` trait, so discard it.
+                    let _ = write!(
+                        out,
                         r#"{{"lat":{},"lon":{},"time_sec":{}"#,
                         fix.lat, fix.lon, fix.time_sec
-                    ));
+                    );
                     if let Some(hr) = fix.hr_bpm {
-                        out.push_str(&format!(r#","hr_bpm":{hr}"#));
+                        let _ = write!(out, r#","hr_bpm":{hr}"#);
+                    }
+                    // Present only for FIT files that actually recorded
+                    // `gps_accuracy`, a real device measurement in metres.
+                    // Absent = unknown; the shell (not the core) supplies a
+                    // QC-passing sentinel for those, so it must NOT be defaulted
+                    // here.
+                    if let Some(acc) = fix.accuracy_m {
+                        let _ = write!(out, r#","accuracy_m":{acc}"#);
                     }
                     out.push('}');
                 }
@@ -554,7 +590,7 @@ mod tests {
         // Pins the additive Task-7/8 wire shape on RunResultView: the spike
         // gate's full evidence tag (grade/confidence/safety_critical/contested,
         // not just citation) and the core-owned split-verdict chip. Android's
-        // ignoreUnknownKeys tolerates the new keys until task 14 consumes them.
+        // ignoreUnknownKeys tolerates the new keys until the shell consumes them.
         // Equatorial fixes: fast front half, back half ~2x slower → "fade".
         let event = serde_json::json!({
             "LogRunTrack": {
@@ -998,9 +1034,9 @@ mod tests {
 
     #[test]
     fn android_shaped_checkin_round_trips_and_surfaces_baseline_status() {
-        // Phase 2 / B1: the morning check-in wire shape (raw human items +
+        // The morning check-in wire shape (raw human items +
         // optional watch numbers) must survive the JNI Bridge exactly as Core.kt
-        // emits it: a field drift would silently drop the check-in on replay.
+        // emits it; a field drift would silently drop the check-in on replay.
         // One check-in is far below the baseline minimum, so the view must carry
         // an honest "collecting baseline" status, never a fabricated z.
         let event = serde_json::json!({
@@ -1101,19 +1137,41 @@ mod android {
     use jni::objects::{JByteArray, JClass};
     use jni::sys::{jbyteArray, jstring};
 
+    /// Build a JNI byte array from `out`, degrading to a defined return rather
+    /// than `.expect()`-panicking across the `extern "system"` boundary (since
+    /// Rust 1.81 an unwind out of such a fn ABORTS the process, defeating the
+    /// module's own panic firewall, see [`super::catch_panic`]). An allocation
+    /// failure (e.g. OOM on a huge payload) first retries with an empty array -
+    /// the smaller allocation may still succeed, and only then falls back to a
+    /// null `jbyteArray`, itself a defined return the shell already handles
+    /// (mirrors the `parseFit` export's degrade-every-step / last-good pattern).
+    fn byte_array_or_null(env: &JNIEnv, out: &[u8]) -> jbyteArray {
+        match env.byte_array_from_slice(out) {
+            Ok(arr) => arr.into_raw(),
+            Err(_) => match env.byte_array_from_slice(&[]) {
+                Ok(arr) => arr.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+        }
+    }
+
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_app_milestone_Core_update(
         env: JNIEnv,
         _class: JClass,
         event: JByteArray,
     ) -> jbyteArray {
-        let bytes = env
-            .convert_byte_array(&event)
-            .expect("event byte array should convert");
-        let out = process_event(&bytes);
-        env.byte_array_from_slice(&out)
-            .expect("requests byte array should build")
-            .into_raw()
+        // Every fallible JNI step degrades rather than `.expect()`-panicking
+        // across this `extern "system"` boundary (unwinding is UB → a process
+        // abort the shell can never intercept). A failure to read the event
+        // byte array is treated exactly like a malformed/dropped event: no
+        // effect requests (the same defined outcome `process_event` returns for
+        // an unparseable event). The accepted path is unchanged.
+        let out = match env.convert_byte_array(&event) {
+            Ok(bytes) => process_event(&bytes),
+            Err(_) => Vec::new(),
+        };
+        byte_array_or_null(&env, &out)
     }
 
     #[unsafe(no_mangle)]
@@ -1121,10 +1179,11 @@ mod android {
         env: JNIEnv,
         _class: JClass,
     ) -> jbyteArray {
+        // `current_view` is itself already panic-firewalled; the only remaining
+        // fallible JNI step is building the return array, which degrades to a
+        // defined return instead of `.expect()`-panicking across the boundary.
         let out = current_view();
-        env.byte_array_from_slice(&out)
-            .expect("view byte array should build")
-            .into_raw()
+        byte_array_or_null(&env, &out)
     }
 
     /// Pure FIT-file parsing helper, deliberately NOT wired through

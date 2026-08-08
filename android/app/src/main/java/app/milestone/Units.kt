@@ -85,3 +85,11 @@ fun formatPaceMinutes(minutes: Double): String {
     val secs = totalSeconds % 60
     return "$mins:${secs.toString().padStart(2, '0')}"
 }
+
+/**
+ * Trim a human-scale decimal to its shortest exact form: a whole value drops the
+ * decimal ("5"), a fractional one keeps a single place ("5.5"). Shared by every
+ * distance/RPE/duration/magnitude label so the "no trailing .0" rule lives once.
+ */
+internal fun trimDecimal(v: Double): String =
+    if (v % 1.0 == 0.0) "${v.toLong()}" else String.format(Locale.US, "%.1f", v)

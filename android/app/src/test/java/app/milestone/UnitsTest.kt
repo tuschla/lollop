@@ -53,4 +53,10 @@ class UnitsTest {
         assertEquals("-:-", formatPaceMinutes(Double.NaN))
         assertEquals("-:-", formatPaceMinutes(-1.0))
     }
+
+    @Test
+    fun trimDecimalDropsWholeAndKeepsFractional() {
+        assertEquals("5", trimDecimal(5.0))
+        assertEquals("5.5", trimDecimal(5.5))
+    }
 }

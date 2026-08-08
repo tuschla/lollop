@@ -103,6 +103,9 @@ dependencies {
     // JVM unit tests (no device): compaction + event JSON wire shapes.
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // runTest + controllable dispatchers for the M1 run-save critical-section
+    // cancellation tests (drives real coroutine cancellation the UI can't).
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
     // Instrumented Compose UI tests (on device/emulator).
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

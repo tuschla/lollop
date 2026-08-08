@@ -136,7 +136,7 @@ class MainActivity : ComponentActivity() {
         // Draw edge-to-edge so the system bars are transparent and we control
         // their contrast per THEME (not the hardcoded navy in themes.xml, which
         // API 35+ ignores). Content is inset via statusBarsPadding / the nav-bar
-        // inset in the chrome (C7).
+        // inset in the chrome.
         enableEdgeToEdge()
         // osmdroid needs a config + user agent set before any MapView inflates.
         Configuration.getInstance().load(this, getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
@@ -185,7 +185,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// B4: how old a crash-recovery sidecar's newest fix may be and still be offered
+// How old a crash-recovery sidecar's newest fix may be and still be offered
 // for resume. Beyond this the app was gone long enough that the run is almost
 // certainly dead, so the sidecar is discarded rather than resumed (a stale resume
 // would let one Stop&save write a garbage multi-hour run). 3 hours.
@@ -212,7 +212,7 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
     var loaded by remember { mutableStateOf(false) }
     var model by remember { mutableStateOf(ViewModel()) }
 
-    // Guided setup (M5): shown once on a true fresh install instead of auto-seeding
+    // Guided setup: shown once on a true fresh install instead of auto-seeding
     // an opinionated profile. Saveable so it survives rotation mid-setup; gated
     // additionally by a persisted "onboarding_done" flag so a skip doesn't re-prompt
     // on the next launch (first-run only, per the plan).
@@ -231,18 +231,18 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
     // recording. The saveable flag keeps them on the map across recreation.
     var showTracker by rememberSaveable { mutableStateOf(false) }
 
-    // C2: the one-time boot work (deciding showSetup, offering run recovery) must
+    // The one-time boot work (deciding showSetup, offering run recovery) must
     // run ONCE PER PROCESS, not on every Activity recreation. A rotation re-runs the
     // boot LaunchedEffect; without this guard it would recompute showSetup=false
     // (line "SetToday persisted → freshInstall=false") and clobber the rememberSaveable
     // guided-setup answers. Saveable so it survives the recreation the guard exists for.
     var bootHandled by rememberSaveable { mutableStateOf(false) }
-    // B4: a crash-recovery sidecar is never auto-resumed anymore: the user is asked
+    // A crash-recovery sidecar is never auto-resumed anymore; the user is asked
     // first (consent), and a stale sidecar (newest fix older than RESUME_STALE_SEC)
     // is discarded outright so it can't silently become a garbage multi-hour run.
     var showResumePrompt by rememberSaveable { mutableStateOf(false) }
 
-    // M9: the (local epoch-day, utc-offset-sec) the core was last told is "today".
+    // The (local epoch-day, utc-offset-sec) the core was last told is "today".
     // Seeded by the boot effect's SetToday below and re-sent on ON_RESUME whenever
     // the day rolls over or the offset changes (app left alive across midnight, or
     // travel). null until the boot effect's first send owns it, so the resume
@@ -255,14 +255,14 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
     // Not persisted across process death (the core's persisted detail covers that).
     var lastPain by remember { mutableStateOf<PainDetail?>(null) }
     // "How evidence grading works" legend sheet, opened from the "?" on grade
-    // badges (M3). Static copy, no coaching logic.
+    // badges. Static copy; no coaching logic.
     var showLegend by remember { mutableStateOf(false) }
-    // Glossary bottom-sheet (m2): the term key to open it scrolled to, or null
-    // when closed. Opened from tappable term chips app-wide. Static UI copy -
+    // Glossary bottom-sheet: the term key to open it scrolled to, or null
+    // when closed. Opened from tappable term chips app-wide. Static UI copy;
     // definitions of jargon, NOT KB training claims.
     var glossaryTerm by remember { mutableStateOf<String?>(null) }
     // Which signal the readiness editor opens pre-selected when reached from a
-    // Today "+ Add" chip (M6 deep-link). Reset to the advanced default otherwise.
+    // Today "+ Add" chip (deep-link). Reset to the advanced default otherwise.
     var readinessInitial by remember { mutableStateOf(ReadinessSignal.WellnessZ) }
 
     // One dispatch path so shell-side echoes (lastPain) stay in lockstep with the
@@ -284,20 +284,20 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
 
     LaunchedEffect(Unit) {
         val fresh = withContext(Dispatchers.IO) { Core.restore(ctx) }
-        // No auto-seed anymore (M5): a fresh install renders the empty Today and
+        // No auto-seed anymore: a fresh install renders the empty Today and
         // routes first-run into the guided setup, which writes user-asserted
         // profile values rather than the old 45 km/wk-looking beginner defaults.
         var vm = withContext(Dispatchers.IO) { Core.currentView() }
-        // Phase 6 / B3: the shell's clock enters the core as event data so it can
-        // date the plan week and pick today's next session (determinism, no clock
+        // The shell's clock enters the core as event data so it can
+        // date the plan week and pick today's next session (determinism; no clock
         // in-core). Sent on launch; the last-write-wins singleton keeps one line.
         val bootDay = todayEpochDay()
         val bootOffset = utcOffsetSec()
         vm = withContext(Dispatchers.IO) { Core.send(Event.SetToday(bootDay, bootOffset)) }
-        // M9: remember what we told the core so the ON_RESUME observer below can
+        // Remember what we told the core so the ON_RESUME observer below can
         // detect a midnight rollover / offset change and re-send (see [lastToday]).
         lastToday = bootDay to bootOffset
-        // TASK A: auto-generate the plan on boot for a set-up user who has NO plan
+        // Auto-generate the plan on boot for a set-up user who has NO plan
         // yet, so they land on the real prescription-led Coach/Today (next-session
         // hero + week strip + prescription headline) with ZERO manual taps. Gated on
         // `program == null` so an EXISTING plan is never touched here: re-firing
@@ -317,7 +317,7 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
             vm = withContext(Dispatchers.IO) { Core.send(Event.GeneratePlan(todayEpochDay())) }
         }
         model = vm
-        // C2: everything below is one-time-per-process. On a rotation the effect
+        // Everything below is one-time-per-process. On a rotation the effect
         // re-runs, but bootHandled is already true (restored from saveable state),
         // so we DON'T recompute showSetup (which would clobber mid-setup answers)
         // and DON'T re-offer run recovery. model + loaded are still refreshed above.
@@ -326,7 +326,7 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
             // Offer the guided setup only on a genuine first run that hasn't already
             // completed/skipped it (persisted flag), and only while no profile exists.
             showSetup = fresh && !setupPrefs.getBoolean("onboarding_done", false) && vm.profile == null
-            // B4: an interrupted GPS run's crash-durable sidecar. Do NOT auto-resume
+            // An interrupted GPS run's crash-durable sidecar. Do NOT auto-resume;
             // a sidecar left by a process/service kill can be hours stale and one
             // Stop&save would then write a garbage multi-hour run. Skipped when a run
             // is already live in memory (a mere config change, not a fresh process).
@@ -371,9 +371,9 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
         }
     }
 
-    // M9: an app process left alive across local midnight (or moved across a
+    // An app process left alive across local midnight (or moved across a
     // timezone / DST boundary) keeps the core dating the plan to the day the boot
-    // effect sent, "Next"/week-number/missed-status freeze on yesterday while the
+    // effect sent; "Next"/week-number/missed-status freeze on yesterday while the
     // shell-side week-strip today-ring has already advanced, so the two disagree.
     // Re-send SetToday on every ON_RESUME whose day or offset differs from the last
     // value we sent. Cheap no-op when nothing changed. Deliberately does NOT touch
@@ -398,13 +398,13 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
     }
 
     if (showSetup) {
-        // Guided setup (M5) replaces the whole scaffold on first run. Completing it
+        // Guided setup replaces the whole scaffold on first run. Completing it
         // writes ONE SetProfile (same wire as the full editor); skipping leaves the
         // profile empty and drops into the normal empty Today. Either way the
         // onboarding flag is set so it never re-prompts.
-        // C7: GuidedSetup is a full-screen replacement (outside the Scaffold that
+        // GuidedSetup is a full-screen replacement (outside the Scaffold that
         // owns the status-bar inset), so under edge-to-edge its header would sit
-        // under the status bar. Inset it here: GuidedSetup.kt itself is owned by
+        // under the status bar. Inset it here; GuidedSetup.kt itself is owned by
         // another agent, so the fix lives at the call site.
         Box(Modifier.fillMaxSize().background(BgTop).statusBarsPadding().navigationBarsPadding()) {
             // A re-run (setupInitial != null) must NOT touch the onboarding pref -
@@ -451,9 +451,9 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
 
     // The bottom-nav destination. rememberSaveable so the selected tab survives a
     // config change (rotation). Saved as the enum NAME with an unknown-name
-    // fallback (review 2026-08-03): the default autoSaver Java-serializes the
+    // fallback: the default autoSaver Java-serializes the
     // enum, and restoring an icicle that still holds a REMOVED constant (a
-    // pre-merge build's "Coach") would throw inside readObject, the same
+    // pre-merge build's "Coach") would throw inside readObject; the same
     // decode-safe pattern as WorkoutType.fromWire.
     var selected by rememberSaveable(stateSaver = DestSaver) { mutableStateOf(Dest.Today) }
 
@@ -463,29 +463,29 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
     // confirm because the safety banner's fallback undo path opens it.
     var confirmClearAll by remember { mutableStateOf(false) }
     var confirmReadiness by remember { mutableStateOf(false) }
-    // Removing a pain hold now confirms first (Phase 1), symmetric with setting
-    // it via triage: an accidental "remove" shouldn't silently drop a red flag.
+    // Removing a pain hold now confirms first, symmetric with setting
+    // it via triage; an accidental "remove" shouldn't silently drop a red flag.
     var confirmRemovePain by remember { mutableStateOf(false) }
 
     // Log bottom-sheet state. `sheetOpen` drives whether the ModalBottomSheet is
     // composed; `sheetMode` is which content it shows (the chooser first, then one
-    // of the editors when picked). C3: rememberSaveable so a rotation mid-entry
+    // of the editors when picked). RememberSaveable so a rotation mid-entry
     // keeps the sheet OPEN on the same editor (the editors' own fields are already
     // rememberSaveable) instead of dropping the in-progress entry. LogMode is a
     // (Java-Serializable) enum, so the autoSaver bundles it like the calc sheet.
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
     var sheetMode by rememberSaveable { mutableStateOf(LogMode.Chooser) }
-    // C3: whether the currently-shown editor has unsaved edits, hoisted here so the
+    // Whether the currently-shown editor has unsaved edits, hoisted here so the
     // sheet's SWIPE-DOWN dismissal can honor the same "Discard this entry?" guard
     // the editor's X already enforces. The Set/Run editors report their dirty state
     // up; other quick forms leave it false (swipe-down just closes them).
     var sheetDirty by rememberSaveable { mutableStateOf(false) }
     var confirmDiscardSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(
-        // C3: a dirty editor blocks the swipe-to-hide and raises the discard
+        // A dirty editor blocks the swipe-to-hide and raises the discard
         // confirm INSTEAD, so the sheet stays VISIBLE under the dialog. That way
         // "Keep editing" (and an outside-tap on the dialog) leave the sheet in
-        // place: no stranded invisible sheet / dead Log FAB. Discard closes it
+        // place; no stranded invisible sheet / dead Log FAB. Discard closes it
         // via `sheetOpen=false` (removes the composable, bypassing this guard).
         confirmValueChange = { target ->
             if (target == SheetValue.Hidden && sheetDirty && sheetMode != LogMode.Chooser) {
@@ -525,7 +525,7 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
                 )
                 // Brand lockup IS the title on destinations (chrome §2): no
                 // secondary title string anywhere in content.
-                // C4/m8: "Clear all data" no longer lives in a global overflow, a
+                // "Clear all data" no longer lives in a global overflow; a
                 // destructive action a tap away on every screen is too easy to hit.
                 // It now lives ONLY at the bottom of Profile under a "Danger zone"
                 // section (behind the confirm dialog). The overflow held nothing
@@ -577,7 +577,7 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
             onDismiss = { confirmClearAll = false },
             onClear = {
                 // Every logged family + derived coaching output; the profile
-                // (training configuration) stays. C4: ClearPlan was missing, so the
+                // (training configuration) stays. ClearPlan was missing, so the
                 // generated coaching plan (next_session / week / program) survived a
                 // "Clear all data" and Coach still showed it. (There are no
                 // Cooper/CriticalSpeed/APRE encoders in the shell yet: those
@@ -593,7 +593,7 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
         ClearConfirmDialog(
             visible = confirmReadiness,
             title = "Clear readiness inputs?",
-            message = "This clears today's readiness inputs and every adjustment they produced - including any safety hold that blocks training. Re-log your readiness to restore it.",
+            message = "This clears today's readiness inputs and every adjustment they produced, including any safety hold that blocks training. Re-log your readiness to restore it.",
             confirmLabel = "Clear",
             onDismiss = { confirmReadiness = false },
             onClear = { dispatch(Event.ClearReadiness) },
@@ -606,7 +606,7 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
             onDismiss = { confirmRemovePain = false },
             onClear = { dispatch(Event.RemoveReadiness(ReadinessSignal.Pain)) },
         )
-        // B4: crash-recovery consent. An interrupted run's sidecar is offered, never
+        // Crash-recovery consent. An interrupted run's sidecar is offered, never
         // silently resumed. Discard leaves nothing behind; Resume repopulates the
         // track and restarts the foreground service.
         if (showResumePrompt) {
@@ -687,7 +687,7 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
 
         if (sheetOpen) {
             ModalBottomSheet(
-                // C3: the dirty-editor guard lives in sheetState.confirmValueChange
+                // The dirty-editor guard lives in sheetState.confirmValueChange
                 // (which keeps the sheet visible while confirming). By the time
                 // onDismissRequest fires the hide is already committed on a clean
                 // sheet, so this just finishes the close.
@@ -711,7 +711,7 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
                 )
             }
         }
-        // C3: the swipe-down discard confirmation for a dirty Log editor.
+        // The swipe-down discard confirmation for a dirty Log editor.
         if (confirmDiscardSheet) {
             AlertDialog(
                 onDismissRequest = { confirmDiscardSheet = false },
@@ -729,8 +729,8 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
                 },
             )
         }
-        // "How evidence grading works" legend (M3), reached from the "?" on any
-        // grade badge. Static reference copy, no coaching logic.
+        // "How evidence grading works" legend, reached from the "?" on any
+        // grade badge. Static reference copy; no coaching logic.
         if (showLegend) {
             ModalBottomSheet(
                 onDismissRequest = { showLegend = false },
@@ -740,8 +740,8 @@ private fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
                 EvidenceLegendSheet(model.grade_definitions)
             }
         }
-        // Glossary (m2): one app-wide sheet defining the jargon, opened from any
-        // term chip. Static UI copy, no coaching logic, no KB claim.
+        // Glossary: one app-wide sheet defining the jargon, opened from any
+        // term chip. Static UI copy; no coaching logic, no KB claim.
         glossaryTerm?.let { term ->
             ModalBottomSheet(
                 onDismissRequest = { glossaryTerm = null },
@@ -768,7 +768,7 @@ enum class LogMode { Chooser, Set, Run, Checkin, Readiness, Review, WeeklyChecki
 
 /** Import cap: real GPX/TCX/FIT exports are well under this; the cap keeps a
  *  pathological or wrong-type file from OOMing the process or blowing up JSON
- *  allocation across the parseFit JNI boundary (BUGS M5). */
+ *  allocation across the parseFit JNI boundary. */
 private const val MaxImportBytes = 32 * 1024 * 1024 // 32 MB
 
 /**
@@ -814,7 +814,7 @@ private fun LogSheetContent(
     onEvent: (Event) -> Unit,
     onTrackRun: () -> Unit,
     onDismiss: () -> Unit,
-    // C3: the shown editor reports whether it has unsaved edits so the host's
+    // The shown editor reports whether it has unsaved edits so the host's
     // swipe-down dismissal can guard it. Default no-op keeps other callers simple.
     onDirtyChange: (Boolean) -> Unit = {},
 ) {
@@ -865,8 +865,8 @@ private fun LogSheetContent(
                                         .onFailure { e ->
                                             if (firstFailure == null) firstFailure = e as? GpxImportException
                                             // A non-import exception here is a shell bug, not a
-                                            // bad file: leave a diagnostic trail even when the
-                                            // partial-import UX carries on (review 2026-08-04).
+                                            // bad file; leave a diagnostic trail even when the
+                                            // partial-import UX carries on.
                                             if (e !is GpxImportException) {
                                                 android.util.Log.w("milestone", "TCX activity skipped on import", e)
                                             }
@@ -890,13 +890,13 @@ private fun LogSheetContent(
                     // multi-activity TCX doesn't block the rest from importing.
                     // distinctBy first: two Activities in the SAME file ending
                     // the same second (duplicated block from a buggy exporter)
-                    // would both pass the model.runs check: the snapshot
-                    // doesn't grow between dispatches (review 2026-08-04).
+                    // would both pass the model.runs check; the snapshot
+                    // doesn't grow between dispatches.
                     val fresh = events
                         .distinctBy { it.observedAt }
                         .filter { ev -> model.runs.none { it.observed_at == ev.observedAt } }
                     if (fresh.isEmpty()) {
-                        throw GpxImportException("Already imported - a logged run ends at the same time")
+                        throw GpxImportException("Already imported: a logged run ends at the same time")
                     }
                     fresh
                 }
@@ -938,7 +938,7 @@ private fun LogSheetContent(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(Space.Card.dp))
                         .background(status.danger)
-                        // Phase 1 (B2): open the triage sheet; nothing is
+                        // Open the triage sheet; nothing is
                         // submitted until "Report pain" inside it, so an accidental
                         // tap can't freeze the app.
                         .clickable { onMode(LogMode.Pain) }
@@ -963,6 +963,56 @@ private fun LogSheetContent(
                             color = DangerOn,
                             style = Type.Caption,
                         )
+                    }
+                }
+                // "Today's plan" fast-path (owner 2026-08-08): the highlighted way
+                // to start today's prescribed session, replacing the removed hero
+                // action button. Only a trainable session dated today, with items,
+                // reaches here; once it's logged the core advances next_session off
+                // today (D1) so the tile disappears. Placed AFTER Report pain (the
+                // safety fast-path stays first, 05-log §1) and before "Log set".
+                val ns = model.next_session
+                if (ns != null && ns.epoch_day == todayEpochDay() && ns.items.isNotEmpty() &&
+                    (ns.status == "next" || ns.status == "adjusted")
+                ) {
+                    val nsDiscipline = sessionDiscipline(ns.session_type)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(Space.Card.dp))
+                            .background(Accent)
+                            .clickable {
+                                if (nsDiscipline == "Run") {
+                                    onTrackRun(); onDismiss()
+                                } else {
+                                    onMode(LogMode.Set)
+                                }
+                            }
+                            .padding(Space.Card.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Space.Card.dp),
+                    ) {
+                        Icon(
+                            painterResource(
+                                if (nsDiscipline == "Run") R.drawable.ic_content_run
+                                else R.drawable.ic_content_set_dumbbell,
+                            ),
+                            contentDescription = null,
+                            tint = OnAccent,
+                            modifier = Modifier.size(24.dp),
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+                            Text(
+                                "Today's plan: ${ns.title}",
+                                color = OnAccent,
+                                style = Type.Title.copy(fontSize = 17.sp, fontWeight = FontWeight.ExtraBold),
+                            )
+                            Text(
+                                ns.items.first().summary,
+                                color = OnAccent.copy(alpha = 0.75f),
+                                style = Type.Caption,
+                            )
+                        }
                     }
                 }
                 // Modality-gate the lift/run entries so a run-only profile isn't
@@ -1038,7 +1088,7 @@ private fun LogSheetContent(
                 onClose = { onMode(LogMode.Chooser) },
                 onDirtyChange = onDirtyChange,
             ) { run -> onEvent(run); onDismiss() }
-            // Phase 2 (B1): the primary human morning check-in. The core derives
+            // The primary human morning check-in. The core derives
             // the z-scores; the user never enters one.
             LogMode.Checkin -> MorningCheckinSheet(
                 echo = model.checkin_today,
@@ -1050,15 +1100,15 @@ private fun LogSheetContent(
                 initialSignal = initialReadinessSignal,
                 onClose = { onMode(LogMode.Chooser) },
             ) { r -> onEvent(r); onDismiss() }
-            // M7: per-session review vs weekly check-in are now separate, correctly
-            // titled sheets: both still emit SubmitReview (UI decomposition).
+            // Per-session review vs weekly check-in are now separate, correctly
+            // titled sheets; both still emit SubmitReview (UI decomposition).
             LogMode.Review -> SessionReviewSheet(
                 onClose = { onMode(LogMode.Chooser) },
             ) { review -> onEvent(review); onDismiss() }
             LogMode.WeeklyCheckin -> WeeklyCheckinSheet(
                 onClose = { onMode(LogMode.Chooser) },
             ) { review -> onEvent(review); onDismiss() }
-            // Phase 1 (B2): pain triage → full PainDetail, then the hold.
+            // Pain triage → full PainDetail, then the hold.
             LogMode.Pain -> PainTriageSheet(
                 onClose = { onMode(LogMode.Chooser) },
             ) { r -> onEvent(r); onDismiss() }
@@ -1145,7 +1195,7 @@ private fun TodayDestination(
         model.adjustments.isNotEmpty() ||
         model.review_adjustments.isNotEmpty() ||
         model.input_count > 0 ||
-        // Phase 2: a morning check-in is coaching signal too, even pre-baseline
+        // A morning check-in is coaching signal too; even pre-baseline
         // (the "collecting baseline" honesty state), and once derived signals land.
         model.checkin_today != null ||
         model.readiness_summary.isNotEmpty() ||
@@ -1158,18 +1208,22 @@ private fun TodayDestination(
     val trendExercise = lastLift?.exercise
     val trendSeries = model.lifts.filter { it.exercise == trendExercise }.map { it.e1rm_kg }
 
-    // Modality gating (WP6): which calculators / trends are relevant. A
+    // Modality gating: which calculators / trends are relevant. A
     // not-yet-set-up user (profile == null) sees every calculator.
     val showLifting = model.showLifting()
     val showRunning = model.showRunning()
     val calcAll = model.profile == null
+
+    // Memoized so the Today list doesn't re-run the priority sort every
+    // recomposition (mirrors the SafetyBanner lookup).
+    val safetyCard = remember(model.adjustments) { dominantSafetyAdjustment(model) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         // Extra bottom inset so the last row (empty-state caption, activity
         // card) clears the Log FAB.
         contentPadding = PaddingValues(
-            // m1: extra bottom inset so the last row (tile labels / e1RM value /
+            // Extra bottom inset so the last row (tile labels / e1RM value /
             // empty-state caption) always clears the Log FAB, never occluded.
             start = Space.Screen.dp, end = Space.Screen.dp,
             top = Space.Screen.dp, bottom = 112.dp,
@@ -1185,13 +1239,12 @@ private fun TodayDestination(
             // including a gates-only medical-referral hold, which produces NO
             // adjustment row at all (BUGS.md 2026-08-03). The adjustment search
             // stays as the fallback.
-            // Highest-PRIORITY safety row, not first-emitted (review 2026-08-03).
+            // Highest-PRIORITY safety row, not first-emitted.
             val hold = headline?.takeIf { it.kind == "safety_hold" && it.summary.isNotBlank() }
-            val safetyCard = model.adjustments.byAdjustmentPriority().firstOrNull { it.safety_critical }
             if (hold != null || safetyCard != null) {
                 item { SectionOverline("Latest guidance") }
                 item {
-                    // Safety hold card: no confidence meter (M3), safety is a
+                    // Safety hold card: no confidence meter; safety is a
                     // rule, not a probability. Grade + citation stay behind why?.
                     if (hold != null) {
                         EvidenceCard(
@@ -1216,8 +1269,8 @@ private fun TodayDestination(
             return@LazyColumn
         }
 
-        // 1. Readiness strip, passive per-signal qualitative pills only (WP5:
-        // the "+ Add" chips are gone; every signal is logged through the + FAB /
+        // 1. Readiness strip: passive per-signal qualitative pills only (the
+        // "+ Add" chips are gone; every signal is logged through the + FAB /
         // check-in). Deliberately NO ring and NO 0–100 number (INVARIANT 1).
         // Owner ruling 2026-08-04: render NOTHING when there is no readiness data
         // at all: gate on actual pills (measured signals or building baselines),
@@ -1229,7 +1282,7 @@ private fun TodayDestination(
             item { ReadinessStrip(model, status) }
         }
 
-        // 2. Today hero (WP4), one card merging Today's call + feedback +
+        // 2. Today hero: one card merging Today's call + feedback +
         // adjustments + the next-session/plan-state card. The call/adjustments
         // portion only renders when there's signal; the plan-state card always
         // renders (a set-up user sees their next session; a profile-less user
@@ -1244,12 +1297,12 @@ private fun TodayDestination(
             )
         }
 
-        // Minimal empty state (WP3): no tiles, everything logs via the + FAB.
+        // Minimal empty state: no tiles; everything logs via the + FAB.
         // Shown only when there's genuinely nothing yet.
         if (!hasAnything) {
             item {
                 Text(
-                    "Nothing logged yet - tap + to log a lift, a run, or how you feel.",
+                    "Nothing logged yet. Tap + to log a lift, a run, or how you feel.",
                     color = OnBgFaint,
                     style = Type.Caption,
                     modifier = Modifier.widthIn(max = 260.dp),
@@ -1271,7 +1324,7 @@ private fun TodayDestination(
             model.program?.let { prog -> item { ProgramCard(prog) { confirmRemovePlan = true } } }
         }
 
-        // 4. Calculators, modality-gated tiles (WP6). Race predictor + HR zones
+        // 4. Calculators: modality-gated tiles. Race predictor + HR zones
         // are running tools; Volume planner is a lifting tool; Protein is always
         // relevant. A not-yet-set-up user (profile == null) sees them all. Rows
         // are built from the visible tiles so a lone tile goes full-width: no
@@ -1302,10 +1355,13 @@ private fun TodayDestination(
                 }
                 add {
                     // Owner ruling (2026-07-28): the tile face shows the COMPUTED
-                    // value ("120–140 g/day"), parsed from the core's own result
-                    // row. A RED-S deficit refusal carries no g/day figure, so it
+                    // value ("120–140 g/day"), read from the core's structured
+                    // protein_figures (no prose scrape). A RED-S
+                    // deficit refusal carries no g/day figure (refused), so it
                     // falls back to "Set g/day" (a result exists to reopen).
-                    val proteinGrams = proteinPerDayFromTargets(model.protein_targets)
+                    val proteinGrams = model.protein_figures
+                        .firstOrNull { !it.refused }
+                        ?.let { "${it.low_g_per_day.toInt()}–${it.high_g_per_day.toInt()}" }
                     CoachToolTile(
                         "Protein target",
                         cta = if (model.profile?.bodyweight_kg != null) "Compute protein" else "Add bodyweight",
@@ -1316,9 +1372,10 @@ private fun TodayDestination(
                 }
                 if (calcAll || showRunning) {
                     add {
-                        // m9: after compute, show the actual HRmax ("187 HRmax bpm"),
-                        // parsed from the core's own HRmax row, never recomputed.
-                        val hrMax = hrMaxFromZones(model.hr_zones)
+                        // After compute, show the actual HRmax ("187 HRmax bpm"),
+                        // read from the core's structured hr_max (no
+                        // prose scrape, never recomputed). bpm is core-rounded.
+                        val hrMax = model.hr_max?.bpm?.toInt()
                         CoachToolTile(
                             "HR zones",
                             cta = if (model.profile?.age_years != null) "Compute HR zones" else "Add your age",
@@ -1351,10 +1408,10 @@ private fun TodayDestination(
             }
         }
 
-        // 5. e1RM trend card (01-today §A.3), a lift-progression viz, so
-        // additionally gated on showLifting (WP6). Renders from the FIRST point.
+        // 5. e1RM trend card (01-today §A.3): a lift-progression viz, so
+        // additionally gated on showLifting. Renders from the FIRST point.
         // Last section on Today (owner ruling 2026-08-04): the "Recent activity"
-        // list was removed: it duplicated the History tab.
+        // list was removed; it duplicated the History tab.
         if (trendExercise != null && trendSeries.isNotEmpty() && (calcAll || showLifting)) {
             item {
                 E1rmTrendCard(trendExercise, trendSeries, lastLift?.e1rm_delta_kg, lastLift?.e1rm_direction)
@@ -1367,7 +1424,7 @@ private fun TodayDestination(
     ClearConfirmDialog(
         visible = confirmRemovePlan,
         title = "Remove this plan?",
-        message = "Deletes the current plan. Your logged workouts are kept. It won't come back on its own - generate a new plan whenever you're ready.",
+        message = "Deletes the current plan. Your logged workouts are kept. It won't come back on its own. Generate a new plan whenever you're ready.",
         confirmLabel = "Remove plan",
         onDismiss = { confirmRemovePlan = false },
         onClear = { onEvent(Event.ClearPlan) },
@@ -1389,7 +1446,7 @@ private fun TodayDestination(
 }
 
 /**
- * Today hero (WP4, owner declutter 2026-08-04): one card stack merging the former
+ * Today hero (owner declutter 2026-08-04): one card stack merging the former
  * separate "Today's call" + "Adjustments" + "Next session" cards. Top = the
  * core-owned headline (EvidenceCard, amber for an adjustment; PlainCard for the
  * ungraded all-clear) + the feedback card; then the adjustment list attached
@@ -1420,8 +1477,15 @@ private fun TodayHeroCard(
         headline?.kind == "adjustment" &&
             a.summary == headline.summary && a.citation == headline.citation
     }
-    val listedAdjustments = model.adjustments.byAdjustmentPriority().filterNot(isHeadline)
-    val listedReviewAdjustments = model.review_adjustments.byAdjustmentPriority().filterNot(isHeadline)
+    // Priority sort + headline dedupe is pure work over the wire lists, memoize
+    // it so it doesn't re-run on every unrelated recomposition (only when the
+    // adjustment lists or the headline actually change).
+    val listedAdjustments = remember(model.adjustments, headline) {
+        model.adjustments.byAdjustmentPriority().filterNot(isHeadline)
+    }
+    val listedReviewAdjustments = remember(model.review_adjustments, headline) {
+        model.review_adjustments.byAdjustmentPriority().filterNot(isHeadline)
+    }
     val nextSession = model.next_session
 
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp + Space.Xs.dp)) {
@@ -1463,7 +1527,7 @@ private fun TodayHeroCard(
                 }
             }
             if (showFeedback && fb != null) {
-                EvidenceCard(fb.message, fb.grade, fb.citation, fb.confidence, fb.safety_critical, fb.contested, fb.category, why = fb.why)
+                EvidenceCard(fb.message, fb.grade, fb.citation, fb.confidence, fb.safety_critical, fb.contested, fb.category_label.ifBlank { null }, why = fb.why)
             }
             // Adjustments & feedback attached directly under the call: never below
             // the fold (owner ruling 2026-08-03: they can carry safety-relevant
@@ -1493,7 +1557,7 @@ private fun TodayHeroCard(
     }
 }
 
-// Signals that need hardware the app can't read yet (M6): never shown as pills
+// Signals that need hardware the app can't read yet: never shown as pills
 // until an integration exists.
 private val hardwareOnlySignals = setOf(
     "BarVelocity", "VelocityLoss", "AerobicDecoupling", "HrvCv",
@@ -1503,16 +1567,16 @@ private val hardwareOnlySignals = setOf(
  * Readiness strip (01-today §A.1, amended for M6/m7 and the 2026-08-04 declutter):
  * overline + one qualitative pill per MEASURED signal (from `readiness_summary`),
  * plus honest "building baseline" pills for channels mid-collection. PASSIVE status
- * only, the "+ Add" chips are gone (WP5): every signal is logged through the + FAB
+ * only; the "+ Add" chips are gone: every signal is logged through the + FAB
  * / check-in, not from the strip. No headline sentence here (it lives on the hero
- * card, m7 dedupe), no "-" placeholders, hardware-only signals stay hidden until
+ * card; dedupe), no "-" placeholders, hardware-only signals stay hidden until
  * an integration exists. No composite score (INVARIANT 1).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReadinessStrip(model: ViewModel, status: StatusColors) {
     val measuredRows = model.readiness_summary.filter { it.signal !in hardwareOnlySignals }
-    // Channels still collecting a baseline (Phase 2): shown honestly as a
+    // Channels still collecting a baseline: shown honestly as a
     // "building baseline" pill instead of a fabricated number.
     val collecting = model.baseline_status
     // No empty-state here (owner ruling 2026-08-04, superseding the earlier "quiet
@@ -1530,7 +1594,7 @@ private fun ReadinessStrip(model: ViewModel, status: StatusColors) {
             measuredRows.forEach { row ->
                 SignalPill(
                     label = readinessPillLabel(row.signal),
-                    state = if (row.group == "metric") "${row.state} · ${trimNum(row.value)}" else row.state,
+                    state = if (row.group == "metric") "${row.state} · ${trimDecimal(row.value)}" else row.state,
                     color = if (row.safety_critical) status.dangerStrong else OnBgMuted,
                 )
             }
@@ -1636,7 +1700,7 @@ private fun E1rmTrendCard(exercise: String, series: List<Double>, deltaKg: Doubl
                     else -> "–"
                 }
                 Text(
-                    "$arrow ${trimNum(Math.abs(deltaKg))} kg",
+                    "$arrow ${trimDecimal(Math.abs(deltaKg))} kg",
                     color = OnBgBody,
                     style = Type.Chip.merge(TabularFigures),
                     modifier = Modifier
@@ -1653,7 +1717,7 @@ private fun E1rmTrendCard(exercise: String, series: List<Double>, deltaKg: Doubl
         ) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    trimNum(latest),
+                    trimDecimal(latest),
                     color = OnBgBody,
                     style = Type.Display.copy(fontWeight = FontWeight.ExtraBold).merge(TabularFigures),
                 )
@@ -1682,6 +1746,12 @@ private fun List<AdjustmentView>.byAdjustmentPriority(): List<AdjustmentView> =
             .thenByDescending { it.confidence },
     )
 
+/** The single highest-priority safety-critical adjustment, or null. Shared by the
+ *  Today safety card and the global SafetyBanner so the lookup is defined once
+ *  (wrap in `remember(model.adjustments)` at each call site). */
+private fun dominantSafetyAdjustment(model: ViewModel): AdjustmentView? =
+    model.adjustments.byAdjustmentPriority().firstOrNull { it.safety_critical }
+
 private fun List<GuidanceView>.byGuidancePriority(): List<GuidanceView> =
     sortedWith(
         compareByDescending<GuidanceView> { it.safety_critical }
@@ -1696,7 +1766,7 @@ private enum class CoachTool { Race, Volume, Protein, HrZones }
  * Body of the Coach calculator [ModalBottomSheet] (owner ruling 2026-07-28): a
  * title, the tool's FORM (unchanged, same events/prefill), then its RESULT
  * EvidenceCards (identical to what used to render inline in the Coach scroll,
- * same splitTanaka/extraDetail/why handling), then the "Clear …" action. Moving
+ * same Tanaka-split/extraDetail/why handling), then the "Clear …" action. Moving
  * these OUT of the Coach LazyColumn is what keeps the main scroll lean.
  */
 @Composable
@@ -1728,7 +1798,7 @@ private fun CoachToolSheet(
         when (tool) {
             CoachTool.Race -> RacePredictorForm(model.race_prediction) { onEvent(it) }
             CoachTool.Volume -> HypertrophyPlannerForm(model.hypertrophy_input) { onEvent(it) }
-            // M5: person data lives on the profile now, prefill bodyweight/age from
+            // Person data lives on the profile now; prefill bodyweight/age from
             // it (override still allowed in the form).
             CoachTool.Protein -> ProteinForm(
                 model.protein_input,
@@ -1783,15 +1853,26 @@ private fun CoachToolSheet(
                 }
             }
             CoachTool.HrZones -> if (model.hr_zones.isNotEmpty()) {
-                model.hr_zones.forEach {
-                    // m10: the HRmax row's "(Tanaka 208 − 0.7 × age)" formula lives
-                    // in why?; the card leads with the number, derivation behind it.
-                    val (summary, tanaka) = splitTanaka(it.summary)
+                // The HRmax row's "(Tanaka 208 − 0.7 × age)" formula lives in
+                // why?; the card leads with the number, derivation behind it. Built
+                // from the core's structured hr_max, not scraped: the
+                // exact parenthetical is reconstructed from the same fields the core
+                // rendered, then stripped off the estimate row's face. Only the
+                // age-based estimate carries it (measured maxima carry no Tanaka).
+                val hm = model.hr_max
+                val tanakaParen = hm
+                    ?.takeIf { !it.measured && it.tanaka_intercept > 0.0 }
+                    ?.let {
+                        "(Tanaka ${it.tanaka_intercept.toInt()} − ${trimDecimal(it.tanaka_slope)} × ${it.age_years.toInt()})"
+                    }
+                model.hr_zones.forEach { row ->
+                    val paren = tanakaParen?.takeIf { row.summary.contains(it) }
+                    val summary = if (paren != null) row.summary.replace(" $paren", "").trim() else row.summary
                     EvidenceCard(
-                        summary, it.grade, it.citation, it.confidence,
-                        it.safety_critical, it.contested, it.section,
-                        extraDetail = tanaka,
-                        why = it.why,
+                        summary, row.grade, row.citation, row.confidence,
+                        row.safety_critical, row.contested, row.section,
+                        extraDetail = paren?.removePrefix("(")?.removeSuffix(")"),
+                        why = row.why,
                     )
                 }
                 TextButton(onClick = { onEvent(Event.ClearHrZones) }) {
@@ -1838,7 +1919,7 @@ private fun ReferenceLibrarySheet(model: ViewModel) {
         )
         if (referenceLibraryCount(model) == 0) {
             Text(
-                "Nothing to show yet - set a profile and log some training and the applicable rules appear here.",
+                "Nothing to show yet. Set a profile and log some training and the applicable rules appear here.",
                 color = OnBgFaint,
                 style = Type.Caption,
             )
@@ -1899,12 +1980,12 @@ private fun ReferenceSection(title: String, count: Int, content: @Composable () 
     }
 }
 
-// ── Coach-as-planner composables (MIGRATION-PLAN Phase 6 / B3) ────────────────
+// ── Coach-as-planner composables ────────────────
 
 /** Today's local epoch-day (days since 1970-01-01), for GeneratePlan/SetToday. */
 private fun todayEpochDay(): Long = java.time.LocalDate.now().toEpochDay()
 
-/** The device's current UTC offset in SECONDS east of UTC (B5), so the core can
+/** The device's current UTC offset in SECONDS east of UTC, so the core can
  *  bucket a logged session's UTC `observed_at` into the correct local day. Uses
  *  the offset at "now" (DST-correct for the current instant). */
 private fun utcOffsetSec(): Int {
@@ -1920,24 +2001,66 @@ private fun planDateLabel(epochDay: Long): String {
     return "$dow ${d.dayOfMonth} $mon"
 }
 
-/** One-letter weekday for the week strip. */
-private fun weekdayInitial(epochDay: Long): String =
-    java.time.LocalDate.ofEpochDay(epochDay)
-        .dayOfWeek.getDisplayName(java.time.format.TextStyle.NARROW, java.util.Locale.US)
+/** Two-letter weekday for the week strip (Mo Tu We Th Fr Sa Su), unambiguous
+ *  where a single narrow initial collides (M/T/T, S/S). */
+private fun weekdayShort(epochDay: Long): String = when (
+    java.time.LocalDate.ofEpochDay(epochDay).dayOfWeek
+) {
+    java.time.DayOfWeek.MONDAY -> "Mo"
+    java.time.DayOfWeek.TUESDAY -> "Tu"
+    java.time.DayOfWeek.WEDNESDAY -> "We"
+    java.time.DayOfWeek.THURSDAY -> "Th"
+    java.time.DayOfWeek.FRIDAY -> "Fr"
+    java.time.DayOfWeek.SATURDAY -> "Sa"
+    java.time.DayOfWeek.SUNDAY -> "Su"
+}
 
 /**
- * The Coach hero: today's concrete next session. Each prescribed exercise is a
- * full EvidenceCard (grade chip, SAFETY/CONTESTED, confidence + citation behind
- * why?). A readiness-adjusted or blocked session wears a status chip; a hold
- * empties the items (the plan never renders load numbers through a hold).
+ * The Coach hero: today's concrete next session, made self-describing. Leads
+ * with a "TODAY'S SESSION" / "NEXT SESSION" overline and a discipline icon
+ * beside the title so a newcomer knows what the card IS. Each prescribed
+ * exercise is a full EvidenceCard (grade chip, SAFETY/CONTESTED, confidence +
+ * citation behind why?) rendered one surface step down (BgTop) so the nested
+ * cards read as nested. A readiness-adjusted or blocked session wears a status
+ * chip; a hold empties the items (the plan never renders load numbers through a
+ * hold). Today's session is started from the "Today's plan" tile in the + Log
+ * chooser, not from the hero.
  */
 @Composable
-private fun NextSessionCard(ns: SessionPlanView) {
+private fun NextSessionCard(
+    ns: SessionPlanView,
+) {
     val status = LocalStatusColors.current
+    val isToday = ns.epoch_day == todayEpochDay()
+    val discipline = sessionDiscipline(ns.session_type)
     PlainCard {
+        // Self-describing overline naming the card for a newcomer. FieldLabel's
+        // quiet uppercase-chip style (Type.Chip, 1.2sp tracking, OnBgFaint).
+        Text(
+            if (isToday) "TODAY'S SESSION" else "NEXT SESSION",
+            color = OnBgFaint,
+            style = Type.Chip.copy(letterSpacing = 1.2.sp),
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // Discipline icon tile: Run / Lift get a symbol; Rest gets none.
+            val iconRes = when (discipline) {
+                "Run" -> R.drawable.ic_content_run
+                "Lift" -> R.drawable.ic_content_set_dumbbell
+                else -> null
+            }
+            if (iconRes != null) {
+                IconTile(
+                    painterResource(iconRes),
+                    Accent, Accent.copy(alpha = 0.14f), size = 36.dp,
+                )
+                Spacer(Modifier.size(Space.Md.dp))
+            }
             Text(ns.title, color = OnBgBody, style = Type.Title, modifier = Modifier.weight(1f))
-            Text(planDateLabel(ns.epoch_day), color = OnBgMuted, style = Type.Caption)
+            // Today is already triple-marked in the week strip below; only a
+            // future-dated session keeps its date label.
+            if (!isToday) {
+                Text(planDateLabel(ns.epoch_day), color = OnBgMuted, style = Type.Caption)
+            }
         }
         when (ns.status) {
             "adjusted" -> Chip("ADJUSTED", status.warn)
@@ -1953,13 +2076,15 @@ private fun NextSessionCard(ns: SessionPlanView) {
                     adj.summary, adj.grade, adj.citation, adj.confidence,
                     adj.safety_critical, adj.contested,
                     showConfidence = false, confidenceInWhy = true, why = adj.why,
+                    // One surface step down so the nested card reads as nested.
+                    container = BgTop,
                 )
             }
         }
         if (ns.items.isEmpty()) {
             Text(
                 if (ns.status == "blocked") {
-                    "Training is on hold - see Today's call."
+                    "Training is on hold. See Today's call."
                 } else {
                     "Rest day."
                 },
@@ -1971,6 +2096,7 @@ private fun NextSessionCard(ns: SessionPlanView) {
                 val detail = listOf(it.anchored_on, it.adjusted_note)
                     .filter { s -> s.isNotBlank() }
                     .joinToString(" · ")
+                val hasHrmax = it.summary.contains("HRmax")
                 EvidenceCard(
                     summary = it.summary,
                     grade = it.grade,
@@ -1984,6 +2110,11 @@ private fun NextSessionCard(ns: SessionPlanView) {
                     confidenceInWhy = true,
                     extraDetail = detail.ifBlank { null },
                     why = it.why,
+                    // One surface step down (BgTop) so the nested prescription card
+                    // reads as nested inside this BgElevated PlainCard.
+                    container = BgTop,
+                    // Surface the HRmax glossary where the prescription mentions it.
+                    glossaryKey = "hrmax".takeIf { hasHrmax },
                 )
             }
         }
@@ -2027,16 +2158,20 @@ private fun ProgramCard(prog: ProgramSummaryView, onRemove: () -> Unit) {
                 showConfidence = true,
                 extraDetail = null,
             )
+            // Remove plan, a destructive action, kept OFF the main face and
+            // revealed only inside the "?" disclosure (owner ruling 2026-08-04).
+            // Restyled OnBgMuted now that it's opt-in; confirm-dialog wiring
+            // (onRemove → confirmRemovePlan) is unchanged.
+            Text(
+                "Remove plan",
+                color = OnBgMuted,
+                style = Type.Caption.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(Space.Sm.dp))
+                    .clickable { onRemove() }
+                    .padding(vertical = Space.Sm.dp, horizontal = Space.Xs.dp),
+            )
         }
-        Text(
-            "Remove plan",
-            color = OnBgFaint,
-            style = Type.Caption.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier
-                .clip(RoundedCornerShape(Space.Sm.dp))
-                .clickable { onRemove() }
-                .padding(vertical = Space.Sm.dp, horizontal = Space.Xs.dp),
-        )
     }
 }
 
@@ -2066,7 +2201,7 @@ private fun PlanPromptCard(onGenerate: () -> Unit) {
     PlainCard {
         Text("Get your next workout", color = OnBgBody, style = Type.Title)
         Text(
-            "Build a dated week from your profile and logged training - every call carries its evidence.",
+            "Build a dated week from your profile and logged training.",
             color = OnBgMuted,
             style = Type.Body,
         )
@@ -2087,13 +2222,13 @@ private fun PlanPromptCard(onGenerate: () -> Unit) {
 
 /** Shown on Coach when no profile exists yet: the plan is built from the profile,
  *  so route the user into guided setup rather than leaving the plan section blank.
- *  (TASK A, profile-less users otherwise never saw the prescription flagship.) */
+ *  (Profile-less users otherwise never saw the prescription flagship.) */
 @Composable
 private fun SetupPromptCard(onStartSetup: () -> Unit) {
     PlainCard {
         Text("Set up your training", color = OnBgBody, style = Type.Title)
         Text(
-            "Answer a few questions and milestone builds a dated week of workouts - every call carries its evidence.",
+            "Answer a few questions and milestone builds a dated week of workouts.",
             color = OnBgMuted,
             style = Type.Body,
         )
@@ -2135,17 +2270,18 @@ private fun WeekStrip(week: List<SessionPlanView>) {
             week.forEachIndexed { i, s ->
                 // Per-day status → dot appearance. Filled = a settled call
                 // (next/done/adjusted/blocked); a hollow ring = still open
-                // (planned) or open-and-past (missed). This is the "planned vs
-                // done/logged" cue the day columns carry at a glance. "missed"
-                // wears a neutral hollow ring (OnBgMuted), NOT danger red: a
-                // skipped planned day is not a safety event, and red is reserved
-                // for real safety states (owner ruling: red = safety). Only
-                // "blocked" (a safety hold) keeps danger.
+                // (planned) or open-and-past (missed). GREEN (evidenceStrong)
+                // marks a completed day, NOT hrZone1's teal, which means "easy
+                // aerobic zone" everywhere else. Rest days render no dot at all
+                // (handled below). "missed" wears a neutral hollow ring
+                // (OnBgMuted), NOT danger red: a skipped planned day is not a
+                // safety event, and red is reserved for real safety states (owner
+                // ruling: red = safety). Only "blocked" (a safety hold) keeps danger.
                 val (dotColor, dotFilled) = when (s.status) {
                     "next" -> Accent to true
                     "adjusted" -> status.warn to true
                     "blocked" -> status.danger to true
-                    "done" -> status.hrZone1 to true
+                    "done" -> status.evidenceStrong to true
                     "missed" -> OnBgMuted to false
                     "rest" -> OnBgFaint to false
                     else -> OnBgFaint to false // planned
@@ -2175,7 +2311,7 @@ private fun WeekStrip(week: List<SessionPlanView>) {
                         .padding(vertical = Space.Sm.dp, horizontal = Space.Xs.dp),
                 ) {
                     Text(
-                        weekdayInitial(s.epoch_day),
+                        weekdayShort(s.epoch_day),
                         color = if (isToday || sel) Accent else OnBgMuted,
                         style = if (isToday) {
                             Type.Caption.copy(fontWeight = FontWeight.Bold)
@@ -2190,18 +2326,25 @@ private fun WeekStrip(week: List<SessionPlanView>) {
                         style = Type.Chip,
                         maxLines = 1,
                     )
-                    Box(
-                        Modifier
-                            .size(8.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .then(
-                                if (dotFilled) {
-                                    Modifier.background(dotColor)
-                                } else {
-                                    Modifier.border(1.5.dp, dotColor, RoundedCornerShape(4.dp))
-                                },
-                            ),
-                    )
+                    if (s.status != "rest") {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .then(
+                                    if (dotFilled) {
+                                        Modifier.background(dotColor)
+                                    } else {
+                                        Modifier.border(1.5.dp, dotColor, RoundedCornerShape(4.dp))
+                                    },
+                                ),
+                        )
+                    } else {
+                        // Rest days carry no dot: a hollow ring here read as an
+                        // unsettled session where none exists. Keep an 8.dp
+                        // placeholder so every column's height stays aligned.
+                        Spacer(Modifier.size(8.dp))
+                    }
                 }
             }
         }
@@ -2249,8 +2392,8 @@ private fun HistoryDestination(
     }
     var filter by rememberSaveable { mutableStateOf(defaultFilter) }
     val hasAny = model.lifts.isNotEmpty() || model.runs.isNotEmpty()
-    // Modality filtering (WP6): show the Lifts|Runs segment only when BOTH sides
-    // are relevant, either the profile programs that modality, or the user has
+    // Modality filtering: show the Lifts|Runs segment only when BOTH sides
+    // are relevant: either the profile programs that modality, or the user has
     // logged that type. Otherwise render the single available list with no
     // segment, defaulting to whichever side has data / is programmed.
     val liftsPresent = model.lifts.isNotEmpty()
@@ -2269,9 +2412,9 @@ private fun HistoryDestination(
             else -> defaultFilter
         }
     }
-    // Phase 4 / M4: tapping a card opens its detail/edit/delete sheet. We persist
+    // Tapping a card opens its detail/edit/delete sheet. We persist
     // only a lightweight selection KEY (kind + entry_id + observed_at), never the
-    // whole view, a run's RunResultView carries ~0.5 MB of GPX, and bundling that
+    // whole view; a run's RunResultView carries ~0.5 MB of GPX, and bundling that
     // into the saved-state parcel risks TransactionTooLargeException on rotation.
     // The selected entry is re-resolved from the CURRENT model each recomposition,
     // so a rotation-while-selected re-reads fresh data; a delete-while-rotated
@@ -2332,8 +2475,8 @@ private fun HistoryDestination(
                 }
             }
         }
-        // 2. Filter, two-option segmented Lifts | Runs, no "All", no counts.
-        // Hidden when only one modality is relevant (WP6): the single available
+        // 2. Filter: two-option segmented Lifts | Runs, no "All", no counts.
+        // Hidden when only one modality is relevant: the single available
         // list renders on its own.
         if (showSegment) {
             item {
@@ -2473,9 +2616,9 @@ private fun ProfileDestination(
 
         // 1b. The core's evidence-cited profile-context rows ("Profile" guidance
         // section, training age from cadence etc.). Folded into ONE collapsed
-        // section (WP7) so they don't wall the Profile tab; expanding reveals the
-        // same full-chrome EvidenceCards. m6: no "Training age · …" until there's
-        // logged history to base it on: on a zero-data day-1 user it derives from
+        // section so they don't wall the Profile tab; expanding reveals the
+        // same full-chrome EvidenceCards. No "Training age · …" until there's
+        // logged history to base it on; on a zero-data day-1 user it derives from
         // a profile default, not from evidence about them.
         if (model.profile != null) {
             val hasHistory = model.lifts.isNotEmpty() || model.runs.isNotEmpty()
@@ -2496,11 +2639,45 @@ private fun ProfileDestination(
             }
         }
 
-        // 2. Appearance · Theme, swatch cards + a system-dark-mode override.
-        // By default light/dark follows the OS; the toggle lets the user pin one.
+        // 2. Re-run guided setup: a whole-row ≥48dp entry that reopens the guided
+        // wizard PRE-FILLED from the current profile. Moved up directly under the
+        // Profile rows: it edits the same answers. The seed + onboarding
+        // semantics live at the call site (setupInitial != null → a re-run that
+        // leaves the onboarding pref untouched on skip).
         item {
             Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-                SectionOverline("Appearance · Theme")
+                SectionOverline("Setup")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(Space.Card.dp))
+                        .background(BgElevated)
+                        .border(1.dp, OnBgBody.copy(alpha = 0.07f), RoundedCornerShape(Space.Card.dp))
+                        .clickable { onRerunSetup() }
+                        .padding(Space.Card.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.Card.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+                        Text("Re-run guided setup", color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+                        Text(
+                            "Answer the setup questions again. Your current answers are pre-filled.",
+                            color = OnBgFaint,
+                            style = Type.Caption,
+                        )
+                    }
+                    RowChevron()
+                }
+            }
+        }
+
+        // 3. Appearance, every appearance control under one overline: theme
+        // swatch cards, the system-dark-mode override, and (API 31+) the
+        // system-accent switch. By default light/dark follows the OS.
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                SectionOverline("Appearance")
                 val currentTheme by ThemeSettings.theme.collectAsState()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2559,10 +2736,40 @@ private fun ProfileDestination(
                         }
                     }
                 }
+
+                // System accent, the third appearance control, under the same
+                // overline. Gated to API 31+ where dynamic (wallpaper) colour
+                // exists; safety colours never follow it.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    PlainCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f).padding(end = Space.Md.dp),
+                                verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+                            ) {
+                                Text("Use system accent color", color = OnBgBody, style = Type.Body)
+                                Text(
+                                    "Match the app's accent to your phone's wallpaper colour. Safety colours never change.",
+                                    color = OnBgFaint,
+                                    style = Type.Caption,
+                                )
+                            }
+                            val dynamicAccent by ThemeSettings.dynamicAccent.collectAsState()
+                            Switch(
+                                checked = dynamicAccent,
+                                onCheckedChange = { ThemeSettings.setDynamicAccent(ctx, it) },
+                            )
+                        }
+                    }
+                }
             }
         }
 
-        // 2b. Running · Units, the distance unit + the live pace-bucket size.
+        // 4. Running · Units, the distance unit + the live pace-bucket size.
         // Both apply immediately (user-decisions.md: Profile changes apply at once).
         item {
             Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
@@ -2611,69 +2818,7 @@ private fun ProfileDestination(
             }
         }
 
-        // 3. Settings group.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            item {
-                PlainCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f).padding(end = Space.Md.dp),
-                            verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
-                        ) {
-                            Text("Use system accent color", color = OnBgBody, style = Type.Body)
-                            Text(
-                                "Match the app's accent to your phone's wallpaper colour. Safety colours never change.",
-                                color = OnBgFaint,
-                                style = Type.Caption,
-                            )
-                        }
-                        val dynamicAccent by ThemeSettings.dynamicAccent.collectAsState()
-                        Switch(
-                            checked = dynamicAccent,
-                            onCheckedChange = { ThemeSettings.setDynamicAccent(ctx, it) },
-                        )
-                    }
-                }
-            }
-        }
-
-        // 3b. Re-run guided setup (WP7): a whole-row ≥48dp entry that reopens the
-        // guided wizard PRE-FILLED from the current profile. The seed + onboarding
-        // semantics live at the call site (setupInitial != null → a re-run that
-        // leaves the onboarding pref untouched on skip).
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-                SectionOverline("Setup")
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .clip(RoundedCornerShape(Space.Card.dp))
-                        .background(BgElevated)
-                        .border(1.dp, OnBgBody.copy(alpha = 0.07f), RoundedCornerShape(Space.Card.dp))
-                        .clickable { onRerunSetup() }
-                        .padding(Space.Card.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Space.Card.dp),
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-                        Text("Re-run guided setup", color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
-                        Text(
-                            "Answer the setup questions again - your current answers are pre-filled.",
-                            color = OnBgFaint,
-                            style = Type.Caption,
-                        )
-                    }
-                    RowChevron()
-                }
-            }
-        }
-
-        // 4. Evidence & references, the Reference library, moved here off Coach
+        // 5. Evidence & references, the Reference library, moved here off Coach
         // (owner ruling 2026-07-28). A whole-row ≥48dp tap target opening the
         // read-only study wall (grade chips + why? intact) as a sheet.
         item {
@@ -2716,8 +2861,8 @@ private fun ProfileDestination(
             }
         }
 
-        // 5. Danger zone, the ONE destructive action, at the very bottom of Profile
-        // (C4). It used to also sit a tap away in a global top-bar overflow; that's
+        // 6. Danger zone: the ONE destructive action, at the very bottom of Profile
+        // It used to also sit a tap away in a global top-bar overflow; that's
         // gone. A "Danger zone" overline + the confirm dialog keep it from being hit
         // by accident.
         item {
@@ -2860,8 +3005,8 @@ internal fun ClearConfirmDialog(
  * screen; never scrollable, never dismissable. Renders ONLY when the core
  * actually blocks training (`train_blocked`), a downgrade-class adjustment
  * (HRV/wellness dip) is NOT a hold and renders as an amber inline card on Today,
- * never here (M1). Safety is a rule, not a probability: the "?" disclosure
- * shows grade + citation but NO confidence meter (M3). `holdDetail` is the
+ * never here. Safety is a rule, not a probability: the "?" disclosure
+ * shows grade + citation but NO confidence meter. `holdDetail` is the
  * body-part/character sub-line for a characterized Pain report. A Pain hold
  * shows the "Remove the pain report" inline undo (the only clear path, now
  * confirm-gated). "Add details" opens the readiness editor.
@@ -2875,7 +3020,7 @@ internal fun SafetyBanner(
     onRemovePain: (() -> Unit)? = null,
     onAddDetails: (() -> Unit)? = null,
 ) {
-    // Proportional safety (M1): the pinned red banner is reserved for a genuine
+    // Proportional safety: the pinned red banner is reserved for a genuine
     // training block. A non-blocking safety_tier (e.g. HrvTrend) is handled by
     // the amber Today card, not here.
     if (!model.train_blocked) return
@@ -2923,7 +3068,7 @@ internal fun SafetyBanner(
             }
             // Sub-line: the characterized pain detail when we have it ("right
             // knee · sharp · 6/10"), else the tier that triggered the hold.
-            val subLine = holdDetail?.let { "Pain - $it" }
+            val subLine = holdDetail?.let { "Pain: $it" }
                 ?: tier?.let { "Triggered by ${safetyTierLabel(it)}." }
             if (subLine != null) {
                 Text(subLine, color = DangerOn, style = Type.Body)
@@ -2963,21 +3108,21 @@ internal fun SafetyBanner(
                 // build_headline resolves the DOMINANT hold source including
                 // gates-only medical referrals, which emit NO adjustment row
                 // (BUGS.md 2026-08-03); fall back to the safety-critical
-                // adjustment. Safety is a rule, not a probability (M3): grade
+                // adjustment. Safety is a rule, not a probability; grade
                 // + citation only, NO confidence meter.
                 val hold = model.today_headline?.takeIf {
                     it.kind == "safety_hold" && it.summary.isNotBlank()
                 }
-                val adj = model.adjustments.byAdjustmentPriority().firstOrNull { it.safety_critical }
+                val adj = remember(model.adjustments) { dominantSafetyAdjustment(model) }
                 val holdSummary = hold?.summary ?: adj?.summary
                 val holdGrade = hold?.grade ?: adj?.grade
                 val holdCitation = hold?.citation ?: adj?.citation
                 if (holdSummary != null) {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
                         Text(holdSummary, color = Color.White, style = Type.Caption)
-                        if (!holdGrade.isNullOrBlank()) {
+                        gradeLabel(holdGrade ?: "")?.let { gradeText ->
                             Text(
-                                "Evidence: ${gradeLabel(holdGrade)}",
+                                "Evidence: $gradeText",
                                 color = Color.White.copy(alpha = 0.85f),
                                 style = Type.Caption,
                             )
@@ -3008,10 +3153,10 @@ internal fun SafetyBanner(
             }
             // Undo path for a mis-logged signal, surfaced where the hold shows.
             // A Pain hold gets the surgical per-signal undo (the ONLY clear
-            // path, INVARIANT 3), now confirm-gated (Phase 1); other readiness
+            // path, INVARIANT 3), now confirm-gated; other readiness
             // holds keep the guarded clear-all confirm.
             val painHold = tier == "Pain" && onRemovePain != null
-            // A1 fix: a MedicalReferral hold comes from a profile health flag
+            // A MedicalReferral hold comes from a profile health flag
             // (youth/PARQ/pregnancy/injury) or an NFOR/OTS review: NOT a
             // readiness input, so "Clear readiness inputs" would not lift it and
             // is misleading. Point to the real resolution instead (no action).
@@ -3052,7 +3197,7 @@ internal fun SafetyBanner(
  */
 private fun safetyTierLabel(tier: String): String = when (tier) {
     "MedicalReferral" -> "a medical-referral red flag"
-    "Pain" -> "pain reported today - a red flag"
+    "Pain" -> "pain reported today, a red flag"
     "Illness" -> "illness"
     "ObjectivePerformance" -> "an objective performance drop"
     "SubjectiveMultiDay" -> "subjective signals (multi-day)"
@@ -3116,12 +3261,12 @@ private fun LiftCard(l: LiftResultView, series: List<Double> = emptyList(), onCl
         }
         Row {
             Text(
-                "${trimNum(l.weight_kg)} kg × ${l.reps}",
+                "${trimDecimal(l.weight_kg)} kg × ${l.reps}",
                 color = OnBgBody,
                 style = Type.Body.merge(TabularFigures),
             )
             Text(
-                " @ RPE ${trimNum(l.rpe)}",
+                " @ RPE ${trimDecimal(l.rpe)}",
                 color = OnBgFaint,
                 style = Type.Body.merge(TabularFigures),
             )
@@ -3134,14 +3279,14 @@ private fun LiftCard(l: LiftResultView, series: List<Double> = emptyList(), onCl
             Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
-                        trimNum(l.e1rm_kg),
+                        trimDecimal(l.e1rm_kg),
                         color = OnBgBody,
                         style = Type.Title.merge(TabularFigures),
                     )
                     Text(" kg e1RM", color = OnBgFaint, style = Type.Caption)
                 }
                 Text(
-                    "${Math.round(l.pct_1rm)}% 1RM · RIR ${trimNum(l.rir)}",
+                    "${Math.round(l.pct_1rm)}% 1RM · RIR ${trimDecimal(l.rir)}",
                     color = OnBgFaint,
                     style = Type.Caption.merge(TabularFigures),
                 )
@@ -3156,10 +3301,6 @@ private fun LiftCard(l: LiftResultView, series: List<Double> = emptyList(), onCl
         }
     }
 }
-
-/** Drop a trailing `.0` (whole values), else keep one decimal (e.g. 2.5 RIR). */
-private fun trimNum(d: Double): String =
-    if (d % 1.0 == 0.0) "${d.toInt()}" else String.format(Locale.US, "%.1f", d)
 
 /**
  * Friendly log date for a history card from a unix-seconds stamp: "2 hours ago",
@@ -3259,7 +3400,7 @@ private fun RunCard(r: RunResultView, onClick: (() -> Unit)? = null) {
             Text(
                 // Surface the run's HR (% of HRmax) when the core has it; a
                 // hand-entered run with no HR stays "HR -". Never invented.
-                "HR ${if (r.hr_pct_max > 0.0) "${trimNum(r.hr_pct_max)}%" else "-"} · ${r.zone}",
+                "HR ${if (r.hr_pct_max > 0.0) "${trimDecimal(r.hr_pct_max)}%" else "-"} · ${r.zone}",
                 color = if (r.zone.startsWith("Z")) OnBgMuted else OnBgFaint,
                 style = Type.Caption.merge(TabularFigures),
             )
@@ -3284,16 +3425,17 @@ private fun RunCard(r: RunResultView, onClick: (() -> Unit)? = null) {
         // Only chip the interval-LIKE case; a steady run is the default
         // expectation, so labelling it adds noise. VI still rode in on the wire.
         val intervalNotable = interval != null && interval.kind == "interval"
-        // I16: the user's own run-type label (USER DATA, no evidence, no coaching
+        // The user's own run-type label (USER DATA: no evidence, no coaching
         // reads it). Show it as a NEUTRAL chip, but NEVER when the measured INTERVAL
-        // VI chip is already up: a second label there would duplicate or contradict
+        // VI chip is already up; a second label there would duplicate or contradict
         // the derived verdict. Unknown/future wire strings map to null (untagged).
         val userType = WorkoutType.fromWire(r.workout_type)
         val showUserType = userType != null && !intervalNotable
-        // m4: a first-ever run has no prior distance to gauge a spike against -
+        // A first-ever run has no prior distance to gauge a spike against;
         // that's baseline-building, not a danger. Frame it neutrally; a REAL
-        // >10% jump keeps the red SPIKE alarm.
-        val isBaseline = r.spike_flag && r.spike_note.contains("no prior run")
+        // >10% jump keeps the red SPIKE alarm. spike_has_baseline is the core's
+        // structured provenance; no spike_note scrape.
+        val isBaseline = r.spike_flag && !r.spike_has_baseline
         if (r.spike_flag || split != null || intervalNotable || showUserType) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                 if (r.spike_flag) {
@@ -3326,15 +3468,10 @@ private fun RunCard(r: RunResultView, onClick: (() -> Unit)? = null) {
             }
         }
         if (r.spike_note.isNotBlank()) {
-            Text(
-                if (isBaseline) {
-                    "Baseline building - log a few more runs to unlock load-spike guidance."
-                } else {
-                    r.spike_note
-                },
-                color = OnBgMuted,
-                style = Type.Caption,
-            )
+            // Render the core's honest spike_note verbatim: including the
+            // first-run "no prior run" line, rather than a gamified "unlock"
+            // paraphrase (the BASELINE chip already carries the neutral framing).
+            Text(r.spike_note, color = OnBgMuted, style = Type.Caption)
         }
         // The core's evidence-cited pacing copy (fade cue or discipline praise).
         // The copy stays visible; the raw citation(s) move behind why? (m3,
@@ -3380,7 +3517,7 @@ private fun RunCard(r: RunResultView, onClick: (() -> Unit)? = null) {
     }
 }
 
-/** A tapped History/Today entry (Phase 4 / M4), routed to the detail sheet. */
+/** A tapped History/Today entry, routed to the detail sheet. */
 private sealed interface HistoryEntry {
     data class Lift(val v: LiftResultView) : HistoryEntry
     data class Run(val v: RunResultView) : HistoryEntry
@@ -3425,10 +3562,10 @@ private fun deleteEventFor(entry: HistoryEntry): Event = when (entry) {
 }
 
 /**
- * The entry detail → edit/delete flow (Phase 4 / M4). Tapping a History or Today
+ * The entry detail → edit/delete flow. Tapping a History or Today
  * card sets [selected]; this hosts the detail bottom sheet (Edit + Delete), the
  * pre-filled keypad editor (emitting AmendSet/AmendRun), and the delete confirm.
- * A GPS-tracked run (has a GPX track) is delete-only, its measured route is not
+ * A GPS-tracked run (has a GPX track) is delete-only; its measured route is not
  * field-editable, so Edit is offered only for lifts and hand-entered runs.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -3440,7 +3577,7 @@ private fun EntryActionSheets(
     onEvent: (Event) -> Unit,
 ) {
     if (selected == null) return
-    // C3: saveable so a rotation mid-edit keeps the editor open (keyed on the
+    // Saveable so a rotation mid-edit keeps the editor open (keyed on the
     // selected entry, so picking a different entry resets these).
     var editing by rememberSaveable(selected) { mutableStateOf(false) }
     var confirmDelete by rememberSaveable(selected) { mutableStateOf(false) }
@@ -3512,12 +3649,12 @@ private fun EntryDetailContent(entry: HistoryEntry, onEdit: () -> Unit, onDelete
             is HistoryEntry.Lift -> {
                 TileOverline(entry.v.exercise.ifBlank { "Set" })
                 Text(
-                    "${trimNum(entry.v.weight_kg)} kg × ${entry.v.reps} @ RPE ${trimNum(entry.v.rpe)}",
+                    "${trimDecimal(entry.v.weight_kg)} kg × ${entry.v.reps} @ RPE ${trimDecimal(entry.v.rpe)}",
                     color = OnBgBody,
                     style = Type.Title.merge(TabularFigures),
                 )
                 Text(
-                    "e1RM ${trimNum(entry.v.e1rm_kg)} kg${formatLogDate(entry.v.observed_at).let { if (it.isBlank()) "" else " · $it" }}",
+                    "e1RM ${trimDecimal(entry.v.e1rm_kg)} kg${formatLogDate(entry.v.observed_at).let { if (it.isBlank()) "" else " · $it" }}",
                     color = OnBgFaint,
                     style = Type.Caption.merge(TabularFigures),
                 )
@@ -3543,7 +3680,7 @@ private fun EntryDetailContent(entry: HistoryEntry, onEdit: () -> Unit, onDelete
                 if (entry.v.gpx.isNotBlank()) {
                     RunRouteMap(entry.v.gpx)
                 }
-                // TASK C: per-km / per-mi splits from the GPS track. Pick the list
+                // Per-km / per-mi splits from the GPS track. Pick the list
                 // matching the user's distance-unit override (`unit` resolved above);
                 // pace is pre-formatted by the core (render verbatim). A hand-entered
                 // run carries no track, so both lists are empty → no split section.
@@ -3567,8 +3704,9 @@ private fun EntryDetailContent(entry: HistoryEntry, onEdit: () -> Unit, onDelete
         // it's a per-run action, offered once where the run is inspected).
         if (entry is HistoryEntry.Run && entry.v.gpx.isNotBlank()) {
             val ctx = LocalContext.current
+            val shareScope = rememberCoroutineScope()
             OutlinedButton(
-                onClick = { shareGpx(ctx, entry.v.gpx) },
+                onClick = { shareScope.launch { shareGpx(ctx, entry.v.gpx) } },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Export GPX") }
         }
@@ -3606,11 +3744,6 @@ private fun EntryDetailContent(entry: HistoryEntry, onEdit: () -> Unit, onDelete
     }
 }
 
-@Composable
-private fun FeedbackCard(f: FeedbackView) {
-    EvidenceCard(f.message, f.grade, f.citation, f.confidence, f.safety_critical, f.contested, f.category, why = f.why)
-}
-
 /**
  * EvidenceCard (02-coach §EvidenceCard, INVARIANTS 2 & 5). Owner ruling
  * 2026-07-31 (supersedes the earlier "grade badge on the face" wording): the
@@ -3623,13 +3756,13 @@ private fun FeedbackCard(f: FeedbackView) {
  *
  * `showConfidence` no longer drives any face meter (there is none); it survives
  * only as the default source for `confidenceInWhy`, which gates the confidence
- * figure INSIDE the "?" panel. A safety hold (both false) shows no confidence -
- * safety is a rule, not a probability (M3). Adjustment/prescription pass
+ * figure INSIDE the "?" panel. A safety hold (both false) shows no confidence;
+ * safety is a rule, not a probability. Adjustment/prescription pass
  * `showConfidence = false` + `confidenceInWhy = true`; feedback/calculator/
  * reference/profile-guidance cards default to confidence-in-panel.
  * `container`/`border` let a caller tint the card (the amber Today adjustment
- * card, M1). `extraDetail` is an optional line rendered inside the "?" panel (m10:
- * the HRmax card's Tanaka formula moves here off the collapsed face).
+ * card). `extraDetail` is an optional line rendered inside the "?" panel (the
+ * HRmax card's Tanaka formula moves here off the collapsed face).
  */
 /** The single unified evidence-disclosure affordance (owner ruling 2026-07-31): a
  *  small circular "?" that toggles a card's evidence panel (grade badge,
@@ -3681,6 +3814,7 @@ internal fun EvidenceCard(
     border: Color? = null,
     extraDetail: String? = null,
     why: WhyView? = null,
+    glossaryKey: String? = null,
 ) {
     val status = LocalStatusColors.current
     // Keyed on the card's identity (summary+citation), not composition position:
@@ -3718,23 +3852,52 @@ internal fun EvidenceCard(
             Modifier.padding(Space.Card.dp),
             verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp + Space.Xs.dp),
-            ) {
-                // Collapsed FACE (owner ruling 2026-07-31, extended 2026-07-31 to
-                // hide CONTESTED too): ONLY the SAFETY chip stays on the face -
-                // safety visibility is a HARD RULE, not a declutter tradeoff. The
-                // CONTESTED marker (an evidence-quality tag, not a safety signal),
-                // the grade badge, confidence, citation and grade-note ALL live
-                // behind the "?" now, so a card leads with just its summary.
-                if (safetyCritical) Chip("SAFETY", status.danger)
-                section?.let { Text(it, color = Accent, style = Type.Chip) }
-                Spacer(Modifier.weight(1f))
-                DisclosureButton(expanded) { expanded = !expanded }
+            // A bare face (no SAFETY chip, no section overline) would collapse the
+            // header to a lone right-aligned "?" floating above the summary, which
+            // reads as an empty gap (the hero's nested prescription cards). Fold
+            // the summary, glossary affordance, and "?" into ONE row instead. The
+            // chip/section variant keeps the two-row face.
+            if (!safetyCritical && section == null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        summary,
+                        modifier = Modifier.weight(1f),
+                        color = OnBgBody,
+                        style = Type.Body.copy(fontWeight = FontWeight.Bold),
+                    )
+                    glossaryKey?.let { GlossaryInfo(it) }
+                    DisclosureButton(expanded) { expanded = !expanded }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp + Space.Xs.dp),
+                ) {
+                    // Collapsed FACE (owner ruling 2026-07-31, extended 2026-07-31 to
+                    // hide CONTESTED too): ONLY the SAFETY chip stays on the face -
+                    // safety visibility is a HARD RULE, not a declutter tradeoff. The
+                    // CONTESTED marker (an evidence-quality tag, not a safety signal),
+                    // the grade badge, confidence, citation and grade-note ALL live
+                    // behind the "?" now, so a card leads with just its summary.
+                    if (safetyCritical) Chip("SAFETY", status.danger)
+                    section?.let { Text(it, color = Accent, style = Type.Chip) }
+                    Spacer(Modifier.weight(1f))
+                    DisclosureButton(expanded) { expanded = !expanded }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+                ) {
+                    Text(
+                        summary,
+                        modifier = Modifier.weight(1f),
+                        color = OnBgBody,
+                        style = Type.Body.copy(fontWeight = FontWeight.Bold),
+                    )
+                    glossaryKey?.let { GlossaryInfo(it) }
+                }
             }
-            Text(summary, color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
             if (expanded) {
                 WhyDetail(
                     why = why,
@@ -3743,7 +3906,7 @@ internal fun EvidenceCard(
                     confidence = confidence,
                     contested = contested,
                     // Confidence appears inside the "?" for every card EXCEPT a
-                    // safety hold (safety is a rule, not a probability, M3). Callers
+                    // safety hold (safety is a rule, not a probability). Callers
                     // that pass showConfidence=false without confidenceInWhy (the
                     // safety card) suppress it; adjustment/prescription/feedback/
                     // calculator/reference cards keep it in the panel.
@@ -3756,13 +3919,13 @@ internal fun EvidenceCard(
 }
 
 /**
- * The three-part "why?" disclosure body (M2 / MIGRATION-PLAN Phase 3). Renders
+ * The three-part "why?" disclosure body. Renders
  * the core-provided WhyView as: basis (what it's based on) → why THIS grade →
  * what data would improve it, then the citation. This replaces the old circular
  * restatement ("Evidence: Weak - 40% confidence / <citation>"). When the core
  * carries no why? block (old core), it falls back to that legacy restatement so
  * the sheet is never empty. The confidence figure only appears when the card
- * shows a meter at all (never on a safety hold, M3, safety is a rule).
+ * shows a meter at all (never on a safety hold, safety is a rule).
  */
 @Composable
 private fun WhyDetail(
@@ -3794,13 +3957,17 @@ private fun WhyDetail(
                 WhyLine("Based on", why.basis)
             }
             // 2. Why THIS grade (+ confidence figure when the card shows one).
-            val gradeLine = why.grade_note.ifBlank { "Evidence grade: ${gradeLabel(grade)}." }
-            val gradeLineFull = if (showConfidence) {
-                "$gradeLine (${Math.round(confidence * 100)}% confidence)"
-            } else {
-                gradeLine
+            val gradeLine = why.grade_note.ifBlank {
+                gradeLabel(grade)?.let { "Evidence grade: $it." } ?: ""
             }
-            WhyLine("Why this grade", gradeLineFull)
+            if (gradeLine.isNotBlank()) {
+                val gradeLineFull = if (showConfidence) {
+                    "$gradeLine (${Math.round(confidence * 100)}% confidence)"
+                } else {
+                    gradeLine
+                }
+                WhyLine("Why this grade", gradeLineFull)
+            }
             // 3. What would improve it, the engagement loop. Skipped when the
             //    core reports nothing would ("-").
             val improves = why.improves.trim()
@@ -3808,16 +3975,19 @@ private fun WhyDetail(
                 WhyLine("To improve", improves)
             }
         } else {
-            // Legacy fallback: the pre-Phase-3 evidence restatement.
-            Text(
-                if (showConfidence) {
-                    "Evidence: ${gradeLabel(grade)} - ${Math.round(confidence * 100)}% confidence"
-                } else {
-                    "Evidence: ${gradeLabel(grade)}"
-                },
-                color = OnBgMuted,
-                style = Type.Caption.merge(TabularFigures),
-            )
+            // Legacy fallback: the pre-Phase-3 evidence restatement. Hidden for an
+            // unmapped grade rather than leaking a raw Debug string.
+            gradeLabel(grade)?.let { label ->
+                Text(
+                    if (showConfidence) {
+                        "Evidence: $label, ${Math.round(confidence * 100)}% confidence"
+                    } else {
+                        "Evidence: $label"
+                    },
+                    color = OnBgMuted,
+                    style = Type.Caption.merge(TabularFigures),
+                )
+            }
         }
         Text(citationLabel(citation), color = OnBgFaint, style = Type.Caption)
         extraDetail?.let { Text(it, color = OnBgMuted, style = Type.Caption) }
@@ -3825,7 +3995,7 @@ private fun WhyDetail(
         // already name the contested question (avoid a duplicate line).
         if (contested && (why == null || !why.grade_note.contains("contested", ignoreCase = true))) {
             Text(
-                "Experts disagree on this - here's both sides. Treated as provisional.",
+                "Experts disagree on this. Here's both sides. Treated as provisional.",
                 color = OnBgMuted,
                 style = Type.Caption,
             )
@@ -3842,22 +4012,25 @@ private fun WhyLine(label: String, body: String) {
     }
 }
 
-/** The evidence-grade legend, opened from the "?" on any grade badge (M3). */
+/** The evidence-grade legend, opened from the "?" on any grade badge. */
 val LocalEvidenceLegend = staticCompositionLocalOf<() -> Unit> { {} }
 
 /**
- * Grade badge + a small "?" that opens the "How evidence grading works" legend
- * (M3). The badge color/label still key off the raw wire grade.
+ * Grade badge + a small "?" that opens the "How evidence grading works" legend.
+ * The badge color/label still key off the raw wire grade.
  */
 @Composable
 internal fun GradeChip(grade: String) {
+    // Unmapped/future grades have no human label; hide the whole badge rather
+    // than leak a raw Debug string.
+    val label = gradeChipLabel(grade) ?: return
     val status = LocalStatusColors.current
     val openLegend = LocalEvidenceLegend.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp),
     ) {
-        Chip(gradeChipLabel(grade), status.gradeColor(grade))
+        Chip(label, status.gradeColor(grade))
         Text(
             "?",
             color = OnBgFaint,
@@ -3872,7 +4045,7 @@ internal fun GradeChip(grade: String) {
 }
 
 /**
- * Static "How evidence grading works" reference sheet (M3). Explains the five
+ * Static "How evidence grading works" reference sheet. Explains the five
  * grades and the SAFETY / CONTESTED markers. No coaching logic, no wire data.
  */
 @Composable
@@ -3897,25 +4070,28 @@ private fun EvidenceLegendSheet(definitions: List<GradeDefView> = emptyList()) {
         // core that doesn't export them.
         if (definitions.isNotEmpty()) {
             definitions.forEach { d ->
-                LegendRow(
-                    d.grade,
-                    d.label.ifBlank { gradeLabel(d.grade) },
-                    status,
-                    d.definition + "  (${Math.round(d.confidence * 100)}% confidence)",
-                )
+                val label = d.label.ifBlank { gradeLabel(d.grade) }
+                if (label != null) {
+                    LegendRow(
+                        d.grade,
+                        label,
+                        status,
+                        d.definition + "  (${Math.round(d.confidence * 100)}% confidence)",
+                    )
+                }
             }
         } else {
             LegendRow("Strong", "Strong", status, "Consistent findings from randomized trials or meta-analyses.")
-            LegendRow("Moderate", "Moderate", status, "Mixed or limited randomized trials - the effect is likely but less certain.")
+            LegendRow("Moderate", "Moderate", status, "Mixed or limited randomized trials. The effect is likely but less certain.")
             LegendRow("Weak", "Weak", status, "Mostly observational or small studies; treat as a working hypothesis.")
-            LegendRow("ExpertOpinion", "Expert opinion", status, "No direct trials - expert consensus or mechanism-based reasoning.")
+            LegendRow("ExpertOpinion", "Expert opinion", status, "No direct trials. Expert consensus or mechanism-based reasoning.")
             LegendRow("MarketingMyth", "Marketing myth", status, "A popular claim the evidence does not support. Never programmed.")
         }
         HorizontalDivider(color = OnBgBody.copy(alpha = 0.08f))
         Row(horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp), verticalAlignment = Alignment.CenterVertically) {
             Chip("SAFETY", status.danger)
             Text(
-                "A safety rule - it overrides goals and is never a probability, so it shows no confidence meter.",
+                "A safety call. It comes before your goals, so there's no confidence score to show.",
                 color = OnBgMuted,
                 style = Type.Caption,
             )
@@ -3923,7 +4099,7 @@ private fun EvidenceLegendSheet(definitions: List<GradeDefView> = emptyList()) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp), verticalAlignment = Alignment.CenterVertically) {
             Chip("CONTESTED", status.warn)
             Text(
-                "Experts genuinely disagree - the app shows both sides and treats it as provisional.",
+                "Experts genuinely disagree. The app shows both sides and treats it as provisional.",
                 color = OnBgMuted,
                 style = Type.Caption,
             )
@@ -3944,43 +4120,47 @@ private data class GlossaryEntry(val key: String, val term: String, val definiti
 private val GLOSSARY: List<GlossaryEntry> = listOf(
     GlossaryEntry(
         "e1rm", "e1RM",
-        "Estimated 1-rep max - the heaviest single rep you could likely do, calculated from a set you logged (from the weight and reps). You never have to test a true max.",
+        "Estimated 1-rep max: the heaviest single rep you could likely do, calculated from a set you logged (from the weight and reps). You never have to test a true max.",
     ),
     GlossaryEntry(
         "1rm", "1RM / %1RM",
-        "1RM is your one-rep maximum. %1RM expresses a working load as a share of it - e.g. 80% 1RM is 80% of your best single.",
+        "1RM is your one-rep maximum. %1RM expresses a working load as a share of it, e.g. 80% 1RM is 80% of your best single.",
     ),
     GlossaryEntry(
         "rpe", "RPE",
-        "Rate of Perceived Exertion - how hard a set felt, 1–10. RPE 10 means no reps left in the tank; RPE 8 means about two left.",
+        "Rate of Perceived Exertion: how hard a set felt, 1–10. RPE 10 means no reps left in the tank; RPE 8 means about two left.",
     ),
     GlossaryEntry(
         "rir", "RIR",
-        "Reps In Reserve - how many more reps you could have done before failure. It mirrors RPE: RIR 2 ≈ RPE 8.",
+        "Reps In Reserve: how many more reps you could have done before failure. It mirrors RPE: RIR 2 ≈ RPE 8.",
     ),
     GlossaryEntry(
         "zscore", "z-score / your normal band",
-        "How far a reading sits from your own normal, measured in standard deviations. 0 is typical for you; −1 is below your usual band. The app computes it from your logged history - you never enter it.",
+        "How far a reading sits from your own normal, measured in standard deviations. 0 is typical for you; −1 is below your usual band. The app computes it from your logged history. You never enter it.",
     ),
     GlossaryEntry(
         "vdot", "VDOT",
         "A running-fitness number derived from a recent race or time trial (Daniels). It sets your training paces and zones.",
     ),
     GlossaryEntry(
+        "decoupling", "decoupling",
+        "Aerobic decoupling: the drift between your pace and heart rate across a steady run. A low drift signals a sound aerobic base; a high one means the effort outran it.",
+    ),
+    GlossaryEntry(
         "tonnage", "tonnage",
-        "Total weight lifted in the last 7 days - the sum of weight × reps across every set you logged in that window. A simple volume tally.",
+        "Total weight lifted in the last 7 days: the sum of weight × reps across every set you logged in that window. A simple volume tally.",
     ),
     GlossaryEntry(
         "spike", "SPIKE",
-        "A sudden jump in training load - here, a run much longer than your recent normal. Big jumps can raise injury risk, so the app flags them.",
+        "A sudden jump in training load: here, a run much longer than your recent normal. Big jumps can raise injury risk, so the app flags them.",
     ),
     GlossaryEntry(
         "hrmax", "HRmax",
-        "Your maximum heart rate - the highest your heart can beat. Estimated from your age (Tanaka formula) until you log a measured value from an all-out effort.",
+        "Your maximum heart rate: the highest your heart can beat. Estimated from your age (Tanaka formula) until you log a measured value from an all-out effort.",
     ),
     GlossaryEntry(
         "deload", "deload",
-        "A planned lighter week - less volume and/or load - to shed accumulated fatigue and let your body catch up on adaptation.",
+        "A planned lighter week, less volume and/or load, to shed accumulated fatigue and let your body catch up on adaptation.",
     ),
     GlossaryEntry(
         "mesocycle", "mesocycle",
@@ -3988,7 +4168,31 @@ private val GLOSSARY: List<GlossaryEntry> = listOf(
     ),
     GlossaryEntry(
         "ctl", "CTL / ATL / TSB",
-        "Training-load bookkeeping: CTL is your rolling ~6-week fitness, ATL your rolling ~1-week fatigue, and TSB (CTL − ATL) a rough 'freshness'. Bookkeeping only - not a performance predictor.",
+        "Training-load bookkeeping: CTL is your rolling ~6-week fitness, ATL your rolling ~1-week fatigue, and TSB (CTL − ATL) a rough 'freshness'. Bookkeeping only, not a performance predictor.",
+    ),
+    GlossaryEntry(
+        "trimp", "TRIMP",
+        "Training Impulse: a single number summarising one session's load from its duration and heart-rate intensity. It feeds the CTL/ATL/TSB bookkeeping.",
+    ),
+    GlossaryEntry(
+        "hrzones", "HR zones (Z1 / Z2 / Z3)",
+        "Effort bands set from your thresholds or HRmax. Z1 is very easy recovery; Z2 is an easy conversational pace you can talk through; Z3 is a harder tempo above easy.",
+    ),
+    GlossaryEntry(
+        "volume", "MEV / MAV / MRV",
+        "Weekly training-volume landmarks, counted as sets per muscle: MEV is the minimum effective volume, MAV the productive middle range, and MRV the maximum you can recover from. They shift with your training age and recovery.",
+    ),
+    GlossaryEntry(
+        "maf", "MAF",
+        "Maximum Aerobic Function (Maffetone): an easy aerobic heart-rate cap, often estimated as about 180 minus your age. One method for pacing base work; measured lactate thresholds are an alternative.",
+    ),
+    GlossaryEntry(
+        "pap", "PAP / PAPE",
+        "Post-Activation Potentiation (Enhancement): a heavy 'primer' set can briefly sharpen a following explosive effort, so the two are paired with a short rest between.",
+    ),
+    GlossaryEntry(
+        "reds", "RED-S / LEA",
+        "LEA (Low Energy Availability) is not eating enough to cover training plus daily needs; RED-S (Relative Energy Deficiency in Sport) is the health fallout from sustained LEA. A safety concern. The app defers to a professional.",
     ),
 )
 
@@ -4095,58 +4299,34 @@ private fun LegendRow(wireGrade: String, label: String, status: StatusColors, bo
 
 /** Grade-badge text: the human label, uppercased to match the other chips
  *  (SAFETY / CONTESTED / SPIKE). Display-only. */
-internal fun gradeChipLabel(grade: String): String = gradeLabel(grade).uppercase(Locale.US)
+internal fun gradeChipLabel(grade: String): String? = gradeLabel(grade)?.uppercase(Locale.US)
 
 /**
- * Human label for an evidence grade's wire name. Display-only, badges,
- * sorting, and colors still key off the raw wire value.
+ * Human label for an evidence grade's wire name, or null for an unmapped grade
+ * (callers hide the chip/row rather than leak a raw Debug string). Display-only -
+ * badges, sorting, and colors still key off the raw wire value.
  */
-internal fun gradeLabel(grade: String): String = when (grade) {
+internal fun gradeLabel(grade: String): String? = when (grade) {
     "Strong" -> "Strong"
     "Moderate" -> "Moderate"
     "Weak" -> "Weak"
     "ExpertOpinion" -> "Expert opinion"
     "MarketingMyth" -> "Marketing myth"
-    else -> grade
+    else -> null
 }
-
-// A knowledge-base placeholder citation ("File 02 consensus", "File 07
-// synthesis", …) rather than a real bibliographic reference.
-private val kbPlaceholderCitation = Regex("""^file\s*(\d+)\s+(consensus|synthesis)\b.*$""", RegexOption.IGNORE_CASE)
 
 /**
- * Human-readable citation line. Real citations pass through verbatim; the
- * knowledge base's "File N consensus/synthesis" placeholders render as a
- * friendly caption instead of leaking internal file jargon.
+ * Human-readable citation line. Verbatim-render contract (design/user-decisions
+ * "Evidence display"): the shell renders the CORE's citation string exactly as
+ * emitted, it never paraphrases, renumbers, or collapses a distinction the core
+ * drew (an earlier version rewrote "File 02 consensus" → "Knowledge base
+ * synthesis (File 2)", which both dropped the consensus-vs-synthesis distinction
+ * and renumbered the file, a lossy rewrite that is now removed). The registry
+ * emits real published references (evidence.rs `primary_citations`); a blank
+ * citation is the only thing we touch, rendering it as an em dash.
  */
-internal fun citationLabel(citation: String): String {
-    if (citation.isBlank()) return "-"
-    val m = kbPlaceholderCitation.matchEntire(citation.trim())
-    return if (m != null) "Knowledge base synthesis (File ${m.groupValues[1]})" else citation
-}
-
-// The core's HRmax row: "Estimated HRmax: 187 bpm (Tanaka 208 − 0.7 × 30)".
-private val hrMaxRegex = Regex("""Estimated HRmax:\s*(\d+)\s*bpm""", RegexOption.IGNORE_CASE)
-// The trailing "(Tanaka …)" parenthetical on that same row (m10).
-private val tanakaRegex = Regex("""\s*\(Tanaka[^)]*\)""")
-
-/** Parse the core's estimated HRmax (bpm) out of the HR-zone result rows for the
- *  Coach tile value (m9). null when no HRmax row is present (e.g. the "enter an
- *  age" guidance). Display-only, the shell never recomputes Tanaka. */
-private fun hrMaxFromZones(rows: List<GuidanceView>): Int? =
-    rows.firstNotNullOfOrNull { hrMaxRegex.find(it.summary)?.groupValues?.get(1)?.toIntOrNull() }
-
-// The core's protein row: "Masters (65+): 120–140 g/day (1.6–1.9 g/kg × 75 kg)".
-private val proteinPerDayRegex = Regex("""(\d+(?:\.\d+)?\s*[–-]\s*\d+(?:\.\d+)?)\s*g/day""")
-
-/** Surface the computed daily protein target ("120–140 g/day") on the Coach tile
- *  face (owner ruling 2026-07-28), parsed from the core's own result row, never
- *  recomputed. null when no numeric target row is present (e.g. a RED-S deficit
- *  refusal, which carries no number). Display-only. */
-private fun proteinPerDayFromTargets(rows: List<GuidanceView>): String? =
-    rows.firstNotNullOfOrNull {
-        proteinPerDayRegex.find(it.summary)?.groupValues?.get(1)?.replace(" ", "")
-    }
+internal fun citationLabel(citation: String): String =
+    citation.ifBlank { "-" }
 
 /** Compact day-type token for the week strip, from the core's debug session_type
  *  ("Lift(MaxEffort)" / "Run(LongRun)" / "Rest"). Discipline-level so it fits a
@@ -4155,15 +4335,6 @@ private fun sessionDiscipline(sessionType: String): String = when {
     sessionType.startsWith("Lift") -> "Lift"
     sessionType.startsWith("Run") -> "Run"
     else -> "Rest"
-}
-
-/** Split a summary into (text-without-Tanaka-parenthetical, the-parenthetical).
- *  For the HRmax card the formula moves into why? (m10); other rows pass
- *  through unchanged with a null detail. */
-private fun splitTanaka(summary: String): Pair<String, String?> {
-    val m = tanakaRegex.find(summary) ?: return summary to null
-    val formula = m.value.trim().removePrefix("(").removeSuffix(")")
-    return summary.removeRange(m.range).trim() to formula
 }
 
 /**

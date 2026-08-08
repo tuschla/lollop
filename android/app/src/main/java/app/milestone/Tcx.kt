@@ -57,8 +57,8 @@ fun parseTcxActivities(text: String): List<List<List<GpxFix>>> {
     // Track/Trackpoint handling is gated on being INSIDE an <Activity>: a TCX
     // can legally carry a <Courses><Course><Track> block after </Activities>,
     // and without the gate its trackpoints would append into the last
-    // already-committed activity's (live) list, silently merging a planned
-    // course into a recorded run (review 2026-08-04, HIGH).
+    // already-committed activity's (live) list; silently merging a planned
+    // course into a recorded run.
     var inActivity = false
     var inTrackpoint = false
     var inPosition = false
@@ -103,6 +103,10 @@ fun parseTcxActivities(text: String): List<List<List<GpxFix>>> {
                 "Trackpoint" -> if (inActivity) {
                     inTrackpoint = false
                     if (lat.isFinite() && lon.isFinite()) {
+                        // TCX carries no per-fix accuracy figure, so GpxFix.accuracyM
+                        // is left null (unknown); importedRunEvent then applies the
+                        // QC-passing IMPORT_UNKNOWN_ACCURACY_M sentinel, never a
+                        // fabricated measurement.
                         segment.add(GpxFix(lat, lon, timeSec, hr))
                     }
                 }

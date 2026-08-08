@@ -33,13 +33,35 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+/** Health-screen row copy shared by the guided setup (step 5) and the full
+ *  [ProfileEditor] health section, so the two wordings cannot drift. */
+internal object HealthScreenCopy {
+    const val PARQ_LABEL = "Positive health screen (PAR-Q+)"
+    const val PARQ_BODY =
+        "Known heart, metabolic or kidney condition, uncontrolled blood pressure, recent surgery, or a doctor told you to check before vigorous exercise."
+    const val CLEARED_LABEL = "Cleared by a doctor"
+    const val CLEARED_BODY = "A clinician has cleared you to train since that positive screen."
+    const val PREGNANT_LABEL = "Currently pregnant"
+    const val PREGNANT_BODY =
+        "While you're pregnant we don't generate a plan on our own. Programming is something to shape with your provider."
+    const val PREGNANCY_WARNING_LABEL = "Pregnancy warning sign present"
+    const val PREGNANCY_WARNING_BODY =
+        "Bleeding, breathlessness before exertion, chest pain, or reduced fetal movement: stop and seek care."
+    const val INJURY_LABEL = "Injury, recent surgery, or in rehab"
+    const val INJURY_BODY =
+        "We don't program rehab. Once a professional has cleared you, turn this off and we'll pick general training back up."
+    const val REDS_LABEL = "Under-fuelling / disordered-eating signal"
+    const val REDS_BODY =
+        "Missed periods, rapid weight loss, compulsive exercise, or persistent unexplained fatigue: routes to a professional (RED-S)."
+}
+
 /** The three training modalities the guided setup maps onto the profile's volume
  *  fields. Mirrors the [Focus] row in the full editor: Run-only zeroes lifting,
  *  Lift-only zeroes running, Both splits the week. */
 private enum class Modality(val title: String, val consequence: String) {
     Lift("Lifting / strength", "Barbell & machine work. No running is scheduled unless you add it later."),
     Run("Running / endurance", "Endurance-focused plan. Lifting isn't scheduled unless you add it later."),
-    Both("Both - hybrid", "Runs and lifts are spaced across your week so one doesn't blunt the other."),
+    Both("Both: hybrid", "Runs and lifts are spaced across your week so one doesn't blunt the other."),
 }
 
 /** The lifting intent → the profile's lift goal + (for a single-modality profile)
@@ -73,11 +95,11 @@ private enum class SetupLevel(val title: String, val consequence: String) {
 private val GoalDistance.blurb: String
     get() = when (this) {
         GoalDistance.General -> "Overall endurance, no race on the calendar."
-        GoalDistance.C25k -> "Couch-to-5K - build up to running 5K."
+        GoalDistance.C25k -> "Couch-to-5K: build up to running 5K."
         GoalDistance.FiveK -> "Sharpen speed for a fast 5K."
         GoalDistance.TenK -> "Balance speed and endurance for 10K."
         GoalDistance.HalfMarathon -> "Half-marathon endurance base."
-        GoalDistance.Marathon -> "Full marathon - the highest weekly mileage."
+        GoalDistance.Marathon -> "Full marathon: the highest weekly mileage."
     }
 
 /** For a Both plan, how the total training days split (lift-leaning). Kept in one
@@ -104,6 +126,9 @@ private fun deriveDraft(
     female: Boolean,
     restingHrBpm: Double?,
     health: HealthScreen,
+    initial: ProfileDraft?,
+    keepLiftVolume: Boolean,
+    keepRunVolume: Boolean,
 ): ProfileDraft {
     val cadence = when (level) {
         SetupLevel.Novice -> ProgressionCadence.EverySession
@@ -129,7 +154,11 @@ private fun deriveDraft(
     // reads it as a pure runner; Lift/Both use the level-scaled per-muscle volume.
     val weeklySets = when (modality) {
         Modality.Run -> 0
-        else -> setsPerMuscle
+        // Re-run preservation: keep the profile's existing per-muscle volume when the
+        // user didn't touch the answers that drive it (modality + level). Only a real
+        // change to a driving answer recomputes it: re-running the wizard untouched
+        // must not silently reset a customised volume (data-loss fix).
+        else -> if (keepLiftVolume) initial?.weeklySets ?: setsPerMuscle else setsPerMuscle
     }
     val liftGoal = liftFocus?.liftGoal ?: LiftGoal.MaxStrength
     val concurrentGoal = when (modality) {
@@ -152,21 +181,26 @@ private fun deriveDraft(
         concurrentGoal = concurrentGoal,
         weeklySets = weeklySets,
         runningDaysPerWeek = runningDays,
-        runningKmPerWeek = runningDays * kmPerRunDay,
+        // Same preservation rule for weekly running volume: keep the existing figure
+        // unless the user changed modality, level or days.
+        runningKmPerWeek = if (keepRunVolume) initial?.runningKmPerWeek ?: (runningDays * kmPerRunDay) else runningDays * kmPerRunDay,
         advanced = level == SetupLevel.Advanced,
         enduranceIntensityPctVo2max = 75.0,
         female = female,
         bodyweightKg = bodyweightKg,
         ageYears = ageYears,
         restingHrBpm = restingHrBpm,
-        measuredHrMax = null,
+        // The wizard never asks for a measured HRmax, so re-running must carry the
+        // profile's existing value through untouched instead of nulling it (data-loss
+        // fix: a re-run previously wiped a measured HRmax).
+        measuredHrMax = initial?.measuredHrMax,
         health = health,
     )
 }
 
 /**
- * Guided setup (M5, redesigned 2026-08-04: modality-first, with a health screen).
- * Six plain-language steps, what you train, your goal, days/week, level, about you,
+ * Guided setup (modality-first, with a health screen).
+ * Six plain-language steps: what you train, your goal, days/week, level, about you,
  * and a health screen, each with a one-line consequence, ending in a single
  * [Event.SetProfile] (the same wire the full editor uses). Seedable: when [initial]
  * is non-null (the Profile "Re-run guided setup" row) every answer is pre-filled
@@ -279,7 +313,7 @@ fun GuidedSetup(
             ) {
                 when (step) {
                     0 -> {
-                        StepHeader("What do you train?", "This sets your plan's shape - the details are all editable later.")
+                        StepHeader("What do you train?", "This sets your plan's shape. The details are all editable later.")
                         Modality.entries.forEach { m ->
                             SetupChoiceCard(m.title, m.consequence, selected = modality == m) { modality = m }
                         }
@@ -298,7 +332,7 @@ fun GuidedSetup(
                             }
                         }
                         Modality.Both -> {
-                            StepHeader("Set your lift and run goals", "Both sides get scheduled - then tell us which one leads.")
+                            StepHeader("Set your lift and run goals", "Both sides get scheduled. Then tell us which one leads.")
                             Text("Lifting", color = OnBgMuted, style = Type.Body.copy(fontWeight = FontWeight.Bold))
                             LiftFocus.entries.forEach { g ->
                                 SetupChoiceCard(g.title, g.consequence, selected = liftFocus == g) { liftFocus = g }
@@ -317,7 +351,7 @@ fun GuidedSetup(
                         null -> {}
                     }
                     2 -> {
-                        StepHeader("How many days a week?", "Realistic days you can train. We scale your volume to fit - no all-or-nothing week.")
+                        StepHeader("How many days a week?", "Realistic days you can train. We scale your volume to fit, no all-or-nothing week.")
                         Spacer(Modifier.size(Space.Sm.dp))
                         // `days ?: 0` is out of the 2..7 grid, so nothing is highlighted
                         // until the user actually taps a day: no pre-filled default.
@@ -342,7 +376,7 @@ fun GuidedSetup(
                         }
                     }
                     4 -> {
-                        StepHeader("A little about you", "Entered once here - the Coach protein and HR-zone tools prefill from it instead of asking again.")
+                        StepHeader("A little about you", "Entered once here. The Coach protein and HR-zone tools prefill from it instead of asking again.")
                         // `?: 0` sits outside each grid, so nothing is highlighted until
                         // the user picks it; no age/bodyweight/HR is defaulted and then
                         // silently submitted as if answered.
@@ -358,7 +392,7 @@ fun GuidedSetup(
                                 { if (it == true) "Female" else "Male" },
                             ) { female = it }
                         }
-                        LabeledScale("Resting HR - optional", (35..90).toList(), restingHr ?: 0, { "$it bpm" }) { restingHr = it }
+                        LabeledScale("Resting HR, optional", (35..90).toList(), restingHr ?: 0, { "$it bpm" }) { restingHr = it }
                         if (age == null || bodyweight == null || female == null) {
                             Text("Pick your age, bodyweight and sex to finish.", color = OnBgMuted, style = Type.Caption)
                         }
@@ -366,11 +400,11 @@ fun GuidedSetup(
                     5 -> {
                         StepHeader(
                             "Anything we should know?",
-                            "These keep you safe. When one applies, milestone won't generate a plan and defers to a professional instead - you can still log and track.",
+                            "These keep you safe. When one applies, milestone won't generate a plan and defers to a professional instead. You can still log and track.",
                         )
                         HealthSwitchRow(
-                            "Positive health screen (PAR-Q+)",
-                            "Known heart, metabolic or kidney condition, uncontrolled blood pressure, recent surgery, or a doctor told you to check before vigorous exercise.",
+                            HealthScreenCopy.PARQ_LABEL,
+                            HealthScreenCopy.PARQ_BODY,
                             health.parq_positive,
                         ) {
                             // Clear the dependent child when the parent turns OFF (else a
@@ -382,14 +416,14 @@ fun GuidedSetup(
                         }
                         if (health.parq_positive) {
                             HealthSwitchRow(
-                                "Cleared by a doctor",
-                                "A clinician has cleared you to train since that positive screen.",
+                                HealthScreenCopy.CLEARED_LABEL,
+                                HealthScreenCopy.CLEARED_BODY,
                                 health.medically_cleared,
                             ) { health = health.copy(medically_cleared = it) }
                         }
                         HealthSwitchRow(
-                            "Currently pregnant",
-                            "The engine defers autonomous prescription during pregnancy and individualises with your provider.",
+                            HealthScreenCopy.PREGNANT_LABEL,
+                            HealthScreenCopy.PREGNANT_BODY,
                             health.pregnant,
                         ) {
                             health = health.copy(
@@ -399,23 +433,30 @@ fun GuidedSetup(
                         }
                         if (health.pregnant) {
                             HealthSwitchRow(
-                                "Pregnancy warning sign present",
-                                "Bleeding, breathlessness before exertion, chest pain, or reduced fetal movement - stop and seek care.",
+                                HealthScreenCopy.PREGNANCY_WARNING_LABEL,
+                                HealthScreenCopy.PREGNANCY_WARNING_BODY,
                                 health.pregnancy_warning_sign,
                             ) { health = health.copy(pregnancy_warning_sign = it) }
                         }
                         HealthSwitchRow(
-                            "Injury, recent surgery, or in rehab",
-                            "The engine never prescribes rehabilitation - resume general programming only once cleared.",
+                            HealthScreenCopy.INJURY_LABEL,
+                            HealthScreenCopy.INJURY_BODY,
                             health.injury_or_rehab,
                         ) { health = health.copy(injury_or_rehab = it) }
                         HealthSwitchRow(
-                            "Under-fuelling / disordered-eating signal",
-                            "Missed periods, rapid weight loss, compulsive exercise, or persistent unexplained fatigue - routes to a professional (RED-S).",
+                            HealthScreenCopy.REDS_LABEL,
+                            HealthScreenCopy.REDS_BODY,
                             health.reds_signal,
                         ) { health = health.copy(reds_signal = it) }
 
-                        val defers = (health.parq_positive && !health.medically_cleared) ||
+                        // Age under 18 fires the core's pediatric Defer gate
+                        // (SAFE-PEDS-001, derived from age alone in app.rs, no shell
+                        // health flag). It must appear in this preview or a 14-17 y/o
+                        // would be told nothing while the core silently holds their plan
+                        // (HARD RULE 3: the safety consequence has to be surfaced).
+                        val youth = age?.let { it < 18 } == true
+                        val defers = youth ||
+                            (health.parq_positive && !health.medically_cleared) ||
                             health.pregnant || health.pregnancy_warning_sign ||
                             health.injury_or_rehab || health.reds_signal
                         if (defers) {
@@ -464,6 +505,14 @@ fun GuidedSetup(
                                     female = f,
                                     restingHrBpm = restingHr?.toDouble(),
                                     health = health,
+                                    initial = initial,
+                                    // "Only overwrite what the user actually changed":
+                                    // preserve the existing volumes when the driving
+                                    // answers are untouched vs the seed. Lift volume is
+                                    // driven by modality + level; run volume also by days.
+                                    keepLiftVolume = initial != null && m == seedModality && l == seedLevel,
+                                    keepRunVolume = initial != null && m == seedModality &&
+                                        l == seedLevel && d == seedDays,
                                 ),
                             )
                         }
