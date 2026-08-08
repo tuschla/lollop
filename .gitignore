@@ -9,7 +9,8 @@
 # Machine-local cargo config (absolute NDK/SDK paths, not portable).
 /.cargo/
 
-# Untracked local project files (instructions, CI drafts, design notes, research KB).
+# Untracked local project files (instructions, CI drafts, design notes, research KB, planning docs).
+/planning/
 /.github/
 /design/
 /knowledge-base/
