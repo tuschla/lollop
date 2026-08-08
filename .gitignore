@@ -12,6 +12,3 @@
 # Untracked local project files (instructions, CI drafts, design notes, research KB, planning docs).
 /planning/
 /.github/
-/design/
-/knowledge-base/
-/schema/
