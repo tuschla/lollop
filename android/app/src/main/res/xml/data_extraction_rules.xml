@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backup & device-transfer rules (API 31+). Exclude the event log (the source of
+     truth, moved explicitly via Export/Import instead), its swap/import temporaries
+     (.tmp/.import/.bak), and the transient active-run sidecar from both cloud backup
+     and device-to-device transfer. All live in filesDir. A pre-existing install may
+     have left osmdroid tiles on external storage; exclude that legacy directory too
+     (new tiles live in cache/). The GPX export temp dir lives in cache/, which is
+     never transferred, so it needs no rule here. The milestone_setup prefs
+     (onboarding_done, plan_cleared) describe the excluded log, so restoring them
+     without it would skip guided setup and plan generation on an empty install. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="event-log.ndjson" />
+        <exclude domain="file" path="event-log.ndjson.tmp" />
+        <exclude domain="file" path="event-log.ndjson.import" />
+        <exclude domain="file" path="event-log.ndjson.bak" />
+        <exclude domain="file" path="active-run.ndjson" />
+        <exclude domain="sharedpref" path="milestone_setup.xml" />
+        <exclude domain="external" path="osmdroid/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="event-log.ndjson" />
+        <exclude domain="file" path="event-log.ndjson.tmp" />
+        <exclude domain="file" path="event-log.ndjson.import" />
+        <exclude domain="file" path="event-log.ndjson.bak" />
+        <exclude domain="file" path="active-run.ndjson" />
+        <exclude domain="sharedpref" path="milestone_setup.xml" />
+        <exclude domain="external" path="osmdroid/" />
+    </device-transfer>
+</data-extraction-rules>

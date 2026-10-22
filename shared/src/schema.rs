@@ -5,9 +5,10 @@
 //! File 02 (strength prescription/periodization), File 04 (running prescription).
 //!
 //! Invariant: every recommendation-bearing value is wrapped in [`Recommended`],
-//! which forces an attached [`Evidence`] and [`ConfidenceTag`]. Nothing that
-//! tells a user what to do may exist outside that wrapper.
+//! which forces an attached registry claim (grade, citation, confidence).
+//! Nothing that tells a user what to do may exist outside that wrapper.
 
+use crate::evidence::{ClaimId, EvidenceEntry};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -42,111 +43,85 @@ impl EvidenceGrade {
     }
 }
 
-/// A literature reference backing (or contradicting) a claim.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct Citation {
-    /// Stable knowledge-base claim key, e.g. `"strength-intensity-001"`.
-    pub claim_id: Option<String>,
-    /// Human-readable reference: author/year + journal/DOI.
-    pub reference: String,
-}
-
-/// Evidence attached to a recommendation. Non-negotiable on every
-/// recommendation-bearing type (see [`Recommended`]).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct Evidence {
-    pub grade: EvidenceGrade,
-    pub citation: Citation,
-    /// Named counter-evidence, if the claim is contested.
-    pub contradicting: Vec<Citation>,
-}
-
-/// Confidence tag (File 09 `ConfidenceTag`), attached alongside [`Evidence`].
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct ConfidenceTag {
-    /// 0.05–0.90; defaults derived from grade via [`EvidenceGrade::default_confidence`].
-    pub score: f32,
-    /// True when linked to a contested-question row (e.g. `"CQ-01"`).
-    pub contested: bool,
-    pub contested_question_ref: Option<String>,
-    /// Safety-critical claims override optimization concerns.
-    pub safety_critical: bool,
-}
-
 /// Wrapper forcing evidence + confidence onto any recommendation-bearing value.
 ///
-/// Constructible **only** via [`Recommended::new`]: the private zero-sized
-/// `_sanctioned` field blocks struct literals (and functional-record updates)
-/// outside this module, so every recommendation funnels through the one
-/// constructor, which rejects `MarketingMyth` evidence unconditionally, in
-/// release builds too (HARD RULE 2). Fields stay publicly *readable*; the
-/// marker is `#[serde(skip)]`, so the serialized shape is unchanged
-/// (`value`/`evidence`/`confidence`). `Deserialize` is hand-written below -
-/// a derive would let wire JSON construct one without passing the myth check.
-#[derive(Serialize, Debug, Clone, PartialEq)]
+/// The backing claim is private and set only by [`Recommended::new`], which
+/// rejects `MarketingMyth` claims unconditionally, in release builds too
+/// (HARD RULE 2), so no code path can point a recommendation at a myth.
+/// `value` is the payload plan rewrites edit in place; grade, citation,
+/// confidence and contested question are read off the claim's registry row,
+/// so a recommendation costs no allocation beyond its value.
+#[must_use]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Recommended<T> {
     pub value: T,
-    pub evidence: Evidence,
-    pub confidence: ConfidenceTag,
-    #[serde(skip)]
-    _sanctioned: Sanctioned,
+    claim: ClaimId,
 }
-
-/// Private construction token for [`Recommended`]. Being private, it makes
-/// `Recommended { .. }` literals impossible outside `schema`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct Sanctioned;
 
 impl<T> Recommended<T> {
-    /// Sole sanctioned constructor for a recommendation-bearing value.
+    /// Sole constructor for a recommendation-bearing value.
     ///
     /// # Panics
-    /// Unconditionally (release builds included) if `evidence` carries a
-    /// [`EvidenceGrade::MarketingMyth`] grade: myth-graded claims are
-    /// hard-blocked and must never be surfaced as advice (HARD RULE 2).
-    ///
-    /// The other half of this guard lives at `EvidenceEntry::to_evidence`
-    /// (evidence.rs), which blocks myth ids at the recommendation choke point.
-    pub fn new(value: T, evidence: Evidence, confidence: ConfidenceTag) -> Self {
+    /// Unconditionally (release builds included) if `claim` is graded
+    /// [`EvidenceGrade::MarketingMyth`]: myth claims are hard-blocked and must
+    /// never be surfaced as advice (HARD RULE 2).
+    pub fn new(value: T, claim: ClaimId) -> Self {
         assert!(
-            evidence.grade != EvidenceGrade::MarketingMyth,
-            "MarketingMyth evidence must never back a recommendation (HARD RULE 2)"
+            !claim.entry().is_blocked(),
+            "MarketingMyth claim {} must never back a recommendation (HARD RULE 2)",
+            claim.entry().claim_id,
         );
+        Recommended { value, claim }
+    }
+
+    /// The claim backing this recommendation.
+    pub fn claim_id(&self) -> ClaimId {
+        self.claim
+    }
+
+    /// The registry row backing this recommendation.
+    pub fn evidence(&self) -> &'static EvidenceEntry {
+        self.claim.entry()
+    }
+
+    pub fn grade(&self) -> EvidenceGrade {
+        self.evidence().grade
+    }
+
+    /// The citation line shown for the backing claim.
+    pub fn reference(&self) -> &'static str {
+        self.evidence().reference()
+    }
+
+    /// 0.05–0.90 confidence, the grade's File 09 default.
+    pub fn confidence(&self) -> f32 {
+        self.evidence().confidence_score()
+    }
+
+    /// Safety-critical claims override optimization concerns.
+    pub fn safety_critical(&self) -> bool {
+        self.evidence().safety_critical
+    }
+
+    /// The contested-question id (e.g. `"CQ-01"`) when the claim is debated.
+    pub fn contested(&self) -> Option<&'static str> {
+        self.evidence().contested
+    }
+
+    /// The same claim backing a value derived from this one.
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Recommended<U> {
         Recommended {
-            value,
-            evidence,
-            confidence,
-            _sanctioned: Sanctioned,
+            value: f(self.value),
+            claim: self.claim,
         }
     }
-}
 
-/// Hand-written so the wire cannot smuggle a `MarketingMyth`-graded value past
-/// the [`Recommended::new`] choke point: deserialization re-runs the same
-/// check and fails with an error (not a panic) on myth-graded input.
-impl<'de, T: Deserialize<'de>> Deserialize<'de> for Recommended<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct Raw<T> {
-            value: T,
-            evidence: Evidence,
-            confidence: ConfidenceTag,
+    /// The same claim backing another value.
+    pub fn with_value<U>(&self, value: U) -> Recommended<U> {
+        Recommended {
+            value,
+            claim: self.claim,
         }
-        let raw = Raw::<T>::deserialize(deserializer)?;
-        if raw.evidence.grade == EvidenceGrade::MarketingMyth {
-            return Err(serde::de::Error::custom(
-                "MarketingMyth evidence must never back a recommendation (HARD RULE 2)",
-            ));
-        }
-        Ok(Recommended {
-            value: raw.value,
-            evidence: raw.evidence,
-            confidence: raw.confidence,
-            _sanctioned: Sanctioned,
-        })
     }
 }
 
@@ -168,13 +143,12 @@ pub enum Goal {
     Hybrid,
 }
 
-/// A full training program.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+/// A full training program: the plan week in force, as one mesocycle.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Program {
-    pub id: String,
     pub name: String,
     pub goal: Goal,
-    pub mesocycles: Vec<Mesocycle>,
+    pub mesocycle: Mesocycle,
 }
 
 /// Mesocycle phase (File 02 block model; File 04 base/build/peak/taper).
@@ -193,7 +167,7 @@ pub enum MesoPhase {
 }
 
 /// A block of weeks with one dominant training emphasis.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Mesocycle {
     pub phase: MesoPhase,
     pub weeks: u8,
@@ -207,11 +181,22 @@ pub enum LiftSessionType {
     DynamicEffort,
     Repetition,
     Accessory,
+    /// A bodyweight (calisthenics) day: leverage-tier ladders, not %1RM
+    /// barbell loading. Kept under `SessionType::Lift(_)` so the shell's
+    /// discipline parsing (keys on the `Lift` prefix) is unchanged, but titled
+    /// honestly rather than borrowing a barbell heavy/power/volume label.
+    Calisthenics,
+    /// A uniform full-body strength day (novice linear progression, or a day
+    /// prescribed by effort rather than undulating %1RM): titled by what it
+    /// actually prescribes ("Strength day"), never a borrowed DUP label.
+    FullBody,
 }
 
 /// Running session types (File 04 §3).
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunSessionType {
+    /// A true recovery run (running-014: <76 %HRmax, 20–40 min), placed the
+    /// day after a hard session or long run.
     Recovery,
     LongRun,
     Tempo,
@@ -220,23 +205,86 @@ pub enum RunSessionType {
     Strides,
     Hills,
     RacePace,
+    /// An easy / general-aerobic run (running-015: 65–79 %HRmax, 30–90 min),
+    /// the default non-quality run day.
+    Easy,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum SessionType {
     Lift(LiftSessionType),
     Run(RunSessionType),
+    #[default]
     Rest,
 }
 
+impl SessionType {
+    /// Every session type, for decoding a [`wire_name`](Self::wire_name).
+    pub const ALL: [SessionType; 16] = {
+        use LiftSessionType as L;
+        use RunSessionType as R;
+        [
+            SessionType::Lift(L::MaxEffort),
+            SessionType::Lift(L::DynamicEffort),
+            SessionType::Lift(L::Repetition),
+            SessionType::Lift(L::Accessory),
+            SessionType::Lift(L::Calisthenics),
+            SessionType::Lift(L::FullBody),
+            SessionType::Run(R::Recovery),
+            SessionType::Run(R::LongRun),
+            SessionType::Run(R::Tempo),
+            SessionType::Run(R::Interval),
+            SessionType::Run(R::Repetition),
+            SessionType::Run(R::Strides),
+            SessionType::Run(R::Hills),
+            SessionType::Run(R::RacePace),
+            SessionType::Run(R::Easy),
+            SessionType::Rest,
+        ]
+    };
+
+    /// Stable wire name of a planned day; the shell keys its discipline on the
+    /// `"Lift"` / `"Run"` prefix.
+    pub fn wire_name(self) -> &'static str {
+        use LiftSessionType as L;
+        use RunSessionType as R;
+        match self {
+            SessionType::Lift(L::MaxEffort) => "Lift(MaxEffort)",
+            SessionType::Lift(L::DynamicEffort) => "Lift(DynamicEffort)",
+            SessionType::Lift(L::Repetition) => "Lift(Repetition)",
+            SessionType::Lift(L::Accessory) => "Lift(Accessory)",
+            SessionType::Lift(L::Calisthenics) => "Lift(Calisthenics)",
+            SessionType::Lift(L::FullBody) => "Lift(FullBody)",
+            SessionType::Run(R::Recovery) => "Run(Recovery)",
+            SessionType::Run(R::LongRun) => "Run(LongRun)",
+            SessionType::Run(R::Tempo) => "Run(Tempo)",
+            SessionType::Run(R::Interval) => "Run(Interval)",
+            SessionType::Run(R::Repetition) => "Run(Repetition)",
+            SessionType::Run(R::Strides) => "Run(Strides)",
+            SessionType::Run(R::Hills) => "Run(Hills)",
+            SessionType::Run(R::RacePace) => "Run(RacePace)",
+            SessionType::Run(R::Easy) => "Run(Easy)",
+            SessionType::Rest => "Rest",
+        }
+    }
+
+    /// The session type whose [`wire_name`](Self::wire_name) is `name`.
+    pub fn from_wire_name(name: &str) -> Option<SessionType> {
+        Self::ALL.into_iter().find(|t| t.wire_name() == name)
+    }
+}
+
 /// One planned training day/unit inside a mesocycle.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Session {
     pub session_type: SessionType,
     /// Day offset within the mesocycle, 0-based.
     pub day: u16,
     /// Every prescription carries evidence + confidence by construction.
     pub prescriptions: Vec<Recommended<Prescription>>,
+    /// The DUP day a lift session undulates to (File 02 strength-023), so two
+    /// heavy days of one week read apart. `None` for any other session.
+    pub dup_day: Option<crate::strength::DupDay>,
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +302,10 @@ pub enum LiftIntensity {
     Rir(u8),
     /// Mean concentric velocity target, m/s (0.15–1.30, exercise-specific).
     VelocityMs(f32),
+    /// A ballistic bodyweight movement (jumps): every rep at maximal intent
+    /// (jump as high as possible), no load and no effort target — the stimulus
+    /// is the intent itself (STR-POWER-SELECT-001).
+    MaxIntent,
 }
 
 /// A prescribed lift: the set/rep/load/rest contract for one exercise.
@@ -266,10 +318,20 @@ pub struct LiftPrescription {
     pub intensity: LiftIntensity,
     /// Between-set rest, 30–300 s.
     pub rest_sec: u16,
-    /// Eccentric-pause-concentric, e.g. `"2-1-3"`.
-    pub tempo: Option<String>,
     /// End set when velocity drops this % from fastest rep (10–40).
     pub velocity_loss_pct: Option<u8>,
+    /// Top of the target rep RANGE when the lift is prescribed as a range
+    /// (hypertrophy double progression: work from `reps` up to `reps_max`,
+    /// then add load). `None` = a fixed rep target of `reps`.
+    #[serde(default)]
+    pub reps_max: Option<u8>,
+    /// Explicit working load in kg carried forward from the athlete's own last
+    /// working sets (hypertrophy double progression: same load, or the
+    /// smallest increment once the top of the range was reached). `None` =
+    /// no explicit load; a `PercentOneRm` intensity still resolves against the
+    /// e1RM anchor at render time.
+    #[serde(default)]
+    pub load_kg: Option<f32>,
 }
 
 /// Running intensity, in whichever zone model anchors the session (File 04 §1).
@@ -279,8 +341,14 @@ pub enum RunIntensity {
     ThreeZone(ThreeZone),
     /// VDOT 5-band prescription model.
     Vdot(VdotBand),
-    /// % of HRmax (50–100).
-    HrPercentMax(f32),
+    /// %HRmax band (percent units, 50–100). At least one of `lo`/`hi` is set;
+    /// `hi`-only renders as a ceiling, `lo`-only as a floor, both as a range.
+    /// `hrr_hi` is the Karvonen %HRR ceiling appended when the KB states one.
+    HrPercentMax {
+        lo: Option<f32>,
+        hi: Option<f32>,
+        hrr_hi: Option<f32>,
+    },
     /// Pace in seconds per km.
     PaceSecPerKm(u16),
     /// % of critical power / FTP.
@@ -304,26 +372,215 @@ pub enum VdotBand {
     Repetition,
 }
 
-/// Session volume target: exactly one of duration or distance anchors the run.
+/// Session volume target: a duration, a distance, or a beginner run/walk
+/// interval set (running-025 C25K: `rounds` repeats of `run_sec` running then
+/// `walk_sec` walking).
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum RunVolume {
     DurationMin(u16),
     DistanceKm(f32),
+    RunWalk {
+        run_sec: u16,
+        walk_sec: u16,
+        rounds: u8,
+    },
 }
 
-/// A prescribed run (continuous or as repeats).
+/// One run/walk bout of a beginner session (NHS Couch to 5K): run for
+/// `run_sec`, then walk for `walk_sec` (0 on the final bout).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunSegment {
+    pub run_sec: u16,
+    pub walk_sec: u16,
+}
+
+/// Strides added to the end of an easy run (running-020): `reps` × `rep_sec`
+/// controlled-fast efforts with `recovery_sec` of easy jogging/walking between.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StridesAddOn {
+    pub reps: u8,
+    pub rep_sec: u16,
+    pub recovery_sec: u16,
+}
+
+/// A prescribed run (continuous or as repeats). Every field after `repeats` is
+/// serde-default so older persisted/wire rows decode unchanged.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct RunPrescription {
     pub volume: RunVolume,
     pub intensity: RunIntensity,
     /// For interval/repetition work: (rep count, rep volume).
     pub repeats: Option<(u8, RunVolume)>,
+    /// Recovery between reps; `None` for a continuous run.
+    #[serde(default)]
+    pub recovery: Option<RepRecovery>,
+    /// Easy warm-up before the main set, minutes (C25K: the brisk walk).
+    #[serde(default)]
+    pub warmup_min: Option<u16>,
+    /// Easy cool-down after the main set, minutes.
+    #[serde(default)]
+    pub cooldown_min: Option<u16>,
+    /// Ordered run/walk bouts of a beginner session (C25K), the last bout's
+    /// walk 0; empty for every other run.
+    #[serde(default)]
+    pub segments: Vec<RunSegment>,
+    /// Strides to finish an easy run with; `None` = no strides.
+    #[serde(default)]
+    pub strides: Option<StridesAddOn>,
+}
+
+impl RunPrescription {
+    /// A run with only the core volume/intensity/repeats set; every structure
+    /// field (recovery, warm-up, cool-down, bouts, strides) empty.
+    pub fn new(
+        volume: RunVolume,
+        intensity: RunIntensity,
+        repeats: Option<(u8, RunVolume)>,
+    ) -> Self {
+        RunPrescription {
+            volume,
+            intensity,
+            repeats,
+            recovery: None,
+            warmup_min: None,
+            cooldown_min: None,
+            segments: Vec::new(),
+            strides: None,
+        }
+    }
+}
+
+/// Easy-jog recovery between interval / repetition reps.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepRecovery {
+    /// A known number of seconds.
+    Seconds(u16),
+    /// An easy-jog DISTANCE, metres (repetition work: jog as far as the rep).
+    Metres(u16),
+    /// An easy jog lasting as long as the rep took (VO2max intervals with no
+    /// pace anchor to turn the rep into seconds).
+    EqualToRep,
+}
+
+/// Identifies one calisthenics leverage ladder (see `crate::calisthenics`
+/// `LADDERS`). A plain data enum: `schema` owns the shared wire types so it need
+/// not depend on `evidence`/`calisthenics`; `calisthenics.rs` re-exports this.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LadderId {
+    // dynamic resistance ladders (calis-progression.md §3.1-3.8)
+    HorizontalPush,
+    Dip,
+    VerticalPush,
+    HorizontalPull,
+    VerticalPull,
+    Squat,
+    Hinge,
+    Core,
+    // skill tracks (§3.3 skill row, §3.9, §3.10)
+    Handstand,
+    FrontLever,
+    Planche,
+    BackLever,
+    MuscleUp,
+    // power (ballistic) ladders for a bodyweight Power goal (CAL-POWER-001,
+    // CAL-POWER-LADDER-001; 13-calisthenics-addendum cal-add-005/006)
+    Jump,
+    PlyoPush,
+}
+
+/// An intra-tier tempo bridge (CAL-PROG-TEMPO-001 / CAL-PROG-BRIDGE-001): a slow
+/// lowering plus a pause at the hardest point, used on the easier rung after a
+/// failed step up so the jump back is smaller. Total time per rep stays within
+/// the 0.5–8 s window the evidence supports.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TempoBridge {
+    pub eccentric_sec: u8,
+    pub pause_sec: u8,
+}
+
+/// A per-rung working band: reps for dynamic rungs, hold seconds for timed
+/// (skill/core) rungs. The band top doubles as the tier-advance trigger.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TierTarget {
+    Reps { low: u8, high: u8 },
+    HoldSec { low: u16, high: u16 },
+}
+
+/// A prescribed calisthenics rung: the tier/target/RIR/rest contract for one
+/// pattern. Load is the leverage tier (not a bar weight); `added_kg` is set only
+/// on one of the ladder's `weighted_rungs`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct CalisthenicsPrescription {
+    pub ladder: LadderId,
+    pub tier: u8,
+    /// Canonical tier name (denormalized so shells need no ladder table).
+    pub exercise: String,
+    pub sets: u8,
+    /// The WORKING band for this goal (hypertrophy widens rep rungs; skill holds
+    /// prescribe the submaximal working hold, with the advance test separate in
+    /// `test_hold_sec`).
+    pub target: TierTarget,
+    /// Rung-dependent RIR band (low, high) from `calisthenics::rir_band`.
+    /// Not used for a `ballistic` item: power work states no numeric RIR (only
+    /// "never to failure", STR-PWR-001), so the view renders that cue instead.
+    pub rir: (u8, u8),
+    pub rest_sec: u16,
+    /// Added external load, kg — `Some` only on a ladder's weighted rung.
+    pub added_kg: Option<f64>,
+    /// The rung accepts external load (one of the ladder's `weighted_rungs`), even while
+    /// the suggested load is 0 kg, so the shell shows the added-load field.
+    #[serde(default)]
+    pub load_capable: bool,
+    /// Tempo bridge on this rung (after a failed step up), if any.
+    #[serde(default)]
+    pub tempo_bridge: Option<TempoBridge>,
+    /// Straight-arm skill holds: the clean test-hold seconds that advance the
+    /// rung (one test hold at the end, once a week); `target` is the working hold.
+    #[serde(default)]
+    pub test_hold_sec: Option<u16>,
+    /// Ballistic power item (jumps / plyometric push-ups): maximal intent,
+    /// never to failure.
+    #[serde(default)]
+    pub ballistic: bool,
+    /// Nearest easier / harder rung the athlete's equipment allows.
+    #[serde(default)]
+    pub easier: Option<u8>,
+    #[serde(default)]
+    pub harder: Option<u8>,
+    /// The newest session hit the advance target but its last set was not
+    /// rated, so the rung cannot advance yet.
+    #[serde(default)]
+    pub needs_effort_rating: bool,
+    /// Rungs stepped down after a break from this exercise (CAL-REENTRY-001).
+    #[serde(default)]
+    pub reentry_steps: u8,
+    /// The break was long enough (> 8 weeks) to re-test the starting rung.
+    #[serde(default)]
+    pub retest: bool,
+    /// The plain rung needs equipment the athlete lacks; this is the nearest
+    /// rung that does not (CAL-EQUIP-001).
+    #[serde(default)]
+    pub substituted: bool,
+    /// No set logged and no rung chosen for this ladder yet.
+    #[serde(default)]
+    pub unplaced: bool,
+    /// A horizontal row with no bar or rings in the athlete's kit: done under a
+    /// sturdy table, gripping its edge (CAL-EQUIP-001 "table/inverted rows for
+    /// pulling").
+    #[serde(default)]
+    pub table_row: bool,
+    /// Reps on every set that mark the rung as far too easy, so the plan skips
+    /// a step after one session (CAL-PLACE-001); `None` where skipping never
+    /// applies (loaded, straight-arm, leave-RIR, timed, ballistic, last rung).
+    #[serde(default)]
+    pub skip_reps: Option<u16>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Prescription {
     Lift(LiftPrescription),
     Run(RunPrescription),
+    Calisthenics(CalisthenicsPrescription),
 }
 
 // ---------------------------------------------------------------------------
@@ -408,13 +665,15 @@ pub struct ReadinessInput {
 /// One morning (or pre-session) check-in: raw *human* observations only. Every
 /// scored field is optional; the user answers what they know and the core never
 /// fabricates an unanswered item (HARD RULE 1). The core normalizes these into
-/// the z-scores / deltas the autoregulation rules already consume: the user
-/// no longer supplies a z-score they cannot know.
+/// the z-scores / deltas the autoregulation rules consume, so the user never
+/// has to supply a z-score they cannot know.
 ///
-/// The 1–5 wellness items are the KB's 5-item wellness composite
-/// (`ReadinessSignal::WellnessZ`: sleep/soreness/mood, direction-normalized in
-/// the core); no new instrument is invented. Additive on the wire: every field
-/// is `#[serde(default)]` so a check-in written by any app version replays.
+/// The 1–5 wellness items are the KB's 5-item short-form wellness composite
+/// (`ReadinessSignal::WellnessZ`: sleep/soreness/fatigue/stress/mood,
+/// direction-normalized in the core); no new instrument is invented. The scale
+/// is deliberately 1–5 (not the Hooper 1–7 index) to match the check-in UI's
+/// identical scale rows. Additive on the wire: every field is `#[serde(default)]`
+/// so a check-in written by any app version replays byte-for-byte.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct CheckinInput {
     /// Unix seconds, shell-supplied (the core holds no clock). Day-buckets the
@@ -428,9 +687,20 @@ pub struct CheckinInput {
     /// reverse-scores it into the "higher = better" wellness composite.
     #[serde(default)]
     pub soreness: Option<u8>,
-    /// Mood / stress, 1–5 (5 = great mood, low stress). Higher = better.
+    /// Mood / motivation, 1–5 (5 = great mood). Higher = better. Perceived stress
+    /// is a SEPARATE item (`stress`), not folded in here.
     #[serde(default)]
     pub mood: Option<u8>,
+    /// Fatigue today, 1–5 (5 = utterly wiped). Higher = worse (same direction as
+    /// soreness); the core reverse-scores it into the "higher = better" wellness
+    /// composite. KB 5-item short-form item (autoreg WellnessZ).
+    #[serde(default)]
+    pub fatigue: Option<u8>,
+    /// Perceived stress today, 1–5 (5 = extremely stressed). Higher = worse; the
+    /// core reverse-scores it. Distinct from `mood` (affect/motivation, scored in
+    /// the good direction). KB 5-item short-form item (autoreg WellnessZ).
+    #[serde(default)]
+    pub stress: Option<u8>,
     /// Morning resting HR, bpm (from a watch/manual pulse). The core computes
     /// the vs-baseline delta the RHR rules read (autoreg-040/041).
     #[serde(default)]
@@ -464,6 +734,9 @@ pub enum PainTrend {
     Stable,
     /// Worsening after sessions or rising week-to-week → reactive.
     Rising,
+    /// Pain that worsens in the 24 h AFTER load even if stable during → reactive
+    /// (Silbernagel monitoring, File 08 Table 4.1). Treated like `Rising`.
+    WorseningAfter24h,
 }
 
 /// A characterized pain report attached to a `Pain` readiness input.
@@ -471,17 +744,22 @@ pub enum PainTrend {
 pub struct PainDetail {
     pub kind: PainKind,
     /// 0–10 numeric rating scale. Tendon tolerable band ≤5/10 (safety-039).
-    pub severity: u8,
+    /// `None` = the user gave no rating; graded conservatively (outside the
+    /// tolerable band). Old logs carrying a bare number decode to `Some`.
+    #[serde(default)]
+    pub severity: Option<u8>,
     pub trend: PainTrend,
     /// True when the pain has persisted across sessions despite modification -
     /// escalates STOP/REDUCE responses to DEFER (safety-038/039 "if persists").
     #[serde(default)]
     pub persists: bool,
     /// Free-text body-part location (e.g. `"Left knee"`) for display context on
-    /// the safety banner sub-line and pain history. Display-only: **no rule
-    /// branches on it**, the KB (File 08 Table 4.1) defines no location-graded
-    /// response (HARD RULE 1). `None`, the wire default, keeps every existing
-    /// log replaying unchanged and simply omits the body part from the sub-line.
+    /// the safety banner sub-line and pain history. For a non-persisting
+    /// sharp/joint report it also scopes the stop: a location that maps to one
+    /// body region stops only the movements that load it (File 08 safety-038
+    /// "STOP that exercise"; `autoreg::pain_region`); anything unmapped keeps the
+    /// whole-day stop. `None`, the wire default, keeps every existing log
+    /// replaying unchanged (whole-day stop, no body part on the sub-line).
     #[serde(default)]
     pub location: Option<String>,
 }
@@ -521,10 +799,10 @@ impl IllnessSeverity {
 /// booleans with serde defaults, so profiles persisted before this screen
 /// existed parse unchanged (every flag `false` = no gate).
 ///
-/// The KB defines the *gates*, not questionnaires: it does not enumerate the
-/// PAR-Q+ question list (only that positive answers trigger the gate), gives no
-/// numeric age cutoff for "child/adolescent" (safety-011), and no week-window
-/// for "recent surgery" (safety-044/048), hence plain flags, no thresholds.
+/// File 08 defines the *gates*: it gives no numeric age cutoff for
+/// "child/adolescent" (safety-011) and no week-window for "recent surgery"
+/// (safety-044/048), hence plain flags, no thresholds. The seven PAR-Q+ items
+/// themselves come from File 12 (onboard-051/052; [`HealthScreen::parq_yes`]).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct HealthScreen {
     /// Child/adolescent user (File 08 safety-011). No autonomous maximal
@@ -565,17 +843,86 @@ pub struct HealthScreen {
     /// statements).
     #[serde(default)]
     pub reds_signal: bool,
+    /// PAR-Q+ symptom answer (Q2 chest pain, or Q3 dizziness / fainting), at
+    /// rest or with exertion. STOP + DEFER for medical clearance, and NOT
+    /// cleared by `medically_cleared` (SCREEN-ACSM-001: symptomatic people stop
+    /// and get cleared "whatever their activity level"); the shell clears it
+    /// only by re-answering the questions. Wire default `false` keeps old
+    /// profiles parsing.
+    #[serde(default)]
+    pub symptomatic: bool,
+    /// Currently acutely ill (e.g. fever or infection) at screening: training
+    /// is deferred until the user reports it resolved (ILLNESS-NECK-001). Wire
+    /// default `false` keeps old profiles parsing.
+    #[serde(default)]
+    pub acute_illness: bool,
+    /// The seven PAR-Q+ answers as a bitmask (bit0 = Q1 … bit6 = Q7). The core
+    /// derives the gates from it as well as from the flags (see
+    /// [`HealthScreen::parq_followup_uncleared`], [`HealthScreen::symptomatic_any`],
+    /// [`HealthScreen::injury_any`]), so a shell that sends the answers but
+    /// forgets a flag cannot bypass a gate.
+    #[serde(default)]
+    pub parq_yes: u8,
+    /// The follow-up answers ([`PARQ_FOLLOWUP_BITS`]) that the medical clearance
+    /// covers. A Yes added after clearance is not covered and gates again
+    /// (safety-044: positive answers need clearance). `0` with
+    /// `medically_cleared` is a clearance saved before this field existed and
+    /// covers every current follow-up answer.
+    #[serde(default)]
+    pub cleared_parq_mask: u8,
 }
 
+/// PAR-Q+ Q1 (heart / blood pressure), Q4 (other condition), Q5 (medication),
+/// Q7 (supervised activity only): doctor follow-up items, clearable.
+pub const PARQ_FOLLOWUP_BITS: u8 = 0b101_1001;
+/// PAR-Q+ Q2 (chest pain) and Q3 (dizziness / fainting): symptoms, never
+/// clearable (onboard-052).
+pub const PARQ_SYMPTOM_BITS: u8 = 0b000_0110;
+/// PAR-Q+ Q6 (bone or joint problem): the injury / rehab gate (safety-048).
+pub const PARQ_INJURY_BIT: u8 = 0b010_0000;
+
 impl HealthScreen {
-    /// True when any deferral-relevant flag is raised (a positive PAR-Q+ that
-    /// has since been medically cleared no longer gates, safety-044).
+    /// A PAR-Q+ follow-up answer is not covered by medical clearance
+    /// (safety-044). With per-question answers, every follow-up Yes must sit in
+    /// the cleared set; a legacy single toggle (no answers recorded) is cleared
+    /// by `medically_cleared` alone.
+    pub fn parq_followup_uncleared(&self) -> bool {
+        let followups = self.parq_yes & PARQ_FOLLOWUP_BITS;
+        if followups == 0 {
+            return self.parq_positive && !self.medically_cleared;
+        }
+        if !self.medically_cleared {
+            return true;
+        }
+        let covered = if self.cleared_parq_mask == 0 {
+            followups
+        } else {
+            self.cleared_parq_mask
+        };
+        followups & !covered != 0
+    }
+
+    /// A chest-pain or dizziness / fainting answer, by flag or by PAR-Q+ answer.
+    pub fn symptomatic_any(&self) -> bool {
+        self.symptomatic || self.parq_yes & PARQ_SYMPTOM_BITS != 0
+    }
+
+    /// An injury / rehab answer, by flag or by the PAR-Q+ bone-or-joint answer.
+    pub fn injury_any(&self) -> bool {
+        self.injury_or_rehab || self.parq_yes & PARQ_INJURY_BIT != 0
+    }
+
+    /// True when any deferral-relevant flag is raised (a positive PAR-Q+ whose
+    /// every follow-up answer is medically cleared no longer gates, safety-044;
+    /// a symptomatic answer always gates, SCREEN-ACSM-001).
     pub fn any_gate(&self) -> bool {
         self.youth
-            || (self.parq_positive && !self.medically_cleared)
+            || self.parq_followup_uncleared()
+            || self.symptomatic_any()
+            || self.acute_illness
             || self.pregnant
             || self.pregnancy_warning_sign
-            || self.injury_or_rehab
+            || self.injury_any()
             || self.reds_signal
     }
 }
@@ -610,17 +957,23 @@ pub enum Adjustment {
         load_reduction_pct: f32,
         weeks: u8,
     },
-    /// Cap today's session at planned RPE minus this many points (File 06
-    /// autoreg-006 second clause: e1RM < baseline − 5 % → "cap session at
-    /// planned RPE − 1" alongside the ~5 % top-set load cut).
-    CapRpe(f32),
+    /// Cap today's session at planned RPE minus this many points, i.e. this
+    /// many more reps in reserve (File 06 autoreg-006 second clause: e1RM <
+    /// baseline − 5 % → "cap session at planned RPE − 1" alongside the ~5 %
+    /// top-set load cut).
+    CapRpe(u8),
     /// Swap a hard session for an easy one.
     DowngradeSession,
     /// Modify the provoking exercise (reduce tendon load / compressive
     /// positions) and continue with monitoring, tolerable tendon pain ≤3–5/10,
     /// stable (Silbernagel model, File 08 safety-039). Explicitly NOT a rest:
-    /// "avoid complete rest".
-    ModifyAndMonitor,
+    /// "avoid complete rest". `location` is the user's own words (empty when
+    /// none was given); a location that maps to a body region scopes the
+    /// modification to the movements that load it.
+    ModifyAndMonitor {
+        #[serde(default)]
+        location: String,
+    },
     /// Insert a full rest day.
     RestDay,
     /// Non-negotiable stop (pain, fever, RHR +10 bpm). Safety override.
@@ -629,11 +982,45 @@ pub enum Adjustment {
     /// mental-health). Emitted for medical red flags; `reason` names the trigger
     /// and referral target. Overrides all optimization output (File 08).
     Defer { reason: String },
+    /// Apply `adjustment` to ONE plan item only (matched by movement), e.g. a
+    /// logged first work set above its target RPE cuts THAT lift's remaining
+    /// sets (File 06 autoreg-001 "reduce load for remaining sets"). Never a
+    /// stop: the inner adjustment is a load/RPE change.
+    ForItem {
+        exercise: String,
+        adjustment: Box<Adjustment>,
+    },
+    /// Hold progression without lowering the session (File 13 ready-upd-001):
+    /// lift items keep their planned load one rep further from failure and get
+    /// no load added; run items run easy, except for a `Soreness` trigger
+    /// ("keep systemic intensity"). `trigger` names the signal for the copy.
+    CapTopEnd { trigger: ReadinessSignal },
+    /// Cut today's volume by this %: lift set counts and run duration/distance
+    /// (File 06 autoreg-045 head cold: "cut intensity/duration ~50%").
+    ReduceVolumePct(f32),
+    /// Stop only the plan items that load the painful body part (File 08
+    /// safety-038 "STOP that exercise"); the rest of the day goes ahead with no
+    /// load added. `location` is the user's own words, e.g. "Left knee".
+    StopItems { location: String },
+    /// Replace today's session with the post-illness return check: 10–20 min at
+    /// 60–70 % of usual effort, stopping on any warning symptom (File 13
+    /// ready-upd-003, ILLNESS-RTT-001).
+    ReturnCheck,
 }
 
-/// A user-declared factual label for a logged run's intent (steady, interval,
-/// tempo, long, recovery). This is **USER DATA**, like an exercise name: it is
-/// NOT a knowledge-base claim and carries NO [`Evidence`]. It is deliberately
+impl Adjustment {
+    /// The adjustment itself, looking through an item scope (`ForItem`).
+    pub fn base(&self) -> &Adjustment {
+        match self {
+            Adjustment::ForItem { adjustment, .. } => adjustment.base(),
+            other => other,
+        }
+    }
+}
+
+/// A user-declared factual label for a logged run's intent (steady, easy,
+/// interval, tempo, long, recovery). This is **USER DATA**, like an exercise name: it is
+/// NOT a knowledge-base claim and carries NO [`ClaimId`]. It is deliberately
 /// *not* wrapped in [`Recommended`]: nothing here recommends anything, and per
 /// HARD RULE 1 no coaching output may branch on it. It exists for storage and
 /// display only (history rendering); anything that would consume it to shape
@@ -655,46 +1042,14 @@ pub enum WorkoutType {
     LongRun,
     /// Easy recovery / regeneration run.
     Recovery,
+    /// Easy / general-aerobic run (a planned easy day).
+    Easy,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn strong_evidence() -> Evidence {
-        Evidence {
-            grade: EvidenceGrade::Strong,
-            citation: Citation {
-                claim_id: Some("taper-volume-001".into()),
-                reference: "Bosquet et al. 2007, Med Sci Sports Exerc".into(),
-            },
-            contradicting: vec![],
-        }
-    }
-
-    #[test]
-    fn deserializing_a_myth_graded_recommended_is_rejected() {
-        let valid = Recommended::new(
-            1.0_f64,
-            strong_evidence(),
-            ConfidenceTag {
-                score: EvidenceGrade::Strong.default_confidence(),
-                contested: false,
-                contested_question_ref: None,
-                safety_critical: false,
-            },
-        );
-        let mut json = serde_json::to_value(&valid).unwrap();
-
-        // Round-trips while the grade is legitimate…
-        let ok: Result<Recommended<f64>, _> = serde_json::from_value(json.clone());
-        assert!(ok.is_ok());
-
-        // …but the wire cannot smuggle a myth past the choke point.
-        json["evidence"]["grade"] = serde_json::json!("MarketingMyth");
-        let err = serde_json::from_value::<Recommended<f64>>(json).unwrap_err();
-        assert!(err.to_string().contains("MarketingMyth"), "{err}");
-    }
+    use crate::evidence::claims;
 
     #[test]
     fn recommended_wrapper_carries_evidence_and_confidence() {
@@ -705,45 +1060,27 @@ mod tests {
                 reps: 5,
                 intensity: LiftIntensity::PercentOneRm(80.0),
                 rest_sec: 180,
-                tempo: None,
                 velocity_loss_pct: Some(20),
+                reps_max: None,
+                load_kg: None,
             }),
-            strong_evidence(),
-            ConfidenceTag {
-                score: EvidenceGrade::Strong.default_confidence(),
-                contested: false,
-                contested_question_ref: None,
-                safety_critical: false,
-            },
+            claims::TAPER_001,
         );
 
-        assert_eq!(rx.evidence.grade, EvidenceGrade::Strong);
-        assert!((rx.confidence.score - 0.90).abs() < f32::EPSILON);
+        assert_eq!(rx.grade(), EvidenceGrade::Strong);
+        assert!((rx.confidence() - 0.90).abs() < f32::EPSILON);
+        assert_eq!(
+            rx.reference(),
+            claims::TAPER_001.entry().primary_citations[0]
+        );
     }
 
     #[test]
-    #[should_panic(expected = "MarketingMyth evidence must never back a recommendation")]
+    #[should_panic(expected = "MarketingMyth claim LOAD-ACWR-001 must never back a recommendation")]
     fn recommended_new_rejects_marketing_myths_unconditionally() {
         // HARD RULE 2 at the constructor choke point: deliberately NOT gated
         // on `debug_assertions` must also pass under `cargo test --release`.
-        let myth = Evidence {
-            grade: EvidenceGrade::MarketingMyth,
-            citation: Citation {
-                claim_id: Some("LOAD-ACWR-001".into()),
-                reference: "Gabbett 2016, BJSM".into(),
-            },
-            contradicting: vec![],
-        };
-        let _ = Recommended::new(
-            0u8,
-            myth,
-            ConfidenceTag {
-                score: EvidenceGrade::MarketingMyth.default_confidence(),
-                contested: true,
-                contested_question_ref: Some("CQ-05".into()),
-                safety_critical: false,
-            },
-        );
+        let _ = Recommended::new(0u8, claims::LOAD_ACWR_001);
     }
 
     #[test]

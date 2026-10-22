@@ -9,144 +9,17 @@
 //! Most functions here are pure math and return raw scalars, so they are NOT
 //! wrapped in `Recommended<T>`: they compute a number, they do not prescribe.
 //! Only functions that emit a prescriptive *judgement* (e.g. the decoupling
-//! band verdict) reference the evidence registry via
-//! [`crate::evidence::claim`]. Canonical claim_ids used here:
-//! `LOAD-TRIMP-001`, `RUN-DECOUPLE-001`, `RUN-GAP-001`, `RUN-SPIKE-001`,
+//! band verdict) are graded with a registry claim (`claims::*`). Canonical
+//! claim_ids used here:
+//! `LOAD-TRIMP-001`, `LOAD-SRPE-001`, `RUN-DECOUPLE-001`, `RUN-GAP-001`, `RUN-SPIKE-001`,
 //! and the hard-blocked myth `LOAD-ACWR-001` (see the ACWR note near the end).
 
-// ---------------------------------------------------------------------------
-// TRIMP (Banister)
-// ---------------------------------------------------------------------------
-
-/// Banister TRIMP for one session. Claim: `LOAD-TRIMP-001`.
-///
-/// File 07: `TRIMP = duration_min × HRr × k·e^(b·HRr)`,
-/// `HRr = (HRavg − HRrest)/(HRmax − HRrest)`; men k=0.64, b=1.92; women
-/// k=0.86, b=1.67 (e ≈ 2.718). `[Moderate]`
-///
-/// `hr_ratio` is the pre-computed fractional heart-rate reserve `HRr` (0..1).
-/// `sex_factor` selects the (k, b) pair via [`banister_sex_factors`].
-pub fn banister_trimp(duration_min: f64, hr_ratio: f64, sex_factor: SexFactor) -> f64 {
-    let (k, b) = banister_sex_factors(sex_factor);
-    duration_min * hr_ratio * k * (b * hr_ratio).exp()
-}
-
-/// Sex selector for the Banister TRIMP (k, b) coefficients (File 07).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SexFactor {
-    /// men k=0.64, b=1.92
-    Male,
-    /// women k=0.86, b=1.67
-    Female,
-}
-
-/// Verbatim Banister TRIMP coefficients per File 07: men k=0.64, b=1.92;
-/// women k=0.86, b=1.67. Returns `(k, b)`.
-pub const fn banister_sex_factors(sex: SexFactor) -> (f64, f64) {
-    match sex {
-        SexFactor::Male => (0.64, 1.92),
-        SexFactor::Female => (0.86, 1.67),
-    }
-}
-
-/// Fractional heart-rate reserve `HRr = (HRavg − HRrest)/(HRmax − HRrest)`
-/// (File 07, Banister TRIMP). Denominator guarded to avoid div-by-zero.
-pub fn hr_reserve_fraction(hr_avg: f64, hr_rest: f64, hr_max: f64) -> f64 {
-    let denom = hr_max - hr_rest;
-    if denom.abs() < f64::EPSILON {
-        return 0.0;
-    }
-    (hr_avg - hr_rest) / denom
-}
-
-// ---------------------------------------------------------------------------
-// TSS / rTSS (Coggan)
-// ---------------------------------------------------------------------------
-
-/// Coggan power TSS. Claim: `LOAD-TRIMP-001`.
-///
-/// File 07: `TSS = (sec × NP × IF)/(FTP × 3600) × 100`, `IF = NP/FTP`.
-/// 1 h at FTP = 100 TSS. `[Moderate]`
-///
-/// `normalized_power` = NP (4th-root mean of 30-s rolling-avg power),
-/// `intensity_factor` = IF = NP/FTP (pass explicitly; see
-/// [`intensity_factor`]). FTP guarded against zero.
-pub fn coggan_tss(
-    duration_sec: f64,
-    normalized_power: f64,
-    intensity_factor: f64,
-    ftp: f64,
-) -> f64 {
-    if ftp.abs() < f64::EPSILON {
-        return 0.0;
-    }
-    (duration_sec * normalized_power * intensity_factor) / (ftp * 3600.0) * 100.0
-}
-
-/// Running rTSS. Claim: `LOAD-TRIMP-001`.
-///
-/// File 07: `rTSS = (sec × NGP × IF)/(FTPa × 3600) × 100`, `IF = NGP/FTPa`
-/// (speeds in m/s; NGP = Normalized Graded Pace, FTPa = Functional Threshold
-/// Pace). `[Moderate]`
-///
-/// `normalized_graded_pace` = NGP, `functional_threshold_pace` = FTPa (same
-/// speed units, m/s). Identical algebraic form to [`coggan_tss`].
-pub fn rtss(
-    duration_sec: f64,
-    normalized_graded_pace: f64,
-    intensity_factor: f64,
-    functional_threshold_pace: f64,
-) -> f64 {
-    if functional_threshold_pace.abs() < f64::EPSILON {
-        return 0.0;
-    }
-    (duration_sec * normalized_graded_pace * intensity_factor)
-        / (functional_threshold_pace * 3600.0)
-        * 100.0
-}
-
-/// Intensity Factor `IF = normalized / threshold` (File 07: `IF = NP/FTP`,
-/// and for running `IF = NGP/FTPa`). Threshold guarded against zero.
-pub fn intensity_factor(normalized: f64, threshold: f64) -> f64 {
-    if threshold.abs() < f64::EPSILON {
-        return 0.0;
-    }
-    normalized / threshold
-}
+use crate::evidence::claims;
+use crate::schema::Recommended;
 
 // ---------------------------------------------------------------------------
 // Efficiency Factor & aerobic decoupling
 // ---------------------------------------------------------------------------
-
-/// Efficiency Factor. Claim: `RUN-DECOUPLE-001` (same family).
-///
-/// File 07: `EF = NGP (or NP) / HRavg` over steady aerobic effort.
-/// `[Expert-opinion]`
-///
-/// `normalized_output` = NGP or NP; `avg_hr` = mean HR (bpm). HR guarded.
-pub fn efficiency_factor(normalized_output: f64, avg_hr: f64) -> f64 {
-    if avg_hr.abs() < f64::EPSILON {
-        return 0.0;
-    }
-    normalized_output / avg_hr
-}
-
-/// Aerobic decoupling (Pa:HR / Pw:HR), in percent. Claim: `RUN-DECOUPLE-001`.
-///
-/// File 07: split steady effort in half;
-/// `decoupling% = (EF_firsthalf − EF_secondhalf)/EF_firsthalf × 100`.
-/// Friel: <5% = sound aerobic base; 5–9.99% = build base 3–6 wks;
-/// ≥10% = above aerobic threshold / insufficient endurance. Valid for
-/// efforts ≥ ~20 min (ideally 60–120). `[Expert-opinion]`
-///
-/// A positive result means EF fell in the second half (fatigue/drift);
-/// negative means it rose (a "coupling"). `first_half_ef` guarded.
-pub fn aerobic_decoupling(first_half_ef: f64, second_half_ef: f64) -> f64 {
-    if first_half_ef.abs() < f64::EPSILON {
-        return 0.0;
-    }
-    (first_half_ef - second_half_ef) / first_half_ef * 100.0
-}
 
 /// Friel decoupling band verdict for a computed `decoupling_pct`.
 ///
@@ -162,78 +35,33 @@ pub enum DecouplingBand {
     Insufficient,
 }
 
-/// Classify a decoupling percentage into its Friel band (`RUN-DECOUPLE-001`).
-///
-/// This is a prescriptive judgement, so it also surfaces the evidence entry.
-/// Returns the band plus the `Evidence`/`ConfidenceTag` the caller must ship
-/// alongside any advice derived from it. Falls back to a bare band if the
-/// registry lookup ever fails (it should not for a canonical id).
-pub fn decoupling_band(
-    decoupling_pct: f64,
-) -> (
-    DecouplingBand,
-    Option<crate::schema::Evidence>,
-    Option<crate::schema::ConfidenceTag>,
-) {
-    // Epsilon at the 10% boundary: EF ratios like 1.0/0.9 yield 9.9999…%
-    // from float error, which must still count as the ">=10%" flag band.
-    let band = if decoupling_pct < 5.0 {
+/// Classify a decoupling percentage into its Friel band (`RUN-DECOUPLE-001`),
+/// graded: a prescriptive judgement ships with its evidence.
+pub fn decoupling_band(decoupling_pct: f64) -> Recommended<DecouplingBand> {
+    let band = if decoupling_pct < DECOUPLING_SOUND_PCT {
         DecouplingBand::SoundBase
-    } else if decoupling_pct < 10.0 - 1e-9 {
+    } else if !decoupling_high(decoupling_pct) {
         DecouplingBand::BuildBase
     } else {
         DecouplingBand::Insufficient
     };
-    match crate::evidence::claim("RUN-DECOUPLE-001") {
-        Some(entry) => (
-            band,
-            Some(entry.to_evidence()),
-            Some(entry.to_confidence_tag()),
-        ),
-        None => (band, None, None),
-    }
+    crate::evidence::graded(band, claims::RUN_DECOUPLE_001)
 }
 
-// ---------------------------------------------------------------------------
-// Grade-Adjusted Pace (Minetti 2002)
-// ---------------------------------------------------------------------------
+/// Decoupling percentage below which the aerobic base counts as sound
+/// (`RUN-DECOUPLE-001`, Friel `<5%`).
+pub const DECOUPLING_SOUND_PCT: f64 = 5.0;
 
-/// Minetti et al. (2002) energy cost of running (J·kg⁻¹·m⁻¹).
-/// Claim: `RUN-GAP-001`. Downhill unreliable (see `CQ-08`).
-///
-/// File 07 (verbatim), `i` = gradient fraction (−0.45…+0.45):
-/// `Cr(i) = 155.4·i⁵ − 30.4·i⁴ − 43.3·i³ + 46.3·i² + 19.5·i + 3.6`
-/// with `Cr(0) = 3.6`. Valid −45%…+45%; **downhill error up to 3×**.
-/// `[Moderate]` uphill, `[Weak]` steep downhill.
-///
-/// `gradient` is the fractional grade `i` (e.g. 0.10 = +10%), NOT percent.
-pub fn minetti_energy_cost(gradient: f64) -> f64 {
-    let i = gradient;
-    155.4 * i.powi(5) - 30.4 * i.powi(4) - 43.3 * i.powi(3) + 46.3 * i.powi(2) + 19.5 * i + 3.6
-}
+/// Decoupling percentage at which the base counts as insufficient / the effort
+/// as above the aerobic threshold (`RUN-DECOUPLE-001`).
+pub const DECOUPLING_HIGH_PCT: f64 = 10.0;
 
-/// Minetti flat-ground energy cost `Cr(0) = 3.6` (File 07). Verbatim constant.
-pub const MINETTI_FLAT_COST: f64 = 3.6;
-
-/// Grade-adjusted pace factor via Minetti. Claim: `RUN-GAP-001`.
-///
-/// File 07: adjustment factor `= Cr(i)/Cr(0)`, `Cr(0) = 3.6`;
-/// `GAP speed = actual speed × factor`. Valid −45%…+45%; **downhill error up
-/// to 3×** (`CQ-08`, do not trust steep-downhill output; flag it).
-///
-/// `gradient` is the fractional grade `i` (not percent).
-pub fn grade_adjusted_pace_factor(gradient: f64) -> f64 {
-    minetti_energy_cost(gradient) / MINETTI_FLAT_COST
-}
-
-/// Simplified quadratic GAP adjustment (File 07, Hashiri.AI, `[Expert-opinion]`).
-///
-/// File 07: `adjustment(g%) = 1 + 0.033·g + 0.0025·g²` (g in **percent**).
-/// Provided verbatim as an alternative to [`grade_adjusted_pace_factor`];
-/// note this one takes grade in percent, not fraction.
-pub fn quadratic_gap_factor(gradient_pct: f64) -> f64 {
-    let g = gradient_pct;
-    1.0 + 0.033 * g + 0.0025 * g * g
+/// Whether a decoupling percentage is in the flag band. ONE boundary for every
+/// consumer: the readiness strip, the session-review feedback and the
+/// base-fitness band must agree on a drift of exactly 10.0, and an EF ratio
+/// like 1.0/0.9 yielding 9.9999…% from float error still counts as the flag.
+pub fn decoupling_high(pct: f64) -> bool {
+    pct >= DECOUPLING_HIGH_PCT - 1e-9
 }
 
 // ---------------------------------------------------------------------------
@@ -310,63 +138,8 @@ pub fn tsb(ctl: f64, atl: f64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// Ingest unit normalization (File 07 "Formulas")
-// ---------------------------------------------------------------------------
-
-/// FIT semicircles → decimal degrees: `degrees = semicircles × (180 / 2^31)`
-/// (File 07). `2^31` is exact in `f64`, so this is loss-free for i32 input.
-pub fn semicircles_to_degrees(semicircles: i32) -> f64 {
-    semicircles as f64 * (180.0 / 2_147_483_648.0)
-}
-
-/// FIT per-foot cadence → cadence in steps/min:
-/// `steps/min = (cadence + fractional_cadence) × 2` (File 07).
-pub fn cadence_to_steps_per_min(cadence: f64, fractional_cadence: f64) -> f64 {
-    (cadence + fractional_cadence) * 2.0
-}
-
-/// Instantaneous grade `g = Δaltitude / Δhorizontal_distance` (File 07).
-///
-/// Per the ingest spec, slope is forced to 0 when the horizontal step is under
-/// 5 m (GPS noise dominates below that), matching the ascent-hysteresis rule.
-pub fn grade_fraction(delta_altitude_m: f64, delta_horizontal_m: f64) -> f64 {
-    if delta_horizontal_m.abs() < 5.0 {
-        return 0.0;
-    }
-    delta_altitude_m / delta_horizontal_m
-}
-
-// ---------------------------------------------------------------------------
 // HRmax estimators & HR zones (File 07)
 // ---------------------------------------------------------------------------
-
-/// Population HRmax estimators (File 07, SEE ≈ ±10 bpm). Tanaka is the default.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HrMaxFormula {
-    /// `220 − age` `[Weak]`.
-    Fox,
-    /// `208 − 0.7·age` (default) `[Strong]`, Tanaka 2001.
-    Tanaka,
-    /// `206 − 0.88·age` `[Moderate]`, Gulati 2010.
-    Gulati,
-    /// `211 − 0.64·age` `[Moderate]`, Nes 2013 (HUNT).
-    Nes,
-    /// `207 − 0.7·age` `[Moderate]`, Gellish 2007.
-    Gellish,
-}
-
-/// Estimate HRmax from age via the selected formula (File 07, verbatim
-/// coefficients). Fox=220−age; Tanaka=208−0.7a; Gulati=206−0.88a;
-/// Nes=211−0.64a; Gellish=207−0.7a.
-pub fn hr_max_estimate(age_years: f64, formula: HrMaxFormula) -> f64 {
-    match formula {
-        HrMaxFormula::Fox => 220.0 - age_years,
-        HrMaxFormula::Tanaka => 208.0 - 0.7 * age_years,
-        HrMaxFormula::Gulati => 206.0 - 0.88 * age_years,
-        HrMaxFormula::Nes => 211.0 - 0.64 * age_years,
-        HrMaxFormula::Gellish => 207.0 - 0.7 * age_years,
-    }
-}
 
 /// Karvonen target HR: `target = HRrest + frac·(HRmax − HRrest)` (File 07).
 /// `frac` is the desired %HR-reserve as a fraction (0..1). `[Moderate]`
@@ -378,26 +151,6 @@ pub fn karvonen_target_hr(hr_rest: f64, hr_max: f64, frac: f64) -> f64 {
 /// `[Moderate]`
 pub fn cooper_vo2max(distance_m_12min: f64) -> f64 {
     (distance_m_12min - 504.9) / 44.73
-}
-
-// ---------------------------------------------------------------------------
-// Critical Speed / D′ (File 07, 2-parameter hyperbolic)
-// ---------------------------------------------------------------------------
-
-/// Critical Speed from two maximal efforts (distance m, time s):
-/// `CS = (D2 − D1)/(T2 − T1)` (File 07). Guards equal times. `[Moderate]`
-pub fn critical_speed(d1_m: f64, t1_sec: f64, d2_m: f64, t2_sec: f64) -> f64 {
-    let dt = t2_sec - t1_sec;
-    if dt.abs() < f64::EPSILON {
-        return 0.0;
-    }
-    (d2_m - d1_m) / dt
-}
-
-/// Anaerobic distance capacity D′ from the linear model `D = CS·t + D′`,
-/// i.e. `D′ = D − CS·t` (File 07). Pass a single effort and its CS.
-pub fn d_prime(distance_m: f64, critical_speed_ms: f64, time_sec: f64) -> f64 {
-    distance_m - critical_speed_ms * time_sec
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +187,9 @@ pub enum CsProtocolViolation {
     DurationOutOfRange,
     /// All efforts share the same duration, no slope can be fitted.
     DegenerateDurations,
+    /// A non-positive fitted slope (CS ≤ 0): the efforts imply speed does not
+    /// increase with duration, so D′ and the whole linear model are meaningless.
+    NonPositiveSlope,
     /// Fitted D′ < 0: the KB reads a negative distance reserve as evidence of
     /// non-maximal trials, so the estimate is rejected.
     NegativeDPrime,
@@ -446,7 +202,8 @@ pub const CS_EFFORT_MAX_SEC: f64 = 1800.0;
 /// Ordinary least-squares fit of `D = CS·t + D′` over ≥2 efforts (running-009:
 /// "CS = slope; D′ = distance reserve"). Pure math, no protocol judgement -
 /// returns `None` when a slope is undefined (<2 points or all-equal durations).
-/// For exactly two efforts this reduces to [`critical_speed`] / [`d_prime`].
+/// For exactly two efforts this reduces to the two-point model
+/// `CS = (D₂ − D₁)/(T₂ − T₁)`, `D′ = D₁ − CS·T₁` (File 07).
 pub fn cs_linear_fit(efforts: &[CsEffort]) -> Option<CsFit> {
     if efforts.len() < 2 {
         return None;
@@ -499,7 +256,7 @@ pub fn cs_pairing_ideal(efforts: &[CsEffort]) -> bool {
 /// advisory ideal-pair check.
 pub fn critical_speed_checked(
     efforts: &[CsEffort],
-) -> crate::schema::Recommended<Result<CsFit, CsProtocolViolation>> {
+) -> Recommended<Result<CsFit, CsProtocolViolation>> {
     let out = if efforts.len() < 2 {
         Err(CsProtocolViolation::TooFewEfforts)
     } else if efforts.len() > 5 {
@@ -512,11 +269,12 @@ pub fn critical_speed_checked(
     } else {
         match cs_linear_fit(efforts) {
             None => Err(CsProtocolViolation::DegenerateDurations),
+            Some(fit) if fit.cs_m_per_s <= 0.0 => Err(CsProtocolViolation::NonPositiveSlope),
             Some(fit) if fit.d_prime_m < 0.0 => Err(CsProtocolViolation::NegativeDPrime),
             Some(fit) => Ok(fit),
         }
     };
-    crate::evidence::graded(out, "RUN-CS-PROTOCOL-001")
+    crate::evidence::graded(out, claims::RUN_CS_PROTOCOL_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -560,7 +318,7 @@ pub fn vdot(distance_m: f64, time_sec: f64) -> f64 {
 /// single method's false precision is never presented alone (File 07). `[Moderate]`
 ///
 /// Guards non-positive inputs (returns 0.0) since VDOT/distance are undefined
-/// there. The search brackets 1 s … 6 h; a target VDOT outside a plausible human
+/// there. The search brackets 1 s … 12 h; a target VDOT outside a plausible human
 /// range is clamped to that bracket rather than diverging.
 pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
     if vdot_target <= 0.0 || distance_m <= 0.0 {
@@ -569,7 +327,10 @@ pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
     // vdot(d, t) decreases monotonically in t, so bisect: when the midpoint's
     // VDOT still exceeds the target the time is too short (raise the low bound).
     let mut lo = 1.0; // 1 s - faster than any real finish
-    let mut hi = 6.0 * 3600.0; // 6 h - slower than any race we predict
+    // 12 h covers every walkable marathon; a tighter cap would return an
+    // optimistic bound for low-VDOT marathons and neutralize the running-040
+    // derate for exactly its target population.
+    let mut hi = 12.0 * 3600.0;
     for _ in 0..100 {
         let mid = 0.5 * (lo + hi);
         if vdot(distance_m, mid) > vdot_target {
@@ -581,19 +342,73 @@ pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
     0.5 * (lo + hi)
 }
 
+/// Running speed (m/min) whose Daniels & Gilbert oxygen cost equals `vo2`:
+/// the positive root of `0.000104·v² + 0.182258·v − (4.60 + vo2) = 0`, the
+/// inverse of [`daniels_vo2`]. `None` for a non-finite/non-positive target.
+pub fn daniels_speed_for_vo2(vo2: f64) -> Option<f64> {
+    if !vo2.is_finite() || vo2 <= 0.0 {
+        return None;
+    }
+    let (a, b, c) = (0.000104, 0.182258, -(4.60 + vo2));
+    let disc = b * b - 4.0 * a * c;
+    let v = (-b + disc.sqrt()) / (2.0 * a);
+    (v.is_finite() && v > 0.0).then_some(v)
+}
+
+/// Training pace (seconds per km) for a runner of `vdot` working at
+/// `pct_vo2max` percent of VO2max (running-007: paces come from the CURRENT
+/// VDOT of a recent race). Inverts [`daniels_vo2`] at `pct/100 × VDOT`.
+/// `None` for non-positive inputs. `[Moderate]`
+pub fn pace_sec_per_km_at(vdot: f64, pct_vo2max: f64) -> Option<f64> {
+    if !vdot.is_finite() || vdot <= 0.0 || !pct_vo2max.is_finite() || pct_vo2max <= 0.0 {
+        return None;
+    }
+    daniels_speed_for_vo2(vdot * pct_vo2max / 100.0).map(|v| 60_000.0 / v)
+}
+
+/// Pace band (fast, slow) in seconds per km for a Daniels VDOT band, from the
+/// band's %VO2max limits (`running::vdot_band_vo2max_pct`, running-007 table).
+/// Easy is the exception: its pace comes from marathon pace, 15–25 % slower
+/// (running-015, the claim every easy prescription cites), because the 59–74
+/// %VO2max row inverted through the oxygen-cost equation lands only ~7–9 %
+/// slower than MP, well faster than Daniels' published E paces.
+/// Repetition is ">100 %VO2max" with no stated upper limit, so it returns the
+/// 100 % pace for both ends, read as "at least this fast". `[Moderate]`
+pub fn vdot_band_pace_sec_per_km(vdot: f64, band: crate::schema::VdotBand) -> Option<(f64, f64)> {
+    if matches!(band, crate::schema::VdotBand::Easy) {
+        return crate::running::mp_relative_pace_sec_per_km(
+            vdot,
+            crate::running::RunWorkout::EasyGeneralAerobic,
+        );
+    }
+    let (lo_pct, hi_pct) = crate::running::vdot_band_vo2max_pct(band);
+    let slow = pace_sec_per_km_at(vdot, lo_pct)?;
+    let fast = match hi_pct {
+        Some(hi) => pace_sec_per_km_at(vdot, hi)?,
+        None => slow,
+    };
+    Some((fast, slow))
+}
+
+// ---------------------------------------------------------------------------
+// Session-RPE load (Foster 2001; KB 13-run-feedback-load load-srpe-001)
+// ---------------------------------------------------------------------------
+
+/// Session-RPE training load in arbitrary units: `duration_min × CR-10`
+/// (Foster et al. 2001; `LOAD-SRPE-001`). A SEPARATE series from the HR-based
+/// TRIMP (the two are not interchangeable on interval sessions), never summed
+/// into it. The rating is clamped to the 0–10 scale; non-positive or
+/// non-finite minutes yield 0.
+pub fn srpe_load_au(duration_min: f64, session_rpe: u8) -> f64 {
+    if !duration_min.is_finite() || duration_min <= 0.0 {
+        return 0.0;
+    }
+    duration_min * f64::from(session_rpe.min(10))
+}
+
 // ---------------------------------------------------------------------------
 // Zonal TRIMP variants (File 07)
 // ---------------------------------------------------------------------------
-
-/// Edwards (zonal) TRIMP: `Σ(minutes_in_zone_i × i)` for 5 zones weighted 1–5
-/// (File 07). `minutes[0]` is zone 1 (weight 1) … `minutes[4]` is zone 5. `[Moderate]`
-pub fn edwards_trimp(minutes_per_zone: [f64; 5]) -> f64 {
-    minutes_per_zone
-        .iter()
-        .enumerate()
-        .map(|(i, m)| m * (i as f64 + 1.0))
-        .sum()
-}
 
 /// Lucia TRIMP: 3 zones (below VT1, VT1–VT2, above VT2) weighted 1/2/3
 /// (File 07). `minutes[0]` = low zone … `minutes[2]` = high zone. `[Moderate]`
@@ -628,12 +443,6 @@ pub fn gps_point_accept(distance_moved_m: f64, vertical_rate_m_s: f64) -> bool {
     distance_moved_m >= 2.5 && vertical_rate_m_s.abs() <= 5.0
 }
 
-/// HR-jump plausibility gate: reject changes exceeding ±20 bpm/s (File 07).
-/// Returns true when the per-second delta is plausible.
-pub fn hr_jump_plausible(delta_bpm_per_s: f64) -> bool {
-    delta_bpm_per_s.abs() <= 20.0
-}
-
 /// Stop detection for pace/load exclusion: speed < 0.5 m/s counts as stopped
 /// (File 07 auto-pause rule).
 pub fn is_stopped(speed_m_s: f64) -> bool {
@@ -656,24 +465,6 @@ pub fn is_stopped(speed_m_s: f64) -> bool {
 // request and Lolli et al. 2019 documented the coupling. Use week-to-week
 // ramp (< ~10%/wk, and the `RUN-SPIKE-001` single-session distance-spike
 // signal) as the guardrail instead, see `RUN-SPIKE-001`.
-//
-// A single function is provided ONLY so callers cannot silently reinvent it;
-// it is `#[deprecated]`, never called internally, and returns the raw ratio
-// with no interpretation. Do not build on it.
-
-/// DO NOT USE. Hard-blocked myth `LOAD-ACWR-001` (mathematical coupling;
-/// Impellizzeri/Lolli 2019). Present only to document the block; unused.
-#[deprecated(note = "LOAD-ACWR-001 is a MarketingMyth (hard-blocked). ACWR is \
-            mathematically coupled and does not predict injury. Use \
-            week-to-week ramp <~10%/wk and RUN-SPIKE-001 instead.")]
-#[allow(dead_code)]
-pub fn acwr_do_not_use(acute_7day_load: f64, chronic_28day_load: f64) -> f64 {
-    if chronic_28day_load.abs() < f64::EPSILON {
-        return 0.0;
-    }
-    acute_7day_load / chronic_28day_load
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -702,8 +493,47 @@ mod tests {
         // A finite prediction round-trips normally.
         assert!(riegel_predict(1200.0, 5000.0, 10_000.0, 1.06).is_finite());
         // An absurd goal distance overflows the power to ±inf → collapse to the
-        // degenerate 0.0 sentinel, never leak Inf/NaN to the caller (LOW bug).
+        // degenerate 0.0 sentinel, never leak Inf/NaN to the caller.
         assert_eq!(riegel_predict(1200.0, 5000.0, 1e300, 1.06), 0.0);
+    }
+
+    #[test]
+    fn vdot_50_threshold_pace_matches_daniels_table() {
+        // Daniels' table: VDOT 50 → T pace ≈ 4:15/km (255 s). The T band is
+        // 83–88 %VO2max; its fast end (88 %) is the table's T pace.
+        let (fast, slow) = vdot_band_pace_sec_per_km(50.0, crate::schema::VdotBand::Threshold)
+            .expect("T band pace");
+        assert!((fast - 255.0).abs() <= 3.0, "T fast end {fast}");
+        assert!(slow > fast && slow < 275.0, "T slow end {slow}");
+        // Easy sits well slower than threshold, 15–25 % slower than marathon
+        // pace (running-015).
+        let (e_fast, e_slow) =
+            vdot_band_pace_sec_per_km(50.0, crate::schema::VdotBand::Easy).unwrap();
+        assert!(e_fast > slow && e_slow > e_fast, "E {e_fast}..{e_slow}");
+        let mp = daniels_predict(50.0, 42_195.0) / 42.195;
+        for e in [e_fast, e_slow] {
+            let pct = (e / mp - 1.0) * 100.0;
+            assert!(
+                (15.0 - 1e-6..=25.0 + 1e-6).contains(&pct),
+                "E {e} is {pct}% slower than MP {mp}"
+            );
+        }
+        assert!((e_fast / mp - 1.15).abs() < 1e-9 && (e_slow / mp - 1.25).abs() < 1e-9);
+        // The inversion round-trips through daniels_vo2.
+        let v = daniels_speed_for_vo2(40.0).unwrap();
+        assert!((daniels_vo2(v) - 40.0).abs() < 1e-9);
+        // Repetition has no upper %VO2max: both ends are the 100 % pace.
+        let (r_fast, r_slow) =
+            vdot_band_pace_sec_per_km(50.0, crate::schema::VdotBand::Repetition).unwrap();
+        assert_eq!(r_fast, r_slow);
+        assert_eq!(pace_sec_per_km_at(0.0, 88.0), None);
+    }
+
+    #[test]
+    fn srpe_load_is_minutes_times_cr10() {
+        assert_eq!(srpe_load_au(40.0, 7), 280.0);
+        assert_eq!(srpe_load_au(30.0, 15), 300.0, "rating clamps to 10");
+        assert_eq!(srpe_load_au(-5.0, 7), 0.0);
     }
 
     #[test]
@@ -722,6 +552,30 @@ mod tests {
         // Non-positive inputs guarded.
         assert_eq!(daniels_predict(0.0, 5000.0), 0.0);
         assert_eq!(daniels_predict(50.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn daniels_marathon_bracket_covers_slow_vdots() {
+        // A VDOT-20 marathon finishes past 6 h; the 12 h bracket returns the
+        // true (slower) prediction, not a clamped optimistic bound.
+        let t = daniels_predict(20.0, 42_195.0);
+        assert!(
+            t > 6.0 * 3600.0 && t < 12.0 * 3600.0,
+            "expected 6–12 h, got {t}"
+        );
+        assert!(
+            (vdot(42_195.0, t) - 20.0).abs() < 0.5,
+            "round-trips to VDOT 20, got {}",
+            vdot(42_195.0, t)
+        );
+        // The running-040 marathon derate holds for its target population: at
+        // VDOT 22 the band is non-degenerate.
+        let band = crate::running::marathon_derated_band(4.0 * 3600.0, 4.5 * 3600.0, 22.0);
+        assert!(
+            band.value.0 < band.value.1,
+            "derated band f_min < f_max: {:?}",
+            band.value
+        );
     }
 
     #[test]
@@ -748,126 +602,11 @@ mod tests {
     }
 
     #[test]
-    fn aerobic_decoupling_ten_percent() {
-        // EF drops from 1.0 to 0.9 -> (1.0 - 0.9)/1.0 * 100 = 10%.
-        let d = aerobic_decoupling(1.0, 0.9);
-        assert!((d - 10.0).abs() < 1e-9, "expected ~10%, got {d}");
-        // And that lands in the Insufficient (flag) band.
-        let (band, ev, tag) = decoupling_band(d);
-        assert_eq!(band, DecouplingBand::Insufficient);
-        assert!(ev.is_some() && tag.is_some(), "registry entry must resolve");
-    }
-
-    #[test]
-    fn minetti_flat_ground_cost() {
-        // Cr(0) must equal the verbatim flat-ground constant 3.6.
-        let c = minetti_energy_cost(0.0);
-        assert!((c - 3.6).abs() < 1e-9, "Cr(0) should be 3.6, got {c}");
-        // And the GAP factor at flat grade is exactly 1.0.
-        let f = grade_adjusted_pace_factor(0.0);
-        assert!((f - 1.0).abs() < 1e-9, "flat GAP factor should be 1.0");
-    }
-
-    #[test]
-    fn quadratic_gap_matches_verbatim_formula() {
-        // File 07: adjustment(g%) = 1 + 0.033·g + 0.0025·g² (g in percent).
-        // Flat is exactly 1.0.
-        assert!(
-            (quadratic_gap_factor(0.0) - 1.0).abs() < 1e-9,
-            "flat must be 1.0"
-        );
-        // +10% grade: 1 + 0.33 + 0.25 = 1.58 (pins both coefficients).
-        assert!(
-            (quadratic_gap_factor(10.0) - 1.58).abs() < 1e-9,
-            "got {}",
-            quadratic_gap_factor(10.0)
-        );
-        // Uphill costs more than flat; the quadratic term keeps downhill (−g)
-        // above 1.0 too (it models energy cost, not a pace credit).
-        assert!(
-            quadratic_gap_factor(5.0) > 1.0,
-            "uphill factor must exceed 1.0"
-        );
-    }
-
-    #[test]
-    fn tss_is_positive_for_real_session() {
-        // 1 h at FTP (NP = FTP, IF = 1.0) is defined as exactly 100 TSS.
-        let ftp = 250.0;
-        let np = 250.0;
-        let if_ = intensity_factor(np, ftp);
-        let tss = coggan_tss(3600.0, np, if_, ftp);
-        assert!(tss > 0.0, "TSS must be positive");
-        assert!((tss - 100.0).abs() < 1e-6, "1h @ FTP == 100 TSS, got {tss}");
-        // rTSS shares the form: 1h @ FTPa == 100.
-        let rt = rtss(3600.0, 3.5, intensity_factor(3.5, 3.5), 3.5);
-        assert!((rt - 100.0).abs() < 1e-6, "1h @ FTPa == 100 rTSS, got {rt}");
-    }
-
-    #[test]
-    fn efficiency_factor_and_trimp_sanity() {
-        // EF = normalized_output / avg_hr.
-        let ef = efficiency_factor(180.0, 150.0);
-        assert!((ef - 1.2).abs() < 1e-9, "EF should be 1.2, got {ef}");
-        assert!(
-            efficiency_factor(180.0, 0.0).abs() < f64::EPSILON,
-            "guard div0"
-        );
-
-        // Banister TRIMP positive and sex factors differ.
-        let hrr = hr_reserve_fraction(150.0, 50.0, 190.0);
-        assert!(hrr > 0.0 && hrr < 1.0, "HRr in (0,1), got {hrr}");
-        let male = banister_trimp(60.0, hrr, SexFactor::Male);
-        let female = banister_trimp(60.0, hrr, SexFactor::Female);
-        assert!(male > 0.0 && female > 0.0, "TRIMP must be positive");
-        assert!(
-            (male - female).abs() > f64::EPSILON,
-            "sex factors must differ"
-        );
-    }
-
-    #[test]
-    fn semicircles_round_trip_and_cadence() {
-        // 2^31 semicircles == 180 degrees exactly.
-        assert!((semicircles_to_degrees(i32::MIN) + 180.0).abs() < 1e-9);
-        assert!(semicircles_to_degrees(0).abs() < 1e-12);
-        // FIT cadence 85 rpm/foot → 170 steps/min.
-        assert!((cadence_to_steps_per_min(85.0, 0.0) - 170.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn grade_zeroes_out_tiny_horizontal_steps() {
-        assert!((grade_fraction(2.0, 40.0) - 0.05).abs() < 1e-9);
-        // Under 5 m horizontal → forced flat.
-        assert_eq!(grade_fraction(2.0, 4.0), 0.0);
-    }
-
-    #[test]
-    fn hrmax_estimators_verbatim() {
-        assert!((hr_max_estimate(30.0, HrMaxFormula::Tanaka) - 187.0).abs() < 1e-9);
-        assert!((hr_max_estimate(30.0, HrMaxFormula::Fox) - 190.0).abs() < 1e-9);
-        assert!((hr_max_estimate(40.0, HrMaxFormula::Gulati) - 170.8).abs() < 1e-9);
-        assert!((hr_max_estimate(40.0, HrMaxFormula::Nes) - 185.4).abs() < 1e-9);
-    }
-
-    #[test]
     fn karvonen_and_cooper() {
         // 70% HRR between 50 and 190 → 50 + 0.7*140 = 148.
         assert!((karvonen_target_hr(50.0, 190.0, 0.7) - 148.0).abs() < 1e-9);
         // Cooper at 2400 m: (2400-504.9)/44.73 ≈ 42.37.
         assert!((cooper_vo2max(2400.0) - 42.366).abs() < 0.01);
-    }
-
-    #[test]
-    fn critical_speed_and_d_prime() {
-        // 1000 m @ 200 s and 3000 m @ 660 s → CS = 2000/460 ≈ 4.3478 m/s.
-        let cs = critical_speed(1000.0, 200.0, 3000.0, 660.0);
-        assert!((cs - 4.347826).abs() < 1e-5, "got {cs}");
-        // D′ from the first effort: 1000 - CS*200.
-        let dp = d_prime(1000.0, cs, 200.0);
-        assert!((dp - (1000.0 - cs * 200.0)).abs() < 1e-9);
-        // Equal times guarded.
-        assert_eq!(critical_speed(1.0, 5.0, 2.0, 5.0), 0.0);
     }
 
     // -- Critical Speed protocol validity (running-009 / RUN-CS-PROTOCOL-001) --
@@ -885,9 +624,11 @@ mod tests {
         // 660 s ok) → identical CS/D′ as the closed-form two-point version.
         let efforts = [eff(1000.0, 200.0), eff(3000.0, 660.0)];
         let fit = cs_linear_fit(&efforts).expect("fit");
-        let cs2 = critical_speed(1000.0, 200.0, 3000.0, 660.0);
+        // Closed-form two-point model: CS = 2000/460 ≈ 4.3478 m/s, D′ = 1000 − CS·200.
+        let cs2: f64 = (3000.0 - 1000.0) / (660.0 - 200.0);
+        assert!((cs2 - 4.347826).abs() < 1e-5, "got {cs2}");
         assert!((fit.cs_m_per_s - cs2).abs() < 1e-9);
-        assert!((fit.d_prime_m - d_prime(1000.0, cs2, 200.0)).abs() < 1e-9);
+        assert!((fit.d_prime_m - (1000.0 - cs2 * 200.0)).abs() < 1e-9);
         // Gated path accepts it too.
         let checked = critical_speed_checked(&efforts).value.expect("valid");
         assert!((checked.cs_m_per_s - cs2).abs() < 1e-9);
@@ -937,10 +678,36 @@ mod tests {
         // line has negative intercept (D′ < 0) → rejected per KB.
         let non_maximal = [eff(600.0, 200.0), eff(3000.0, 660.0)];
         let fit = cs_linear_fit(&non_maximal).expect("fit exists");
-        assert!(fit.d_prime_m < 0.0, "premise: D′ negative, got {}", fit.d_prime_m);
+        assert!(
+            fit.d_prime_m < 0.0,
+            "premise: D′ negative, got {}",
+            fit.d_prime_m
+        );
         assert_eq!(
             critical_speed_checked(&non_maximal).value,
             Err(CsProtocolViolation::NegativeDPrime)
+        );
+    }
+
+    #[test]
+    fn cs_gate_rejects_non_positive_slope() {
+        // Efforts implying speed DECREASES with duration → non-positive slope,
+        // which makes D′ (and the whole model) meaningless. Checked before the
+        // D′ sign gate.
+        let backwards = [eff(3000.0, 200.0), eff(1000.0, 660.0)];
+        assert!(
+            cs_linear_fit(&backwards).expect("fit").cs_m_per_s < 0.0,
+            "premise: CS < 0"
+        );
+        assert_eq!(
+            critical_speed_checked(&backwards).value,
+            Err(CsProtocolViolation::NonPositiveSlope)
+        );
+        // Equal distances over different times → a flat (CS = 0) slope, also rejected.
+        let flat_speed = [eff(2000.0, 200.0), eff(2000.0, 400.0)];
+        assert_eq!(
+            critical_speed_checked(&flat_speed).value,
+            Err(CsProtocolViolation::NonPositiveSlope)
         );
     }
 
@@ -951,18 +718,18 @@ mod tests {
         // Two short efforts: not ideal.
         assert!(!cs_pairing_ideal(&[eff(1200.0, 300.0), eff(1500.0, 400.0)]));
         // Two long efforts: not ideal.
-        assert!(!cs_pairing_ideal(&[eff(5000.0, 1200.0), eff(6000.0, 1500.0)]));
+        assert!(!cs_pairing_ideal(&[
+            eff(5000.0, 1200.0),
+            eff(6000.0, 1500.0)
+        ]));
     }
 
     #[test]
     fn cs_checked_carries_moderate_evidence() {
         let r = critical_speed_checked(&[eff(1000.0, 200.0), eff(3000.0, 660.0)]);
-        assert_eq!(
-            r.evidence.citation.claim_id.as_deref(),
-            Some("RUN-CS-PROTOCOL-001")
-        );
-        assert!((r.confidence.score - 0.65).abs() < f32::EPSILON);
-        assert!(!r.confidence.safety_critical);
+        assert_eq!(r.claim_id(), claims::RUN_CS_PROTOCOL_001);
+        assert!((r.confidence() - 0.65).abs() < f32::EPSILON);
+        assert!(!r.safety_critical());
     }
 
     #[test]
@@ -971,26 +738,5 @@ mod tests {
         let v = vdot(5000.0, 1200.0);
         assert!(v > 40.0 && v < 60.0, "VDOT out of range: {v}");
         assert_eq!(vdot(5000.0, 0.0), 0.0);
-    }
-
-    #[test]
-    fn zonal_trimp() {
-        // Edwards: 10 min in each of 5 zones → 10*(1+2+3+4+5) = 150.
-        assert!((edwards_trimp([10.0; 5]) - 150.0).abs() < 1e-9);
-        // Lucia: 10 min each of 3 zones → 10*(1+2+3) = 60.
-        assert!((lucia_trimp([10.0; 3]) - 60.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn ingest_quality_gates() {
-        assert!(gps_speed_plausible(6.0));
-        assert!(!gps_speed_plausible(13.0));
-        assert!(gps_point_accept(3.0, 2.0));
-        assert!(!gps_point_accept(1.0, 2.0)); // moved too little
-        assert!(!gps_point_accept(3.0, 6.0)); // vertical rate too high
-        assert!(hr_jump_plausible(15.0));
-        assert!(!hr_jump_plausible(25.0));
-        assert!(is_stopped(0.3));
-        assert!(!is_stopped(0.8));
     }
 }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- milestone route-trace mark (design/icons/README.md geometry, 100x100 grid):
+<!-- lollop route-trace mark (design/icons/README.md geometry, 100x100 grid):
      start ring (never filled), trace (control points fixed), goal dot (filled).
      Drawn white; tint at the call site (top bar = Accent). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"

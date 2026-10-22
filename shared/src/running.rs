@@ -3,8 +3,8 @@
 //! No IO, no clock, no randomness. Every function is either a pure calculation
 //! (HRmax, zone classification, band table lookup) returning a plain value, or a
 //! prescriptive recommendation (spike gate, volume caps, taper) returning a
-//! [`Recommended<T>`] carrying the backing [`Evidence`](crate::schema::Evidence)
-//! and [`ConfidenceTag`](crate::schema::ConfidenceTag) from the claim registry.
+//! [`Recommended<T>`] whose [`ClaimId`](crate::evidence::ClaimId) names the
+//! backing evidence row in the claim registry.
 //!
 //! Rule ids and table values are transcribed verbatim from
 //! `knowledge-base/extracted/04-running.md`.
@@ -17,8 +17,12 @@
 //! consults it; single-session distance spike (`RUN-SPIKE-001`) is the
 //! strongest injury signal we act on instead.
 
-use crate::schema::{MesoPhase, Recommended, RunSessionType, ThreeZone, VdotBand};
+use crate::evidence::claims;
+use crate::schema::{
+    MesoPhase, Recommended, RunSegment, RunSessionType, RunVolume, ThreeZone, VdotBand, WorkoutType,
+};
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 
 // ---------------------------------------------------------------------------
 // 1. HRmax (pure calculation)
@@ -29,25 +33,83 @@ use serde::{Deserialize, Serialize};
 /// Pure population estimate; SEE ≈ ±10 bpm (individual variation is large, so
 /// this is a fallback for a measured field-test max, not a criterion value).
 pub fn hr_max_tanaka(age_years: f64) -> f64 {
-    208.0 - 0.7 * age_years
+    TANAKA_INTERCEPT_BPM - TANAKA_SLOPE_BPM_PER_YEAR * age_years
+}
+
+/// Tanaka intercept, bpm (RUN-HRMAX-001: 208 − 0.7·age).
+pub const TANAKA_INTERCEPT_BPM: f64 = 208.0;
+/// Tanaka slope, bpm per year of age (RUN-HRMAX-001: 208 − 0.7·age).
+pub const TANAKA_SLOPE_BPM_PER_YEAR: f64 = 0.7;
+
+/// Whether an age (years) is one the Tanaka estimate may be emitted for: a
+/// realistic adult/junior age, 5–100. Outside it no HRmax is fabricated.
+pub fn tanaka_age_in_range(age_years: f64) -> bool {
+    (5.0..=100.0).contains(&age_years)
+}
+
+/// A measured HRmax worth trusting over the Tanaka estimate: finite and
+/// physiologically plausible (100–240 bpm). The one gate the HR-zone
+/// calculator and run targets share.
+pub fn plausible_measured_hr_max(measured_bpm: Option<f64>) -> Option<f64> {
+    measured_bpm.filter(|m| m.is_finite() && (100.0..=240.0).contains(m))
 }
 
 // ---------------------------------------------------------------------------
 // 2. Three-zone classification (pure calculation)
 // ---------------------------------------------------------------------------
 
+/// Upper bound of zone 1 (below LT1), %HRmax (File 04 running-003 table).
+pub const ZONE1_CEILING_PCT_HRMAX: f64 = 82.0;
+/// Floor of zone 3 and of threshold (T) work, %HRmax (running-003 / running-018).
+pub const THRESHOLD_FLOOR_PCT_HRMAX: f64 = 88.0;
+/// Floor of interval/VO2max (I) work, %HRmax (running-019).
+pub const INTERVAL_FLOOR_PCT_HRMAX: f64 = 95.0;
+
 /// Classify an intensity by %HRmax into the LT1/LT2 three-zone model. Rule running-003.
 ///
-/// Boundaries per File 04 table: Z1 < ~82 %HRmax, Z2 ~82–88 %, Z3 > ~88 %.
-/// These are engine defaults; File 04 stresses LT1/LT2 should be field-measured
-/// (LT1 45–70 %HRmax, LT2 55–93 %HRmax) rather than hardcoded when data exist.
+/// Boundaries per File 04 table: Z1 < ~82 %HRmax, Z2 ~82–<88 %, Z3 ≥ ~88 %.
+/// The 88 % boundary is inclusive to the hard zone so a run held exactly at the
+/// prescribed Tempo/Threshold floor (0.88, `tempo_rx`) counts as threshold work
+/// rather than bucketing as moderate. These are engine defaults; File 04
+/// stresses LT1/LT2 should be field-measured (LT1 45–70 %HRmax, LT2 55–93
+/// %HRmax) rather than hardcoded when data exist.
 pub fn classify_three_zone(pct_hr_max: f64) -> ThreeZone {
-    if pct_hr_max < 82.0 {
+    if pct_hr_max < ZONE1_CEILING_PCT_HRMAX {
         ThreeZone::Z1
-    } else if pct_hr_max <= 88.0 {
+    } else if pct_hr_max < THRESHOLD_FLOOR_PCT_HRMAX {
         ThreeZone::Z2
     } else {
         ThreeZone::Z3
+    }
+}
+
+/// How a hard run counts against the weekly quality caps: threshold work (T,
+/// ≤10% weekly) vs interval/VO2max work (I, ≤8% weekly), or neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardRunKind {
+    None,
+    Threshold,
+    Interval,
+}
+
+/// Classify a run for the weekly hard-run cap check. A tagged Tempo run is
+/// threshold and a tagged Interval run is interval, regardless of average HR (a
+/// correctly executed tempo must not be charged as interval volume). An untagged
+/// run falls back to its average %HRmax: below the T floor (88 %HRmax,
+/// running-018) it is neither; 88–95 % is threshold; ≥95 % is interval
+/// (running-019). `pct_hr_max` is a percent (e.g. 90.0), not a fraction.
+pub fn classify_hard_run(pct_hr_max: f64, workout_type: Option<&WorkoutType>) -> HardRunKind {
+    match workout_type {
+        Some(WorkoutType::Tempo) => return HardRunKind::Threshold,
+        Some(WorkoutType::Interval) => return HardRunKind::Interval,
+        _ => {}
+    }
+    if pct_hr_max < THRESHOLD_FLOOR_PCT_HRMAX {
+        HardRunKind::None
+    } else if pct_hr_max < INTERVAL_FLOOR_PCT_HRMAX {
+        HardRunKind::Threshold
+    } else {
+        HardRunKind::Interval
     }
 }
 
@@ -72,15 +134,15 @@ pub fn vdot_band_hr_pct(band: VdotBand) -> (f64, f64) {
 
 /// %VO2max range (low, high) for a VDOT band. Rule running-007 / table verbatim.
 ///
-/// R (Repetition) is ">100 %VO2max"; represented here as an open upper bound
-/// with `f64::INFINITY`.
-pub fn vdot_band_vo2max_pct(band: VdotBand) -> (f64, f64) {
+/// R (Repetition) is ">100 %VO2max": its upper bound is open, so `high` is
+/// `None` rather than a non-finite number that would serialize as JSON `null`.
+pub fn vdot_band_vo2max_pct(band: VdotBand) -> (f64, Option<f64>) {
     match band {
-        VdotBand::Easy => (59.0, 74.0),
-        VdotBand::Marathon => (80.0, 84.0),
-        VdotBand::Threshold => (83.0, 88.0),
-        VdotBand::Interval => (95.0, 100.0),
-        VdotBand::Repetition => (100.0, f64::INFINITY),
+        VdotBand::Easy => (59.0, Some(74.0)),
+        VdotBand::Marathon => (80.0, Some(84.0)),
+        VdotBand::Threshold => (83.0, Some(88.0)),
+        VdotBand::Interval => (95.0, Some(100.0)),
+        VdotBand::Repetition => (100.0, None),
     }
 }
 
@@ -93,6 +155,25 @@ pub fn vdot_band_uses_hr(band: VdotBand) -> bool {
         band,
         VdotBand::Easy | VdotBand::Marathon | VdotBand::Threshold
     )
+}
+
+/// The marathon distance in metres (42.195 km).
+pub const MARATHON_M: f64 = 42_195.0;
+
+/// Pace band (fast, slow) in seconds per km for a workout row that states its
+/// pace relative to marathon pace (running-015 Easy 15–25 %, running-016 Long
+/// run 10–20 % slower than MP). MP is the athlete's Daniels marathon prediction
+/// ÷ the marathon distance in km. `None` for a non-positive VDOT or a row
+/// without both bounds.
+pub fn mp_relative_pace_sec_per_km(vdot: f64, workout: RunWorkout) -> Option<(f64, f64)> {
+    if !vdot.is_finite() || vdot <= 0.0 {
+        return None;
+    }
+    let (Some(lo), Some(hi)) = workout_rx(workout).value.pct_slower_than_mp else {
+        return None;
+    };
+    let mp = crate::load::daniels_predict(vdot, MARATHON_M) / (MARATHON_M / KM_M);
+    (mp.is_finite() && mp > 0.0).then(|| (mp * (1.0 + lo / 100.0), mp * (1.0 + hi / 100.0)))
 }
 
 // ---------------------------------------------------------------------------
@@ -121,13 +202,29 @@ pub enum CapViolation {
     Repetition,
 }
 
+/// Long run's share of weekly volume, low end (running-016 / running-046,
+/// RUN-LONGRUN-001 / RUN-LONGRUN-TARGET-001): Daniels' single-run cap, and the
+/// share at or above [`LONG_RUN_SHARE_SPLIT_KM`].
+pub const LONG_RUN_SHARE_MIN: f64 = 0.25;
+/// Long run's share of weekly volume, high end (running-016 / running-046,
+/// RUN-LONGRUN-001 / RUN-LONGRUN-TARGET-001): the share under
+/// [`LONG_RUN_SHARE_SPLIT_KM`].
+pub const LONG_RUN_SHARE_MAX: f64 = 0.30;
+/// Threshold (T) work's weekly cap, fraction of volume (running-018, RUN-TEMPO-001).
+pub const THRESHOLD_WEEKLY_CAP_FRAC: f64 = 0.10;
+/// Interval (I) work's weekly cap, fraction of volume (running-019, RUN-INTERVAL-001).
+pub const INTERVAL_WEEKLY_CAP_FRAC: f64 = 0.08;
+/// Repetition (R) work's weekly cap, fraction of volume (running-051,
+/// RUN-REPETITION-002).
+pub const REPETITION_WEEKLY_CAP_FRAC: f64 = 0.05;
+
 /// Canonical File 04 weekly volume caps (Daniels). Rule running-016/018/019 + table.
 pub fn default_volume_caps() -> VolumeCaps {
     VolumeCaps {
-        long_run_max_frac: 0.25,
-        threshold_max_frac: 0.10,
-        interval_max_frac: 0.08,
-        repetition_max_frac: 0.05,
+        long_run_max_frac: LONG_RUN_SHARE_MIN,
+        threshold_max_frac: THRESHOLD_WEEKLY_CAP_FRAC,
+        interval_max_frac: INTERVAL_WEEKLY_CAP_FRAC,
+        repetition_max_frac: REPETITION_WEEKLY_CAP_FRAC,
     }
 }
 
@@ -187,14 +284,19 @@ pub fn check_volume_caps(
     } else {
         None
     };
-    crate::evidence::graded(violation, "RUN-VOLCAP-001")
+    crate::evidence::graded(violation, claims::RUN_VOLCAP_001)
 }
 
 // ---------------------------------------------------------------------------
 // 5. Single-session distance spike (prescriptive gate)
 // ---------------------------------------------------------------------------
 
-/// Raw predicate: does this session exceed the 30-day longest run by >10 %? Rule RUN-SPIKE-001 / running-029.
+/// RUN-SPIKE-001 / running-029: a single session more than this fraction over
+/// the 30-day longest run is a spike.
+pub const SPIKE_FRAC: f64 = 0.10;
+
+/// Raw predicate: does this session exceed the 30-day longest run by more than
+/// [`SPIKE_FRAC`]? Rule RUN-SPIKE-001 / running-029.
 ///
 /// Strongest running injury signal (Frandsen 2025). A non-positive 30-day
 /// longest (no history) means any real session is unbounded relative to it →
@@ -203,7 +305,7 @@ pub fn single_session_spike(session_km: f64, longest_30d_km: f64) -> bool {
     if longest_30d_km <= 0.0 {
         return session_km > 0.0;
     }
-    session_km > longest_30d_km * 1.10
+    session_km > longest_30d_km * (1.0 + SPIKE_FRAC)
 }
 
 /// Prescriptive block/flag on a single-session distance spike (running-029
@@ -212,55 +314,14 @@ pub fn single_session_spike(session_km: f64, longest_30d_km: f64) -> bool {
 /// `true` = block/flag. Wrapped in `Recommended` carrying RUN-SPIKE-BLOCK-001
 /// evidence because it drives an action (block the session).
 pub fn single_session_spike_flag(session_km: f64, longest_30d_km: f64) -> Recommended<bool> {
-    crate::evidence::graded(single_session_spike(session_km, longest_30d_km),
-    "RUN-SPIKE-BLOCK-001",)
+    crate::evidence::graded(
+        single_session_spike(session_km, longest_30d_km),
+        claims::RUN_SPIKE_BLOCK_001,
+    )
 }
 
 // ---------------------------------------------------------------------------
-// 6. Taper (prescriptive)
-// ---------------------------------------------------------------------------
-
-/// Bosquet-style taper prescription: only volume drops. RUN-TAPER-001 /
-/// running-037 (safety-critical: never add stimulus, never de-intensify).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TaperRx {
-    /// Taper length, weeks (default 2; >3 wk risks detraining).
-    pub weeks: u8,
-    /// Volume reduction range (low, high) as fractions, e.g. (0.41, 0.60).
-    pub volume_reduction_frac: (f64, f64),
-    /// Hold training intensity unchanged (always true, never de-intensify).
-    pub hold_intensity: bool,
-    /// Hold session frequency unchanged (always true).
-    pub hold_frequency: bool,
-    /// Never introduce a new stimulus during taper (always true).
-    pub add_new_stimulus: bool,
-}
-
-/// Recommend a taper `weeks_out` from the race, or `None` if too early. Rule
-/// RUN-TAPER-001 / running-037/038.
-///
-/// File 04 default: 2-week taper, exponential volume −41–60 %, intensity and
-/// frequency held. Distance-specific variants (running-038) live in the planner;
-/// this returns the population default keyed on how close the race is.
-/// `weeks_out == 0` (race week) still returns the active taper prescription;
-/// `weeks_out > 3` returns `None` (outside the taper window, and >21 days risks
-/// detraining).
-pub fn taper(weeks_out: u8) -> Option<Recommended<TaperRx>> {
-    if weeks_out > 3 {
-        return None;
-    }
-    let rx = TaperRx {
-        weeks: 2,
-        volume_reduction_frac: (0.41, 0.60),
-        hold_intensity: true,
-        hold_frequency: true,
-        add_new_stimulus: false,
-    };
-    Some(crate::evidence::graded(rx, "RUN-TAPER-001"))
-}
-
-// ---------------------------------------------------------------------------
-// 7. Intensity distribution (prescriptive): File 04 §"distribution" table
+// 6. Intensity distribution (prescriptive): File 04 §"distribution" table
 // ---------------------------------------------------------------------------
 
 /// Which easy/moderate/hard split model to run (File 04 running-011/013).
@@ -300,7 +361,7 @@ pub fn intensity_distribution(model: DistributionModel) -> Recommended<Intensity
             hard_pct: 15,
         },
     };
-    crate::evidence::graded(d, "RUN-DIST-001")
+    crate::evidence::graded(d, claims::RUN_DIST_001)
 }
 
 /// Distribution model for a mesocycle phase: pyramidal early, polarized near
@@ -314,7 +375,7 @@ pub fn distribution_for_phase(phase: MesoPhase) -> Recommended<IntensityDistribu
 }
 
 // ---------------------------------------------------------------------------
-// 8. Quality-session spacing (prescriptive validator): File 04 running-023
+// 7. Quality-session spacing (prescriptive validator): File 04 running-023
 // ---------------------------------------------------------------------------
 
 /// Quality-session governance limits (File 04 running-023 / §"Volume caps").
@@ -331,12 +392,14 @@ pub struct QualityLimits {
 /// Canonical quality limits: ≤3/week, ≥48 h apart, no back-to-back Z3. Rule
 /// running-023 → RUN-QUALITY-001 (ExpertOpinion, safety-critical).
 pub fn quality_limits() -> Recommended<QualityLimits> {
-    crate::evidence::graded(QualityLimits {
-        max_per_week: 3,
-        min_spacing_hours: 48,
-        allow_consecutive_z3: false,
-    },
-    "RUN-QUALITY-001",)
+    crate::evidence::graded(
+        QualityLimits {
+            max_per_week: 3,
+            min_spacing_hours: 48,
+            allow_consecutive_z3: false,
+        },
+        claims::RUN_QUALITY_001,
+    )
 }
 
 /// True when a week's quality plan respects the caps: ≤3 sessions, ≥48 h gaps,
@@ -350,11 +413,11 @@ pub fn quality_plan_ok(
     let ok = sessions_per_week <= limits.max_per_week
         && min_gap_hours >= limits.min_spacing_hours
         && (!has_consecutive_z3 || limits.allow_consecutive_z3);
-    crate::evidence::graded(ok, "RUN-QUALITY-001")
+    crate::evidence::graded(ok, claims::RUN_QUALITY_001)
 }
 
 // ---------------------------------------------------------------------------
-// 9. Weekly mileage progression (prescriptive): File 04 running-031/028
+// 8. Weekly mileage progression (prescriptive): File 04 running-031/028
 // ---------------------------------------------------------------------------
 
 /// Safe single-week volume-increase cap as a fraction, by training age
@@ -362,7 +425,7 @@ pub fn quality_plan_ok(
 /// runners are held to ~+5 %. NOT the discredited hard "10 % rule", a ceiling.
 pub fn weekly_increase_cap_frac(training_age_years: f64) -> Recommended<f64> {
     let cap = if training_age_years < 1.0 { 0.10 } else { 0.05 };
-    crate::evidence::graded(cap, "RUN-PROGRESS-001")
+    crate::evidence::graded(cap, claims::RUN_PROGRESS_001)
 }
 
 /// True when next week's volume stays within the training-age increase cap
@@ -373,28 +436,39 @@ pub fn weekly_increase_ok(
     training_age_years: f64,
 ) -> Recommended<bool> {
     let cap = weekly_increase_cap_frac(training_age_years).value;
-    let ok = if current_km <= 0.0 {
-        false
-    } else {
-        (next_km - current_km) / current_km <= cap + 1e-9
-    };
-    crate::evidence::graded(ok, "RUN-PROGRESS-001")
+    let ok = ratio_increase_within(current_km, next_km, cap).unwrap_or(false);
+    crate::evidence::graded(ok, claims::RUN_PROGRESS_001)
 }
 
-/// Flag elevated injury risk when weekly distance rises >30 % across two weeks
-/// (File 04 running-028; Nielsen 2014 ~1.6× risk). `true` = flag. A non-positive
-/// baseline (no history) flags any real increase, erring safe.
+/// Whether growing from `current` to `next` stays within a fractional increase
+/// `cap` (0.10 = +10 %). `None` when `current` is not a positive finite baseline:
+/// the ratio is undefined, and each caller decides what "no baseline" means.
+/// The one ratio behind both the training-age cap ([`weekly_increase_ok`]) and
+/// the hybrid combined-load ramp (`hybrid::combined_load_progression_ok`), so
+/// the two can only differ by cap, never by arithmetic.
+pub fn ratio_increase_within(current: f64, next: f64, cap: f64) -> Option<bool> {
+    (current.is_finite() && current > 0.0).then(|| (next - current) / current <= cap + 1e-9)
+}
+
+/// Two-week distance growth ratio above which injury risk is flagged: a rise of
+/// more than 30 % (File 04 running-028; Nielsen 2014 ~1.6× risk; RUN-PROGRESS-001).
+pub const TWO_WEEK_INCREASE_FLAG_RATIO: f64 = 1.30;
+
+/// Flag elevated injury risk when weekly distance rises more than
+/// [`TWO_WEEK_INCREASE_FLAG_RATIO`] across two weeks (File 04 running-028).
+/// `true` = flag. A non-positive baseline (no history) flags any real increase,
+/// erring safe.
 pub fn two_week_increase_flag(baseline_km: f64, current_km: f64) -> Recommended<bool> {
     let flag = if baseline_km <= 0.0 {
         current_km > 0.0
     } else {
-        current_km > baseline_km * 1.30
+        current_km > baseline_km * TWO_WEEK_INCREASE_FLAG_RATIO
     };
-    crate::evidence::graded(flag, "RUN-PROGRESS-001")
+    crate::evidence::graded(flag, claims::RUN_PROGRESS_001)
 }
 
 // ---------------------------------------------------------------------------
-// 10. Deload cadence (prescriptive): File 04 running-033
+// 9. Deload cadence (prescriptive): File 04 running-033
 // ---------------------------------------------------------------------------
 
 /// Load:recovery cycle prescription (File 04 running-033; RUN-DELOAD-001).
@@ -414,12 +488,14 @@ pub struct DeloadCadence {
 /// drop-a-quality-session directive live in [`recovery_week_rx`]).
 pub fn deload_cadence(conservative: bool) -> Recommended<DeloadCadence> {
     let load_weeks = if conservative { 2 } else { 3 };
-    crate::evidence::graded(DeloadCadence {
-        load_weeks,
-        recovery_weeks: 1,
-        reduction_frac: (0.20, 0.40),
-    },
-    "RUN-DELOAD-001",)
+    crate::evidence::graded(
+        DeloadCadence {
+            load_weeks,
+            recovery_weeks: 1,
+            reduction_frac: (0.20, 0.40),
+        },
+        claims::RUN_DELOAD_001,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -491,8 +567,8 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
     };
     let (rx, claim_id) = match workout {
         // running-014 Recovery: ≥20 % slower than MP (no upper slowness
-        // bound), ceilings <76 %HRmax AND <70 %HRR (no lower HR bound stated -
-        // the old 0.65 floor was invented and is gone), RPE 2–3, 20–40 min.
+        // bound), ceilings <76 %HRmax AND <70 %HRR (the KB states no lower HR
+        // bound), RPE 2–3, 20–40 min.
         RunWorkout::Session(Recovery) => (
             RunWorkoutRx {
                 pct_hr_max: (None, Some(0.76)),
@@ -503,11 +579,11 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
                 hr_governed: true,
                 ..open
             },
-            "RUN-RECOVERY-001",
+            claims::RUN_RECOVERY_001,
         ),
         // running-015 Easy / General-Aerobic: E pace 15–25 % slower than MP,
         // 65–79 %HRmax, RPE 3–4, 30–90 min.
-        RunWorkout::EasyGeneralAerobic => (
+        RunWorkout::EasyGeneralAerobic | RunWorkout::Session(Easy) => (
             RunWorkoutRx {
                 pct_hr_max: (Some(0.65), Some(0.79)),
                 pct_slower_than_mp: (Some(15.0), Some(25.0)),
@@ -516,10 +592,10 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
                 hr_governed: true,
                 ..open
             },
-            "RUN-EASY-001",
+            claims::RUN_EASY_001,
         ),
         // running-016 Long Run: E→E+ (MP −10–20 %), 65–80 %HRmax, RPE 3–5.
-        // NO duration floor in the KB (the old 60-min floor was invented);
+        // The KB states NO duration floor;
         // the KB caps are shares (25–30 % weekly, single run ≤25 %) plus a
         // soft time-cap "~2:00–2:30": 150 min is the outer edge of that
         // window, kept as the only defensible hard ceiling. Share/guardrail
@@ -533,7 +609,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
                 hr_governed: true,
                 ..open
             },
-            "RUN-LONGRUN-001",
+            claims::RUN_LONGRUN_001,
         ),
         // running-018 Tempo / Threshold: 88–92 %HRmax, RPE 6–7, continuous
         // 20–40 min. The KB's "~90 % MP" does not say whether it means pace or
@@ -547,12 +623,12 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
                 hr_governed: true,
                 ..open
             },
-            "RUN-TEMPO-001",
+            claims::RUN_TEMPO_001,
         ),
         // running-017 Marathon-pace segments: M pace (0 % offset from MP by
         // definition), 80–85 %HRmax, RPE 5–6, 8–26 km blocks: the KB states
-        // the blocks in km, not minutes (the old 30–120 min band was
-        // invented). No weekly M-pace cap exists (VDOT table M-row cap: "-").
+        // the blocks in km, not minutes, so no duration band is set. No weekly
+        // M-pace cap exists (VDOT table M-row cap: "-").
         RunWorkout::Session(RacePace) => (
             RunWorkoutRx {
                 pct_hr_max: (Some(0.80), Some(0.85)),
@@ -562,29 +638,30 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
                 hr_governed: true,
                 ..open
             },
-            "RUN-RACEPACE-001",
+            claims::RUN_RACEPACE_001,
         ),
-        // running-019 VO2max intervals (pace-governed, HR lags): 95–100
-        // %HRmax, RPE 8–9, 3–5 min reps (structure: `vo2max_interval_rx`).
+        // running-019 VO2max intervals (pace-governed, HR lags): the canonical
+        // VDOT table gives 97–100 %HRmax (running-019 prose says 95–100; the
+        // table is authoritative and matches `vdot_band_hr_pct`), RPE 8–9, 3–5
+        // min reps (structure: `vo2max_interval_rx`).
         RunWorkout::Session(Interval) => (
             RunWorkoutRx {
-                pct_hr_max: (Some(0.95), Some(1.00)),
+                pct_hr_max: (Some(0.97), Some(1.00)),
                 rpe: Some((8, 9)),
                 duration_min: (Some(3), Some(5)),
                 ..open
             },
-            "RUN-INTERVAL-001",
+            claims::RUN_INTERVAL_001,
         ),
         // VDOT R row: >100 %VO2max, "use pace, not HR" (no HR band), reps
         // ≤2 min, ≤5 % weekly. The KB has NO dedicated R-session rule, rep
-        // distance/count, recovery, and RPE are unstated (the old RPE 8–9 was
-        // invented and is gone).
+        // distance/count, recovery, and RPE are unstated, so none is set.
         RunWorkout::Session(Repetition) => (
             RunWorkoutRx {
                 duration_min: (None, Some(2)),
                 ..open
             },
-            "RUN-REPETITION-001",
+            claims::RUN_REPETITION_001,
         ),
         // running-020 Strides (neuromuscular; 15–30 s reps are sub-minute, so
         // only a coarse ≤1-min row here, exact seconds in `strides_rx`).
@@ -594,7 +671,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
                 duration_min: (None, Some(1)),
                 ..open
             },
-            "RUN-STRIDES-001",
+            claims::RUN_STRIDES_001,
         ),
         // running-021 / running-022 Hill sprints & long hill reps (blended
         // row; hill-sprint specifics in `hill_sprint_rx`).
@@ -605,7 +682,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
                 duration_min: (None, Some(4)),
                 ..open
             },
-            "RUN-WORKOUT-001",
+            claims::RUN_WORKOUT_001,
         ),
     };
     crate::evidence::graded(rx, claim_id)
@@ -639,13 +716,15 @@ pub struct CruiseIntervalRx {
 /// Cruise intervals (running-018): 3–15 min reps at T pace with ~1 min or
 /// 20–25 % rest, total ≤10 % of weekly volume. Moderate (Daniels; Pfitzinger).
 pub fn cruise_interval_rx() -> Recommended<CruiseIntervalRx> {
-    crate::evidence::graded(CruiseIntervalRx {
-        rep_duration_min: (3, 15),
-        rest_approx_min: 1.0,
-        rest_frac: (0.20, 0.25),
-        weekly_cap_frac: 0.10,
-    },
-    "RUN-TEMPO-001",)
+    crate::evidence::graded(
+        CruiseIntervalRx {
+            rep_duration_min: (3, 15),
+            rest_approx_min: 1.0,
+            rest_frac: (0.20, 0.25),
+            weekly_cap_frac: THRESHOLD_WEEKLY_CAP_FRAC,
+        },
+        claims::RUN_TEMPO_001,
+    )
 }
 
 /// VO2max-interval structure (running-019 → RUN-INTERVAL-001, contested CQ-10
@@ -666,26 +745,15 @@ pub struct Vo2maxIntervalRx {
 /// 800–1600 m), recovery ≈ rep time (slightly less), total ≤8 % weekly.
 /// Rep count per session is NOT stated in the KB.
 pub fn vo2max_interval_rx() -> Recommended<Vo2maxIntervalRx> {
-    crate::evidence::graded(Vo2maxIntervalRx {
-        rep_duration_min: (3, 5),
-        rep_distance_m: (800, 1600),
-        recovery_max_ratio_of_rep: 1.0,
-        weekly_cap_frac: 0.08,
-    },
-    "RUN-INTERVAL-001",)
-}
-
-/// True when an interval rep's recovery respects running-019: recovery ≈ rep
-/// time, "slightly less", i.e. recovery must not exceed the rep time. The KB
-/// states no lower recovery bound, so none is enforced (a non-positive
-/// recovery passes the stated rule; the KB is silent on it).
-pub fn interval_recovery_ok(rep_sec: f64, recovery_sec: f64) -> Recommended<bool> {
-    crate::evidence::graded(recovery_sec <= rep_sec, "RUN-INTERVAL-001")
-}
-
-/// True when an interval rep distance sits in the 800–1600 m band (running-019).
-pub fn interval_rep_distance_ok(rep_m: f64) -> Recommended<bool> {
-    crate::evidence::graded((800.0..=1600.0).contains(&rep_m), "RUN-INTERVAL-001")
+    crate::evidence::graded(
+        Vo2maxIntervalRx {
+            rep_duration_min: (3, 5),
+            rep_distance_m: (800, 1600),
+            recovery_max_ratio_of_rep: 1.0,
+            weekly_cap_frac: INTERVAL_WEEKLY_CAP_FRAC,
+        },
+        claims::RUN_INTERVAL_001,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -712,14 +780,16 @@ pub struct StridesRx {
 /// numeric week count for the introduction, and no pace band beyond
 /// "controlled-fast (not sprint)" / RPE 6–7).
 pub fn strides_rx() -> Recommended<StridesRx> {
-    crate::evidence::graded(StridesRx {
-        rep_sec: (15, 30),
-        reps: (4, 8),
-        recovery_sec: (45, 120),
-        per_week: (1, 3),
-        rpe: (6, 7),
-    },
-    "RUN-STRIDES-001",)
+    crate::evidence::graded(
+        StridesRx {
+            rep_sec: (15, 30),
+            reps: (4, 8),
+            recovery_sec: (45, 120),
+            per_week: (1, 3),
+            rpe: (6, 7),
+        },
+        claims::RUN_STRIDES_001,
+    )
 }
 
 /// Hill-sprint prescription (running-021 → RUN-HILLSPRINT-001, ExpertOpinion;
@@ -749,17 +819,19 @@ pub struct HillSprintRx {
 /// 6–10 % grade, full recovery (walk down / ~2 min), RPE 9, treated as
 /// strength work on easy days. Weekly frequency is unstated in the KB.
 pub fn hill_sprint_rx() -> Recommended<HillSprintRx> {
-    crate::evidence::graded(HillSprintRx {
-        rep_sec: (8, 20),
-        reps: (4, 10),
-        effort_pct: (90.0, 95.0),
-        grade_pct: (6.0, 10.0),
-        recovery_approx_sec: 120,
-        rpe: 9,
-        per_week: None,
-        on_easy_days: true,
-    },
-    "RUN-HILLSPRINT-001",)
+    crate::evidence::graded(
+        HillSprintRx {
+            rep_sec: (8, 20),
+            reps: (4, 10),
+            effort_pct: (90.0, 95.0),
+            grade_pct: (6.0, 10.0),
+            recovery_approx_sec: 120,
+            rpe: 9,
+            per_week: None,
+            on_easy_days: true,
+        },
+        claims::RUN_HILLSPRINT_001,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -771,98 +843,17 @@ pub fn hill_sprint_rx() -> Recommended<HillSprintRx> {
 /// real long run fails the guardrail).
 pub fn long_run_within_daily_avg(long_run_km: f64, avg_daily_run_km: f64) -> Recommended<bool> {
     let ok = avg_daily_run_km > 0.0 && long_run_km <= 2.0 * avg_daily_run_km;
-    crate::evidence::graded(ok, "RUN-LONGRUN-001")
+    crate::evidence::graded(ok, claims::RUN_LONGRUN_001)
 }
 
 /// Default weekly long-run share band (running-016 + volume-caps section):
-/// 25–30 % of weekly volume, as fractions. NOTE the KB discrepancy: running-024
-/// gives 20–30 % for its goal table while running-016 and the caps table give
-/// 25–30 %; the KB does not reconcile, so each rule keeps its own figure -
-/// this is running-016's, `goal_week_plan` carries running-024's.
+/// 25–30 % of weekly volume, as fractions. `goal_week_plan` carries the same
+/// band for its distance-race rows.
 pub fn long_run_share_default() -> Recommended<(f64, f64)> {
-    crate::evidence::graded((0.25, 0.30), "RUN-LONGRUN-001")
-}
-
-// ---------------------------------------------------------------------------
-// Running power zones (running-010), proxy only, frameworks NOT interchangeable
-// ---------------------------------------------------------------------------
-
-/// Coggan 7-zone %FTP model (running-010). Distinct from [`StrydPowerZone`] on
-/// purpose: the KB forbids treating the frameworks as interchangeable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CogganPowerZone {
-    Z1,
-    Z2,
-    Z3,
-    Z4,
-    Z5,
-    Z6,
-    Z7,
-}
-
-/// Classify %FTP into the Coggan 7-zone table (running-010 → RUN-POWER-001,
-/// Weak: consistent proxy, not a criterion metabolic measure). Verbatim bands:
-/// Z1 <55, Z2 56–75, Z3 76–90, Z4 91–105, Z5 106–120, Z6 121–150, Z7 >150.
-/// The KB leaves the between-band points (e.g. 55.5) unassigned, so those
-/// return `None` rather than inventing a boundary rule.
-pub fn coggan_power_zone(pct_ftp: f64) -> Recommended<Option<CogganPowerZone>> {
-    use CogganPowerZone::*;
-    let z = if pct_ftp < 55.0 {
-        Some(Z1)
-    } else if (56.0..=75.0).contains(&pct_ftp) {
-        Some(Z2)
-    } else if (76.0..=90.0).contains(&pct_ftp) {
-        Some(Z3)
-    } else if (91.0..=105.0).contains(&pct_ftp) {
-        Some(Z4)
-    } else if (106.0..=120.0).contains(&pct_ftp) {
-        Some(Z5)
-    } else if (121.0..=150.0).contains(&pct_ftp) {
-        Some(Z6)
-    } else if pct_ftp > 150.0 {
-        Some(Z7)
-    } else {
-        None
-    };
-    crate::evidence::graded(z, "RUN-POWER-001")
-}
-
-/// Coggan sweet-spot band: 88–94 %FTP (running-010, verbatim).
-pub fn coggan_sweet_spot(pct_ftp: f64) -> Recommended<bool> {
-    crate::evidence::graded((88.0..=94.0).contains(&pct_ftp), "RUN-POWER-001")
-}
-
-/// Stryd 5-zone %CP model (running-010). CP ≈ 40-min power per Stryd docs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StrydPowerZone {
-    Z1,
-    Z2,
-    Z3,
-    Z4,
-    Z5,
-}
-
-/// Classify %CP into the Stryd 5-zone table (running-010 → RUN-POWER-001).
-/// Verbatim bands share their boundaries (Z1 65–80, Z2 80–90, Z3 90–100,
-/// Z4 100–115, Z5 115–130); the KB does not say which zone owns a shared
-/// boundary, so bands are taken half-open `[lo, hi)` with Z5's top inclusive.
-/// Below 65 or above 130 %CP is unstated in the KB → `None`.
-pub fn stryd_power_zone(pct_cp: f64) -> Recommended<Option<StrydPowerZone>> {
-    use StrydPowerZone::*;
-    let z = if (65.0..80.0).contains(&pct_cp) {
-        Some(Z1)
-    } else if (80.0..90.0).contains(&pct_cp) {
-        Some(Z2)
-    } else if (90.0..100.0).contains(&pct_cp) {
-        Some(Z3)
-    } else if (100.0..115.0).contains(&pct_cp) {
-        Some(Z4)
-    } else if (115.0..=130.0).contains(&pct_cp) {
-        Some(Z5)
-    } else {
-        None
-    };
-    crate::evidence::graded(z, "RUN-POWER-001")
+    crate::evidence::graded(
+        (LONG_RUN_SHARE_MIN, LONG_RUN_SHARE_MAX),
+        claims::RUN_LONGRUN_001,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -870,22 +861,16 @@ pub fn stryd_power_zone(pct_cp: f64) -> Recommended<Option<StrydPowerZone>> {
 // (running-026/032/033)
 // ---------------------------------------------------------------------------
 
-/// running-026 (SAFETY-CRITICAL): for obese/very deconditioned runners, extend
-/// the run/walk phase longer before continuous running to manage impact-injury
-/// risk. `true` = extend. The KB states no numeric extension length and no
-/// BMI/fitness threshold, the flag is qualitative by design (the adjacent
-/// C25K rule already allows 9 → 10–12 weeks for the general case).
-pub fn extend_run_walk_phase(obese_or_very_deconditioned: bool) -> Recommended<bool> {
-    crate::evidence::graded(obese_or_very_deconditioned, "RUN-RUNWALK-EXT-001")
-}
-
 /// running-032: progress only ONE variable at a time, volume OR intensity,
 /// never both in the same week. `true` = the week's plan is OK.
 pub fn single_variable_progression_ok(
     volume_increased: bool,
     intensity_increased: bool,
 ) -> Recommended<bool> {
-    crate::evidence::graded(!(volume_increased && intensity_increased), "RUN-ONEVAR-001")
+    crate::evidence::graded(
+        !(volume_increased && intensity_increased),
+        claims::RUN_ONEVAR_001,
+    )
 }
 
 /// Mileage band for recovery-week depth (running-033). The KB gives NO numeric
@@ -921,12 +906,14 @@ pub fn recovery_week_rx(band: MileageBand) -> Recommended<RecoveryWeekRx> {
         MileageBand::Lower => (None, 0.50),
         MileageBand::Unspecified => (Some(0.20), 0.40),
     };
-    crate::evidence::graded(RecoveryWeekRx {
-        volume_reduction_frac,
-        reduce_intensity: true,
-        drop_quality_session: true,
-    },
-    "RUN-DELOAD-DEPTH-001",)
+    crate::evidence::graded(
+        RecoveryWeekRx {
+            volume_reduction_frac,
+            reduce_intensity: true,
+            drop_quality_session: true,
+        },
+        claims::RUN_DELOAD_DEPTH_001,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -958,8 +945,7 @@ pub struct DistanceTaperRx {
 /// Padilla): 5K/10K 7–10 d cut ~40–50 % keeping 1–2 short sharp I/T; HM
 /// 10–14 d cut ~50 %; marathon 2–3 wk cut 40–60 % progressive keeping MP
 /// touches + short tempo. Returns `None` for goals the KB states no
-/// distance-specific default for (general fitness, C25K), use the generic
-/// [`taper`] (running-037) there.
+/// distance-specific default for (general fitness, C25K).
 pub fn distance_taper(goal: GoalDistance) -> Option<Recommended<DistanceTaperRx>> {
     let base = DistanceTaperRx {
         days: (0, 0),
@@ -991,19 +977,237 @@ pub fn distance_taper(goal: GoalDistance) -> Option<Recommended<DistanceTaperRx>
         },
         GoalDistance::General | GoalDistance::C25k => return None,
     };
-    Some(crate::evidence::graded(rx, "RUN-TAPER-001"))
+    Some(crate::evidence::graded(rx, claims::RUN_TAPER_001))
+}
+
+// ---------------------------------------------------------------------------
+// Race-date periodization (running-035/042/043/052) and the per-goal,
+// per-phase quality mix (running-024)
+// ---------------------------------------------------------------------------
+
+/// Race-specific Peak weeks placed right before the taper (running-052,
+/// ExpertOpinion parameter: Daniels' final phase / Casado 2022's competitive
+/// block, shortened to 3 weeks).
+pub const PEAK_WEEKS: u32 = 3;
+
+/// A dated race plan more than this many whole weeks out is still in Base
+/// (running-052: ~16 weeks of race-specific preparation).
+pub const BUILD_HORIZON_WEEKS: u32 = 16;
+
+/// Whole calendar weeks the taper covers for a race goal: the distance
+/// default's longest taper rounded up to whole weeks (running-038: 5K/10K
+/// 7–10 d and HM 10–14 d → 2 weeks, marathon 14–21 d → 3 weeks), which also
+/// keeps running-037's 2-week Bosquet taper. `0` for goals with no race.
+pub fn taper_weeks(goal: GoalDistance) -> u32 {
+    distance_taper(goal).map_or(0, |t| (t.value.days.1 as u32).div_ceil(7))
+}
+
+/// The training phase of a dated race-plan week that sits `weeks_to_race`
+/// whole weeks before the race's own week (0 = the race week): Taper in the
+/// final `taper_weeks`, Peak in the `PEAK_WEEKS` before that, Build back to
+/// `BUILD_HORIZON_WEEKS`, Base earlier (running-035 sequence, running-042
+/// race-date anchoring). `None` for goals with no race distance.
+pub fn race_phase(goal: GoalDistance, weeks_to_race: u32) -> Option<Recommended<MesoPhase>> {
+    let taper = taper_weeks(goal);
+    if taper == 0 {
+        return None;
+    }
+    let (phase, claim) = if weeks_to_race < taper {
+        (MesoPhase::Taper, claims::RUN_PERIOD_001)
+    } else if weeks_to_race < taper + PEAK_WEEKS {
+        (MesoPhase::Peak, claims::RUN_PHASE_TID_001)
+    } else if weeks_to_race < BUILD_HORIZON_WEEKS {
+        (MesoPhase::Build, claims::RUN_PHASE_TID_001)
+    } else {
+        (MesoPhase::Base, claims::RUN_PHASE_TID_001)
+    };
+    Some(crate::evidence::graded(phase, claim))
+}
+
+/// Volume cut of taper week `k` of `n` (1-based) against the last full load
+/// week: progressive from the Bosquet floor (41 %) up to the distance
+/// default's deepest cut, capped at Bosquet's 60 % (running-037/038/042).
+/// 10K: 41 % then 50 %; half marathon: a 50 % step taper; marathon: 41 / 50.5
+/// / 60 %. Intensity and run frequency are held (the caller keeps every run day
+/// and the quality sessions). `None` for goals with no race distance.
+pub fn taper_volume_cut(goal: GoalDistance, k: u32, n: u32) -> Option<Recommended<f64>> {
+    let t = distance_taper(goal)?;
+    let (lo, hi) = t.value.volume_cut_frac;
+    let (floor, cap) = crate::strength::TAPER_VOLUME_CUT_FRAC;
+    let lo = lo.clamp(floor, cap);
+    let hi = hi.clamp(lo, cap);
+    let cut = if n <= 1 {
+        hi
+    } else {
+        let k = k.clamp(1, n);
+        lo + (hi - lo) * (k - 1) as f64 / (n - 1) as f64
+    };
+    Some(t.with_value(cut))
+}
+
+/// The quality sessions a week of `phase` schedules for `goal`, in priority
+/// order (the plan takes as many as the week's quality budget allows).
+/// running-024 goal table (5K: I, R, T; 10K: T, I, R; HM: T, MP, I; marathon:
+/// T, MP) laid onto running-035's phases: Base = light tempo only; Build adds
+/// the goal's main work; Peak is race-specific; Taper keeps 1–2 short sharp
+/// sessions (running-038: I/T for 5K/10K, MP touches + short tempo for the
+/// marathon). A recovery week (Deload) schedules none. RUN-PHASE-TID-001.
+pub fn quality_mix(goal: GoalDistance, phase: MesoPhase) -> Recommended<&'static [RunSessionType]> {
+    use GoalDistance::*;
+    use MesoPhase::*;
+    use RunSessionType::{Interval, RacePace, Repetition, Tempo};
+    let mix: &'static [RunSessionType] = match (goal, phase) {
+        (_, Deload) | (C25k, _) => &[],
+        (General, _) | (_, Base) => &[Tempo],
+        (FiveK, Build) => &[Interval, Tempo],
+        (FiveK, Peak) => &[Interval, Repetition],
+        (FiveK, Taper) | (TenK, Peak) | (TenK, Taper) => &[Interval, Tempo],
+        (TenK, Build) | (HalfMarathon, Build) => &[Tempo, Interval],
+        (HalfMarathon, Peak) | (HalfMarathon, Taper) => &[Tempo, RacePace],
+        (Marathon, Build) => &[Tempo, RacePace],
+        (Marathon, Peak) | (Marathon, Taper) => &[RacePace, Tempo],
+    };
+    crate::evidence::graded(mix, claims::RUN_PHASE_TID_001)
+}
+
+/// Goal long-run progression ceiling, km (running-046): half marathon
+/// 16–21 km, marathon 29–32 km. Reached only through the spike rule, the
+/// weekly ramp and the share cap. `None` for goals with no stated target.
+pub fn goal_long_run_target_km(goal: GoalDistance) -> Option<Recommended<(f64, f64)>> {
+    let t = match goal {
+        GoalDistance::HalfMarathon => (16.0, 21.0),
+        GoalDistance::Marathon => (29.0, 32.0),
+        _ => return None,
+    };
+    Some(crate::evidence::graded(t, claims::RUN_LONGRUN_TARGET_001))
+}
+
+/// Weekly volume below which Daniels allows the long run a 30 % share
+/// (running-046; ~40 mi/wk).
+pub const LONG_RUN_SHARE_SPLIT_KM: f64 = 64.0;
+
+/// The long run's share of weekly volume (running-046 / Daniels): at most 30 %
+/// under 64 km/wk, 25 % at or above it.
+pub fn long_run_share(weekly_km: f64) -> Recommended<f64> {
+    let share = if weekly_km < LONG_RUN_SHARE_SPLIT_KM {
+        LONG_RUN_SHARE_MAX
+    } else {
+        LONG_RUN_SHARE_MIN
+    };
+    crate::evidence::graded(share, claims::RUN_LONGRUN_TARGET_001)
+}
+
+/// Daniels' longest-steady-run time cap (running-016/046), minutes.
+pub const LONG_RUN_MAX_MIN: f64 = 150.0;
+
+// ---------------------------------------------------------------------------
+// Warm-up / cool-down and repetition-session structure (running-050/051)
+// ---------------------------------------------------------------------------
+
+/// Warm-up / cool-down around a hard run (running-050 → RUN-WARMUP-001).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WarmupRx {
+    /// Easy-running warm-up before the main set, minutes (10–15).
+    pub warmup_min: (u16, u16),
+    /// Easy-running cool-down after it, minutes.
+    pub cooldown_min: u16,
+    /// Easy pace (s/km) the plan counts warm-up/cool-down minutes at when no
+    /// pace anchor exists, so the week's km still adds up (an accounting
+    /// default, never shown as a target): [`ACCOUNTING_EASY_PACE_SEC_PER_KM`].
+    pub accounting_easy_pace_sec_per_km: f64,
+}
+
+/// Easy pace (6:30 /km) warm-up/cool-down minutes are counted at when no pace
+/// anchor exists: the running-050 engineering default for weekly-volume
+/// accounting only, never shown to the athlete as a target (RUN-WARMUP-001).
+pub const ACCOUNTING_EASY_PACE_SEC_PER_KM: f64 = 390.0;
+
+/// Precede threshold, interval, repetition and race-pace runs with 10–15 min
+/// of easy running and follow them with ~10 min easy; both count toward the
+/// week's volume (running-050). RUN-WARMUP-001.
+pub fn warmup_rx() -> Recommended<WarmupRx> {
+    crate::evidence::graded(
+        WarmupRx {
+            warmup_min: (10, 15),
+            cooldown_min: 10,
+            accounting_easy_pace_sec_per_km: ACCOUNTING_EASY_PACE_SEC_PER_KM,
+        },
+        claims::RUN_WARMUP_001,
+    )
+}
+
+/// Repetition-session structure (running-051 → RUN-REPETITION-002).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RepetitionRx {
+    /// Rep distances, metres, longest first (400 m, then 200 m).
+    pub rep_m: [u16; 2],
+    /// Fewest reps that make a session.
+    pub min_reps: u8,
+    /// Most reps in one session.
+    pub max_reps: u8,
+    /// Recovery: easy jog as far as the rep (distance ratio 1.0).
+    pub recovery_jog_ratio_of_rep_distance: f64,
+    /// R work ≤5 % of weekly volume.
+    pub weekly_cap_frac: f64,
+}
+
+/// Repetitions (running-051): 200 m or 400 m at R pace, an easy jog as far as
+/// the rep between them, at least 4 and at most 12 reps, R total ≤5 % of the
+/// week. RUN-REPETITION-002 (ExpertOpinion).
+pub fn repetition_rx() -> Recommended<RepetitionRx> {
+    crate::evidence::graded(
+        RepetitionRx {
+            rep_m: [400, 200],
+            min_reps: 4,
+            max_reps: 12,
+            recovery_jog_ratio_of_rep_distance: 1.0,
+            weekly_cap_frac: REPETITION_WEEKLY_CAP_FRAC,
+        },
+        claims::RUN_REPETITION_002,
+    )
+}
+
+/// Marathon-pace volume limits (running-053 → RUN-RACEPACE-002).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RacePaceRx {
+    /// M-pace running share of the week (min, max): 15–20 %.
+    pub weekly_share_min: f64,
+    pub weekly_share_max: f64,
+    /// One M-pace run at most the lesser of 110 min or 29 km.
+    pub max_min: u16,
+    pub max_km: f64,
+}
+
+/// Marathon-pace work (running-053): about 15–20 % of weekly volume, and a
+/// single M run no longer than the lesser of 110 min or 29 km (Daniels).
+/// RUN-RACEPACE-002 (ExpertOpinion).
+pub fn race_pace_rx() -> Recommended<RacePaceRx> {
+    crate::evidence::graded(
+        RacePaceRx {
+            weekly_share_min: 0.15,
+            weekly_share_max: 0.20,
+            max_min: 110,
+            max_km: 29.0,
+        },
+        claims::RUN_RACEPACE_002,
+    )
 }
 
 // ---------------------------------------------------------------------------
 // Pace re-testing & environment correction triggers (running-041)
 // ---------------------------------------------------------------------------
 
+/// Weeks after which training paces / HR zones are due for re-testing: the low
+/// end of the KB's 4–6-week window (running-041 RUN-RETEST-001, running-006
+/// RUN-HRRECALC-001).
+pub const RETEST_DUE_WEEKS: u8 = 4;
+
 /// Whether training paces are due for a re-test (running-041 →
 /// RUN-RETEST-001): set paces from CURRENT fitness and re-test every 4–6
-/// weeks. Due once ≥4 weeks have elapsed (same convention as
-/// [`hr_zone_recalc_due`]'s 4–6-week window).
+/// weeks. Due once [`RETEST_DUE_WEEKS`] have elapsed (same convention as
+/// [`hr_zone_recalc_due`]).
 pub fn pace_retest_due(weeks_since_test: u8) -> Recommended<bool> {
-    crate::evidence::graded(weeks_since_test >= 4, "RUN-RETEST-001")
+    crate::evidence::graded(weeks_since_test >= RETEST_DUE_WEEKS, claims::RUN_RETEST_001)
 }
 
 /// Freshness of the race result feeding a VDOT/CS pace computation
@@ -1027,40 +1231,69 @@ pub fn race_input_freshness(weeks_since_race: u8) -> Recommended<RaceInputFreshn
     } else {
         RaceInputFreshness::Stale
     };
-    crate::evidence::graded(f, "RUN-RETEST-001")
+    crate::evidence::graded(f, claims::RUN_RETEST_001)
 }
 
 /// Environment-correction triggers for prescribed paces (running-041).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PaceCorrectionTriggers {
-    /// Heat correction needed: temperature > ~15 °C.
+    /// Heat correction needed: air temperature > ~15 °C (a conservative
+    /// flags-only trigger; see [`pace_correction_triggers`]).
     pub heat: bool,
     /// Altitude correction needed: elevation > ~900 m.
     pub altitude: bool,
 }
 
-/// Whether pace corrections are triggered (running-041): heat above ~15 °C,
-/// altitude above ~900 m. The KB states ONLY these trigger thresholds, no
-/// correction magnitudes (sec/km or %), so this returns flags, never adjusted
-/// paces.
-pub fn pace_correction_triggers(temp_c: f64, altitude_m: f64) -> Recommended<PaceCorrectionTriggers> {
-    crate::evidence::graded(PaceCorrectionTriggers {
-        heat: temp_c > 15.0,
-        altitude: altitude_m > 900.0,
-    },
-    "RUN-RETEST-001",)
+/// Air temperature (°C) above which a heat pace correction is flagged
+/// (running-041; RUN-RETEST-001). See [`pace_correction_triggers`].
+pub const PACE_CORRECTION_HEAT_C: f64 = 15.0;
+
+/// Altitude (m) above which an altitude pace correction is flagged
+/// (running-041; RUN-RETEST-001).
+pub const PACE_CORRECTION_ALTITUDE_M: f64 = 900.0;
+
+/// Whether pace corrections are triggered (running-041): heat above
+/// [`PACE_CORRECTION_HEAT_C`], altitude above [`PACE_CORRECTION_ALTITUDE_M`].
+/// Returns FLAGS only — the evidence pins trigger
+/// thresholds, never correction magnitudes (sec/km or %), so no adjusted pace is
+/// ever emitted. The ~15 °C heat threshold is a CONSERVATIVE practical trigger,
+/// NOT the physiological degradation onset: marathon pace optimises at ~4–10 °C
+/// air temp and degrades continuously above it (El Helou 2012, PMID 22649525),
+/// with the first statistically-significant slowing at WBGT >~15 °C (Ely 2007,
+/// PMID 17473775) — so 15 °C avoids flagging imperceptible sub-15 °C loss. NB the
+/// engine reads dry-bulb air temp only; true heat stress is WBGT (adds humidity),
+/// so a fixed air-temp trigger under-fires in humid air (documented limitation).
+pub fn pace_correction_triggers(
+    temp_c: f64,
+    altitude_m: f64,
+) -> Recommended<PaceCorrectionTriggers> {
+    crate::evidence::graded(
+        PaceCorrectionTriggers {
+            heat: temp_c > PACE_CORRECTION_HEAT_C,
+            altitude: altitude_m > PACE_CORRECTION_ALTITUDE_M,
+        },
+        claims::RUN_RETEST_001,
+    )
 }
 
 // ---------------------------------------------------------------------------
 // Marathon realism gate (running-040)
 // ---------------------------------------------------------------------------
 
+/// Longest training run (km) under which a marathon goal-time prediction is
+/// optimistic (running-040; RUN-VDOT-001).
+pub const MARATHON_REALISM_LONG_RUN_KM: f64 = 30.0;
+
 /// Flag a marathon goal-time prediction as optimistic when the longest training
-/// run is under 30 km. Rule running-040: first-timers under this threshold
-/// often finish 10–15% slower than a Riegel-from-5K projection, so the estimate
-/// should be derated (~2–3 VDOT points). Returns `true` when the gate trips.
+/// run is under [`MARATHON_REALISM_LONG_RUN_KM`]. Rule running-040: first-timers
+/// under this threshold often finish 10–15% slower than a Riegel-from-5K
+/// projection, so the estimate should be derated (~2–3 VDOT points). Returns
+/// `true` when the gate trips.
 pub fn marathon_prediction_optimistic(longest_run_km: f64) -> Recommended<bool> {
-    crate::evidence::graded(longest_run_km < 30.0, "RUN-VDOT-001")
+    crate::evidence::graded(
+        longest_run_km < MARATHON_REALISM_LONG_RUN_KM,
+        claims::RUN_VDOT_001,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1082,6 +1315,12 @@ pub enum Equivalency {
 pub fn race_equivalency(riegel_sec: f64, daniels_sec: f64) -> Recommended<Equivalency> {
     let lo = riegel_sec.min(daniels_sec);
     let hi = riegel_sec.max(daniels_sec);
+    // A 0.0 sentinel (an undefined prediction) makes the agreement ratio
+    // meaningless (division by zero → Inf/NaN); present the raw span rather than
+    // a false-precision midpoint.
+    if riegel_sec <= 0.0 || daniels_sec <= 0.0 {
+        return crate::evidence::graded(Equivalency::Range(lo, hi), claims::RUN_EQUIV_001);
+    }
     let rel_diff = (hi - lo) / lo;
     let out = if rel_diff <= 0.02 {
         Equivalency::Agreed((riegel_sec + daniels_sec) / 2.0)
@@ -1090,7 +1329,7 @@ pub fn race_equivalency(riegel_sec: f64, daniels_sec: f64) -> Recommended<Equiva
     };
     // running-039: the Riegel/Daniels equivalency combiner (RUN-EQUIV-001), not
     // the VDOT-fitness estimate (RUN-VDOT-001).
-    crate::evidence::graded(out, "RUN-EQUIV-001")
+    crate::evidence::graded(out, claims::RUN_EQUIV_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -1122,7 +1361,7 @@ pub fn hr_method_preference(resting_hr_bpm: f64) -> Recommended<HrMethodPreferen
     } else {
         HrMethodPreference::Unstated
     };
-    crate::evidence::graded(p, "RUN-KARVONEN-001")
+    crate::evidence::graded(p, claims::RUN_KARVONEN_001)
 }
 
 /// Prefer Karvonen (%HRR) over %HRmax when resting HR is low, where the two
@@ -1131,19 +1370,18 @@ pub fn hr_method_preference(resting_hr_bpm: f64) -> Recommended<HrMethodPreferen
 /// [`hr_method_preference`]. RUN-KARVONEN-001.
 pub fn prefer_karvonen(resting_hr_bpm: f64) -> Recommended<bool> {
     let p = hr_method_preference(resting_hr_bpm);
-    Recommended::new(
-        p.value == HrMethodPreference::PreferKarvonen,
-        p.evidence,
-        p.confidence,
-    )
+    p.with_value(p.value == HrMethodPreference::PreferKarvonen)
 }
 
 /// Whether HR training zones are due for recalculation (running-006): recompute
-/// every 4–6 weeks off a measured max HR. Due once ≥4 weeks have elapsed.
-/// RUN-HRRECALC-001 (Strong, safety-critical, stale zones misplace every
-/// prescription).
+/// every 4–6 weeks off a measured max HR. Due once [`RETEST_DUE_WEEKS`] have
+/// elapsed. RUN-HRRECALC-001 (Strong, safety-critical, stale zones misplace
+/// every prescription).
 pub fn hr_zone_recalc_due(weeks_since_recalc: u8) -> Recommended<bool> {
-    crate::evidence::graded(weeks_since_recalc >= 4, "RUN-HRRECALC-001")
+    crate::evidence::graded(
+        weeks_since_recalc >= RETEST_DUE_WEEKS,
+        claims::RUN_HRRECALC_001,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1175,7 +1413,7 @@ pub fn vdot_derate_points(goal: GoalDistance, under_mileaged: bool) -> Recommend
     } else {
         (0.0, 0.0)
     };
-    crate::evidence::graded(d, "RUN-VDOT-001")
+    crate::evidence::graded(d, claims::RUN_VDOT_001)
 }
 
 /// Derate an optimistic marathon finish-time band for an under-mileaged runner
@@ -1185,10 +1423,12 @@ pub fn vdot_derate_points(goal: GoalDistance, under_mileaged: bool) -> Recommend
 /// the *minimum* derate and the slow bound by the *maximum*, so the displayed
 /// range moves later (pace easier) and widens by the derate's own uncertainty.
 /// `base_vdot` (from the runner's recent race) anchors the point→time
-/// conversion through [`load::daniels_predict`] at the marathon distance, no
+/// conversion through [`daniels_predict`](crate::load::daniels_predict) at the marathon distance, no
 /// new magnitude is invented, it is the same 2–3 VDOT points the caveat states.
 /// Carries RUN-VDOT-001 so the adjusted number still travels with its grade
-/// (HARD RULE 2). A degenerate band or non-positive VDOT is returned unchanged.
+/// (HARD RULE 2). A degenerate band, a VDOT the derate would take to zero or
+/// below, or a prediction that fails is returned unchanged, so no bound ever
+/// renders as a 0:00 finish.
 pub fn marathon_derated_band(
     low_sec: f64,
     high_sec: f64,
@@ -1196,18 +1436,22 @@ pub fn marathon_derated_band(
 ) -> Recommended<(f64, f64)> {
     let derate = vdot_derate_points(GoalDistance::Marathon, true);
     let (min_pts, max_pts) = derate.value;
-    let base_time = crate::load::daniels_predict(base_vdot, 42_195.0);
+    let base_time = crate::load::daniels_predict(base_vdot, MARATHON_M);
     // Translate the VDOT-point derate into a time slowdown factor via the same
-    // Daniels marathon prediction the band is built from; guard degenerate
-    // inputs (no valid race → no prediction) by leaving the band untouched.
-    let (lo, hi) = if base_vdot <= 0.0 || base_time <= 0.0 || low_sec <= 0.0 {
-        (low_sec, high_sec)
-    } else {
-        let f_min = crate::load::daniels_predict(base_vdot - min_pts, 42_195.0) / base_time;
-        let f_max = crate::load::daniels_predict(base_vdot - max_pts, 42_195.0) / base_time;
-        (low_sec * f_min, high_sec * f_max)
+    // Daniels marathon prediction the band is built from.
+    let derated = (base_vdot - max_pts > 0.0 && base_time > 0.0 && low_sec > 0.0 && high_sec > 0.0)
+        .then(|| {
+            (
+                crate::load::daniels_predict(base_vdot - min_pts, MARATHON_M),
+                crate::load::daniels_predict(base_vdot - max_pts, MARATHON_M),
+            )
+        })
+        .filter(|(t_min, t_max)| *t_min > 0.0 && *t_max > 0.0);
+    let (lo, hi) = match derated {
+        Some((t_min, t_max)) => (low_sec * t_min / base_time, high_sec * t_max / base_time),
+        None => (low_sec, high_sec),
     };
-    Recommended::new((lo, hi), derate.evidence, derate.confidence)
+    derate.with_value((lo, hi))
 }
 
 /// Weekly session/quality budget for a goal distance (running-024 goal table).
@@ -1222,11 +1466,17 @@ pub struct GoalWeekPlan {
 }
 
 /// Sessions + quality per week by goal distance (running-024). Marathon
-/// `advanced` runners extend to 5–7 sessions. Long-run share is 20–30% of
+/// `advanced` runners extend to 5–7 sessions. Long-run share is 25–30% of
 /// weekly volume for the distance-race rows; C25K carries no long run
 /// (running-025 is run/walk to 30 min), so its share is 0. RUN-WORKOUT-001.
+///
+/// The long-run share follows running-016 (25–30 %) over running-024's 20–30 %
+/// (see planning/knowledge-base/long-run-weekly-volume-share.md): 25 % is
+/// Daniels' prescribed long-run share (and cap) for runners at/above ~64 km/wk,
+/// firsthand-verified, while running-024's 20 % lower bound is uncited. The band
+/// matches [`long_run_share_default`].
 pub fn goal_week_plan(goal: GoalDistance, advanced: bool) -> Recommended<GoalWeekPlan> {
-    let lr = (0.20, 0.30);
+    let lr = (LONG_RUN_SHARE_MIN, LONG_RUN_SHARE_MAX);
     let plan = match goal {
         GoalDistance::General => GoalWeekPlan {
             sessions_per_week: (3, 5),
@@ -1237,7 +1487,7 @@ pub fn goal_week_plan(goal: GoalDistance, advanced: bool) -> Recommended<GoalWee
             sessions_per_week: (3, 3),
             quality_per_week: (0, 0),
             // running-025 defines no long run for C25K (run/walk to 30 min); the
-            // 20-30% long-run share belongs to the distance-race rows only.
+            // 25-30% long-run share belongs to the distance-race rows only.
             long_run_share: (0.0, 0.0),
         },
         GoalDistance::FiveK | GoalDistance::TenK | GoalDistance::HalfMarathon => GoalWeekPlan {
@@ -1251,7 +1501,7 @@ pub fn goal_week_plan(goal: GoalDistance, advanced: bool) -> Recommended<GoalWee
             long_run_share: lr,
         },
     };
-    crate::evidence::graded(plan, "RUN-WORKOUT-001")
+    crate::evidence::graded(plan, claims::RUN_WORKOUT_001)
 }
 
 /// Couch-to-5K beginner protocol (running-025): 3 run/walk sessions per week at
@@ -1270,13 +1520,103 @@ pub struct C25kPlan {
 /// The Couch-to-5K default plan (running-025). RUN-C25K-001 (ExpertOpinion,
 /// safety-critical beginner guardrail).
 pub fn c25k_plan() -> Recommended<C25kPlan> {
-    crate::evidence::graded(C25kPlan {
-        runs_per_week: 3,
-        weeks: (9, 12),
-        rest_day_between: true,
-        repeat_hard_week_allowed: true,
-    },
-    "RUN-C25K-001",)
+    crate::evidence::graded(
+        C25kPlan {
+            runs_per_week: 3,
+            weeks: (9, 12),
+            rest_day_between: true,
+            repeat_hard_week_allowed: true,
+        },
+        claims::RUN_C25K_001,
+    )
+}
+
+/// One Couch to 5K session: a brisk warm-up walk, then the run/walk bouts in
+/// order (each bout runs `run_sec`, then walks `walk_sec`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct C25kSession {
+    pub warmup_walk_min: u16,
+    pub bouts: Vec<RunSegment>,
+}
+
+impl C25kSession {
+    /// Total running seconds in the session (warm-up walk excluded).
+    pub fn run_sec(&self) -> u32 {
+        self.bouts.iter().map(|b| b.run_sec as u32).sum()
+    }
+
+    /// Longest single running bout, seconds.
+    pub fn longest_bout_sec(&self) -> u16 {
+        self.bouts.iter().map(|b| b.run_sec).max().unwrap_or(0)
+    }
+
+    /// The session as a `RunVolume`: a uniform run/walk set stays a `RunWalk`
+    /// (weeks 1–2); anything else is its whole duration (bouts incl. walks,
+    /// warm-up walk excluded), rounded up to whole minutes.
+    pub fn volume(&self) -> RunVolume {
+        let first = self.bouts.first().copied().unwrap_or(RunSegment {
+            run_sec: 0,
+            walk_sec: 0,
+        });
+        let uniform = self.bouts.len() > 1 && self.bouts.iter().all(|b| *b == first);
+        if uniform && first.walk_sec > 0 {
+            return RunVolume::RunWalk {
+                run_sec: first.run_sec,
+                walk_sec: first.walk_sec,
+                rounds: self.bouts.len().min(u8::MAX as usize) as u8,
+            };
+        }
+        let total: u32 = self
+            .bouts
+            .iter()
+            .map(|b| b.run_sec as u32 + b.walk_sec as u32)
+            .sum();
+        RunVolume::DurationMin(total.div_ceil(60).min(u16::MAX as u32) as u16)
+    }
+}
+
+/// The NHS Couch to 5K session for programme week `week` (1-based) and the
+/// `run_of_week`-th run of that week (1-based; weeks 5 and 6 differ by run),
+/// transcribed from the NHS week table (running-049): a 5-minute brisk walk,
+/// then
+/// - wk1: 8 × (60 s run, 90 s walk); wk2: 6 × (90 s run, 2 min walk);
+/// - wk3: 2 × (90 s run, 90 s walk, 3 min run, 3 min walk);
+/// - wk4: 3 run, 90 s walk, 5 run, 2.5 walk, 3 run, 90 s walk, 5 run (min);
+/// - wk5: run 1 = 3 × 5 min with 3 min walks; run 2 = 8, 5 walk, 8; run 3 = 20;
+/// - wk6: run 1 = 5, 3 walk, 8, 3 walk, 5; run 2 = 10, 3 walk, 10; run 3 = 25;
+/// - wk7: 25 min; wk8: 28 min; wk9 (and any repeat beyond): 30 min continuous.
+///
+/// Weeks advance only when completed (repeat a week without penalty).
+/// RUN-C25K-002 (ExpertOpinion, safety-critical beginner guardrail).
+pub fn c25k_session_rx(week: u8, run_of_week: u8) -> Recommended<C25kSession> {
+    let b = |run_sec: u16, walk_sec: u16| RunSegment { run_sec, walk_sec };
+    let run = run_of_week.clamp(1, 3);
+    let bouts = match week.max(1) {
+        1 => vec![b(60, 90); 8],
+        2 => vec![b(90, 120); 6],
+        3 => vec![b(90, 90), b(180, 180), b(90, 90), b(180, 180)],
+        4 => vec![b(180, 90), b(300, 150), b(180, 90), b(300, 0)],
+        5 => match run {
+            1 => vec![b(300, 180), b(300, 180), b(300, 0)],
+            2 => vec![b(480, 300), b(480, 0)],
+            _ => vec![b(1200, 0)],
+        },
+        6 => match run {
+            1 => vec![b(300, 180), b(480, 180), b(300, 0)],
+            2 => vec![b(600, 180), b(600, 0)],
+            _ => vec![b(1500, 0)],
+        },
+        7 => vec![b(1500, 0)],
+        8 => vec![b(1680, 0)],
+        _ => vec![b(1800, 0)],
+    };
+    crate::evidence::graded(
+        C25kSession {
+            warmup_walk_min: 5,
+            bouts,
+        },
+        claims::RUN_C25K_002,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1307,7 +1647,7 @@ pub fn maf_cap_bpm(age_years: f64, adj: MafAdjustment) -> Recommended<f64> {
         MafAdjustment::Returning => -5.0,
         MafAdjustment::Overtrained => -10.0,
     };
-    crate::evidence::graded(180.0 - age_years + delta, "RUN-MAF-001")
+    crate::evidence::graded(180.0 - age_years + delta, claims::RUN_MAF_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -1317,7 +1657,7 @@ pub fn maf_cap_bpm(age_years: f64, adj: MafAdjustment) -> Recommended<f64> {
 /// Enforce the architectural invariant that ~80% of running time is easy
 /// (running-011): true when the easy (Z1) time share is at least 80%. RUN-DIST-001.
 pub fn easy_share_floor_ok(easy_frac_by_time: f64) -> Recommended<bool> {
-    crate::evidence::graded(easy_frac_by_time >= 0.80, "RUN-DIST-001")
+    crate::evidence::graded(easy_frac_by_time >= 0.80, claims::RUN_DIST_001)
 }
 
 /// Intensity-counting method (running-012). Pick ONE per athlete and declare it.
@@ -1337,11 +1677,11 @@ pub fn default_counting_method(for_plan_design: bool) -> Recommended<IntensityCo
     } else {
         IntensityCountingMethod::TimeInZone
     };
-    crate::evidence::graded(m, "RUN-DIST-001")
+    crate::evidence::graded(m, claims::RUN_DIST_001)
 }
 
 // ---------------------------------------------------------------------------
-// Volume-bump hold & unscheduled deload (running-031/034)
+// Volume-bump hold (running-031)
 // ---------------------------------------------------------------------------
 
 /// Weeks to hold before the next volume bump for novices (running-031):
@@ -1353,15 +1693,7 @@ pub fn novice_volume_bump_hold_weeks(training_age_years: f64) -> Recommended<Opt
     } else {
         None
     };
-    crate::evidence::graded(hold, "RUN-PROGRESS-001")
-}
-
-/// Insert an unscheduled down week when ≥2 overtraining signals fire
-/// (running-034): elevated RHR >5–7 bpm ≥3 days, HRV trending down, RPE rising,
-/// disrupted sleep/soreness/mood, or standard-workout performance down >3–5%.
-/// RUN-DOWNWEEK-001 (ExpertOpinion, safety-critical recovery guard).
-pub fn unscheduled_deload(overtraining_signal_count: u8) -> Recommended<bool> {
-    crate::evidence::graded(overtraining_signal_count >= 2, "RUN-DOWNWEEK-001")
+    crate::evidence::graded(hold, claims::RUN_PROGRESS_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -1402,6 +1734,22 @@ pub fn haversine_m(a: GpsPoint, b: GpsPoint) -> f64 {
     2.0 * EARTH_RADIUS_M * h.min(1.0).sqrt().asin()
 }
 
+/// One MOVING leg between consecutive fixes as `(dt_seconds, distance_m)`.
+/// `None` when the timestamps don't advance or the ground speed is below the
+/// auto-pause floor (`load::is_stopped`, <0.5 m/s, File 07), so every moving
+/// time/distance derivation pauses on the same legs. Saturating: a corrupt
+/// stamp pair (i64::MIN → i64::MAX) cannot overflow, and the dt gate discards
+/// the saturated value. Distance is raw haversine; callers that need jitter
+/// rejection cap it at [`MAX_PLAUSIBLE_SPEED_MPS`].
+pub(crate) fn leg(a: GpsPoint, b: GpsPoint) -> Option<(f64, f64)> {
+    let dt = b.observed_at.saturating_sub(a.observed_at) as f64;
+    if dt <= 0.0 {
+        return None;
+    }
+    let d = haversine_m(a, b);
+    (!crate::load::is_stopped(d / dt)).then_some((dt, d))
+}
+
 /// The subset of fixes good enough to trust, in original order. Shared by
 /// distance, duration, and GPX export so all three describe the same track, an
 /// exported file opened in Strava/Garmin shows the same distance the app does.
@@ -1417,10 +1765,10 @@ pub fn usable_track(points: &[GpsPoint], max_accuracy_m: f32) -> Vec<GpsPoint> {
 /// BEGIN a new segment (the first fix captured after a pause/resume or a long
 /// gap in fixes). The leg from `points[i-1]` to `points[i]` at such an index is a
 /// PAUSE BRIDGE the runner may have relocated across, so no track metric may sum
-/// distance or time across it. An EMPTY `segment_starts`, every legacy
-/// (re-anchored) log and every hand-logged run, yields the WHOLE track as a
-/// single segment, so every metric routed through this is BIT-IDENTICAL to the
-/// pre-segment behaviour. Out-of-range, zero, and duplicate indices are ignored,
+/// distance or time across it. An EMPTY `segment_starts` (a re-anchored log or
+/// a hand-logged run) yields the WHOLE track as a single segment, so every
+/// metric routed through this reduces BIT-IDENTICALLY to its whole-track form.
+/// Out-of-range, zero, and duplicate indices are ignored,
 /// so a malformed boundary list can only under-split, never panic.
 pub(crate) fn segments<'a>(points: &'a [GpsPoint], segment_starts: &[u32]) -> Vec<&'a [GpsPoint]> {
     let mut bounds: Vec<usize> = segment_starts
@@ -1468,63 +1816,58 @@ fn usable_segments(
     (pts, is_start)
 }
 
-/// Total track distance in km. Fixes whose reported horizontal accuracy is
-/// worse than `max_accuracy_m` are dropped first so GPS noise does not inflate
-/// distance. Pure and order-dependent (order = fix order from the shell). The
-/// bare form treats the whole track as one segment; see [`track_distance_km_seg`]
-/// for the pause-bridge-aware form.
+/// Total track distance in km: the sum of the MOVING legs. Fixes whose reported
+/// horizontal accuracy is worse than `max_accuracy_m` are dropped first, a leg
+/// below the auto-pause floor (`load::is_stopped`, <0.5 m/s) contributes
+/// nothing, and every leg is capped at [`MAX_PLAUSIBLE_SPEED_MPS`], so GPS
+/// wander accumulated while standing still is not counted as distance. These
+/// are the same gates the displayed pace, variation index and splits apply, so
+/// distance-of-record and moving pace describe the same track. Pure and
+/// order-dependent (order = fix order from the shell). The bare form treats the
+/// whole track as one segment; see [`track_distance_km_seg`] for the
+/// pause-bridge-aware form.
 pub fn track_distance_km(points: &[GpsPoint], max_accuracy_m: f32) -> f64 {
     track_distance_km_seg(points, max_accuracy_m, &[])
 }
 
 /// [`track_distance_km`] that excludes each pause-bridge leg (a leg entering a
-/// [`segments`] boundary) so a paused relocation contributes no distance, the
-/// true coordinates stay put (no re-anchoring shift). Empty `segment_starts` is
-/// bit-identical to [`track_distance_km`].
+/// `segments` boundary) so a paused relocation contributes no distance, the
+/// true coordinates stay put (no re-anchoring shift). Stop floor and jitter cap
+/// apply per segment. Empty `segment_starts` is bit-identical to
+/// [`track_distance_km`].
 pub fn track_distance_km_seg(
     points: &[GpsPoint],
     max_accuracy_m: f32,
     segment_starts: &[u32],
 ) -> f64 {
-    let (usable, is_start) = usable_segments(points, segment_starts, max_accuracy_m);
-    let mut total = 0.0;
+    moving_legs(points, max_accuracy_m, segment_starts)
+        .iter()
+        .map(|(_, d)| d)
+        .sum::<f64>()
+        / 1000.0
+}
+
+/// Cumulative MOVING distance in metres to each usable fix (`out[0] == 0.0`). A
+/// leg contributes distance ONLY when it is moving — its timestamps advance and
+/// its ground speed clears the auto-pause floor (`load::is_stopped`, <0.5 m/s) —
+/// and its distance is capped to the plausible-runner ceiling, the SAME gates as
+/// [`moving_legs`]/[`track_distance_km`]. A pause-bridge leg entering a segment
+/// start adds nothing. This keeps the split walk on the headline distance, so a
+/// stopped run's below-floor drift does not inflate the cumulative total.
+fn cumulative_moving_m(usable: &[GpsPoint], is_start: &[bool]) -> Vec<f64> {
+    let mut cumulative = Vec::with_capacity(usable.len());
+    let mut running_total = 0.0;
+    cumulative.push(0.0);
     for i in 1..usable.len() {
-        if is_start[i] {
-            continue;
-        }
-        total += haversine_m(usable[i - 1], usable[i]);
+        let leg_m = if is_start[i] {
+            0.0
+        } else {
+            leg(usable[i - 1], usable[i]).map_or(0.0, |(dt, d)| d.min(MAX_PLAUSIBLE_SPEED_MPS * dt))
+        };
+        running_total += leg_m;
+        cumulative.push(running_total);
     }
-    total / 1000.0
-}
-
-/// Elapsed wall time across a track, in minutes, from the first to the last
-/// *usable* fix (same accuracy gate as [track_distance_km], so derived pace is
-/// consistent). Returns 0.0 for an empty/single-fix or non-monotonic track.
-pub fn track_duration_min(points: &[GpsPoint], max_accuracy_m: f32) -> f64 {
-    track_duration_min_seg(points, max_accuracy_m, &[])
-}
-
-/// [`track_duration_min`] that sums each segment's own first-to-last span, so the
-/// pause GAP between segments (a runner stopped, then resumed elsewhere) is not
-/// counted as run time. Empty `segment_starts` is bit-identical to
-/// [`track_duration_min`].
-pub fn track_duration_min_seg(
-    points: &[GpsPoint],
-    max_accuracy_m: f32,
-    segment_starts: &[u32],
-) -> f64 {
-    segments(points, segment_starts)
-        .into_iter()
-        .map(|seg| {
-            let usable = usable_track(seg, max_accuracy_m);
-            match (usable.first(), usable.last()) {
-                (Some(f), Some(l)) if l.observed_at > f.observed_at => {
-                    (l.observed_at - f.observed_at) as f64 / 60.0
-                }
-                _ => 0.0,
-            }
-        })
-        .sum()
+    cumulative
 }
 
 /// Second-half-vs-first-half pace slowdown across a track, as a percent (a
@@ -1534,13 +1877,13 @@ pub fn track_duration_min_seg(
 /// measurement of the run, not a recommendation. Returns `None` when the track
 /// is too short, degenerate, or non-monotonic to split meaningfully (fewer than
 /// three usable fixes, a zero-distance/zero-duration half). Same accuracy gate
-/// as [track_distance_km]/[track_duration_min] so all three agree on the track.
+/// as [`track_distance_km`] so both agree on the track.
 pub fn track_positive_split_pct(points: &[GpsPoint], max_accuracy_m: f32) -> Option<f64> {
     track_positive_split_pct_seg(points, max_accuracy_m, &[])
 }
 
 /// [`track_positive_split_pct`] that treats each pause-bridge leg as zero distance
-/// and zero time (exactly as the old re-anchored zero-length bridge did), so the
+/// and zero time, so the
 /// halfway split and each half's moving pace are measured over the true route
 /// without the relocation displacement. Empty `segment_starts` is bit-identical
 /// to [`track_positive_split_pct`].
@@ -1553,21 +1896,11 @@ pub fn track_positive_split_pct_seg(
     if usable.len() < 3 {
         return None;
     }
-    // Cumulative distance to each fix (cumulative[0] == 0.0); a leg ENTERING a
-    // segment start (pause bridge) adds nothing.
-    let mut cumulative = Vec::with_capacity(usable.len());
-    let mut running_total = 0.0;
-    cumulative.push(0.0);
-    for i in 1..usable.len() {
-        let leg = if is_start[i] {
-            0.0
-        } else {
-            haversine_m(usable[i - 1], usable[i])
-        };
-        running_total += leg;
-        cumulative.push(running_total);
-    }
-    let total = running_total;
+    // Cumulative MOVING distance to each fix (a pause-bridge or below-floor leg
+    // adds nothing), so the halfway split and each half sit on the same distance
+    // the headline uses (see `cumulative_moving_m`).
+    let cumulative = cumulative_moving_m(&usable, &is_start);
+    let total = *cumulative.last().unwrap_or(&0.0);
     if total <= 0.0 {
         return None;
     }
@@ -1581,18 +1914,13 @@ pub fn track_positive_split_pct_seg(
     // (`load::is_stopped`, <0.5 m/s) AND pause-bridge legs contribute distance-or-
     // relocation but no time, so a mid-run café stop or a paused relocation can't
     // produce a false "FADE" verdict. This matches the moving-time base of the
-    // run's displayed pace, its km-splits, and its VI; wall-clock halves used to
-    // disagree with all three on any run with a pause.
+    // run's displayed pace, its km-splits, and its VI, which wall-clock halves
+    // would contradict on any run with a pause.
     let moving_leg = |i: usize| -> f64 {
         if is_start[i] {
             return 0.0;
         }
-        let dt = (usable[i].observed_at - usable[i - 1].observed_at) as f64;
-        if dt > 0.0 && !crate::load::is_stopped(haversine_m(usable[i - 1], usable[i]) / dt) {
-            dt
-        } else {
-            0.0
-        }
+        leg(usable[i - 1], usable[i]).map_or(0.0, |(dt, _)| dt)
     };
     let dur1: f64 = (1..=split).map(moving_leg).sum();
     let dur2: f64 = (split + 1..usable.len()).map(moving_leg).sum();
@@ -1639,18 +1967,17 @@ pub struct RunSplit {
 /// run yields 5 full km splits + 1 partial). Split boundaries fall at exact unit
 /// distances (apportioned within the crossing leg at its constant speed), so a
 /// split's pace does not depend on where GPS fixes happened to land, but each
-/// split is TIMED in MOVING seconds only: a leg whose ground speed is below the
-/// auto-pause floor (`load::is_stopped`, <0.5 m/s) or whose timestamps don't
-/// advance contributes its distance but NO time, exactly as `moving_duration_min`
-/// excludes it from the run's headline pace. A mid-split café/traffic stop
-/// therefore cannot make that split read minutes slower than the run's own
-/// moving-pace average on the same detail sheet. (Degenerate escape hatch: a
-/// split covered entirely below the stop floor has zero moving time and falls
-/// back to its wall-clock time so its pace stays finite.) Same accuracy gate as
-/// [`track_distance_km`], and the same cumulative-distance walk as
-/// [`track_positive_split_pct`]. Pure and order-dependent. Returns an empty vec
-/// for a sub-metre unit, an empty / single-fix / zero-distance track
-/// (nothing to split).
+/// split is TIMED in MOVING seconds and MEASURED in moving distance only: a leg
+/// whose ground speed is below the auto-pause floor (`load::is_stopped`,
+/// <0.5 m/s) or whose timestamps don't advance contributes neither time nor
+/// distance, exactly as `moving_duration_min` / `track_distance_km` exclude it.
+/// So a mid-split café/traffic stop cannot make that split read minutes slower
+/// than the run's own moving-pace average, and the splits sum to the headline
+/// moving distance — an all-stopped track has zero moving distance and yields no
+/// splits. Same accuracy gate as [`track_distance_km`], and the same
+/// moving-distance walk as [`track_positive_split_pct`]. Pure and
+/// order-dependent. Returns an empty vec for a sub-metre unit, an empty /
+/// single-fix / zero-distance track (nothing to split).
 pub fn track_splits(points: &[GpsPoint], max_accuracy_m: f32, unit_m: f64) -> Vec<RunSplit> {
     track_splits_seg(points, max_accuracy_m, unit_m, &[])
 }
@@ -1669,7 +1996,7 @@ pub fn track_splits_seg(
     unit_m: f64,
     segment_starts: &[u32],
 ) -> Vec<RunSplit> {
-    // P4: reject a sub-metre unit. The boundary loop below emits one split per
+    // Reject a sub-metre unit. The boundary loop below emits one split per
     // `unit_m` of distance, so a tiny unit (a caller bug / corrupt input) would
     // spin for millions of iterations. Every real caller passes km/mile.
     if unit_m < 1.0 {
@@ -1679,22 +2006,11 @@ pub fn track_splits_seg(
     if usable.len() < 2 {
         return Vec::new();
     }
-    // Cumulative distance to each fix (cumulative[0] == 0.0), the same walk as
-    // `track_positive_split_pct`; a pause-bridge leg adds zero distance, so it
-    // behaves downstream exactly like the re-anchored zero-length bridge did.
-    let mut cumulative = Vec::with_capacity(usable.len());
-    let mut running_total = 0.0;
-    cumulative.push(0.0);
-    for i in 1..usable.len() {
-        let leg = if is_start[i] {
-            0.0
-        } else {
-            haversine_m(usable[i - 1], usable[i])
-        };
-        running_total += leg;
-        cumulative.push(running_total);
-    }
-    let total = running_total;
+    // Cumulative MOVING distance to each fix (a pause-bridge or below-floor leg
+    // adds nothing), so km-split boundaries and the total track the headline
+    // distance and the splits sum to it (see `cumulative_moving_m`).
+    let cumulative = cumulative_moving_m(&usable, &is_start);
+    let total = *cumulative.last().unwrap_or(&0.0);
     if total <= 0.0 {
         return Vec::new();
     }
@@ -1703,13 +2019,15 @@ pub fn track_splits_seg(
     let mut index = 1u32;
     let mut boundary = unit_m;
     // Time accumulated into the CURRENT split since the last unit boundary.
-    let mut moving_s = 0.0; // moving legs only - the split's pace clock
-    let mut wall_s = 0.0; // every leg - fallback for an all-stopped split
+    let mut moving_s = 0.0; // the split's pace clock (moving legs only)
     for i in 1..usable.len() {
         let leg_d = cumulative[i] - cumulative[i - 1];
-        let dt = ((usable[i].observed_at - usable[i - 1].observed_at) as f64).max(0.0);
-        // Same pause gate as `moving_legs` / `moving_duration_min`: legs with
-        // non-advancing time or speed below the stop floor are paused time.
+        let dt = (usable[i]
+            .observed_at
+            .saturating_sub(usable[i - 1].observed_at) as f64)
+            .max(0.0);
+        // Same pause gate as `leg`, read off the leg's gated cumulative distance
+        // (0 for a paused or pause-bridge leg).
         let moving = dt > 0.0 && !crate::load::is_stopped(leg_d / dt);
         // Distance already consumed within this leg (start of unconsumed part).
         let mut pos = cumulative[i - 1];
@@ -1721,11 +2039,10 @@ pub fn track_splits_seg(
             } else {
                 0.0
             };
-            wall_s += sub;
             if moving {
                 moving_s += sub;
             }
-            let dur = if moving_s > 0.0 { moving_s } else { wall_s };
+            let dur = moving_s;
             splits.push(RunSplit {
                 index,
                 // Full split: distance == unit, so pace IS the (moving) time.
@@ -1734,7 +2051,7 @@ pub fn track_splits_seg(
                 distance_m: unit_m,
                 partial: false,
             });
-            // P4: even at a legitimate unit, a corrupt track (a mis-unit'd
+            // Even at a legitimate unit, a corrupt track (a mis-unit'd
             // coordinate inflating cumulative distance to thousands of km) could
             // emit millions of splits in `view()`. Bound the list: a genuine
             // run never approaches this many.
@@ -1743,25 +2060,20 @@ pub fn track_splits_seg(
             }
             pos = boundary;
             moving_s = 0.0;
-            wall_s = 0.0;
             index += 1;
             boundary = unit_m * index as f64;
         }
         // Remainder of the leg past the last boundary feeds the next split.
-        let sub = if leg_d > 0.0 {
-            dt * ((cumulative[i] - pos) / leg_d)
-        } else {
-            dt // zero-distance leg (standstill): all of it is this split's time
-        };
-        wall_s += sub;
+        // Only a moving leg advances the split clock; a paused / zero-distance
+        // leg (leg_d == 0) contributes neither time nor distance.
         if moving {
-            moving_s += sub;
+            moving_s += dt * ((cumulative[i] - pos) / leg_d);
         }
     }
     // Final partial split: whatever remains after the last full unit.
     let remaining = total - unit_m * (index - 1) as f64;
     if remaining > 1e-6 {
-        let dur = if moving_s > 0.0 { moving_s } else { wall_s };
+        let dur = moving_s;
         splits.push(RunSplit {
             index,
             // Normalize the short remainder to a full unit so it is comparable.
@@ -1788,8 +2100,8 @@ pub use crate::load::MAX_PLAUSIBLE_SPEED_MPS;
 /// drift (hills / a negative split, ±~15% swing), sits at ~1.00–1.01, while
 /// genuine reps-plus-recovery sessions sit ~1.11–1.21 (degrading toward the low
 /// end only under heavy GPS noise). 1.10 sits in that gap with margin on BOTH
-/// sides: it no longer misses noisy real intervals (the old 1.15 did) and steady
-/// runs stay comfortably clear. An ENGINE HEURISTIC, not a cited threshold (the
+/// sides: noisy real intervals (~1.11) still clear it and steady runs stay
+/// comfortably below. An ENGINE HEURISTIC, not a cited threshold (the
 /// KB source, Skiba GOVSS, gives no boundary), hence the RUN-INTERVAL-VI-001 chip
 /// is graded Weak and its copy measures rather than prescribes.
 pub const INTERVAL_VI_THRESHOLD: f64 = 1.10;
@@ -1799,8 +2111,10 @@ pub const INTERVAL_VI_THRESHOLD: f64 = 1.10;
 /// shell renders it with the same grade chip / why? chrome as any other
 /// recommendation, the differentiation is descriptive but still evidence-cited.
 pub fn interval_verdict(variability_index: f64) -> Recommended<bool> {
-    crate::evidence::graded(variability_index >= INTERVAL_VI_THRESHOLD,
-    "RUN-INTERVAL-VI-001",)
+    crate::evidence::graded(
+        variability_index >= INTERVAL_VI_THRESHOLD,
+        claims::RUN_INTERVAL_VI_001,
+    )
 }
 
 /// Rolling-average window (seconds) applied to the speed series BEFORE the
@@ -1822,27 +2136,23 @@ pub const INTERVAL_WINDOW_SEC: f64 = 30.0;
 /// excluded exactly as `moving_duration_min` excludes it from the displayed pace.
 /// Distance is capped so the implied speed never exceeds [`MAX_PLAUSIBLE_SPEED_MPS`]
 /// (GPS jitter rejection). Same accuracy gate as [`track_distance_km`].
-fn moving_legs(points: &[GpsPoint], max_accuracy_m: f32, segment_starts: &[u32]) -> Vec<(f64, f64)> {
+fn moving_legs(
+    points: &[GpsPoint],
+    max_accuracy_m: f32,
+    segment_starts: &[u32],
+) -> Vec<(f64, f64)> {
     // Moving legs are computed WITHIN each segment, so the pause-bridge leg
     // between segments is never formed (a paused relocation is neither moving
     // time nor moving distance). Empty `segment_starts` → one segment → the
-    // legs of the whole track, bit-identical to the pre-segment behaviour.
+    // legs of the whole track.
     segments(points, segment_starts)
         .into_iter()
         .flat_map(|seg| {
             usable_track(seg, max_accuracy_m)
                 .windows(2)
                 .filter_map(|w| {
-                    let dt = (w[1].observed_at - w[0].observed_at) as f64;
-                    if dt <= 0.0 {
-                        return None;
-                    }
-                    let leg_m = haversine_m(w[0], w[1]);
-                    if crate::load::is_stopped(leg_m / dt) {
-                        return None;
-                    }
                     // Cap distance so speed ≤ the plausible-runner ceiling (jitter).
-                    Some((dt, leg_m.min(MAX_PLAUSIBLE_SPEED_MPS * dt)))
+                    leg(w[0], w[1]).map(|(dt, d)| (dt, d.min(MAX_PLAUSIBLE_SPEED_MPS * dt)))
                 })
                 .collect::<Vec<_>>()
         })
@@ -1876,7 +2186,7 @@ fn windowed_bin_speeds(legs: &[(f64, f64)], window_s: f64) -> Vec<(f64, f64)> {
                 bins.push((bin_dist / bin_time, bin_time));
                 bin_time = 0.0;
                 bin_dist = 0.0;
-                // P4: a corrupt `dt` (e.g. a mis-unit'd timestamp yielding a
+                // A corrupt `dt` (e.g. a mis-unit'd timestamp yielding a
                 // multi-week "leg") would otherwise drive this resampling loop
                 // for millions of iterations inside `view()`. A real run never
                 // approaches this many windows; past it the series is corrupt
@@ -1972,6 +2282,11 @@ pub fn track_variability_index_seg(
     Some(((ns / avg) * 100.0).round() / 100.0)
 }
 
+/// Nominal GNSS range error (m) a GPX `<hdop>` multiplies into a horizontal
+/// accuracy: the export writes `accuracy_m / 5` and the shell's importer reads
+/// `hdop × 5` (Gpx.kt `GPS_UERE_NOMINAL_M`), so a fix's accuracy round-trips.
+const GPX_HDOP_UERE_M: f32 = 5.0;
+
 /// Serialise a fix track to a GPX 1.1 document (the format Strava, Garmin
 /// Connect, Komoot, etc. import). Pure and deterministic: `observed_at` unix
 /// seconds are rendered as RFC 3339 UTC timestamps in-core, never from a live
@@ -1984,12 +2299,12 @@ pub fn export_gpx(points: &[GpsPoint], track_name: &str) -> String {
 /// coordinates (no re-anchoring shift), so a paused + relocated run opens in
 /// Strava/Garmin as the real route with a visible gap at each pause instead of a
 /// single continuous line drawn through wrong coordinates. Empty
-/// `segment_starts` is a single `<trkseg>`, byte-identical to [`export_gpx`].
+/// `segment_starts` is a single `<trkseg>`, identical to [`export_gpx`].
 pub fn export_gpx_seg(points: &[GpsPoint], track_name: &str, segment_starts: &[u32]) -> String {
     let mut s = String::with_capacity(256 + points.len() * 96);
     s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     s.push_str(
-        "<gpx version=\"1.1\" creator=\"milestone\" \
+        "<gpx version=\"1.1\" creator=\"lollop\" \
          xmlns=\"http://www.topografix.com/GPX/1/1\">\n",
     );
     s.push_str("  <trk>\n    <name>");
@@ -2002,12 +2317,16 @@ pub fn export_gpx_seg(points: &[GpsPoint], track_name: &str, segment_starts: &[u
         s.push_str("    <trkseg>\n");
         for p in seg {
             s.push_str("      <trkpt lat=\"");
-            s.push_str(&format!("{:.7}", p.lat));
+            let _ = write!(s, "{:.7}", p.lat);
             s.push_str("\" lon=\"");
-            s.push_str(&format!("{:.7}", p.lon));
+            let _ = write!(s, "{:.7}", p.lon);
             s.push_str("\"><time>");
             s.push_str(&unix_to_rfc3339_utc(p.observed_at));
-            s.push_str("</time></trkpt>\n");
+            s.push_str("</time>");
+            if p.accuracy_m.is_finite() && p.accuracy_m > 0.0 {
+                let _ = write!(s, "<hdop>{}</hdop>", p.accuracy_m / GPX_HDOP_UERE_M);
+            }
+            s.push_str("</trkpt>\n");
         }
         s.push_str("    </trkseg>\n");
     }
@@ -2034,8 +2353,8 @@ fn xml_escape_into(out: &mut String, text: &str) {
 /// `chrono`, no clock. Uses Howard Hinnant's civil-from-days algorithm so it is
 /// correct across the whole proleptic Gregorian range.
 fn unix_to_rfc3339_utc(secs: i64) -> String {
-    let days = secs.div_euclid(86_400);
-    let tod = secs.rem_euclid(86_400);
+    let days = secs.div_euclid(crate::DAY_SEC);
+    let tod = secs.rem_euclid(crate::DAY_SEC);
     let (h, m, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);
     let (y, mo, d) = civil_from_days(days);
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
@@ -2044,7 +2363,7 @@ fn unix_to_rfc3339_utc(secs: i64) -> String {
 /// Convert a count of days since the unix epoch (1970-01-01) to a civil
 /// `(year, month, day)`. Howard Hinnant, "chrono-Compatible Low-Level Date
 /// Algorithms" (public domain).
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
+pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = (z - era * 146_097) as u64;
@@ -2057,1348 +2376,5 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn pt(lat: f64, lon: f64, t: i64) -> GpsPoint {
-        GpsPoint {
-            lat,
-            lon,
-            observed_at: t,
-            accuracy_m: 5.0,
-        }
-    }
-
-    #[test]
-    fn p4_windowed_bins_correct_normally_and_bounded_when_dt_is_corrupt() {
-        // Fix (normal): a 90 s leg at 3 m/s resamples into three full 30 s bins,
-        // each averaging 3 m/s: the smoothing behaviour is unchanged.
-        let normal = windowed_bin_speeds(&[(90.0, 270.0)], INTERVAL_WINDOW_SEC);
-        assert_eq!(normal.len(), 3, "90 s / 30 s window = 3 bins");
-        for (speed, dur) in &normal {
-            assert!((speed - 3.0).abs() < 1e-9 && (*dur - 30.0).abs() < 1e-9);
-        }
-        // Corrupt: a single leg with a mis-unit'd dt (~4e7 s ≈ a millisecond
-        // timestamp mistaken for seconds) would drive the resampling loop for
-        // ~1.3M iterations; the cap bounds it to MAX_WINDOW_BINS and returns.
-        let corrupt = windowed_bin_speeds(&[(4.0e7, 4.0e7)], INTERVAL_WINDOW_SEC);
-        assert_eq!(corrupt.len(), MAX_WINDOW_BINS, "bin count is clamped");
-        // A non-positive window can never spin forever.
-        assert!(windowed_bin_speeds(&[(90.0, 270.0)], 0.0).is_empty());
-    }
-
-    #[test]
-    fn p4_track_splits_reject_sub_metre_unit_and_bound_a_corrupt_track() {
-        // A normal km split still works (fix half of the pair).
-        let track = vec![pt(0.0, 0.0, 0), pt(0.0, 0.02, 300)]; // ~2.2 km, 5 min
-        assert!(!track_splits(&track, 30.0, KM_M).is_empty(), "km splits still work");
-        // A sub-metre unit is rejected up front: the boundary loop below emits
-        // one split per unit, so a tiny unit would iterate millions of times.
-        assert!(track_splits(&track, 30.0, 0.5).is_empty(), "sub-metre unit rejected");
-        assert!(track_splits(&track, 30.0, 0.0).is_empty(), "zero unit rejected");
-        // Even at a legit unit, a corrupt long track cannot emit unbounded splits:
-        // a ~13 000 km leg (120° of longitude) would be >13 000 km splits but the
-        // cap stops it at MAX_SPLITS.
-        let corrupt = vec![pt(0.0, 0.0, 0), pt(0.0, 120.0, 3600)];
-        assert_eq!(track_splits(&corrupt, 30.0, KM_M).len(), MAX_SPLITS, "splits capped");
-    }
-
-    #[test]
-    fn haversine_one_degree_latitude_is_about_111km() {
-        // One degree of latitude ≈ R * (π/180) ≈ 111.19 km on a sphere.
-        let d = haversine_m(pt(0.0, 0.0, 0), pt(1.0, 0.0, 0));
-        assert!((d - 111_194.0).abs() < 50.0, "got {d}");
-    }
-
-    #[test]
-    fn haversine_stays_finite_for_near_antipodal_coords() {
-        // A demonstrated valid coordinate pair whose rounded haversine `h`
-        // exceeds 1.0, so an unclamped `sqrt(h).asin()` returns NaN. The
-        // `h.min(1.0)` clamp must keep the distance finite (and ≈ half the
-        // Earth's circumference for an antipodal pair).
-        let d = haversine_m(pt(-59.13, 0.0, 0), pt(59.1300000000043, 180.0, 0));
-        assert!(d.is_finite(), "near-antipodal haversine must be finite, got {d}");
-        assert!(d > 0.0, "distance should be positive, got {d}");
-    }
-
-    #[test]
-    fn positive_split_detects_back_half_slowdown() {
-        // Five equatorial fixes 0.001° apart → four equal ~111.3 m segments.
-        // First half covered in 20 s, second half in 40 s → back half is exactly
-        // twice as slow, i.e. a +100 % positive split.
-        let track = vec![
-            pt(0.0, 0.000, 0),
-            pt(0.0, 0.001, 10),
-            pt(0.0, 0.002, 20),
-            pt(0.0, 0.003, 40),
-            pt(0.0, 0.004, 60),
-        ];
-        let split = track_positive_split_pct(&track, 30.0).expect("split");
-        assert!((split - 100.0).abs() < 1.0, "got {split}");
-    }
-
-    #[test]
-    fn even_pace_run_reports_no_meaningful_split() {
-        let track = vec![
-            pt(0.0, 0.000, 0),
-            pt(0.0, 0.001, 10),
-            pt(0.0, 0.002, 20),
-            pt(0.0, 0.003, 30),
-            pt(0.0, 0.004, 40),
-        ];
-        let split = track_positive_split_pct(&track, 30.0).expect("split");
-        assert!(split.abs() < 1.0, "got {split}");
-    }
-
-    #[test]
-    fn mid_run_pause_does_not_produce_a_false_positive_split() {
-        // Evenly paced ~3.7 m/s throughout, but with a 10-min standstill in the
-        // SECOND half (the app's Pause button leaves a ~0-speed bridge leg). With
-        // wall-clock halves this read a massive "FADE" (back half ~11× slower);
-        // moving-time halves must see it as the even run it is.
-        let track = vec![
-            pt(0.0, 0.000, 0),
-            pt(0.0, 0.001, 30),
-            pt(0.0, 0.002, 60),   // ~halfway
-            pt(0.0, 0.002, 660),  // 10-min stop, 0 m → excluded
-            pt(0.0, 0.003, 690),
-            pt(0.0, 0.004, 720),
-        ];
-        let split = track_positive_split_pct(&track, 30.0).expect("split");
-        assert!(split.abs() < 1.0, "paused steady run falsely split: {split}");
-    }
-
-    #[test]
-    fn positive_split_needs_three_usable_fixes() {
-        let track = vec![pt(0.0, 0.0, 0), pt(0.0, 0.001, 10)];
-        assert!(track_positive_split_pct(&track, 30.0).is_none());
-    }
-
-    /// Even-pace straight track along the equator: constant longitude step +
-    /// constant time step ⇒ constant ground speed, so every FULL split must
-    /// carry the same per-unit pace regardless of where fixes land relative to
-    /// the km/mile boundaries. `legs` × ~111 m each.
-    fn even_equator_track(legs: usize, dlon_deg: f64, dt_s: i64) -> Vec<GpsPoint> {
-        (0..=legs)
-            .map(|i| pt(0.0, i as f64 * dlon_deg, i as i64 * dt_s))
-            .collect()
-    }
-
-    #[test]
-    fn splits_even_pace_all_full_splits_equal_pace() {
-        // 50 legs × ~111.19 m ≈ 5.56 km at a constant ~3.71 m/s.
-        let track = even_equator_track(50, 0.001, 30);
-        let km = track_splits(&track, 30.0, KM_M);
-        let full: Vec<_> = km.iter().filter(|s| !s.partial).collect();
-        assert_eq!(full.len(), 5, "≈5.56 km → 5 full km splits");
-        let p0 = full[0].pace_sec_per_unit;
-        for s in &full {
-            assert!(
-                (s.pace_sec_per_unit - p0).abs() < 0.5,
-                "full split {} pace {} vs {p0}",
-                s.index,
-                s.pace_sec_per_unit
-            );
-            assert!((s.distance_m - KM_M).abs() < 1e-6);
-        }
-        // Indices are 1-based and contiguous.
-        assert_eq!(
-            km.iter().map(|s| s.index).collect::<Vec<_>>(),
-            vec![1, 2, 3, 4, 5, 6]
-        );
-    }
-
-    #[test]
-    fn splits_mid_run_stop_does_not_inflate_split_pace() {
-        // Even-pace equator track (~111.19 m / 30 s legs, ~3.71 m/s) with a
-        // 300 s standstill spliced in mid-first-km (after ~556 m): the stopped
-        // leg (0 m over 300 s, below the 0.5 m/s auto-pause floor) must be
-        // excluded from split 1's TIME, so its pace matches the other full
-        // splits (the run's moving pace) instead of reading ~5 min slower -
-        // consistent with `moving_duration_min` on the same detail sheet.
-        let mut track: Vec<GpsPoint> = (0..=5).map(|i| pt(0.0, i as f64 * 0.001, i * 30)).collect();
-        // Standstill: same position as fix 5, 300 s later.
-        track.push(pt(0.0, 0.005, 5 * 30 + 300));
-        track.extend((6..=50).map(|i| pt(0.0, i as f64 * 0.001, i * 30 + 300)));
-
-        let km = track_splits(&track, 30.0, KM_M);
-        let full: Vec<_> = km.iter().filter(|s| !s.partial).collect();
-        assert_eq!(full.len(), 5, "≈5.56 km → 5 full km splits");
-        // Moving average: 1000 m at ~3.7065 m/s ≈ 269.8 s/km.
-        let moving_avg = KM_M / (0.001f64.to_radians() * super::EARTH_RADIUS_M / 30.0);
-        for s in &full {
-            assert!(
-                (s.pace_sec_per_unit - moving_avg).abs() < 2.0,
-                "split {} pace {} should sit at the moving average {moving_avg}, \
-                 not be inflated by the stop",
-                s.index,
-                s.pace_sec_per_unit
-            );
-        }
-        // Explicitly: split 1 (which contains the stop) equals split 2.
-        assert!(
-            (full[0].pace_sec_per_unit - full[1].pace_sec_per_unit).abs() < 0.5,
-            "stop split {} vs clean split {}",
-            full[0].pace_sec_per_unit,
-            full[1].pace_sec_per_unit
-        );
-    }
-
-    #[test]
-    fn splits_all_stopped_split_falls_back_to_wall_clock() {
-        // A track covered entirely below the 0.5 m/s stop floor (~111.19 m legs
-        // over 300 s each, ~0.37 m/s) has zero moving time; the partial split
-        // must fall back to wall-clock so its pace stays finite and non-zero.
-        let track: Vec<GpsPoint> = (0..=4).map(|i| pt(0.0, i as f64 * 0.001, i * 300)).collect();
-        let km = track_splits(&track, 30.0, KM_M);
-        assert_eq!(km.len(), 1);
-        assert!(km[0].partial);
-        assert!(
-            km[0].pace_sec_per_unit > 0.0 && km[0].pace_sec_per_unit.is_finite(),
-            "got {}",
-            km[0].pace_sec_per_unit
-        );
-    }
-
-    #[test]
-    fn splits_final_partial_is_flagged() {
-        // ≈5.56 km → the 6th km split is partial (~0.56 km).
-        let track = even_equator_track(50, 0.001, 30);
-        let km = track_splits(&track, 30.0, KM_M);
-        let last = km.last().expect("a split");
-        assert!(last.partial, "final split flagged partial");
-        assert!(last.distance_m < KM_M, "partial covers < 1 km");
-        assert!(
-            km[..km.len() - 1].iter().all(|s| !s.partial),
-            "only the last split is partial"
-        );
-    }
-
-    #[test]
-    fn splits_km_and_mi_counts_differ_for_same_track() {
-        // Same ≈5.56 km track: 5 full + 1 partial km (6) vs 3 full + 1 partial mi
-        // (4), since 5.56 km ≈ 3.45 mi.
-        let track = even_equator_track(50, 0.001, 30);
-        let km = track_splits(&track, 30.0, KM_M);
-        let mi = track_splits(&track, 30.0, MILE_M);
-        assert_eq!(km.len(), 6, "km splits");
-        assert_eq!(mi.len(), 4, "mile splits");
-        assert_eq!(mi.iter().filter(|s| !s.partial).count(), 3, "3 full miles");
-        assert!(mi.last().unwrap().partial);
-    }
-
-    #[test]
-    fn splits_under_one_unit_is_single_partial() {
-        // ~445 m: under a km → one partial split, index 1.
-        let track = even_equator_track(4, 0.001, 30);
-        let km = track_splits(&track, 30.0, KM_M);
-        assert_eq!(km.len(), 1);
-        assert_eq!(km[0].index, 1);
-        assert!(km[0].partial);
-        assert!(km[0].distance_m < KM_M);
-    }
-
-    #[test]
-    fn splits_degenerate_tracks_are_empty() {
-        assert!(track_splits(&[], 30.0, KM_M).is_empty(), "empty track");
-        assert!(
-            track_splits(&[pt(0.0, 0.0, 0)], 30.0, KM_M).is_empty(),
-            "single fix"
-        );
-        // Zero-distance track (all fixes stacked) → nothing to split.
-        let stacked = vec![pt(0.0, 0.0, 0), pt(0.0, 0.0, 10), pt(0.0, 0.0, 20)];
-        assert!(track_splits(&stacked, 30.0, KM_M).is_empty(), "zero distance");
-        // Non-positive unit.
-        assert!(track_splits(&even_equator_track(50, 0.001, 30), 30.0, 0.0).is_empty());
-    }
-
-    #[test]
-    fn variability_index_separates_interval_from_steady_same_average() {
-        // Two runs with the SAME total distance (0.004° lon ≈ 445 m) and the SAME
-        // duration (120 s) → identical average pace. The current engine rates them
-        // the same; the variability index must not.
-        // Steady: four equal ~111 m / 30 s segments (~3.71 m/s throughout).
-        let steady = vec![
-            pt(0.0, 0.000, 0),
-            pt(0.0, 0.001, 30),
-            pt(0.0, 0.002, 60),
-            pt(0.0, 0.003, 90),
-            pt(0.0, 0.004, 120),
-        ];
-        // Interval with JOG recovery (recovery legs stay ABOVE the 0.5 m/s
-        // auto-pause floor, so they count as moving time, matching the app's
-        // moving-pace base; and the same 445 m / 120 s average holds): two
-        // ~200 m / 30 s hard reps (~6.7 m/s) each followed by a ~22 m / 30 s jog
-        // (~0.74 m/s). Standing (0 m/s) recovery would be excluded as a pause.
-        let interval = vec![
-            pt(0.0, 0.0000, 0),
-            pt(0.0, 0.0018, 30),
-            pt(0.0, 0.0020, 60),
-            pt(0.0, 0.0038, 90),
-            pt(0.0, 0.0040, 120),
-        ];
-
-        // Same average by construction: sanity-check that first.
-        let ds = track_distance_km(&steady, 30.0);
-        let di = track_distance_km(&interval, 30.0);
-        assert!((ds - di).abs() < 0.001, "distances differ: {ds} vs {di}");
-        assert_eq!(
-            track_duration_min(&steady, 30.0),
-            track_duration_min(&interval, 30.0),
-        );
-
-        let vi_steady = track_variability_index(&steady, 30.0).expect("steady VI");
-        let vi_interval = track_variability_index(&interval, 30.0).expect("interval VI");
-
-        // Steady ≈ 1.0; interval well above it (jog-recovery 4th-power mean ~1.5).
-        assert!((vi_steady - 1.0).abs() < 0.03, "steady VI {vi_steady}");
-        assert!(vi_interval > 1.4, "interval VI {vi_interval}");
-        assert!(
-            vi_interval > vi_steady + 0.3,
-            "interval {vi_interval} not clearly above steady {vi_steady}",
-        );
-
-        // Normalized speed exceeds the plain average for the interval run.
-        let ns = normalized_speed_mps(&interval, 30.0).expect("interval NS");
-        let avg = di * 1000.0 / (track_duration_min(&interval, 30.0) * 60.0);
-        assert!(ns > avg, "NS {ns} should exceed avg {avg}");
-    }
-
-    #[test]
-    fn variability_index_needs_two_usable_fixes() {
-        assert!(normalized_speed_mps(&[pt(0.0, 0.0, 0)], 30.0).is_none());
-        assert!(track_variability_index(&[pt(0.0, 0.0, 0)], 30.0).is_none());
-    }
-
-    /// Build a DENSE (1 Hz) GPS track from a speed profile `(speed_mps,
-    /// duration_s)`, with deterministic lateral position jitter to mimic a real
-    /// consumer GPS at ~a few metres accuracy. Forward motion runs along lon at
-    /// the equator (1° ≈ 111 320 m); the lateral wobble is `jitter_deg·sin(i·1.3)`
-    /// on lat, which makes consecutive per-second leg lengths swing (exactly the
-    /// noise that, un-smoothed, blows up the 4th-power mean).
-    fn noisy_track(profile: &[(f64, i64)], jitter_deg: f64) -> Vec<GpsPoint> {
-        let mut pts = Vec::new();
-        let mut lon = 0.0f64;
-        let mut t = 0i64;
-        let deg_per_m = 1.0 / 111_320.0;
-        // Seed the first fix.
-        pts.push(GpsPoint { lat: 0.0, lon: 0.0, observed_at: 0, accuracy_m: 5.0 });
-        for &(speed, dur) in profile {
-            for _ in 0..dur {
-                lon += speed * deg_per_m; // advance ~speed metres this second
-                t += 1;
-                let lat = jitter_deg * (t as f64 * 1.3).sin();
-                pts.push(GpsPoint { lat, lon, observed_at: t, accuracy_m: 5.0 });
-            }
-        }
-        pts
-    }
-
-    #[test]
-    fn steady_noisy_1hz_run_is_not_flagged_interval() {
-        // A genuinely STEADY 5-min run at ~3 m/s, sampled 1 Hz with ~3 m lateral
-        // GPS jitter. Per-second leg speeds swing wildly; without the rolling
-        // window the 4th-power mean reads this as an "interval" (the reported
-        // bug). With the window, jitter averages out → VI must stay steady.
-        let track = noisy_track(&[(3.0, 300)], 0.000_03);
-        let vi = track_variability_index(&track, 30.0).expect("vi");
-        assert!(
-            vi < INTERVAL_VI_THRESHOLD,
-            "steady noisy run wrongly flagged interval: VI {vi}"
-        );
-    }
-
-    #[test]
-    fn short_noisy_1hz_run_is_not_flagged_interval() {
-        // The exact failure the user reported: a short ~1 km steady run (≈5.5 min
-        // at 3 m/s) sampled 1 Hz with jitter must NOT read as interval.
-        let track = noisy_track(&[(3.0, 330)], 0.000_03);
-        let vi = track_variability_index(&track, 30.0).expect("vi");
-        assert!(vi < INTERVAL_VI_THRESHOLD, "short steady run wrongly flagged: VI {vi}");
-    }
-
-    #[test]
-    fn interval_noisy_1hz_run_is_flagged() {
-        // A real 1 Hz interval session at realistic (~1 m) GPS jitter: 4× (90 s
-        // hard @ ~5 m/s, then 90 s jog @ ~2 m/s). The rep structure spans many
-        // 30 s windows, so it survives smoothing and flags interval. (Under
-        // pathologically heavy high-frequency noise VI can still fall under the
-        // cutoff: the metric is Weak-graded; this guards the realistic case.)
-        let mut profile = Vec::new();
-        for _ in 0..4 {
-            profile.push((5.0, 90));
-            profile.push((2.0, 90));
-        }
-        let track = noisy_track(&profile, 0.000_01);
-        let vi = track_variability_index(&track, 30.0).expect("vi");
-        assert!(
-            vi >= INTERVAL_VI_THRESHOLD,
-            "interval run not flagged: VI {vi}"
-        );
-    }
-
-    /// Save-time GPS decimation (shell `RunSession.decimatedTrackForCore`): keep
-    /// every `stride`-th fix plus the endpoints. These tests prove the core's
-    /// of-record figures survive that lossy thinning at strides 2 and 3: the
-    /// shell may hand the core fewer points, and the verdicts must not move.
-    fn decimate(points: &[GpsPoint], stride: usize) -> Vec<GpsPoint> {
-        assert!(stride >= 1);
-        if points.len() < 3 {
-            return points.to_vec();
-        }
-        let mut out: Vec<GpsPoint> = points.iter().step_by(stride).copied().collect();
-        let last = *points.last().unwrap();
-        if out.last() != Some(&last) {
-            out.push(last);
-        }
-        out
-    }
-
-    #[test]
-    fn decimation_preserves_the_steady_vi_verdict() {
-        // A genuinely steady noisy run reads steady (VI < threshold); thinning it
-        // ×2 and ×3 must keep that verdict, fewer points, same call.
-        let full = noisy_track(&[(3.0, 300)], 0.000_03);
-        for stride in [2usize, 3] {
-            let thinned = decimate(&full, stride);
-            let vi = track_variability_index(&thinned, 30.0).expect("vi");
-            assert!(
-                vi < INTERVAL_VI_THRESHOLD,
-                "steady run flipped to interval after ×{stride} decimation: VI {vi}"
-            );
-        }
-    }
-
-    #[test]
-    fn decimation_preserves_the_interval_vi_verdict() {
-        // A real interval session (4× 90 s hard / 90 s jog) flags interval; the
-        // 30 s rolling window still gets ~10–15 samples/bin at a 2–3 s cadence,
-        // so the verdict survives ×2 and ×3 thinning.
-        let mut profile = Vec::new();
-        for _ in 0..4 {
-            profile.push((5.0, 90));
-            profile.push((2.0, 90));
-        }
-        let full = noisy_track(&profile, 0.000_01);
-        for stride in [2usize, 3] {
-            let thinned = decimate(&full, stride);
-            let vi = track_variability_index(&thinned, 30.0).expect("vi");
-            assert!(
-                vi >= INTERVAL_VI_THRESHOLD,
-                "interval run lost its verdict after ×{stride} decimation: VI {vi}"
-            );
-        }
-    }
-
-    #[test]
-    fn decimation_preserves_distance_within_one_percent() {
-        // Total distance is the storage-heaviest figure users see; thinning must
-        // not move it more than ±1 % at strides 2 and 3. Uses realistic sub-metre
-        // GPS jitter (0.000_004 ≈ 0.44 m), a real good-fix running track barely
-        // wanders between 1 s samples, so thinning to a 2–3 s cadence keeps the
-        // path length. (The heavier 0.000_03/0.000_01 wobble the VI fixtures use
-        // is a deliberate per-second speed-swing stress case, whose fixed-freq
-        // sine ALIASES under decimation, an artifact of the generator, not a
-        // real track shape, so it is not the right fixture for distance parity.)
-        let mut profile = Vec::new();
-        for _ in 0..4 {
-            profile.push((5.0, 90));
-            profile.push((2.0, 90));
-        }
-        for track in [noisy_track(&[(3.0, 600)], 0.000_004), noisy_track(&profile, 0.000_004)] {
-            let full_km = track_distance_km(&track, 30.0);
-            for stride in [2usize, 3] {
-                let thinned_km = track_distance_km(&decimate(&track, stride), 30.0);
-                let err = (thinned_km - full_km).abs() / full_km;
-                assert!(
-                    err <= 0.01,
-                    "×{stride} decimation moved distance {err:.4} (>1%): {full_km} → {thinned_km}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn decimation_preserves_the_positive_split_sign() {
-        // A run that clearly slows in the back half is a POSITIVE split; one that
-        // speeds up is NEGATIVE. Decimation must not flip that sign: the split
-        // verdict a runner reads stays the same.
-        let positive = noisy_track(&[(4.0, 150), (2.5, 150)], 0.000_01);
-        let negative = noisy_track(&[(2.5, 150), (4.0, 150)], 0.000_01);
-        for stride in [2usize, 3] {
-            let ps_pos = track_positive_split_pct(&decimate(&positive, stride), 30.0).expect("pos");
-            let ps_neg = track_positive_split_pct(&decimate(&negative, stride), 30.0).expect("neg");
-            assert!(
-                ps_pos > 0.0,
-                "positive-split run lost its sign after ×{stride}: {ps_pos}"
-            );
-            assert!(
-                ps_neg < 0.0,
-                "negative-split run lost its sign after ×{stride}: {ps_neg}"
-            );
-        }
-    }
-
-    #[test]
-    fn steady_run_with_a_mid_run_pause_stays_steady() {
-        // A steady ~3.7 m/s run with one long standing pause in the middle: the
-        // paused leg (a ~0 m/s bridge spanning the stop, exactly what the app's
-        // Pause button leaves) must be EXCLUDED, so the run reads steady, not a
-        // false "interval" from the depressed elapsed-time average.
-        let steady_paused = vec![
-            pt(0.0, 0.000, 0),
-            pt(0.0, 0.001, 30),   // ~3.7 m/s
-            pt(0.0, 0.002, 60),   // ~3.7 m/s
-            pt(0.0, 0.002, 660),  // 10-min stop, ~0 m/s → excluded
-            pt(0.0, 0.003, 690),  // ~3.7 m/s
-            pt(0.0, 0.004, 720),  // ~3.7 m/s
-        ];
-        let vi = track_variability_index(&steady_paused, 30.0).expect("vi");
-        assert!(vi < INTERVAL_VI_THRESHOLD, "paused steady wrongly flagged: VI {vi}");
-        assert!((vi - 1.0).abs() < 0.05, "VI {vi} should be ~1.0");
-    }
-
-    #[test]
-    fn normalized_speed_clamps_gps_jitter_spike() {
-        // A single teleport fix (huge distance in 1 s) must be clamped, not allowed
-        // to blow up the 4th-power mean. Two clean 30 s segments plus one spike.
-        let spiky = vec![
-            pt(0.0, 0.000, 0),
-            pt(0.0, 0.001, 30),
-            pt(5.0, 5.000, 31), // ~780 km in 1 s → clamp to MAX_PLAUSIBLE_SPEED_MPS
-            pt(5.0, 5.001, 61),
-        ];
-        let ns = normalized_speed_mps(&spiky, 30.0).expect("ns");
-        assert!(ns <= MAX_PLAUSIBLE_SPEED_MPS + 1e-9, "NS {ns} not clamped");
-    }
-
-    #[test]
-    fn track_distance_sums_segments_and_drops_noisy_fixes() {
-        let clean = vec![pt(0.0, 0.0, 0), pt(0.0, 0.001, 10), pt(0.0, 0.002, 20)];
-        let d = track_distance_km(&clean, 30.0);
-        // Two equal ~111.3 m equatorial-lon segments ≈ 0.2226 km.
-        assert!((d - 0.2226).abs() < 0.001, "got {d}");
-
-        // A noisy middle fix (accuracy 50 m) is dropped, leaving one long segment.
-        let noisy = vec![
-            pt(0.0, 0.0, 0),
-            GpsPoint {
-                lat: 5.0,
-                lon: 5.0,
-                observed_at: 10,
-                accuracy_m: 50.0,
-            },
-            pt(0.0, 0.002, 20),
-        ];
-        let d2 = track_distance_km(&noisy, 30.0);
-        assert!((d2 - 0.2226).abs() < 0.001, "got {d2}");
-    }
-
-    #[test]
-    fn track_duration_is_first_to_last_span() {
-        let t = vec![pt(0.0, 0.0, 100), pt(0.0, 0.001, 400)];
-        assert!((track_duration_min(&t, 30.0) - 5.0).abs() < 1e-9);
-        assert_eq!(track_duration_min(&[], 30.0), 0.0);
-        assert_eq!(track_duration_min(&[pt(0.0, 0.0, 100)], 30.0), 0.0);
-    }
-
-    #[test]
-    fn track_duration_spans_only_usable_fixes() {
-        // A noisy first fix must not inflate duration past the usable segment,
-        // which would otherwise skew pace low against the accuracy-filtered
-        // distance.
-        let t = vec![
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.0,
-                observed_at: 0,
-                accuracy_m: 99.0,
-            },
-            pt(0.0, 0.001, 120),
-            pt(0.0, 0.002, 300),
-        ];
-        // Usable span is 120..300 = 3 min, not 0..300 = 5 min.
-        assert!((track_duration_min(&t, 30.0) - 3.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn rfc3339_renders_known_epochs_utc() {
-        assert_eq!(unix_to_rfc3339_utc(0), "1970-01-01T00:00:00Z");
-        // 1_700_000_000 → 2023-11-14T22:13:20Z (verified against a UTC clock).
-        assert_eq!(unix_to_rfc3339_utc(1_700_000_000), "2023-11-14T22:13:20Z");
-    }
-
-    #[test]
-    fn export_gpx_wraps_fixes_and_escapes_name() {
-        let track = vec![
-            pt(52.52, 13.405, 1_700_000_000),
-            pt(52.521, 13.406, 1_700_000_030),
-        ];
-        let gpx = export_gpx(&track, "Tom & \"Jerry\" <run>'s");
-        assert!(gpx.starts_with("<?xml version=\"1.0\""));
-        assert!(gpx.contains("<gpx version=\"1.1\""));
-        // All five XML predefined entities are escaped so the name cannot break
-        // the document (& " < > ').
-        assert!(gpx.contains("<name>Tom &amp; &quot;Jerry&quot; &lt;run&gt;&apos;s</name>"));
-        // One trkpt per fix, with lat/lon and an RFC-3339 timestamp.
-        assert_eq!(gpx.matches("<trkpt ").count(), 2);
-        assert!(gpx.contains("lat=\"52.5200000\" lon=\"13.4050000\""));
-        assert!(gpx.contains("<time>2023-11-14T22:13:20Z</time>"));
-        assert!(gpx.trim_end().ends_with("</gpx>"));
-    }
-
-    #[test]
-    fn usable_track_drops_noisy_fixes() {
-        let track = vec![
-            pt(52.52, 13.405, 0),
-            GpsPoint {
-                lat: 52.60,
-                lon: 13.50,
-                observed_at: 30,
-                accuracy_m: 80.0, // beyond the gate → excluded
-            },
-            pt(52.521, 13.406, 60),
-        ];
-        // The GPX must carry the same fixes distance uses, the noisy one gone.
-        let usable = usable_track(&track, MAX_GPS_ACCURACY_M);
-        assert_eq!(usable.len(), 2);
-        let gpx = export_gpx(&usable, "run");
-        assert_eq!(gpx.matches("<trkpt ").count(), 2);
-        assert!(!gpx.contains("lat=\"52.6000000\""));
-    }
-
-    #[test]
-    fn tanaka_at_age_30_is_about_187() {
-        // 208 - 0.7*30 = 187.0
-        let hr = hr_max_tanaka(30.0);
-        assert!((hr - 187.0).abs() < 1e-9, "got {hr}");
-    }
-
-    #[test]
-    fn three_zone_boundaries() {
-        assert_eq!(classify_three_zone(70.0), ThreeZone::Z1);
-        assert_eq!(classify_three_zone(81.9), ThreeZone::Z1);
-        // 82 is the LT1 boundary → Z2 (inclusive lower edge).
-        assert_eq!(classify_three_zone(82.0), ThreeZone::Z2);
-        assert_eq!(classify_three_zone(88.0), ThreeZone::Z2);
-        // Just above LT2 → Z3.
-        assert_eq!(classify_three_zone(88.1), ThreeZone::Z3);
-        assert_eq!(classify_three_zone(95.0), ThreeZone::Z3);
-    }
-
-    #[test]
-    fn vdot_table_values_verbatim() {
-        assert_eq!(vdot_band_hr_pct(VdotBand::Easy), (65.0, 79.0));
-        assert_eq!(vdot_band_vo2max_pct(VdotBand::Marathon), (80.0, 84.0));
-        assert_eq!(vdot_band_hr_pct(VdotBand::Threshold), (88.0, 92.0));
-        assert!(!vdot_band_uses_hr(VdotBand::Repetition));
-        assert!(vdot_band_uses_hr(VdotBand::Threshold));
-        // R is >100 %VO2max: open upper bound.
-        assert!(vdot_band_vo2max_pct(VdotBand::Repetition).1.is_infinite());
-    }
-
-    #[test]
-    fn long_run_cap_pass_and_fail() {
-        // 12 km of a 50 km week = 24 % ≤ 25 %: pass.
-        assert!(long_run_within_cap(12.0, 50.0));
-        // Exactly 25 %: pass (cap is inclusive).
-        assert!(long_run_within_cap(12.5, 50.0));
-        // 15 km of 50 km = 30 %: fail.
-        assert!(!long_run_within_cap(15.0, 50.0));
-        // Zero weekly volume cannot satisfy a share cap.
-        assert!(!long_run_within_cap(5.0, 0.0));
-    }
-
-    #[test]
-    fn spike_true_just_above_10pct_false_at_or_below() {
-        // 10 % over exactly: not a spike (rule is strictly >10 %).
-        assert!(!single_session_spike(22.0, 20.0));
-        // Just above 10 %: spike.
-        assert!(single_session_spike(22.01, 20.0));
-        // Below the longest run: never a spike.
-        assert!(!single_session_spike(18.0, 20.0));
-        // No history → any real session errs to spike.
-        assert!(single_session_spike(5.0, 0.0));
-    }
-
-    #[test]
-    fn hr_method_and_recalc() {
-        assert!(prefer_karvonen(50.0).value);
-        assert!(!prefer_karvonen(55.0).value);
-        assert!(!prefer_karvonen(72.0).value);
-        assert!(!hr_zone_recalc_due(3).value);
-        assert!(hr_zone_recalc_due(4).value);
-    }
-
-    #[test]
-    fn vdot_derate_and_goal_plan() {
-        assert_eq!(
-            vdot_derate_points(GoalDistance::HalfMarathon, true).value,
-            (1.0, 1.5)
-        );
-        assert_eq!(
-            vdot_derate_points(GoalDistance::Marathon, true).value,
-            (2.0, 3.0)
-        );
-        assert_eq!(
-            vdot_derate_points(GoalDistance::FiveK, true).value,
-            (0.0, 0.0)
-        );
-        assert_eq!(
-            vdot_derate_points(GoalDistance::Marathon, false).value,
-            (0.0, 0.0)
-        );
-        let c = goal_week_plan(GoalDistance::C25k, false).value;
-        assert_eq!((c.sessions_per_week, c.quality_per_week), ((3, 3), (0, 0)));
-        // running-025 defines no long run for C25K: the share is 0, not 20-30%.
-        assert_eq!(c.long_run_share, (0.0, 0.0));
-        assert_eq!(
-            goal_week_plan(GoalDistance::FiveK, false)
-                .value
-                .quality_per_week,
-            (2, 2)
-        );
-        assert_eq!(
-            goal_week_plan(GoalDistance::Marathon, true)
-                .value
-                .sessions_per_week,
-            (5, 7)
-        );
-        assert_eq!(
-            goal_week_plan(GoalDistance::Marathon, false)
-                .value
-                .sessions_per_week,
-            (4, 6)
-        );
-        // marathon_derated_band (running-040/008, option B): the optimistic
-        // band is shifted SLOWER, the fast bound by the min derate and the slow
-        // bound by the max, so the range moves later and widens, and the
-        // result carries the same RUN-VDOT-001 evidence as the derate itself.
-        let vdot = crate::load::vdot(10_000.0, 2_520.0); // a real 42:00 10K
-        let base_low = 12_000.0;
-        let base_high = 12_600.0;
-        let band = marathon_derated_band(base_low, base_high, vdot);
-        assert!(
-            band.value.0 > base_low && band.value.1 > base_high,
-            "both bounds slow down: {:?} vs ({base_low}, {base_high})",
-            band.value
-        );
-        assert!(
-            band.value.1 - band.value.0 > base_high - base_low,
-            "the derate widens the span by its own uncertainty: {:?}",
-            band.value
-        );
-        assert_eq!(
-            band.evidence.citation.claim_id.as_deref(),
-            Some("RUN-VDOT-001"),
-            "the derated number still cites running-040/008 (HARD RULE 2)"
-        );
-        // A degenerate prediction (no valid race → VDOT 0) is left untouched,
-        // never fabricated slower.
-        let degen = marathon_derated_band(0.0, 0.0, 0.0);
-        assert_eq!(degen.value, (0.0, 0.0));
-
-        let p = c25k_plan().value;
-        assert_eq!(
-            (
-                p.runs_per_week,
-                p.rest_day_between,
-                p.repeat_hard_week_allowed
-            ),
-            (3, true, true)
-        );
-    }
-
-    #[test]
-    fn distribution_and_progression_guards() {
-        assert!(easy_share_floor_ok(0.80).value);
-        assert!(!easy_share_floor_ok(0.79).value);
-        assert_eq!(
-            default_counting_method(true).value,
-            IntensityCountingMethod::SessionGoal
-        );
-        assert_eq!(
-            default_counting_method(false).value,
-            IntensityCountingMethod::TimeInZone
-        );
-        assert_eq!(novice_volume_bump_hold_weeks(0.5).value, Some((2, 3)));
-        assert_eq!(novice_volume_bump_hold_weeks(3.0).value, None);
-        assert!(unscheduled_deload(2).value);
-        assert!(!unscheduled_deload(1).value);
-    }
-
-    #[test]
-    fn maf_cap_adjusts() {
-        assert_eq!(maf_cap_bpm(40.0, MafAdjustment::None).value, 140.0);
-        assert_eq!(
-            maf_cap_bpm(40.0, MafAdjustment::EliteImproving).value,
-            145.0
-        );
-        assert_eq!(maf_cap_bpm(40.0, MafAdjustment::Returning).value, 135.0);
-        assert_eq!(maf_cap_bpm(40.0, MafAdjustment::Overtrained).value, 130.0);
-        // Weak + contested per global CQ-12 (MAF vs measured LT1).
-        assert!(maf_cap_bpm(40.0, MafAdjustment::None).confidence.contested);
-    }
-
-    #[test]
-    fn taper_returns_reduction_in_documented_range() {
-        let rx = taper(2).expect("2 weeks out is inside the taper window");
-        let (lo, hi) = rx.value.volume_reduction_frac;
-        assert!((lo - 0.41).abs() < 1e-9);
-        assert!((hi - 0.60).abs() < 1e-9);
-        assert!(rx.value.hold_intensity && rx.value.hold_frequency);
-        assert!(!rx.value.add_new_stimulus);
-        // Outside the window → no taper prescription.
-        assert!(taper(5).is_none());
-    }
-
-    #[test]
-    fn distribution_models_keep_easy_at_80() {
-        let pyr = intensity_distribution(DistributionModel::Pyramidal).value;
-        assert_eq!((pyr.easy_pct, pyr.moderate_pct, pyr.hard_pct), (80, 15, 5));
-        let pol = intensity_distribution(DistributionModel::Polarized).value;
-        assert_eq!((pol.easy_pct, pol.moderate_pct, pol.hard_pct), (80, 5, 15));
-        // Phase mapping: base pyramidal, peak polarized.
-        assert_eq!(distribution_for_phase(MesoPhase::Base).value.hard_pct, 5);
-        assert_eq!(distribution_for_phase(MesoPhase::Peak).value.hard_pct, 15);
-    }
-
-    #[test]
-    fn quality_plan_respects_caps() {
-        // 3 sessions, 48h apart, no back-to-back Z3: ok.
-        assert!(quality_plan_ok(3, 48, false).value);
-        // 4 sessions: too many.
-        assert!(!quality_plan_ok(4, 48, false).value);
-        // Too tight spacing.
-        assert!(!quality_plan_ok(2, 24, false).value);
-        // Consecutive Z3 never allowed.
-        assert!(!quality_plan_ok(2, 48, true).value);
-    }
-
-    #[test]
-    fn weekly_increase_cap_scales_with_training_age() {
-        assert!((weekly_increase_cap_frac(0.5).value - 0.10).abs() < 1e-9);
-        assert!((weekly_increase_cap_frac(3.0).value - 0.05).abs() < 1e-9);
-        // Novice +10% ok, experienced +10% not.
-        assert!(weekly_increase_ok(50.0, 55.0, 0.5).value);
-        assert!(!weekly_increase_ok(50.0, 55.0, 3.0).value);
-        // Zero base cannot be ratioed.
-        assert!(!weekly_increase_ok(0.0, 10.0, 0.5).value);
-    }
-
-    #[test]
-    fn two_week_spike_flags_above_30pct() {
-        // +30% exactly: not flagged (rule is strictly >30%).
-        assert!(!two_week_increase_flag(40.0, 52.0).value);
-        // Just above 30%: flagged.
-        assert!(two_week_increase_flag(40.0, 52.1).value);
-        // No history errs to flag.
-        assert!(two_week_increase_flag(0.0, 10.0).value);
-    }
-
-    #[test]
-    fn deload_cadence_defaults_and_conservative() {
-        let default = deload_cadence(false).value;
-        assert_eq!((default.load_weeks, default.recovery_weeks), (3, 1));
-        assert_eq!(deload_cadence(true).value.load_weeks, 2);
-        let (lo, hi) = default.reduction_frac;
-        assert!((lo - 0.20).abs() < 1e-9 && (hi - 0.40).abs() < 1e-9);
-    }
-
-    #[test]
-    fn check_volume_caps_flags_first_violation() {
-        // All within caps: None.
-        let ok = check_volume_caps(12.0, 4.0, 3.0, 2.0, 50.0);
-        assert_eq!(ok.value, None);
-        // Long run over 25 %: LongRun wins (checked first).
-        let bad = check_volume_caps(20.0, 4.0, 3.0, 2.0, 50.0);
-        assert_eq!(bad.value, Some(CapViolation::LongRun));
-    }
-
-    #[test]
-    fn workout_rx_hr_governance_split() {
-        // Aerobic sessions are HR-governed.
-        assert!(run_workout_rx(RunSessionType::Recovery).value.hr_governed);
-        assert!(run_workout_rx(RunSessionType::LongRun).value.hr_governed);
-        assert!(run_workout_rx(RunSessionType::Tempo).value.hr_governed);
-        assert!(run_workout_rx(RunSessionType::RacePace).value.hr_governed);
-        assert!(workout_rx(RunWorkout::EasyGeneralAerobic).value.hr_governed);
-        // Short/max efforts are effort-governed, HR lags.
-        assert!(!run_workout_rx(RunSessionType::Interval).value.hr_governed);
-        assert!(!run_workout_rx(RunSessionType::Repetition).value.hr_governed);
-        assert!(!run_workout_rx(RunSessionType::Strides).value.hr_governed);
-        assert!(!run_workout_rx(RunSessionType::Hills).value.hr_governed);
-    }
-
-    #[test]
-    fn workout_rx_bands_verbatim() {
-        // running-018 Tempo 88–92 %HRmax, RPE 6–7, 20–40 min continuous.
-        let t = run_workout_rx(RunSessionType::Tempo).value;
-        assert_eq!(t.pct_hr_max, (Some(0.88), Some(0.92)));
-        assert_eq!(t.rpe, Some((6, 7)));
-        assert_eq!(t.duration_min, (Some(20), Some(40)));
-        // running-019 Interval 95–100 %HRmax, 3–5 min reps.
-        let i = run_workout_rx(RunSessionType::Interval).value;
-        assert_eq!(i.pct_hr_max, (Some(0.95), Some(1.00)));
-        assert_eq!(i.duration_min, (Some(3), Some(5)));
-        assert_eq!(i.rpe, Some((8, 9)));
-    }
-
-    #[test]
-    fn recovery_rx_has_open_lower_hr_and_both_ceilings() {
-        // running-014: KB gives NO lower HR bound (the 0.65 floor was
-        // invented), <76 %HRmax AND <70 %HRR ceilings, pace ≥20 % slower than
-        // MP with no upper slowness bound, RPE 2–3, 20–40 min.
-        let r = run_workout_rx(RunSessionType::Recovery);
-        assert_eq!(r.value.pct_hr_max, (None, Some(0.76)));
-        assert_eq!(r.value.pct_hrr_max, Some(0.70));
-        assert_eq!(r.value.pct_slower_than_mp, (Some(20.0), None));
-        assert_eq!(r.value.rpe, Some((2, 3)));
-        assert_eq!(r.value.duration_min, (Some(20), Some(40)));
-        assert_eq!(
-            r.evidence.citation.claim_id.as_deref(),
-            Some("RUN-RECOVERY-001")
-        );
-    }
-
-    #[test]
-    fn easy_ga_is_distinct_from_recovery() {
-        // running-015: E pace 15–25 % slower than MP, 65–79 %HRmax, RPE 3–4,
-        // 30–90 min, a different band set from Recovery on every axis.
-        let e = workout_rx(RunWorkout::EasyGeneralAerobic);
-        assert_eq!(e.value.pct_hr_max, (Some(0.65), Some(0.79)));
-        assert_eq!(e.value.pct_slower_than_mp, (Some(15.0), Some(25.0)));
-        assert_eq!(e.value.rpe, Some((3, 4)));
-        assert_eq!(e.value.duration_min, (Some(30), Some(90)));
-        assert_eq!(e.evidence.citation.claim_id.as_deref(), Some("RUN-EASY-001"));
-        assert_ne!(e.value, run_workout_rx(RunSessionType::Recovery).value);
-    }
-
-    #[test]
-    fn long_run_rx_has_no_duration_floor() {
-        // running-016: no duration floor in the KB (the 60-min floor was
-        // invented); soft time-cap ~2:00–2:30 → 150-min outer ceiling; pace
-        // MP −10–20 %; 65–80 %HRmax; RPE 3–5.
-        let lr = run_workout_rx(RunSessionType::LongRun).value;
-        assert_eq!(lr.duration_min, (None, Some(150)));
-        assert_eq!(lr.pct_hr_max, (Some(0.65), Some(0.80)));
-        assert_eq!(lr.pct_slower_than_mp, (Some(10.0), Some(20.0)));
-        assert_eq!(lr.rpe, Some((3, 5)));
-    }
-
-    #[test]
-    fn race_pace_rx_is_km_blocks_not_minutes() {
-        // running-017: 8–26 km blocks (KB states km, not minutes), M pace,
-        // 80–85 %HRmax, RPE 5–6. No weekly M cap exists (VDOT M row: "-").
-        let m = run_workout_rx(RunSessionType::RacePace).value;
-        assert_eq!(m.distance_km, (Some(8.0), Some(26.0)));
-        assert_eq!(m.duration_min, (None, None));
-        assert_eq!(m.pct_hr_max, (Some(0.80), Some(0.85)));
-        assert_eq!(m.pct_slower_than_mp, (Some(0.0), Some(0.0)));
-        assert_eq!(m.rpe, Some((5, 6)));
-    }
-
-    #[test]
-    fn repetition_rx_carries_only_kb_backed_parameters() {
-        // VDOT R row only: reps ≤2 min, pace-not-HR. RPE was NOT stated in the
-        // KB (the old (8,9) was invented) and no HR band exists.
-        let r = run_workout_rx(RunSessionType::Repetition);
-        assert_eq!(r.value.rpe, None);
-        assert_eq!(r.value.pct_hr_max, (None, None));
-        assert_eq!(r.value.duration_min, (None, Some(2)));
-        assert!(!r.value.hr_governed);
-        assert_eq!(
-            r.evidence.citation.claim_id.as_deref(),
-            Some("RUN-REPETITION-001")
-        );
-    }
-
-    #[test]
-    fn cruise_intervals_verbatim() {
-        // running-018: 3–15 min reps, rest ~1 min or 20–25 %, total ≤10 %.
-        let c = cruise_interval_rx().value;
-        assert_eq!(c.rep_duration_min, (3, 15));
-        assert!((c.rest_approx_min - 1.0).abs() < 1e-9);
-        assert_eq!(c.rest_frac, (0.20, 0.25));
-        assert!((c.weekly_cap_frac - 0.10).abs() < 1e-9);
-    }
-
-    #[test]
-    fn vo2max_interval_structure_and_gates() {
-        // running-019: 3–5 min reps, 800–1600 m, recovery ≈ rep time.
-        let i = vo2max_interval_rx();
-        assert_eq!(i.value.rep_duration_min, (3, 5));
-        assert_eq!(i.value.rep_distance_m, (800, 1600));
-        assert!((i.value.weekly_cap_frac - 0.08).abs() < 1e-9);
-        // Contested CQ-10 (Rønnestad short intervals) must surface.
-        assert!(i.confidence.contested);
-        // Recovery ≤ rep time passes; longer recovery fails.
-        assert!(interval_recovery_ok(240.0, 240.0).value);
-        assert!(interval_recovery_ok(240.0, 200.0).value);
-        assert!(!interval_recovery_ok(240.0, 241.0).value);
-        // Rep distance band 800–1600 m inclusive.
-        assert!(interval_rep_distance_ok(800.0).value);
-        assert!(interval_rep_distance_ok(1600.0).value);
-        assert!(!interval_rep_distance_ok(799.0).value);
-        assert!(!interval_rep_distance_ok(1601.0).value);
-    }
-
-    #[test]
-    fn strides_and_hill_sprints_verbatim() {
-        let s = strides_rx().value;
-        assert_eq!(
-            (s.rep_sec, s.reps, s.recovery_sec, s.per_week, s.rpe),
-            ((15, 30), (4, 8), (45, 120), (1, 3), (6, 7))
-        );
-        let h = hill_sprint_rx().value;
-        assert_eq!((h.rep_sec, h.reps), ((8, 20), (4, 10)));
-        assert_eq!(h.effort_pct, (90.0, 95.0));
-        assert_eq!(h.grade_pct, (6.0, 10.0));
-        assert_eq!(h.recovery_approx_sec, 120);
-        assert_eq!(h.rpe, 9);
-        // Weekly frequency is NOT stated in the KB → never invented.
-        assert_eq!(h.per_week, None);
-        assert!(h.on_easy_days);
-        // Placement contradiction (Lydiard vs Hudson) must ride along.
-        assert!(!hill_sprint_rx().evidence.contradicting.is_empty());
-    }
-
-    #[test]
-    fn long_run_guardrails() {
-        // running-016: LR ≤ 2× average daily run.
-        assert!(long_run_within_daily_avg(16.0, 8.0).value);
-        assert!(!long_run_within_daily_avg(16.1, 8.0).value);
-        // No history errs safe.
-        assert!(!long_run_within_daily_avg(10.0, 0.0).value);
-        // Share default 25–30 % (running-016 figure; running-024's 20–30 % is
-        // documented as a KB discrepancy and kept on goal_week_plan).
-        assert_eq!(long_run_share_default().value, (0.25, 0.30));
-        assert_eq!(
-            goal_week_plan(GoalDistance::General, false).value.long_run_share,
-            (0.20, 0.30)
-        );
-    }
-
-    #[test]
-    fn coggan_zones_verbatim_with_unstated_gaps() {
-        use CogganPowerZone::*;
-        assert_eq!(coggan_power_zone(54.9).value, Some(Z1));
-        assert_eq!(coggan_power_zone(56.0).value, Some(Z2));
-        assert_eq!(coggan_power_zone(75.0).value, Some(Z2));
-        assert_eq!(coggan_power_zone(90.0).value, Some(Z3));
-        assert_eq!(coggan_power_zone(105.0).value, Some(Z4));
-        assert_eq!(coggan_power_zone(120.0).value, Some(Z5));
-        assert_eq!(coggan_power_zone(150.0).value, Some(Z6));
-        assert_eq!(coggan_power_zone(150.1).value, Some(Z7));
-        // The KB leaves 55–56 (and the other between-band points) unassigned.
-        assert_eq!(coggan_power_zone(55.5).value, None);
-        // Sweet spot 88–94.
-        assert!(coggan_sweet_spot(88.0).value && coggan_sweet_spot(94.0).value);
-        assert!(!coggan_sweet_spot(87.9).value && !coggan_sweet_spot(94.1).value);
-        // Weak grade must ride along (proxy, not criterion). Schema maps
-        // Weak → 0.40 (File 09 header); File 04's per-rule 0.30 for Weak is a
-        // KB-internal inconsistency, resolved codebase-wide by the grade enum.
-        let c = coggan_power_zone(80.0);
-        assert_eq!(c.evidence.grade, crate::schema::EvidenceGrade::Weak);
-        assert!((c.confidence.score - 0.40).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn stryd_zones_half_open_bands() {
-        use StrydPowerZone::*;
-        assert_eq!(stryd_power_zone(65.0).value, Some(Z1));
-        // Shared boundaries go to the upper zone (half-open bands).
-        assert_eq!(stryd_power_zone(80.0).value, Some(Z2));
-        assert_eq!(stryd_power_zone(90.0).value, Some(Z3));
-        assert_eq!(stryd_power_zone(100.0).value, Some(Z4));
-        assert_eq!(stryd_power_zone(115.0).value, Some(Z5));
-        assert_eq!(stryd_power_zone(130.0).value, Some(Z5));
-        // Outside the stated table → unstated, never invented.
-        assert_eq!(stryd_power_zone(64.9).value, None);
-        assert_eq!(stryd_power_zone(130.1).value, None);
-    }
-
-    #[test]
-    fn hr_method_preference_branches() {
-        // running-005: <55 prefer Karvonen; ≥70 converged; [55,70) unstated.
-        assert_eq!(
-            hr_method_preference(54.9).value,
-            HrMethodPreference::PreferKarvonen
-        );
-        assert_eq!(hr_method_preference(55.0).value, HrMethodPreference::Unstated);
-        assert_eq!(hr_method_preference(69.9).value, HrMethodPreference::Unstated);
-        assert_eq!(
-            hr_method_preference(70.0).value,
-            HrMethodPreference::EitherConverged
-        );
-    }
-
-    #[test]
-    fn run_walk_extension_is_safety_critical() {
-        // running-026 (safety_critical true in the KB).
-        let x = extend_run_walk_phase(true);
-        assert!(x.value);
-        assert!(x.confidence.safety_critical);
-        assert!(!extend_run_walk_phase(false).value);
-    }
-
-    #[test]
-    fn single_variable_progression_gate() {
-        // running-032: volume OR intensity, never both in one week.
-        assert!(single_variable_progression_ok(true, false).value);
-        assert!(single_variable_progression_ok(false, true).value);
-        assert!(single_variable_progression_ok(false, false).value);
-        assert!(!single_variable_progression_ok(true, true).value);
-    }
-
-    #[test]
-    fn recovery_week_depth_by_mileage() {
-        // running-033: general 20–40 %, higher-mileage 10–30 %, lower-mileage
-        // up to 50 % (floor unstated); both volume and intensity reduced, one
-        // quality session dropped.
-        let g = recovery_week_rx(MileageBand::Unspecified).value;
-        assert_eq!(g.volume_reduction_frac, (Some(0.20), 0.40));
-        let hi = recovery_week_rx(MileageBand::Higher).value;
-        assert_eq!(hi.volume_reduction_frac, (Some(0.10), 0.30));
-        let lo = recovery_week_rx(MileageBand::Lower).value;
-        assert_eq!(lo.volume_reduction_frac, (None, 0.50));
-        assert!(g.reduce_intensity && g.drop_quality_session);
-    }
-
-    #[test]
-    fn distance_taper_defaults_verbatim() {
-        // running-038 (Strong, safety-critical): distance-specific defaults.
-        let five = distance_taper(GoalDistance::FiveK).expect("5K default");
-        assert_eq!(five.value.days, (7, 10));
-        assert_eq!(five.value.volume_cut_frac, (0.40, 0.50));
-        assert_eq!(five.value.keep_sharp_sessions, Some((1, 2)));
-        assert!(five.confidence.safety_critical);
-        let ten = distance_taper(GoalDistance::TenK).expect("10K default");
-        assert_eq!(ten.value.days, (7, 10));
-        let hm = distance_taper(GoalDistance::HalfMarathon).expect("HM default");
-        assert_eq!(hm.value.days, (10, 14));
-        assert_eq!(hm.value.volume_cut_frac, (0.50, 0.50));
-        assert!(!hm.value.progressive);
-        let m = distance_taper(GoalDistance::Marathon).expect("marathon default");
-        assert_eq!(m.value.days, (14, 21));
-        assert_eq!(m.value.volume_cut_frac, (0.40, 0.60));
-        assert!(m.value.progressive && m.value.keep_mp_touches_and_short_tempo);
-        // Intensity + frequency always held; no defaults stated for
-        // general/C25K goals.
-        assert!(m.value.hold_intensity && m.value.hold_frequency);
-        assert!(distance_taper(GoalDistance::General).is_none());
-        assert!(distance_taper(GoalDistance::C25k).is_none());
-    }
-
-    #[test]
-    fn pace_retest_and_environment_triggers() {
-        // running-041: re-test every 4–6 wk.
-        assert!(!pace_retest_due(3).value);
-        assert!(pace_retest_due(4).value);
-        // Race input freshness window ≤6–8 wk.
-        assert_eq!(race_input_freshness(6).value, RaceInputFreshness::Fresh);
-        assert_eq!(race_input_freshness(7).value, RaceInputFreshness::Marginal);
-        assert_eq!(race_input_freshness(8).value, RaceInputFreshness::Marginal);
-        assert_eq!(race_input_freshness(9).value, RaceInputFreshness::Stale);
-        // Corrections trigger above ~15 °C / ~900 m, flags only, the KB
-        // states no magnitudes.
-        let t = pace_correction_triggers(15.1, 900.1).value;
-        assert!(t.heat && t.altitude);
-        let none = pace_correction_triggers(15.0, 900.0).value;
-        assert!(!none.heat && !none.altitude);
-    }
-
-    #[test]
-    fn marathon_gate_trips_under_30km() {
-        assert!(marathon_prediction_optimistic(24.0).value);
-        assert!(!marathon_prediction_optimistic(32.0).value);
-        // Boundary: exactly 30 km is not optimistic.
-        assert!(!marathon_prediction_optimistic(30.0).value);
-    }
-
-    #[test]
-    fn equivalency_agrees_or_ranges() {
-        // Within 2 %: midpoint.
-        match race_equivalency(3600.0, 3636.0).value {
-            Equivalency::Agreed(m) => assert!((m - 3618.0).abs() < 1e-9),
-            other => panic!("expected Agreed, got {other:?}"),
-        }
-        // >2 % apart: range, low first.
-        match race_equivalency(3800.0, 3600.0).value {
-            Equivalency::Range(lo, hi) => {
-                assert!((lo - 3600.0).abs() < 1e-9 && (hi - 3800.0).abs() < 1e-9)
-            }
-            other => panic!("expected Range, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn equivalency_cites_the_equivalency_claim_not_vdot() {
-        // running-039 is the Riegel/Daniels equivalency combiner (RUN-EQUIV-001),
-        // NOT the VDOT-fitness estimate (RUN-VDOT-001). Guards the citation fix.
-        let r = race_equivalency(3600.0, 3636.0);
-        assert_eq!(
-            r.evidence.citation.claim_id.as_deref(),
-            Some("RUN-EQUIV-001"),
-        );
-        assert_eq!(r.evidence.grade, crate::schema::EvidenceGrade::Moderate);
-    }
-
-    // ── Segment-aware track fns (pause + relocation) ──────────────────
-
-    /// A pause + relocation: segment 1 is four ~111 m legs at the equator, then
-    /// the runner relocates ~111 km east and runs segment 2 (four more ~111 m
-    /// legs). Index 5 begins segment 2, so the bridge leg (seg1 end → seg2 start)
-    /// is a pause bridge. Segment 2 stays at the equator, so re-anchoring it back
-    /// onto segment 1 is a pure-longitude translation that preserves haversine
-    /// EXACTLY, the parity oracle for the VI/split verdicts.
-    fn relocation_fixture() -> Vec<GpsPoint> {
-        vec![
-            pt(0.0, 0.000, 0),
-            pt(0.0, 0.001, 10),
-            pt(0.0, 0.002, 20),
-            pt(0.0, 0.003, 30),
-            pt(0.0, 0.004, 40),
-            // 60 s pause + ~111 km relocation east.
-            pt(0.0, 1.000, 100),
-            pt(0.0, 1.001, 110),
-            pt(0.0, 1.002, 120),
-            pt(0.0, 1.003, 130),
-            pt(0.0, 1.004, 140),
-        ]
-    }
-
-    /// The equivalent track the OLD shell stored: segment 2 re-anchored onto
-    /// segment 1's end (pure-longitude shift at the equator), collapsing the
-    /// bridge to zero length. Empty `segment_starts` reproduces the legacy metric.
-    fn reanchored_equivalent() -> Vec<GpsPoint> {
-        let full = relocation_fixture();
-        let off_lon = full[4].lon - full[5].lon; // 0.004 - 1.000
-        let mut out = full[..5].to_vec();
-        for p in &full[5..] {
-            out.push(pt(p.lat, p.lon + off_lon, p.observed_at));
-        }
-        out
-    }
-
-    #[test]
-    fn empty_starts_is_bit_identical_to_the_single_track_metrics() {
-        // Every track fn's segment-aware form must reduce EXACTLY to the legacy
-        // whole-track form when there is no interior boundary, the regression net
-        // for legacy re-anchored logs and hand-logged runs. A start of 0 (index 0
-        // never has an entering leg) and an out-of-range index are both no-ops.
-        let t = reanchored_equivalent(); // one continuous run with slight structure
-        for starts in [&[][..], &[0][..], &[999][..]] {
-            assert_eq!(
-                track_distance_km(&t, 30.0),
-                track_distance_km_seg(&t, 30.0, starts),
-                "distance parity, starts={starts:?}",
-            );
-            assert_eq!(
-                track_duration_min(&t, 30.0),
-                track_duration_min_seg(&t, 30.0, starts),
-                "duration parity, starts={starts:?}",
-            );
-            assert_eq!(
-                track_positive_split_pct(&t, 30.0),
-                track_positive_split_pct_seg(&t, 30.0, starts),
-                "split parity, starts={starts:?}",
-            );
-            assert_eq!(
-                track_splits(&t, 30.0, KM_M),
-                track_splits_seg(&t, 30.0, KM_M, starts),
-                "km-splits parity, starts={starts:?}",
-            );
-            assert_eq!(
-                normalized_speed_mps(&t, 30.0),
-                normalized_speed_mps_seg(&t, 30.0, starts),
-                "NS parity, starts={starts:?}",
-            );
-            assert_eq!(
-                track_variability_index(&t, 30.0),
-                track_variability_index_seg(&t, 30.0, starts),
-                "VI parity, starts={starts:?}",
-            );
-            assert_eq!(
-                export_gpx(&t, "run"),
-                export_gpx_seg(&t, "run", starts),
-                "gpx parity, starts={starts:?}",
-            );
-        }
-    }
-
-    #[test]
-    fn segmented_distance_excludes_the_pause_bridge() {
-        let t = relocation_fixture();
-        // Without boundaries the ~111 km bridge dominates the sum.
-        let naive = track_distance_km(&t, 30.0);
-        assert!(naive > 100.0, "bridge should dominate the naive sum: {naive}");
-        // With the boundary at index 5 the bridge contributes nothing → only the
-        // two ~445 m segments remain (~0.89 km).
-        let seg = track_distance_km_seg(&t, 30.0, &[5]);
-        assert!((seg - 0.889).abs() < 0.05, "segmented distance {seg}");
-        // And it equals the distance of the re-anchored equivalent the old shell
-        // stored (bit-identical route length, no shift needed).
-        assert!(
-            (seg - track_distance_km(&reanchored_equivalent(), 30.0)).abs() < 1e-9,
-            "segmented == re-anchored distance",
-        );
-        // The pause gap (60 s) is not run time: two 40 s segments → 80 s = 4/3 min.
-        let dur = track_duration_min_seg(&t, 30.0, &[5]);
-        assert!((dur - 80.0 / 60.0).abs() < 1e-9, "segmented duration {dur}");
-    }
-
-    #[test]
-    fn segmented_vi_and_split_match_the_reanchored_equivalent() {
-        let t = relocation_fixture();
-        let re = reanchored_equivalent();
-        // The re-anchored track is the legacy oracle: the segment-aware metrics on
-        // the TRUE coords must equal it (equatorial relocation ⇒ exact).
-        assert_eq!(
-            track_variability_index_seg(&t, 30.0, &[5]),
-            track_variability_index(&re, 30.0),
-            "VI parity vs re-anchored",
-        );
-        assert_eq!(
-            track_positive_split_pct_seg(&t, 30.0, &[5]),
-            track_positive_split_pct(&re, 30.0),
-            "split parity vs re-anchored",
-        );
-        // Raw splits agree to f64 rounding (the equatorial re-anchor translation is
-        // exact only up to the last ULP, so compare per field with a tolerance).
-        let seg_splits = track_splits_seg(&t, 30.0, KM_M, &[5]);
-        let re_splits = track_splits(&re, 30.0, KM_M);
-        assert_eq!(seg_splits.len(), re_splits.len(), "same split count");
-        for (a, b) in seg_splits.iter().zip(&re_splits) {
-            assert_eq!(a.index, b.index);
-            assert_eq!(a.partial, b.partial);
-            assert!((a.pace_sec_per_unit - b.pace_sec_per_unit).abs() < 1e-6);
-            assert!((a.cumulative_m - b.cumulative_m).abs() < 1e-6);
-            assert!((a.distance_m - b.distance_m).abs() < 1e-6);
-        }
-    }
-
-    #[test]
-    fn gpx_emits_one_trkseg_per_segment_with_true_coords() {
-        let t = relocation_fixture();
-        let gpx = export_gpx_seg(&t, "paused run", &[5]);
-        // Two recording segments → two <trkseg> blocks with a gap between.
-        assert_eq!(gpx.matches("<trkseg>").count(), 2, "two segments\n{gpx}");
-        assert_eq!(gpx.matches("</trkseg>").count(), 2);
-        // TRUE coordinates: segment 2's real relocated longitude (1.000…) is
-        // present, NOT re-anchored back onto segment 1 (0.004…).
-        assert!(gpx.contains("lon=\"1.0000000\""), "true seg-2 coord\n{gpx}");
-        // Every real fix is still emitted (10 points across the two segments).
-        assert_eq!(gpx.matches("<trkpt").count(), 10);
-        // Empty starts → a single <trkseg>, byte-identical to the bare export.
-        let flat = export_gpx_seg(&t, "paused run", &[]);
-        assert_eq!(flat.matches("<trkseg>").count(), 1);
-        assert_eq!(flat, export_gpx(&t, "paused run"));
-    }
-}
-
+mod tests;

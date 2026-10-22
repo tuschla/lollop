@@ -6,11 +6,12 @@
 //! holds the *non-safety* individualization arithmetic.
 //!
 //! Training-age strength defaults are transcribed verbatim from File 08
-//! Table 1.1 (indiv-002/003/004, Rhea 2003 → STR-TRAGE-001). Scaling order,
-//! re-entry brackets, and detraining rates come from File 08 §2/§3.4
-//! (scaling-028/029, load-036/037 → DETRAIN-001).
+//! Table 1.1 (indiv-002/003/004, Rhea 2003 → STR-TRAGE-001). Scaling order and
+//! re-entry brackets come from File 08 §2/§3.4 (scaling-028/029, Table 3.4b →
+//! REENTRY-001).
 
 use crate::evidence;
+use crate::evidence::claims;
 use crate::schema::{Adjustment, HealthScreen, Recommended};
 
 // ---------------------------------------------------------------------------
@@ -45,7 +46,7 @@ pub fn training_age_from_cadence(cadence: ProgressionCadence) -> Recommended<Tra
         ProgressionCadence::WeekToWeek => TrainingAge::Intermediate,
         ProgressionCadence::MonthToMonth => TrainingAge::Advanced,
     };
-    evidence::graded(age, "INDIV-TRAGE-001")
+    evidence::graded(age, claims::INDIV_TRAGE_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -84,14 +85,33 @@ pub fn strength_defaults(age: TrainingAge) -> Recommended<StrengthDefaults> {
             sets_per_muscle: 8,
         },
     };
-    evidence::graded(d, "STR-TRAGE-001")
+    evidence::graded(d, claims::STR_TRAGE_001)
 }
 
-/// Whether added volume returns disproportionately more for this athlete
-/// (indiv-006: 1→4-set ES gain +1.12 untrained vs +0.70 advanced). True for
-/// novices/intermediates, who are more volume-sensitive. STR-TRAGE-001.
-pub fn high_volume_sensitivity(age: TrainingAge) -> Recommended<bool> {
-    evidence::graded(!matches!(age, TrainingAge::Advanced), "STR-TRAGE-001")
+/// How disproportionately added volume returns for this athlete along the
+/// File 08 indiv-006 dose-response gradient (1→4-set effect-size gain +1.12
+/// untrained vs +0.70 advanced): the less trained the lifter, the more each
+/// added set buys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VolumeSensitivity {
+    /// Novice: largest marginal return per added set (indiv-006 ~+1.12 ES).
+    High,
+    /// Intermediate: middling return, between novice and advanced — its own
+    /// honest tier, never collapsed into the novice "high" bucket.
+    Moderate,
+    /// Advanced: smallest marginal return per added set (indiv-006 ~+0.70 ES).
+    Low,
+}
+
+/// Volume sensitivity for a training age along the indiv-006 gradient
+/// (untrained > intermediate > advanced). STR-TRAGE-001.
+pub fn volume_sensitivity(age: TrainingAge) -> Recommended<VolumeSensitivity> {
+    let s = match age {
+        TrainingAge::Novice => VolumeSensitivity::High,
+        TrainingAge::Intermediate => VolumeSensitivity::Moderate,
+        TrainingAge::Advanced => VolumeSensitivity::Low,
+    };
+    evidence::graded(s, claims::STR_TRAGE_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -119,14 +139,16 @@ pub enum ScaleLever {
 /// adaptations retained if intensity held while volume is cut). SCALE-DOWN-001
 /// (Strong).
 pub fn scale_down_order() -> Recommended<[ScaleLever; 5]> {
-    evidence::graded([
-        ScaleLever::AccessoryVolume,
-        ScaleLever::SetsTowardMev,
-        ScaleLever::Frequency,
-        ScaleLever::SecondaryQuality,
-        ScaleLever::IntensityAndMainCompounds,
-    ],
-    "SCALE-DOWN-001",)
+    evidence::graded(
+        [
+            ScaleLever::AccessoryVolume,
+            ScaleLever::SetsTowardMev,
+            ScaleLever::Frequency,
+            ScaleLever::SecondaryQuality,
+            ScaleLever::IntensityAndMainCompounds,
+        ],
+        claims::SCALE_DOWN_001,
+    )
 }
 
 /// Ordered scale-UP hierarchy: add volume and frequency before intensity, add
@@ -134,20 +156,22 @@ pub fn scale_down_order() -> Recommended<[ScaleLever; 5]> {
 /// The inverse priority to scale-down. SCALE-UP-001 (ExpertOpinion ordering,
 /// unlike the Strong scale-down evidence).
 pub fn scale_up_order() -> Recommended<[ScaleLever; 5]> {
-    evidence::graded([
-        ScaleLever::SetsTowardMev,
-        ScaleLever::Frequency,
-        ScaleLever::AccessoryVolume,
-        ScaleLever::IntensityAndMainCompounds,
-        ScaleLever::SecondaryQuality,
-    ],
-    "SCALE-UP-001",)
+    evidence::graded(
+        [
+            ScaleLever::SetsTowardMev,
+            ScaleLever::Frequency,
+            ScaleLever::AccessoryVolume,
+            ScaleLever::IntensityAndMainCompounds,
+            ScaleLever::SecondaryQuality,
+        ],
+        claims::SCALE_UP_001,
+    )
 }
 
 /// Minimum weekly exposures per muscle to preserve when consolidating frequency
 /// (File 08 scaling-028). SCALE-DOWN-001.
 pub fn min_muscle_exposures_per_week() -> Recommended<u8> {
-    evidence::graded(2, "SCALE-DOWN-001")
+    evidence::graded(2, claims::SCALE_DOWN_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -190,7 +214,7 @@ pub fn resistance_reentry(weeks_off: f64) -> Recommended<ReEntry> {
             ramp_weeks: (1, 2),
             treat_as_novice: false,
         }
-    } else if weeks_off < 8.0 {
+    } else if weeks_off <= 8.0 {
         ReEntry {
             load_frac: Some(0.70),
             ramp_weeks: (2, 4),
@@ -207,57 +231,58 @@ pub fn resistance_reentry(weeks_off: f64) -> Recommended<ReEntry> {
             treat_as_novice: true,
         }
     };
-    evidence::graded(r, "REENTRY-001")
+    evidence::graded(r, claims::REENTRY_001)
 }
 
-// ---------------------------------------------------------------------------
-// 5. Detraining timelines (File 08 Table 3.4a; descriptive data, not advice)
-// ---------------------------------------------------------------------------
-
-/// A trainable quality and how fast it decays without exposure (File 08
-/// Table 3.4a). Raw descriptive rates, not wrapped, as they prescribe nothing.
+/// Where a declared layoff's re-entry ramp stands `days_since_return` days
+/// after training resumed (KB reentry-002, REENTRY-RAMP-001): the bracket's
+/// starting fraction ramps linearly back to full load over the bracket's ramp
+/// window, `frac(t) = frac0 + (1 − frac0) · min(1, t / ramp_weeks_max)`. It
+/// applies only to loads anchored BEFORE the layoff and replaces (never stacks
+/// with) detraining decay of those anchors.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DetrainRate {
-    pub quality: &'static str,
-    /// Approximate weeks until meaningful loss begins.
-    pub onset_weeks: f64,
-    /// Illustrative loss note.
-    pub note: &'static str,
+pub struct ReentryRamp {
+    /// Load fraction for pre-layoff anchors today; `None` for a >8 wk layoff
+    /// (no KB fraction: pre-layoff anchors are dropped while the window runs).
+    pub frac: Option<f64>,
+    /// Length of the ramp window in days (`ramp_weeks.1 × 7`).
+    pub ramp_days: i64,
+    /// `true` while the window is still running (`t < ramp_days`); `false`
+    /// once it has ended — the layoff then no longer shapes any load.
+    pub active: bool,
+    /// The >8 wk "treat as a fresh novice" bracket.
+    pub treat_as_novice: bool,
 }
 
-/// Detraining timelines, most-protected to least (File 08 Table 3.4a).
-pub static DETRAINING: &[DetrainRate] = &[
-    DetrainRate {
-        quality: "strength",
-        onset_weeks: 8.0,
-        note: "~7-12% loss over 8-12wk; most protected (neural)",
-    },
-    DetrainRate {
-        // D3 (documented, non-KB number): KB Table 3.4a describes hypertrophy
-        // detraining only qualitatively ("slower loss; beginners retain gains
-        // for weeks; retained myonuclei aid re-gain") and gives NO week figure.
-        // 3.0 is an editorial ordering value chosen only to place hypertrophy
-        // BETWEEN strength (8 wk, KB) and VO2max (2 wk, KB); it is not a KB
-        // claim and must not be surfaced as a prescription (it drives no graded
-        // recommendation: this struct prescribes nothing, per the type doc).
-        quality: "hypertrophy",
-        onset_weeks: 3.0,
-        note: "slow loss; myonuclei aid re-gain (muscle memory)",
-    },
-    DetrainRate {
-        quality: "vo2max",
-        onset_weeks: 2.0,
-        note: "fastest; ~6-20% over ~4wk in highly trained",
-    },
-    DetrainRate {
-        quality: "power",
-        onset_weeks: 1.0,
-        note: "fades within ~1wk of zero exposure",
-    },
-];
+/// Evaluate the re-entry ramp for `weeks_off` declared weeks off, `t =
+/// days_since_return` days after the return (a future return date counts as
+/// day 0). REENTRY-RAMP-001 (ExpertOpinion ramp shape over the REENTRY-001
+/// brackets; Bosquet 2013 detraining dose-response).
+pub fn reentry_ramp(weeks_off: f64, days_since_return: i64) -> Recommended<ReentryRamp> {
+    let re = resistance_reentry(weeks_off).value;
+    let ramp_days = re.ramp_weeks.1 as i64 * 7;
+    let t = days_since_return.max(0);
+    let active = ramp_days > 0 && t < ramp_days && re.load_frac.is_none_or(|f| f < 1.0);
+    let frac = re.load_frac.map(|f0| {
+        if ramp_days <= 0 {
+            1.0
+        } else {
+            f0 + (1.0 - f0) * (t as f64 / ramp_days as f64).min(1.0)
+        }
+    });
+    evidence::graded(
+        ReentryRamp {
+            frac,
+            ramp_days,
+            active,
+            treat_as_novice: re.treat_as_novice,
+        },
+        claims::REENTRY_RAMP_001,
+    )
+}
 
 // ---------------------------------------------------------------------------
-// 6. Progression & nutrition (File 08 load-031/indiv-008/013/020; DBLPROG/MASTERS/DEFICIT)
+// 5. Progression & nutrition (File 08 load-031/indiv-008/013/020; DBLPROG/MASTERS/DEFICIT)
 // ---------------------------------------------------------------------------
 
 /// Novice linear load increment when all prescribed reps are completed
@@ -273,18 +298,20 @@ pub struct LoadIncrement {
 /// Novice linear-progression load bump when the session was completed
 /// (File 08 indiv-008; DBLPROG-001).
 pub fn novice_load_increment() -> Recommended<LoadIncrement> {
-    evidence::graded(LoadIncrement {
-        upper_kg: 2.5,
-        lower_kg: 5.0,
-    },
-    "DBLPROG-001",)
+    evidence::graded(
+        LoadIncrement {
+            upper_kg: 2.5,
+            lower_kg: 5.0,
+        },
+        claims::DBLPROG_001,
+    )
 }
 
 /// Double progression: once the top of the rep range is hit on every set, add
 /// load and drop to the range bottom (File 08 load-031). Returns `true` when the
 /// engine should add load this session. DBLPROG-001.
 pub fn double_progression_add_load(top_of_range_all_sets: bool) -> Recommended<bool> {
-    evidence::graded(top_of_range_all_sets, "DBLPROG-001")
+    evidence::graded(top_of_range_all_sets, claims::DBLPROG_001)
 }
 
 /// Daily protein target as g/kg bodyweight (min, max) for a goal context
@@ -297,10 +324,12 @@ pub struct ProteinTarget {
 /// Masters (65+) protein target: 1.2-1.6 g/kg/day for anabolic resistance
 /// (File 08 indiv-013; MASTERS-001).
 pub fn masters_protein_target() -> Recommended<ProteinTarget> {
-    evidence::graded(ProteinTarget {
-        g_per_kg: (1.2, 1.6),
-    },
-    "MASTERS-001",)
+    evidence::graded(
+        ProteinTarget {
+            g_per_kg: (1.2, 1.6),
+        },
+        claims::MASTERS_001,
+    )
 }
 
 /// Lean-mass-preserving deficit protein target: 1.8-2.7 g/kg/day, hold intensity
@@ -313,12 +342,14 @@ pub fn masters_protein_target() -> Recommended<ProteinTarget> {
 /// cited to the RED-S deferral claim (SAFE-REDS-001, Strong, safety-critical).
 pub fn deficit_protein_target(reds_signal_present: bool) -> Recommended<Option<ProteinTarget>> {
     if reds_signal_present {
-        evidence::graded(None, "SAFE-REDS-001")
+        evidence::graded(None, claims::SAFE_REDS_001)
     } else {
-        evidence::graded(Some(ProteinTarget {
-            g_per_kg: (1.8, 2.7),
-        }),
-        "DEFICIT-001",)
+        evidence::graded(
+            Some(ProteinTarget {
+                g_per_kg: (1.8, 2.7),
+            }),
+            claims::DEFICIT_001,
+        )
     }
 }
 
@@ -326,7 +357,35 @@ pub fn deficit_protein_target(reds_signal_present: bool) -> Recommended<Option<P
 /// resistance (File 08 indiv-013): ~0.4 g/kg per meal (vs the lower per-meal
 /// dose sufficient in younger adults). MASTERS-001.
 pub fn masters_protein_per_meal() -> Recommended<f64> {
-    evidence::graded(0.4, "MASTERS-001")
+    evidence::graded(0.4, claims::MASTERS_001)
+}
+
+/// The WHO 5-17 weekly activity reference (File 08 youth-pa-001): an average
+/// of 60 min/day of moderate-to-vigorous activity across the week, and
+/// vigorous plus muscle- and bone-strengthening activity on at least 3 days.
+/// Information and tracking only, never a program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct YouthActivityTargets {
+    pub daily_minutes: u32,
+    /// `daily_minutes` × 7: the daily average over one Mon–Sun week.
+    pub weekly_minutes: u32,
+    /// Days a week with vigorous activity, and (counted separately) days with
+    /// muscle- and bone-strengthening activity.
+    pub days_per_week: u8,
+}
+
+/// The WHO 5-17 activity reference (YOUTH-PA-001, Strong) that the under-18
+/// activity card tracks logged activity against.
+pub fn youth_activity_targets() -> Recommended<YouthActivityTargets> {
+    const DAILY_MINUTES: u32 = 60;
+    evidence::graded(
+        YouthActivityTargets {
+            daily_minutes: DAILY_MINUTES,
+            weekly_minutes: DAILY_MINUTES * 7,
+            days_per_week: 3,
+        },
+        claims::YOUTH_PA_001,
+    )
 }
 
 /// Novice linear-progression stall response (File 08 indiv-009, Starting
@@ -362,18 +421,18 @@ pub fn novice_stall_action(
     } else {
         None
     };
-    evidence::graded(outcome, "DBLPROG-001")
+    evidence::graded(outcome, claims::DBLPROG_001)
 }
 
 // ---------------------------------------------------------------------------
-// 7. Time budget, substitution & environment (File 08 indiv-023/026, safety-024)
+// 6. Time budget, substitution & environment (File 08 indiv-023/026, safety-024)
 // ---------------------------------------------------------------------------
 
 /// Weekly frequency a muscle can be *maintained* on under time pressure
 /// (File 08 indiv-026: ~1x/wk holds a muscle; protect frequency + intensity,
 /// cut accessory volume first). TIMECAP-001.
 pub fn maintenance_frequency_per_week() -> Recommended<u8> {
-    evidence::graded(1, "TIMECAP-001")
+    evidence::graded(1, claims::TIMECAP_001)
 }
 
 /// Substitution rule for limited equipment: substitute the movement pattern and
@@ -389,11 +448,13 @@ pub struct SubstitutionRule {
 /// Movement-pattern substitution default for home/minimal equipment
 /// (File 08 indiv-023; SUBST-001).
 pub fn substitution_rule() -> Recommended<SubstitutionRule> {
-    evidence::graded(SubstitutionRule {
-        match_movement_pattern: true,
-        compensate_with_reps_near_failure: true,
-    },
-    "SUBST-001",)
+    evidence::graded(
+        SubstitutionRule {
+            match_movement_pattern: true,
+            compensate_with_reps_near_failure: true,
+        },
+        claims::SUBST_001,
+    )
 }
 
 /// Environmental training modifier (File 08 §1.5 Table; safety-024/indiv-025).
@@ -464,36 +525,12 @@ pub fn environment_modifier(env: Environment) -> Recommended<EnvironmentModifier
         },
         Environment::Neutral => none,
     };
-    evidence::graded(m, "ENV-001")
+    evidence::graded(m, claims::ENV_001)
 }
 
 // ---------------------------------------------------------------------------
-// 8. Stage-0 onboarding gates (File 08 onboard-050; safety-011/044/045/046/048)
+// 7. Stage-0 onboarding gates (File 08 onboard-050; safety-011/044/045/046/048)
 // ---------------------------------------------------------------------------
-
-/// Verbatim pregnancy warning-sign list (File 08 safety-046): any of these →
-/// STOP and DEFER. Data for shells to display; the engine consumes the
-/// [`HealthScreen::pregnancy_warning_sign`] flag.
-pub static PREGNANCY_WARNING_SIGNS: &[&str] = &[
-    "vaginal bleeding",
-    "amniotic fluid leakage",
-    "regular painful contractions",
-    "dyspnea before exertion",
-    "dizziness/faintness",
-    "headache",
-    "chest pain",
-    "calf pain/swelling",
-    "muscle weakness affecting balance",
-    "decreased fetal movement",
-];
-
-/// Verbatim pregnancy contraindication conditions (File 08 safety-046) → DEFER.
-pub static PREGNANCY_CONTRAINDICATIONS: &[&str] = &[
-    "placenta previa after 26 wk",
-    "preeclampsia/gestational hypertension",
-    "incompetent cervix",
-    "severe anemia",
-];
 
 /// Pregnancy avoid-list (File 08 safety-047; SAFE-PREG-AVOID-001, Strong,
 /// safety-critical). Every flag is a verbatim KB item; the altitude bound is
@@ -513,15 +550,17 @@ pub struct PregnancyPrecautions {
 /// The pregnancy avoid-list (File 08 safety-047; ACOG 804). Surfaced whenever
 /// the profile reports pregnancy, alongside the safety-045 deferral.
 pub fn pregnancy_precautions() -> Recommended<PregnancyPrecautions> {
-    evidence::graded(PregnancyPrecautions {
-        avoid_prolonged_supine: true,
-        avoid_overheating: true,
-        avoid_contact_fall_risk: true,
-        avoid_scuba: true,
-        avoid_altitude_above_m: ALTITUDE_THRESHOLD_M,
-        avoid_valsalva: true,
-    },
-    "SAFE-PREG-AVOID-001",)
+    evidence::graded(
+        PregnancyPrecautions {
+            avoid_prolonged_supine: true,
+            avoid_overheating: true,
+            avoid_contact_fall_risk: true,
+            avoid_scuba: true,
+            avoid_altitude_above_m: ALTITUDE_THRESHOLD_M,
+            avoid_valsalva: true,
+        },
+        claims::SAFE_PREG_AVOID_001,
+    )
 }
 
 /// Run the Stage-0 onboarding gates (File 08 onboard-050: screen → route →
@@ -537,379 +576,88 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
     if s.pregnancy_warning_sign {
         // safety-046: warning signs → STOP and DEFER.
         out.push(evidence::graded(Adjustment::Defer {
-            reason: "Pregnancy warning sign reported. Stop exercising now and contact your obstetric provider."
+            reason: "You reported a pregnancy warning sign. Stop exercising now and contact your provider."
                 .into(),
         },
-        "SAFE-PREG-WARN-001",));
+        claims::SAFE_PREG_WARN_001,));
     }
-    if s.parq_positive && !s.medically_cleared {
-        // safety-044 + onboard-050: positive PAR-Q+/ACSM screen → medical
-        // clearance gate before any prescription.
+    if s.symptomatic_any() {
+        // onboard-051/052 (SCREEN-ACSM-001): chest pain or dizziness/fainting
+        // → STOP + DEFER regardless of activity status. Deliberately NOT
+        // cleared by `medically_cleared`: a prior clearance answer does not
+        // cover a current symptom.
         out.push(evidence::graded(Adjustment::Defer {
-            reason: "Positive PAR-Q+/ACSM screen (cardiovascular, metabolic, or renal condition; uncontrolled hypertension; recent surgery; or acute illness). Medical clearance is required before programming."
+            reason: "You reported chest pain, dizziness or fainting. See a doctor before you train, then update your health answers."
                 .into(),
         },
-        "SAFE-CVD-001",));
+        claims::SCREEN_ACSM_001,));
+    }
+    if s.acute_illness {
+        // File 08 acute illness → DEFER; fever / infection = no training
+        // (ILLNESS-NECK-001) until the user reports it resolved.
+        out.push(evidence::graded(
+            Adjustment::Defer {
+                reason: "Better means no fever and your symptoms are gone. Then tap I'm better."
+                    .into(),
+            },
+            claims::ILLNESS_NECK_001,
+        ));
+    }
+    if s.parq_followup_uncleared() {
+        // safety-044 + onboard-050: positive PAR-Q+/ACSM screen → medical
+        // clearance gate before any prescription. Every follow-up Yes must be
+        // covered by the clearance (a Yes added later gates again).
+        out.push(evidence::graded(Adjustment::Defer {
+            reason: "Once a doctor has cleared you, turn on \"Cleared by a doctor\" in your health answers."
+                .into(),
+        },
+        claims::SAFE_CVD_001,));
     }
     if s.pregnant {
         // safety-045: no autonomous prescription/progression in pregnancy;
-        // provider clearance + individualization. The ~150 min/wk moderate
+        // provider clearance + individualization. The ~150 min a week moderate
         // figure is the KB's reference target for uncomplicated pregnancy -
-        // surfaced as context, NOT an engine prescription.
+        // surfaced as context, NOT an engine prescription. The hold banner
+        // already says lollop won't plan; the card carries the reference.
         out.push(evidence::graded(Adjustment::Defer {
-            reason: "Pregnancy. The engine does not autonomously prescribe or progress load; train under provider clearance and individual guidance (reference for uncomplicated pregnancy: ~150 min/wk moderate activity)."
+            reason: "In an uncomplicated pregnancy, a common guide is about 150 minutes of moderate activity a week, agreed with your provider."
                 .into(),
         },
-        "SAFE-PREG-001",));
+        claims::SAFE_PREG_001,));
     }
-    if s.injury_or_rehab {
+    if s.injury_any() {
         // safety-048: the engine never prescribes rehabilitation.
         out.push(evidence::graded(Adjustment::Defer {
-            reason: "Current injury under care, recent surgery, or active rehab. Defer to your physician/physiotherapist; general programming resumes on clearance."
+            reason: "You have an injury, recent surgery or ongoing rehab. lollop doesn't plan rehab. Follow your doctor or physio, and update your health answers once they clear you."
                 .into(),
         },
-        "SAFE-INJURY-001",));
+        claims::SAFE_INJURY_001,));
     }
     if s.youth {
         // safety-011: pediatric/adolescent, supervision + technique-first;
-        // never autonomous maximal loading or 1RM testing.
-        out.push(evidence::graded(Adjustment::Defer {
-            reason: "Child/adolescent user. Train only under qualified supervision, technique-first; the engine will not prescribe maximal loading or 1RM testing."
-                .into(),
-        },
-        "SAFE-PEDS-001",));
+        // never autonomous maximal loading or 1RM testing. The engine builds
+        // no plan at all for this gate (the hold banner says so); the card
+        // carries the KB's how-to.
+        out.push(evidence::graded(
+            Adjustment::Defer {
+                reason:
+                    "Put technique ahead of weight, and skip near-max weights and 1-rep-max tests."
+                        .into(),
+            },
+            claims::SAFE_PEDS_001,
+        ));
     }
     if s.reds_signal {
         // safety-049 absolute rule (via onboard-050 screening): never a
         // programming variable: reduce/rest and defer.
         out.push(evidence::graded(Adjustment::Defer {
-            reason: "RED-S / disordered-eating signal. Reduce or rest training stress and defer to a physician, registered dietitian, or mental-health professional."
+            reason: "You reported a sign of under-eating. Ease off training and talk to a doctor, a registered dietitian or a mental-health professional."
                 .into(),
         },
-        "SAFE-REDS-001",));
+        claims::SAFE_REDS_001,));
     }
     out
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cadence_maps_to_training_age() {
-        assert_eq!(
-            training_age_from_cadence(ProgressionCadence::EverySession).value,
-            TrainingAge::Novice
-        );
-        assert_eq!(
-            training_age_from_cadence(ProgressionCadence::WeekToWeek).value,
-            TrainingAge::Intermediate
-        );
-        assert_eq!(
-            training_age_from_cadence(ProgressionCadence::MonthToMonth).value,
-            TrainingAge::Advanced
-        );
-    }
-
-    #[test]
-    fn strength_defaults_match_table_1_1() {
-        let n = strength_defaults(TrainingAge::Novice).value;
-        assert_eq!(
-            (n.intensity_pct_1rm, n.freq_per_muscle, n.sets_per_muscle),
-            (60, 3, 4)
-        );
-        let i = strength_defaults(TrainingAge::Intermediate).value;
-        assert_eq!(
-            (i.intensity_pct_1rm, i.freq_per_muscle, i.sets_per_muscle),
-            (80, 2, 4)
-        );
-        let a = strength_defaults(TrainingAge::Advanced).value;
-        assert_eq!(
-            (a.intensity_pct_1rm, a.freq_per_muscle, a.sets_per_muscle),
-            (85, 2, 8)
-        );
-        // Defaults carry Strong evidence (Rhea 2003).
-        assert!(
-            (strength_defaults(TrainingAge::Novice).confidence.score - 0.90).abs() < f32::EPSILON
-        );
-    }
-
-    #[test]
-    fn volume_sensitivity_higher_in_less_trained() {
-        assert!(high_volume_sensitivity(TrainingAge::Novice).value);
-        assert!(high_volume_sensitivity(TrainingAge::Intermediate).value);
-        assert!(!high_volume_sensitivity(TrainingAge::Advanced).value);
-    }
-
-    #[test]
-    fn scaling_protects_intensity_last_and_first() {
-        let down = scale_down_order().value;
-        assert_eq!(down[0], ScaleLever::AccessoryVolume);
-        assert_eq!(down[4], ScaleLever::IntensityAndMainCompounds);
-        // Scale-up adds intensity late, secondary quality last.
-        let up = scale_up_order().value;
-        assert_eq!(up[0], ScaleLever::SetsTowardMev);
-        assert_eq!(up[4], ScaleLever::SecondaryQuality);
-        assert_eq!(min_muscle_exposures_per_week().value, 2);
-    }
-
-    #[test]
-    fn reentry_brackets_scale_with_time_off() {
-        assert_eq!(resistance_reentry(0.5).value.load_frac, Some(1.00));
-        assert_eq!(resistance_reentry(1.5).value.load_frac, Some(0.90));
-        assert_eq!(resistance_reentry(3.0).value.load_frac, Some(0.825));
-        assert_eq!(resistance_reentry(6.0).value.load_frac, Some(0.70));
-        let long = resistance_reentry(12.0).value;
-        // >8 wk: KB states no fraction, treat as novice, drop the anchor.
-        assert_eq!(long.load_frac, None);
-        assert!(long.treat_as_novice);
-        // Monotonic non-increasing load fraction across the numeric brackets.
-        assert!(resistance_reentry(6.0).value.load_frac < resistance_reentry(3.0).value.load_frac);
-    }
-
-    #[test]
-    fn progression_and_nutrition_targets() {
-        let inc = novice_load_increment().value;
-        assert_eq!((inc.upper_kg, inc.lower_kg), (2.5, 5.0));
-        assert!(double_progression_add_load(true).value);
-        assert!(!double_progression_add_load(false).value);
-        assert_eq!(masters_protein_target().value.g_per_kg, (1.2, 1.6));
-        assert_eq!(
-            deficit_protein_target(false).value.expect("no RED-S").g_per_kg,
-            (1.8, 2.7)
-        );
-        // Deficit protein guidance is Strong (Helms/Longland).
-        assert!((deficit_protein_target(false).confidence.score - 0.90).abs() < f32::EPSILON);
-        assert_eq!(masters_protein_per_meal().value, 0.4);
-    }
-
-    #[test]
-    fn deficit_refused_inside_the_fn_when_reds_signal_present() {
-        // File 08 safety-022: deficit request + RED-S signal → the target fn
-        // itself refuses (no call path can obtain a deficit past the flag) and
-        // the refusal is cited to the RED-S deferral, safety-critical.
-        let blocked = deficit_protein_target(true);
-        assert!(blocked.value.is_none(), "no deficit target under RED-S");
-        assert_eq!(
-            blocked.evidence.citation.claim_id.as_deref(),
-            Some("SAFE-REDS-001")
-        );
-        assert!(blocked.confidence.safety_critical);
-    }
-
-    #[test]
-    fn novice_stall_response() {
-        assert!(novice_stall_action(2, true, false).value.is_none());
-        assert!(novice_stall_action(3, false, false).value.is_none());
-        let o = novice_stall_action(3, true, false).value.unwrap();
-        assert_eq!(
-            (
-                o.deload_frac,
-                o.scope_single_lift,
-                o.transition_to_intermediate
-            ),
-            (0.10, true, false)
-        );
-        assert!(
-            novice_stall_action(3, true, true)
-                .value
-                .unwrap()
-                .transition_to_intermediate
-        );
-    }
-
-    #[test]
-    fn time_substitution_and_environment() {
-        assert_eq!(maintenance_frequency_per_week().value, 1);
-        let sub = substitution_rule().value;
-        assert!(sub.match_movement_pattern && sub.compensate_with_reps_near_failure);
-        // Heat: reduce intensity (no KB factor), acclimatize 10–14 days, hard
-        // heat-illness stop.
-        let heat = environment_modifier(Environment::Heat).value;
-        assert!(heat.reduce_intensity);
-        assert_eq!(heat.acclimatization_days, Some((10, 14)));
-        assert!(heat.stop_on_heat_illness_signs);
-        assert!(!heat.extend_warm_up);
-        // Altitude: reduce intensity until acclimatized; the KB states NO day
-        // count for altitude (unlike heat), and no illness stop.
-        let alt = environment_modifier(Environment::Altitude).value;
-        assert!(alt.reduce_intensity);
-        assert_eq!(alt.acclimatization_days, None, "no altitude day count in KB");
-        assert!(!alt.stop_on_heat_illness_signs);
-        assert_eq!(ALTITUDE_THRESHOLD_M, 2_500.0);
-        // Cold: extend warm-up only; the KB states nothing else for cold.
-        let cold = environment_modifier(Environment::Cold).value;
-        assert!(cold.extend_warm_up);
-        assert!(!cold.reduce_intensity);
-        assert_eq!(cold.acclimatization_days, None);
-        // Neutral leaves the prescription unchanged.
-        let neutral = environment_modifier(Environment::Neutral).value;
-        assert!(!neutral.reduce_intensity && !neutral.extend_warm_up);
-        // ENV-001 is safety-critical via the heat STOP branch.
-        assert!(
-            environment_modifier(Environment::Heat)
-                .confidence
-                .safety_critical
-        );
-    }
-
-    // --- Stage-0 onboarding gates (File 08 onboard-050) ---
-
-    #[test]
-    fn clear_health_screen_yields_no_gates() {
-        assert!(onboarding_gates(&HealthScreen::default()).is_empty());
-        assert!(!HealthScreen::default().any_gate());
-    }
-
-    #[test]
-    fn each_screen_flag_defers_with_its_own_safety_claim() {
-        let cases: &[(fn(&mut HealthScreen), &str)] = &[
-            (|s| s.youth = true, "SAFE-PEDS-001"),
-            (|s| s.parq_positive = true, "SAFE-CVD-001"),
-            (|s| s.pregnant = true, "SAFE-PREG-001"),
-            (|s| s.pregnancy_warning_sign = true, "SAFE-PREG-WARN-001"),
-            (|s| s.injury_or_rehab = true, "SAFE-INJURY-001"),
-            (|s| s.reds_signal = true, "SAFE-REDS-001"),
-        ];
-        for (set, claim_id) in cases {
-            let mut s = HealthScreen::default();
-            set(&mut s);
-            let gates = onboarding_gates(&s);
-            assert_eq!(gates.len(), 1, "{claim_id}: exactly one gate fires");
-            assert!(
-                matches!(gates[0].value, Adjustment::Defer { .. }),
-                "{claim_id}: gate must defer to a professional"
-            );
-            assert_eq!(
-                gates[0].evidence.citation.claim_id.as_deref(),
-                Some(*claim_id)
-            );
-            assert!(
-                gates[0].confidence.safety_critical,
-                "{claim_id}: every onboarding gate is safety-critical"
-            );
-            assert!(s.any_gate());
-        }
-    }
-
-    #[test]
-    fn medical_clearance_clears_only_the_parq_gate() {
-        // safety-044: clearance re-opens programming after a positive screen…
-        let cleared = HealthScreen {
-            parq_positive: true,
-            medically_cleared: true,
-            ..HealthScreen::default()
-        };
-        assert!(onboarding_gates(&cleared).is_empty());
-        // …but pregnancy keeps deferring autonomous prescription regardless
-        // (safety-045: provider clearance AND individualization, the engine
-        // still must not autonomously prescribe/progress load).
-        let pregnant_cleared = HealthScreen {
-            pregnant: true,
-            medically_cleared: true,
-            ..HealthScreen::default()
-        };
-        assert_eq!(onboarding_gates(&pregnant_cleared).len(), 1);
-    }
-
-    #[test]
-    fn pediatric_gate_names_the_prohibitions() {
-        // safety-011: no autonomous maximal loading or 1RM testing.
-        let s = HealthScreen {
-            youth: true,
-            ..HealthScreen::default()
-        };
-        let gates = onboarding_gates(&s);
-        match &gates[0].value {
-            Adjustment::Defer { reason } => {
-                assert!(reason.contains("supervision"));
-                assert!(reason.contains("1RM"));
-            }
-            other => panic!("expected Defer, got {other:?}"),
-        }
-        // Strong evidence (Lloyd/Faigenbaum consensus), never overstated.
-        assert!((gates[0].confidence.score - 0.90).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn pregnancy_gate_emits_safe_preg_001_with_reference_target() {
-        // safety-045: SAFE-PREG-001 actually emitted; the ~150 min/wk figure is
-        // a reference target only, phrased as such.
-        let s = HealthScreen {
-            pregnant: true,
-            ..HealthScreen::default()
-        };
-        let gates = onboarding_gates(&s);
-        assert_eq!(
-            gates[0].evidence.citation.claim_id.as_deref(),
-            Some("SAFE-PREG-001")
-        );
-        match &gates[0].value {
-            Adjustment::Defer { reason } => {
-                assert!(reason.contains("150 min/wk"));
-                assert!(reason.contains("reference"));
-            }
-            other => panic!("expected Defer, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn injury_gate_is_expert_opinion_yet_safety_critical() {
-        // safety-048 is the lowest-graded File 08 safety rule (ExpertOpinion,
-        // 0.30) but still safety-critical: the grade is never inflated to make
-        // the stop look better-evidenced.
-        let s = HealthScreen {
-            injury_or_rehab: true,
-            ..HealthScreen::default()
-        };
-        let g = &onboarding_gates(&s)[0];
-        assert!((g.confidence.score - 0.30).abs() < f32::EPSILON);
-        assert!(g.confidence.safety_critical);
-    }
-
-    #[test]
-    fn multiple_flags_all_surface_with_warning_sign_first() {
-        let s = HealthScreen {
-            pregnant: true,
-            pregnancy_warning_sign: true,
-            injury_or_rehab: true,
-            ..HealthScreen::default()
-        };
-        let gates = onboarding_gates(&s);
-        assert_eq!(gates.len(), 3, "every fired gate must surface");
-        assert_eq!(
-            gates[0].evidence.citation.claim_id.as_deref(),
-            Some("SAFE-PREG-WARN-001"),
-            "acute warning sign leads"
-        );
-    }
-
-    #[test]
-    fn pregnancy_precautions_verbatim_avoid_list() {
-        let p = pregnancy_precautions();
-        assert!(p.value.avoid_prolonged_supine);
-        assert!(p.value.avoid_overheating);
-        assert!(p.value.avoid_contact_fall_risk);
-        assert!(p.value.avoid_scuba);
-        assert_eq!(p.value.avoid_altitude_above_m, 2_500.0);
-        assert!(p.value.avoid_valsalva);
-        assert_eq!(
-            p.evidence.citation.claim_id.as_deref(),
-            Some("SAFE-PREG-AVOID-001")
-        );
-        assert!(p.confidence.safety_critical);
-        // Warning-sign / contraindication lists carry the verbatim KB items.
-        assert_eq!(PREGNANCY_WARNING_SIGNS.len(), 10);
-        assert_eq!(PREGNANCY_CONTRAINDICATIONS.len(), 4);
-    }
-
-    #[test]
-    fn detraining_ordered_most_to_least_protected() {
-        assert_eq!(DETRAINING.first().unwrap().quality, "strength");
-        assert_eq!(DETRAINING.last().unwrap().quality, "power");
-        // Onset weeks strictly decrease down the list (more protected first).
-        for w in DETRAINING.windows(2) {
-            assert!(w[0].onset_weeks > w[1].onset_weeks);
-        }
-    }
-}
+mod tests;

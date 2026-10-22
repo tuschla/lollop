@@ -3,17 +3,23 @@ package app.milestone
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
- * JVM unit tests (no device) for the run-tracking shell fixes: the incremental
- * live-distance accumulator must match a full haversine, and the readiness
- * `Soreness` signal must be present, correctly ordered vs the Rust schema, and
- * submittable on the wire.
+ * JVM unit tests (no device) for the run-tracking shell: the incremental
+ * live-distance accumulator must match a full haversine, and the recorded track,
+ * moving time, pace slices and notification state stay consistent.
  */
 class RunTrackingUnitTest {
+
+    @Before fun isolate() = RunSession.reset()
+    @After fun cleanup() = RunSession.reset()
 
     private fun obj(e: Event) = (e.toJson() as JsonObject)
 
@@ -44,6 +50,21 @@ class RunTrackingUnitTest {
     }
 
     @Test
+    fun nearAntipodalSegmentIsFiniteNotNaN() {
+        // On a near-antipodal leg the haversine `h` can round a hair past
+        // 1.0, and Math.asin(x > 1) is NaN — which would poison live distance and the
+        // oracle. The asin-input clamp (h.coerceAtMost(1.0)) keeps the result finite.
+        // An exactly antipodal pair (~half the Earth's circumference apart) is the edge.
+        val a = GpsPoint(0.0, 0.0, 0, 5.0)
+        val b = GpsPoint(0.0, 180.0, 10, 5.0)
+        val seg = segmentKm(a, b)
+        assertTrue("near-antipodal segment is finite (no NaN)", seg.isFinite())
+        // ~π·6371 km with the core-matching 6371.0 km radius (running.rs EARTH_RADIUS_M).
+        assertTrue("near-antipodal distance ≈ half the Earth's circumference", seg in 20_000.0..20_100.0)
+        assertTrue("oracle over a near-antipodal track is finite too", haversineKm(listOf(a, b)).isFinite())
+    }
+
+    @Test
     fun runSessionCapsGpsJitterSpikeInLiveDistanceLikeTheCore() {
         RunSession.reset()
         // Two clean ~30 m / 10 s legs, then a teleport (~800 km in 1 s). The jitter
@@ -67,7 +88,7 @@ class RunTrackingUnitTest {
 
     @Test
     fun restoreOpensANewSegmentForTheFirstPostResumeFix() {
-        // M2: a crash-resume splice must be a SEGMENT BOUNDARY. The app can be dead
+        // A crash-resume splice must be a SEGMENT BOUNDARY. The app can be dead
         // for hours of wall time while the runner relocates, but the first live fix
         // after restore() arrives only a few MONOTONIC seconds later, so the gap rule
         // (which measures monotonically) would NOT fire: restore() must arm the
@@ -114,23 +135,213 @@ class RunTrackingUnitTest {
     }
 
     @Test
-    fun readinessSignalEnumIncludesSorenessInSchemaOrder() {
-        val names = ReadinessSignal.entries.map { it.name }
-        assertTrue(names.contains("Soreness"))
-        // schema.rs orders Soreness between Pain and Illness: the manual picker
-        // iterates entries, so wrong ordering would misplace it in the UI.
-        assertEquals(names.indexOf("Pain") + 1, names.indexOf("Soreness"))
-        assertEquals(names.indexOf("Soreness") + 1, names.indexOf("Illness"))
+    fun resetClearsArmedAndLastFixElapsed() {
+        // The armed-start flows are part of the session's reset contract: a new run
+        // must never inherit a stale armed flag or fix stamp.
+        RunSession.armed.value = true
+        RunSession.lastFixElapsedMs.value = 12_345L
+        RunSession.saving.value = true
+        RunSession.reset()
+        assertFalse("armed cleared on reset", RunSession.armed.value)
+        assertEquals("last-fix stamp cleared on reset", 0L, RunSession.lastFixElapsedMs.value)
+        assertFalse("saving cleared on reset", RunSession.saving.value)
     }
 
     @Test
-    fun sorenessIsSubmittableOnTheWire() {
-        val fields = obj(
-            Event.SubmitReadiness(ReadinessSignal.Soreness, 6.0, 1_600_000_000L),
-        )["SubmitReadiness"]!!.jsonObject
-        assertEquals("Soreness", fields["signal"]!!.jsonPrimitive.content)
-        assertEquals(6.0, fields["value"]!!.jsonPrimitive.content.toDouble(), 1e-9)
-        assertEquals(1_600_000_000L, fields["observed_at"]!!.jsonPrimitive.content.toLong())
+    fun resetBumpsSessionGenerationButAddAndRestoreDoNot() {
+        // The armed-teardown race guard: reset() (Cancel/Back/discard) must advance the
+        // session token so the service's captured generation diverges and a location
+        // result queued on the main looper stands down instead of resurrecting a ghost
+        // run + sidecar. Recording a fix (add) and recovering a run (restore) keep the
+        // SAME session identity — only a reset ends a session — so the service's stream,
+        // whose captured token equals the value at start, keeps recording across them.
+        RunSession.reset()
+        val g0 = RunSession.generation
+        RunSession.reset()
+        assertTrue("reset advances the session generation", RunSession.generation > g0)
+        val g1 = RunSession.generation
+        // A recorded fix does not end the session: the token is stable, so the live
+        // stream (captured == g1) keeps recording.
+        RunSession.add(GpsPoint(52.52, 13.405, 0, 5.0), 0L)
+        RunSession.add(GpsPoint(52.52027, 13.405, 10, 5.0), 10_000_000_000L)
+        assertEquals("add() keeps the session generation", g1, RunSession.generation)
+        // A crash-recovery restore is a fresh recording under the same identity token;
+        // the service started for it captures whatever the current value is.
+        RunSession.restore(
+            listOf(
+                GpsPoint(52.52, 13.405, 0, 5.0),
+                GpsPoint(52.5203, 13.405, 10, 5.0),
+            ),
+        )
+        assertEquals("restore() keeps the session generation", g1, RunSession.generation)
+        // The next teardown advances it again (monotonic), invalidating that stream.
+        RunSession.reset()
+        assertTrue("the following reset advances it again", RunSession.generation > g1)
+    }
+
+    @Test
+    fun resetClearsPausedState() {
+        // The notification Pause/Resume actions and the in-app Pause button share the
+        // one RunSession.paused flag; a new run must never inherit a stale paused state.
+        RunSession.paused.value = true
+        RunSession.reset()
+        assertFalse("paused cleared on reset", RunSession.paused.value)
+    }
+
+    @Test
+    fun notifTitleResPinsStateToResourceId() {
+        // The state→resource mapping lives in the pure function, so a swapped id
+        // fails here against the ACTUAL R.string constants (plain ints on the JVM
+        // test classpath) — not against caller-supplied local literals, which is
+        // what let a call-site swap slip past the old tests. A paused recording
+        // selects the paused title; armed/locate ignore the paused flag.
+        assertEquals(
+            R.string.track_notif_recording_title,
+            trackingNotifTitleRes(recording = true, armed = false, paused = false),
+        )
+        assertEquals(
+            R.string.track_notif_paused_title,
+            trackingNotifTitleRes(recording = true, armed = false, paused = true),
+        )
+        assertEquals(
+            R.string.track_notif_armed_title,
+            trackingNotifTitleRes(recording = false, armed = true, paused = true),
+        )
+        assertEquals(
+            R.string.track_notif_locate_title,
+            trackingNotifTitleRes(recording = false, armed = false, paused = true),
+        )
+    }
+
+    @Test
+    fun notifContentSpecPinsStateToResourceIdOrProgress() {
+        // The content spec (pure): recording+unpaused shows the raw progress line plus
+        // the current pace (resolved via track_notif_progress_pace); paused selects the
+        // parameterized "Paused · %1$s" resource with the progress as its arg (also the
+        // notifyIfChanged throttle key, so a pause toggle re-posts); a lost signal while
+        // recording shows the signal-lost line; armed/locate pin their fixed resources.
+        // Asserting the real R.string ids pins the wiring itself, not just the branch logic.
+        val progress = "2:00 · 1.00 km"
+        val pace = "5:45 /km"
+        fun spec(recording: Boolean, armed: Boolean, paused: Boolean, signalLost: Boolean = false, progress: String? = "2:00 · 1.00 km", paceNow: String? = pace) =
+            trackingNotifContentSpec(recording, armed, paused, signalLost, progress, paceNow)
+        assertEquals(
+            NotifContentSpec.Progress(progress, pace),
+            spec(recording = true, armed = false, paused = false),
+        )
+        // No current pace yet (standing still / fresh segment): progress without pace.
+        assertEquals(
+            NotifContentSpec.Progress(progress, null),
+            spec(recording = true, armed = false, paused = false, paceNow = null),
+        )
+        assertEquals(
+            NotifContentSpec.PausedProgress(R.string.track_notif_paused_content, progress),
+            spec(recording = true, armed = false, paused = true),
+        )
+        // A lost GPS signal while actively recording replaces the progress line, so the
+        // lock screen shows it; a pause outranks it (nothing is expected to record).
+        assertEquals(
+            NotifContentSpec.Literal(R.string.track_notif_signal_lost),
+            spec(recording = true, armed = false, paused = false, signalLost = true),
+        )
+        assertEquals(
+            NotifContentSpec.PausedProgress(R.string.track_notif_paused_content, progress),
+            spec(recording = true, armed = false, paused = true, signalLost = true),
+        )
+        // Paused / signal loss only fold while recording; the armed/locate copy is fixed.
+        assertEquals(
+            NotifContentSpec.Literal(R.string.track_notif_armed_text),
+            spec(recording = false, armed = true, paused = true, signalLost = true),
+        )
+        assertEquals(
+            NotifContentSpec.Literal(R.string.track_notif_locate_text),
+            spec(recording = false, armed = false, paused = true, signalLost = true),
+        )
+        // Null progress (no two-fix track yet) falls back to a state-appropriate
+        // literal instead of an empty/absent progress line.
+        assertEquals(
+            NotifContentSpec.Literal(R.string.track_notif_paused_text),
+            spec(recording = true, armed = false, paused = true, progress = null),
+        )
+        assertEquals(
+            NotifContentSpec.Literal(R.string.track_notif_recording_hint),
+            spec(recording = true, armed = false, paused = false, progress = null),
+        )
+    }
+
+    @Test
+    fun signalLossIsDueOnlyPastTheThresholdAndAfterAFix() {
+        // Shared by the in-app pill and the service's screen-off watchdog.
+        assertFalse("no fix yet → nothing lost", signalLossDue(lastFixElapsedMs = 0L, nowElapsedMs = 60_000L))
+        assertFalse("at the threshold is not yet lost", signalLossDue(10_000L, 10_000L + SIGNAL_LOSS_MS))
+        assertTrue("past the threshold is lost", signalLossDue(10_000L, 10_000L + SIGNAL_LOSS_MS + 1))
+        assertTrue("warned before the 30 s segment break", SIGNAL_LOSS_MS < 30_000L)
+    }
+
+    /** Feed [seconds] of 1 Hz fixes moving north at [mps] (0 = standing still), starting
+     *  from [state] = (lat, tSec); returns the new state. */
+    private fun runFor(state: Pair<Double, Long>, seconds: Int, mps: Double): Pair<Double, Long> {
+        val degPerM = 1.0 / 111_194.93 // metres → degrees of latitude at R = 6371 km
+        var (lat, t) = state
+        repeat(seconds) {
+            lat += mps * degPerM
+            t += 1
+            RunSession.add(GpsPoint(lat, 13.4, t, 5.0), t * 1_000_000_000L)
+        }
+        return lat to t
+    }
+
+    @Test
+    fun currentPaceFollowsASurgeWhileTheAverageBarelyMoves() {
+        RunSession.reset()
+        RunSession.add(GpsPoint(52.5, 13.4, 0, 5.0), 0L)
+        // 10 min steady at 5:00/km (3.333 m/s), then a 60 s surge at 4:00/km (4.1667 m/s).
+        var s = runFor(52.5 to 0L, 600, 1000.0 / 300.0)
+        assertEquals("steady: now ≈ 5:00/km", 5.0, RunSession.currentPaceMinPerKm.value, 0.05)
+        s = runFor(s, 60, 1000.0 / 240.0)
+        assertEquals("surge: now ≈ 4:00/km within one window", 4.0, RunSession.currentPaceMinPerKm.value, 0.05)
+        val avg = averagePaceMinPerKm(RunSession.elapsedSec.value, RunSession.distanceKm.value)
+        assertTrue("average barely moves (still ~4:53/km, not 4:00): $avg", avg > 4.8)
+        // Standing still for a full window: nothing is moving "now" → unknown, rendered "-".
+        runFor(s, 61, 0.0)
+        assertFalse(
+            "standing still → no current pace",
+            RunSession.currentPaceMinPerKm.value.isFinite(),
+        )
+        RunSession.reset()
+        assertFalse("reset clears the current pace", RunSession.currentPaceMinPerKm.value.isFinite())
+    }
+
+    @Test
+    fun currentPaceRestartsAfterAPauseBoundary() {
+        RunSession.reset()
+        RunSession.add(GpsPoint(52.5, 13.4, 0, 5.0), 0L)
+        val s = runFor(52.5 to 0L, 120, 1000.0 / 300.0)
+        assertTrue(RunSession.currentPaceMinPerKm.value.isFinite())
+        // Pause: the next accepted fix opens a new segment, so pre-pause legs are not "now".
+        RunSession.markResumeBoundary()
+        runFor(s, 1, 1000.0 / 300.0)
+        assertFalse(
+            "a fresh segment has no current pace until a window of new legs builds",
+            RunSession.currentPaceMinPerKm.value.isFinite(),
+        )
+        RunSession.reset()
+    }
+
+    @Test
+    fun restoreForcesArmedFalse() {
+        // A recovered run is already recording, never armed: restore() must clear the
+        // arm flag even if a crash left it set.
+        RunSession.reset()
+        RunSession.armed.value = true
+        val pts = listOf(
+            GpsPoint(52.5200, 13.4050, 0, 5.0),
+            GpsPoint(52.5203, 13.4050, 10, 5.0),
+        )
+        RunSession.restore(pts)
+        assertFalse("armed forced off on restore", RunSession.armed.value)
+        assertTrue("restored run is recording", RunSession.tracking.value)
+        RunSession.reset()
     }
 
     @Test
@@ -197,6 +408,83 @@ class RunTrackingUnitTest {
             RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
         }
         assertEquals(6L, RunSession.elapsedSec.value)
+        RunSession.reset()
+    }
+
+    @Test
+    fun theReviewMovingTimeIsTheWholeSecondTrackTheCoreDerivesFrom() {
+        RunSession.reset()
+        val degPerM = 1.0 / 111_320.0
+        var lon = 0.0
+        // 80 legs, 1 s apart by their fix stamps but 995 ms apart on the monotonic
+        // clock: the live clock floors 79.6 s to 79, the saved run lasts 80 s.
+        RunSession.add(GpsPoint(0.0, lon, 1_000, 5.0), 0L)
+        for (t in 1..80) {
+            lon += 3.0 * degPerM
+            RunSession.add(GpsPoint(0.0, lon, 1_000L + t, 5.0), t * 995_000_000L)
+        }
+        assertEquals(79L, RunSession.elapsedSec.value)
+        assertEquals(80L, recordedMovingSec(RunSession.decimatedTrackForCore(), RunSession.decimatedSegmentStarts()))
+        // A pause bridge into a new segment adds no moving time, nor does a standing leg.
+        val pts = listOf(
+            GpsPoint(0.0, 0.0, 0, 5.0),
+            GpsPoint(0.0, 30.0 * degPerM, 10, 5.0),
+            GpsPoint(0.0, 300.0 * degPerM, 100, 5.0),
+            GpsPoint(0.0, 300.5 * degPerM, 110, 5.0),
+            GpsPoint(0.0, 330.5 * degPerM, 120, 5.0),
+        )
+        assertEquals(20L, recordedMovingSec(pts, listOf(2)))
+        RunSession.reset()
+    }
+
+    @Test
+    fun theReviewRouteSplitsAtPausesAndTheGateCaptionExplainsOnlyWhatIsOn() {
+        val pts = (0..4).map { GpsPoint(52.0 + it * 0.0003, 13.0, it * 10L, 5.0) }
+        // A pause opened a new segment at index 3: no bridging line across it.
+        val segs = trackSegments(pts, listOf(3))
+        assertEquals(listOf(3, 2), segs.map { it.size })
+        assertEquals(pts[3].lat, segs[1].first().lat, 0.0)
+        assertEquals(30L, segs[1].first().timeSec)
+        assertEquals(listOf(5), trackSegments(pts, emptyList()).map { it.size })
+        assertTrue(trackSegments(emptyList(), listOf(0)).isEmpty())
+
+        assertEquals(R.string.track_gates_caption_none, startGatesCaptionRes(precise = false, moving = false))
+        assertEquals(R.string.track_gates_caption_precise, startGatesCaptionRes(precise = true, moving = false))
+        assertEquals(R.string.track_gates_caption_moving, startGatesCaptionRes(precise = false, moving = true))
+        assertEquals(R.string.track_gates_caption_both, startGatesCaptionRes(precise = true, moving = true))
+    }
+
+    @Test
+    fun stationaryGapDoesNotSlowTheCurrentPaceBucket() {
+        RunSession.reset()
+        RunSession.setPaceBucketMinutes(1) // 1-min slices from the default 4
+        val degPerM = 1.0 / 111_320.0
+        var lon = 0.0
+        // 30 s of moving at 3 m/s → an OPEN (partial) 30 s slice at ~5.56 min/km.
+        RunSession.add(GpsPoint(0.0, lon, 0, 5.0), 0L)
+        for (t in 1..30) {
+            lon += 3.0 * degPerM
+            RunSession.add(GpsPoint(0.0, lon, t.toLong(), 5.0), t * 1_000_000_000L)
+        }
+        val before = RunSession.paceBucketsFlow.value.last()
+        assertFalse("open trailing slice", before.complete)
+        // 120 s standing still at 1 Hz: the fix drifts within a ~±2 m envelope but every
+        // consecutive-fix step is well below the 0.5 m/s stop floor (a real stationary
+        // GPS wanders slowly, not by whole metres/s), and each 1 s dt is under the 30 s
+        // segment-break gap, so no boundary opens either. Every such leg must be DROPPED
+        // from the pace accumulator: standing at a red light must not slow the slice.
+        for (t in 31..150) {
+            val latOff = 2.0 * degPerM * kotlin.math.sin(2.0 * Math.PI * (t - 30) / 60.0)
+            RunSession.add(GpsPoint(0.0 + latOff, lon, t.toLong(), 5.0), t * 1_000_000_000L)
+        }
+        val after = RunSession.paceBucketsFlow.value.last()
+        assertFalse("still the same open slice, never a fabricated full one", after.complete)
+        assertEquals("stationary gap adds no moving time to the slice", before.minutes, after.minutes, 1e-9)
+        assertEquals("stationary gap does not slow the pace", before.paceMinPerKm, after.paceMinPerKm, 1e-9)
+        // No slice ever completed from the idle stretch.
+        assertTrue("no completed slice from an idle stretch", RunSession.paceBucketsFlow.value.none { it.complete })
+        // The incremental output still equals a from-scratch recompute over the track.
+        assertEquals(RunSession.paceBuckets(1), RunSession.paceBucketsFlow.value)
         RunSession.reset()
     }
 
@@ -341,7 +629,7 @@ class RunTrackingUnitTest {
         RunSession.reset()
     }
 
-    // ── I15/B2: trackForCore sends TRUE coords + segment starts (no re-anchor) ──
+    // ── trackForCore sends TRUE coords + segment starts (no re-anchor) ──
 
     @Test
     fun trackForCoreKeepsTrueCoordsAndReportsSegmentStarts() {
@@ -399,7 +687,7 @@ class RunTrackingUnitTest {
         RunSession.reset()
     }
 
-    // ── External review (2026-08-04): tracker save-date, short-run gate, ──────────
+    // ── tracker save-date, short-run gate, ──────────
     // ── non-monotonic-fix drop, sidecar recovery thinning ────────────────────────
 
     @Test
@@ -477,18 +765,17 @@ class RunTrackingUnitTest {
         RunSession.reset()
     }
 
-    // ── External review (2026-08-06) P3: append-only storage + incremental pace ──
-    // ── buckets. The saved track must stay byte-identical, and the incremental  ──
+    // ── append-only storage + incremental pace buckets. The saved track must ──
+    // ── stay unchanged, and the incremental                                  ──
     // ── accumulator must equal a from-scratch recompute over the whole track.   ──
 
     @Test
     fun incrementalPaceBucketsMatchTheReferenceFunctionAcrossBoundaryAndJitter() {
-        // The pace buckets are now folded in one leg at a time as fixes arrive
-        // (O(1) amortised) instead of RunSession.paceBuckets() rescanning the whole
-        // track each fix. This proves the incremental output (paceBucketsFlow) is
-        // bit-identical to the retained reference function over a run that exercises
-        // every path: normal legs, a pause boundary (dropped), a jitter spike
-        // (capped), multiple completed slices + a partial tail.
+        // The pace buckets are folded in one leg at a time as fixes arrive (O(1)
+        // amortised). This proves the incremental output (paceBucketsFlow) is
+        // bit-identical to the from-scratch reference at the bottom of this file over
+        // a run that exercises every path: normal legs, a pause boundary (dropped), a
+        // jitter spike (capped), multiple completed slices + a partial tail.
         RunSession.reset()
         RunSession.setPaceBucketMinutes(1) // 1-min slices from the default 4
         val degPerM = 1.0 / 111_320.0
@@ -532,7 +819,7 @@ class RunTrackingUnitTest {
         // dropped non-monotonic fix never appears; a pause boundary is reported),
         // and the of-record saved forms (trackForCore / decimatedTrackForCore /
         // segmentStartIndices) are pure functions of that list, so a run built
-        // through add() is byte-identical to the old prev+p semantics.
+        // through add() is identical to the old prev+p semantics.
         RunSession.reset()
         val expected = ArrayList<GpsPoint>()
         val degPerM = 1.0 / 111_320.0
@@ -581,4 +868,223 @@ class RunTrackingUnitTest {
         val small = pts.take(100)
         assertEquals(small, ActiveRunStore.thinForRecovery(small, 5400))
     }
+
+    // ── TrackSnapshot.equals honours the List contract ──────────────────────────
+    @Test
+    fun trackSnapshotEqualsHonoursTheListContract() {
+        // equals used to mix array-identity (two snapshots) with element-wise List
+        // semantics (snapshot vs plain List), breaking transitivity: two equal-content
+        // snapshots on DIFFERENT backing arrays compared UNEQUAL while each compared
+        // EQUAL to a plain List of the same fixes.
+        val p1 = GpsPoint(52.5200, 13.4050, 0, 5.0)
+        val p2 = GpsPoint(52.5203, 13.4050, 10, 5.0)
+        // Each run resets to a FRESH backing array, so these two snapshots hold the
+        // same fixes on distinct arrays — the transitivity-breaking case.
+        RunSession.reset()
+        RunSession.add(p1, 0L)
+        RunSession.add(p2, 10_000_000_000L)
+        val snapA = RunSession.points.value
+        RunSession.reset()
+        RunSession.add(p1, 0L)
+        RunSession.add(p2, 10_000_000_000L)
+        val snapB = RunSession.points.value
+        val plain = listOf(p1, p2)
+
+        // Equal content on distinct arrays ⇒ equal (the fix; the old backing-identity
+        // fast path short-circuited to false here).
+        assertEquals(snapA, snapB)
+        assertEquals(snapB, snapA)
+        // Symmetric with a plain List, both directions.
+        assertEquals(plain, snapA)
+        assertEquals(snapA, plain)
+        // hashCode consistent with equals, and with a plain List's element-wise hash.
+        assertEquals(snapA.hashCode(), snapB.hashCode())
+        assertEquals(plain.hashCode(), snapA.hashCode())
+        // Different content stays unequal.
+        RunSession.reset()
+        RunSession.add(p1, 0L)
+        val snapShort = RunSession.points.value
+        assertNotEquals(snapA, snapShort)
+    }
+
+    @Test
+    fun non_monotonic_fix_is_rejected_and_not_persisted() {
+        RunSession.reset()
+        // Seed the track with one fix (monotonic base at 10 s).
+        assertTrue(RunSession.add(GpsPoint(52.5200, 13.4050, 0, 5.0), 10_000_000_000L))
+        val before = RunSession.points.value.size
+        // A later fix stamped BEFORE it on the monotonic elapsedRealtime timebase is a
+        // batch-reorder artefact: add drops it and returns false, so the crash sidecar
+        // (which mirrors only add's accepted fixes) never persists it.
+        assertFalse(RunSession.add(GpsPoint(52.5300, 13.4050, 5, 5.0), 5_000_000_000L))
+        assertEquals(before, RunSession.points.value.size)
+        RunSession.reset()
+    }
+
+    // ── locate-failure latch ─────────────────────────────────────────────────────
+
+    @Test
+    fun resetClearsTheLocateFailureLatch() {
+        // A failed location start latches so the screen stops re-launching the
+        // service into the same failure; leaving the tracker must not carry the latch
+        // into the next session.
+        RunSession.locationFailed.value = true
+        RunSession.reset()
+        assertFalse(RunSession.locationFailed.value)
+    }
+
+    // ── live pace vs the plan's range ────────────────────────────────────────────
+
+    @Test
+    fun paceCueComparesTheRollingPaceWithThePlanRange() {
+        // Plan range 5:00–6:00 /km (300–360 s/km).
+        assertEquals(PaceCue.OnTarget, paceCue(5.5, 300, 360))
+        assertEquals("bounds are on target", PaceCue.OnTarget, paceCue(5.0, 300, 360))
+        assertEquals(PaceCue.OnTarget, paceCue(6.0, 300, 360))
+        assertEquals("slower than the range → speed up", PaceCue.SpeedUp, paceCue(6.5, 300, 360))
+        assertEquals("faster than the range → ease off", PaceCue.EaseOff, paceCue(4.5, 300, 360))
+        // Bound order doesn't matter.
+        assertEquals(PaceCue.SpeedUp, paceCue(6.5, 360, 300))
+        // Nothing to judge: no current pace, or no pace range on the plan.
+        assertEquals(null, paceCue(Double.NaN, 300, 360))
+        assertEquals(null, paceCue(5.5, 0, 0))
+    }
+
+    // ── "X to go" on a single-step planned run ──────────────────────────────────
+
+    @Test
+    fun singleStepPlanDistanceComesFromTheRunHead() {
+        val easy = PrescriptionView(
+            summary = "7 km · 6:03–7:14 /km (easy) · HR 120–146 bpm",
+            exercise = "Easy run",
+            run_head = "7 km",
+            face_lead = "7 km",
+            run_head_km = 7.0,
+        )
+        assertEquals(7.0, plannedRunKm(easy)!!, 1e-9)
+        assertEquals(7.0, singleStepPlanKm(easy)!!, 1e-9)
+        // A warm-up + reps + cool-down guide carries its own per-step countdown.
+        val reps = easy.copy(
+            summary = "6 × 800 m · 3:40–3:50 /km",
+            run_head = "6 × 800 m",
+            face_lead = "6 × 800 m",
+            run_head_km = null,
+            run_structure = RunStructureView(reps = 6, rep_m = 800, recovery_sec = 120, warmup_min = 15, cooldown_min = 10),
+        )
+        assertEquals(null, singleStepPlanKm(reps))
+        // A head that is not a plain distance gives no planned distance.
+        assertEquals(null, plannedRunKm(reps))
+    }
+
+    @Test
+    fun planHeadlineReexpressesTheLeadDistanceInTheUserUnit() {
+        val easy = PrescriptionView(summary = "7 km · 6:03–7:14 /km (easy)", exercise = "Easy run", face_lead = "7 km", run_head = "7 km", run_head_km = 7.0)
+        assertEquals("Easy run · 7 km", runPlanHeadline(easy, DistanceUnit.Km))
+        assertEquals("Easy run · 4.3 mi", runPlanHeadline(easy, DistanceUnit.Mi))
+        // A structural head stays as the core wrote it.
+        val reps = easy.copy(face_lead = "6 × 800 m", run_head = "6 × 800 m", run_head_km = null)
+        assertEquals("Easy run · 6 × 800 m", runPlanHeadline(reps, DistanceUnit.Mi))
+    }
+
+    @Test
+    fun theUntrimmedWindowReadsTheRunsOfRecordDistance() {
+        // The raw parsed track (14.0 km) runs a little long of the core's QC'd moving
+        // distance (13.97 km): the whole window reads the History figure exactly, so
+        // "Keeps 8.68 mi" matches the list, not a raw 8.70.
+        val record = 13.97
+        assertEquals(record, trimPreviewShare(14.0, 14.0, record), 0.0)
+        assertEquals(runDistLabel(record, DistanceUnit.Mi), runDistLabel(trimPreviewShare(14.0, 14.0, record), DistanceUnit.Mi))
+        // Half the raw track keeps half the of-record distance.
+        assertEquals(record / 2.0, trimPreviewShare(7.0, 14.0, record), 1e-12)
+        // Unknown totals fall back to the raw window.
+        assertEquals(3.0, trimPreviewShare(3.0, 0.0, record), 0.0)
+        assertEquals(3.0, trimPreviewShare(3.0, 14.0, 0.0), 0.0)
+    }
+
+    @Test
+    fun trimKeepsReadsMovingTimeNotTheWallClockSpanOfAPausedRun() {
+        // 60 s of running (30 m every 10 s), 20 s standing still, a pause, then
+        // another 60 s of running: 4:20 on the wall clock, 2:00 moving.
+        val degPerM = 1.0 / 111_195.0
+        val seg1 = (0..6).map { GpxFix(47.0 + it * 30.0 * degPerM, 8.0, it * 10L, null) } +
+            GpxFix(47.0 + 180.0 * degPerM, 8.0, 80L, null)
+        val seg2 = (0..6).map { GpxFix(47.01 + it * 30.0 * degPerM, 8.0, 200L + it * 10L, null) }
+        val points = timedTrackFromSegments(listOf(seg1, seg2))
+        val last = points.lastIndex
+        assertEquals(260L, points[last].timeSec - points[0].timeSec)
+        assertEquals(120.0, points[last].movingSec, 0.0)
+
+        // The untouched window reads the run detail's moving time, not "4:20".
+        assertEquals("2:00", fmtRunTime(trimKeptMovingSec(points, 0, last, recordSec = 120.0)))
+        // The core's QC'd figure wins over the raw track's, as for distance.
+        assertEquals(118, trimKeptMovingSec(points, 0, last, recordSec = 118.0))
+        // Trimming the first segment away keeps only the second one's minute.
+        assertEquals(60, trimKeptMovingSec(points, seg1.size, last, recordSec = 120.0))
+        // Keeping the first segment drops the standing tail and the pause with the second.
+        assertEquals(60, trimKeptMovingSec(points, 0, seg1.size - 1, recordSec = 120.0))
+        // Unknown of-record time falls back to the raw moving seconds.
+        assertEquals(120, trimKeptMovingSec(points, 0, last, recordSec = 0.0))
+        // Fewer than two kept fixes keep no time.
+        assertEquals(0, trimKeptMovingSec(points, 3, 3, recordSec = 120.0))
+        assertEquals(0, trimKeptMovingSec(points, -1, -1, recordSec = 120.0))
+    }
+}
+
+// ── Test-only reference oracles (kept out of the APK) ───────────────────────────
+
+/** Path length over the raw fixes, km (an unclamped, ungated haversine sum): the
+ *  reference the live accumulators are pinned against. */
+private fun haversineKm(points: List<GpsPoint>): Double {
+    if (points.size < 2) return 0.0
+    var total = 0.0
+    for (i in 1 until points.size) total += segmentKm(points[i - 1], points[i])
+    return total
+}
+
+/** The pause-boundary indices of the live track, sorted (no decimation). */
+private fun RunSession.segmentStartIndices(): List<Int> = decimatedSegmentStarts(Int.MAX_VALUE)
+
+/**
+ * From-scratch per-N-minute pace slices over the whole track: the spec the
+ * incremental [RunSession.paceBucketsFlow] must equal after any sequence. A slice is
+ * [bucketMinutes] of MOVING time; pause-bridge legs are dropped whole, standing-still
+ * legs (below [MIN_MOVING_SPEED_MPS]) accrue nothing, jitter legs are capped at
+ * [MAX_PLAUSIBLE_SPEED_MPS]·dt, and a leg straddling a slice edge is split by time.
+ */
+private fun RunSession.paceBuckets(bucketMinutes: Int): List<PaceBucket> {
+    val pts = points.value
+    val starts = segmentStartIndices().toHashSet()
+    val n = bucketMinutes.coerceAtLeast(1)
+    val bucketSec = n * 60.0
+    if (pts.size < 2) return emptyList()
+    val out = ArrayList<PaceBucket>()
+    var curSec = 0.0
+    var curKm = 0.0
+    for (i in 1 until pts.size) {
+        if (i in starts) continue
+        var legSec = (pts[i].observedAt - pts[i - 1].observedAt).toDouble()
+        if (legSec <= 0.0) continue
+        var legKm = segmentKm(pts[i - 1], pts[i])
+        if (legKm * 1000.0 / legSec < MIN_MOVING_SPEED_MPS) continue
+        val maxKm = MAX_PLAUSIBLE_SPEED_MPS * legSec / 1000.0
+        if (legKm > maxKm) legKm = maxKm
+        while (curSec + legSec >= bucketSec) {
+            val take = bucketSec - curSec
+            val frac = if (legSec > 0.0) take / legSec else 0.0
+            val kmChunk = legKm * frac
+            curKm += kmChunk
+            out.add(PaceBucket(paceMinPerKm = n / curKm, minutes = n.toDouble(), complete = true))
+            legSec -= take
+            legKm -= kmChunk
+            curSec = 0.0
+            curKm = 0.0
+        }
+        curSec += legSec
+        curKm += legKm
+    }
+    if (curSec > 0.0) {
+        val minutes = curSec / 60.0
+        out.add(PaceBucket(paceMinPerKm = minutes / curKm, minutes = minutes, complete = false))
+    }
+    return out
 }

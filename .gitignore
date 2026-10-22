@@ -9,6 +9,8 @@
 # Machine-local cargo config (absolute NDK/SDK paths, not portable).
 /.cargo/
 
-# Untracked local project files (instructions, CI drafts, design notes, research KB, planning docs).
+# Untracked local project files (instructions, design notes, research KB, planning docs).
 /planning/
-/.github/
+
+# Overnight AUR dependency-check logs, scratch output.
+aur-check-*.log

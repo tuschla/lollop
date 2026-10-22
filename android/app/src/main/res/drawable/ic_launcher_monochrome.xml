@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 1-color milestone mark (design/brand/milestone-mark-1color.svg) rendered
+<!-- 1-color lollop mark (design/brand/lollop-mark-1color.svg) rendered
      white for the themed-icon (monochrome) adaptive layer; the launcher only
      uses its alpha. Same safe-zone group transform as the foreground layer. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"

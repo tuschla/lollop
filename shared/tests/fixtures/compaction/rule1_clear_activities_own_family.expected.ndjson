@@ -1,0 +1,2 @@
+{"LogSet":{"exercise":"Bench","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":1760000000,"entry_id":123,"hold_sec":null}}
+{"LogActivity":{"kind":"Cycling","minutes":30.0,"vigorous":false,"strengthening":false,"observed_at":1760090000,"entry_id":125}}

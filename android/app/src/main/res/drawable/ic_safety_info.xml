@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Info mark for a calm notice (the under-18 plan pause): a ring with an "i",
+     drawn white like ic_safety_warning_triangle; tint at the call site. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M12,3 a9,9 0 1 1 0,18 a9,9 0 1 1 0,-18 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M12 11v5.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M10.8,7.6 a1.2,1.2 0 1 1 2.4,0 a1.2,1.2 0 1 1 -2.4,0 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

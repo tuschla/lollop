@@ -1,0 +1,4666 @@
+{
+  "safety_tier": null,
+  "train_blocked": false,
+  "hold_reason": null,
+  "checked_in_today": false,
+  "adjustments": [],
+  "review_adjustments": [],
+  "review_present": false,
+  "weekly_checkin_present": false,
+  "input_count": 0,
+  "lifts": [
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 12,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 68.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": null,
+      "e1rm_direction": null,
+      "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
+      "observed_at": 1726509600,
+      "entry_id": 1,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 12,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 68.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
+      "observed_at": 1726509600,
+      "entry_id": 2,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 12,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 68.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
+      "observed_at": 1726509600,
+      "entry_id": 3,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Pull-up",
+      "weight_kg": 0.0,
+      "reps": 6,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 79.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": null,
+      "e1rm_direction": null,
+      "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
+      "observed_at": 1726509600,
+      "entry_id": 4,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Pull-up",
+      "weight_kg": 0.0,
+      "reps": 6,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 79.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
+      "observed_at": 1726509600,
+      "entry_id": 5,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Pull-up",
+      "weight_kg": 0.0,
+      "reps": 6,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 79.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
+      "observed_at": 1726509600,
+      "entry_id": 6,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Squat",
+      "weight_kg": 0.0,
+      "reps": 20,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 58.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": null,
+      "e1rm_direction": null,
+      "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
+      "observed_at": 1726682400,
+      "entry_id": 7,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Squat",
+      "weight_kg": 0.0,
+      "reps": 20,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 58.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
+      "observed_at": 1726682400,
+      "entry_id": 8,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Squat",
+      "weight_kg": 0.0,
+      "reps": 20,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 58.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
+      "observed_at": 1726682400,
+      "entry_id": 9,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 14,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 65.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
+      "observed_at": 1726855200,
+      "entry_id": 10,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 14,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 65.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
+      "observed_at": 1726855200,
+      "entry_id": 11,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 14,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 65.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
+      "observed_at": 1726855200,
+      "entry_id": 12,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 12,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 68.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
+      "observed_at": 1727114400,
+      "entry_id": 13,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 12,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 68.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
+      "observed_at": 1727114400,
+      "entry_id": 14,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 12,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 68.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
+      "observed_at": 1727114400,
+      "entry_id": 15,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Pull-up",
+      "weight_kg": 0.0,
+      "reps": 6,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 79.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
+      "observed_at": 1727114400,
+      "entry_id": 16,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Pull-up",
+      "weight_kg": 0.0,
+      "reps": 6,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 79.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
+      "observed_at": 1727114400,
+      "entry_id": 17,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Pull-up",
+      "weight_kg": 0.0,
+      "reps": 6,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 79.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
+      "observed_at": 1727114400,
+      "entry_id": 18,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Squat",
+      "weight_kg": 0.0,
+      "reps": 20,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 58.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
+      "observed_at": 1727287200,
+      "entry_id": 19,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Squat",
+      "weight_kg": 0.0,
+      "reps": 20,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 58.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
+      "observed_at": 1727287200,
+      "entry_id": 20,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Squat",
+      "weight_kg": 0.0,
+      "reps": 20,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 58.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
+      "observed_at": 1727287200,
+      "entry_id": 21,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 14,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 65.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
+      "observed_at": 1727460000,
+      "entry_id": 22,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 14,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 65.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
+      "observed_at": 1727460000,
+      "entry_id": 23,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 14,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 65.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
+      "observed_at": 1727460000,
+      "entry_id": 24,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 12,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 68.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
+      "observed_at": 1727719200,
+      "entry_id": 25,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 12,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 68.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
+      "observed_at": 1727719200,
+      "entry_id": 26,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 12,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 68.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
+      "observed_at": 1727719200,
+      "entry_id": 27,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Pull-up",
+      "weight_kg": 0.0,
+      "reps": 6,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 79.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
+      "observed_at": 1727719200,
+      "entry_id": 28,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Pull-up",
+      "weight_kg": 0.0,
+      "reps": 6,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 79.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
+      "observed_at": 1727719200,
+      "entry_id": 29,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Pull-up",
+      "weight_kg": 0.0,
+      "reps": 6,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 79.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
+      "observed_at": 1727719200,
+      "entry_id": 30,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Squat",
+      "weight_kg": 0.0,
+      "reps": 20,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 58.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
+      "observed_at": 1727892000,
+      "entry_id": 31,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Squat",
+      "weight_kg": 0.0,
+      "reps": 20,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 58.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
+      "observed_at": 1727892000,
+      "entry_id": 32,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Squat",
+      "weight_kg": 0.0,
+      "reps": 20,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 58.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
+      "observed_at": 1727892000,
+      "entry_id": 33,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 14,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 65.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
+      "observed_at": 1728064800,
+      "entry_id": 34,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 14,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 65.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
+      "observed_at": 1728064800,
+      "entry_id": 35,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Push-up",
+      "weight_kg": 0.0,
+      "reps": 14,
+      "rpe": 8.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 65.0,
+      "rir": 2.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": 0.0,
+      "e1rm_direction": "flat",
+      "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
+      "observed_at": 1728064800,
+      "entry_id": 36,
+      "hold_sec": null,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    },
+    {
+      "exercise": "Plank",
+      "weight_kg": 0.0,
+      "reps": 0,
+      "rpe": 7.0,
+      "e1rm_kg": 0.0,
+      "pct_1rm": 0.0,
+      "rir": 3.0,
+      "rpe_recorded": true,
+      "cross_check": null,
+      "e1rm_delta_kg": null,
+      "e1rm_direction": null,
+      "summary": "Plank - 30 s hold",
+      "observed_at": 1728176400,
+      "entry_id": 37,
+      "hold_sec": 30,
+      "e1rm_pr": false,
+      "tonnage_kg": 0.0
+    }
+  ],
+  "runs": [],
+  "guidance": [
+    {
+      "section": "Profile",
+      "summary": "Training age: Intermediate",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Rippetoe & Baker 2013, Practical Programming for Strength Training (3rd ed., Aasgaard)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Your experience level comes from how often you can add weight (beginner: every session; intermediate: week to week; advanced: month to month), not from how you'd label yourself.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": "Intermediate"
+    },
+    {
+      "section": "Strength",
+      "summary": "Lifting 3 days a week: 3 full-body days. Weekly sets per muscle stay the same however many days you lift, and days that train the same muscles are about 48 hours apart.",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Grgic et al. 2018, Sports Med 48(5):1207-1220 (training-frequency meta-analysis)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Lifting is planned on the number of days you actually have (2–4 or more) by spreading the same weekly volume across them: when volume is matched, how often you train has no significant effect on strength.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Starting point: 80% 1RM, each muscle 2× a week, 4 sets per muscle",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Rhea et al. 2003, MSSE",
+      "confidence": 0.9,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "How long you've been training matters most for how much training it takes to keep getting stronger.",
+        "grade_note": "Strong evidence: many good studies agree.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Strength loading: 80–100% 1RM, 1–5 reps, 3–6 sets, ~1–3 reps left",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Zatsiorsky & Kraemer 2020, Science and Practice of Strength Training (3rd ed., Human Kinetics); Haff & Triplett 2016, NSCA Essentials of Strength Training and Conditioning (4th ed.)",
+      "confidence": 0.9,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Lifting heavy is the main driver of maximal strength; moving the weight fast, or trying to, drives power.",
+        "grade_note": "Strong evidence: many good studies agree.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Set cutoff for Strength: end the set when a rep visibly slows (about 20% bar-speed loss if you track bar speed)",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Pareja-Blanco et al. 2017, Scand J Med Sci Sports 27(7):724-735 (velocity-loss thresholds)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Ending a set once bar speed drops by a fixed amount is the best-supported way to adjust how many reps you do.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Test a true 1RM only when your technique is solid and you're rested and warmed up. Lifts that load the spine, like squats and deadlifts, also need a solid brace",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Baechle & Earle 2016, Essentials of Strength Training and Conditioning (4th ed., NSCA/Human Kinetics)",
+      "confidence": 0.3,
+      "safety_critical": true,
+      "contested": false,
+      "why": {
+        "basis": "Test a one-rep max only when your technique is solid and you're recovered and warmed up (beginners with supervision; lifts that load the spine only once you can brace well). Beginners raise weights by no more than 2.5–5% on upper-body lifts and 5–10% on lower-body lifts, and should prefer an estimated max at first.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Periodization model: daily undulating (heavy, medium and light days each week)",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Matveyev 1981, Fundamentals of Sport Training & Bompa, Periodization: Theory and Methodology of Training (linear/novice)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Match the plan's structure to your level: beginners progress steadily (linear); intermediates vary the focus from day to day (undulating) or train in focused blocks; advanced lifters use focused blocks or rotating exercise methods (conjugate).",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Adding weight: +1–2.5% on upper-body lifts, +2.5–5% on lower-body lifts after each week you hit your reps",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "A common coaching rule; no published study behind the exact numbers",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "When weights follow percentages, add 2.5–5% to lower-body lifts and 1–2.5% to upper-body lifts after each successful week.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Prilepin chart at ~90% 1RM: 1–2 reps a set, 7 reps in total is optimal (range 4–10)",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "A.S. Prilepin 1974 (Soviet weightlifting research, >1,000 elite lifters)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": true,
+      "why": {
+        "basis": "Prilepin's chart sets a ceiling on total reps per session for each weight range (as a % of your one-rep max), with bar speed and form used to check the weight.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on whether Prilepin's chart, built from elite Olympic weightlifters, carries over to powerlifting lifts and beginners, so this is contested. What the app does for now: use it only as a ceiling on reps per session, checked against bar speed and technique.",
+        "improves": "Log your working sets so the app can check each session's reps against the target."
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hypertrophy",
+      "summary": "14 weekly sets → 2–3×/wk, 5–8 sets/session",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Schoenfeld/Ogborn/Krieger 2016",
+      "confidence": 0.9,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Train each muscle 2–3 times a week. Twice a week or more beats once because it fits in more weekly sets; with the same weekly sets, how often you train barely matters.",
+        "grade_note": "Strong evidence: many good studies agree.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hypertrophy",
+      "summary": "14 weekly sets per muscle: spread them over 2 or more sessions a week so each set stays good",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Remmert et al. 2025, SportRxiv preprint 537 (per-session volume meta-regressions; not peer reviewed)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Spread any weekly target above about 12 sets per muscle over 2 or more sessions.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hypertrophy",
+      "summary": "Reps and weight: big lifts 5–10 reps at 75–85% 1RM, other compound lifts 8–15 at 65–75%, single-joint lifts 12–25 at 50–70%",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Schoenfeld, Grgic, Van Every & Plotkin 2021, Sports 9(2):32 (loading recommendations)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Reps and weight by exercise: heavy multi-joint lifts 5–10 reps at 75–85% of your one-rep max, lighter multi-joint and machine lifts 8–15 at 65–75%, single-joint lifts 12–25 at 50–70%.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hypertrophy",
+      "summary": "Weekly sets for muscle growth top out at 14",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Schoenfeld, Ogborn & Krieger 2017, J Sports Sci",
+      "confidence": 0.9,
+      "safety_critical": false,
+      "contested": true,
+      "why": {
+        "basis": "More weekly sets build more muscle, with smaller gains from each extra set.",
+        "grade_note": "Strong evidence: many good studies agree. Experts still disagree on how many weekly sets keep adding muscle, so this is contested. What the app does for now: 10–20 hard sets per muscle per week. One view on the other side: More weekly sets keep adding growth with no clear ceiling (Schoenfeld & Krieger).",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hypertrophy",
+      "summary": "Fewest sets that still build muscle (Intermediate): 10–18 per muscle a week",
+      "summary_mi": "",
+      "grade": "Weak",
+      "citation": "Israetel, Hoffmann & Smith 2021, Scientific Principles of Hypertrophy Training (Renaissance Periodization)",
+      "confidence": 0.4,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "The fewest weekly sets that build muscle go up with experience: about 6–10 per muscle for beginners, 10–18 for intermediates and 12–20+ for advanced lifters, varying by person.",
+        "grade_note": "Weak evidence: based on how the body works or on observation, not direct trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Your level",
+      "summary": "Added sets still pay off for you, though less than for a beginner",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Rhea et al. 2003, MSSE",
+      "confidence": 0.9,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "How long you've been training matters most for how much training it takes to keep getting stronger.",
+        "grade_note": "Strong evidence: many good studies agree.",
+        "improves": "-"
+      },
+      "training_age": ""
+    }
+  ],
+  "feedback": null,
+  "reference": [
+    {
+      "section": "Hybrid",
+      "summary": "Two sessions on one day: ideally 6–24 h apart, at least 3 h",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125 (AMPK-mTOR molecular interference)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": true,
+      "why": {
+        "basis": "Spacing lifting and endurance sessions at least 3 hours apart (ideally 6–24) reduces how much one blunts the other in the short term.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hybrid",
+      "summary": "Keep 2–3 lift sessions a week in a running block",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Blagrove, Howatson & Hayes 2018, Sports Med",
+      "confidence": 0.9,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Strength training makes running about 2–8% more economical, so the same pace costs less energy.",
+        "grade_note": "Strong evidence: many good studies agree.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hybrid",
+      "summary": "When lifting matters as much as running: run at most 3 days a week",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Schumann et al. 2022, Sports Med 52(3):601-612 (PMID 34757594; 43-trial concurrent-training meta-analysis)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": true,
+      "why": {
+        "basis": "Keeping running to 3 days a week while strength or muscle is also a main goal is a cautious default, not a limit backed by evidence. Recent meta-analyses found that how often you combine lifting and running didn't change strength or muscle results; spacing sessions 3+ hours apart and keeping runs shorter matter more.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on how much running holds back lifting gains in real training, so this is contested. What the app does for now: shield only power and explosive work from it.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hybrid",
+      "summary": "To keep a fitness gain without building it: about 33% of the training that built it (about 2 short sessions a week)",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Bickel, Cross & Bamman 2011, Med Sci Sports Exerc 43(7):1177-1187 (adaptations retained on ~1/3 volume)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Maintaining a quality you're not focusing on takes about a third of the training that builds it (about 2 short sessions a week), which frees recovery for your main goal.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hybrid",
+      "summary": "Do your most important session when you're freshest: early in the week or right after a rest day",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125 (schedule priority quality when fresh)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Schedule your top-priority training when you're freshest: early in the week or after a rest day.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hybrid",
+      "summary": "Two sessions in one day: eat plenty of carbs between the run and the lift. Running low on carbs makes the run interfere more with your lifting",
+      "summary_mi": "",
+      "grade": "Weak",
+      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125",
+      "confidence": 0.4,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "On days with two sessions, fully refuel with carbohydrate between the endurance session and the lift; low carbohydrate stores make endurance work hold back lifting gains more.",
+        "grade_note": "Weak evidence: based on how the body works or on observation, not direct trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hybrid",
+      "summary": "Most of the year, keep strength and endurance work apart. Combine them only near a race that needs both, and accept some interference (hybrid races: 2–3 strength and 3–4 endurance sessions a week)",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Issurin 2010, Sports Med 40(3):189-206 (block periodization of qualities)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Early in a training cycle, keep strength and endurance work apart to limit interference. Closer to an event, combine them on purpose (moderate weights, high reps, short rests), accepting some interference for event-specific fitness. For hybrid races, aim for 2–3 strength and 3–4 endurance sessions a week.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hybrid",
+      "summary": "In a peak strength or power block: 2–3 easy runs a week, no hard intervals, and long runs at least 24 hours from heavy leg days",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Jones et al. 2013 (endurance-frequency dose-response for interference)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": true,
+      "why": {
+        "basis": "When lifting and running share a week, keep long or hard runs at least 24 hours away from heavy leg sessions, in both directions. When you run 4 or more days or 40+ km (25+ miles) a week, cap lower-body lifting at 2 sessions a week and trim lower-body muscle-building volume by about 20–33%.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Safety",
+      "summary": "Never ramp up high running volume and heavy lifting fast in the same week. The combined strain of both on tendons has not been studied, so build one and hold the other",
+      "summary_mi": "",
+      "grade": "Weak",
+      "citation": "Baar 2014 (evidence gap noted)",
+      "confidence": 0.4,
+      "safety_critical": true,
+      "contested": false,
+      "why": {
+        "basis": "No study has tested how combined training affects tendon stiffness, so go carefully when raising high running volume and heavy lifting at the same time.",
+        "grade_note": "Weak evidence: based on how the body works or on observation, not direct trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Safety",
+      "summary": "Eat enough for your training: under-eating (RED-S) is more likely if you run a lot, are lean, or are female",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Mountjoy et al. 2023, Br J Sports Med 57(17):1073-1097 (IOC RED-S consensus)",
+      "confidence": 0.3,
+      "safety_critical": true,
+      "contested": false,
+      "why": {
+        "basis": "Eat enough to cover your training and avoid under-eating (RED-S), especially if you do a lot of endurance work, are lean or are female, so you don't add to the risk of a bone stress injury.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Peak taper: cut volume 41–60% over 8–14 days, hold intensity",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Bosquet et al. 2007, Med Sci Sports Exerc 39(8):1358-1365 (taper meta-analysis)",
+      "confidence": 0.9,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "A taper is the best-supported way to peak for an event: 2 weeks, cutting volume by 41–60% on an exponential curve while keeping intensity and how often you train.",
+        "grade_note": "Strong evidence: many good studies agree.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Last near-max deadlift 10–14 days out from a meet",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Travis et al. 2020/2021",
+      "confidence": 0.65,
+      "safety_critical": true,
+      "contested": false,
+      "why": {
+        "basis": "Do your last near-max deadlift 10–14 days before a test or meet; it's very tiring and slow to recover from.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "PAP: rest 5–7 min between the heavy set and the jump or sprint",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Seitz & Haff 2016, Sports Med 46(2):231-240",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Pairing a heavy set with an explosive one: rest 5–7 minutes after the heavy set (about 3–7 works best), and stop pairing if the explosive set gets slower than usual.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Maintenance: train each lift 1× a week to hold strength",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Bickel, Cross & Bamman 2011, Med Sci Sports Exerc 43(7):1177-1187 (adaptations maintained on reduced volume)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "When short on time, keep how often and how hard you train, and cut extra exercises first. A muscle can be maintained on about one session a week, because keeping muscle takes far less volume than building it.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Olympic pulling derivatives: 3–5 sets × 1–3 reps at 85–100% 1RM, 3–5 min rest",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Suchomel, Nimphius & Stone 2016, Sports Med 46(10):1419-1449 (muscular strength in athletic performance)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Olympic-lift pulls: 3–5 sets of 1–3 reps at 85–100% or more of your max in the full lift (lighter for speed-focused versions), early in the session.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "RPE-anchored: top set at RPE 8, then back-off sets 10–15% lighter",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Zourdos et al. 2016, J Strength Cond Res 30(1):267-275 (RIR-based RPE)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "One heavy top set with about 2 reps left, then back-off sets at a fixed drop of 10–15% below it.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Two-for-two rule: add weight once you beat the top of the rep target by 2 or more reps on the last set for 2 sessions in a row",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Baechle & Earle 2016, Essentials of Strength Training and Conditioning (4th ed., NSCA/Human Kinetics)",
+      "confidence": 0.3,
+      "safety_critical": true,
+      "contested": false,
+      "why": {
+        "basis": "The 2-for-2 rule: add weight, in small capped steps, once you do 2 or more reps over the goal on the last set in 2 sessions in a row.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Stall: if e1RM stays flat for 2 weeks or more while you're recovering well, take a lighter week or change how your training is structured",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Rhea et al. 2003, Med Sci Sports Exerc 35(3):456-464 (dose-response by training age)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "If your one-rep max (or its estimate) stalls for 2–3 weeks despite good recovery, change how the plan is structured or take a lighter week.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Strength",
+      "summary": "Double progression: once you reach the top of the rep range on every set, add weight and drop back to the bottom of the range",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Rippetoe & Kilgore 2011, Starting Strength: Basic Barbell Training (3rd ed., Aasgaard) (novice linear increments)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Double progression: work within a rep range and add weight (dropping to the bottom of the range) once you hit the top of the range on all sets. By default, beginners add about 2.5 kg (5 lb) on upper-body lifts and 5 kg (10 lb) on lower-body lifts each session while they complete their reps.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hypertrophy",
+      "summary": "Lighter week: about 50% of your sets, ~2–4 reps left, 60–70% of your usual weights",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Israetel, Hoffmann & Smith 2021, Scientific Principles of Hypertrophy Training (Renaissance Periodization)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "A lighter week: one week at about maintenance volume (roughly half the sets), with 2–4 or more reps left, at about 60–70% of your working weights, with the same movements.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hypertrophy",
+      "summary": "Train each muscle at least 2× a week",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Mujika & Padilla 2000 (volume cut 60-90% with adaptations retained if intensity held)",
+      "confidence": 0.9,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "When cutting back, drop extra and single-joint exercises first, then sets toward the minimum that still makes progress, then sessions (keeping each muscle trained at least twice a week), then your second goal. Keep intensity, weights and main lifts until last.",
+        "grade_note": "Strong evidence: many good studies agree.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Hypertrophy",
+      "summary": "Joint pain at heavy weights: shift that muscle to 12–25 reps at 50–70% 1RM (lighter weights still build muscle)",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Schoenfeld/Grgic/Ogborn/Krieger 2017 (load-interchangeability basis)",
+      "confidence": 0.9,
+      "safety_critical": true,
+      "contested": false,
+      "why": {
+        "basis": "If a joint hurts under heavy weights, switch that muscle's work to lighter weights for 12–25 reps; muscle growth is preserved.",
+        "grade_note": "Strong evidence: many good studies agree.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Nutrition",
+      "summary": "Age 65+ protein: 1.2–1.6 g/kg/day (older muscle needs more)",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Fragala et al. 2019, JSCR 33(8):2019-2052 (NSCA position)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "For adults 65 and over, aim for at least 1.2–1.6 g of protein per kg of bodyweight a day (about 0.4 g/kg per meal), because muscles respond less to protein with age. Include fast power work for everyday function, and allow more recovery when performance hasn't bounced back.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Nutrition",
+      "summary": "Protein while eating less to lose weight (keeps muscle): 1.8–2.7 g/kg/day",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Helms et al. 2014, Int J Sport Nutr Exerc Metab 24(2):127-138",
+      "confidence": 0.9,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "When you eat less than you burn, keep your muscle by eating 1.8–2.7 g of protein per kg of bodyweight a day, keeping weights heavy, and cutting sets toward the fewest that still build muscle rather than lightening the weight.",
+        "grade_note": "Strong evidence: many good studies agree.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Nutrition",
+      "summary": "Age 65+ per-meal protein: ~0.4 g/kg (older muscle needs more)",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Fragala et al. 2019, JSCR 33(8):2019-2052 (NSCA position)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "For adults 65 and over, aim for at least 1.2–1.6 g of protein per kg of bodyweight a day (about 0.4 g/kg per meal), because muscles respond less to protein with age. Include fast power work for everyday function, and allow more recovery when performance hasn't bounced back.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Running",
+      "summary": "Couch to 5K: 3 run/walk sessions a week over 9–12 weeks, a rest day between; repeat a hard week whenever you need to",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Josh Clark 1996; NHS version",
+      "confidence": 0.3,
+      "safety_critical": true,
+      "contested": false,
+      "why": {
+        "basis": "Couch to 5K: three run/walk sessions a week for 9 weeks (10–12 if needed), at an effort you can talk at, with rest days between. Repeat any week that feels too hard.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Running",
+      "summary": "Pyramidal split (base / newer runners): 80% easy, 15% moderate, 5% hard",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Silva Oliveira, Boppre & Fonseca 2024, Sports Med 54(8):2071-2095 (intensity-distribution meta-analysis)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": true,
+      "why": {
+        "basis": "About 80% easy running is the shared core of every good mix of easy and hard training. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how runners should split their training between easy and hard, so this is contested. What the app does for now: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. One view on the other side: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Running",
+      "summary": "Polarized split (trained / peak phase): 80% easy, 5% moderate, 15% hard",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Silva Oliveira, Boppre & Fonseca 2024, Sports Med 54(8):2071-2095 (intensity-distribution meta-analysis)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": true,
+      "why": {
+        "basis": "About 80% easy running is the shared core of every good mix of easy and hard training. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how runners should split their training between easy and hard, so this is contested. What the app does for now: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. One view on the other side: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Scaling",
+      "summary": "To scale back, cut in this order: extra exercises, then sets per muscle (toward the fewest that still build muscle), then sessions per week, then your second goal, then heavy main lifts",
+      "summary_mi": "",
+      "grade": "Strong",
+      "citation": "Mujika & Padilla 2000 (volume cut 60-90% with adaptations retained if intensity held)",
+      "confidence": 0.9,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "When cutting back, drop extra and single-joint exercises first, then sets toward the minimum that still makes progress, then sessions (keeping each muscle trained at least twice a week), then your second goal. Keep intensity, weights and main lifts until last.",
+        "grade_note": "Strong evidence: many good studies agree.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Scaling",
+      "summary": "To scale up, add in this order: sets per muscle (toward the fewest that still build muscle), then sessions per week, then extra exercises, then heavy main lifts, then your second goal",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Kraemer & Ratamess 2004, Med Sci Sports Exerc 36(4):674-688 (ACSM progression models)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "When adding training, first add volume to your main goal (from the minimum toward the productive range), then sessions per week, then extra exercises or variety, then weight; take on a second goal only once the first is progressing.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Substitutions",
+      "summary": "Home / minimal equipment: match the movement pattern, then add reps near failure to make up for the lighter weight",
+      "summary_mi": "",
+      "grade": "ExpertOpinion",
+      "citation": "Rippetoe & Kilgore 2011, Starting Strength (3rd ed., Aasgaard) (movement-pattern substitution)",
+      "confidence": 0.3,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "With home or minimal equipment, swap in a lift with the same movement pattern (not the exact lift) and make up for lighter weights with more reps taken closer to failure, which largely preserves muscle growth.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        "improves": "-"
+      },
+      "training_age": ""
+    },
+    {
+      "section": "Coaching",
+      "summary": "Next steps name things you can control: pacing, effort and technique",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Williamson et al. 2022, Int Rev Sport Exerc Psychol (goal-setting meta-analysis)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": true,
+      "why": {
+        "basis": "Next steps are framed as things you control (pacing, effort, technique) rather than results; whether these beat specific result goals in sport is still debated.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on whether goals you control (pacing, effort, technique) work better in sport than specific result goals, so this is contested. What the app does for now: next steps are framed as things you control. One view on the other side: Specific, moderately difficult goals improve sport performance in a meta-analysis (Kyllo & Landers 1995), though over a third of sport studies found them no better.",
+        "improves": "-"
+      },
+      "training_age": ""
+    }
+  ],
+  "profile": {
+    "progression_cadence": "WeekToWeek",
+    "lift_goal": "MaxStrength",
+    "goal_distance": "General",
+    "concurrent_goal": "Strength",
+    "weekly_sets": 14,
+    "running_days_per_week": 0,
+    "running_km_per_week": 0.0,
+    "running_km_per_week_set": true,
+    "advanced": false,
+    "female": false,
+    "high_load_block": false,
+    "health": {
+      "youth": false,
+      "parq_positive": false,
+      "medically_cleared": false,
+      "pregnant": false,
+      "pregnancy_warning_sign": false,
+      "injury_or_rehab": false,
+      "reds_signal": false,
+      "symptomatic": false,
+      "acute_illness": false,
+      "parq_yes": 0,
+      "cleared_parq_mask": 0
+    },
+    "environment": null,
+    "env_temp_c": null,
+    "env_altitude_m": null,
+    "weeks_off": null,
+    "bodyweight_kg": 80.0,
+    "age_years": 34.0,
+    "birth_epoch_day": null,
+    "resting_hr_bpm": 52.0,
+    "measured_hr_max": null,
+    "weight_lb": false,
+    "resistance_modality": "Calisthenics",
+    "effective_from_epoch_day": null,
+    "lift_days_per_week": null,
+    "training_weekdays": null,
+    "goal_race_epoch_day": null,
+    "recent_race": null,
+    "stated_longest_recent_km": null,
+    "layoff_returned_epoch_day": null,
+    "meet_epoch_day": null,
+    "calis_equipment": null,
+    "specialization_muscle": null,
+    "runner_strength": false
+  },
+  "race_prediction": null,
+  "hypertrophy_plan": [],
+  "protein_targets": [],
+  "hr_zones": [],
+  "training_load": null,
+  "srpe_load": null,
+  "weekly_report": [],
+  "run_progress": null,
+  "lift_audit": [
+    {
+      "section": "Calisthenics",
+      "summary": "Skill tracks are optional. To start one, pick it as a starting step or log a first set: wall walks (handstand), tuck front lever, planche lean, German hang (back lever), explosive pull-ups (muscle-up).",
+      "summary_mi": "",
+      "grade": "Moderate",
+      "citation": "Oranchuk 2019 (doi:10.1111/sms.13375)",
+      "confidence": 0.65,
+      "safety_critical": false,
+      "contested": false,
+      "why": {
+        "basis": "Holds progress by lever length and seconds held (about 4–5 holds of 5–10 seconds; move up when clean at the target time). Strength from a hold is specific to that joint angle, so it isn't assumed to carry over to full movements.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        "improves": "-"
+      },
+      "training_age": ""
+    }
+  ],
+  "cooper": [],
+  "critical_speed": [],
+  "apre": [],
+  "hr_zone_input": null,
+  "protein_input": null,
+  "hypertrophy_input": null,
+  "hypertrophy_ramp": [],
+  "cooper_input": null,
+  "critical_speed_input": [],
+  "apre_input": null,
+  "trend": null,
+  "provisional": {
+    "summary": "Starting weights are typical values; they adapt as you log (day 10 of about 14).",
+    "grade": "ExpertOpinion",
+    "citation": "Kraemer & Ratamess 2004, Med Sci Sports Exerc 36(4):674-688 (ACSM progression models; individualization principle)",
+    "confidence": 0.3,
+    "safety_critical": false,
+    "contested": false,
+    "why": {
+      "basis": "Starting values come from people like you, not from you yet, so treat them as a first guess: they move toward your own numbers as you log.",
+      "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
+      "improves": "-"
+    },
+    "neutral": false,
+    "exercise": null,
+    "suggested_load_kg": null,
+    "suggests_end_exercise": false
+  },
+  "autoreg_source": null,
+  "readiness_summary": [],
+  "today_headline": {
+    "kind": "prescription",
+    "summary": "",
+    "grade": "ExpertOpinion",
+    "citation": "Low 2016, Overcoming Gravity (2nd ed.)",
+    "confidence": 0.3,
+    "safety_critical": false,
+    "contested": true,
+    "why": {
+      "basis": "Step 7/9 of the push-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Archer push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session.",
+      "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on the order of bodyweight progression steps and when to move up, so this is contested. What the app does for now: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. One view on the other side: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
+      "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
+    }
+  },
+  "signal_groups": [
+    {
+      "signal": "Rpe",
+      "group": "metric"
+    },
+    {
+      "signal": "EstimatedOneRm",
+      "group": "metric"
+    },
+    {
+      "signal": "BarVelocity",
+      "group": "metric"
+    },
+    {
+      "signal": "VelocityLoss",
+      "group": "metric"
+    },
+    {
+      "signal": "WellnessZ",
+      "group": "metric"
+    },
+    {
+      "signal": "HrvLnRmssd",
+      "group": "metric"
+    },
+    {
+      "signal": "HrvCv",
+      "group": "metric"
+    },
+    {
+      "signal": "AerobicDecoupling",
+      "group": "metric"
+    },
+    {
+      "signal": "RestingHr",
+      "group": "metric"
+    },
+    {
+      "signal": "Soreness",
+      "group": "metric"
+    },
+    {
+      "signal": "Pain",
+      "group": "red_flag"
+    },
+    {
+      "signal": "Illness",
+      "group": "red_flag"
+    },
+    {
+      "signal": "RedS",
+      "group": "red_flag"
+    },
+    {
+      "signal": "CardiacRedFlag",
+      "group": "red_flag"
+    },
+    {
+      "signal": "BoneStress",
+      "group": "red_flag"
+    }
+  ],
+  "checkin_today": null,
+  "baseline_status": [],
+  "grade_definitions": [
+    {
+      "grade": "Strong",
+      "label": "Strong",
+      "definition": "Many good studies agree.",
+      "confidence": 0.9
+    },
+    {
+      "grade": "Moderate",
+      "label": "Moderate",
+      "definition": "Some good studies support it, but it isn't settled yet.",
+      "confidence": 0.65
+    },
+    {
+      "grade": "Weak",
+      "label": "Weak",
+      "definition": "Based on how the body works or on observation, not direct trials.",
+      "confidence": 0.4
+    },
+    {
+      "grade": "ExpertOpinion",
+      "label": "Expert opinion",
+      "definition": "What experienced coaches do; not yet tested in trials.",
+      "confidence": 0.3
+    },
+    {
+      "grade": "MarketingMyth",
+      "label": "Myth",
+      "definition": "Studies contradict it, so the app never uses it.",
+      "confidence": 0.05
+    }
+  ],
+  "next_session": {
+    "epoch_day": 20003,
+    "title": "Calisthenics",
+    "session_type": "Lift(Calisthenics)",
+    "status": "next",
+    "items": [
+      {
+        "summary": "Pseudo-planche push-up: 5×5–8 · 1–2 reps left",
+        "exercise": "Pseudo-planche push-up",
+        "sets": 5,
+        "reps_low": 5,
+        "reps_high": 8,
+        "load_kg": null,
+        "intensity_label": "RIR 1–2",
+        "intensity": {
+          "RirRange": {
+            "lo": 1,
+            "hi": 2
+          }
+        },
+        "rest_sec": 180,
+        "rep_count": 0,
+        "rep_volume": "",
+        "timed_hold": false,
+        "target_rpe": 8.0,
+        "last_set": null,
+        "suggested_load_kg": null,
+        "plates_per_side": [],
+        "effort_cue": "",
+        "hold_low_sec": 0,
+        "hold_high_sec": 0,
+        "added_kg": 0.0,
+        "anchored_on": "",
+        "anchored_on_last": false,
+        "adjusted_note": "",
+        "safety_reason": "",
+        "safety_reason_mi": "",
+        "grade": "ExpertOpinion",
+        "citation": "Low 2016, Overcoming Gravity (2nd ed.)",
+        "confidence": 0.3,
+        "safety_critical": false,
+        "contested": true,
+        "why": {
+          "basis": "Step 7/9 of the push-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Archer push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session.",
+          "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on the order of bodyweight progression steps and when to move up, so this is contested. What the app does for now: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. One view on the other side: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
+          "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
+        },
+        "done": false,
+        "status": "open",
+        "sets_done": 0,
+        "logged_sets": [],
+        "ended_early": false,
+        "run_logged_km": 0.0,
+        "run_logged_min": 0.0,
+        "run_target": null,
+        "calis": {
+          "ladder": "HorizontalPush",
+          "rung": 6,
+          "rung_count": 9,
+          "easier": {
+            "rung": 5,
+            "name": "Decline push-up",
+            "target": "5–8 reps",
+            "available": true,
+            "timed_hold": false
+          },
+          "harder": {
+            "rung": 7,
+            "name": "Archer push-up",
+            "target": "5–8 reps per side",
+            "available": true,
+            "timed_hold": false
+          },
+          "load_capable": false,
+          "test_hold_sec": 0,
+          "ballistic": false,
+          "needs_effort_rating": false
+        },
+        "run_structure": null,
+        "face_name": "Pseudo-planche push-up",
+        "face_detail": "5×5–8 · 1–2 reps left",
+        "face_lead": "5×5–8",
+        "run_head": "",
+        "run_head_km": null
+      },
+      {
+        "summary": "Bench dip: 5×8–12 · 0–1 reps left",
+        "exercise": "Bench dip",
+        "sets": 5,
+        "reps_low": 8,
+        "reps_high": 12,
+        "load_kg": null,
+        "intensity_label": "RIR 0–1",
+        "intensity": {
+          "RirRange": {
+            "lo": 0,
+            "hi": 1
+          }
+        },
+        "rest_sec": 180,
+        "rep_count": 0,
+        "rep_volume": "",
+        "timed_hold": false,
+        "target_rpe": 9.0,
+        "last_set": null,
+        "suggested_load_kg": null,
+        "plates_per_side": [],
+        "effort_cue": "",
+        "hold_low_sec": 0,
+        "hold_high_sec": 0,
+        "added_kg": 0.0,
+        "anchored_on": "",
+        "anchored_on_last": false,
+        "adjusted_note": "",
+        "safety_reason": "",
+        "safety_reason_mi": "",
+        "grade": "Moderate",
+        "citation": "Kotarsky 2018 (PMID 29466268)",
+        "confidence": 0.65,
+        "safety_critical": false,
+        "contested": false,
+        "why": {
+          "basis": "Step 1/6 of the dip progression. Reaching 12 reps on every set on 2 sessions moves you up to Foot-supported dip. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+          "improves": "Log your reps (or hold time) so the plan can time your next step."
+        },
+        "done": false,
+        "status": "open",
+        "sets_done": 0,
+        "logged_sets": [],
+        "ended_early": false,
+        "run_logged_km": 0.0,
+        "run_logged_min": 0.0,
+        "run_target": null,
+        "calis": {
+          "ladder": "Dip",
+          "rung": 0,
+          "rung_count": 6,
+          "easier": null,
+          "harder": {
+            "rung": 1,
+            "name": "Foot-supported dip",
+            "target": "5–8 reps",
+            "available": true,
+            "timed_hold": false
+          },
+          "load_capable": false,
+          "test_hold_sec": 0,
+          "ballistic": false,
+          "needs_effort_rating": false
+        },
+        "run_structure": null,
+        "face_name": "Bench dip",
+        "face_detail": "5×8–12 · 0–1 reps left",
+        "face_lead": "5×8–12",
+        "run_head": "",
+        "run_head_km": null
+      },
+      {
+        "summary": "Full pull-up: 5×5–8 · 1–2 reps left",
+        "exercise": "Full pull-up",
+        "sets": 5,
+        "reps_low": 5,
+        "reps_high": 8,
+        "load_kg": null,
+        "intensity_label": "RIR 1–2",
+        "intensity": {
+          "RirRange": {
+            "lo": 1,
+            "hi": 2
+          }
+        },
+        "rest_sec": 180,
+        "rep_count": 0,
+        "rep_volume": "",
+        "timed_hold": false,
+        "target_rpe": 8.0,
+        "last_set": null,
+        "suggested_load_kg": null,
+        "plates_per_side": [],
+        "effort_cue": "",
+        "hold_low_sec": 0,
+        "hold_high_sec": 0,
+        "added_kg": 0.0,
+        "anchored_on": "",
+        "anchored_on_last": false,
+        "adjusted_note": "",
+        "safety_reason": "",
+        "safety_reason_mi": "",
+        "grade": "Moderate",
+        "citation": "Kotarsky 2018 (PMID 29466268)",
+        "confidence": 0.65,
+        "safety_critical": false,
+        "contested": false,
+        "why": {
+          "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. Prefer a harder version instead of weight? Choose Harder for L-sit pull-up.",
+          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+          "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
+        },
+        "done": false,
+        "status": "open",
+        "sets_done": 0,
+        "logged_sets": [],
+        "ended_early": false,
+        "run_logged_km": 0.0,
+        "run_logged_min": 0.0,
+        "run_target": null,
+        "calis": {
+          "ladder": "VerticalPull",
+          "rung": 4,
+          "rung_count": 8,
+          "easier": {
+            "rung": 3,
+            "name": "Negative pull-up",
+            "target": "3–5 reps",
+            "available": true,
+            "timed_hold": false
+          },
+          "harder": {
+            "rung": 5,
+            "name": "L-sit pull-up",
+            "target": "5–8 reps",
+            "available": true,
+            "timed_hold": false
+          },
+          "load_capable": true,
+          "test_hold_sec": 0,
+          "ballistic": false,
+          "needs_effort_rating": false
+        },
+        "run_structure": null,
+        "face_name": "Full pull-up",
+        "face_detail": "5×5–8 · 1–2 reps left",
+        "face_lead": "5×5–8",
+        "run_head": "",
+        "run_head_km": null
+      },
+      {
+        "summary": "High-incline row: 5×8–12 · 0–1 reps left",
+        "exercise": "High-incline row",
+        "sets": 5,
+        "reps_low": 8,
+        "reps_high": 12,
+        "load_kg": null,
+        "intensity_label": "RIR 0–1",
+        "intensity": {
+          "RirRange": {
+            "lo": 0,
+            "hi": 1
+          }
+        },
+        "rest_sec": 180,
+        "rep_count": 0,
+        "rep_volume": "",
+        "timed_hold": false,
+        "target_rpe": 9.0,
+        "last_set": null,
+        "suggested_load_kg": null,
+        "plates_per_side": [],
+        "effort_cue": "",
+        "hold_low_sec": 0,
+        "hold_high_sec": 0,
+        "added_kg": 0.0,
+        "anchored_on": "",
+        "anchored_on_last": false,
+        "adjusted_note": "",
+        "safety_reason": "",
+        "safety_reason_mi": "",
+        "grade": "Moderate",
+        "citation": "Kotarsky 2018 (PMID 29466268)",
+        "confidence": 0.65,
+        "safety_critical": false,
+        "contested": false,
+        "why": {
+          "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions moves you up to Inclined body row. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+          "improves": "Log your reps (or hold time) so the plan can time your next step."
+        },
+        "done": false,
+        "status": "open",
+        "sets_done": 0,
+        "logged_sets": [],
+        "ended_early": false,
+        "run_logged_km": 0.0,
+        "run_logged_min": 0.0,
+        "run_target": null,
+        "calis": {
+          "ladder": "HorizontalPull",
+          "rung": 0,
+          "rung_count": 7,
+          "easier": null,
+          "harder": {
+            "rung": 1,
+            "name": "Inclined body row",
+            "target": "5–8 reps",
+            "available": true,
+            "timed_hold": false
+          },
+          "load_capable": false,
+          "test_hold_sec": 0,
+          "ballistic": false,
+          "needs_effort_rating": false
+        },
+        "run_structure": null,
+        "face_name": "High-incline row",
+        "face_detail": "5×8–12 · 0–1 reps left",
+        "face_lead": "5×8–12",
+        "run_head": "",
+        "run_head_km": null
+      },
+      {
+        "summary": "Assisted squat: 5×8–12 · 0–1 reps left",
+        "exercise": "Assisted squat",
+        "sets": 5,
+        "reps_low": 8,
+        "reps_high": 12,
+        "load_kg": null,
+        "intensity_label": "RIR 0–1",
+        "intensity": {
+          "RirRange": {
+            "lo": 0,
+            "hi": 1
+          }
+        },
+        "rest_sec": 180,
+        "rep_count": 0,
+        "rep_volume": "",
+        "timed_hold": false,
+        "target_rpe": 9.0,
+        "last_set": null,
+        "suggested_load_kg": null,
+        "plates_per_side": [],
+        "effort_cue": "",
+        "hold_low_sec": 0,
+        "hold_high_sec": 0,
+        "added_kg": 0.0,
+        "anchored_on": "",
+        "anchored_on_last": false,
+        "adjusted_note": "",
+        "safety_reason": "",
+        "safety_reason_mi": "",
+        "grade": "Moderate",
+        "citation": "Kotarsky 2018 (PMID 29466268)",
+        "confidence": 0.65,
+        "safety_critical": false,
+        "contested": false,
+        "why": {
+          "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions moves you up to Bodyweight squat. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+          "improves": "Log your reps (or hold time) so the plan can time your next step."
+        },
+        "done": false,
+        "status": "open",
+        "sets_done": 0,
+        "logged_sets": [],
+        "ended_early": false,
+        "run_logged_km": 0.0,
+        "run_logged_min": 0.0,
+        "run_target": null,
+        "calis": {
+          "ladder": "Squat",
+          "rung": 0,
+          "rung_count": 7,
+          "easier": null,
+          "harder": {
+            "rung": 1,
+            "name": "Bodyweight squat",
+            "target": "8–15 reps",
+            "available": true,
+            "timed_hold": false
+          },
+          "load_capable": false,
+          "test_hold_sec": 0,
+          "ballistic": false,
+          "needs_effort_rating": false
+        },
+        "run_structure": null,
+        "face_name": "Assisted squat",
+        "face_detail": "5×8–12 · 0–1 reps left",
+        "face_lead": "5×8–12",
+        "run_head": "",
+        "run_head_km": null
+      },
+      {
+        "summary": "Glute bridge: 5×10–15 · 0–1 reps left",
+        "exercise": "Glute bridge",
+        "sets": 5,
+        "reps_low": 10,
+        "reps_high": 15,
+        "load_kg": null,
+        "intensity_label": "RIR 0–1",
+        "intensity": {
+          "RirRange": {
+            "lo": 0,
+            "hi": 1
+          }
+        },
+        "rest_sec": 180,
+        "rep_count": 0,
+        "rep_volume": "",
+        "timed_hold": false,
+        "target_rpe": 9.0,
+        "last_set": null,
+        "suggested_load_kg": null,
+        "plates_per_side": [],
+        "effort_cue": "",
+        "hold_low_sec": 0,
+        "hold_high_sec": 0,
+        "added_kg": 0.0,
+        "anchored_on": "",
+        "anchored_on_last": false,
+        "adjusted_note": "",
+        "safety_reason": "",
+        "safety_reason_mi": "",
+        "grade": "Moderate",
+        "citation": "Kotarsky 2018 (PMID 29466268)",
+        "confidence": 0.65,
+        "safety_critical": false,
+        "contested": false,
+        "why": {
+          "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions moves you up to Single-leg glute bridge. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
+          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+          "improves": "Log your reps (or hold time) so the plan can time your next step."
+        },
+        "done": false,
+        "status": "open",
+        "sets_done": 0,
+        "logged_sets": [],
+        "ended_early": false,
+        "run_logged_km": 0.0,
+        "run_logged_min": 0.0,
+        "run_target": null,
+        "calis": {
+          "ladder": "Hinge",
+          "rung": 0,
+          "rung_count": 8,
+          "easier": null,
+          "harder": {
+            "rung": 1,
+            "name": "Single-leg glute bridge",
+            "target": "8–12 reps per side",
+            "available": true,
+            "timed_hold": false
+          },
+          "load_capable": false,
+          "test_hold_sec": 0,
+          "ballistic": false,
+          "needs_effort_rating": false
+        },
+        "run_structure": null,
+        "face_name": "Glute bridge",
+        "face_detail": "5×10–15 · 0–1 reps left",
+        "face_lead": "5×10–15",
+        "run_head": "",
+        "run_head_km": null
+      },
+      {
+        "summary": "Front plank: 5×20–45 s hold",
+        "exercise": "Front plank",
+        "sets": 5,
+        "reps_low": 0,
+        "reps_high": 0,
+        "load_kg": null,
+        "intensity_label": "hold until you almost can't",
+        "intensity": "Prose",
+        "rest_sec": 180,
+        "rep_count": 0,
+        "rep_volume": "20–45 s hold",
+        "timed_hold": true,
+        "target_rpe": null,
+        "last_set": null,
+        "suggested_load_kg": null,
+        "plates_per_side": [],
+        "effort_cue": "",
+        "hold_low_sec": 20,
+        "hold_high_sec": 45,
+        "added_kg": 0.0,
+        "anchored_on": "",
+        "anchored_on_last": false,
+        "adjusted_note": "",
+        "safety_reason": "",
+        "safety_reason_mi": "",
+        "grade": "Moderate",
+        "citation": "Oranchuk 2019 (doi:10.1111/sms.13375)",
+        "confidence": 0.65,
+        "safety_critical": false,
+        "contested": false,
+        "why": {
+          "basis": "Step 1/7 of the core progression. Clean 45-second holds on 2 sessions move you up to Long-lever plank.",
+          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+          "improves": "Log your reps (or hold time) so the plan can time your next step."
+        },
+        "done": false,
+        "status": "open",
+        "sets_done": 0,
+        "logged_sets": [],
+        "ended_early": false,
+        "run_logged_km": 0.0,
+        "run_logged_min": 0.0,
+        "run_target": null,
+        "calis": {
+          "ladder": "Core",
+          "rung": 0,
+          "rung_count": 7,
+          "easier": null,
+          "harder": {
+            "rung": 1,
+            "name": "Long-lever plank",
+            "target": "20–30 s hold",
+            "available": true,
+            "timed_hold": true
+          },
+          "load_capable": false,
+          "test_hold_sec": 0,
+          "ballistic": false,
+          "needs_effort_rating": false
+        },
+        "run_structure": null,
+        "face_name": "Front plank",
+        "face_detail": "5×20–45 s hold",
+        "face_lead": "5×20–45 s hold",
+        "run_head": "",
+        "run_head_km": null
+      }
+    ],
+    "adjustment": null,
+    "move_targets": [
+      20009
+    ],
+    "moved_from_epoch_day": null,
+    "move_note": null,
+    "move_blocked_reason": null,
+    "credited_from_epoch_day": null
+  },
+  "week_plan": [
+    {
+      "epoch_day": 20003,
+      "title": "Calisthenics",
+      "session_type": "Lift(Calisthenics)",
+      "status": "next",
+      "items": [
+        {
+          "summary": "Pseudo-planche push-up: 5×5–8 · 1–2 reps left",
+          "exercise": "Pseudo-planche push-up",
+          "sets": 5,
+          "reps_low": 5,
+          "reps_high": 8,
+          "load_kg": null,
+          "intensity_label": "RIR 1–2",
+          "intensity": {
+            "RirRange": {
+              "lo": 1,
+              "hi": 2
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 8.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "ExpertOpinion",
+          "citation": "Low 2016, Overcoming Gravity (2nd ed.)",
+          "confidence": 0.3,
+          "safety_critical": false,
+          "contested": true,
+          "why": {
+            "basis": "Step 7/9 of the push-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Archer push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session.",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on the order of bodyweight progression steps and when to move up, so this is contested. What the app does for now: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. One view on the other side: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
+            "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "HorizontalPush",
+            "rung": 6,
+            "rung_count": 9,
+            "easier": {
+              "rung": 5,
+              "name": "Decline push-up",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "harder": {
+              "rung": 7,
+              "name": "Archer push-up",
+              "target": "5–8 reps per side",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Pseudo-planche push-up",
+          "face_detail": "5×5–8 · 1–2 reps left",
+          "face_lead": "5×5–8",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Bench dip: 5×8–12 · 0–1 reps left",
+          "exercise": "Bench dip",
+          "sets": 5,
+          "reps_low": 8,
+          "reps_high": 12,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/6 of the dip progression. Reaching 12 reps on every set on 2 sessions moves you up to Foot-supported dip. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "Dip",
+            "rung": 0,
+            "rung_count": 6,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Foot-supported dip",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Bench dip",
+          "face_detail": "5×8–12 · 0–1 reps left",
+          "face_lead": "5×8–12",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Full pull-up: 5×5–8 · 1–2 reps left",
+          "exercise": "Full pull-up",
+          "sets": 5,
+          "reps_low": 5,
+          "reps_high": 8,
+          "load_kg": null,
+          "intensity_label": "RIR 1–2",
+          "intensity": {
+            "RirRange": {
+              "lo": 1,
+              "hi": 2
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 8.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. Prefer a harder version instead of weight? Choose Harder for L-sit pull-up.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "VerticalPull",
+            "rung": 4,
+            "rung_count": 8,
+            "easier": {
+              "rung": 3,
+              "name": "Negative pull-up",
+              "target": "3–5 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "harder": {
+              "rung": 5,
+              "name": "L-sit pull-up",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": true,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Full pull-up",
+          "face_detail": "5×5–8 · 1–2 reps left",
+          "face_lead": "5×5–8",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "High-incline row: 5×8–12 · 0–1 reps left",
+          "exercise": "High-incline row",
+          "sets": 5,
+          "reps_low": 8,
+          "reps_high": 12,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions moves you up to Inclined body row. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "HorizontalPull",
+            "rung": 0,
+            "rung_count": 7,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Inclined body row",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "High-incline row",
+          "face_detail": "5×8–12 · 0–1 reps left",
+          "face_lead": "5×8–12",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Assisted squat: 5×8–12 · 0–1 reps left",
+          "exercise": "Assisted squat",
+          "sets": 5,
+          "reps_low": 8,
+          "reps_high": 12,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions moves you up to Bodyweight squat. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "Squat",
+            "rung": 0,
+            "rung_count": 7,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Bodyweight squat",
+              "target": "8–15 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Assisted squat",
+          "face_detail": "5×8–12 · 0–1 reps left",
+          "face_lead": "5×8–12",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Glute bridge: 5×10–15 · 0–1 reps left",
+          "exercise": "Glute bridge",
+          "sets": 5,
+          "reps_low": 10,
+          "reps_high": 15,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions moves you up to Single-leg glute bridge. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "Hinge",
+            "rung": 0,
+            "rung_count": 8,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Single-leg glute bridge",
+              "target": "8–12 reps per side",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Glute bridge",
+          "face_detail": "5×10–15 · 0–1 reps left",
+          "face_lead": "5×10–15",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Front plank: 5×20–45 s hold",
+          "exercise": "Front plank",
+          "sets": 5,
+          "reps_low": 0,
+          "reps_high": 0,
+          "load_kg": null,
+          "intensity_label": "hold until you almost can't",
+          "intensity": "Prose",
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "20–45 s hold",
+          "timed_hold": true,
+          "target_rpe": null,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 20,
+          "hold_high_sec": 45,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Oranchuk 2019 (doi:10.1111/sms.13375)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/7 of the core progression. Clean 45-second holds on 2 sessions move you up to Long-lever plank.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "Core",
+            "rung": 0,
+            "rung_count": 7,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Long-lever plank",
+              "target": "20–30 s hold",
+              "available": true,
+              "timed_hold": true
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Front plank",
+          "face_detail": "5×20–45 s hold",
+          "face_lead": "5×20–45 s hold",
+          "run_head": "",
+          "run_head_km": null
+        }
+      ],
+      "adjustment": null,
+      "move_targets": [
+        20009
+      ],
+      "moved_from_epoch_day": null,
+      "move_note": null,
+      "move_blocked_reason": null,
+      "credited_from_epoch_day": null
+    },
+    {
+      "epoch_day": 20004,
+      "title": "Rest",
+      "session_type": "Rest",
+      "status": "rest",
+      "items": [],
+      "adjustment": null,
+      "move_targets": [],
+      "moved_from_epoch_day": null,
+      "move_note": null,
+      "move_blocked_reason": null,
+      "credited_from_epoch_day": null
+    },
+    {
+      "epoch_day": 20005,
+      "title": "Calisthenics",
+      "session_type": "Lift(Calisthenics)",
+      "status": "planned",
+      "items": [
+        {
+          "summary": "Pseudo-planche push-up: 5×5–8 · 1–2 reps left",
+          "exercise": "Pseudo-planche push-up",
+          "sets": 5,
+          "reps_low": 5,
+          "reps_high": 8,
+          "load_kg": null,
+          "intensity_label": "RIR 1–2",
+          "intensity": {
+            "RirRange": {
+              "lo": 1,
+              "hi": 2
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 8.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "ExpertOpinion",
+          "citation": "Low 2016, Overcoming Gravity (2nd ed.)",
+          "confidence": 0.3,
+          "safety_critical": false,
+          "contested": true,
+          "why": {
+            "basis": "Step 7/9 of the push-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Archer push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session.",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on the order of bodyweight progression steps and when to move up, so this is contested. What the app does for now: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. One view on the other side: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
+            "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "HorizontalPush",
+            "rung": 6,
+            "rung_count": 9,
+            "easier": {
+              "rung": 5,
+              "name": "Decline push-up",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "harder": {
+              "rung": 7,
+              "name": "Archer push-up",
+              "target": "5–8 reps per side",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Pseudo-planche push-up",
+          "face_detail": "5×5–8 · 1–2 reps left",
+          "face_lead": "5×5–8",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Pike push-up: 5×5–8 · 1–2 reps left",
+          "exercise": "Pike push-up",
+          "sets": 5,
+          "reps_low": 5,
+          "reps_high": 8,
+          "load_kg": null,
+          "intensity_label": "RIR 1–2",
+          "intensity": {
+            "RirRange": {
+              "lo": 1,
+              "hi": 2
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 8.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/7 of the overhead push progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Elevated pike push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 5 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "VerticalPush",
+            "rung": 0,
+            "rung_count": 7,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Elevated pike push-up",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Pike push-up",
+          "face_detail": "5×5–8 · 1–2 reps left",
+          "face_lead": "5×5–8",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Full pull-up: 5×5–8 · 1–2 reps left",
+          "exercise": "Full pull-up",
+          "sets": 5,
+          "reps_low": 5,
+          "reps_high": 8,
+          "load_kg": null,
+          "intensity_label": "RIR 1–2",
+          "intensity": {
+            "RirRange": {
+              "lo": 1,
+              "hi": 2
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 8.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. Prefer a harder version instead of weight? Choose Harder for L-sit pull-up.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "VerticalPull",
+            "rung": 4,
+            "rung_count": 8,
+            "easier": {
+              "rung": 3,
+              "name": "Negative pull-up",
+              "target": "3–5 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "harder": {
+              "rung": 5,
+              "name": "L-sit pull-up",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": true,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Full pull-up",
+          "face_detail": "5×5–8 · 1–2 reps left",
+          "face_lead": "5×5–8",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "High-incline row: 5×8–12 · 0–1 reps left",
+          "exercise": "High-incline row",
+          "sets": 5,
+          "reps_low": 8,
+          "reps_high": 12,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions moves you up to Inclined body row. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "HorizontalPull",
+            "rung": 0,
+            "rung_count": 7,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Inclined body row",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "High-incline row",
+          "face_detail": "5×8–12 · 0–1 reps left",
+          "face_lead": "5×8–12",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Assisted squat: 5×8–12 · 0–1 reps left",
+          "exercise": "Assisted squat",
+          "sets": 5,
+          "reps_low": 8,
+          "reps_high": 12,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions moves you up to Bodyweight squat. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "Squat",
+            "rung": 0,
+            "rung_count": 7,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Bodyweight squat",
+              "target": "8–15 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Assisted squat",
+          "face_detail": "5×8–12 · 0–1 reps left",
+          "face_lead": "5×8–12",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Glute bridge: 5×10–15 · 0–1 reps left",
+          "exercise": "Glute bridge",
+          "sets": 5,
+          "reps_low": 10,
+          "reps_high": 15,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions moves you up to Single-leg glute bridge. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "Hinge",
+            "rung": 0,
+            "rung_count": 8,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Single-leg glute bridge",
+              "target": "8–12 reps per side",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Glute bridge",
+          "face_detail": "5×10–15 · 0–1 reps left",
+          "face_lead": "5×10–15",
+          "run_head": "",
+          "run_head_km": null
+        }
+      ],
+      "adjustment": null,
+      "move_targets": [],
+      "moved_from_epoch_day": null,
+      "move_note": null,
+      "move_blocked_reason": "No free day left this week works. On Tuesday, the same muscles would be trained on back-to-back days (keep about 48 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
+      "credited_from_epoch_day": null
+    },
+    {
+      "epoch_day": 20006,
+      "title": "Rest",
+      "session_type": "Rest",
+      "status": "rest",
+      "items": [],
+      "adjustment": null,
+      "move_targets": [],
+      "moved_from_epoch_day": null,
+      "move_note": null,
+      "move_blocked_reason": null,
+      "credited_from_epoch_day": null
+    },
+    {
+      "epoch_day": 20007,
+      "title": "Calisthenics",
+      "session_type": "Lift(Calisthenics)",
+      "status": "planned",
+      "items": [
+        {
+          "summary": "Pseudo-planche push-up: 5×5–8 · 1–2 reps left",
+          "exercise": "Pseudo-planche push-up",
+          "sets": 5,
+          "reps_low": 5,
+          "reps_high": 8,
+          "load_kg": null,
+          "intensity_label": "RIR 1–2",
+          "intensity": {
+            "RirRange": {
+              "lo": 1,
+              "hi": 2
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 8.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "ExpertOpinion",
+          "citation": "Low 2016, Overcoming Gravity (2nd ed.)",
+          "confidence": 0.3,
+          "safety_critical": false,
+          "contested": true,
+          "why": {
+            "basis": "Step 7/9 of the push-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Archer push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session.",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on the order of bodyweight progression steps and when to move up, so this is contested. What the app does for now: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. One view on the other side: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
+            "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "HorizontalPush",
+            "rung": 6,
+            "rung_count": 9,
+            "easier": {
+              "rung": 5,
+              "name": "Decline push-up",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "harder": {
+              "rung": 7,
+              "name": "Archer push-up",
+              "target": "5–8 reps per side",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Pseudo-planche push-up",
+          "face_detail": "5×5–8 · 1–2 reps left",
+          "face_lead": "5×5–8",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Bench dip: 5×8–12 · 0–1 reps left",
+          "exercise": "Bench dip",
+          "sets": 5,
+          "reps_low": 8,
+          "reps_high": 12,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/6 of the dip progression. Reaching 12 reps on every set on 2 sessions moves you up to Foot-supported dip. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "Dip",
+            "rung": 0,
+            "rung_count": 6,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Foot-supported dip",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Bench dip",
+          "face_detail": "5×8–12 · 0–1 reps left",
+          "face_lead": "5×8–12",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Full pull-up: 5×5–8 · 1–2 reps left",
+          "exercise": "Full pull-up",
+          "sets": 5,
+          "reps_low": 5,
+          "reps_high": 8,
+          "load_kg": null,
+          "intensity_label": "RIR 1–2",
+          "intensity": {
+            "RirRange": {
+              "lo": 1,
+              "hi": 2
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 8.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. Prefer a harder version instead of weight? Choose Harder for L-sit pull-up.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "VerticalPull",
+            "rung": 4,
+            "rung_count": 8,
+            "easier": {
+              "rung": 3,
+              "name": "Negative pull-up",
+              "target": "3–5 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "harder": {
+              "rung": 5,
+              "name": "L-sit pull-up",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": true,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Full pull-up",
+          "face_detail": "5×5–8 · 1–2 reps left",
+          "face_lead": "5×5–8",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "High-incline row: 5×8–12 · 0–1 reps left",
+          "exercise": "High-incline row",
+          "sets": 5,
+          "reps_low": 8,
+          "reps_high": 12,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions moves you up to Inclined body row. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "HorizontalPull",
+            "rung": 0,
+            "rung_count": 7,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Inclined body row",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "High-incline row",
+          "face_detail": "5×8–12 · 0–1 reps left",
+          "face_lead": "5×8–12",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Assisted squat: 5×8–12 · 0–1 reps left",
+          "exercise": "Assisted squat",
+          "sets": 5,
+          "reps_low": 8,
+          "reps_high": 12,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions moves you up to Bodyweight squat. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "Squat",
+            "rung": 0,
+            "rung_count": 7,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Bodyweight squat",
+              "target": "8–15 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Assisted squat",
+          "face_detail": "5×8–12 · 0–1 reps left",
+          "face_lead": "5×8–12",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Glute bridge: 5×10–15 · 0–1 reps left",
+          "exercise": "Glute bridge",
+          "sets": 5,
+          "reps_low": 10,
+          "reps_high": 15,
+          "load_kg": null,
+          "intensity_label": "RIR 0–1",
+          "intensity": {
+            "RirRange": {
+              "lo": 0,
+              "hi": 1
+            }
+          },
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "",
+          "timed_hold": false,
+          "target_rpe": 9.0,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 0,
+          "hold_high_sec": 0,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Kotarsky 2018 (PMID 29466268)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions moves you up to Single-leg glute bridge. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "Hinge",
+            "rung": 0,
+            "rung_count": 8,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Single-leg glute bridge",
+              "target": "8–12 reps per side",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Glute bridge",
+          "face_detail": "5×10–15 · 0–1 reps left",
+          "face_lead": "5×10–15",
+          "run_head": "",
+          "run_head_km": null
+        },
+        {
+          "summary": "Front plank: 5×20–45 s hold",
+          "exercise": "Front plank",
+          "sets": 5,
+          "reps_low": 0,
+          "reps_high": 0,
+          "load_kg": null,
+          "intensity_label": "hold until you almost can't",
+          "intensity": "Prose",
+          "rest_sec": 180,
+          "rep_count": 0,
+          "rep_volume": "20–45 s hold",
+          "timed_hold": true,
+          "target_rpe": null,
+          "last_set": null,
+          "suggested_load_kg": null,
+          "plates_per_side": [],
+          "effort_cue": "",
+          "hold_low_sec": 20,
+          "hold_high_sec": 45,
+          "added_kg": 0.0,
+          "anchored_on": "",
+          "anchored_on_last": false,
+          "adjusted_note": "",
+          "safety_reason": "",
+          "safety_reason_mi": "",
+          "grade": "Moderate",
+          "citation": "Oranchuk 2019 (doi:10.1111/sms.13375)",
+          "confidence": 0.65,
+          "safety_critical": false,
+          "contested": false,
+          "why": {
+            "basis": "Step 1/7 of the core progression. Clean 45-second holds on 2 sessions move you up to Long-lever plank.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "improves": "Log your reps (or hold time) so the plan can time your next step."
+          },
+          "done": false,
+          "status": "open",
+          "sets_done": 0,
+          "logged_sets": [],
+          "ended_early": false,
+          "run_logged_km": 0.0,
+          "run_logged_min": 0.0,
+          "run_target": null,
+          "calis": {
+            "ladder": "Core",
+            "rung": 0,
+            "rung_count": 7,
+            "easier": null,
+            "harder": {
+              "rung": 1,
+              "name": "Long-lever plank",
+              "target": "20–30 s hold",
+              "available": true,
+              "timed_hold": true
+            },
+            "load_capable": false,
+            "test_hold_sec": 0,
+            "ballistic": false,
+            "needs_effort_rating": false
+          },
+          "run_structure": null,
+          "face_name": "Front plank",
+          "face_detail": "5×20–45 s hold",
+          "face_lead": "5×20–45 s hold",
+          "run_head": "",
+          "run_head_km": null
+        }
+      ],
+      "adjustment": null,
+      "move_targets": [
+        20008
+      ],
+      "moved_from_epoch_day": null,
+      "move_note": null,
+      "move_blocked_reason": null,
+      "credited_from_epoch_day": null
+    },
+    {
+      "epoch_day": 20008,
+      "title": "Rest",
+      "session_type": "Rest",
+      "status": "rest",
+      "items": [],
+      "adjustment": null,
+      "move_targets": [],
+      "moved_from_epoch_day": null,
+      "move_note": null,
+      "move_blocked_reason": null,
+      "credited_from_epoch_day": null
+    },
+    {
+      "epoch_day": 20009,
+      "title": "Rest",
+      "session_type": "Rest",
+      "status": "rest",
+      "items": [],
+      "adjustment": null,
+      "move_targets": [],
+      "moved_from_epoch_day": null,
+      "move_note": null,
+      "move_blocked_reason": null,
+      "credited_from_epoch_day": null
+    }
+  ],
+  "program": {
+    "name": "Calisthenics strength",
+    "goal": "Strength",
+    "phase": "Build",
+    "week": 2,
+    "weeks_total": 6,
+    "grade": "Moderate",
+    "citation": "Kotarsky 2018 (PMID 29466268)",
+    "confidence": 0.65,
+    "safety_critical": false,
+    "contested": false,
+    "why": {
+      "basis": "A strength week built from your profile and logged training.",
+      "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+      "improves": "-"
+    },
+    "muscle_volume": [],
+    "muscle_volume_note": ""
+  },
+  "hr_max": null,
+  "protein_figures": [],
+  "hr_zone_bands": [],
+  "hypertrophy_figures": null,
+  "today_epoch_day": 20003,
+  "session_done": null,
+  "calisthenics_ladders": [
+    {
+      "ladder": "HorizontalPush",
+      "pattern": "Push-up",
+      "skill": false,
+      "power": false,
+      "current_rung": 4,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Wall push-up",
+          "target": "8–12 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 1,
+          "name": "Incline push-up (high)",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 2,
+          "name": "Incline push-up (low)",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 3,
+          "name": "Knee push-up",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 4,
+          "name": "Full push-up",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 5,
+          "name": "Decline push-up",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 6,
+          "name": "Pseudo-planche push-up",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 7,
+          "name": "Archer push-up",
+          "target": "5–8 reps per side",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 8,
+          "name": "One-arm push-up",
+          "target": "3–8 reps per side",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "Dip",
+      "pattern": "Dip",
+      "skill": false,
+      "power": false,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Bench dip",
+          "target": "8–12 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 1,
+          "name": "Foot-supported dip",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 2,
+          "name": "Straight-bar dip",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 3,
+          "name": "Full parallel-bar dip",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 4,
+          "name": "Ring dip",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 5,
+          "name": "Weighted dip",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "VerticalPush",
+      "pattern": "Overhead push",
+      "skill": false,
+      "power": false,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Pike push-up",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 1,
+          "name": "Elevated pike push-up",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 2,
+          "name": "Wall handstand push-up (partial)",
+          "target": "3–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 3,
+          "name": "Wall handstand push-up (full)",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 4,
+          "name": "Deficit wall handstand push-up",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 5,
+          "name": "Freestanding handstand push-up",
+          "target": "3–5 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 6,
+          "name": "Weighted handstand push-up",
+          "target": "3–5 reps",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "HorizontalPull",
+      "pattern": "Row",
+      "skill": false,
+      "power": false,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "High-incline row",
+          "target": "8–12 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 1,
+          "name": "Inclined body row",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 2,
+          "name": "Horizontal body row",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 3,
+          "name": "Feet-elevated body row",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 4,
+          "name": "Ring row",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 5,
+          "name": "Archer row",
+          "target": "5–8 reps per side",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 6,
+          "name": "One-arm row",
+          "target": "3–8 reps per side",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "VerticalPull",
+      "pattern": "Pull-up",
+      "skill": false,
+      "power": false,
+      "current_rung": 4,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Dead hang",
+          "target": "30 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 1,
+          "name": "Scapular pulls",
+          "target": "8–12 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 2,
+          "name": "Assisted pull-up",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 3,
+          "name": "Negative pull-up",
+          "target": "3–5 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 4,
+          "name": "Full pull-up",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 5,
+          "name": "L-sit pull-up",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 6,
+          "name": "One-arm assisted pull-up",
+          "target": "3–5 reps per side",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 7,
+          "name": "One-arm pull-up",
+          "target": "1–5 reps per side",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "Squat",
+      "pattern": "Squat",
+      "skill": false,
+      "power": false,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Assisted squat",
+          "target": "8–12 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 1,
+          "name": "Bodyweight squat",
+          "target": "8–15 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 2,
+          "name": "Split squat",
+          "target": "8–12 reps per side",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 3,
+          "name": "Bulgarian split squat",
+          "target": "8–12 reps per side",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 4,
+          "name": "Assisted pistol squat",
+          "target": "5–8 reps per side",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 5,
+          "name": "Pistol squat",
+          "target": "5–8 reps per side",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 6,
+          "name": "Weighted pistol squat",
+          "target": "5–8 reps per side",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "Hinge",
+      "pattern": "Hips and hamstrings",
+      "skill": false,
+      "power": false,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Glute bridge",
+          "target": "10–15 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 1,
+          "name": "Single-leg glute bridge",
+          "target": "8–12 reps per side",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 2,
+          "name": "Back extension",
+          "target": "10–15 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 3,
+          "name": "Single-leg Romanian deadlift",
+          "target": "8–12 reps per side",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 4,
+          "name": "Assisted Nordic curl",
+          "target": "5–8 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 5,
+          "name": "Negative Nordic curl",
+          "target": "3–6 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 6,
+          "name": "Full Nordic curl",
+          "target": "3–6 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 7,
+          "name": "Weighted Nordic curl",
+          "target": "3–6 reps",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "Core",
+      "pattern": "Core",
+      "skill": false,
+      "power": false,
+      "current_rung": 0,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Front plank",
+          "target": "20–45 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 1,
+          "name": "Long-lever plank",
+          "target": "20–30 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 2,
+          "name": "Hollow-body hold",
+          "target": "15–30 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 3,
+          "name": "Ab-wheel from knees",
+          "target": "5–10 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 4,
+          "name": "Hanging leg raise",
+          "target": "8–12 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 5,
+          "name": "Standing ab-wheel",
+          "target": "3–6 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 6,
+          "name": "Dragon flag",
+          "target": "3–6 reps",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "Handstand",
+      "pattern": "Handstand",
+      "skill": true,
+      "power": false,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Wall walk",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 1,
+          "name": "Chest-to-wall handstand",
+          "target": "15–30 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 2,
+          "name": "Freestanding kick-up",
+          "target": "3–10 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 3,
+          "name": "Freestanding handstand",
+          "target": "10–30 s hold",
+          "available": true,
+          "timed_hold": true
+        }
+      ]
+    },
+    {
+      "ladder": "FrontLever",
+      "pattern": "Front lever",
+      "skill": true,
+      "power": false,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Tuck front lever",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 1,
+          "name": "Advanced tuck front lever",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 2,
+          "name": "Straddle front lever",
+          "target": "5–10 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 3,
+          "name": "Full front lever",
+          "target": "5–10 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 4,
+          "name": "Front lever pulls",
+          "target": "3–6 reps",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "Planche",
+      "pattern": "Planche",
+      "skill": true,
+      "power": false,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Planche lean",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 1,
+          "name": "Tuck planche",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 2,
+          "name": "Advanced tuck planche",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 3,
+          "name": "Straddle planche",
+          "target": "5–10 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 4,
+          "name": "Full planche",
+          "target": "5–10 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 5,
+          "name": "Planche push-up",
+          "target": "3–6 reps",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "BackLever",
+      "pattern": "Back lever",
+      "skill": true,
+      "power": false,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "German hang",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 1,
+          "name": "Tuck back lever",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 2,
+          "name": "Advanced tuck back lever",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 3,
+          "name": "Straddle back lever",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        },
+        {
+          "rung": 4,
+          "name": "Full back lever",
+          "target": "5–15 s hold",
+          "available": true,
+          "timed_hold": true
+        }
+      ]
+    },
+    {
+      "ladder": "MuscleUp",
+      "pattern": "Muscle-up",
+      "skill": true,
+      "power": false,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Explosive pull-up",
+          "target": "3–5 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 1,
+          "name": "Muscle-up transition drill",
+          "target": "3–5 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 2,
+          "name": "Negative muscle-up",
+          "target": "2–3 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 3,
+          "name": "Strict muscle-up",
+          "target": "1–5 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 4,
+          "name": "Weighted muscle-up",
+          "target": "1–3 reps",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "Jump",
+      "pattern": "Jump",
+      "skill": false,
+      "power": true,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Vertical jump",
+          "target": "3–5 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 1,
+          "name": "Broad jump",
+          "target": "3–5 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 2,
+          "name": "Single-leg hop",
+          "target": "3–5 reps per side",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    },
+    {
+      "ladder": "PlyoPush",
+      "pattern": "Explosive push-up",
+      "skill": false,
+      "power": true,
+      "current_rung": null,
+      "placed_rung": null,
+      "equipment_note": "",
+      "rungs": [
+        {
+          "rung": 0,
+          "name": "Incline plyometric push-up",
+          "target": "3–5 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 1,
+          "name": "Plyometric push-up",
+          "target": "3–5 reps",
+          "available": true,
+          "timed_hold": false
+        },
+        {
+          "rung": 2,
+          "name": "Clap push-up",
+          "target": "3–5 reps",
+          "available": true,
+          "timed_hold": false
+        }
+      ]
+    }
+  ],
+  "hold_resolutions": [],
+  "illness_check_prompt": false,
+  "consistency": {
+    "this_week_done": 0,
+    "this_week_planned": 3,
+    "weeks": [
+      {
+        "week_monday_epoch_day": 19996,
+        "done": 3,
+        "planned": 3
+      }
+    ],
+    "share_pct": 100,
+    "repeating_week": false,
+    "notes": [
+      {
+        "section": "Consistency",
+        "summary": "0 of 3 planned sessions done this week.",
+        "summary_mi": "",
+        "grade": "Moderate",
+        "citation": "Michie et al. 2009, Health Psychol 28(6):690-701 (behaviour-change techniques meta-regression)",
+        "confidence": 0.65,
+        "safety_critical": false,
+        "contested": false,
+        "why": {
+          "basis": "Tracking what you do and comparing it with your plan (sessions done vs planned each week) is among the most effective ways to help people stay active.",
+          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+          "improves": "-"
+        },
+        "training_age": ""
+      }
+    ]
+  },
+  "plan_withheld": null,
+  "activities": [],
+  "youth_activity": null
+}

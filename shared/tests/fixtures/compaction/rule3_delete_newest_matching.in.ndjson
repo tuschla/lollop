@@ -1,0 +1,3 @@
+{"LogSet":{"exercise":"A","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":0,"entry_id":3,"hold_sec":null}}
+{"LogSet":{"exercise":"B","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":86400,"entry_id":3,"hold_sec":null}}
+{"DeleteEntry":{"kind":"Set","entry_id":3,"observed_at_fallback":0}}

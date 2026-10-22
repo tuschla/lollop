@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Run tracking: resume/play control (paused state of the pause toggle). Same
+     24dp grid and rounded silhouette family as ic_track_pause / ic_track_stop. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M8,6.7 a1.2,1.2 0 0 1 1.8,-1 l8.6,5.3 a1.2,1.2 0 0 1 0,2 l-8.6,5.3 a1.2,1.2 0 0 1 -1.8,-1 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

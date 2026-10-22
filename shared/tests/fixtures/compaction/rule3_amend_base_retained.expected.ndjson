@@ -1,0 +1,2 @@
+{"LogSet":{"exercise":"Bench","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":0,"entry_id":5,"hold_sec":null}}
+{"AmendSet":{"entry_id":5,"exercise":"Bench","weight_kg":120.0,"reps":5,"rpe":8.0,"observed_at":0,"observed_at_fallback":0,"hold_sec":null}}

@@ -1,0 +1,455 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Guided-setup wizard + full profile editor copy (GuidedSetup.kt, ProfileEditor.kt)
+     under `setup_`, plus shared shell-widget chrome (Widgets.kt, RunMap.kt, Export.kt)
+     under `ui_`. -->
+<resources>
+
+    <!-- ===================== setup_ : Guided setup wizard ===================== -->
+
+    <!-- Header + navigation chrome -->
+    <string name="setup_skip">Skip</string>
+    <string name="setup_btn_back">Back</string>
+    <string name="setup_btn_next">Next</string>
+    <string name="setup_btn_finish">Finish</string>
+    <!-- Primary button while an edit opened from the review has nothing else to ask. -->
+    <string name="setup_btn_back_to_review">Back to review</string>
+    <!-- The same button where the review was not seen yet (a Profile Focus switch). -->
+    <string name="setup_btn_review_answers">Review answers</string>
+    <!-- Keypad band: closes the number keypad (on the screen's last number field). -->
+    <string name="setup_keypad_done">Done</string>
+    <!-- Keypad band: moves the keypad on to the screen's next number field. Distinct
+         from the step's Next button. -->
+    <string name="setup_keypad_next">Next field</string>
+    <!-- TalkBack for that key, %1$s = the field it moves to ("Bodyweight"). -->
+    <string name="setup_keypad_next_cd">Next field: %1$s</string>
+    <!-- TalkBack: the step-progress bar, announced when the step changes. %1$d = this
+         step, %2$d = the steps on the current path (an answer that adds a screen adds
+         to it before the next step is announced). -->
+    <string name="setup_step_progress">Step %1$d of %2$d</string>
+
+    <!-- Caption under a disabled Next: what is still missing on this step. -->
+    <string name="setup_need_train">Pick what you train to continue.</string>
+    <string name="setup_need_goal">Pick a goal to continue.</string>
+    <string name="setup_need_lead">Pick which one leads to continue.</string>
+    <string name="setup_need_level">Pick your level to continue.</string>
+    <string name="setup_need_fix_value">Fix the value marked in red to continue.</string>
+    <string name="setup_need_race_time">Enter your finish time, or pick I don\'t know.</string>
+
+    <!-- Leave-setup confirm dialog -->
+    <string name="setup_leave_title">Leave setup?</string>
+    <string name="setup_leave_body">Your answers won\'t be saved.</string>
+    <string name="setup_leave_confirm">Leave</string>
+    <string name="setup_leave_dismiss">Stay</string>
+
+    <!-- What you train (Modality) -->
+    <string name="setup_step_train_q">What do you train?</string>
+    <string name="setup_modality_lift_title">Lifting</string>
+    <string name="setup_modality_lift_consequence">Weights or bodyweight.</string>
+    <string name="setup_modality_run_title">Running</string>
+    <string name="setup_modality_run_consequence">Runs only.</string>
+    <string name="setup_modality_both_title">Both</string>
+    <string name="setup_modality_both_consequence">Runs and lifts, spaced so one doesn\'t hold back the other.</string>
+
+    <!-- Lift branch: lifting goal (LiftFocus). Card titles are the shared LiftGoal
+         labels (setup_liftgoal_*) so the wizard, the review and the Profile
+         Training goal row use one vocabulary. -->
+    <string name="setup_step_lift_q">What\'s your lifting goal?</string>
+    <string name="setup_liftfocus_strength_consequence">Heavy, low-rep work.</string>
+    <string name="setup_liftfocus_muscle_consequence">More sets per muscle each week, for growth (hypertrophy).</string>
+    <string name="setup_liftfocus_power_consequence">Fast, explosive lifts.</string>
+
+    <!-- Lift / Both branches: strength-training modality (ResistanceModality); the
+         same goal-neutral question heads the Profile row. -->
+    <string name="setup_modality_strength_q">How do you lift?</string>
+    <string name="setup_modality_weights_title">Weights</string>
+    <string name="setup_modality_weights_consequence">Barbells, dumbbells and machines.</string>
+    <string name="setup_modality_calis_title">Bodyweight (calisthenics)</string>
+    <string name="setup_modality_calis_consequence">Move up to harder bodyweight moves instead of adding weight.</string>
+    <!-- Strength / power: optional test or meet date -->
+    <string name="setup_meet_q">Got a test day or meet coming up?</string>
+    <string name="setup_meet_sub">Optional. The weeks before it ease off so you arrive fresh.</string>
+    <string name="setup_date_none">No date yet</string>
+    <string name="setup_date_pick">Pick a date</string>
+
+    <!-- Calisthenics: "Where are you now?" self-placement + equipment -->
+    <string name="setup_step_place_q">Where are you now?</string>
+    <string name="setup_step_place_sub">Pick the hardest one you can do for a few clean reps.</string>
+    <string name="setup_place_not_sure">Not sure, start easy</string>
+    <!-- A re-run's ladder that already holds a rung: no answer keeps that rung. -->
+    <string name="setup_place_keep">Keep my current level</string>
+    <string name="setup_place_push_q">Push-ups</string>
+    <string name="setup_place_push_wall">Wall push-ups</string>
+    <string name="setup_place_push_knee">Knee push-ups</string>
+    <string name="setup_place_push_full">Full push-ups</string>
+    <string name="setup_place_push_hard">Feet-up or archer push-ups</string>
+    <string name="setup_place_pull_q">Pull-ups</string>
+    <string name="setup_place_pull_hang">Hanging from a bar</string>
+    <string name="setup_place_pull_negative">Slow lowering (negatives)</string>
+    <string name="setup_place_pull_few">1–4 pull-ups</string>
+    <string name="setup_place_pull_many">5+ pull-ups</string>
+    <string name="setup_place_squat_q">Squats</string>
+    <string name="setup_place_squat_assisted">Squats holding on</string>
+    <string name="setup_place_squat_bodyweight">Bodyweight squats</string>
+    <string name="setup_place_squat_split">Split squats</string>
+    <string name="setup_place_squat_pistol">One-leg squats with support</string>
+    <string name="setup_equip_q">What do you have?</string>
+    <string name="setup_equip_bar">Pull-up bar</string>
+    <string name="setup_equip_dips">Dip bars</string>
+    <string name="setup_equip_rings">Rings</string>
+    <string name="setup_equip_none">None of these</string>
+    <!-- Under the pull-up rungs when the equipment answer has nothing to hang from. -->
+    <string name="setup_place_pull_needs_bar">Needs a pull-up bar or rings</string>
+
+    <!-- Run branch: race goal (GoalDistance label + blurb; label shared with editor) -->
+    <string name="setup_step_run_q">What are you training for?</string>
+    <string name="setup_goaldist_general">General fitness</string>
+    <string name="setup_goaldist_c25k">Couch to 5K</string>
+    <string name="setup_goaldist_5k">5K</string>
+    <string name="setup_goaldist_10k">10K</string>
+    <string name="setup_goaldist_half">Half marathon</string>
+    <string name="setup_goaldist_marathon">Marathon</string>
+    <string name="setup_goaldist_general_blurb">Overall endurance, no race on the calendar.</string>
+    <string name="setup_goaldist_c25k_blurb">From zero to running 5K without stopping.</string>
+    <string name="setup_goaldist_5k_blurb">Sharpen speed for a fast 5K.</string>
+    <string name="setup_goaldist_10k_blurb">Balance speed and endurance for 10K.</string>
+    <!-- %1$s = the half-marathon distance in the user's unit ("21.1 km" / "13.1 mi"). -->
+    <string name="setup_goaldist_half_blurb">Build the endurance to race %1$s.</string>
+    <string name="setup_goaldist_marathon_blurb">The longest race, with the most weekly running.</string>
+
+    <!-- Race goals: race date + a recent race or time trial -->
+    <string name="setup_step_race_q">About your race</string>
+    <string name="setup_step_race_sub">Both optional.</string>
+    <string name="setup_race_date_q">When is the race?</string>
+    <string name="setup_recent_race_q">A recent race or time trial?</string>
+    <string name="setup_recent_race_sub">An all-out effort in the last couple of months.</string>
+    <string name="setup_dont_know">I don\'t know</string>
+    <string name="setup_racedist_mile">1 mile</string>
+    <string name="setup_recent_race_time_label">Finish time</string>
+    <string name="setup_recent_race_time_invalid">That time doesn\'t look right for this distance. Check the digits.</string>
+    <string name="setup_recent_race_value">%1$s in %2$s</string>
+
+    <!-- Both branch: which side leads (BothPriority) -->
+    <string name="setup_step_lead_q">Which one leads?</string>
+    <string name="setup_step_lead_sub">Gets priority when they clash.</string>
+    <string name="setup_bothpriority_liftlean_title">Lifting</string>
+    <string name="setup_bothpriority_liftlean_consequence">Running fits around it.</string>
+    <string name="setup_bothpriority_runlean_title">Running</string>
+    <string name="setup_bothpriority_runlean_consequence">Lifting fits around it.</string>
+
+    <!-- Days per week + weekdays -->
+    <string name="setup_step_days_q">How many days a week can you train?</string>
+    <string name="setup_step_days_lift_q">How many days a week can you lift?</string>
+    <string name="setup_step_days_run_q">How many days a week can you run?</string>
+    <string name="setup_days_scale_label">Days per week</string>
+    <string name="setup_days_pick_hint">Pick a number of days to continue.</string>
+    <plurals name="setup_days_weekdays_hint">
+        <item quantity="one">Tick at least %d day, or pick Any days.</item>
+        <item quantity="other">Tick at least %d days, or pick Any days.</item>
+    </plurals>
+    <string name="setup_days_lift_split_q">Of those, how many for lifting?</string>
+    <!-- The Both-week split: %1$s = setup_days_lift_count, %2$s = setup_days_run_count. -->
+    <string name="setup_days_split">That\'s %1$s and %2$s a week.</string>
+    <plurals name="setup_days_lift_count">
+        <item quantity="one">%d lift day</item>
+        <item quantity="other">%d lift days</item>
+    </plurals>
+    <plurals name="setup_days_run_count">
+        <item quantity="one">%d run day</item>
+        <item quantity="other">%d run days</item>
+    </plurals>
+    <!-- %1$d = the lifting-led run-day cap, %2$s = setup_days_rest_count. -->
+    <string name="setup_days_split_capped">With lifting leading, running is capped at %1$d days so it doesn\'t hold back your lifting. The other %2$s are rest days. For more run days, make running lead.</string>
+    <plurals name="setup_days_rest_count">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <string name="setup_weekdays_q">Which days suit you?</string>
+    <string name="setup_weekdays_any">Any days</string>
+    <!-- More days ticked than trained: the plan picks that many of them. -->
+    <string name="setup_weekdays_any_of">Any %1$d of %2$s</string>
+
+    <!-- Experience (SetupLevel) -->
+    <string name="setup_step_level_q">Roughly your current level?</string>
+    <string name="setup_level_lifting">Lifting</string>
+    <string name="setup_level_running">Running</string>
+    <string name="setup_runlevel_novice_consequence">New to running, or back after a long break.</string>
+    <string name="setup_runlevel_intermediate_consequence">Regular running, past the beginner stage.</string>
+    <string name="setup_runlevel_advanced_consequence">Years of steady running.</string>
+    <string name="setup_level_novice_title">New to this</string>
+    <string name="setup_level_novice_consequence">Little or no regular lifting.</string>
+    <string name="setup_level_intermediate_title">A year or two in</string>
+    <string name="setup_level_intermediate_consequence">Regular lifting, past the beginner stage.</string>
+    <string name="setup_level_advanced_title">Experienced</string>
+    <string name="setup_level_advanced_consequence">Several years of structured lifting.</string>
+
+    <!-- Your running right now (Run / Both) -->
+    <string name="setup_step_runnow_q">Your running right now</string>
+    <string name="setup_step_runnow_sub">Both optional. A rough guess works.</string>
+    <string name="setup_runnow_weekly_label">Weekly distance</string>
+    <string name="setup_runnow_none">I don\'t run yet</string>
+    <string name="setup_runnow_longest_label">Longest run, last month</string>
+    <string name="setup_not_sure">Not sure</string>
+    <string name="setup_unit_per_week">%1$s/wk</string>
+
+    <!-- About you -->
+    <string name="setup_step_about_q">About you</string>
+    <!-- Birthday answer (wizard About step + Profile › Age): the core derives the age
+         from it each day. -->
+    <string name="setup_about_birthday_label">Birthday</string>
+    <string name="setup_birthday_pick">Pick your birthday</string>
+    <!-- Profile › Age picker button, where the row above already shows the birthday. -->
+    <string name="setup_birthday_change">Change birthday</string>
+    <!-- Profile › Age picker button while no birthday or age is given. -->
+    <string name="setup_birthday_add">Add birthday</string>
+    <!-- The birthday's other answer: no birthday and no age are saved. -->
+    <string name="setup_birthday_skip">Prefer not to say</string>
+    <!-- Caption while no age is given (a measured max heart rate still counts). -->
+    <string name="setup_birthday_skipped_note">Without an age, heart-rate targets use effort instead.</string>
+    <!-- Profile › Age value while no birthday or age is given. -->
+    <string name="setup_age_not_given">Not given</string>
+    <!-- A birthday with the age it gives today, e.g. "Born 12 Mar 1991 · 35". -->
+    <string name="setup_birthday_value">Born %1$s · %2$d</string>
+    <!-- A profile saved before birthdays carries only a stated age. -->
+    <string name="setup_birthday_legacy">You gave your age as %1$s. Add your birthday so it stays up to date.</string>
+    <string name="setup_birthday_add_prompt">Add your birthday so this stays up to date.</string>
+    <!-- One toggle for weight and distance units ("kg · km | lb · mi"). -->
+    <string name="setup_about_units_label">Units</string>
+    <string name="setup_about_pick_hint">Add your birthday or choose Prefer not to say.</string>
+    <string name="setup_unit_bpm">bpm</string>
+
+    <!-- Sex picker (shared by the wizard's about-you question + editor You section) -->
+    <string name="setup_sex_label">Sex</string>
+    <string name="setup_sex_female">Female</string>
+    <string name="setup_sex_male">Male</string>
+    <string name="setup_sex_not_saying">Prefer not to say</string>
+    <string name="setup_sex_caption">Only used for a couple of health checks. Never changes your training.</string>
+
+    <!-- Review: every answer in plain words before Finish -->
+    <string name="setup_step_review_q">Check your answers</string>
+    <string name="setup_step_review_sub">Tap a row to change it.</string>
+    <string name="setup_review_edit">Edit</string>
+    <string name="setup_review_train">What you train</string>
+    <string name="setup_review_lift_goal">Lifting goal</string>
+    <string name="setup_review_run_goal">Running goal</string>
+    <string name="setup_review_lead">Leads</string>
+    <string name="setup_review_meet">Test or meet: %1$s</string>
+    <string name="setup_review_place">Where you are now</string>
+    <string name="setup_review_place_easy">Starting easy on every move</string>
+    <!-- Review, a re-run's unanswered placement. %1$s = the movement ("Push-ups"). -->
+    <string name="setup_review_place_keep">%1$s: keeping your current level</string>
+    <string name="setup_review_equipment">Equipment: %1$s</string>
+    <string name="setup_review_race_date">Race day: %1$s</string>
+    <string name="setup_review_recent_race">Recent result: %1$s</string>
+    <string name="setup_review_days">Days you can train</string>
+    <string name="setup_review_level">Experience</string>
+    <string name="setup_review_level_lifting">Lifting: %1$s</string>
+    <string name="setup_review_level_running">Running: %1$s</string>
+    <string name="setup_review_volume">Starting volume</string>
+    <string name="setup_review_lift_volume">%1$d sets per muscle a week</string>
+    <string name="setup_review_run_volume">About %1$d %2$s a week</string>
+    <string name="setup_review_run_volume_unset">Weekly distance not given</string>
+    <string name="setup_review_volume_both">%1$d sets per muscle · about %2$d %3$s a week</string>
+    <string name="setup_review_runnow_longest">Longest recent run %1$s %2$s</string>
+    <string name="setup_review_about">About you</string>
+    <string name="setup_review_about_hold">No plan under 18. You can still log and track.</string>
+    <string name="setup_review_age">Age %1$s</string>
+    <string name="setup_review_age_not_given">Age not given</string>
+    <string name="setup_review_health">Health</string>
+    <string name="setup_review_health_hold">No plan for now. See a professional first. You can still log and track.</string>
+
+    <!-- Health screen (headers + defer notice; gate rows below are shared) -->
+    <string name="setup_step_health_q">Anything we should know?</string>
+    <string name="setup_step_health_sub">Turn on any that apply. If one does, see a professional before lollop builds a plan.</string>
+    <string name="setup_health_defer_notice">From your answers, lollop won\'t build a plan for now. You can still log and track.</string>
+    <string name="setup_health_defer_youth">You\'re under 18, so lollop won\'t build a plan. Strength training at your age needs a coach who can watch your technique. It still tracks your activity and everything you log.</string>
+
+    <!-- HealthScreenCopy: shared health-gate rows (wizard health screen + editor Health
+         section); one source so the two wordings cannot drift. -->
+    <!-- PAR-Q+ (onboard-051): seven plain-language yes/no questions. Q2/Q3 are
+         symptoms (not clearable, their consequence shows under the row once on),
+         Q6 is the injury/rehab hold; any other Yes unlocks "Cleared by a doctor". -->
+    <string name="setup_parq_intro">Turn on any that apply.</string>
+    <string name="setup_parq_symptom_body">See a doctor before training. Your plan stays on hold until you turn this off.</string>
+    <string name="setup_parq_legacy">An earlier answer noted a health condition. Answer the questions below to update it.</string>
+    <string name="setup_parq_q1">Has a doctor ever said you have a heart condition or high blood pressure?</string>
+    <string name="setup_parq_q2">Do you feel pain in your chest at rest, during daily activities, or when you exercise?</string>
+    <string name="setup_parq_q3">In the last 12 months, have you lost your balance because of dizziness, or passed out?</string>
+    <string name="setup_parq_q4">Have you been diagnosed with another long-term medical condition?</string>
+    <string name="setup_parq_q5">Do you take prescribed medicine for a long-term medical condition?</string>
+    <string name="setup_parq_q6">Do you have a bone, joint or muscle problem that more activity could make worse, now or in the last 12 months? Or are you recovering from an injury or surgery?</string>
+    <string name="setup_parq_q7">Has a doctor ever said you should only exercise under medical supervision?</string>
+    <!-- How many health answers apply: the Profile Health questions row and the
+         setup review's Health row. -->
+    <plurals name="setup_health_flag_count">
+        <item quantity="one">%d applies</item>
+        <item quantity="other">%d apply</item>
+    </plurals>
+    <string name="setup_health_ill_label">I\'m ill right now (fever, infection)</string>
+    <string name="setup_health_ill_body">lollop holds the plan while you\'re unwell. Turn this off once you\'re better.</string>
+    <string name="setup_health_cleared_label">Cleared by a doctor</string>
+    <string name="setup_health_cleared_body">A doctor has cleared you to train despite the condition above. This doesn\'t cover chest pain or fainting.</string>
+    <string name="setup_health_pregnant_label">Currently pregnant</string>
+    <string name="setup_health_pregnant_body">lollop won\'t build a plan. Work out your training with your doctor or midwife.</string>
+    <string name="setup_health_pregnancy_warning_label">A pregnancy warning sign</string>
+    <string name="setup_health_pregnancy_warning_body">Stop exercising and get medical care if you have bleeding, chest pain, breathlessness before you exercise, or the baby moving less.</string>
+    <string name="setup_health_injury_body">lollop doesn\'t build rehab plans. Turn this off once a professional clears you.</string>
+    <string name="setup_health_reds_label">Signs of under-eating</string>
+    <string name="setup_health_reds_body">Missed periods, rapid weight loss, compulsive exercise or ongoing unexplained tiredness. lollop points you to a professional.</string>
+
+    <!-- ===================== setup_ : Profile editor ===================== -->
+
+    <!-- Focus row (Focus enum segment labels) -->
+    <string name="setup_row_focus">Focus</string>
+    <string name="setup_focus_lift">Lift</string>
+    <string name="setup_focus_run">Run</string>
+    <string name="setup_focus_both">Both</string>
+    <!-- Focus-switch confirm. Adding a side asks its questions in the guided setup;
+         dropping a side applies at once. -->
+    <string name="setup_focus_to_lift_title">Switch to lifting?</string>
+    <string name="setup_focus_to_lift_body">Your running plan pauses, and lifting needs a few answers first.</string>
+    <string name="setup_focus_to_run_title">Switch to running?</string>
+    <string name="setup_focus_to_run_body">Your lifting plan pauses, and running needs a few answers first.</string>
+    <string name="setup_focus_add_lift_title">Add lifting?</string>
+    <string name="setup_focus_add_lift_body">Lifting needs a few answers first. Your running stays.</string>
+    <string name="setup_focus_add_run_title">Add running?</string>
+    <string name="setup_focus_add_run_body">Running needs a few answers first. Your lifting stays.</string>
+    <string name="setup_focus_answer_lift">Answer lifting questions</string>
+    <string name="setup_focus_answer_run">Answer running questions</string>
+    <string name="setup_focus_to_lift_only_title">Switch to lifting only?</string>
+    <string name="setup_focus_to_lift_only_body">Your running plan pauses from today. Your running answers are kept for when you switch back.</string>
+    <string name="setup_focus_to_run_only_title">Switch to running only?</string>
+    <string name="setup_focus_to_run_only_body">Your lifting plan pauses from today. Your lifting answers are kept for when you switch back.</string>
+    <string name="setup_focus_switch_confirm">Switch</string>
+    <!-- Focus switch back to a side set up before, with every answer kept: it resumes
+         without the setup. %1$s = the goal ("Strength", "10K"), %2$s = "4 days". -->
+    <string name="setup_focus_resume_lift_title">Switch back to lifting?</string>
+    <string name="setup_focus_resume_lift_body">Your %1$s plan (%2$s) resumes. Your running plan pauses.</string>
+    <string name="setup_focus_resume_run_title">Switch back to running?</string>
+    <string name="setup_focus_resume_run_body">Your %1$s plan (%2$s) resumes. Your lifting plan pauses.</string>
+
+    <!-- Training goal row (LiftGoal segment labels, shared with the wizard's lift
+         goal cards and the review) -->
+    <string name="setup_row_training_goal">Training goal</string>
+    <string name="setup_row_training_goal_sub">Strength: heavy, low-rep work. Muscle: more sets per muscle each week, for growth (hypertrophy). Power: fast, explosive lifts.</string>
+    <string name="setup_liftgoal_strength">Strength</string>
+    <string name="setup_liftgoal_muscle">Muscle</string>
+    <string name="setup_liftgoal_power">Power</string>
+
+    <!-- Resistance modality row (abbreviated ResistanceModality segment labels;
+         the row is headed by setup_modality_strength_q) -->
+    <string name="setup_modality_weights_short">Weights</string>
+    <string name="setup_modality_calis_short">Bodyweight</string>
+
+    <!-- Experience row (SetupLevel titles, shared with the wizard's level step) -->
+    <string name="setup_row_experience">Experience</string>
+    <!-- A Both profile's Experience, one row per side. -->
+    <string name="setup_row_lift_experience">Lifting experience</string>
+    <string name="setup_row_run_experience">Running experience</string>
+
+    <!-- Goal distance + which-leads rows -->
+    <string name="setup_row_goal_distance">Goal distance</string>
+    <string name="setup_row_which_leads">Which leads?</string>
+    <string name="setup_lead_lifting">Lifting</string>
+    <string name="setup_lead_running">Running</string>
+
+    <!-- Volume rows -->
+    <string name="setup_row_weekly_sets">Sets per muscle a week</string>
+    <string name="setup_row_running_volume">Weekly distance</string>
+    <string name="setup_distance_value">%1$s %2$s</string>
+    <!-- Training days row: the one days control (count, lift/run split, weekdays) -->
+    <string name="setup_row_weekdays">Training days</string>
+    <string name="setup_row_lift_days">Lifting days</string>
+    <string name="setup_row_running_days">Running days</string>
+    <!-- Non-breaking spaces keep "5 days" and "2 lift / 3 run" whole when the
+         value wraps after the dot. -->
+    <plurals name="setup_days_count">
+        <item quantity="one">%d\u00A0day</item>
+        <item quantity="other">%d\u00A0days</item>
+    </plurals>
+    <!-- Both: the lift / run split under the day count ("2 lift · 3 run"), plus
+         the rest days a lifting-led week leaves when the run cap applies. -->
+    <string name="setup_days_split_sub">%1$d\u00A0lift · %2$d\u00A0run</string>
+    <string name="setup_days_split_rest_sub">%1$d\u00A0lift · %2$d\u00A0run · %3$d\u00A0rest</string>
+    <string name="setup_row_meet">Test or meet date</string>
+    <string name="setup_row_race_date">Race date</string>
+    <string name="setup_row_recent_race">Recent race or time trial</string>
+    <string name="setup_row_longest_run">Longest run, last month</string>
+    <string name="setup_row_equipment">Equipment</string>
+    <string name="setup_row_priority_muscle">Priority muscle</string>
+    <string name="setup_priority_none">None</string>
+    <string name="setup_muscle_chest">Chest</string>
+    <string name="setup_muscle_back">Back</string>
+    <string name="setup_muscle_quads">Quads</string>
+    <string name="setup_muscle_hamstrings">Hamstrings</string>
+    <string name="setup_muscle_glutes">Glutes</string>
+    <string name="setup_muscle_side_delts">Side delts (shoulders)</string>
+    <string name="setup_muscle_rear_delts">Rear delts (shoulders)</string>
+    <string name="setup_muscle_biceps">Biceps</string>
+    <string name="setup_muscle_triceps">Triceps</string>
+    <string name="setup_muscle_calves">Calves</string>
+    <string name="setup_muscle_abs">Abs</string>
+    <string name="setup_row_runner_strength">Add 2 short strength sessions a week</string>
+    <string name="setup_row_runner_strength_sub">Makes each stride cost less energy.</string>
+    <string name="setup_row_health_questions">Health questions</string>
+    <string name="setup_parq_value_clear">None apply</string>
+    <string name="setup_parq_value_legacy">Answer again</string>
+    <string name="setup_row_advanced">Advanced running base</string>
+    <string name="setup_row_advanced_sub">Marathon plans: 5–7 run days a week instead of 4–6.</string>
+
+    <!-- You section (person data) -->
+    <string name="setup_section_you">You</string>
+    <string name="setup_row_age">Age</string>
+    <string name="setup_row_bodyweight">Bodyweight</string>
+    <string name="setup_row_resting_hr">Resting heart rate</string>
+    <string name="setup_row_max_hr">Max heart rate</string>
+    <string name="setup_max_hr_hint">Measured on a max test or race, not estimated.</string>
+    <string name="setup_not_set">Not set</string>
+    <string name="setup_age_value">%1$s yr</string>
+    <string name="setup_bodyweight_value">%1$s %2$s</string>
+    <string name="setup_bpm_value">%1$s bpm</string>
+
+    <!-- Profile group labels (accent section overlines, one card each) -->
+    <string name="setup_section_plan">Plan</string>
+    <string name="setup_section_lifting">Lifting</string>
+    <string name="setup_section_running">Running</string>
+    <string name="setup_rerun_setup">Re-run guided setup</string>
+
+    <!-- Training context (advanced): environment, re-entry, overload -->
+    <string name="setup_section_context">Training context</string>
+    <string name="setup_row_environment">Environment</string>
+    <string name="setup_env_heat">Heat</string>
+    <string name="setup_env_altitude">Altitude</string>
+    <string name="setup_env_cold">Cold</string>
+    <string name="setup_env_neutral">Normal</string>
+    <string name="setup_row_env_temp">Session temperature</string>
+    <string name="setup_temp_value">%1$d °C</string>
+    <string name="setup_row_env_altitude">Session altitude</string>
+    <string name="setup_altitude_value">%1$d m</string>
+    <string name="setup_row_break">Back from a break?</string>
+    <string name="setup_break_none">No break</string>
+    <string name="setup_break_weeks_label">How long were you off?</string>
+    <string name="setup_break_restart_label">When did you restart?</string>
+    <string name="setup_break_value">Since %1$s</string>
+    <string name="setup_weeks_value">%1$d wk</string>
+    <string name="setup_row_high_load">High-load block</string>
+    <string name="setup_row_high_load_sub">Planned hard weeks. A good morning check-in won\'t add extra training.</string>
+
+    <!-- Health &amp; safety group label -->
+    <string name="setup_section_health">Health &amp; safety</string>
+
+    <!-- ===================== ui_ : shared shell widgets ===================== -->
+
+    <!-- Widgets.kt content descriptions + keypad range hint + heatmap legend -->
+    <string name="ui_cd_expanded">Expanded</string>
+    <string name="ui_cd_collapsed">Collapsed</string>
+    <string name="ui_cd_delete_digit">Delete digit</string>
+    <string name="ui_keypad_range_hint">Enter %1$s–%2$s %3$s</string>
+
+    <!-- Export.kt share-sheet chooser title -->
+    <string name="ui_export_chooser_title">Export run</string>
+
+    <!-- ProfileScreen.kt: the Clear/Import dialog's "Export first" action after a successful save -->
+    <string name="setup_export_first_done">Exported</string>
+    <string name="setup_export_first_done_cd">Exported. Export again</string>
+
+</resources>

@@ -1,8 +1,11 @@
 package app.milestone
 
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.InputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -10,32 +13,35 @@ import org.junit.Test
  * Unit tests for [EventLog.compact], the Kotlin half of the compaction lockstep
  * with Rust `compact_event_log` (shared/src/log.rs). Lines are produced by the
  * real [Event.toJson] so a wire-shape drift would surface here too.
+ *
+ * Also covers [readBounded], the guard on the other end of the same durable log:
+ * a restore reads a user-chosen document before it may replace the log, and that
+ * read must stay bounded.
  */
 class EventLogTest {
 
     private fun line(e: Event) = e.toJson().toString()
 
     // Pin observedAt + entryId so a helper called twice (input AND expected)
-    // produces byte-identical lines: the LogSet/LogRun defaults are the wall
+    // produces identical lines: the LogSet/LogRun defaults are the wall
     // clock (seconds / millis), which would otherwise differ between calls.
     private fun set(exercise: String) = line(Event.LogSet(exercise, 100.0, 5, 8.0, observedAt = 0, entryId = 0))
     private fun run(km: Double) = line(Event.LogRun(km, km * 5.0, 75.0, 0.0, observedAt = 0, entryId = 0))
     private fun profile(weeklySets: Int) = line(
         Event.SetProfile(
             ProgressionCadence.WeekToWeek, LiftGoal.MaxStrength, GoalDistance.TenK,
-            ConcurrentGoal.Strength, weeklySets, 4, 45.0, false, 75.0,
+            ConcurrentGoal.Strength, weeklySets, 4, 45.0, false,
         )
     )
-    private fun protein(bw: Double) = line(Event.ComputeProtein(bw, masters = false, deficit = true))
 
     // The Kotlin Event type has no variants for the dormant calculators yet, so
     // these lines are raw serde wire shapes (struct variants = single-key object,
-    // unit variants = bare string) exactly as app.rs serializes them.
+    // unit variants = bare string) exactly as app/mod.rs serializes them.
     private fun cooper(distanceM: Double) = """{"ComputeCooper":{"distance_m_12min":$distanceM}}"""
     private fun criticalSpeed(distanceM: Double) =
         """{"ComputeCriticalSpeed":{"efforts":[{"distance_m":$distanceM,"time_sec":720.0}]}}"""
     private fun apre(reps: Int) =
-        """{"ComputeApre":{"scheme":"Apre6","reps":$reps,"current_load_lb":225.0}}"""
+        """{"ComputeApre":{"scheme":"Apre6","reps":$reps,"current_load_kg":100.0}}"""
     private val clearCooper = "\"ClearCooper\""
     private val clearCriticalSpeed = "\"ClearCriticalSpeed\""
     private val clearApre = "\"ClearApre\""
@@ -43,22 +49,13 @@ class EventLogTest {
     private fun readiness(signal: ReadinessSignal, value: Double = 1.0) =
         line(Event.SubmitReadiness(signal, value, observedAt = 0))
 
+    /** An undated (legacy) remove: the core deletes its input outright. */
     private fun removeReadiness(signal: ReadinessSignal) =
-        line(Event.RemoveReadiness(signal))
+        line(Event.RemoveReadiness(signal, observedAt = 0))
 
-    @Test
-    fun removeReadinessCancelsItsSubmitPairwise() {
-        // Mirrors log.rs Rule 0: pain + its undo are inert; the wellness input
-        // logged in between survives untouched.
-        val out = EventLog.compact(
-            listOf(
-                readiness(ReadinessSignal.Pain),
-                readiness(ReadinessSignal.WellnessZ, -1.5),
-                removeReadiness(ReadinessSignal.Pain),
-            ),
-        )
-        assertEquals(listOf(readiness(ReadinessSignal.WellnessZ, -1.5)), out)
-    }
+    /** A dated remove: the core retracts its input from [observedAt] on. */
+    private fun removeReadinessAt(signal: ReadinessSignal, observedAt: Long) =
+        line(Event.RemoveReadiness(signal, observedAt = observedAt))
 
     @Test
     fun removeReadinessCancelsOnlyTheLatestMatchingSubmit() {
@@ -92,21 +89,58 @@ class EventLogTest {
     }
 
     @Test
-    fun clearDropsFamilyPrefixButKeepsLaterEntries() {
-        val out = EventLog.compact(listOf(set("a"), set("b"), line(Event.ClearSets), set("c")))
-        assertEquals(listOf(set("c")), out)
+    fun aDatedRemoveKeepsItsSubmitAndConsumesIt() {
+        // The dated remove retracts the newer Soreness (both lines stay); the
+        // undated remove then pairs with the older one, as the core does.
+        val older = line(Event.SubmitReadiness(ReadinessSignal.Soreness, 6.0, observedAt = 100))
+        val newer = line(Event.SubmitReadiness(ReadinessSignal.Soreness, 5.0, observedAt = 200))
+        val dated = removeReadinessAt(ReadinessSignal.Soreness, 300)
+        val out = EventLog.compact(listOf(older, newer, dated, removeReadiness(ReadinessSignal.Soreness)))
+        assertEquals(listOf(newer, dated), out)
+    }
+
+    // ── review family: every review survives (lockstep with log.rs) ──
+
+    private fun review(count: Int, observedAt: Long) =
+        line(Event.SubmitReview(overtrainingSignalCount = count, observedAt = observedAt))
+
+    /** A review that sets the per-session review (an off day). */
+    private fun sessionReview(observedAt: Long) =
+        line(Event.SubmitReview(badDay = true, observedAt = observedAt))
+
+    @Test
+    fun everyReviewSurvivesAndOnlyATrailingClearReviewIsKept() {
+        val r1 = review(1, 100)
+        val r2 = sessionReview(200)
+        val clear = line(Event.ClearReview)
+        assertEquals(listOf(r1, r2), EventLog.compact(listOf(r1, r2)))
+        assertEquals(listOf(r1, r2, clear), EventLog.compact(listOf(r1, clear, r2, clear)))
+        // A later session review replaces the store the clear emptied: inert.
+        assertEquals(listOf(r1, r2), EventLog.compact(listOf(r1, clear, r2)))
+        // A weekly-only review never sets the session review, so the clear stays.
+        val weeklyOnly = review(2, 300)
+        assertEquals(listOf(r1, clear, weeklyOnly), EventLog.compact(listOf(r1, clear, weeklyOnly)))
     }
 
     @Test
-    fun trailingClearCollapsesToEmpty() {
-        val out = EventLog.compact(listOf(run(5.0), run(6.0), line(Event.ClearRuns)))
-        assertTrue(out.isEmpty())
-    }
-
-    @Test
-    fun clearOnlyTouchesItsOwnFamily() {
-        val out = EventLog.compact(listOf(set("a"), run(5.0), line(Event.ClearSets)))
-        assertEquals(listOf(run(5.0)), out)
+    fun aClearWeeklyCheckinIsInertOnlyBeforeALaterWeeklyCheckin() {
+        val w1 = line(Event.SubmitWeeklyCheckin(Event.SubmitReview(overtrainingSignalCount = 2, observedAt = 100)))
+        val w2 = line(
+            Event.SubmitWeeklyCheckin(
+                Event.SubmitReview(
+                    overtrainingSigns = OvertrainingSigns(worseSleep = true),
+                    overtrainingSignalWeeks = 1.5,
+                    observedAt = 200,
+                ),
+            ),
+        )
+        val clear = line(Event.ClearWeeklyCheckin)
+        assertEquals(listOf(w1, w2), EventLog.compact(listOf(w1, clear, w2)))
+        // A session review never replaces the weekly check-in: the clear stays.
+        val s = sessionReview(300)
+        assertEquals(listOf(w1, clear, s), EventLog.compact(listOf(w1, clear, s)))
+        // A trailing clear is kept.
+        assertEquals(listOf(w1, w2, clear), EventLog.compact(listOf(w1, w2, clear)))
     }
 
     @Test
@@ -114,18 +148,6 @@ class EventLogTest {
         val track = line(Event.LogRunTrack(listOf(GpsPoint(0.0, 0.0, 0, 5.0)), 0.0, 0.0))
         val out = EventLog.compact(listOf(run(5.0), track, line(Event.ClearRuns), run(8.0)))
         assertEquals(listOf(run(8.0)), out)
-    }
-
-    @Test
-    fun onlyLastProfileSurvives() {
-        val out = EventLog.compact(listOf(profile(10), set("a"), profile(20)))
-        assertEquals(listOf(set("a"), profile(20)), out)
-    }
-
-    @Test
-    fun onlyLastProteinSurvives() {
-        val out = EventLog.compact(listOf(protein(70.0), set("a"), protein(90.0)))
-        assertEquals(listOf(set("a"), protein(90.0)), out)
     }
 
     // ── families 9–11: Cooper / CriticalSpeed / Apre (lockstep with log.rs) ──
@@ -168,30 +190,11 @@ class EventLogTest {
         assertTrue(out.isEmpty())
     }
 
-    // ── families 13–14: plan request + SetToday (Phase 6, lockstep with log.rs) ──
+    // ── families 13–14: plan request + SetToday (lockstep with log.rs) ──
 
     private fun generatePlan(start: Long) = line(Event.GeneratePlan(start))
     private fun setToday(day: Long) = line(Event.SetToday(day))
     private val clearPlan = line(Event.ClearPlan)
-
-    @Test
-    fun onlyLastPlanRequestSurvives() {
-        val out = EventLog.compact(listOf(generatePlan(1), set("a"), generatePlan(8)))
-        assertEquals(listOf(set("a"), generatePlan(8)), out)
-    }
-
-    @Test
-    fun clearWipesThePlanFamily() {
-        val out = EventLog.compact(listOf(generatePlan(1), generatePlan(8), clearPlan))
-        assertTrue(out.isEmpty())
-    }
-
-    @Test
-    fun onlyLastSetTodaySurvives() {
-        // SetToday is sent every foreground; compaction keeps exactly one line.
-        val out = EventLog.compact(listOf(setToday(1), setToday(2), setToday(3)))
-        assertEquals(listOf(setToday(3)), out)
-    }
 
     @Test
     fun planAndTodayClearsTouchOnlyTheirOwnFamilies() {
@@ -212,24 +215,10 @@ class EventLogTest {
         assertEquals(listOf(criticalSpeed(3000.0), apre(6)), out)
     }
 
-    // ── family 12: check-ins (Phase 2 / B1, lockstep with log.rs) ──
+    // ── family 12: check-ins (lockstep with log.rs) ──
 
     private fun checkin(observedAt: Long) =
         line(Event.SubmitCheckin(observedAt, sleepQuality = 3, soreness = 3, mood = 3))
-
-    @Test
-    fun checkinsAreRetainedHistoryOnlyAClearWipes() {
-        // Family 12 is NOT day-scoped: multiple check-ins across days all survive
-        // (they ARE the rolling baseline). Only a ClearCheckins supersedes them.
-        val kept = EventLog.compact(listOf(checkin(0), checkin(86_400), checkin(172_800)))
-        assertEquals(3, kept.size)
-
-        val cleared = EventLog.compact(listOf(checkin(0), checkin(86_400), line(Event.ClearCheckins)))
-        assertTrue(cleared.isEmpty())
-
-        val after = EventLog.compact(listOf(checkin(0), line(Event.ClearCheckins), checkin(86_400)))
-        assertEquals(listOf(checkin(86_400)), after)
-    }
 
     @Test
     fun clearCheckinsOnlyTouchesItsOwnFamily() {
@@ -242,27 +231,6 @@ class EventLogTest {
     // ── Rule 4: check-in retention window (45 days, lockstep with log.rs) ──────
 
     private val DAY = 86_400L
-
-    @Test
-    fun rule4DropsCheckinsOlderThanTheRetentionWindow() {
-        // Newest check-in is day 60; the 45-day window's cutoff is day 15. Day 0
-        // (60 days old) is dropped; day 20 (inside 45) and day 60 survive.
-        val out = EventLog.compact(listOf(checkin(0), checkin(20 * DAY), checkin(60 * DAY)))
-        assertEquals(listOf(checkin(20 * DAY), checkin(60 * DAY)), out)
-    }
-
-    @Test
-    fun rule4KeepsTheCheckinExactlyAtTheWindowEdge() {
-        // observed_at == cutoff (newest − 45 days) is NOT strictly older → kept.
-        val out = EventLog.compact(listOf(checkin(0), checkin(45 * DAY)))
-        assertEquals(listOf(checkin(0), checkin(45 * DAY)), out)
-    }
-
-    @Test
-    fun rule4IsANoopWithoutCheckins() {
-        val out = EventLog.compact(listOf(run(5.0), readiness(ReadinessSignal.WellnessZ)))
-        assertEquals(listOf(run(5.0), readiness(ReadinessSignal.WellnessZ)), out)
-    }
 
     @Test
     fun rule4AnchorsOnTheNewestSurvivingCheckinNotAClearedOne() {
@@ -287,7 +255,7 @@ class EventLogTest {
 
     @Test
     fun rule4PerChannelWindowKeepsASparseChannelAlive() {
-        // F1 (lockstep with log.rs): derive_readiness windows EACH channel on ITS
+        // Lockstep with log.rs: derive_readiness windows EACH channel on ITS
         // OWN newest reading, not the log's global newest. Eight resting-HR-ONLY
         // check-ins on days 0..7 build a full RHR baseline; sleep-ONLY check-ins on
         // days 60..63 carry NO resting-HR. A global-newest anchor (day 63) would
@@ -304,7 +272,7 @@ class EventLogTest {
         assertEquals(rhrWeek + sleepBurst, out)
     }
 
-    // ── Rule 3: DeleteEntry / AmendSet / AmendRun (Phase 4 / M4, lockstep) ──
+    // ── Rule 3: DeleteEntry / AmendSet / AmendRun (lockstep with log.rs) ──
 
     private fun setId(exercise: String, id: Long, observedAt: Long) =
         line(Event.LogSet(exercise, 100.0, 5, 8.0, observedAt = observedAt, entryId = id))
@@ -317,50 +285,52 @@ class EventLogTest {
     private fun amendRun(id: Long, km: Double) =
         line(Event.AmendRun(id, km, km * 5.0, 0.0, 0.0, observedAt = 0))
 
-    @Test
-    fun deleteCancelsItsLoggedSetPairwise() {
-        val out = EventLog.compact(listOf(setId("Bench", 7, 0), run(5.0), delSet(7)))
-        assertEquals(listOf(run(5.0)), out)
-    }
-
-    @Test
-    fun deleteTargetsTheNewestMatchingRow() {
-        val out = EventLog.compact(listOf(setId("A", 3, 0), setId("B", 3, 86_400), delSet(3)))
-        assertEquals(listOf(setId("A", 3, 0)), out)
-    }
-
-    @Test
-    fun amendSupersedesThePriorSetButSurvives() {
-        // B8: a strict amend needs its base row on replay, so Log→Amend keeps BOTH
-        // the base log AND the amend (lockstep with log.rs).
-        val out = EventLog.compact(listOf(setId("Bench", 5, 0), amendSet(5, 120.0)))
-        assertEquals(listOf(setId("Bench", 5, 0), amendSet(5, 120.0)), out)
-    }
-
-    @Test
-    fun amendChainCollapsesToLogPlusLastAmend() {
-        // B8: Log→Amend→Amend (no delete) collapses to [log, last amend], the
-        // superseded middle amend is dropped, the base log is retained.
-        val out = EventLog.compact(
-            listOf(setId("Bench", 9, 0), amendSet(9, 110.0), amendSet(9, 130.0))
+    private fun runTrackId(id: Long, observedAt: Long) = line(
+        Event.LogRunTrack(
+            listOf(
+                GpsPoint(0.0, 0.000, 0L, 5.0),
+                GpsPoint(0.0, 0.005, 100L, 5.0),
+                GpsPoint(0.0, 0.010, 200L, 5.0),
+                GpsPoint(0.0, 0.015, 300L, 5.0),
+                GpsPoint(0.0, 0.020, 400L, 5.0),
+            ),
+            0.0, 0.0, observedAt = observedAt, entryId = id,
         )
-        assertEquals(listOf(setId("Bench", 9, 0), amendSet(9, 130.0)), out)
+    )
+    private fun trimRun(id: Long, observedAtFallback: Long, from: Long, until: Long) =
+        line(Event.TrimRunTrack(id, observedAtFallback, from, until))
+
+    @Test
+    fun anotherRunsTrimBlocksTheDeletePairDrop() {
+        // A trim belonging to a DIFFERENT run (7_200_006) than the deleted run
+        // (7_200_005) is NOT in the delete's removal chain, so it still counts as a
+        // run line in the window and blocks the spike-unsafe pair-drop. The delete
+        // and its base survive. Lockstep with log.rs
+        // trim_counts_as_a_run_line_for_the_spike_guard.
+        val events = listOf(
+            runTrackId(7_200_005L, 0),
+            runTrackId(7_200_006L, 0),
+            trimRun(7_200_006L, 0, 100, 300),
+            delRun(7_200_005L),
+        )
+        assertEquals(events, EventLog.compact(events))
     }
 
     @Test
-    fun amendChainEndingInDeleteCancelsAway() {
-        // The whole edit chain plus its delete is inert.
-        val out = EventLog.compact(
-            listOf(setId("Bench", 9, 0), amendSet(9, 110.0), amendSet(9, 130.0), delSet(9))
+    fun clearRunsWipesATrimmedRunBaseAndItsTrims() {
+        val events = listOf(
+            runTrackId(7_200_003L, 0),
+            trimRun(7_200_003L, 0, 100, 300),
+            line(Event.ClearRuns),
         )
-        assertTrue(out.isEmpty())
+        assertTrue(EventLog.compact(events).isEmpty())
     }
 
     @Test
     fun amendAfterDeleteNeverResurrectsTheEntry() {
-        // B8 core prevention (lockstep with log.rs): Log→Delete→Amend targeting the
+        // Core prevention (lockstep with log.rs): Log→Delete→Amend targeting the
         // already-deleted row. The delete cancels the entry; the orphan amend
-        // matches nothing and is dropped → the entry STAYS deleted (before B8 the
+        // matches nothing and is dropped → the entry STAYS deleted (previously the
         // amend survived as a push and resurrected the row on the next launch).
         val setOut = EventLog.compact(listOf(setId("Bench", 5, 0), delSet(5), amendSet(5, 120.0)))
         assertTrue(setOut.isEmpty())
@@ -370,21 +340,6 @@ class EventLogTest {
             listOf(runId(5.0, 2, 0), runId(8.0, 3, 86_400), delRun(3), amendRun(3, 9.0))
         )
         assertEquals(listOf(runId(5.0, 2, 0)), runOut)
-    }
-
-    @Test
-    fun unmatchedDeleteIsDroppedAlone() {
-        val before = EventLog.compact(listOf(delSet(42), setId("Bench", 42, 0)))
-        assertEquals(listOf(setId("Bench", 42, 0)), before)
-
-        val orphan = EventLog.compact(listOf(run(5.0), delSet(1)))
-        assertEquals(listOf(run(5.0)), orphan)
-    }
-
-    @Test
-    fun deleteAcrossAClearCollapsesAway() {
-        val out = EventLog.compact(listOf(setId("Bench", 4, 0), line(Event.ClearSets), delSet(4)))
-        assertTrue(out.isEmpty())
     }
 
     @Test
@@ -400,10 +355,10 @@ class EventLogTest {
 
     @Test
     fun rule3LegacyChainCollapsesOnlyWhilePinnedToOneDate() {
-        // F2 guard (lockstep with log.rs). Rule 3's chain-walk keys a legacy
+        // Chain-walk guard (lockstep with log.rs). Rule 3's chain-walk keys a legacy
         // (entry_id 0) chain by ONE (fam, id, observed_at) match key: correct only
-        // while the row's date is immutable. THIS SHELL enforces that: LogEntry.kt
-        // pins observed_at == observed_at_fallback for id-0 rows, blocking
+        // while the row's date is immutable. THIS SHELL enforces that: the log editors
+        // pin observed_at == observed_at_fallback for id-0 rows, blocking
         // re-dating. SUPPORTED (pinned) path: a one-date legacy Log→Amend→Amend
         // collapses to [log, last amend], exactly like an id-bearing chain. (The
         // replay-equivalence of the UNSUPPORTED re-dated case, which reverts /
@@ -430,9 +385,63 @@ class EventLogTest {
         assertEquals(listOf(runId(5.0, 2, 0)), dropped)
     }
 
+    // ── Family 15: logged activities (lockstep with log.rs) ──
+
+    private fun activity(id: Long, observedAt: Long, minutes: Double = 45.0) =
+        line(Event.LogActivity(ActivityKind.Sport, minutes, observedAt = observedAt, entryId = id))
+    private fun delActivity(id: Long, fallback: Long = 0) =
+        line(Event.DeleteEntry(Event.EntryKind.Activity, id, observedAtFallback = fallback))
+
     @Test
-    fun emptyLogStaysEmpty() {
-        assertTrue(EventLog.compact(emptyList()).isEmpty())
+    fun activityDeleteCancelsItsEntryEvenWithOtherLinesBetween() {
+        // No baked baseline in family 15: a run or another activity in between
+        // never blocks the pair-drop.
+        val out = EventLog.compact(
+            listOf(activity(1, 100), runId(5.0, 2, 150), activity(3, 200), delActivity(1)),
+        )
+        assertEquals(listOf(runId(5.0, 2, 150), activity(3, 200)), out)
+    }
+
+    @Test
+    fun activityDeleteMatchesOnlyItsOwnFamily() {
+        // An Activity delete sharing a set's id leaves the set alone and, with no
+        // activity to match, replays as a no-op: dropped alone.
+        val out = EventLog.compact(listOf(setId("Bench", 9, 100), delActivity(9)))
+        assertEquals(listOf(setId("Bench", 9, 100)), out)
+        // A legacy (id 0) activity is matched on its observed_at.
+        assertTrue(EventLog.compact(listOf(activity(0, 5000), delActivity(0, fallback = 5000))).isEmpty())
+    }
+
+    @Test
+    fun anInvalidActivityHasNoIdentity() {
+        // The core ignores minutes outside (0, 600]: such a line is never a delete
+        // target, so the delete matches nothing and is dropped alone.
+        val tooLong = activity(4, 100, minutes = 601.0)
+        assertEquals(listOf(tooLong), EventLog.compact(listOf(tooLong, delActivity(4))))
+    }
+
+    @Test
+    fun clearActivitiesSweepsOnlyItsFamily() {
+        val out = EventLog.compact(
+            listOf(
+                activity(1, 100), set("a"), run(5.0), activity(2, 200), delActivity(2),
+                line(Event.ClearActivities), activity(3, 300),
+            ),
+        )
+        assertEquals(listOf(set("a"), run(5.0), activity(3, 300)), out)
+        // A delete kept by an earlier pass is swept with its family too.
+        assertTrue(EventLog.compact(listOf(delActivity(7), line(Event.ClearActivities))).isEmpty())
+        // ClearSets / ClearRuns leave activities alone.
+        assertEquals(
+            listOf(activity(1, 100)),
+            EventLog.compact(listOf(activity(1, 100), line(Event.ClearSets), line(Event.ClearRuns))),
+        )
+    }
+
+    @Test
+    fun activityVariantsAreRecognized() {
+        assertEquals("ClearActivities", EventLog.variantOf(line(Event.ClearActivities)))
+        assertEquals("LogActivity", EventLog.variantOf(activity(1, 100)))
     }
 
     @Test
@@ -446,6 +455,31 @@ class EventLogTest {
         assertEquals("ClearSets", EventLog.variantOf(line(Event.ClearSets)))
         assertEquals("LogSet", EventLog.variantOf(set("a")))
         assertEquals(null, EventLog.variantOf("not json"))
+    }
+
+    // ── shared golden corpus (lockstep with the Rust compaction_golden test) ──
+
+    private fun compactionFixturesDir(): File {
+        val relative = File("../../shared/tests/fixtures/compaction")
+        if (relative.isDirectory) return relative
+        val resource = javaClass.classLoader.getResource("compaction")
+            ?: error("compaction fixtures not found (cwd=${System.getProperty("user.dir")})")
+        return File(resource.toURI())
+    }
+
+    @Test
+    fun compactionGoldenFixtures() {
+        val dir = compactionFixturesDir()
+        val cases = dir.listFiles { f -> f.name.endsWith(".in.ndjson") }
+            ?.map { it.name.removeSuffix(".in.ndjson") }
+            ?.sorted()
+            .orEmpty()
+        assertTrue("no compaction fixtures in ${dir.absolutePath}", cases.isNotEmpty())
+        for (case in cases) {
+            val input = File(dir, "$case.in.ndjson").readLines().filter { it.isNotBlank() }
+            val expected = File(dir, "$case.expected.ndjson").readLines().filter { it.isNotBlank() }
+            assertEquals("compaction fixture `$case` diverged", expected, EventLog.compact(input))
+        }
     }
 
     // ── load(): fresh-install vs compacted-empty (Core.restore's seed decision) ──
@@ -502,7 +536,7 @@ class EventLogTest {
         assertEquals(listOf(run(5.0)), file.readLines().filter { it.isNotBlank() })
     }
 
-    // ── load(): torn-line GC (item I4), drop crash-truncated lines, but never
+    // ── load(): torn-line GC, drop crash-truncated lines, but never
     //    a valid-JSON future event we simply don't recognize (forward-compat) ──
 
     @Test
@@ -552,5 +586,242 @@ class EventLogTest {
         assertFalse(restored.freshInstall)
         assertEquals(original, restored.lines)
         assertEquals(bytes, file.readText())
+    }
+
+    @Test
+    fun loadSkipsTheRewriteForATinyDropButStillReturnsCompactedLines() {
+        // A routine launch: one superseded SetToday and one aged-out check-in are
+        // the only drops in a log large enough that the bounded rewrite rule calls
+        // them not worth an fsync. The file ON DISK stays untouched while replay
+        // still gets the compacted survivors. Sized from the rule itself, so a
+        // retuned threshold keeps this a below-threshold case.
+        val drops = 2
+        val filler = (1..drops * EventLog.REWRITE_MIN_DROPPED_SHARE_INVERSE).map { set("f$it") }
+        val staleCheckin = checkin(0)
+        val freshCheckin = checkin(60 * DAY)
+        val original = filler + listOf(setToday(1), setToday(2), staleCheckin, freshCheckin)
+        assertFalse(EventLog.compactionWorthRewriting(drops, original.size))
+        val file = tempLog()
+        file.writeText(original.joinToString("\n") + "\n")
+
+        val restored = EventLog.load(file)
+        // Compaction still drops the superseded SetToday and the stale check-in...
+        assertFalse(restored.lines.contains(setToday(1)))
+        assertTrue(restored.lines.contains(setToday(2)))
+        assertFalse(restored.lines.contains(staleCheckin))
+        assertTrue(restored.lines.contains(freshCheckin))
+        assertEquals(original.size - drops, restored.lines.size)
+        // ...but the durable file is left exactly as written.
+        assertEquals(original, file.readLines().filter { it.isNotBlank() })
+    }
+
+    @Test
+    fun loadSelfHealsANewlinelessTornTailThenAcceptsAnAppend() {
+        // A process kill mid-appendText left a newline-less partial last line.
+        // load() drops it AND rewrites the durable log with a trailing newline, so
+        // the next Core.appendText starts a fresh line instead of gluing its JSON
+        // onto the torn bytes (which would make that next event unparseable, and
+        // lost, on the next boot).
+        val file = tempLog()
+        val torn = """{"LogSet":{"exercise":"Bench","weigh"""
+        file.writeText(set("a") + "\n" + torn) // valid first line, torn tail, NO trailing newline
+        val restored = EventLog.load(file)
+        assertFalse(restored.freshInstall)
+        assertEquals(listOf(set("a")), restored.lines)
+        // Healed on disk: the intact line joined with a trailing newline.
+        assertEquals(listOf(set("a")).joinToString("\n", postfix = "\n"), file.readText())
+        // A subsequent append lands on its own line → the whole log reparses.
+        file.appendText(run(5.0) + "\n")
+        val reloaded = EventLog.load(file)
+        assertEquals(listOf(set("a"), run(5.0)), reloaded.lines)
+    }
+
+    @Test
+    fun loadRewritesAValidButNewlinelessLastLineWithATrailingNewline() {
+        // Even when every line parses, a newline-less tail (an append cut off right
+        // before its '\n') must be healed: the next append would otherwise glue
+        // onto this line and corrupt both events. load() rewrites with the trailing
+        // newline even though nothing was dropped.
+        val file = tempLog()
+        val original = listOf(set("a"), run(5.0))
+        file.writeText(original.joinToString("\n")) // valid last line, NO trailing newline
+        val restored = EventLog.load(file)
+        assertFalse(restored.freshInstall)
+        assertEquals(original, restored.lines)
+        assertEquals(original.joinToString("\n", postfix = "\n"), file.readText())
+    }
+
+    // ── read(): the export's view of the log must never mutate it ──
+
+    @Test
+    fun readCompactsWithoutTouchingTheLogOrItsTemporaries() {
+        // Everything load() would act on: a compactable prefix (≥5% dropped), a
+        // torn newline-less tail, and leftover swap temporaries. read() runs while
+        // the core may be appending, so it must change none of it.
+        val file = tempLog()
+        val torn = """{"LogSet":{"exercise":"Bench","weigh"""
+        val bytes = listOf(set("a"), line(Event.ClearSets), run(5.0)).joinToString("\n", postfix = "\n") + torn
+        file.writeText(bytes)
+        val temps = listOf(".tmp", ".import", ".bak").map { File(file.parentFile, file.name + it) }
+        try {
+            temps.forEach { it.writeText("x") }
+
+            val read = EventLog.read(file)
+
+            assertFalse(read.freshInstall)
+            assertEquals(listOf(run(5.0)), read.lines)
+            assertEquals(bytes, file.readText())
+            assertTrue(temps.all { it.exists() && it.readText() == "x" })
+        } finally {
+            temps.forEach { it.delete() }
+        }
+    }
+
+    @Test
+    fun readOfAMissingLogCreatesNothingAndRestoresNothing() {
+        // load() would move a crash-left .bak back into place; read() must not.
+        val file = tempLog().also { it.delete() }
+        val bak = File(file.parentFile, file.name + ".bak").apply { writeText(set("a") + "\n") }
+        try {
+            val read = EventLog.read(file)
+            assertTrue(read.freshInstall)
+            assertTrue(read.lines.isEmpty())
+            assertFalse(file.exists())
+            assertTrue(bak.exists())
+        } finally {
+            bak.delete()
+        }
+    }
+
+    @Test
+    fun loadReportsTheLargestEntryIdEvenWhenItsLineCompactsAway() {
+        // EntryIds must never reuse an id a restored entry carried, including one a
+        // later clear removed (a stale amend/delete could still name it).
+        val file = tempLog()
+        file.writeText(
+            listOf(
+                line(Event.LogSet("a", 100.0, 5, 8.0, observedAt = 1, entryId = 5)),
+                line(Event.LogSet("b", 100.0, 5, 8.0, observedAt = 2, entryId = 900)),
+                line(Event.ClearSets),
+                line(Event.LogRun(5.0, 25.0, 75.0, 0.0, observedAt = 3, entryId = 12)),
+            ).joinToString("\n", postfix = "\n")
+        )
+        assertEquals(900L, EventLog.load(file).maxEntryId)
+    }
+
+    @Test
+    fun entryIdsStayAboveARestoredIdAfterTheClockMovedBack() {
+        // A restored id from a clock that ran ahead of today's wall clock.
+        val restored = System.currentTimeMillis() + 10L * 365 * 86_400_000L
+        EntryIds.raiseTo(restored)
+        val a = EntryIds.next()
+        val b = EntryIds.next()
+        assertTrue(a > restored)
+        assertTrue(b > a)
+    }
+
+    @Test
+    fun swapLogFileReplacesTheLogAndLeavesNoTemporary() {
+        val dir = java.nio.file.Files.createTempDirectory("swap").toFile()
+        try {
+            File(dir, "event-log.ndjson").writeText(set("old") + "\n")
+            swapLogFile(dir, listOf(set("a"), run(5.0)))
+            assertEquals(listOf(set("a"), run(5.0)).joinToString("\n", postfix = "\n"), File(dir, "event-log.ndjson").readText())
+            assertFalse(File(dir, "event-log.ndjson.import").exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    /** Emits [n] bytes and records how many the reader actually pulled, so a test
+     *  can pin read amplification and not just the returned value. */
+    private class CountingSource(private val n: Long) : InputStream() {
+        var bytesRead = 0L
+            private set
+        private var pos = 0L
+
+        override fun read(): Int {
+            if (pos >= n) return -1
+            pos++
+            bytesRead++
+            return 0
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (pos >= n) return -1
+            val take = minOf(len.toLong(), n - pos).toInt()
+            b.fill(0, off, off + take)
+            pos += take
+            bytesRead += take
+            return take
+        }
+    }
+
+    @Test
+    fun streamValidateRejectsAnOversizedStreamWithoutDrainingIt() {
+        // A content provider may report an unknown size, so the bound has to hold on
+        // the stream itself: a stream past the cap is rejected...
+        val src = CountingSource(MAX_IMPORT_BYTES + 1)
+        assertEquals(ImportCheck.Invalid, streamValidateImport(src, MAX_IMPORT_BYTES))
+        // ...and the reader stops there instead of buffering the whole file: at most
+        // one 64 KiB chunk past the cap is ever pulled (bounded memory).
+        assertTrue(
+            "read ${src.bytesRead} bytes past the cap",
+            src.bytesRead <= MAX_IMPORT_BYTES + 64 * 1024,
+        )
+    }
+
+    @Test
+    fun streamValidateAcceptsAWellFormedLogAndRejectsAJunkLine() {
+        val log = (set("a") + "\n" + run(5.0) + "\n").toByteArray()
+        assertEquals(
+            ImportCheck.Valid(listOf(set("a"), run(5.0))),
+            streamValidateImport(ByteArrayInputStream(log), MAX_IMPORT_BYTES),
+        )
+        // A single unknown/garbage line rejects the whole file (streamed, so a large
+        // binary file trips this on its first line before it can fill the heap).
+        val junk = (set("a") + "\n" + "not a wire line" + "\n").toByteArray()
+        assertEquals(
+            ImportCheck.Invalid,
+            streamValidateImport(ByteArrayInputStream(junk), MAX_IMPORT_BYTES),
+        )
+    }
+
+    @Test
+    fun streamValidateRejectsAMalformedNamedClearTheCoreWouldReject() {
+        // {"ClearSets":{}} is a unit variant given a body — a shape the
+        // core rejects at serde. Import must NOT accept it, or the next launch's
+        // compaction would treat it as a family clear and wipe every logged set.
+        val evil = (set("a") + "\n" + """{"ClearSets":{}}""" + "\n").toByteArray()
+        assertEquals(
+            ImportCheck.Invalid,
+            streamValidateImport(ByteArrayInputStream(evil), MAX_IMPORT_BYTES),
+        )
+    }
+
+    @Test
+    fun variantOfRejectsShapeMismatchedNamedLines() {
+        // A unit variant with a body, or a struct variant
+        // with a non-object payload, or a struct name as a bare string, names NO event
+        // — so compaction never treats it as a clear and import rejects it. Valid
+        // shapes (unit → bare string, struct → object) still resolve.
+        assertEquals(null, EventLog.variantOf("""{"ClearSets":{}}"""))
+        assertEquals(null, EventLog.variantOf("""{"LogSet":5}"""))
+        assertEquals(null, EventLog.variantOf("\"LogSet\""))
+        assertEquals("ClearSets", EventLog.variantOf("\"ClearSets\""))
+        assertEquals(
+            "SetExerciseEnded",
+            EventLog.variantOf(
+                """{"SetExerciseEnded":{"exercise":"Bench","epoch_day":1,"ended":true,"observed_at":0}}""",
+            ),
+        )
+    }
+
+    @Test
+    fun compactionNeverTreatsAMalformedClearAsAFamilyWipe() {
+        // The concrete data-loss vector: a log ending in {"ClearSets":{}} must NOT
+        // sweep the logged sets in Kotlin compaction (the core would reject the line).
+        val out = EventLog.compact(listOf(set("a"), """{"ClearSets":{}}"""))
+        assertEquals(listOf(set("a"), """{"ClearSets":{}}"""), out)
     }
 }

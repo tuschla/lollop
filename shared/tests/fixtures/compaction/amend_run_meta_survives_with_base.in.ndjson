@@ -1,0 +1,3 @@
+{"LogRun":{"distance_km":8.0,"duration_min":44.0,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":1700000000,"entry_id":7300001,"workout_type":null}}
+{"AmendRunMeta":{"entry_id":7300001,"observed_at_fallback":1700000000,"session_rpe":6,"workout_type":"Tempo"}}
+{"AmendRunMeta":{"entry_id":7300001,"observed_at_fallback":1700000000,"session_rpe":7,"workout_type":"Tempo"}}

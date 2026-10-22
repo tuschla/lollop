@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- History, run import, route maps and History charts (HistoryDetail.kt, RunImport.kt,
+     RunMap.kt, the History region of MainActivity.kt, Widgets.kt charts). -->
+<resources>
+    <!-- Run import: why one file was skipped, shown after its name ("bike.fit (a cycling activity, not a run)"). -->
+    <string name="import_reason_read_failed">couldn\'t be read</string>
+    <string name="import_reason_too_large">too large, 32 MB max</string>
+    <string name="import_reason_wrong_type">not a GPX, TCX or FIT file</string>
+    <string name="import_reason_no_track">no GPS points</string>
+    <!-- %1$s = the keep threshold in the user's unit ("0.3 mi"); "3 minutes" mirrors MIN_RUN_SEC (RunTracking.kt). -->
+    <string name="import_reason_too_short">too short for a run, under %1$s or 3 minutes</string>
+    <string name="import_reason_no_timestamps">no timestamps, so it looks like a planned route</string>
+    <string name="import_reason_damaged">the file is damaged</string>
+    <!-- %1$s = the activity's sport as the file names it, lowercase ("cycling"). -->
+    <string name="import_reason_not_a_run">a %1$s activity, not a run</string>
+    <string name="import_reason_not_a_run_unknown">not a running activity</string>
+    <string name="import_reason_implausible_pace">pace too fast for a run</string>
+    <string name="import_reason_rejected">couldn\'t be saved</string>
+    <string name="import_reason_unknown">couldn\'t be imported</string>
+    <!-- %1$s = file name, %2$s = reason. -->
+    <string name="import_skip_item">%1$s (%2$s)</string>
+    <string name="import_unnamed_file">file</string>
+    <!-- Run import result. %1$s = the run's date ("Jun 12, 2017"). -->
+    <string name="import_result_one">Imported a run from %1$s</string>
+    <plurals name="import_result_many">
+        <item quantity="one">Imported %d run</item>
+        <item quantity="other">Imported %d runs</item>
+    </plurals>
+    <string name="import_result_none">No runs imported</string>
+    <!-- %1$s = the imported/duplicate summary, %2$s = skipped files with reasons. -->
+    <string name="import_result_with_skipped">%1$s. Skipped: %2$s</string>
+    <!-- %1$s = the imported/duplicate summary, %2$s = "Skipped 5 files". -->
+    <string name="import_result_with_skipped_count">%1$s. %2$s</string>
+    <plurals name="import_result_skipped_count">
+        <item quantity="one">Skipped %d file</item>
+        <item quantity="other">Skipped %d files</item>
+    </plurals>
+    <!-- Title of the dialog listing every skipped file. -->
+    <plurals name="import_details_title">
+        <item quantity="one">%d file skipped</item>
+        <item quantity="other">%d files skipped</item>
+    </plurals>
+    <string name="import_view">View</string>
+
+    <!-- Route map (run detail). -->
+    <string name="runmap_open_full">Open full-screen map</string>
+    <string name="runmap_close">Close map</string>
+    <string name="runmap_fit_route">Fit route</string>
+    <string name="runmap_start">Start</string>
+    <string name="runmap_finish">Finish</string>
+    <string name="runmap_start_finish">Start · Finish</string>
+    <!-- Spoken route map: %1$s is the distance, e.g. "3.18 miles". -->
+    <string name="runmap_cd">Route map, %1$s.</string>
+    <string name="runmap_cd_loop">Route map, %1$s, loop.</string>
+    <string name="runmap_open_full_action">open full screen</string>
+
+    <!-- Run detail sheet. -->
+    <string name="run_stat_distance">Distance</string>
+    <string name="run_stat_time">Time</string>
+    <string name="run_stat_avg_pace">Avg pace</string>
+    <!-- Spoken stat: %1$s label, %2$s value with spoken unit, e.g. "Distance, 3.18 miles". -->
+    <string name="run_stat_cd">%1$s, %2$s</string>
+    <string name="run_unit_miles">%1$s miles</string>
+    <string name="run_unit_km">%1$s kilometers</string>
+    <string name="run_unit_per_mile">%1$s per mile</string>
+    <string name="run_unit_per_km">%1$s per kilometer</string>
+    <string name="run_your_log">Your log</string>
+    <string name="run_rate_title">Rate this run</string>
+    <string name="run_effort_value">%1$d of 10 · %2$s</string>
+    <string name="run_type_unset">Set type</string>
+    <string name="run_details">Details</string>
+    <string name="run_details_value">Distance, time, HR</string>
+    <string name="run_trim_row">Trim start or end</string>
+    <string name="run_delete_row">Delete run</string>
+    <string name="run_delete_message">It\'s removed from your history and this week\'s progress.</string>
+    <string name="run_splits_show_all">Show all %1$d splits</string>
+    <string name="run_split_fastest">Fastest</string>
+    <string name="run_split_slowest">Slowest</string>
+    <!-- Spoken split row: %1$s index, %2$s spoken pace, %3$s spoken delta. -->
+    <string name="run_split_cd">Split %1$s, %2$s, %3$s</string>
+    <string name="run_split_cd_partial">Last split, %1$s, %2$s</string>
+    <string name="run_split_cd_fastest">%1$s, fastest</string>
+    <string name="run_split_cd_slowest">%1$s, slowest</string>
+    <string name="run_split_faster">%1$s faster than average</string>
+    <string name="run_split_slower">%1$s slower than average</string>
+    <string name="run_split_even">same as average</string>
+    <plurals name="run_minutes_spoken">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="run_seconds_spoken">
+        <item quantity="one">%d second</item>
+        <item quantity="other">%d seconds</item>
+    </plurals>
+    <!-- Spoken pace: %1$s minutes ("8 minutes"), %2$d seconds, %3$s "mile" or "kilometer". -->
+    <string name="run_pace_spoken">%1$s %2$d per %3$s</string>
+    <string name="run_unit_mile_word">mile</string>
+    <string name="run_unit_km_word">kilometer</string>
+
+    <!-- Trim run sheet. -->
+    <string name="trim_removes">Removes %1$s from the start and %2$s from the end</string>
+    <string name="trim_hint">Drag either end to trim</string>
+    <string name="trim_start_thumb">Trim start</string>
+    <string name="trim_end_thumb">Trim end</string>
+    <string name="trim_removed_state">%1$s removed</string>
+
+    <!-- Sparkline, spoken: %1$d points, %2$s first value, %3$s last value. -->
+    <plurals name="ui_sparkline_cd_up">
+        <item quantity="one">Trend, %1$d point, up from %2$s to %3$s</item>
+        <item quantity="other">Trend, %1$d points, up from %2$s to %3$s</item>
+    </plurals>
+    <plurals name="ui_sparkline_cd_down">
+        <item quantity="one">Trend, %1$d point, down from %2$s to %3$s</item>
+        <item quantity="other">Trend, %1$d points, down from %2$s to %3$s</item>
+    </plurals>
+    <plurals name="ui_sparkline_cd_flat">
+        <item quantity="one">Trend, %1$d point, flat from %2$s to %3$s</item>
+        <item quantity="other">Trend, %1$d points, flat from %2$s to %3$s</item>
+    </plurals>
+
+    <!-- Activity heatmap: tint legend, a logged day spoken ("Monday, September 21: Lift, 1 run"). -->
+    <string name="history_heatmap_lift">Lift</string>
+    <string name="history_heatmap_run">Run</string>
+    <string name="history_heatmap_both">Both</string>
+    <string name="history_heatmap_open_day">Open this day</string>
+    <string name="history_heatmap_cell">%1$s: %2$s</string>
+    <plurals name="history_heatmap_runs">
+        <item quantity="one">%d run</item>
+        <item quantity="other">%d runs</item>
+    </plurals>
+    <!-- Weekly distance chart, a tapped bar: %1$s week's Monday ("Sep 21"), %2$s distance, %3$s unit. -->
+    <string name="history_weekly_bar_value">Week of %1$s · %2$s %3$s</string>
+
+    <!-- History changes, confirmed with Undo. -->
+    <string name="history_run_deleted">Run deleted</string>
+    <string name="history_set_deleted">Set deleted</string>
+    <string name="history_session_deleted">Session deleted</string>
+    <string name="history_run_updated">Run updated</string>
+    <string name="history_set_updated">Set updated</string>
+
+    <!-- Set detail. %1$s = the exercise, %2$s = its relative date ("Deadlift · Yesterday", shown as an overline). -->
+    <string name="history_detail_with_date">%1$s · %2$s</string>
+    <string name="history_set_e1rm_label">e1RM</string>
+    <string name="history_set_load_label">Weight</string>
+    <!-- The set's weight as a share of its estimated max. -->
+    <string name="history_pct_e1rm">%1$d%% of e1RM</string>
+    <string name="history_edit_set">Edit set</string>
+    <string name="history_delete_set">Delete set</string>
+    <string name="history_delete_set_message">This removes the set from your history, charts and totals.</string>
+    <!-- %1$s–%2$s %3$s = the range incl. the set's e1RM, %4$d = the other formulas. -->
+    <string name="history_e1rm_range">e1RM %1$s–%2$s %3$s across this estimate and %4$d other formulas</string>
+
+    <!-- Lift card set summary, joined by history_sets_separator:
+         "3 × 5 @ 120 kg, 1 × 3 @ 125 kg", "2 × 30 s hold · +10 kg". -->
+    <string name="history_sets_separator">", "</string>
+    <!-- %1$s = figure, %2$s = unit ("120 kg"). -->
+    <string name="history_load">%1$s %2$s</string>
+    <string name="history_sets_reps">%1$d × %2$d</string>
+    <string name="history_sets_reps_load">%1$d × %2$d @ %3$s</string>
+    <string name="history_sets_hold">%1$d × %2$d s hold</string>
+    <string name="history_sets_hold_loaded">%1$d × %2$d s hold · +%3$s</string>
+
+    <!-- Empty states + import on the Runs segment. -->
+    <string name="history_lifts_empty">Your lifting sessions will show up here.</string>
+    <string name="history_log_set">Log a set</string>
+    <string name="history_runs_empty">Your runs will show up here.</string>
+    <string name="history_track_run">Track a run</string>
+    <string name="history_import_runs_long">Import from GPX, TCX or FIT</string>
+
+    <!-- Today e1RM card: change over the plotted window. %1$s signed figure ("+12.5"),
+         %2$s unit, %3$s the first plotted day ("Aug 12"). -->
+    <string name="main_e1rm_change_since">%1$s %2$s since %3$s</string>
+    <string name="main_e1rm_change_subject">e1RM change</string>
+    <!-- %1$d sessions on the chart, %2$s first day. -->
+    <plurals name="main_e1rm_change_why">
+        <item quantity="one">The difference between your best estimated max on %2$s and in your latest session (%1$d session on this chart).</item>
+        <item quantity="other">The difference between your best estimated max on %2$s and in your latest session (%1$d sessions on this chart).</item>
+    </plurals>
+</resources>

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- RatingScale (UI sweep §0.4) -->
+    <string name="rating_unrated">Not rated</string>
+    <string name="rating_effort_start">0 Rest</string>
+    <string name="rating_effort_end">10 Max</string>
+    <!-- %1$d = effort 0–10, %2$s = its CR-10 word, spoken by TalkBack: "5 of 10, Hard". -->
+    <string name="rating_effort_spoken">%1$d of 10, %2$s</string>
+    <!-- %1$d = the picked value, %2$s = its word: "3 · Okay". -->
+    <string name="rating_value_word">%1$d · %2$s</string>
+
+    <!-- Morning check-in: one word per value 1–5, indexed value − 1. -->
+    <string-array name="rating_sleep_words">
+        <item>Terrible</item>
+        <item>Poor</item>
+        <item>Okay</item>
+        <item>Good</item>
+        <item>Great</item>
+    </string-array>
+    <string-array name="rating_mood_words">
+        <item>Awful</item>
+        <item>Low</item>
+        <item>Okay</item>
+        <item>Good</item>
+        <item>Great</item>
+    </string-array>
+    <string-array name="rating_soreness_words">
+        <item>None</item>
+        <item>Barely</item>
+        <item>A little sore</item>
+        <item>Sore</item>
+        <item>Very sore</item>
+    </string-array>
+    <string-array name="rating_fatigue_words">
+        <item>Fresh</item>
+        <item>Mostly fresh</item>
+        <item>A bit tired</item>
+        <item>Tired</item>
+        <item>Exhausted</item>
+    </string-array>
+    <string-array name="rating_stress_words">
+        <item>Calm</item>
+        <item>Mostly calm</item>
+        <item>A bit tense</item>
+        <item>Tense</item>
+        <item>Stressed</item>
+    </string-array>
+    <string name="log_checkin_scale_note">On every row, left is worse and right is better.</string>
+    <string name="log_switch_rhr_hint">From your watch, in bpm</string>
+    <string name="log_switch_hrv_hint">rMSSD in ms, from your watch or app</string>
+
+    <!-- Pain severity endpoints -->
+    <string name="rating_pain_start">0 None</string>
+    <!-- %1$d = pain severity 0–10, spoken by TalkBack: "6 of 10". -->
+    <string name="rating_pain_spoken">%1$d of 10</string>
+    <string name="rating_pain_end">10 Worst</string>
+    <string name="log_unit_m_per_s">m/s</string>
+
+    <!-- Weekly check-in session counts (0–7) -->
+    <plurals name="rating_sessions">
+        <item quantity="one">%d session</item>
+        <item quantity="other">%d sessions</item>
+    </plurals>
+</resources>

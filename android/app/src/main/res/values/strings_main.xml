@@ -1,0 +1,721 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shell chrome + MainActivity user-visible strings (l10n extraction). All keys
+     prefixed main_ for collision-free merge with the other values/*.xml files. -->
+<resources>
+
+    <!-- Chrome.kt: nav + top bar + editor header -->
+    <string name="main_dest_today">Today</string>
+    <string name="main_dest_history">History</string>
+    <string name="main_dest_profile">Profile</string>
+    <string name="main_run_in_progress">Run in progress</string>
+    <string name="main_return">Return</string>
+    <string name="main_save">Save</string>
+    <string name="main_close">Close</string>
+
+    <!-- Log button docked in the nav bar -->
+    <string name="main_log">Log</string>
+
+    <!-- StatusCard.kt: mark tile descriptions, overlines, hero chip -->
+    <string name="main_status_mark_adjusted">Adjusted</string>
+    <string name="main_status_mark_safety">Safety</string>
+    <string name="main_status_mark_info">Note</string>
+    <string name="main_status_adjusted_today">Adjusted today</string>
+    <string name="main_status_unwell">Unwell</string>
+    <string name="main_status_coach_note">Coach note</string>
+    <string name="main_status_pain">Pain</string>
+    <string name="main_status_pain_area">Pain · %1$s</string>
+    <string name="main_status_on_hold">Training on hold</string>
+    <string name="main_remove_report">Delete report</string>
+    <string name="main_adjusted_chip">Adjusted</string>
+    <string name="main_adjusted_chip_cd">Adjusted today, see the note above</string>
+
+    <!-- Clear-all / readiness / pain confirm dialogs -->
+    <string name="main_clear_all_title">Clear all data?</string>
+    <string name="main_clear_all_message">This deletes every logged set, run, check-in and report, plus the plan and saved calculator results. Your profile settings stay. This can\'t be undone.</string>
+    <string name="main_export_first">Export first</string>
+    <string name="main_clear_all_confirm">Clear all</string>
+    <string name="main_clear_readiness_title">Clear today\'s readings?</string>
+    <string name="main_clear_readiness_message">This clears today\'s check-in and readings, and every change they made to your plan, including a training hold. Log them again to bring it back.</string>
+    <string name="main_clear">Clear</string>
+    <string name="main_remove_pain_title">Delete the pain report?</string>
+    <!-- Delete-report confirm, pain and illness alike; the _hold variant when the report holds training. -->
+    <string name="main_remove_report_message">Only do this if it was logged by mistake.</string>
+    <string name="main_remove_report_message_hold">Only do this if it was logged by mistake. Deleting it lifts the training hold.</string>
+    <string name="main_resume_run_title">Resume your run?</string>
+    <string name="main_resume_run_message">A run was still recording when the app closed. Resume it, or discard it if you don\'t want to keep it.</string>
+    <string name="main_resume">Resume</string>
+    <string name="main_discard">Discard</string>
+    <string name="main_discard_entry_title">Discard this entry?</string>
+    <string name="main_keep_editing">Keep editing</string>
+
+    <!-- Run import (the per-file reasons live in strings_history.xml) -->
+    <string name="main_import_failed_generic">Couldn\'t import this file</string>
+    <string name="main_import_duplicate">Already imported: a logged run ends at the same time</string>
+
+    <!-- Log chooser rows -->
+    <string name="main_report_pain">Report pain</string>
+    <string name="main_report_pain_sub">Takes 10 seconds. Your plan adjusts.</string>
+    <string name="main_todays_plan">Today\'s plan: %1$s</string>
+    <string name="main_log_set_title">Log set</string>
+    <string name="main_log_set_sub">Exercise, weight, reps</string>
+    <string name="main_log_run_title">Log run</string>
+    <string name="main_log_run_sub">Distance, duration, HR</string>
+    <string name="main_import_run_title">Import runs</string>
+    <string name="main_import_run_sub">GPX, TCX or FIT files from another app</string>
+    <string name="main_morning_checkin_title">Morning check-in</string>
+    <string name="main_morning_checkin_sub">How you slept, soreness, mood</string>
+    <string name="main_session_review_title">Session review</string>
+    <string name="main_session_review_sub">How this one session went</string>
+    <string name="main_weekly_checkin_title">Weekly check-in</string>
+    <string name="main_weekly_checkin_sub">How the last 7 days went</string>
+    <string name="main_advanced_signal_title">Log a lab reading</string>
+    <string name="main_advanced_signal_sub">Measured values like HRV or bar speed</string>
+    <string name="main_track_run_title">Track run (GPS)</string>
+    <string name="main_track_run_sub">Live map + route</string>
+
+    <!-- Today destination -->
+    <string name="main_today_empty">Nothing logged yet. Tap + to log a lift, a run or how you feel.</string>
+    <string name="main_overline_this_week">This week</string>
+    <string name="main_overline_progress">Progress</string>
+    <string name="main_tool_race_title">Race predictor</string>
+    <string name="main_tool_race_cta">Set a recent race</string>
+    <string name="main_tool_volume_title">Volume planner</string>
+    <string name="main_tool_volume_cta">Plan volume</string>
+    <string name="main_tool_protein_title">Protein target</string>
+    <string name="main_tool_protein_cta_compute">Compute protein</string>
+    <string name="main_tool_protein_cta_add_bw">Add bodyweight</string>
+    <string name="main_tool_protein_cta_deficit">For weight loss only</string>
+    <string name="main_value_set">Set</string>
+    <string name="main_unit_g_per_day">g/day</string>
+    <string name="main_tool_hr_title">HR zones</string>
+    <string name="main_tool_hr_cta_compute">Compute HR zones</string>
+    <string name="main_tool_hr_cta_add_age">Add your age</string>
+    <!-- Profile calculator row values: HRmax, a volume plan's weekly sets, a block with no ramp. -->
+    <string name="main_calc_value_hrmax">HRmax %1$d</string>
+    <string name="main_calc_value_sets_ramp">%1$d→%2$d sets</string>
+    <string name="main_calc_value_sets">%1$d sets</string>
+    <string name="main_calc_value_weeks">%1$d-week block</string>
+    <string name="main_overline_calculators">Calculators</string>
+    <string name="main_remove_plan_title">Remove this plan?</string>
+    <string name="main_remove_plan_message">Deletes the current plan. Your logged sessions stay. A new plan is built only when you tap Plan my training.</string>
+    <string name="main_remove_plan">Remove plan</string>
+
+    <!-- Readiness strip: signal pills; channels still learning your normal read as one quiet caption each -->
+    <string name="main_overline_readiness">Readiness</string>
+    <string name="main_building_baseline">%1$s: learning your normal, %2$d of %3$d days</string>
+    <string name="main_sparse_week">%1$s: too few readings this week, %2$d of %3$d</string>
+    <string name="main_safety_critical_suffix">. Safety critical</string>
+
+    <!-- M13: core training-load / lift-audit / honesty sections the shell now surfaces -->
+    <string name="main_overline_training_load">Training load</string>
+    <string name="main_training_load_detail">%1$s. Counted %2$d sessions. Left out %3$d (lifts or runs without heart rate).</string>
+    <string name="main_lift_session_audit">Session notes</string>
+
+    <!-- Calculator sheet: the one result card (overline, headline caption, rows) -->
+    <string name="main_differs_from_profile">Differs from profile: %1$s %2$s</string>
+    <string name="main_calc_clear">Clear result</string>
+    <string name="main_calc_clear_subject">Clear result: %1$s</string>
+    <string name="main_calc_race_overline">Predicted finish</string>
+    <string name="main_calc_race_caption">%1$s finish time</string>
+    <string name="main_calc_protein_overline">Protein target</string>
+    <string name="main_calc_protein_caption">grams per day</string>
+    <string name="main_calc_protein_basis">%1$s–%2$s g/kg × %3$s kg · %4$s</string>
+    <string name="main_calc_protein_deficit">for weight loss</string>
+    <string name="main_calc_protein_masters">age 65+</string>
+    <string name="main_calc_hr_overline">Heart-rate zones</string>
+    <string name="main_calc_hr_caption_estimated">bpm HRmax (estimated)</string>
+    <string name="main_calc_hr_caption_measured">bpm HRmax (measured)</string>
+    <string name="main_calc_hr_by_pace">by pace</string>
+    <string name="main_calc_hr_reserve">Reserve %1$s</string>
+    <string name="main_calc_hr_pct_cd">%1$s of HRmax</string>
+    <string name="main_calc_percent">%1$s%%</string>
+    <string name="main_calc_volume_overline">Weekly sets</string>
+    <string name="main_calc_volume_caption">sets per week, %1$s, %2$d-week block</string>
+    <string name="main_calc_ramp">%1$d → %2$d</string>
+    <string name="main_calc_productive">productive %1$s</string>
+    <string name="main_calc_week_short">Wk %1$d</string>
+    <string name="main_calc_ramp_cd">Weekly sets by week: %1$s. Productive range %2$s, max %3$d.</string>
+    <string name="main_calc_kv_rir">Reps left by week</string>
+    <string name="main_calc_kv_frequency">Peak frequency</string>
+    <string name="main_calc_kv_frequency_value">%1$s×/wk, %2$s sets</string>
+    <string name="main_calc_kv_rest_heavy">Rest, heavy compounds</string>
+    <string name="main_calc_kv_rest_isolation">Rest, isolation</string>
+    <string name="main_calc_kv_shape">Block shape</string>
+    <plurals name="main_calc_kv_shape_value">
+        <item quantity="one">%1$s weeks + %2$d lighter week</item>
+        <item quantity="other">%1$s weeks + %2$d lighter weeks</item>
+    </plurals>
+    <string name="main_calc_minutes">%1$d min</string>
+    <string name="main_calc_minutes_range">%1$d–%2$d min</string>
+    <string name="main_calc_seconds">%1$d s</string>
+
+    <!-- Reference library -->
+    <string name="main_evidence_references_title">Evidence &amp; references</string>
+    <string name="main_evidence_references_body">Every rule the plan can use, with its evidence grade and sources.</string>
+    <string name="main_reference_empty">Nothing here yet. Fill in your profile and log some training to see the rules that apply to you.</string>
+    <string name="main_section_reference">Reference</string>
+
+    <!-- Next session card -->
+    <string name="main_todays_session">TODAY\'S SESSION</string>
+    <string name="main_next_session_overline">NEXT SESSION</string>
+    <string name="main_chip_on_hold">ON HOLD</string>
+    <string name="main_session_on_hold">Training is on hold. The banner at the top says why.</string>
+    <string name="main_rest_day">Rest day.</string>
+    <!-- Prescription tile action pills -->
+    <string name="main_plan_item_track">Track run</string>
+
+    <!-- Per-set completion (hero / week strip) -->
+    <string name="plan_log_set_n_of_n">Log set %1$d of %2$d</string>
+    <string name="plan_end_exercise">End exercise</string>
+    <string name="plan_reopen">Reopen</string>
+    <string name="plan_item_complete">Exercise complete</string>
+    <string name="plan_next_exercise">Next: %1$s</string>
+    <string name="plan_ended_early">Ended early %1$d/%2$d</string>
+    <string name="plan_run_logged">Logged %1$s</string>
+    <string name="plan_since_last_set_label">Since last set</string>
+
+    <!-- Plan / setup prompt cards -->
+    <string name="main_plan_prompt_title">Get your next session</string>
+    <string name="main_plan_prompt_body">Plans your week day by day from your profile and what you\'ve logged.</string>
+    <string name="main_plan_prompt_cta">Plan my training</string>
+    <!-- In place of "Plan my training" when no plan can be built yet: why, and where to fix it. -->
+    <string name="main_plan_withheld_health_title">Your plan is paused</string>
+    <string name="main_plan_withheld_health_body">A health answer in your profile pauses planning. Update it once it no longer applies.</string>
+    <string name="main_plan_withheld_empty_title">Nothing to plan yet</string>
+    <string name="main_plan_withheld_empty_body">Your profile has no lifting sessions and no running days. Answer the setup questions again to get a plan.</string>
+    <string name="main_plan_withheld_empty_cta">Answer the setup questions</string>
+    <string name="main_setup_prompt_title">Set up your training</string>
+    <string name="main_setup_prompt_body">Answer a few questions and lollop plans your week day by day.</string>
+    <string name="main_setup_prompt_cta">Start guided setup</string>
+
+    <!-- Week strip (accessibility) -->
+    <string name="main_a11y_today_prefix">"Today, "</string>
+
+    <!-- History destination -->
+    <string name="main_overline_last_7_days">Last 7 days</string>
+    <!-- Label under the 7-day session count (the count itself is the tile figure). -->
+    <plurals name="history_stat_sessions">
+        <item quantity="one">session</item>
+        <item quantity="other">sessions</item>
+    </plurals>
+    <string name="history_last_7_days_empty">Nothing logged in the last 7 days</string>
+    <string name="main_stat_tonnage">tonnage</string>
+    <string name="main_stat_running">running</string>
+    <string name="main_unit_km">km</string>
+    <string name="main_unit_klb">klb</string>
+    <string name="main_unit_t">t</string>
+    <string name="main_segment_lifts">Lifts</string>
+    <string name="main_segment_runs">Runs</string>
+    <string name="main_overline_last_12_weeks">Last 12 weeks</string>
+    <string name="main_today_axis">Today</string>
+    <string name="main_jump_to_month">Jump to month</string>
+
+    <!-- Profile destination -->
+    <string name="main_section_how_coach_reads">How your answers shape the plan</string>
+    <plurals name="main_coach_reads_sub">
+        <item quantity="one">%d rule from your answers</item>
+        <item quantity="other">%d rules from your answers</item>
+    </plurals>
+    <!-- The profile's training-age row; %1$s = the core's training age ("Intermediate"). -->
+    <string name="main_training_age_row">Training age · %1$s</string>
+    <string name="main_appearance">Appearance</string>
+    <string name="main_use_system_accent">Use system accent color</string>
+    <string name="main_use_system_accent_sub">Match the app\'s accent to your phone\'s wallpaper color. Safety colors never change.</string>
+    <string name="main_label_show_route_maps">Show route maps</string>
+    <string name="main_caption_route_maps">Map tiles load from OpenStreetMap. Your runs stay on this device.</string>
+    <string name="main_overline_units">Units</string>
+    <string name="main_label_weight">Weight</string>
+    <string name="main_label_distance_units">Distance units</string>
+    <string name="main_distance_auto">Auto</string>
+    <string name="main_unit_mi">mi</string>
+    <string name="main_live_pace_split">Recent pace window</string>
+    <string name="main_live_pace_split_sub">The run screen\'s recent pace covers this many minutes.</string>
+    <string name="main_minutes_fmt">%1$d min</string>
+    <string name="main_overline_evidence">Evidence</string>
+    <string name="main_evidence_row_sub">Grades and sources for every coaching rule.</string>
+    <!-- Profile: the guided-setup answers (plan, goals, you, health, context), folded
+         below the everyday settings since setup asks them at first start. -->
+    <string name="main_overline_plan_answers">Your plan answers</string>
+    <!-- The tile that unfolds "Your plan answers". -->
+    <string name="main_plan_answers_title">Age, health and training answers</string>
+    <string name="main_plan_answers_sub">What guided setup asked. Your plan is built from these.</string>
+    <string name="main_overline_danger_zone">Reset</string>
+    <string name="main_clear_all_data">Clear all data</string>
+    <string name="main_danger_zone_sub">Deletes everything you\'ve logged, the plan and calculator results. Profile settings stay.</string>
+
+    <!-- ClearConfirmDialog defaults -->
+    <string name="main_clear_confirm_title_default">Clear all?</string>
+    <string name="main_clear_confirm_message_default">This deletes every logged entry in this list. This can\'t be undone.</string>
+    <string name="main_cancel">Cancel</string>
+
+    <!-- Safety banner -->
+    <string name="main_do_not_train">DO NOT TRAIN</string>
+    <!-- Title of the calm under-18 card that replaces DO NOT TRAIN: plans pause, activity goes on. -->
+    <string name="main_hold_youth_title">Plans paused under 18</string>
+    <!-- Spoken subject of the under-18 card\'s "?" ("Details: plan pause"). -->
+    <string name="main_hold_youth_subject">plan pause</string>
+    <string name="main_pain_prefix">Pain: %1$s</string>
+    <string name="main_programming_paused">Your plan is paused until this clears.</string>
+    <!-- Under-18 card caption: plans pause, the rest of the app keeps working. -->
+    <string name="main_hold_paused_youth">Logging, history and your weekly activity still work.</string>
+    <string name="main_add_details">Add details</string>
+    <string name="main_evidence_prefix">Evidence: %1$s</string>
+    <string name="main_medical_hold_body">A health answer in your profile pauses your plan until it\'s resolved.</string>
+    <string name="main_reported_hold_body">Something you reported pauses your plan until it clears.</string>
+    <string name="main_logged_by_mistake">Logged by mistake? Clear today\'s readings…</string>
+
+    <!-- Entry detail / edit / delete -->
+    <string name="main_delete_run_title">Delete this run?</string>
+    <string name="main_delete_set_title">Delete this set?</string>
+    <string name="main_delete">Delete</string>
+    <string name="main_run">Run</string>
+    <string name="main_set">Set</string>
+    <string name="main_splits">Splits</string>
+    <string name="main_export_gpx">Export GPX</string>
+    <string name="main_export_gpx_failed">Couldn\'t export this run\'s GPX</string>
+    <!-- Trim run (head/tail GPS trim) -->
+    <string name="main_trim_run">Trim run</string>
+    <string name="history_trim_loading">Loading route…</string>
+    <string name="main_trim_keeps">Keeps %1$s · %2$s</string>
+    <string name="main_trim_confirm">Trim</string>
+    <string name="main_trim_confirm_title">Trim to %1$s (%2$s)?</string>
+    <string name="main_trim_confirm_message">Removes %1$d min from the start and %2$d min from the end. This can\'t be undone.</string>
+    <string name="main_trim_unavailable">This run\'s track can\'t be trimmed.</string>
+    <string name="main_edit">Edit</string>
+
+    <!-- Disclosure button -->
+    <string name="main_hide_details">Hide details</string>
+    <string name="main_details">Details</string>
+
+    <!-- Why? disclosure -->
+    <string name="main_why_based_on">Based on</string>
+    <string name="main_evidence_grade">Evidence grade: %1$s.</string>
+    <string name="main_grade_line_confidence">%1$s (%2$d%% confidence)</string>
+    <!-- One evidence block for several exercises whose confidence differs: %2$d lowest, %3$d highest. -->
+    <string name="main_grade_line_confidence_range">%1$s (%2$d–%3$d%% confidence)</string>
+    <string name="main_why_this_grade">Why this grade</string>
+    <string name="main_why_to_improve">To improve</string>
+    <string name="main_evidence_confidence">Evidence: %1$s, %2$d%% confidence</string>
+    <string name="main_evidence_label">Evidence: %1$s</string>
+    <string name="main_contested_explainer">Experts disagree on this. Both sides are below, and the app treats its choice as unsettled.</string>
+
+    <!-- Shared chips -->
+    <string name="main_chip_safety">SAFETY</string>
+    <string name="main_chip_contested">CONTESTED</string>
+    <string name="main_chip_baseline">NO HISTORY YET</string>
+    <string name="main_chip_spike">SPIKE</string>
+
+    <!-- Evidence-grade legend -->
+    <string name="main_evidence_legend_title">How evidence grading works</string>
+    <string name="main_evidence_legend_body">Each recommendation shows how strong the research behind it is. A higher grade means more and better studies agree.</string>
+    <string name="main_confidence_paren">" (%1$d%% confidence)"</string>
+    <string name="main_grade_strong">Strong</string>
+    <string name="main_grade_strong_def">Many good studies agree.</string>
+    <string name="main_grade_moderate">Moderate</string>
+    <string name="main_grade_moderate_def">Some good studies support it, but it isn\'t settled yet.</string>
+    <string name="main_grade_weak">Weak</string>
+    <string name="main_grade_weak_def">Based on how the body works or on observation, not direct trials.</string>
+    <string name="main_grade_expert">Expert opinion</string>
+    <string name="main_grade_expert_def">What experienced coaches do; not yet tested in trials.</string>
+    <string name="main_grade_myth">Myth</string>
+    <string name="main_grade_myth_def">Studies contradict it, so the app never uses it.</string>
+    <string name="main_legend_safety">A safety call. It comes before your goals, so there\'s no confidence score to show.</string>
+    <string name="main_legend_contested">Experts disagree. The app shows both sides and treats its choice as unsettled.</string>
+
+    <!-- Glossary -->
+    <string name="main_glossary_title">Glossary</string>
+    <string name="main_glossary_search_hint">Search terms</string>
+    <string name="main_glossary_no_match">No term matches “%1$s”</string>
+    <string name="main_explain">Explain %1$s</string>
+    <string name="main_glossary_e1rm_term">e1RM</string>
+    <string name="main_glossary_e1rm_def">Estimated 1-rep max: the heaviest single rep you could likely do, worked out from the weight and reps of a set you logged. You never have to test a true max.</string>
+    <string name="main_glossary_1rm_term" formatted="false">1RM / %1RM</string>
+    <string name="main_glossary_1rm_def" formatted="false">1RM is your one-rep maximum. %1RM is a weight given as a share of it: 80% 1RM is 80% of your best single.</string>
+    <string name="main_glossary_rpe_term">RPE</string>
+    <string name="main_glossary_rpe_def">Rate of Perceived Exertion: how hard a set felt. The set editor asks how many reps you had left (4+, 3, 2, 1 or 0). 0 reps left is RPE 10, and 2 reps left is about RPE 8.</string>
+    <string name="main_glossary_rir_term">RIR</string>
+    <string name="main_glossary_rir_def">Reps In Reserve: how many more reps you could have done before failure. The app shows it as ~N reps left. RIR 2 is about RPE 8.</string>
+    <string name="main_glossary_zscore_term">z-score / your normal band</string>
+    <string name="main_glossary_zscore_def">How far a reading sits from your own normal, in standard deviations. 0 is typical for you, and −1 is below your usual range. The app works it out from your logged history.</string>
+    <string name="main_glossary_vdot_term">VDOT</string>
+    <string name="main_glossary_vdot_def">A running-fitness number derived from a recent race or time trial (Daniels). It sets your training paces and zones.</string>
+    <string name="main_glossary_decoupling_term">decoupling</string>
+    <string name="main_glossary_decoupling_def">Aerobic decoupling, or heart-rate drift: how far your heart rate drifts up against your pace during a steady run. Low drift means your endurance base held up. High drift means the run was harder than your base can sustain.</string>
+    <string name="main_glossary_vi_term">VI (Variability Index)</string>
+    <string name="main_glossary_vi_def">How much your pace varied across the run. Around 1.0 means a steady effort. Higher means more speeding up and slowing down, like an interval session.</string>
+    <string name="main_glossary_tonnage_term">tonnage</string>
+    <string name="main_glossary_tonnage_def">Total weight lifted in the last 7 days: weight × reps, added up across every set you logged.</string>
+    <string name="main_glossary_spike_term">SPIKE</string>
+    <string name="main_glossary_spike_def">A sudden jump in training load: here, a run much longer than your recent normal. Big jumps can raise injury risk, so the app points them out.</string>
+    <string name="main_glossary_hrmax_term">HRmax</string>
+    <string name="main_glossary_hrmax_def">Your maximum heart rate: the highest your heart can beat. Estimated from your age (Tanaka formula) until you log a measured value from an all-out effort.</string>
+    <string name="main_glossary_deload_term">deload</string>
+    <string name="main_glossary_deload_def">A planned lighter week, with fewer sets or less weight, so built-up fatigue clears and your body absorbs the training.</string>
+    <string name="main_glossary_mesocycle_term">mesocycle</string>
+    <string name="main_glossary_mesocycle_def">A training block of several weeks (often 4–6) built around one focus, usually ending in a lighter week.</string>
+    <string name="main_glossary_ctl_term">CTL / ATL / TSB</string>
+    <string name="main_glossary_ctl_def">Training-load bookkeeping: CTL is your rolling ~6-week fitness, ATL your rolling ~1-week fatigue, and TSB (CTL − ATL) a rough freshness score. It doesn\'t predict performance.</string>
+    <string name="main_glossary_trimp_term">TRIMP</string>
+    <string name="main_glossary_trimp_def">Training Impulse: a single number summarizing one session\'s load from its duration and heart-rate intensity. It feeds the CTL/ATL/TSB bookkeeping.</string>
+    <string name="main_glossary_hrzones_term">HR zones</string>
+    <string name="main_glossary_hrzones_def">Heart-rate ranges set from your HRmax. Run cards use three zones, Z1–Z3: Z1 is easy running you can talk through, and most of your weekly time belongs here; Z2 is steady and too hard to chat; Z3 is hard running. The HR zones calculator shows five finer bands for planning workouts: Easy, Marathon, Threshold, Interval and Repetition. The last two go by pace, not heart rate.</string>
+    <string name="main_glossary_volume_term">MEV / MAV / MRV</string>
+    <string name="main_glossary_volume_def">Weekly training-volume landmarks, counted as sets per muscle: MEV is the minimum effective volume, MAV the productive middle range, and MRV the maximum you can recover from. They shift with your training age and recovery.</string>
+    <string name="main_glossary_maf_term">MAF</string>
+    <string name="main_glossary_maf_def">Maximum Aerobic Function (Maffetone): an easy aerobic heart-rate cap, often estimated as about 180 minus your age. One method for pacing base work; measured lactate thresholds are an alternative.</string>
+    <string name="main_glossary_pap_term">PAP / PAPE</string>
+    <string name="main_glossary_pap_def">Post-Activation Potentiation (Enhancement): a heavy \'primer\' set can briefly sharpen a following explosive effort, so the two are paired with a short rest between.</string>
+    <string name="main_glossary_reds_term">RED-S / LEA</string>
+    <string name="main_glossary_reds_def">RED-S (Relative Energy Deficiency in Sport) is the health harm from under-eating over time: not eating enough to cover training plus daily needs. LEA (Low Energy Availability) is the research name for that under-eating. It\'s a safety concern, so the app tells you to see a professional.</string>
+
+    <!-- Log editor hints / failures -->
+    <string name="log_hint_enter_weight">Tap to enter a weight</string>
+    <string name="main_save_failed">Couldn\'t save that entry</string>
+    <string name="main_data_unreadable">Some of your saved data couldn\'t be read, so what\'s shown may be incomplete.</string>
+
+    <!-- Pain triage trend -->
+    <string name="pain_trend_worsening">Worse 24 h after</string>
+
+    <!-- Profile: export / import my data -->
+    <string name="profile_export_data">Export my data</string>
+    <string name="profile_import_data">Import my data</string>
+    <string name="main_import_invalid">That file isn\'t a valid lollop export.</string>
+    <string name="main_import_replace_title">Replace all current data?</string>
+    <string name="main_import_replace_body">It replaces everything logged now. This can\'t be undone.</string>
+    <string name="main_import_file_empty">This file has no logged entries.</string>
+    <plurals name="main_import_file_entries">
+        <item quantity="one">This file has %1$d entry (%2$s).</item>
+        <item quantity="other">This file has %1$d entries (%2$s).</item>
+    </plurals>
+    <plurals name="main_import_file_entries_undated">
+        <item quantity="one">This file has %1$d entry.</item>
+        <item quantity="other">This file has %1$d entries.</item>
+    </plurals>
+    <!-- Date range of an import file's entries, e.g. "Oct 2 – Oct 14". -->
+    <string name="main_import_date_range">%1$s – %2$s</string>
+    <string name="main_restoring_data">Restoring your data…</string>
+    <plurals name="main_restored_entries">
+        <item quantity="one">Restored %d entry</item>
+        <item quantity="other">Restored %d entries</item>
+    </plurals>
+    <string name="main_import_refused_run">Finish or discard your run before importing data.</string>
+    <string name="main_import_replace_confirm">Replace</string>
+    <string name="main_export_ok">Data exported</string>
+    <string name="main_export_failed">Couldn\'t export your data</string>
+    <string name="main_overline_your_data">Your data</string>
+    <string name="profile_export_data_sub">Save every logged set, run and check-in to a file you keep.</string>
+    <string name="profile_import_data_sub">Restore from a file you exported. Replaces everything logged now.</string>
+
+    <!-- History: lift session cards + session sheet (URH-3) -->
+    <string name="history_session_undated">Undated sets</string>
+    <plurals name="history_exercise_count">
+        <item quantity="one">%d exercise</item>
+        <item quantity="other">%d exercises</item>
+    </plurals>
+    <plurals name="history_set_count">
+        <item quantity="one">%d set</item>
+        <item quantity="other">%d sets</item>
+    </plurals>
+    <string name="history_session_e1rm">e1RM %1$s %2$s</string>
+    <string name="history_set_n">Set %1$d</string>
+    <!-- Session sheet subtitle tail: the day's volume (load × reps summed). %1$s = figure ("4,690"), %2$s = unit. -->
+    <string name="history_session_volume">%1$s %2$s lifted</string>
+    <!-- Session sheet set row, spoken: %1$s = "Set 2", %2$s = the set line ("171 lb × 5 · 2 reps left"). -->
+    <string name="history_set_row_cd">%1$s, %2$s</string>
+    <!-- Session sheet set row, reps-left column: "2 left", "1–2 left", "4+ left". -->
+    <plurals name="history_set_left">
+        <item quantity="one">%1$d left</item>
+        <item quantity="other">%1$d left</item>
+    </plurals>
+    <string name="history_set_left_range">%1$d–%2$d left</string>
+    <string name="history_set_left_4plus">4+ left</string>
+    <!-- Session sheet e1RM change pill: %1$s = signed figure ("+47.6"), %2$s = unit, %3$d = sessions. -->
+    <plurals name="history_e1rm_change_pill">
+        <item quantity="one">%1$s %2$s · %3$d session</item>
+        <item quantity="other">%1$s %2$s · %3$d sessions</item>
+    </plurals>
+    <plurals name="history_e1rm_flat_pill">
+        <item quantity="one">No change · %d session</item>
+        <item quantity="other">No change · %d sessions</item>
+    </plurals>
+    <string name="history_delete_session">Delete session</string>
+    <string name="history_delete_session_title">Delete this session?</string>
+    <plurals name="history_delete_session_message">
+        <item quantity="one">This removes the %d set logged that day from your history, charts and totals.</item>
+        <item quantity="other">This removes all %d sets logged that day from your history, charts and totals.</item>
+    </plurals>
+    <!-- History: activity heatmap legend + spoken summary (URH-3) -->
+    <string name="history_heatmap_desc">%1$d-week activity: %2$s, busiest week %3$s</string>
+    <plurals name="history_active_days">
+        <item quantity="one">%d active day</item>
+        <item quantity="other">%d active days</item>
+    </plurals>
+    <plurals name="history_sessions">
+        <item quantity="one">%d session</item>
+        <item quantity="other">%d sessions</item>
+    </plurals>
+    <!-- History: daily distance chart in the user's distance unit (URH-5) -->
+    <plurals name="history_days">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <string name="history_bars_total">%1$s %2$s total</string>
+    <string name="history_bars_desc">%1$s, total %2$s %3$s, longest %4$s %3$s on %5$s</string>
+    <string name="history_bars_desc_empty">%1$s, no distance logged</string>
+    <!-- History: run card titles + duration (URH-12) -->
+    <string name="history_run_steady">Steady run</string>
+    <string name="history_run_interval">Interval run</string>
+    <string name="history_run_tempo">Tempo run</string>
+    <string name="history_run_long">Long run</string>
+    <string name="history_run_recovery">Recovery run</string>
+    <string name="history_run_easy">Easy run</string>
+    <!-- An untagged run's title, by the weekday it started: %1$s = "Tuesday". -->
+    <string name="history_run_weekday">%1$s run</string>
+    <!-- Run detail overline: %1$s = the run title, %2$s = its date ("Today"). -->
+    <string name="history_run_overline">%1$s · %2$s</string>
+
+    <!-- Today: hero accessibility, glossary path, rest day, coach status (UXT-1/9/10/14) -->
+    <string name="main_details_subject">Details: %1$s</string>
+    <string name="main_hide_details_subject">Hide details: %1$s</string>
+    <string name="main_action_subject">%1$s, %2$s</string>
+    <string name="main_why_terms">Terms used here</string>
+    <string name="main_rest_day_next_overline">Rest day · next session</string>
+    <string name="main_move_short">Move</string>
+
+    <!-- Run import result: "Imported 3 runs · 2 already in history". -->
+    <plurals name="main_import_summary_duplicates">
+        <item quantity="one">%d already in history</item>
+        <item quantity="other">%d already in history</item>
+    </plurals>
+
+    <!-- Set logging (AndroidLogging): plan-item footer, rest timer, chooser, keypad a11y -->
+    <string name="plan_set_not_counted">not counted (warm-up or light)</string>
+    <string name="plan_skip_exercise">Skip exercise</string>
+    <string name="plan_secondary_action_cd">%1$s: %2$s</string>
+    <string name="plan_sets_done_cd">%1$d of %2$d sets done</string>
+    <string name="plan_rest_left_label">Rest left</string>
+    <string name="plan_rest_done_label">Rest done</string>
+    <string name="plan_rest_done_cd">Rest done. Time for your next set.</string>
+    <string name="plan_since_last_set_cd">Time since your last set</string>
+    <string name="main_morning_checkin_done_sub">Done today · tap to edit</string>
+    <string name="ui_cd_adjust_add">Add %1$s %2$s</string>
+    <string name="ui_cd_adjust_sub">Subtract %1$s %2$s</string>
+    <string name="ui_cd_decimal_point">Decimal point</string>
+
+    <!-- History (Wave 3): run progress, best efforts, run rating, lift bests (URH-2/4/12) -->
+    <string name="history_progress_overline">Progress</string>
+    <string name="history_weekly_plan_legend">Plan %1$s %2$s a week</string>
+    <string name="history_weekly_this_week">This week</string>
+    <string name="history_weekly_desc">Weekly distance over %1$d weeks: %2$s %3$s in total, most %4$s %3$s in the week of %5$s, this week %6$s %3$s</string>
+    <string name="history_weekly_desc_empty">Weekly distance over %1$d weeks: nothing logged yet</string>
+    <string name="history_weekly_desc_plan">. Plan %1$s %2$s a week</string>
+    <string name="history_longest_run">Longest run</string>
+    <string name="history_best_effort_open">Open this run</string>
+    <string name="history_effort_value">Effort %1$d/10</string>
+    <string name="history_effort_selected">%1$d · %2$s</string>
+    <string name="history_effort_anchor_0">Rest</string>
+    <string name="history_effort_anchor_1">Very, very easy</string>
+    <string name="history_effort_anchor_2">Easy</string>
+    <string name="history_effort_anchor_3">Moderate</string>
+    <string name="history_effort_anchor_4">Somewhat hard</string>
+    <string name="history_effort_anchor_5">Hard</string>
+    <string name="history_effort_anchor_6">Between hard and very hard</string>
+    <string name="history_effort_anchor_7">Very hard</string>
+    <string name="history_effort_anchor_8">Between very hard and maximal</string>
+    <string name="history_effort_anchor_9">Nearly maximal</string>
+    <string name="history_effort_anchor_10">Maximal</string>
+    <string name="history_training_load_subject">training load</string>
+    <string name="history_training_load_explain">Training load is minutes of running × your 0–10 effort rating. It works without a heart-rate strap, and it is kept separate from heart-rate load.</string>
+    <string name="history_workout_type">Run type</string>
+    <string name="history_workout_type_cd">Run type, %1$s</string>
+    <string name="history_new_best">New best</string>
+    <string name="history_new_best_cd">New best estimated max for %1$s</string>
+
+    <!-- Today wiring (Wave 3): plan-item face lines (UXT-7/8, UXL-7/13), run targets -->
+    <string name="plan_face_per_side">Per side: %1$s %2$s</string>
+    <string name="plan_face_effort">Effort: %1$s</string>
+    <string name="plan_face_last">Last: %1$s</string>
+    <string name="plan_face_pace_only">Pace: %1$s</string>
+    <string name="plan_face_hr">Heart rate: %1$s</string>
+    <string name="plan_dur_sec">%1$d s</string>
+    <string name="plan_dur_min_sec">%1$d:%2$s min</string>
+    <!-- A run item's logged distance ("4.1 km", "0.43 mi"); the logged time follows as a clock. -->
+    <string name="plan_run_logged_distance">%1$s %2$s</string>
+    <string name="plan_run_warmup">%1$d min warm-up</string>
+    <string name="plan_run_cooldown">%1$d min cool-down</string>
+    <string name="plan_run_reps_m">%1$d × %2$d m</string>
+    <string name="plan_run_reps_time">%1$d × %2$s</string>
+    <string name="plan_run_rec_jog_m">%1$d m easy jog</string>
+    <string name="plan_run_rec_jog_time">%1$s easy jog</string>
+    <string name="plan_run_rec_equal">an easy jog as long as each rep</string>
+    <string name="plan_run_reps_with_rec">%1$s with %2$s</string>
+    <string name="plan_run_strides">%1$d × %2$d s strides</string>
+    <string name="plan_run_walk_repeat">Run %1$s, walk %2$s, × %3$d</string>
+    <string name="plan_run_walk_bout">run %1$s, walk %2$s</string>
+    <string name="plan_run_walk_last">run %1$s</string>
+    <!-- Calisthenics rung choice on a plan item (CAL-3) -->
+    <string name="plan_calis_easier">Easier</string>
+    <string name="plan_calis_harder">Harder</string>
+    <string name="plan_calis_chip_cd">%1$s: %2$s, %3$s</string>
+    <string name="plan_calis_chip_cd_short">%1$s: %2$s</string>
+    <string name="plan_calis_rate_effort">Rate your last set to move up</string>
+    <string name="plan_calis_unplaced">New to this movement? If it feels easy, tap Harder until it\'s a real effort.</string>
+    <!-- Post-illness return check (AUTOREG-4) -->
+    <string name="plan_check_title">Return check</string>
+    <string name="plan_check_any_session">Any easy session you log today completes this check.</string>
+    <!-- Session moves (UXT-4) -->
+    <string name="main_move_session">Move session</string>
+    <string name="main_move_session_title">Move %1$s</string>
+    <string name="main_move_session_body">Pick a free day. These days keep enough rest before your next hard session.</string>
+    <string name="main_move_to_day">Move to %1$s</string>
+    <string name="main_moved_from">Moved from %1$s</string>
+    <!-- Session done (UXT-3) -->
+    <string name="main_session_done_overline">SESSION DONE</string>
+    <string name="main_session_done_title">Today\'s session</string>
+    <string name="main_session_done_met_cd">%1$s: %2$s, target reached</string>
+    <!-- Planned vs done (FEEDBACK-11): neutral, no streaks. The "THIS WEEK" overline names the week. -->
+    <plurals name="main_week_done_count">
+        <item quantity="one">%1$d of %2$d session done</item>
+        <item quantity="other">%1$d of %2$d sessions done</item>
+    </plurals>
+    <string name="main_consistency_share">Recent plan weeks: %1$d%% of planned sessions done.</string>
+    <string name="main_consistency_subject">planned vs done</string>
+    <!-- Holds (UXT-2 / AUTOREG-4) and relearning the HRV normal -->
+    <string name="main_resolve_hold_confirm">Yes, resume</string>
+    <string name="main_baseline_paused">%1$s: paused after unusual readings</string>
+    <string name="main_restart_hrv_baseline">Changed device? Relearn your HRV normal</string>
+    <!-- Program card: hypertrophy volume per muscle -->
+    <string name="main_muscle_volume_title">Planned sets per muscle</string>
+    <!-- Profile: during training (UXT-12, URH-9) -->
+    <string name="main_overline_during_training">During training</string>
+    <string name="main_label_rest_alert">Rest timer alert</string>
+    <string name="main_caption_rest_alert">Sound and vibration when your rest is over. Off: a silent reminder only.</string>
+    <string name="main_label_keep_screen_on">Keep screen on while tracking</string>
+    <string name="main_caption_keep_screen_on">Keeps the run screen awake while recording, for a mounted or handheld phone. Uses more battery.</string>
+
+    <!-- Profile: the one light/dark control (System | Light | Dark) -->
+    <string name="main_dark_mode_pinned">Theme mode</string>
+    <string name="main_dark_mode_system">System</string>
+    <string name="main_dark_mode_light">Light</string>
+    <string name="main_dark_mode_dark">Dark</string>
+
+    <!-- History · Runs: merged progress chart, records, rated run, route actions -->
+    <string name="history_progress_weeks">%1$d weeks</string>
+    <string name="history_progress_days">%1$d days</string>
+    <string name="history_records">Records</string>
+    <string name="history_effort_overline">Effort</string>
+    <!-- The rated run's training load, inside the rating's "?" panel: %1$s = the figure. -->
+    <string name="history_training_load_value">Training load %1$s</string>
+    <!-- Lift session sheet: e1RM change since the exercise's first session. %1$s = signed figure ("+10.2"), %2$s = unit, %3$d = sessions. -->
+    <plurals name="history_e1rm_change">
+        <item quantity="one">%1$s %2$s over %3$d session</item>
+        <item quantity="other">%1$s %2$s over %3$d sessions</item>
+    </plurals>
+    <plurals name="history_e1rm_flat">
+        <item quantity="one">No change over %d session</item>
+        <item quantity="other">No change over %d sessions</item>
+    </plurals>
+    <!-- Screen-reader subject of a run's findings "?" ("Details: pacing and load checks"). -->
+    <string name="history_findings_subject">pacing and load checks</string>
+    <!-- Today while training is on hold: what still works (the Log FAB). -->
+    <string name="main_blocked_still_works">Check-ins and history still work. Tap + to log how you feel.</string>
+    <!-- Weekly sets per muscle: a muscle with no direct target (covered by compound lifts). %1$s = sets. -->
+    <string name="main_muscle_volume_no_target">%1$s (no target)</string>
+    <!-- Today polish (2026-10-10). A continuous run's extras around its main block, %1$s = "10 min warm-up · 10 min cool-down". -->
+    <string name="plan_run_plus">Plus %1$s</string>
+    <!-- Progress card title, %1$s = exercise ("Back squat · e1RM"). -->
+    <string name="main_e1rm_title">%1$s · e1RM</string>
+    <!-- Progress card chart caption: what one point is and the period, %1$s = start day ("12 Aug"). -->
+    <string name="main_e1rm_caption">Best set per session since %1$s</string>
+    <!-- Weekly sets per muscle, collapsed one-line summary. %1$s = muscles short of target ("rear delts, calves"). -->
+    <string name="main_muscle_volume_all_on_target">Every muscle on target</string>
+    <string name="main_muscle_volume_short">On target except %1$s</string>
+    <!-- Progress card chart, spoken: %1$s exercise, %2$d sessions, %3$s first best e1RM, %4$s latest, %5$s unit. -->
+    <string name="main_e1rm_trend_cd">%1$s best estimated max over %2$d sessions, from %3$s to %4$s %5$s</string>
+    <!-- DO-NOT-TRAIN banner reason line, per hold reason (C2). -->
+    <string name="main_hold_reason_pain">You reported pain today.</string>
+    <string name="main_hold_reason_illness">You reported feeling ill.</string>
+    <string name="main_hold_reason_ill_profile">You marked yourself ill. Rest until you\'re better.</string>
+    <string name="main_hold_reason_youth">Under 18, strength plans need a coach who can watch your technique, so lollop won\'t build one.</string>
+    <string name="main_hold_reason_professional">A health answer needs a professional\'s OK first.</string>
+    <!-- Pregnancy hold, worded like its Profile row; the warning-sign variant says to stop and seek care. -->
+    <string name="main_hold_reason_pregnancy">You\'re pregnant, so lollop won\'t build a plan. Shape your training with your provider.</string>
+    <string name="main_hold_reason_pregnancy_warning">You noted a pregnancy warning sign. Stop and contact your provider.</string>
+    <string name="main_hold_paused_pregnancy">Your plan stays paused while this answer is on.</string>
+    <string name="main_hold_reason_medical_signal">A warning sign you reported needs a professional\'s OK first.</string>
+    <string name="main_hold_reason_performance">Your performance dropped sharply.</string>
+    <string name="main_hold_reason_checkins">Your check-ins have been low for several days.</string>
+    <string name="main_hold_reason_hrv">Your HRV has been well below normal.</string>
+    <string name="main_hold_reason_single_day">Today\'s check-in is far off your normal.</string>
+    <string name="main_hold_reason_generic">A recent report paused training.</string>
+    <!-- Banner actions per hold reason. -->
+    <string name="main_hold_check_age">Check age</string>
+    <string name="main_hold_review_health">Review health answers</string>
+    <!-- The same way back where no Profile flow exists (the run tracker). -->
+    <string name="main_hold_review_health_hint">Review your answers in Profile › Your plan answers › Health &amp; safety.</string>
+    <!-- Banner / Today action for a pain or illness report logged by mistake. -->
+    <string name="main_remove_report_action">Logged by mistake? Delete this report</string>
+    <string name="main_remove_illness_title">Delete the illness report?</string>
+    <!-- Spoken subject of the banner's "?" ("Details: training hold"). -->
+    <string name="main_do_not_train_subject">training hold</string>
+    <!-- Readiness pill from an earlier check-in, %1$s = the state ("normal · earlier"). -->
+    <string name="main_readiness_earlier">%1$s · earlier</string>
+    <string name="main_checkin_for_today">Check in for today</string>
+    <!-- Move: the session can't move; the dialog body is the core's reason. %1$s = session title. -->
+    <string name="main_move_blocked_title">%1$s can\'t move</string>
+    <!-- Move picker row for today ("Move to today"). -->
+    <string name="main_move_today">today</string>
+    <!-- Session done card. -->
+    <string name="main_session_done_review">How did it go?</string>
+    <string name="main_session_done_resume">Resume session</string>
+    <!-- Session done row not fully met: %1$s exercise, %2$s its visible line ("6 of 6 sets · best 320 lb × 5 · short reps", "Skipped"). -->
+    <string name="main_session_done_status_cd">%1$s: %2$s</string>
+    <!-- Week strip: a planned day credited by a session done on another day, %1$s = that day ("Done Tue 13 Oct"). -->
+    <string name="main_week_done_on">Done %1$s</string>
+    <string name="main_week_done_on_lighter">Done %1$s, lighter than planned</string>
+    <string name="main_week_day_lighter">Done, lighter than planned</string>
+    <string name="main_week_day_partial">Partly done</string>
+    <string name="main_week_before_plan">Before your plan started</string>
+    <!-- Settled plan items. %1$s = progress ("4/6"). -->
+    <string name="plan_skipped">Skipped</string>
+    <string name="plan_skipped_pain">Skipped · pain</string>
+    <!-- A pain report skipped the exercise, %1$s = the body area, lower case ("left knee"). -->
+    <string name="plan_skipped_pain_area">Skipped · pain in %1$s</string>
+    <string name="plan_done_lighter">%1$s · lighter</string>
+    <!-- Every set at the planned load, some reps missed. -->
+    <string name="plan_done_short">%1$s · short reps</string>
+    <!-- A pain report stopped the exercise after some sets, %1$s = the body area ("Left knee"). -->
+    <string name="plan_stopped_area">Stopped · %1$s</string>
+    <string name="plan_stopped_pain">Stopped · pain</string>
+    <!-- Session done, a run short of its plan: %1$s logged figure, %2$s planned figure with unit ("5 of 5.9 mi"). -->
+    <string name="main_done_run_of">%1$s of %2$s</string>
+    <!-- Session evidence panel: one item's own line under a shared evidence block, %1$s = exercise, %2$s = detail. -->
+    <string name="main_evidence_item_detail">%1$s: %2$s</string>
+    <!-- First lifting sessions: the prescription spelled out. %1$d sets, %2$s reps ("5" or "8–12"), %3$d reps left. -->
+    <plurals name="plan_guide_spelled">
+        <item quantity="one">%1$d sets of %2$s reps, stopping with about %3$d rep left</item>
+        <item quantity="other">%1$d sets of %2$s reps, stopping with about %3$d reps left</item>
+    </plurals>
+    <!-- First lifting session with no weight to start from (the spelled-out line above already states the reps left). %1$d = reps + reps in reserve. -->
+    <string name="plan_guide_first_weight">First time? Pick a weight you could lift about %1$d times.</string>
+    <!-- The same for a bodyweight exercise, whose easier/harder version is the load. -->
+    <string name="plan_guide_first_version">First time? Pick the version you can do about %1$d times.</string>
+    <!-- Today hero while a rest from the set loop runs, %1$s = "1:42". -->
+    <string name="main_rest_pill">Rest %1$s</string>
+    <string name="main_rest_pill_cd">Rest: %1$s left</string>
+    <!-- Pain / illness report feedback (snackbars; the action re-submits the removed report). -->
+    <string name="main_pain_report_saved">Pain report saved</string>
+    <string name="main_report_removed">Report deleted</string>
+    <!-- Snackbar after Move, %1$s = the target day ("Sat, Oct 17"); its action moves the session back. -->
+    <string name="main_moved_to">Moved to %1$s</string>
+    <!-- Snackbar after End exercise: %1$s exercise, %2$d sets done, %3$d planned ("Squat ended at 4/6"). -->
+    <string name="plan_ended_msg">%1$s ended at %2$d/%3$d</string>
+    <!-- Snackbar after Skip exercise (nothing logged yet), %1$s = exercise. -->
+    <string name="plan_skipped_msg">%1$s skipped</string>
+    <!-- Today while a session is in progress: the coaching notes folded into one row. -->
+    <plurals name="main_coaching_notes">
+        <item quantity="one">%1$d coaching note</item>
+        <item quantity="other">%1$d coaching notes</item>
+    </plurals>
+
+</resources>

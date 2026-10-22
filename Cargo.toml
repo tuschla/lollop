@@ -8,13 +8,23 @@ rust-version = "1.90"
 license = "AGPL-3.0-only"
 
 [workspace.dependencies]
-crux_core = "0.19"
+crux_core = "0.20"
 serde = "1.0.228"
 
+# Lint policy shared by every member (`[lints] workspace = true`). Kept lean:
+# only lints the tree is clean under, so `-D warnings` stays meaningful.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+manual_is_multiple_of = "warn"
+
 # Shipped .so size: fitparser's generated FIT-profile tables roughly doubled the
-# cdylib, so the release profile trades compile time for size. NO `panic="abort"`:
-# the JNI bridge's catch_unwind panic firewall (shared/src/ffi.rs) needs
-# unwinding to turn core panics into JSON error payloads.
+# cdylib, so the release profile is size-optimized. Measured `opt-level = "s"`
+# against "z": "s" grew arm64 libshared.so from 1.91 MB to 2.32 MB (+21.5%), over
+# the 20% budget, so "z" is retained. NO `panic="abort"`: the JNI bridge's
+# catch_unwind panic firewall (shared/src/ffi.rs) needs unwinding to turn core
+# panics into JSON error payloads.
 [profile.release]
 opt-level = "z"
 lto = true

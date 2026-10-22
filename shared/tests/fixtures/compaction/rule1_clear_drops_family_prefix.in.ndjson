@@ -1,0 +1,4 @@
+{"LogSet":{"exercise":"a","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":0,"entry_id":0,"hold_sec":null}}
+{"LogSet":{"exercise":"b","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":0,"entry_id":0,"hold_sec":null}}
+"ClearSets"
+{"LogSet":{"exercise":"c","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":0,"entry_id":0,"hold_sec":null}}

@@ -1,0 +1,2 @@
+{"SubmitReadiness":{"signal":"Soreness","value":5.0,"observed_at":200,"streak":0,"pain":null,"effort_min":null}}
+{"RemoveReadiness":{"signal":"Soreness","observed_at":300}}

@@ -1,0 +1,3 @@
+{"GeneratePlan":{"start_epoch_day":1}}
+{"LogSet":{"exercise":"a","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":0,"entry_id":0,"hold_sec":null}}
+{"GeneratePlan":{"start_epoch_day":8}}

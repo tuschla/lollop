@@ -6,22 +6,41 @@ rust-version.workspace = true
 license.workspace = true
 
 [lib]
-crate-type = ["cdylib", "lib", "staticlib"]
+# `cdylib` is the Android `libshared.so`; `lib` serves tests and the workspace.
+# No `staticlib` until an iOS shell exists to link it.
+crate-type = ["cdylib", "lib"]
+
+[lints]
+workspace = true
 
 [dependencies]
 crux_core = { workspace = true }
 fitparser = "0.11.0"
 serde = { workspace = true, features = ["derive"] }
+# Already linked through crux_core (its `JsonFfiFormat` is serde_json), so the
+# FFI error envelope and FIT payload use it directly at no size cost.
+serde_json = "1"
+# `jni` is a plain optional dependency (off by default) enabled by `jni-host`
+# below, so the JNI exports can link into a HOST-JVM build for offline UI/UX QA
+# (Robolectric drives the real Rust core). The android-target entry below keeps
+# it non-optional for device builds. Both tables name the same crate/version; on
+# an android build the target entry wins and the feature is irrelevant.
+jni = { version = "0.22", default-features = false, optional = true }
 
 [features]
-# `#[effect(typegen)]` in app.rs emits shell-codegen type registration gated on
+# `#[effect(typegen)]` in app/mod.rs emits shell-codegen type registration gated on
 # this feature. The Android JSON FFI shell never needs it, so keep it
 # off by default; enable with `--features typegen` when generating shell types.
 typegen = ["crux_core/typegen"]
+# Compile the `Java_app_milestone_Core_*` JNI exports (shared/src/ffi.rs) on a
+# NON-Android host so `cargo build -p shared --features jni-host` yields a
+# target/debug/libshared.so the JVM QA tests load via System.loadLibrary. Off by
+# default: production android builds get the exports through the target cfg, not
+# this feature.
+jni-host = ["dep:jni"]
 
 [target.'cfg(target_os = "android")'.dependencies]
-jni = { version = "0.21", default-features = false }
+jni = { version = "0.22", default-features = false }
 
 [dev-dependencies]
 crux_core = { workspace = true, features = ["testing"] }
-serde_json = "1"

@@ -1,0 +1,16 @@
+{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"HalfMarathon","concurrent_goal":"Strength","weekly_sets":14,"running_days_per_week":4,"running_km_per_week":40.0,"running_km_per_week_set":true,"advanced":true,"female":false,"high_load_block":false,"health":{"youth":false,"parq_positive":false,"medically_cleared":false,"pregnant":false,"pregnancy_warning_sign":false,"injury_or_rehab":false,"reds_signal":false,"symptomatic":false,"acute_illness":false,"parq_yes":0,"cleared_parq_mask":0},"environment":null,"env_temp_c":null,"env_altitude_m":null,"weeks_off":null,"bodyweight_kg":80.0,"age_years":34.0,"resting_hr_bpm":52.0,"measured_hr_max":null,"weight_lb":false,"resistance_modality":"Weights","effective_from_epoch_day":null,"lift_days_per_week":null,"training_weekdays":null,"goal_race_epoch_day":null,"recent_race":null,"stated_longest_recent_km":null,"layoff_returned_epoch_day":null,"meet_epoch_day":null,"calis_equipment":null,"specialization_muscle":null,"runner_strength":false}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":9.0,"observed_at":1727460000,"entry_id":1,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":9.0,"observed_at":1727546400,"entry_id":2,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":9.0,"observed_at":1727632800,"entry_id":3,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":9.0,"observed_at":1727719200,"entry_id":4,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":9.0,"observed_at":1727805600,"entry_id":5,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":9.0,"observed_at":1727892000,"entry_id":6,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":9.0,"observed_at":1727978400,"entry_id":7,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":9.0,"observed_at":1728064800,"entry_id":8,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":9.0,"observed_at":1728151200,"entry_id":9,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":9.0,"observed_at":1728237600,"entry_id":10,"hold_sec":null}}
+{"LogRun":{"distance_km":6.0,"duration_min":36.0,"hr_pct_max":76.0,"longest_recent_km":16.0,"observed_at":1728111600,"entry_id":100,"workout_type":null,"session_rpe":5,"avg_hr_bpm":145.0}}
+{"GeneratePlan":{"start_epoch_day":20003}}
+{"SetToday":{"epoch_day":20003,"utc_offset_sec":0}}
+{"SubmitReadiness":{"signal":"Pain","value":4.0,"observed_at":1728259500,"streak":1,"pain":{"kind":"TendonLoadRelated","severity":4,"trend":"Stable","persists":false,"location":"knee"},"effort_min":null}}
+{"SubmitCheckin":{"observed_at":1728259300,"sleep_quality":2,"soreness":4,"mood":2,"fatigue":3,"stress":2,"resting_hr_bpm":53.0,"hrv_rmssd_ms":62.0}}

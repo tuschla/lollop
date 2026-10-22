@@ -1,0 +1,375 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  L10N: strings for the log editors (EditorChrome, SetEditor, RunEditor,
+  ReadinessEditors, PainTriage, ReviewSheets), the Log sheet and the Coach
+  calculator forms. Other screens keep their own strings_*.xml.
+  Android merges all values/*.xml, so keep every name prefixed `log_` to avoid clashes.
+-->
+<resources>
+    <!-- Editor scaffold / discard dialog -->
+    <string name="log_discard_title">Discard this entry?</string>
+    <string name="log_discard_confirm">Discard</string>
+    <string name="log_keep_editing">Keep editing</string>
+
+    <!-- Log-set editor -->
+    <string name="log_exercise_search_hint">Search exercises</string>
+    <string name="log_set_title_new">Log set</string>
+    <string name="log_set_title_edit">Edit set</string>
+    <string name="log_field_exercise">Exercise</string>
+    <!-- Planned loop: the plan sets the exercise; one action reopens the picker -->
+    <string name="log_change_exercise">Change</string>
+    <string name="log_change_exercise_cd">Change exercise: %1$s</string>
+    <string name="log_field_weight">Weight</string>
+    <string name="log_field_reps">Reps</string>
+    <string name="log_field_hold">Hold (s)</string>
+    <string name="log_field_added_load">Added weight</string>
+    <!-- Effort in reps left (the core stores the RIR-based RPE: 10 − reps left). -->
+    <string name="log_field_rpe">Effort: reps left</string>
+    <!-- The coach's effort target, in reps left ("target ~2 left") -->
+    <string name="log_rpe_target_hint">target ~%1$s</string>
+    <!-- Effort cells (reps left), spoken -->
+    <string name="log_effort_cd">%1$s reps left</string>
+    <string name="log_effort_cd_1">1 rep left</string>
+    <string name="log_effort_cd_4plus">4 or more reps left</string>
+    <!-- Effort as reps left, from the RIR-based RPE (10 − reps left): "2 reps left";
+         a half point is a range ("1–2 reps left"); 4 or more reads "4+ reps left". -->
+    <plurals name="log_reps_left">
+        <item quantity="one">%1$d rep left</item>
+        <item quantity="other">%1$d reps left</item>
+    </plurals>
+    <string name="log_reps_left_range">%1$d–%2$d reps left</string>
+    <string name="log_reps_left_4plus">4+ reps left</string>
+    <!-- One logged set: "30 s hold", "30 s hold · +10 kg" (%2$s = load with unit),
+         "100 kg × 5", and with its effort "100 kg × 5 · 2 reps left". -->
+    <string name="log_set_line_hold">%1$d\u00A0s hold</string>
+    <string name="log_set_line_hold_loaded">%1$d\u00A0s hold · +%2$s</string>
+    <string name="log_set_line_reps">%1$s × %2$d</string>
+    <string name="log_set_line_effort">%1$s · %2$s</string>
+    <!-- The set editor header's prescribed band: a hold ("20–45 s", "30 s"), else
+         reps ("5–8 reps", "5 reps"), joined with the effort ("~2 reps left"). -->
+    <string name="log_band_hold_range">%1$d–%2$d s</string>
+    <string name="log_band_hold">%1$d s</string>
+    <string name="log_band_reps_range">%1$d–%2$d reps</string>
+    <plurals name="log_band_reps">
+        <item quantity="one">%1$d rep</item>
+        <item quantity="other">%1$d reps</item>
+    </plurals>
+    <string name="log_band_effort">~%1$s</string>
+    <string name="log_set_header_n_of_n">Set %1$d of %2$d</string>
+    <string name="log_set_header_n">Set %1$d</string>
+    <!-- Closes the loop and leaves today's session in progress (it does not end it). -->
+    <string name="log_set_done">Done for now</string>
+    <!-- Pinned primary action: names what it does. -->
+    <string name="log_primary_set_n_of_n">Log set %1$d of %2$d</string>
+    <string name="log_primary_set_n">Log set %1$d</string>
+    <string name="log_primary_extra_set">Log extra set</string>
+    <string name="log_finish_unsaved_title">Log this set before closing?</string>
+    <string name="log_finish_unsaved_body">You changed this set but haven\'t logged it yet.</string>
+    <string name="log_finish_log_it">Log set and close</string>
+    <!-- Weight keypad: folds it away. -->
+    <string name="log_keypad_done">Done</string>
+    <!-- First session with no load to start from: %1$d = target reps + reps in reserve. -->
+    <string name="log_hint_first_weight">First time? Pick a weight you could lift about %1$d times.</string>
+    <!-- Undo + edit the set just logged, from inside the loop -->
+    <string name="log_undo_logged">Logged %1$s</string>
+    <string name="log_undo">Undo</string>
+    <string name="log_undo_cd">Undo: delete %1$s</string>
+    <string name="log_last_set">Last: %1$s</string>
+    <string name="log_edit">Edit</string>
+    <string name="log_edit_set_cd">Edit set: %1$s</string>
+    <!-- The athlete's last top set of this movement from a prior session, and the
+         plates to load on each side of the bar for the prescribed weight. -->
+    <string name="log_last_time">Last session: %1$s</string>
+    <string name="log_plates_per_side">Per side: %1$s %2$s</string>
+    <!-- Rest-end alert notifications -->
+    <string name="log_rest_channel_countdown">Rest timer</string>
+    <string name="log_rest_channel_done">Rest done</string>
+    <string name="log_rest_notif_title">Resting · %1$s</string>
+    <string name="log_rest_notif_done_title">Rest done</string>
+    <string name="log_rest_notif_done_body">Time for your next set of %1$s.</string>
+
+    <!-- Log-run editor -->
+    <string name="log_run_title_edit">Edit run</string>
+    <string name="log_field_distance">Distance</string>
+    <string name="log_field_duration">Duration</string>
+    <string name="log_unit_hms">h:mm:ss</string>
+    <string name="log_duration_invalid">Minutes and seconds go up to 59, and a run up to 10 hours.</string>
+    <string name="log_run_zero_hint">Enter a distance and duration above zero to save.</string>
+    <!-- Average heart rate: one field; its unit ("bpm ⇄") is the swap, spoken: -->
+    <string name="log_hr_pct_max">% max</string>
+    <string name="log_hr_use_pct">Switch to % of max</string>
+    <string name="log_hr_use_bpm">Switch to bpm</string>
+    <string name="log_optional">optional</string>
+
+    <!-- Units -->
+    <string name="log_unit_min">min</string>
+    <string name="log_unit_sec">sec</string>
+    <string name="log_unit_bpm">bpm</string>
+    <string name="log_unit_ms">ms</string>
+    <string name="log_unit_years">years</string>
+
+    <!-- Morning check-in -->
+    <string name="log_checkin_title">Morning check-in</string>
+    <string name="log_checkin_sleep">Sleep</string>
+    <string name="log_checkin_soreness">Soreness</string>
+    <string name="log_checkin_mood">Mood</string>
+    <string name="log_checkin_fatigue">Fatigue</string>
+    <string name="log_checkin_stress">Stress</string>
+    <string name="log_anchor_terrible">terrible</string>
+    <string name="log_anchor_great">great</string>
+    <string name="log_anchor_none">none</string>
+    <string name="log_anchor_very_sore">very sore</string>
+    <string name="log_anchor_awful">awful</string>
+    <string name="log_anchor_fresh">fresh</string>
+    <string name="log_anchor_exhausted">exhausted</string>
+    <string name="log_anchor_calm">calm</string>
+    <string name="log_anchor_stressed">stressed</string>
+    <string name="log_switch_add_rhr">Add resting heart rate</string>
+    <string name="log_field_resting_hr">Resting heart rate</string>
+    <string name="log_switch_add_hrv">Add HRV</string>
+    <string name="log_field_hrv">HRV (rMSSD)</string>
+    <string name="log_hrv_help">Use rMSSD from the same app each morning. Apple Health shows a different HRV measure (SDNN), so don\'t mix the two.</string>
+    <!-- Illness item (asked first when the coach wants the check). Head cold =
+         above-neck tier (1), flu/fever/body aches = below-neck-or-fever tier (2). -->
+    <string name="log_illness_q">Feeling ill?</string>
+    <string name="log_illness_help">Head cold: easier, shorter sessions. Flu or fever: no training until you\'ve recovered.</string>
+    <string name="log_illness_none">No, I feel fine</string>
+    <string name="log_illness_above_neck">Head cold only: runny nose, sore throat, sneezing</string>
+    <string name="log_illness_below_neck">Flu, fever, body aches, chest or stomach symptoms</string>
+
+    <!-- Readiness editor -->
+    <string name="log_readiness_title">Log a lab reading</string>
+    <string name="log_readiness_intro">Each entry here can change today\'s plan. Log only what you measured or felt, one at a time.</string>
+    <string name="log_field_signal">What to log</string>
+    <string name="log_switch_yes_have">Yes, I have this</string>
+    <string name="log_field_severity">Severity</string>
+    <string name="log_field_value">Value</string>
+    <string name="log_field_run_duration">Run duration</string>
+    <string name="log_decoupling_hint">Heart-rate drift only counts on a steady run longer than 20 minutes.</string>
+
+    <!-- Pain triage -->
+    <string name="log_report_pain">Report pain</string>
+    <string name="log_pain_intro">About 10 seconds. Your plan pauses or adjusts based on what you report. Answer what you can.</string>
+    <string name="log_pain_where">Where does it hurt?</string>
+    <string name="log_pain_feel">What does it feel like?</string>
+    <string name="log_pain_severity">How bad is it?</string>
+    <string name="log_pain_worse">Getting worse after sessions?</string>
+
+    <!-- Session review -->
+    <string name="log_review_title">Session review</string>
+    <string name="log_review_intro">How did this session go? Your logged sets and tracked runs already cover the rest.</string>
+    <string name="log_switch_off_day">Off day (felt worse than usual)</string>
+    <string name="log_review_run_header">Logged a run by hand (no GPS)? Add what your watch showed.</string>
+    <string name="log_switch_decoupling_recorded">Heart-rate drift recorded</string>
+    <string name="log_field_decoupling_drift">Heart-rate drift</string>
+    <string name="log_switch_cool_steady">Steady, easy run in cool weather</string>
+    <string name="log_switch_easy_intensity">Time above the easy zone recorded</string>
+    <string name="log_field_time_above_z2">Time above the easy zone, %</string>
+    <string name="log_switch_positive_split">Second half slower than the first</string>
+    <string name="log_field_second_half_slowdown">Second-half slowdown</string>
+
+    <!-- Weekly check-in -->
+    <string name="log_weekly_title">Weekly check-in</string>
+    <string name="log_weekly_failed_sessions">Hard sessions not finished</string>
+    <string name="log_weekly_rpe_gap">Same effort, lighter weight</string>
+    <!-- Lab data (bar-velocity device), folded behind "More details" -->
+    <string name="log_weekly_more_details">More details</string>
+    <string name="log_weekly_velocity_drop">Bar-speed drop this week</string>
+    <!-- FEEDBACK-14: listed overtraining signs + how long -->
+    <string name="log_weekly_signs_q">Noticed any of these lately?</string>
+    <string name="log_weekly_signs_ctx">Two or more lasting a week or longer can mean you need more recovery. Tick what fits.</string>
+    <string name="log_weekly_sign_performance">Sessions feel harder or performance has dropped</string>
+    <string name="log_weekly_sign_mood">Low mood or less motivation</string>
+    <string name="log_weekly_sign_rhr">Resting heart rate higher than usual</string>
+    <string name="log_weekly_sign_sleep">Sleeping worse</string>
+    <string name="log_weekly_signs_how_long">For how long?</string>
+    <string name="log_weekly_signs_lt1">Less than a week</string>
+    <string name="log_weekly_signs_1to2">1–2 weeks</string>
+    <string name="log_weekly_signs_gt2">More than 2 weeks</string>
+    <string name="log_weekly_clinical_header">Health questions</string>
+    <string name="log_clinical_compulsive_q">Over the last few weeks, have you felt you must exercise even when ill or injured, or anxious when you can\'t?</string>
+    <string name="log_clinical_compulsive_ctx">If yes, we\'ll pause training and suggest talking it over with a professional.</string>
+    <string name="log_clinical_bone_q">Any bone pain in one spot that\'s getting worse and hurts on impact or at rest?</string>
+    <string name="log_clinical_bone_ctx">This can be an early sign of a stress fracture. If yes, we\'ll pause training and suggest seeing a doctor. Ordinary muscle soreness doesn\'t count.</string>
+    <string name="log_no">No</string>
+    <string name="log_yes">Yes</string>
+    <!-- AUTOREG-10: low-energy (RED-S) screen, worded for the athlete -->
+    <string name="log_clinical_reds_q_female">In the last 3 months, have your periods stopped, or come later or further apart than usual? (Not counting pregnancy or hormonal contraception.)</string>
+    <string name="log_clinical_reds_q_male">For several weeks, have you noticed a clearly lower sex drive, or fewer morning erections than usual?</string>
+    <string name="log_clinical_reds_q_any">Lately, has either of these happened? Periods stopping or coming further apart (not from pregnancy or contraception). A clearly lower sex drive or fewer morning erections for several weeks.</string>
+    <string name="log_clinical_reds_ctx">These can be early signs of under-eating for the training you do. If yes, we\'ll pause training and suggest seeing a doctor or sports dietitian. No weight-loss advice until then.</string>
+    <!-- Clear the weekly check-in in force -->
+    <string name="log_weekly_clear">Delete weekly check-in</string>
+    <string name="log_weekly_clear_title">Delete this weekly check-in?</string>
+    <string name="log_weekly_clear_body">Its suggestions, like a lighter week, go away. Past days keep what it changed.</string>
+    <string name="log_weekly_clear_confirm">Delete</string>
+
+    <!-- Log chooser: calisthenics movements -->
+    <string name="log_chooser_calis_header">Your bodyweight movements</string>
+    <!-- The quiet row folding the chooser's rarer entries -->
+    <string name="log_chooser_more">More</string>
+
+    <!-- Race predictor -->
+    <string name="log_field_recent_race">Recent race</string>
+    <string name="log_field_recent_min">Recent time: minutes</string>
+    <string name="log_field_recent_sec">Recent time: seconds</string>
+    <string name="log_field_goal_race">Goal race</string>
+    <string name="log_field_weekly_volume">Weekly distance</string>
+    <string name="log_switch_race_stale">That race wasn\'t recent</string>
+    <string name="log_field_weeks_since_race">Weeks since that race</string>
+    <string name="log_btn_predict">Predict finish time</string>
+
+    <!-- Hypertrophy planner -->
+    <string name="log_field_muscle">Muscle</string>
+    <string name="log_field_accumulation_weeks">Weeks in the block</string>
+    <string name="log_btn_plan_volume">Plan weekly sets</string>
+    <string name="log_switch_not_growing">Muscle not growing on current sets</string>
+    <string name="log_switch_recovering_easily">Recovering easily from it</string>
+
+    <!-- Protein form -->
+    <string name="log_field_bodyweight">Bodyweight</string>
+    <string name="log_prefill_profile">From your profile. You can change it here.</string>
+    <string name="log_switch_masters">Age 65+</string>
+    <string name="log_switch_deficit">Eating less than you burn</string>
+    <string name="log_protein_no_context">Pick one above. There\'s no proven protein target for everyone.</string>
+    <string name="log_protein_deficit_only">Under 65, research backs a protein target only while you eat less than you burn. Turn that on if it fits.</string>
+    <string name="log_btn_compute_protein">Get protein target</string>
+
+    <!-- HR zones form -->
+    <string name="log_field_age">Age</string>
+    <string name="log_switch_use_rhr">Also use resting heart rate (more personal zones)</string>
+    <string name="log_btn_compute_hr">Get heart-rate zones</string>
+
+    <!-- Backdate / observed-at chip + date/time pickers -->
+    <string name="log_logged">Logged</string>
+    <string name="log_backdate_locked">This older entry\'s date can\'t be changed. To move it, delete it and log it again.</string>
+    <string name="log_future_clamped">Can\'t log in the future. Set to now.</string>
+    <string name="log_logged_at">Logged at</string>
+    <string name="log_ok">OK</string>
+
+    <!-- Pain triage: character choices (wire PainKind decided in code) -->
+    <string name="log_pain_char_sharp">Sharp or joint pain</string>
+    <string name="log_pain_char_tendon">Dull ache that builds with use</string>
+    <string name="log_pain_char_doms">Muscle soreness</string>
+    <string name="log_pain_char_not_sure">Not sure</string>
+    <!-- Pain triage: body areas (display labels; the wire keeps an English key) -->
+    <string name="log_pain_area_left_knee">Left knee</string>
+    <string name="log_pain_area_right_knee">Right knee</string>
+    <string name="log_pain_area_ankle">Ankle / Achilles</string>
+    <string name="log_pain_area_hip">Hip</string>
+    <string name="log_pain_area_lower_back">Lower back</string>
+    <string name="log_pain_area_shoulder">Shoulder</string>
+    <string name="log_pain_area_elbow_wrist">Elbow / wrist</string>
+    <string name="log_pain_area_neck">Neck</string>
+    <string name="log_pain_area_foot">Foot</string>
+    <string name="log_pain_area_other">Other</string>
+    <string name="log_pain_severity_value">%1$d / 10</string>
+
+    <!-- Readiness editor: illness levels, value hints and units -->
+    <string name="log_illness_level_none">None</string>
+    <string name="log_illness_level_above">Head cold only (no fever)</string>
+    <string name="log_illness_level_below">Flu, fever or body aches</string>
+    <string name="log_spec_rpe">Effort vs plan (RPE points) · 1 off adjusts the weight, 2 off adjusts it more</string>
+    <string name="log_spec_e1rm">Today\'s estimated max ÷ your normal · under 0.95 holds the weight, over 1.05 adds to it</string>
+    <string name="log_spec_bar_velocity">Average bar speed while lifting (m/s)</string>
+    <string name="log_spec_velocity_loss" formatted="false">Bar-speed drop within a set (%) · stop at 10–40% depending on goal</string>
+    <string name="log_spec_wellness">Wellness vs your normal (z-score) · −1.5 or lower eases today\'s session</string>
+    <string name="log_spec_hrv">HRV vs your normal (z-score) · below −0.5 eases today\'s session</string>
+    <string name="log_spec_hrv_cv" formatted="false">HRV coefficient of variation (%)</string>
+    <string name="log_spec_decoupling" formatted="false">Heart-rate drift (%) · over 10 keeps the run easy</string>
+    <string name="log_spec_rhr">Resting heart rate above your normal (bpm) · +5 for 2+ days eases training, +10 stops it</string>
+    <string name="log_spec_soreness">Soreness, 1–7 · 6 or more eases intensity</string>
+    <string name="log_value_min">%1$d\u00A0min</string>
+    <string name="log_value_pct">%1$s\u00A0%%</string>
+    <string name="log_value_bpm">%1$d\u00A0bpm</string>
+
+    <!-- Morning / weekly check-in: an earlier answer is a hint, never the value -->
+    <string name="log_checkin_last">Last time: %1$s</string>
+    <string name="log_checkin_last_unit">Last time: %1$s\u00A0%2$s</string>
+    <string name="log_checkin_saved">Check-in saved</string>
+    <string name="log_weekly_nothing">Nothing to report this week</string>
+    <string name="log_weekly_saved">Weekly check-in saved</string>
+
+    <!-- Protein form: empty bodyweight -->
+    <string name="log_protein_weight_hint">Enter your weight</string>
+
+    <!-- Calculator rows and result headers (CoachTools) -->
+    <string name="log_value_with_unit">%1$s\u00A0%2$s</string>
+    <string name="log_tool_tanaka">Max heart rate from age: %1$d − %2$s × %3$d</string>
+    <!-- New manual run confirmation (snackbar; action opens it in History) -->
+    <string name="log_run_saved">Run saved</string>
+
+    <!-- Gym-floor set loop -->
+    <!-- Primary action once the current exercise is complete -->
+    <string name="log_primary_next">Next: %1$s</string>
+    <string name="log_primary_finish_session">Finish session</string>
+    <!-- Rest readout, spoken on focus: "Rest timer: 1:42 left" -->
+    <string name="log_rest_left_cd">Rest timer: %1$s left</string>
+    <!-- In-session coaching cue actions: "Use 140 kg" applies the coach's load -->
+    <string name="log_cue_use_load">Use %1$s</string>
+    <string name="log_cue_end_exercise">End exercise</string>
+    <!-- One-tap warm-ups on set 1 of a barbell lift -->
+    <string name="log_warmup_label">Warm-up</string>
+    <string name="log_warmup_hint">one tap logs it, no rest timer</string>
+    <string name="log_warmup_bar">Bar</string>
+    <string name="log_warmup_cd">Log warm-up: %1$s</string>
+    <string name="log_warmup_logged">Warm-up logged: %1$s</string>
+    <!-- Spoken state of a warm-up step already logged today. -->
+    <string name="log_warmup_done_state">logged</string>
+    <!-- A typed exercise the app doesn't know yet -->
+    <string name="log_add_exercise">+ Add \u2018%1$s\u2019</string>
+    <!-- Log chooser: reopen today's session after Finish -->
+    <string name="log_chooser_resume">Resume session: %1$s</string>
+    <!-- Logged-at chip -->
+    <string name="log_today">Today</string>
+    <string name="log_logged_change_cd">change when this was logged</string>
+    <!-- Readiness signal picker: labels (display only; the wire is the signal name) -->
+    <string name="log_signal_rpe">Effort vs plan</string>
+    <string name="log_signal_e1rm">Estimated 1RM</string>
+    <string name="log_signal_bar_velocity">Bar speed</string>
+    <string name="log_signal_velocity_loss">Bar-speed drop</string>
+    <string name="log_signal_wellness">Wellness (z-score)</string>
+    <string name="log_signal_hrv">HRV (ln rMSSD)</string>
+    <string name="log_signal_hrv_cv">HRV (CV)</string>
+    <string name="log_signal_decoupling">Heart-rate drift</string>
+    <string name="log_signal_rhr">Resting heart rate vs normal</string>
+    <string name="log_signal_soreness">Soreness</string>
+    <string name="log_signal_pain">Pain</string>
+    <string name="log_signal_illness">Illness</string>
+    <string name="log_signal_reds">Under-eating (RED-S)</string>
+    <string name="log_signal_cardiac">Heart warning signs</string>
+    <string name="log_signal_bone_stress">Bone stress</string>
+    <!-- Readiness signal picker: one-line explainers -->
+    <string name="log_signal_rpe_explainer">How hard training felt compared to the plan.</string>
+    <string name="log_signal_e1rm_explainer">Today\'s estimated one-rep max compared with your normal.</string>
+    <string name="log_signal_bar_velocity_explainer">Measured bar speed on a reference lift.</string>
+    <string name="log_signal_velocity_loss_explainer">How much bar speed dropped within a set.</string>
+    <string name="log_signal_wellness_explainer">Sleep, soreness, fatigue, stress and mood combined, versus your normal.</string>
+    <string name="log_signal_hrv_explainer">Heart-rate variability compared with your recent normal.</string>
+    <string name="log_signal_hrv_cv_explainer">How much your HRV readings vary day to day.</string>
+    <string name="log_signal_decoupling_explainer">Heart-rate drift versus pace during a steady run.</string>
+    <string name="log_signal_rhr_explainer">This morning\'s resting heart rate compared with your normal.</string>
+    <string name="log_signal_soreness_explainer">How sore your muscles are today, from 1 to 7.</string>
+    <string name="log_signal_pain_explainer">Sharp or joint pain. Logging it pauses training.</string>
+    <string name="log_signal_illness_explainer">Feeling sick. How bad it is decides today\'s training.</string>
+    <string name="log_signal_reds_explainer">Signs of under-eating (RED-S). We\'ll suggest seeing a doctor.</string>
+    <string name="log_signal_cardiac_explainer">Chest pain, fainting or a racing heartbeat. Training stops until a doctor clears you.</string>
+    <string name="log_signal_bone_stress_explainer">Bone pain in one spot, a possible stress injury. We\'ll pause training and suggest a doctor.</string>
+    <!-- Race predictor distance presets -->
+    <string name="log_race_5k">5K</string>
+    <string name="log_race_10k">10K</string>
+    <string name="log_race_half">Half</string>
+    <string name="log_race_marathon">Marathon</string>
+    <!-- Hypertrophy planner muscles (display only; the wire key is fixed) -->
+    <string name="log_muscle_chest">Chest</string>
+    <string name="log_muscle_back">Back</string>
+    <string name="log_muscle_quads">Quads</string>
+    <string name="log_muscle_hamstrings">Hamstrings</string>
+    <string name="log_muscle_glutes">Glutes</string>
+    <string name="log_muscle_side_delts">Side delts</string>
+    <string name="log_muscle_rear_delts">Rear delts</string>
+    <string name="log_muscle_biceps">Biceps</string>
+    <string name="log_muscle_triceps">Triceps</string>
+    <string name="log_muscle_calves">Calves</string>
+    <string name="log_muscle_abs">Abs</string>
+</resources>

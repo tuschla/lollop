@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * C5 rotation escape hatch: the captured-but-unsaved-run condition is DERIVED
+ * Rotation escape hatch: the captured-but-unsaved-run condition is DERIVED
  * from [RunSession] (`hasUnsavedCapture`) rather than kept in a composition-
  * volatile `remember`, so it survives rotation / Back+reopen. That derivation is
  * the single load-bearing predicate for the tracker control row, the
@@ -24,7 +24,7 @@ class TrackerStateTest {
     // | tracking | pointCount | hasUnsavedCapture | meaning                       |
     // |----------|------------|-------------------|-------------------------------|
     // | false    | 0          | false             | fresh open / locate preview   |
-    // | false    | >0         | true              | captured, awaiting save (C5)  |
+    // | false    | >0         | true              | captured, awaiting save       |
     // | true     | 0          | false             | recording, first fix pending  |
     // | true     | >0         | false             | recording in progress         |
 
@@ -37,7 +37,7 @@ class TrackerStateTest {
     @Test
     fun stoppedWithPointsIsAnUnsavedCapture() {
         // Service stopped after a failed save / dismissed short-run prompt but the
-        // fixes are still held: the C5 case rotation used to strand.
+        // fixes are still held: the case rotation used to strand.
         assertTrue(hasUnsavedCapture(tracking = false, pointCount = 1))
         assertTrue(hasUnsavedCapture(tracking = false, pointCount = 4200))
     }
@@ -53,5 +53,13 @@ class TrackerStateTest {
         // A run in progress is not "awaiting save": Stop & save hasn't run.
         assertFalse(hasUnsavedCapture(tracking = true, pointCount = 1))
         assertFalse(hasUnsavedCapture(tracking = true, pointCount = 9000))
+    }
+
+    @Test
+    fun fresh_lock_lights_for_a_fix_newer_than_the_clock_sample() {
+        // A fix stamped at the current clock sample (age 0) is a fresh lock: the pill
+        // resamples the clock on every new fix stamp, so a just-landed lock lights within
+        // its window instead of reading stale against an older clock sample.
+        assertTrue(isFreshLock(accuracyM = 10.0, fixElapsedMs = 5_000L, nowElapsedMs = 5_000L))
     }
 }

@@ -1,6 +1,7 @@
 package app.milestone
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -9,7 +10,7 @@ import org.junit.Test
  * Pure (no-XML) unit tests for the run-import parser logic that the JVM unit
  * suite can exercise directly:
  *
- *  - [mergeTcxTracks]: the M3 fix: a standard Garmin/Strava TCX opens one
+ *  - [mergeTcxTracks]: a standard Garmin/Strava TCX opens one
  *    `<Track>` per `<Lap>` (autolaps on continuous running included), so a Track
  *    boundary is NOT inherently a pause. Consecutive Tracks with a small
  *    inter-track gap must merge into one segment (otherwise the core drops each
@@ -25,7 +26,7 @@ class ImportParserTest {
 
     private fun fix(t: Long) = GpxFix(lat = 0.0, lon = 0.0, timeSec = t, hrBpm = null)
 
-    // --- M3: TCX lap merge ------------------------------------------------------
+    // --- TCX lap merge ------------------------------------------------------
 
     @Test
     fun consecutiveAutolapTracksMergeIntoOneSegment() {
@@ -102,7 +103,7 @@ class ImportParserTest {
         assertNull("non-numeric rejected", parseHrBpm("abc"))
     }
 
-    // --- Imported-run accuracy (BUGS.md "Imported-run accuracy assumption") -----
+    // --- Imported-run accuracy ("Imported-run accuracy assumption") -----
 
     @Test
     fun hdopConvertsToMetresViaNominalUere() {
@@ -125,7 +126,9 @@ class ImportParserTest {
 
     // importedRunEvent is a pure function (no android.util.Xml), so its accuracy
     // handling is unit-testable directly. Build fixes with distinct positions/times
-    // so they survive the core-facing QC the event feeds.
+    // at a running pace (0.0054° ≈ 600 m per 200 s, 3 m/s) so they survive the
+    // core-facing QC, the import's plausibility gate and its minimum run length
+    // (0.5 km and 3 minutes).
     private fun fixAt(t: Long, lon: Double, accuracyM: Double?) =
         GpxFix(lat = 0.0, lon = lon, timeSec = t, hrBpm = null, accuracyM = accuracyM)
 
@@ -135,7 +138,7 @@ class ImportParserTest {
         // must clear the core's 30 m QC gate (never a fabricated 5.0 that reads
         // as a great fix).
         val ev = importedRunEvent(
-            listOf(listOf(fixAt(1000, 0.000, null), fixAt(1010, 0.001, null))),
+            listOf(listOf(fixAt(1000, 0.000, null), fixAt(1200, 0.0054, null))),
             measuredHrMax = null,
         )
         assertEquals(2, ev.points.size)
@@ -149,10 +152,94 @@ class ImportParserTest {
         // A real recorded/derived figure (FIT gps_accuracy or GPX hdop) survives
         // to the core untouched, not overwritten by the sentinel.
         val ev = importedRunEvent(
-            listOf(listOf(fixAt(1000, 0.000, 8.0), fixAt(1010, 0.001, 12.5))),
+            listOf(listOf(fixAt(1000, 0.000, 8.0), fixAt(1200, 0.0054, 12.5))),
             measuredHrMax = null,
         )
         assertEquals(8.0, ev.points[0].accuracyM, 1e-9)
         assertEquals(12.5, ev.points[1].accuracyM, 1e-9)
+    }
+
+    // --- Time-weighted %HRmax ---------------------------------------------------
+
+    @Test
+    fun hrPctMaxIsTimeWeightedSoALongHeldSampleDominates() {
+        // The first sample is held ~300 s (the gap to the next fix), the second only
+        // ~5 s. A time-weighted mean must land within 1 bpm of the long-held sample;
+        // a plain mean (142.5 bpm) would sit ~27 bpm below it.
+        val measuredHrMax = 190.0
+        val ev = importedRunEvent(
+            listOf(
+                listOf(
+                    GpxFix(0.0, 0.000, 1000, 170), // held 300 s (~556 m: moving)
+                    GpxFix(0.0, 0.005, 1300, 115), // held 5 s (~2 m: standing)
+                    GpxFix(0.0, 0.00502, 1305, null),
+                ),
+            ),
+            measuredHrMax = measuredHrMax,
+        )
+        val weightedBpm = ev.hrPctMax / 100.0 * measuredHrMax
+        assertEquals("the 300-s sample dominates the 5-s spike", 170.0, weightedBpm, 1.0)
+        assertNotEquals("a plain mean would not satisfy this", 142.5, weightedBpm, 1.0)
+    }
+
+    @Test
+    fun evenlySpacedHrSamplesMatchThePlainMean() {
+        // Constant 100 s spacing (the final fix takes the median gap, also 100 s) →
+        // all weights are equal, so the time-weighted result is the old plain mean.
+        val measuredHrMax = 200.0
+        val ev = importedRunEvent(
+            listOf(
+                listOf(
+                    GpxFix(0.0, 0.0000, 1000, 100),
+                    GpxFix(0.0, 0.0030, 1100, 120),
+                    GpxFix(0.0, 0.0060, 1200, 140),
+                ),
+            ),
+            measuredHrMax = measuredHrMax,
+        )
+        assertEquals(120.0 / measuredHrMax * 100.0, ev.hrPctMax, 1e-9)
+    }
+
+    // --- import <time> parsing (GPX + TCX share parseImportTimeSec) ---------
+    // The XML→segment path uses android.util.Xml (a non-functional JVM stub), so the
+    // timestamp decoder is verified on its pure helper.
+
+    @Test
+    fun specUtcTimestampsParseToTheirInstant() {
+        assertEquals(1_788_084_000L, parseImportTimeSec("2026-08-30T10:00:00Z"))
+        // An explicit offset resolves to the same instant (10:00+02:00 == 08:00Z).
+        assertEquals(1_788_076_800L, parseImportTimeSec("2026-08-30T10:00:00+02:00"))
+    }
+
+    @Test
+    fun zoneNaiveTimestampParsesAsUtcNotDropped() {
+        // A zone-naive stamp (no Z / offset) is read as UTC per the GPX/TCX spec, NOT
+        // dropped to 0 — a dropped time made a genuinely recorded run get misdiagnosed
+        // downstream as "a planned route, not a recorded run".
+        val naive = parseImportTimeSec("2026-08-30T10:00:00")
+        assertEquals(1_788_084_000L, naive)
+        assertEquals(parseImportTimeSec("2026-08-30T10:00:00Z"), naive)
+        assertTrue("a naive timestamp must not read as time-less", naive > 0L)
+    }
+
+    @Test
+    fun missingOrGarbageTimestampIsZero() {
+        assertEquals(0L, parseImportTimeSec(""))
+        assertEquals(0L, parseImportTimeSec("   "))
+        assertEquals(0L, parseImportTimeSec("not-a-timestamp"))
+    }
+
+    // --- distinct entry ids per imported activity --------------------------
+
+    @Test
+    fun two_imported_runs_in_one_ms_get_distinct_ids() {
+        // A multi-activity TCX import builds several runs back-to-back; the default
+        // System.currentTimeMillis() id would collide within a millisecond, making a
+        // later DeleteEntry/AmendRun target the wrong run. EntryIds.next() guarantees
+        // a unique id per built run even in a tight loop.
+        val seg = listOf(listOf(GpxFix(0.0, 0.000, 1000, null), GpxFix(0.0, 0.0054, 1200, null)))
+        val a = importedRunEvent(seg, measuredHrMax = null)
+        val b = importedRunEvent(seg, measuredHrMax = null)
+        assertNotEquals(a.entryId, b.entryId)
     }
 }

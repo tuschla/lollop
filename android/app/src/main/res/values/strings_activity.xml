@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Under-18 weekly activity card + Log activity editor (YouthActivity.kt) and the
+     plain-text coach summary (CoachExport.kt). Activity copy follows the WHO 2020
+     5–17 guideline (youth-pa-001): information and tracking only, no streaks, no guilt. -->
+<resources>
+
+    <!-- Today: weekly activity card -->
+    <string name="activity_overline">Your activity</string>
+    <!-- %1$d = active minutes this week, %2$d = weekly target (420). -->
+    <string name="activity_week_minutes">%1$d of %2$d active minutes this week</string>
+    <!-- %1$d = days with vigorous activity, %2$d = target days (3). -->
+    <string name="activity_vigorous_days">%1$d of %2$d days with vigorous activity</string>
+    <!-- %1$d = days with muscle- or bone-strengthening activity, %2$d = target days (3). -->
+    <string name="activity_strength_days">%1$d of %2$d days with muscle and bone strengthening</string>
+    <!-- Appended to a card line whose target is met, %1$s = the line. -->
+    <string name="activity_line_reached">%1$s · Reached</string>
+    <!-- %1$d = daily target minutes (60). -->
+    <string name="activity_daily_hint">About %1$d minutes a day on average, at moderate effort or harder.</string>
+    <!-- Where the minutes came from, %1$s = the nonzero parts joined by " · ". -->
+    <string name="activity_from">From %1$s</string>
+    <string name="activity_from_runs">runs %1$d min</string>
+    <string name="activity_from_lifting">lifting %1$d min</string>
+    <string name="activity_from_other">other activity %1$d min</string>
+    <string name="activity_log_action">Log activity</string>
+    <string name="activity_logged_this_week">Logged this week</string>
+    <!-- One logged activity: %1$s = day ("Mon"), %2$s = kind, %3$d = minutes, %4$s = effort. -->
+    <string name="activity_entry_line">%1$s · %2$s · %3$d min · %4$s</string>
+    <!-- Appended to an entry line logged as muscle- or bone-strengthening, %1$s = the line. -->
+    <string name="activity_entry_line_strengthening">%1$s · strengthening</string>
+    <!-- %1$s = the entry line above. -->
+    <string name="activity_remove_cd">Delete %1$s</string>
+    <string name="activity_removed">Activity deleted</string>
+    <string name="activity_saved">Activity saved</string>
+    <string name="activity_subject">weekly activity</string>
+
+    <!-- Activity kinds (ActivityKind) -->
+    <string name="activity_kind_sport">Sport or PE</string>
+    <string name="activity_kind_cycling">Cycling</string>
+    <string name="activity_kind_swimming">Swimming</string>
+    <string name="activity_kind_walking">Walking</string>
+    <string name="activity_kind_dance">Dance</string>
+    <string name="activity_kind_strength">Strength or jumping</string>
+    <string name="activity_kind_other">Other</string>
+
+    <!-- Effort, faithful to the WHO relative 0–10 scale: moderate 5–6, vigorous 7–8. -->
+    <string name="activity_effort_moderate">Moderate</string>
+    <string name="activity_effort_moderate_sub">Breathing faster, can still talk</string>
+    <string name="activity_effort_vigorous">Vigorous</string>
+    <string name="activity_effort_vigorous_sub">Can only say a few words at a time</string>
+    <string name="activity_effort_moderate_short">moderate</string>
+    <string name="activity_effort_vigorous_short">vigorous</string>
+
+    <!-- Log activity editor -->
+    <string name="activity_editor_title">Log activity</string>
+    <string name="activity_field_kind">What did you do?</string>
+    <string name="activity_field_minutes">Active time</string>
+    <string name="activity_minutes_hint">Count the time you were moving at least moderately.</string>
+    <string name="activity_minutes_invalid">Enter 1 to 600 minutes.</string>
+    <string name="activity_field_effort">How hard was it?</string>
+    <string name="activity_strengthening">Strengthened muscles or bones</string>
+    <string name="activity_strengthening_hint">For example jumping, climbing or bodyweight exercises.</string>
+    <string name="activity_chooser_sub">Sport, PE, cycling, dancing and other active time</string>
+
+    <!-- Coach summary (plain text, shared via the share sheet) -->
+    <string name="coach_export_action">Share a summary for your coach</string>
+    <plurals name="coach_export_action_sub">
+        <item quantity="one">Plain text of your last week of lifts, runs and activity.</item>
+        <item quantity="other">Plain text of your last %1$d weeks of lifts, runs and activity.</item>
+    </plurals>
+    <string name="coach_export_chooser">Share summary</string>
+    <string name="coach_export_subject">Training summary</string>
+    <!-- %1$s = first day, %2$s = last day. -->
+    <string name="coach_export_header">Training summary, %1$s to %2$s</string>
+    <!-- %1$s = the week\'s Monday. -->
+    <string name="coach_export_week">Week of %1$s</string>
+    <!-- One week with nothing logged, %1$s = its Monday. -->
+    <string name="coach_export_week_empty">Week of %1$s: nothing logged.</string>
+    <!-- Consecutive weeks with nothing logged, folded into one line: %1$s = the first Monday, %2$s = the last Monday. -->
+    <string name="coach_export_weeks_empty">Weeks of %1$s to %2$s: nothing logged.</string>
+    <!-- %1$s = the week\'s totals joined by " · ". -->
+    <string name="coach_export_totals">Totals: %1$s</string>
+    <plurals name="coach_export_lift_sessions">
+        <item quantity="one">%1$d lifting session</item>
+        <item quantity="other">%1$d lifting sessions</item>
+    </plurals>
+    <!-- %1$d = runs, %2$s = total distance ("12.40 km"). -->
+    <plurals name="coach_export_runs">
+        <item quantity="one">%1$d run, %2$s</item>
+        <item quantity="other">%1$d runs, %2$s</item>
+    </plurals>
+    <!-- A week\'s active minutes, named by where they came from (only the nonzero sources). -->
+    <plurals name="coach_export_active_minutes_runs">
+        <item quantity="one">%1$d active minute from runs</item>
+        <item quantity="other">%1$d active minutes from runs</item>
+    </plurals>
+    <plurals name="coach_export_active_minutes_other">
+        <item quantity="one">%1$d active minute from other activity</item>
+        <item quantity="other">%1$d active minutes from other activity</item>
+    </plurals>
+    <plurals name="coach_export_active_minutes">
+        <item quantity="one">%1$d active minute from runs and other activity</item>
+        <item quantity="other">%1$d active minutes from runs and other activity</item>
+    </plurals>
+    <!-- Lift line: %1$s = exercise, %2$s = its set groups joined by ", ". -->
+    <string name="coach_export_lift">%1$s: %2$s</string>
+    <!-- %1$d sets × %2$d reps @ %3$s load ("100 kg"). -->
+    <string name="coach_export_sets_load">%1$d × %2$d @ %3$s</string>
+    <string name="coach_export_sets_reps">%1$d × %2$d</string>
+    <string name="coach_export_sets_hold">%1$d × %2$d s hold</string>
+    <!-- Run line: %1$s distance, %2$s duration ("27:30"), %3$s pace ("5:30 /km"). -->
+    <string name="coach_export_run">Run: %1$s · %2$s · %3$s</string>
+    <string name="coach_export_run_effort">effort %1$d/10</string>
+    <!-- Activity line: %1$s kind, %2$d minutes, %3$s effort. -->
+    <string name="coach_export_activity">%1$s: %2$d min · %3$s</string>
+    <string name="coach_export_strengthening">muscle and bone strengthening</string>
+
+</resources>

@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The emulator smoke job is expensive (boots a real AVD), so it runs only on
+  # demand and weekly, never on every push/PR.
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  core:
+    name: Rust core (fmt / clippy / build / test / cross)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          # crux MSRV; matches rust-version in Cargo.toml.
+          toolchain: "1.90"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --locked -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace --locked
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Add Android target
+        run: rustup target add aarch64-linux-android
+
+      - name: Set up Android SDK/NDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Cross-build core for arm64
+        run: cargo ndk -t arm64-v8a build -p shared --locked
+
+  android:
+    name: Android unit + UI/UX QA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: "1.90"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Add Android targets
+        run: rustup target add aarch64-linux-android x86_64-linux-android
+
+      - name: Set up Android SDK/NDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build jniLibs
+        run: cargo ndk -o android/app/src/main/jniLibs -t arm64-v8a -t x86_64 build -p shared --release
+
+      - name: Unit tests + offline UI/UX QA
+        # testDebugUnitTest runs the JVM wire-shape tests AND the Robolectric
+        # UI/UX QA suite; its gradle task builds the host libshared.so (jni-host)
+        # so the UI tests drive the real Rust core. verifyRoborazziDebug gates the
+        # committed screenshot baselines.
+        working-directory: android
+        run: ./gradlew --no-daemon testDebugUnitTest verifyRoborazziDebug
+
+      - name: Upload Roborazzi diffs on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: roborazzi-diffs
+          path: android/app/build/outputs/roborazzi
+          if-no-files-found: ignore
+
+  emulator-smoke:
+    name: Android on-device smoke (emulator)
+    # Expensive: only weekly + on manual dispatch, never on push/PR.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: "1.90"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Add Android target
+        run: rustup target add x86_64-linux-android
+
+      - name: Set up Android SDK/NDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build jniLibs (x86_64 for the emulator)
+        run: cargo ndk -o android/app/src/main/jniLibs -t x86_64 build -p shared --release
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: On-device smoke (assemble, install, instrumented tests, monkey)
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+          disable-animations: true
+          # The runner executes each script line in its own shell, so every line
+          # is self-contained (no `cd`, no multi-line constructs).
+          working-directory: android
+          script: |
+            ./gradlew --no-daemon installDebug connectedDebugAndroidTest
+            ../scripts/monkey-gate.sh

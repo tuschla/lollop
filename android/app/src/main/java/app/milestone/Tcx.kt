@@ -3,45 +3,30 @@ package app.milestone
 import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
 import java.io.StringReader
-import java.time.Instant
-import java.time.OffsetDateTime
+
+// Minimal TCX (Garmin Training Center XML) track reader for run import
+// (Garmin/Strava/etc. exports that ship TCX instead of GPX). Reads only
+// `<Activities>/<Activity>/<Lap>/<Track>/<Trackpoint>`, each Trackpoint's
+// `<Time>`, `<Position>` (`LatitudeDegrees`/`LongitudeDegrees`), and an
+// optional `<HeartRateBpm><Value>` sample. Tag names are matched by local
+// name (namespace prefix stripped) so any TCX namespace declaration works.
+// Everything else (Lap summary stats, Extensions, Author, Creator, Course)
+// is ignored. Produces [GpxFix]es, the same shape as the GPX reader.
 
 /**
- * Minimal TCX (Garmin Training Center XML) track reader for run import
- * (Garmin/Strava/etc. exports that ship TCX instead of GPX). Reads only
- * `<Activities>/<Activity>/<Lap>/<Track>/<Trackpoint>`, each Trackpoint's
- * `<Time>`, `<Position>` (`LatitudeDegrees`/`LongitudeDegrees`), and an
- * optional `<HeartRateBpm><Value>` sample. Tag names are matched by local
- * name (namespace prefix stripped) so any TCX namespace declaration works.
- * Everything else (Lap summary stats, Extensions, Author, Creator, Course)
- * is ignored. Reuses [GpxFix], same shape as the GPX reader, only the
- * source markup differs.
- */
-
-/**
- * One list of fixes per recording SEGMENT, grouped by the enclosing
- * `<Activity>`. A standard Garmin/Strava TCX opens a new `<Track>` per `<Lap>`
+ * One entry per `<Activity>` (a TCX export can bundle several, e.g. a multi-sport
+ * day: each is a separate run, not a pause inside one), each a list of recording
+ * SEGMENTS. A standard Garmin/Strava TCX opens a new `<Track>` per `<Lap>`
  * - including AUTOLAPS on continuous running, so a `<Track>` boundary is NOT
  * inherently a pause. Consecutive `<Track>`s whose inter-track time gap is
- * small (< [MAX_TRACK_MERGE_GAP_SEC], the same convention as the live
+ * small (≤ [MAX_TRACK_MERGE_GAP_SEC], the same convention as the live
  * pipeline's fix-gap threshold) are therefore MERGED into one segment; only a
- * genuine pause (a larger gap, or a clock discontinuity) splits segments. This
- * fixes a systematic undercount: the core drops the entering leg of every
- * segment boundary from BOTH distance and moving time (~−130 m / −40 s on an
- * autolap-per-km marathon) if each lap became its own segment. A TCX export can
- * also bundle several `<Activity>` blocks (e.g. a multi-sport day), each is a
- * separate run, not a pause inside one, so callers that need one import per run
- * should use [parseTcxActivities] instead of flattening this. Trackpoints
- * without a `<Position>` (TCX emits these during pauses) are skipped rather
- * than producing a fix with missing coordinates.
- */
-fun parseTcx(text: String): List<List<GpxFix>> = parseTcxActivities(text).flatten()
-
-/**
- * Same trackpoint reader as [parseTcx], but keeping the `<Activity>`
- * grouping: outer list per `<Activity>`, inner list per `<Track>` within it.
- * Import call sites use this to turn each Activity into its own run event
- * instead of flattening a multi-activity export into one.
+ * genuine pause (a larger gap, or a clock discontinuity) splits segments. The
+ * core drops the entering leg of every segment boundary from BOTH distance and
+ * moving time, so one segment per lap would undercount (~−130 m / −40 s on an
+ * autolap-per-km marathon). Trackpoints without a `<Position>` (TCX emits these
+ * during pauses) are skipped rather than producing a fix with missing
+ * coordinates.
  */
 fun parseTcxActivities(text: String): List<List<List<GpxFix>>> {
     val parser = Xml.newPullParser().apply {
@@ -91,7 +76,7 @@ fun parseTcxActivities(text: String): List<List<List<GpxFix>>> {
                 "LongitudeDegrees" -> if (inTrackpoint && inPosition) {
                     lon = parser.nextText().trim().toDoubleOrNull() ?: Double.NaN
                 }
-                "Time" -> if (inTrackpoint) timeSec = parseTcxTime(parser.nextText())
+                "Time" -> if (inTrackpoint) timeSec = parseImportTimeSec(parser.nextText())
                 "HeartRateBpm" -> if (inTrackpoint) inHeartRateBpm = true
                 "Value" -> if (inTrackpoint && inHeartRateBpm) {
                     hr = parseHrBpm(parser.nextText())
@@ -160,11 +145,3 @@ internal fun mergeTcxTracks(tracks: List<List<GpxFix>>): List<List<GpxFix>> {
     return segments
 }
 
-/** ISO-8601 `<Time>` → unix seconds; 0 when missing/unparseable. */
-private fun parseTcxTime(raw: String): Long {
-    val s = raw.trim()
-    if (s.isEmpty()) return 0L
-    return runCatching { Instant.parse(s).epochSecond }
-        .recoverCatching { OffsetDateTime.parse(s).toEpochSecond() }
-        .getOrDefault(0L)
-}

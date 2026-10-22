@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- GPS run-tracking copy (06-run-tracking). Owned by RunTracking.kt / Tracker*.kt /
+     RunSession.kt / RunTrackingService.kt. All names are `track_`-prefixed. -->
+<resources>
+
+    <!-- Ongoing foreground-service notification -->
+    <string name="track_notif_channel_name">Run tracking</string>
+    <string name="track_notif_locate_title">Finding GPS…</string>
+    <string name="track_notif_locate_text">Tap Start when you\'re ready to record.</string>
+    <string name="track_notif_armed_title">Ready to record</string>
+    <string name="track_notif_armed_text">Recording will start on its own.</string>
+    <string name="track_notif_recording_title">Tracking run</string>
+    <string name="track_notif_paused_title">Run paused</string>
+    <string name="track_notif_paused_content">Paused · %1$s</string>
+    <string name="track_notif_paused_text">Paused</string>
+    <string name="track_notif_recording_hint">Recording your route…</string>
+    <!-- Recording progress line (lock screen): %1$s = "23:41 · 4.12 km". -->
+    <string name="track_notif_progress">Moving %1$s</string>
+    <!-- Same line plus the current pace: %2$s = "5:45 /km". -->
+    <string name="track_notif_progress_pace">Moving %1$s · %2$s now</string>
+    <!-- The figures inside the progress line: %1$s = moving time ("23:41"), %2$s = distance ("4.12 km"). -->
+    <string name="track_notif_progress_figures">%1$s · %2$s</string>
+    <string name="track_notif_signal_lost">GPS signal lost. Searching…</string>
+    <!-- Guided run: %1$s = the step line ("Rep 2 of 6 · 320 m left"), %2$s = the progress line. -->
+    <string name="track_notif_step">%1$s · %2$s</string>
+
+    <!-- Notification action labels (shared with the in-app pause button) -->
+    <string name="track_action_pause">Pause</string>
+    <string name="track_action_resume">Resume</string>
+    <string name="track_action_stop">Stop</string>
+
+    <!-- Map GPS status pill -->
+    <string name="track_pill_permission_needed">Location permission needed</string>
+    <string name="track_pill_location_off">Location is off</string>
+    <string name="track_pill_signal_lost">GPS signal lost. Searching…</string>
+    <string name="track_pill_paused">Paused</string>
+    <string name="track_pill_recording">Recording</string>
+    <string name="track_pill_armed_moving">Starts when moving</string>
+    <string name="track_pill_armed_precise">Waiting for precise GPS…</string>
+    <string name="track_pill_armed_waiting">Waiting for GPS…</string>
+    <string name="track_pill_fresh_lock">GPS lock · ±%1$d m</string>
+    <string name="track_pill_acquiring">Finding GPS…</string>
+
+    <!-- Location permission panel. The rationale shows before the system prompt;
+         the other three captions match what the user actually allowed. -->
+    <string name="track_perm_rationale">lollop needs precise location to measure distance and pace. Your route stays on this phone.</string>
+    <string name="track_perm_denied_caption">lollop can\'t record a route without location. Allow precise location to track this run, or log it by hand.</string>
+    <string name="track_perm_coarse_caption">lollop only has approximate location, which can\'t measure a route. Allow precise location to track this run, or log it by hand.</string>
+    <string name="track_perm_blocked_caption">Location is blocked for lollop. Allow it in app settings to track this run, or log it by hand.</string>
+    <string name="track_btn_continue">Continue</string>
+    <string name="track_btn_allow_location">Allow location</string>
+    <string name="track_btn_log_manually">Log run by hand</string>
+
+    <!-- Live stat sheet -->
+    <string name="track_stat_elapsed">Moving</string>
+    <string name="track_stat_elapsed_paused">Moving · Paused</string>
+    <string name="track_stat_distance">Distance</string>
+    <string name="track_stat_pace_now">Pace now</string>
+    <!-- Whole-run average pace, under PACE NOW (which already shows the unit): %1$s = "5:15". -->
+    <string name="track_stat_avg_pace">Avg %1$s</string>
+    <!-- The newest completed N-minute pace slice, under the live figures: %1$d = N, %2$s = "5:12", %3$s = "/km". -->
+    <string name="track_stat_last_slice">Last %1$d min %2$s %3$s</string>
+    <!-- Under DISTANCE while following a single-step plan: %1$s = "2.40 mi". -->
+    <string name="track_stat_to_go">%1$s to go</string>
+    <string name="track_stat_plan_done">Planned distance done</string>
+    <!-- Under PACE NOW while following a plan with a pace range: what to do, never a
+         description of the current pace. -->
+    <string name="track_pace_status_speed_up">Speed up</string>
+    <string name="track_pace_status_ease_off">Ease off</string>
+    <string name="track_pace_status_on_target">On target</string>
+    <string name="track_cd_pace_status_speed_up">Slower than your target pace. Speed up.</string>
+    <string name="track_cd_pace_status_ease_off">Faster than your target pace. Ease off.</string>
+    <string name="track_cd_pace_status_on_target">On your target pace.</string>
+
+    <!-- Screen-reader readouts for the live stats (units spelled out) -->
+    <string name="track_cd_stats">Moving time %1$s. Distance %2$s. Current pace %3$s. Average pace %4$s.</string>
+    <string name="track_cd_distance_km">%1$s kilometers</string>
+    <string name="track_cd_distance_mi">%1$s miles</string>
+    <string name="track_cd_pace_km">%1$s per kilometer</string>
+    <string name="track_cd_pace_mi">%1$s per mile</string>
+    <string name="track_cd_not_available">not available yet</string>
+    <plurals name="track_cd_hours">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
+    <plurals name="track_cd_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="track_cd_seconds">
+        <item quantity="one">%d second</item>
+        <item quantity="other">%d seconds</item>
+    </plurals>
+    <string name="track_cd_pill_fresh_lock">GPS lock ready</string>
+    <string name="track_state_paused">Paused</string>
+    <string name="track_state_recording">Recording</string>
+
+    <!-- Degraded-state captions + inline actions -->
+    <string name="track_location_off_caption">Location is off, so your route can\'t be recorded. Turn it on in system settings.</string>
+    <string name="track_open_settings">Open settings</string>
+    <string name="track_notifications_off_caption">Notifications are off. Tracking still works, but the run won\'t show on your lock screen.</string>
+    <string name="track_location_failed_caption">GPS couldn\'t start on this phone.</string>
+    <string name="track_btn_try_again">Try again</string>
+    <string name="track_battery_caption">Battery optimization can stop long runs.</string>
+    <string name="track_battery_allow">Allow</string>
+
+    <!-- Optional start gates (independent checkboxes under one overline); the caption
+         explains only what is on. -->
+    <string name="track_gates_overline">Start options</string>
+    <string name="track_gates_caption_none">Optional. Without them, recording starts when you tap Start.</string>
+    <string name="track_gates_caption_precise">Precise start waits for an accurate GPS lock.</string>
+    <string name="track_gates_caption_moving">Start on move begins recording once you\'re moving.</string>
+    <string name="track_gates_caption_both">Waits for an accurate GPS lock, then starts once you\'re moving.</string>
+    <string name="track_gate_precise">Precise start</string>
+    <string name="track_gate_moving">Start on move</string>
+
+    <!-- Control row -->
+    <string name="track_btn_start">Start</string>
+    <string name="track_btn_start_now">Start now</string>
+    <string name="track_btn_save_run">Save run</string>
+    <string name="track_btn_stop">Stop</string>
+
+    <!-- Content descriptions -->
+    <string name="track_cd_recenter">Recenter</string>
+    <string name="track_cd_discard_run">Discard run</string>
+    <string name="track_cd_back">Back</string>
+
+    <!-- Map tile attribution (legal caption on the OSM tiles) -->
+    <string name="track_map_attribution">© OpenStreetMap</string>
+
+    <!-- Toasts -->
+    <string name="track_toast_save_failed">Couldn\'t save the run. Tap Save run to try again.</string>
+    <string name="track_toast_not_enough_gps">GPS never got a clear enough signal, so there was no run to save.</string>
+
+    <!-- Discard-confirm dialog -->
+    <string name="track_discard_title">Discard this run?</string>
+    <string name="track_discard_body">This deletes the recorded run. It can\'t be undone.</string>
+
+    <!-- Finish sheet (Stop pauses recording and opens this review) -->
+    <string name="track_finish_title">Finish this run?</string>
+    <!-- Spoken form of the review figures: %1$s distance ("3.21 km"), %2$s moving time ("23:41"), %3$s average pace ("5:15 /km"). -->
+    <string name="track_finish_summary">%1$s · %2$s moving · %3$s average</string>
+    <string name="track_finish_avg_pace">Avg pace</string>
+    <string name="track_finish_resume">Resume</string>
+    <!-- Inline note at the top of the review for a run under the keep threshold:
+         %1$s = the run's distance ("0.13 mi"), %2$s = the threshold, rounded ("0.3 mi").
+         "3 minutes" mirrors MIN_RUN_SEC (RunTracking.kt). -->
+    <string name="track_short_run_note">Short run (%1$s). Runs under %2$s or 3 minutes are often started by accident.</string>
+
+    <!-- Today's plan on the tracker -->
+    <string name="track_plan_follow">Follow today\'s plan</string>
+    <!-- %1$s = the plan item's name and distance ("Easy run · 4.3 mi"); its targets are the lines below. -->
+    <string name="track_plan_title">Today\'s plan: %1$s</string>
+    <!-- Target lines; %1$s = a display-ready range from the plan. -->
+    <string name="track_target_pace">Pace: %1$s</string>
+    <string name="track_target_hr">Heart rate: %1$s</string>
+    <!-- While recording, the plan's targets on one line: %1$s = "9:00–9:50 /mi · ≤ 140 bpm · effort 3–5 of 10". -->
+    <string name="track_plan_targets_line">Plan %1$s</string>
+
+    <!-- Guided steps -->
+    <string name="track_step_warmup">Warm-up</string>
+    <string name="track_step_main">Main run</string>
+    <string name="track_step_rep">Rep %1$d of %2$d</string>
+    <string name="track_step_recovery">Recovery jog</string>
+    <string name="track_step_cooldown">Cool-down</string>
+    <string name="track_step_stride">Stride %1$d of %2$d</string>
+    <string name="track_step_stride_recovery">Easy between strides</string>
+    <string name="track_step_run">Run %1$d of %2$d</string>
+    <string name="track_step_walk">Walk %1$d of %2$d</string>
+    <!-- %1$s = "2:41" or "320 m". -->
+    <string name="track_step_left">%1$s left</string>
+    <string name="track_step_metres">%1$d m</string>
+    <string name="track_step_open">Tap Skip step when you\'re done</string>
+    <!-- %1$s = step title, %2$s = what is left of it. -->
+    <string name="track_step_line">%1$s · %2$s</string>
+    <!-- %1$s = the next step's title. -->
+    <string name="track_step_next">Next: %1$s</string>
+    <string name="track_step_all_done">All steps done. Tap Stop when you\'re ready.</string>
+    <string name="track_step_skip">Skip step</string>
+
+    <!-- Manual run editor: average heart rate. -->
+    <string name="track_log_hr_avg">Average heart rate</string>
+    <string name="track_log_hr_bpm">bpm</string>
+
+</resources>

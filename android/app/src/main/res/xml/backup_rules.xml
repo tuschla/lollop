@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Auto Backup rules (API < 31). The event log is the source of truth and is
+     large and device-specific; the active-run sidecar is transient crash-recovery
+     state. Both live in filesDir and are excluded, along with the log's swap/import
+     temporaries (.tmp/.import/.bak) so a backup can never capture a half-written or
+     set-aside copy of it. A pre-existing install may have left osmdroid tiles on
+     external storage; exclude that legacy directory too (new tiles live in cache/).
+     The GPX export temp dir lives in cache/, which Auto Backup never includes, so it
+     needs no rule here. The milestone_setup prefs (onboarding_done, plan_cleared)
+     describe the excluded log, so restoring them without it would skip guided setup
+     and plan generation on an empty install. -->
+<full-backup-content>
+    <exclude domain="file" path="event-log.ndjson" />
+    <exclude domain="file" path="event-log.ndjson.tmp" />
+    <exclude domain="file" path="event-log.ndjson.import" />
+    <exclude domain="file" path="event-log.ndjson.bak" />
+    <exclude domain="file" path="active-run.ndjson" />
+    <exclude domain="sharedpref" path="milestone_setup.xml" />
+    <exclude domain="external" path="osmdroid/" />
+</full-backup-content>

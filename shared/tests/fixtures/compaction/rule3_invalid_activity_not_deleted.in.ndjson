@@ -1,0 +1,4 @@
+{"LogActivity":{"kind":"Strength","minutes":20.0,"vigorous":false,"strengthening":true,"observed_at":1760000000,"entry_id":0}}
+{"LogActivity":{"kind":"Other","minutes":0.0,"vigorous":false,"strengthening":false,"observed_at":1760000000,"entry_id":0}}
+{"DeleteEntry":{"kind":"Activity","entry_id":0,"observed_at_fallback":1760000000}}
+{"DeleteEntry":{"kind":"Activity","entry_id":0,"observed_at_fallback":1760000000}}

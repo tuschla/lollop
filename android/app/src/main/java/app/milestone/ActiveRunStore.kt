@@ -121,7 +121,7 @@ object ActiveRunStore {
      * inside logCaptured's IO context) right after the save's event-log append
      * returns, so process death in the gap between "run is in the append-only log"
      * and "sidecar deleted" can't leave the just-saved run's sidecar on disk to be
-     * resurrected by the B4 recovery prompt (a duplicate saved run). Routing the
+     * resurrected by the recovery prompt (a duplicate saved run). Routing the
      * delete through the io thread, rather than deleting on the caller, also
      * orders it AFTER any still-queued fix appends, so a late append can't recreate
      * the file after a direct delete.

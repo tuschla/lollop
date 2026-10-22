@@ -10,12 +10,14 @@
 
 use fitparser::{FitDataRecord, Value, profile::MesgNum};
 
-/// One GPS+HR fix extracted from a FIT `record` message.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// One GPS+HR fix extracted from a FIT `record` message. Its serialization is
+/// the per-fix wire shape of the shell's `parseFit` payload (`ffi.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 pub struct FitFix {
     pub lat: f64,
     pub lon: f64,
     pub time_sec: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub hr_bpm: Option<u16>,
     /// Horizontal position accuracy in metres, as recorded by the device in the
     /// FIT `record.gps_accuracy` field (field 31, `UInt8`, scale 1 / offset 0,
@@ -24,14 +26,76 @@ pub struct FitFix {
     /// such field: NOT a fabricated stand-in. The shell decides what accuracy
     /// to hand the core's QC gate for a `None` fix (see the sentinel in
     /// `Gpx.kt`'s `importedRunEvent`); this module never invents one.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub accuracy_m: Option<f32>,
 }
 
 /// A parsed FIT activity: fixes grouped into segments by the recorder's
 /// timer stop_all/start events (see [`parse_fit`] for the exact split rule).
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
 pub struct FitTrack {
     pub segments: Vec<Vec<FitFix>>,
+}
+
+/// Why a FIT file can't be imported as a run. Each variant maps to one stable
+/// [`FitError::kind`] the shell keys its per-file import reason on.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FitError {
+    /// The bytes are not a FIT file (bad/oversized header, missing `.FIT` tag).
+    NotFit,
+    /// A stream/decode error or rejected chained header left too few fixes.
+    Damaged,
+    /// A cleanly decoded file with fewer than two positioned records.
+    NoTrack,
+    /// A track too short to keep as a run: under [`MIN_IMPORT_M`] of GPS
+    /// distance or [`MIN_IMPORT_SEC`] of recorded time, the shell tracker's
+    /// accidental-recording thresholds. Reported as `no_track` / `too_short`.
+    TooShort,
+    /// The file records a non-running activity. Carries the FIT sport name in
+    /// plain lowercase words (e.g. `"cycling"`, `"cross country skiing"`).
+    NotARun(String),
+}
+
+/// The shortest GPS distance (metres, summed within segments) an imported
+/// track must cover to count as a run: the tracker's short-run threshold.
+pub const MIN_IMPORT_M: f64 = 500.0;
+/// The shortest recorded time (seconds, summed within segments) an imported
+/// track must span to count as a run: the tracker's short-run threshold.
+pub const MIN_IMPORT_SEC: i64 = 180;
+
+impl FitError {
+    /// Stable machine-readable kind for the shell's error envelope.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            FitError::NotFit => "not_fit",
+            FitError::Damaged => "damaged",
+            FitError::NoTrack | FitError::TooShort => "no_track",
+            FitError::NotARun(_) => "not_a_run",
+        }
+    }
+
+    /// Detail for the kind: the sport for [`FitError::NotARun`], `"too_short"`
+    /// for [`FitError::TooShort`], else empty.
+    pub fn context(&self) -> &str {
+        match self {
+            FitError::NotARun(sport) => sport.as_str(),
+            FitError::TooShort => "too_short",
+            FitError::NotFit | FitError::Damaged | FitError::NoTrack => "",
+        }
+    }
+
+    /// The plain-language message shown to the user.
+    pub fn message(&self) -> String {
+        match self {
+            FitError::NotFit => "Not a FIT file".to_string(),
+            FitError::Damaged => {
+                "FIT file is damaged or incomplete; no usable GPS track".to_string()
+            }
+            FitError::NoTrack => "No GPS track in this FIT file".to_string(),
+            FitError::TooShort => "Too short to import as a run".to_string(),
+            FitError::NotARun(sport) => format!("This FIT file records {sport}, not a run"),
+        }
+    }
 }
 
 /// FIT position fields are signed 32-bit "semicircles". Verified against
@@ -52,9 +116,13 @@ fn semicircles_to_degrees(raw: i32) -> f64 {
 ///
 /// Records without a usable position (`position_lat`/`position_long`
 /// missing or the FIT "invalid value" sentinel) or timestamp are skipped
-/// rather than erroring the whole file. Returns `Err` with a plain-language
-/// message when the bytes don't parse as FIT at all, or when fewer than two
-/// positioned records survive (nothing worth logging as a track).
+/// rather than erroring the whole file. Returns [`FitError::NotARun`] when a
+/// `session`/`lap`/`sport` message names a non-running sport (see
+/// `non_run_sport`), checked before the GPS so an indoor ride without GPS is
+/// still reported as "not a run". Returns [`FitError::NotFit`] when the bytes
+/// don't parse as FIT at all, and [`FitError::Damaged`]/[`FitError::NoTrack`]
+/// when fewer than two positioned records survive (nothing worth logging as a
+/// track).
 ///
 /// ## Segment splitting
 ///
@@ -67,16 +135,28 @@ fn semicircles_to_degrees(raw: i32) -> f64 {
 /// segment boundaries; the overwhelming majority of single-activity runs
 /// never emit them, so those files fall back to exactly one segment: this
 /// is the documented single-segment case, not a bug.
-pub fn parse_fit(bytes: &[u8]) -> Result<FitTrack, String> {
-    if bytes.is_empty() {
-        return Err("Not a FIT file".to_string());
-    }
-    let records = fitparser::from_bytes(bytes).map_err(|_| "Not a FIT file".to_string())?;
+pub fn parse_fit(bytes: &[u8]) -> Result<FitTrack, FitError> {
+    validate_fit_header(bytes)?;
 
+    // Salvage-decode: keep every record decoded before the first stream error so
+    // a watch that died mid-run (file ends without its trailing CRC) or an
+    // exporter that appended padding still yields the fixes it did record,
+    // instead of failing the whole import on the tail (`from_bytes` is
+    // all-or-nothing).
+    let (records, truncated) = decode_records_salvaging(bytes);
+    if let Some(sport) = non_run_sport(&records) {
+        return Err(FitError::NotARun(sport));
+    }
+    track_from_records(&records, truncated)
+}
+
+/// Group the positioned `record` fixes into segments (split rule: see
+/// [`parse_fit`]). `truncated` picks the honest message when too few survive.
+fn track_from_records(records: &[FitDataRecord], truncated: bool) -> Result<FitTrack, FitError> {
     let mut segments: Vec<Vec<FitFix>> = Vec::new();
     let mut current: Vec<FitFix> = Vec::new();
 
-    for record in &records {
+    for record in records {
         match record.kind() {
             MesgNum::Record => {
                 if let Some(fix) = fix_from_record(record) {
@@ -97,10 +177,189 @@ pub fn parse_fit(bytes: &[u8]) -> Result<FitTrack, String> {
 
     let total_fixes: usize = segments.iter().map(Vec::len).sum();
     if total_fixes < 2 {
-        return Err("No GPS track in this FIT file".to_string());
+        // Fewer than two positioned records survived, so there is no track worth
+        // logging. A stream/decode error or a rejected chained header means the
+        // file is damaged/incomplete; an otherwise-clean file simply has no GPS.
+        return Err(if truncated {
+            FitError::Damaged
+        } else {
+            FitError::NoTrack
+        });
     }
 
     Ok(FitTrack { segments })
+}
+
+/// The import gate on a parsed track: [`FitError::TooShort`] when its fixes
+/// cover under [`MIN_IMPORT_M`] or span under [`MIN_IMPORT_SEC`], each summed
+/// within segments (a pause between segments counts as neither).
+pub fn import_gate(track: &FitTrack) -> Result<(), FitError> {
+    let point = |f: &FitFix| crate::running::GpsPoint {
+        lat: f.lat,
+        lon: f.lon,
+        observed_at: f.time_sec,
+        accuracy_m: f.accuracy_m.unwrap_or(0.0),
+    };
+    let mut metres = 0.0;
+    let mut seconds = 0i64;
+    for seg in &track.segments {
+        metres += seg
+            .windows(2)
+            .map(|w| crate::running::haversine_m(point(&w[0]), point(&w[1])))
+            .filter(|d| d.is_finite())
+            .sum::<f64>();
+        if let (Some(first), Some(last)) = (seg.first(), seg.last()) {
+            seconds = seconds.saturating_add(last.time_sec.saturating_sub(first.time_sec).max(0));
+        }
+    }
+    if metres < MIN_IMPORT_M || seconds < MIN_IMPORT_SEC {
+        return Err(FitError::TooShort);
+    }
+    Ok(())
+}
+
+/// Structural pre-validation of a FIT file header, returning
+/// [`FitError::NotFit`] rather than letting `fitparser` slice on an untrusted
+/// `header_size`.
+///
+/// `fitparser` reads `header_size` as a raw wire byte (validated only as `> 12`)
+/// and slices `input[0..header_size - 2]`, so a crafted oversized value (e.g.
+/// `0xFF` on a short file) panics on an out-of-bounds range — caught by the FFI
+/// firewall, but the user sees a generic panic toast and a stack is logged. The
+/// FIT spec fixes `header_size` at 12 or 14 and stamps `.FIT` at bytes 8..12, so
+/// reject anything else up front. (A 14-byte header carries a header CRC in
+/// bytes 12..14; its correctness is `fitparser`'s job, not ours.)
+fn validate_fit_header(bytes: &[u8]) -> Result<(), FitError> {
+    if bytes.len() < 12 {
+        return Err(FitError::NotFit);
+    }
+    let header_size = bytes[0] as usize;
+    if !matches!(bytes[0], 12 | 14) || &bytes[8..12] != b".FIT" || bytes.len() < header_size {
+        return Err(FitError::NotFit);
+    }
+    Ok(())
+}
+
+/// Stream records out of a FIT byte slice, stopping at the first stream error or
+/// structurally invalid header and reporting whether one occurred.
+///
+/// Mirrors `fitparser::from_bytes`'s object loop but keeps the records decoded
+/// before an error instead of discarding the whole file, so a truncated
+/// recording still surfaces its fixes (see [`parse_fit`]). `parse_fit` uses no
+/// decode options, so unknown messages are decoded and dropped downstream by
+/// `kind()` matching, exactly as before.
+///
+/// A FIT stream may CHAIN several sub-files, each introduced by its own header.
+/// `fitparser` slices `input[0..header_size - 2]` on the raw wire byte for EVERY
+/// header, so a chained oversized header panics just like a bad first one.
+/// fitparser opens a new header after each `Crc`, and also WITHOUT a CRC as soon
+/// as a message runs past the header's declared data size (its position passes
+/// `end_of_messages` with bytes left). Track the same byte offset here and
+/// validate the header at each such boundary (stream start, after each `Crc`,
+/// and after an overrun) before handing the buffer to `fitparser`.
+fn decode_records_salvaging(bytes: &[u8]) -> (Vec<FitDataRecord>, bool) {
+    use fitparser::de::{FitObject, FitStreamProcessor};
+
+    let mut processor = FitStreamProcessor::new();
+    let mut records = Vec::new();
+    let mut buffer = bytes;
+    let mut truncated = false;
+    let mut expect_header = true;
+    // Bytes of `bytes` handed to fitparser so far; equals fitparser's own stream
+    // position because every header it sees passed `validate_fit_header`, so its
+    // `header_size` is exactly the bytes it consumed.
+    let mut consumed = 0usize;
+    // Offset where the current sub-file's messages end (fitparser's
+    // `end_of_messages`): its CRC sits there.
+    let mut end_of_messages = 0usize;
+    while !buffer.is_empty() {
+        if expect_header {
+            // Reject a structurally impossible (or non-FIT) chained header before
+            // fitparser slices on its header_size byte; keep what decoded first.
+            if validate_fit_header(buffer).is_err() {
+                truncated = true;
+                break;
+            }
+            expect_header = false;
+        }
+        let (rest, obj) = match processor.deserialize_next(buffer) {
+            Ok(next) => next,
+            // Missing trailing CRC, a cut-off final record, or trailing padding:
+            // stop, keeping everything decoded so far.
+            Err(_) => {
+                truncated = true;
+                break;
+            }
+        };
+        match obj {
+            // End of one sub-file; the next bytes (if any) open a new header.
+            FitObject::Crc(..) => {
+                processor.reset();
+                expect_header = true;
+            }
+            FitObject::DataMessage(msg) => match processor.decode_message(msg) {
+                Ok(rec) => records.push(rec),
+                Err(_) => {
+                    truncated = true;
+                    break;
+                }
+            },
+            FitObject::Header(header) => {
+                end_of_messages = consumed
+                    .saturating_add(usize::from(header.header_size()))
+                    .saturating_add(header.data_size() as usize);
+            }
+            FitObject::DefinitionMessage(..) => {}
+        }
+        // Defensive: a non-advancing decode would spin the loop forever; treat a
+        // stalled stream as truncated.
+        if rest.len() >= buffer.len() {
+            truncated = true;
+            break;
+        }
+        consumed += buffer.len() - rest.len();
+        // A message overran the declared data size: fitparser parses the next
+        // bytes as a chained header without any CRC first.
+        if consumed > end_of_messages {
+            expect_header = true;
+        }
+        buffer = rest;
+    }
+    (records, truncated)
+}
+
+/// The first sport named by a `session`, `lap` or `sport` message that is not
+/// running-family, as plain lowercase words (`cross_country_skiing` →
+/// `"cross country skiing"`); `None` when every such message is a run or names
+/// no concrete sport.
+///
+/// fitparser resolves a named enum value to its snake_case FIT-profile string
+/// and leaves an unnamed one numeric, so a non-string value is an unknown sport
+/// and stays importable, as do `generic` and `all` (no concrete sport) and an
+/// absent field. `sub_sport == "treadmill"` is the FIT profile's
+/// run-on-fitness-equipment marker, so it counts as a run whatever the parent
+/// sport says; any other sub-sport of `running` (trail, street, track, …) is a
+/// run by its parent.
+fn non_run_sport(records: &[FitDataRecord]) -> Option<String> {
+    records
+        .iter()
+        .filter(|r| matches!(r.kind(), MesgNum::Session | MesgNum::Lap | MesgNum::Sport))
+        .find_map(|record| {
+            let mut sport: Option<&str> = None;
+            let mut treadmill = false;
+            for field in record.fields() {
+                match (field.name(), field.value()) {
+                    ("sport", Value::String(s)) => sport = Some(s.as_str()),
+                    ("sub_sport", Value::String(s)) => treadmill = s.as_str() == "treadmill",
+                    _ => {}
+                }
+            }
+            match sport {
+                None | Some("running" | "generic" | "all") => None,
+                Some(_) if treadmill => None,
+                Some(other) => Some(other.replace('_', " ")),
+            }
+        })
 }
 
 /// True when a FIT `event` message is `event == "timer"` with the given
@@ -196,253 +455,4 @@ fn fix_from_record(record: &FitDataRecord) -> Option<FitFix> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn empty_bytes_is_a_plain_error_not_a_panic() {
-        assert_eq!(parse_fit(&[]), Err("Not a FIT file".to_string()));
-    }
-
-    #[test]
-    fn garbage_bytes_is_a_plain_error_not_a_panic() {
-        let garbage = vec![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 255, 254, 253];
-        assert_eq!(parse_fit(&garbage), Err("Not a FIT file".to_string()));
-    }
-
-    #[test]
-    fn a_fit_looking_header_with_no_data_still_errors_cleanly() {
-        // A syntactically plausible 12-byte FIT header (size, protocol,
-        // profile version, data size = 0, ".FIT" tag) but no CRC/data
-        // records: exercises the "parses far enough to not be garbage, but
-        // still not a usable track" path without needing a real fixture.
-        let mut header = vec![12u8, 0x10, 0x94, 0x08, 0, 0, 0, 0];
-        header.extend_from_slice(b".FIT");
-        assert!(parse_fit(&header).is_err());
-    }
-
-    #[test]
-    fn semicircle_conversion_is_exact_at_known_reference_points() {
-        // 2^31 semicircles == 180 degrees exactly (the FIT spec's defining
-        // identity); i32::MIN/MAX are the extreme raw values a real file can
-        // carry, so pin the conversion there rather than only at 0.
-        assert_eq!(semicircles_to_degrees(0), 0.0);
-        assert_eq!(semicircles_to_degrees(i32::MAX), 179.99999991618097);
-        assert_eq!(semicircles_to_degrees(i32::MIN), -180.0);
-
-        // A real-world reference: Berlin Alexanderplatz is documented at
-        // roughly 52.5219 N, 13.4132 E. Round-trip a semicircle value close
-        // to that back to degrees and check it lands in the right place
-        // within FIT's own precision (~2.1 cm at the equator).
-        let berlin_lat_semicircles: i32 = ((52.5219_f64) * 2_147_483_648.0 / 180.0) as i32;
-        let deg = semicircles_to_degrees(berlin_lat_semicircles);
-        assert!((deg - 52.5219).abs() < 1e-6, "got {deg}");
-    }
-
-    /// Real device-recorded FIT files, borrowed from fitparser's own
-    /// (MIT-licensed, same repo) test fixtures at
-    /// `fitparse-rs/fitparser/tests/fixtures/*.fit`, cheaper and more
-    /// faithful than hand-encoding a minimal FIT byte stream (correct
-    /// CRC-16/ANT, message definitions, field layout) from scratch.
-    fn fixture(name: &str) -> Vec<u8> {
-        let path = format!("{}/tests/fixtures/{}", env!("CARGO_MANIFEST_DIR"), name);
-        std::fs::read(&path).unwrap_or_else(|e| panic!("read fixture {path}: {e}"))
-    }
-
-    #[test]
-    fn happy_path_extracts_a_real_gps_and_hr_track() {
-        // Garmin Fenix 5 bike ride: 19 recorded fixes, all with heart rate,
-        // no stop_all/start pair in this short file so it stays one segment
-        // (the documented single-segment fallback: see `parse_fit` docs).
-        let bytes = fixture("garmin-fenix-5-bike.fit");
-        let track = parse_fit(&bytes).expect("real device file should parse");
-
-        assert_eq!(track.segments.len(), 1, "no stop_all/start pair in this file");
-        let fixes = &track.segments[0];
-        assert_eq!(fixes.len(), 19);
-
-        let first = fixes[0];
-        assert!((first.lat - 37.41116).abs() < 1e-4, "lat: {first:?}");
-        assert!((first.lon - (-122.06907)).abs() < 1e-4, "lon: {first:?}");
-        assert_eq!(first.time_sec, 1_497_283_762);
-        assert_eq!(first.hr_bpm, Some(77));
-
-        // This real device file records NO `gps_accuracy` field on its record
-        // messages, so accuracy is honestly unknown, `None`, never a
-        // fabricated figure. (See `synthetic_gps_accuracy_field_flows_through`
-        // for the present-field path.)
-        assert!(
-            fixes.iter().all(|f| f.accuracy_m.is_none()),
-            "fenix-5 fixture carries no gps_accuracy → must stay None, not a stand-in"
-        );
-
-        // Timestamps are monotonic non-decreasing across the whole segment -
-        // a sanity check that we read `timestamp`, not some other field.
-        assert!(fixes.windows(2).all(|w| w[1].time_sec >= w[0].time_sec));
-    }
-
-    #[test]
-    fn happy_path_second_fixture_also_parses_without_hr() {
-        // A different real device file with no heart-rate strap: hr_bpm
-        // must come back None, not a fabricated/default value.
-        let bytes = fixture("Activity.fit");
-        let track = parse_fit(&bytes).expect("real device file should parse");
-        let total: usize = track.segments.iter().map(Vec::len).sum();
-        assert_eq!(total, 14);
-        assert!(
-            track.segments.iter().flatten().all(|f| f.hr_bpm.is_none()),
-            "this fixture has no HR strap data"
-        );
-        assert!(
-            track.segments.iter().flatten().all(|f| f.accuracy_m.is_none()),
-            "this fixture has no gps_accuracy field → accuracy stays None"
-        );
-    }
-
-    /// FIT CRC-16 (ANT variant) over a byte slice, mirrors fitparser's own
-    /// `de::crc::get_crc`. Needed to hand-encode a valid FIT file below (the
-    /// trailing 2-byte data CRC is validated by `from_bytes` by default).
-    fn fit_crc(data: &[u8]) -> u16 {
-        const TABLE: [u16; 16] = [
-            0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401, 0xA001, 0x6C00,
-            0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
-        ];
-        let mut crc: u16 = 0;
-        for &byte in data {
-            let mut tmp = TABLE[(crc & 0xF) as usize];
-            crc = (crc >> 4) & 0x0FFF;
-            crc = crc ^ tmp ^ TABLE[(byte & 0xF) as usize];
-            tmp = TABLE[(crc & 0xF) as usize];
-            crc = (crc >> 4) & 0x0FFF;
-            crc = crc ^ tmp ^ TABLE[((byte >> 4) & 0xF) as usize];
-        }
-        crc
-    }
-
-    #[test]
-    fn synthetic_gps_accuracy_field_flows_through() {
-        // Neither real-device fixture in shared/tests/fixtures/ records
-        // `gps_accuracy`, so hand-encode a minimal valid FIT that DOES: the
-        // only way to prove the field is read and surfaced (not fabricated).
-        //
-        // One `record` definition (global mesg 20, little-endian) with fields
-        // timestamp(253,u32) position_lat(0,i32) position_long(1,i32)
-        // gps_accuracy(31,u8), then two data records carrying 8 m and 12 m.
-        const FIT_EPOCH_OFFSET: i64 = 631_065_600; // unix secs at 1989-12-31Z
-        let to_semi = |deg: f64| -> i32 { (deg * 2_147_483_648.0 / 180.0) as i32 };
-
-        let mut data: Vec<u8> = Vec::new();
-        // --- definition message (local type 0) ---
-        data.push(0x40); // definition, local type 0
-        data.push(0x00); // reserved
-        data.push(0x00); // architecture: little-endian
-        data.extend_from_slice(&20u16.to_le_bytes()); // global mesg num = record
-        data.push(4); // field count
-        data.extend_from_slice(&[253, 4, 0x86]); // timestamp: u32
-        data.extend_from_slice(&[0, 4, 0x85]); // position_lat: i32
-        data.extend_from_slice(&[1, 4, 0x85]); // position_long: i32
-        data.extend_from_slice(&[31, 1, 0x02]); // gps_accuracy: u8
-
-        let push_record = |unix: i64, lat: f64, lon: f64, acc: u8, out: &mut Vec<u8>| {
-            out.push(0x00); // data message, local type 0
-            out.extend_from_slice(&((unix - FIT_EPOCH_OFFSET) as u32).to_le_bytes());
-            out.extend_from_slice(&to_semi(lat).to_le_bytes());
-            out.extend_from_slice(&to_semi(lon).to_le_bytes());
-            out.push(acc);
-        };
-        push_record(1_500_000_000, 52.5200, 13.4050, 8, &mut data);
-        push_record(1_500_000_030, 52.5210, 13.4060, 12, &mut data);
-
-        // --- 12-byte header (no header CRC → header bytes join the data CRC) ---
-        let mut file: Vec<u8> = Vec::new();
-        file.push(12); // header size
-        file.push(0x10); // protocol version 1.0
-        file.extend_from_slice(&100u16.to_le_bytes()); // profile version (arbitrary)
-        file.extend_from_slice(&(data.len() as u32).to_le_bytes()); // data size
-        file.extend_from_slice(b".FIT");
-        file.extend_from_slice(&data);
-        // Trailing data CRC covers header + all messages.
-        let crc = fit_crc(&file);
-        file.extend_from_slice(&crc.to_le_bytes());
-
-        let track = parse_fit(&file).expect("hand-encoded FIT should parse");
-        let fixes: Vec<FitFix> = track.segments.into_iter().flatten().collect();
-        assert_eq!(fixes.len(), 2);
-        // The device's real recorded accuracy comes through unchanged, in metres.
-        assert_eq!(fixes[0].accuracy_m, Some(8.0));
-        assert_eq!(fixes[1].accuracy_m, Some(12.0));
-        assert!((fixes[0].lat - 52.5200).abs() < 1e-4, "lat: {:?}", fixes[0]);
-    }
-
-    /// Build a raw `record` `FitDataField` (name-matched by `fix_from_record`).
-    fn field(name: &str, number: u8, value: Value) -> fitparser::FitDataField {
-        fitparser::FitDataField::new(name.to_string(), number, None, value, String::new())
-    }
-
-    /// Assemble a `record` message from raw fields. `timestamp` is encoded as a
-    /// plain `UInt32` of unix seconds, `fix_from_record` matches on field NAME
-    /// and `TryInto<i64>` accepts any integer variant, so this needs no chrono.
-    fn record(fields: Vec<fitparser::FitDataField>) -> FitDataRecord {
-        let mut r = FitDataRecord::new(MesgNum::Record);
-        for f in fields {
-            r.push(f);
-        }
-        r
-    }
-
-    #[test]
-    fn sentinel_position_value_yields_no_fix() {
-        // fitparser normally strips FIT invalid sentinels before we see them,
-        // but `fix_from_record` guards defensively (like the gps_accuracy
-        // guard). Feed it a raw record directly: a `position_lat`/`position_long`
-        // carrying the SInt32 invalid sentinel (`i32::MAX`) must yield NO fix -
-        // without the guard it converts to ~180° and injects a multi-thousand-km
-        // phantom fix into distance/pace/splits.
-        let sentinel_lat = record(vec![
-            field("timestamp", 253, Value::UInt32(1_500_000_000)),
-            field("position_lat", 0, Value::SInt32(i32::MAX)),
-            field("position_long", 1, Value::SInt32(157_000_000)),
-        ]);
-        assert_eq!(fix_from_record(&sentinel_lat), None, "sentinel lat drops the fix");
-
-        let sentinel_lon = record(vec![
-            field("timestamp", 253, Value::UInt32(1_500_000_000)),
-            field("position_lat", 0, Value::SInt32(626_000_000)),
-            field("position_long", 1, Value::SInt32(i32::MAX)),
-        ]);
-        assert_eq!(fix_from_record(&sentinel_lon), None, "sentinel lon drops the fix");
-
-        // A valid pair still yields a fix: the guard must not over-reject.
-        let good = record(vec![
-            field("timestamp", 253, Value::UInt32(1_500_000_000)),
-            field("position_lat", 0, Value::SInt32(626_000_000)),
-            field("position_long", 1, Value::SInt32(157_000_000)),
-        ]);
-        assert!(fix_from_record(&good).is_some(), "a valid record still yields a fix");
-    }
-
-    #[test]
-    fn invalid_heart_rate_sentinel_drops_hr_but_keeps_fix() {
-        // `heart_rate == 0xFF` is the FIT UInt8 invalid sentinel (a dropped
-        // strap read). The fix survives on its valid position, but `hr_bpm`
-        // must be None, never a fabricated 255 bpm.
-        let sentinel_hr = record(vec![
-            field("timestamp", 253, Value::UInt32(1_500_000_000)),
-            field("position_lat", 0, Value::SInt32(626_000_000)),
-            field("position_long", 1, Value::SInt32(157_000_000)),
-            field("heart_rate", 3, Value::UInt8(u8::MAX)),
-        ]);
-        let fix = fix_from_record(&sentinel_hr).expect("valid position keeps the fix");
-        assert_eq!(fix.hr_bpm, None, "0xFF sentinel must not surface as 255 bpm");
-
-        // A real strap reading comes through.
-        let good_hr = record(vec![
-            field("timestamp", 253, Value::UInt32(1_500_000_000)),
-            field("position_lat", 0, Value::SInt32(626_000_000)),
-            field("position_long", 1, Value::SInt32(157_000_000)),
-            field("heart_rate", 3, Value::UInt8(150)),
-        ]);
-        let fix = fix_from_record(&good_hr).expect("valid record");
-        assert_eq!(fix.hr_bpm, Some(150));
-    }
-}
+mod tests;

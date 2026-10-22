@@ -11,11 +11,12 @@
 //! (File 05 §6.5). Contested metrics (ACWR, the 10% rule) may never become a
 //! hard injury claim, the registry hard-blocks them.
 //!
-//! Claim ids: FEEDBACK-001, GOAL-PROCESS-001, AUTOREG-RIR-001, RUN-DECOUPLE-001,
+//! Claim ids: FEEDBACK-001, FB-PROCESS-GOAL-001, AUTOREG-RIR-001, RUN-DECOUPLE-001,
 //! RUN-SPIKE-001, SAFE-BSI-001, SAFE-OTS-001, SAFE-REDS-001, LOAD-ACWR-001,
 //! MYTH-POSITIVITY.
 
 use crate::evidence;
+use crate::evidence::claims;
 use crate::schema::Recommended;
 
 // ---------------------------------------------------------------------------
@@ -23,7 +24,7 @@ use crate::schema::Recommended;
 // ---------------------------------------------------------------------------
 
 /// The message category the engine emits for a session (File 05 decision tree).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedbackCategory {
     /// Bone-stress red flag: stop + refer (feedback-032/033/034). Suppresses praise.
     ConcernInjury,
@@ -31,6 +32,10 @@ pub enum FeedbackCategory {
     ConcernRecovery,
     /// Compulsive / unhealthy pattern (feedback-039). Suppresses praise.
     ConcernBehavior,
+    /// Low-energy-availability warning sign reported on the recurring RED-S
+    /// screen (missed/irregular periods; low libido / fewer morning erections):
+    /// route to the clinician referral (REDS-SCREEN-001). Suppresses praise.
+    ConcernEnergy,
     /// Single-session distance spike: warn, never praise (feedback-037). Suppresses praise.
     DangerousProgression,
     /// Easy day run too hard, or positive split on even effort (feedback-011/016).
@@ -58,9 +63,23 @@ impl FeedbackCategory {
             FeedbackCategory::ConcernInjury
                 | FeedbackCategory::ConcernRecovery
                 | FeedbackCategory::ConcernBehavior
+                | FeedbackCategory::ConcernEnergy
                 | FeedbackCategory::DangerousProgression
         )
     }
+}
+
+/// Which condition produced a [`FeedbackCategory::CorrectiveProcess`] verdict, so
+/// the shell can pick trigger-specific copy (KB File 05 §6.2) rather than one
+/// generic corrective line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CorrectiveTrigger {
+    /// Lifting reps not completed (feedback-021).
+    MissedTarget,
+    /// Lifting reps met but at RIR ~0 against a 2-3 target (feedback-020).
+    RepsMetAtRir0,
+    /// Aerobic decoupling >10% on an intended-aerobic run (feedback-014).
+    DecouplingHigh,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,41 +95,77 @@ pub struct SafetySignals {
     /// Compulsive pattern: training through pain, distress at missed sessions,
     /// rapidly escalating volume (feedback-039).
     pub compulsive_flag: bool,
+    /// A positive answer on the recurring RED-S screen (REDS-SCREEN-001):
+    /// missed/irregular periods, or low libido / fewer morning erections.
+    pub reds_signal_reported: bool,
     /// Count of co-occurring NFOR signals over >=1-2 wks (feedback-036; >=2 fires).
     pub overtraining_signal_count: u8,
     /// How long the NFOR signals have co-occurred, in weeks (feedback-036
     /// duration condition: ">=2 signals over >=1-2 wks; do not fire on a
     /// single noisy night"). `None` = duration untracked by the shell, the
-    /// gate then errs protective and still fires on count alone (pre-duration
-    /// behavior); `Some(w)` requires w >= 1.
+    /// gate then errs protective and still fires on count alone; `Some(w)`
+    /// requires w >= 1.
     pub overtraining_weeks: Option<f64>,
     /// Single-session distance over the prior-30-day longest, as a fraction
     /// (feedback-037; >0.10 warns, never praises).
     pub single_session_spike_frac: Option<f64>,
 }
 
-/// Run the safety gates in priority order (Pain > Behavior > Recovery >
-/// dangerous progression), returning the first concern that fires. `None` when
-/// the session is safety-clear and execution evaluation may proceed.
+/// The feedback-036 overtraining condition: ≥2 co-occurring signs (worse
+/// performance, low mood, higher resting HR / lower HRV, worse sleep) that have
+/// lasted at least a week. `weeks == None` = the duration was not reported, and
+/// the gate errs protective and fires on the count alone. The ONE predicate the
+/// recovery concern and the recovery-week deload share, so the card and the
+/// lighter plan always appear together.
+pub fn overtraining_sustained(signal_count: u8, weeks: Option<f64>) -> bool {
+    signal_count >= 2 && weeks.is_none_or(|w| w >= 1.0)
+}
+
+/// Run the safety gates in priority order (Pain > Energy > Behavior >
+/// Recovery > dangerous progression), returning the first concern that fires.
+/// Only one card shows, so the Strong RED-S referral ranks above the
+/// compulsive-exercise card: a user with both still gets the dietitian /
+/// clinician referral. `None` when the session is safety-clear and execution
+/// evaluation may proceed.
 pub fn safety_gate(s: SafetySignals) -> Option<Recommended<FeedbackCategory>> {
     if s.bone_pain_red_flag {
-        return Some(evidence::graded(FeedbackCategory::ConcernInjury, "SAFE-BSI-001"));
+        return Some(evidence::graded(
+            FeedbackCategory::ConcernInjury,
+            claims::SAFE_BSI_001,
+        ));
+    }
+    if s.reds_signal_reported {
+        // REDS-SCREEN-001 (Strong, safety-critical): any positive answer on
+        // the recurring low-energy-availability screen goes to the referral.
+        return Some(evidence::graded(
+            FeedbackCategory::ConcernEnergy,
+            claims::REDS_SCREEN_001,
+        ));
     }
     if s.compulsive_flag {
         // feedback-039: ExpertOpinion, safety-critical (suppresses praise).
-        return Some(evidence::graded(FeedbackCategory::ConcernBehavior,
-        "FB-BEHAVIOR-001",));
+        return Some(evidence::graded(
+            FeedbackCategory::ConcernBehavior,
+            claims::FB_BEHAVIOR_001,
+        ));
     }
-    if s.overtraining_signal_count >= 2 && s.overtraining_weeks.is_none_or(|w| w >= 1.0) {
+    if overtraining_sustained(s.overtraining_signal_count, s.overtraining_weeks) {
         // feedback-036: Moderate (Meeusen 2013), safety-critical. The >=1-2 wk
         // duration condition keeps a single noisy night from firing; an
         // untracked duration still fires on the signal count (protective).
-        return Some(evidence::graded(FeedbackCategory::ConcernRecovery, "FB-RECOVERY-001"));
+        return Some(evidence::graded(
+            FeedbackCategory::ConcernRecovery,
+            claims::FB_RECOVERY_001,
+        ));
     }
-    if s.single_session_spike_frac.is_some_and(|f| f > 0.10) {
+    if s.single_session_spike_frac
+        .is_some_and(|f| f > crate::running::SPIKE_FRAC)
+    {
         // running-029 hard rule: block/flag, never praise (feedback-037).
-        return Some(evidence::graded(FeedbackCategory::DangerousProgression,
-        "RUN-SPIKE-BLOCK-001",));
+        return Some(evidence::graded(
+            FeedbackCategory::DangerousProgression,
+            claims::RUN_SPIKE_BLOCK_001,
+        ));
     }
     None
 }
@@ -132,24 +187,30 @@ pub fn lifting_feedback(
     reps_met: bool,
     rir_actual: u8,
     rir_target: u8,
-) -> Recommended<FeedbackCategory> {
-    let cat = if !reps_met {
+) -> (Recommended<FeedbackCategory>, Option<CorrectiveTrigger>) {
+    let (cat, trigger) = if !reps_met {
         // Missed reps: data, not failure, propose load adjustment.
-        FeedbackCategory::CorrectiveProcess
+        (
+            FeedbackCategory::CorrectiveProcess,
+            Some(CorrectiveTrigger::MissedTarget),
+        )
     } else if rir_actual == 0 && rir_target >= 2 {
         // Reps met but cost far more than planned: hold/drop load.
-        FeedbackCategory::CorrectiveProcess
+        (
+            FeedbackCategory::CorrectiveProcess,
+            Some(CorrectiveTrigger::RepsMetAtRir0),
+        )
     } else if rir_actual >= 4 && rir_target <= 2 {
         // Well under target intensity: room to add load.
-        FeedbackCategory::ProgressionNudge
+        (FeedbackCategory::ProgressionNudge, None)
     } else if rir_actual >= rir_target {
         // Reps met at/below planned cost, mastery, cue planned progression.
-        FeedbackCategory::PositiveMastery
+        (FeedbackCategory::PositiveMastery, None)
     } else {
         // Harder than planned but short of failure, neutral process note.
-        FeedbackCategory::InformationalNeutral
+        (FeedbackCategory::InformationalNeutral, None)
     };
-    evidence::graded(cat, "FB-RIR-001")
+    (evidence::graded(cat, claims::FB_RIR_001), trigger)
 }
 
 /// Running interval/threshold mastery (feedback-015; FB-INTERVAL-MASTERY-001,
@@ -161,15 +222,19 @@ pub fn interval_mastery_feedback(
     target_paces_met: bool,
     rpe_at_or_below_target: bool,
 ) -> Option<Recommended<FeedbackCategory>> {
-    (target_paces_met && rpe_at_or_below_target)
-        .then(|| evidence::graded(FeedbackCategory::PositiveMastery, "FB-INTERVAL-MASTERY-001"))
+    (target_paces_met && rpe_at_or_below_target).then(|| {
+        evidence::graded(
+            FeedbackCategory::PositiveMastery,
+            claims::FB_INTERVAL_MASTERY_001,
+        )
+    })
 }
 
 /// A genuine off day: target pace missed but RPE was very high (feedback-018/025).
 /// Attributes to normal variation, never guilt; the stimulus still counts.
 /// FB-BADDAY-001 (ExpertOpinion).
 pub fn bad_day_feedback() -> Recommended<FeedbackCategory> {
-    evidence::graded(FeedbackCategory::ContextualBadDay, "FB-BADDAY-001")
+    evidence::graded(FeedbackCategory::ContextualBadDay, claims::FB_BADDAY_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -183,39 +248,46 @@ pub fn bad_day_feedback() -> Recommended<FeedbackCategory> {
 pub fn decoupling_feedback(
     drift_pct: f64,
     cool_steady_context: bool,
-) -> Option<Recommended<FeedbackCategory>> {
+) -> Option<(Recommended<FeedbackCategory>, Option<CorrectiveTrigger>)> {
     if !cool_steady_context {
         return None;
     }
-    // The upper boundary MUST match `load::decoupling_band` exactly, which flags
-    // the ">=10%" Insufficient band at `< 10.0 - 1e-9` (a float 9.9999…% from an
-    // EF ratio still counts as the flag band). A bare `<= 10.0` here disagreed at
-    // ~10%: the feedback card said "neutral" while the base-fitness band row said
-    // "insufficient" for the identical drift. One boundary, one place.
-    let cat = if drift_pct < 5.0 {
-        FeedbackCategory::PositiveExecution
-    } else if drift_pct < 10.0 - 1e-9 {
-        FeedbackCategory::InformationalNeutral
+    // Same bands as `load::decoupling_band` (`DECOUPLING_SOUND_PCT`,
+    // `decoupling_high`), so the feedback card and the base-fitness row never
+    // disagree on the same drift.
+    let (cat, trigger) = if drift_pct < crate::load::DECOUPLING_SOUND_PCT {
+        (FeedbackCategory::PositiveExecution, None)
+    } else if !crate::load::decoupling_high(drift_pct) {
+        (FeedbackCategory::InformationalNeutral, None)
     } else {
-        FeedbackCategory::CorrectiveProcess
+        (
+            FeedbackCategory::CorrectiveProcess,
+            Some(CorrectiveTrigger::DecouplingHigh),
+        )
     };
-    Some(evidence::graded(cat, "RUN-DECOUPLE-001"))
+    Some((evidence::graded(cat, claims::RUN_DECOUPLE_001), trigger))
 }
 
 // ---------------------------------------------------------------------------
 // 3b. Running intensity discipline (feedback-011/016)
 // ---------------------------------------------------------------------------
 
+/// Share of an easy run's duration above the Zone-2/VT1 ceiling beyond which
+/// intensity discipline is flagged (feedback-011: "more than ~25%"; RUN-DIST-001).
+pub const EASY_RUN_ABOVE_VT1_MAX_FRAC: f64 = 0.25;
+
 /// Easy-run intensity discipline (feedback-011): on an easy run where mean HR sat
-/// above the Zone-2/VT1 ceiling for more than ~25% of the duration, emit
-/// INTENSITY_DISCIPLINE, easy days build the aerobic base. `None` otherwise.
-/// RUN-DIST-001.
+/// above the Zone-2/VT1 ceiling for more than [`EASY_RUN_ABOVE_VT1_MAX_FRAC`] of
+/// the duration, emit INTENSITY_DISCIPLINE, easy days build the aerobic base.
+/// `None` otherwise. RUN-DIST-001.
 pub fn easy_run_intensity_discipline(
     frac_time_above_vt1: f64,
 ) -> Option<Recommended<FeedbackCategory>> {
-    if frac_time_above_vt1 > 0.25 {
-        Some(evidence::graded(FeedbackCategory::IntensityDiscipline,
-        "RUN-DIST-001",))
+    if frac_time_above_vt1 > EASY_RUN_ABOVE_VT1_MAX_FRAC {
+        Some(evidence::graded(
+            FeedbackCategory::IntensityDiscipline,
+            claims::RUN_DIST_001,
+        ))
     } else {
         None
     }
@@ -236,9 +308,9 @@ pub const POSITIVE_SPLIT_FLAG_PCT: f64 = 3.0;
 /// emits POSITIVE_EXECUTION, "textbook pacing discipline" (feedback-017).
 pub fn positive_split_discipline(second_half_slower_pct: f64) -> Recommended<FeedbackCategory> {
     if second_half_slower_pct > POSITIVE_SPLIT_FLAG_PCT {
-        evidence::graded(FeedbackCategory::IntensityDiscipline, "FB-PACING-001")
+        evidence::graded(FeedbackCategory::IntensityDiscipline, claims::FB_PACING_001)
     } else {
-        evidence::graded(FeedbackCategory::PositiveExecution, "FB-PACING-001")
+        evidence::graded(FeedbackCategory::PositiveExecution, claims::FB_PACING_001)
     }
 }
 
@@ -257,7 +329,9 @@ pub fn resolve_feedback(
     if let Some(concern) = safety_gate(safety) {
         return concern;
     }
-    execution.unwrap_or_else(|| evidence::graded(FeedbackCategory::InformationalNeutral, "FEEDBACK-001"))
+    execution.unwrap_or_else(|| {
+        evidence::graded(FeedbackCategory::InformationalNeutral, claims::FEEDBACK_001)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -267,7 +341,7 @@ pub fn resolve_feedback(
 /// Clinician-prompt copy appended to a female user's bone-stress referral
 /// (feedback-035). Gentle, no self-diagnosis, the referral itself stays the
 /// message; this only adds the menstrual/nutrition discussion prompt.
-pub const BSI_FEMALE_PROMPT: &str = "It's also worth discussing menstrual and nutrition status with the clinician. Under-fueling and menstrual disturbance raise bone-stress risk.";
+pub const BSI_FEMALE_PROMPT: &str = "Also tell them about your periods and how much you eat. Under-eating and missed or irregular periods raise the risk of a bone stress injury.";
 
 /// Whether to append the menstrual/nutrition clinician prompt (feedback-035;
 /// FB-BSI-FEMALE-001, ExpertOpinion, safety-critical): fires only for a
@@ -277,7 +351,7 @@ pub fn bsi_menstrual_nutrition_prompt(
     female_user: bool,
     bsi_referral_fired: bool,
 ) -> Recommended<bool> {
-    evidence::graded(female_user && bsi_referral_fired, "FB-BSI-FEMALE-001")
+    evidence::graded(female_user && bsi_referral_fired, claims::FB_BSI_FEMALE_001)
 }
 
 /// Message verbosity / metric-density personalization (feedback-023/024;
@@ -320,20 +394,20 @@ pub fn verbosity_for_experience(advanced: bool) -> Recommended<FeedbackVerbosity
             lead_with_single_lever: true,
         }
     };
-    evidence::graded(v, "FB-VERBOSITY-001")
+    evidence::graded(v, claims::FB_VERBOSITY_001)
 }
 
 /// Whether praise copy must anchor to a concrete mastery experience, a named
 /// PR, completed session, or barrier overcome (feedback-005;
-/// FB-MASTERY-ANCHOR-001, Strong, Bandura 1997). True for the positive
-/// mastery/consistency categories; concern/corrective categories never
-/// receive it (praise is suppressed there anyway, feedback-042).
+/// FB-MASTERY-ANCHOR-001, Strong, Bandura 1997). The rule triggers on the
+/// mastery and consistency categories; both resolve to `PositiveMastery` here
+/// (a completed planned week is a mastery experience, rendered with its
+/// count). `PositiveExecution` (durability/pacing affirmed) is a descriptive
+/// observation, and the concern/corrective categories suppress praise outright
+/// (feedback-042).
 pub fn mastery_anchor_required(category: FeedbackCategory) -> Recommended<bool> {
-    let anchored = matches!(
-        category,
-        FeedbackCategory::PositiveMastery | FeedbackCategory::PositiveExecution
-    );
-    evidence::graded(anchored, "FB-MASTERY-ANCHOR-001")
+    let anchored = matches!(category, FeedbackCategory::PositiveMastery);
+    evidence::graded(anchored, claims::FB_MASTERY_ANCHOR_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -350,39 +424,26 @@ pub enum GoalFraming {
 }
 
 /// Default all goal framing to controllable process goals (feedback-003;
-/// GOAL-PROCESS-001).
+/// FB-PROCESS-GOAL-001: Moderate and contested, since process vs specific
+/// outcome goals is unresolved in the sport literature).
 pub fn default_goal_framing() -> Recommended<GoalFraming> {
-    evidence::graded(GoalFraming::Process, "GOAL-PROCESS-001")
-}
-
-/// Whether a fixed positive:corrective ratio is enforced. Always false, the
-/// 2.9:1 "positivity ratio" is a retracted myth (feedback-007; MYTH-POSITIVITY
-/// hard-blocked). Bias positive but never hardcode a number.
-pub fn positivity_ratio_enforced() -> bool {
-    !evidence::claim("MYTH-POSITIVITY")
-        .expect("MYTH-POSITIVITY present")
-        .is_blocked()
-}
-
-/// Whether ACWR may generate a hard injury-prediction claim. Always false -
-/// LOAD-ACWR-001 is a hard-blocked myth; ACWR informs soft load-trend framing
-/// only (feedback-030; §6.5).
-pub fn acwr_injury_claim_allowed() -> bool {
-    !evidence::claim("LOAD-ACWR-001")
-        .expect("LOAD-ACWR-001 present")
-        .is_blocked()
+    evidence::graded(GoalFraming::Process, claims::FB_PROCESS_GOAL_001)
 }
 
 // ---------------------------------------------------------------------------
 // 6. Longitudinal trend summary (feedback-027/028/029)
 // ---------------------------------------------------------------------------
 
-/// Direction of a rolling multi-week metric versus day-to-day noise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which way a measured change went: a rolling multi-week metric versus
+/// day-to-day noise, or one set's e1RM versus the previous (wire: lowercase).
+/// Any unknown wire value reads as `Flat`, the no-trend default.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum TrendDirection {
     Up,
-    Flat,
     Down,
+    #[serde(other)]
+    Flat,
 }
 
 /// The message a weekly/monthly summary should carry (File 05 §6, trend arm).
@@ -401,11 +462,15 @@ pub enum TrendSummary {
     Stable,
 }
 
+/// Weeks of a flat rolling trend after which it is reframed as a plateau
+/// (feedback-028; FB-TREND-001).
+pub const PLATEAU_FLAT_WEEKS: u8 = 4;
+
 /// Resolve the longitudinal trend message (feedback-027/028/029). Load-explained
 /// decline (performance down + load spike or low recovery) takes precedence and
 /// routes to a recovery-first deload nudge; otherwise an improving rolling trend
-/// celebrates consistency, and a ≥4-week flat stretch is reframed as a plateau.
-/// FB-TREND-001 (ExpertOpinion, feedback-027/028/029).
+/// celebrates consistency, and a flat stretch of [`PLATEAU_FLAT_WEEKS`] or more
+/// is reframed as a plateau. FB-TREND-001 (ExpertOpinion, feedback-027/028/029).
 pub fn trend_summary(
     direction: TrendDirection,
     weeks_flat: u8,
@@ -417,466 +482,33 @@ pub fn trend_summary(
         TrendSummary::LoadExplainedDecline
     } else if direction == TrendDirection::Up {
         TrendSummary::Improving
-    } else if direction == TrendDirection::Flat && weeks_flat >= 4 {
+    } else if direction == TrendDirection::Flat && weeks_flat >= PLATEAU_FLAT_WEEKS {
         TrendSummary::Plateau
     } else {
         TrendSummary::Stable
     };
-    evidence::graded(summary, "FB-TREND-001")
+    evidence::graded(summary, claims::FB_TREND_001)
 }
 
 // ---------------------------------------------------------------------------
 // 7. Tone-by-context & pre-baseline provisional framing (feedback-026/040)
 // ---------------------------------------------------------------------------
 
-/// Tone modifier applied to an emitted category by the session's planned intent
-/// (feedback-026).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToneModifier {
-    /// Planned-easy: celebrate restraint; not chasing pace is the win.
-    CelebrateRestraint,
-    /// Planned-hard: praise completion/effort even if paces were imperfect.
-    PraiseEffort,
-}
-
-/// Tone modifier by planned session intensity (feedback-026). FB-TONE-001
-/// (ExpertOpinion).
-pub fn planned_intensity_tone(planned_hard: bool) -> Recommended<ToneModifier> {
-    let tone = if planned_hard {
-        ToneModifier::PraiseEffort
-    } else {
-        ToneModifier::CelebrateRestraint
-    };
-    evidence::graded(tone, "FB-TONE-001")
-}
+/// Days of logged data after which a stable per-user baseline exists and the
+/// provisional framing ends. FB-PROVISIONAL-001 (ExpertOpinion, feedback-040).
+pub const PROVISIONAL_BASELINE_DAYS: u16 = 14;
 
 /// Whether a recommendation must be framed as a provisional population default
 /// still converging on the user (feedback-040): true until a stable per-user
-/// baseline exists (~14 days of data). Callers should lower the surfaced
-/// `ConfidenceTag` and show "using population default until N days" copy.
-/// FB-PROVISIONAL-001 (ExpertOpinion, feedback-040).
+/// baseline exists ([`PROVISIONAL_BASELINE_DAYS`] days of data). Callers should
+/// lower the surfaced `ConfidenceTag` and show "using population default until
+/// N days" copy. FB-PROVISIONAL-001 (ExpertOpinion, feedback-040).
 pub fn provisional_until_baseline(days_of_data: u16) -> Recommended<bool> {
-    evidence::graded(days_of_data < 14, "FB-PROVISIONAL-001")
+    evidence::graded(
+        days_of_data < PROVISIONAL_BASELINE_DAYS,
+        claims::FB_PROVISIONAL_001,
+    )
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn running_intensity_discipline_thresholds() {
-        assert!(easy_run_intensity_discipline(0.25).is_none());
-        assert_eq!(
-            easy_run_intensity_discipline(0.26).unwrap().value,
-            FeedbackCategory::IntensityDiscipline
-        );
-        assert_eq!(
-            positive_split_discipline(3.1).value,
-            FeedbackCategory::IntensityDiscipline
-        );
-    }
-
-    #[test]
-    fn even_or_negative_split_earns_positive_execution() {
-        // feedback-017: an even/negative split is praised, not silently
-        // dropped, "textbook pacing discipline", cited per-rule.
-        for pct in [3.0, 0.0, -2.0] {
-            let f = positive_split_discipline(pct);
-            assert_eq!(f.value, FeedbackCategory::PositiveExecution, "{pct}%");
-            assert_eq!(
-                f.evidence.citation.claim_id.as_deref(),
-                Some("FB-PACING-001")
-            );
-        }
-    }
-
-    #[test]
-    fn trend_summary_precedence_and_bands() {
-        // Load-explained decline outranks a nominally-up direction.
-        assert_eq!(
-            trend_summary(TrendDirection::Up, 0, true, true, false).value,
-            TrendSummary::LoadExplainedDecline
-        );
-        assert_eq!(
-            trend_summary(TrendDirection::Down, 0, true, false, true).value,
-            TrendSummary::LoadExplainedDecline
-        );
-        // Improving.
-        assert_eq!(
-            trend_summary(TrendDirection::Up, 0, false, false, false).value,
-            TrendSummary::Improving
-        );
-        // Plateau needs >=4 flat weeks.
-        assert_eq!(
-            trend_summary(TrendDirection::Flat, 4, false, false, false).value,
-            TrendSummary::Plateau
-        );
-        assert_eq!(
-            trend_summary(TrendDirection::Flat, 3, false, false, false).value,
-            TrendSummary::Stable
-        );
-        // Performance down but no load explanation -> not a recovery-first message.
-        assert_eq!(
-            trend_summary(TrendDirection::Down, 0, true, false, false).value,
-            TrendSummary::Stable
-        );
-    }
-
-    #[test]
-    fn tone_and_provisional_framing() {
-        assert_eq!(
-            planned_intensity_tone(false).value,
-            ToneModifier::CelebrateRestraint
-        );
-        assert_eq!(
-            planned_intensity_tone(true).value,
-            ToneModifier::PraiseEffort
-        );
-        assert!(provisional_until_baseline(0).value);
-        assert!(provisional_until_baseline(13).value);
-        assert!(!provisional_until_baseline(14).value);
-    }
-
-    #[test]
-    fn safety_gate_priority_order() {
-        // Pain outranks everything.
-        let all = SafetySignals {
-            bone_pain_red_flag: true,
-            compulsive_flag: true,
-            overtraining_signal_count: 5,
-            single_session_spike_frac: Some(0.9),
-            ..Default::default()
-        };
-        assert_eq!(
-            safety_gate(all).unwrap().value,
-            FeedbackCategory::ConcernInjury
-        );
-
-        // Behavior outranks recovery + progression.
-        let behav = SafetySignals {
-            bone_pain_red_flag: false,
-            compulsive_flag: true,
-            overtraining_signal_count: 5,
-            single_session_spike_frac: Some(0.9),
-            ..Default::default()
-        };
-        assert_eq!(
-            safety_gate(behav).unwrap().value,
-            FeedbackCategory::ConcernBehavior
-        );
-
-        // Recovery outranks progression.
-        let rec = SafetySignals {
-            overtraining_signal_count: 2,
-            single_session_spike_frac: Some(0.9),
-            ..Default::default()
-        };
-        assert_eq!(
-            safety_gate(rec).unwrap().value,
-            FeedbackCategory::ConcernRecovery
-        );
-
-        // Spike alone.
-        let spike = SafetySignals {
-            single_session_spike_frac: Some(0.11),
-            ..Default::default()
-        };
-        assert_eq!(
-            safety_gate(spike).unwrap().value,
-            FeedbackCategory::DangerousProgression
-        );
-
-        // Clear session.
-        assert!(safety_gate(SafetySignals::default()).is_none());
-        // A single NFOR signal does not fire (needs >=2).
-        assert!(
-            safety_gate(SafetySignals {
-                overtraining_signal_count: 1,
-                ..Default::default()
-            })
-            .is_none()
-        );
-        // Spike at/below 10% does not fire.
-        assert!(
-            safety_gate(SafetySignals {
-                single_session_spike_frac: Some(0.10),
-                ..Default::default()
-            })
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn concern_injury_is_safety_critical() {
-        let c = evidence::graded(FeedbackCategory::ConcernInjury, "SAFE-BSI-001");
-        assert!(c.confidence.safety_critical);
-    }
-
-    #[test]
-    fn suppression_set_matches_file05() {
-        for c in [
-            FeedbackCategory::ConcernInjury,
-            FeedbackCategory::ConcernRecovery,
-            FeedbackCategory::ConcernBehavior,
-            FeedbackCategory::DangerousProgression,
-        ] {
-            assert!(
-                c.suppresses_competing_praise(),
-                "{c:?} must suppress praise"
-            );
-        }
-        for c in [
-            FeedbackCategory::PositiveMastery,
-            FeedbackCategory::PositiveExecution,
-            FeedbackCategory::ProgressionNudge,
-            FeedbackCategory::CorrectiveProcess,
-            FeedbackCategory::InformationalNeutral,
-            FeedbackCategory::IntensityDiscipline,
-            FeedbackCategory::ContextualBadDay,
-        ] {
-            assert!(
-                !c.suppresses_competing_praise(),
-                "{c:?} must not suppress praise"
-            );
-        }
-    }
-
-    #[test]
-    fn resolve_suppresses_praise_under_concern() {
-        let praise = Some(evidence::graded(FeedbackCategory::PositiveMastery,
-        "AUTOREG-RIR-001",));
-        let injury = SafetySignals {
-            bone_pain_red_flag: true,
-            ..Default::default()
-        };
-        assert_eq!(
-            resolve_feedback(injury, praise).value,
-            FeedbackCategory::ConcernInjury
-        );
-
-        // Safety-clear: execution passes through.
-        let praise = Some(evidence::graded(FeedbackCategory::PositiveMastery,
-        "AUTOREG-RIR-001",));
-        assert_eq!(
-            resolve_feedback(SafetySignals::default(), praise).value,
-            FeedbackCategory::PositiveMastery
-        );
-
-        // Safety-clear, no execution: informational default.
-        assert_eq!(
-            resolve_feedback(SafetySignals::default(), None).value,
-            FeedbackCategory::InformationalNeutral
-        );
-    }
-
-    #[test]
-    fn lifting_branches() {
-        // Missed reps.
-        assert_eq!(
-            lifting_feedback(false, 2, 2).value,
-            FeedbackCategory::CorrectiveProcess
-        );
-        // Reps met, RIR 0 vs 2-3 target, caution.
-        assert_eq!(
-            lifting_feedback(true, 0, 3).value,
-            FeedbackCategory::CorrectiveProcess
-        );
-        // Reps met, RIR 4 vs 1-2 target, nudge.
-        assert_eq!(
-            lifting_feedback(true, 4, 1).value,
-            FeedbackCategory::ProgressionNudge
-        );
-        // Reps met at target cost, mastery.
-        assert_eq!(
-            lifting_feedback(true, 2, 2).value,
-            FeedbackCategory::PositiveMastery
-        );
-        // Above-target reserve is also mastery (feedback-019: RIR ≥ target).
-        assert_eq!(
-            lifting_feedback(true, 3, 3).value,
-            FeedbackCategory::PositiveMastery
-        );
-    }
-
-    #[test]
-    fn below_target_rir_is_never_mastery() {
-        // feedback-019 requires rir_actual >= rir_target for PositiveMastery;
-        // a set that cost more than planned (RIR 1 vs target 3) routes to a
-        // neutral process tone, not praise-with-progression.
-        let f = lifting_feedback(true, 1, 3);
-        assert_ne!(f.value, FeedbackCategory::PositiveMastery);
-        assert_eq!(f.value, FeedbackCategory::InformationalNeutral);
-        // Per-rule citation, graded Moderate per File 05, not the Strong
-        // File 09 autoregulation-backbone claim.
-        assert_eq!(f.evidence.citation.claim_id.as_deref(), Some("FB-RIR-001"));
-
-        // RIR 2 vs target 3, still short of plan, still not mastery.
-        assert_ne!(
-            lifting_feedback(true, 2, 3).value,
-            FeedbackCategory::PositiveMastery
-        );
-        // At failure against a 2-3 target → corrective (feedback-020).
-        assert_eq!(
-            lifting_feedback(true, 0, 2).value,
-            FeedbackCategory::CorrectiveProcess
-        );
-    }
-
-    #[test]
-    fn decoupling_gated_and_banded() {
-        // Confounded context: no message.
-        assert!(decoupling_feedback(3.0, false).is_none());
-        // <5% durability.
-        assert_eq!(
-            decoupling_feedback(3.0, true).unwrap().value,
-            FeedbackCategory::PositiveExecution
-        );
-        // 5-10% neutral.
-        assert_eq!(
-            decoupling_feedback(7.0, true).unwrap().value,
-            FeedbackCategory::InformationalNeutral
-        );
-        // >10% corrective.
-        assert_eq!(
-            decoupling_feedback(12.0, true).unwrap().value,
-            FeedbackCategory::CorrectiveProcess
-        );
-        // Boundary must agree with `load::decoupling_band`: exactly 10% and a
-        // float 9.9999…% both land in the flag band, so the feedback card and the
-        // base-fitness band row never contradict each other at ~10%.
-        assert_eq!(
-            decoupling_feedback(10.0, true).unwrap().value,
-            FeedbackCategory::CorrectiveProcess
-        );
-        let just_under = 10.0 - 1e-12;
-        assert_eq!(
-            decoupling_feedback(just_under, true).unwrap().value,
-            FeedbackCategory::CorrectiveProcess,
-            "9.9999…% must flag, matching load::decoupling_band"
-        );
-        assert!(matches!(
-            crate::load::decoupling_band(just_under).0,
-            crate::load::DecouplingBand::Insufficient
-        ));
-    }
-
-    #[test]
-    fn contested_metrics_and_goal_default() {
-        // Both myths hard-blocked -> guards return false.
-        assert!(!positivity_ratio_enforced());
-        assert!(!acwr_injury_claim_allowed());
-        // Process framing is the default.
-        assert_eq!(default_goal_framing().value, GoalFraming::Process);
-    }
-
-    // --- feedback-036: the >=1-2 wk duration condition ---
-
-    #[test]
-    fn recovery_concern_respects_duration_condition() {
-        // Two signals over half a week is a "single noisy night" territory -
-        // the gate must NOT fire (feedback-036 duration condition).
-        let short = SafetySignals {
-            overtraining_signal_count: 2,
-            overtraining_weeks: Some(0.5),
-            ..Default::default()
-        };
-        assert!(safety_gate(short).is_none());
-        // >=1 week satisfies the stated >=1-2 wk band.
-        let sustained = SafetySignals {
-            overtraining_signal_count: 2,
-            overtraining_weeks: Some(1.0),
-            ..Default::default()
-        };
-        assert_eq!(
-            safety_gate(sustained).unwrap().value,
-            FeedbackCategory::ConcernRecovery
-        );
-        // Untracked duration errs protective: count alone still fires.
-        let untracked = SafetySignals {
-            overtraining_signal_count: 2,
-            overtraining_weeks: None,
-            ..Default::default()
-        };
-        assert!(safety_gate(untracked).is_some());
-    }
-
-    // --- feedback-015: interval/threshold mastery ---
-
-    #[test]
-    fn interval_mastery_needs_paces_and_rpe() {
-        let m = interval_mastery_feedback(true, true).expect("mastery fires");
-        assert_eq!(m.value, FeedbackCategory::PositiveMastery);
-        assert_eq!(
-            m.evidence.citation.claim_id.as_deref(),
-            Some("FB-INTERVAL-MASTERY-001")
-        );
-        assert!((m.confidence.score - 0.65).abs() < f32::EPSILON);
-        assert!(interval_mastery_feedback(true, false).is_none());
-        assert!(interval_mastery_feedback(false, true).is_none());
-    }
-
-    // --- feedback-035: female BSI clinician prompt ---
-
-    #[test]
-    fn female_bsi_prompt_gated_on_both_conditions() {
-        let p = bsi_menstrual_nutrition_prompt(true, true);
-        assert!(p.value);
-        assert!(p.confidence.safety_critical);
-        assert_eq!(
-            p.evidence.citation.claim_id.as_deref(),
-            Some("FB-BSI-FEMALE-001")
-        );
-        // ExpertOpinion: the linkage prompt has no direct trial evidence.
-        assert!((p.confidence.score - 0.30).abs() < f32::EPSILON);
-        assert!(!bsi_menstrual_nutrition_prompt(true, false).value);
-        assert!(!bsi_menstrual_nutrition_prompt(false, true).value);
-        // The copy defers to the clinician and diagnoses nothing.
-        assert!(BSI_FEMALE_PROMPT.contains("clinician"));
-    }
-
-    // --- feedback-023/024: verbosity personalization ---
-
-    #[test]
-    fn verbosity_defaults_by_experience() {
-        let b = verbosity_for_experience(false).value;
-        assert_eq!((b.max_takeaways, b.max_metrics), (1, 1));
-        assert!(b.rationale_mandatory && b.minimize_jargon && b.lead_with_single_lever);
-        let a = verbosity_for_experience(true).value;
-        assert_eq!((a.max_takeaways, a.max_metrics), (1, 3));
-        assert!(!a.minimize_jargon && a.lead_with_single_lever);
-        assert_eq!(
-            verbosity_for_experience(true)
-                .evidence
-                .citation
-                .claim_id
-                .as_deref(),
-            Some("FB-VERBOSITY-001")
-        );
-    }
-
-    // --- feedback-005: mastery anchoring in praise copy ---
-
-    #[test]
-    fn mastery_anchor_only_for_praise_categories() {
-        assert!(mastery_anchor_required(FeedbackCategory::PositiveMastery).value);
-        assert!(mastery_anchor_required(FeedbackCategory::PositiveExecution).value);
-        for c in [
-            FeedbackCategory::ConcernInjury,
-            FeedbackCategory::ConcernRecovery,
-            FeedbackCategory::CorrectiveProcess,
-            FeedbackCategory::InformationalNeutral,
-            FeedbackCategory::ContextualBadDay,
-        ] {
-            assert!(!mastery_anchor_required(c).value, "{c:?} never anchored");
-        }
-        // Strong (Bandura self-efficacy), the best-evidenced feedback rule.
-        assert!(
-            (mastery_anchor_required(FeedbackCategory::PositiveMastery)
-                .confidence
-                .score
-                - 0.90)
-                .abs()
-                < f32::EPSILON
-        );
-    }
-}
+mod tests;

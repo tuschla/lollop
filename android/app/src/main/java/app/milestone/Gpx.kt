@@ -1,6 +1,10 @@
 package app.milestone
 
 import android.util.Xml
+import kotlin.math.abs
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
@@ -12,16 +16,17 @@ import org.xmlpull.v1.XmlPullParser
 import java.io.StringReader
 import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 
-/**
- * Minimal GPX 1.0/1.1 track reader for two shell jobs: rendering a saved run's
- * route (parsing the core-produced [RunResultView.gpx] back into points) and
- * importing a run recorded elsewhere (Garmin/Strava/Komoot exports). Reads only
- * `<trk>/<trkseg>/<trkpt>`, lat/lon attributes, the optional `<time>`, and an
- * optional heart-rate sample from the common Garmin TrackPointExtension
- * (`<gpxtpx:hr>`, matched by local name so any namespace prefix works).
- * Everything else (waypoints, routes, metadata) is ignored.
- */
+// Minimal GPX 1.0/1.1 track reader for two shell jobs: rendering a saved run's
+// route (parsing the core-produced GPX from [Core.exportGpx] back into points) and
+// importing a run recorded elsewhere (Garmin/Strava/Komoot exports). Reads only
+// `<trk>/<trkseg>/<trkpt>`, lat/lon attributes, the optional `<time>`, and an
+// optional heart-rate sample from the common Garmin TrackPointExtension
+// (`<gpxtpx:hr>`, matched by local name so any namespace prefix works).
+// Everything else (waypoints, routes, metadata) is ignored.
+
 /**
  * [accuracyM] is the fix's horizontal accuracy in metres when the source file
  * carried a real figure, a FIT `record.gps_accuracy` reading, or a GPX
@@ -100,7 +105,7 @@ fun parseGpx(text: String): List<List<GpxFix>> {
                     hr = null
                     accuracyM = null
                 }
-                "time" -> if (inTrkpt) timeSec = parseGpxTime(parser.nextText())
+                "time" -> if (inTrkpt) timeSec = parseImportTimeSec(parser.nextText())
                 "hr" -> if (inTrkpt) hr = parseHrBpm(parser.nextText())
                 // `<hdop>` is a direct child of `<trkpt>` in GPX 1.0/1.1; a real
                 // (estimated) accuracy, so surface it. Absent → stays null =
@@ -126,9 +131,12 @@ fun parseGpx(text: String): List<List<GpxFix>> {
     return segments
 }
 
+/** Physiologically plausible heart-rate samples (bpm) an import keeps. */
+private val PLAUSIBLE_HR_BPM = 20..250
+
 /**
  * A heart-rate sample from an imported file, kept only when finite and
- * physiologically plausible (20..=250 bpm). Rejects NaN / `Infinity` (a literal
+ * physiologically plausible ([PLAUSIBLE_HR_BPM]). Rejects NaN / `Infinity` (a literal
  * `Infinity` token would otherwise reach the JSON wire as a bare token → the
  * whole event is serde-rejected and the import silently logs nothing) and
  * absurd magnitudes (e.g. 1e9 bpm poisoning TRIMP/CTL/ATL). Shared by the GPX
@@ -136,16 +144,28 @@ fun parseGpx(text: String): List<List<GpxFix>> {
  */
 internal fun parseHrBpm(raw: String): Int? {
     val v = raw.trim().toDoubleOrNull() ?: return null
-    if (!v.isFinite() || v < 20.0 || v > 250.0) return null
+    if (!v.isFinite() || v < PLAUSIBLE_HR_BPM.first || v > PLAUSIBLE_HR_BPM.last) return null
     return v.toInt()
 }
 
-/** ISO-8601 `<time>` → unix seconds; 0 when missing/unparseable (route-only GPX). */
-private fun parseGpxTime(raw: String): Long {
+/**
+ * ISO-8601 `<time>`/`<Time>` → unix seconds; 0 when missing/unparseable (a
+ * route-only GPX with no timestamps). Shared by the GPX and TCX readers so both
+ * decode timestamps identically.
+ *
+ * GPX 1.1 and TCX both REQUIRE the timestamp in UTC (xsd:dateTime, conventionally
+ * `…Z`), so [Instant]/[OffsetDateTime] cover the spec-conformant forms. But some
+ * exporters emit a zone-NAIVE stamp (`YYYY-MM-DDThh:mm:ss`, no `Z` and no offset),
+ * which parses under neither; discarding it would make a genuinely recorded run
+ * look time-less and be misdiagnosed downstream as "a planned route, not a recorded
+ * run". So a naive stamp is read as UTC, per the spec.
+ */
+internal fun parseImportTimeSec(raw: String): Long {
     val s = raw.trim()
     if (s.isEmpty()) return 0L
     return runCatching { Instant.parse(s).epochSecond }
         .recoverCatching { OffsetDateTime.parse(s).toEpochSecond() }
+        .recoverCatching { LocalDateTime.parse(s).toInstant(ZoneOffset.UTC).epochSecond }
         .getOrDefault(0L)
 }
 
@@ -156,14 +176,22 @@ private fun parseGpxTime(raw: String): Long {
  * gate (`running::MAX_GPS_ACCURACY_M` = 30.0) so an imported track is never rejected
  * for unknown accuracy, while being pinned to the WORST value that still passes
  * so any future accuracy-weighting feature treats it as the least-trusted
- * acceptable fix, never mistakes it for a good measured fix the way the old
- * fabricated 5.0 did." If the core ever tightens that gate below this value,
+ * acceptable fix, never mistakes it for a good measured fix." If the core ever
+ * tightens that gate below this value,
  * this must move with it (a `null`-accuracy import must always survive QC).
  */
-private const val IMPORT_UNKNOWN_ACCURACY_M = 30.0
+internal const val IMPORT_UNKNOWN_ACCURACY_M = 30.0
 
-/** Why an import produced no event, surfaced verbatim in the failure toast. */
-class GpxImportException(message: String) : Exception(message)
+/** Why one imported file (or one activity inside it) produced no run. The shell
+ *  maps each to plain-language copy beside the file's name. */
+internal enum class ImportFailure {
+    ReadFailed, TooLarge, WrongType, NoTrack, TooShort, NoTimestamps, Damaged, NotARun, ImplausiblePace, Rejected, Unknown,
+}
+
+/** An import that produced no event, with its [reason]. [detail] carries the one
+ *  variable part a reason needs (the activity's sport for [ImportFailure.NotARun]). */
+internal class GpxImportException(val reason: ImportFailure, val detail: String? = null) :
+    Exception(detail?.let { "$reason: $it" } ?: reason.name)
 
 /** FIT sniff: the 12/14-byte FIT header carries ".FIT" at offset 8. */
 fun isFitFile(bytes: ByteArray): Boolean =
@@ -173,28 +201,32 @@ fun isFitFile(bytes: ByteArray): Boolean =
 
 /**
  * Decode the core's [Core.parseFit] JSON into the same segment shape
- * [parseGpx]/[parseTcx] produce, so all three formats share [importedRunEvent].
- * The core's `{"error":…}` envelope becomes the import-failure toast verbatim.
+ * [parseGpx]/[parseTcxActivities] produce, so all three formats share [importedRunEvent].
  *
- * `json` is nullable: the M5-hardened JNI returns a null jstring on a double
- * result-string allocation failure. Treat null like the error envelope, a
- * user-facing "couldn't read" failure, so the caller's runCatching toasts it.
+ * Error envelopes: the object form `{"error":{"kind":…,"context":…}}` names why
+ * (`not_a_run` with the lowercase sport as context: a cycling file is refused, never
+ * logged as running volume; `no_track` with context `too_short`: a fragment under the
+ * keep threshold, [MIN_RUN_KM] or [MIN_RUN_SEC]); the legacy plain-string form and the
+ * panic firewall's object read as a damaged file. `json` is nullable: the JNI returns
+ * a null jstring
+ * on a double result-string allocation failure, read like a damaged file.
  */
-fun fitSegments(json: String?): List<List<GpxFix>> {
-    val root = kotlinx.serialization.json.Json
-        .parseToJsonElement(json ?: throw GpxImportException("Couldn't read this FIT file"))
+internal fun fitSegments(json: String?): List<List<GpxFix>> {
+    val root = Json
+        .parseToJsonElement(json ?: throw GpxImportException(ImportFailure.Damaged))
         .jsonObject
-    // Two error shapes share the key: parse_fit's own Err is a plain STRING,
-    // but the ffi panic firewall emits an OBJECT ({"kind":"panic",…}); e.g. a
-    // truncated file that passes the magic sniff then panics inside fitparser.
-    // Only the string form is user-facing copy; the panic object gets a
-    // generic message.
     root["error"]?.let { err ->
-        val msg = (err as? kotlinx.serialization.json.JsonPrimitive)?.content
-            ?: "Couldn't read this FIT file"
-        throw GpxImportException(msg)
+        val obj = err as? JsonObject
+        val kind = obj?.get("kind")?.jsonPrimitive?.contentOrNull
+        val context = obj?.get("context")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        throw when (kind) {
+            "not_a_run" -> GpxImportException(ImportFailure.NotARun, context)
+            "no_track" -> GpxImportException(if (context == "too_short") ImportFailure.TooShort else ImportFailure.NoTrack)
+            "not_fit" -> GpxImportException(ImportFailure.WrongType)
+            else -> GpxImportException(ImportFailure.Damaged)
+        }
     }
-    val segments = root["segments"] ?: throw GpxImportException("Couldn't read this FIT file")
+    val segments = root["segments"] ?: throw GpxImportException(ImportFailure.Damaged)
     return segments.jsonArray.map { seg ->
         seg.jsonArray.map { p ->
             val o = p.jsonObject
@@ -202,7 +234,7 @@ fun fitSegments(json: String?): List<List<GpxFix>> {
                 lat = o.getValue("lat").jsonPrimitive.double,
                 lon = o.getValue("lon").jsonPrimitive.double,
                 timeSec = o.getValue("time_sec").jsonPrimitive.long,
-                hrBpm = o["hr_bpm"]?.jsonPrimitive?.intOrNull,
+                hrBpm = o["hr_bpm"]?.jsonPrimitive?.intOrNull?.takeIf { it in PLAUSIBLE_HR_BPM },
                 // Present only when the FIT recorded `record.gps_accuracy` (a
                 // real device measurement, metres). Absent → null = unknown,
                 // NOT a fabricated 5 m; importedRunEvent supplies the sentinel.
@@ -210,6 +242,57 @@ fun fitSegments(json: String?): List<List<GpxFix>> {
             )
         }
     }
+}
+
+/** Fastest believable average moving pace for an imported run, seconds per km
+ *  (2:50 /km): anything faster is a bike ride, a car trip or a
+ *  broken clock, never running volume. */
+private const val FASTEST_PLAUSIBLE_SEC_PER_KM = 170.0
+
+/** A leg slower than this counts as standing still: File 07's auto-pause rule, the
+ *  same gate the core's moving time uses (`load::is_stopped`). Shared with the trim
+ *  preview's moving time ([timedTrackFromSegments]). */
+internal const val STOPPED_SPEED_MPS = 0.5
+
+/**
+ * Whether a track's average MOVING pace (distance over the time spent moving, legs
+ * within each segment only, mirroring the core's moving time) is faster than
+ * [FASTEST_PLAUSIBLE_SEC_PER_KM]. [segmentStarts] are indices that begin a new
+ * segment: the pause-bridge leg into them is never counted.
+ */
+internal fun isImplausiblyFast(points: List<GpsPoint>, segmentStarts: Collection<Int>): Boolean {
+    val starts = segmentStarts.toHashSet()
+    var km = 0.0
+    var movingSec = 0.0
+    for (i in 1 until points.size) {
+        if (i in starts) continue
+        val dt = (points[i].observedAt - points[i - 1].observedAt).toDouble()
+        if (dt <= 0.0) continue
+        val legKm = segmentKm(points[i - 1], points[i])
+        km += legKm
+        if (legKm * 1000.0 / dt >= STOPPED_SPEED_MPS) movingSec += dt
+    }
+    return km > 0.0 && movingSec > 0.0 && movingSec / km < FASTEST_PLAUSIBLE_SEC_PER_KM
+}
+
+/**
+ * Whether a track is a fragment under the keep threshold ([isShortRun]: [MIN_RUN_KM]
+ * or [MIN_RUN_SEC]), measured as the core's FIT gate does: GPS distance and recorded
+ * time summed over the legs within each segment ([segmentStarts] begin a new one, so a
+ * pause bridge counts neither). One gate for GPX, TCX and FIT alike.
+ */
+internal fun isTooShortForARun(points: List<GpsPoint>, segmentStarts: Collection<Int>): Boolean {
+    val starts = segmentStarts.toHashSet()
+    var km = 0.0
+    var sec = 0L
+    for (i in 1 until points.size) {
+        if (i in starts) continue
+        val dt = points[i].observedAt - points[i - 1].observedAt
+        if (dt <= 0L) continue
+        km += segmentKm(points[i - 1], points[i])
+        sec += dt
+    }
+    return isShortRun(km, sec)
 }
 
 /**
@@ -228,10 +311,13 @@ fun fitSegments(json: String?): List<List<GpxFix>> {
  *   unknown", never treat it as a measurement.
  * - Decimated to [TRACK_DECIMATION_CAP] like a live save, keeping segment
  *   boundaries and endpoints, so one import can't bloat the append-only log.
+ * - Refused ([ImportFailure.ImplausiblePace]) when its moving pace is faster than
+ *   any run ([isImplausiblyFast]), and ([ImportFailure.TooShort]) when it is a
+ *   fragment under the keep threshold ([isTooShortForARun]).
  */
 fun importedRunEvent(segments: List<List<GpxFix>>, measuredHrMax: Double?): Event.LogRunTrack {
     if (segments.sumOf { it.size } < 2) {
-        throw GpxImportException("No GPS track found in this file")
+        throw GpxImportException(ImportFailure.NoTrack)
     }
     // Drop untimestamped fixes at the SOURCE: a LEADING
     // observed_at=0 fix slips past the core's dt<=0 QC gate (the first point is
@@ -245,13 +331,13 @@ fun importedRunEvent(segments: List<List<GpxFix>>, measuredHrMax: Double?): Even
     val timed = segments
         .map { seg ->
             seg.filter {
-                it.timeSec > 0 && kotlin.math.abs(it.lat) <= 90.0 && kotlin.math.abs(it.lon) <= 180.0
+                it.timeSec > 0 && abs(it.lat) <= 90.0 && abs(it.lon) <= 180.0
             }
         }
         .filter { it.isNotEmpty() }
     val all = timed.flatten()
     if (all.size < 2) {
-        throw GpxImportException("This file has no timestamps (a planned route, not a recorded run)")
+        throw GpxImportException(ImportFailure.NoTimestamps)
     }
 
     // Flatten segments and remember each segment's first index (the core's
@@ -286,10 +372,37 @@ fun importedRunEvent(segments: List<List<GpxFix>>, measuredHrMax: Double?): Even
         )
     }
     val segmentStarts = boundaryIdx.sorted().mapNotNull { indexMap[it] }
+    if (isImplausiblyFast(points, segmentStarts)) throw GpxImportException(ImportFailure.ImplausiblePace)
+    if (isTooShortForARun(points, segmentStarts)) throw GpxImportException(ImportFailure.TooShort)
 
-    val hrSamples = all.mapNotNull { it.hrBpm }
-    val hrPctMax = if (hrSamples.isNotEmpty() && measuredHrMax != null && measuredHrMax > 0.0) {
-        hrSamples.average() / measuredHrMax * 100.0
+    // Time-weighted %HRmax: weight each kept HR sample by the seconds until the
+    // NEXT kept fix so a reading held for minutes dominates a brief spike a plain
+    // mean would over-count equally; the final fix (no following fix to bound it)
+    // is weighted by the median inter-fix gap. Evenly spaced fixes give equal
+    // weights, so the result matches a plain mean. A stale/low
+    // measured_hr_max paired with a hard-effort file can push the average above
+    // 100 % (physiologically impossible); clamp at the source so a 104.7 % never
+    // rides the wire. The core independently re-clamps (it cannot trust any one
+    // shell's import path), but clamping here keeps the persisted event honest too.
+    val hrPctMax = if (all.any { it.hrBpm != null } && measuredHrMax != null && measuredHrMax > 0.0) {
+        val fixGaps = all.zipWithNext { a, b -> (b.timeSec - a.timeSec).toDouble().coerceAtLeast(0.0) }
+        val medianGap = if (fixGaps.isEmpty()) {
+            1.0
+        } else {
+            val sorted = fixGaps.sorted()
+            val m = sorted.size
+            if (m % 2 == 1) sorted[m / 2] else (sorted[m / 2 - 1] + sorted[m / 2]) / 2.0
+        }
+        var num = 0.0
+        var den = 0.0
+        for (i in all.indices) {
+            val hr = all[i].hrBpm ?: continue
+            val w = if (i < all.lastIndex) fixGaps[i] else medianGap
+            num += hr * w
+            den += w
+        }
+        val avg = if (den > 0.0) num / den else all.mapNotNull { it.hrBpm }.average()
+        (avg / measuredHrMax * 100.0).coerceAtMost(100.0)
     } else {
         0.0
     }
@@ -298,6 +411,9 @@ fun importedRunEvent(segments: List<List<GpxFix>>, measuredHrMax: Double?): Even
         points = points,
         hrPctMax = hrPctMax,
         longestRecentKm = 0.0,
+        // Explicit unique id so a multi-activity TCX/GPX import (several runs built
+        // in a tight loop) never collides on same-millisecond default ids.
+        entryId = EntryIds.next(),
         // Logged-at = when the run happened (last fix), not when it was
         // imported: history sorts and displays by this.
         observedAt = all.last().timeSec,
