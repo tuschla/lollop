@@ -62,13 +62,23 @@ fn row(vm: &ViewModel, d: i64) -> SessionPlanView {
 fn is_judged(s: SessionStatus) -> bool {
     matches!(
         s,
-        SessionStatus::Done | SessionStatus::DoneLighter | SessionStatus::Missed | SessionStatus::Partial
+        SessionStatus::Done
+            | SessionStatus::DoneLighter
+            | SessionStatus::Missed
+            | SessionStatus::Partial
     )
 }
 
 /// Log every item of `row` as prescribed, `at` local `hour` on its day. Lifts
 /// get every set at the shown weight and top reps; runs their shown distance.
-fn log_row(app: &Engine, model: &mut Model, row: &SessionPlanView, hour: i64, offset: i64, id: &mut u64) {
+fn log_row(
+    app: &Engine,
+    model: &mut Model,
+    row: &SessionPlanView,
+    hour: i64,
+    offset: i64,
+    id: &mut u64,
+) {
     let mut t = local(row.epoch_day, hour, 0, offset);
     for it in &row.items {
         *id += 1;
@@ -111,10 +121,7 @@ fn assert_calendar(vm: &ViewModel, today: i64, ctx: &str) {
                     s.status
                 );
             }
-            if s.epoch_day < today
-                && s.session_type != SessionType::Rest
-                && !s.items.is_empty()
-            {
+            if s.epoch_day < today && s.session_type != SessionType::Rest && !s.items.is_empty() {
                 assert_ne!(
                     s.status,
                     SessionStatus::Next,
@@ -134,7 +141,11 @@ fn assert_calendar(vm: &ViewModel, today: i64, ctx: &str) {
             ns.epoch_day
         );
         if ns.epoch_day < monday + 7 {
-            assert_eq!(&row(vm, ns.epoch_day), ns, "{ctx}: the hero mirrors its strip row");
+            assert_eq!(
+                &row(vm, ns.epoch_day),
+                ns,
+                "{ctx}: the hero mirrors its strip row"
+            );
         } else {
             assert_eq!(
                 monday_of(ns.epoch_day),
@@ -147,16 +158,26 @@ fn assert_calendar(vm: &ViewModel, today: i64, ctx: &str) {
         let planned: Vec<&SessionPlanView> = vm
             .week_plan
             .iter()
-            .filter(|s| s.session_type != SessionType::Rest && s.status != SessionStatus::BeforePlan)
+            .filter(|s| {
+                s.session_type != SessionType::Rest && s.status != SessionStatus::BeforePlan
+            })
             .collect();
-        assert_eq!(usize::from(c.this_week_planned), planned.len(), "{ctx}: planned = strip");
+        assert_eq!(
+            usize::from(c.this_week_planned),
+            planned.len(),
+            "{ctx}: planned = strip"
+        );
         assert_eq!(
             usize::from(c.this_week_done),
             planned.iter().filter(|s| s.status.is_done()).count(),
             "{ctx}: done = strip"
         );
         for (k, w) in c.weeks.iter().enumerate() {
-            assert_eq!(monday_of(w.week_monday_epoch_day), w.week_monday_epoch_day, "{ctx}");
+            assert_eq!(
+                monday_of(w.week_monday_epoch_day),
+                w.week_monday_epoch_day,
+                "{ctx}"
+            );
             assert!(w.done <= w.planned, "{ctx}: week {w:?}");
             let back = (c.weeks.len() - k) as i64;
             assert_eq!(
@@ -198,7 +219,12 @@ fn assert_calendar(vm: &ViewModel, today: i64, ctx: &str) {
 fn the_reference_calendar_agrees_with_the_core() {
     assert_eq!(ymd(1970, 1, 1), 0);
     assert_eq!(ymd(2026, 10, 17), 20_743, "the youth tests' 2026-10-17");
-    for d in [ymd(2026, 12, 31), ymd(2028, 2, 29), ymd(2000, 2, 29), ymd(1969, 12, 31)] {
+    for d in [
+        ymd(2026, 12, 31),
+        ymd(2028, 2, 29),
+        ymd(2000, 2, 29),
+        ymd(1969, 12, 31),
+    ] {
         let (y, m, dd) = civil_from_days(d);
         assert_eq!(ymd(y, m, dd), d);
     }
@@ -242,13 +268,7 @@ fn calendar_invariants_hold_across_year_ends_leap_days_and_offsets() {
             for d in start..=pivot + 8 {
                 set_today(&app, &mut model, d, offset);
                 if d == plan_start {
-                    send(
-                        &app,
-                        &mut model,
-                        Event::GeneratePlan {
-                            start_epoch_day: d,
-                        },
-                    );
+                    send(&app, &mut model, Event::GeneratePlan { start_epoch_day: d });
                 }
                 let wd = (d - 4).rem_euclid(7);
                 if d % 3 != 0 {
@@ -271,7 +291,11 @@ fn calendar_invariants_hold_across_year_ends_leap_days_and_offsets() {
                 assert_calendar(&vm, d, &format!("{ctx0} day {d}"));
                 // Follow the plan when it has today's session; before it,
                 // and on odd days, log free work, some near midnight.
-                if let Some(ns) = vm.next_session.as_ref().filter(|s| s.epoch_day == d && d % 5 != 0) {
+                if let Some(ns) = vm
+                    .next_session
+                    .as_ref()
+                    .filter(|s| s.epoch_day == d && d % 5 != 0)
+                {
                     let hour = if wd == 6 { 23 } else { 18 };
                     log_row(&app, &mut model, ns, hour, offset, &mut id);
                 } else if d < plan_start && wd % 2 == 1 {
@@ -298,7 +322,11 @@ fn iso_week_53_is_one_week_across_the_year_boundary() {
     let mut id = 1;
     for (d, km) in [(thu, 8.0), (sat, 12.0)] {
         id += 1;
-        send(&app, &mut model, log_run(km, km * 6.0, 70.0, 50.0, local(d, 7, 0, 0), id));
+        send(
+            &app,
+            &mut model,
+            log_run(km, km * 6.0, 70.0, 50.0, local(d, 7, 0, 0), id),
+        );
     }
     set_today(&app, &mut model, sat, 0);
     let vm = app.view(&model);
@@ -306,7 +334,14 @@ fn iso_week_53_is_one_week_across_the_year_boundary() {
     let first = civil_from_days(vm.week_plan[0].epoch_day);
     let last = civil_from_days(vm.week_plan[6].epoch_day);
     assert_eq!((first, last), ((2026, 12, 28), (2027, 1, 3)));
-    let week = vm.run_progress.as_ref().unwrap().weekly.last().unwrap().clone();
+    let week = vm
+        .run_progress
+        .as_ref()
+        .unwrap()
+        .weekly
+        .last()
+        .unwrap()
+        .clone();
     assert_eq!((week.week_start_epoch_day, week.runs), (mon, 2), "{week:?}");
     assert!((week.km - 20.0).abs() < 1e-9, "{week:?}");
 
@@ -342,7 +377,12 @@ fn a_feb_29_birthday_crosses_18_on_march_1_of_a_common_year() {
         let vm = app.view(model);
         let ctx = format!("{:?}", civil_from_days(d));
         assert_eq!(age(&vm), want_age, "{ctx}");
-        assert_eq!(vm.hold_reason == Some(HoldReason::Youth), youth, "{ctx}: {:?}", vm.hold_reason);
+        assert_eq!(
+            vm.hold_reason == Some(HoldReason::Youth),
+            youth,
+            "{ctx}: {:?}",
+            vm.hold_reason
+        );
         assert_eq!(vm.youth_activity.is_some(), youth, "{ctx}");
         assert_eq!(vm.train_blocked, youth, "{ctx}");
         assert_eq!(vm.profile.as_ref().unwrap().health.youth, youth, "{ctx}");
@@ -389,12 +429,26 @@ fn a_run_across_local_midnight_counts_in_the_week_it_started() {
         send(&app, &mut model, log_run_track(pts, 72.0, 50.0, begin, 1));
         set_today(&app, &mut model, sunday, offset);
         let vm = app.view(&model);
-        let w = vm.run_progress.as_ref().expect("a dated run").weekly.last().unwrap().clone();
-        assert_eq!((w.week_start_epoch_day, w.runs), (sunday - 6, 1), "offset {offset}: {w:?}");
+        let w = vm
+            .run_progress
+            .as_ref()
+            .expect("a dated run")
+            .weekly
+            .last()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            (w.week_start_epoch_day, w.runs),
+            (sunday - 6, 1),
+            "offset {offset}: {w:?}"
+        );
         set_today(&app, &mut model, sunday + 1, offset);
         let vm = app.view(&model);
         let weekly = &vm.run_progress.as_ref().unwrap().weekly;
-        assert_eq!(weekly[15].runs, 0, "offset {offset}: Monday's week is empty");
+        assert_eq!(
+            weekly[15].runs, 0,
+            "offset {offset}: Monday's week is empty"
+        );
         assert_eq!(weekly[14].runs, 1, "offset {offset}");
     }
 }
@@ -406,7 +460,12 @@ fn a_run_across_local_midnight_counts_in_the_week_it_started() {
 fn work_near_local_midnight_completes_its_local_day_at_extreme_offsets() {
     let mon = ymd(2027, 6, 7);
     assert_eq!(monday_of(mon), mon);
-    for (offset, hour) in [(-5 * HOUR, 22), (-12 * HOUR, 23), (14 * HOUR, 0), (14 * HOUR, 7)] {
+    for (offset, hour) in [
+        (-5 * HOUR, 22),
+        (-12 * HOUR, 23),
+        (14 * HOUR, 0),
+        (14 * HOUR, 7),
+    ] {
         let (app, mut model) = planned_strength_model_on(mon, true);
         set_today(&app, &mut model, mon, offset);
         let ns = app.view(&model).next_session.expect("today's session");
@@ -415,10 +474,17 @@ fn work_near_local_midnight_completes_its_local_day_at_extreme_offsets() {
         log_row(&app, &mut model, &ns, hour, offset, &mut id);
         let vm = app.view(&model);
         let ctx = format!("offset {offset}, {hour}:00");
-        assert!(row(&vm, mon).status.is_done(), "{ctx}: {:?}", row(&vm, mon).status);
+        assert!(
+            row(&vm, mon).status.is_done(),
+            "{ctx}: {:?}",
+            row(&vm, mon).status
+        );
         assert!(!is_judged(row(&vm, mon + 1).status), "{ctx}");
         assert_eq!(vm.consistency.as_ref().unwrap().this_week_done, 1, "{ctx}");
-        assert!(vm.next_session.unwrap().epoch_day > mon, "{ctx}: the hero moves on");
+        assert!(
+            vm.next_session.unwrap().epoch_day > mon,
+            "{ctx}: the hero moves on"
+        );
         let done = vm.session_done.expect("today's session summary");
         assert_eq!(done.epoch_day, mon, "{ctx}");
         assert_calendar(&app.view(&model), mon, &ctx);
@@ -444,7 +510,11 @@ fn a_lift_session_running_past_local_midnight_stays_one_session() {
             let kg = it.load_kg.or(it.suggested_load_kg).unwrap_or(40.0);
             for _ in 0..it.sets {
                 let reps = u32::from(it.reps_high.max(1));
-                send(&app, &mut model, log_set(&it.exercise, kg, reps, it.target_rpe.unwrap_or(7.0), t));
+                send(
+                    &app,
+                    &mut model,
+                    log_set(&it.exercise, kg, reps, it.target_rpe.unwrap_or(7.0), t),
+                );
                 t += 240;
             }
         }
@@ -455,7 +525,12 @@ fn a_lift_session_running_past_local_midnight_stays_one_session() {
         set_today(&app, &mut model, mon + 1, offset);
         let vm = app.view(&model);
         let ctx = format!("offset {offset}");
-        assert_eq!(row(&vm, mon).status, SessionStatus::Done, "{ctx}: {:?}", row(&vm, mon).items);
+        assert_eq!(
+            row(&vm, mon).status,
+            SessionStatus::Done,
+            "{ctx}: {:?}",
+            row(&vm, mon).items
+        );
         assert_eq!(vm.consistency.as_ref().unwrap().this_week_done, 1, "{ctx}");
         if let Some(f) = &vm.feedback {
             assert!(!f.message.contains("Came up short"), "{ctx}: {}", f.message);
@@ -499,7 +574,12 @@ fn an_18th_birthday_mid_week_does_not_turn_held_days_into_missed_ones() {
     assert_calendar(&vm, thu, "18th birthday");
     for d in mon..thu {
         let r = row(&vm, d);
-        assert_ne!(r.status, SessionStatus::Missed, "held day {d}: {:?}", r.title);
+        assert_ne!(
+            r.status,
+            SessionStatus::Missed,
+            "held day {d}: {:?}",
+            r.title
+        );
     }
     // (Repeating the plan week after held weeks is the conservative,
     // factual ADH-PROGRESS-001 call; only the make-up nudge is wrong.)
@@ -576,7 +656,13 @@ fn a_short_lift_says_today_only_on_its_local_day() {
             send(
                 &app,
                 &mut model,
-                log_set(&it.exercise, it.load_kg.unwrap(), u32::from(it.reps_low), 8.0, t),
+                log_set(
+                    &it.exercise,
+                    it.load_kg.unwrap(),
+                    u32::from(it.reps_low),
+                    8.0,
+                    t,
+                ),
             );
             t += 120;
         }
@@ -590,18 +676,43 @@ fn a_short_lift_says_today_only_on_its_local_day() {
                 observed_at: t,
             },
         );
-        for other in ns.items.iter().filter(|o| o.exercise != it.exercise && !o.is_run()) {
+        for other in ns
+            .items
+            .iter()
+            .filter(|o| o.exercise != it.exercise && !o.is_run())
+        {
             let kg = other.load_kg.or(other.suggested_load_kg).unwrap_or(40.0);
             for _ in 0..other.sets {
-                send(&app, &mut model, log_set(&other.exercise, kg, u32::from(other.reps_high.max(1)), 7.0, t));
+                send(
+                    &app,
+                    &mut model,
+                    log_set(
+                        &other.exercise,
+                        kg,
+                        u32::from(other.reps_high.max(1)),
+                        7.0,
+                        t,
+                    ),
+                );
                 t += 120;
             }
         }
-        let msg = app.view(&model).feedback.map(|f| f.message).unwrap_or_default();
+        let msg = app
+            .view(&model)
+            .feedback
+            .map(|f| f.message)
+            .unwrap_or_default();
         let ctx = format!("offset {offset}");
-        assert!(msg.contains(&format!("Came up short on {} today", it.exercise)), "{ctx}: {msg}");
+        assert!(
+            msg.contains(&format!("Came up short on {} today", it.exercise)),
+            "{ctx}: {msg}"
+        );
         set_today(&app, &mut model, mon + 1, offset);
-        let msg = app.view(&model).feedback.map(|f| f.message).unwrap_or_default();
+        let msg = app
+            .view(&model)
+            .feedback
+            .map(|f| f.message)
+            .unwrap_or_default();
         assert!(
             msg.contains(&format!("Came up short on {} on Monday", it.exercise)),
             "{ctx}: {msg}"
@@ -631,7 +742,13 @@ fn an_offset_change_does_not_move_entries_logged_mid_day() {
         );
         (app, model)
     };
-    send(&app, &mut model, Event::GeneratePlan { start_epoch_day: start });
+    send(
+        &app,
+        &mut model,
+        Event::GeneratePlan {
+            start_epoch_day: start,
+        },
+    );
     let mut id = 0;
     for d in start..dst_day {
         set_today(&app, &mut model, d, HOUR);
@@ -646,9 +763,14 @@ fn an_offset_change_does_not_move_entries_logged_mid_day() {
                 .iter()
                 .map(|s| (s.epoch_day, s.status))
                 .collect::<Vec<_>>(),
-            vm.consistency
-                .as_ref()
-                .map(|c| (c.this_week_done, c.this_week_planned, c.weeks.clone(), c.share_pct)),
+            vm.consistency.as_ref().map(|c| {
+                (
+                    c.this_week_done,
+                    c.this_week_planned,
+                    c.weeks.clone(),
+                    c.share_pct,
+                )
+            }),
             vm.run_progress.as_ref().map(|r| {
                 r.weekly
                     .iter()
@@ -700,10 +822,19 @@ fn a_clock_moving_backwards_never_judges_future_days() {
     set_today(&app, &mut model, mon, 0);
     let back = app.view(&model);
     assert_calendar(&back, mon, "clock back to Monday");
-    assert!(!is_judged(row(&back, wed).status), "{:?}", row(&back, wed).status);
+    assert!(
+        !is_judged(row(&back, wed).status),
+        "{:?}",
+        row(&back, wed).status
+    );
     assert_eq!(back.consistency.as_ref().unwrap().this_week_done, 1);
     if let Some(f) = &back.feedback {
-        assert!(!f.message.contains(&format!("on {}", crate::app::plan_views::weekday_name(wed))), "{}", f.message);
+        assert!(
+            !f.message
+                .contains(&format!("on {}", crate::app::plan_views::weekday_name(wed))),
+            "{}",
+            f.message
+        );
     }
 
     set_today(&app, &mut model, wed, 0);
@@ -712,7 +843,10 @@ fn a_clock_moving_backwards_never_judges_future_days() {
 }
 
 fn key_statuses(vm: &ViewModel) -> Vec<(i64, SessionStatus)> {
-    vm.week_plan.iter().map(|s| (s.epoch_day, s.status)).collect()
+    vm.week_plan
+        .iter()
+        .map(|s| (s.epoch_day, s.status))
+        .collect()
 }
 
 /// A check-in or a session dated tomorrow (a wrong phone clock, a typo in a
@@ -741,7 +875,11 @@ fn entries_dated_in_the_future_do_not_count_as_today() {
     log_row(&app, &mut model, &tomorrow, 9, 0, &mut id);
     let vm = app.view(&model);
     assert!(!vm.checked_in_today, "a check-in dated tomorrow");
-    assert_eq!(row(&vm, mon).status, SessionStatus::Next, "today's session is still open");
+    assert_eq!(
+        row(&vm, mon).status,
+        SessionStatus::Next,
+        "today's session is still open"
+    );
     assert!(vm.session_done.is_none());
     assert_eq!(vm.consistency.as_ref().unwrap().this_week_done, 0);
     assert_calendar(&vm, mon, "future-dated entries");
@@ -786,7 +924,11 @@ fn backdating_into_a_past_plan_week_updates_that_week_only() {
     let vm = app.view(&model);
     assert_calendar(&vm, today, "after backdating");
     let after = vm.consistency.unwrap();
-    assert_eq!(after.weeks[0].done, after.weeks[0].planned, "{:?}", after.weeks);
+    assert_eq!(
+        after.weeks[0].done, after.weeks[0].planned,
+        "{:?}",
+        after.weeks
+    );
     assert_eq!(after.weeks[1], w2, "the other week is untouched");
     assert_eq!(
         (after.this_week_done, after.this_week_planned),
@@ -804,7 +946,13 @@ fn a_mid_week_plan_start_in_iso_week_53() {
     let app = Engine;
     let mut model = Model::default();
     send(&app, &mut model, Event::SetProfile(strength_profile()));
-    send(&app, &mut model, Event::GeneratePlan { start_epoch_day: thu });
+    send(
+        &app,
+        &mut model,
+        Event::GeneratePlan {
+            start_epoch_day: thu,
+        },
+    );
     set_today(&app, &mut model, thu, 0);
     let vm = app.view(&model);
     assert_calendar(&vm, thu, "plan day 1");
@@ -823,11 +971,18 @@ fn a_mid_week_plan_start_in_iso_week_53() {
     set_today(&app, &mut model, next_mon, 0);
     let vm = app.view(&model);
     assert_calendar(&vm, next_mon, "first full week");
-    assert!(vm.week_plan.iter().all(|s| s.status != SessionStatus::BeforePlan));
+    assert!(
+        vm.week_plan
+            .iter()
+            .all(|s| s.status != SessionStatus::BeforePlan)
+    );
     let c = vm.consistency.unwrap();
     assert_eq!(c.weeks.len(), 1);
     assert_eq!(c.weeks[0].week_monday_epoch_day, ymd(2026, 12, 28));
-    assert_eq!(c.share_pct, None, "a partial first week never counts toward the share");
+    assert_eq!(
+        c.share_pct, None,
+        "a partial first week never counts toward the share"
+    );
     assert!(!c.repeating_week, "a partial first week always advances");
 }
 
@@ -854,7 +1009,13 @@ fn a_race_today_or_in_the_past_keeps_the_plan_sane() {
                     ..running_profile()
                 }),
             );
-            send(&app, &mut model, Event::GeneratePlan { start_epoch_day: plan_start });
+            send(
+                &app,
+                &mut model,
+                Event::GeneratePlan {
+                    start_epoch_day: plan_start,
+                },
+            );
             set_today(&app, &mut model, today, 0);
             let vm = app.view(&model);
             let ctx = format!("race {label}, plan from {plan_start}");

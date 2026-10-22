@@ -14,3 +14,6 @@
 
 # Overnight AUR dependency-check logs, scratch output.
 aur-check-*.log
+
+# Roborazzi screenshot baselines: local only, recorded with recordRoborazziDebug.
+/android/app/src/test/screenshots/

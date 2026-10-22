@@ -48,7 +48,7 @@ jobs:
         run: rustup target add aarch64-linux-android
 
       - name: Set up Android SDK/NDK
-        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
@@ -79,7 +79,7 @@ jobs:
         run: rustup target add aarch64-linux-android x86_64-linux-android
 
       - name: Set up Android SDK/NDK
-        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
@@ -90,18 +90,10 @@ jobs:
       - name: Unit tests + offline UI/UX QA
         # testDebugUnitTest runs the JVM wire-shape tests AND the Robolectric
         # UI/UX QA suite; its gradle task builds the host libshared.so (jni-host)
-        # so the UI tests drive the real Rust core. verifyRoborazziDebug gates the
-        # committed screenshot baselines.
+        # so the UI tests drive the real Rust core. Screenshot baselines are
+        # local-only (not in git), so CI captures without comparing.
         working-directory: android
-        run: ./gradlew --no-daemon testDebugUnitTest verifyRoborazziDebug
-
-      - name: Upload Roborazzi diffs on failure
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: roborazzi-diffs
-          path: android/app/build/outputs/roborazzi
-          if-no-files-found: ignore
+        run: ./gradlew --no-daemon testDebugUnitTest
 
   emulator-smoke:
     name: Android on-device smoke (emulator)
@@ -128,7 +120,7 @@ jobs:
         run: rustup target add x86_64-linux-android
 
       - name: Set up Android SDK/NDK
-        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked

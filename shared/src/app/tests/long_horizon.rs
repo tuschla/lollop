@@ -434,8 +434,11 @@ impl Sim {
 
     fn fail(&mut self, check: &'static str, msg: String) {
         if self.failures.len() < 40 {
-            self.failures
-                .push(format!("[{}] day {} {check}: {msg}", self.name, self.today - START));
+            self.failures.push(format!(
+                "[{}] day {} {check}: {msg}",
+                self.name,
+                self.today - START
+            ));
         }
     }
 
@@ -954,7 +957,9 @@ impl Sim {
             self.hit("wire");
             let json = serde_json::to_string(vm).expect("view serializes");
             if let Err(e) = serde_json::from_str::<ViewModel>(&json) {
-                bad.push(format!("view JSON does not decode (a NaN became null?): {e}"));
+                bad.push(format!(
+                    "view JSON does not decode (a NaN became null?): {e}"
+                ));
             }
             let v: serde_json::Value = serde_json::from_str(&json).expect("json");
             walk_json(&v, "", "", &mut bad);
@@ -1025,13 +1030,22 @@ impl Sim {
         let Some(&top) = self.holds.iter().next() else {
             // No hold the athlete reported: benign check-ins never block.
             if vm.train_blocked {
-                let msg = format!("blocked with no hold: {:?} {:?}", vm.hold_reason, vm.today_headline.summary);
+                let msg = format!(
+                    "blocked with no hold: {:?} {:?}",
+                    vm.hold_reason, vm.today_headline.summary
+                );
                 self.fail("hold lifts", msg);
             }
             if let Some((h, day, plan_day)) = self.gate_lifted {
                 self.hit("gate lifts");
                 if vm.plan_withheld.is_some() {
-                    self.fail("gate lifts", format!("{h:?} lifted on day {} but the plan is still withheld", day - START));
+                    self.fail(
+                        "gate lifts",
+                        format!(
+                            "{h:?} lifted on day {} but the plan is still withheld",
+                            day - START
+                        ),
+                    );
                 }
                 if self.today >= plan_day && vm.next_session.is_none() {
                     self.fail("gate lifts", format!("{h:?} lifted but no next session"));
@@ -1047,38 +1061,63 @@ impl Sim {
         };
         self.hit("hold blocks");
         if top != Hold::Youth && !vm.train_blocked {
-            self.fail("hold blocks", format!("{top:?} active but training not blocked"));
+            self.fail(
+                "hold blocks",
+                format!("{top:?} active but training not blocked"),
+            );
         }
         if vm.hold_reason != Some(top.reason()) {
-            self.fail("hold blocks", format!("{top:?} active, hold_reason {:?}", vm.hold_reason));
+            self.fail(
+                "hold blocks",
+                format!("{top:?} active, hold_reason {:?}", vm.hold_reason),
+            );
         }
         if top.withholds_plan() {
             if vm.plan_withheld != Some(PlanWithheld::HealthHold) {
-                self.fail("hold blocks", format!("{top:?}: plan_withheld {:?}", vm.plan_withheld));
+                self.fail(
+                    "hold blocks",
+                    format!("{top:?}: plan_withheld {:?}", vm.plan_withheld),
+                );
             }
             if vm.next_session.is_some() || !vm.week_plan.is_empty() {
-                self.fail("hold blocks", format!("{top:?}: the gated plan still renders"));
+                self.fail(
+                    "hold blocks",
+                    format!("{top:?}: the gated plan still renders"),
+                );
             }
         } else if let Some(ns) = &vm.next_session
             && (ns.status != SessionStatus::Blocked || !ns.items.is_empty())
         {
-            let msg = format!("{top:?}: next session {:?} with {} items", ns.status, ns.items.len());
+            let msg = format!(
+                "{top:?}: next session {:?} with {} items",
+                ns.status,
+                ns.items.len()
+            );
             self.fail("hold blocks", msg);
         }
         if top == Hold::Illness {
             let today = self.today;
             for row in vm.week_plan.iter().filter(|s| s.epoch_day > today) {
                 if !row.items.is_empty() {
-                    self.fail("hold blocks", format!("flu: day +{} still planned", row.epoch_day - today));
+                    self.fail(
+                        "hold blocks",
+                        format!("flu: day +{} still planned", row.epoch_day - today),
+                    );
                 }
             }
         }
         if top == Hold::Youth {
             if vm.youth_activity.is_none() {
-                self.fail("hold blocks", "under 18 without the WHO activity card".into());
+                self.fail(
+                    "hold blocks",
+                    "under 18 without the WHO activity card".into(),
+                );
             }
         } else if vm.youth_activity.is_some() {
-            self.fail("hold blocks", "adult shows the under-18 activity card".into());
+            self.fail(
+                "hold blocks",
+                "adult shows the under-18 activity card".into(),
+            );
         }
     }
 
@@ -1116,13 +1155,25 @@ impl Sim {
         self.hit("history");
         let mut bad = Vec::new();
         if vm.lifts.len() != self.sets.len() {
-            bad.push(format!("{} lift rows vs {} logged", vm.lifts.len(), self.sets.len()));
+            bad.push(format!(
+                "{} lift rows vs {} logged",
+                vm.lifts.len(),
+                self.sets.len()
+            ));
         }
         if vm.runs.len() != self.runs.len() {
-            bad.push(format!("{} run rows vs {} logged", vm.runs.len(), self.runs.len()));
+            bad.push(format!(
+                "{} run rows vs {} logged",
+                vm.runs.len(),
+                self.runs.len()
+            ));
         }
         if vm.activities.len() != self.activities {
-            bad.push(format!("{} activities vs {}", vm.activities.len(), self.activities));
+            bad.push(format!(
+                "{} activities vs {}",
+                vm.activities.len(),
+                self.activities
+            ));
         }
         let ton: f64 = vm.lifts.iter().map(|l| l.tonnage_kg).sum();
         let want: f64 = self
@@ -1148,10 +1199,14 @@ impl Sim {
                 let in_week: Vec<&RunRec> = self
                     .runs
                     .iter()
-                    .filter(|r| (w.week_start_epoch_day..w.week_start_epoch_day + 7).contains(&r.day))
+                    .filter(|r| {
+                        (w.week_start_epoch_day..w.week_start_epoch_day + 7).contains(&r.day)
+                    })
                     .collect();
                 let k: f64 = in_week.iter().map(|r| r.km).sum();
-                if in_week.len() as u32 != w.runs || (w.km - k).abs() > 0.06 * in_week.len() as f64 + 0.01 {
+                if in_week.len() as u32 != w.runs
+                    || (w.km - k).abs() > 0.06 * in_week.len() as f64 + 0.01
+                {
                     bad.push(format!(
                         "week {}: {} runs / {} km vs logged {} / {k:.2}",
                         w.week_start_epoch_day - START,
@@ -1167,7 +1222,9 @@ impl Sim {
         // The consistency card's finished weeks count distinct logged days.
         if let (Some(c), Some(start)) = (&vm.consistency, self.plan_start) {
             for w in &c.weeks {
-                if w.week_monday_epoch_day < start || w.week_monday_epoch_day < self.last_profile_change {
+                if w.week_monday_epoch_day < start
+                    || w.week_monday_epoch_day < self.last_profile_change
+                {
                     continue;
                 }
                 let days: BTreeSet<i64> = self
@@ -1221,7 +1278,10 @@ impl Sim {
         let mut bad = Vec::new();
         let days: Vec<i64> = vm.week_plan.iter().map(|s| s.epoch_day).collect();
         if days != (mon..mon + 7).collect::<Vec<_>>() {
-            bad.push(format!("strip days {:?}", days.iter().map(|d| d - START).collect::<Vec<_>>()));
+            bad.push(format!(
+                "strip days {:?}",
+                days.iter().map(|d| d - START).collect::<Vec<_>>()
+            ));
         }
         let live: BTreeSet<u64> = self.sets.iter().map(|s| s.id).collect();
         let set_day: HashMap<u64, i64> = self.sets.iter().map(|s| (s.id, s.day)).collect();
@@ -1233,7 +1293,10 @@ impl Sim {
             if d > self.today
                 && matches!(
                     row.status,
-                    SessionStatus::Done | SessionStatus::DoneLighter | SessionStatus::Missed | SessionStatus::Partial
+                    SessionStatus::Done
+                        | SessionStatus::DoneLighter
+                        | SessionStatus::Missed
+                        | SessionStatus::Partial
                 )
             {
                 bad.push(format!("future day {} is {:?}", d - START, row.status));
@@ -1248,13 +1311,22 @@ impl Sim {
                     bad.push(format!("day {} credited from {}", d - START, src - START));
                 }
                 if !self.logged_on(src, run) {
-                    bad.push(format!("day {} {:?} with nothing logged on {}", d - START, row.status, src - START));
+                    bad.push(format!(
+                        "day {} {:?} with nothing logged on {}",
+                        d - START,
+                        row.status,
+                        src - START
+                    ));
                 }
             }
             for it in &row.items {
                 for s in &it.logged_sets {
                     if !live.contains(&s.entry_id) {
-                        bad.push(format!("day {} lists deleted/unknown set {}", d - START, s.entry_id));
+                        bad.push(format!(
+                            "day {} lists deleted/unknown set {}",
+                            d - START,
+                            s.entry_id
+                        ));
                     } else if set_day[&s.entry_id] != d && set_day[&s.entry_id] != src {
                         bad.push(format!(
                             "day {} lists a set from day {}",
@@ -1264,12 +1336,26 @@ impl Sim {
                     }
                 }
                 if usize::from(it.sets_done) > it.logged_sets.len() {
-                    bad.push(format!("{}: {} done of {} logged", it.summary, it.sets_done, it.logged_sets.len()));
+                    bad.push(format!(
+                        "{}: {} done of {} logged",
+                        it.summary,
+                        it.sets_done,
+                        it.logged_sets.len()
+                    ));
                 }
                 if it.is_run() && d <= self.today {
-                    let k: f64 = self.runs.iter().filter(|r| r.day == src).map(|r| r.km).sum();
+                    let k: f64 = self
+                        .runs
+                        .iter()
+                        .filter(|r| r.day == src)
+                        .map(|r| r.km)
+                        .sum();
                     if it.run_logged_km > k + 0.06 {
-                        bad.push(format!("day {} run_logged_km {} > logged {k:.2}", d - START, it.run_logged_km));
+                        bad.push(format!(
+                            "day {} run_logged_km {} > logged {k:.2}",
+                            d - START,
+                            it.run_logged_km
+                        ));
                     }
                 }
             }
@@ -1296,7 +1382,11 @@ impl Sim {
         let stated = self.profile.stated_longest_recent_km;
         let mut bad = Vec::new();
         let mut hits = 0;
-        for row in vm.week_plan.iter().filter(|s| s.epoch_day >= self.today && !s.status.is_done()) {
+        for row in vm
+            .week_plan
+            .iter()
+            .filter(|s| s.epoch_day >= self.today && !s.status.is_done())
+        {
             for it in row.items.iter().filter(|i| i.is_run()) {
                 let Some(km) = it.run_head_km else { continue };
                 let through = (row.epoch_day - 1).min(self.today);
@@ -1310,7 +1400,10 @@ impl Sim {
                 if let Some(b) = base {
                     hits += 1;
                     if km > 1.1 * b + 0.01 {
-                        bad.push(format!("day {}: {km} km > 110% of {b} km", row.epoch_day - START));
+                        bad.push(format!(
+                            "day {}: {km} km > 110% of {b} km",
+                            row.epoch_day - START
+                        ));
                     }
                 }
                 if let Some(cap) = goal_cap
@@ -1332,7 +1425,11 @@ impl Sim {
         let lb_slack = if self.profile.weight_lb { 2.3 } else { 0.0 };
         let mut bad = Vec::new();
         let mut seen_today: Vec<((String, u8), f64, f64)> = Vec::new();
-        for row in vm.week_plan.iter().filter(|s| s.epoch_day >= self.today && !s.status.is_done()) {
+        for row in vm
+            .week_plan
+            .iter()
+            .filter(|s| s.epoch_day >= self.today && !s.status.is_done())
+        {
             let through = (row.epoch_day - 1).min(self.today);
             for it in row.items.iter().filter(|i| i.kind() == ItemKind::Lift) {
                 // STR-INTENT-001 / HYP-FAIL-SAFE-001: never below 1 RIR.
@@ -1342,7 +1439,10 @@ impl Sim {
                 if let PlanIntensity::PercentE1rm { pct, .. } = it.intensity {
                     let rir = 30.0 * (100.0 / f64::from(pct) - 1.0) - f64::from(it.reps_high);
                     if rir < 0.95 {
-                        bad.push(format!("{}: {pct}% × {} = {rir:.2} RIR", it.summary, it.reps_high));
+                        bad.push(format!(
+                            "{}: {pct}% × {} = {rir:.2} RIR",
+                            it.summary, it.reps_high
+                        ));
                     }
                 }
                 let Some(load) = it.load_kg else { continue };
@@ -1354,12 +1454,18 @@ impl Sim {
                     .map(|s| e1rm_bound(s.kg, s.reps, s.rpe))
                     .reduce(f64::max);
                 let Some(e) = e else {
-                    bad.push(format!("{}: a load with no logged set (HARD RULE 1)", it.summary));
+                    bad.push(format!(
+                        "{}: a load with no logged set (HARD RULE 1)",
+                        it.summary
+                    ));
                     continue;
                 };
                 let cap = e / (1.0 + f64::from(it.reps_low + 1) / 30.0);
                 if load > cap + 2.5 + lb_slack {
-                    bad.push(format!("{}: {load} kg over the 1-RIR load {cap:.1} of e1RM {e:.1}", it.summary));
+                    bad.push(format!(
+                        "{}: {load} kg over the 1-RIR load {cap:.1} of e1RM {e:.1}",
+                        it.summary
+                    ));
                 }
                 if row.epoch_day == self.today {
                     seen_today.push(((name, it.reps_low), load, e));
@@ -1422,9 +1528,14 @@ impl Sim {
         for row in vm.week_plan.iter().filter(|s| s.epoch_day >= self.today) {
             for it in row.items.iter().filter(|i| i.kind() == ItemKind::Lift) {
                 let key = (norm(&it.exercise), it.reps_low);
-                let Some(&pre) = re.pre_loads.get(&key) else { continue };
+                let Some(&pre) = re.pre_loads.get(&key) else {
+                    continue;
+                };
                 hits += 1;
-                for (what, l) in [("load", it.load_kg), ("suggested load", it.suggested_load_kg)] {
+                for (what, l) in [
+                    ("load", it.load_kg),
+                    ("suggested load", it.suggested_load_kg),
+                ] {
                     if let Some(l) = l
                         && l > pre * frac + 2.5
                     {
@@ -1501,7 +1612,9 @@ impl Sim {
         if !clean {
             return;
         }
-        let (Some(prev), Some(prev2)) = (prev, prev2) else { return };
+        let (Some(prev), Some(prev2)) = (prev, prev2) else {
+            return;
+        };
         let race = self.profile.goal_race_epoch_day.is_some_and(|r| r >= mon);
         let running = self.profile.running_days_per_week > 0;
         let lifting = self.profile.weekly_sets > 0;
@@ -1523,7 +1636,10 @@ impl Sim {
             if run_km > 1.3 * reference + 1.0 {
                 self.fail(
                     "run ramp",
-                    format!("planned {run_km:.1} km after {:.1} / {:.1} planned, {actual:.1} run", prev.run_km, prev2.run_km),
+                    format!(
+                        "planned {run_km:.1} km after {:.1} / {:.1} planned, {actual:.1} run",
+                        prev.run_km, prev2.run_km
+                    ),
                 );
             }
         }
@@ -1544,7 +1660,10 @@ impl Sim {
                 4
             };
             if total != want_total {
-                self.fail("deload cadence", format!("block of {total} weeks, expected {want_total}"));
+                self.fail(
+                    "deload cadence",
+                    format!("block of {total} weeks, expected {want_total}"),
+                );
             }
             let deload_expected = !(lifting && novice) && snap.week == total;
             if (snap.phase == MesoPhase::Deload) != deload_expected {
@@ -1554,11 +1673,18 @@ impl Sim {
                 );
             }
             let repeating = vm.consistency.as_ref().is_some_and(|c| c.repeating_week);
-            let want_week = if repeating { prev.week } else { prev.week % total + 1 };
+            let want_week = if repeating {
+                prev.week
+            } else {
+                prev.week % total + 1
+            };
             if snap.week != want_week {
                 self.fail(
                     "deload cadence",
-                    format!("week {} after {} (repeating {repeating})", snap.week, prev.week),
+                    format!(
+                        "week {} after {} (repeating {repeating})",
+                        snap.week, prev.week
+                    ),
                 );
             }
         }
@@ -1566,11 +1692,17 @@ impl Sim {
             self.hit("deload depth");
             // RUN-DELOAD-DEPTH-001: the recovery week cuts 20–40 %.
             if running && !lifting && run_km > 0.8 * prev.run_km.max(prev2.run_km) + 0.5 {
-                self.fail("deload depth", format!("recovery week {run_km:.1} km after {:.1}", prev.run_km));
+                self.fail(
+                    "deload depth",
+                    format!("recovery week {run_km:.1} km after {:.1}", prev.run_km),
+                );
             }
             // STR-DELOAD-VOL-001: about half the sets.
             if lifting && !running && f64::from(lift_sets) > 0.75 * f64::from(prev.lift_sets) {
-                self.fail("deload depth", format!("deload week {lift_sets} sets after {}", prev.lift_sets));
+                self.fail(
+                    "deload depth",
+                    format!("deload week {lift_sets} sets after {}", prev.lift_sets),
+                );
             }
         }
     }
@@ -1694,7 +1826,16 @@ fn intermediate_lifter_strength_then_hypertrophy_over_two_years() {
             });
         }
     });
-    sim.finish(&["lift caps", "load step", "deload cadence", "deload depth", "week strip", "history", "wire", "units"]);
+    sim.finish(&[
+        "lift caps",
+        "load step",
+        "deload cadence",
+        "deload depth",
+        "week strip",
+        "history",
+        "wire",
+        "units",
+    ]);
 }
 
 #[test]
@@ -1709,7 +1850,16 @@ fn hybrid_athlete_three_years_view_stays_fast() {
         800 => s.go_away(6),
         _ => {}
     });
-    sim.finish(&["spike ceiling", "run ramp", "lift caps", "load step", "deload cadence", "week strip", "history", "wire"]);
+    sim.finish(&[
+        "spike ceiling",
+        "run ramp",
+        "lift caps",
+        "load step",
+        "deload cadence",
+        "week strip",
+        "history",
+        "wire",
+    ]);
 }
 
 #[test]
@@ -1739,10 +1889,19 @@ fn masters_runner_sixty_seven_eighteen_months() {
     sim.run(548, |_, _| {});
     // RUN-DELOAD-001: 2:1 for older athletes (masters 65+, MASTERS-001).
     assert!(
-        sim.weeks.values().any(|w| w.weeks_total == 3 && w.phase == MesoPhase::Deload),
+        sim.weeks
+            .values()
+            .any(|w| w.weeks_total == 3 && w.phase == MesoPhase::Deload),
         "a 67-year-old gets the 2:1 recovery cadence"
     );
-    sim.finish(&["spike ceiling", "run ramp", "deload cadence", "deload depth", "week strip", "history"]);
+    sim.finish(&[
+        "spike ceiling",
+        "run ramp",
+        "deload cadence",
+        "deload depth",
+        "week strip",
+        "history",
+    ]);
 }
 
 #[test]
@@ -1770,7 +1929,15 @@ fn goal_and_unit_switcher_two_years() {
         }),
         _ => {}
     });
-    sim.finish(&["units", "spike ceiling", "lift caps", "load step", "week strip", "history", "wire"]);
+    sim.finish(&[
+        "units",
+        "spike ceiling",
+        "lift caps",
+        "load step",
+        "week strip",
+        "history",
+        "wire",
+    ]);
 }
 
 #[test]
@@ -1787,7 +1954,14 @@ fn athlete_with_holidays_and_breaks_two_years() {
         500 => s.go_away(70),
         _ => {}
     });
-    sim.finish(&["re-entry", "lift caps", "load step", "spike ceiling", "week strip", "history"]);
+    sim.finish(&[
+        "re-entry",
+        "lift caps",
+        "load step",
+        "spike ceiling",
+        "week strip",
+        "history",
+    ]);
 }
 
 #[test]
@@ -1806,7 +1980,14 @@ fn illness_pain_and_reds_episodes_resolved() {
         _ if i == 265 - wd(START + 265) + 6 => s.resolve_hold(Hold::Reds),
         _ => {}
     });
-    sim.finish(&["hold blocks", "easy return", "hold lifts", "week strip", "history", "wire"]);
+    sim.finish(&[
+        "hold blocks",
+        "easy return",
+        "hold lifts",
+        "week strip",
+        "history",
+        "wire",
+    ]);
 }
 
 #[test]
@@ -1825,7 +2006,13 @@ fn pregnancy_hold_then_return() {
         456 => s.resolve_hold(Hold::Pregnancy),
         _ => {}
     });
-    sim.finish(&["hold blocks", "gate lifts", "re-entry", "week strip", "history"]);
+    sim.finish(&[
+        "hold blocks",
+        "gate lifts",
+        "re-entry",
+        "week strip",
+        "history",
+    ]);
 }
 
 #[test]

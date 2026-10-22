@@ -142,13 +142,23 @@ fn load_noun(s: &str) -> Option<String> {
         let prev = i.checked_sub(1).map(|j| w[j].as_str());
         let hit = match word.as_str() {
             "loading" => {
-                matches!(prev, Some("strength" | "power" | "hypertrophy" | "heavy" | "light"))
+                matches!(
+                    prev,
+                    Some("strength" | "power" | "hypertrophy" | "heavy" | "light")
+                )
             }
             "load" | "loads" => matches!(
                 prev,
                 Some(
-                    "same" | "lighter" | "heavier" | "working" | "planned" | "bar" | "starting"
-                        | "target" | "top-set"
+                    "same"
+                        | "lighter"
+                        | "heavier"
+                        | "working"
+                        | "planned"
+                        | "bar"
+                        | "starting"
+                        | "target"
+                        | "top-set"
                 )
             ),
             _ => false,
@@ -215,7 +225,10 @@ fn string_violations(key: &str, s: &str, lb: bool) -> Vec<String> {
         }
         let sign_at = before.len() - before.chars().next_back().map_or(0, char::len_utf8);
         // A range separator (`4 - 0`, `3-0`) is a separate rule.
-        if s[..sign_at].trim_end().ends_with(|c: char| c.is_ascii_digit()) {
+        if s[..sign_at]
+            .trim_end()
+            .ends_with(|c: char| c.is_ascii_digit())
+        {
             continue;
         }
         if s[a..e].chars().all(|c| c == '0' || c == '.' || c == ':') {
@@ -349,8 +362,8 @@ fn walk(v: &Value, path: &mut String, key: &str, lb: bool, scenario: &str, out: 
                 // A plan item's `intensity_label` is shown only when it has no
                 // `target_rpe` (the shell phrases an RPE target as reps left,
                 // `PlanCompletion.setTargetBand`).
-                let rpe_face = k == "intensity_label"
-                    && map.get("target_rpe").is_some_and(|t| !t.is_null());
+                let rpe_face =
+                    k == "intensity_label" && map.get("target_rpe").is_some_and(|t| !t.is_null());
                 if rpe_face {
                     let mut sub = Hits::new();
                     walk(child, path, k, lb, scenario, &mut sub);
@@ -377,7 +390,12 @@ fn walk(v: &Value, path: &mut String, key: &str, lb: bool, scenario: &str, out: 
 /// The miles twins: where a km line has a `*_mi` sibling, the shell shows the
 /// twin to a miles user (`summary_mi.ifBlank { summary }`), so a km line with
 /// an empty twin leaks km, and a twin must never say km itself.
-fn twin_violations(map: &serde_json::Map<String, Value>, path: &str, scenario: &str, out: &mut Hits) {
+fn twin_violations(
+    map: &serde_json::Map<String, Value>,
+    path: &str,
+    scenario: &str,
+    out: &mut Hits,
+) {
     let at_path = |field: &str| {
         if path.is_empty() {
             field.to_string()
@@ -401,7 +419,13 @@ fn twin_violations(map: &serde_json::Map<String, Value>, path: &str, scenario: &
             record(out, at_path(twin), rule, b, scenario);
         }
         if number_then_unit(t, "km") || t.contains("/km") || has_word(t, "km") {
-            record(out, at_path(twin), "unit: miles twin says km".into(), t, scenario);
+            record(
+                out,
+                at_path(twin),
+                "unit: miles twin says km".into(),
+                t,
+                scenario,
+            );
         }
     }
     // A run head in km is converted by the shell from `run_head_km`.
@@ -509,9 +533,7 @@ fn drive(profile: Profile, seed: u64, days: i64, end: i64, offset: i64) -> Vec<E
                 &app,
                 &mut model,
                 &mut log,
-                Event::GeneratePlan {
-                    start_epoch_day: d,
-                },
+                Event::GeneratePlan { start_epoch_day: d },
             );
         }
         if rng.next() < 0.8 {
@@ -542,7 +564,11 @@ fn drive(profile: Profile, seed: u64, days: i64, end: i64, offset: i64) -> Vec<E
                 let ex: &[(&str, f64)] = if calis {
                     &[("Push-up", 0.0), ("Pull-up", 0.0), ("Squat", 0.0)]
                 } else {
-                    &[("Back Squat", 100.0), ("Bench Press", 70.0), ("Deadlift", 130.0)]
+                    &[
+                        ("Back Squat", 100.0),
+                        ("Bench Press", 70.0),
+                        ("Deadlift", 130.0),
+                    ]
                 };
                 for &(name, kg) in ex {
                     for _ in 0..3 {
@@ -603,10 +629,7 @@ fn drive(profile: Profile, seed: u64, days: i64, end: i64, offset: i64) -> Vec<E
             if item.sets == 0 {
                 continue;
             }
-            let kg = item
-                .suggested_load_kg
-                .or(item.load_kg)
-                .unwrap_or(0.0)
+            let kg = item.suggested_load_kg.or(item.load_kg).unwrap_or(0.0)
                 * if lighter { 0.85 } else { 1.0 };
             let rpe = item.target_rpe.unwrap_or(8.0);
             let sets = if rng.next() < 0.1 {
@@ -822,13 +845,19 @@ fn overlays(end: i64) -> Vec<(&'static str, Vec<Event>)> {
         ),
         (
             "illness",
-            vec![ev(json!({"SubmitReadiness": {"signal": "Illness", "value": 1.0, "observed_at": (d - 1) * DAY_SEC + 8 * HOUR}}))],
+            vec![ev(
+                json!({"SubmitReadiness": {"signal": "Illness", "value": 1.0, "observed_at": (d - 1) * DAY_SEC + 8 * HOUR}}),
+            )],
         ),
         (
             "illness_resolved",
             vec![
-                ev(json!({"SubmitReadiness": {"signal": "Illness", "value": 1.0, "observed_at": (d - 4) * DAY_SEC + 8 * HOUR}})),
-                ev(json!({"ResolveHold": {"signal": "Illness", "observed_at": (d - 1) * DAY_SEC + 8 * HOUR}})),
+                ev(
+                    json!({"SubmitReadiness": {"signal": "Illness", "value": 1.0, "observed_at": (d - 4) * DAY_SEC + 8 * HOUR}}),
+                ),
+                ev(
+                    json!({"ResolveHold": {"signal": "Illness", "observed_at": (d - 1) * DAY_SEC + 8 * HOUR}}),
+                ),
             ],
         ),
         (
@@ -852,8 +881,12 @@ fn overlays(end: i64) -> Vec<(&'static str, Vec<Event>)> {
         (
             "high_rpe_rhr",
             vec![
-                ev(json!({"SubmitReadiness": {"signal": "Rpe", "value": 9.5, "observed_at": d * DAY_SEC + 6 * HOUR}})),
-                ev(json!({"SubmitCheckin": {"observed_at": d * DAY_SEC + 7 * HOUR, "resting_hr_bpm": 66.0, "hrv_rmssd_ms": 30.0, "sleep_quality": 1, "soreness": 5, "mood": 1, "fatigue": 5, "stress": 5}})),
+                ev(
+                    json!({"SubmitReadiness": {"signal": "Rpe", "value": 9.5, "observed_at": d * DAY_SEC + 6 * HOUR}}),
+                ),
+                ev(
+                    json!({"SubmitCheckin": {"observed_at": d * DAY_SEC + 7 * HOUR, "resting_hr_bpm": 66.0, "hrv_rmssd_ms": 30.0, "sleep_quality": 1, "soreness": 5, "mood": 1, "fatigue": 5, "stress": 5}}),
+                ),
             ],
         ),
     ]
@@ -936,7 +969,13 @@ fn today_on_stale(vm: &ViewModel, json: &Value, scenario: &str, out: &mut Hits) 
             .iter()
             .find(|p| lower.contains(**p) && (p.contains("today") || has_word_ci(s, "today")));
         if let Some(p) = pinned {
-            record(out, path, format!("today: `{p}` on a day with nothing logged"), s, scenario);
+            record(
+                out,
+                path,
+                format!("today: `{p}` on a day with nothing logged"),
+                s,
+                scenario,
+            );
         }
     }
 }
@@ -1091,9 +1130,7 @@ const KNOWN: &[(&str, &str)] = &[
 ];
 
 fn is_known(path: &str, rule: &str) -> bool {
-    KNOWN
-        .iter()
-        .any(|(p, r)| path == *p && rule.starts_with(r))
+    KNOWN.iter().any(|(p, r)| path == *p && rule.starts_with(r))
 }
 
 /// The family's hits, minus the known bugs.
@@ -1134,7 +1171,11 @@ fn the_scanner_flags_each_rule_and_passes_clean_copy() {
         "The ratio of this week's load to your usual load; your running load",
         "Progress only while bending the wrist back under load is pain-free",
     ] {
-        assert!(flagged(clean, false).is_empty(), "{clean}: {:?}", flagged(clean, false));
+        assert!(
+            flagged(clean, false).is_empty(),
+            "{clean}: {:?}",
+            flagged(clean, false)
+        );
     }
     for (s, lb, rule) in [
         ("weight NaN kg", false, "NaN"),

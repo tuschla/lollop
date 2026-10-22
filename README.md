@@ -86,8 +86,8 @@ checker (`UxInvariants`) fails on `NaN`/`null`/`@ RPE 0`-style leaks, unlabeled
 or sub-48 dp tap targets, duplicate in-card actions, and actions clipped at
 fontScale 1.3.
 
-**Screenshot regression (Roborazzi)** — 222 baselines (light + dark) live under
-`android/app/src/test/screenshots/` and are committed: Today (plan, run, rest
+**Screenshot regression (Roborazzi)** — about 270 baselines (light + dark) live under
+`android/app/src/test/screenshots/`, local only (not in git, not checked in CI): Today (plan, run, rest
 day, holds, session done, calisthenics, hypertrophy), the Log sheet and
 editors, History and Runs, the run tracker, guided setup, Profile, and each
 colour theme. Captures hide Compose ripple hosts (`captureWithoutRipples` in

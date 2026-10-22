@@ -163,7 +163,12 @@ fn vm_json(vm: &ViewModel) -> String {
 /// The first path where two JSON values differ, with both values
 /// (shortened). Numbers within `rel_tol` (relative) count as equal.
 fn value_diff(a: &serde_json::Value, b: &serde_json::Value, rel_tol: f64) -> Option<String> {
-    fn walk(a: &serde_json::Value, b: &serde_json::Value, tol: f64, path: &mut String) -> Option<String> {
+    fn walk(
+        a: &serde_json::Value,
+        b: &serde_json::Value,
+        tol: f64,
+        path: &mut String,
+    ) -> Option<String> {
         use serde_json::Value as V;
         match (a, b) {
             (V::Object(x), V::Object(y)) => {
@@ -198,16 +203,20 @@ fn value_diff(a: &serde_json::Value, b: &serde_json::Value, rel_tol: f64) -> Opt
             }
             _ if a == b => None,
             (V::Number(x), V::Number(y))
-                if x.as_f64().zip(y.as_f64()).is_some_and(|(x, y)| {
-                    (x - y).abs() <= tol * x.abs().max(y.abs())
-                }) =>
+                if x.as_f64()
+                    .zip(y.as_f64())
+                    .is_some_and(|(x, y)| (x - y).abs() <= tol * x.abs().max(y.abs())) =>
             {
                 None
             }
             _ => {
                 let cut = |v: &V| {
                     let s = v.to_string();
-                    if s.len() > 160 { format!("{}…", &s[..char_floor(&s, 160)]) } else { s }
+                    if s.len() > 160 {
+                        format!("{}…", &s[..char_floor(&s, 160)])
+                    } else {
+                        s
+                    }
                 };
                 Some(format!("{path}: {} vs {}", cut(a), cut(b)))
             }
@@ -464,9 +473,11 @@ impl Gen {
         } else if r < 0.97 {
             self.now() + self.rng.int(1, 5) * DAY_SEC
         } else if self.mode == Mode::Absurd && r < 0.985 {
-            self.rng.pick(&[i64::MIN, i64::MAX, -1, i64::MAX / 2, i64::MIN / 2])
+            self.rng
+                .pick(&[i64::MIN, i64::MAX, -1, i64::MAX / 2, i64::MIN / 2])
         } else {
-            self.rng.pick(&[1, -86_400 * 365, 4_102_444_800, 32_503_680_000, 315_532_800])
+            self.rng
+                .pick(&[1, -86_400 * 365, 4_102_444_800, 32_503_680_000, 315_532_800])
         }
     }
 
@@ -489,7 +500,8 @@ impl Gen {
         } else if r < 0.96 {
             0
         } else {
-            self.rng.pick(&[u64::MAX, i64::MAX as u64, i64::MAX as u64 + 1, 1])
+            self.rng
+                .pick(&[u64::MAX, i64::MAX as u64, i64::MAX as u64 + 1, 1])
         }
     }
 
@@ -521,12 +533,18 @@ impl Gen {
     }
 
     fn opt_f(&mut self, p_some: f64, lo: f64, hi: f64) -> Option<f64> {
-        if self.rng.chance(p_some) { Some(self.f(lo, hi, 0.15)) } else { None }
+        if self.rng.chance(p_some) {
+            Some(self.f(lo, hi, 0.15))
+        } else {
+            None
+        }
     }
 
     fn day(&mut self) -> i64 {
         if self.mode == Mode::Absurd && self.rng.chance(0.02) {
-            return self.rng.pick(&[i64::MIN, i64::MAX, -1_000_000_000, 1_000_000_000]);
+            return self
+                .rng
+                .pick(&[i64::MIN, i64::MAX, -1_000_000_000, 1_000_000_000]);
         }
         if self.wild() && self.rng.chance(0.03) {
             return self.rng.pick(&[0, -1, -719_468, 2_932_896, 100_000]);
@@ -536,7 +554,8 @@ impl Gen {
 
     fn u8w(&mut self, lo: u8, hi: u8) -> u8 {
         if self.wild() && self.rng.chance(0.1) {
-            self.rng.pick(&[0, 255, hi.saturating_add(1), lo.saturating_sub(1)])
+            self.rng
+                .pick(&[0, 255, hi.saturating_add(1), lo.saturating_sub(1)])
         } else {
             self.rng.int(i64::from(lo), i64::from(hi)) as u8
         }
@@ -704,9 +723,11 @@ impl Gen {
         };
         if self.rng.chance(0.08) {
             self.offset = if self.mode == Mode::Absurd && self.rng.chance(0.2) {
-                self.rng.pick(&[i64::MIN, i64::MAX, 86_400 * 3, -86_400 * 3])
+                self.rng
+                    .pick(&[i64::MIN, i64::MAX, 86_400 * 3, -86_400 * 3])
             } else {
-                self.rng.pick(&[0, 3600, 7200, -18_000, 50_400, -43_200, 20_700])
+                self.rng
+                    .pick(&[0, 3600, 7200, -18_000, 50_400, -43_200, 20_700])
             };
         }
         Event::SetToday {
@@ -718,7 +739,9 @@ impl Gen {
     fn log_set(&mut self) -> Event {
         let hold = self.rng.chance(0.1);
         let exercise = if hold {
-            self.rng.pick(&["Plank", "Dead Hang", "Front Lever", "L-sit"]).into()
+            self.rng
+                .pick(&["Plank", "Dead Hang", "Front Lever", "L-sit"])
+                .into()
         } else {
             self.exercise()
         };
@@ -794,7 +817,11 @@ impl Gen {
         };
         let pace = self.rng.range(4.0, 8.0);
         let duration_min = if self.wild() {
-            self.f(distance_km.abs().min(100.0) * pace, distance_km.abs().min(100.0) * pace + 1.0, 0.08)
+            self.f(
+                distance_km.abs().min(100.0) * pace,
+                distance_km.abs().min(100.0) * pace + 1.0,
+                0.08,
+            )
         } else {
             (distance_km * pace).round()
         };
@@ -818,7 +845,11 @@ impl Gen {
             distance_km,
             duration_min,
             hr_pct_max,
-            longest_recent_km: if self.wild() { self.f(0.0, 25.0, 0.1) } else { 0.0 },
+            longest_recent_km: if self.wild() {
+                self.f(0.0, 25.0, 0.1)
+            } else {
+                0.0
+            },
             observed_at,
             entry_id,
             workout_type,
@@ -837,9 +868,13 @@ impl Gen {
             self.rng.int(2, 500) as usize
         };
         let (mut lat, mut lon) = if self.wild() && self.rng.chance(0.08) {
-            self.rng.pick(&[(0.0, 0.0), (89.99, 10.0), (-33.9, 179.999), (51.5, -0.0001)])
+            self.rng
+                .pick(&[(0.0, 0.0), (89.99, 10.0), (-33.9, 179.999), (51.5, -0.0001)])
         } else {
-            (48.1 + self.rng.range(-0.5, 0.5), 11.5 + self.rng.range(-0.5, 0.5))
+            (
+                48.1 + self.rng.range(-0.5, 0.5),
+                11.5 + self.rng.range(-0.5, 0.5),
+            )
         };
         let step = self.rng.int(1, 10);
         let speed = self.rng.range(2.0, 5.5);
@@ -872,7 +907,7 @@ impl Gen {
                 match self.rng.below(7) {
                     0 => p.accuracy_m = self.rng.pick(&[0.0, -1.0, 1e6, f32::MAX]),
                     1 => p.observed_at = t - step, // repeated time
-                    2 => p.observed_at = t - 300, // backwards
+                    2 => p.observed_at = t - 300,  // backwards
                     3 => p.lat += 5.0,             // teleport
                     4 => {
                         p.lat = 0.0;
@@ -903,10 +938,17 @@ impl Gen {
     fn log_run_track(&mut self) -> Event {
         let start = self.stamp();
         let (points, segment_starts) = self.track(start);
-        let span = points.first().zip(points.last()).map(|(a, b)| (a.observed_at, b.observed_at));
+        let span = points
+            .first()
+            .zip(points.last())
+            .map(|(a, b)| (a.observed_at, b.observed_at));
         let ids: Vec<u64> = self.runs.iter().map(|r| r.id).collect();
         let entry_id = self.log_id(&ids);
-        let observed_at = if self.rng.chance(0.85) { start } else { self.stamp() };
+        let observed_at = if self.rng.chance(0.85) {
+            start
+        } else {
+            self.stamp()
+        };
         self.runs.push(RunRef {
             id: entry_id,
             at: observed_at,
@@ -915,8 +957,16 @@ impl Gen {
         let (workout_type, session_rpe, avg_hr_bpm) = self.run_extras();
         Event::LogRunTrack {
             points,
-            hr_pct_max: if self.rng.chance(0.5) { 0.0 } else { self.f(60.0, 95.0, 0.05) },
-            longest_recent_km: if self.wild() { self.f(0.0, 25.0, 0.1) } else { 0.0 },
+            hr_pct_max: if self.rng.chance(0.5) {
+                0.0
+            } else {
+                self.f(60.0, 95.0, 0.05)
+            },
+            longest_recent_km: if self.wild() {
+                self.f(0.0, 25.0, 0.1)
+            } else {
+                0.0
+            },
             segment_starts,
             observed_at,
             entry_id,
@@ -943,7 +993,9 @@ impl Gen {
             let keep = self.rng.below(bytes.len() as u64) as usize;
             bytes.truncate(keep);
         }
-        let parsed = catch_unwind(|| crate::fit::parse_fit(&bytes)).ok().and_then(Result::ok);
+        let parsed = catch_unwind(|| crate::fit::parse_fit(&bytes))
+            .ok()
+            .and_then(Result::ok);
         // Unparseable, or refused by the import gate (too short, not a run):
         // the shell reports it and logs nothing.
         let Some(track) = parsed.filter(|t| crate::fit::import_gate(t).is_ok()) else {
@@ -962,7 +1014,10 @@ impl Gen {
                 accuracy_m: f.accuracy_m.unwrap_or(30.0),
             }));
         }
-        let span = points.first().zip(points.last()).map(|(a, b)| (a.observed_at, b.observed_at));
+        let span = points
+            .first()
+            .zip(points.last())
+            .map(|(a, b)| (a.observed_at, b.observed_at));
         let observed_at = points.first().map_or(0, |p| p.observed_at);
         let entry_id = self.fresh_id();
         self.runs.push(RunRef {
@@ -1011,7 +1066,12 @@ impl Gen {
     }
 
     fn delete(&mut self) -> Event {
-        let kind = self.rng.pick(&[EntryKind::Set, EntryKind::Set, EntryKind::Run, EntryKind::Activity]);
+        let kind = self.rng.pick(&[
+            EntryKind::Set,
+            EntryKind::Set,
+            EntryKind::Run,
+            EntryKind::Activity,
+        ]);
         let pool: Vec<(u64, i64)> = match kind {
             EntryKind::Set => self.sets.clone(),
             EntryKind::Run => self.runs.iter().map(|r| (r.id, r.at)).collect(),
@@ -1033,7 +1093,11 @@ impl Gen {
         if entry_id == 0 {
             return (old_at, old_at);
         }
-        let at = if self.rng.chance(0.7) { old_at } else { self.stamp() };
+        let at = if self.rng.chance(0.7) {
+            old_at
+        } else {
+            self.stamp()
+        };
         (at, if self.rng.chance(0.8) { old_at } else { 0 })
     }
 
@@ -1110,7 +1174,12 @@ impl Gen {
     }
 
     fn trim(&mut self) -> Event {
-        let gps: Vec<RunRef> = self.runs.iter().copied().filter(|r| r.span.is_some()).collect();
+        let gps: Vec<RunRef> = self
+            .runs
+            .iter()
+            .copied()
+            .filter(|r| r.span.is_some())
+            .collect();
         if gps.is_empty() {
             return self.amend_run_meta();
         }
@@ -1147,9 +1216,9 @@ impl Gen {
             ReadinessSignal::Soreness => self.rng.int(1, 7) as f64,
             ReadinessSignal::WellnessZ | ReadinessSignal::HrvLnRmssd => self.f(-3.0, 3.0, 0.1),
             ReadinessSignal::RestingHr => self.f(-5.0, 15.0, 0.1),
-            ReadinessSignal::RedS | ReadinessSignal::CardiacRedFlag | ReadinessSignal::BoneStress => {
-                self.rng.pick(&[0.0, 1.0, 1.0])
-            }
+            ReadinessSignal::RedS
+            | ReadinessSignal::CardiacRedFlag
+            | ReadinessSignal::BoneStress => self.rng.pick(&[0.0, 1.0, 1.0]),
             _ => self.f(-40.0, 40.0, 0.1),
         };
         let pain = if signal == ReadinessSignal::Pain && self.rng.chance(0.6) {
@@ -1161,11 +1230,23 @@ impl Gen {
                     PainKind::Other,
                 ]),
                 severity: self.rng.opt(0.8, |r| r.int(0, 10) as u8),
-                trend: self.rng.pick(&[PainTrend::Stable, PainTrend::Rising, PainTrend::WorseningAfter24h]),
+                trend: self.rng.pick(&[
+                    PainTrend::Stable,
+                    PainTrend::Rising,
+                    PainTrend::WorseningAfter24h,
+                ]),
                 persists: self.rng.chance(0.2),
                 location: self.rng.opt(0.6, |r| {
-                    r.pick(&["Left knee", "lower back", "Shoulder", "Achilles", "Hüfte", "", "Schulter 💥"])
-                        .to_owned()
+                    r.pick(&[
+                        "Left knee",
+                        "lower back",
+                        "Shoulder",
+                        "Achilles",
+                        "Hüfte",
+                        "",
+                        "Schulter 💥",
+                    ])
+                    .to_owned()
                 }),
             })
         } else {
@@ -1174,7 +1255,11 @@ impl Gen {
         ReadinessInput {
             signal,
             value,
-            observed_at: if self.rng.chance(0.85) { self.now() } else { self.stamp() },
+            observed_at: if self.rng.chance(0.85) {
+                self.now()
+            } else {
+                self.stamp()
+            },
             streak: self.u8w(0, 5),
             pain,
             effort_min: self.opt_f(0.3, 5.0, 120.0),
@@ -1183,7 +1268,11 @@ impl Gen {
 
     fn checkin(&mut self) -> CheckinInput {
         CheckinInput {
-            observed_at: if self.rng.chance(0.85) { self.now() } else { self.stamp() },
+            observed_at: if self.rng.chance(0.85) {
+                self.now()
+            } else {
+                self.stamp()
+            },
             sleep_quality: self.rng.opt(0.8, |_| 0).map(|_| self.u8w(1, 5)),
             soreness: self.rng.opt(0.8, |_| 0).map(|_| self.u8w(1, 5)),
             mood: self.rng.opt(0.7, |_| 0).map(|_| self.u8w(1, 5)),
@@ -1198,7 +1287,11 @@ impl Gen {
         let p = 0.25;
         let b = |g: &mut Gen| g.rng.chance(p * 0.6);
         let ou8 = |g: &mut Gen, hi: u8| {
-            if g.rng.chance(p) { Some(g.u8w(0, hi)) } else { None }
+            if g.rng.chance(p) {
+                Some(g.u8w(0, hi))
+            } else {
+                None
+            }
         };
         SessionReview {
             bone_pain_red_flag: self.rng.chance(0.05),
@@ -1264,12 +1357,20 @@ impl Gen {
             stall_adequate_recovery: b(self),
             stalled_again_after_reramp: b(self),
             planned_hard: self.rng.opt(p, |r| r.chance(0.5)),
-            trend_direction: self
-                .rng
-                .opt(p, |r| r.pick(&[TrendDirection::Up, TrendDirection::Down, TrendDirection::Flat])),
+            trend_direction: self.rng.opt(p, |r| {
+                r.pick(&[
+                    TrendDirection::Up,
+                    TrendDirection::Down,
+                    TrendDirection::Flat,
+                ])
+            }),
             weeks_flat: ou8(self, 8),
             bad_day: b(self),
-            observed_at: if self.rng.chance(0.9) { self.now() } else { self.stamp() },
+            observed_at: if self.rng.chance(0.9) {
+                self.now()
+            } else {
+                self.stamp()
+            },
         }
     }
 
@@ -1299,8 +1400,14 @@ impl Gen {
             ResistanceModality::Weights
         };
         let today = self.today;
-        let birth = self.rng.opt(0.4, |r| today - r.int(6, 85) * 365 - r.int(0, 364));
-        let age_years = if birth.is_none() { self.opt_f(0.3, 12.0, 80.0) } else { None };
+        let birth = self
+            .rng
+            .opt(0.4, |r| today - r.int(6, 85) * 365 - r.int(0, 364));
+        let age_years = if birth.is_none() {
+            self.opt_f(0.3, 12.0, 80.0)
+        } else {
+            None
+        };
         let km = if running { self.f(5.0, 80.0, 0.1) } else { 0.0 };
         let p = Profile {
             resistance_modality: modality,
@@ -1309,7 +1416,11 @@ impl Gen {
                 ProgressionCadence::WeekToWeek,
                 ProgressionCadence::MonthToMonth,
             ]),
-            lift_goal: self.rng.pick(&[LiftGoal::MaxStrength, LiftGoal::Power, LiftGoal::Hypertrophy]),
+            lift_goal: self.rng.pick(&[
+                LiftGoal::MaxStrength,
+                LiftGoal::Power,
+                LiftGoal::Hypertrophy,
+            ]),
             goal_distance: self.rng.pick(&[
                 GoalDistance::General,
                 GoalDistance::C25k,
@@ -1333,7 +1444,12 @@ impl Gen {
             high_load_block: self.rng.chance(0.1),
             health,
             environment: self.rng.opt(0.2, |r| {
-                r.pick(&[Environment::Heat, Environment::Altitude, Environment::Cold, Environment::Neutral])
+                r.pick(&[
+                    Environment::Heat,
+                    Environment::Altitude,
+                    Environment::Cold,
+                    Environment::Neutral,
+                ])
             }),
             env_temp_c: self.opt_f(0.15, -10.0, 40.0),
             env_altitude_m: self.opt_f(0.1, 0.0, 3500.0),
@@ -1372,7 +1488,15 @@ impl Gen {
                 rings: r.chance(0.3),
             }),
             specialization_muscle: self.rng.opt(0.15, |r| {
-                r.pick(&["chest", "glutes", "side_delts", "biceps", "", "unknown muscle"]).to_owned()
+                r.pick(&[
+                    "chest",
+                    "glutes",
+                    "side_delts",
+                    "biceps",
+                    "",
+                    "unknown muscle",
+                ])
+                .to_owned()
             }),
             runner_strength: self.rng.chance(0.2),
         };
@@ -1422,7 +1546,9 @@ impl Gen {
                 Event::ComputeCriticalSpeed { efforts }
             }
             _ => Event::ComputeApre {
-                scheme: self.rng.pick(&[ApreScheme::Apre3, ApreScheme::Apre6, ApreScheme::Apre10]),
+                scheme: self
+                    .rng
+                    .pick(&[ApreScheme::Apre3, ApreScheme::Apre6, ApreScheme::Apre10]),
                 reps: self.u8w(0, 15),
                 current_load_kg: self.f(20.0, 200.0, 0.15),
             },
@@ -1431,7 +1557,9 @@ impl Gen {
 }
 
 fn fit_fixture(name: &str) -> Vec<u8> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
     std::fs::read(&path).unwrap_or_else(|e| panic!("fixture {}: {e}", path.display()))
 }
 
@@ -1498,10 +1626,16 @@ walk_compound!(
 impl serde::ser::SerializeMap for &mut FloatWalk {
     type Ok = ();
     type Error = std::fmt::Error;
-    fn serialize_key<T: ?Sized + serde::Serialize>(&mut self, k: &T) -> Result<(), std::fmt::Error> {
+    fn serialize_key<T: ?Sized + serde::Serialize>(
+        &mut self,
+        k: &T,
+    ) -> Result<(), std::fmt::Error> {
         self.nested("{key}", k)
     }
-    fn serialize_value<T: ?Sized + serde::Serialize>(&mut self, v: &T) -> Result<(), std::fmt::Error> {
+    fn serialize_value<T: ?Sized + serde::Serialize>(
+        &mut self,
+        v: &T,
+    ) -> Result<(), std::fmt::Error> {
         self.nested("{}", v)
     }
     fn end(self) -> Result<(), std::fmt::Error> {
@@ -1581,7 +1715,12 @@ impl serde::Serializer for &mut FloatWalk {
     fn serialize_unit(self) -> Result<(), std::fmt::Error> {
         Ok(())
     }
-    fn serialize_unit_variant(self, _: &'static str, _: u32, _: &'static str) -> Result<(), std::fmt::Error> {
+    fn serialize_unit_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+    ) -> Result<(), std::fmt::Error> {
         Ok(())
     }
     fn serialize_newtype_struct<T: ?Sized + serde::Serialize>(
@@ -1645,7 +1784,8 @@ fn check_wire(vm: &ViewModel, json: &str) -> Result<(), String> {
     if !walk.bad.is_empty() {
         return Err(format!("non-finite floats in the view: {:?}", walk.bad));
     }
-    serde_json::from_str::<ViewModel>(json).map_err(|e| format!("view JSON does not decode: {e}"))?;
+    serde_json::from_str::<ViewModel>(json)
+        .map_err(|e| format!("view JSON does not decode: {e}"))?;
     Ok(())
 }
 
@@ -1725,7 +1865,10 @@ fn check_numbers(vm: &ViewModel) -> Result<(), String> {
             if let Some(kg) = it.load_kg
                 && kg < 0.0
             {
-                return Err(format!("{} prescribes {kg} kg on day {}", it.exercise, s.epoch_day));
+                return Err(format!(
+                    "{} prescribes {kg} kg on day {}",
+                    it.exercise, s.epoch_day
+                ));
             }
             if it.plates_per_side.iter().any(|p| *p <= 0.0) {
                 return Err(format!("{} plates {:?}", it.exercise, it.plates_per_side));
@@ -1777,19 +1920,29 @@ fn check_step(prev: &ViewModel, e: &Event, next: &ViewModel, model: &Model) -> R
         _ => dl == 0 && dr == 0 && da == 0,
     };
     if !ok {
-        return Err(format!("History counts moved by sets {dl:+} / runs {dr:+} / activities {da:+}"));
+        return Err(format!(
+            "History counts moved by sets {dl:+} / runs {dr:+} / activities {da:+}"
+        ));
     }
     // An amend replaces its row: the targeted id never appears more often.
     if let Event::AmendSet { entry_id, .. } = e {
         let n = |v: &ViewModel| v.lifts.iter().filter(|l| l.entry_id == *entry_id).count();
         if *entry_id != 0 && n(next) > n(prev) {
-            return Err(format!("AmendSet duplicated entry {entry_id}: {} → {}", n(prev), n(next)));
+            return Err(format!(
+                "AmendSet duplicated entry {entry_id}: {} → {}",
+                n(prev),
+                n(next)
+            ));
         }
     }
     if let Event::AmendRun { entry_id, .. } = e {
         let n = |v: &ViewModel| v.runs.iter().filter(|r| r.entry_id == *entry_id).count();
         if *entry_id != 0 && n(next) > n(prev) {
-            return Err(format!("AmendRun duplicated entry {entry_id}: {} → {}", n(prev), n(next)));
+            return Err(format!(
+                "AmendRun duplicated entry {entry_id}: {} → {}",
+                n(prev),
+                n(next)
+            ));
         }
     }
     // HARD RULE 3: a bare pain report, a below-neck illness or a cardiac red
@@ -1828,7 +1981,8 @@ fn fuzz_case(seed: u64, mode: Mode) -> Result<(), String> {
             let _ = app.update(e.clone(), &mut model);
             app.view(&model)
         }));
-        let next = step.map_err(|p| format!("event #{i} PANIC {}: {}", panic_text(&*p), short(e)))?;
+        let next =
+            step.map_err(|p| format!("event #{i} PANIC {}: {}", panic_text(&*p), short(e)))?;
         check_numbers(&next).map_err(|m| format!("after event #{i} {}: {m}", short(e)))?;
         // The JSON encode + decode costs as much as the view: sample it.
         if i % 4 == 3 || i + 1 == events.len() {
@@ -1855,15 +2009,20 @@ fn fuzz_case(seed: u64, mode: Mode) -> Result<(), String> {
         // is best-effort (within an ULP), so numbers compare to 1e-15; every
         // other field (ids, stamps, strings, enums, optionals) exactly.
         for (i, e) in events.iter().enumerate() {
-            let s = serde_json::to_string(e).map_err(|err| format!("event #{i} won't serialize: {err}"))?;
-            let back: Event = serde_json::from_str(&s)
-                .map_err(|err| format!("event #{i} wire form does not decode ({err}): {}", short(e)))?;
+            let s = serde_json::to_string(e)
+                .map_err(|err| format!("event #{i} won't serialize: {err}"))?;
+            let back: Event = serde_json::from_str(&s).map_err(|err| {
+                format!("event #{i} wire form does not decode ({err}): {}", short(e))
+            })?;
             let (va, vb) = (
                 serde_json::to_value(e).expect("event to value"),
                 serde_json::to_value(&back).expect("event to value"),
             );
             if let Some(d) = value_diff(&va, &vb, 1e-15) {
-                return Err(format!("event #{i} wire round-trip changed {d}: {}", short(e)));
+                return Err(format!(
+                    "event #{i} wire round-trip changed {d}: {}",
+                    short(e)
+                ));
             }
         }
     }
@@ -1882,7 +2041,11 @@ fn fuzz_case(seed: u64, mode: Mode) -> Result<(), String> {
     };
     let compacted = compact_event_log(events.clone());
     if compacted.len() > events.len() {
-        return Err(format!("compaction grew the log {} → {}", events.len(), compacted.len()));
+        return Err(format!(
+            "compaction grew the log {} → {}",
+            events.len(),
+            compacted.len()
+        ));
     }
     let replayed = replay_cold(compacted.clone())?;
     if replayed != final_json {
@@ -1909,9 +2072,16 @@ fn fuzz_case(seed: u64, mode: Mode) -> Result<(), String> {
 fn has_avg_hr(e: &Event) -> bool {
     matches!(
         e,
-        Event::LogRun { avg_hr_bpm: Some(_), .. }
-            | Event::LogRunTrack { avg_hr_bpm: Some(_), .. }
-            | Event::AmendRun { avg_hr_bpm: Some(_), .. }
+        Event::LogRun {
+            avg_hr_bpm: Some(_),
+            ..
+        } | Event::LogRunTrack {
+            avg_hr_bpm: Some(_),
+            ..
+        } | Event::AmendRun {
+            avg_hr_bpm: Some(_),
+            ..
+        }
     )
 }
 
@@ -1982,7 +2152,11 @@ fn restore_lift(v: &LiftResultView) -> Event {
 /// `HistoryDetail.kt::loggedHrPctMax`: a bpm entry sends 0 and lets the core
 /// derive the percentage again.
 fn logged_hr_pct(v: &RunResultView) -> f64 {
-    if v.avg_hr_bpm.is_some() { 0.0 } else { v.hr_pct_max }
+    if v.avg_hr_bpm.is_some() {
+        0.0
+    } else {
+        v.hr_pct_max
+    }
 }
 
 /// `restoreEventFor` for a run without a route.
@@ -2139,7 +2313,8 @@ fn without_run_fields(json: &str, id: u64, at: i64, fields: &[&str]) -> serde_js
     let mut v: serde_json::Value = serde_json::from_str(json).expect("view parses");
     if let Some(runs) = v.get_mut("runs").and_then(|r| r.as_array_mut()) {
         for r in runs {
-            let is_target = r["entry_id"].as_u64() == Some(id) && r["observed_at"].as_i64() == Some(at);
+            let is_target =
+                r["entry_id"].as_u64() == Some(id) && r["observed_at"].as_i64() == Some(at);
             if let (true, Some(m)) = (is_target, r.as_object_mut()) {
                 for k in fields {
                     m.remove(*k);
@@ -2158,7 +2333,13 @@ const SPIKE_CHIP: [&str; 4] = ["spike_flag", "spike_has_baseline", "spike_note",
 
 /// A GPS Undo rebuilds the route from the QC'd GPX by design, so the count
 /// of fixes QC dropped (not shown by the shell) comes back as 0.
-const SPIKE_CHIP_AND_QC: [&str; 5] = ["spike_flag", "spike_has_baseline", "spike_note", "summary", "qc_dropped"];
+const SPIKE_CHIP_AND_QC: [&str; 5] = [
+    "spike_flag",
+    "spike_has_baseline",
+    "spike_note",
+    "summary",
+    "qc_dropped",
+];
 
 /// Up to three delete → Undo rounds on random History rows (GPS runs only
 /// when `gps`, otherwise sets, hand-entered runs and activities): each must
@@ -2197,13 +2378,19 @@ fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
         let _ = app.update(delete_of(kind, id, at), &mut model);
         let mid = app.view(&model);
         if Row::count(kind, &mid) + 1 != Row::count(kind, &before) {
-            return Err(format!("round {round}: deleting {kind:?} {id}@{at} did not remove exactly one row"));
+            return Err(format!(
+                "round {round}: deleting {kind:?} {id}@{at} did not remove exactly one row"
+            ));
         }
         let _ = app.update(restore.clone(), &mut model);
         let after = app.view(&model);
         let after_json = vm_json(&after);
         // GPX carries 1e-7° (~1 cm): a 10 km route may move by ~1 m.
-        let (tol, masked): (f64, &[&str]) = if gps { (1e-4, &SPIKE_CHIP_AND_QC) } else { (0.0, &SPIKE_CHIP) };
+        let (tol, masked): (f64, &[&str]) = if gps {
+            (1e-4, &SPIKE_CHIP_AND_QC)
+        } else {
+            (0.0, &SPIKE_CHIP)
+        };
         let diff = value_diff(
             &without_run_fields(&before_json, id, at, masked),
             &without_run_fields(&after_json, id, at, masked),
@@ -2242,7 +2429,11 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
         }
         let row = rows.swap_remove(g.rng.below(rows.len() as u64) as usize);
         let new_at = |g: &mut Gen, at: i64| {
-            if g.rng.chance(0.3) { at - g.rng.int(1, 5) * DAY_SEC } else { at }
+            if g.rng.chance(0.3) {
+                at - g.rng.int(1, 5) * DAY_SEC
+            } else {
+                at
+            }
         };
         let (edit, undo) = match &row {
             Row::Lift(v) => {
@@ -2333,12 +2524,16 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
         let _ = app.update(edit.clone(), &mut model);
         let mid = app.view(&model);
         if Row::count(kind, &mid) != Row::count(kind, &before) {
-            return Err(format!("round {round}: the edit changed the row count: {}", short(&edit)));
+            return Err(format!(
+                "round {round}: the edit changed the row count: {}",
+                short(&edit)
+            ));
         }
         let shows_edit = match &edit {
-            Event::AmendSet { weight_kg, .. } => {
-                mid.lifts.iter().any(|l| l.entry_id == id && (l.weight_kg - weight_kg).abs() < 1e-9)
-            }
+            Event::AmendSet { weight_kg, .. } => mid
+                .lifts
+                .iter()
+                .any(|l| l.entry_id == id && (l.weight_kg - weight_kg).abs() < 1e-9),
             Event::AmendRun { distance_km, .. } => mid
                 .runs
                 .iter()
@@ -2346,7 +2541,10 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
             _ => true,
         };
         if !shows_edit {
-            return Err(format!("round {round}: the edit does not show in History: {}", short(&edit)));
+            return Err(format!(
+                "round {round}: the edit does not show in History: {}",
+                short(&edit)
+            ));
         }
         let _ = app.update(undo.clone(), &mut model);
         let after = app.view(&model);
@@ -2370,9 +2568,12 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
 
 #[test]
 fn delete_then_undo_restores_the_view() {
-    run_cases("delete_then_undo_restores_the_view", 0x554e_444f_0000_0004, 40, |seed| {
-        undo_delete_case(seed, false)
-    });
+    run_cases(
+        "delete_then_undo_restores_the_view",
+        0x554e_444f_0000_0004,
+        40,
+        |seed| undo_delete_case(seed, false),
+    );
 }
 
 #[test]
@@ -2387,7 +2588,12 @@ fn gps_run_delete_then_undo_via_gpx_restores_the_view() {
 
 #[test]
 fn edit_then_undo_restores_the_view() {
-    run_cases("edit_then_undo_restores_the_view", 0x4544_4954_0000_0006, 40, undo_edit_case);
+    run_cases(
+        "edit_then_undo_restores_the_view",
+        0x4544_4954_0000_0006,
+        40,
+        undo_edit_case,
+    );
 }
 
 // ── Mutated wire JSON ("NaN-like" values the JSON grammar can carry) ───────
@@ -2436,7 +2642,9 @@ fn mutate(rng: &mut Rng, v: &mut serde_json::Value) {
         return;
     }
     if r < 0.2 {
-        if let Some(serde_json::Value::Object(m)) = v.as_object_mut().and_then(|m| m.values_mut().next()) {
+        if let Some(serde_json::Value::Object(m)) =
+            v.as_object_mut().and_then(|m| m.values_mut().next())
+        {
             m.insert("zz_unknown_field".into(), json!(1));
         }
         return;
@@ -2480,8 +2688,20 @@ fn mutate_text(rng: &mut Rng, s: &str) -> String {
             // Replace the first number with a spelling JSON does not allow
             // (or one that overflows f64).
             let start = s.find(|c: char| c.is_ascii_digit()).unwrap_or(0);
-            let end = start + s[start..].find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(0);
-            let bad = rng.pick(&["1e999", "-1e999", "NaN", "Infinity", "-Infinity", "0x10", "1e-999", "01"]);
+            let end = start
+                + s[start..]
+                    .find(|c: char| !c.is_ascii_digit() && c != '.')
+                    .unwrap_or(0);
+            let bad = rng.pick(&[
+                "1e999",
+                "-1e999",
+                "NaN",
+                "Infinity",
+                "-Infinity",
+                "0x10",
+                "1e-999",
+                "01",
+            ]);
             format!("{}{bad}{}", &s[..start], &s[end..])
         }
         1 => s[..char_floor(s, rng.below(s.len() as u64) as usize)].to_owned(),
@@ -2519,7 +2739,8 @@ fn mutation_case(seed: u64) -> Result<(), String> {
         }))
         .map_err(|p| format!("mutated event #{j} PANIC {}: {text}", panic_text(&*p)))?;
         check_numbers(&vm).map_err(|m| format!("after mutated event #{j} {text}: {m}"))?;
-        check_wire_text(&vm, &vm_json(&vm)).map_err(|m| format!("after mutated event #{j} {text}: {m}"))?;
+        check_wire_text(&vm, &vm_json(&vm))
+            .map_err(|m| format!("after mutated event #{j} {text}: {m}"))?;
     }
     let _ = decoded_n;
     Ok(())
@@ -2527,7 +2748,12 @@ fn mutation_case(seed: u64) -> Result<(), String> {
 
 #[test]
 fn mutated_wire_json_never_breaks_the_core() {
-    run_cases("mutated_wire_json_never_breaks_the_core", 0x4a53_4f4e_0000_0007, 40, mutation_case);
+    run_cases(
+        "mutated_wire_json_never_breaks_the_core",
+        0x4a53_4f4e_0000_0007,
+        40,
+        mutation_case,
+    );
 }
 
 // ── Focused regressions for the bugs the fuzzers found ─────────────────────
@@ -2627,7 +2853,12 @@ fn a_negative_hr_percentage_never_reaches_the_run_card() {
 /// Delete a run row from History and send the shell's Undo; the row as
 /// shown (before, after).
 fn delete_and_undo_run(app: &Engine, model: &mut Model, id: u64) -> (RunResultView, RunResultView) {
-    let row = |vm: ViewModel| vm.runs.into_iter().find(|r| r.entry_id == id).expect("run row");
+    let row = |vm: ViewModel| {
+        vm.runs
+            .into_iter()
+            .find(|r| r.entry_id == id)
+            .expect("run row")
+    };
     let before = row(app.view(model));
     let _ = app.update(delete_of(EntryKind::Run, id, before.observed_at), model);
     let _ = app.update(restore_manual_run(&before), model);
@@ -2679,11 +2910,22 @@ fn undo_of_a_deleted_run_keeps_its_spike_chip() {
     );
     // Today's 20 km run first, then a 5 km run from two days ago logged late.
     let _ = app.update(log_run(20.0, 110.0, 70.0, 0.0, at, 11), &mut model);
-    let _ = app.update(log_run(5.0, 30.0, 70.0, 0.0, at - 2 * DAY_SEC, 12), &mut model);
+    let _ = app.update(
+        log_run(5.0, 30.0, 70.0, 0.0, at - 2 * DAY_SEC, 12),
+        &mut model,
+    );
     let (before, after) = delete_and_undo_run(&app, &mut model, 11);
     assert_eq!(
-        (before.spike_flag, before.spike_has_baseline, &before.spike_note),
-        (after.spike_flag, after.spike_has_baseline, &after.spike_note),
+        (
+            before.spike_flag,
+            before.spike_has_baseline,
+            &before.spike_note
+        ),
+        (
+            after.spike_flag,
+            after.spike_has_baseline,
+            &after.spike_note
+        ),
         "delete + Undo changed the run card's spike chip"
     );
 }
@@ -2696,7 +2938,11 @@ fn a_run_trimmed_to_its_standing_start_never_shows_negative_zero() {
     // auto-pause floor), then 3 m/s for 8 min.
     let mut points = Vec::new();
     for i in 0..120i64 {
-        let metres = if i < 20 { i as f64 } else { 20.0 + (i - 20) as f64 * 15.0 };
+        let metres = if i < 20 {
+            i as f64
+        } else {
+            20.0 + (i - 20) as f64 * 15.0
+        };
         points.push(GpsPoint {
             lat: 48.1 + metres / 111_000.0,
             lon: 11.5,
@@ -2708,7 +2954,11 @@ fn a_run_trimmed_to_its_standing_start_never_shows_negative_zero() {
     let mut model = Model::default();
     let _ = app.update(log_run_track(points, 0.0, 0.0, start, 21), &mut model);
     let moved = app.view(&model);
-    assert!(moved.runs[0].distance_km > 1.0, "the untrimmed run moved: {}", moved.runs[0].summary);
+    assert!(
+        moved.runs[0].distance_km > 1.0,
+        "the untrimmed run moved: {}",
+        moved.runs[0].summary
+    );
     let _ = app.update(trim(21, start, start, start + 19 * 5), &mut model);
     let r = &app.view(&model).runs[0];
     assert!(
