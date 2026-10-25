@@ -30,7 +30,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -54,7 +53,6 @@ import org.robolectric.Shadows.shadowOf
  * Everything runs the REAL core over JNI; the run-import batch rules are the
  * production [planRunImport] with the production [importedRunEvent] builder.
  */
-@Ignore("PARKED: written but never run (owner parked the work before the first gradle run); verify, then BUG-ignore real failures")
 @RunWith(RobolectricTestRunner::class)
 class ImportExportRoundtripTest {
 
@@ -258,10 +256,11 @@ class ImportExportRoundtripTest {
         val restored = freshInstallCore(QaHarness.strengthProfile()).let { send(reimported) }.runs.single()
         assertSameRun("GPX round trip", original, restored)
         assertTrue(restored.has_gpx)
-        assertEquals("pauses survive the round trip", 3, segmentCount(gpxOf(restored)))
+        val restoredGpx = gpxOf(restored)
+        assertEquals("pauses survive the round trip", 3, segmentCount(restoredGpx))
         // A second export → import cycle is a fixed point: nothing drifts.
         val again = freshInstallCore(QaHarness.strengthProfile())
-            .let { send(importedRunEvent(parseRunFileSegments(gpxOf(restored).toByteArray(), Core::parseFit).single(), null)) }
+            .let { send(importedRunEvent(parseRunFileSegments(restoredGpx.toByteArray(), Core::parseFit).single(), null)) }
             .runs.single()
         assertSameRun("second round trip", restored, again)
     }

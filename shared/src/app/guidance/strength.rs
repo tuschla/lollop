@@ -72,19 +72,20 @@ fn push_loading_rows(
         None => "never to failure; stop before bar speed drops".to_string(),
         Some((lo, hi)) => format!("~{} reps left", fmt_u8_range(lo, hi)),
     };
-    // A single "0–95% 1RM" band tells nobody what to load. The Power band is an
-    // ENVELOPE across exercise types (strength-002/030; STR-POWER-SELECT-001),
-    // so state it per exercise type in plain words.
+    // A single "0–95% 1RM" band tells nobody what weight to use. The Power band
+    // is an ENVELOPE across exercise types (strength-002/030;
+    // STR-POWER-SELECT-001), so state it per exercise type in plain words.
+    // The heading says "weights", never "loading" (the bar carries weight).
     let loading = if p.lift_goal == LiftGoal::Power {
         format!(
-            "Power loading: jumps at bodyweight up to about 30% 1RM, loaded squats 30–70%, cleans and pulls 70–95% 1RM. {} fast reps, {} sets, never to failure",
+            "Weights for power: jumps at bodyweight up to about 30% 1RM, weighted squats 30–70%, cleans and pulls 70–95% 1RM. {} fast reps, {} sets, never to failure",
             fmt_u8_range(lr.value.reps.0, lr.value.reps.1),
             fmt_u8_range(lr.value.sets.0, lr.value.sets.1)
         )
     } else {
         format!(
-            "{} loading: {}% 1RM, {} reps, {} sets, {}",
-            lift_goal_label(p.lift_goal),
+            "Weights for {}: {}% 1RM, {} reps, {} sets, {}",
+            lift_goal_label(p.lift_goal).to_lowercase(),
             fmt_u8_range(lr.value.pct_1rm.0, lr.value.pct_1rm.1),
             fmt_u8_range(lr.value.reps.0, lr.value.reps.1),
             fmt_u8_range(lr.value.sets.0, lr.value.sets.1),

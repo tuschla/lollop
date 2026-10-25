@@ -29,6 +29,7 @@ fn run(distance_km: f64) -> Event {
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: None,
+        utc_offset_sec: None,
     }
 }
 
@@ -507,7 +508,7 @@ fn unmatched_remove_readiness_is_dropped_alone() {
 
 #[test]
 fn replay_equivalence_preserves_run_spike_baseline() {
-    // A run's longest_recent_km is derived from prior runs at update time;
+    // A run's card spike baseline is derived from the runs around it;
     // compaction across a ClearRuns must not perturb the surviving runs'
     // spike baseline.
     assert_replay_equivalent(vec![
@@ -620,8 +621,7 @@ fn checkin(observed_at: i64) -> Event {
     })
 }
 
-/// A resting-HR-ONLY check-in (no wellness items): exercises the RestingHr
-/// channel in isolation for the per-channel Rule 4 window.
+/// A resting-HR-ONLY check-in (no wellness items).
 fn checkin_rhr(observed_at: i64, rhr: f64) -> Event {
     Event::SubmitCheckin(crate::schema::CheckinInput {
         observed_at,
@@ -631,36 +631,6 @@ fn checkin_rhr(observed_at: i64, rhr: f64) -> Event {
         fatigue: None,
         stress: None,
         resting_hr_bpm: Some(rhr),
-        hrv_rmssd_ms: None,
-    })
-}
-
-/// A sleep-ONLY check-in (no resting-HR/HRV): the wellness channel in
-/// isolation for the per-channel Rule 4 window.
-fn checkin_sleep(observed_at: i64, sleep: u8) -> Event {
-    Event::SubmitCheckin(crate::schema::CheckinInput {
-        observed_at,
-        sleep_quality: Some(sleep),
-        soreness: None,
-        mood: None,
-        fatigue: None,
-        stress: None,
-        resting_hr_bpm: None,
-        hrv_rmssd_ms: None,
-    })
-}
-
-/// A soreness-ONLY check-in (no sleep/mood/HR): drives the endpoint bridge's
-/// recency gate for the Rule 4 replay-equivalence guard.
-fn checkin_sore(observed_at: i64, sore: u8) -> Event {
-    Event::SubmitCheckin(crate::schema::CheckinInput {
-        observed_at,
-        sleep_quality: None,
-        soreness: Some(sore),
-        mood: None,
-        fatigue: None,
-        stress: None,
-        resting_hr_bpm: None,
         hrv_rmssd_ms: None,
     })
 }
@@ -678,10 +648,8 @@ fn clear_checkins_only_touches_its_own_family() {
 }
 
 #[test]
-fn rule4_anchors_on_the_newest_surviving_checkin_not_a_cleared_one() {
-    // A ClearCheckins wipes the pre-clear history (Rule 1); Rule 4 then
-    // anchors on the post-clear check-in, so a lone recent check-in after a
-    // clear is never mistaken for "stale" against a wiped older reference.
+fn a_clear_sweeps_only_the_checkins_before_it() {
+    // Rule 1 is the only check-in reducer compaction applies.
     let out = compact_event_log(vec![
         checkin(0),
         checkin(DAY_SEC),
@@ -692,107 +660,43 @@ fn rule4_anchors_on_the_newest_surviving_checkin_not_a_cleared_one() {
 }
 
 #[test]
-fn replay_equivalence_drops_stale_checkins() {
-    // A full baseline week on days 0..=6, then a fresh burst on days 60..=66.
-    // The old week is >45 days before the newest check-in, so Rule 4 drops it
-    // and since derive_readiness only reads the trailing 30 days, the
-    // replayed view is identical before and after compaction.
+fn checkins_are_never_windowed() {
+    // An old baseline week, a sparse resting-HR week and a fresh burst two
+    // months later: every check-in survives, however old.
     let mut events = Vec::new();
-    for d in 0..7 {
+    for d in 0..8 {
         events.push(checkin(d * DAY_SEC));
+        events.push(checkin_rhr(d * DAY_SEC + 3600, 50.0 + d as f64));
     }
+    events.push(set_today(70));
     for d in 60..67 {
         events.push(checkin(d * DAY_SEC));
     }
-    let compacted = compact_event_log(events.clone());
-    assert!(
-        compacted.len() < events.len(),
-        "the stale week must be dropped"
-    );
+    assert_eq!(compact_event_log(events.clone()), events);
     assert_replay_equivalent(events);
 }
 
 #[test]
-fn rule4_per_channel_window_keeps_a_sparse_channel_alive() {
-    // Replay-equivalence guard. `derive_readiness` windows EACH channel on
-    // ITS OWN newest reading (per_day_series), not the log's global newest.
-    // Eight resting-HR-ONLY check-ins on days 0..=7 build a full RHR baseline
-    // (>= MIN_BASELINE_CHECKINS), then sleep-ONLY check-ins on days 60..=63
-    // carry NO resting-HR. Anchoring Rule 4 on the GLOBAL newest (day 63)
-    // would drop the whole RHR week (>45 days back) and silently vanish the
-    // RestingHr readiness row on the next launch. The per-channel anchor
-    // (min channel newest = day 7 for RHR) keeps them, so replay is identical.
-    let mut events = Vec::new();
+fn a_clock_moved_back_after_a_launch_still_reads_the_old_checkins() {
+    // The shell compacts on launch and keeps appending. A launch on day 70
+    // (old week on days 0..=7, fresh burst on days 60..=66), then the clock
+    // moves back to day 6: the old week is the newest reading on or before
+    // today again, so the view reads it. A check-in window anchored on the
+    // launch-time readings dropped it and rendered another baseline.
+    // (The shape of fuzz seeds 0xb184bb3cf2143208 / 0x7cd3a85e3770ff5e.)
+    let mut launch = Vec::new();
     for d in 0..8 {
-        events.push(checkin_rhr(d * DAY_SEC, 50.0 + d as f64));
+        launch.push(checkin(d * DAY_SEC));
     }
-    for d in 60..64 {
-        events.push(checkin_sleep(d * DAY_SEC, 3));
+    launch.push(set_today(70));
+    for d in 60..67 {
+        launch.push(checkin(d * DAY_SEC));
     }
-    let out = compact_event_log(events.clone());
-    let rhr_kept = out
-        .iter()
-        .filter(|e| matches!(e, Event::SubmitCheckin(c) if c.resting_hr_bpm.is_some()))
-        .count();
-    assert_eq!(
-        rhr_kept, 8,
-        "all 8 resting-HR check-ins must survive - their channel still reads them"
-    );
-    // The full stream really does derive a RestingHr input (else the guard is
-    // vacuous); compaction must not change the rendered view.
-    assert_replay_equivalent(events);
-}
-
-#[test]
-fn rule4_stale_soreness_bridge_is_replay_equivalent() {
-    // Regression guard. A maxed-sore morning (day 1) followed only by sleep-only
-    // check-ins on days 47..=61 folds into the "wellness" retention channel,
-    // whose newest (day 61) pushes the Rule 4 cutoff (day 16) past the sore
-    // reading → compaction evicts it. The soreness endpoint bridge is
-    // recency-gated (SORENESS_RECENCY_DAYS), so the 60-day-old reading never
-    // fires in the FULL log either; compacted and uncompacted logs replay to
-    // the identical view. Pre-fix the ungated bridge fired only on the full
-    // log (soreness series anchored on its OWN newest), so the views diverged
-    // and this assertion failed.
-    let mut events = vec![checkin_sore(DAY_SEC, 5)];
-    for d in 47..=61 {
-        events.push(checkin_sleep(d * DAY_SEC, 3));
-    }
-    // The sore line really is evicted by compaction (else the guard is
-    // vacuous): its only channel anchor is the day-61 wellness newest.
-    let out = compact_event_log(events.clone());
-    let sore_kept = out
-        .iter()
-        .filter(|e| matches!(e, Event::SubmitCheckin(c) if c.soreness.is_some()))
-        .count();
-    assert_eq!(
-        sore_kept, 0,
-        "the stale soreness line is out of Rule 4's window"
-    );
-    assert_replay_equivalent(events);
-}
-
-#[test]
-fn rule4_stale_hrv_verdict_is_replay_equivalent() {
-    // Mirrors the soreness-bridge guard for the HRV recency gate. A matured
-    // HRV baseline (22 daily readings) followed only by sleep-only check-ins
-    // on days 22..=31 leaves the newest HRV reading more than HRV_RECENCY_DAYS
-    // behind the newest check-in, so the rolling verdict expires in the FULL
-    // log. Compaction retains or evicts the HRV lines by their own channel
-    // anchor; either way the compacted and uncompacted logs must replay to the
-    // identical view.
-    let mut events = Vec::new();
-    for d in 0..22 {
-        events.push(Event::SubmitCheckin(crate::schema::CheckinInput {
-            observed_at: d * DAY_SEC,
-            hrv_rmssd_ms: Some(40.0),
-            ..Default::default()
-        }));
-    }
-    for d in 22..=31 {
-        events.push(checkin_sleep(d * DAY_SEC, 3));
-    }
-    assert_replay_equivalent(events);
+    let later = [set_today(6)];
+    let full: Vec<Event> = launch.iter().cloned().chain(later.clone()).collect();
+    let mut resumed = compact_event_log(launch);
+    resumed.extend(later);
+    assert_eq!(replay(&full), replay(&resumed));
 }
 
 #[test]
@@ -841,9 +745,36 @@ fn session_moves_survive_keep_first_and_clear_with_the_plan() {
     // GeneratePlan is dropped.
     let out = compact_event_log(vec![generate_plan(1), mv(1, 2), generate_plan(8), mv(2, 3)]);
     assert_eq!(out, vec![generate_plan(1), mv(1, 2), mv(2, 3)]);
-    // ClearPlan sweeps the moves with the plan (update clears them too).
+    // ClearPlan sweeps the moves with the plan (update clears them too); the
+    // ClearPlan itself stays as the final plan state.
     let out = compact_event_log(vec![generate_plan(1), mv(1, 2), Event::ClearPlan]);
-    assert!(out.is_empty(), "{out:?}");
+    assert_eq!(out, vec![Event::ClearPlan]);
+}
+
+#[test]
+fn a_final_clear_plan_is_kept_and_a_superseded_one_dropped() {
+    // The last ClearPlan is the durable "plan removed" record while no
+    // GeneratePlan follows it; earlier clears go with the plan they cleared.
+    let out = compact_event_log(vec![
+        generate_plan(1),
+        Event::ClearPlan,
+        generate_plan(2),
+        Event::ClearPlan,
+    ]);
+    assert_eq!(out, vec![Event::ClearPlan]);
+    // A fixed point: compacting the kept clear again keeps it.
+    assert_eq!(compact_event_log(out), vec![Event::ClearPlan]);
+    // A later GeneratePlan supersedes it (the plan is back).
+    let out = compact_event_log(vec![generate_plan(1), Event::ClearPlan, generate_plan(3)]);
+    assert_eq!(out, vec![generate_plan(3)]);
+    // Replay-equivalent with and without surrounding lines.
+    assert_replay_equivalent(vec![
+        profile(12),
+        generate_plan(1),
+        set_today(2),
+        Event::ClearPlan,
+        set_today(3),
+    ]);
 }
 
 #[test]
@@ -912,6 +843,7 @@ fn run_id(distance_km: f64, id: u64, observed_at: i64) -> Event {
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: None,
+        utc_offset_sec: None,
     }
 }
 
@@ -1244,6 +1176,7 @@ fn run_track_id(id: u64, observed_at: i64) -> Event {
         session_rpe: None,
         segment_starts: Vec::new(),
         avg_hr_bpm: None,
+        utc_offset_sec: None,
     }
 }
 
@@ -1275,13 +1208,11 @@ fn trim_lines_survive_compaction_alongside_the_base_log() {
 
 #[test]
 fn delete_of_a_trimmed_run_replays_to_nothing() {
-    // A DeleteEntry cancels the base LogRunTrack AND its trims on replay. The
-    // trims between the base and the delete are the delete's OWN removal chain,
-    // so they are skipped by the spike-baseline guard: the delete's chain-walk
-    // now drops base + trims + delete entirely. This pins the delete chain-walk:
-    // without walking THROUGH the trims to the base log, compaction would drop
-    // the delete+trim while resurrecting the untrimmed base, and replay would
-    // diverge (a run would reappear).
+    // A DeleteEntry cancels the base LogRunTrack AND its trims on replay, so the
+    // delete's chain-walk drops base + trims + delete entirely. This pins the
+    // delete chain-walk: without walking THROUGH the trims to the base log,
+    // compaction would drop the delete+trim while resurrecting the untrimmed
+    // base, and replay would diverge (a run would reappear).
     assert!(
         compact_event_log(vec![
             run_track_id(7_200_002, 0),
@@ -1319,18 +1250,18 @@ fn clear_runs_wipes_a_base_and_its_trims() {
 }
 
 #[test]
-fn trim_counts_as_a_run_line_for_the_spike_guard() {
-    // Another run's trim sitting between a run and that run's delete is a run
-    // line for the baseline-bake guard: it is NOT in the deleted run's removal
-    // chain (it belongs to a DIFFERENT run, 7_200_006), so it is not skipped
-    // and the delete's pair-drop is held back — kept lines, replay-equivalent
-    // either way.
-    assert_replay_equivalent(vec![
+fn a_run_delete_drops_its_pair_across_other_run_lines() {
+    // No run carries another's distance (the card spike baseline is derived from
+    // the surviving runs), so another run's log and trim between a run and its
+    // delete no longer hold the pair back.
+    let events = vec![
         run_track_id(7_200_005, 0),
         run_id(5.0, 7_200_006, DAY_SEC),
         trim_run(7_200_006, DAY_SEC, 100, 300),
         del_run(7_200_005),
-    ]);
+    ];
+    assert_eq!(compact_event_log(events.clone()), events[1..3].to_vec());
+    assert_replay_equivalent(events);
 }
 
 #[test]

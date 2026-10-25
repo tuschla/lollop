@@ -394,6 +394,9 @@
     <!-- Date range of an import file's entries, e.g. "Oct 2 – Oct 14". -->
     <string name="main_import_date_range">%1$s – %2$s</string>
     <string name="main_restoring_data">Restoring your data…</string>
+    <!-- Boot found the native coaching core unusable (library missing, or every call failing). -->
+    <string name="main_core_unavailable_title">lollop can\'t start on this phone</string>
+    <string name="main_core_unavailable_message">The app\'s coaching engine didn\'t load, so your training can\'t be shown right now. Nothing was changed or deleted. Export your data to keep a copy before you update or reinstall lollop.</string>
     <plurals name="main_restored_entries">
         <item quantity="one">Restored %d entry</item>
         <item quantity="other">Restored %d entries</item>

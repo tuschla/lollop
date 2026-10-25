@@ -8,7 +8,8 @@ use super::*;
 /// load in the separate session-RPE series ([`build_srpe_load`],
 /// LOAD-SRPE-001), which is not interchangeable with HR load and is never
 /// summed into this chain. Time enters only via each event's `observed_at`
-/// (no clock in the core).
+/// and the shell-supplied local today the chain runs through (no clock in the
+/// core).
 pub(in crate::app) fn build_training_load(
     model: &Model,
     facts: &RunFacts,
@@ -22,7 +23,9 @@ pub(in crate::app) fn build_training_load(
     // day into the future, sliding the whole MAX_LOAD_DAYS window off the real
     // history so CTL/ATL/TSB reflect only that phantom run. Drop it here.
     let cutoff = end_of_local_today_sec(model);
-    for (r, &minutes) in model.runs.iter().zip(&facts.minutes) {
+    // Chronological (`RunFacts::chrono`): a day's TRIMP is a float sum.
+    for &i in &facts.chrono {
+        let (r, minutes) = (&model.runs[i], facts.minutes[i]);
         if r.observed_at <= 0
             || r.hr_pct_max <= 0.0
             || minutes <= 0.0
@@ -36,8 +39,10 @@ pub(in crate::app) fn build_training_load(
             crate::schema::ThreeZone::Z2 => [0.0, minutes, 0.0],
             crate::schema::ThreeZone::Z3 => [0.0, 0.0, minutes],
         };
+        // The run's load lands on the local day it STARTED, the day plan
+        // completion credits and its card names.
         *daily
-            .entry(local_day(r.observed_at, model.today_utc_offset_sec))
+            .entry(local_day(facts.started[i], model.today_utc_offset_sec))
             .or_insert(0.0) += load::lucia_trimp(zone_minutes);
         counted += 1;
     }
@@ -53,17 +58,24 @@ pub(in crate::app) fn build_training_load(
 
     let (&first, _) = daily.first_key_value()?;
     let (&last, _) = daily.last_key_value()?;
+    // The chain runs through local TODAY, not the last run day: CTL/ATL are
+    // EWMAs of DAILY load and a rest day is a day of zero load (File 07), so
+    // fitness and fatigue decay while you rest. The card carries no "as of"
+    // date, so its figures must be today's. No shell "today" → the last run day
+    // (no clock in the core). `max` keeps a run bucketed on a later local day
+    // than today (offset change) inside the chain.
+    let end = model.today_epoch_day.map_or(last, |t| t.max(last));
     // Bound the daily chain to the most recent MAX_LOAD_DAYS (see the constant):
     // the EWMAs have long converged by then, and this caps the loop so a corrupt
     // or mis-unit'd `observed_at` can never spin `view()` into an unbounded loop.
-    let start = first.max(last - (MAX_LOAD_DAYS - 1));
+    let start = first.max(end.saturating_sub(MAX_LOAD_DAYS - 1));
     let (mut ctl, mut atl) = (0.0_f64, 0.0_f64);
-    for day in start..=last {
+    for day in start..=end {
         let l = daily.get(&day).copied().unwrap_or(0.0);
         ctl = load::ctl(ctl, l);
         atl = load::atl(atl, l);
     }
-    let span_days = last - start + 1;
+    let span_days = end - start + 1;
     let tsb = load::tsb(ctl, atl);
     let round1 = |x: f64| (x * 10.0).round() / 10.0;
     let g = graded((), claims::LOAD_PMC_001);

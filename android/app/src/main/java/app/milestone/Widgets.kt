@@ -58,6 +58,9 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.layout.AlignmentLine
+import androidx.compose.ui.layout.FirstBaseline
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
@@ -77,6 +80,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Constraints
 import java.util.Locale
 
 // --- Selectable-control vocabulary (one look for every "pick one" control) ---
@@ -387,8 +391,10 @@ fun <T> SegmentedEnumRow(
  * quiet heading over its control and a long question ("Hard sessions you couldn't
  * finish") reads as a sentence rather than a shouted overline. An optional
  * right-aligned live value / unit hint (e.g. `Reps … 5`, `Weight … kg`) sits on the
- * label's first baseline; a long label wraps within its own column and always
- * keeps a Space.Md gap to it. [heading] marks a sub-question as a heading for
+ * label's first baseline, a Space.Md gap away, while the label's longest word
+ * still fits beside it (a long label wraps within its own column); otherwise (a
+ * long hint, a large font) the hint wraps onto its own line under the label, so
+ * the label never breaks inside a word. [heading] marks a sub-question as a heading for
  * TalkBack's heading navigation (setup steps); plain field labels leave it off.
  * [onTrailing] turns the trailing hint into a quiet in-place action (a unit swap
  * such as "bpm ⇄"): Bold `Accent`, spoken as [trailingDescription], with a 48dp
@@ -405,27 +411,20 @@ fun FieldLabel(
     onTrailing: (() -> Unit)? = null,
     trailingDescription: String? = null,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
-    ) {
+    val labelText: @Composable () -> Unit = {
         Text(
             label,
             color = OnBgMuted,
             style = Type.Body.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier
-                .weight(1f)
-                .alignByBaseline()
-                .then(if (heading) Modifier.semantics { heading() } else Modifier),
+            modifier = if (heading) Modifier.semantics { heading() } else Modifier,
         )
+    }
+    val hint: @Composable () -> Unit = {
         if (trailing != null && onTrailing != null) {
             // Padded (and shifted back by the same amount, so the label stays flush
             // right) so the target is at least ~48dp wide; the overlay adds the
             // 48dp height without growing the label row.
-            Box(
-                Modifier.alignByBaseline().offset(x = Space.Sm.dp),
-                contentAlignment = Alignment.Center,
-            ) {
+            Box(Modifier.offset(x = Space.Sm.dp), contentAlignment = Alignment.Center) {
                 Text(
                     trailing,
                     color = Accent,
@@ -445,12 +444,44 @@ fun FieldLabel(
                 )
             }
         } else if (trailing != null) {
-            Text(
-                trailing,
-                color = OnBgFaint,
-                style = Type.Caption.merge(TabularFigures),
-                modifier = Modifier.alignByBaseline(),
-            )
+            Text(trailing, color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
+        }
+    }
+    Layout(contents = listOf(labelText, hint), modifier = Modifier.fillMaxWidth()) { (labelM, hintM), constraints ->
+        val width = constraints.maxWidth
+        val gap = Space.Md.dp.roundToPx()
+        val loose = Constraints(maxWidth = width)
+        val labelMeasurable = labelM.single()
+        val hintMeasurable = hintM.singleOrNull()
+        val hintWidth = hintMeasurable?.maxIntrinsicWidth(Constraints.Infinity) ?: 0
+        // Side by side only while the label's longest word still fits beside the
+        // whole hint; a narrower column would break the label inside a word.
+        val beside = hintMeasurable != null &&
+            labelMeasurable.minIntrinsicWidth(Constraints.Infinity) + gap + hintWidth <= width
+        if (hintMeasurable == null) {
+            val l = labelMeasurable.measure(loose)
+            layout(width, l.height) { l.placeRelative(0, 0) }
+        } else if (beside) {
+            val h = hintMeasurable.measure(loose)
+            val l = labelMeasurable.measure(Constraints(maxWidth = width - gap - h.width))
+            // Both on the label's first baseline.
+            val lBase = l[FirstBaseline].takeIf { it != AlignmentLine.Unspecified } ?: 0
+            val hBase = h[FirstBaseline].takeIf { it != AlignmentLine.Unspecified } ?: 0
+            val base = maxOf(lBase, hBase)
+            val lY = base - lBase
+            val hY = base - hBase
+            // placeRelative: the label at the start, the hint at the end (mirrored in RTL).
+            layout(width, maxOf(lY + l.height, hY + h.height)) {
+                l.placeRelative(0, lY)
+                h.placeRelative(width - h.width, hY)
+            }
+        } else {
+            val l = labelMeasurable.measure(loose)
+            val h = hintMeasurable.measure(loose)
+            layout(width, l.height + h.height) {
+                l.placeRelative(0, 0)
+                h.placeRelative(width - h.width, l.height)
+            }
         }
     }
 }

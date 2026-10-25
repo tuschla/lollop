@@ -514,8 +514,8 @@ pub(super) fn apply_run_targets(
         SessionType::Run(k) => Some(k),
         _ => None,
     };
-    let profile = profile_for_day(model, epoch_day).or(model.profile.as_ref());
-    let hr = hr_anchor(profile);
+    let day_profile = profile_for_day(model, epoch_day);
+    let hr = hr_anchor(day_profile.as_deref().or(model.profile.as_ref()));
     for (rx, it) in s.prescriptions.iter().zip(items.iter_mut()) {
         let Prescription::Run(r) = &rx.value else {
             continue;

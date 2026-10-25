@@ -262,9 +262,14 @@ impl PastReadiness {
         Self(
             (week_monday..today)
                 .map(|day| {
-                    let dp = profile_for_day(model, day).unwrap_or(profile);
-                    let picture = readiness_picture(model, days, Some(dp), Some(day));
-                    (day, picture.adjustments(model))
+                    let dp = profile_for_day(model, day);
+                    let picture = readiness_picture(
+                        model,
+                        days,
+                        Some(dp.as_deref().unwrap_or(profile)),
+                        Some(day),
+                    );
+                    (day, picture.adjustments(model, days))
                 })
                 .collect(),
         )
@@ -563,12 +568,12 @@ pub(in crate::app) fn restate_basis_load(it: &mut PrescriptionView, weight_lb: b
         .replacen(&at, &format!("{at} planned, {today}"), 1);
 }
 
-/// `ReduceLoadPct`: the load is already cut by the fold; annotate the affected
-/// items and re-render their label off the folded numbers.
+/// `ReduceLoadPct`: the weight is already cut by the fold; annotate the
+/// affected items and re-render their label off the folded numbers.
 fn note_load_cut(items: &mut [PrescriptionView], pct: f32, weight_lb: bool) -> bool {
     for it in items.iter_mut() {
         if !it.is_run() && it.load_kg.is_some() {
-            it.adjusted_note = format!("load −{pct:.0}% today");
+            it.adjusted_note = format!("−{pct:.0}% weight today");
             resync_intensity(it, weight_lb);
         }
     }

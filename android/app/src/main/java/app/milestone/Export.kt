@@ -82,11 +82,25 @@ private fun writeGpxToCache(ctx: Context, gpx: String, runStartEpochSec: Long): 
 // res/xml/backup_rules.xml) so the user moves it deliberately.
 // ---------------------------------------------------------------------------
 
-/** Cap on an import candidate: a real (decimated) log is kilobytes-to-a-few-MiB, so
- *  anything past this is not one of ours. The reader STREAMS within this bound
- *  (never materializing the whole file), so this is a sanity limit, not the memory
- *  ceiling. */
-internal const val MAX_IMPORT_BYTES = 8L * 1024 * 1024
+/** Cap on a whole import candidate, from what the app really writes. A backup is
+ *  the compacted log, and every GPS run is one LogRunTrack line of up to
+ *  [TRACK_DECIMATION_CAP] fixes: one year of a hybrid athlete recording at the
+ *  tracker's screen-off cadence (1 fix / 4 s) exports to about 11.7 MiB (146 GPS
+ *  runs, PersistenceTortureTest.aOneYearBackupWithGpsRunsIsImportable), five years
+ *  to about 50 MiB. 256 MiB is two decades of that, so any backup the app produced
+ *  re-imports, while a pick past it is not one of ours. The reader STREAMS within
+ *  this bound, and a non-log file fails on its first line ([MAX_IMPORT_LINE_BYTES]
+ *  bounds a newline-less one), so this is a sanity limit; the valid lines are then
+ *  held whole, as boot holds the log. */
+internal const val MAX_IMPORT_BYTES = 256L * 1024 * 1024
+
+/** Cap on one import line. The longest line the app writes is a LogRunTrack: at
+ *  most [TRACK_DECIMATION_CAP] fixes (plus kept pause boundaries) of at most ~140
+ *  wire bytes each (four full-precision numbers and their keys), so under 1 MiB.
+ *  16 MiB leaves room for an undecimated track from an older build; a longer
+ *  "line" (a newline-less binary pick) is refused before it can fill the line
+ *  buffer. */
+internal const val MAX_IMPORT_LINE_BYTES = 16L * 1024 * 1024
 
 private fun eventLogFile(ctx: Context) = File(ctx.filesDir, "event-log.ndjson")
 
@@ -102,12 +116,22 @@ fun dataExportFilename(): String =
 /** Write the compacted event log to the user-chosen document uri; true only when
  *  every line was written. The log is read with the read-only [EventLog.read]
  *  inside an exclusive dispatcher turn, so no append interleaves with the read and
- *  the export never rewrites the live log. */
+ *  the export never rewrites the live log.
+ *
+ *  A removed plan ([KEY_PLAN_CLEARED]) is normally the log's own final `ClearPlan`
+ *  line, which compaction keeps ([RestoredLog.planRemoved]). A log rewritten by an
+ *  older build dropped it with the plan it cleared, so the backup ends with a
+ *  `ClearPlan` line when the log holds no plan line: restoring it
+ *  ([replaceEventLog]) then keeps the plan removed instead of generating one. */
 suspend fun exportDataTo(ctx: Context, uri: Uri): Boolean {
     val lines = runCatching {
         var read = emptyList<String>()
         EventDispatcher.exclusive {
-            read = withContext(Dispatchers.IO) { EventLog.read(eventLogFile(ctx)).lines }
+            read = withContext(Dispatchers.IO) {
+                val log = EventLog.read(eventLogFile(ctx)).lines
+                val planRemoved = ctx.setupPrefs().getBoolean(KEY_PLAN_CLEARED, false)
+                if (planRemoved && lastPlanEvent(log) == null) log + CLEAR_PLAN_LINE else log
+            }
             null
         }
         read
@@ -133,6 +157,18 @@ suspend fun exportDataTo(ctx: Context, uri: Uri): Boolean {
     }
 }
 
+/** [Event.ClearPlan] as a log line. */
+private val CLEAR_PLAN_LINE = Event.ClearPlan.toJson().toString()
+
+/** The variant of the last `GeneratePlan` / `ClearPlan` line in [lines], or null
+ *  when there is none: "ClearPlan" means the log ends with the plan removed. */
+internal fun lastPlanEvent(lines: List<String>): String? =
+    lines.asReversed().firstNotNullOfOrNull { line ->
+        // Substring pre-check so the scan never JSON-parses a large track line.
+        if ("GeneratePlan" !in line && "ClearPlan" !in line) return@firstNotNullOfOrNull null
+        EventLog.variantOf(line)?.takeIf { it == "GeneratePlan" || it == "ClearPlan" }
+    }
+
 /** Outcome of reading + validating an import candidate before it can replace the log. */
 sealed interface ImportCheck {
     data class Valid(val lines: List<String>) : ImportCheck
@@ -142,17 +178,18 @@ sealed interface ImportCheck {
 /**
  * Stream [input] line by line, validating each non-blank line's variant as it is
  * read and returning the survivors, or [ImportCheck.Invalid] on the first
- * unknown-variant / non-JSON line OR once the running byte count crosses [max].
+ * unknown-variant / non-JSON line, a line longer than [maxLine], OR once the
+ * running byte count crosses [max].
  *
- * Peak memory stays one buffered line plus the accumulated valid lines (a real log
- * is kilobytes): the whole file is NEVER materialized, so a mistaken large non-log
- * pick fails gracefully instead of transiently holding ~3× its size and OOM-ing.
- * A content provider may report an unknown size (statSize
+ * Peak memory stays one buffered line (at most [maxLine]) plus the accumulated
+ * valid lines: the whole file is NEVER materialized as bytes, so a mistaken large
+ * non-log pick fails gracefully instead of transiently holding ~3× its size and
+ * OOM-ing. A content provider may report an unknown size (statSize
  * == -1), so the running byte bound — not a declared-size pre-check — is what stops
  * an oversized or endless stream; a binary file trips the variant check on its first
- * garbage line, well before [max].
+ * garbage line (or the line cap), well before [max].
  */
-internal fun streamValidateImport(input: InputStream, max: Long): ImportCheck {
+internal fun streamValidateImport(input: InputStream, max: Long, maxLine: Long = MAX_IMPORT_LINE_BYTES): ImportCheck {
     val lines = ArrayList<String>()
     val lineBuf = ByteArrayOutputStream()
     val buf = ByteArray(64 * 1024)
@@ -173,11 +210,13 @@ internal fun streamValidateImport(input: InputStream, max: Long): ImportCheck {
         var start = 0
         for (i in 0 until n) {
             if (buf[i] == '\n'.code.toByte()) {
+                if (lineBuf.size() + (i - start) > maxLine) return ImportCheck.Invalid
                 lineBuf.write(buf, start, i - start)
                 if (!flushLine()) return ImportCheck.Invalid
                 start = i + 1
             }
         }
+        if (lineBuf.size() + (n - start) > maxLine) return ImportCheck.Invalid
         if (start < n) lineBuf.write(buf, start, n - start)
     }
     if (!flushLine()) return ImportCheck.Invalid
@@ -235,10 +274,16 @@ enum class DataImportResult { Replaced, RunInProgress, Failed }
  * Runs as ONE exclusive dispatcher turn, non-cancellable, with the core's log
  * detached first: no queued event, run save or resume `SetToday` can append to the
  * imported file (it would replay on top of it), and a cancel can't strand the old
- * in-memory model over the new file. A failed write re-attaches the original log
- * and reports [DataImportResult.Failed]. Refused while a run is recording or armed,
+ * in-memory model over the new file. A failed write (an OutOfMemoryError
+ * included: see [isFatalToVm]) re-attaches the original log and reports
+ * [DataImportResult.Failed]. Refused while a run is recording or armed,
  * because the restart that must follow ends the tracking service. On
  * [DataImportResult.Replaced] the caller restarts with [restartForImport].
+ *
+ * The "plan removed" marker ([KEY_PLAN_CLEARED]) describes the log, so it is set
+ * from the imported one (its last plan line is a `ClearPlan`, see [exportDataTo]):
+ * a backup of a removed plan restores without one, and this device's own marker
+ * never outlives its replaced log.
  */
 suspend fun replaceEventLog(ctx: Context, lines: List<String>): DataImportResult {
     if (RunSession.tracking.value || RunSession.armed.value) return DataImportResult.RunInProgress
@@ -248,50 +293,71 @@ suspend fun replaceEventLog(ctx: Context, lines: List<String>): DataImportResult
                 val previous = Core.detachLog()
                 try {
                     swapLogFile(ctx.filesDir, lines)
-                } catch (e: Exception) {
+                } catch (t: Throwable) {
                     Core.reattachLog(previous)
-                    throw e
+                    throw t
                 }
+                ctx.setupPrefs().edit().putBoolean(KEY_PLAN_CLEARED, lastPlanEvent(lines) == "ClearPlan").commit()
             }
             null
         }
         DataImportResult.Replaced
-    } catch (e: Exception) {
-        Log.e("Export", "data import failed", e)
+    } catch (t: Throwable) {
+        if (t.isFatalToVm()) throw t
+        Log.e("Export", "data import failed", t)
         DataImportResult.Failed
     }
 }
 
+/** A throwable after which the VM itself can't be trusted to go on, so it must
+ *  not be reported as a failed import. An OutOfMemoryError (one allocation the
+ *  heap couldn't serve) or a StackOverflowError is not: the throwing frames
+ *  unwind and free what they held, and the user keeps their old log. */
+private fun Throwable.isFatalToVm(): Boolean =
+    this is VirtualMachineError && this !is OutOfMemoryError && this !is StackOverflowError
+
 /** Atomically replace `event-log.ndjson` in [dir] with [lines] (tmp + fsync +
- *  rename), so a crash mid-write can never leave a half-written log. Throws when
- *  the log could not be replaced; the original is then still in place (or set
- *  aside as `.bak`, which the next boot's [EventLog.load] restores). */
+ *  rename), so a crash mid-write can never leave a half-written log. The lines are
+ *  STREAMED to the temporary through one small buffer: a 5-year backup (~49 MiB)
+ *  joined into one string OOM-killed the app at a 192 MB heap. Throws when the log
+ *  could not be replaced (an OutOfMemoryError included); the temporary is then
+ *  deleted and the original is still in place (or set aside as `.bak`, which the
+ *  next boot's [EventLog.load] restores). */
 internal fun swapLogFile(dir: File, lines: List<String>) {
     val dst = File(dir, "event-log.ndjson")
     val tmp = File(dir, "event-log.ndjson.import")
-    // fsync the bytes to disk BEFORE the rename: a rename-replace without fsync
-    // can commit the directory metadata (the new name) before the file's data
-    // reaches disk, so a power loss right after the rename can truncate the WHOLE
-    // log to zero/garbage.
-    FileOutputStream(tmp).use {
-        it.write(lines.joinToString("\n", postfix = "\n").toByteArray())
-        it.fd.sync()
+    try {
+        // fsync the bytes to disk BEFORE the rename: a rename-replace without fsync
+        // can commit the directory metadata (the new name) before the file's data
+        // reaches disk, so a power loss right after the rename can truncate the WHOLE
+        // log to zero/garbage.
+        FileOutputStream(tmp).use { out ->
+            val w = out.bufferedWriter(Charsets.UTF_8)
+            for (line in lines) {
+                w.write(line)
+                w.write('\n'.code)
+            }
+            w.flush()
+            out.fd.sync()
+        }
+        if (tmp.renameTo(dst)) return
+        // Some filesystems refuse an atomic rename over an existing file. Move the live
+        // log aside to a .bak before overwriting so a crash mid-swap can restore it,
+        // rather than deleting it outright (a delete then a failed rename would lose the
+        // log). The .bak is excluded from backup via res/xml/backup_rules.xml.
+        val bak = File(dst.path + ".bak")
+        bak.delete()
+        val moved = dst.renameTo(bak)
+        if (tmp.renameTo(dst)) {
+            if (moved) bak.delete()
+            return
+        }
+        if (moved) bak.renameTo(dst)
+        throw IOException("couldn't replace the event log")
+    } finally {
+        // A no-op once renamed into place; otherwise no partial temporary survives.
+        tmp.delete()
     }
-    if (tmp.renameTo(dst)) return
-    // Some filesystems refuse an atomic rename over an existing file. Move the live
-    // log aside to a .bak before overwriting so a crash mid-swap can restore it,
-    // rather than deleting it outright (a delete then a failed rename would lose the
-    // log). The .bak is excluded from backup via res/xml/backup_rules.xml.
-    val bak = File(dst.path + ".bak")
-    bak.delete()
-    val moved = dst.renameTo(bak)
-    if (tmp.renameTo(dst)) {
-        if (moved) bak.delete()
-        return
-    }
-    if (moved) bak.renameTo(dst)
-    tmp.delete()
-    throw IOException("couldn't replace the event log")
 }
 
 /** Restart into the replaced log: start the launcher activity as a fresh task from

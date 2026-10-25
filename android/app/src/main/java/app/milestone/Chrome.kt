@@ -18,8 +18,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -29,9 +33,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
@@ -103,7 +110,7 @@ fun MilestoneNavBar(selected: Dest, onSelect: (Dest) -> Unit) {
     // the OS setting, so the divider stays right when the DarkMode override
     // forces Dark on a light OS (or vice-versa). A dark ground has low luminance.
     val dark = LocalPalette.current.bgTop.luminance() < 0.5f
-    Column(Modifier.fillMaxWidth().background(BgTop)) {
+    Column(Modifier.fillMaxWidth().background(BgTop).testTag("bottom-nav")) {
         HorizontalDivider(
             thickness = 1.dp,
             color = OnBgBody.copy(alpha = if (dark) HairlineAlpha.Row else HairlineAlpha.Control),
@@ -158,6 +165,63 @@ fun MilestoneNavBar(selected: Dest, onSelect: (Dest) -> Unit) {
                 .windowInsetsBottomHeight(WindowInsets.navigationBars)
                 .background(OnBgBody.copy(alpha = if (dark) NavInsetBandAlphaDark else NavInsetBandAlphaLight)),
         )
+    }
+}
+
+/**
+ * Side navigation rail: [MilestoneNavBar]'s three destinations (same icons,
+ * labels and colours) down the start edge, with Log ([onLog], Today only, as the
+ * FAB is) at its top. Used instead of the bottom bar and the Log FAB when they
+ * would be laid over the pinned safety banner (a landscape phone under a hold;
+ * user decision 2026-10-25): beside the banner, never over it.
+ */
+@Composable
+fun MilestoneNavRail(selected: Dest, onSelect: (Dest) -> Unit, onLog: (() -> Unit)?) {
+    val logLabel = stringResource(R.string.main_log)
+    NavigationRail(
+        modifier = Modifier.testTag("nav-rail"),
+        containerColor = BgTop,
+        header = onLog?.let { log ->
+            {
+                FloatingActionButton(
+                    onClick = log,
+                    modifier = Modifier.testTag("log-fab").semantics { contentDescription = logLabel },
+                    containerColor = Accent,
+                    contentColor = OnAccent,
+                    shape = RoundedCornerShape(Space.Card.dp),
+                ) {
+                    Icon(painterResource(R.drawable.ic_action_log_plus), contentDescription = null, modifier = Modifier.size(20.dp))
+                }
+            }
+        },
+    ) {
+        Dest.entries.forEach { dest ->
+            val active = dest == selected
+            NavigationRailItem(
+                selected = active,
+                onClick = { onSelect(dest) },
+                icon = {
+                    Icon(
+                        painterResource(if (active) dest.iconSelected else dest.iconUnselected),
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                    )
+                },
+                label = {
+                    Text(
+                        stringResource(dest.labelRes),
+                        style = if (active) Type.Chip else Type.Chip.copy(fontWeight = FontWeight.Normal),
+                    )
+                },
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = Accent,
+                    selectedTextColor = Accent,
+                    indicatorColor = AccentTint,
+                    unselectedIconColor = OnBgFaint,
+                    unselectedTextColor = OnBgFaint,
+                ),
+            )
+        }
     }
 }
 

@@ -134,6 +134,9 @@ fn ctx(weekly_km: f64, baseline: Option<f64>, n: usize) -> DayCtx {
         baseline,
         baseline_stated: false,
         detrained: false,
+        capacity: baseline,
+        capacity_stated: false,
+        capacity_detrained: false,
         n_run_days: n,
         recovery: false,
         taper: false,
@@ -411,7 +414,8 @@ fn volume_holds_in_the_week_the_phase_steps_intensity_up() {
 #[test]
 fn recovery_week_cuts_by_the_kb_midpoint_and_shrinks_the_long_run() {
     // A demonstrated 14 km longest run sets the load-week long run; in the
-    // recovery week the long run shrinks with the week and keeps its share.
+    // recovery week the long run shrinks with the week and keeps its share
+    // (at 3 run days the share's low-volume form, the week's average run).
     let p = runner(GoalDistance::HalfMarathon, 3, 30.0);
     let a = Anchors {
         longest_recent_run_km: Some(14.0),
@@ -433,7 +437,7 @@ fn recovery_week_cuts_by_the_kb_midpoint_and_shrinks_the_long_run() {
             .map(|s| km_of(run_of(s).volume))
             .expect("a long run")
     };
-    let share = running::long_run_share(plan.weekly_km).value;
+    let share = running::long_run_share(plan.weekly_km).value.max(1.0 / 3.0);
     assert!(long_of(&sessions) <= share * plan.weekly_km + 1e-6);
     assert!(long_of(&sessions) < long_of(&load_sessions));
 }
@@ -861,7 +865,10 @@ fn a_demonstrated_anchored_long_run_within_bounds_cites_the_spike_rule() {
 
 #[test]
 fn a_volume_dominated_long_run_still_cites_the_share_cap() {
+    // Four run days: 30 % of the week is above the average run, so the share
+    // itself sets the long run.
     let mut p = half_marathoner();
+    p.running_days_per_week = 4;
     p.running_km_per_week = 60.0;
     let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
     assert_eq!(long_run_km(&prog), Some(18.0), "30 % of 60 km");
@@ -888,7 +895,9 @@ fn no_run_history_matches_the_volume_only_plan() {
     p.running_km_per_week = 40.0;
     let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
     assert_eq!(prog, synthesize(&p, &Anchors::default(), 0).unwrap());
-    assert_eq!(long_run_km(&prog), Some(12.0));
+    // 3 run days: the week's average run (40 / 3 → 13 km) is above its 30 %
+    // share, so it sets the long run (low-volume guardrail, RUN-LONGRUN-001).
+    assert_eq!(long_run_km(&prog), Some(13.0));
 }
 
 #[test]
@@ -900,7 +909,8 @@ fn measured_volume_raises_the_long_run_even_without_a_longest_anchor() {
         ..Default::default()
     };
     let prog = synthesize(&p, &anchors, 0).unwrap();
-    assert_eq!(long_run_km(&prog), Some(18.0));
+    // 60 km over 3 run days: the average run, 20 km.
+    assert_eq!(long_run_km(&prog), Some(20.0));
 }
 
 #[test]
@@ -959,9 +969,9 @@ fn detrained_anchor(km: f64) -> Anchors {
 fn detrained_anchor_keeps_a_long_run_instead_of_collapsing_to_the_volume_floor() {
     let p = half_marathoner(); // 16 km/wk, 3 days
     let cliff = synthesize(&p, &Anchors::default(), 0).unwrap();
-    // The prescription stores km as f32: 4.8 widens to 4.80000019 in f64.
+    // 16 km over 3 days: the average run (5.3 → 5 km) is the volume floor.
     let cliff_km = long_run_km(&cliff).expect("a long-run distance");
-    assert!((cliff_km - 4.8).abs() < 1e-5, "{cliff_km}");
+    assert!((cliff_km - 5.0).abs() < 1e-5, "{cliff_km}");
     assert_eq!(long_run_claim(&cliff), Some(claims::RUN_LONGRUN_001));
     // Day 31: anchor 20.3 km, held at the 2×-daily-average bound (10.5).
     let d31 = synthesize(&p, &detrained_anchor(21.1 * 27.0 / 28.0), 0).unwrap();
@@ -1054,9 +1064,13 @@ fn hybrid_two_run_week_includes_an_easy_run() {
 
 #[test]
 fn low_volume_easy_days_stay_under_the_spike_ceiling_and_the_long_run() {
-    // 8 km/wk over 3 days, longest recent run 2.5 km: the long run is 2.5 km
-    // and each easy day takes its sized share as a distance, never a fixed
-    // 30-min run (≈4 km at a beginner pace, +50 % over the longest run).
+    // 8 km/wk over 3 days, longest recent run 2.5 km: each easy day takes its
+    // sized share as a distance, never a fixed 30-min run (≈4 km at a
+    // beginner pace, +50 % over the longest run). At 3 days the 30 % share is
+    // less than an average run, so the long run takes the week's average run
+    // (the low-volume guardrail, RUN-LONGRUN-001): it grows past the 2.5 km
+    // longest within the spike ceiling instead of locking the week at
+    // 3 × 2.5 km.
     let mut p = runner(GoalDistance::General, 3, 8.0);
     p.stated_longest_recent_km = Some(2.5);
     let (plan, sessions) = week(&p, &Anchors::default(), 0);
@@ -1071,6 +1085,10 @@ fn low_volume_easy_days_stay_under_the_spike_ceiling_and_the_long_run() {
         .find(|s| kind_of(s) == RunSessionType::LongRun)
         .map(|s| km_or_minutes(run_of(s).volume))
         .expect("a long run");
+    assert!(
+        long > 2.5 + 1e-6,
+        "long run {long} stuck at the longest run"
+    );
     let ceiling = 2.7; // 2.5 km + 10 %, floored to 0.1 km
     let mut total = 0.0;
     for s in &sessions {
@@ -1096,6 +1114,7 @@ fn low_volume_easy_days_stay_under_the_spike_ceiling_and_the_long_run() {
         "{total} > {}",
         plan.weekly_km
     );
+    assert!(total > 3.0 * 2.5 + 1e-6, "{total} km locked at 3 × 2.5 km");
 }
 
 #[test]

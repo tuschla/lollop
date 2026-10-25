@@ -157,7 +157,7 @@ fn gps_tracked_run_derives_distance_and_pace_from_fixes() {
 }
 
 #[test]
-fn gps_run_of_only_noise_fixes_offers_no_gpx_export() {
+fn gps_run_of_only_noise_fixes_offers_no_route() {
     let app = Engine;
     let mut model = Model::default();
 
@@ -190,16 +190,20 @@ fn gps_run_of_only_noise_fixes_offers_no_gpx_export() {
     let vm = app.view(&model);
     assert_eq!(vm.runs.len(), 1);
     assert_eq!(vm.runs[0].pace, "-");
-    // No exportable route for a noise-only track: the flag is false AND the
-    // on-demand export is empty.
+    // No exportable route for a noise-only track: the flag the shell gates the
+    // map and share on is false. The on-demand document carries the recorded
+    // fixes instead, for Undo of a delete only (`gps_unmeasurable`), so the
+    // run comes back as recorded.
     assert!(
         !vm.runs[0].has_gpx,
         "has_gpx should be false for a noise-only track"
     );
+    assert!(vm.runs[0].gps_unmeasurable);
     let gpx = export_run_gpx(9_115_001, 9_115_001);
-    assert!(
-        gpx.is_empty(),
-        "on-demand GPX should be empty for a noise-only track, got {gpx}"
+    assert_eq!(
+        gpx.matches("<trkpt ").count(),
+        2,
+        "the recorded fixes export for Undo, got {gpx}"
     );
     // An unmeasurable track must say so, not render a "0.0km" entry, and must
     // not trip the distance-spike gate against a phantom zero baseline.
@@ -409,7 +413,9 @@ fn run_view_differentiates_interval_from_steady_same_average() {
         distance_km: 0.0,
         duration_min: 0.0,
         hr_pct_max: 0.0,
+        wire_hr_pct_max: 0.0,
         longest_recent_km: 5.0,
+        wire_longest_recent_km: 5.0,
         // Four even ~111 m / 30 s segments (~3.71 m/s throughout).
         track: vec![
             g(0.000, 0),
@@ -421,6 +427,8 @@ fn run_view_differentiates_interval_from_steady_same_average() {
         track_segment_starts: Vec::new(),
         observed_at: 0,
         entry_id: 0,
+        logged_utc_offset_sec: None,
+        hr_pinned: false,
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: None,
@@ -652,7 +660,7 @@ fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx() {
     // the `view()` above).
     let gpx = export_run_gpx(11_203_001, 11_203_001);
     assert_eq!(gpx.matches("<trkseg>").count(), 2, "two segments in GPX");
-    assert!(gpx.contains("lon=\"1.0000000\""), "true seg-2 coord kept");
+    assert!(gpx.contains("lon=\"1\""), "true seg-2 coord kept");
 
     // WITHOUT the boundary over these SAME true coords, the QC gate rejects
     // the ~1853 m/s bridge as a teleport and drops ALL of segment 2 with it -

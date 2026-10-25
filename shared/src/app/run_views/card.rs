@@ -111,18 +111,28 @@ const MAX_HR_PCT_MAX: f64 = 100.0;
 
 /// The uncached run-view derivation over the run's QC'd track (`None` for a
 /// hand-entered run). The run CARD's spike chip judges against the per-row
-/// `longest_recent_km` baked at ingest (which honors a tracker's
-/// caller-supplied paired history). The SAFETY GATE that can defer training
-/// derives its baseline fresh at view() time from `model.runs` instead (see
+/// `longest_recent_km`, which the reducer re-derives from the surviving runs
+/// (floored by a tracker's caller-supplied paired history, see
+/// `ingest::refresh_spike_baselines`). The SAFETY GATE that can defer training
+/// derives its baseline at view() time from `model.runs` (see
 /// [`latest_run_spike`]).
 fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     #[cfg(test)]
     RUN_VIEW_BUILDS.with(|c| c.set(c.get() + 1));
-    let recent_longest_km = r.longest_recent_km;
-    // Clamp the stored %HRmax to the physiological ceiling before it is echoed
-    // or classified (see MAX_HR_PCT_MAX): the core never trusts the import-side
-    // clamp alone.
-    let hr_pct_max = r.hr_pct_max.min(MAX_HR_PCT_MAX);
+    // The feedback gate's baseline rule (`is_ratio_base_km`): a base under it
+    // is no earlier run, so card and gate always give one spike verdict.
+    let has_baseline = is_ratio_base_km(r.longest_recent_km);
+    let recent_longest_km = if has_baseline {
+        r.longest_recent_km
+    } else {
+        0.0
+    };
+    // Clamp the stored %HRmax to 0..=100 before it is echoed or classified
+    // (see MAX_HR_PCT_MAX): the core never trusts the import-side clamp alone.
+    // A negative figure (corrupt/hand-edited log, a non-Android shell) is no
+    // heart-rate reading, the same as the 0 sentinel. `+ 0.0`: `clamp` keeps a
+    // wire -0.0, which would ride the view as "hr_pct_max":-0.0.
+    let hr_pct_max = r.hr_pct_max.clamp(0.0, MAX_HR_PCT_MAX) + 0.0;
     // A GPS track derives its own distance/duration; a manual run uses scalars.
     let gps = qc.is_some();
     // File 07 QC gates ran BEFORE any derivation (accuracy, implausible speed,
@@ -189,7 +199,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     };
 
     let split_note = split_note_suffix(split.as_ref().and(split_pct));
-    let spike_note = spike_note_text(spike.value, recent_longest_km);
+    let spike_note = spike_note_text(spike.value, has_baseline);
     let spike_seg = if spike_note.is_empty() {
         String::new()
     } else {
@@ -204,6 +214,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         hr_pct_max,
         hr_label: hr_card_label(r.avg_hr_bpm, hr_pct_max, shown_zone),
         avg_hr_bpm: r.avg_hr_bpm,
+        utc_offset_sec: r.logged_utc_offset_sec,
         spike_flag: spike.value,
         spike_note: spike_note.to_string(),
         split_pct,
@@ -233,9 +244,10 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         // on demand via the `exportGpx` FFI query (see [`export_run_gpx`]) only
         // for the one run it inspects.
         has_gpx: track.len() >= 2,
+        gps_unmeasurable: false,
         observed_at: r.observed_at,
         entry_id: r.entry_id,
-        spike_has_baseline: recent_longest_km > 0.0,
+        spike_has_baseline: has_baseline,
         session_rpe: r.session_rpe,
         // Session-RPE load (Foster; LOAD-SRPE-001): moving minutes × CR-10.
         // Its own figure, never mixed into the heart-rate load.
@@ -246,6 +258,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         // Best-effort records depend on OTHER data (the rest of the history),
         // so they are filled after the per-run memo by `annotate_run_views`.
         best_effort_labels: Vec::new(),
+        started_at: run_started_at(r, qc),
     }
 }
 
@@ -274,18 +287,50 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64, qc_dropped: u32) -> Run
         contested: false,
         qc_dropped,
         has_gpx: false,
+        gps_unmeasurable: true,
         observed_at: r.observed_at,
         entry_id: r.entry_id,
         splits_km: Vec::new(),
         splits_mi: Vec::new(),
-        spike_has_baseline: r.longest_recent_km > 0.0,
+        spike_has_baseline: is_ratio_base_km(r.longest_recent_km),
         hr_label: hr_card_label(r.avg_hr_bpm, hr_pct_max, None),
         avg_hr_bpm: r.avg_hr_bpm,
+        utc_offset_sec: r.logged_utc_offset_sec,
         session_rpe: r.session_rpe,
         // No measurable time → no session-RPE load.
         srpe_load_au: None,
         best_effort_labels: Vec::new(),
+        started_at: run_started_at(r, None),
     }
+}
+
+/// [`RunResultView::started_at`]: a GPS run's first QC'd fix (its first raw
+/// fix when fewer than two survived QC, the card's unmeasurable case), a
+/// hand-entered run's stamp minus its duration. Never after `observed_at` (a
+/// corrupt fix time cannot date a run's start past its end); 0 stays 0
+/// (undated). The run's day everywhere a view groups runs by day for the shell
+/// (the card's title and date, the progress weeks), so they agree.
+pub(in crate::app) fn run_started_at(r: &LoggedRun, qc: Option<&QcTrack>) -> i64 {
+    if r.observed_at == 0 {
+        return 0;
+    }
+    let qc_track = qc.map_or(&[][..], |q| &q.track[..]);
+    let qc_track = if qc_track.len() >= 2 { qc_track } else { &[] };
+    let start = match qc_track.first().or(r.track.first()) {
+        Some(p) => p.observed_at,
+        None => {
+            let secs = r.duration_min * 60.0;
+            // A non-finite or negative duration (corrupt log) has no length;
+            // `as` saturates a huge one.
+            let secs = if secs.is_finite() && secs > 0.0 {
+                secs.round() as i64
+            } else {
+                0
+            };
+            r.observed_at.saturating_sub(secs)
+        }
+    };
+    start.min(r.observed_at)
 }
 
 /// The zone the card shows for the run's average %HRmax, if any.
@@ -334,14 +379,14 @@ fn split_note_suffix(split_pct: Option<f64>) -> String {
 }
 
 /// Why the card carries a SPIKE chip; empty when the spike gate did not trip.
-fn spike_note_text(spike: bool, recent_longest_km: f64) -> &'static str {
+fn spike_note_text(spike: bool, has_baseline: bool) -> &'static str {
     // The spike gate errs safe with no history (see single_session_spike), so a
     // user's first run trips it. Say *why* rather than claiming a ">10%" jump over
     // a baseline that does not exist yet, the SPIKE flag itself is unchanged, only
     // the wording is honest about the cause. Held as a field so a shell can render
     // it beside the SPIKE chip without re-parsing `summary`.
     if spike {
-        if recent_longest_km > 0.0 {
+        if has_baseline {
             "Longer than your recent longest run"
         } else {
             "No earlier run to compare this distance with yet"

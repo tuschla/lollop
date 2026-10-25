@@ -598,7 +598,7 @@ fn export_gpx_wraps_fixes_and_escapes_name() {
     assert!(gpx.contains("<name>Tom &amp; &quot;Jerry&quot; &lt;run&gt;&apos;s</name>"));
     // One trkpt per fix, with lat/lon and an RFC-3339 timestamp.
     assert_eq!(gpx.matches("<trkpt ").count(), 2);
-    assert!(gpx.contains("lat=\"52.5200000\" lon=\"13.4050000\""));
+    assert!(gpx.contains("lat=\"52.52\" lon=\"13.405\""));
     assert!(gpx.contains("<time>2023-11-14T22:13:20Z</time>"));
     assert!(gpx.trim_end().ends_with("</gpx>"));
 }
@@ -619,7 +619,7 @@ fn export_gpx_writes_accuracy_as_hdop_the_importer_reads_back() {
         2,
         "no hdop for unknown accuracy"
     );
-    let hdop: f32 = gpx
+    let hdop: f64 = gpx
         .split("<hdop>")
         .nth(2)
         .unwrap()
@@ -628,7 +628,7 @@ fn export_gpx_writes_accuracy_as_hdop_the_importer_reads_back() {
         .unwrap()
         .parse()
         .unwrap();
-    assert_eq!(hdop * GPX_HDOP_UERE_M, 12.5);
+    assert_eq!((hdop * GPX_HDOP_UERE_M) as f32, 12.5);
 }
 
 #[test]
@@ -648,7 +648,7 @@ fn usable_track_drops_noisy_fixes() {
     assert_eq!(usable.len(), 2);
     let gpx = export_gpx(&usable, "run");
     assert_eq!(gpx.matches("<trkpt ").count(), 2);
-    assert!(!gpx.contains("lat=\"52.6000000\""));
+    assert!(!gpx.contains("lat=\"52.6\""));
 }
 
 #[test]
@@ -1238,7 +1238,7 @@ fn empty_starts_is_bit_identical_to_the_single_track_metrics() {
         );
         assert_eq!(
             export_gpx(&t, "run"),
-            export_gpx_seg(&t, "run", starts),
+            export_gpx_seg(&t, "run", starts, None),
             "gpx parity, starts={starts:?}",
         );
     }
@@ -1327,19 +1327,34 @@ fn segmented_vi_and_split_match_the_reanchored_equivalent() {
 #[test]
 fn gpx_emits_one_trkseg_per_segment_with_true_coords() {
     let t = relocation_fixture();
-    let gpx = export_gpx_seg(&t, "paused run", &[5]);
+    let gpx = export_gpx_seg(&t, "paused run", &[5], None);
     // Two recording segments → two <trkseg> blocks with a gap between.
     assert_eq!(gpx.matches("<trkseg>").count(), 2, "two segments\n{gpx}");
     assert_eq!(gpx.matches("</trkseg>").count(), 2);
     // TRUE coordinates: segment 2's real relocated longitude (1.000…) is
     // present, NOT re-anchored back onto segment 1 (0.004…).
-    assert!(gpx.contains("lon=\"1.0000000\""), "true seg-2 coord\n{gpx}");
+    assert!(gpx.contains("lon=\"1\""), "true seg-2 coord\n{gpx}");
     // Every real fix is still emitted (10 points across the two segments).
     assert_eq!(gpx.matches("<trkpt").count(), 10);
     // Empty starts → a single <trkseg>, byte-identical to the bare export.
-    let flat = export_gpx_seg(&t, "paused run", &[]);
+    let flat = export_gpx_seg(&t, "paused run", &[], None);
     assert_eq!(flat.matches("<trkseg>").count(), 1);
     assert_eq!(flat, export_gpx(&t, "paused run"));
+}
+
+#[test]
+fn gpx_names_the_runs_logged_at_stamp_before_its_track() {
+    // A run logged after its last kept fix (a standing-still finish, a trim):
+    // the document names the stamp in lollop's namespaced track extension.
+    let t = relocation_fixture();
+    let gpx = export_gpx_seg(&t, "run", &[], Some(1_700_000_000));
+    assert!(gpx.contains(" xmlns:lollop=\"urn:lollop:gpx:1\">"), "{gpx}");
+    let ext = "<extensions><lollop:logged_at>2023-11-14T22:13:20Z</lollop:logged_at></extensions>";
+    let at = gpx.find(ext).expect("the stamp is written");
+    assert!(
+        at < gpx.find("<trkseg>").unwrap(),
+        "extensions precede the segments\n{gpx}"
+    );
 }
 
 #[test]

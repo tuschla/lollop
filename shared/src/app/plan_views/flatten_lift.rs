@@ -325,7 +325,9 @@ fn rep_range_arm(
     let (bottom, _) =
         crate::hypertrophy::rep_range_for(crate::hypertrophy::classify(&l.exercise)).value;
     let bottom = bottom.min(l.reps);
-    let frac = anchors.load_frac_for(&l.exercise).map_or(1.0, |d| d.frac);
+    let frac = anchors
+        .carried_derate_for(&l.exercise)
+        .map_or(1.0, |d| d.frac);
     let last = anchors.last_working_for(&l.exercise);
     let last_kg = last.map(|w| w.weight_kg).filter(|w| *w > 0.0);
     // A load the athlete actually lifted is carried exactly as logged (a 6 kg
@@ -333,14 +335,14 @@ fn rep_range_arm(
     // range) lands on the plate grid. A step up lands on the grid when the
     // grid can express a step within the cap, else stays the capped step
     // itself (`hypertrophy::load_step_kg`, STR-LOADPROG-001 ≤ +10 %).
-    // `+ 1e-6`: a load logged in lb converts to a kg float a hair under its own
-    // grid point; never round it down a plate.
+    // `load_kg` is f32: an on-grid lb load can come back a hair under its grid
+    // point, so it reaches the grid through `f32_load_ceil`.
     let load = l.load_kg.filter(|kg| *kg > 0.0).and_then(|kg| {
         let kg = f64::from(kg);
         match last_kg {
             Some(w) if frac >= 1.0 && (kg - w).abs() < 1e-3 => Some(w),
             Some(w) if frac >= 1.0 && kg > w => {
-                let grid = round_load_grid(kg + 1e-6, weight_lb);
+                let grid = round_load_grid(f32_load_ceil(kg), weight_lb);
                 let capped_step = kg <= w + crate::hypertrophy::load_step_kg(w) + 1e-3;
                 if capped_step && grid <= w + 1e-6 {
                     Some(kg)
@@ -348,7 +350,7 @@ fn rep_range_arm(
                     (grid > 0.0).then_some(grid)
                 }
             }
-            _ => round_load_or_drop(kg * frac + 1e-6, weight_lb),
+            _ => round_load_or_drop(f32_load_ceil(kg) * frac, weight_lb),
         }
     });
     let last_shown = last.filter(|w| w.weight_kg > 0.0 && load.is_some());

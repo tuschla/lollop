@@ -54,7 +54,7 @@ fn profile_drives_evidence_cited_guidance() {
 
 #[test]
 fn power_guidance_row_states_kb_language_not_the_rir_number() {
-    // The Power loading row is cited to STR-PWR-001 (Moderate). The numeric
+    // The Power weights row is cited to STR-PWR-001 (Moderate). The numeric
     // RIR 3-5 band is an expert-opinion encoding (STR-PWR-RIR-001), so it
     // must NOT print under this row; the row states the KB's qualitative
     // "never to failure" instruction instead.
@@ -63,8 +63,8 @@ fn power_guidance_row_states_kb_language_not_the_rir_number() {
     let rows = build_guidance(&p);
     let loading = rows
         .iter()
-        .find(|r| r.summary.contains("Power loading:"))
-        .expect("a Power loading guidance row exists");
+        .find(|r| r.summary.contains("Weights for power:"))
+        .expect("a Power weights guidance row exists");
     assert!(
         loading.summary.contains("never to failure"),
         "row states the KB power instruction: {}",

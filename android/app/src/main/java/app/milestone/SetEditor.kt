@@ -50,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -63,7 +64,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -73,27 +76,25 @@ import kotlinx.coroutines.delay
 private const val UndoWindowMs = 8_000L
 
 /** Snackbar-style "Logged … · Undo" row above the loop's primary action. The
- *  line is announced politely once, so a screen-reader user hears what was saved. */
+ *  line is announced politely once, so a screen-reader user hears what was saved.
+ *  The line is never cut: Undo sits beside it while the line fits in two lines
+ *  there, else (a large font, a narrow screen) Undo moves under the whole-width
+ *  line, so the logged set always shows whole, reps included. */
 @Composable
 private fun UndoRow(text: String, undoDescription: String, onUndo: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(Space.Card.dp))
-            .background(OnBgBody)
-            .padding(start = Space.Card.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    val measurer = rememberTextMeasurer()
+    val style = Type.Caption
+    val line: @Composable () -> Unit = {
         Text(
             text,
             color = BgTop,
-            style = Type.Caption,
-            maxLines = 2,
+            style = style,
             modifier = Modifier
-                .weight(1f)
                 .padding(vertical = Space.Sm.dp)
                 .semantics { liveRegion = LiveRegionMode.Polite },
         )
+    }
+    val undo: @Composable () -> Unit = {
         Box(
             modifier = Modifier
                 .heightIn(min = ActionMinHeight)
@@ -110,18 +111,53 @@ private fun UndoRow(text: String, undoDescription: String, onUndo: () -> Unit) {
             )
         }
     }
+    Layout(
+        contents = listOf(line, undo),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Space.Card.dp))
+            .background(OnBgBody)
+            .padding(start = Space.Card.dp),
+    ) { (lineM, undoM), constraints ->
+        val width = constraints.maxWidth
+        val u = undoM.single().measure(Constraints())
+        val besideWidth = (width - u.width).coerceAtLeast(0)
+        val beside = measurer.measure(text, style, constraints = Constraints(maxWidth = besideWidth), density = this)
+            .lineCount <= UndoRowMaxLinesBeside
+        if (beside) {
+            val l = lineM.single().measure(Constraints(maxWidth = besideWidth))
+            val h = maxOf(l.height, u.height)
+            // placeRelative: the line at the start, Undo at the end (mirrored in RTL).
+            layout(width, h) {
+                l.placeRelative(0, (h - l.height) / 2)
+                u.placeRelative(width - u.width, (h - u.height) / 2)
+            }
+        } else {
+            // Under the line, the row keeps the start inset at its end too.
+            val l = lineM.single().measure(Constraints(maxWidth = (width - Space.Card.dp.roundToPx()).coerceAtLeast(0)))
+            layout(width, l.height + u.height) {
+                l.placeRelative(0, 0)
+                u.placeRelative(width - u.width, l.height)
+            }
+        }
+    }
 }
+
+/** Lines the "Logged …" text may take beside Undo before Undo moves under it. */
+private const val UndoRowMaxLinesBeside = 2
 
 /** Exercise search well (UI sweep §8): the keypad field's look, a `BgSunken` well
  *  in a 1dp [ChoiceCellBorder] hairline (1.5dp `Accent` while focused), with a
  *  `ui-search` 18dp glyph, a Bold value and an `OnBgFaint` "Search exercises"
  *  placeholder. No dropdown; typing filters the quick-pick chips below it. The
  *  keyboard capitalises the first word and its Done key folds it, so it never
- *  stays up over the in-form keypad. */
+ *  stays up over the in-form keypad. The field names itself with the hint (as the
+ *  glossary's search well does), so it keeps an accessible name once it holds text. */
 @Composable
 private fun ExerciseSearchField(value: String, onChange: (String) -> Unit, onFocusChange: (Boolean) -> Unit = {}) {
     val focusManager = LocalFocusManager.current
     var focused by remember { mutableStateOf(false) }
+    val hint = stringResource(R.string.log_exercise_search_hint)
     val shape = RoundedCornerShape(Space.Card.dp)
     Row(
         modifier = Modifier
@@ -151,13 +187,13 @@ private fun ExerciseSearchField(value: String, onChange: (String) -> Unit, onFoc
                 imeAction = ImeAction.Done,
             ),
             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-            modifier = Modifier.weight(1f).testTag("exercise-search").onFocusChanged {
+            modifier = Modifier.weight(1f).testTag("exercise-search").semantics { contentDescription = hint }.onFocusChanged {
                 focused = it.isFocused
                 onFocusChange(it.isFocused)
             },
             decorationBox = { inner ->
                 if (value.isEmpty()) {
-                    Text(stringResource(R.string.log_exercise_search_hint), color = OnBgFaint, style = Type.Body)
+                    Text(hint, color = OnBgFaint, style = Type.Body)
                 }
                 inner()
             },
@@ -627,7 +663,7 @@ fun LogSetEditor(
                     cueLoadLabel = cueLoadLabel,
                     onUseCueLoad = cueLoadKg?.let { kg ->
                         {
-                            fields = fields.copy(weightText = weightFieldText(kg, weightUnit), weightVerbatim = kg, weightFresh = true)
+                            fields = fields.copy(weightText = loadFigure(kg, weightUnit), weightVerbatim = kg, weightFresh = true)
                             keypadOpen = false
                             liveItem?.let { AppliedCueLoads.record(it, kg) }
                         }

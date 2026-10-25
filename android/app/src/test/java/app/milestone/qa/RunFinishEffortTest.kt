@@ -10,7 +10,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppClock
 import app.milestone.GpsPoint
@@ -123,7 +122,7 @@ class RunFinishEffortTest {
     private fun openTracker() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         seedRecordingRun()
-        lastScenario = ActivityScenario.launch(
+        lastScenario = launchMain(
             Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_TRACKING, true),
         )
         val stop = str(R.string.track_btn_stop)
@@ -186,7 +185,7 @@ class RunFinishEffortTest {
         )
         seedRecordingRun()
         RunSession.startSteps(android.os.SystemClock.elapsedRealtime())
-        lastScenario = ActivityScenario.launch(
+        lastScenario = launchMain(
             Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_TRACKING, true),
         )
         val rep = str(R.string.track_step_rep, 1, 6)

@@ -39,16 +39,16 @@ pub(in crate::app) struct Mastery {
 
 /// The e1RM a set supports when it can estimate one reliably — the same gate
 /// the plan anchors use: not a hold, not a calisthenics rung on a calisthenics
-/// profile, ≤10 effective reps, not an isolation lift (strength-006).
-pub(super) fn pr_e1rm(s: &LoggedSet, calis: bool) -> Option<f64> {
+/// profile, ≤10 effective reps, not an isolation lift (strength-006). `facts`
+/// is what the set's name says ([`SetIndex::facts`]).
+pub(super) fn pr_e1rm(s: &LoggedSet, facts: NameFacts, calis: bool) -> Option<f64> {
     if s.hold_sec.is_some() || s.weight_kg <= 0.0 || s.reps == 0 {
         return None;
     }
-    if calis && crate::calisthenics::tier_by_name(&s.exercise).is_some() {
+    if calis && facts.calis_tier.is_some() {
         return None;
     }
-    if strength::effective_reps(s.reps, s.rpe) > strength::E1RM_RELIABLE_REP_CAP
-        || crate::plan::is_isolation_lift(&s.exercise)
+    if strength::effective_reps(s.reps, s.rpe) > strength::E1RM_RELIABLE_REP_CAP || facts.isolation
     {
         return None;
     }
@@ -62,6 +62,7 @@ pub(super) fn pr_e1rm(s: &LoggedSet, calis: bool) -> Option<f64> {
 /// rule is never praised (feedback-037).
 pub(in crate::app) fn detect_mastery(
     model: &Model,
+    set_index: &SetIndex,
     facts: &RunFacts,
     week: &[SessionPlanView],
 ) -> Option<Mastery> {
@@ -73,13 +74,17 @@ pub(in crate::app) fn detect_mastery(
         .profile
         .as_ref()
         .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics);
+    // A run's day is the local day it STARTED (`RunFacts::started`), the day
+    // plan completion credits and its card names.
+    let run_day =
+        |i: usize| dated(model.runs[i].observed_at).then(|| local_day(facts.started[i], offset));
     let latest = model
         .sets
         .iter()
         .map(|s| s.observed_at)
-        .chain(model.runs.iter().map(|r| r.observed_at))
         .filter(|t| dated(*t))
         .map(|t| local_day(t, offset))
+        .chain((0..model.runs.len()).filter_map(run_day))
         .max();
     if let Some(day) = latest
         && today.is_none_or(|t| t.saturating_sub(day) <= FEEDBACK_FRESH_DAYS)
@@ -87,18 +92,26 @@ pub(in crate::app) fn detect_mastery(
         let in_prior = |t: i64| {
             dated(t) && {
                 let d = local_day(t, offset);
-                d < day && d >= day - PR_WINDOW_DAYS
+                d < day && d >= day.saturating_sub(PR_WINDOW_DAYS)
             }
         };
         let on_day = |t: i64| dated(t) && local_day(t, offset) == day;
-        let day_sets: Vec<&LoggedSet> = model
-            .sets
-            .iter()
-            .filter(|s| on_day(s.observed_at))
+        // Positions of the latest day's sets in `model.sets`, chronological
+        // (`observed_at`, then `entry_id`, the `lifts` order), so a tie between
+        // two bests keeps the earlier set whatever the storage order.
+        let mut day_sets: Vec<usize> = (0..model.sets.len())
+            .filter(|&i| on_day(model.sets[i].observed_at))
             .collect();
-        let kind = e1rm_best(model, &day_sets, &in_prior, calis)
-            .or_else(|| rep_best(model, &day_sets, &in_prior))
-            .or_else(|| longest_run(model, facts, &on_day, &in_prior));
+        day_sets.sort_by_key(|&i| (model.sets[i].observed_at, model.sets[i].entry_id));
+        let kind = e1rm_best(model, set_index, &day_sets, &in_prior, calis)
+            .or_else(|| rep_best(model, set_index, &day_sets, &in_prior))
+            .or_else(|| {
+                let run_on = |i: usize| run_day(i) == Some(day);
+                let run_prior = |i: usize| {
+                    run_day(i).is_some_and(|d| d < day && d >= day.saturating_sub(PR_WINDOW_DAYS))
+                };
+                longest_run(model, facts, &run_on, &run_prior)
+            });
         if let Some(kind) = kind {
             return Some(Mastery { day, kind });
         }
@@ -110,24 +123,27 @@ pub(in crate::app) fn detect_mastery(
 /// 90 days, beyond the noise band.
 fn e1rm_best(
     model: &Model,
-    day_sets: &[&LoggedSet],
+    set_index: &SetIndex,
+    day_sets: &[usize],
     in_prior: &impl Fn(i64) -> bool,
     calis: bool,
 ) -> Option<MasteryKind> {
     let mut best: Option<(f64, MasteryKind)> = None;
-    for s in day_sets {
-        let Some(e1) = pr_e1rm(s, calis) else {
+    for &i in day_sets {
+        let s = &model.sets[i];
+        let facts = set_index.facts(i);
+        let Some(e1) = pr_e1rm(s, facts, calis) else {
             continue;
         };
-        let prior = model
-            .sets
+        let prior = set_index
+            .movement_sets(facts.movement)
             .iter()
-            .filter(|p| {
-                in_prior(p.observed_at) && crate::plan::same_movement(&p.exercise, &s.exercise)
-            })
-            .filter_map(|p| pr_e1rm(p, calis))
+            .filter(|&&p| in_prior(model.sets[p].observed_at))
+            .filter_map(|&p| pr_e1rm(&model.sets[p], set_index.facts(p), calis))
             .fold(0.0_f64, f64::max);
-        if prior > 0.0 && e1 > prior * (1.0 + E1RM_NOISE_FRAC) {
+        // A prior under MIN_RATIO_BASE_KG is no prior best (a subnormal
+        // corrupt-log weight would divide to "+inf%").
+        if prior >= MIN_RATIO_BASE_KG && e1 > prior * (1.0 + E1RM_NOISE_FRAC) {
             let gain = e1 / prior - 1.0;
             if best.as_ref().is_none_or(|(g, _)| gain > *g) {
                 best = Some((
@@ -150,22 +166,22 @@ fn e1rm_best(
 /// The day's biggest rep best at a load against the prior 90 days.
 fn rep_best(
     model: &Model,
-    day_sets: &[&LoggedSet],
+    set_index: &SetIndex,
+    day_sets: &[usize],
     in_prior: &impl Fn(i64) -> bool,
 ) -> Option<MasteryKind> {
     let mut best: Option<(u32, MasteryKind)> = None;
-    for s in day_sets {
+    for &i in day_sets {
+        let s = &model.sets[i];
         if s.hold_sec.is_some() || s.weight_kg <= 0.0 || s.reps == 0 {
             continue;
         }
-        let prior_reps = model
-            .sets
+        let prior_reps = set_index
+            .movement_sets(set_index.facts(i).movement)
             .iter()
+            .map(|&p| &model.sets[p])
             .filter(|p| {
-                in_prior(p.observed_at)
-                    && p.hold_sec.is_none()
-                    && p.weight_kg >= s.weight_kg - 0.01
-                    && crate::plan::same_movement(&p.exercise, &s.exercise)
+                in_prior(p.observed_at) && p.hold_sec.is_none() && p.weight_kg >= s.weight_kg - 0.01
             })
             .map(|p| p.reps)
             .max();
@@ -189,26 +205,30 @@ fn rep_best(
     best.map(|(_, kind)| kind)
 }
 
-/// The day's run when it is the longest in 90 days, never a spike.
+/// The day's run when it is the longest in 90 days, never a spike. `on_day`
+/// and `in_prior` take a run index (a run is dated by its start).
 fn longest_run(
     model: &Model,
     facts: &RunFacts,
-    on_day: &impl Fn(i64) -> bool,
-    in_prior: &impl Fn(i64) -> bool,
+    on_day: &impl Fn(usize) -> bool,
+    in_prior: &impl Fn(usize) -> bool,
 ) -> Option<MasteryKind> {
+    // Longest; a tie keeps the EARLIER run (`observed_at`, then `entry_id`),
+    // independent of storage order (an Undo or amend moves a row to the tail).
     let (idx, r) = model
         .runs
         .iter()
         .enumerate()
-        .filter(|(_, r)| on_day(r.observed_at))
-        .max_by(|(a, _), (b, _)| facts.km[*a].total_cmp(&facts.km[*b]))?;
+        .filter(|(i, _)| on_day(*i))
+        .max_by(|(a, ra), (b, rb)| {
+            facts.km[*a]
+                .total_cmp(&facts.km[*b])
+                .then((rb.observed_at, rb.entry_id).cmp(&(ra.observed_at, ra.entry_id)))
+        })?;
     let km = facts.km[idx];
-    let prior_km = model
-        .runs
-        .iter()
-        .zip(&facts.km)
-        .filter(|(o, _)| in_prior(o.observed_at))
-        .map(|(_, &k)| k)
+    let prior_km = (0..model.runs.len())
+        .filter(|&i| in_prior(i))
+        .map(|i| facts.km[i])
         .fold(0.0_f64, f64::max);
     // The 30-day spike baseline excludes the run itself.
     let baseline = spike_baseline_km(&model.runs, &facts.km, r.observed_at, Some(idx));

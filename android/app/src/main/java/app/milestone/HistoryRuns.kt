@@ -69,8 +69,8 @@ internal fun runTitle(r: RunResultView): String {
         null -> null
     }
     if (tagged != null) return stringResource(tagged)
-    if (r.observed_at <= 0L) return stringResource(R.string.main_run)
-    val weekday = Instant.ofEpochSecond(r.observed_at).atZone(ZoneId.systemDefault()).dayOfWeek
+    if (r.started_at <= 0L) return stringResource(R.string.main_run)
+    val weekday = Instant.ofEpochSecond(r.started_at).atZone(ZoneId.systemDefault()).dayOfWeek
         .getDisplayName(java.time.format.TextStyle.FULL, Locale.getDefault())
     return stringResource(R.string.history_run_weekday, weekday)
 }
@@ -85,9 +85,49 @@ internal fun localDaysAgo(epochSec: Long, nowMillis: Long): Long? {
 /**
  * The date chip beside a run's title: "Today", "Yesterday", "3 days ago", then the
  * absolute date, on every run card alike (an imported or untagged run included), so
- * the list reads at one rhythm.
+ * the list reads at one rhythm. Dated by the day the run STARTED, the day
+ * [runTitle] names, so a run across midnight never reads "Sunday run · <a Monday>".
  */
-internal fun runDateChip(r: RunResultView, nowMillis: Long): String = formatLogDate(r.observed_at, nowMillis)
+internal fun runDateChip(r: RunResultView, nowMillis: Long): String = formatLogDate(runDaySec(r), nowMillis)
+
+/** The stamp a run is dated by everywhere the shell names or groups its day (title,
+ *  date chip, History's month headers and newest-first order, heatmap, daily
+ *  distance, records, coach summary): its start, or its logged stamp for a row
+ *  without one. One rule: a run belongs to the local day it STARTED, so a run from
+ *  Sun 23:40 to Mon 00:20 is Sunday's everywhere. 0 = undated. */
+internal fun runDaySec(r: RunResultView): Long = r.started_at.takeIf { it > 0L } ?: r.observed_at
+
+/** The local calendar day a run belongs to ([runDaySec] in [zone]); null when undated. */
+internal fun runLocalDay(r: RunResultView, zone: ZoneId): Long? =
+    runDaySec(r).takeIf { it > 0L }?.let { localEpochDay(it, zone) }
+
+/** History's run stream, newest first by [runDaySec] (the core lists runs by their
+ *  logged stamp): the month headers bucket by start, so the stream must be in start
+ *  order or two overlapping runs could split a month and repeat its header key.
+ *  Stable, so equal starts keep the core's newest-first order; undated rows last. */
+internal fun historyRunStream(runs: List<RunResultView>): List<RunResultView> =
+    runs.asReversed().sortedByDescending { runDaySec(it) }
+
+/** The latest-logged run that started on local [day] (a heatmap cell opens it), or null. */
+internal fun latestRunOnDay(runs: List<RunResultView>, day: Long, zone: ZoneId): RunResultView? =
+    runs.lastOrNull { runLocalDay(it, zone) == day }
+
+/** Total distance per local day the runs started on (undated and zero-distance rows
+ *  left out): History's daily distance chart. */
+internal fun runKmByDay(runs: List<RunResultView>, zone: ZoneId): Map<Long, Double> {
+    val m = HashMap<Long, Double>()
+    for (r in runs) {
+        if (r.distance_km <= 0.0) continue
+        val day = runLocalDay(r, zone) ?: continue
+        m[day] = (m[day] ?: 0.0) + r.distance_km
+    }
+    return m
+}
+
+/** The run a record cell names (the core keys a record by the run's entry_id, null
+ *  for the longest run, and `observed_at`), or null if it is no longer listed. */
+internal fun recordRun(runs: List<RunResultView>, entryId: Long?, observedAt: Long): RunResultView? =
+    runs.firstOrNull { (entryId == null || it.entry_id == entryId) && it.observed_at == observedAt }
 
 /** The run detail overline: title and date with the day named once ("Tempo run ·
  *  Today", "Today", "Saturday run", "Saturday run · September 12"). */
@@ -95,7 +135,7 @@ internal fun runDateChip(r: RunResultView, nowMillis: Long): String = formatLogD
 internal fun runOverline(r: RunResultView, nowMillis: Long): String {
     val chip = runDateChip(r, nowMillis)
     val untaggedRecent = WorkoutType.fromWire(r.workout_type) == null &&
-        localDaysAgo(r.observed_at, nowMillis)?.let { it in 0L..1L } == true
+        localDaysAgo(runDaySec(r), nowMillis)?.let { it in 0L..1L } == true
     return when {
         untaggedRecent -> chip
         chip.isBlank() -> runTitle(r)
@@ -255,34 +295,36 @@ internal fun RunProgressSection(
  * The Runs records: a RECORDS overline over one card holding a two-column grid of
  * record cells (longest run, then the best efforts 1K/5K/10K/half), split by a
  * hairline cross. Each cell names the record, states its figure in the user's
- * distance [unit] and the day it was set, and opens the run holding it. An odd last
- * cell spans both columns. Always open (it is compact). [onOpenRun] gets the run's
- * entry_id (null when only its timestamp is known) and observed_at.
+ * distance [unit] and the day it was set (the day its run STARTED, [recordDaySec]),
+ * and opens the run holding it ([onOpenRun], resolved in [runs]).
+ * An odd last cell spans both columns. Always open (it is compact).
  */
 @Composable
 internal fun RunRecordsSection(
     progress: RunProgressView,
+    runs: List<RunResultView>,
     unit: DistanceUnit,
     nowMillis: Long,
-    onOpenRun: (entryId: Long?, observedAt: Long) -> Unit,
+    onOpenRun: (RunResultView) -> Unit,
 ) {
     val cells = buildList {
         if (progress.longest_run_km > 0.0) {
             // A one-decimal summary figure ("13.1 mi"), distinct from the run card's
             // two-decimal measured distance.
+            val run = recordRun(runs, null, progress.longest_run_observed_at)
             add(
                 RecordCell(
                     label = stringResource(R.string.history_longest_run),
                     value = "${trimDecimal(metersToDisplay(progress.longest_run_km * 1000.0, unit))} ${unit.distanceLabel}",
-                    date = formatLogDate(progress.longest_run_observed_at, nowMillis),
-                    entryId = null,
-                    observedAt = progress.longest_run_observed_at,
+                    date = formatLogDate(recordDaySec(run, progress.longest_run_observed_at), nowMillis),
+                    run = run,
                 ),
             )
         }
         // Time plus the day it was set; pace lives in the run sheet the cell opens.
         progress.best_efforts.forEach { b ->
-            add(RecordCell(b.label, b.time_label, formatLogDate(b.observed_at, nowMillis), b.entry_id, b.observed_at))
+            val run = recordRun(runs, b.entry_id, b.observed_at)
+            add(RecordCell(b.label, b.time_label, formatLogDate(recordDaySec(run, b.observed_at), nowMillis), run))
         }
     }
     if (cells.isEmpty()) return
@@ -294,7 +336,7 @@ internal fun RunRecordsSection(
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                     pair.forEachIndexed { col, cell ->
                         if (col > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(Hairline))
-                        RecordGridCell(cell, Modifier.weight(1f)) { onOpenRun(cell.entryId, cell.observedAt) }
+                        RecordGridCell(cell, Modifier.weight(1f)) { cell.run?.let(onOpenRun) }
                     }
                 }
             }
@@ -302,13 +344,17 @@ internal fun RunRecordsSection(
     }
 }
 
+/** One record cell; [run] is null once its run is no longer listed (the tap does nothing). */
 private data class RecordCell(
     val label: String,
     val value: String,
     val date: String,
-    val entryId: Long?,
-    val observedAt: Long,
+    val run: RunResultView?,
 )
+
+/** The stamp a record cell dates itself by: its [run]'s start ([runDaySec]), else the
+ *  record's own logged stamp [observedAt] when the run is not listed. */
+internal fun recordDaySec(run: RunResultView?, observedAt: Long): Long = run?.let(::runDaySec) ?: observedAt
 
 /** One record cell: overline name, tabular figure, the day it was set; opens its run. */
 @Composable

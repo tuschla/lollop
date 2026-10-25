@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -695,7 +697,7 @@ fun RacePredictorForm(
             }
         }
         if (keypadOpen) {
-            NumericKeypad(
+            FormKeypad(
                 onKey = { key ->
                     setBuffer(editNumericBuffer(buffer(), key, fresh))
                     fresh = false
@@ -929,7 +931,7 @@ fun ProteinForm(
             )
         }
         if (keypadOpen) {
-            NumericKeypad(
+            FormKeypad(
                 onKey = { key ->
                     bwText = editNumericBuffer(bwText, key, fresh)
                     fresh = false
@@ -1017,7 +1019,7 @@ fun HrZonesForm(
             }
         }
         if (keypadOpen) {
-            NumericKeypad(
+            FormKeypad(
                 onKey = { key ->
                     ageText = editNumericBuffer(ageText, key, fresh)
                     fresh = false
@@ -1036,5 +1038,21 @@ fun HrZonesForm(
             Modifier.fillMaxWidth(),
             enabled = ageValid,
         )
+    }
+}
+
+/** A calculator form's shared keypad, scrolled into view as it opens: it sits
+ *  under the form's switches and scales, below the fold of a short sheet (a
+ *  landscape phone), where the user would see no keypad and Back would fold it
+ *  unseen. */
+@Composable
+private fun FormKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit, allowDecimal: Boolean = true, onDone: () -> Unit) {
+    val requester = remember { BringIntoViewRequester() }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        requester.bringIntoView()
+    }
+    Box(Modifier.bringIntoViewRequester(requester)) {
+        NumericKeypad(onKey = onKey, onBackspace = onBackspace, allowDecimal = allowDecimal, onDone = onDone)
     }
 }

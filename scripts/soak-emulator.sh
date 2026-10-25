@@ -227,7 +227,8 @@ cat >"$PY/node.py" <<'PY'
 """Read a uiautomator dump on stdin. argv: mode text [anchor].
 mode eq|pre|re: print "cx cy x1 y1 x2 y2 <label>" of the first node whose text or
 content-desc equals / starts with / regex-matches text (only nodes AFTER the first
-node labelled exactly `anchor`, when given); texts: print every label."""
+node labelled exactly `anchor`, when given); texts: print every label; on: exit 0
+when the node labelled exactly `text` (or its parent/children) is checked/selected."""
 import re, sys, xml.etree.ElementTree as ET
 mode, want = sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else ""
 anchor = sys.argv[3] if len(sys.argv) > 3 else None
@@ -237,6 +238,14 @@ i, j = raw.find("<?xml"), raw.rfind("</hierarchy>")
 if i < 0 or j < 0:
     sys.exit(2)
 root = ET.fromstring(raw[i:j + 12])
+if mode == "on":
+    parent = {c: p for p in root.iter() for c in p}
+    on = lambda n: n.get("checked") == "true" or n.get("selected") == "true"
+    for n in root.iter("node"):
+        if want in (n.get("text"), n.get("content-desc")):
+            near = [n, parent.get(n)] + list(n)
+            sys.exit(0 if any(m is not None and on(m) for m in near) else 1)
+    sys.exit(2)
 for n in root.iter("node"):
     for k in ("text", "content-desc"):
         v = n.get(k, "")
@@ -778,7 +787,12 @@ gps_run() {
   sleep 3; shot gps-08-finish-sheet
   summary="$(find_node re '^[0-9.]+ (mi|km) · ' | cut -d' ' -f7- || true)"
   echo "$summary" >"$G/finish-summary.txt"
-  tap_node eq "Run type, Easy" || true
+  # A run that follows today's plan opens with its type preselected, and the chip
+  # toggles: tap Easy only when it is not already on.
+  if ! dump_ui | python3 "$PY/node.py" on "Run type, Easy"; then
+    tap_node eq "Run type, Easy" || true; sleep 1
+  fi
+  shot gps-08b-finish-type
   tap_node eq "Save run" || die "Save run not found"
   sleep 5; shot gps-09-after-save
   mark "gps-saved"
@@ -823,6 +837,7 @@ out = open(sys.argv[2], "a")
 def chk(ok, name, detail):
     out.write(f"{'PASS' if ok else 'FAIL'}\t{name}\t{detail}\n")
 chk(g["tracked_runs_in_log"] == 1, "exactly one tracked run saved", f"{g['tracked_runs_in_log']} LogRunTrack event(s) in the log")
+chk(g.get("workout_type") == "Easy", "run type chosen on Finish is saved", f"workout_type {g.get('workout_type')!r}")
 if g["tracked_runs_in_log"]:
     c = g["core"]
     fed, recm = e["fed_moving_m"], c["distance_m"]

@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,6 +33,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -268,18 +270,24 @@ internal fun HrZonesResult(model: ViewModel, onClear: () -> Unit) {
         notes = rows.filterIndexed { i, _ -> i !in faceRows },
         onClear = onClear,
     ) {
-        Column {
-            bands.forEachIndexed { i, b ->
-                if (i > 0) CalcHairline()
-                HrZoneRow(b, bandSwatch(b.kind))
-            }
-        }
+        HrZoneTable(bands)
     }
 }
 
-/** One zone-table row: swatch, name, %HRmax, then bpm (or "by pace") end-aligned. */
+/** One zone row's texts, in the styles they render in. */
+private class HrZoneTexts(
+    val name: String,
+    val pct: String,
+    val bpm: String,
+    val bpmColor: Color,
+    val bpmStyle: TextStyle,
+    val reserve: String?,
+    val spoken: String,
+    val swatch: Color,
+)
+
 @Composable
-private fun HrZoneRow(band: HrZoneBandView, swatch: Color) {
+private fun hrZoneTexts(band: HrZoneBandView): HrZoneTexts {
     val pct = stringResource(R.string.main_calc_percent, wholeRange(band.pct_low, band.pct_high))
     val bpm = if (band.pace_governed) stringResource(R.string.main_calc_hr_by_pace) else wholeRange(band.bpm_low, band.bpm_high)
     val reserve = if (!band.pace_governed && band.karvonen_high_bpm > 0.0) {
@@ -293,26 +301,86 @@ private fun HrZoneRow(band: HrZoneBandView, swatch: Color) {
         if (band.pace_governed) bpm else stringResource(R.string.log_value_with_unit, bpm, stringResource(R.string.log_unit_bpm)),
         reserve,
     ).joinToString(", ")
+    return HrZoneTexts(
+        name = band.name,
+        pct = pct,
+        bpm = bpm,
+        bpmColor = if (band.pace_governed) OnBgMuted else OnBgBody,
+        bpmStyle = if (band.pace_governed) Type.Caption else Type.Body.copy(fontWeight = FontWeight.Bold).merge(TabularFigures),
+        reserve = reserve,
+        spoken = spoken,
+        swatch = bandSwatch(band.kind),
+    )
+}
+
+private val HrZoneNameStyle get() = Type.Body.copy(fontWeight = FontWeight.Bold)
+private val HrZoneCaptionStyle get() = Type.Caption.merge(TabularFigures)
+private val HrZoneSwatch = 12.dp
+
+/** Column weights of a side-by-side zone row: name, %HRmax, bpm. */
+private const val HrZoneNameWeight = 1.3f
+private const val HrZonePctWeight = 1f
+private const val HrZoneBpmWeight = 1.2f
+
+/**
+ * The zone table: swatch, name, %HRmax, then bpm (or "by pace") end-aligned. When
+ * any word of any row (a range such as "122–148" counts as one word) would not fit
+ * its column at this width and font scale, every row wraps to stacked (spec §10):
+ * name, then %HRmax, then bpm under it, start-aligned, so no name or range ever
+ * breaks inside a word. Decided by measuring the texts, not by a font-scale step.
+ */
+@Composable
+private fun HrZoneTable(bands: List<HrZoneBandView>) {
+    val rows = bands.map { hrZoneTexts(it) }
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val restPx = constraints.maxWidth - with(density) { (HrZoneSwatch + Space.Md.dp * 3).roundToPx() }
+        val perWeight = restPx / (HrZoneNameWeight + HrZonePctWeight + HrZoneBpmWeight)
+        fun fits(text: String, style: TextStyle, weight: Float): Boolean = text.split(' ').all {
+            measurer.measure(it, style, maxLines = 1, softWrap = false).size.width <= (perWeight * weight).toInt()
+        }
+        val stacked = rows.any { r ->
+            !fits(r.name, HrZoneNameStyle, HrZoneNameWeight) ||
+                !fits(r.pct, HrZoneCaptionStyle, HrZonePctWeight) ||
+                !fits(r.bpm, r.bpmStyle, HrZoneBpmWeight) ||
+                r.reserve?.let { fits(it, HrZoneCaptionStyle, HrZoneBpmWeight) } == false
+        }
+        Column {
+            rows.forEachIndexed { i, r ->
+                if (i > 0) CalcHairline()
+                HrZoneRow(r, stacked)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HrZoneRow(r: HrZoneTexts, stacked: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = ActionMinHeight)
             .padding(vertical = Space.Sm.dp)
-            .semantics(mergeDescendants = true) { contentDescription = spoken },
+            .semantics(mergeDescendants = true) { contentDescription = r.spoken },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
     ) {
-        Box(Modifier.size(12.dp).background(swatch, RoundedCornerShape(3.dp)))
-        Text(band.name, color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold), modifier = Modifier.weight(1.3f))
-        Text(pct, color = OnBgMuted, style = Type.Caption.merge(TabularFigures), modifier = Modifier.weight(1f))
-        Column(Modifier.weight(1.2f), horizontalAlignment = Alignment.End) {
-            Text(
-                bpm,
-                color = if (band.pace_governed) OnBgMuted else OnBgBody,
-                style = if (band.pace_governed) Type.Caption else Type.Body.copy(fontWeight = FontWeight.Bold).merge(TabularFigures),
-                textAlign = TextAlign.End,
-            )
-            reserve?.let { Text(it, color = OnBgMuted, style = Type.Caption.merge(TabularFigures), textAlign = TextAlign.End) }
+        Box(Modifier.size(HrZoneSwatch).background(r.swatch, RoundedCornerShape(3.dp)))
+        if (stacked) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+                Text(r.name, color = OnBgBody, style = HrZoneNameStyle)
+                Text(r.pct, color = OnBgMuted, style = HrZoneCaptionStyle)
+                Text(r.bpm, color = r.bpmColor, style = r.bpmStyle)
+                r.reserve?.let { Text(it, color = OnBgMuted, style = HrZoneCaptionStyle) }
+            }
+        } else {
+            Text(r.name, color = OnBgBody, style = HrZoneNameStyle, modifier = Modifier.weight(HrZoneNameWeight))
+            Text(r.pct, color = OnBgMuted, style = HrZoneCaptionStyle, modifier = Modifier.weight(HrZonePctWeight))
+            Column(Modifier.weight(HrZoneBpmWeight), horizontalAlignment = Alignment.End) {
+                Text(r.bpm, color = r.bpmColor, style = r.bpmStyle, textAlign = TextAlign.End)
+                r.reserve?.let { Text(it, color = OnBgMuted, style = HrZoneCaptionStyle, textAlign = TextAlign.End) }
+            }
         }
     }
 }

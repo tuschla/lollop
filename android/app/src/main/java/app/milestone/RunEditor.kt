@@ -1,13 +1,20 @@
 package app.milestone
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import java.util.Locale
 
@@ -26,7 +33,7 @@ private fun runEditEvent(
     // was given as % of max or not at all.
     avgHrBpm: Double?,
 ): Event = when {
-    initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, 0.0, observedAt, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
+    initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, 0.0, observedAt, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm, utcOffsetSec = utcOffsetSec())
     // observedAtFallback = the row's ORIGINAL stamp → replace, don't duplicate.
     initial.entry_id != 0L ->
         Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, 0.0, observedAt, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
@@ -119,6 +126,20 @@ fun LogRunEditor(
     // (Back closes the keypad before it asks to discard or closes the editor);
     // tapping a field opens it again.
     var keypadOpen by rememberSaveable { mutableStateOf(true) }
+    // The keypad sits right under the field it types into. A short window (a
+    // landscape phone) shows less than the fields and the keypad, so whenever the
+    // keypad opens or retargets it is scrolled into view, then its field above it:
+    // the user sees the value and the keypad's top rows, never a keypad below the
+    // fold that Back would fold unseen.
+    val keypadRequester = remember { BringIntoViewRequester() }
+    val fieldRequesters = remember { RunField.entries.associateWith { BringIntoViewRequester() } }
+    LaunchedEffect(keypadOpen, active) {
+        if (keypadOpen) {
+            withFrameNanos { }
+            keypadRequester.bringIntoView()
+            fieldRequesters.getValue(active).bringIntoView()
+        }
+    }
     // Average heart rate: ONE keypad field, empty = not recorded. The core treats
     // hr_pct_max == 0 as "no HR sample" and reports zone "-" rather than
     // fabricating one, so a run logged without a monitor sends 0. bpm, the figure
@@ -250,67 +271,80 @@ fun LogRunEditor(
         },
     ) {
         BackHandler(enabled = keypadOpen) { keypadOpen = false }
+        // The shared keypad, right under the field it types into. Distance takes a
+        // decimal; the h:mm:ss digits and the HR number don't.
+        val keypadUnder: @Composable (RunField) -> Unit = { field ->
+            if (keypadOpen && active == field) {
+                Box(Modifier.bringIntoViewRequester(keypadRequester)) {
+                    NumericKeypad(onKey = { keyIn(it) }, onBackspace = { backspace() }, allowDecimal = field == RunField.Distance)
+                }
+            }
+        }
         FormCard {
-            KeypadValueField(
-                stringResource(R.string.log_field_distance), unit.distanceLabel, distText,
-                active = keypadOpen && active == RunField.Distance,
-                invalid = !distEmpty && !distValid,
-                min = 0.0, max = distMax, format = "%.2f",
-                adjustments = listOf(-0.5, 0.5, 1.0),
-                onActivate = { active = RunField.Distance; fresh = true; keypadOpen = true },
-                onText = { distText = it; fresh = false; distFresh = false; dirty = true },
-            )
+            Box(Modifier.bringIntoViewRequester(fieldRequesters.getValue(RunField.Distance))) {
+                KeypadValueField(
+                    stringResource(R.string.log_field_distance), unit.distanceLabel, distText,
+                    active = keypadOpen && active == RunField.Distance,
+                    invalid = !distEmpty && !distValid,
+                    min = 0.0, max = distMax, format = "%.2f",
+                    adjustments = listOf(-0.5, 0.5, 1.0),
+                    onActivate = { active = RunField.Distance; fresh = true; keypadOpen = true },
+                    onText = { distText = it; fresh = false; distFresh = false; dirty = true },
+                )
+            }
+            keypadUnder(RunField.Distance)
             // Timer-style h:mm:ss: no ± chips (they step a plain number), the keypad
             // types the digits. Its one hint slot says why Save is dead: an
             // impossible h:mm:ss, or numbers that are still zero.
-            KeypadValueField(
-                stringResource(R.string.log_field_duration), stringResource(R.string.log_unit_hms),
-                fmtDurationDigits(durDigits),
-                active = keypadOpen && active == RunField.Duration,
-                invalid = false,
-                min = 0.0, max = RunDurationMaxMin, format = "%.0f",
-                adjustments = emptyList(),
-                onActivate = { active = RunField.Duration; fresh = true; keypadOpen = true },
-                onText = {},
-                hint = when {
-                    durInvalid -> stringResource(R.string.log_duration_invalid)
-                    zeroBlocksSave -> stringResource(R.string.log_run_zero_hint)
-                    else -> null
-                },
-                hintColor = if (durInvalid) DangerText else OnBgMuted,
-            )
-            // The keypad sits right under the two fields it types into.
-            // Distance takes a decimal; the h:mm:ss digits and the HR number don't.
-            if (keypadOpen) {
-                NumericKeypad(onKey = { keyIn(it) }, onBackspace = { backspace() }, allowDecimal = active == RunField.Distance)
+            Box(Modifier.bringIntoViewRequester(fieldRequesters.getValue(RunField.Duration))) {
+                KeypadValueField(
+                    stringResource(R.string.log_field_duration), stringResource(R.string.log_unit_hms),
+                    fmtDurationDigits(durDigits),
+                    active = keypadOpen && active == RunField.Duration,
+                    invalid = false,
+                    min = 0.0, max = RunDurationMaxMin, format = "%.0f",
+                    adjustments = emptyList(),
+                    onActivate = { active = RunField.Duration; fresh = true; keypadOpen = true },
+                    onText = {},
+                    hint = when {
+                        durInvalid -> stringResource(R.string.log_duration_invalid)
+                        zeroBlocksSave -> stringResource(R.string.log_run_zero_hint)
+                        else -> null
+                    },
+                    hintColor = if (durInvalid) DangerText else OnBgMuted,
+                )
             }
-            // Typed on the shared keypad above, like distance and duration.
-            KeypadValueField(
-                stringResource(R.string.track_log_hr_avg),
-                stringResource(if (bpmMode) R.string.track_log_hr_bpm else R.string.log_hr_pct_max),
-                hrText,
-                active = keypadOpen && active == RunField.HeartRate,
-                invalid = hrText.isNotBlank() && !hrValid,
-                min = RunHrMin, max = hrMax, format = "%.0f",
-                adjustments = listOf(-5.0, 5.0),
-                onActivate = { active = RunField.HeartRate; fresh = true; keypadOpen = true },
-                onText = { hrText = it; fresh = false; dirty = true },
-                // When the core can convert bpm, the unit itself is the swap ("bpm ⇄"):
-                // no extra row. The typed number belongs to the old unit, so it clears.
-                onUnitClick = if (hrMaxKnown) {
-                    {
-                        hrInBpm = !hrInBpm
-                        if (hrText.isNotEmpty()) dirty = true
-                        hrText = ""
-                        active = RunField.HeartRate
-                        fresh = true
-                        keypadOpen = true
-                    }
-                } else {
-                    null
-                },
-                unitClickDescription = stringResource(if (bpmMode) R.string.log_hr_use_pct else R.string.log_hr_use_bpm),
-            )
+            keypadUnder(RunField.Duration)
+            // Typed on the shared keypad too, like distance and duration.
+            Box(Modifier.bringIntoViewRequester(fieldRequesters.getValue(RunField.HeartRate))) {
+                KeypadValueField(
+                    stringResource(R.string.track_log_hr_avg),
+                    stringResource(if (bpmMode) R.string.track_log_hr_bpm else R.string.log_hr_pct_max),
+                    hrText,
+                    active = keypadOpen && active == RunField.HeartRate,
+                    invalid = hrText.isNotBlank() && !hrValid,
+                    min = RunHrMin, max = hrMax, format = "%.0f",
+                    adjustments = listOf(-5.0, 5.0),
+                    onActivate = { active = RunField.HeartRate; fresh = true; keypadOpen = true },
+                    onText = { hrText = it; fresh = false; dirty = true },
+                    // When the core can convert bpm, the unit itself is the swap ("bpm ⇄"):
+                    // no extra row. The typed number belongs to the old unit, so it clears.
+                    onUnitClick = if (hrMaxKnown) {
+                        {
+                            hrInBpm = !hrInBpm
+                            if (hrText.isNotEmpty()) dirty = true
+                            hrText = ""
+                            active = RunField.HeartRate
+                            fresh = true
+                            keypadOpen = true
+                        }
+                    } else {
+                        null
+                    },
+                    unitClickDescription = stringResource(if (bpmMode) R.string.log_hr_use_pct else R.string.log_hr_use_bpm),
+                )
+            }
+            keypadUnder(RunField.HeartRate)
             // Whole-session effort (CR-10): optional; tap the picked number again to
             // clear it. Feeds the session-effort load series.
             EffortScale(sessionRpe, { sessionRpe = it; dirty = true })

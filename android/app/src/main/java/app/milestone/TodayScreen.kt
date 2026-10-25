@@ -46,6 +46,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 
@@ -1255,42 +1257,74 @@ private fun NextSessionCard(
             },
             color = Accent,
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // Discipline icon tile: Run / Lift get a symbol; Rest gets none.
-            val iconRes = when (discipline) {
-                "Run" -> R.drawable.ic_content_run
-                "Lift" -> R.drawable.ic_content_set_dumbbell
-                else -> null
+        // The title keeps its words whole: while its longest word fits beside
+        // "Move" and the "?", they trail the title; otherwise (a large font on a
+        // narrow phone) they drop to their own line under it, at the end.
+        val titleLead: @Composable () -> Unit = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Discipline icon tile: Run / Lift get a symbol; Rest gets none.
+                val iconRes = when (discipline) {
+                    "Run" -> R.drawable.ic_content_run
+                    "Lift" -> R.drawable.ic_content_set_dumbbell
+                    else -> null
+                }
+                if (iconRes != null) {
+                    IconTile(
+                        painterResource(iconRes),
+                        Accent, AccentTint, size = 36.dp,
+                    )
+                    Spacer(Modifier.size(Space.Md.dp))
+                }
+                Row(
+                    Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+                ) {
+                    Column(Modifier.weight(1f, fill = false)) {
+                        Text(ns.title, color = OnBgBody, style = Type.Title)
+                        // Today is already marked in the week strip below; only a
+                        // future-dated session keeps its date label.
+                        if (!isToday) {
+                            Text(planDateLabel(ns.epoch_day), color = OnBgMuted, style = Type.Caption)
+                        }
+                    }
+                    if (adjusted) AdjustedChip()
+                }
             }
-            if (iconRes != null) {
-                IconTile(
-                    painterResource(iconRes),
-                    Accent, AccentTint, size = 36.dp,
-                )
-                Spacer(Modifier.size(Space.Md.dp))
-            }
-            Row(
-                Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
-            ) {
-                Column(Modifier.weight(1f, fill = false)) {
-                    Text(ns.title, color = OnBgBody, style = Type.Title)
-                    // Today is already marked in the week strip below; only a
-                    // future-dated session keeps its date label.
-                    if (!isToday) {
-                        Text(planDateLabel(ns.epoch_day), color = OnBgMuted, style = Type.Caption)
+        }
+        val titleActions: @Composable () -> Unit = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Rescheduling, used rarely: a quiet trailing "Move" beside the "?",
+                // never a row of its own between the title and the first exercise.
+                SessionMoveAction(ns, today, onMove)
+                if (hasEvidence) {
+                    // The disc, not its touch target, ends at the card's content edge.
+                    Box(Modifier.offset(x = DisclosureEdgeInset)) {
+                        DisclosureButton(expanded, subject = ns.title) { expanded = !expanded }
                     }
                 }
-                if (adjusted) AdjustedChip()
             }
-            // Rescheduling, used rarely: a quiet trailing "Move" beside the "?",
-            // never a row of its own between the title and the first exercise.
-            SessionMoveAction(ns, today, onMove)
-            if (hasEvidence) {
-                // The disc, not its touch target, ends at the card's content edge.
-                Box(Modifier.offset(x = DisclosureEdgeInset)) {
-                    DisclosureButton(expanded, subject = ns.title) { expanded = !expanded }
+        }
+        Layout(contents = listOf(titleLead, titleActions), modifier = Modifier.fillMaxWidth()) { (leadM, actionsM), constraints ->
+            val width = constraints.maxWidth
+            val lead = leadM.single()
+            val actions = actionsM.single()
+            val actionsWidth = actions.maxIntrinsicWidth(Constraints.Infinity)
+            if (lead.minIntrinsicWidth(Constraints.Infinity) + actionsWidth <= width) {
+                val a = actions.measure(Constraints(maxWidth = width))
+                val l = lead.measure(Constraints(maxWidth = width - a.width))
+                val h = maxOf(l.height, a.height)
+                // placeRelative: the title at the start, the actions at the end (mirrored in RTL).
+                layout(width, h) {
+                    l.placeRelative(0, (h - l.height) / 2)
+                    a.placeRelative(width - a.width, (h - a.height) / 2)
+                }
+            } else {
+                val l = lead.measure(Constraints(maxWidth = width))
+                val a = actions.measure(Constraints(maxWidth = width))
+                layout(width, l.height + a.height) {
+                    l.placeRelative(0, 0)
+                    a.placeRelative(width - a.width, l.height)
                 }
             }
         }

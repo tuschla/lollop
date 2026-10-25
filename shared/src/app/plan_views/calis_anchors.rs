@@ -204,9 +204,11 @@ fn calis_acclimated(state: &CalisState) -> bool {
 ///
 /// Deterministic: "sessions" are distinct LOCAL calendar days (`observed_at`
 /// shifted by `utc_offset_sec`); spans come from `observed_at`, never a clock.
-/// `sets` is an ITERATOR so the caller can pass a date-filtered history slice.
+/// `sets` is an ITERATOR so the caller can pass a date-filtered history slice;
+/// each set comes with its name's rung ([`crate::calisthenics::tier_by_name`]),
+/// which the caller resolves once per distinct name.
 pub(in crate::app) fn build_calisthenics_anchors<'a>(
-    sets: impl Iterator<Item = &'a LoggedSet>,
+    sets: impl Iterator<Item = (&'a LoggedSet, Option<(crate::schema::LadderId, u8)>)>,
     placements: &[CalisPlacement],
     inputs: &[ReadinessInput],
     goal: LiftGoal,
@@ -227,9 +229,9 @@ pub(in crate::app) fn build_calisthenics_anchors<'a>(
     let pain_present = crate::autoreg::pain_blocks_progression(inputs);
     let day_of = |t: i64| local_day(t, utc_offset_sec);
 
-    // Match every logged set to (ladder, rung) once.
+    // Every logged set that names a ladder rung, with its (ladder, rung).
     let matched: Vec<(crate::schema::LadderId, u8, &LoggedSet)> = sets
-        .filter_map(|s| cal::tier_by_name(&s.exercise).map(|(l, r)| (l, r, s)))
+        .filter_map(|(s, tier)| tier.map(|(l, r)| (l, r, s)))
         .collect();
 
     // Muscle-up gate bests: max single-set reps ever at Full pull-up+ and Full
@@ -266,8 +268,10 @@ pub(in crate::app) fn build_calisthenics_anchors<'a>(
         if by_day.is_empty() && places.is_empty() {
             continue;
         }
+        // Log order, never storage order: the day's last set is the
+        // prescribed added load, and an Undo or amend moves a row to the tail.
         for v in by_day.values_mut() {
-            v.sort_by_key(|(_, s)| s.observed_at);
+            v.sort_by(|(_, a), (_, b)| a.chrono_cmp(b));
         }
         places.sort_by_key(|p| p.observed_at);
         let place = |p: &CalisPlacement| CalisState {
@@ -437,7 +441,7 @@ pub(in crate::app) fn build_calisthenics_anchors<'a>(
         let last_loaded_set = matched
             .iter()
             .filter(|(lid, r, s)| *lid == l.id && cal::weighted_ok(l.id, *r) && s.weight_kg > 0.0)
-            .max_by_key(|(_, _, s)| s.observed_at)
+            .max_by(|(_, _, a), (_, _, b)| a.chrono_cmp(b))
             .map(|(_, r, s)| (*r, s.weight_kg, s.reps, s.rpe));
 
         // Active: dynamic ladders always; skill tracks once logged, but muscle-up

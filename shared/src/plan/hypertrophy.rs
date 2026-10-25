@@ -113,7 +113,8 @@ pub(crate) struct MuscleWeekTarget {
 /// day, every standard target is scaled down by one shared factor
 /// (HYP-VOL-CAP-001), so the cut is spread and no muscle loses all its work.
 /// A specialization block's priority and maintenance targets are never
-/// scaled. The plan and the program card both read this, so they agree.
+/// scaled. The plan and the program card both read this, so they agree; the
+/// volume planner reads the whole block ([`hypertrophy_block_targets`]).
 pub(crate) fn hypertrophy_week_targets(
     profile: &Profile,
     ta: TrainingAge,
@@ -122,29 +123,121 @@ pub(crate) fn hypertrophy_week_targets(
     lift_days: usize,
 ) -> Vec<MuscleWeekTarget> {
     let weeks = block_weeks.max(1);
-    let idx = (week_in_block.clamp(1, weeks) - 1) as usize;
-    let raw: Vec<MuscleWeekTarget> = MUSCLE_ORDER
+    let idx = usize::from(week_in_block.clamp(1, weeks) - 1);
+    fitted_block_memo(profile, ta, weeks, lift_days)[idx].clone()
+}
+
+/// [`hypertrophy_week_targets`] for every week of the block, in order.
+pub(crate) fn hypertrophy_block_targets(
+    profile: &Profile,
+    ta: TrainingAge,
+    block_weeks: u8,
+    lift_days: usize,
+) -> Vec<Vec<MuscleWeekTarget>> {
+    fitted_block_memo(profile, ta, block_weeks.max(1), lift_days).to_vec()
+}
+
+/// Everything [`fitted_block`] reads: the profile's stated weekly sets and
+/// specialization muscle, the training age, the block length and lift days.
+#[derive(PartialEq)]
+struct FitKey {
+    weekly_sets: u8,
+    specialization: Option<String>,
+    ta: TrainingAge,
+    weeks: u8,
+    days: usize,
+}
+
+/// Distinct fitted blocks kept per thread (a view needs one or two).
+const FIT_MEMO_CAP: usize = 8;
+
+/// One memoized fitted block: its key and the per-week muscle targets.
+type FitMemoEntry = (FitKey, std::rc::Rc<[Vec<MuscleWeekTarget>]>);
+
+thread_local! {
+    /// [`fitted_block`] is a pure function of its [`FitKey`] and packs the
+    /// whole block (one `allocate_week` per trim step per week), while the plan
+    /// asks for one week per synthesized day: fit each block once.
+    static FIT_MEMO: std::cell::RefCell<Vec<FitMemoEntry>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn fitted_block_memo(
+    profile: &Profile,
+    ta: TrainingAge,
+    weeks: u8,
+    lift_days: usize,
+) -> std::rc::Rc<[Vec<MuscleWeekTarget>]> {
+    let key = FitKey {
+        weekly_sets: profile.weekly_sets,
+        specialization: profile.specialization_muscle.clone(),
+        ta,
+        weeks,
+        days: lift_days.clamp(1, 7),
+    };
+    if let Some(hit) =
+        FIT_MEMO.with_borrow(|m| m.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
+    {
+        return hit;
+    }
+    let block: std::rc::Rc<[Vec<MuscleWeekTarget>]> = fitted_block(
+        key.specialization.as_deref(),
+        key.weekly_sets,
+        ta,
+        weeks,
+        key.days,
+    )
+    .into();
+    FIT_MEMO.with_borrow_mut(|m| {
+        if m.len() >= FIT_MEMO_CAP {
+            m.clear();
+        }
+        m.push((key, block.clone()));
+    });
+    block
+}
+
+/// Every week of the block (0-based), each fitted to the
+/// whole-session cap. An accumulation block only adds sets (03:9-10 "start
+/// near MEV and add ~2–4 sets/week", 03:350): the cap may lower the LEVEL
+/// (03:504-505) but must not make a building week shed sets. Fitting each week
+/// on its own would (a later, heavier week can need a deeper cut: 10, 12, 14,
+/// 14, 13, 13), so each muscle's target is the least of its own fitted target
+/// over this week and every later week of the block: the highest ramp that
+/// never drops and never exceeds any week's own fit (so each week still packs
+/// under the cap).
+fn fitted_block(
+    specialization: Option<&str>,
+    weekly_sets: u8,
+    ta: TrainingAge,
+    weeks: u8,
+    days: usize,
+) -> Vec<Vec<MuscleWeekTarget>> {
+    let ramps: Vec<(&'static str, VolumeRole, Vec<u8>)> = MUSCLE_ORDER
         .iter()
         .filter_map(|m| hypertrophy::landmarks_for(m))
         .map(|lm| {
-            let role =
-                hypertrophy::volume_role(lm.muscle, profile.specialization_muscle.as_deref(), ta)
-                    .value;
-            let ramp = hypertrophy::weekly_targets(lm, profile.weekly_sets, role, weeks).value;
-            MuscleWeekTarget {
-                muscle: lm.muscle,
-                target: ramp.get(idx).copied().unwrap_or(0),
-                role,
-            }
+            let role = hypertrophy::volume_role(lm.muscle, specialization, ta).value;
+            let ramp = hypertrophy::weekly_targets(lm, weekly_sets, role, weeks).value;
+            (lm.muscle, role, ramp)
         })
         .collect();
+    let raw_week = |w: usize| -> Vec<MuscleWeekTarget> {
+        ramps
+            .iter()
+            .map(|&(muscle, role, ref ramp)| MuscleWeekTarget {
+                muscle,
+                target: ramp.get(w).copied().unwrap_or(0),
+                role,
+            })
+            .collect()
+    };
     // Fit the standard targets so the week packs under the cap: sized as the
     // plan sizes it, on full-body days with the default exercises (the
     // athlete's own lifts change the split, not the total; each day's cap
     // in `allocate_week` still holds either way). Start from the share of the
     // budget the uncapped week overshoots by, then trim in small steps until
     // no day had to cut a muscle short.
-    let days = lift_days.clamp(1, 7);
     let regions = super::WeekRegions::full(days);
     let cap = u32::from(hypertrophy::SESSION_WORKING_SET_CAP);
     let total = |targets: &[MuscleWeekTarget], day_cap: u32| -> u32 {
@@ -153,7 +246,7 @@ pub(crate) fn hypertrophy_week_targets(
             .map(|it| u32::from(it.sets))
             .sum()
     };
-    let scaled = |scale: f32| -> Vec<MuscleWeekTarget> {
+    let scaled = |raw: &[MuscleWeekTarget], scale: f32| -> Vec<MuscleWeekTarget> {
         raw.iter()
             .map(|t| match t.role {
                 VolumeRole::Standard => MuscleWeekTarget {
@@ -165,16 +258,40 @@ pub(crate) fn hypertrophy_week_targets(
             .collect()
     };
     let fits = |targets: &[MuscleWeekTarget]| total(targets, u32::MAX) == total(targets, cap);
-    if fits(&raw) {
-        return raw;
-    }
+    // Trim from `scale` in small steps until the week fits (0 = every
+    // standard target cut to nothing, the cap's last word).
+    let trim = |raw: &[MuscleWeekTarget], mut scale: f32| -> Vec<MuscleWeekTarget> {
+        let mut out = scaled(raw, scale);
+        while scale > 0.0 && !fits(&out) {
+            scale = (scale - 0.02).max(0.0);
+            out = scaled(raw, scale);
+        }
+        out
+    };
     let budget = cap * days as u32;
-    let mut scale = (budget as f32 / total(&raw, u32::MAX) as f32).min(1.0);
-    let mut out = scaled(scale);
-    while scale > 0.0 && !fits(&out) {
-        scale -= 0.02;
-        out = scaled(scale.max(0.0));
+    let own_fit = |raw: Vec<MuscleWeekTarget>| -> Vec<MuscleWeekTarget> {
+        if fits(&raw) {
+            return raw;
+        }
+        let start = (budget as f32 / total(&raw, u32::MAX) as f32).min(1.0);
+        trim(&raw, start)
+    };
+    let mut out: Vec<Vec<MuscleWeekTarget>> = Vec::with_capacity(usize::from(weeks));
+    for w in (0..usize::from(weeks)).rev() {
+        let mut targets = own_fit(raw_week(w));
+        if let Some(later) = out.last() {
+            for (t, l) in targets.iter_mut().zip(later) {
+                t.target = t.target.min(l.target);
+            }
+            // Fewer sets per muscle nearly always still pack; if the packing
+            // disagrees, the cap wins (and earlier weeks follow this week).
+            if !fits(&targets) {
+                targets = trim(&targets, 1.0);
+            }
+        }
+        out.push(targets);
     }
+    out.reverse();
     out
 }
 

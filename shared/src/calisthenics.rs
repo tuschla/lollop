@@ -1412,6 +1412,7 @@ static NAME_INDEX: std::sync::LazyLock<std::collections::HashMap<String, (Ladder
 /// spacing and a plural "s". Canonical names are unique across ALL ladders, so
 /// a hit is unambiguous.
 pub fn tier_by_name(name: &str) -> Option<(LadderId, u8)> {
+    crate::plan::count_name_classification();
     let key = name_key(name);
     if key.is_empty() {
         return None;

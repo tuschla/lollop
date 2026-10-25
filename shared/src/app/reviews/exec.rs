@@ -84,6 +84,7 @@ fn top_set(it: &PrescriptionView) -> Option<&ItemSetView> {
             a.weight_kg
                 .total_cmp(&b.weight_kg)
                 .then(a.reps.cmp(&b.reps))
+                .then((a.observed_at, a.entry_id).cmp(&(b.observed_at, b.entry_id)))
         })
 }
 

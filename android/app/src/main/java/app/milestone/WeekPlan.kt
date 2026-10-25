@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -39,6 +41,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 
@@ -465,8 +469,12 @@ private fun planPlainLabel(prog: ProgramSummaryView): String {
     return "$focus · $phaseWord · week ${prog.week} of ${prog.weeks_total}"
 }
 
-/** Height of a week-strip day's glyph slot (the ✓ or the dot). */
+/** Least height of a week-strip day's glyph slot (the ✓ or the dot); the slot
+ *  grows to the ✓'s line at a large font ([WeekStrip] measures it). */
 private val DayGlyphSlot = 16.dp
+
+/** The done ✓'s style in a week-strip day. */
+private val DayDoneGlyphStyle = Type.Chip.copy(fontWeight = FontWeight.Bold)
 
 /** A week-strip day's status dot. */
 private val DayDotSize = 8.dp
@@ -498,127 +506,39 @@ private fun WeekStrip(
     // reopens nothing.
     readOnly: Boolean = false,
 ) {
-    val status = LocalStatusColors.current
+    val measurer = rememberTextMeasurer()
+    // The widest word a day column shows (bold, as today's weekday is), so the
+    // strip can tell when seven columns no longer fit them whole.
+    val dayLabels = week.flatMap { s ->
+        listOf(weekdayShort(s.epoch_day), if (s.status == "before_plan") "\u2014" else sessionDiscipline(s.session_type))
+    }
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            week.forEachIndexed { i, s ->
-                // Per-day status → dot appearance. Filled = a settled call
-                // (next/done/adjusted/blocked); a hollow ring = still open
-                // (planned) or open-and-past (missed). GREEN (the done mark)
-                // marks a completed day, NOT hrZone1's teal, which means "easy
-                // aerobic zone" everywhere else. Rest days render no dot at all
-                // (handled below). "missed" wears a neutral hollow ring and
-                // "partial" (some work logged, under the lighter credit) a
-                // half-filled one, both neutral
-                // (OnBgMuted), NOT danger red: a skipped planned day is not a
-                // safety event, and red is reserved for real safety states.
-                // Only "blocked" (a safety hold) keeps danger.
-                val (dotColor, dotFilled) = when (s.status) {
-                    "next" -> Accent to true
-                    "adjusted" -> status.warn to true
-                    "blocked" -> status.danger to true
-                    "done", "done_lighter" -> status.done to true
-                    "missed", "partial" -> OnBgMuted to false
-                    "rest" -> OnBgFaint to false
-                    else -> OnBgFaint to false // planned
-                }
-                val isToday = s.epoch_day == today
-                val sel = selectedDay == s.epoch_day
-                // A day before the plan started is neither planned nor missed: a
-                // neutral dash, no dot, nothing to count.
-                val beforePlan = s.status == "before_plan"
-                val isDone = s.status == "done" || s.status == "done_lighter"
-                // Done by a same-discipline session on another day ("Done Tue").
-                val creditedFrom = s.credited_from_epoch_day?.takeIf { isDone && it != s.epoch_day }
-                // One spoken description per day column: the weekday, its discipline,
-                // and its status (the dot's fill/colour is a purely visual cue).
-                val todayPrefix = stringResource(R.string.main_a11y_today_prefix)
-                val dayDesc = buildString {
-                    if (isToday) append(todayPrefix)
-                    append(weekdayFull(s.epoch_day))
-                    append(", ")
-                    if (!beforePlan) {
-                        append(sessionDiscipline(s.session_type))
-                        append(", ")
-                    }
-                    append(weekDayStatusPhrase(s.status))
-                    creditedFrom?.let { append(", on ").append(weekdayFull(it)) }
-                }
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        // ≥48dp tap target for each day column (accessibility).
-                        .heightIn(min = ActionMinHeight)
-                        // Clip before clickable so the ripple stays rounded.
-                        .clip(RoundedCornerShape(Space.Md.dp))
-                        .background(
-                            if (sel) Accent.copy(alpha = 0.12f) else Color.Transparent,
-                            RoundedCornerShape(Space.Md.dp),
-                        )
-                        // TODAY is marked distinctly with an accent ring.
-                        .then(
-                            if (isToday) {
-                                Modifier.border(1.dp, Accent, RoundedCornerShape(Space.Md.dp))
-                            } else {
-                                Modifier
-                            },
-                        )
-                        // One tab per day: selection is spoken, not only coloured.
-                        .selectable(selected = sel, role = Role.Tab) { onSelectDay(if (sel) -1L else s.epoch_day) }
-                        .padding(vertical = Space.Sm.dp, horizontal = Space.Xs.dp)
-                        // Merge the weekday/discipline glyphs into one named, tappable
-                        // node (keeps the onClick; replaces the terse child texts).
-                        .semantics(mergeDescendants = true) { contentDescription = dayDesc },
-                ) {
-                    Text(
-                        weekdayShort(s.epoch_day),
-                        color = if (isToday || sel) Accent else OnBgBody,
-                        style = if (isToday) Type.Chip else Type.Chip.copy(fontWeight = FontWeight.Normal),
-                        maxLines = 1,
-                    )
-                    // Day-type/label token, from the core's session_type.
-                    Text(
-                        if (beforePlan) "\u2014" else sessionDiscipline(s.session_type),
-                        color = OnBgMuted,
-                        style = Type.Chip,
-                        maxLines = 1,
-                    )
-                    // One fixed-height glyph slot, so every column keeps one height.
-                    Box(Modifier.height(DayGlyphSlot), contentAlignment = Alignment.Center) {
-                        when {
-                            s.status == "rest" || beforePlan -> Unit
-                            // Non-colour done cue (a11y): a ✓ glyph, not hue alone, so
-                            // a colour-blind user can answer "did I finish?" at a glance.
-                            isDone -> Text(
-                                "\u2713",
-                                color = status.done,
-                                style = Type.Chip.copy(fontWeight = FontWeight.Bold),
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                            )
-                            else -> Box(
-                                Modifier
-                                    .size(DayDotSize)
-                                    .clip(RoundedCornerShape(DayDotSize / 2))
-                                    .then(
-                                        if (dotFilled) {
-                                            Modifier.background(dotColor)
-                                        } else {
-                                            Modifier.border(1.5.dp, dotColor, RoundedCornerShape(DayDotSize / 2))
-                                        },
-                                    )
-                                    .then(if (s.status == "partial") Modifier.testTag("week-partial-mark") else Modifier),
-                            ) {
-                                if (s.status == "partial") {
-                                    Box(Modifier.fillMaxHeight().width(DayDotSize / 2).background(dotColor))
-                                }
-                            }
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val density = LocalDensity.current
+            val gapPx = with(density) { Space.Xs.dp.roundToPx() }
+            val needPx = with(density) { (Space.Xs.dp * 2).roundToPx() } +
+                (dayLabels.maxOfOrNull { measurer.measure(it, Type.Chip, maxLines = 1, softWrap = false).size.width } ?: 0)
+            // One glyph-slot height for every column: the 16dp floor, or the ✓'s
+            // line once the font scales past it (13sp at 130 % no longer fits 16dp).
+            val glyphSlot = maxOf(DayGlyphSlot, with(density) { measurer.measure("\u2713", DayDoneGlyphStyle, maxLines = 1).size.height.toDp() })
+            // Seven equal columns while every label fits whole; at a large font on a
+            // narrow phone the week wraps into balanced rows (4 + 3, …) of equal
+            // columns instead of cutting "Rest" to "Res".
+            val days = week.size.coerceAtLeast(1)
+            val fit = ((constraints.maxWidth + gapPx) / (needPx + gapPx)).coerceIn(1, days)
+            val rows = (days + fit - 1) / fit
+            val perRow = (days + rows - 1) / rows
+            Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+                week.chunked(perRow).forEach { rowDays ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        rowDays.forEach { s ->
+                            WeekStripDay(s, today, selectedDay, onSelectDay, glyphSlot, Modifier.weight(1f))
                         }
+                        // A short last row keeps the full rows' column width.
+                        repeat(perRow - rowDays.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }
@@ -722,6 +642,135 @@ private fun WeekStrip(
                             onReopen = { onReopen(item, s.epoch_day) },
                             isCheck = isCheck(item),
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One week-strip day column: weekday, day-type token and status glyph, one
+ *  ≥48dp tab named by its spoken description. */
+@Composable
+private fun WeekStripDay(
+    s: SessionPlanView,
+    today: Long,
+    selectedDay: Long,
+    onSelectDay: (Long) -> Unit,
+    glyphSlot: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val status = LocalStatusColors.current
+    // Per-day status → dot appearance. Filled = a settled call
+    // (next/done/adjusted/blocked); a hollow ring = still open
+    // (planned) or open-and-past (missed). GREEN (the done mark)
+    // marks a completed day, NOT hrZone1's teal, which means "easy
+    // aerobic zone" everywhere else. Rest days render no dot at all
+    // (handled below). "missed" wears a neutral hollow ring and
+    // "partial" (some work logged, under the lighter credit) a
+    // half-filled one, both neutral
+    // (OnBgMuted), NOT danger red: a skipped planned day is not a
+    // safety event, and red is reserved for real safety states.
+    // Only "blocked" (a safety hold) keeps danger.
+    val (dotColor, dotFilled) = when (s.status) {
+        "next" -> Accent to true
+        "adjusted" -> status.warn to true
+        "blocked" -> status.danger to true
+        "done", "done_lighter" -> status.done to true
+        "missed", "partial" -> OnBgMuted to false
+        "rest" -> OnBgFaint to false
+        else -> OnBgFaint to false // planned
+    }
+    val isToday = s.epoch_day == today
+    val sel = selectedDay == s.epoch_day
+    // A day before the plan started is neither planned nor missed: a
+    // neutral dash, no dot, nothing to count.
+    val beforePlan = s.status == "before_plan"
+    val isDone = s.status == "done" || s.status == "done_lighter"
+    // Done by a same-discipline session on another day ("Done Tue").
+    val creditedFrom = s.credited_from_epoch_day?.takeIf { isDone && it != s.epoch_day }
+    // One spoken description per day column: the weekday, its discipline,
+    // and its status (the dot's fill/colour is a purely visual cue).
+    val todayPrefix = stringResource(R.string.main_a11y_today_prefix)
+    val dayDesc = buildString {
+        if (isToday) append(todayPrefix)
+        append(weekdayFull(s.epoch_day))
+        append(", ")
+        if (!beforePlan) {
+            append(sessionDiscipline(s.session_type))
+            append(", ")
+        }
+        append(weekDayStatusPhrase(s.status))
+        creditedFrom?.let { append(", on ").append(weekdayFull(it)) }
+    }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+        modifier = modifier
+            // ≥48dp tap target for each day column (accessibility).
+            .heightIn(min = ActionMinHeight)
+            // Clip before clickable so the ripple stays rounded.
+            .clip(RoundedCornerShape(Space.Md.dp))
+            .background(
+                if (sel) Accent.copy(alpha = 0.12f) else Color.Transparent,
+                RoundedCornerShape(Space.Md.dp),
+            )
+            // TODAY is marked distinctly with an accent ring.
+            .then(
+                if (isToday) {
+                    Modifier.border(1.dp, Accent, RoundedCornerShape(Space.Md.dp))
+                } else {
+                    Modifier
+                },
+            )
+            // One tab per day: selection is spoken, not only coloured.
+            .selectable(selected = sel, role = Role.Tab) { onSelectDay(if (sel) -1L else s.epoch_day) }
+            .padding(vertical = Space.Sm.dp, horizontal = Space.Xs.dp)
+            // Merge the weekday/discipline glyphs into one named, tappable
+            // node (keeps the onClick; replaces the terse child texts).
+            .semantics(mergeDescendants = true) { contentDescription = dayDesc },
+    ) {
+        Text(
+            weekdayShort(s.epoch_day),
+            color = if (isToday || sel) Accent else OnBgBody,
+            style = if (isToday) Type.Chip else Type.Chip.copy(fontWeight = FontWeight.Normal),
+            maxLines = 1,
+        )
+        // Day-type/label token, from the core's session_type.
+        Text(
+            if (beforePlan) "\u2014" else sessionDiscipline(s.session_type),
+            color = OnBgMuted,
+            style = Type.Chip,
+            maxLines = 1,
+        )
+        // One glyph slot of the strip's height, so every column keeps one height.
+        Box(Modifier.height(glyphSlot), contentAlignment = Alignment.Center) {
+            when {
+                s.status == "rest" || beforePlan -> Unit
+                // Non-colour done cue (a11y): a ✓ glyph, not hue alone, so
+                // a colour-blind user can answer "did I finish?" at a glance.
+                isDone -> Text(
+                    "\u2713",
+                    color = status.done,
+                    style = DayDoneGlyphStyle,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                )
+                else -> Box(
+                    Modifier
+                        .size(DayDotSize)
+                        .clip(RoundedCornerShape(DayDotSize / 2))
+                        .then(
+                            if (dotFilled) {
+                                Modifier.background(dotColor)
+                            } else {
+                                Modifier.border(1.5.dp, dotColor, RoundedCornerShape(DayDotSize / 2))
+                            },
+                        )
+                        .then(if (s.status == "partial") Modifier.testTag("week-partial-mark") else Modifier),
+                ) {
+                    if (s.status == "partial") {
+                        Box(Modifier.fillMaxHeight().width(DayDotSize / 2).background(dotColor))
                     }
                 }
             }

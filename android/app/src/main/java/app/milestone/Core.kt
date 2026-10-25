@@ -34,6 +34,13 @@ internal val coreJson = Json { ignoreUnknownKeys = true }
  *  and leaves the core with what replayed. */
 private const val MAX_REPLAY_RESETS = 16
 
+/** A stand-in for the native core's two round trips ([Core.faultForTest]): the raw
+ *  `update` response bytes for one event's wire JSON, and the raw `view` bytes. */
+internal interface CoreFault {
+    fun update(event: ByteArray): ByteArray?
+    fun view(): ByteArray?
+}
+
 /**
  * JNI bridge to the Rust/crux core (`libshared.so`).
  *
@@ -43,12 +50,79 @@ private const val MAX_REPLAY_RESETS = 16
  * safety tiers, contested markers lives in Rust and is rendered verbatim.
  */
 object Core {
-    init {
+    /** Why `libshared.so` failed to load (a missing or ABI-incompatible library),
+     *  or null. Caught instead of letting the initializer throw, which would make
+     *  every later touch of [Core] a NoClassDefFoundError crash: boot reads it via
+     *  [probe] and shows the core-unavailable state instead. */
+    private val loadError: Throwable? = try {
         System.loadLibrary("shared")
+        null
+    } catch (e: UnsatisfiedLinkError) {
+        e
+    } catch (e: SecurityException) {
+        e
     }
 
     private external fun update(event: ByteArray): ByteArray?
     private external fun view(): ByteArray?
+
+    /** TEST-ONLY fault injection: when set, every core round trip ([update]/[view])
+     *  goes here instead of the JNI library, so a JVM test can boot the app on a core
+     *  that answers null (an emulated arm64 library under translation, a JNI
+     *  allocation failure) or throws [UnsatisfiedLinkError] (a library that never
+     *  loaded). Never set on device. */
+    @Volatile internal var faultForTest: CoreFault? = null
+
+    private fun jniUpdate(event: ByteArray): ByteArray? = faultForTest.let { if (it != null) it.update(event) else update(event) }
+
+    private fun jniView(): ByteArray? = faultForTest.let { if (it != null) it.view() else view() }
+
+    /** Latched for the process once boot found the core unusable ([probe] failed, or
+     *  [markUnavailable] after the boot clock event was refused). While set, [apply]
+     *  refuses every event and [restore] replays nothing, so a dead core can never
+     *  append to (or compete with) the user's durable log. */
+    @Volatile var unavailable = false
+        private set
+
+    /**
+     * Boot health check, run BEFORE [restore] touches the log: the library loaded and
+     * [view] returns a ViewModel that decodes. A core that answers null (every JNI call
+     * failing, as a release arm64-only APK does under x86_64 translation), an error
+     * envelope or undecodable bytes, or that throws [LinkageError], is unavailable:
+     * latches [unavailable] and returns false. Reads only; applies no event.
+     */
+    @Synchronized
+    fun probe(): Boolean {
+        if (unavailable) return false
+        val ok = loadError == null && try {
+            val bytes = jniView()
+            bytes != null && String(bytes, Charsets.UTF_8).let { text ->
+                !isCoreErrorEnvelope(text) &&
+                    runCatching { coreJson.decodeFromString(ViewModel.serializer(), text) }.isSuccess
+            }
+        } catch (e: LinkageError) {
+            false
+        }
+        if (!ok) {
+            android.util.Log.e("Core", "native core unavailable at boot", loadError)
+            unavailable = true
+        }
+        return ok
+    }
+
+    /** Latch [unavailable] after boot: the core read a view but refused the boot
+     *  clock event every working core accepts. */
+    @Synchronized
+    fun markUnavailable() {
+        android.util.Log.e("Core", "native core refused the boot clock event, treating it as unavailable")
+        unavailable = true
+    }
+
+    /** TEST-ONLY: undo [unavailable] (with [faultForTest] cleared) between scenarios. */
+    @Synchronized
+    internal fun clearUnavailableForTest() {
+        unavailable = false
+    }
 
     /** TEST-ONLY bridge reset: drops the native core's global
      *  bridge and rebuilds it empty so a host-JVM UI/UX QA scenario starts from
@@ -70,12 +144,28 @@ object Core {
      *  payload no longer ships a per-run GPX string (it was a ~0.5 MB blob
      *  re-serialised over JNI + re-parsed on every event); the shell calls this
      *  only for the one run it inspects, matched by the same (entry_id,
-     *  observed_at) identity as delete/amend. Returns "" for a hand-entered run,
-     *  an unknown id, or a track with no exportable route; null only if the JNI
-     *  string couldn't be allocated (the caller treats null like ""). Reads the
+     *  observed_at) identity as delete/amend. Returns "" for a hand-entered run or
+     *  an unknown id; for a GPS run QC left unmeasurable (gps_unmeasurable) it is
+     *  the recorded fixes, read only by Undo (no route to map or share). null only
+     *  if the JNI string couldn't be allocated (the caller treats null like ""). Reads the
      *  registry the last [view] populated, so call it after the run list rendered.
      *  Heavy (builds + returns the whole document): call OFF the main thread. */
     external fun exportGpx(entryId: Long, observedAt: Long): String?
+
+    /** Pure core query (no model/log): `{"distance_km":…,"duration_min":…}` for a
+     *  `LogRunTrack` event's wire JSON, or `{"error":…}`; null only if the JNI
+     *  string couldn't be allocated. See [savedFigures]. */
+    private external fun trackFigures(event: ByteArray): String?
+
+    /** The distance and moving time [track] will be SAVED with, from the core's own
+     *  QC and derivation (the same as the saved run's card), so the Finish review
+     *  shows what History will list. Null when the core can't answer (an error
+     *  envelope or a JNI allocation failure). O(fixes): fine on the main thread for
+     *  a capped (decimated) track. */
+    fun savedFigures(track: Event.LogRunTrack): TrackFigures? {
+        val json = trackFigures(track.toJson().toString().toByteArray(Charsets.UTF_8)) ?: return null
+        return runCatching { coreJson.decodeFromString(TrackFigures.serializer(), json) }.getOrNull()
+    }
 
     // Append-only, newline-delimited event log. The crux core holds all state in
     // memory only, so we persist the event *stream* (not the derived model) and
@@ -87,6 +177,12 @@ object Core {
     // config change) would double every logged lift/run. Guard so replay happens
     // exactly once per process.
     private var restored = false
+
+    /** Whether the log this process replayed ended with the plan removed (its last
+     *  plan line a kept `ClearPlan`, [RestoredLog.planRemoved]). Boot reads it so a
+     *  removed plan stays removed when the setup prefs' marker was lost. */
+    var restoredPlanRemoved = false
+        private set
 
     /**
      * Point the core at [ctx]'s event log and replay it to rebuild state. Safe to
@@ -104,6 +200,9 @@ object Core {
      */
     @Synchronized
     fun restore(ctx: Context): Boolean {
+        // An unavailable core never gets the log: nothing is replayed into it and no
+        // event it might accept can be appended (the boot shows the error state).
+        if (unavailable) return false
         val file = File(ctx.filesDir, "event-log.ndjson")
         log = file
         // Already replayed this process (Activity recreation): the only way this
@@ -112,6 +211,7 @@ object Core {
         // Marked BEFORE replaying: the native core keeps whatever a partial replay
         // applied, so a second attempt in this process would double those events.
         restored = true
+        restoredPlanRemoved = false
         // Compacting before replay matters here: a run's GPS track (thousands of
         // points) is the heaviest line in the log, and every `Clear*` supersedes
         // its whole family: the compacted replay is model-equivalent.
@@ -126,6 +226,7 @@ object Core {
         // Entry ids seed from the wall clock; after the clock moved back they must
         // still never reuse an id a restored entry carries.
         EntryIds.raiseTo(loaded.maxEntryId)
+        restoredPlanRemoved = loaded.planRemoved
         // A failed torn-tail repair (often disk full, the same cause as the tear)
         // leaves the durable tail newline-less: the next append must lead with one.
         appendTornGuard = runCatching { file.exists() && !EventLog.endsWithNewline(file) }.getOrDefault(true)
@@ -190,8 +291,10 @@ object Core {
      *  order the core accepted the events, so a later replay reconstructs the
      *  identical model.** */
     private fun apply(event: Event): Applied {
+        // A core found unusable at boot refuses everything: nothing reaches the log.
+        if (unavailable) return Applied.Rejected
         val wire = event.toJson().toString()
-        val response = update(wire.toByteArray(Charsets.UTF_8))
+        val response = jniUpdate(wire.toByteArray(Charsets.UTF_8))
         if (isPanicResetResponse(response)) {
             // The FFI caught a panic and swapped in a FRESH (empty) core bridge.
             // The offending event was never applied or persisted; rebuild the fresh
@@ -238,7 +341,7 @@ object Core {
      *  Returns true when the core ended up missing any line. Raw JNI [update], never
      *  [apply], so a reset during replay cannot recurse into [replayLogAfterReset]. */
     private fun replay(lines: List<String>): Boolean {
-        val outcome = replayLog(lines, MAX_REPLAY_RESETS) { update(it.toByteArray(Charsets.UTF_8)) }
+        val outcome = replayLog(lines, MAX_REPLAY_RESETS) { jniUpdate(it.toByteArray(Charsets.UTF_8)) }
         if (outcome.skipped.isEmpty() && outcome.complete) return false
         val which = outcome.skipped.joinToString { "#$it ${EventLog.variantOf(lines[it])}" }
         val gaveUp = if (outcome.complete) "" else "; gave up after $MAX_REPLAY_RESETS resets"
@@ -260,7 +363,7 @@ object Core {
             emptyList()
         }
         if (replay(lines)) logDegraded = true
-        lastSetToday?.let { update(it.toJson().toString().toByteArray(Charsets.UTF_8)) }
+        lastSetToday?.let { jniUpdate(it.toJson().toString().toByteArray(Charsets.UTF_8)) }
     }
 
     /** Dispatch one event via [apply], then return the fresh view model plus how
@@ -314,7 +417,7 @@ object Core {
     fun currentView(): ViewModel {
         // A null return is the JNI byte-array alloc failure (ffi byte_array_or_null
         // exhausted its retries).
-        val bytes = view() ?: run {
+        val bytes = jniView() ?: run {
             android.util.Log.e("Core", "core view() returned null (JNI alloc failure), keeping last good view")
             return staleView()
         }
@@ -1522,6 +1625,9 @@ data class RunResultView(
     // The average heart rate the athlete entered, bpm; null when none was (a
     // tracked run's HR is %HRmax only). Echoed so Undo re-logs the bpm itself.
     val avg_hr_bpm: Double? = null,
+    // The UTC offset the run was logged under (null for a legacy row); Undo
+    // re-sends it so the restored %HRmax is identical.
+    val utc_offset_sec: Int? = null,
     // Ready-to-show heart-rate line from the core: "148 bpm · Z2" when a bpm
     // was entered, "HR 80% · Z2" without one, "" with no heart rate. A hard-
     // rated run never carries a contradicting Z1 label.
@@ -1569,6 +1675,24 @@ data class RunResultView(
     val srpe_load_au: Double? = null,
     // Best-effort records this run holds, e.g. ["Fastest 5K"].
     val best_effort_labels: List<String> = emptyList(),
+    // When the run STARTED, unix seconds; 0 when undated. observed_at is when it was
+    // logged (a tracked/imported run's LAST fix); this is a GPS run's first fix, a
+    // hand-entered run's stamp minus its duration (view_types.rs started_at). Names,
+    // titles and captions a run.
+    val started_at: Long = 0,
+    // A GPS run whose fixes all fail QC ("GPS signal too poor"): no route (has_gpx
+    // false), but a tracked run. [Core.exportGpx] returns its recorded fixes so
+    // Undo re-logs it as recorded (view_types.rs gps_unmeasurable). Omitted = false.
+    val gps_unmeasurable: Boolean = false,
+)
+
+// A track's of-record figures before it is saved ([Core.savedFigures], ffi.rs
+// track_figures_json): distance km and moving minutes, exactly the saved card's
+// distance_km / duration_min. No defaults, so an error envelope fails to decode.
+@Serializable
+data class TrackFigures(
+    val distance_km: Double,
+    val duration_min: Double,
 )
 
 // One km-or-mi split of a GPS run. `pace` is pre-formatted "m:ss" (render
@@ -1988,6 +2112,11 @@ sealed interface Event {
         // core derives age_years and the under-18 gate from it and its today;
         // emitted only when set, so a legacy age-only profile keeps its wire.
         val birthEpochDay: Long? = null,
+        // When the edit was made, unix seconds (mirrors app::Profile::edited_at):
+        // on its effective day the edit is in force only from this instant, so an
+        // evening edit never re-converts a run logged that morning. Stamped by
+        // ProfileDraft.toEvent for a dated edit; emitted only when set.
+        val editedAtSec: Long? = null,
     ) : Event {
         override fun toJson() = buildJsonObject {
             put("SetProfile", buildJsonObject {
@@ -2045,6 +2174,7 @@ sealed interface Event {
                     put("effective_from_epoch_day", effectiveFromEpochDay)
                 }
                 if (birthEpochDay != null) put("birth_epoch_day", birthEpochDay)
+                if (editedAtSec != null) put("edited_at", editedAtSec)
                 // Health screen: emit only when a gate flag is raised so the
                 // all-clear line stays identical to the pre-health-screen form.
                 if (health.anyRaised()) put("health", buildJsonObject {
@@ -2164,6 +2294,11 @@ sealed interface Event {
         // Average heart rate in bpm; the core converts it to %HRmax from the
         // profile's measured HRmax (else the age estimate). Null = omitted.
         val avgHrBpm: Double? = null,
+        // The device's UTC offset (seconds east) when the run was logged: the
+        // core reads the run's local day with it, so a later time-zone change
+        // never re-converts its %HRmax. Production senders pass utcOffsetSec();
+        // Undo re-sends the row's echoed one. Null (legacy) = omitted.
+        val utcOffsetSec: Int? = null,
     ) : Event {
         override fun toJson() = buildJsonObject {
             put("LogRun", buildJsonObject {
@@ -2176,6 +2311,7 @@ sealed interface Event {
                 workoutType?.let { put("workout_type", it.name) }
                 sessionRpe?.let { put("session_rpe", it) }
                 avgHrBpm?.let { put("avg_hr_bpm", it) }
+                utcOffsetSec?.let { put("utc_offset_sec", it) }
             })
         }
     }
@@ -2200,6 +2336,8 @@ sealed interface Event {
         val sessionRpe: Int? = null,
         // Average heart rate in bpm (see [LogRun.avgHrBpm]); null = omitted.
         val avgHrBpm: Double? = null,
+        // The device's UTC offset when the run was logged (see [LogRun.utcOffsetSec]).
+        val utcOffsetSec: Int? = null,
     ) : Event {
         override fun toJson() = buildJsonObject {
             put("LogRunTrack", buildJsonObject {
@@ -2223,6 +2361,7 @@ sealed interface Event {
                 }
                 sessionRpe?.let { put("session_rpe", it) }
                 avgHrBpm?.let { put("avg_hr_bpm", it) }
+                utcOffsetSec?.let { put("utc_offset_sec", it) }
             })
         }
     }

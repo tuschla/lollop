@@ -59,7 +59,7 @@ pub(super) fn off_day(model: &Model, offset: i64) -> Option<i64> {
 /// The e1RM anchors per lift the plan synthesizes against
 /// (`build_plan_anchors`), taken as-of today, so an audit judges a logged load
 /// against the athlete's demonstrated 1RM rather than a rep-count guess.
-pub(super) fn lift_anchors_now(model: &Model) -> crate::plan::Anchors {
+pub(super) fn lift_anchors_now(model: &Model, set_index: &SetIndex) -> crate::plan::Anchors {
     let offset = model.today_utc_offset_sec;
     let today = model.today_epoch_day.unwrap_or_else(|| {
         model
@@ -71,7 +71,7 @@ pub(super) fn lift_anchors_now(model: &Model) -> crate::plan::Anchors {
             .unwrap_or(0)
     });
     let ctx = AnchorCtx::for_profile(model.profile.as_ref(), model, offset);
-    build_plan_anchors(model.sets.iter(), ctx, today, offset)
+    build_plan_anchors(set_index.with_facts(&model.sets), ctx, today, offset)
 }
 
 /// Sessions of a movement kept in the anchor window as of a day: the most
@@ -135,27 +135,78 @@ fn window_best(list: &[(i64, f64)], as_of: i64) -> Option<f64> {
         .reduce(f64::max)
 }
 
-/// An undeclared break inside one movement's own history, treated as a layoff
+/// The return day of the athlete's latest undeclared break from ALL lifting:
+/// the first lift day after at least a full week without a single logged set,
+/// or `today + 1` (the day prescribed from the history through `today`) while
+/// the break still runs. A missed session of one lift is no break; a week with
+/// no resistance training at all is (File 08 Table 3.4b brackets are by time
+/// off training, REENTRY-001). `days` are every dated lift day on or before
+/// `today`, sorted and unique.
+fn lifting_break_return(days: &[i64], today: i64) -> Option<i64> {
+    let pending = days.last().map(|&last| [last, today.saturating_add(1)]);
+    pending
+        .iter()
+        .map(|w| &w[..])
+        .chain(days.windows(2).rev())
+        .find(|w| off_weeks(w[1].saturating_sub(w[0])) >= 1.0)
+        .map(|w| w[1])
+}
+
+/// Weeks fully off between two training days `gap` days apart (a lift on
+/// Monday and the next on the following Monday is six days off, under a week).
+fn off_weeks(gap: i64) -> f64 {
+    (gap - 1).max(0) as f64 / 7.0
+}
+
+/// An undeclared break in one movement's training, treated as a layoff
 /// (REENTRY-001 / REENTRY-RAMP-001) while its re-entry ramp runs. `days` are
-/// the movement's dated training days, sorted and unique. The latest gap
-/// between consecutive training days that the detraining credit marks (more
-/// than 30 days, DETRAIN-STR-001) gives `weeks_off`, and the first day after
-/// it is the return day: the athlete then ramps back from 70 % over the
-/// bracket's weeks instead of jumping straight back to full load the day after
-/// one light session. A gap past 8 weeks returns `None`: the anchor window's
-/// horizon already sets those pre-gap sessions aside (no load fraction).
-fn implicit_layoff(days: &[i64], today: i64) -> Option<(Layoff, individualization::ReentryRamp)> {
-    let gap = |w: &[i64]| w[1] - w[0];
-    let w = days
+/// the movement's dated training days, sorted and unique; `break_return` is
+/// the athlete's latest return from a break off all lifting
+/// ([`lifting_break_return`]). Two kinds of break, the latest one governs:
+///
+/// - the athlete's break from all lifting (1–4 weeks without this movement):
+///   its Table 3.4b bracket by this movement's own time off before the return
+///   (1–2 wk ~90 %, 2–4 wk ~80–85 %), ramping back from the return day;
+/// - a gap of more than 30 days in this movement's own history that the
+///   detraining credit marks (DETRAIN-STR-001), even while other lifts went
+///   on; the first day after it is the return day.
+///
+/// Either way the athlete ramps back over the bracket's weeks instead of
+/// jumping straight back to full load the day after one light session. A
+/// break past 8 weeks returns `None`: the anchor window's horizon already sets
+/// those pre-gap sessions aside (no load fraction).
+fn implicit_layoff(
+    days: &[i64],
+    break_return: Option<i64>,
+    today: i64,
+) -> Option<(Layoff, individualization::ReentryRamp)> {
+    let gap = |w: &[i64]| w[1].saturating_sub(w[0]);
+    let own = days
         .windows(2)
         .rev()
-        .find(|&w| strength::lift_detrain_credit(gap(w)).value != Some(1.0))?;
-    strength::lift_detrain_credit(gap(w)).value?;
-    let layoff = Layoff {
-        weeks_off: gap(w) as f64 / 7.0,
-        returned_epoch_day: Some(w[1]),
+        .find(|&w| strength::lift_detrain_credit(gap(w)).value != Some(1.0))
+        .filter(|&w| strength::lift_detrain_credit(gap(w)).value.is_some())
+        .map(|w| (w[1], gap(w) as f64 / 7.0));
+    let athlete = break_return.and_then(|r| {
+        let last = *days.iter().rev().find(|&&d| d < r)?;
+        let gap = r.saturating_sub(last);
+        // The detraining credit takes over past 30 days without the
+        // movement, counted the way `build_plan_anchors`' `finish` counts
+        // them: to the return day, or to today while the break still runs
+        // (`r = today + 1`). Counting the prescribed day too would hand a
+        // 30-day pending break to neither rule (full load).
+        let days_since = r.min(today).saturating_sub(last);
+        (strength::lift_detrain_credit(days_since).value == Some(1.0)).then(|| (r, off_weeks(gap)))
+    });
+    let (returned, weeks_off) = match (own, athlete) {
+        (Some(o), Some(a)) if a.0 > o.0 => a,
+        (o, a) => o.or(a)?,
     };
-    let ramp = individualization::reentry_ramp(layoff.weeks_off, today.saturating_sub(w[1])).value;
+    let layoff = Layoff {
+        weeks_off,
+        returned_epoch_day: Some(returned),
+    };
+    let ramp = individualization::reentry_ramp(weeks_off, today.saturating_sub(returned)).value;
     (ramp.active && !ramp.treat_as_novice).then_some((layoff, ramp))
 }
 
@@ -260,51 +311,66 @@ fn score_sessions(
 ///   unrated and open-ended ("4+ reps left") sets as lower bounds
 ///   ([`score_sessions`]).
 /// - ONE derate per movement, never stacked: a pre-break anchor on a running
-///   re-entry ramp (a declared layoff, or an undeclared 31–56-day gap in the
-///   movement's own history, [`implicit_layoff`]) scales by the ramp
-///   (REENTRY-RAMP-001) instead of any
+///   re-entry ramp (a declared layoff, a week or more without any lifting, or
+///   an undeclared 31–56-day gap in the movement's own history,
+///   [`implicit_layoff`]) scales by the ramp (REENTRY-RAMP-001) instead of any
 ///   detraining decay; otherwise 31–56 days without the movement scales by the
 ///   detraining credit and >56 days drops the anchor (DETRAIN-STR-001); else a
 ///   latest-session e1RM ≥5 % under baseline cuts the next load 5 %
-///   (AUTOREG-E1RM-GATE-001).
+///   (AUTOREG-E1RM-GATE-001). A lift without an anchor that carries a
+///   pre-break last working load gets the same ramp derate.
 ///
 /// `sets` is an ITERATOR so `build_plan_views` can hand over the history logged
-/// strictly before each prescribed day without allocating; `today_epoch_day`
-/// is that cutoff (the detraining and ramp reference).
+/// strictly before each prescribed day without allocating; each set comes with
+/// its name's facts ([`SetIndex`]), resolved once per distinct name.
+/// `today_epoch_day` is that cutoff (the detraining and ramp reference).
 pub(super) fn build_plan_anchors<'a>(
-    sets: impl Iterator<Item = &'a LoggedSet>,
+    sets: impl Iterator<Item = (&'a LoggedSet, NameFacts)>,
     ctx: AnchorCtx,
     today_epoch_day: i64,
     offset: i64,
 ) -> crate::plan::Anchors {
     use crate::plan::{DerateCause, LiftDerate};
     use std::collections::HashMap;
-    let sets: Vec<&LoggedSet> = sets.collect();
-    // Normalize each distinct name once: a history repeats a handful of names
-    // thousands of times.
-    let mut keys: HashMap<&str, Vec<String>> = HashMap::new();
-    // Dated training days of each movement (any rep count: a >10-rep set
-    // never anchors, but it IS training that keeps the anchor fresh).
-    let mut trained_days: HashMap<Vec<String>, Vec<i64>> = HashMap::new();
-    // movement → (eligible sets, display name, latest observed_at)
-    let mut groups: HashMap<Vec<String>, (Vec<Obs>, String, i64)> = HashMap::new();
-    for s in &sets {
-        if s.hold_sec.is_some()
-            || (ctx.calisthenics && crate::calisthenics::tier_by_name(&s.exercise).is_some())
-        {
+    let sets: Vec<(&LoggedSet, NameFacts)> = sets.collect();
+    // Per movement id ([`NameFacts::movement`]), filled per set and keyed by
+    // `movement_key` once per movement after the pass: one of its names, its
+    // dated training days, and its eligible sets with the display name and
+    // latest observed_at.
+    #[derive(Default)]
+    struct Movement<'a> {
+        name: Option<&'a str>,
+        days: Vec<i64>,
+        /// Eligible sets and the latest of them in log order
+        /// ([`LoggedSet::chrono_cmp`]), whose spelling the plan shows.
+        group: Option<(Vec<Obs>, &'a LoggedSet)>,
+    }
+    let mut movements: Vec<Movement> = Vec::new();
+    // Every dated lift day up to today, any set (holds and ladder rungs are
+    // resistance training too): the athlete's breaks from all lifting.
+    let mut lift_days: Vec<i64> = Vec::new();
+    for &(s, facts) in &sets {
+        let day = (s.observed_at > 0).then(|| local_day(s.observed_at, offset));
+        if let Some(d) = day.filter(|d| *d <= today_epoch_day) {
+            lift_days.push(d);
+        }
+        if s.hold_sec.is_some() || (ctx.calisthenics && facts.calis_tier.is_some()) {
             continue;
         }
-        let key = keys
-            .entry(s.exercise.as_str())
-            .or_insert_with(|| crate::plan::movement_key(&s.exercise))
-            .clone();
-        let day = (s.observed_at > 0).then(|| local_day(s.observed_at, offset));
+        let id = facts.movement as usize;
+        if id >= movements.len() {
+            movements.resize_with(id + 1, Movement::default);
+        }
+        let m = &mut movements[id];
+        m.name = Some(&s.exercise);
+        // Dated training days of the movement (any rep count: a >10-rep set
+        // never anchors, but it IS training that keeps the anchor fresh).
         if let Some(d) = day {
-            trained_days.entry(key.clone()).or_default().push(d);
+            m.days.push(d);
         }
         if s.reps == 0
             || strength::effective_reps(s.reps, s.rpe) > strength::E1RM_RELIABLE_REP_CAP
-            || crate::plan::is_isolation_lift(&s.exercise)
+            || facts.isolation
         {
             continue;
         }
@@ -320,12 +386,11 @@ pub(super) fn build_plan_anchors<'a>(
         if e1.is_nan() || e1 <= 0.0 {
             continue;
         }
-        let g = groups
-            .entry(key)
-            .or_insert_with(|| (Vec::new(), s.exercise.clone(), i64::MIN));
-        if s.observed_at >= g.2 {
-            g.1 = s.exercise.clone();
-            g.2 = s.observed_at;
+        let g = m.group.get_or_insert_with(|| (Vec::new(), s));
+        // Log order, never storage order: an Undo re-pushes a same-second set
+        // at the tail, which must not rename the plan item.
+        if s.chrono_cmp(g.1).is_ge() {
+            g.1 = s;
         }
         g.0.push(Obs {
             day,
@@ -335,6 +400,23 @@ pub(super) fn build_plan_anchors<'a>(
             rated,
         });
     }
+    // Dated training days of each movement, and movement → (eligible sets,
+    // display name, latest observed_at).
+    let mut trained_days: HashMap<Vec<String>, Vec<i64>> = HashMap::new();
+    let mut groups: HashMap<Vec<String>, (Vec<Obs>, String, i64)> = HashMap::new();
+    for m in movements {
+        let Some(any_name) = m.name else {
+            continue;
+        };
+        let key = crate::plan::movement_key(any_name);
+        if !m.days.is_empty() {
+            trained_days.insert(key.clone(), m.days);
+        }
+        if let Some((obs, latest)) = m.group {
+            groups.insert(key, (obs, latest.exercise.clone(), latest.observed_at));
+        }
+    }
+    let sets: Vec<&LoggedSet> = sets.into_iter().map(|(s, _)| s).collect();
 
     // The declared layoff's re-entry ramp as of today (REENTRY-RAMP-001). An
     // undatable return never advances (every session counts as pre-layoff).
@@ -349,6 +431,29 @@ pub(super) fn build_plan_anchors<'a>(
         )
     });
     let reentry_novice = layoff.is_some_and(|(_, r)| r.active && r.treat_as_novice);
+    lift_days.sort_unstable();
+    lift_days.dedup();
+    let break_return = lifting_break_return(&lift_days, today_epoch_day);
+    // The re-entry that governs a movement with these training days: the
+    // declared layoff while its ramp runs; once it has ended, an undeclared
+    // break that returned after it (a finished declared layoff never shadows
+    // a newer break). An undatable declared layoff never ends.
+    let governing = |days: &[i64]| {
+        if layoff.is_some_and(|(_, r)| r.active) {
+            return layoff;
+        }
+        let implicit = implicit_layoff(days, break_return, today_epoch_day);
+        match (layoff, implicit) {
+            (Some((d, _)), Some((i, _)))
+                if d.returned_epoch_day
+                    .is_some_and(|dr| i.returned_epoch_day.is_some_and(|ir| ir > dr)) =>
+            {
+                implicit
+            }
+            (Some(_), _) => layoff,
+            (None, i) => i,
+        }
+    };
 
     let mut out: Vec<(String, f64, i64)> = Vec::new();
     let mut derates: Vec<LiftDerate> = Vec::new();
@@ -382,9 +487,10 @@ pub(super) fn build_plan_anchors<'a>(
         // The plain (no-layoff) scoring: the anchor without a break, and the
         // stall count either way.
         let plain = score_sessions(&all, ctx.off_day, &same_day, &full);
-        // A declared layoff governs; else an undeclared break inside this
-        // movement's own history runs the same re-entry ramp.
-        let picked = match layoff.or_else(|| implicit_layoff(&days, today_epoch_day)) {
+        // The governing re-entry (a declared layoff, or a newer undeclared
+        // break from all lifting or inside this movement's own history) runs
+        // the re-entry ramp.
+        let picked = match governing(&days) {
             None => plain.and_then(|w| finish(w, last_day)),
             Some((l, today_ramp)) => {
                 let returned = l.returned_epoch_day;
@@ -400,10 +506,21 @@ pub(super) fn build_plan_anchors<'a>(
                     score_sessions(&post, ctx.off_day, &same_day, &full)
                         .and_then(|w| finish(w, last_day))
                 } else {
-                    // ≤8 wk: the break never ages a pre-layoff anchor (dated at
-                    // the return day); the ramp replaces that decay.
+                    // ≤8 wk: the break itself never ages a pre-layoff anchor:
+                    // pre-layoff sessions move forward by the break's length
+                    // (the last one lands on the return day, the ones before
+                    // keep their spacing, so a best that had already left the
+                    // window stays out); the ramp replaces that decay.
+                    let shift = returned
+                        .and_then(|r| {
+                            days.iter()
+                                .rev()
+                                .find(|&&d| d < r)
+                                .map(|&d| r.saturating_sub(d))
+                        })
+                        .unwrap_or(0);
                     let eff = |d: i64| match returned {
-                        Some(r) if d < r => r,
+                        Some(r) if d < r => d.saturating_add(shift),
                         _ => d,
                     };
                     let frac_at = |d: i64| match returned {
@@ -465,6 +582,57 @@ pub(super) fn build_plan_anchors<'a>(
         }
         out.push((name, anchor, latest_at));
     }
+    let last_working = build_last_working(&sets, ctx.calisthenics, today_epoch_day, offset);
+    // A lift with no e1RM anchor (isolation, high-rep) still carries its last
+    // working load (hypertrophy double progression, the start-weight
+    // suggestion): when that load was lifted before a break, the same re-entry
+    // ramp scales it (REENTRY-RAMP-001: only numbers set before the break);
+    // otherwise 31–56 days without the movement scale it by the detraining
+    // credit, exactly as an anchored lift's `finish` does (DETRAIN-STR-001),
+    // so more time off never carries a heavier load.
+    for lw in &last_working {
+        let Some(mut days) = trained_days.remove(&crate::plan::movement_key(&lw.exercise)) else {
+            continue;
+        };
+        days.sort_unstable();
+        days.dedup();
+        let governed = governing(&days);
+        if let Some((l, ramp)) = governed {
+            let lifted = today_epoch_day.saturating_sub(lw.age_days);
+            let pre_break = l.returned_epoch_day.is_none_or(|r| lifted < r);
+            if let Some(frac) = ramp.frac.filter(|f| pre_break && ramp.active && *f < 1.0) {
+                derates.push(LiftDerate {
+                    exercise: lw.exercise.clone(),
+                    frac: (frac * 1000.0).round() / 1000.0,
+                    cause: DerateCause::Reentry {
+                        day: l
+                            .returned_epoch_day
+                            .map_or(0, |r| today_epoch_day.saturating_sub(r).max(0)),
+                        ramp_days: ramp.ramp_days,
+                    },
+                });
+                continue;
+            }
+        }
+        // A declared return day restarts the count, as in `finish`.
+        let returned = governed.and_then(|(l, _)| l.returned_epoch_day);
+        let Some(days_since) = days
+            .last()
+            .map(|&d| today_epoch_day.saturating_sub(returned.map_or(d, |r| d.max(r))))
+        else {
+            continue;
+        };
+        if let Some(credit) = strength::lift_detrain_credit(days_since)
+            .value
+            .filter(|c| *c < 1.0)
+        {
+            derates.push(LiftDerate {
+                exercise: lw.exercise.clone(),
+                frac: credit,
+                cause: DerateCause::Detraining { days_since },
+            });
+        }
+    }
     out.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
     derates.sort_by(|a, b| a.exercise.cmp(&b.exercise));
     stalls.sort();
@@ -476,7 +644,7 @@ pub(super) fn build_plan_anchors<'a>(
         lift_derates: derates,
         reentry_novice,
         lift_stall_weeks: stalls,
-        last_working: build_last_working(&sets, ctx.calisthenics, today_epoch_day, offset),
+        last_working,
         ..Default::default()
     }
 }
@@ -502,16 +670,14 @@ pub(super) fn build_last_working(
     // movement → (newest day, sets on that day in log order)
     let mut newest: HashMap<Vec<String>, (i64, Vec<&LoggedSet>)> = HashMap::new();
     for s in sets {
-        if s.observed_at <= 0
-            || s.hold_sec.is_some()
-            || s.weight_kg < 0.0
-            || s.reps == 0
-            || (calisthenics && crate::calisthenics::tier_by_name(&s.exercise).is_some())
-        {
+        if s.observed_at <= 0 || s.hold_sec.is_some() || s.weight_kg < 0.0 || s.reps == 0 {
             continue;
         }
         let day = local_day(s.observed_at, offset);
-        if day > today_epoch_day || today_epoch_day - day > HORIZON_DAYS {
+        if day > today_epoch_day
+            || today_epoch_day.saturating_sub(day) > HORIZON_DAYS
+            || (calisthenics && crate::calisthenics::tier_by_name(&s.exercise).is_some())
+        {
             continue;
         }
         let key = keys
@@ -529,7 +695,7 @@ pub(super) fn build_last_working(
     let mut out: Vec<(crate::plan::LastWorking, i64)> = newest
         .into_values()
         .filter_map(|(day, mut day_sets)| {
-            day_sets.sort_by_key(|s| s.observed_at);
+            day_sets.sort_by(|a, b| a.chrono_cmp(b));
             let top = day_sets
                 .iter()
                 .map(|s| s.weight_kg)
@@ -560,9 +726,9 @@ pub(super) fn build_last_working(
 /// Logged running km per COMPLETED local calendar week before
 /// `week_start_epoch_day` (a Monday), most-recent-first: index 0 is the week
 /// just before, up to `RUN_WEEK_HISTORY` weeks back. Runs are bucketed by
-/// their LOCAL day exactly like `build_run_anchors`; undated (`observed_at <=
-/// 0`) and same-week-or-later rows never count. Feeds the plan's cross-cycle
-/// volume carry (RUN-VOLUME-001), a measured fact, never a target.
+/// the LOCAL day they STARTED exactly like `build_run_anchors`; undated
+/// (`observed_at <= 0`) and same-week-or-later rows never count. Feeds the
+/// plan's cross-cycle volume carry (RUN-VOLUME-001), a measured fact, never a target.
 pub(super) fn build_run_week_km(
     runs: &[LoggedRun],
     facts: &RunFacts,
@@ -571,15 +737,17 @@ pub(super) fn build_run_week_km(
 ) -> Vec<f64> {
     const RUN_WEEK_HISTORY: i64 = 12;
     let mut weeks = vec![0.0_f64; RUN_WEEK_HISTORY as usize];
-    for (r, &km) in runs.iter().zip(&facts.km) {
+    // Chronological (`RunFacts::chrono`): a week's km is a float sum.
+    for &i in &facts.chrono {
+        let (r, km) = (&runs[i], facts.km[i]);
         if r.observed_at <= 0 {
             continue;
         }
-        let day = local_day(r.observed_at, utc_offset_sec);
+        let day = local_day(facts.started[i], utc_offset_sec);
         if day >= week_start_epoch_day {
             continue;
         }
-        let back = (week_start_epoch_day - 1 - day).div_euclid(7);
+        let back = (week_start_epoch_day - 1).saturating_sub(day).div_euclid(7);
         if (0..RUN_WEEK_HISTORY).contains(&back) {
             weeks[back as usize] += km;
         }
@@ -615,10 +783,10 @@ const WEEKLY_VOLUME_WINDOW_DAYS: i64 = 28;
 /// longest_run_detrained)`.
 ///
 /// Deterministic: the "now" reference is the shell-supplied `today_epoch_day`,
-/// never a wall clock. Runs are bucketed by their LOCAL calendar day
-/// (`observed_at` shifted by `utc_offset_sec`, like every plan-strip day
-/// bucket), so a window ends at the end of local today: a run logged earlier
-/// today counts, and a future-dated row never does.
+/// never a wall clock. Runs are bucketed by the LOCAL calendar day they
+/// STARTED (`RunFacts::started` shifted by `utc_offset_sec`, like plan
+/// completion), so a window ends at the end of local today: a run started
+/// earlier today counts, and a future-dated row never does.
 ///
 /// - `longest_recent_run_km`: the longest run of the trailing
 ///   [`LONGEST_RUN_WINDOW_DAYS`], the window [`spike_baseline_km`] uses
@@ -642,7 +810,6 @@ const WEEKLY_VOLUME_WINDOW_DAYS: i64 = 28;
 /// still bound the long run, and the log-time spike gate keeps its hard 30-day
 /// window: the taper is a planning-capacity concept only.
 pub(super) fn build_run_anchors(
-    runs: &[LoggedRun],
     facts: &RunFacts,
     today_epoch_day: i64,
     utc_offset_sec: i64,
@@ -655,8 +822,8 @@ pub(super) fn build_run_anchors(
     // was longer than every in-window run.
     let mut best: f64 = 0.0;
     let mut best_detrained = false;
-    for (r, &km) in runs.iter().zip(&facts.km) {
-        let d = local_day(r.observed_at);
+    for (i, &km) in facts.km.iter().enumerate() {
+        let d = local_day(facts.started[i]);
         if d > today_epoch_day {
             continue; // future-dated row excluded, like spike_baseline_km
         }
@@ -675,8 +842,9 @@ pub(super) fn build_run_anchors(
 
     let mut total_km = 0.0;
     let mut first_run_day: Option<i64> = None;
-    for (r, &km) in runs.iter().zip(&facts.km) {
-        let d = local_day(r.observed_at);
+    for &i in &facts.chrono {
+        let km = facts.km[i];
+        let d = local_day(facts.started[i]);
         if d <= today_epoch_day && today_epoch_day.saturating_sub(d) < WEEKLY_VOLUME_WINDOW_DAYS {
             total_km += km;
             first_run_day = Some(first_run_day.map_or(d, |f| f.min(d)));
@@ -695,6 +863,74 @@ pub(super) fn build_run_anchors(
     });
 
     (longest_recent, recent_weekly, detrained)
+}
+
+/// The athlete's latest undeclared break from running as of local day `day`
+/// (the history the day `day + 1` is prescribed from): the latest stretch of
+/// at least a full week without a logged run, between two run days or from
+/// the last run to the prescribed day while it still runs. File 08 Table 3.4b
+/// brackets the running re-entry by that time off (RUN-REENTRY-001, applied in
+/// `plan::run`). A re-entry ends: the break is returned only while its ramp
+/// back to the prior volume runs, or while a run from before it would still
+/// carry long-run credit (DETRAIN-001, [`RUN_DECAY_END_DAYS`]) that the
+/// rebuild sets aside. `None` without a dated run or such a gap, or once the
+/// latest one no longer shapes the plan.
+pub(super) fn build_run_break(
+    runs: &[LoggedRun],
+    facts: &RunFacts,
+    day: i64,
+    utc_offset_sec: i64,
+) -> Option<crate::plan::RunBreak> {
+    let local_day = |t: i64| crate::local_day(t, utc_offset_sec);
+    let mut days: Vec<i64> = runs
+        .iter()
+        .zip(&facts.started)
+        .filter(|(r, _)| r.observed_at > 0)
+        .map(|(_, &start)| local_day(start))
+        .filter(|d| *d <= day)
+        .collect();
+    days.sort_unstable();
+    days.dedup();
+    let pending = [*days.last()?, day.saturating_add(1)];
+    let (last_run, back) = std::iter::once(&pending[..])
+        .chain(days.windows(2).rev())
+        .find(|w| off_weeks(w[1].saturating_sub(w[0])) >= 1.0)
+        .map(|w| (w[0], w[1]))?;
+    let weeks_off = off_weeks(back.saturating_sub(last_run));
+    let mut reentry =
+        individualization::run_reentry(weeks_off, day.saturating_add(1).saturating_sub(back)).value;
+    // A pre-break run carries long-run credit until it is fully detrained.
+    let pre_break_credit = day.saturating_sub(last_run) < RUN_DECAY_END_DAYS;
+    reentry.rebuild_long_run &= pre_break_credit;
+    reentry.near_novice_spike &= pre_break_credit;
+    if !reentry.active && !reentry.rebuild_long_run {
+        return None;
+    }
+    // Longest run since the return, credited exactly like
+    // `build_run_anchors`' longest recent run.
+    let mut best = 0.0_f64;
+    let mut best_detrained = false;
+    for ((r, &km), &start) in runs.iter().zip(&facts.km).zip(&facts.started) {
+        let d = local_day(start);
+        let age = day.saturating_sub(d);
+        if r.observed_at <= 0 || d < back || d > day || age >= RUN_DECAY_END_DAYS {
+            continue;
+        }
+        let eff = km * detrain_credit(age);
+        if eff > best {
+            best = eff;
+            best_detrained = age > LONGEST_RUN_WINDOW_DAYS;
+        }
+    }
+    Some(crate::plan::RunBreak {
+        weeks_off,
+        last_run_epoch_day: last_run,
+        prior_weekly_km: build_run_anchors(facts, last_run, utc_offset_sec).1,
+        reentry,
+        longest_since_km: (best > 0.0).then_some(best),
+        longest_since_detrained: best > 0.0 && best_detrained,
+        stated_longest_after: false,
+    })
 }
 
 /// Detraining-credit factor for a demonstrated running capacity `age_days`

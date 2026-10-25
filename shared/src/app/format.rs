@@ -150,14 +150,35 @@ pub(super) fn sanitize_review(r: &mut SessionReview) {
 /// prescribed %1RM, and rounding on the DISPLAY grid means a lb user never sees
 /// a fractional-lb load no US plate combination can make (the wire stays kg).
 /// The grade still travels with the underlying %1RM claim.
+///
+/// A load already ON the grid stays put: a lb entry is stored as
+/// `lb / LB_PER_KG` and an e1RM × %1RM product carries float dust, so
+/// `lb / step` can land at 42.99999… and a bare floor would drop a whole plate.
+/// [`LOAD_GRID_EPS`] absorbs that dust; this is the ONE place it lives, so
+/// every caller passes its raw load (an f32-sourced one via [`f32_load_ceil`]).
 pub(crate) fn round_load_grid(kg: f64, weight_lb: bool) -> f64 {
+    let floor_steps = |x: f64, step: f64| (x / step + LOAD_GRID_EPS).floor() * step;
     if weight_lb {
         let lb = kg * LB_PER_KG;
         let step = if lb < 50.0 { 2.5 } else { 5.0 };
-        (lb / step).floor() * step / LB_PER_KG
+        floor_steps(lb, step) / LB_PER_KG
     } else {
-        (kg / 2.5).floor() * 2.5
+        floor_steps(kg, 2.5)
     }
+}
+
+/// Float-dust tolerance of [`round_load_grid`], in grid steps: far above the
+/// ~1e-13-step error of an f64 kg↔lb round trip or an e1RM × %1RM × derate
+/// product, far below any load difference (2.5e-10 kg / 5e-10 lb overshoot).
+const LOAD_GRID_EPS: f64 = 1e-10;
+
+/// A kg load that came off an f32 wire field (`LiftPrescription::load_kg`),
+/// raised by its own f32 precision (half an f32 ulp, at most 2^-24 relative;
+/// apply it before any factor) before it is put on the grid: the f32 cast can
+/// leave an on-grid lb load ~2e-6 plate steps under its grid point, beyond
+/// [`LOAD_GRID_EPS`], and the f32 cannot tell the two apart anyway.
+pub(crate) fn f32_load_ceil(kg: f64) -> f64 {
+    kg + kg.abs() * f64::from(f32::EPSILON) / 2.0
 }
 
 /// Format a kg figure: rounded ONCE to 0.1 kg, then printed as an integer when
@@ -220,12 +241,24 @@ pub(super) fn fmt_weight(kg: f64, lb: bool) -> String {
     format!("{} {}", fmt_weight_num(kg, lb), weight_suffix(lb))
 }
 
-/// The km distance a line shows at one decimal, restated in miles at one
-/// decimal with a trailing ".0" dropped ("7.5 mi", "5 mi"): the `_mi` twin of
-/// a km line for a shell that shows miles.
+/// The smallest kg figure a weight ratio is taken over (a prior e1RM best):
+/// below it the base quotes as "0 kg" and is no baseline, the weight twin of
+/// [`MIN_RATIO_BASE_KM`].
+pub(super) const MIN_RATIO_BASE_KG: f64 = 0.05;
+
+/// A km figure rounded ONCE to the tenth a distance line shows, half away from
+/// zero: the one rounding behind both the km line and its miles twin, so the
+/// pair always describe the same distance (`{:.1}` on the raw value would round
+/// an exact .x5 tie half to EVEN: "5.2 km" beside the "3.3 mi" of 5.3 km).
+pub(super) fn shown_km_tenths(km: f64) -> f64 {
+    (km * 10.0).round() / 10.0
+}
+
+/// The km distance a line shows at one decimal ([`shown_km_tenths`]), restated
+/// in miles at one decimal with a trailing ".0" dropped ("7.5 mi", "5 mi"): the
+/// `_mi` twin of a km line for a shell that shows miles.
 pub(super) fn fmt_mi_of_km(km: f64) -> String {
-    let shown_km = (km * 10.0).round() / 10.0;
-    let mi = shown_km * 1000.0 / crate::running::MILE_M;
+    let mi = shown_km_tenths(km) * 1000.0 / crate::running::MILE_M;
     // One decimal, a half rounded up (never to even).
     let tenths = mi * 10.0;
     let one = if tenths.fract() == 0.5 {
@@ -236,12 +269,29 @@ pub(super) fn fmt_mi_of_km(km: f64) -> String {
     format!("{} mi", one.strip_suffix(".0").unwrap_or(&one))
 }
 
-/// A km figure as a line shows it ("12.3 km"), or its miles twin.
+/// The smallest km figure a distance ratio is taken over (a run's 30-day
+/// longest for the spike copy and gate, a week-over-week base). Below it the
+/// base quotes as "0.0 km" and is no baseline: a corrupt log's subnormal
+/// distance (5e-324 km survives `sanitize_f64`) would otherwise divide to
+/// "+inf%".
+pub(super) const MIN_RATIO_BASE_KM: f64 = 0.05;
+
+/// Whether `km` is a distance ratio base at all (`>= MIN_RATIO_BASE_KM`). The
+/// ONE baseline rule of the run card's spike chip (`spike_has_baseline`, its
+/// note) and the feedback spike gate (`latest_run_spike`), so the two spike
+/// verdicts on one screen never disagree: a 40 m accidental tracker start is
+/// no earlier run for either, exactly like a first run.
+pub(super) fn is_ratio_base_km(km: f64) -> bool {
+    km >= MIN_RATIO_BASE_KM
+}
+
+/// A km figure as a line shows it ("12.3 km", [`shown_km_tenths`]), or its
+/// miles twin.
 pub(super) fn fmt_km_or_mi(km: f64, mi: bool) -> String {
     if mi {
         fmt_mi_of_km(km)
     } else {
-        format!("{km:.1} km")
+        format!("{:.1} km", shown_km_tenths(km))
     }
 }
 

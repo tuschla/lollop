@@ -20,7 +20,9 @@ fn set(exercise: &str, weight_kg: f64, reps: u32, rpe: f64, day: i64) -> LoggedS
 
 fn anchors_at(sets: &[LoggedSet], ctx: AnchorCtx, today: i64) -> crate::plan::Anchors {
     build_plan_anchors(
-        sets.iter().filter(|s| s.observed_at / DAY_SEC < today),
+        SetIndex::new(sets)
+            .with_facts(sets)
+            .filter(|(s, _)| s.observed_at / DAY_SEC < today),
         ctx,
         today,
         0,
@@ -51,12 +53,13 @@ fn one_rep_set_e1rm_equals_load() {
 #[test]
 fn anchor_tracks_recent_window_not_all_time_max() {
     // One optimistic old best must not pin every later load: the anchor is the
-    // best of the last 3 sessions / 21 days.
+    // best of the last 3 sessions / 21 days. Weekly sessions, so no week-long
+    // break puts the old best on a re-entry ramp (REENTRY-RAMP-001).
     let mut sets = vec![set("Back Squat", 120.0, 5, 8.0, 0)];
-    for d in [30, 37, 44, 51] {
+    for d in (7..=49).step_by(7) {
         sets.push(set("Back Squat", 100.0, 5, 8.0, d));
     }
-    let a = anchors_at(&sets, AnchorCtx::default(), 52);
+    let a = anchors_at(&sets, AnchorCtx::default(), 50);
     let e = a.e1rm_for("Back Squat").unwrap();
     let recent = (crate::strength::e1rm_epley_rpe(100.0, 5, 8.0) * 10.0).round() / 10.0;
     assert_eq!(e, recent, "anchor = recent window best, not the day-0 PR");
@@ -145,10 +148,18 @@ fn declared_layoff_and_inactivity_do_not_stack() {
 #[test]
 fn six_weeks_off_starts_near_70pct_and_ramps_to_full() {
     // 6 wk off → ~70 % on the return day, ramping to 100 %
-    // over the 4-wk window; the athlete trains the lift lightly meanwhile.
+    // over the 4-wk window; the athlete trains the lift lightly meanwhile,
+    // the last time the day before the ramp ends (a full week without any
+    // lifting after the ramp would be a new break, REENTRY-001).
     let returned = 50;
     let mut sets = vec![set("Back Squat", 100.0, 5, 8.0, 0)];
-    for d in [returned, returned + 7, returned + 14, returned + 21] {
+    for d in [
+        returned,
+        returned + 7,
+        returned + 14,
+        returned + 21,
+        returned + 27,
+    ] {
         sets.push(set("Back Squat", 70.0, 5, 0.0, d));
     }
     let frac_on = |today: i64| {
@@ -393,6 +404,7 @@ fn rir_row_item(anchors: &crate::plan::Anchors, age_days: i64, reps: u8) -> Pres
     apply_last_sets(
         &mut items,
         &model,
+        &SetIndex::new(&model.sets),
         anchors,
         &[Some(today - age_days)],
         today,
@@ -673,9 +685,14 @@ fn declared_layoff_derates_the_lift_load_not_the_logged_best() {
         observed_at: 1_000,
         entry_id: 1,
     }];
-    let fresh = build_plan_anchors(sets.iter(), AnchorCtx::default(), 0, 0);
+    let fresh = build_plan_anchors(
+        SetIndex::new(&sets).with_facts(&sets),
+        AnchorCtx::default(),
+        0,
+        0,
+    );
     let returning = build_plan_anchors(
-        sets.iter(),
+        SetIndex::new(&sets).with_facts(&sets),
         AnchorCtx {
             layoff: Some(Layoff {
                 weeks_off: 6.0,
@@ -787,7 +804,12 @@ fn a_stale_pr_is_dropped_from_the_plan_anchors() {
         observed_at: (today - 420) * DAY_SEC, // ~14 months ago
         entry_id: 1,
     }];
-    let a = build_plan_anchors(stale.iter(), AnchorCtx::default(), today, 0);
+    let a = build_plan_anchors(
+        SetIndex::new(&stale).with_facts(&stale),
+        AnchorCtx::default(),
+        today,
+        0,
+    );
     assert!(
         a.e1rm_for("Back Squat").is_none(),
         "a 14-month-old PR no longer anchors a %1RM load"
@@ -797,7 +819,12 @@ fn a_stale_pr_is_dropped_from_the_plan_anchors() {
         observed_at: (today - 5) * DAY_SEC,
         ..stale[0].clone()
     }];
-    let a2 = build_plan_anchors(recent.iter(), AnchorCtx::default(), today, 0);
+    let a2 = build_plan_anchors(
+        SetIndex::new(&recent).with_facts(&recent),
+        AnchorCtx::default(),
+        today,
+        0,
+    );
     assert!(a2.e1rm_for("Back Squat").is_some(), "a recent PR anchors");
 }
 
@@ -828,7 +855,12 @@ fn a_weighted_timed_hold_produces_no_plan_anchor() {
             entry_id: 2,
         },
     ];
-    let anchors = build_plan_anchors(sets.iter(), AnchorCtx::default(), 0, 0);
+    let anchors = build_plan_anchors(
+        SetIndex::new(&sets).with_facts(&sets),
+        AnchorCtx::default(),
+        0,
+        0,
+    );
     assert!(
         anchors.e1rm_for("Weighted plank").is_none(),
         "a weighted hold must not fabricate a %1RM anchor"
@@ -863,7 +895,7 @@ fn long_layoff_drops_the_anchor_and_represcribes_as_novice() {
         }),
         ..Default::default()
     };
-    let anchors = build_plan_anchors(sets.iter(), ctx, 0, 0);
+    let anchors = build_plan_anchors(SetIndex::new(&sets).with_facts(&sets), ctx, 0, 0);
     assert!(
         anchors.reentry_novice,
         "12 wk off → treat as a fresh novice"

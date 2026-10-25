@@ -20,6 +20,20 @@ fn runs_via_log(stamps: &[(f64, i64)]) -> Vec<LoggedRun> {
     m.runs
 }
 
+/// A 6:00/km run logged at noon of local day `day` (offset 0). A run belongs
+/// to the day it STARTED, so [`logrun`]'s midnight stamp minus its duration
+/// would date it the day before.
+fn logrun_noon(distance_km: f64, day: i64) -> Event {
+    log_run(
+        distance_km,
+        distance_km * 6.0,
+        70.0,
+        0.0,
+        day * DAY_SEC + 12 * 3600,
+        0,
+    )
+}
+
 // ── C25K per-session running minutes are monotone ─────────────────────────
 
 /// Total running minutes in the week's last (hardest) C25K session.
@@ -156,11 +170,15 @@ fn manual_run(km: f64, at: i64) -> LoggedRun {
         distance_km: km,
         duration_min: km * 6.0,
         hr_pct_max: 70.0,
+        wire_hr_pct_max: 70.0,
         longest_recent_km: 0.0,
+        wire_longest_recent_km: 0.0,
         track: Vec::new(),
         track_segment_starts: Vec::new(),
         observed_at: at,
         entry_id: 0,
+        logged_utc_offset_sec: None,
+        hr_pinned: false,
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: None,
@@ -477,10 +495,12 @@ fn the_long_run_anchors_to_logged_recent_distance_not_a_stale_profile() {
 #[test]
 fn a_volume_dominated_long_run_card_still_cites_the_share_cap() {
     // Counterpart: a long run set by the weekly-volume share (30 % under
-    // 64 km/wk) keeps citing RUN-LONGRUN-001 (Daniels).
+    // 64 km/wk) keeps citing RUN-LONGRUN-001 (Daniels). Four run days, so the
+    // share (not the 3-day average run) sets it.
     let app = Engine;
     let mut model = Model::default();
     let mut p = running_profile();
+    p.running_days_per_week = 4;
     p.running_km_per_week = 60.0; // 0.30×60 = 18 km, volume-dominated
     app.update(Event::SetProfile(p), &mut model)
         .expect_only_render();
@@ -539,9 +559,10 @@ fn a_stale_run_outside_the_window_does_not_raise_the_long_run() {
     .expect_only_render();
 
     let summary = planned_long_run_summary(&app, &model);
-    // Fully-detrained run ignored → 0.30 × 16 = 4.8 km (as with no history).
+    // Fully-detrained run ignored → the 3-day average run, 16 / 3 → 5 km
+    // (as with no history).
     assert!(
-        summary.starts_with("4.8 km"),
+        summary.starts_with("5 km"),
         "a fully-detrained run must not raise the long run, got {summary:?}"
     );
 }
@@ -568,7 +589,7 @@ fn a_log_less_running_plan_is_unchanged_by_the_run_anchors() {
         &mut model,
     )
     .expect_only_render();
-    assert!(planned_long_run_summary(&app, &model).starts_with("4.8 km"));
+    assert!(planned_long_run_summary(&app, &model).starts_with("5 km"));
 }
 
 #[test]
@@ -613,12 +634,12 @@ fn build_run_anchors_uses_the_trailing_windows() {
         .expect_only_render();
     let today = 400i64;
     // In-window: 21 km (2 d ago) and 10 km (5 d ago).
-    app.update(logrun(21.0, today - 2), &mut model)
+    app.update(logrun_noon(21.0, today - 2), &mut model)
         .expect_only_render();
-    app.update(logrun(10.0, today - 5), &mut model)
+    app.update(logrun_noon(10.0, today - 5), &mut model)
         .expect_only_render();
     // Stale: 30 km 40 d ago, outside both the 30-day and 28-day windows.
-    app.update(logrun(30.0, today - 40), &mut model)
+    app.update(logrun_noon(30.0, today - 40), &mut model)
         .expect_only_render();
 
     let (longest, weekly, _) = run_anchors(&model.runs, today, 0);
@@ -628,15 +649,15 @@ fn build_run_anchors_uses_the_trailing_windows() {
     assert_eq!(weekly, Some(31.0));
 
     // A future-dated row (after `today`) is excluded, like `spike_baseline_km`.
-    app.update(logrun(99.0, today + 5), &mut model)
+    app.update(logrun_noon(99.0, today + 5), &mut model)
         .expect_only_render();
     let (longest2, _, _) = run_anchors(&model.runs, today, 0);
     assert_eq!(longest2, Some(21.0), "a future-dated run must not anchor");
     // Weekly-window boundary (strict `<`). A run 27 days old counts
     // toward weekly km; a run exactly 28 days old is excluded.
-    app.update(logrun(8.0, today - 27), &mut model)
+    app.update(logrun_noon(8.0, today - 27), &mut model)
         .expect_only_render();
-    app.update(logrun(12.0, today - 28), &mut model)
+    app.update(logrun_noon(12.0, today - 28), &mut model)
         .expect_only_render();
     let (longest3, weekly3, _) = run_anchors(&model.runs, today, 0);
     assert_eq!(
@@ -676,9 +697,10 @@ fn run_anchors_count_a_same_day_run_by_local_day() {
     let (longest_w, _, _) = run_anchors(&runs_w, today, west);
     assert_eq!(longest_w, Some(9.0), "a 20:00-today run (UTC−5) must count");
 
-    // A run on local TOMORROW is future-dated and excluded.
-    let tomorrow_0030 = (today + 1) * DAY_SEC + 30 * 60 - berlin;
-    let runs_f = runs_via_log(&[(30.0, tomorrow_0030)]);
+    // A run on local TOMORROW is future-dated and excluded: 30 km at 6:00/km
+    // logged 04:00 local tomorrow started 01:00 local tomorrow (23:00 UTC today).
+    let tomorrow_0400 = (today + 1) * DAY_SEC + 4 * 3600 - berlin;
+    let runs_f = runs_via_log(&[(30.0, tomorrow_0400)]);
     let (longest_f, weekly_f, _) = run_anchors(&runs_f, today, berlin);
     assert_eq!(longest_f, None, "a local-tomorrow run must not anchor");
     assert_eq!(weekly_f, None);
@@ -686,11 +708,13 @@ fn run_anchors_count_a_same_day_run_by_local_day() {
 
 #[test]
 fn run_anchors_offset_zero_midnight_history_is_unchanged() {
-    // The FULL-CREDIT window edge for an offset-0, midnight-stamped history is
-    // unchanged: a run exactly 30 days ago still anchors at full distance and
-    // is NOT flagged detrained (unchanged from the pre-taper behaviour).
+    // The FULL-CREDIT window edge for an offset-0 history is unchanged: a run
+    // exactly 30 days ago still anchors at full distance and is NOT flagged
+    // detrained (unchanged from the pre-taper behaviour). Stamped at noon: a
+    // run belongs to the day it STARTED, and a midnight stamp minus its
+    // duration is the day before.
     let today = 500i64;
-    let at_30 = (today - 30) * DAY_SEC;
+    let at_30 = (today - 30) * DAY_SEC + 12 * 3600;
     let (l30, _, det30) = run_anchors(&runs_via_log(&[(8.0, at_30)]), today, 0);
     assert_eq!(
         l30,
@@ -703,7 +727,7 @@ fn run_anchors_offset_zero_midnight_history_is_unchanged() {
     );
     // A run 31 days ago does not VANISH at the window edge; its credit is
     // tapered by one day of the 28-day detraining slope: 8 × 27/28 = 7.714…
-    let at_31 = (today - 31) * DAY_SEC;
+    let at_31 = (today - 31) * DAY_SEC + 12 * 3600;
     let (l31, _, det31) = run_anchors(&runs_via_log(&[(8.0, at_31)]), today, 0);
     let expected_31 = 8.0 * 27.0 / 28.0;
     assert!(
@@ -723,7 +747,7 @@ fn longest_run_anchor_tapers_past_the_window_instead_of_a_cliff() {
     // full-credit edge the anchor must SLOPE (retained then decaying) rather
     // than drop from 21.1 to None in one overnight step.
     let today = 1_000i64;
-    let race_at = |age: i64| (today - age) * DAY_SEC;
+    let race_at = |age: i64| (today - age) * DAY_SEC + 12 * 3600;
     let anchor = |age: i64| run_anchors(&runs_via_log(&[(21.1, race_at(age))]), today, 0);
 
     // Day 30: full credit, not detrained.

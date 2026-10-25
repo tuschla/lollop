@@ -239,7 +239,9 @@ pub struct TrainingLoadView {
     pub atl: f64,
     /// Training Stress Balance (form) entering the next day: CTL − ATL.
     pub tsb: f64,
-    /// Days spanned from the first to the last counted session.
+    /// Days the daily chain spans: from the first counted session through local
+    /// today (the last counted session when the shell set no today), at most
+    /// `MAX_LOAD_DAYS`.
     pub days: u32,
     /// Sessions that contributed load (dated runs with HR + duration).
     pub sessions_counted: u32,
@@ -1032,7 +1034,7 @@ pub struct PrescriptionView {
     #[serde(default)]
     pub anchored_on_last: bool,
     /// Set when a readiness adjustment modified this item, e.g.
-    /// `"load −10% - readiness (AUTOREG-RIR-001)"`. Empty otherwise.
+    /// `"−10% weight today"`. Empty otherwise.
     #[serde(default)]
     pub adjusted_note: String,
     /// This item is the post-illness return check (ready-upd-003,
@@ -1809,6 +1811,12 @@ pub struct RunResultView {
     /// restored run is identical. Serde-default.
     #[serde(default)]
     pub avg_hr_bpm: Option<f64>,
+    /// The device's UTC offset the run was logged under (the row's stamped
+    /// `utc_offset_sec`; `None` for a legacy row). A shell re-logging the run
+    /// (delete → undo) sends it back so the restored %HRmax is identical.
+    /// Omitted when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utc_offset_sec: Option<i64>,
     /// True when this run's distance spikes >10% over the recent longest.
     pub spike_flag: bool,
     /// Why the spike gate fired, phrased honestly (empty when it did not). A
@@ -1867,6 +1875,13 @@ pub struct RunResultView {
     /// no route.
     #[serde(default)]
     pub has_gpx: bool,
+    /// A GPS run whose fixes all fail the QC gates ("GPS signal too poor"):
+    /// no route (`has_gpx` false), but still a tracked run. `exportGpx` returns
+    /// its recorded fixes for this run only so the shell's Undo of a delete can
+    /// re-log it as recorded (`LogRunTrack`), never as a 0 km manual run. Sent
+    /// only when true, so every other run keeps its wire.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gps_unmeasurable: bool,
     /// When the run was logged, unix seconds; 0 when undated. A shell dates the
     /// history card from this; the core does no formatting (it holds no clock).
     pub observed_at: i64,
@@ -1905,6 +1920,14 @@ pub struct RunResultView {
     /// (see [`RunProgressView::best_efforts`]). Empty otherwise. Serde-default.
     #[serde(default)]
     pub best_effort_labels: Vec<String>,
+    /// When the run STARTED, unix seconds; 0 when undated. `observed_at` is
+    /// when it was logged, which for a tracked or imported run is its LAST
+    /// fix: a GPS run starts at the first fix of its QC'd track (the route and
+    /// GPX begin there), a hand-entered run at `observed_at` minus its
+    /// duration (the editor's stamp defaults to the moment it is logged). A
+    /// shell names, titles and captions a run by this. Serde-default.
+    #[serde(default)]
+    pub started_at: i64,
 }
 
 /// Running progress over time (self-monitoring against the plan,

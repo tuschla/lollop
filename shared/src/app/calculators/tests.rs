@@ -2,20 +2,26 @@ use super::*;
 use crate::schema::WorkoutType;
 
 const DAY: i64 = 86_400;
-/// Epoch-day 704 is a Monday, so a week anchored here is one clean Mon–Sun
-/// block for the local-week bucketing.
-const MON: i64 = 704 * DAY;
+/// Noon of epoch-day 704, a Monday, so a week anchored here is one clean
+/// Mon–Sun block for the local-week bucketing. Noon, not 00:00: a run stamped
+/// at its end counts in the week it STARTED, so a run "logged" at Monday 00:00
+/// would be the previous Sunday's.
+const MON: i64 = 704 * DAY + 12 * 3600;
 
 fn run(km: f64, minutes: f64, hr_pct: f64, wt: Option<WorkoutType>, at: i64) -> LoggedRun {
     LoggedRun {
         distance_km: km,
         duration_min: minutes,
         hr_pct_max: hr_pct,
+        wire_hr_pct_max: hr_pct,
         longest_recent_km: 0.0,
+        wire_longest_recent_km: 0.0,
         track: Vec::new(),
         track_segment_starts: Vec::new(),
         observed_at: at,
         entry_id: 0,
+        logged_utc_offset_sec: None,
+        hr_pinned: false,
         workout_type: wt,
         session_rpe: None,
         avg_hr_bpm: None,

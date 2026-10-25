@@ -43,20 +43,23 @@ pub(super) fn build_youth_activity(cx: &ViewCtx) -> Option<YouthActivityView> {
         return None;
     }
     let offset = model.today_utc_offset_sec;
-    let monday = today - mon0_weekday(today);
+    // Saturating: a corrupt log's SetToday near i64::MIN/MAX must not overflow.
+    let monday = today.saturating_sub(mon0_weekday(today));
     // The local day of a dated entry inside this week, as an index 0..7.
     let week_day = |observed_at: i64| {
         if is_undated(observed_at) {
             return None;
         }
-        let d = local_day(observed_at, offset) - monday;
+        let d = local_day(observed_at, offset).saturating_sub(monday);
         (0..7).contains(&d).then_some(d as usize)
     };
     let mut vigorous = [false; 7];
     let mut strengthening = [false; 7];
 
     let mut run_minutes = 0.0;
-    for (r, &min) in model.runs.iter().zip(&cx.runs.minutes) {
+    // Chronological (`RunFacts::chrono`): the minute total is a float sum.
+    for &i in &cx.runs.chrono {
+        let (r, min) = (&model.runs[i], cx.runs.minutes[i]);
         let Some(d) = week_day(r.observed_at) else {
             continue;
         };
@@ -91,13 +94,11 @@ pub(super) fn build_youth_activity(cx: &ViewCtx) -> Option<YouthActivityView> {
         .map(|(first, last)| ((last - first) as f64 / 60.0).min(LIFT_SPAN_CAP_MIN))
         .sum();
 
-    let mut activity_minutes = 0.0;
     let mut week_entries: Vec<&LoggedActivity> = Vec::new();
     for a in &model.activities {
         let Some(d) = week_day(a.observed_at) else {
             continue;
         };
-        activity_minutes += a.minutes;
         vigorous[d] |= a.vigorous;
         strengthening[d] |= a.strengthening;
         week_entries.push(a);
@@ -107,6 +108,8 @@ pub(super) fn build_youth_activity(cx: &ViewCtx) -> Option<YouthActivityView> {
             .cmp(&b.observed_at)
             .then(a.entry_id.cmp(&b.entry_id))
     });
+    // Summed chronologically, never in storage order (an Undo re-pushes a row).
+    let activity_minutes: f64 = week_entries.iter().map(|a| a.minutes).sum();
 
     let whole = |m: f64| m.round() as u32;
     let (run_minutes, lift_minutes, activity_minutes) = (
@@ -118,7 +121,11 @@ pub(super) fn build_youth_activity(cx: &ViewCtx) -> Option<YouthActivityView> {
     let targets = individualization::youth_activity_targets();
     Some(YouthActivityView {
         week_monday_epoch_day: monday,
-        minutes: run_minutes + lift_minutes + activity_minutes,
+        // Saturating: a corrupt log's run of >= ~4.3e9 minutes saturates
+        // `run_minutes` at u32::MAX; the total must not wrap below it.
+        minutes: run_minutes
+            .saturating_add(lift_minutes)
+            .saturating_add(activity_minutes),
         run_minutes,
         lift_minutes,
         activity_minutes,

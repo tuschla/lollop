@@ -24,19 +24,6 @@ use crate::schema::{CheckinInput, ReadinessInput, ReadinessSignal};
 // next-morning LOCAL pair (e.g. 23:30 then 07:00 Berlin) from collapsing into
 // one UTC bucket and silently breaking a multi-day streak. Offset 0 is UTC
 // bucketing.
-//
-// Rule-4 compaction safety (log.rs): `compact_event_log` drops a `SubmitCheckin`
-// only when its raw `observed_at < anchor − RETAIN_CHECKIN_DAYS` (45 days),
-// where `anchor` is the MIN over present channels of that channel's newest raw
-// `observed_at`. That cutoff is computed on RAW UTC seconds, independent of
-// `utc_offset_sec`. Derivation reads a day only when `newest_day − day < 30`
-// (`LONG_BASELINE_WINDOW_DAYS`, the widest channel window); applying the SAME
-// offset to both `newest_day` and `day` cancels in their difference except for a
-// floor-rounding boundary, so the offset can widen the window's RAW-second reach
-// by at most one day (≈30→≈31 days back from the newest reading). A line old
-// enough to have been compacted away can therefore never re-enter the
-// derivation window; log.rs asserts `RETAIN_CHECKIN_DAYS > 30 + 1` at compile
-// time.
 
 /// Minimum number of distinct check-in days before a rolling baseline is
 /// trustworthy enough to emit a z-score / delta for the wellness composite and
@@ -73,8 +60,7 @@ const BASELINE_WINDOW_DAYS: i64 = 14;
 /// 3–4-week baseline to trust ([`HRV_MIN_BASELINE_READING_DAYS`] reading-days must fit
 /// inside it), and resting HR wants a wide, stable individual baseline so a
 /// chronic elevation cannot creep into its own reference. Same exclusive
-/// boundary as [`BASELINE_WINDOW_DAYS`]; this is the widest derivation reach and
-/// governs the compaction-retention margin above.
+/// boundary as [`BASELINE_WINDOW_DAYS`]; this is the widest derivation reach.
 pub(crate) const LONG_BASELINE_WINDOW_DAYS: i64 = 30;
 
 /// Recency window (LOCAL days) for the soreness endpoint bridge: the maxed-sore
@@ -87,19 +73,6 @@ pub(crate) const LONG_BASELINE_WINDOW_DAYS: i64 = 30;
 /// indefinitely. Unlike the wellness/HRV/RHR channels, the bridge is a
 /// single-reading gate with no baseline minimum, so without a recency bound one
 /// sore morning would persist forever.
-///
-/// It also restores compaction replay-equivalence. Compaction Rule 4
-/// (`log.rs`; its cutoff mechanics are spelled out in the day-bucketing note) can
-/// push the folded "wellness" anchor forward off late sleep-only check-ins and
-/// evict an old soreness line the uncompacted bridge would still read. Anchoring
-/// THIS gate on the GLOBAL newest check-in
-/// closes that gap: `anchor ≤ global_newest` always, and passing the gate means
-/// `global_newest − soreness_day ≤ 2` local days, i.e. `< 3` days of raw
-/// separation (the offset cancels in the difference), so
-/// `anchor − soreness_day < 3 < 45` days → the reading is provably inside Rule
-/// 4's window and survives. Equivalently, any soreness line old enough for Rule
-/// 4 to drop is already too old to pass this gate, so compacted and uncompacted
-/// replays agree.
 pub(super) const SORENESS_RECENCY_DAYS: i64 = 2;
 
 /// Recency window (LOCAL days) for the HRV rolling verdict: the newest HRV
@@ -291,32 +264,14 @@ pub(super) fn wellness_goodness(c: &CheckinInput) -> Option<f64> {
     if n == 0.0 { None } else { Some(sum / n) }
 }
 
-/// The HRV channel's reading: a positive RMSSD (ms). Derivation and compaction
-/// Rule 4 (`log.rs`, via [`has_hrv`]) must agree on which check-ins carry it.
+/// The HRV channel's reading: a positive RMSSD (ms).
 fn hrv_reading(c: &CheckinInput) -> Option<f64> {
     c.hrv_rmssd_ms.filter(|v| *v > 0.0)
 }
 
-/// The resting-HR channel's reading: a positive bpm. Shared with compaction
-/// Rule 4 via [`has_rhr`].
+/// The resting-HR channel's reading: a positive bpm.
 fn rhr_reading(c: &CheckinInput) -> Option<f64> {
     c.resting_hr_bpm.filter(|v| *v > 0.0)
-}
-
-/// Whether a check-in carries an HRV reading the derivation reads.
-pub(crate) fn has_hrv(c: &CheckinInput) -> bool {
-    hrv_reading(c).is_some()
-}
-
-/// Whether a check-in carries a resting-HR reading the derivation reads.
-pub(crate) fn has_rhr(c: &CheckinInput) -> bool {
-    rhr_reading(c).is_some()
-}
-
-/// Whether a check-in carries any wellness item (the composite and the soreness
-/// bridge both read only these five answers).
-pub(crate) fn has_wellness(c: &CheckinInput) -> bool {
-    wellness_goodness(c).is_some()
 }
 
 /// One channel's reading for one local day: `(day, raw_value, observed_at)`.
@@ -326,10 +281,10 @@ type DaySample = (i64, f64, i64);
 /// and bounded to the trailing `window_days` of the newest reading (EXCLUSIVE:
 /// `newest − day < window_days`, so `window_days` inclusive days). Each tuple is
 /// `(day, raw_value, observed_at)`. `utc_offset_sec` shifts each stamp to the
-/// device's local day before bucketing (see the day-bucketing note). Readings with
-/// `observed_at <= 0` are skipped (they can't be day-bucketed; the skip is on the
-/// RAW stamp, matching log.rs Rule 4); the most recent check-in per local day
-/// wins so re-doing a check-in the same day overwrites, never double-counts.
+/// device's local day before bucketing (see the day-bucketing note). Readings
+/// with `observed_at <= 0` are skipped (they can't be day-bucketed); the most
+/// recent check-in per local day wins so re-doing a check-in the same day
+/// overwrites, never double-counts.
 fn per_day_series(
     checkins: &[CheckinInput],
     utc_offset_sec: i64,
@@ -668,12 +623,13 @@ impl History<'_> {
     /// `days` of the global newest check-in AND, when the shell gave a clock, of
     /// today. The global bound alone never expires a verdict whose reading IS
     /// the newest check-in (the user stopped checking in, so `g − day == 0`
-    /// forever); the today bound lets it go quiet once the window elapses. It is
-    /// strictly narrower than the global bound, so compaction Rule 4
-    /// replay-equivalence is intact.
+    /// forever); the today bound lets it go quiet once the window elapses.
     fn recent(&self, day: i64, days: i64) -> bool {
-        self.global_newest_day.is_some_and(|g| g - day <= days)
-            && self.today_epoch_day.is_none_or(|t| t - day <= days)
+        self.global_newest_day
+            .is_some_and(|g| g.saturating_sub(day) <= days)
+            && self
+                .today_epoch_day
+                .is_none_or(|t| t.saturating_sub(day) <= days)
     }
 }
 
@@ -756,8 +712,7 @@ fn derive_wellness(history: &History, out: &mut DerivedReadiness) {
 /// newest soreness reading; streak 0 (single-item gate).
 ///
 /// Recency-gated (see [`SORENESS_RECENCY_DAYS`]), so a transient sore morning
-/// cannot record indefinitely and the lookback stays inside compaction Rule 4's
-/// wellness-retention window (replay-equivalent).
+/// cannot record indefinitely.
 fn soreness_bridge(history: &History, out: &mut DerivedReadiness) {
     let series = history.series(BASELINE_WINDOW_DAYS, |c| c.soreness.map(f64::from));
     if let Some(&(day, raw, at)) = series.last()

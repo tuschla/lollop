@@ -453,6 +453,401 @@ fn a_run_across_local_midnight_counts_in_the_week_it_started() {
     }
 }
 
+/// A run logged as the shell logs it, stamped at its END (a tracked run's last
+/// fix; a hand-entered run's finish), from Sunday 23:40 to Monday local: the
+/// progress week counts it in the week it STARTED, the day its card's
+/// `started_at` names, at any offset. Fails if the weeks bucket `observed_at`.
+#[test]
+fn a_run_stamped_at_its_end_after_midnight_counts_in_its_start_week() {
+    let sunday = ymd(2027, 3, 7);
+    assert_eq!((sunday - 4).rem_euclid(7), 6);
+    for offset in [-10 * HOUR, 0, 2 * HOUR, 13 * HOUR] {
+        let begin = local(sunday, 23, 40, offset);
+        // GPS: 6 km at 5:00/km, last fix 00:10 Monday; manual: 40 min, logged 00:20.
+        let pts: Vec<GpsPoint> = (0..=360)
+            .map(|i| GpsPoint {
+                lat: 48.0 + 6.0 / 111.0 * f64::from(i) / 360.0,
+                lon: 11.0,
+                observed_at: begin + 5 * i64::from(i),
+                accuracy_m: 4.0,
+            })
+            .collect();
+        let end = pts.last().unwrap().observed_at;
+        let cases = [
+            ("gps", log_run_track(pts, 72.0, 50.0, end, 1)),
+            (
+                "manual",
+                log_run(8.0, 40.0, 72.0, 50.0, local(sunday + 1, 0, 20, offset), 1),
+            ),
+        ];
+        for (kind, ev) in cases {
+            let ctx = format!("{kind} offset {offset}");
+            let app = Engine;
+            let mut model = Model::default();
+            send(&app, &mut model, Event::SetProfile(running_profile()));
+            send(&app, &mut model, ev);
+            set_today(&app, &mut model, sunday + 1, offset);
+            let vm = app.view(&model);
+            assert_eq!(vm.runs.len(), 1, "{ctx}");
+            assert_eq!(
+                crate::local_day(vm.runs[0].started_at, offset),
+                sunday,
+                "{ctx}: the card names Sunday"
+            );
+            assert_eq!(
+                crate::local_day(vm.runs[0].observed_at, offset),
+                sunday + 1,
+                "{ctx}: logged on Monday"
+            );
+            let weekly = &vm.run_progress.as_ref().expect("a dated run").weekly;
+            assert_eq!(
+                (weekly[14].week_start_epoch_day, weekly[14].runs),
+                (sunday - 6, 1),
+                "{ctx}: Sunday's week holds it"
+            );
+            assert_eq!(weekly[15].runs, 0, "{ctx}: Monday's week is empty");
+        }
+    }
+}
+
+/// The weekly running report (running-031 week-over-week cap, running-028
+/// two-week ramp) files a run in the week it STARTED, like plan completion
+/// (`completion.rs::run_session_day`) and the progress chart. A 10 km run
+/// Sunday 23:30 → Monday 00:30 after two 10 km weeks: last week is 20 km vs
+/// 10 km (+100%) and this week is empty, never this week's 10 km vs last
+/// week's 10 km (+0%, the week it ended).
+#[test]
+fn the_weekly_report_counts_a_midnight_crossing_run_in_its_start_week() {
+    let sunday = ymd(2027, 3, 7);
+    assert_eq!((sunday - 4).rem_euclid(7), 6);
+    let offset = 0;
+    let app = Engine;
+    let mut model = Model::default();
+    send(&app, &mut model, Event::SetProfile(running_profile()));
+    // Wednesday noon of the two weeks before: 10 km each.
+    for (id, d) in [(1, sunday - 11), (2, sunday - 4)] {
+        send(
+            &app,
+            &mut model,
+            log_run(10.0, 60.0, 70.0, 50.0, local(d, 12, 0, offset), id),
+        );
+    }
+    // Sunday 23:30 → Monday 00:30, logged at its end like every shell run.
+    let end = local(sunday + 1, 0, 30, offset);
+    send(&app, &mut model, log_run(10.0, 60.0, 70.0, 50.0, end, 3));
+    set_today(&app, &mut model, sunday + 1, offset);
+    let vm = app.view(&model);
+    let weekly = &vm.run_progress.as_ref().expect("dated runs").weekly;
+    assert_eq!(
+        (
+            weekly[14].week_start_epoch_day,
+            weekly[14].km,
+            weekly[15].runs
+        ),
+        (sunday - 6, 20.0, 0),
+        "the progress chart files it in Sunday's week"
+    );
+    let ramp: Vec<&str> = vm
+        .weekly_report
+        .iter()
+        .map(|r| r.summary.as_str())
+        .filter(|s| s.starts_with("Week-over-week"))
+        .collect();
+    assert!(
+        ramp.iter().any(|s| s.contains("(+100%)")),
+        "the report's week is the week the run started: {ramp:?}"
+    );
+}
+
+/// The runs of a model holding one hand-entered `km` run at 6:00/km logged at
+/// local `00:30` on `start_day + 1` (offset 0): it started the evening before,
+/// on `start_day`, and is stamped at its end like every shell run.
+fn runs_ending_after_midnight(km: f64, start_day: i64) -> Vec<LoggedRun> {
+    let app = Engine;
+    let mut model = Model::default();
+    let end = local(start_day + 1, 0, 30, 0);
+    send(&app, &mut model, log_run(km, km * 6.0, 70.0, 0.0, end, 1));
+    assert_eq!(crate::local_day(end - (km * 360.0) as i64, 0), start_day);
+    model.runs
+}
+
+/// The run anchors date a run by the day it STARTED (`RunFacts::started`),
+/// the day plan completion credits: the plan's weekly-km carry, the
+/// longest-recent-run anchor (its 30-day full-credit edge), the 28-day weekly
+/// volume window and the last run day of a running break. Each would move a
+/// day later on the end stamp.
+#[test]
+fn run_anchors_date_a_midnight_crossing_run_by_its_start() {
+    // Weekly carry before Monday: Sunday's run is last week's km.
+    let sunday = ymd(2027, 3, 7);
+    let runs = runs_ending_after_midnight(10.0, sunday);
+    assert_eq!(
+        build_run_week_km(&runs, &RunFacts::new(&runs), sunday + 1, 0),
+        vec![10.0],
+        "the run started in the week before Monday"
+    );
+
+    let today = 500;
+    // Started 31 days ago (ended 30 days ago): past the full-credit window.
+    let (longest, _, detrained) =
+        run_anchors(&runs_ending_after_midnight(10.0, today - 31), today, 0);
+    assert!(
+        detrained && longest.is_some_and(|l| (l - 10.0 * 27.0 / 28.0).abs() < 1e-9),
+        "a run started 31 days ago is one taper day in: {longest:?} {detrained}"
+    );
+    // Started 28 days ago (ended 27 days ago): outside the 28-day volume window.
+    let (_, weekly, _) = run_anchors(&runs_ending_after_midnight(10.0, today - 28), today, 0);
+    assert_eq!(
+        weekly, None,
+        "a run started 28 days ago is out of the window"
+    );
+
+    // A break: the last run day is the day the run started.
+    let runs = runs_ending_after_midnight(10.0, today - 20);
+    let b = build_run_break(&runs, &RunFacts::new(&runs), today, 0).expect("a 20-day break");
+    assert_eq!(b.last_run_epoch_day, today - 20);
+}
+
+/// The training-load chain puts a run's TRIMP on the day it STARTED: a run
+/// from Sunday 23:30 to Monday 00:30 opens a two-day chain through Monday,
+/// not a one-day chain on Monday, at any offset.
+#[test]
+fn training_load_lands_a_midnight_crossing_run_on_its_start_day() {
+    let sunday = ymd(2027, 3, 7);
+    for offset in [-10 * HOUR, 0, 2 * HOUR, 13 * HOUR] {
+        let app = Engine;
+        let mut model = Model::default();
+        let end = local(sunday + 1, 0, 30, offset);
+        send(&app, &mut model, log_run(10.0, 60.0, 75.0, 0.0, end, 1));
+        set_today(&app, &mut model, sunday + 1, offset);
+        let tl = app
+            .view(&model)
+            .training_load
+            .expect("an HR run carries load");
+        assert_eq!(
+            tl.days, 2,
+            "offset {offset}: the chain starts Sunday: {tl:?}"
+        );
+    }
+}
+
+/// The pacing cue reads a split measured on the session being judged: a
+/// tracked run from Sunday 23:40 to Monday 00:02 with a fading back half is
+/// Sunday's session, so a session review dated Sunday gets the cue.
+#[test]
+fn the_pacing_cue_judges_a_midnight_crossing_run_on_its_start_day() {
+    let sunday = ymd(2027, 3, 7);
+    let app = Engine;
+    let mut model = Model::default();
+    // 4 km north: 20 × 100 m at 5:00/km, then 20 × 100 m at 6:00/km.
+    let mut t = local(sunday, 23, 40, 0);
+    let mut pts = Vec::new();
+    for k in 0..=40 {
+        pts.push(GpsPoint {
+            lat: 48.0 + 0.0009 * f64::from(k),
+            lon: 11.0,
+            observed_at: t,
+            accuracy_m: 5.0,
+        });
+        t += if k < 20 { 30 } else { 36 };
+    }
+    let end = pts.last().unwrap().observed_at;
+    assert_eq!(crate::local_day(end, 0), sunday + 1);
+    send(&app, &mut model, log_run_track(pts, 70.0, 0.0, end, 1));
+    send(
+        &app,
+        &mut model,
+        Event::SubmitReview(SessionReview {
+            observed_at: local(sunday, 12, 0, 0),
+            ..Default::default()
+        }),
+    );
+    set_today(&app, &mut model, sunday + 1, 0);
+    let fb = app.view(&model).feedback.expect("feedback present");
+    assert_eq!(fb.category, FeedbackCategory::IntensityDiscipline, "{fb:?}");
+}
+
+/// The distance-spike warning stays fresh for a week counted from the day
+/// the run STARTED: present on day 7, gone on day 8 (on the end stamp it
+/// would still show on day 8).
+#[test]
+fn the_spike_warning_ages_from_the_run_start_day() {
+    let sunday = ymd(2027, 3, 7);
+    let app = Engine;
+    let mut model = Model::default();
+    send(
+        &app,
+        &mut model,
+        log_run(5.0, 30.0, 70.0, 0.0, local(sunday - 3, 12, 0, 0), 1),
+    );
+    // 8 km (+60 %) at 6:00/km, 23:32 Sunday → 00:20 Monday.
+    send(
+        &app,
+        &mut model,
+        log_run(8.0, 48.0, 70.0, 0.0, local(sunday + 1, 0, 20, 0), 2),
+    );
+    let category = |model: &mut Model, d: i64| {
+        set_today(&app, model, d, 0);
+        app.view(model).feedback.map(|f| f.category)
+    };
+    assert_eq!(
+        category(&mut model, sunday + 7),
+        Some(FeedbackCategory::DangerousProgression)
+    );
+    assert_ne!(
+        category(&mut model, sunday + 8),
+        Some(FeedbackCategory::DangerousProgression),
+        "eight days after the run started the spike warning has aged out"
+    );
+}
+
+/// A longest-run praise belongs to the day the run STARTED and ages from it:
+/// shown the next day, gone the day after (on the end stamp it would still
+/// show then).
+#[test]
+fn the_longest_run_praise_ages_from_the_run_start_day() {
+    let sunday = ymd(2027, 3, 7);
+    let app = Engine;
+    let mut model = Model::default();
+    send(
+        &app,
+        &mut model,
+        log_run(8.0, 48.0, 70.0, 0.0, local(sunday - 5, 12, 0, 0), 1),
+    );
+    // 8.5 km (+6 %, inside the spike rule) at 6:00/km, 23:19 Sunday → 00:10 Monday.
+    send(
+        &app,
+        &mut model,
+        log_run(8.5, 51.0, 70.0, 0.0, local(sunday + 1, 0, 10, 0), 2),
+    );
+    let category = |model: &mut Model, d: i64| {
+        set_today(&app, model, d, 0);
+        app.view(model).feedback.map(|f| f.category)
+    };
+    assert_eq!(
+        category(&mut model, sunday + 1),
+        Some(FeedbackCategory::PositiveMastery)
+    );
+    assert_ne!(
+        category(&mut model, sunday + 2),
+        Some(FeedbackCategory::PositiveMastery),
+        "two days after the run started the praise has aged out"
+    );
+}
+
+/// The provisional "day N of about 14" counts a run on the day it STARTED: a
+/// Sunday-afternoon set and a run from Sunday 23:30 to Monday 00:30 are one
+/// day of data, not two.
+#[test]
+fn the_provisional_day_count_counts_a_midnight_crossing_run_on_its_start_day() {
+    let sunday = ymd(2027, 3, 7);
+    let app = Engine;
+    let mut model = Model::default();
+    send(
+        &app,
+        &mut model,
+        log_set("Back Squat", 100.0, 5, 8.0, local(sunday, 15, 0, 0)),
+    );
+    send(
+        &app,
+        &mut model,
+        log_run(10.0, 60.0, 70.0, 0.0, local(sunday + 1, 0, 30, 0), 1),
+    );
+    set_today(&app, &mut model, sunday + 1, 0);
+    let prov = format!(
+        "{:?}",
+        app.view(&model).provisional.expect("provisional framing")
+    );
+    assert!(prov.contains("(day 1 of about"), "{prov}");
+}
+
+/// Safety first (HARD RULE 3): a run begun before the day an illness hold was
+/// lifted and finished after midnight on it is not a session back. It counts
+/// on the day it STARTED, so the first session after the hold is still the
+/// return check (on the end stamp it would count as trained-since and drop it).
+#[test]
+fn a_run_started_before_a_hold_lifted_is_not_a_session_back() {
+    let d = ymd(2027, 3, 8);
+    let app = Engine;
+    let mut model = Model::default();
+    send(
+        &app,
+        &mut model,
+        Event::SubmitReadiness(ReadinessInput {
+            observed_at: local(d - 1, 8, 0, 0),
+            ..crate::autoreg::tests::input(ReadinessSignal::Illness, 2.0)
+        }),
+    );
+    // 23:30 the day before → 00:30 on the day the hold is lifted (00:15).
+    send(
+        &app,
+        &mut model,
+        log_run(10.0, 60.0, 70.0, 0.0, local(d, 0, 30, 0), 1),
+    );
+    send(
+        &app,
+        &mut model,
+        Event::ResolveHold {
+            signal: ReadinessSignal::Illness,
+            observed_at: local(d, 0, 15, 0),
+        },
+    );
+    let cx = ViewCtx::new(&model);
+    assert!(
+        return_step_on(&model, &cx.days, d + 1, 0).is_some(),
+        "the run started before the hold lifted: the next session is still the return step"
+    );
+    // A run started on the day the hold was lifted is a session back.
+    send(
+        &app,
+        &mut model,
+        log_run(5.0, 30.0, 70.0, 0.0, local(d, 18, 0, 0), 2),
+    );
+    let cx = ViewCtx::new(&model);
+    assert!(return_step_on(&model, &cx.days, d + 1, 0).is_none());
+}
+
+/// Plan completion credits a run to the day it STARTED by the same start the
+/// card shows (`RunFacts::started`): a tracked run whose first fix, at Sunday
+/// 23:59:50, is dropped by QC (poor accuracy) starts at its first kept fix on
+/// Monday, for the card's title and for the plan alike.
+#[test]
+fn plan_completion_dates_a_run_by_its_first_kept_fix() {
+    let sunday = ymd(2027, 3, 7);
+    let app = Engine;
+    let mut model = Model::default();
+    let first = local(sunday, 23, 59, 0) + 50;
+    let mut pts = vec![GpsPoint {
+        lat: 48.0,
+        lon: 11.0,
+        observed_at: first,
+        accuracy_m: 500.0,
+    }];
+    pts.extend((1..=40).map(|k| GpsPoint {
+        lat: 48.0 + 0.0009 * f64::from(k),
+        lon: 11.0,
+        observed_at: first + 20 + 30 * i64::from(k - 1),
+        accuracy_m: 5.0,
+    }));
+    let end = pts.last().unwrap().observed_at;
+    send(&app, &mut model, log_run_track(pts, 70.0, 0.0, end, 1));
+    set_today(&app, &mut model, sunday + 1, 0);
+    let vm = app.view(&model);
+    let card_day = crate::local_day(vm.runs[0].started_at, 0);
+    assert_eq!(
+        card_day,
+        sunday + 1,
+        "QC dropped the Sunday fix: {}",
+        vm.runs[0].started_at
+    );
+    let cx = ViewCtx::new(&model);
+    assert_eq!(
+        cx.days.run_days(),
+        &[Some(card_day)],
+        "plan completion credits the card's day"
+    );
+}
+
 /// A session logged late in the evening west of UTC (the next UTC day) or
 /// early in the morning at +14 h (the previous UTC day) completes its LOCAL
 /// day, and the next day is untouched.
@@ -543,7 +938,6 @@ fn a_lift_session_running_past_local_midnight_stays_one_session() {
 /// Monday's …" nudge may ask to make up a session the athlete was not
 /// allowed to train (as for any other lifted gate, see the PAR-Q twin below).
 #[test]
-#[ignore = "BUG: after an 18th birthday, days held by the under-18 gate read Missed and get a make-up nudge (refresh_birthday_ages rewrites past profiles)"]
 fn an_18th_birthday_mid_week_does_not_turn_held_days_into_missed_ones() {
     let mon = ymd(2027, 6, 7);
     let thu = mon + 3;

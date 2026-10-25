@@ -53,7 +53,12 @@ use lift::{BlockCtx, dup_emphasis, lift_session, main_lifts};
 use run::{RunWeekPlan, RunWeekRequest, run_week_plan, run_week_sessions};
 use schedule::{LiftSpec, place_week};
 
-pub(crate) use hypertrophy::{hypertrophy_week_targets, uses_double_progression};
+pub(crate) use hypertrophy::{
+    hypertrophy_block_targets, hypertrophy_week_targets, uses_double_progression,
+};
+#[cfg(test)]
+pub(crate) use lift::NAME_CLASSIFICATIONS;
+pub(crate) use lift::count_name_classification;
 pub(crate) use lift::{
     MovementPattern, e1rm_reliable_name, is_barbell_lift, is_isolation_lift, movement_key,
     movement_pattern, same_movement,
@@ -114,11 +119,12 @@ pub struct Anchors {
     /// window a logged run supersedes it.
     pub stated_longest_in_window: bool,
     /// Per-lift working-load derates (at most one per movement), applied to the
-    /// %1RM LOAD in `flatten_prescription`: detraining credit after 31–56 days
-    /// without the movement (DETRAIN-STR-001 via the REENTRY-001 bracket), the
-    /// re-entry ramp for pre-break anchors (REENTRY-RAMP-001) after a declared
-    /// layoff or an undeclared 31–56-day gap in the movement's own history, or
-    /// a 5 % cut after the latest session's e1RM fell ≥5 % below baseline
+    /// %1RM LOAD in `flatten_prescription` and to a carried last-working load:
+    /// detraining credit after 31–56 days without the movement (DETRAIN-STR-001
+    /// via the REENTRY-001 bracket), the re-entry ramp for pre-break numbers
+    /// (REENTRY-RAMP-001) after a declared layoff, a week or more without any
+    /// lifting, or an undeclared 31–56-day gap in the movement's own history,
+    /// or a 5 % cut after the latest session's e1RM fell ≥5 % below baseline
     /// (AUTOREG-E1RM-GATE-001). Never stacked: one derate per movement.
     pub lift_derates: Vec<LiftDerate>,
     /// `true` while a declared >8 wk layoff's re-entry window is running (KB
@@ -166,6 +172,47 @@ pub struct Anchors {
     /// `week_start_epoch_day`) that weekday holds a session when the athlete
     /// can train on it, so a new plan never opens on a rest day.
     pub plan_start_epoch_day: Option<i64>,
+    /// The athlete's latest undeclared break from running (a week or more
+    /// with no logged run), set in
+    /// `app/plan_views/plan_week.rs::build_plan_views` from
+    /// `app/anchors.rs::build_run_break` while it still shapes the plan (its
+    /// re-entry ramp runs, or a run from before it still carries long-run
+    /// credit). `None` without one, or when the stated weekly distance was
+    /// entered after the break began (the athlete's current answer then
+    /// governs). Drives the File 08 Table 3.4b running re-entry
+    /// (RUN-REENTRY-001) in `run::effective_weekly_km` and the long-run /
+    /// spike baselines in `run::run_week_sessions`.
+    pub run_break: Option<RunBreak>,
+}
+
+/// An undeclared break from running (see [`Anchors::run_break`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RunBreak {
+    /// Weeks fully off running: from the last run before the break to the
+    /// first run after it, or to the day being prescribed while it runs.
+    pub weeks_off: f64,
+    /// Local day of the last run before the break.
+    pub last_run_epoch_day: i64,
+    /// The measured weekly volume (28-day average) as of that last run: the
+    /// prior volume the re-entry fraction scales, with the stated one.
+    pub prior_weekly_km: Option<f64>,
+    /// The RUN-REENTRY-001 bracket as of the day being prescribed (restart
+    /// fraction on its ramp, rebuild-long-run and near-novice spike flags).
+    /// `rebuild_long_run` / `near_novice_spike` hold only while a run from
+    /// before the break would still carry long-run credit (DETRAIN-001).
+    pub reentry: crate::individualization::RunReEntry,
+    /// Longest run since the break, detraining-adjusted like
+    /// `Anchors::longest_recent_run_km` but over runs since the return only;
+    /// `None` when none was logged yet. After 2+ weeks off it replaces the
+    /// pre-break longest as the demonstrated long-run capacity ("rebuild long
+    /// run"); after 4+ weeks also as every run's spike baseline.
+    pub longest_since_km: Option<f64>,
+    /// `true` when `longest_since_km` is a detraining-tapered value (its run
+    /// is older than the 30-day full-credit window, DETRAIN-001).
+    pub longest_since_detrained: bool,
+    /// The stated longest run was entered after the break began (a current
+    /// answer, RUN-START-001), set in `build_plan_views`.
+    pub stated_longest_after: bool,
 }
 
 /// One movement's last logged working sets (see [`Anchors::last_working`]).
@@ -198,9 +245,9 @@ impl Anchors {
 pub enum DerateCause {
     /// The movement has not been trained for `days_since` days (31–56).
     Detraining { days_since: i64 },
-    /// A pre-break anchor on the re-entry ramp (a declared layoff, or an
-    /// undeclared 31–56-day gap): day `day` of a `ramp_days`-long ramp back to
-    /// full load.
+    /// A pre-break anchor on the re-entry ramp (a declared layoff, a week or
+    /// more without any lifting, or an undeclared 31–56-day gap in the
+    /// movement): day `day` of a `ramp_days`-long ramp back to full load.
     Reentry { day: i64, ramp_days: i64 },
     /// The latest session's e1RM came in ≥5 % under the anchor baseline.
     E1rmDrop,
@@ -238,6 +285,25 @@ impl Anchors {
         self.lift_derates
             .iter()
             .find(|d| d.exercise.eq_ignore_ascii_case(exercise) || movement_key(&d.exercise) == key)
+    }
+
+    /// The derate on a load carried from the movement's last working session
+    /// (hypertrophy double progression, the start-weight suggestion). A
+    /// re-entry ramp scales only numbers set before the break
+    /// (REENTRY-RAMP-001): a session logged since the return already reflects
+    /// it, so its load is carried unscaled.
+    pub fn carried_derate_for(&self, exercise: &str) -> Option<&LiftDerate> {
+        let d = self.load_frac_for(exercise)?;
+        match d.cause {
+            DerateCause::Reentry { day, .. }
+                if self
+                    .last_working_for(exercise)
+                    .is_some_and(|w| w.age_days <= day) =>
+            {
+                None
+            }
+            _ => Some(d),
+        }
     }
 
     /// The e1RM the working load is computed from: the logged anchor times its
@@ -926,7 +992,7 @@ fn apply_lift_week_modifiers(
     // A meet taper (applied per session, 0–14 days out) replaces the calendar
     // deload while it runs.
     let meet_offset = match (profile.meet_epoch_day, week.anchors.week_start_epoch_day) {
-        (Some(meet), Some(ws)) if lifting => Some(meet - ws),
+        (Some(meet), Some(ws)) if lifting => Some(meet.saturating_sub(ws)),
         _ => None,
     };
     if let Some(days) = meet_offset.filter(|d| (-6..=20).contains(d)) {

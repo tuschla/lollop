@@ -275,6 +275,7 @@ fn track_event(points: Vec<GpsPoint>, at: i64, id: u64, rpe: Option<u8>) -> Even
         workout_type: None,
         session_rpe: rpe,
         avg_hr_bpm: None,
+        utc_offset_sec: None,
     }
 }
 
@@ -476,6 +477,7 @@ fn tagged_run(km: f64, minutes: f64, hr: f64, wt: Option<WorkoutType>, at: i64) 
         workout_type: wt,
         session_rpe: None,
         avg_hr_bpm: None,
+        utc_offset_sec: None,
     }
 }
 
@@ -640,6 +642,7 @@ fn manual_run_bpm(id: u64, avg_hr_bpm: Option<f64>) -> Event {
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm,
+        utc_offset_sec: None,
     }
 }
 
@@ -830,6 +833,7 @@ fn rated_bpm_run(avg_hr_bpm: Option<f64>, hr_pct_max: f64, session_rpe: Option<u
         workout_type: None,
         session_rpe,
         avg_hr_bpm,
+        utc_offset_sec: None,
     }
 }
 
@@ -900,7 +904,10 @@ fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_week
     };
     let today = 704;
     set_today(&mut model, today);
+    // The shell stamps every profile edit effective today; the race is dated
+    // with that day (an undated legacy edit has no day to date it with).
     let mut p = running_profile();
+    p.effective_from_epoch_day = Some(today);
     p.recent_race = Some(RecentRace {
         distance_km: 10.0,
         time_sec: 3000,
@@ -932,6 +939,7 @@ fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_week
     // race still goes stale.
     let later = today + 9 * 7;
     set_today(&mut model, later);
+    p.effective_from_epoch_day = Some(later);
     app.update(Event::SetProfile(p.clone()), &mut model)
         .expect_only_render();
     assert_eq!(race_day(&model), Some(today));
@@ -951,6 +959,35 @@ fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_week
         .expect_only_render();
     assert_eq!(race_day(&model), Some(later));
     assert!(anchor(&model, later).is_some());
+}
+
+#[test]
+fn an_undated_race_in_an_undated_profile_edit_stays_undated() {
+    // A legacy edit (no effective day) gives the race no day to be dated
+    // with: the clock is not read, so a compacted replay (which keeps only
+    // the last SetToday) agrees, and the race of unknown age sets no paces.
+    let app = Engine;
+    let mut model = Model::default();
+    app.update(
+        Event::SetToday {
+            epoch_day: 704,
+            utc_offset_sec: 0,
+        },
+        &mut model,
+    )
+    .expect_only_render();
+    let mut p = running_profile();
+    p.effective_from_epoch_day = None;
+    p.recent_race = Some(RecentRace {
+        distance_km: 10.0,
+        time_sec: 3000,
+        epoch_day: None,
+    });
+    app.update(Event::SetProfile(p), &mut model)
+        .expect_only_render();
+    let p = model.profile.as_ref().unwrap();
+    assert_eq!(p.recent_race.as_ref().unwrap().epoch_day, None);
+    assert_eq!(super::super::run_targets::pace_anchor_vdot(p, 704), None);
 }
 
 #[test]
@@ -1025,6 +1062,7 @@ fn deleting_then_re_logging_a_bpm_run_from_its_view_is_identical() {
             workout_type: None,
             session_rpe: Some(5),
             avg_hr_bpm: Some(152.0),
+            utc_offset_sec: None,
         },
         &mut model,
     );
@@ -1055,6 +1093,7 @@ fn deleting_then_re_logging_a_bpm_run_from_its_view_is_identical() {
             workout_type: before.workout_type,
             session_rpe: before.session_rpe,
             avg_hr_bpm: before.avg_hr_bpm,
+            utc_offset_sec: None,
         },
         &mut model,
     );
@@ -1195,7 +1234,10 @@ fn a_short_stop_swallowed_by_the_jitter_gate_is_not_moving_time() {
         pts.push(at(stop + 3.5 + 3.0 * (s - 1) as f64, 26 + s));
     }
     let qc = qc_track(&pts, &[]);
-    assert_eq!(qc.dropped, 6, "the standing fixes are jitter-dropped");
+    assert_eq!(
+        qc.dropped, 5,
+        "the standing fixes are jitter-dropped, but the last, where the runner stood until, is kept"
+    );
     let moving_sec = moving_duration_min(&qc) * 60.0;
     assert!(
         (moving_sec - 40.0).abs() < 1e-9,

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.xmlpull.v1.XmlPullParserException
 
 /** Import cap: real GPX/TCX/FIT exports are well under this; the cap keeps a
  *  pathological or wrong-type file from OOMing the process or blowing up JSON
@@ -53,25 +54,65 @@ internal fun readCappedBytes(stream: InputStream, cap: Int = MAX_RUN_IMPORT_BYTE
 }
 
 /**
- * One file → the segments of each run it holds (one per TCX `<Activity>`, else one).
+ * One file → the runs it holds (one per TCX `<Activity>`, else one).
  * Sniffs the CONTENT, not the extension/MIME (providers lie): the FIT header magic
  * first (binary), then the XML root within the first [SNIFF_BYTES] to tell GPX from
- * TCX, so a wrong-type file is refused without decoding all of it.
+ * TCX, so a wrong-type file is refused without decoding all of it. XML that breaks
+ * off or is malformed past the root (a cut-off download) is [ImportFailure.Damaged],
+ * and so is a document that declares a DTD ([declaresDtd]).
  */
-internal fun parseRunFileSegments(bytes: ByteArray, parseFit: (ByteArray) -> String?): List<List<List<GpxFix>>> {
-    if (isFitFile(bytes)) return listOf(fitSegments(parseFit(bytes)))
-    val head = bytes.decodeToString(0, minOf(bytes.size, SNIFF_BYTES))
+internal fun parseRunFileSegments(bytes: ByteArray, parseFit: (ByteArray) -> String?): List<ImportedRun> {
+    if (isFitFile(bytes)) return listOf(ImportedRun(fitSegments(parseFit(bytes))))
+    // XML 1.0 §4.3.3: a UTF-16 entity starts with its byte order mark; anything
+    // else is read as UTF-8 (the BOM, if any, skipped: the pull-parser throws
+    // "content not allowed in prolog" on it).
+    val (charset, bom) = when {
+        bytes.startsWith(0xFE, 0xFF) -> Charsets.UTF_16BE to 2
+        bytes.startsWith(0xFF, 0xFE) -> Charsets.UTF_16LE to 2
+        bytes.startsWith(0xEF, 0xBB, 0xBF) -> Charsets.UTF_8 to 3
+        else -> Charsets.UTF_8 to 0
+    }
+    val head = String(bytes, bom, minOf(bytes.size - bom, SNIFF_BYTES), charset)
     val tcx = head.contains("<TrainingCenterDatabase")
     if (!tcx && !head.contains("<gpx")) throw GpxImportException(ImportFailure.WrongType)
-    // BOM stripped before the pull-parser: it throws "content not allowed in
-    // prolog" on a BOM'd export.
-    val text = bytes.decodeToString().removePrefix("\uFEFF")
-    return if (tcx) parseTcxActivities(text) else listOf(parseGpx(text))
+    val text = String(bytes, bom, bytes.size - bom, charset)
+    if (declaresDtd(text)) throw GpxImportException(ImportFailure.Damaged)
+    return try {
+        if (tcx) parseTcxActivities(text) else listOf(parseGpxRun(text))
+    } catch (e: XmlPullParserException) {
+        throw GpxImportException(ImportFailure.Damaged).apply { initCause(e) }
+    }
+}
+
+private fun ByteArray.startsWith(vararg prefix: Int): Boolean =
+    size >= prefix.size && prefix.indices.all { this[it] == prefix[it].toByte() }
+
+/**
+ * Whether [text]'s prolog (what precedes the root element: the XML declaration,
+ * comments, processing instructions) holds a `<!DOCTYPE`. No GPX or TCX exporter
+ * writes one, and the platform pull parser expands a DTD's internal entities
+ * without any limit: ten nested entities in a 700-byte file make 10^10
+ * characters (billion laughs, an OutOfMemoryError). So such a file is refused
+ * before it reaches the parser (OWASP: disable DTDs entirely); external entities
+ * go with it. A `<!DOCTYPE` anywhere else is no declaration (XML 1.0 §2.8 allows
+ * it only in the prolog), and the parser refuses it as malformed.
+ */
+internal fun declaresDtd(text: String): Boolean {
+    var i = 0
+    while (i < text.length) {
+        i = when {
+            text[i].isWhitespace() -> i + 1
+            text.startsWith("<?", i) -> text.indexOf("?>", i + 2).takeIf { it >= 0 }?.plus(2) ?: return false
+            text.startsWith("<!--", i) -> text.indexOf("-->", i + 4).takeIf { it >= 0 }?.plus(3) ?: return false
+            else -> return text.startsWith("<!DOCTYPE", i)
+        }
+    }
+    return false
 }
 
 /** One picked/shared file, already read and parsed: its display [name] and the
- *  segments of each run it holds, or why it couldn't be read. */
-internal data class ParsedRunFile(val name: String, val runs: Result<List<List<List<GpxFix>>>>)
+ *  runs it holds, or why it couldn't be read. */
+internal data class ParsedRunFile(val name: String, val runs: Result<List<ImportedRun>>)
 
 /** One file that produced no run, and why ([detail] as in [GpxImportException]). */
 internal data class RunImportFailure(val fileName: String, val reason: ImportFailure, val detail: String? = null)
@@ -94,15 +135,17 @@ internal data class RunImportPlan(
  *    implausibly fast file is reported by name and never blocks the others;
  *  - inside a multi-activity file, an activity that fails is skipped as long as
  *    another imports; when none does, the first activity's reason is the file's;
- *  - a run ending at the same second as an already-logged run ([existingObservedAt])
+ *  - a run logged at the same second as an already-logged run ([existingObservedAt])
  *    or as an earlier run in this batch IS that run (entry ids differ per import, so
  *    the core can't pair them): it is skipped and counted, never double-counted into
- *    weekly volume or the spike baseline.
+ *    weekly volume or the spike baseline. A run's own GPX export names its logged-at
+ *    stamp ([ImportedRun.loggedAtSec]), so it matches even when its track ends
+ *    earlier (a standing-still finish dropped by QC, a trimmed end).
  */
 internal fun planRunImport(
     files: List<ParsedRunFile>,
     existingObservedAt: Set<Long>,
-    build: (List<List<GpxFix>>) -> Event.LogRunTrack,
+    build: (ImportedRun) -> Event.LogRunTrack,
 ): RunImportPlan {
     val seen = HashSet(existingObservedAt)
     val runs = ArrayList<PlannedRun>()
@@ -114,7 +157,7 @@ internal fun planRunImport(
             failures += failureOf(file.name, unreadable)
             continue
         }
-        val activities = file.runs.getOrThrow().filter { it.isNotEmpty() }
+        val activities = file.runs.getOrThrow().filter { it.segments.isNotEmpty() }
         if (activities.isEmpty()) {
             failures += RunImportFailure(file.name, ImportFailure.NoTrack)
             continue
@@ -274,7 +317,7 @@ internal object RunImport {
                 planRunImport(
                     files = files,
                     existingObservedAt = hydrated.runs.mapTo(HashSet()) { it.observed_at },
-                    build = { segments -> importedRunEvent(segments, hrMax) },
+                    build = { run -> importedRunEvent(run, hrMax) },
                 )
             }
             var appliedRuns: List<PlannedRun> = emptyList()

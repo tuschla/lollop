@@ -87,8 +87,8 @@ internal fun groupLiftSessions(lifts: List<LiftResultView>, zone: ZoneId): List<
 
 /**
  * Activity-heatmap days: per local day, whether any set was lifted (a lifting day is
- * ONE session, however many sets) and how many runs were logged. Undated entries are
- * skipped (they have no day to land on).
+ * ONE session, however many sets) and how many runs STARTED that day ([runLocalDay],
+ * the day a run's title names). Undated entries are skipped (they have no day to land on).
  */
 internal fun historyActivityDays(
     lifts: List<LiftResultView>,
@@ -102,8 +102,7 @@ internal fun historyActivityDays(
         days[day] = (days[day] ?: DayActivity(lifted = false, runs = 0)).copy(lifted = true)
     }
     for (r in runs) {
-        if (r.observed_at <= 0L) continue
-        val day = localEpochDay(r.observed_at, zone)
+        val day = runLocalDay(r, zone) ?: continue
         val prev = days[day] ?: DayActivity(lifted = false, runs = 0)
         days[day] = prev.copy(runs = prev.runs + 1)
     }

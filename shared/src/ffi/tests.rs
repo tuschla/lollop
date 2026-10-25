@@ -1022,3 +1022,36 @@ fn malformed_event_is_dropped_without_panicking() {
         "view still renders after a bad event"
     );
 }
+
+#[test]
+fn track_figures_json_previews_a_log_run_track_and_refuses_other_events() {
+    // A 3 m/s runner for 100 s, sent as the very LogRunTrack wire JSON Save uses.
+    let points: Vec<serde_json::Value> = (0..=100)
+        .map(|t| {
+            serde_json::json!({
+                "lat": 0.0,
+                "lon": f64::from(t) * 3.0 / 111_194.926_644_558_7,
+                "observed_at": 1_000 + i64::from(t),
+                "accuracy_m": 5.0
+            })
+        })
+        .collect();
+    let event = serde_json::json!({
+        "LogRunTrack": {
+            "points": points,
+            "hr_pct_max": 0.0,
+            "longest_recent_km": 0.0,
+            "observed_at": 1_100,
+            "entry_id": 1
+        }
+    });
+    let out: serde_json::Value =
+        serde_json::from_slice(&super::track_figures_json(event.to_string().as_bytes())).unwrap();
+    let km = out["distance_km"].as_f64().unwrap();
+    let min = out["duration_min"].as_f64().unwrap();
+    assert!((km - 0.3).abs() < 1e-3, "{out}");
+    assert!((min * 60.0 - 100.0).abs() < 1e-9, "{out}");
+
+    let other = super::track_figures_json(br#""ClearRuns""#);
+    assert!(other.starts_with(br#"{"error""#));
+}

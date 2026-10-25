@@ -317,20 +317,23 @@ pub fn vdot(distance_m: f64, time_sec: f64) -> f64 {
 /// Pair with [`riegel_predict`] and combine via `running::race_equivalency` so a
 /// single method's false precision is never presented alone (File 07). `[Moderate]`
 ///
-/// Guards non-positive inputs (returns 0.0) since VDOT/distance are undefined
-/// there. The search brackets 1 s … 12 h; a target VDOT outside a plausible human
-/// range is clamped to that bracket rather than diverging.
+/// Guards non-positive inputs and a non-finite distance (returns 0.0) since
+/// VDOT/distance are undefined there. The search brackets 1 s … the time at
+/// 24 m/min, where Daniels' oxygen cost turns negative, so every positive
+/// target VDOT has its root inside the bracket: no distance or VDOT is clamped
+/// to a fabricated bound.
 pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
-    if vdot_target <= 0.0 || distance_m <= 0.0 {
+    if vdot_target <= 0.0 || distance_m <= 0.0 || !distance_m.is_finite() {
         return 0.0;
     }
     // vdot(d, t) decreases monotonically in t, so bisect: when the midpoint's
     // VDOT still exceeds the target the time is too short (raise the low bound).
     let mut lo = 1.0; // 1 s - faster than any real finish
-    // 12 h covers every walkable marathon; a tighter cap would return an
-    // optimistic bound for low-VDOT marathons and neutralize the running-040
-    // derate for exactly its target population.
-    let mut hi = 12.0 * 3600.0;
+    // At 24 m/min `daniels_vo2` is negative (its root is ~24.9 m/min), so the
+    // VDOT there is below any positive target. A fixed cap (it was 12 h) would
+    // return the cap itself for a slow walker's marathon, a time neither
+    // method predicted. 2.5 s per metre = 24 m/min.
+    let mut hi = 2.5 * distance_m;
     for _ in 0..100 {
         let mid = 0.5 * (lo + hi);
         if vdot(distance_m, mid) > vdot_target {
@@ -437,10 +440,14 @@ pub fn gps_speed_plausible(speed_m_s: f64) -> bool {
     speed_m_s <= MAX_PLAUSIBLE_SPEED_MPS
 }
 
+/// The smallest move that counts as one (File 07, Apple pattern): a fix closer
+/// than this to the previous one is jitter.
+pub const GPS_MIN_MOVE_M: f64 = 2.5;
+
 /// GPS point-acceptance gate (Apple pattern, File 07): accept a new fix only if
-/// it moved ≥ 2.5 m AND the implied vertical rate is ≤ 5 m/s.
+/// it moved ≥ [`GPS_MIN_MOVE_M`] AND the implied vertical rate is ≤ 5 m/s.
 pub fn gps_point_accept(distance_moved_m: f64, vertical_rate_m_s: f64) -> bool {
-    distance_moved_m >= 2.5 && vertical_rate_m_s.abs() <= 5.0
+    distance_moved_m >= GPS_MIN_MOVE_M && vertical_rate_m_s.abs() <= 5.0
 }
 
 /// Stop detection for pace/load exclusion: speed < 0.5 m/s counts as stopped
@@ -556,8 +563,8 @@ mod tests {
 
     #[test]
     fn daniels_marathon_bracket_covers_slow_vdots() {
-        // A VDOT-20 marathon finishes past 6 h; the 12 h bracket returns the
-        // true (slower) prediction, not a clamped optimistic bound.
+        // A VDOT-20 marathon finishes past 6 h; the search returns the true
+        // (slower) prediction, not a clamped optimistic bound.
         let t = daniels_predict(20.0, 42_195.0);
         assert!(
             t > 6.0 * 3600.0 && t < 12.0 * 3600.0,

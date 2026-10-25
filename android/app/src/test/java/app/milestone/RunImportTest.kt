@@ -38,13 +38,13 @@ class RunImportTest {
     /** An easy 6:00 /km run: 27.8 m every 10 s. */
     private fun easyRun(endSec: Long) = track(endSec, metresPerFix = 27.8)
 
-    private fun ok(vararg runs: List<List<GpxFix>>) = Result.success(runs.toList())
+    private fun ok(vararg runs: List<List<GpxFix>>) = Result.success(runs.map { ImportedRun(it) })
 
     private fun failed(reason: ImportFailure, detail: String? = null) =
-        Result.failure<List<List<List<GpxFix>>>>(GpxImportException(reason, detail))
+        Result.failure<List<ImportedRun>>(GpxImportException(reason, detail))
 
     private fun plan(files: List<ParsedRunFile>, existing: Set<Long> = emptySet()) =
-        planRunImport(files, existing) { segments -> importedRunEvent(segments, measuredHrMax = null) }
+        planRunImport(files, existing) { run -> importedRunEvent(run, measuredHrMax = null) }
 
     @Test
     fun eachSkippedFileIsNamedWithItsReasonAndNeverBlocksTheOthers() {

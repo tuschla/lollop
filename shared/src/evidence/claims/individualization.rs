@@ -103,6 +103,25 @@ claim_group! {
         &[CITE_BOSQUET_2013],
     )
     .contradicting(&["The ramp shape is an app default"]),
+    // File 08 load-036 / Table 3.4b, running column: the running re-entry
+    // after time off, by bracket (the resistance column is REENTRY-001). The
+    // ramp back to full uses the same row's window (1, 1–2, 2–4, 4–6+ wk):
+    // load-036 applies the ramp to running too, the table states its length
+    // only for resistance. Past 8 weeks the table gives no fraction, so the
+    // restart rests on the running logged since (RUN-START-001).
+    RUN_REENTRY_001 => claim(
+        "RUN-REENTRY-001",
+        "After a break from running, the restart depends on time off: under a week, run as planned; 1–2 weeks, about 90% of your usual weekly distance; 2–4 weeks, about 70–80%, building the long run up again; 4–8 weeks, about 50–60%, with single runs judged almost as for a beginner; over 8 weeks, rebuild your base from the running you do again, with walk/run intervals if needed. The restart then builds back to your usual distance over the following weeks.",
+        ExpertOpinion,
+        &[
+            "Mujika & Padilla 2000, Sports Med 30(2):79-87 & 30(3):145-154 (detraining time course)",
+            "Bosquet et al. 2013, Scand J Med Sci Sports 23(3):e140-e149 (training-cessation meta-analysis)",
+        ],
+    )
+    .contradicting(&[
+        "The percentages are expert-opinion defaults extrapolated from detraining data",
+        "The table states a ramp length only for lifting; running borrows the same row's 1-6 week window",
+    ]),
     // File 08 youth-pa-001: information and tracking for under-18 profiles
     // (the plan hold stays); never a program.
     YOUTH_PA_001 => claim(

@@ -2,20 +2,22 @@ package app.milestone
 
 import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
+import org.xmlpull.v1.XmlPullParserException
 import java.io.StringReader
 
 // Minimal TCX (Garmin Training Center XML) track reader for run import
 // (Garmin/Strava/etc. exports that ship TCX instead of GPX). Reads only
-// `<Activities>/<Activity>/<Lap>/<Track>/<Trackpoint>`, each Trackpoint's
-// `<Time>`, `<Position>` (`LatitudeDegrees`/`LongitudeDegrees`), and an
-// optional `<HeartRateBpm><Value>` sample. Tag names are matched by local
-// name (namespace prefix stripped) so any TCX namespace declaration works.
-// Everything else (Lap summary stats, Extensions, Author, Creator, Course)
-// is ignored. Produces [GpxFix]es, the same shape as the GPX reader.
+// `<Activities>/<Activity>/<Lap>/<Track>/<Trackpoint>`, each Activity's `Sport`
+// attribute, each Trackpoint's `<Time>`, `<Position>` (`LatitudeDegrees`/
+// `LongitudeDegrees`), and an optional `<HeartRateBpm><Value>` sample. Tag names
+// are matched by local name (namespace prefix stripped) so any TCX namespace
+// declaration works. Everything else (Lap summary stats, Extensions, Author,
+// Creator, Course) is ignored. Produces [GpxFix]es, the same shape as the GPX reader.
 
 /**
- * One entry per `<Activity>` (a TCX export can bundle several, e.g. a multi-sport
- * day: each is a separate run, not a pause inside one), each a list of recording
+ * One [ImportedRun] per `<Activity>` (a TCX export can bundle several, e.g. a multi-sport
+ * day: each is a separate run, not a pause inside one), each carrying its `Sport`
+ * attribute and a list of recording
  * SEGMENTS. A standard Garmin/Strava TCX opens a new `<Track>` per `<Lap>`
  * - including AUTOLAPS on continuous running, so a `<Track>` boundary is NOT
  * inherently a pause. Consecutive `<Track>`s whose inter-track time gap is
@@ -28,12 +30,13 @@ import java.io.StringReader
  * during pauses) are skipped rather than producing a fix with missing
  * coordinates.
  */
-fun parseTcxActivities(text: String): List<List<List<GpxFix>>> {
+internal fun parseTcxActivities(text: String): List<ImportedRun> {
     val parser = Xml.newPullParser().apply {
         setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         setInput(StringReader(text))
     }
-    val activities = mutableListOf<List<List<GpxFix>>>()
+    val activities = mutableListOf<ImportedRun>()
+    var sport: String? = null
     // One raw fix list per `<Track>` in the current `<Activity>`; merged into
     // recording segments by [mergeTcxTracks] at Activity end (autolap boundaries
     // collapse, genuine pauses split).
@@ -52,14 +55,22 @@ fun parseTcxActivities(text: String): List<List<List<GpxFix>>> {
     var lon = Double.NaN
     var timeSec = 0L
     var hr: Int? = null
+    // A cut-off download often ends right after a tag: the pull parser then
+    // reaches END_DOCUMENT without throwing, with only the activities closed so
+    // far parsed. As for GPX ([parseGpxRun]), only a closed root proves the file
+    // is whole; anything else is Damaged (thrown as the parse error the caller
+    // maps to it), never a shorter run or "no GPS points".
+    var rootClosed = false
     var event = parser.eventType
     while (event != XmlPullParser.END_DOCUMENT) {
         val name = parser.name?.substringAfterLast(':')
+        if (event == XmlPullParser.START_TAG) checkImportDepth(parser)
         when (event) {
             XmlPullParser.START_TAG -> when (name) {
                 "Activity" -> {
                     inActivity = true
                     tracks = mutableListOf()
+                    sport = parser.getAttributeValue(null, "Sport")?.trim()?.takeIf { it.isNotEmpty() }
                 }
                 "Track" -> if (inActivity) segment = mutableListOf()
                 "Trackpoint" -> if (inActivity) {
@@ -99,12 +110,14 @@ fun parseTcxActivities(text: String): List<List<List<GpxFix>>> {
                 "Activity" -> {
                     inActivity = false
                     val merged = mergeTcxTracks(tracks)
-                    if (merged.isNotEmpty()) activities.add(merged)
+                    if (merged.isNotEmpty()) activities.add(ImportedRun(merged, sport))
                 }
+                "TrainingCenterDatabase" -> if (parser.depth == 1) rootClosed = true
             }
         }
         event = parser.next()
     }
+    if (!rootClosed) throw XmlPullParserException("TCX ends before </TrainingCenterDatabase>: truncated")
     return activities
 }
 

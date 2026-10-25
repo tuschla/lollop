@@ -250,6 +250,23 @@ pub(crate) fn e1rm_reliable_name(name: &str) -> bool {
     !is_isolation_lift(name)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test-only: calls of the exercise-NAME classifiers ([`is_isolation_lift`],
+    /// [`same_movement`], [`movement_key`], `calisthenics::tier_by_name`), the
+    /// per-set work the app's `SetIndex` exists to avoid. A deterministic
+    /// proxy for view time (`view_time_stays_bounded…`).
+    pub(crate) static NAME_CLASSIFICATIONS: std::cell::Cell<u64> =
+        const { std::cell::Cell::new(0) };
+}
+
+/// Counts one `NAME_CLASSIFICATIONS` call (test builds only; a no-op else).
+#[inline(always)]
+pub(crate) fn count_name_classification() {
+    #[cfg(test)]
+    NAME_CLASSIFICATIONS.with(|c| c.set(c.get() + 1));
+}
+
 /// Whether a lift is an ISOLATION movement whose estimated 1RM is unreliable
 /// (File 02 strength-006; STR-E1RM-CHECK-001). Two sources: the File-03 Table-4
 /// catalog class (authoritative for the 16 known rows), then a keyword taxonomy
@@ -265,6 +282,7 @@ pub(crate) fn e1rm_reliable_name(name: &str) -> bool {
 /// audit — so no two sites disagree. The taxonomy is EXPERT-OPINION (mirroring
 /// `movement_pattern`), serving the cited reliability principle.
 pub(crate) fn is_isolation_lift(name: &str) -> bool {
+    count_name_classification();
     if hypertrophy::exercise_entry(name)
         .is_some_and(|e| e.class == hypertrophy::ExerciseClass::Isolation)
     {
@@ -317,6 +335,7 @@ fn isolation_keyword(name: &str, needles: &[&str]) -> bool {
 /// KB does not provide (HARD RULE 1), so it is left as a rare cosmetic dup
 /// rather than risk false-merging distinct lifts.
 pub(crate) fn same_movement(a: &str, b: &str) -> bool {
+    count_name_classification();
     let (mut x, mut y) = (movement_tokens(a), movement_tokens(b));
     loop {
         match (x.next(), y.next()) {
@@ -333,6 +352,7 @@ pub(crate) fn same_movement(a: &str, b: &str) -> bool {
 /// catalog label ("Hack squat / leg press") keys as its current display name
 /// ("Hack squat"), so history logged under the old label stays the same lift.
 pub(crate) fn movement_key(name: &str) -> Vec<String> {
+    count_name_classification();
     movement_tokens(name).map(str::to_ascii_lowercase).collect()
 }
 

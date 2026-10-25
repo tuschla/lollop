@@ -170,11 +170,13 @@ class SetLoggingLogicTest {
 
     @Test
     fun weightTextIsWholeOrHalfPoundsAndTrimmedKilograms() {
-        assertEquals("290", weightFieldText(lbToKgWire(290.0), WeightUnit.Lb))
-        assertEquals("292.5", weightFieldText(lbToKgWire(292.5), WeightUnit.Lb))
-        // kg is lossless: a 101.25 kg load is not rounded to a non-loadable 101.3.
-        assertEquals("101.25", weightFieldText(101.25, WeightUnit.Kg))
-        assertEquals("100", weightFieldText(100.0, WeightUnit.Kg))
+        assertEquals("290", loadFigure(lbToKgWire(290.0), WeightUnit.Lb))
+        assertEquals("292.5", loadFigure(lbToKgWire(292.5), WeightUnit.Lb))
+        // kg keeps two decimals: a 101.25 kg load is not rounded to a non-loadable 101.3.
+        assertEquals("101.25", loadFigure(101.25, WeightUnit.Kg))
+        assertEquals("100", loadFigure(100.0, WeightUnit.Kg))
+        // A core-derived lb load (225 lb = 102.05828… kg) reads at the field's precision.
+        assertEquals("102.06", loadFigure(225.0 / LB_PER_KG, WeightUnit.Kg))
         assertEquals("295", trimWeightText("295.0"))
         assertEquals("292.5", trimWeightText("292.5"))
     }

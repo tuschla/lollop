@@ -207,14 +207,10 @@ internal fun warmUpSteps(workKg: Double, unit: WeightUnit, exercise: String): Li
 /** [kg] in lb rounded to the nearest half pound, without trailing zeros. */
 private fun halfPoundFigure(kg: Double): String = fmtLosslessPrefill(Math.round(kgToLb(kg) * 2.0) / 2.0)
 
-/** The weight field's text for a stored [kg]: in lb the nearest half pound
- *  ("290", "292.5"), in kg the exact value without trailing zeros ("101.25",
- *  "100"). Display only: an untouched Save re-emits the exact kg. Pure. */
-internal fun weightFieldText(kg: Double, unit: WeightUnit): String =
-    if (unit == WeightUnit.Lb) halfPoundFigure(kg) else fmtLosslessPrefill(kg)
-
-/** A load figure for set lines and snackbars: lb in whole or half pounds, kg
- *  to at most two decimals, never a trailing ".0" ("135", "101.25"). Pure. */
+/** A load figure for the weight field, set lines and snackbars: lb in whole or
+ *  half pounds, kg to at most two decimals, never a trailing ".0" ("135",
+ *  "101.25"). The weight field shows exactly this, so a load the core derived
+ *  from pounds (`230.0 / LB_PER_KG`) reads "104.33", never every digit. Pure. */
 internal fun loadFigure(kg: Double, unit: WeightUnit): String =
     if (unit == WeightUnit.Lb) halfPoundFigure(kg) else plateFigure(kg)
 
@@ -246,8 +242,8 @@ private val PlateStepsLb = listOf(-5.0, 5.0, 10.0)
 /** NEW-entry seed from a coach prescription. weightText null → keep the editor's fresh default. */
 internal data class SetPrefill(
     val exercise: String,
-    val weightText: String?,   // weightFieldText display string; exact kg lives in weightKgVerbatim
-    val weightKgVerbatim: Double?, // exact wire kg to emit on an untouched Save (lossless)
+    val weightText: String?,   // loadFigure display string; the seeded kg lives in weightKgVerbatim
+    val weightKgVerbatim: Double?, // seeded wire kg; an untouched Save emits it while on the wire grid (resolveSaveWeightKg)
     val reps: Int,
     val holdSec: Int,
     // The prescribed effort, shown as a HINT on the effort scale only. Never a
@@ -290,10 +286,10 @@ internal fun prescriptionPrefill(p: PrescriptionView, weightUnit: WeightUnit, ap
     val cueKg = appliedCue?.takeIf { lastWork == null || it.atSec >= lastWork.observed_at }?.kg
     val kg = cueKg ?: lastWork?.weight_kg ?: p.added_kg ?: p.load_kg ?: p.suggested_load_kg
         ?: p.last_set?.takeIf { it.weight_kg > 0.0 && it.hold_sec == null }?.weight_kg
-    // Display uses the field's own format (kg trimmed, lb to the half pound); an
-    // untouched Save re-emits the exact `weightKgVerbatim` below, so this text
-    // never carries the Save value and its rounding is display-only.
-    val text = kg?.let { weightFieldText(it, weightUnit) }
+    // Display uses the field's own format (kg to two decimals, lb to the half
+    // pound); an untouched Save resolves through `resolveSaveWeightKg`, which
+    // emits this kg only when it is on the 0.01 kg wire grid, else the text shown.
+    val text = kg?.let { loadFigure(it, weightUnit) }
     return SetPrefill(
         exercise = p.exercise,
         weightText = text,
@@ -322,10 +318,11 @@ internal data class FreshSetSeed(
     val reps: Int?,
     val rpe: Double?,
     val holdSec: Int,
-    // Exact wire kg to re-emit on an untouched Save (lossless): the edited row's
-    // stored kg, or a prescription's verbatim load. Null when nothing seeded a
-    // load. Held as one value so a chip-switch reseed swaps it wholesale and one
-    // exercise's load never rides into another.
+    // The seeded wire kg an untouched Save emits while it is on the wire grid
+    // ([resolveSaveWeightKg]): the edited row's stored kg, or a prescription's
+    // verbatim load. Null when nothing seeded a load. Held as one value so a
+    // chip-switch reseed swaps it wholesale and one exercise's load never rides
+    // into another.
     val weightKgVerbatim: Double?,
 )
 
@@ -336,9 +333,9 @@ internal fun freshSetSeed(
 ): FreshSetSeed {
     val exercise = initial?.exercise ?: rx?.exercise ?: ""
     val weightText = when {
-        // An edited row renders its stored kg verbatim (lossless) or the lb display
-        // figure; the untouched-Save path re-emits the exact wire kg.
-        initial != null -> weightFieldText(initial.weight_kg, weightUnit)
+        // An edited row renders its stored kg as the field's display figure; the
+        // untouched-Save path resolves it through resolveSaveWeightKg.
+        initial != null -> loadFigure(initial.weight_kg, weightUnit)
         rx?.weightText != null -> rx.weightText
         else -> ""
     }
@@ -357,8 +354,8 @@ internal fun freshSetSeed(
  * The set editor's entry fields, held as one saveable value so every re-seed of
  * the gym-floor loop is a pure reducer ([reseededTo], [afterLoggedSet],
  * [withWorkingLoad]). [weightFresh] is the calculator-style flag: the first key
- * after a (re)seed replaces the buffer, and an untouched Save re-emits the exact
- * [weightVerbatim] kg. [reps] null = no count picked; [rpe] null = unrated.
+ * after a (re)seed replaces the buffer, and an untouched Save emits the seeded
+ * [weightVerbatim] kg ([resolveSaveWeightKg]). [reps] null = no count picked; [rpe] null = unrated.
  */
 internal data class SetEditorState(
     val exercise: String,
@@ -424,7 +421,7 @@ internal fun SetEditorState.reseededTo(
         }
         last != null -> copy(
             exercise = last.exercise,
-            weightText = weightFieldText(last.weight_kg, weightUnit),
+            weightText = loadFigure(last.weight_kg, weightUnit),
             weightVerbatim = last.weight_kg,
             reps = last.reps.coerceAtLeast(1),
             holdSec = last.hold_sec ?: holdSec,
@@ -492,11 +489,19 @@ internal fun firstOpenItem(items: List<PrescriptionView>): PrescriptionView? =
 internal fun nextOpenItem(items: List<PrescriptionView>, exercise: String): PrescriptionView? =
     items.firstOrNull { !it.done && it.exercise.isNotBlank() && !it.exercise.trim().equals(exercise.trim(), ignoreCase = true) }
 
-/** The wire kg an editor Save emits: 0 for a bodyweight rung; the exact stored
- *  verbatim kg while the weight buffer is untouched ([weightFresh]) so an
- *  untouched Save is lossless and a loop repeat re-emits the load actually saved;
- *  otherwise the displayed buffer, converting lb→kg. Null when the buffer parses
- *  to nothing. Pure so the repeat-last-set invariant is unit-testable. */
+/** Whether [kg] sits on the 0.01 kg wire grid every typed load is saved on
+ *  ([lbToKgWire] for lb, the kg field's two decimals). A load off it was never
+ *  entered by a lifter: the core's exact lb divisions (`230.0 / LB_PER_KG`). */
+private fun onKgWireGrid(kg: Double): Boolean = Math.round(kg * 100.0) / 100.0 == kg
+
+/** The wire kg an editor Save emits: 0 for a bodyweight rung; the seeded
+ *  verbatim kg while the weight buffer is untouched ([weightFresh]) and that kg
+ *  is on the wire grid ([onKgWireGrid]), so an untouched Save is lossless (a
+ *  100 kg set shown as "220.5" lb stays 100 kg) and a loop repeat re-emits the
+ *  load actually saved; otherwise the displayed buffer, converting lb→kg, so an
+ *  off-grid seed (102.05828… kg shown as "102.06" or "225" lb) stores what the
+ *  field shows. Null when the buffer parses to nothing. Pure so the
+ *  repeat-last-set invariant is unit-testable. */
 internal fun resolveSaveWeightKg(
     bodyweightMode: Boolean,
     weightFresh: Boolean,
@@ -505,7 +510,7 @@ internal fun resolveSaveWeightKg(
     weightUnit: WeightUnit,
 ): Double? = when {
     bodyweightMode -> 0.0
-    weightFresh && weightVerbatim != null -> weightVerbatim
+    weightFresh && weightVerbatim != null && onKgWireGrid(weightVerbatim) -> weightVerbatim
     else -> parseKeypadNumber(weightText)
         ?.let { if (weightUnit == WeightUnit.Lb) lbToKgWire(it) else it }
 }

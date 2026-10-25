@@ -302,8 +302,13 @@ data class ProfileDraft(
     /** [effectiveFromEpochDay] is the day this profile takes effect:
      *  pass the core's today so an edit re-prescribes only from today forward and
      *  leaves settled past days alone. Null (the default) replaces the whole
-     *  profile history — used by tests, never a production edit. */
-    fun toEvent(effectiveFromEpochDay: Long? = null) = Event.SetProfile(
+     *  profile history — used by tests, never a production edit. A dated edit is
+     *  stamped with the instant it is made ([editedAtSec], the core keeps a run
+     *  logged earlier that day on the profile it was logged under). */
+    fun toEvent(
+        effectiveFromEpochDay: Long? = null,
+        editedAtSec: Long? = effectiveFromEpochDay?.let { AppClock.nowSec() },
+    ) = Event.SetProfile(
         progressionCadence = progressionCadence,
         liftGoal = liftGoal,
         goalDistance = goalDistance,
@@ -338,6 +343,7 @@ data class ProfileDraft(
         runnerStrength = runnerStrength,
         effectiveFromEpochDay = effectiveFromEpochDay,
         birthEpochDay = birthEpochDay,
+        editedAtSec = editedAtSec,
     )
 
     companion object {

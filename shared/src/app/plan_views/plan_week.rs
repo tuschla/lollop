@@ -109,6 +109,7 @@ impl<'a> PlanFrame<'a> {
             model: self.model,
             weight_lb: self.weight_lb,
             session_days: &self.cx.days.sets,
+            set_index: &self.cx.set_index,
             run_days: &self.cx.days.runs,
             run_facts: &self.cx.runs,
         }
@@ -183,11 +184,12 @@ pub(in crate::app) fn build_plan_views(
     // Saturating so a corrupt wire `today`/`start` near i64::MIN/MAX can't
     // debug-overflow (a panic would brick every later view via the FFI firewall).
     let week_monday = today.saturating_sub(mon0_weekday(today));
+    let today_profile = profile_for_day(model, today);
     let f = PlanFrame {
         cx,
         model,
         profile,
-        today_profile: profile_for_day(model, today).unwrap_or(profile),
+        today_profile: today_profile.as_deref().unwrap_or(profile),
         start,
         today,
         offset,
@@ -281,54 +283,66 @@ fn plan_snapshots(f: &PlanFrame) -> Option<(Rc<PlanSnapshots>, Rc<PastReadiness>
     // rewrite it either. `through` is also the
     // decay/window reference, so an anchor ages against the day being prescribed.
     let run_week_km = build_run_week_km(&model.runs, &cx.runs, week_monday, offset);
-    let plan_through =
-        |through: i64, day_profile: &Profile| -> Option<(crate::plan::Anchors, Program)> {
-            let dated_set = |i: usize| session_days[i].is_none_or(|d| d <= through);
-            let mut anchors = build_plan_anchors(
-                model
-                    .sets
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| dated_set(*i))
-                    .map(|(_, s)| s),
-                AnchorCtx::for_profile(Some(day_profile), model, offset),
-                through,
-                offset,
-            );
-            let (longest_recent, recent_weekly, detrained) = cx.run_anchors_on(through);
-            anchors.longest_recent_run_km = longest_recent;
-            anchors.recent_weekly_km = recent_weekly;
-            anchors.longest_run_detrained = detrained;
-            anchors.stated_longest_in_window = stated_longest_since(model, day_profile)
-                .is_some_and(|d| through.saturating_sub(d) <= LONGEST_RUN_WINDOW_DAYS);
-            // Race-date periodization dates the week; the cross-cycle volume
-            // carry reads whole calendar weeks before it (RUN-VOLUME-001).
-            anchors.week_start_epoch_day = Some(week_monday);
-            anchors.plan_start_epoch_day = Some(start);
-            anchors.run_week_km = run_week_km.clone();
-            // Pace anchor: a fresh recent race (≤8 wk) on the day being
-            // prescribed (`through + 1`).
-            anchors.run_vdot =
-                crate::app::run_targets::pace_anchor_vdot(day_profile, through.saturating_add(1));
-            let day_inputs = manual_inputs_on(model, through, through.saturating_add(1), offset);
-            anchors.calisthenics = build_calisthenics_anchors(
-                model
-                    .sets
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| dated_set(*i))
-                    .map(|(_, s)| s),
-                &calis_placements_through(model, through),
-                &day_inputs,
-                day_profile.lift_goal,
-                Some(through),
-                offset,
-            );
-            #[cfg(test)]
-            PLAN_SYNTH_BUILDS.with(|c| c.set(c.get() + 1));
-            let program = crate::plan::synthesize(day_profile, &anchors, week_index)?;
-            Some((anchors, program))
+    let plan_through = |through: i64,
+                        day_profile: &Profile|
+     -> Option<(crate::plan::Anchors, Program)> {
+        // The sets attributed to session days `<= through`, with their
+        // name facts.
+        let dated_sets = || {
+            cx.set_index
+                .with_facts(&model.sets)
+                .enumerate()
+                .filter(|(i, _)| session_days[*i].is_none_or(|d| d <= through))
+                .map(|(_, set)| set)
         };
+        let mut anchors = build_plan_anchors(
+            dated_sets(),
+            AnchorCtx::for_profile(Some(day_profile), model, offset),
+            through,
+            offset,
+        );
+        let (longest_recent, recent_weekly, detrained) = cx.run_anchors_on(through);
+        anchors.longest_recent_run_km = longest_recent;
+        anchors.recent_weekly_km = recent_weekly;
+        anchors.longest_run_detrained = detrained;
+        let stated_longest_on = stated_longest_since(model, day_profile);
+        anchors.stated_longest_in_window =
+            stated_longest_on.is_some_and(|d| through.saturating_sub(d) <= LONGEST_RUN_WINDOW_DAYS);
+        // An undeclared break from running (RUN-REENTRY-001), unless the
+        // weekly distance was stated after it began (a current answer). A
+        // longest run stated after it began is a current answer too
+        // (RUN-START-001), so it counts through the long-run rebuild.
+        anchors.run_break = build_run_break(&model.runs, &cx.runs, through, offset)
+            .filter(|b| {
+                stated_weekly_since(model, day_profile).is_none_or(|s| s <= b.last_run_epoch_day)
+            })
+            .map(|b| crate::plan::RunBreak {
+                stated_longest_after: stated_longest_on.is_some_and(|s| s > b.last_run_epoch_day),
+                ..b
+            });
+        // Race-date periodization dates the week; the cross-cycle volume
+        // carry reads whole calendar weeks before it (RUN-VOLUME-001).
+        anchors.week_start_epoch_day = Some(week_monday);
+        anchors.plan_start_epoch_day = Some(start);
+        anchors.run_week_km = run_week_km.clone();
+        // Pace anchor: a fresh recent race (≤8 wk) on the day being
+        // prescribed (`through + 1`).
+        anchors.run_vdot =
+            crate::app::run_targets::pace_anchor_vdot(day_profile, through.saturating_add(1));
+        let day_inputs = manual_inputs_on(model, through, through.saturating_add(1), offset);
+        anchors.calisthenics = build_calisthenics_anchors(
+            dated_sets().map(|(s, facts)| (s, facts.calis_tier)),
+            &calis_placements_through(model, through),
+            &day_inputs,
+            day_profile.lift_goal,
+            Some(through),
+            offset,
+        );
+        #[cfg(test)]
+        PLAN_SYNTH_BUILDS.with(|c| c.set(c.get() + 1));
+        let program = crate::plan::synthesize(day_profile, &anchors, week_index)?;
+        Some((anchors, program))
+    };
 
     // The snapshots are a pure function of the key below, so a view driven by an
     // unrelated event (a calculator query, a readiness echo) reuses them instead
@@ -397,8 +411,11 @@ fn plan_snapshots(f: &PlanFrame) -> Option<(Rc<PlanSnapshots>, Rc<PastReadiness>
                 // with the profile effective that day. A day whose own profile was
                 // still gated (cleared mid-week) had no plan: it renders blocked,
                 // never wiping the rest of the week.
-                let day_profile = profile_for_day(model, epoch_day).unwrap_or(profile);
-                match plan_through(epoch_day.saturating_sub(1), day_profile) {
+                let day_profile = profile_for_day(model, epoch_day);
+                match plan_through(
+                    epoch_day.saturating_sub(1),
+                    day_profile.as_deref().unwrap_or(profile),
+                ) {
                     Some((a, p)) => past.push((epoch_day, a, p)),
                     None => gated.push(epoch_day),
                 }
@@ -650,7 +667,7 @@ fn resolve_next_session(
             // `flatten_session`, so only the per-adjustment rewrite runs here.
             annotate_adjustments(ns, &recs.today, weight_lb);
             refresh_item_statuses(&mut ns.items, &recs.today);
-        } else if let Some(r) = return_step_on(model, ns.epoch_day, offset) {
+        } else if let Some(r) = return_step_on(model, &cx.days, ns.epoch_day, offset) {
             // ready-upd-003/004: the first session after a resolved hold is the
             // easy one (or the post-illness return check) even when it falls
             // after today (the hold was resolved on a rest day).
@@ -699,7 +716,7 @@ fn program_week(f: &PlanFrame, meso: &Mesocycle) -> (u8, u8) {
         .filter(|race| {
             *race >= week_monday && crate::running::taper_weeks(today_profile.goal_distance) > 0
         })
-        .map(|race| (race - week_monday) / 7);
+        .map(|race| race.saturating_sub(week_monday) / 7);
     match race_weeks_out {
         Some(out) => {
             let start_monday = start.saturating_sub(mon0_weekday(start));

@@ -30,7 +30,8 @@ fn two_qualifying_pushup_sessions() -> Vec<LoggedSet> {
 /// day 101 on a strength goal.
 fn pushup_anchors(sets: &[LoggedSet], inputs: &[ReadinessInput]) -> Vec<crate::plan::CalisAnchor> {
     build_calisthenics_anchors(
-        sets.iter(),
+        sets.iter()
+            .map(|s| (s, crate::calisthenics::tier_by_name(&s.exercise))),
         &[],
         inputs,
         crate::strength::LiftGoal::MaxStrength,
@@ -315,7 +316,7 @@ fn calisthenics_hold_set_round_trips_renders_and_yields_no_e1rm() {
 
     // A ladder-named hold set never anchors an e1RM; a barbell set still does.
     let anchors = build_plan_anchors(
-        model.sets.iter(),
+        SetIndex::new(&model.sets).with_facts(&model.sets),
         AnchorCtx {
             calisthenics: true,
             ..Default::default()

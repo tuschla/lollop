@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,17 +34,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -62,6 +69,8 @@ internal fun Context.setupPrefs(): SharedPreferences = getSharedPreferences(SETU
 // Persisted flag (in the [SETUP_PREFS] prefs) recording that the user removed
 // their plan. It gates the boot auto-GeneratePlan so a "Remove plan" survives both
 // rotation and relaunch; generating any plan clears it. See the boot effect + dispatch.
+// A data backup carries it as a trailing ClearPlan line ([exportDataTo]) and a
+// restore sets it from the imported log ([replaceEventLog]).
 internal const val KEY_PLAN_CLEARED = "plan_cleared"
 
 // Process-scoped serial event dispatcher. The queue AND its single consumer live
@@ -88,13 +97,24 @@ internal object EventDispatcher {
     private class Batch(val events: List<Event>) : Msg
     private class Block(val body: suspend () -> ViewModel?, val done: CompletableDeferred<ViewModel?>) : Msg
 
-    private val channel = Channel<Msg>(Channel.UNLIMITED)
+    // A var only for [resetForTest]; the consumer drains the channel it was started on.
+    @Volatile private var channel = newQueue()
+
+    // A queued [exclusive] block the channel drops undelivered (only [resetForTest]
+    // cancels a queue) cancels its awaiter instead of leaving it suspended forever.
+    private fun newQueue() = Channel<Msg>(Channel.UNLIMITED) { (it as? Block)?.done?.cancel() }
 
     // The freshest hydrated ViewModel, or null before boot hydrates it. The
     // composition seeds `loaded`/`model` from this (rotation → last content
     // instantly, cold start → the splash holds while boot hydrates) and collects it
     // so every later event's model reaches the UI.
     val model = MutableStateFlow<ViewModel?>(null)
+
+    // Boot found the native core unusable ([Core.probe] / [Core.markUnavailable]):
+    // the shell shows [CoreUnavailableScreen] instead of any screen that could write,
+    // and the splash lets go although [model] stays null. Process-scoped like
+    // [model], so a rotation renders the error at once.
+    val coreUnavailable = MutableStateFlow(false)
 
     // Core outcomes the user must hear about ([report]). A Channel, not a
     // SharedFlow: a notice sent while nothing collects (an Activity mid-recreation)
@@ -116,45 +136,85 @@ internal object EventDispatcher {
     // The crash-recovery sidecar fixes read ONCE at boot when a resume prompt is
     // offered, so the Resume action reuses them instead of re-reading the sidecar
     // file off disk. Null when no interrupted run was found / after it is consumed.
-    var recoveredSidecar: List<GpsPoint>? = null
+    var recoveredSidecar: RecoveredTrack? = null
 
     // Process-level scope for work that must outlive a sheet/screen (imports,
     // export, the data restore).
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    // The event→view send paths, injectable so a JVM test can substitute fakes:
-    // the real path crosses the JNI boundary (Core.send), which is unavailable off
-    // device. A var so the consumer's drop-one-unit runCatching still wraps
-    // whatever send path is installed.
-    var sender: suspend (Event) -> SendResult = { e -> withContext(CoreJniDispatcher) { Core.send(e) } }
-    var batchSender: suspend (List<Event>) -> SendResult =
+    // The real event→view send paths, across the JNI boundary (Core.send).
+    private val coreSender: suspend (Event) -> SendResult = { e -> withContext(CoreJniDispatcher) { Core.send(e) } }
+    private val coreBatchSender: suspend (List<Event>) -> SendResult =
         { es -> withContext(CoreJniDispatcher) { Core.sendAll(es) } }
 
-    init {
-        // One serial consumer, started once per process and never cancelled (a
-        // SupervisorJob on the immediate main dispatcher). It drains the queue
-        // STRICTLY IN ORDER: an [Ev] runs one Core.send, a [Batch] one Core.sendAll,
-        // a [Block] an exclusive body as ONE turn. Either way exactly one unit of
-        // work is ever in flight and results reach [model] in enqueue order.
-        scope.launch {
-            for (m in channel) when (m) {
-                // A malformed view (or any send throw) must drop THIS unit, never
-                // kill the process-lifetime consumer loop.
-                is Ev -> runCatching { sender(m.e) }
-                    .onSuccess(::publish)
-                    .onFailure { Log.e("EventDispatcher", "event dropped", it) }
-                is Batch -> runCatching { batchSender(m.events) }
-                    .onSuccess(::publish)
-                    .onFailure { Log.e("EventDispatcher", "event batch dropped", it) }
-                is Block -> {
-                    val r = runCatching { m.body() }
-                    r.getOrNull()?.let { model.value = it }
-                    // Complete the awaiter with the body's value (null included) or its
-                    // exception; a thrown body reaches the awaiter, never kills the consumer.
-                    r.fold({ m.done.complete(it) }, { m.done.completeExceptionally(it) })
-                }
+    // The send paths in use, injectable so a JVM test can substitute fakes: the
+    // real ones are unavailable off device. A var so the consumer's drop-one-unit
+    // runCatching still wraps whatever send path is installed.
+    var sender: suspend (Event) -> SendResult = coreSender
+    var batchSender: suspend (List<Event>) -> SendResult = coreBatchSender
+
+    private var consumer: Job = startConsumer(channel)
+
+    // One serial consumer per process (only [resetForTest] replaces it), on the
+    // immediate main dispatcher under a SupervisorJob. It drains the queue
+    // STRICTLY IN ORDER: an [Ev] runs one Core.send, a [Batch] one Core.sendAll,
+    // a [Block] an exclusive body as ONE turn. Either way exactly one unit of
+    // work is ever in flight and results reach [model] in enqueue order.
+    //
+    // Only [resetForTest] cancels a consumer, after cancelling its queue, so a
+    // cancelled consumer never takes another unit; one still in flight then (a
+    // non-cancellable body) publishes nothing, though an exclusive body's awaiter
+    // still gets its outcome.
+    private fun startConsumer(queue: Channel<Msg>): Job = scope.launch {
+        for (m in queue) when (m) {
+            // A malformed view (or any send throw) must drop THIS unit, never
+            // kill the process-lifetime consumer loop.
+            is Ev -> {
+                val r = runCatching { sender(m.e) }
+                if (!isActive) break
+                r.onSuccess(::publish).onFailure { Log.e("EventDispatcher", "event dropped", it) }
+            }
+            is Batch -> {
+                val r = runCatching { batchSender(m.events) }
+                if (!isActive) break
+                r.onSuccess(::publish).onFailure { Log.e("EventDispatcher", "event batch dropped", it) }
+            }
+            is Block -> {
+                val r = runCatching { m.body() }
+                if (isActive) r.getOrNull()?.let { model.value = it }
+                // Complete the awaiter with the body's value (null included) or its
+                // exception; a thrown body reaches the awaiter, never kills the consumer.
+                r.fold({ m.done.complete(it) }, { m.done.completeExceptionally(it) })
             }
         }
+    }
+
+    /**
+     * Test isolation only: the process-scoped state of a freshly started process —
+     * a new queue and consumer, the real core send paths, no model, no pending
+     * notice, boot not handled. Robolectric recycles the main looper's pending
+     * messages between tests while this object lives on, so a test that ends with a
+     * unit in flight (the core answered on its thread, the consumer's resumption
+     * still queued on main) would otherwise leave a consumer that never runs again,
+     * and every later boot would wait on it forever. The old consumer is cancelled:
+     * if it does resume, it runs and publishes nothing more and stops. Every
+     * [exclusive] still queued on the old queue is cancelled, so its awaiter never
+     * hangs.
+     */
+    fun resetForTest() {
+        val old = channel
+        channel = newQueue()
+        old.cancel()
+        consumer.cancel()
+        consumer = startConsumer(channel)
+        sender = coreSender
+        batchSender = coreBatchSender
+        while (noticeChannel.tryReceive().isSuccess) Unit
+        model.value = null
+        coreUnavailable.value = false
+        bootHandled = false
+        recoveredSidecar = null
+        staleReported = false
     }
 
     private fun publish(r: SendResult) {
@@ -368,6 +428,12 @@ private fun rememberCoachSession(openTrackingRequest: MutableStateFlow<Boolean>)
         // (rotation) queues AFTER it.
         var fresh = false
         val vm = EventDispatcher.exclusive {
+            // A core that can't answer (library missing, an arm64-only release on an
+            // x86_64 phone under translation, every JNI call returning null) would
+            // otherwise boot onto an EMPTY model: the "Set up your training" screen
+            // over a user who has data, inviting a re-setup on a dead engine. Probe it
+            // before the log is touched and show the error state instead.
+            if (!withContext(CoreJniDispatcher) { Core.probe() }) return@exclusive null
             fresh = withContext(CoreJniDispatcher) { Core.restore(ctx) }
             // A fresh install renders the empty Today and routes first-run into the
             // guided setup, which writes user-asserted profile values.
@@ -380,6 +446,12 @@ private fun rememberCoachSession(openTrackingRequest: MutableStateFlow<Boolean>)
             val bootDay = todayEpochDay()
             val bootOffset = utcOffsetSec()
             val today = withContext(CoreJniDispatcher) { Core.send(Event.SetToday(bootDay, bootOffset)) }
+            // Every working core accepts the clock event; one that reads a view but
+            // refuses it can't apply anything the user does either.
+            if (!today.accepted) {
+                Core.markUnavailable()
+                return@exclusive null
+            }
             // An unreadable log or a replay that had to skip lines surfaces here.
             EventDispatcher.report(today)
             var v = today.view
@@ -394,6 +466,17 @@ private fun rememberCoachSession(openTrackingRequest: MutableStateFlow<Boolean>)
             // auto-generation to match the visible state.
             if (v.program != null && setupPrefs.getBoolean(KEY_PLAN_CLEARED, false)) {
                 setupPrefs.edit().putBoolean(KEY_PLAN_CLEARED, false).apply()
+            }
+            // The other direction: the log itself records a removal (compaction keeps
+            // a final ClearPlan, [RestoredLog.planRemoved]), so a log that ends with
+            // the plan removed re-arms a lost marker (prefs cleared or corrupted, or
+            // the async apply() of the ClearPlan echo never reached disk). Only on the
+            // process's first boot turn: a later re-run (rotation) follows the
+            // in-session marker, which a GeneratePlan tap clears.
+            if (!EventDispatcher.bootHandled && v.program == null && Core.restoredPlanRemoved &&
+                !setupPrefs.getBoolean(KEY_PLAN_CLEARED, false)
+            ) {
+                setupPrefs.edit().putBoolean(KEY_PLAN_CLEARED, true).apply()
             }
             // Auto-generate the plan on boot for a set-up user who has NO plan
             // yet, so they land on the real prescription-led Coach/Today (next-session
@@ -417,7 +500,13 @@ private fun rememberCoachSession(openTrackingRequest: MutableStateFlow<Boolean>)
                 v = plan.view
             }
             v
-        }!!
+        }
+        // No model: the core is unavailable. [CoachScreen] shows the error state; no
+        // setup decision, no run recovery, nothing that could dispatch an event.
+        if (vm == null) {
+            EventDispatcher.coreUnavailable.value = true
+            return@LaunchedEffect
+        }
         session.model = vm
         // The consumer already published this hydrated model IN QUEUE ORDER (no
         // separate publish needed), so a later Activity recreation (rotation) renders
@@ -536,7 +625,9 @@ private fun rememberCoachSession(openTrackingRequest: MutableStateFlow<Boolean>)
 /**
  * Crash-recovery consent: an interrupted run's sidecar is offered, never silently
  * resumed. Discard leaves nothing behind; Resume repopulates the track and
- * restarts the foreground service. Composed at the very top of [CoachScaffold],
+ * restarts the foreground service, or, without a precise-location grant (revoked
+ * while the app was gone), holds the run for the tracker, which asks for the grant
+ * and restarts recording once it is given. Composed at the very top of [CoachScaffold],
  * ahead of its full-screen setup/tracker returns, so a tracker screen restored
  * after process death can never hide it.
  */
@@ -571,7 +662,16 @@ internal fun ResumeRunDialog(session: CoachSession) {
                     EventDispatcher.recoveredSidecar = null
                     if (recovered.size >= 2) {
                         RunSession.restore(recovered)
-                        RunTrackingService.start(ctx)
+                        if (hasFineLocation(ctx)) {
+                            RunTrackingService.start(ctx)
+                        } else {
+                            // No grant (revoked mid-run, or a lapsed one-time grant): a
+                            // start now would only fail the location FGS and strand the
+                            // run. Hold it as a capture; the tracker asks for location and
+                            // restarts recording once it is granted.
+                            RunSession.tracking.value = false
+                            RunSession.resumeAwaitingLocation.value = true
+                        }
                         session.showTracker = true
                     } else {
                         ActiveRunStore.clear()
@@ -593,6 +693,12 @@ internal fun ResumeRunDialog(session: CoachSession) {
 internal fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
     val session = rememberCoachSession(openTrackingRequest)
 
+    val coreUnavailable by EventDispatcher.coreUnavailable.collectAsState()
+    if (coreUnavailable) {
+        CoreUnavailableScreen()
+        return
+    }
+
     if (!session.loaded) {
         val ctx = LocalContext.current
         // An import restart is still replaying the restored log (the key goes once boot runs).
@@ -612,5 +718,32 @@ internal fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
     }
 
     CoachScaffold(session)
+}
+
+/**
+ * Boot found the native core unusable ([Core.probe]): say so instead of rendering an
+ * empty model as a fresh install. Nothing here can dispatch an event (the core
+ * refuses them anyway, [Core.unavailable]); the one action is the raw-log export,
+ * which reads the durable log in pure Kotlin ([exportDataTo]), so the user's data
+ * can leave the phone before an update or reinstall.
+ */
+@Composable
+internal fun CoreUnavailableScreen() {
+    val exportData = rememberDataExport()
+    Box(
+        Modifier.fillMaxSize().background(BgTop).safeDrawingPadding().padding(Space.Screen.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.Card.dp)) {
+            Text(
+                stringResource(R.string.main_core_unavailable_title),
+                color = OnBgBody,
+                style = Type.Title,
+                modifier = Modifier.semantics { heading() },
+            )
+            Text(stringResource(R.string.main_core_unavailable_message), color = OnBgBody, style = Type.Body)
+            PrimaryButton(stringResource(R.string.profile_export_data), onClick = exportData, modifier = Modifier.fillMaxWidth())
+        }
+    }
 }
 

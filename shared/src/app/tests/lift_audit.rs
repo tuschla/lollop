@@ -326,7 +326,12 @@ fn weights_profile_still_audits_a_barbell_lift_sharing_a_tier_name() {
             .any(|g| g.summary.contains("Bulgarian split squat")),
         "a Weights user's barbell lift is still audited"
     );
-    let anchors = build_plan_anchors(model.sets.iter(), AnchorCtx::default(), 0, 0);
+    let anchors = build_plan_anchors(
+        SetIndex::new(&model.sets).with_facts(&model.sets),
+        AnchorCtx::default(),
+        0,
+        0,
+    );
     assert!(
         anchors.e1rm_for("Bulgarian split squat").is_some(),
         "a Weights user's barbell lift still anchors an e1RM"

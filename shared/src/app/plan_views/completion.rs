@@ -57,25 +57,15 @@ fn attribute_session_days(sets: &[LoggedSet], offset: i64) -> Vec<Option<i64>> {
     out
 }
 
-/// The session day a run is attributed to: the local day of its START — the
-/// first GPS fix for a tracked run, else `observed_at − duration` for a manual
-/// run. `None` for an undated legacy run (`observed_at <= 0`), which never counts.
-fn run_session_day(r: &LoggedRun, offset: i64) -> Option<i64> {
-    if let Some(first) = r.track.first()
-        && first.observed_at > 0
-    {
-        return Some(local_day(first.observed_at, offset));
-    }
-    if r.observed_at <= 0 {
-        return None;
-    }
-    let start = r.observed_at.saturating_sub((r.duration_min * 60.0) as i64);
-    Some(local_day(start, offset))
-}
-
-/// Per-run session day, aligned to `runs` by index.
-fn attribute_run_days(runs: &[LoggedRun], offset: i64) -> Vec<Option<i64>> {
-    runs.iter().map(|r| run_session_day(r, offset)).collect()
+/// Per-run session day, aligned to `runs` by index: the local day of the run's
+/// START, [`RunFacts::started`] (its first QC'd fix, else its stamp minus its
+/// duration), the one start every view and coaching bucket uses. `None` for an
+/// undated legacy run (`observed_at <= 0`), which never counts.
+fn attribute_run_days(runs: &[LoggedRun], facts: &RunFacts, offset: i64) -> Vec<Option<i64>> {
+    runs.iter()
+        .zip(&facts.started)
+        .map(|(r, &start)| (r.observed_at > 0).then(|| local_day(start, offset)))
+        .collect()
 }
 
 /// Every logged set's and run's session day plus the distinct local days with
@@ -84,7 +74,7 @@ fn attribute_run_days(runs: &[LoggedRun], offset: i64) -> Vec<Option<i64>> {
 pub(in crate::app) struct LoggedDays {
     /// Per-set session day, aligned to `model.sets`.
     pub(super) sets: Vec<Option<i64>>,
-    /// Per-run session day, aligned to `model.runs`.
+    /// Per-run session day (its start day), aligned to `model.runs`.
     pub(super) runs: Vec<Option<i64>>,
     /// Distinct days with lifting / running, indexed by [`Discipline`].
     pub(super) by_discipline: [std::collections::BTreeSet<i64>; 2],
@@ -93,10 +83,10 @@ pub(in crate::app) struct LoggedDays {
 }
 
 impl LoggedDays {
-    pub(in crate::app) fn new(model: &Model) -> Self {
+    pub(in crate::app) fn new(model: &Model, facts: &RunFacts) -> Self {
         let offset = model.today_utc_offset_sec;
         let sets = attribute_session_days(&model.sets, offset);
-        let runs = attribute_run_days(&model.runs, offset);
+        let runs = attribute_run_days(&model.runs, facts, offset);
         let by_discipline: [std::collections::BTreeSet<i64>; 2] = [
             sets.iter().flatten().copied().collect(),
             runs.iter().flatten().copied().collect(),
@@ -108,6 +98,12 @@ impl LoggedDays {
             by_discipline,
             active,
         }
+    }
+
+    /// Per-run session day (the day the run STARTED), aligned to `model.runs`;
+    /// `None` for an undated run.
+    pub(in crate::app) fn run_days(&self) -> &[Option<i64>] {
+        &self.runs
     }
 }
 
@@ -234,31 +230,26 @@ const STEP_UP_SURPLUS_REPS: f64 = 2.0;
 pub(in crate::app) fn apply_last_sets(
     items: &mut [PrescriptionView],
     model: &Model,
+    set_index: &SetIndex,
     anchors: &crate::plan::Anchors,
     session_days: &[Option<i64>],
     epoch_day: i64,
     weight_lb: bool,
 ) {
     let step = movement_step_kg(weight_lb);
-    let mut keys: std::collections::HashMap<&str, Vec<String>> = std::collections::HashMap::new();
     for it in items.iter_mut() {
         if it.is_run() || it.added_kg.is_some() || it.timed_hold {
             continue;
         }
-        let key = crate::plan::movement_key(&it.exercise);
-        let Some((set_day, s)) = last_top_set(
+        let Some((set_day, i)) = last_top_set(
             &model.sets,
+            set_index.same_movement_sets(&it.exercise),
             epoch_day,
             |i| session_days.get(i).copied().flatten(),
-            |s| {
-                *keys
-                    .entry(s.exercise.as_str())
-                    .or_insert_with(|| crate::plan::movement_key(&s.exercise))
-                    == key
-            },
         ) else {
             continue;
         };
+        let s = &model.sets[i];
         let summary = item_set_summary(s, weight_lb);
         it.last_set = Some(ItemSetView {
             entry_id: s.entry_id,
@@ -272,7 +263,7 @@ pub(in crate::app) fn apply_last_sets(
             short: false,
             summary: summary.clone(),
         });
-        let age_days = epoch_day - set_day;
+        let age_days = epoch_day.saturating_sub(set_day);
         if it.load_kg.is_none()
             && s.weight_kg > 0.0
             && !anchors.reentry_novice
@@ -283,7 +274,7 @@ pub(in crate::app) fn apply_last_sets(
             let capacity = crate::strength::effective_reps_f(s.reps, s.rpe);
             // One derate, never stacked: the anchor's own when the movement has
             // one, else the detraining credit for this set's age.
-            let derate = anchors.load_frac_for(&it.exercise);
+            let derate = anchors.carried_derate_for(&it.exercise);
             let frac = derate.map_or(credit, |d| d.frac);
             let scale = if capacity < target {
                 crate::strength::e1rm_epley_frac(1.0, capacity)
@@ -294,14 +285,13 @@ pub(in crate::app) fn apply_last_sets(
             let step_up = frac >= 1.0
                 && capacity - target >= STEP_UP_SURPLUS_REPS
                 && step <= crate::strength::MAX_LOAD_STEP_FRAC * s.weight_kg;
-            // `+ 1e-6`: a load logged in lb converts to a kg float a hair under
-            // its own grid point; never round it down a plate. A load the
-            // athlete lifted is suggested exactly as logged; only a computed
-            // one (stepped, derated, rep-scaled) lands on the plate grid.
+            // A load the athlete lifted is suggested exactly as logged; only a
+            // computed one (stepped, derated, rep-scaled) lands on the plate
+            // grid (`round_load_grid` keeps an on-grid lb load on its plate).
             let suggested = if step_up {
-                round_load_grid(s.weight_kg + step + 1e-6, weight_lb)
+                round_load_grid(s.weight_kg + step, weight_lb)
             } else if frac < 1.0 || scale < 1.0 {
-                round_load_grid(s.weight_kg * frac * scale + 1e-6, weight_lb)
+                round_load_grid(s.weight_kg * frac * scale, weight_lb)
             } else {
                 s.weight_kg
             };
@@ -350,34 +340,41 @@ pub(in crate::app) fn apply_last_sets(
 }
 
 /// The top working set of the most recent day before `before_day` among the
-/// `sets` that `matches` (same movement): heaviest, then most reps, then the
-/// latest stamp (the first such set on a full tie). `day_of(i)` is set `i`'s
-/// day, `None` when it cannot be dated. Timed holds and rep-less sets never
-/// count. The one rule behind the plan item's "Last:" line and the review's
-/// "Last time" basis; only the day attribution differs between them.
-pub(in crate::app) fn last_top_set<'a>(
-    sets: &'a [LoggedSet],
+/// `candidates` (positions in `sets`, ascending: one movement's sets, see
+/// [`SetIndex::same_movement_sets`]): heaviest, then most reps, then the
+/// latest stamp, and on a same-stamp tie the FIRST logged
+/// ([`LoggedSet::chrono_cmp`]: lower `entry_id`, then content), never the
+/// storage slot an Undo moves. Returns its day and
+/// position. `day_of(i)` is set `i`'s day, `None` when it cannot be dated.
+/// Timed holds and rep-less sets never count. The one rule behind the plan
+/// item's "Last:" line and the review's "Last time" basis; only the day
+/// attribution differs between them.
+pub(in crate::app) fn last_top_set(
+    sets: &[LoggedSet],
+    candidates: &[usize],
     before_day: i64,
     mut day_of: impl FnMut(usize) -> Option<i64>,
-    mut matches: impl FnMut(&'a LoggedSet) -> bool,
-) -> Option<(i64, &'a LoggedSet)> {
-    let mut best: Option<(i64, &LoggedSet)> = None;
-    for (i, s) in sets.iter().enumerate() {
+) -> Option<(i64, usize)> {
+    let mut best: Option<(i64, usize)> = None;
+    for &i in candidates {
+        let s = &sets[i];
         let Some(d) = day_of(i) else {
             continue;
         };
-        if d >= before_day || s.hold_sec.is_some() || s.reps == 0 || !matches(s) {
+        if d >= before_day || s.hold_sec.is_some() || s.reps == 0 {
             continue;
         }
-        let better = best.is_none_or(|(bd, b)| {
+        let better = best.is_none_or(|(bd, bi)| {
+            let b = &sets[bi];
             d.cmp(&bd)
                 .then(s.weight_kg.total_cmp(&b.weight_kg))
                 .then(s.reps.cmp(&b.reps))
                 .then(s.observed_at.cmp(&b.observed_at))
+                .then_with(|| b.chrono_cmp(s))
                 .is_gt()
         });
         if better {
-            best = Some((d, s));
+            best = Some((d, i));
         }
     }
     best
@@ -392,19 +389,21 @@ pub(in crate::app) fn last_top_set<'a>(
 fn apply_hold_caps(
     items: &mut [PrescriptionView],
     model: &Model,
+    set_index: &SetIndex,
     session_days: &[Option<i64>],
     before_day: i64,
 ) {
-    let from = before_day - crate::app::anchors::WINDOW_DAYS;
+    // Saturating: a corrupt log's SetToday near i64::MIN must not overflow.
+    let from = before_day.saturating_sub(crate::app::anchors::WINDOW_DAYS);
     for it in items.iter_mut() {
         if it.is_run() || it.timed_hold || it.reps_low == 0 {
             continue;
         }
         let reps = u32::from(it.reps_low);
-        it.hold_load_cap_kg = model
-            .sets
+        it.hold_load_cap_kg = set_index
+            .same_movement_sets(&it.exercise)
             .iter()
-            .enumerate()
+            .map(|&i| (i, &model.sets[i]))
             .filter(|(i, s)| {
                 session_days
                     .get(*i)
@@ -414,7 +413,6 @@ fn apply_hold_caps(
                     && s.hold_sec.is_none()
                     && s.reps >= reps
                     && s.weight_kg > 0.0
-                    && crate::plan::same_movement(&it.exercise, &s.exercise)
             })
             .map(|(_, s)| s.weight_kg)
             .reduce(f64::max);
@@ -494,6 +492,8 @@ pub(super) struct FlattenCtx<'a> {
     pub(super) weight_lb: bool,
     /// Per-set session day, aligned to `model.sets`.
     pub(super) session_days: &'a [Option<i64>],
+    /// Name-derived facts of `model.sets`.
+    pub(super) set_index: &'a SetIndex,
     /// Per-run session day, aligned to `model.runs`.
     pub(super) run_days: &'a [Option<i64>],
     /// Realised distance/moving time per run, aligned to `model.runs`.
@@ -700,6 +700,7 @@ pub(super) fn flatten_session(
         model,
         weight_lb,
         session_days,
+        set_index,
         ..
     } = *ctx;
     let fold = judge.fold;
@@ -719,13 +720,20 @@ pub(super) fn flatten_session(
     apply_last_sets(
         &mut items,
         model,
+        set_index,
         anchors,
         session_days,
         epoch_day.min(judge_day),
         weight_lb,
     );
     if epoch_day == today {
-        apply_hold_caps(&mut items, model, session_days, epoch_day.min(judge_day));
+        apply_hold_caps(
+            &mut items,
+            model,
+            set_index,
+            session_days,
+            epoch_day.min(judge_day),
+        );
     }
     // Fill each item's completion from the judged day's logs — only meaningful
     // inside the plan window (a pre-plan or future day has nothing logged
@@ -785,10 +793,12 @@ fn judge_run_item(
     let facts = ctx.run_facts;
     let mut km = 0.0;
     let mut min = 0.0;
-    for (day, (&k, &m)) in ctx.run_days.iter().zip(facts.km.iter().zip(&facts.minutes)) {
-        if *day == Some(judge.day) {
-            km += k;
-            min += m;
+    // Chronological (`RunFacts::chrono`), never storage order: the logged
+    // km/min are float sums the card shows rounded.
+    for &i in &facts.chrono {
+        if ctx.run_days.get(i).copied().flatten() == Some(judge.day) {
+            km += facts.km[i];
+            min += facts.minutes[i];
         }
     }
     it.run_logged_km = km;
@@ -824,7 +834,7 @@ fn judge_lift_item(it: &mut PrescriptionView, judge: &DayJudge, ctx: &FlattenCtx
         })
         .map(|(_, srec)| srec)
         .collect();
-    day_sets.sort_by_key(|srec| srec.observed_at);
+    day_sets.sort_by(|a, b| a.chrono_cmp(b));
     let heaviest = day_sets
         .iter()
         .map(|srec| srec.weight_kg)
@@ -1047,6 +1057,7 @@ mod tests {
         apply_last_sets(
             std::slice::from_mut(&mut item),
             &model,
+            &SetIndex::new(&model.sets),
             &crate::plan::Anchors::default(),
             &[Some(97)],
             100,

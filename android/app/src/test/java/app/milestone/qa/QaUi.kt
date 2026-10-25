@@ -1,6 +1,7 @@
 package app.milestone.qa
 
 import android.content.Context
+import android.content.Intent
 import android.view.View
 import android.view.ViewGroup
 import androidx.annotation.PluralsRes
@@ -22,6 +23,10 @@ import androidx.test.core.app.ApplicationProvider
 import app.milestone.EventDispatcher
 import app.milestone.MainActivity
 import app.milestone.R
+import app.milestone.ViewModel
+import java.util.Timer
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.schedule
 
 /** Shared UI drivers for the offline scenario suite. */
 
@@ -53,13 +58,49 @@ fun plural(@PluralsRes id: Int, count: Int, vararg args: Any): String =
 // and starve the single-threaded dispatcher.
 internal var lastScenario: ActivityScenario<MainActivity>? = null
 
+/** How long a launch may hold the splash before the watchdog gives up on boot:
+ *  far past the long-history boot budget (45 s), so only a stuck boot reaches it. */
+private const val SPLASH_WATCHDOG_MS = 120_000L
+
+/**
+ * Run [launch] (an Activity start, which idles the main looper until no frame is
+ * pending) under a watchdog. The splash cancels every frame while boot has
+ * published no model, so a boot that never publishes would keep that idle
+ * spinning forever; after [SPLASH_WATCHDOG_MS] the watchdog stands an empty model
+ * in to release the splash, and the launch fails with the reason instead.
+ */
+internal fun <T> launchWithSplashWatchdog(launch: () -> T): T {
+    val stalled = AtomicBoolean(false)
+    val watchdog = Timer("splash-watchdog", true)
+    watchdog.schedule(SPLASH_WATCHDOG_MS) {
+        if (EventDispatcher.model.compareAndSet(null, ViewModel())) stalled.set(true)
+    }
+    val launched = try {
+        launch()
+    } finally {
+        watchdog.cancel()
+    }
+    if (stalled.get()) {
+        throw AssertionError(
+            "boot published no model within ${SPLASH_WATCHDOG_MS / 1000} s, so the splash held every " +
+                "frame and the launch could not go idle (is the EventDispatcher consumer stuck?)",
+        )
+    }
+    return launched
+}
+
+/** Start [MainActivity] (with [intent], e.g. a tracker extra) under [launchWithSplashWatchdog]. */
+internal fun launchMain(intent: Intent? = null): ActivityScenario<MainActivity> = launchWithSplashWatchdog {
+    if (intent == null) ActivityScenario.launch(MainActivity::class.java) else ActivityScenario.launch(intent)
+}
+
 /** Launch the real Activity and wait until boot hydration finished: the restored
  *  (and, for a set-up profile, freshly planned) model is published and the main
  *  scaffold replaced the loading spinner. The semantics fetch comes FIRST: under
  *  Robolectric it is what idles the main looper, so the boot coroutine (which
  *  resumes on Main) can only progress while the condition keeps fetching. */
 fun ComposeTestRule.launchApp() {
-    lastScenario = ActivityScenario.launch(MainActivity::class.java)
+    lastScenario = launchMain()
     waitUntil(30_000) {
         onAllNodesWithText(str(R.string.main_dest_history)).fetchSemanticsNodes().isNotEmpty() &&
             EventDispatcher.bootHandled
@@ -70,7 +111,7 @@ fun ComposeTestRule.launchApp() {
 /** Launch the real Activity on a FRESH install and wait for the guided-setup
  *  screen (which replaces the scaffold) to appear. */
 fun ComposeTestRule.launchAppExpectingSetup() {
-    lastScenario = ActivityScenario.launch(MainActivity::class.java)
+    lastScenario = launchMain()
     waitUntil(30_000) {
         onAllNodesWithText(str(R.string.setup_step_train_q)).fetchSemanticsNodes().isNotEmpty()
     }

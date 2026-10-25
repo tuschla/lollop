@@ -2,6 +2,8 @@ package app.milestone.qa
 
 import android.content.Context
 import androidx.annotation.StringRes
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -356,7 +358,33 @@ class RedesignFlowsTest {
      *  "Delete report" asks first, Cancel keeps it, Delete removes it, and the
      *  snackbar's Undo puts the same report (area, kind, severity) back. */
     @Test
-    fun painReport_deleteAsksFirst_cancelKeepsIt_undoRestoresTheSameReport() {
+    fun painReport_deleteAsksFirst_cancelKeepsIt_undoRestoresTheSameReport() = reportPainThenDeleteAndUndo()
+
+    /** The core appends the report to the durable log BEFORE it builds the new
+     *  view, and that view reaches the UI on a later main-looper turn that Compose's
+     *  idling can't see. A busy JVM (the whole suite under load) stretches that gap;
+     *  here it is held open on purpose, so the flow must sync on the published model,
+     *  never on the log alone, before it looks for the card's "Delete report". */
+    @Test
+    fun painReport_deleteFlow_waitsForTheModel_whenTheViewLagsTheLog() {
+        val real = EventDispatcher.sender
+        // Each pain report's view is held back this long after its log append.
+        val lagMs = 2_000L
+        try {
+            EventDispatcher.sender = { e ->
+                real(e).also {
+                    if (e is Event.SubmitReadiness) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Thread.sleep(lagMs) }
+                    }
+                }
+            }
+            reportPainThenDeleteAndUndo()
+        } finally {
+            EventDispatcher.sender = real
+        }
+    }
+
+    private fun reportPainThenDeleteAndUndo() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         openChooserFromFab("pain report")
@@ -368,7 +396,9 @@ class RedesignFlowsTest {
         rule.onAllNodes(hasText(str(R.string.log_pain_char_tendon)))[0].performScrollTo().performClick()
         rule.pickRating("pain-severity", 3)
         rule.onAllNodes(hasText(str(R.string.log_report_pain)) and hasClickAction())[0].performClick()
-        waitForState { painReports().size == 1 }
+        // The log gets the report before the core builds its view: wait for the
+        // published model too, or the card below may not exist yet.
+        waitForState { painReports().size == 1 && EventDispatcher.model.value!!.readiness_summary.any { it.signal == "Pain" } }
         val sent = painReports().single()["pain"]!!.toString()
         assertTrue(sent, sent.contains("Left knee") && sent.contains("TendonLoadRelated") && sent.contains("\"severity\":3"))
         val vm = EventDispatcher.model.value!!
@@ -634,7 +664,6 @@ class RedesignFlowsTest {
     /** Export GPX names the file by the run's START (spec §2.7), not by its
      *  logged-at stamp, which the tracker sets to the last fix. */
     @Test
-    @org.junit.Ignore("BUG: Export GPX names the file by observed_at (the run's LAST fix), not its start (ui-sweep §2.7)")
     fun exportGpx_sharesAFileNamedByTheRunsStart() {
         val end = QaHarness.daysAgoAtMidday(1)
         val run = trackedRun(end, fixes = 1200)
@@ -662,7 +691,6 @@ class RedesignFlowsTest {
      *  (HistoryRuns.runTitle): a tracked run from Sunday 23:40 to Monday 00:20
      *  is a Sunday run, though the tracker stamps it at its last fix. */
     @Test
-    @org.junit.Ignore("BUG: an untagged tracked run is titled by the weekday of its LAST fix (observed_at), not the day it started")
     fun trackedRunAcrossMidnight_isTitledByTheDayItStarted() {
         val midnight = app.milestone.todayEpochDay() * 86_400L
         val run = trackedRun(midnight + 20 * 60, fixes = 801)
@@ -679,7 +707,6 @@ class RedesignFlowsTest {
     /** The detail's date line is "the run's local start date and time"
      *  (RunDetailSheet.runStartCaption): a tracked 11:00–12:00 run reads 11:00. */
     @Test
-    @org.junit.Ignore("BUG: run detail start caption shows the last-fix time (observed_at), not the run's start")
     fun trackedRunDetail_captionStatesItsStartTime() {
         val end = QaHarness.daysAgoAtMidday(1)
         val run = trackedRun(end, fixes = 1201)
@@ -840,6 +867,9 @@ class RedesignFlowsTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         openWeekly()
+        // Something answered, so Save turns on once the bar speed is valid (an
+        // emptied bar speed alone answers nothing).
+        rule.onNode(hasText(str(R.string.log_weekly_sign_sleep)) and hasClickAction()).performScrollTo().performClick()
         rule.onNode(hasText(str(R.string.log_weekly_more_details)) and hasClickAction()).performScrollTo().performClick()
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.log_weekly_velocity_drop), substring = true))
             .performScrollTo().performClick()
@@ -873,7 +903,6 @@ class RedesignFlowsTest {
      *  untouched state, so Save must stay off (an untouched Save would send a
      *  fabricated week over the stored one, BUGS.md 2026-09-11 #1). */
     @Test
-    @org.junit.Ignore("BUG: weekly check-in Save stays enabled after a sign is ticked then unticked (nothing answered)")
     fun weeklyCheckin_tickThenUntick_isStillUnanswered() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
@@ -885,6 +914,37 @@ class RedesignFlowsTest {
         rule.waitForIdle()
         rule.onNode(hasTestTag("editor-primary")).assertIsNotEnabled()
         assertEquals("the explicit all-clear is offered again", 1, countOf(nothingToReport))
+    }
+
+    // ═══════════════ Session review: the Save gate ════════════════════════
+
+    /** Switching "Off day" on and back off answers nothing: Save goes off again
+     *  (it would send a fabricated "fine" review); a real answer turns it on and
+     *  is what gets sent. */
+    @Test
+    fun sessionReview_toggleOnThenOff_isUnanswered_aRealAnswerSaves() {
+        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
+        rule.launchApp()
+        openChooserFromFab("review")
+        rule.onNode(row(R.string.log_chooser_more)).performScrollTo().performClick()
+        rule.onNode(row(R.string.main_session_review_title)).performScrollTo().performClick()
+        waitForAny(hasTestTag("editor-primary"))
+        val save = rule.onNode(hasTestTag("editor-primary"))
+        save.assertIsNotEnabled()
+        val offDay = row(R.string.log_switch_off_day)
+        rule.onNode(offDay).performScrollTo().performClick()
+        rule.waitForIdle()
+        save.assertIsEnabled()
+        rule.onNode(offDay).performScrollTo().performClick()
+        rule.waitForIdle()
+        save.assertIsNotEnabled()
+        rule.onNode(offDay).performScrollTo().performClick()
+        rule.waitForIdle()
+        save.assertIsEnabled()
+        save.performClick()
+        waitForState { journeyLog().any { it.variant == "SubmitReview" } }
+        val sent = journeyLog().filter { it.variant == "SubmitReview" }.map { it.toString() }.single()
+        assertTrue(sent, sent.contains("\"bad_day\":true"))
     }
 
     private fun keypadKey(k: Char) {
@@ -1045,5 +1105,132 @@ class RedesignFlowsTest {
         val set = journeyLog().last { it.variant == "LogSet" }.payload
         assertEquals("\"Back Squat\"", set["exercise"].toString())
         assertEquals("135 lb in kg", 61.23, set["weight_kg"].toString().toDouble(), 0.01)
+    }
+}
+
+/**
+ * The Save gate of both review sheets, answer by answer (component level, no core):
+ * every kind of answer alone turns Save on, marks the sheet edited and (weekly)
+ * withdraws the explicit all-clear; every answer that can be taken back (a switch,
+ * the typed bar speed) leaves the sheet unanswered again: Save off, not an unsaved
+ * edit, the all-clear offered. Each answer gets a fresh sheet, so none rides on
+ * another (BUGS.md 2026-10-23 fixes 1 and 2).
+ */
+@RunWith(RobolectricTestRunner::class)
+class ReviewSheetsSaveGateTest {
+
+    @get:Rule
+    val rule = androidx.compose.ui.test.junit4.createAndroidComposeRule<androidx.activity.ComponentActivity>()
+
+    private var sheet by androidx.compose.runtime.mutableIntStateOf(0)
+    private var dirty = false
+
+    private class Answer(val name: String, val give: () -> Unit, val takeBack: (() -> Unit)? = null)
+
+    @Before
+    fun setUp() {
+        Locale.setDefault(Locale.US)
+    }
+
+    private fun show(weekly: Boolean) = rule.setContent {
+        app.milestone.MilestoneTheme {
+            androidx.compose.runtime.CompositionLocalProvider(app.milestone.LocalEditorPinnedActions provides true) {
+                androidx.compose.runtime.key(sheet) {
+                    if (weekly) {
+                        app.milestone.WeeklyCheckinSheet(onDirtyChange = { dirty = it }, onSubmit = {})
+                    } else {
+                        app.milestone.SessionReviewSheet(onDirtyChange = { dirty = it }, showRun = true, onSubmit = {})
+                    }
+                }
+            }
+        }
+    }
+
+    private fun tap(matcher: SemanticsMatcher, index: Int = 0) {
+        rule.onAllNodes(matcher)[index].performScrollTo().performClick()
+        rule.waitForIdle()
+    }
+
+    private fun tap(@StringRes label: Int) = tap(hasText(str(label)) and hasClickAction())
+
+    private fun setTrack(tag: String, index: Float) {
+        rule.onNode(hasTestTag(tag)).performScrollTo()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(index) }
+        rule.waitForIdle()
+    }
+
+    private fun keypad(matcher: SemanticsMatcher) =
+        tap(matcher and hasClickAction() and hasAnyAncestor(hasTestTag("numeric-keypad")))
+
+    private fun expect(answer: String, answered: Boolean, weekly: Boolean) {
+        val enabled = rule.onNode(hasTestTag("editor-primary")).fetchSemanticsNode().config
+            .getOrNull(SemanticsProperties.Disabled) == null
+        assertEquals("$answer: Save enabled", answered, enabled)
+        assertEquals("$answer: an unsaved edit", answered, dirty)
+        if (weekly) {
+            val allClear = rule.onAllNodes(hasText(str(R.string.log_weekly_nothing)) and hasClickAction()).fetchSemanticsNodes()
+            assertEquals("$answer: the all-clear offered", if (answered) 0 else 1, allClear.size)
+        }
+    }
+
+    private fun gate(weekly: Boolean, answers: List<Answer>) {
+        show(weekly)
+        for (a in answers) {
+            sheet++
+            rule.waitForIdle()
+            expect("${a.name} (untouched)", answered = false, weekly = weekly)
+            a.give()
+            expect("${a.name} given", answered = true, weekly = weekly)
+            val takeBack = a.takeBack ?: continue
+            takeBack()
+            expect("${a.name} taken back", answered = false, weekly = weekly)
+        }
+    }
+
+    private fun switchAnswer(@StringRes label: Int) = Answer(str(label), { tap(label) }, { tap(label) })
+
+    @Test
+    fun sessionReview_everyAnswerAloneSaves_andEverySwitchTakenBackIsUnanswered() = gate(
+        weekly = false,
+        answers = listOf(
+            R.string.log_switch_off_day,
+            R.string.log_switch_decoupling_recorded,
+            R.string.log_switch_easy_intensity,
+            R.string.log_switch_positive_split,
+        ).map(::switchAnswer),
+    )
+
+    @Test
+    fun weeklyCheckin_everyAnswerAloneSaves_andEveryRevocableAnswerTakenBackIsUnanswered() {
+        val yes = hasText(str(R.string.log_yes)) and hasClickAction()
+        val no = hasText(str(R.string.log_no)) and hasClickAction()
+        val velocityField = hasClickAction() and hasContentDescription(str(R.string.log_weekly_velocity_drop), substring = true)
+        gate(
+            weekly = true,
+            answers = listOf(
+                R.string.log_weekly_sign_performance,
+                R.string.log_weekly_sign_mood,
+                R.string.log_weekly_sign_rhr,
+                R.string.log_weekly_sign_sleep,
+            ).map(::switchAnswer) + listOf(
+                Answer("failed key sessions = 2", { setTrack("weekly-failed", 2f) }),
+                // Zero is an answer too ("none this week"), not an empty field.
+                Answer("effort-gap sessions = 0", { setTrack("weekly-rpe-gap", 0f) }),
+                Answer(
+                    "bar-speed drop typed",
+                    {
+                        tap(R.string.log_weekly_more_details)
+                        tap(velocityField)
+                        keypad(hasText("0"))
+                    },
+                    { keypad(hasContentDescription(str(R.string.ui_cd_delete_digit))) },
+                ),
+                // The three clinical screens, in reading order: compulsive, bone, RED-S;
+                // a "No" is as much an answer as a "Yes".
+                Answer("compulsive exercise = yes", { tap(yes, 0) }),
+                Answer("bone pain = no", { tap(no, 1) }),
+                Answer("low energy (RED-S) = yes", { tap(yes, 2) }),
+            ),
+        )
     }
 }

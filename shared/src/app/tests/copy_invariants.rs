@@ -49,16 +49,13 @@ fn number_spans(s: &str) -> Vec<(usize, usize)> {
         if b[i].is_ascii_digit() {
             let start = i;
             while i < b.len() {
-                if b[i].is_ascii_digit() {
-                    i += 1;
-                } else if (b[i] == b'.' || b[i] == b':')
-                    && i + 1 < b.len()
-                    && b[i + 1].is_ascii_digit()
-                {
-                    i += 1;
-                } else {
+                let digit = b[i].is_ascii_digit();
+                let joiner =
+                    (b[i] == b'.' || b[i] == b':') && i + 1 < b.len() && b[i + 1].is_ascii_digit();
+                if !(digit || joiner) {
                     break;
                 }
+                i += 1;
             }
             out.push((start, i));
         } else {
@@ -1015,6 +1012,29 @@ fn sweep_empty(hits: &mut Hits) {
         calculators(&app, &mut model);
         collect(&app, &model, &format!("{name}/calculators"), true, hits);
     }
+    // An RPE two over target (ReduceLoadPct, AUTOREG-RIR-001) on a fresh
+    // plan, in kg and lb: the load-cut item notes render.
+    for lb in [false, true] {
+        let (app, mut model) = planned_strength_model(true);
+        if lb {
+            let p = Profile {
+                weight_lb: true,
+                ..model.profile.clone().expect("a profile")
+            };
+            let _ = app.update(Event::SetProfile(p), &mut model);
+        }
+        let _ = app.update(
+            Event::SubmitReadiness(input(ReadinessSignal::Rpe, 2.0)),
+            &mut model,
+        );
+        collect(
+            &app,
+            &model,
+            &format!("rpe-over-target/lb={lb}"),
+            false,
+            hits,
+        );
+    }
 }
 
 /// Every archetype after 7 weeks of logs (follow-the-plan from week 3) at four UTC
@@ -1097,7 +1117,11 @@ static ALL_HITS: std::sync::LazyLock<Hits> = std::sync::LazyLock::new(|| {
     std::thread::scope(|s| {
         for _ in 0..workers {
             s.spawn(|| {
-                while let Some((k, job)) = queue.lock().unwrap().pop() {
+                loop {
+                    // Pop in its own statement: a `while let` scrutinee would
+                    // hold the queue lock for the whole job, serializing them.
+                    let next = queue.lock().unwrap().pop();
+                    let Some((k, job)) = next else { break };
                     let h = job();
                     results.lock().unwrap()[k] = Some(h);
                 }
@@ -1121,13 +1145,7 @@ fn all_hits() -> &'static Hits {
 
 /// Known bugs: (path, rule prefix). Excluded from the family tests so those
 /// keep guarding everything else; each has its own ignored `BUG:` test.
-const KNOWN: &[(&str, &str)] = &[
-    // guidance/strength.rs:80,86 "Strength loading: …" / "Power loading: …".
-    ("guidance[].summary", "banned: `loading`"),
-    // plan_views/adjustments.rs:571 "load −10% today".
-    ("next_session.items[].adjusted_note", "banned: `load`"),
-    ("week_plan[].items[].adjusted_note", "banned: `load`"),
-];
+const KNOWN: &[(&str, &str)] = &[];
 
 fn is_known(path: &str, rule: &str) -> bool {
     KNOWN.iter().any(|(p, r)| path == *p && rule.starts_with(r))
@@ -1241,17 +1259,15 @@ fn copy_never_pins_today_on_an_earlier_reading() {
     assert_family(&["today:"]);
 }
 
-// ── Known copy bugs (each one KNOWN entry above) ────────────────────────────
+// ── Fixed copy bugs (each once a KNOWN entry above) ─────────────────────────
 
 #[test]
-#[ignore = "BUG: guidance row says \"Strength loading: …\" / \"Power loading: …\" (load for weight, 2026-10-18 copy rule)"]
-fn bug_guidance_loading_heading_uses_load_for_weight() {
+fn guidance_weight_heading_never_says_loading() {
     assert_fixed("guidance[].summary", "banned: `loading`");
 }
 
 #[test]
-#[ignore = "BUG: a ReduceLoadPct item note reads \"load −10% today\" (load for weight, 2026-10-18 copy rule)"]
-fn bug_load_cut_note_uses_load_for_weight() {
+fn weight_cut_note_never_says_load() {
     assert_fixed("next_session.items[].adjusted_note", "banned: `load`");
     assert_fixed("week_plan[].items[].adjusted_note", "banned: `load`");
 }

@@ -19,7 +19,11 @@ fitparser = "0.11.0"
 serde = { workspace = true, features = ["derive"] }
 # Already linked through crux_core (its `JsonFfiFormat` is serde_json), so the
 # FFI error envelope and FIT payload use it directly at no size cost.
-serde_json = "1"
+# `float_roundtrip`: a correctly rounded float parser (feature unification
+# turns it on for crux_core's event decode too), so the shortest decimal a
+# coordinate is written as (GPX export, the shell's event JSON) reads back to
+# the same f64; the default fast parser is off by one ulp on ~2-6% of them.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 # `jni` is a plain optional dependency (off by default) enabled by `jni-host`
 # below, so the JNI exports can link into a HOST-JVM build for offline UI/UX QA
 # (Robolectric drives the real Rust core). The android-target entry below keeps

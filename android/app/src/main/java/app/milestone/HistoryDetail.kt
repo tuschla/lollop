@@ -49,10 +49,12 @@ internal fun deleteEventFor(entry: HistoryEntry): Event = when (entry) {
 
 /**
  * The event that logs a deleted entry again, for "Undo": the same entry_id,
- * observed_at and figures the view shows (the core re-derives everything else). A
- * GPS run is rebuilt from its route [segments] (parsed from the core's own GPX), so
- * it is null for a GPS run whose route hasn't loaded; the caller then confirms the
- * delete instead of offering Undo.
+ * observed_at and figures the view shows (the core re-derives everything else:
+ * a typed bpm's %HRmax against the profile in force on the run's day, the spike
+ * baseline from the runs around it). A GPS run is rebuilt from its [segments]
+ * (parsed from the core's own GPX: the route, or for a run QC left unmeasurable
+ * its recorded fixes), so it is null for a GPS run whose fixes haven't loaded;
+ * the caller then confirms the delete instead of offering Undo.
  */
 internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>): Event? = when (entry) {
     is HistoryEntry.Lift -> entry.v.let { v ->
@@ -62,12 +64,12 @@ internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>):
         )
     }
     is HistoryEntry.Run -> entry.v.let { v ->
-        if (!v.has_gpx) {
+        if (!v.has_gpx && !v.gps_unmeasurable) {
             Event.LogRun(
                 distanceKm = v.distance_km, durationMin = v.duration_min, hrPctMax = loggedHrPctMax(v),
                 longestRecentKm = 0.0, observedAt = v.observed_at, entryId = v.entry_id,
                 workoutType = WorkoutType.fromWire(v.workout_type), sessionRpe = v.session_rpe,
-                avgHrBpm = v.avg_hr_bpm,
+                avgHrBpm = v.avg_hr_bpm, utcOffsetSec = v.utc_offset_sec,
             )
         } else {
             val points = ArrayList<GpsPoint>()
@@ -75,8 +77,8 @@ internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>):
             for (seg in segments) {
                 if (seg.isEmpty()) continue
                 if (points.isNotEmpty()) starts += points.size
-                // The exported route already passed the core's QC, so a fix without
-                // a recorded accuracy takes the QC-passing import sentinel.
+                // A fix without a recorded accuracy takes the import sentinel, which
+                // passes QC like the unknown accuracy the core exported it from.
                 seg.mapTo(points) { GpsPoint(it.lat, it.lon, it.timeSec, it.accuracyM ?: IMPORT_UNKNOWN_ACCURACY_M) }
             }
             if (points.size < 2) {
@@ -86,7 +88,7 @@ internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>):
                     points = points, hrPctMax = loggedHrPctMax(v), longestRecentKm = 0.0,
                     observedAt = v.observed_at, entryId = v.entry_id,
                     workoutType = WorkoutType.fromWire(v.workout_type), segmentStarts = starts,
-                    sessionRpe = v.session_rpe, avgHrBpm = v.avg_hr_bpm,
+                    sessionRpe = v.session_rpe, avgHrBpm = v.avg_hr_bpm, utcOffsetSec = v.utc_offset_sec,
                 )
             }
         }

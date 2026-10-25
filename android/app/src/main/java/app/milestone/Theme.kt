@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -18,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -372,8 +374,21 @@ val DarkStatusColors = StatusColors(done = Color(0xFF4ADE80), warnMark = Color(0
 
 val LocalStatusColors = staticCompositionLocalOf { StatusColors() }
 
+/**
+ * Base direction of every paragraph: its first strong character, LTR when it has
+ * none. The copy is English-only while the layout mirrors in RTL locales; taking
+ * the base direction from the RTL layout (Compose's default) reordered the neutral
+ * characters at a paragraph's edges ("5.5 km" → "km 5.5", a sentence's final '.'
+ * jumping to the line start). LTR is the fallback, not RTL, so a neutral-only
+ * figure ("−2.5", "4%") keeps its sign and symbol in place; user-entered RTL text
+ * still starts with a strong RTL character and resolves RTL. Set on every style
+ * because an explicit `style` replaces Material's LocalTextStyle and a
+ * TextMeasurer never reads it.
+ */
+val AppTextDirection = TextDirection.ContentOrLtr
+
 /** Tabular figures so numeric columns (pace, e1RM, confidence) don't jitter. */
-val TabularFigures = TextStyle(fontFeatureSettings = "tnum")
+val TabularFigures = TextStyle(fontFeatureSettings = "tnum", textDirection = AppTextDirection)
 
 /**
  * Type scale, shared by every theme (design spec §3, visual-design-system.md §3).
@@ -381,28 +396,29 @@ val TabularFigures = TextStyle(fontFeatureSettings = "tnum")
  * running text is never below [Caption] (14sp), and no style is below 12sp.
  */
 object Type {
-    val Display = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum")
-    val Title = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    val Display = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum", textDirection = AppTextDirection)
+    val Title = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, textDirection = AppTextDirection)
 
     // Off-scale display figures, each owned by one surface.
     /** Do-not-train banner headline: 23sp Black. */
-    val BannerTitle = TextStyle(fontSize = 23.sp, fontWeight = FontWeight.Black)
+    val BannerTitle = TextStyle(fontSize = 23.sp, fontWeight = FontWeight.Black, textDirection = AppTextDirection)
     /** Guided-run step countdown on the tracker: 28sp/32sp ExtraBold, tabular. */
-    val Countdown = TextStyle(fontSize = 28.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold, fontFeatureSettings = "tnum")
+    val Countdown = TextStyle(fontSize = 28.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold, fontFeatureSettings = "tnum", textDirection = AppTextDirection)
     /** Numeric keypad key face: 22sp Bold, tabular. */
-    val KeypadKey = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum")
+    val KeypadKey = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum", textDirection = AppTextDirection)
     /** History week-strip stat value: 19sp ExtraBold, tabular. */
-    val StatValue = TextStyle(fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, fontFeatureSettings = "tnum")
+    val StatValue = TextStyle(fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, fontFeatureSettings = "tnum", textDirection = AppTextDirection)
     /** Title of a history card or detail sheet (a run, a lift session): 17sp ExtraBold. */
-    val CardTitle = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+    val CardTitle = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, textDirection = AppTextDirection)
 
-    val Section = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+    val Section = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, textDirection = AppTextDirection)
     // 22sp leading for multi-line running text, trimmed above the first and below
     // the last line so a single line keeps its font height and one-line rows don't grow.
     val Body = TextStyle(
         fontSize = 16.sp,
         lineHeight = 22.sp,
         lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
+        textDirection = AppTextDirection,
     )
     // Secondary running text. Explicit 20sp line height, untrimmed: the extra
     // leading is split above the first and below the last line, so a multi-line
@@ -412,14 +428,39 @@ object Type {
         fontSize = 14.sp,
         lineHeight = 20.sp,
         lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
+        textDirection = AppTextDirection,
     )
     /** Chip / control / short-label text (choice chips, segments, nav labels,
      *  chart legends): 13sp Bold. */
-    val Chip = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    val Chip = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, textDirection = AppTextDirection)
 
     /** Tile-scale overline (chrome §3): 12sp Bold, FieldLabel letter-spacing,
      *  UPPERCASE at the call site, color `OnBgFaint`. Top-left of every tile. */
-    val Overline = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+    val Overline = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, textDirection = AppTextDirection)
+}
+
+/** Material's type scale with [AppTextDirection], for the text M3 components draw
+ *  themselves (button labels, text fields, nav labels) and for `Text` without a
+ *  style, which reads LocalTextStyle (seeded from `bodyLarge`). */
+private val AppTypography = Typography().run {
+    fun TextStyle.directed() = copy(textDirection = AppTextDirection)
+    Typography(
+        displayLarge = displayLarge.directed(),
+        displayMedium = displayMedium.directed(),
+        displaySmall = displaySmall.directed(),
+        headlineLarge = headlineLarge.directed(),
+        headlineMedium = headlineMedium.directed(),
+        headlineSmall = headlineSmall.directed(),
+        titleLarge = titleLarge.directed(),
+        titleMedium = titleMedium.directed(),
+        titleSmall = titleSmall.directed(),
+        bodyLarge = bodyLarge.directed(),
+        bodyMedium = bodyMedium.directed(),
+        bodySmall = bodySmall.directed(),
+        labelLarge = labelLarge.directed(),
+        labelMedium = labelMedium.directed(),
+        labelSmall = labelSmall.directed(),
+    )
 }
 
 /** Spacing scale in dp, shared by every theme (design spec §4). */
@@ -627,6 +668,6 @@ fun MilestoneTheme(
         LocalStatusColors provides if (dark) DarkStatusColors else StatusColors(),
         LocalPalette provides palette,
     ) {
-        MaterialTheme(colorScheme = scheme, content = content)
+        MaterialTheme(colorScheme = scheme, typography = AppTypography, content = content)
     }
 }

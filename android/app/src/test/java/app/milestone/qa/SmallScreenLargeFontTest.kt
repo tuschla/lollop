@@ -100,7 +100,9 @@ class SmallScreenLargeFontTest {
             n.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.let { get ->
                 val layouts = mutableListOf<TextLayoutResult>()
                 if (b.width > 0f && b.height > 0f && get(layouts)) {
-                    layouts.filter { it.cutsOffText }.forEach { out += "[text-cut] \"${it.layoutInput.text.text}\"" }
+                    layouts.filter { it.cutsOffText || it.needsMoreLinesAt(n.size.width) }
+                        .forEach { out += "[text-cut] \"${it.layoutInput.text.text}\"" }
+                    layouts.filter { it.splitsAWord }.forEach { out += "[word-split] \"${it.layoutInput.text.text}\"" }
                 }
             }
             n.children.forEach(::walkText)
@@ -128,6 +130,9 @@ class SmallScreenLargeFontTest {
                 val a = actions[i]
                 val b = actions[j]
                 if (a.isAncestorOf(b) || b.isAncestorOf(a)) continue
+                // A small control laid wholly over a larger tappable surface (the "?" on
+                // a tappable row, the map card's expand button) is a deliberate overlay.
+                if (a.boundsInRoot.encloses(b.boundsInRoot) || b.boundsInRoot.encloses(a.boundsInRoot)) continue
                 val inter = a.boundsInRoot.intersect(b.boundsInRoot)
                 if (inter.width > 2f && inter.height > 2f) {
                     out += "[overlap] ${label(a)} ∩ ${label(b)} (${dp(inter.width)}x${dp(inter.height)}dp)"
@@ -159,9 +164,49 @@ class SmallScreenLargeFontTest {
             (0 until lineCount).any { isLineEllipsized(it) } ||
             (!layoutInput.softWrap && multiParagraph.intrinsics.maxIntrinsicWidth > size.width + 1f)
 
-    private fun assertClean(where: String) {
-        val p = layoutProblems()
-        assertTrue("[$where @ ${RuntimeEnvironment.getQualifiers().substringBefore("-normal")} x$fontScale]\n" + p.joinToString("\n"), p.isEmpty())
+    /** Lines this text needs at [widthPx] (the width its node really has: the
+     *  semantics layout is re-run at the parent's max width, so it can't show a
+     *  line cap that only bites at the real width). */
+    private fun TextLayoutResult.linesAt(widthPx: Int): Int = androidx.compose.ui.text.Paragraph(
+        text = layoutInput.text.text,
+        style = layoutInput.style,
+        constraints = androidx.compose.ui.unit.Constraints(maxWidth = widthPx.coerceAtLeast(1)),
+        density = layoutInput.density,
+        fontFamilyResolver = layoutInput.fontFamilyResolver,
+    ).lineCount
+
+    /** A line-capped (maxLines) wrapping text needs more lines than it may show. */
+    private fun TextLayoutResult.needsMoreLinesAt(widthPx: Int): Boolean =
+        layoutInput.softWrap && layoutInput.maxLines != Int.MAX_VALUE && linesAt(widthPx) > layoutInput.maxLines
+
+    /** A soft line break fell INSIDE a word ("DISTA / NCE"): the box is
+     *  narrower than one of the text's words. */
+    private val TextLayoutResult.splitsAWord: Boolean
+        get() {
+            val text = layoutInput.text.text
+            return (0 until lineCount - 1).any { i ->
+                val end = getLineEnd(i)
+                end in 1 until text.length && text[end - 1].isLetterOrDigit() && text[end].isLetterOrDigit()
+            }
+        }
+
+    private fun Rect.encloses(o: Rect) =
+        o.left >= left - 1f && o.top >= top - 1f && o.right <= right + 1f && o.bottom <= bottom + 1f
+
+    /** Layout problems seen along the journey, "[where] problem". */
+    private val problems = mutableListOf<String>()
+
+    private fun record(where: String, found: List<String>) {
+        problems += found.map { "[$where @ x$fontScale] $it" }
+    }
+
+    /** Record the current screen's layout problems under [where]. */
+    private fun assertClean(where: String) = record(where, layoutProblems())
+
+    /** Fail with every layout problem seen along the journey. */
+    private fun assertJourneyClean() {
+        val left = problems.distinct()
+        assertTrue("layout problems at 320dp:\n" + left.joinToString("\n"), left.isEmpty())
     }
 
     private var fontScale = 1f
@@ -300,11 +345,13 @@ class SmallScreenLargeFontTest {
         assertClean("chooser")
         assertEveryActionReachable("chooser", hasClickAction() and hasAnyAncestor(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollBy)) and !hasAnyAncestor(hasScrollToIndexAction()))
         assertClean("chooser scrolled")
+        assertJourneyClean()
     }
 
+    /** Also the hero session title split mid-word ("Heav/y day") beside Move. */
     @Test fun todayAndChooser_font200() = todayAndChooser(2.0f)
 
-    @org.junit.Ignore("PARKED: suspected BUG, week-strip \"Rest\" label cut off at 130% on 320dp (not yet visually confirmed)")
+    /** Also the week strip's day-type label "Rest" cut to "Res". */
     @Test fun todayAndChooser_font130() = todayAndChooser(1.3f)
 
     // ═══════════════ The set loop ═════════════════════════════════════════
@@ -324,18 +371,52 @@ class SmallScreenLargeFontTest {
         val primary = rule.onNode(hasTestTag("editor-primary")).fetchSemanticsNode()
         assertEquals("the loop's primary is whole", primary.size.height.toFloat(), primary.boundsInRoot.height, 1f)
         assertEveryActionReachable("set loop", hasClickAction() and hasAnyAncestor(hasTestTag("effort-scale")))
-        // Log the set: the next header shows and the screen stays clean.
+        // Log the set: the next header shows and the screen stays clean, also once
+        // the rest countdown has joined the header's first row (its ticker shows
+        // it within a second, so a check right after the tap would miss it).
         rule.onNode(hasTestTag("editor-primary")).performClick()
         rule.waitUntil(10_000) {
-            rule.onAllNodes(hasText(str(R.string.log_set_header_n_of_n, 2, first.sets))).fetchSemanticsNodes().isNotEmpty()
+            rule.onAllNodes(hasText(str(R.string.log_set_header_n_of_n, 2, first.sets))).fetchSemanticsNodes().isNotEmpty() &&
+                rule.onAllNodes(hasTestTag("rest-readout")).fetchSemanticsNodes().isNotEmpty()
         }
         assertClean("set loop after a set")
+        assertJourneyClean()
     }
 
-    @org.junit.Ignore("PARKED: \"Logged Back Squat 117.5 kg × 3\" undo row reported cut at 200% on 320dp (not yet triaged)")
     @Test fun setLoop_font200() = setLoop(2.0f)
 
+    /** Also field labels wrapped letter by letter beside their hint ("W/ar/m/-u/p"). */
     @Test fun setLoop_font130() = setLoop(1.3f)
+
+    /** The "Logged … · Undo" row keeps the whole set (its reps), at most 2 lines. */
+    @Test
+    fun setLoopUndoRow_font200_showsTheWholeSet() {
+        useFont(2.0f)
+        strengthWithHistory()
+        rule.launchApp()
+        val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() }
+        rule.onNode(
+            hasClickAction() and hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n, 1), substring = true) and
+                hasAnyAncestor(hasTestTag("plan-item:${first.exercise}")),
+        ).performScrollTo().performClick()
+        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag("editor-primary")).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasTestTag("editor-primary")).performClick()
+        // "Logged <set>" (not the bare "Logged" date chip label).
+        val prefix = strPrefix(R.string.log_undo_logged) + " "
+        val logged = SemanticsMatcher("undo row text") { n ->
+            n.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text.startsWith(prefix) }
+        }
+        rule.waitUntil(10_000) { rule.onAllNodes(logged, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        val node = rule.onAllNodes(logged, useUnmergedTree = true).fetchSemanticsNodes().first()
+        val layouts = mutableListOf<TextLayoutResult>()
+        node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts)
+        val l = layouts.single()
+        // The semantics layout is re-run at the parent's max width, so measure the
+        // text again at the width the row actually gives it.
+        val needed = l.linesAt(node.size.width)
+        assertTrue("the undo row shows \"${l.layoutInput.text.text}\" whole: needs $needed lines, shows at most 2", needed <= 2)
+    }
 
     // ═══════════════ History › run detail › rate sheet ════════════════════
 
@@ -372,12 +453,12 @@ class SmallScreenLargeFontTest {
         assertEveryActionReachable("rate sheet types", SemanticsMatcher("run type chip") {
             it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("run-type-") == true
         })
+        assertJourneyClean()
     }
 
-    @org.junit.Ignore("PARKED: suspected BUG, run detail 3-up stat values (3.72 / 29:57 / 8:03) cut at 200% on 320dp (not yet visually confirmed)")
+    /** Also the 3-up stats cutting their numbers ("3.7", "29:5", "8:"). */
     @Test fun runDetail_font200() = runDetail(2.0f)
 
-    @org.junit.Ignore("PARKED: overlap checker flags the map's \"Open full-screen map\" overlay button (intentional overlay; checker needs an exemption)")
     @Test fun runDetail_font130() = runDetail(1.3f)
 
     // ═══════════════ A pinned DO-NOT-TRAIN banner ═════════════════════════
@@ -401,19 +482,33 @@ class SmallScreenLargeFontTest {
             val s = rule.onNode(a).fetchSemanticsNode()
             val unclipped = Rect(s.positionInRoot, s.size.toSize())
             assertTrue("banner action ${label(s)} is whole on screen: ${s.boundsInRoot} of $unclipped", s.boundsInRoot.height >= unclipped.height - 1f && s.boundsInRoot.height > 0f)
-            // The banner never scrolls: nothing may float over its way back.
-            assertTrue("banner action ${label(s)} is under the Log button", !underFab(s))
+        }
+        // The banner never scrolls: nothing may float over any of it.
+        val banner = rule.onNode(hasText(str(R.string.main_do_not_train))).fetchSemanticsNode()
+        var card = banner
+        while (card.parent != null && card.parent!!.boundsInRoot.width < banner.rootBounds().width - 1f) card = card.parent!!
+        rule.onAllNodes(logFab).fetchSemanticsNodes().forEach { fab ->
+            val cover = card.boundsInRoot.intersect(fab.boundsInRoot)
+            if (cover.width > 2f && cover.height > 2f) record("pain hold", listOf("[fab-over-banner] the Log button covers ${dp(cover.width)}x${dp(cover.height)}dp of the banner"))
         }
         assertTabsWholeAndWorking("pain hold")
-        // Today under the banner: its "what still works" line and the week stay reachable.
+        // Today under the banner keeps at least one whole touch row, so it stays
+        // reachable. The banner's hold statement (headline, reason, actions) always
+        // shows whole first (HARD RULE 3, INVARIANT 3), so this is all Today is owed.
         val list = rule.onAllNodes(hasScrollToIndexAction())[0].fetchSemanticsNode().boundsInRoot
-        val listRoom = dp(list.height)
+        if (dp(list.height) < app.milestone.ActionMinHeight.value) record("pain hold", listOf("[no-room] Today gets ${dp(list.height)}dp under the pinned banner"))
         goTo(R.string.main_dest_profile)
         assertEquals("the banner stays pinned on Profile", 1, rule.onAllNodes(hasText(str(R.string.main_do_not_train))).fetchSemanticsNodes().size)
-        assertTrue("Today keeps room under the pinned banner (${listRoom}dp)", listRoom >= 96f)
+        assertJourneyClean()
     }
 
-    @org.junit.Ignore("PARKED: suspected BUG, pinned DO NOT TRAIN banner leaves Today 0dp at 200% on 320dp (not yet visually confirmed)")
+    private fun SemanticsNode.rootBounds(): Rect {
+        var r = this
+        while (r.parent != null) r = r.parent!!
+        return r.boundsInRoot
+    }
+
+    /** Also the pinned banner taking the whole screen with the Log button over it. */
     @Test fun painHold_font200() = painHold(2.0f)
 
     @Test fun painHold_font130() = painHold(1.3f)
@@ -443,6 +538,7 @@ class SmallScreenLargeFontTest {
             rule.onNode(hasContentDescription(str(R.string.main_close)) and hasClickAction()).performClick()
             rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag("editor-primary")).fetchSemanticsNodes().isEmpty() }
         }
+        assertJourneyClean()
     }
 
     @Test fun checkins_font200() = checkins(2.0f)
@@ -466,9 +562,11 @@ class SmallScreenLargeFontTest {
         assertEveryActionReachable("hr zones", hasText(str(R.string.log_btn_compute_hr)) and hasClickAction())
         assertEveryActionReachable("hr zones clear", hasText(str(R.string.main_calc_clear)) and hasClickAction())
         assertClean("hr zones scrolled")
+        assertJourneyClean()
     }
 
     @Test fun profileCalculator_font200() = profileCalculator(2.0f)
 
+    /** Also the HR zones table splitting names and ranges mid-word ("Maratho/n", "122–14/8"). */
     @Test fun profileCalculator_font130() = profileCalculator(1.3f)
 }

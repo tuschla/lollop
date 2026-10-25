@@ -229,6 +229,42 @@ fn parse_fit_json(bytes: &[u8]) -> Vec<u8> {
     .unwrap_or_else(|_| FIT_FALLBACK_ERR.as_bytes().to_vec())
 }
 
+/// The figures a `LogRunTrack` will be saved with, before it is sent:
+/// `{"distance_km":D,"duration_min":M}` from [`crate::app::preview_track_figures`]
+/// (the same QC and derivation the saved run's card uses), so the tracker's
+/// Finish review shows exactly what History will list. Input is the event's
+/// own wire JSON, the bytes Save then sends; anything else (or a panic)
+/// returns the `{"error":…}` envelope. Pure: no bridge, model or log.
+#[cfg(any(target_os = "android", feature = "jni-host", test))]
+fn track_figures_json(event: &[u8]) -> Vec<u8> {
+    #[derive(Serialize)]
+    struct Figures {
+        distance_km: f64,
+        duration_min: f64,
+    }
+    catch_panic("track_figures", false, || {
+        match serde_json::from_slice::<crate::app::Event>(event) {
+            Ok(crate::app::Event::LogRunTrack {
+                points,
+                segment_starts,
+                ..
+            }) => {
+                let (distance_km, duration_min) =
+                    crate::app::preview_track_figures(points, &segment_starts);
+                serde_json::to_vec(&Figures {
+                    distance_km,
+                    duration_min,
+                })
+                .unwrap_or_else(|err| {
+                    error_envelope("bad_input", "track_figures", &err.to_string())
+                })
+            }
+            Ok(_) => error_envelope("bad_input", "track_figures", "not a LogRunTrack event"),
+            Err(err) => error_envelope("bad_input", "track_figures", &err.to_string()),
+        }
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests;
@@ -248,7 +284,9 @@ mod android {
     //! [`super::catch_panic`] turns them into error payloads first and, on the
     //! update path, resets the bridge, which `with_env`'s generic catch cannot do.
 
-    use super::{FIT_FALLBACK_ERR, current_view, parse_fit_json, process_event};
+    use super::{
+        FIT_FALLBACK_ERR, current_view, parse_fit_json, process_event, track_figures_json,
+    };
     use jni::errors::LogErrorAndDefault;
     use jni::objects::{JByteArray, JClass, JString};
     use jni::sys::jlong;
@@ -394,6 +432,27 @@ mod android {
             })
             .unwrap_or_default();
             Ok(string_or_null(env, &gpx, ""))
+        })
+        .resolve::<LogErrorAndDefault>()
+    }
+
+    /// Pure preview of a track's of-record figures ([`track_figures_json`]),
+    /// NOT wired through `update`/`view`: takes a `LogRunTrack` event's wire
+    /// JSON, returns `{"distance_km":…,"duration_min":…}` or `{"error":…}`.
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_app_milestone_Core_trackFigures<'local>(
+        mut env: EnvUnowned<'local>,
+        _class: JClass<'local>,
+        event: JByteArray<'local>,
+    ) -> JString<'local> {
+        const FALLBACK: &str = r#"{"error":"track figures unavailable"}"#;
+        env.with_env(|env| -> jni::errors::Result<_> {
+            let json: String = match env.convert_byte_array(&event) {
+                Ok(bytes) => String::from_utf8(track_figures_json(&bytes))
+                    .unwrap_or_else(|_| FALLBACK.to_string()),
+                Err(_) => FALLBACK.to_string(),
+            };
+            Ok(string_or_null(env, &json, FALLBACK))
         })
         .resolve::<LogErrorAndDefault>()
     }

@@ -36,10 +36,32 @@ use super::Anchors;
 /// RETURNING from a break (`weeks_off = Some(w > 0)`, the REENTRY-001 signal),
 /// the stated figure is a stale PRE-layoff number and must NOT floor the
 /// re-entry plan. In that case the MEASURED reality governs when it is known.
-/// With no logged runs to measure yet, the stated figure still stands.
+/// With no logged runs to measure yet, the stated figure still stands. A
+/// declared layoff never outranks a newer undeclared break: once the athlete
+/// stops running again after the declared return, that break governs.
+///
+/// Undeclared break (`anchors.run_break`, a week or more with no logged run):
+/// the stated figure and the volume measured before the break are pre-break
+/// numbers, so while the File 08 Table 3.4b re-entry ramp runs the floor is
+/// their higher one scaled by today's ramp fraction (RUN-REENTRY-001); running
+/// measured since builds on it. Once the ramp ended the break no longer
+/// shapes the weekly volume.
 pub(super) fn effective_weekly_km(profile: &Profile, anchors: &Anchors) -> f64 {
     let stated = profile.running_km_per_week.max(0.0);
-    let returning = profile.weeks_off.is_some_and(|w| w > 0.0);
+    let declared_return = profile
+        .layoff_returned_epoch_day
+        .or(profile.effective_from_epoch_day);
+    // A break counts as newer when it began on or after the declared return
+    // (an undatable declared layoff stays in force).
+    let newer_break = anchors.run_break.filter(|b| {
+        profile.weeks_off.is_none_or(|w| w <= 0.0)
+            || declared_return.is_some_and(|r| b.last_run_epoch_day >= r)
+    });
+    let returning = profile.weeks_off.is_some_and(|w| w > 0.0) && newer_break.is_none();
+    if let Some(b) = newer_break.filter(|b| b.reentry.active) {
+        let floor = stated.max(b.prior_weekly_km.unwrap_or(0.0)) * b.reentry.volume_frac;
+        return anchors.recent_weekly_km.map_or(floor, |m| m.max(floor));
+    }
     match anchors.recent_weekly_km {
         // Re-entry: measured mileage overrides a stale pre-layoff figure even
         // when it is LOWER (the profile stops being a floor after a break).
@@ -336,7 +358,7 @@ fn cycle_pos(profile: &Profile, anchors: &Anchors, week_index: u32, load_weeks: 
     let cycle_len = load_weeks + 1;
     let race = match (profile.goal_race_epoch_day, anchors.week_start_epoch_day) {
         (Some(race), Some(week_start)) if race >= week_start && running::taper_weeks(goal) > 0 => {
-            Some(race - week_start)
+            Some(race.saturating_sub(week_start))
         }
         _ => None,
     };
@@ -469,21 +491,30 @@ pub(super) fn run_week_plan(
     // up to the heaviest week the athlete actually ran in the previous cycle
     // (RUN-VOLUME-001, running-033: progression resumes from the last load
     // level reached, so a compliant athlete grows cycle to cycle and a
-    // non-compliant one repeats). Capped at the goal plateau.
+    // non-compliant one repeats). Capped at the goal plateau. A week holding
+    // runs from before a break is a pre-break load, not one the athlete holds
+    // now: the re-entry restarts below it (RUN-REENTRY-001).
     let scale = if req.volume_scale.is_finite() {
         req.volume_scale.clamp(0.0, 1.0)
     } else {
         1.0
     };
     let effective = effective_weekly_km(profile, anchors) * scale;
+    let pre_break = |back: usize| match (anchors.run_break, anchors.week_start_epoch_day) {
+        (Some(b), Some(monday)) => monday - 7 * (back as i64 + 1) <= b.last_run_epoch_day,
+        _ => false,
+    };
     let carry = (!req.hold_volume && req.week_index >= cycle_len)
         .then(|| {
             let start = cy.cycle_offset as usize;
             let end = (start + cycle_len as usize).min(anchors.run_week_km.len());
-            anchors
-                .run_week_km
-                .get(start..end)
-                .map(|w| w.iter().copied().fold(0.0_f64, f64::max))
+            anchors.run_week_km.get(start..end).map(|w| {
+                (start..)
+                    .zip(w)
+                    .filter(|(back, _)| !pre_break(*back))
+                    .map(|(_, km)| *km)
+                    .fold(0.0_f64, f64::max)
+            })
         })
         .flatten()
         .map(|c| match goal_volume_plateau_km(goal) {
@@ -607,9 +638,18 @@ fn recovery_week_cut() -> f64 {
 /// Everything a single day's prescription needs beyond its own kind.
 pub(super) struct DayCtx {
     pub(super) weekly_km: f64,
+    /// Every run's RUN-SPIKE-001 baseline: the longest run of the trailing
+    /// window (or the stated one, `baseline_stated`); `detrained` when it is a
+    /// DETRAIN-001-tapered value.
     pub(super) baseline: Option<f64>,
     pub(super) baseline_stated: bool,
     pub(super) detrained: bool,
+    /// Demonstrated long-run capacity that may raise the long run above its
+    /// share: the spike baseline, except through a RUN-REENTRY-001 rebuild,
+    /// when only runs since the break count.
+    pub(super) capacity: Option<f64>,
+    pub(super) capacity_stated: bool,
+    pub(super) capacity_detrained: bool,
     pub(super) n_run_days: usize,
     pub(super) recovery: bool,
     pub(super) taper: bool,
@@ -710,21 +750,53 @@ pub(super) fn run_week_sessions(
         }
     }
 
+    // RUN-REENTRY-001 after a break: 2+ weeks off, the long run is built up
+    // again (only runs since the break count as demonstrated long-run
+    // capacity); 4+ weeks off, single runs are judged near-novice (every
+    // run's spike ceiling rests only on runs since the break). Otherwise a
+    // run of the trailing window (RUN-SPIKE-001, DETRAIN-001 taper) counts.
+    let brk = anchors.run_break;
+    let all_runs = (anchors.longest_recent_run_km, anchors.longest_run_detrained);
+    let since_break = |b: crate::plan::RunBreak| (b.longest_since_km, b.longest_since_detrained);
+    let capacity_runs = brk
+        .filter(|b| b.reentry.rebuild_long_run)
+        .map_or(all_runs, since_break);
+    let spike_runs = brk
+        .filter(|b| b.reentry.near_novice_spike)
+        .map_or(all_runs, since_break);
     let stated = profile
         .stated_longest_recent_km
         .filter(|k| k.is_finite() && *k > 0.0);
-    let logged = anchors.longest_recent_run_km.filter(|k| *k > 0.0);
-    let stated_wins = match (logged, stated) {
-        (None, Some(_)) => true,
-        (Some(l), Some(s)) => anchors.stated_longest_in_window && s > l,
-        _ => false,
+    // The stated longest run is a run of the last 30 days only while it is
+    // inside that window; once runs were logged, they replace it (RUN-START-001).
+    // Through a long-run rebuild only an answer given after the break began
+    // is current: one from before it is no current capacity.
+    let stated_current = brk.is_none_or(|b| !b.reentry.rebuild_long_run || b.stated_longest_after);
+    // (baseline, stated, detrained) from a logged (km, detrained) source.
+    let pick = |(logged, detrained): (Option<f64>, bool)| {
+        let logged = logged.filter(|k| *k > 0.0);
+        let stated_wins = stated_current
+            && match (logged, stated) {
+                (None, Some(_)) => anchors.stated_longest_in_window || brk.is_none(),
+                (Some(l), Some(s)) => anchors.stated_longest_in_window && s > l,
+                _ => false,
+            };
+        if stated_wins {
+            (stated, true, false)
+        } else {
+            (logged, false, detrained && logged.is_some())
+        }
     };
-    let baseline = if stated_wins { stated } else { logged };
+    let (baseline, baseline_stated, detrained) = pick(spike_runs);
+    let (capacity, capacity_stated, capacity_detrained) = pick(capacity_runs);
     let mut ctx = DayCtx {
         weekly_km: plan.weekly_km,
         baseline,
-        baseline_stated: stated_wins,
-        detrained: anchors.longest_run_detrained && !stated_wins && logged.is_some(),
+        baseline_stated,
+        detrained,
+        capacity,
+        capacity_stated,
+        capacity_detrained,
         n_run_days: days.len(),
         recovery: plan.recovery,
         taper: plan.taper_week.is_some(),
@@ -887,13 +959,24 @@ fn run_session(kind: RunSessionType, day: u16, ctx: &DayCtx, soft_km: f64) -> Se
         running::run_workout_rx(kind)
     };
     let degraded = spike_degrades_quality(kind, ctx);
-    let pres = Prescription::Run(translate_run(kind, &rx.value, ctx, soft_km));
+    let mut run = translate_run(kind, &rx.value, ctx, soft_km);
     let session = if kind == RunSessionType::LongRun && !ctx.recovery {
-        // Cite whichever rule actually BINDS the long-run distance.
+        // Cite whichever rule actually BINDS the long-run distance: the
+        // capacity raise rests on `capacity`, the spike ceiling on `baseline`.
         let bind = long_run_decision(ctx).1;
-        if ctx.detrained && !matches!(bind, LongRunBind::Volume | LongRunBind::Target) {
+        let (stated, detrained) = match bind {
+            LongRunBind::Demonstrated | LongRunBind::DailyAvgCap => {
+                (ctx.capacity_stated, ctx.capacity_detrained)
+            }
+            LongRunBind::SpikeCeiling => (ctx.baseline_stated, ctx.detrained),
+            _ => (false, false),
+        };
+        let average_run = bind == LongRunBind::AverageRun && !ctx.taper;
+        run.long_run_avg_floor = average_run;
+        let pres = Prescription::Run(run);
+        if detrained {
             crate::evidence::graded(pres, claims::DETRAIN_001)
-        } else if bind.cites_spike() && ctx.baseline_stated {
+        } else if bind.cites_spike() && stated {
             // The ceiling rests on the athlete's stated longest run.
             crate::evidence::graded(pres, claims::RUN_START_001)
         } else if bind.cites_spike() {
@@ -902,24 +985,30 @@ fn run_session(kind: RunSessionType, day: u16, ctx: &DayCtx, soft_km: f64) -> Se
             crate::evidence::graded(pres, claims::RUN_LONGRUN_TARGET_001)
         } else if ctx.taper {
             crate::evidence::graded(pres, claims::RUN_TAPER_001)
+        } else if average_run {
+            // The low-mileage guardrail set it, not the 25–30 % share.
+            crate::evidence::graded(pres, claims::RUN_LONGRUN_001)
         } else {
             rx.with_value(pres)
         }
-    } else if ctx.recovery {
-        // Every run in a recovery week is a reduced-volume, reduced-intensity
-        // session: cite the recovery-week depth rule.
-        crate::evidence::graded(pres, claims::RUN_DELOAD_DEPTH_001)
-    } else if degraded {
-        // A quality slot forced off distance by the spike ceiling is now an
-        // easy run; RUN-SPIKE-001 governs the substitution.
-        crate::evidence::graded(pres, claims::RUN_SPIKE_001)
-    } else if ctx.taper && matches!(kind, RunSessionType::Easy | RunSessionType::Recovery) {
-        // Taper: the easy volume is what the taper cut (intensity held).
-        crate::evidence::graded(pres, claims::RUN_TAPER_001)
-    } else if kind == RunSessionType::Repetition {
-        crate::evidence::graded(pres, claims::RUN_REPETITION_002)
     } else {
-        rx.with_value(pres)
+        let pres = Prescription::Run(run);
+        if ctx.recovery {
+            // Every run in a recovery week is a reduced-volume, reduced-intensity
+            // session: cite the recovery-week depth rule.
+            crate::evidence::graded(pres, claims::RUN_DELOAD_DEPTH_001)
+        } else if degraded {
+            // A quality slot forced off distance by the spike ceiling is now an
+            // easy run; RUN-SPIKE-001 governs the substitution.
+            crate::evidence::graded(pres, claims::RUN_SPIKE_001)
+        } else if ctx.taper && matches!(kind, RunSessionType::Easy | RunSessionType::Recovery) {
+            // Taper: the easy volume is what the taper cut (intensity held).
+            crate::evidence::graded(pres, claims::RUN_TAPER_001)
+        } else if kind == RunSessionType::Repetition {
+            crate::evidence::graded(pres, claims::RUN_REPETITION_002)
+        } else {
+            rx.with_value(pres)
+        }
     };
     Session {
         session_type: SessionType::Run(kind),
@@ -1148,6 +1237,11 @@ pub(super) enum LongRunBind {
     /// The weekly share (30 % under 64 km/wk, else 25 %) governed. →
     /// RUN-LONGRUN-001.
     Volume,
+    /// The share was shorter than the week's average run, so the long run is
+    /// the average run (RUN-LONGRUN-001's low-mileage guardrail keeps it the
+    /// week's longest, within 2× the daily average). → RUN-LONGRUN-001, with
+    /// copy that states this rule instead of the share.
+    AverageRun,
     /// The demonstrated-capacity anchor set the value, within safety bounds. It
     /// exceeds the share but is 0 % over the 30-day longest run. → RUN-SPIKE-001.
     Demonstrated,
@@ -1173,22 +1267,38 @@ impl LongRunBind {
 /// Decide the long-run distance (km, floored to the plan resolution) and which
 /// KB rule binds it:
 ///  - the weekly share: 30 % under 64 km/wk, 25 % at or above (running-046,
-///    Daniels), the base;
+///    Daniels), the base. With few run days the share rule breaks down (File
+///    04 running-016 and its volume caps: "low-mileage guardrail: long run ≤
+///    2× average daily run"; `long-run-weekly-volume-share.md`): with 3 run
+///    days or fewer the share is less than an average run, so the long run
+///    would never be the week's longest and could never grow while no easy
+///    day may outrun it. The long run is therefore at least the average run
+///    of the week, the least that keeps it the longest (RUN-LONGRUN-001), at
+///    every volume, so more weekly distance never plans a shorter week
+///    (`AverageRun`);
 ///  - the ≤2×-daily-average guardrail (running-016);
-///  - demonstrated capacity may raise it above the share, up to that guardrail,
-///    except in a planned recovery week: there the long run shrinks with the
-///    week and stays within its share (running-033 cuts volume; the owner's
-///    "never below the demonstrated longest" governs load weeks);
+///  - demonstrated capacity (`ctx.capacity`) may raise it above the share, up
+///    to that guardrail, except in a planned recovery week: there the long
+///    run shrinks with the week and stays within its share (running-033 cuts
+///    volume; the owner's "never below the demonstrated longest" governs load
+///    weeks);
 ///  - the goal long-run ceiling (HM 21 km, marathon 32 km) and, with a pace
 ///    anchor, the 150-min cap at easy pace (running-046);
-///  - RUN-SPIKE-001: never more than 10 % over the 30-day longest run (logged,
-///    or the stated one while it is longer and still inside its own 30 days:
-///    RUN-START-001), a hard ceiling on all.
+///  - RUN-SPIKE-001: never more than 10 % over the 30-day longest run
+///    (`ctx.baseline`: logged, or the stated one while it is longer and still
+///    inside its own 30 days: RUN-START-001), a hard ceiling on all.
 pub(super) fn long_run_decision(ctx: &DayCtx) -> (f64, LongRunBind) {
     let w = ctx.weekly_km.max(0.0);
     let share = running::long_run_share(w).value;
     let mut target = floor_km(share * w);
     let mut bind = LongRunBind::Volume;
+    if ctx.n_run_days > 0 {
+        let average_run = floor_km(daily_avg_run_km(w, ctx.n_run_days));
+        if average_run > target {
+            target = average_run;
+            bind = LongRunBind::AverageRun;
+        }
+    }
     let daily_avg_cap = (ctx.n_run_days > 0 && w > 0.0)
         .then(|| floor_km(2.0 * daily_avg_run_km(w, ctx.n_run_days)));
     if let Some(cap) = daily_avg_cap
@@ -1202,7 +1312,7 @@ pub(super) fn long_run_decision(ctx: &DayCtx) -> (f64, LongRunBind) {
     // above the share, bounded by the daily-average guardrail; never in a
     // recovery week.
     if !ctx.recovery
-        && let Some(b) = baseline.filter(|b| *b >= MIN_DISTANCE_KM)
+        && let Some(b) = ctx.capacity.filter(|b| *b >= MIN_DISTANCE_KM)
     {
         let dem = floor_km(b);
         let raised = daily_avg_cap.map_or(dem, |c| dem.min(c));

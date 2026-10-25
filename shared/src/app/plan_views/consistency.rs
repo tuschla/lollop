@@ -71,8 +71,8 @@ fn plan_week_records(
         (0..weeks)
             .map(|w| {
                 let monday = start_monday.saturating_add(w * 7);
-                let p = profile_for_day(model, monday).unwrap_or(profile);
-                let planned = crate::plan::planned_training_days(p);
+                let p = profile_for_day(model, monday);
+                let planned = crate::plan::planned_training_days(p.as_deref().unwrap_or(profile));
                 let done = (0..7)
                     .filter(|d| active.contains(&monday.saturating_add(*d)))
                     .count()

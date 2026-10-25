@@ -23,7 +23,6 @@ mod signals;
 pub(crate) mod tests;
 
 pub use derive::{BaselineKind, BaselineStatus, DerivedReadiness, derive_readiness};
-pub(crate) use derive::{LONG_BASELINE_WINDOW_DAYS, has_hrv, has_rhr, has_wellness};
 pub use hold::{ReturnKind, TimedInput, last_hold_resolution, return_adjustment};
 pub use pain::{
     PainRegion, item_spared_by_pain, pain_blocks_progression, pain_hold_active, pain_region,
@@ -45,7 +44,7 @@ pub(crate) use prescriptions::{
 pub use rules::{
     RhrNoise, RuleContext, adjustments_in, bone_stress_referral, failed_set_stop,
     first_set_rpe_adjust, hrv_below_swc, illness_active, illness_plan_recs, illness_stop,
-    increase_hold, reds_referral, resolve_safety_in, rhr_neck_check_due,
+    increase_hold, reds_defer, reds_referral, resolve_safety_in, rhr_neck_check_due,
 };
 pub use signals::{ALL_SIGNALS, SignalGroup, SignalState, signal_group, signal_states_in};
 

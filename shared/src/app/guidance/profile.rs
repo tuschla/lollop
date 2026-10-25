@@ -37,44 +37,55 @@ pub(super) fn weekly_basis_text(weekly_km: f64, basis: WeeklyBasis, mi: bool) ->
 }
 
 /// Run the programming engine over the profile, producing evidence-cited rows.
-/// Uses the STATED weekly volume (no logged-run history in scope); `view()` calls
-/// [`build_guidance_measured`] with the measured volume.
+/// Uses the STATED weekly volume (no logged-run history in scope) and no
+/// training hold; `view()` calls [`build_guidance_measured`] with the measured
+/// volume and today's [`calculator_hold`].
 #[cfg(test)]
 pub(in crate::app) fn build_guidance(p: &Profile) -> Vec<GuidanceView> {
     let (weekly_km, basis) = effective_weekly_km(p, None);
-    build_guidance_measured(p, weekly_km, basis)
+    build_guidance_measured(p, weekly_km, basis, None)
 }
+
+/// Memo key of [`build_guidance_measured`]: `(profile, weekly_km bits, basis,
+/// hold)`.
+type GuidanceKey = (Profile, u64, WeeklyBasis, Option<Recommended<Adjustment>>);
 
 thread_local! {
     /// `build_guidance_measured_uncached` is a pure function of
-    /// `(profile, weekly_km bits, weekly_basis)`, and rebuilding the whole
-    /// evidence-cited guidance list (every strength/running/hybrid rule) on every
-    /// event is wasted work. The inputs change only when the profile or measured
-    /// mileage changes. Output is identical to the uncached rebuild.
-    static GUIDANCE_CACHE: std::cell::RefCell<LastMemo<(Profile, u64, WeeklyBasis), Vec<GuidanceView>>> =
+    /// `(profile, weekly_km bits, weekly_basis, hold)`, and rebuilding the
+    /// whole evidence-cited guidance list (every strength/running/hybrid rule)
+    /// on every event is wasted work. The inputs change only when the profile,
+    /// measured mileage or today's hold changes. Output is identical to the
+    /// uncached rebuild.
+    static GUIDANCE_CACHE: std::cell::RefCell<LastMemo<GuidanceKey, Vec<GuidanceView>>> =
         const { std::cell::RefCell::new(LastMemo::new()) };
 }
 
 /// Memoized wrapper over [`build_guidance_measured_uncached`], keyed on
-/// `(profile, weekly_km bits, basis)`.
+/// `(profile, weekly_km bits, basis, hold)`.
 pub(in crate::app) fn build_guidance_measured(
     p: &Profile,
     weekly_km: f64,
     weekly_basis: WeeklyBasis,
+    hold: Option<&Recommended<Adjustment>>,
 ) -> Vec<GuidanceView> {
     let key_km = weekly_km.to_bits();
     let hit = GUIDANCE_CACHE.with(|c| {
         c.borrow()
-            .get_if(|(cp, ck, cb)| cp == p && *ck == key_km && *cb == weekly_basis)
+            .get_if(|(cp, ck, cb, ch)| {
+                cp == p && *ck == key_km && *cb == weekly_basis && ch.as_ref() == hold
+            })
             .cloned()
     });
     if let Some(rows) = hit {
         return rows;
     }
-    let rows = build_guidance_measured_uncached(p, weekly_km, weekly_basis);
+    let rows = build_guidance_measured_uncached(p, weekly_km, weekly_basis, hold);
     GUIDANCE_CACHE.with(|c| {
-        c.borrow_mut()
-            .set((p.clone(), key_km, weekly_basis), rows.clone());
+        c.borrow_mut().set(
+            (p.clone(), key_km, weekly_basis, hold.cloned()),
+            rows.clone(),
+        );
     });
     rows
 }
@@ -82,15 +93,22 @@ pub(in crate::app) fn build_guidance_measured(
 /// The uncached guidance builder behind [`build_guidance_measured`]. As
 /// [`build_guidance`] but with the caller's effective weekly volume + its
 /// source, so the km-gated safety/hybrid guards read the athlete's real recent
-/// mileage rather than a stale stated figure.
+/// mileage rather than a stale stated figure, and today's [`calculator_hold`].
 fn build_guidance_measured_uncached(
     p: &Profile,
     weekly_km: f64,
     weekly_basis: WeeklyBasis,
+    hold: Option<&Recommended<Adjustment>>,
 ) -> Vec<GuidanceView> {
     let mut rows = Vec::new();
 
     build_safety_guidance(p, weekly_km, weekly_basis, &mut rows);
+    // A hold from outside the profile (a readiness or weekly-check-in
+    // deferral, a RED-S signal) says so in the Safety block; a profile gate
+    // already leads it with its own row.
+    if let Some(hold) = hold.filter(|_| !p.health.any_gate()) {
+        push_hold_row(&mut rows, "Safety", hold);
+    }
 
     let lifting = p.weekly_sets > 0;
     let running = p.running_days_per_week > 0;
@@ -108,11 +126,13 @@ fn build_guidance_measured_uncached(
         row.training_age = training_age_label(age).to_string();
     }
 
-    // onboard-050: gates run BEFORE any prescription. A gated profile keeps
-    // only the safety block, its training-age row and the environment notes:
-    // no %1RM, 1RM-testing, volume-ramp, running-cap or hybrid rows
-    // (safety-011/045/049).
-    if p.health.any_gate() {
+    // onboard-050: gates run BEFORE any prescription. A gated profile, or a
+    // day held by a readiness / weekly-check-in deferral or RED-S (the same
+    // hold Today and the calculators read; safety-040/043 "before
+    // prescribing", autoreg-046), keeps only the safety block, its
+    // training-age row and the environment notes: no %1RM, 1RM-testing,
+    // volume-ramp, running-cap or hybrid rows (safety-011/045/049).
+    if p.health.any_gate() || hold.is_some() {
         build_environment_guidance(p, &mut rows);
         return rows;
     }

@@ -93,8 +93,9 @@ fn weekly_report_runs_the_volume_system_over_the_latest_week() {
     // blocks, so the running-031 ramp cap / running-028 flag are judged over
     // the user's real training week. Anchor both weeks on a Monday
     // (mon0_weekday(704) == 0) so the prior/current split is one clean
-    // calendar week.
-    let w1 = 704 * DAY_SEC; // a Monday
+    // calendar week. Runs are stamped at noon: a run counts in the week it
+    // STARTED, so one stamped at Monday 00:00 would be the previous Sunday's.
+    let w1 = 704 * DAY_SEC + 12 * 3600; // a Monday, noon
     let w2 = w1 + WEEK; // the following Monday
     // Prior week: 3 × 10 km easy (Z1, 75 %HRmax) = 30 km.
     for i in [0i64, 2, 4] {
@@ -159,7 +160,8 @@ fn weekly_report_does_not_flag_the_planned_rebound_off_a_recovery_week() {
     // Each week's volume is split over two runs (Mon + Wed): the plan advances
     // by completed work (ADH-PROGRESS-001), and 2 of 3 planned runs completes a
     // week.
-    let wk = |w: i64| (704 + w * 7) * DAY_SEC; // Monday of block-week w, in seconds
+    // Monday noon of block-week w (noon: a run counts in the week it started).
+    let wk = |w: i64| (704 + w * 7) * DAY_SEC + 12 * 3600;
     for (w, km) in [(0, 40.0), (1, 42.0), (2, 44.0), (3, 28.0), (4, 40.0)] {
         for d in [0, 2] {
             app.update(
@@ -327,10 +329,18 @@ fn weekly_report_groups_a_full_mon_sun_week() {
     // long run - not the 6 km Sunday run alone.
     let app = Engine;
     let mut model = Model::default();
-    app.update(log_run_at(10.0, 62.0, 75.0, MON * DAY_SEC), &mut model)
-        .expect_only_render();
-    app.update(log_run_at(6.0, 37.0, 75.0, (MON + 6) * DAY_SEC), &mut model)
-        .expect_only_render();
+    // Noon: a run counts in the week it STARTED, so 00:00 would be Sunday's.
+    let noon = 12 * 3600;
+    app.update(
+        log_run_at(10.0, 62.0, 75.0, MON * DAY_SEC + noon),
+        &mut model,
+    )
+    .expect_only_render();
+    app.update(
+        log_run_at(6.0, 37.0, 75.0, (MON + 6) * DAY_SEC + noon),
+        &mut model,
+    )
+    .expect_only_render();
     let report = app.view(&model).weekly_report;
     assert!(
         report

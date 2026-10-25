@@ -412,28 +412,25 @@ class RunTrackingUnitTest {
     }
 
     @Test
-    fun theReviewMovingTimeIsTheWholeSecondTrackTheCoreDerivesFrom() {
+    fun theSaveEventCarriesTheDecimatedTrackItsPausesAndItsLastFix() {
         RunSession.reset()
         val degPerM = 1.0 / 111_320.0
         var lon = 0.0
-        // 80 legs, 1 s apart by their fix stamps but 995 ms apart on the monotonic
-        // clock: the live clock floors 79.6 s to 79, the saved run lasts 80 s.
         RunSession.add(GpsPoint(0.0, lon, 1_000, 5.0), 0L)
         for (t in 1..80) {
+            if (t == 41) RunSession.markResumeBoundary()
             lon += 3.0 * degPerM
             RunSession.add(GpsPoint(0.0, lon, 1_000L + t, 5.0), t * 995_000_000L)
         }
-        assertEquals(79L, RunSession.elapsedSec.value)
-        assertEquals(80L, recordedMovingSec(RunSession.decimatedTrackForCore(), RunSession.decimatedSegmentStarts()))
-        // A pause bridge into a new segment adds no moving time, nor does a standing leg.
-        val pts = listOf(
-            GpsPoint(0.0, 0.0, 0, 5.0),
-            GpsPoint(0.0, 30.0 * degPerM, 10, 5.0),
-            GpsPoint(0.0, 300.0 * degPerM, 100, 5.0),
-            GpsPoint(0.0, 300.5 * degPerM, 110, 5.0),
-            GpsPoint(0.0, 330.5 * degPerM, 120, 5.0),
-        )
-        assertEquals(20L, recordedMovingSec(pts, listOf(2)))
+        // The Finish review previews this very event's figures (Core.savedFigures),
+        // and Save sends it, so both read the same track, pauses and date.
+        val event = RunSession.trackEventForCore(entryId = 7L, workoutType = WorkoutType.Easy, sessionRpe = 4)
+        assertEquals(RunSession.decimatedTrackForCore(), event.points)
+        assertEquals(listOf(41), event.segmentStarts)
+        assertEquals("dated at the last fix", 1_080L, event.observedAt)
+        assertEquals(7L, event.entryId)
+        assertEquals(WorkoutType.Easy, event.workoutType)
+        assertEquals(4, event.sessionRpe)
         RunSession.reset()
     }
 

@@ -3,6 +3,7 @@ package app.milestone
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -25,6 +26,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
@@ -32,9 +34,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -243,284 +250,356 @@ internal fun CoachScaffold(session: CoachSession) {
         sheetOpen = true
     }
 
-    Scaffold(
-        containerColor = BgTop,
-        // M3 lays the snackbar above the FAB on Today and above the nav bar elsewhere.
-        snackbarHost = { UiMessageHost() },
-        topBar = {
-            // Chrome §5 stacking order: status bar → SAFETY BANNER → app bar.
-            // The DO-NOT-TRAIN banner is the topmost element below the status
-            // bar on EVERY destination: it renders ABOVE the brand app bar,
-            // never scrolls, never dismisses (HARD RULE 3 / INVARIANT 3). The
-            // under-18 plan pause is no training stop: it is Today's first card
-            // (YouthHoldCard), below the app bar, and the host renders nothing.
-            Column(Modifier.background(BgTop).statusBarsPadding()) {
-                SafetyBannerHost(
-                    session.model,
-                    onEvent = { session.dispatch(it) },
-                    modifier = Modifier
-                        .padding(horizontal = Space.Screen.dp)
-                        .padding(top = Space.Md.dp),
-                    lastPain = session.lastPain,
-                    onAddDetails = { sheetMode = LogMode.Readiness; sheetOpen = true },
-                    onOpenProfile = { row -> profileFocus = row; selected = Dest.Profile },
-                )
-                // Brand lockup IS the title on destinations (chrome §2): no
-                // secondary title string anywhere in content. No overflow menu:
-                // "Clear all data" lives only in Profile's Danger zone, since a
-                // destructive action a tap away on every screen is too easy to hit.
-                BrandTopBar()
-            }
-        },
-        bottomBar = {
-            Column {
-                // Run-in-progress chip pinned just above the nav bar (chrome §4),
-                // below content, never above the safety banner (which is topmost).
-                if (liveTracking && !session.showTracker) {
-                    RunInProgressChip { session.showTracker = true }
-                }
-                MilestoneNavBar(selected) { selected = it }
-            }
-        },
-        floatingActionButton = {
-            // The Log FAB belongs to Today only (chrome §1). It floats over the
-            // list; Today's rows keep their full width and the list's bottom
-            // padding lets its last row scroll clear of it.
-            if (selected == Dest.Today) {
-                val logLabel = stringResource(R.string.main_log)
-                ExtendedFloatingActionButton(
-                    onClick = openLog,
-                    // Extended ("+ Log") at the top of Today; icon-only once the list scrolls.
-                    expanded = fabExpanded,
-                    // The extended FAB clears its content's semantics, so the
-                    // visible "Log" text never reaches TalkBack; name the button.
-                    modifier = Modifier.semantics { contentDescription = logLabel },
-                    containerColor = Accent,
-                    // Dark OnAccent on every accent fill: white (#fff) text fails
-                    // AA contrast against the accent here.
-                    contentColor = OnAccent,
-                    shape = RoundedCornerShape(Space.Card.dp),
-                    text = { Text(logLabel, style = Type.Body.copy(fontWeight = FontWeight.ExtraBold)) },
-                    icon = {
-                        Icon(
-                            painterResource(R.drawable.ic_action_log_plus),
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
+    // The bottom bar's measured height: the top chrome keeps the app bar off it.
+    var bottomBarPx by remember { mutableIntStateOf(0) }
+    // The nav bar's own measured height, kept while the rail replaces it, so the
+    // rail decision below is judged against the bar it would bring back.
+    var navBarPx by remember { mutableIntStateOf(0) }
+    // The chrome gives way to the pinned safety banner, never the reverse (user
+    // decision 2026-10-25): when the bottom nav and the Log button no longer fit
+    // under the banner (a landscape phone under a hold), a side rail carries the
+    // destinations and Log, beside the banner instead of over it.
+    var navRail by remember { mutableStateOf(false) }
+    val logRoomPx = with(LocalDensity.current) { LogButtonRoom.roundToPx() }
+    Row(Modifier.fillMaxSize().background(BgTop)) {
+        if (navRail) {
+            MilestoneNavRail(selected, onSelect = { selected = it }, onLog = if (selected == Dest.Today) openLog else null)
+        }
+        Scaffold(
+            modifier = Modifier.weight(1f),
+            containerColor = BgTop,
+            // M3 lays the snackbar above the FAB on Today and above the nav bar elsewhere.
+            snackbarHost = { UiMessageHost() },
+            topBar = {
+                // Chrome §5 stacking order: status bar → SAFETY BANNER → app bar.
+                // The DO-NOT-TRAIN banner is the topmost element below the status
+                // bar on EVERY destination: it renders ABOVE the brand app bar,
+                // never scrolls, never dismisses (HARD RULE 3 / INVARIANT 3). The
+                // under-18 plan pause is no training stop: it is Today's first card
+                // (YouthHoldCard), below the app bar, and the host renders nothing.
+                TopChrome(
+                    bottomBarPx = bottomBarPx,
+                    navBarPx = navBarPx,
+                    logRoomPx = logRoomPx,
+                    onNeedsRail = { if (navRail != it) navRail = it },
+                    banner = {
+                        SafetyBannerHost(
+                            session.model,
+                            onEvent = { session.dispatch(it) },
+                            modifier = Modifier
+                                .padding(horizontal = Space.Screen.dp)
+                                .padding(top = Space.Md.dp),
+                            lastPain = session.lastPain,
+                            onAddDetails = { sheetMode = LogMode.Readiness; sheetOpen = true },
+                            onOpenProfile = { row -> profileFocus = row; selected = Dest.Profile },
                         )
                     },
+                    // Brand lockup IS the title on destinations (chrome §2): no
+                    // secondary title string anywhere in content. No overflow menu:
+                    // "Clear all data" lives only in Profile's Danger zone, since a
+                    // destructive action a tap away on every screen is too easy to hit.
+                    appBar = { BrandTopBar() },
                 )
-            }
-        },
-    ) { pad ->
-        ClearAllDataDialog(
-            visible = confirmClearAll,
-            onDismiss = { confirmClearAll = false },
-            onClear = {
-                // Every logged family + derived coaching output; the profile
-                // (training configuration) stays. ONE batch: a single core turn with
-                // one view decode and one published model, never a run of partial
-                // models. (There are no Cooper/CriticalSpeed/APRE encoders in the
-                // shell: those calculators have no UI, so nothing to clear for them.)
-                session.dispatchAll(
-                    listOf(
-                        Event.ClearSets, Event.ClearRuns, Event.ClearReadiness,
-                        Event.ClearCheckins, Event.ClearReview, Event.ClearWeeklyCheckin, Event.ClearRacePrediction,
-                        Event.ClearHypertrophyPlan, Event.ClearProtein, Event.ClearHrZones,
-                        Event.ClearPlan, Event.ClearActivities,
-                    ),
-                )
-                // Explicit decision: after "Clear all data" the plan is NOT
-                // auto-regenerated on the next boot; the user re-creates it from the
-                // PlanPromptCard. The dispatch echo already sets this marker for the
-                // ClearPlan above, but writing it here makes the durable-disable an
-                // explicit part of clear-all rather than an invisible side effect.
-                setupPrefs.edit().putBoolean(KEY_PLAN_CLEARED, true).apply()
             },
-        )
-        CompositionLocalProvider(
-            LocalEvidenceLegend provides { showLegend = true },
-            LocalGlossary provides { term -> glossaryTerm = term },
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(pad),
-            ) {
-                // Destinations are pure projections of the one hoisted `model`.
-                Box(Modifier.weight(1f)) {
-                    when (selected) {
-                        Dest.Today -> {
-                            TodayDestination(
-                                model = session.model,
-                                listState = todayListState,
-                                onEvent = { session.dispatch(it) },
-                                lastPain = session.lastPain,
-                                onOpenProfile = { row -> profileFocus = row; selected = Dest.Profile },
-                                onStartSetup = {
-                                    // First-run entry point (no seed): keep the onboarding
-                                    // pref semantics at the call site above.
-                                    session.setupInitial = null
-                                    session.showSetup = true
-                                },
-                                onRerunSetup = { rerunSetup(null) },
-                                onLogPlanItem = {
-                                    sheetPlanExercise = it.exercise
-                                    sheetPlanDay = null
-                                    sheetMode = LogMode.Set
-                                    sheetOpen = true
-                                },
-                                onLogPastItem = { item, day ->
-                                    sheetPlanExercise = item.exercise
-                                    sheetPlanDay = day
-                                    sheetMode = LogMode.Set
-                                    sheetOpen = true
-                                },
-                                onLogPastRun = { day ->
-                                    sheetPlanExercise = null
-                                    sheetPlanDay = day
-                                    sheetMode = LogMode.Run
-                                    sheetOpen = true
-                                },
-                                onTrackRun = { session.showTracker = true },
-                                onOpenSheet = { mode ->
-                                    sheetPlanExercise = null
-                                    sheetPlanDay = null
-                                    sheetMode = mode
-                                    sheetOpen = true
-                                },
-                            )
+            bottomBar = {
+                Column(Modifier.onSizeChanged { bottomBarPx = it.height }) {
+                    // Run-in-progress chip pinned just above the nav bar (chrome §4),
+                    // below content, never above the safety banner (which is topmost).
+                    if (liveTracking && !session.showTracker) {
+                        RunInProgressChip { session.showTracker = true }
+                    }
+                    if (!navRail) {
+                        Box(Modifier.onSizeChanged { navBarPx = it.height }) {
+                            MilestoneNavBar(selected) { selected = it }
                         }
-                        Dest.History -> HistoryDestination(
-                            model = session.model,
-                            onEvent = { session.dispatch(it) },
-                            onTrackRun = { session.showTracker = true },
-                            onLogSet = {
-                                sheetPlanExercise = null
-                                sheetPlanDay = null
-                                sheetMode = LogMode.Set
-                                sheetOpen = true
-                            },
-                        )
-                        Dest.Profile -> ProfileDestination(
-                            ctx = ctx,
-                            model = session.model,
-                            onEvent = { session.dispatch(it) },
-                            onClearAll = { confirmClearAll = true },
-                            onRerunSetup = rerunSetup,
-                            focusRow = profileFocus,
-                            onFocusHandled = { profileFocus = null },
-                            planAnswersOpen = planAnswersOpen,
-                            onPlanAnswersOpenChange = { planAnswersOpen = it },
-                        )
                     }
                 }
-            }
-
-            // Re-resolve the tapped plan item against the LIVE model each recomposition
-            // (by key, not object): a stale key (plan cleared) or a day under a training
-            // hold (its row carries no items) resolves to null and the editor opens
-            // blank, no error path. Mirrors History's resolveHistoryEntry.
-            val planPrefill = sheetPlanExercise?.let { key ->
-                // The day's own row keeps its items after they complete (the hero moves
-                // on once the whole day is done), so the loop editor still sees the item
-                // it is logging and can show "Exercise complete". Prefer an open item
-                // with this name; fall back to the finished one.
-                val day = sheetPlanDay ?: session.model.today()
-                val items = session.model.week_plan.firstOrNull { it.epoch_day == day }?.items.orEmpty()
-                items.firstOrNull { it.exercise == key && !it.done } ?: items.firstOrNull { it.exercise == key }
-            }
-            // Seed the editor's stamp to a past plan day's local noon (null = today's flow).
-            val planObservedAt = sheetPlanDay?.takeIf { it != session.model.today() }?.let(::planDayObservedAt)
-
-            if (sheetOpen) {
-                // A set loop in progress can't be swiped or scrim-tapped away (a scroll
-                // back up to the timer closed the whole loop); it closes via X or Finish.
-                val loopLocked = sheetLocked && sheetMode == LogMode.Set
-                ModalBottomSheet(
-                    // The dirty-editor and loop guards live in sheetState.confirmValueChange
-                    // (which keeps the sheet visible while confirming). By the time
-                    // onDismissRequest fires the hide is already committed on a clean,
-                    // unlocked sheet, so this just finishes the close.
-                    onDismissRequest = { sheetDirty = false; sheetLocked = false; sheetPlanExercise = null; sheetPlanDay = null; sheetOpen = false },
-                    sheetState = sheetState,
-                    sheetGesturesEnabled = !loopLocked,
-                    // Sheet ground a hair off BgElevated for separation (05-log §1);
-                    // on paper the elevated surface already separates.
-                    containerColor = BgSunken,
-                ) {
-                    SheetNavBarScrim()
-                    LogSheetContent(
-                        mode = sheetMode,
-                        model = session.model,
-                        initialReadinessSignal = ReadinessSignal.WellnessZ,
-                        // Returning to the chooser clears the dirty flag (the entry was
-                        // handled or discarded via the editor's own guard).
-                        onMode = {
-                            if (it == LogMode.Chooser) {
-                                sheetDirty = false; sheetLocked = false; sheetPlanExercise = null; sheetPlanDay = null
-                            }
-                            sheetMode = it
-                        },
-                        onEvent = { session.dispatch(it) },
-                        onTrackRun = { session.showTracker = true },
-                        onDismiss = dismissSheet,
-                        onDirtyChange = { sheetDirty = it },
-                        planPrefill = planPrefill,
-                        onPlanPrefill = { sheetPlanExercise = it },
-                        planObservedAt = planObservedAt,
-                        onSheetLockChange = { sheetLocked = it },
-                        // Finishing a session lands on Today's top, where its done state is.
-                        onFinishSession = {
-                            dismissSheet()
-                            scope.launch { todayListState.animateScrollToItem(0) }
+            },
+            floatingActionButton = {
+                // The Log FAB belongs to Today only (chrome §1). It floats over the
+                // list; Today's rows keep their full width and the list's bottom
+                // padding lets its last row scroll clear of it. With the rail, Log is
+                // the rail's header instead.
+                if (selected == Dest.Today && !navRail) {
+                    val logLabel = stringResource(R.string.main_log)
+                    ExtendedFloatingActionButton(
+                        onClick = openLog,
+                        // Extended ("+ Log") at the top of Today; icon-only once the list scrolls.
+                        expanded = fabExpanded,
+                        // The extended FAB clears its content's semantics, so the
+                        // visible "Log" text never reaches TalkBack; name the button.
+                        modifier = Modifier.testTag("log-fab").semantics { contentDescription = logLabel },
+                        containerColor = Accent,
+                        // Dark OnAccent on every accent fill: white (#fff) text fails
+                        // AA contrast against the accent here.
+                        contentColor = OnAccent,
+                        shape = RoundedCornerShape(Space.Card.dp),
+                        text = { Text(logLabel, style = Type.Body.copy(fontWeight = FontWeight.ExtraBold)) },
+                        icon = {
+                            Icon(
+                                painterResource(R.drawable.ic_action_log_plus),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
                         },
                     )
                 }
-            }
-            // The swipe-down discard confirmation for a dirty Log editor.
-            if (confirmDiscardSheet) {
-                AlertDialog(
-                    onDismissRequest = { confirmDiscardSheet = false },
-                    shape = RoundedCornerShape(Space.Card.dp),
-                    title = { Text(stringResource(R.string.main_discard_entry_title)) },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            confirmDiscardSheet = false
-                            sheetDirty = false
-                            sheetLocked = false
-                            sheetOpen = false
-                        }) { Text(stringResource(R.string.main_discard), color = DangerText) }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { confirmDiscardSheet = false }) { Text(stringResource(R.string.main_keep_editing)) }
-                    },
-                )
-            }
-            // "How evidence grading works" legend, reached from the "?" on any
-            // grade badge. Static reference copy; no coaching logic.
-            if (showLegend) {
-                ModalBottomSheet(
-                    onDismissRequest = { showLegend = false },
-                    // Fully expanded only: Back and swipe close the sheet in one step
-                    // (a half-height detent made Back collapse it first).
-                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                    containerColor = BgSunken,
+            },
+        ) { pad ->
+            ClearAllDataDialog(
+                visible = confirmClearAll,
+                onDismiss = { confirmClearAll = false },
+                onClear = {
+                    // Every logged family + derived coaching output; the profile
+                    // (training configuration) stays. ONE batch: a single core turn with
+                    // one view decode and one published model, never a run of partial
+                    // models. (There are no Cooper/CriticalSpeed/APRE encoders in the
+                    // shell: those calculators have no UI, so nothing to clear for them.)
+                    session.dispatchAll(
+                        listOf(
+                            Event.ClearSets, Event.ClearRuns, Event.ClearReadiness,
+                            Event.ClearCheckins, Event.ClearReview, Event.ClearWeeklyCheckin, Event.ClearRacePrediction,
+                            Event.ClearHypertrophyPlan, Event.ClearProtein, Event.ClearHrZones,
+                            Event.ClearPlan, Event.ClearActivities,
+                        ),
+                    )
+                    // Explicit decision: after "Clear all data" the plan is NOT
+                    // auto-regenerated on the next boot; the user re-creates it from the
+                    // PlanPromptCard. The dispatch echo already sets this marker for the
+                    // ClearPlan above, but writing it here makes the durable-disable an
+                    // explicit part of clear-all rather than an invisible side effect.
+                    setupPrefs.edit().putBoolean(KEY_PLAN_CLEARED, true).apply()
+                },
+            )
+            CompositionLocalProvider(
+                LocalEvidenceLegend provides { showLegend = true },
+                LocalGlossary provides { term -> glossaryTerm = term },
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(pad),
                 ) {
-                    SheetNavBarScrim()
-                    EvidenceLegendSheet(session.model.grade_definitions)
+                    // Destinations are pure projections of the one hoisted `model`.
+                    Box(Modifier.weight(1f)) {
+                        when (selected) {
+                            Dest.Today -> {
+                                TodayDestination(
+                                    model = session.model,
+                                    listState = todayListState,
+                                    onEvent = { session.dispatch(it) },
+                                    lastPain = session.lastPain,
+                                    onOpenProfile = { row -> profileFocus = row; selected = Dest.Profile },
+                                    onStartSetup = {
+                                        // First-run entry point (no seed): keep the onboarding
+                                        // pref semantics at the call site above.
+                                        session.setupInitial = null
+                                        session.showSetup = true
+                                    },
+                                    onRerunSetup = { rerunSetup(null) },
+                                    onLogPlanItem = {
+                                        sheetPlanExercise = it.exercise
+                                        sheetPlanDay = null
+                                        sheetMode = LogMode.Set
+                                        sheetOpen = true
+                                    },
+                                    onLogPastItem = { item, day ->
+                                        sheetPlanExercise = item.exercise
+                                        sheetPlanDay = day
+                                        sheetMode = LogMode.Set
+                                        sheetOpen = true
+                                    },
+                                    onLogPastRun = { day ->
+                                        sheetPlanExercise = null
+                                        sheetPlanDay = day
+                                        sheetMode = LogMode.Run
+                                        sheetOpen = true
+                                    },
+                                    onTrackRun = { session.showTracker = true },
+                                    onOpenSheet = { mode ->
+                                        sheetPlanExercise = null
+                                        sheetPlanDay = null
+                                        sheetMode = mode
+                                        sheetOpen = true
+                                    },
+                                )
+                            }
+                            Dest.History -> HistoryDestination(
+                                model = session.model,
+                                onEvent = { session.dispatch(it) },
+                                onTrackRun = { session.showTracker = true },
+                                onLogSet = {
+                                    sheetPlanExercise = null
+                                    sheetPlanDay = null
+                                    sheetMode = LogMode.Set
+                                    sheetOpen = true
+                                },
+                            )
+                            Dest.Profile -> ProfileDestination(
+                                ctx = ctx,
+                                model = session.model,
+                                onEvent = { session.dispatch(it) },
+                                onClearAll = { confirmClearAll = true },
+                                onRerunSetup = rerunSetup,
+                                focusRow = profileFocus,
+                                onFocusHandled = { profileFocus = null },
+                                planAnswersOpen = planAnswersOpen,
+                                onPlanAnswersOpenChange = { planAnswersOpen = it },
+                            )
+                        }
+                    }
+                }
+
+                // Re-resolve the tapped plan item against the LIVE model each recomposition
+                // (by key, not object): a stale key (plan cleared) or a day under a training
+                // hold (its row carries no items) resolves to null and the editor opens
+                // blank, no error path. Mirrors History's resolveHistoryEntry.
+                val planPrefill = sheetPlanExercise?.let { key ->
+                    // The day's own row keeps its items after they complete (the hero moves
+                    // on once the whole day is done), so the loop editor still sees the item
+                    // it is logging and can show "Exercise complete". Prefer an open item
+                    // with this name; fall back to the finished one.
+                    val day = sheetPlanDay ?: session.model.today()
+                    val items = session.model.week_plan.firstOrNull { it.epoch_day == day }?.items.orEmpty()
+                    items.firstOrNull { it.exercise == key && !it.done } ?: items.firstOrNull { it.exercise == key }
+                }
+                // Seed the editor's stamp to a past plan day's local noon (null = today's flow).
+                val planObservedAt = sheetPlanDay?.takeIf { it != session.model.today() }?.let(::planDayObservedAt)
+
+                if (sheetOpen) {
+                    // A set loop in progress can't be swiped or scrim-tapped away (a scroll
+                    // back up to the timer closed the whole loop); it closes via X or Finish.
+                    val loopLocked = sheetLocked && sheetMode == LogMode.Set
+                    ModalBottomSheet(
+                        // The dirty-editor and loop guards live in sheetState.confirmValueChange
+                        // (which keeps the sheet visible while confirming). By the time
+                        // onDismissRequest fires the hide is already committed on a clean,
+                        // unlocked sheet, so this just finishes the close.
+                        onDismissRequest = { sheetDirty = false; sheetLocked = false; sheetPlanExercise = null; sheetPlanDay = null; sheetOpen = false },
+                        sheetState = sheetState,
+                        sheetGesturesEnabled = !loopLocked,
+                        // Sheet ground a hair off BgElevated for separation (05-log §1);
+                        // on paper the elevated surface already separates.
+                        containerColor = BgSunken,
+                    ) {
+                        SheetNavBarScrim()
+                        LogSheetContent(
+                            mode = sheetMode,
+                            model = session.model,
+                            initialReadinessSignal = ReadinessSignal.WellnessZ,
+                            // Returning to the chooser clears the dirty flag (the entry was
+                            // handled or discarded via the editor's own guard).
+                            onMode = {
+                                if (it == LogMode.Chooser) {
+                                    sheetDirty = false; sheetLocked = false; sheetPlanExercise = null; sheetPlanDay = null
+                                }
+                                sheetMode = it
+                            },
+                            onEvent = { session.dispatch(it) },
+                            onTrackRun = { session.showTracker = true },
+                            onDismiss = dismissSheet,
+                            onDirtyChange = { sheetDirty = it },
+                            planPrefill = planPrefill,
+                            onPlanPrefill = { sheetPlanExercise = it },
+                            planObservedAt = planObservedAt,
+                            onSheetLockChange = { sheetLocked = it },
+                            // Finishing a session lands on Today's top, where its done state is.
+                            onFinishSession = {
+                                dismissSheet()
+                                scope.launch { todayListState.animateScrollToItem(0) }
+                            },
+                        )
+                    }
+                }
+                // The swipe-down discard confirmation for a dirty Log editor.
+                if (confirmDiscardSheet) {
+                    AlertDialog(
+                        onDismissRequest = { confirmDiscardSheet = false },
+                        shape = RoundedCornerShape(Space.Card.dp),
+                        title = { Text(stringResource(R.string.main_discard_entry_title)) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                confirmDiscardSheet = false
+                                sheetDirty = false
+                                sheetLocked = false
+                                sheetOpen = false
+                            }) { Text(stringResource(R.string.main_discard), color = DangerText) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { confirmDiscardSheet = false }) { Text(stringResource(R.string.main_keep_editing)) }
+                        },
+                    )
+                }
+                // "How evidence grading works" legend, reached from the "?" on any
+                // grade badge. Static reference copy; no coaching logic.
+                if (showLegend) {
+                    ModalBottomSheet(
+                        onDismissRequest = { showLegend = false },
+                        // Fully expanded only: Back and swipe close the sheet in one step
+                        // (a half-height detent made Back collapse it first).
+                        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                        containerColor = BgSunken,
+                    ) {
+                        SheetNavBarScrim()
+                        EvidenceLegendSheet(session.model.grade_definitions)
+                    }
+                }
+                // Glossary: one app-wide sheet defining the jargon, opened from any
+                // term chip. Static UI copy; no coaching logic, no KB claim.
+                glossaryTerm?.let { term ->
+                    ModalBottomSheet(
+                        onDismissRequest = { glossaryTerm = null },
+                        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                        containerColor = BgSunken,
+                    ) {
+                        SheetNavBarScrim()
+                        GlossarySheet(term)
+                    }
                 }
             }
-            // Glossary: one app-wide sheet defining the jargon, opened from any
-            // term chip. Static UI copy; no coaching logic, no KB claim.
-            glossaryTerm?.let { term ->
-                ModalBottomSheet(
-                    onDismissRequest = { glossaryTerm = null },
-                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                    containerColor = BgSunken,
-                ) {
-                    SheetNavBarScrim()
-                    GlossarySheet(term)
-                }
+        }
+    }
+}
+
+/** Room the Log button needs under the banner: the extended FAB (56dp) and
+ *  the Scaffold's 16dp FAB margin. */
+private val LogButtonRoom = 72.dp
+
+/**
+ * The destinations' top chrome under the status bar: the safety [banner], then
+ * the [appBar] (the wordmark). The banner always shows whole and is never folded
+ * or overlapped (INVARIANT 3; its own Layout in SafetyBanner.kt caps only its
+ * extras). The app bar is brand chrome only, so when the banner leaves it no room
+ * above the bottom bar ([bottomBarPx], the Scaffold places the two from opposite
+ * edges) it is left out instead of being laid over the navigation labels.
+ * [onNeedsRail] reports whether a banner leaves less than [logRoomPx] between
+ * it and the nav bar ([navBarPx]): the nav bar and the Log button would then be
+ * laid over it, so the host swaps them for a side rail (a landscape phone under
+ * a hold, user decision 2026-10-25).
+ */
+@Composable
+private fun TopChrome(
+    bottomBarPx: Int,
+    navBarPx: Int,
+    logRoomPx: Int,
+    onNeedsRail: (Boolean) -> Unit,
+    banner: @Composable () -> Unit,
+    appBar: @Composable () -> Unit,
+) {
+    Layout(listOf(banner, appBar), Modifier.background(BgTop).statusBarsPadding()) { (bannerSlot, appBarSlot), c ->
+        val loose = c.copy(minHeight = 0, maxHeight = Constraints.Infinity)
+        val banners = bannerSlot.map { it.measure(loose) }
+        val bars = appBarSlot.map { it.measure(loose) }
+        val bannerHeight = banners.sumOf { it.height }
+        val barHeight = bars.sumOf { it.height }
+        onNeedsRail(bannerHeight > 0 && c.hasBoundedHeight && c.maxHeight - bannerHeight - navBarPx < logRoomPx)
+        val showBar = !c.hasBoundedHeight || bannerHeight + barHeight <= c.maxHeight - bottomBarPx
+        val width = if (c.hasBoundedWidth) c.maxWidth else (banners + bars).maxOfOrNull { it.width } ?: 0
+        layout(width, bannerHeight + if (showBar) barHeight else 0) {
+            var y = 0
+            for (p in if (showBar) banners + bars else banners) {
+                p.placeRelative(0, y)
+                y += p.height
             }
         }
     }

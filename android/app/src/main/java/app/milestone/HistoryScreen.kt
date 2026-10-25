@@ -46,19 +46,52 @@ private enum class HistoryFilter { Lifts, Runs }
 
 /** Precomputed History month scaffolding: [jumpTargets] maps each month
  *  label to its LazyColumn item index for the jump control; [headerBefore] maps a
- *  reversed-entry index to the month header to emit before that card, so the stream
+ *  stream-entry index to the month header to emit before that card, so the stream
  *  loop never recomputes month strings per card. */
-private data class MonthNav(
+internal data class MonthNav(
     val jumpTargets: List<Pair<String, Int>>,
     val headerBefore: Map<Int, String>,
 )
 
 /** Local-month header label ("August 2026", in the locale's own order) for a history
- *  entry's `observed_at`, bucketed in the device zone (the shell owns the wall clock;
- *  the core stays clock-free). Blank for an undated entry so no header is emitted. */
-private fun monthLabel(epochSec: Long, zone: java.time.ZoneId, fmt: java.time.format.DateTimeFormatter): String {
+ *  card's day stamp (a lift session's first set, a run's start: [runDaySec]),
+ *  bucketed in the device zone (the shell owns the wall clock; the core stays
+ *  clock-free). Blank for an undated entry so no header is emitted. */
+internal fun monthLabel(epochSec: Long, zone: java.time.ZoneId, fmt: java.time.format.DateTimeFormatter): String {
     if (epochSec <= 0L) return ""
     return java.time.Instant.ofEpochSecond(epochSec).atZone(zone).toLocalDate().format(fmt)
+}
+
+/** The month headers and jump targets for a newest-first stream with one day stamp
+ *  per card ([stamps]), after [base] non-month items. MIRRORS the stream's emission
+ *  order (a header slot before each month's first card, then the card): a wrong
+ *  offset would scroll to the wrong row. Pure. */
+internal fun buildMonthNav(
+    stamps: List<Long>,
+    base: Int,
+    zone: java.time.ZoneId,
+    fmt: java.time.format.DateTimeFormatter,
+): MonthNav {
+    val headerBefore = HashMap<Int, String>()
+    val labels = ArrayList<Pair<String, Int>>()
+    var streamOffset = 0
+    var prevMonth: String? = null
+    stamps.forEachIndexed { i, stamp ->
+        val month = monthLabel(stamp, zone, fmt)
+        if (month.isNotBlank() && month != prevMonth) {
+            headerBefore[i] = month
+            labels += month to streamOffset
+            streamOffset++ // header slot
+        }
+        streamOffset++ // card slot
+        prevMonth = month
+    }
+    val jumpTargets = if (labels.size < 2) {
+        emptyList()
+    } else {
+        labels.map { (label, off) -> label to (base + off) }
+    }
+    return MonthNav(jumpTargets = jumpTargets, headerBefore = headerBefore)
 }
 
 /** ConsistencyView.weeks holds at most this many finished plan weeks (the core's
@@ -216,10 +249,13 @@ internal fun HistoryDestination(
     val runRecords = model.run_progress?.takeIf { it.longest_run_km > 0.0 || it.best_efforts.isNotEmpty() }
     val showRunRecords = activeFilter == HistoryFilter.Runs && runRecords != null
     val monthFmt = remember { localizedDayFormatter("yMMMM") }
-    val monthNav = remember(activeFilter, liftSessions, model.runs, showSegment, showRunProgress, showRunRecords) {
-        // One stamp per stream card: a lift SESSION (its first set) or a run.
+    // The Runs stream, newest first by START (a run belongs to the day it started,
+    // the day its title and date chip name), shared by the month headers and the cards.
+    val runStream = remember(model.runs) { historyRunStream(model.runs) }
+    val monthNav = remember(activeFilter, liftSessions, runStream, showSegment, showRunProgress, showRunRecords) {
+        // One stamp per stream card: a lift SESSION (its first set) or a run's start.
         val stamps: List<Long> = when (activeFilter) {
-            HistoryFilter.Runs -> model.runs.asReversed().map { it.observed_at }
+            HistoryFilter.Runs -> runStream.map(::runDaySec)
             else -> liftSessions.map { it.firstObservedAt }
         }
         // Non-month items emitted before the entry stream: the 7-day strip and the
@@ -231,29 +267,7 @@ internal fun HistoryDestination(
         if (showSegment) base++                        // Lifts | Runs segment
         if (showRunProgress) base++                    // run progress chart
         if (showRunRecords) base++                     // run records
-        // Precompute BOTH the header label to emit before each entry index (so the
-        // stream loop never recomputes month strings per card) and the jump targets
-        // (label -> LazyColumn item index), mirroring the stream's emission order.
-        val headerBefore = HashMap<Int, String>()
-        val labels = ArrayList<Pair<String, Int>>()
-        var streamOffset = 0
-        var prevMonth: String? = null
-        stamps.forEachIndexed { i, stamp ->
-            val month = monthLabel(stamp, zone, monthFmt)
-            if (month.isNotBlank() && month != prevMonth) {
-                headerBefore[i] = month
-                labels += month to streamOffset
-                streamOffset++ // header slot
-            }
-            streamOffset++ // card slot
-            prevMonth = month
-        }
-        val jumpTargets = if (labels.size < 2) {
-            emptyList()
-        } else {
-            labels.map { (label, off) -> label to (base + off) }
-        }
-        MonthNav(jumpTargets = jumpTargets, headerBefore = headerBefore)
+        buildMonthNav(stamps, base, zone, monthFmt)
     }
     LazyColumn(
         state = listState,
@@ -340,7 +354,7 @@ internal fun HistoryDestination(
                     }
                     ContributionHeatmap(days, todayLocalDay, weeks = 12) { day ->
                         val session = liftSessions.firstOrNull { it.epochDay == day }
-                        val run = model.runs.lastOrNull { it.observed_at > 0L && localEpochDay(it.observed_at, zone) == day }
+                        val run = latestRunOnDay(model.runs, day, zone)
                         if (session != null && (run == null || activeFilter == HistoryFilter.Lifts)) {
                             manualFilter = HistoryFilter.Lifts
                             selectedSessionKey = session.key
@@ -369,18 +383,9 @@ internal fun HistoryDestination(
         if (showRunProgress) {
             item(key = "run-progress") {
                 // Garmin-style per-day distance, a factual aggregation (sum of
-                // distance_km per local day) over the same local-day bucketing as the
-                // heatmap, shown in the user's distance unit.
-                val kmByDay = remember(model.runs) {
-                    val m = HashMap<Long, Double>()
-                    model.runs
-                        .filter { it.observed_at > 0 && it.distance_km > 0.0 }
-                        .forEach { r ->
-                            val day = localEpochDay(r.observed_at, zone)
-                            m[day] = (m[day] ?: 0.0) + r.distance_km
-                        }
-                    m
-                }
+                // distance_km per local day the run started) over the same local-day
+                // bucketing as the heatmap, shown in the user's distance unit.
+                val kmByDay = remember(model.runs) { runKmByDay(model.runs, zone) }
                 RunProgressSection(
                     progress = model.run_progress,
                     kmByDay = kmByDay,
@@ -394,12 +399,10 @@ internal fun HistoryDestination(
             item(key = "run-records") {
                 RunRecordsSection(
                     progress = runRecords,
+                    runs = model.runs,
                     unit = distanceUnit,
                     nowMillis = nowMillis,
-                    onOpenRun = { entryId, observedAt ->
-                        model.runs.firstOrNull { (entryId == null || it.entry_id == entryId) && it.observed_at == observedAt }
-                            ?.let { selectedKey = historyEntryKey(HistoryEntry.Run(it)) }
-                    },
+                    onOpenRun = { selectedKey = historyEntryKey(HistoryEntry.Run(it)) },
                 )
             }
         }
@@ -445,9 +448,8 @@ internal fun HistoryDestination(
         }
 
         if (activeFilter == HistoryFilter.Runs && model.runs.isNotEmpty()) {
-            // Same month-header grouping as the Lifts segment.
-            val reversed = model.runs.asReversed()
-            reversed.forEachIndexed { i, r ->
+            // Same month-header grouping as the Lifts segment, by the day each run started.
+            runStream.forEachIndexed { i, r ->
                 monthNav.headerBefore[i]?.let { m ->
                     item(key = "run-month-$m") { MonthHeader(m, jumpMonths.takeIf { i == 0 }, onJump) }
                 }

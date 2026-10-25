@@ -100,8 +100,8 @@ internal fun TrackerReadinessSheet(model: ViewModel, onEvent: (Event) -> Unit, o
 /**
  * The Finish review shown in place of the control row after Stop: the title, then a
  * scrolling summary (a route thumbnail with start and finish markers, the paused
- * run's distance · moving time · average pace as three large figures, the moving
- * time taken from the recorded track as the core will derive it so History repeats
+ * run's distance · moving time · average pace as three large figures, distance and
+ * moving time computed by the core for the very track Save sends so History repeats
  * these figures, a short-run notice when the run is under the keep threshold
  * ([isShortRun])), then the optional whole-session effort and run type. The action
  * row stays pinned: Discard · Resume · Save run, with the primary action outermost
@@ -122,21 +122,23 @@ internal fun RunFinishPanel(
     onDiscard: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val liveKm by RunSession.distanceKm.collectAsStateWithLifecycle()
-    // Moving time from the very track Save hands the core, on its whole-second basis,
-    // so the review's time and pace are the figures History then lists.
+    // Distance and moving time are the core's figures for the very event Save sends
+    // ([RunSession.trackEventForCore]): the same QC and derivation as the saved run,
+    // so the review shows exactly what History then lists.
     val points by RunSession.points.collectAsStateWithLifecycle()
-    val elapsedSec = remember(points) {
-        recordedMovingSec(RunSession.decimatedTrackForCore(), RunSession.decimatedSegmentStarts())
+    val figures = remember(points) {
+        Core.savedFigures(RunSession.trackEventForCore(entryId = 0L, workoutType = null, sessionRpe = null))
     }
+    val km = figures?.distance_km ?: 0.0
+    val elapsedSec = figures?.let { Math.round(it.duration_min * 60.0) } ?: 0L
     val route = remember(points) {
         trackSegments(RunSession.decimatedTrackForCore(), RunSession.decimatedSegmentStarts())
     }
-    val avgPace = averagePaceMinPerKm(elapsedSec, liveKm)
+    val avgPace = averagePaceMinPerKm(elapsedSec, km)
     val paceFigure = if (avgPace.isFinite()) formatPaceMinutes(paceInUnit(avgPace, unit)) else NO_VALUE
     val spoken = stringResource(
         R.string.track_finish_summary,
-        runDistLabel(liveKm, unit),
+        runDistLabel(km, unit),
         formatElapsed(elapsedSec),
         if (avgPace.isFinite()) "$paceFigure ${unit.paceSuffix}" else stringResource(R.string.track_cd_not_available),
     )
@@ -171,9 +173,9 @@ internal fun RunFinishPanel(
                     ) {
                         LiveFigure(
                             label = stringResource(R.string.track_stat_distance),
-                            value = distanceFigure(liveKm, unit),
+                            value = distanceFigure(km, unit),
                             suffix = unit.distanceLabel,
-                            known = liveKm > 0.0,
+                            known = km > 0.0,
                             maxSp = LIVE_FIGURE_MAX_SP,
                             modifier = Modifier.weight(1f),
                         )
@@ -197,11 +199,11 @@ internal fun RunFinishPanel(
                     // A run under the keep threshold says so here, inline: Save keeps
                     // it, Discard drops it, and the effort/type picks are never lost to
                     // a dialog. The threshold reads as a round figure ("0.3 mi").
-                    if (isShortRun(liveKm, elapsedSec)) {
+                    if (isShortRun(km, elapsedSec)) {
                         InlineNotice(
                             stringResource(
                                 R.string.track_short_run_note,
-                                runDistLabel(liveKm, unit),
+                                runDistLabel(km, unit),
                                 shortRunThresholdLabel(unit),
                             ),
                         )

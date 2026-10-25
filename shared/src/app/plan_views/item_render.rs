@@ -279,7 +279,7 @@ impl RunAmount {
             RunAmount::Minutes(m) => Some(format!("{m:.0} min")),
             RunAmount::MinutesRange(lo, hi) => Some(format!("{lo}–{hi} min")),
             RunAmount::PlanKm(k) => Some(fmt_run_km(k)),
-            RunAmount::Km(k) => Some(format!("{k:.1} km")),
+            RunAmount::Km(k) => Some(fmt_km_or_mi(k, false)),
             RunAmount::RunWalk => None,
         }
     }
@@ -287,10 +287,9 @@ impl RunAmount {
     /// The km figure [`Self::label`] shows; `None` when the amount is not a
     /// distance.
     pub(super) fn shown_km(self) -> Option<f64> {
-        let tenths = |km: f64| (km * 10.0).round() / 10.0;
         match self {
-            RunAmount::PlanKm(k) => Some(tenths(f64::from(k))),
-            RunAmount::Km(k) => Some(tenths(k)),
+            RunAmount::PlanKm(k) => Some(shown_km_tenths(f64::from(k))),
+            RunAmount::Km(k) => Some(shown_km_tenths(k)),
             RunAmount::Minutes(_) | RunAmount::MinutesRange(..) | RunAmount::RunWalk => None,
         }
     }
@@ -298,7 +297,7 @@ impl RunAmount {
     /// `keep` of the amount, as a readiness cut shows it, from the shown
     /// (one-decimal) kilometres; `None` when there is no single number to cut.
     pub(super) fn scaled(self, keep: f64) -> Option<RunAmount> {
-        let tenths = |km: f64| (km * 10.0).round() / 10.0;
+        let tenths = shown_km_tenths;
         match self {
             RunAmount::Minutes(m) => Some(RunAmount::Minutes((m * keep).round().max(1.0))),
             RunAmount::PlanKm(k) => Some(RunAmount::Km((tenths(f64::from(k)) * keep).max(0.1))),

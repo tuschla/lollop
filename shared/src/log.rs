@@ -4,9 +4,13 @@
 //!
 //! [`compact_event_log`] drops lines whose effect on the replayed model is
 //! provably nil, returning a shorter but **replay-equivalent** stream (same
-//! relative order of survivors). Six rules (0, 1, 2, 2b, 3, 4), all grounded in
+//! relative order of survivors). Five rules (0, 1, 2, 2b, 3), all grounded in
 //! [`crate::app`]'s `update`, where the model stores only raw inputs and no
-//! event's `update` reads another family's state:
+//! event's `update` reads another family's state, except for figures that are a
+//! pure function of the surviving model and are re-derived whenever their inputs
+//! change (a run's typed-bpm %HRmax from the profile in force at its instant, its
+//! card spike baseline from the runs around it), so dropping a line those
+//! inputs no longer hold cannot change them:
 //!
 //! 0. **An undated `RemoveReadiness` cancels its submit.** It deletes exactly
 //!    the latest prior active `SubmitReadiness` with the same signal, so the
@@ -38,9 +42,9 @@
 //! 1. **A `Clear<F>` supersedes its family.** It empties family `F`'s vec, so
 //!    every `F` event (and the clear) at or before the *last* `Clear<F>` leaves
 //!    no residue, `F` events after it replay against an already-empty vec.
-//!    (A run's `longest_recent_km` reads prior runs, but only within the run
-//!    family and only forward of a clear, so this stays exact.) The review
-//!    family is the exception, see Rule 2.
+//!    The review family is the exception, see Rule 2. One clear line is kept:
+//!    the last `ClearPlan` when no `GeneratePlan` follows it (a no-op on
+//!    replay, but the durable record that the user removed their plan).
 //! 2. **Last write wins for singletons; profile history is eff-keyed; reviews
 //!    are a history.** The calculators assign a `model` field outright, so only
 //!    the last surviving one matters. Every `SubmitReview` and
@@ -52,27 +56,26 @@
 //!    replaces the same store anyway (a later clear of it, or a later payload
 //!    that sets it). Reviews are rare (one per session or week), so keeping
 //!    every line costs the log next to nothing. `SetProfile` is special: `update` keeps a
-//!    `profile_history` and a SetProfile with eff `E` drops every entry with eff
-//!    `>= E`, so a SetProfile line is dead only when a LATER one has eff `<=` it
-//!    (`None` = −∞); ascending-dated profiles all survive, a `None`-dated edit
-//!    replaces the whole history. `SetExerciseEnded` (family 1) additionally
-//!    last-write-wins by exact `(exercise, epoch_day)` key.
+//!    `profile_history` keyed by (effective day, edit instant) and a SetProfile
+//!    drops every entry at or after its own key, so a SetProfile line is dead
+//!    only when a LATER one has a key `<=` it (`None` = −∞); ascending profiles
+//!    all survive, a `None`-dated edit replaces the whole history, and one that
+//!    pins logged runs' %HRmax (a run line survives before it) is a barrier no
+//!    later line kills an earlier one across. `SetExerciseEnded` (family 1)
+//!    additionally last-write-wins by exact `(exercise, epoch_day)` key.
 //!
 //!    2b. **The plan request is keep-FIRST.** `update`'s `GeneratePlan` arm
 //!    keeps the original plan anchor and ignores every later request, so only
 //!    the first surviving `GeneratePlan` matters.
-//! 4. **Check-ins (family 12) age out of a trailing window, PER CHANNEL.**
-//!    `derive_readiness` reads at most the newest `LONG_BASELINE_WINDOW_DAYS`
-//!    (30, its widest channel window) of check-ins, but windows EACH channel
-//!    (wellness / HRV / resting-HR) on THAT channel's OWN newest reading, not
-//!    the log's global newest (a sparse channel last logged long ago is still
-//!    read). So the cutoff anchors on the MIN over channels present of that
-//!    channel's own newest reading: a
-//!    `SubmitCheckin` more than `RETAIN_CHECKIN_DAYS` (45) days before that
-//!    anchor is out of window for EVERY channel it carries, so dropping it is
-//!    provably inert, replay-equivalent and deterministic (the reference is log
-//!    data, never a clock). Family 0 readiness is emphatically NOT windowed: a
-//!    Pain/Illness hold lives until explicitly cleared (HARD RULE 3).
+//!
+//! **Check-ins (family 12) are never windowed.** The view reads a check-in
+//! whenever it is its channel's newest reading on or before the day being
+//! judged, and a later `SetToday` can move today back to any reading's day, so
+//! no check-in outside a `ClearCheckins` (Rule 1) is provably inert for the
+//! events a launch-time compaction is followed by. (Check-ins cost about one
+//! line a day, a small fraction of the never-compacted set log.) Family 0
+//! readiness is not windowed either: a Pain/Illness hold lives until
+//! explicitly cleared (HARD RULE 3).
 //!
 //! This is the authoritative implementation, and the replay-equivalence tests
 //! (`log/tests.rs`) pin its correctness. Because it is *not* exposed over the
@@ -259,18 +262,6 @@ fn line_passes_gate(event: &Event) -> bool {
     }
 }
 
-/// `eff(a) <= eff(b)` for profile effective-from days, treating `None` as −∞ (an
-/// undated profile is effective from the beginning of time). Drives the
-/// profile-history compaction pass (Rule 2) and mirrors `update`'s `profile_history`
-/// reducer, which orders `None` below every dated entry.
-fn le_eff(a: Option<i64>, b: Option<i64>) -> bool {
-    match (a, b) {
-        (None, _) => true,
-        (Some(_), None) => false,
-        (Some(x), Some(y)) => x <= y,
-    }
-}
-
 /// A logged-history line's `(family, entry_id, observed_at)` identity, or `None`
 /// if the event is not a set/run/activity log-or-amend line. Rule 3 matches a
 /// delete/amend against these, the same fields `update`'s `find_set`/`find_run`/
@@ -311,9 +302,8 @@ fn entry_identity(event: &Event) -> Option<(Family, u64, i64)> {
         } => Some((Family::Runs, id(*entry_id), *observed_at)),
         // A trim or meta edit targets its run by (id, observed_at_fallback); it
         // has no observed_at of its own, so identity keys on the fallback (= the
-        // run's observed_at, as the shell sends it). Counting one here makes
-        // `run_line_between` treat it as a run line (conservative spike guard)
-        // and lets a delete's chain-walk find and cancel it.
+        // run's observed_at, as the shell sends it), which lets a delete's
+        // chain-walk find and cancel it.
         Event::TrimRunTrack {
             entry_id,
             observed_at_fallback,
@@ -331,17 +321,6 @@ fn entry_identity(event: &Event) -> Option<(Family, u64, i64)> {
         } => Some((Family::Activities, id(*entry_id), *observed_at)),
         _ => None,
     }
-}
-
-/// Whether any run-family log/amend line sits strictly between indices `i` and
-/// `j`, ignoring indices in `skip` (a delete's own removal chain: those lines
-/// are removed together with the base, so they cannot bake a survivor's
-/// baseline). A run bakes its spike baseline from the runs present when
-/// logged, so any OTHER run line in the window blocks the pair-drop (Rule 3).
-fn run_line_between(events: &[Event], i: usize, j: usize, skip: &[usize]) -> bool {
-    events[i + 1..j].iter().enumerate().any(|(k, e)| {
-        !skip.contains(&(i + 1 + k)) && matches!(entry_identity(e), Some((Family::Runs, _, _)))
-    })
 }
 
 /// Whether `event` is an `AmendSet`/`AmendRun` (an *edit* of an existing entry),
@@ -384,7 +363,7 @@ fn entry_line_matches(event: &Event, fam: Family, id: u64, time: i64) -> bool {
 
 /// Singleton families whose members are last-write-wins. The profile family is
 /// NOT here: it is history-keyed (a dedicated Rule 2 pass keeps the
-/// eff-subsequence that survives `update`'s `profile_history` reducer, not just
+/// key-subsequence that survives `update`'s `profile_history` reducer, not just
 /// the last line). The plan family is NOT here either: `update`'s `GeneratePlan`
 /// arm is first-write-wins (it preserves the original plan anchor), so it is
 /// compacted keep-FIRST by Rule 2b, not last-write-wins. The review family
@@ -402,15 +381,6 @@ const SINGLETONS: [Family; 8] = [
     Family::Today,
 ];
 
-/// Rule 4 retention window: a `SubmitCheckin` more than this many days before the
-/// per-channel anchor is dropped. Chosen safely larger than autoreg's widest
-/// derivation window (`LONG_BASELINE_WINDOW_DAYS`, 30) plus the one day the local
-/// offset can shift a bucket, so every dropped line is already outside every
-/// rolling-baseline window `derive_readiness` reads. Lockstep with
-/// `EventLog.kt::RETAIN_CHECKIN_DAYS`.
-const RETAIN_CHECKIN_DAYS: i64 = 45;
-const _: () = assert!(RETAIN_CHECKIN_DAYS > crate::autoreg::LONG_BASELINE_WINDOW_DAYS + 1);
-
 /// Drop provably-inert events from a persisted log, preserving replay order.
 #[must_use]
 pub fn compact_event_log(events: Vec<Event>) -> Vec<Event> {
@@ -419,12 +389,12 @@ pub fn compact_event_log(events: Vec<Event>) -> Vec<Event> {
     rule0_readiness_removes(&events, &mut remove);
     rule3_entry_edits(&events, &mut remove);
     rule1_clears(&kinds, &mut remove);
+    rule1_keep_final_plan_clear(&events, &mut remove);
     rule2_singletons(&kinds, &mut remove);
     rule2_review_clears(&events, &mut remove);
     rule2_profile_history(&events, &mut remove);
     rule2_exercise_ended(&events, &mut remove);
     rule2b_plan_keep_first(&events, &kinds, &mut remove);
-    rule4_checkin_window(&events, &mut remove);
     events
         .into_iter()
         .zip(remove)
@@ -600,28 +570,15 @@ fn rule3_entry_edits(events: &[Event], remove: &mut [bool]) {
             remove[j] = true;
             continue;
         };
-        // A set or activity carries NO baked cross-entry state (a set's e1RM chain
-        // is derived in `view` from the surviving rows), so removing one is exact.
-        // A RUN bakes `longest_recent_km` from the runs present when it was logged,
-        // so removing a run line could change the baked spike baseline of any run
-        // logged while it was still present: i.e. any run line between the EARLIEST
-        // removed line and this delete/amend. In that case DON'T remove: keeping the
-        // lines is trivially replay-equivalent (only removals can break replay).
+        // No entry carries baked cross-entry state (a set's e1RM chain and a
+        // run's card spike baseline are derived from the surviving rows), so
+        // removing one is exact.
         if target.is_delete {
-            let removal = delete_chain(events, remove, i, &target);
-            // `removal` is searched strictly downward, so its last index is the
-            // earliest line of the chain.
-            let earliest = removal[removal.len() - 1];
-            if fam != Family::Runs || !run_line_between(events, earliest, j, &removal) {
-                for k in removal {
-                    remove[k] = true;
-                }
-                remove[j] = true;
+            for k in delete_chain(events, remove, i, &target) {
+                remove[k] = true;
             }
-            // else: baseline-unsafe → keep the entry and the delete (both survive).
-        } else if is_amend_line(&events[i])
-            && (fam != Family::Runs || !run_line_between(events, i, j, &[]))
-        {
+            remove[j] = true;
+        } else if is_amend_line(&events[i]) {
             // Amend: telescope away a superseded prior AMEND, but keep the base
             // LOG line (the strict amend needs a row to replace on replay). The
             // amend itself always survives: it carries the entry's current values.
@@ -672,6 +629,22 @@ fn rule1_clears(kinds: &[(Family, bool)], remove: &mut [bool]) {
     }
 }
 
+/// Rule 1's one kept clear: the last `ClearPlan` survives when no
+/// `GeneratePlan` follows it, because it is then the log's final plan state.
+/// Replaying it is a no-op on the plan family Rule 1 already emptied, but the
+/// line is the durable record that the user removed their plan: the shell's
+/// boot reads it so a removed plan is not auto-generated again when its own
+/// prefs marker was lost (lockstep with `EventLog.kt`).
+fn rule1_keep_final_plan_clear(events: &[Event], remove: &mut [bool]) {
+    if let Some(last) = events.iter().rposition(|e| matches!(e, Event::ClearPlan))
+        && !events[last + 1..]
+            .iter()
+            .any(|e| matches!(e, Event::GeneratePlan { .. }))
+    {
+        remove[last] = false;
+    }
+}
+
 /// Rule 2: for each [`SINGLETONS`] family, keep only the last surviving member.
 fn rule2_singletons(kinds: &[(Family, bool)], remove: &mut [bool]) {
     for fam in SINGLETONS {
@@ -716,31 +689,58 @@ fn rule2_review_clears(events: &[Event], remove: &mut [bool]) {
 }
 
 /// Rule 2 (profile history): a SetProfile line is dead iff a LATER surviving
-/// SetProfile has eff <= its eff (None = -inf). Mirrors `update`'s
-/// `profile_history` reducer (a SetProfile with eff E drops every history entry
-/// with eff >= E), so the survivors are exactly the entries that remain in
-/// `profile_history` after replay — NOT a plain keep-last singleton: a run of
-/// ascending-dated profiles all survive, and a None-dated edit (-inf) supersedes
-/// the whole history. The last line is never dead (nothing follows it), so
-/// `model.profile` (= the last applied) is always kept. Runs after Rule 1, which
-/// already swept the pre-ClearProfile history.
+/// SetProfile has a history key <= its own ([`profile_key`]), with no pinning
+/// edit in between. Mirrors `update`'s `profile_history` reducer (a SetProfile
+/// supersedes every history entry at or after its key), so the survivors are
+/// exactly the entries that remain in `profile_history` after replay — NOT a
+/// plain keep-last singleton: a run of ascending-dated profiles all survive,
+/// same-day edits made later in the day all survive, and a None-dated edit
+/// (-inf) supersedes the whole history. A None-dated edit also pins the
+/// %HRmax every run logged before it has at that moment, which reads the
+/// history then: once a run line survives before it, it is a barrier no line
+/// at or after it may kill an earlier one across. The last line is never dead
+/// (nothing follows it), so `model.profile` (= the last applied) is always
+/// kept. Runs after Rules 1 and 3, which already swept the pre-ClearProfile
+/// history and the deleted runs.
 fn rule2_profile_history(events: &[Event], remove: &mut [bool]) {
-    let profile_effs: Vec<(usize, Option<i64>)> = events
+    let first_run = events.iter().enumerate().position(|(j, e)| {
+        !remove[j]
+            && matches!(
+                e,
+                Event::LogRun { .. } | Event::LogRunTrack { .. } | Event::AmendRun { .. }
+            )
+    });
+    let profiles: Vec<(usize, &crate::app::Profile)> = events
         .iter()
         .enumerate()
         .filter(|&(j, _)| !remove[j])
         .filter_map(|(j, e)| match e {
-            Event::SetProfile(p) => Some((j, p.effective_from_epoch_day)),
+            Event::SetProfile(p) => Some((j, p)),
             _ => None,
         })
         .collect();
-    for (a, &(j, eff_j)) in profile_effs.iter().enumerate() {
-        if profile_effs[a + 1..]
-            .iter()
-            .any(|&(_, eff_k)| le_eff(eff_k, eff_j))
-        {
-            remove[j] = true;
+    for (a, &(j, p)) in profiles.iter().enumerate() {
+        let key_j = profile_key(p);
+        for &(k, q) in &profiles[a + 1..] {
+            let pins = q.effective_from_epoch_day.is_none() && first_run.is_some_and(|r| r < k);
+            if pins {
+                break;
+            }
+            if profile_key(q) <= key_j {
+                remove[j] = true;
+                break;
+            }
         }
+    }
+}
+
+/// A SetProfile's `profile_history` key, as `update` orders it
+/// (`app::history_key`): (effective day, then `edited_at`), `None` = -inf, and
+/// an undated edit is (-inf, -inf).
+fn profile_key(p: &crate::app::Profile) -> (i64, i64) {
+    match p.effective_from_epoch_day {
+        Some(day) => (day, p.edited_at.unwrap_or(i64::MIN)),
+        None => (i64::MIN, i64::MIN),
     }
 }
 
@@ -793,69 +793,6 @@ fn rule2b_plan_keep_first(events: &[Event], kinds: &[(Family, bool)], remove: &m
     for &j in plan_survivors.iter().skip(1) {
         remove[j] = true;
     }
-}
-
-/// Rule 4: age check-ins (the check-in family) out of a trailing window, PER
-/// CHANNEL. `derive_readiness` windows EACH channel (wellness / HRV /
-/// resting-HR) on THAT channel's own newest reading (`per_day_series` in
-/// `autoreg::derive` takes the max day *among readings that carry the channel's
-/// value* and keeps `newest − day < window`, at most
-/// `LONG_BASELINE_WINDOW_DAYS` = 30): NOT the log's global newest check-in. A
-/// channel last logged long ago (e.g. sparse resting-HR/HRV) is therefore STILL
-/// read on replay, so anchoring the cutoff on the global newest could delete
-/// lines a sparse channel still needs, silently vanishing its readiness row on
-/// the next launch (safety-adjacent, RestingHr/HRV feed the SafetyTier ladder).
-/// Conservative per-channel-safe cutoff: anchor on the MIN over channels
-/// PRESENT of that channel's own newest reading. Any check-in older than
-/// `anchor - RETAIN_CHECKIN_DAYS` is out of window for EVERY channel it carries
-/// (each channel's newest >= the min), so dropping it is provably
-/// replay-equivalent. Reference is surviving-check-in log data, never a clock.
-/// Family 0 readiness is never touched here: HARD RULE 3.
-fn rule4_checkin_window(events: &[Event], remove: &mut [bool]) {
-    let Some(anchor) = checkin_anchor(events, remove) else {
-        return;
-    };
-    let cutoff = anchor - RETAIN_CHECKIN_DAYS * crate::DAY_SEC;
-    for (j, e) in events.iter().enumerate() {
-        if matches!(e, Event::SubmitCheckin(c) if c.observed_at < cutoff) {
-            remove[j] = true;
-        }
-    }
-}
-
-/// Rule 4's anchor: the MIN over the channels present among surviving
-/// check-ins of each channel's newest `observed_at`.
-fn checkin_anchor(events: &[Event], remove: &[bool]) -> Option<i64> {
-    let (mut wellness_newest, mut hrv_newest, mut rhr_newest): (
-        Option<i64>,
-        Option<i64>,
-        Option<i64>,
-    ) = (None, None, None);
-    for (j, e) in events.iter().enumerate() {
-        if remove[j] {
-            continue;
-        }
-        let Event::SubmitCheckin(c) = e else { continue };
-        // `per_day_series` skips `observed_at <= 0` (can't be day-bucketed), so
-        // such readings anchor no channel's window.
-        if c.observed_at <= 0 {
-            continue;
-        }
-        let newer = |n: Option<i64>| Some(n.map_or(c.observed_at, |m| m.max(c.observed_at)));
-        if crate::autoreg::has_wellness(c) {
-            wellness_newest = newer(wellness_newest);
-        }
-        if crate::autoreg::has_hrv(c) {
-            hrv_newest = newer(hrv_newest);
-        }
-        if crate::autoreg::has_rhr(c) {
-            rhr_newest = newer(rhr_newest);
-        }
-    }
-    [wellness_newest, hrv_newest, rhr_newest]
-        .into_iter()
-        .flatten()
-        .min()
 }
 
 #[cfg(test)]

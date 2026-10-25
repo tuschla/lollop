@@ -143,51 +143,68 @@ pub fn parse_fit(bytes: &[u8]) -> Result<FitTrack, FitError> {
     // exporter that appended padding still yields the fixes it did record,
     // instead of failing the whole import on the tail (`from_bytes` is
     // all-or-nothing).
-    let (records, truncated) = decode_records_salvaging(bytes);
-    if let Some(sport) = non_run_sport(&records) {
+    let (mut scan, truncated) = scan_fit(bytes);
+    if let Some(sport) = scan.non_run_sport.take() {
         return Err(FitError::NotARun(sport));
     }
-    track_from_records(&records, truncated)
+    scan.into_track(truncated)
 }
 
-/// Group the positioned `record` fixes into segments (split rule: see
-/// [`parse_fit`]). `truncated` picks the honest message when too few survive.
-fn track_from_records(records: &[FitDataRecord], truncated: bool) -> Result<FitTrack, FitError> {
-    let mut segments: Vec<Vec<FitFix>> = Vec::new();
-    let mut current: Vec<FitFix> = Vec::new();
+/// What [`parse_fit`] keeps of a FIT stream, folded in one record at a time so
+/// no decoded message outlives its own step: the positioned `record` fixes
+/// grouped into segments (split rule: see [`parse_fit`]) and the first
+/// non-running sport named. Peak heap is the fixes (one per positioned record,
+/// each at least 9 wire bytes) plus one decoded message, never the whole file's
+/// messages: a 32 MB file of messages the importer never reads costs one
+/// message's worth.
+#[derive(Default)]
+struct TrackScan {
+    segments: Vec<Vec<FitFix>>,
+    current: Vec<FitFix>,
+    non_run_sport: Option<String>,
+}
 
-    for record in records {
+impl TrackScan {
+    fn push(&mut self, record: &FitDataRecord) {
         match record.kind() {
             MesgNum::Record => {
                 if let Some(fix) = fix_from_record(record) {
-                    current.push(fix);
+                    self.current.push(fix);
                 }
             }
             // A "start" after a stop_all needs no bookkeeping here: the next
             // Record simply accumulates into the fresh `current`.
-            MesgNum::Event if is_timer_event(record, "stop_all") && !current.is_empty() => {
-                segments.push(std::mem::take(&mut current));
+            MesgNum::Event if is_timer_event(record, "stop_all") && !self.current.is_empty() => {
+                self.segments.push(std::mem::take(&mut self.current));
+            }
+            MesgNum::Session | MesgNum::Lap | MesgNum::Sport if self.non_run_sport.is_none() => {
+                self.non_run_sport = non_run_sport(record);
             }
             _ => {}
         }
     }
-    if !current.is_empty() {
-        segments.push(current);
-    }
 
-    let total_fixes: usize = segments.iter().map(Vec::len).sum();
-    if total_fixes < 2 {
-        // Fewer than two positioned records survived, so there is no track worth
-        // logging. A stream/decode error or a rejected chained header means the
-        // file is damaged/incomplete; an otherwise-clean file simply has no GPS.
-        return Err(if truncated {
-            FitError::Damaged
-        } else {
-            FitError::NoTrack
-        });
+    /// The track, or why there is none. `truncated` picks the honest message
+    /// when too few fixes survive.
+    fn into_track(mut self, truncated: bool) -> Result<FitTrack, FitError> {
+        if !self.current.is_empty() {
+            self.segments.push(self.current);
+        }
+        let total_fixes: usize = self.segments.iter().map(Vec::len).sum();
+        if total_fixes < 2 {
+            // Fewer than two positioned records survived, so there is no track worth
+            // logging. A stream/decode error or a rejected chained header means the
+            // file is damaged/incomplete; an otherwise-clean file simply has no GPS.
+            return Err(if truncated {
+                FitError::Damaged
+            } else {
+                FitError::NoTrack
+            });
+        }
+        Ok(FitTrack {
+            segments: self.segments,
+        })
     }
-
-    Ok(FitTrack { segments })
 }
 
 /// The import gate on a parsed track: [`FitError::TooShort`] when its fixes
@@ -240,14 +257,13 @@ fn validate_fit_header(bytes: &[u8]) -> Result<(), FitError> {
     Ok(())
 }
 
-/// Stream records out of a FIT byte slice, stopping at the first stream error or
-/// structurally invalid header and reporting whether one occurred.
+/// Stream a FIT byte slice into a [`TrackScan`], stopping at the first stream
+/// error or structurally invalid header and reporting whether one occurred.
 ///
-/// Mirrors `fitparser::from_bytes`'s object loop but keeps the records decoded
-/// before an error instead of discarding the whole file, so a truncated
-/// recording still surfaces its fixes (see [`parse_fit`]). `parse_fit` uses no
-/// decode options, so unknown messages are decoded and dropped downstream by
-/// `kind()` matching, exactly as before.
+/// Mirrors `fitparser::from_bytes`'s object loop but keeps what decoded before
+/// an error instead of discarding the whole file, so a truncated recording still
+/// surfaces its fixes (see [`parse_fit`]). Each decoded message is folded into
+/// the scan and dropped at once (bounded heap, see [`TrackScan`]).
 ///
 /// A FIT stream may CHAIN several sub-files, each introduced by its own header.
 /// `fitparser` slices `input[0..header_size - 2]` on the raw wire byte for EVERY
@@ -257,21 +273,36 @@ fn validate_fit_header(bytes: &[u8]) -> Result<(), FitError> {
 /// `end_of_messages` with bytes left). Track the same byte offset here and
 /// validate the header at each such boundary (stream start, after each `Crc`,
 /// and after an overrun) before handing the buffer to `fitparser`.
-fn decode_records_salvaging(bytes: &[u8]) -> (Vec<FitDataRecord>, bool) {
-    use fitparser::de::{FitObject, FitStreamProcessor};
+///
+/// Developer fields reach fitparser only as opaque native byte fields
+/// ([`opaque_developer_fields`]): it trusts a developer field's size against
+/// its declared base type (an odd size for a `uint16` overflows its `u8` byte
+/// count, a panic in debug, the rest of the file eaten in release), it fails the
+/// stream on a developer field without a description, and it hands decoded
+/// developer fields back in `HashMap` order under any name an app picks
+/// (`"heart_rate"`). The importer reads none of them. A sub-file whose
+/// definitions were rewritten has its data CRC checked here, over its original
+/// bytes, instead of by fitparser (which saw the rewritten ones).
+fn scan_fit(bytes: &[u8]) -> (TrackScan, bool) {
+    use fitparser::de::{DecodeOption, FitObject, FitStreamProcessor};
 
     let mut processor = FitStreamProcessor::new();
-    let mut records = Vec::new();
+    let mut scan = TrackScan::default();
     let mut buffer = bytes;
     let mut truncated = false;
     let mut expect_header = true;
     // Bytes of `bytes` handed to fitparser so far; equals fitparser's own stream
     // position because every header it sees passed `validate_fit_header`, so its
-    // `header_size` is exactly the bytes it consumed.
+    // `header_size` is exactly the bytes it consumed, and every rewritten
+    // definition is as long as the original.
     let mut consumed = 0usize;
     // Offset where the current sub-file's messages end (fitparser's
     // `end_of_messages`): its CRC sits there.
     let mut end_of_messages = 0usize;
+    // Where the current sub-file's data CRC starts (its header too unless the
+    // header carries its own CRC), and whether this loop checks that CRC.
+    let mut crc_from = 0usize;
+    let mut own_crc_check = false;
     while !buffer.is_empty() {
         if expect_header {
             // Reject a structurally impossible (or non-FIT) chained header before
@@ -282,7 +313,24 @@ fn decode_records_salvaging(bytes: &[u8]) -> (Vec<FitDataRecord>, bool) {
             }
             expect_header = false;
         }
-        let (rest, obj) = match processor.deserialize_next(buffer) {
+        let rewritten = if consumed < end_of_messages {
+            match opaque_developer_fields(buffer) {
+                Ok(def) => def,
+                // Too many fields to renumber: stop, keeping what decoded.
+                Err(TooManyFields) => {
+                    truncated = true;
+                    break;
+                }
+            }
+        } else {
+            None
+        };
+        if rewritten.is_some() && !own_crc_check {
+            processor.add_option(DecodeOption::SkipDataCrcValidation);
+            own_crc_check = true;
+        }
+        let input = rewritten.as_deref().unwrap_or(buffer);
+        let (rest, obj) = match processor.deserialize_next(input) {
             Ok(next) => next,
             // Missing trailing CRC, a cut-off final record, or trailing padding:
             // stop, keeping everything decoded so far.
@@ -291,47 +339,138 @@ fn decode_records_salvaging(bytes: &[u8]) -> (Vec<FitDataRecord>, bool) {
                 break;
             }
         };
+        let advanced = input.len() - rest.len();
         match obj {
             // End of one sub-file; the next bytes (if any) open a new header.
-            FitObject::Crc(..) => {
+            FitObject::Crc(stored) => {
+                if own_crc_check && fit_crc(&bytes[crc_from..end_of_messages]) != stored {
+                    truncated = true;
+                    break;
+                }
                 processor.reset();
                 expect_header = true;
             }
             FitObject::DataMessage(msg) => match processor.decode_message(msg) {
-                Ok(rec) => records.push(rec),
+                Ok(rec) => scan.push(&rec),
                 Err(_) => {
                     truncated = true;
                     break;
                 }
             },
             FitObject::Header(header) => {
+                let header_size = usize::from(header.header_size());
                 end_of_messages = consumed
-                    .saturating_add(usize::from(header.header_size()))
+                    .saturating_add(header_size)
                     .saturating_add(header.data_size() as usize);
+                crc_from = if header.crc().unwrap_or(0) > 0 {
+                    consumed + header_size
+                } else {
+                    consumed
+                };
+                if own_crc_check {
+                    processor.remove_option(DecodeOption::SkipDataCrcValidation);
+                    own_crc_check = false;
+                }
             }
             FitObject::DefinitionMessage(..) => {}
         }
         // Defensive: a non-advancing decode would spin the loop forever; treat a
         // stalled stream as truncated.
-        if rest.len() >= buffer.len() {
+        if advanced == 0 {
             truncated = true;
             break;
         }
-        consumed += buffer.len() - rest.len();
+        consumed += advanced;
         // A message overran the declared data size: fitparser parses the next
         // bytes as a chained header without any CRC first.
         if consumed > end_of_messages {
             expect_header = true;
         }
-        buffer = rest;
+        buffer = &buffer[advanced..];
     }
-    (records, truncated)
+    (scan, truncated)
 }
 
-/// The first sport named by a `session`, `lap` or `sport` message that is not
+/// A definition message whose developer fields can't all be renumbered as
+/// native fields (see [`opaque_developer_fields`]).
+struct TooManyFields;
+
+/// Native field numbers no message of the FIT profile fitparser 0.11 decodes
+/// uses (its generated `profile::decode` names numbers up to 210, then 250,
+/// 253 and 254): a developer field renumbered to one of these decodes as an
+/// `unknown_field_N` byte array, never as a named native field.
+const OPAQUE_FIELD_NUMBERS: std::ops::RangeInclusive<u8> = 211..=249;
+
+/// FIT base type `byte` (0x0D): an array of raw bytes, valid at any size.
+const FIT_BASE_TYPE_BYTE: u8 = 0x0D;
+
+/// If `buffer` starts with a complete definition message that declares
+/// developer fields, a copy of it with every developer field turned into a
+/// native `byte` field of the same size (numbered from
+/// [`OPAQUE_FIELD_NUMBERS`], skipping the definition's own field numbers) and a
+/// developer-field count of 0. Same length, and the fields keep their order
+/// (native first, then the former developer fields), so every data message of
+/// this local type still decodes to the same bytes, just never as a developer
+/// field. `None` when there is nothing to rewrite (another message, or a
+/// definition cut short, which fitparser reports itself).
+fn opaque_developer_fields(buffer: &[u8]) -> Result<Option<Vec<u8>>, TooManyFields> {
+    // Record header: bit 7 clear (normal header), bit 6 definition, bit 5
+    // developer data. Then reserved, architecture, global number (2), the
+    // native field count and 3 bytes per field, the developer field count and 3
+    // bytes per developer field.
+    let Some(&header) = buffer.first() else {
+        return Ok(None);
+    };
+    if header & 0xE0 != 0x60 || buffer.len() < 6 {
+        return Ok(None);
+    }
+    let native = usize::from(buffer[5]);
+    let dev_count_at = 6 + 3 * native;
+    let Some(&dev_count) = buffer.get(dev_count_at) else {
+        return Ok(None);
+    };
+    let dev = usize::from(dev_count);
+    let end = dev_count_at + 1 + 3 * dev;
+    if dev == 0 || buffer.len() < end {
+        return Ok(None);
+    }
+    let Ok(total) = u8::try_from(native + dev) else {
+        return Err(TooManyFields);
+    };
+    let taken: Vec<u8> = buffer[6..dev_count_at]
+        .chunks_exact(3)
+        .map(|f| f[0])
+        .collect();
+    let mut free = OPAQUE_FIELD_NUMBERS.filter(|n| !taken.contains(n));
+    let mut out = Vec::with_capacity(end);
+    out.extend_from_slice(&buffer[..5]);
+    out.push(total);
+    out.extend_from_slice(&buffer[6..dev_count_at]);
+    for field in buffer[dev_count_at + 1..end].chunks_exact(3) {
+        let number = free.next().ok_or(TooManyFields)?;
+        out.extend_from_slice(&[number, field[1], FIT_BASE_TYPE_BYTE]);
+    }
+    out.push(0);
+    Ok(Some(out))
+}
+
+/// The FIT SDK's CRC-16 (nibble-table form), as fitparser checks a sub-file's
+/// data CRC.
+fn fit_crc(data: &[u8]) -> u16 {
+    const T: [u16; 16] = [
+        0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401, 0xA001, 0x6C00, 0x7800,
+        0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
+    ];
+    data.iter().fold(0u16, |crc, &b| {
+        let crc = (crc >> 4) ^ T[usize::from(crc & 0xF)] ^ T[usize::from(b & 0xF)];
+        (crc >> 4) ^ T[usize::from(crc & 0xF)] ^ T[usize::from(b >> 4)]
+    })
+}
+
+/// The sport a `session`, `lap` or `sport` message names when it is not
 /// running-family, as plain lowercase words (`cross_country_skiing` →
-/// `"cross country skiing"`); `None` when every such message is a run or names
-/// no concrete sport.
+/// `"cross country skiing"`); `None` when it is a run or names no concrete
+/// sport. [`TrackScan`] keeps the first such sport of the file.
 ///
 /// fitparser resolves a named enum value to its snake_case FIT-profile string
 /// and leaves an unnamed one numeric, so a non-string value is an unknown sport
@@ -340,26 +479,21 @@ fn decode_records_salvaging(bytes: &[u8]) -> (Vec<FitDataRecord>, bool) {
 /// run-on-fitness-equipment marker, so it counts as a run whatever the parent
 /// sport says; any other sub-sport of `running` (trail, street, track, …) is a
 /// run by its parent.
-fn non_run_sport(records: &[FitDataRecord]) -> Option<String> {
-    records
-        .iter()
-        .filter(|r| matches!(r.kind(), MesgNum::Session | MesgNum::Lap | MesgNum::Sport))
-        .find_map(|record| {
-            let mut sport: Option<&str> = None;
-            let mut treadmill = false;
-            for field in record.fields() {
-                match (field.name(), field.value()) {
-                    ("sport", Value::String(s)) => sport = Some(s.as_str()),
-                    ("sub_sport", Value::String(s)) => treadmill = s.as_str() == "treadmill",
-                    _ => {}
-                }
-            }
-            match sport {
-                None | Some("running" | "generic" | "all") => None,
-                Some(_) if treadmill => None,
-                Some(other) => Some(other.replace('_', " ")),
-            }
-        })
+fn non_run_sport(record: &FitDataRecord) -> Option<String> {
+    let mut sport: Option<&str> = None;
+    let mut treadmill = false;
+    for field in record.fields() {
+        match (field.name(), field.value()) {
+            ("sport", Value::String(s)) => sport = Some(s.as_str()),
+            ("sub_sport", Value::String(s)) => treadmill = s.as_str() == "treadmill",
+            _ => {}
+        }
+    }
+    match sport {
+        None | Some("running" | "generic" | "all") => None,
+        Some(_) if treadmill => None,
+        Some(other) => Some(other.replace('_', " ")),
+    }
 }
 
 /// True when a FIT `event` message is `event == "timer"` with the given

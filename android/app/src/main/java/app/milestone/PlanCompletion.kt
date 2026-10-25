@@ -1085,16 +1085,13 @@ internal fun SetLoopHeader(
             // The rest length is not repeated here: the rest readout counts it.
             val band = if (item != null && !done) setTargetBand(LocalContext.current.resources, item) else ""
             // The set count and the target share the line as two texts, so the
-            // count stays its own readable node.
-            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            // count stays its own readable node. When the rest readout leaves too
+            // little room beside the count (a narrow phone at a large font), the
+            // target moves under it whole instead of breaking inside its words.
+            FlowRow(modifier = Modifier.weight(1f), itemVerticalAlignment = Alignment.CenterVertically) {
                 Text(title, color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
                 if (band.isNotBlank()) {
-                    Text(
-                        " \u00b7 $band",
-                        color = OnBgMuted,
-                        style = Type.Body,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
+                    Text(" \u00b7 $band", color = OnBgMuted, style = Type.Body)
                 }
             }
             RestReadout(lastSetSec, item?.rest_sec ?: 0)
@@ -1142,12 +1139,13 @@ internal fun SetLoopHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
             ) {
+                // Wraps rather than clips: at 200 % font the whole set ("Last: 100 kg
+                // × 3 · 3 reps left") no longer fits one line beside "Edit".
                 Text(
                     shown,
                     color = OnBgMuted,
                     style = Type.Caption.merge(TabularFigures),
                     modifier = Modifier.weight(1f),
-                    maxLines = 1,
                 )
                 Text(
                     stringResource(R.string.log_edit),

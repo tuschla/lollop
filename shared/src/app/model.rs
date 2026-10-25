@@ -25,19 +25,46 @@ pub(super) struct LoggedSet {
     pub(super) hold_sec: Option<u16>,
 }
 
+impl LoggedSet {
+    /// The one log order for sets, never their storage slot (an Undo or amend
+    /// re-pushes a row at the tail): log time, then the stable `entry_id`,
+    /// then the set's content, so two same-second sets (an import, a double
+    /// tap, a legacy `entry_id == 0` pair) still order the same way every time.
+    pub(super) fn chrono_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.observed_at
+            .cmp(&other.observed_at)
+            .then(self.entry_id.cmp(&other.entry_id))
+            .then_with(|| self.exercise.cmp(&other.exercise))
+            .then(self.weight_kg.total_cmp(&other.weight_kg))
+            .then(self.reps.cmp(&other.reps))
+            .then(self.rpe.total_cmp(&other.rpe))
+            .then(self.hold_sec.cmp(&other.hold_sec))
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct LoggedRun {
     /// Manual distance; ignored when `track` is non-empty (derived instead).
     pub(super) distance_km: f64,
     /// Manual duration; ignored when `track` is non-empty (derived instead).
     pub(super) duration_min: f64,
+    /// Average %HRmax: the wire figure, or for a typed bpm its conversion
+    /// against the HRmax of the profile in force at the run's instant
+    /// (`ingest::derived_hr_pct_max`), re-derived whenever the profile history
+    /// changes so it never depends on log order (unless `hr_pinned`).
     pub(super) hr_pct_max: f64,
-    /// Spike baseline baked at ingest (max of the caller-supplied paired-history
-    /// value and the 30-day-longest at log time). Drives the run CARD's
-    /// descriptive spike chip only; the spike SAFETY GATE derives its baseline
-    /// fresh from `model.runs` at view() time so deleting the baseline run
-    /// re-arms it (see `latest_run_spike`).
+    /// The wire `hr_pct_max` (sanitized), which stands when no bpm conversion
+    /// applies.
+    pub(super) wire_hr_pct_max: f64,
+    /// Card spike baseline: the longest OTHER run in this run's trailing
+    /// 30-day window, floored by the caller-supplied paired-history value,
+    /// re-derived whenever a run in that window changes
+    /// (`ingest::refresh_spike_baselines`). Drives the run CARD's descriptive
+    /// spike chip only; the spike SAFETY GATE derives its baseline at view()
+    /// time from `model.runs` (see `latest_run_spike`).
     pub(super) longest_recent_km: f64,
+    /// The caller-supplied paired-history spike baseline (sanitized, >= 0).
+    pub(super) wire_longest_recent_km: f64,
     /// GPS fixes for a tracked run; empty for a hand-entered run.
     pub(super) track: Vec<GpsPoint>,
     /// Indices into `track` that BEGIN a new recording segment: the first
@@ -51,6 +78,17 @@ pub(super) struct LoggedRun {
     /// Stable per-entry identity; see [`LoggedSet::entry_id`]. 0 =
     /// legacy/absent → matched on `observed_at` instead.
     pub(super) entry_id: u64,
+    /// The device's UTC offset when the row was logged (the wire
+    /// `utc_offset_sec` the shell stamps; an amend keeps the original row's).
+    /// The %HRmax conversion reads the run's local day with it, so a later
+    /// time-zone change never re-converts the run. `None` (a legacy row) =
+    /// the clock's current offset.
+    pub(super) logged_utc_offset_sec: Option<i64>,
+    /// A legacy undated `SetProfile` arrived after this row was logged: its
+    /// `hr_pct_max` stays the figure it had then (the edit applies from its
+    /// position in the log, not to runs already logged). Cleared by
+    /// `ClearProfile`.
+    pub(super) hr_pinned: bool,
     /// User-declared run-intent label. USER DATA, carries no evidence of its
     /// own: history display, and the weekly hard-session checks honor it as
     /// the session's declared goal (running-012/023). `None` = untagged; never
@@ -242,9 +280,19 @@ pub struct Profile {
     /// editing a goal or weekly-set target never re-prescribes an already-shown
     /// past day. `None` (wire default) = effective from the beginning of time
     /// (−∞): a None-dated edit replaces the whole history, matching a shell that
-    /// predates dated profiles. Production shells send the core's today.
+    /// predates dated profiles, but applies only from its position in the log
+    /// to logged runs (it pins the %HRmax of the runs already logged,
+    /// `LoggedRun::hr_pinned`). Production shells send the core's today.
     #[serde(default)]
     pub effective_from_epoch_day: Option<i64>,
+    /// When the edit was made, unix seconds (the shell's clock). On its
+    /// effective day the edit is in force only from this instant, so an
+    /// evening edit leaves a run logged that morning on the profile it was
+    /// logged under ([`profile_at`]); it also orders same-day edits in the
+    /// history. `None` (wire default, legacy) = from the start of that day.
+    /// Ignored on an undated edit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_at: Option<i64>,
     /// Lifting sessions per week the athlete commits to, 2..=5. `None` (wire
     /// default) = the legacy fixed lift layout, so old profiles plan unchanged.
     #[serde(default)]
@@ -878,11 +926,19 @@ pub enum Event {
         session_rpe: Option<u8>,
         /// Average heart rate in bpm as the user's watch shows it (UXL-12). When
         /// set and plausible, `update` converts it to `hr_pct_max` against the
-        /// profile's measured HRmax, else the Tanaka age estimate (RUN-HRMAX-001);
-        /// with neither known the sent `hr_pct_max` stands. `#[serde(default)]`
+        /// measured HRmax, else the Tanaka age estimate (RUN-HRMAX-001), of the
+        /// profile in force at the run's instant (re-derived when the profile
+        /// history changes); with neither known the sent `hr_pct_max` stands.
+        /// `#[serde(default)]`
         /// → `None` for old logs and shells.
         #[serde(default)]
         avg_hr_bpm: Option<f64>,
+        /// The device's UTC offset, seconds east, when the run was logged. The
+        /// bpm conversion reads the run's local day with it, so a later
+        /// time-zone change never re-converts the run. `None` (old logs and
+        /// shells; omitted from the wire) = the clock's current offset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        utc_offset_sec: Option<i64>,
     },
     /// Log one GPS-tracked run. Distance and duration are derived in-core from
     /// the fix track (haversine + time span); `hr_pct_max` comes from a paired
@@ -917,6 +973,9 @@ pub enum Event {
         /// Average heart rate the athlete entered, bpm; see [`Event::LogRun`].
         #[serde(default)]
         avg_hr_bpm: Option<f64>,
+        /// The device's UTC offset when the run was logged; see [`Event::LogRun`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        utc_offset_sec: Option<i64>,
     },
     /// Drop all logged runs.
     ClearRuns,
@@ -1221,45 +1280,99 @@ pub(super) fn find_activity(acts: &[LoggedActivity], id: u64, observed_at: i64) 
     }
 }
 
-/// Ordering key for a profile edit's effective day: `None` = −∞
-/// (`i64::MIN`), so a None-dated edit precedes every dated one and, on apply,
-/// replaces the whole history.
-pub(super) fn eff_key(eff: Option<i64>) -> i64 {
-    eff.unwrap_or(i64::MIN)
+/// A profile-history entry's position: its effective day (`None` = −∞ as
+/// `i64::MIN`), then the instant it was made (`edited_at`; `None`, or any
+/// undated edit, = the start of that day). The history is kept ascending by
+/// this key: an edit supersedes every entry at or after its own key (an
+/// undated one the whole history), so a later same-day edit leaves the earlier
+/// one in force for the part of the day before it.
+pub(super) fn history_key(p: &Profile) -> (i64, i64) {
+    match p.effective_from_epoch_day {
+        Some(day) => (day, p.edited_at.unwrap_or(i64::MIN)),
+        None => (i64::MIN, i64::MIN),
+    }
 }
 
-/// The profile effective on local day `day`: the latest history entry with
-/// `effective_from_epoch_day <= day` (None = −∞ always qualifies). When every
-/// entry is dated strictly after `day` (a plan day before the first edit), the
-/// earliest entry is used so the day still has a profile. Falls back to
-/// `model.profile` only when the history is empty (defensive; every applied
-/// `SetProfile` populates the history).
-pub(super) fn profile_for_day(model: &Model, day: i64) -> Option<&Profile> {
-    if model.profile_history.is_empty() {
-        return model.profile.as_ref();
-    }
-    model
-        .profile_history
-        .iter()
-        .filter(|p| eff_key(p.effective_from_epoch_day) <= day)
-        .max_by_key(|p| eff_key(p.effective_from_epoch_day))
-        .or_else(|| model.profile_history.first())
+/// The profile effective on local day `day`: the latest history entry whose
+/// effective day ([`history_key`]) is `<= day`. When every entry is dated
+/// strictly after `day` (a plan day before the first edit), the earliest entry
+/// is used so the day still has a profile. Falls back to `model.profile` only
+/// when the history is empty (defensive; every applied `SetProfile` populates
+/// the history). A birthday-carrying profile is aged for `day` itself
+/// (`ingest::aged_on`), so a day the under-18 gate held keeps its gate after
+/// the 18th birthday.
+pub(super) fn profile_for_day(model: &Model, day: i64) -> Option<std::borrow::Cow<'_, Profile>> {
+    in_force(model, day, |_| true)
+}
+
+/// The profile in force at instant `at` (unix seconds) on a clock at UTC
+/// offset `utc_offset_sec`: [`profile_for_day`] of `at`'s local day, except
+/// that an edit made later that same day (its `edited_at` after `at`, on its
+/// history day) is not in force yet.
+pub(super) fn profile_at(
+    model: &Model,
+    at: i64,
+    utc_offset_sec: i64,
+) -> Option<std::borrow::Cow<'_, Profile>> {
+    let day = crate::local_day(at, utc_offset_sec);
+    in_force(model, day, |p| {
+        !p.edited_at.is_some_and(|t| {
+            t > at && history_key(p).0 == day && crate::local_day(t, utc_offset_sec) == day
+        })
+    })
+}
+
+/// The latest history entry with history day `<= day` that `admit` lets in
+/// (else the earliest entry), aged for `day`.
+fn in_force(
+    model: &Model,
+    day: i64,
+    admit: impl Fn(&Profile) -> bool,
+) -> Option<std::borrow::Cow<'_, Profile>> {
+    let p = if model.profile_history.is_empty() {
+        model.profile.as_ref()
+    } else {
+        model
+            .profile_history
+            .iter()
+            .rev()
+            .find(|p| history_key(p).0 <= day && admit(p))
+            .or_else(|| model.profile_history.first())
+    }?;
+    Some(super::ingest::aged_on(p, day))
 }
 
 /// The local day `p`'s `stated_longest_recent_km` was first stated: the
 /// effective day of the earliest unbroken run of profile-history entries
 /// ending at `p` that all carry the same value, so re-saving the profile with
 /// the answer unchanged never makes it look fresh. `None` when unstated or
-/// undated.
+/// undated. `p` is located by its [`history_key`] (unique in the history), so
+/// a day-aged copy from `profile_for_day` finds its entry.
 pub(super) fn stated_longest_since(model: &Model, p: &Profile) -> Option<i64> {
-    let km = p.stated_longest_recent_km?;
+    stated_since(model, p, |q| q.stated_longest_recent_km)
+}
+
+/// The local day `p`'s `running_km_per_week` was first stated, like
+/// [`stated_longest_since`]; `None` when unset (0) or undated.
+pub(super) fn stated_weekly_since(model: &Model, p: &Profile) -> Option<i64> {
+    stated_since(model, p, |q| {
+        Some(q.running_km_per_week).filter(|km| *km > 0.0)
+    })
+}
+
+fn stated_since(
+    model: &Model,
+    p: &Profile,
+    field: impl Fn(&Profile) -> Option<f64>,
+) -> Option<i64> {
+    let km = field(p)?;
     let h = &model.profile_history;
-    let Some(end) = h.iter().position(|q| std::ptr::eq(q, p)) else {
+    let Some(end) = h.iter().position(|q| history_key(q) == history_key(p)) else {
         return p.effective_from_epoch_day;
     };
     let start = h[..end]
         .iter()
-        .rposition(|q| q.stated_longest_recent_km != Some(km))
+        .rposition(|q| field(q) != Some(km))
         .map_or(0, |i| i + 1);
     h[start].effective_from_epoch_day
 }

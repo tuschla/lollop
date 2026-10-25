@@ -1,35 +1,29 @@
 use super::*;
 
-/// The hold that keeps the plan calculators (hypertrophy plan, APRE) from
-/// giving load or volume numbers: the first Stage-0 onboarding gate, else a
-/// RED-S signal (onboard-050 "gates BEFORE any prescription"; safety-011 no
-/// autonomous loading for minors; safety-045 none in pregnancy; safety-049 no
-/// volume or intensity increase under RED-S).
+/// The hold that keeps the plan calculators (hypertrophy plan, APRE) and the
+/// prescriptive guidance from giving load or volume numbers: today's training
+/// hold (`SafetyState::hold`: a profile gate, a readiness Stop / RestDay /
+/// Defer, or a weekly-check-in deferral; the same call that blocks Today),
+/// else a RED-S signal (onboard-050 "gates BEFORE any prescription";
+/// safety-011 no autonomous loading for minors; safety-040/043 defer "before
+/// prescribing"; safety-045 none in pregnancy; safety-049 no volume or
+/// intensity increase under RED-S; autoreg-046 no training with a fever).
 pub(in crate::app) fn calculator_hold(
-    profile: Option<&Profile>,
+    training_hold: Option<&Recommended<Adjustment>>,
     reds_present: bool,
 ) -> Option<Recommended<Adjustment>> {
-    profile
-        .and_then(|p| {
-            individualization::onboarding_gates(&p.health)
-                .into_iter()
-                .next()
-        })
-        .or_else(|| {
-            reds_present.then(|| {
-                graded(
-                    Adjustment::Defer {
-                        reason: String::new(),
-                    },
-                    claims::SAFE_REDS_001,
-                )
-            })
-        })
+    training_hold
+        .cloned()
+        .or_else(|| reds_present.then(autoreg::reds_referral))
 }
 
-/// The single row a held calculator shows instead of numbers, carrying the
-/// hold's own evidence.
-fn push_hold_row(rows: &mut Vec<GuidanceView>, section: &str, hold: &Recommended<Adjustment>) {
+/// The single row a held calculator or guidance list shows instead of
+/// numbers, carrying the hold's own evidence.
+pub(in crate::app) fn push_hold_row(
+    rows: &mut Vec<GuidanceView>,
+    section: &str,
+    hold: &Recommended<Adjustment>,
+) {
     push_guidance(
         rows,
         section,
@@ -141,15 +135,16 @@ fn block_ramp(
     let mut planned = hypertrophy::weekly_targets(lm, stated, role, weeks);
     let mut session_trimmed = false;
     // A profile that runs the hypertrophy week reads the plan's own targets,
-    // already fitted to the whole-session cap (HYP-VOL-CAP-001), week by week.
+    // already fitted to the whole-session cap (HYP-VOL-CAP-001) block-wide.
     if let (Some(p), Some(ta)) = (profile, ta)
         && crate::plan::uses_double_progression(p)
     {
         let days = crate::plan::week_shape(p).lift_days;
-        let fitted: Vec<u8> = (1..=weeks)
-            .map(|w| {
-                crate::plan::hypertrophy_week_targets(p, ta, w, weeks, days)
-                    .iter()
+        let fitted: Vec<u8> = crate::plan::hypertrophy_block_targets(p, ta, weeks, days)
+            .iter()
+            .take(usize::from(weeks))
+            .map(|week| {
+                week.iter()
                     .find(|t| t.muscle == lm.muscle)
                     .map_or(0, |t| t.target)
             })

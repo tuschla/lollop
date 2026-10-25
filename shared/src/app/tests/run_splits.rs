@@ -117,7 +117,9 @@ fn negative_split_note_reads_as_a_magnitude_not_a_signed_number() {
         distance_km: 0.0,
         duration_min: 0.0,
         hr_pct_max: 70.0,
+        wire_hr_pct_max: 70.0,
         longest_recent_km: 12.0,
+        wire_longest_recent_km: 12.0,
         track: stretch(&[
             GpsPoint {
                 lat: 0.0,
@@ -153,6 +155,8 @@ fn negative_split_note_reads_as_a_magnitude_not_a_signed_number() {
         track_segment_starts: Vec::new(),
         observed_at: 0,
         entry_id: 0,
+        logged_utc_offset_sec: None,
+        hr_pinned: false,
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: None,
@@ -264,7 +268,9 @@ fn positive_split_note_reads_as_a_back_half_slowdown() {
         distance_km: 0.0,
         duration_min: 0.0,
         hr_pct_max: 70.0,
+        wire_hr_pct_max: 70.0,
         longest_recent_km: 12.0,
+        wire_longest_recent_km: 12.0,
         // Front half (0 → 0.002° over 40 s) is fast; back half
         // (0.002 → 0.004° over 100 s) is slow, a clear back-half slowdown.
         track: vec![
@@ -302,6 +308,8 @@ fn positive_split_note_reads_as_a_back_half_slowdown() {
         track_segment_starts: Vec::new(),
         observed_at: 0,
         entry_id: 0,
+        logged_utc_offset_sec: None,
+        hr_pinned: false,
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: None,
@@ -409,11 +417,15 @@ fn manual_run_has_no_split_verdict() {
         distance_km: 8.0,
         duration_min: 45.0,
         hr_pct_max: 70.0,
+        wire_hr_pct_max: 70.0,
         longest_recent_km: 10.0,
+        wire_longest_recent_km: 10.0,
         track: vec![],
         track_segment_starts: Vec::new(),
         observed_at: 0,
         entry_id: 0,
+        logged_utc_offset_sec: None,
+        hr_pinned: false,
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: None,

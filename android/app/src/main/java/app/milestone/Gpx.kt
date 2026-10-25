@@ -13,19 +13,23 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import org.xmlpull.v1.XmlPullParser
+import org.xmlpull.v1.XmlPullParserException
 import java.io.StringReader
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.LocalDateTime
 import java.time.ZoneOffset
+import java.util.Locale
 
 // Minimal GPX 1.0/1.1 track reader for two shell jobs: rendering a saved run's
 // route (parsing the core-produced GPX from [Core.exportGpx] back into points) and
 // importing a run recorded elsewhere (Garmin/Strava/Komoot exports). Reads only
-// `<trk>/<trkseg>/<trkpt>`, lat/lon attributes, the optional `<time>`, and an
+// `<trk>/<trkseg>/<trkpt>`, lat/lon attributes, the optional `<time>`, an
 // optional heart-rate sample from the common Garmin TrackPointExtension
-// (`<gpxtpx:hr>`, matched by local name so any namespace prefix works).
-// Everything else (waypoints, routes, metadata) is ignored.
+// (`<gpxtpx:hr>`, matched by local name so any namespace prefix works), the
+// track's `<type>` (Strava/Garmin name the sport there) and lollop's own
+// `<trk><extensions><lollop:logged_at>` stamp. Everything else (waypoints,
+// routes, metadata) is ignored.
 
 /**
  * [accuracyM] is the fix's horizontal accuracy in metres when the source file
@@ -66,8 +70,64 @@ internal fun hdopToAccuracyM(raw: String): Double? {
     return hdop * GPS_UERE_NOMINAL_M
 }
 
+/**
+ * One run read from an import file (one per TCX `<Activity>`, else one per file).
+ *
+ * - [segments]: one list of fixes per recording segment; segments mark pauses.
+ * - [sport]: the sport the file names for it, verbatim (TCX `<Activity Sport>`, GPX
+ *   `<trk><type>`), or null when it names none. [importedRunEvent] refuses a
+ *   recognised non-running sport ([nonRunSport]). A FIT file's sport is gated in
+ *   the core, so FIT runs carry null.
+ * - [loggedAtSec]: the run's logged-at stamp when the file is lollop's own GPX
+ *   export (`<lollop:logged_at>`), else null. The stamp can sit after the last
+ *   fix (the core's QC drops a standing-still finish; a trim cuts the end while
+ *   the run keeps its stamp), and it is what identifies the run as already logged.
+ */
+internal data class ImportedRun(
+    val segments: List<List<GpxFix>>,
+    val sport: String? = null,
+    val loggedAtSec: Long? = null,
+)
+
+/**
+ * The non-running sport an import file names for an activity ([ImportedRun.sport]),
+ * as plain lowercase words for [ImportFailure.NotARun]'s detail ("cycling", like the
+ * core's FIT gate); null when it names a run or nothing this reader recognises.
+ *
+ * TCX's `Sport` is `Running`/`Biking`/`Other`, but a GPX `<type>` is free text in any
+ * language ("running", "Ride", "trail_running", "Laufen", "1"). So, unlike the FIT
+ * enum, only a recognised non-running sport is refused: an unknown label stays
+ * importable (the implausible-pace gate still guards fast tracks), and a label that
+ * names running in any word wins over everything else.
+ */
+internal fun nonRunSport(declared: String?): String? {
+    val words = declared.orEmpty().lowercase(Locale.ROOT).split(NON_WORD).filter { it.isNotEmpty() }
+    if (words.any { "run" in it || "jog" in it }) return null
+    fun named(test: (String) -> Boolean) = words.any(test)
+    return when {
+        named { "cycl" in it || it.startsWith("bik") || "bike" in it || "biking" in it || it in RIDE_WORDS } -> "cycling"
+        named { it.startsWith("swim") } -> "swimming"
+        named { it.startsWith("ski") || it.endsWith("ski") || "skiing" in it } -> "skiing"
+        named { it.startsWith("hik") } -> "hiking"
+        named { it.startsWith("walk") } -> "walking"
+        else -> null
+    }
+}
+
+private val NON_WORD = Regex("[^\\p{L}\\p{N}]+")
+
+/** Strava's ride sport types no stem above catches, lowercased ("Ride",
+ *  "VirtualRide", "GravelRide", "Velomobile"); the bike/cycle/ski compounds
+ *  ("MountainBikeRide", "EBikeRide", "Handcycle", "NordicSki", "RollerSki")
+ *  match the stems. */
+private val RIDE_WORDS = setOf("ride", "virtualride", "gravelride", "velomobile")
+
 /** One list of fixes per `<trkseg>`; segments mark recording pauses. */
-fun parseGpx(text: String): List<List<GpxFix>> {
+fun parseGpx(text: String): List<List<GpxFix>> = parseGpxRun(text).segments
+
+/** The whole GPX as one run: its segments ([parseGpx]), the first `<trk>`'s
+ *  `<type>` as [ImportedRun.sport] and lollop's `<lollop:logged_at>` stamp. */
+internal fun parseGpxRun(text: String): ImportedRun {
     val parser = Xml.newPullParser().apply {
         setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         setInput(StringReader(text))
@@ -80,19 +140,41 @@ fun parseGpx(text: String): List<List<GpxFix>> {
     // the already-committed segment; silently merging waypoints/route noise
     // into a recorded run.
     var inTrk = false
+    var trkDepth = 0
     var inTrkseg = false
+    var sport: String? = null
+    var loggedAtSec: Long? = null
     var inTrkpt = false
     var lat = 0.0
     var lon = 0.0
     var timeSec = 0L
     var hr: Int? = null
     var accuracyM: Double? = null
+    // A cut-off download often ends right after a tag: the pull parser then
+    // reaches END_DOCUMENT without throwing, with `<trkseg>/<trk>/<gpx>` still
+    // open and only the segments closed so far parsed. Only a closed root
+    // proves the file is whole; anything else is Damaged (thrown as the parse
+    // error the caller maps to it), never a shorter run.
+    var rootClosed = false
     var event = parser.eventType
     while (event != XmlPullParser.END_DOCUMENT) {
         val name = parser.name?.substringAfterLast(':')
+        if (event == XmlPullParser.START_TAG) checkImportDepth(parser)
         when (event) {
             XmlPullParser.START_TAG -> when (name) {
-                "trk" -> inTrk = true
+                "trk" -> {
+                    inTrk = true
+                    trkDepth = parser.depth
+                }
+                // The track's own `<type>` only: a `<link>` inside `<trk>` has a
+                // `<type>` (a MIME type) one level deeper, and so does a `<trkpt>`.
+                "type" -> if (inTrk && parser.depth == trkDepth + 1) {
+                    val declared = parser.nextText().trim()
+                    if (sport == null && declared.isNotEmpty()) sport = declared
+                }
+                "logged_at" -> if (inTrk && !inTrkseg) {
+                    loggedAtSec = parseImportTimeSec(parser.nextText()).takeIf { it > 0L }
+                }
                 "trkseg" -> if (inTrk) {
                     inTrkseg = true
                     segment = mutableListOf()
@@ -124,11 +206,28 @@ fun parseGpx(text: String): List<List<GpxFix>> {
                     if (segment.isNotEmpty()) segments.add(segment)
                 }
                 "trk" -> inTrk = false
+                "gpx" -> if (parser.depth == 1) rootClosed = true
             }
         }
         event = parser.next()
     }
-    return segments
+    if (!rootClosed) throw XmlPullParserException("GPX ends before </gpx>: truncated")
+    return ImportedRun(segments, sport, loggedAtSec)
+}
+
+/** Deepest element nesting an import reads. A GPX or TCX track nests about ten
+ *  levels deep (TCX `…/Trackpoint/Extensions/TPX/Speed`), but the platform pull
+ *  parser's time grows super-linearly with depth (100 000 nested elements, a
+ *  0.7 MB file, took 4.8 s; `ImportParserFuzzTest.deepNestingParsesInLinearTime`),
+ *  so a deeper file is refused as damaged as soon as it gets there. */
+internal const val MAX_IMPORT_XML_DEPTH = 64
+
+/** Throws the parse error the import maps to [ImportFailure.Damaged] once the
+ *  element [parser] just opened sits deeper than [MAX_IMPORT_XML_DEPTH]. */
+internal fun checkImportDepth(parser: XmlPullParser) {
+    if (parser.depth > MAX_IMPORT_XML_DEPTH) {
+        throw XmlPullParserException("elements nest deeper than $MAX_IMPORT_XML_DEPTH levels", parser, null)
+    }
 }
 
 /** Physiologically plausible heart-rate samples (bpm) an import keeps. */
@@ -295,12 +394,63 @@ internal fun isTooShortForARun(points: List<GpsPoint>, segmentStarts: Collection
     return isShortRun(km, sec)
 }
 
+/** How far after an imported track's last fix its file-named logged-at stamp
+ *  ([ImportedRun.loggedAtSec]) may sit and still be believed: a day, longer than
+ *  any trimmed-off finish or standing-still tail of one run. */
+private const val MAX_LOGGED_AT_AFTER_LAST_FIX_SEC = 24L * 3600
+
+/** The most fixes in a row [dropGnssExcursions] drops as one dropout. */
+private const val MAX_GNSS_EXCURSION_FIXES = 30
+
+/** Implied ground speed (m/s) from [a] to [b], or null when [b] isn't stamped
+ *  after [a] (no speed). */
+private fun speedMps(a: GpxFix, b: GpxFix): Double? {
+    val dt = b.timeSec - a.timeSec
+    return if (dt > 0) haversineM(a.lat, a.lon, b.lat, b.lon) / dt else null
+}
+
 /**
- * Build the [Event.LogRunTrack] for an imported GPX document. The core stays
+ * [segment] without its GNSS dropouts: fixes the core's QC drops as jumps (an
+ * implied speed over [MAX_PLAUSIBLE_SPEED_MPS] from the last kept fix,
+ * `load::gps_speed_plausible`) when the track comes back, i.e. a later fix (at
+ * most [MAX_GNSS_EXCURSION_FIXES] on) is plausible from that kept fix again. One
+ * multipath or no-fix teleport then never makes the whole run "implausibly fast".
+ * A jump the track never returns from (a car ride, a relocation) is kept, so
+ * [isImplausiblyFast] still judges it.
+ */
+internal fun dropGnssExcursions(segment: List<GpxFix>): List<GpxFix> {
+    if (segment.size < 3) return segment
+    val out = ArrayList<GpxFix>(segment.size)
+    out.add(segment[0])
+    var i = 1
+    while (i < segment.size) {
+        val kept = out.last()
+        val jumps = speedMps(kept, segment[i])?.let { it > MAX_PLAUSIBLE_SPEED_MPS } == true
+        val back = if (!jumps) {
+            null
+        } else {
+            (i + 1 until minOf(segment.size, i + 1 + MAX_GNSS_EXCURSION_FIXES)).firstOrNull { k ->
+                speedMps(kept, segment[k])?.let { it <= MAX_PLAUSIBLE_SPEED_MPS } == true
+            }
+        }
+        if (back != null) {
+            i = back
+        } else {
+            out.add(segment[i])
+            i++
+        }
+    }
+    return out
+}
+
+/**
+ * Build the [Event.LogRunTrack] for an imported run. The core stays
  * the single source of record: it derives distance/duration/pace/splits/zone
  * from the points exactly as it does for a live-tracked run; the shell only
  * reshapes the file.
  *
+ * - Refused ([ImportFailure.NotARun]) when the file names another sport
+ *   ([nonRunSport]), checked first, as the core's FIT gate does.
  * - `hr_pct_max` is computed ONLY when the file carries HR samples AND the
  *   profile has a MEASURED HRmax, never estimated shell-side (the Tanaka
  *   estimate is core logic). Otherwise 0.0 = "no HR", same as the tracker.
@@ -314,8 +464,12 @@ internal fun isTooShortForARun(points: List<GpsPoint>, segmentStarts: Collection
  * - Refused ([ImportFailure.ImplausiblePace]) when its moving pace is faster than
  *   any run ([isImplausiblyFast]), and ([ImportFailure.TooShort]) when it is a
  *   fragment under the keep threshold ([isTooShortForARun]).
+ * - Stamped at the file's own logged-at stamp ([ImportedRun.loggedAtSec]) when it
+ *   names a believable one, else at its last fix.
  */
-fun importedRunEvent(segments: List<List<GpxFix>>, measuredHrMax: Double?): Event.LogRunTrack {
+internal fun importedRunEvent(run: ImportedRun, measuredHrMax: Double?): Event.LogRunTrack {
+    nonRunSport(run.sport)?.let { throw GpxImportException(ImportFailure.NotARun, it) }
+    val segments = run.segments
     if (segments.sumOf { it.size } < 2) {
         throw GpxImportException(ImportFailure.NoTrack)
     }
@@ -325,14 +479,14 @@ fun importedRunEvent(segments: List<List<GpxFix>>, measuredHrMax: Double?): Even
     // not moving time; silently fast pace, and a 1970 stamp on re-export. FIT
     // already drops these in fit.rs; mirror it for GPX/TCX here. Same choke
     // point drops out-of-range coordinates (a hand-edited lat="91.5" would
-    // otherwise render as a real point). Deliberate side effect: HR averaging
-    // below also counts only KEPT fixes; a fix untrusted for position/time
-    // isn't trusted for its HR sample either.
+    // otherwise render as a real point) and every GNSS dropout the core's QC
+    // drops as a jump ([dropGnssExcursions]; a no-fix 0,0 "Null Island" fix
+    // mid-run is one), so the pace gate below judges the legs the core keeps.
+    // Deliberate side effect: HR averaging below also counts only KEPT fixes; a
+    // fix untrusted for position/time isn't trusted for its HR sample either.
     val timed = segments
         .map { seg ->
-            seg.filter {
-                it.timeSec > 0 && abs(it.lat) <= 90.0 && abs(it.lon) <= 180.0
-            }
+            dropGnssExcursions(seg.filter { it.timeSec > 0 && abs(it.lat) <= 90.0 && abs(it.lon) <= 180.0 })
         }
         .filter { it.isNotEmpty() }
     val all = timed.flatten()
@@ -414,9 +568,14 @@ fun importedRunEvent(segments: List<List<GpxFix>>, measuredHrMax: Double?): Even
         // Explicit unique id so a multi-activity TCX/GPX import (several runs built
         // in a tight loop) never collides on same-millisecond default ids.
         entryId = EntryIds.next(),
-        // Logged-at = when the run happened (last fix), not when it was
-        // imported: history sorts and displays by this.
-        observedAt = all.last().timeSec,
+        // Logged-at = when the run happened, not when it was imported: history
+        // sorts and displays by this, and the batch dedupe matches on it. A
+        // lollop export names the run's own stamp, which may sit after the last
+        // kept fix; anything else (or a stamp before the track ends, or more than
+        // a day after it) is stamped at the last fix.
+        observedAt = run.loggedAtSec
+            ?.takeIf { it in all.last().timeSec..all.last().timeSec + MAX_LOGGED_AT_AFTER_LAST_FIX_SEC }
+            ?: all.last().timeSec,
         workoutType = null,
         segmentStarts = segmentStarts,
     )

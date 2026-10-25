@@ -8,13 +8,20 @@ use crate::feedback;
 /// it is compared against, and the rest of the plateau run.
 const TREND_BLOCKS: usize = 7;
 
-/// Best reliable e1RM per movement in each 4-week block back from `today`
+/// Best reliable e1RM of `movement` in each 4-week block back from `today`
 /// (block `k` covers local days `today - 28k - 27 ..= today - 28k`), in one
-/// pass over the sets.
-fn block_bests(model: &Model, key: &str, today: i64, calis: bool) -> [Option<f64>; TREND_BLOCKS] {
+/// pass over the movement's sets.
+fn block_bests(
+    model: &Model,
+    set_index: &SetIndex,
+    movement: u32,
+    today: i64,
+    calis: bool,
+) -> [Option<f64>; TREND_BLOCKS] {
     let offset = model.today_utc_offset_sec;
     let mut best = [0.0_f64; TREND_BLOCKS];
-    for s in &model.sets {
+    for &i in set_index.movement_sets(movement) {
+        let s = &model.sets[i];
         if s.observed_at <= 0 {
             continue;
         }
@@ -23,14 +30,16 @@ fn block_bests(model: &Model, key: &str, today: i64, calis: bool) -> [Option<f64
             continue;
         };
         let k = back / 28;
-        if k >= TREND_BLOCKS || !crate::plan::same_movement(&s.exercise, key) {
+        if k >= TREND_BLOCKS {
             continue;
         }
-        if let Some(e) = pr_e1rm(s, calis) {
+        if let Some(e) = pr_e1rm(s, set_index.facts(i), calis) {
             best[k] = best[k].max(e);
         }
     }
-    best.map(|b| (b > 0.0).then_some(b))
+    // A best under MIN_RATIO_BASE_KG is no best (a subnormal corrupt-log
+    // weight would ratio to "up inf%").
+    best.map(|b| (b >= MIN_RATIO_BASE_KG).then_some(b))
 }
 
 /// One lift's rolling trend: best estimated max over the last 4 weeks vs the
@@ -44,8 +53,14 @@ struct LiftTrend {
     weeks_flat: u8,
 }
 
-fn lift_trend(model: &Model, exercise: &str, today: i64, calis: bool) -> Option<LiftTrend> {
-    let blocks = block_bests(model, exercise, today, calis);
+fn lift_trend(
+    model: &Model,
+    set_index: &SetIndex,
+    (exercise, movement): (&str, u32),
+    today: i64,
+    calis: bool,
+) -> Option<LiftTrend> {
+    let blocks = block_bests(model, set_index, movement, today, calis);
     let current = blocks[0]?;
     let previous = blocks[1]?;
     let delta = current / previous - 1.0;
@@ -87,6 +102,7 @@ fn lift_trend(model: &Model, exercise: &str, today: i64, calis: bool) -> Option<
 /// causal story competes with it, feedback-039/041/042).
 pub(in crate::app) fn build_trend(
     model: &Model,
+    set_index: &SetIndex,
     weekly: Option<&SessionReview>,
     derived_wellness_streak: Option<u8>,
     spike: Option<RunSpike>,
@@ -128,17 +144,23 @@ pub(in crate::app) fn build_trend(
             .profile
             .as_ref()
             .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics);
-        // Distinct movements trained in the last 4 weeks.
+        // Distinct movements trained in the last 4 weeks, each under its
+        // first-logged name: chronological (`observed_at`, then `entry_id`, the
+        // `lifts` order), so the name and the tie between equal-rank trends do
+        // not depend on storage order (an Undo or amend moves a set to the tail).
         let offset = model.today_utc_offset_sec;
-        let mut names: Vec<&str> = Vec::new();
-        for s in &model.sets {
-            if s.observed_at > 0
-                && today.saturating_sub(local_day(s.observed_at, offset)) <= 27
-                && !names
-                    .iter()
-                    .any(|n| crate::plan::same_movement(n, &s.exercise))
-            {
-                names.push(&s.exercise);
+        let mut recent: Vec<usize> = (0..model.sets.len())
+            .filter(|&i| {
+                let s = &model.sets[i];
+                s.observed_at > 0 && today.saturating_sub(local_day(s.observed_at, offset)) <= 27
+            })
+            .collect();
+        recent.sort_by_key(|&i| (model.sets[i].observed_at, model.sets[i].entry_id));
+        let mut names: Vec<(&str, u32)> = Vec::new();
+        for i in recent {
+            let movement = set_index.facts(i).movement;
+            if !names.iter().any(|&(_, m)| m == movement) {
+                names.push((&model.sets[i].exercise, movement));
             }
         }
         let mut picked: Option<(
@@ -148,7 +170,7 @@ pub(in crate::app) fn build_trend(
             Recommended<feedback::TrendSummary>,
         )> = None;
         for name in names {
-            let Some(t) = lift_trend(model, name, today, calis) else {
+            let Some(t) = lift_trend(model, set_index, name, today, calis) else {
                 continue;
             };
             let rec = feedback::trend_summary(

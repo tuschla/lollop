@@ -134,8 +134,11 @@ pub(super) fn rhr_verdict(inputs: &[ReadinessInput], ctx: &RuleContext) -> RhrVe
 
 /// RED-S / low-energy-availability red flag (safety-049; the KB's own
 /// "safety-035" cross-refs are a numbering bug: no such block exists): never a
-/// programming variable, reduce stress and defer to a professional.
-fn reds_defer(inputs: &[ReadinessInput]) -> bool {
+/// programming variable, reduce stress and defer to a professional. The one
+/// readiness-channel RED-S test: the hold (`medical_referral`) and the app's
+/// RED-S-dependent refusals (safety-022 deficit, calculators) both read it over
+/// the same date-scoped inputs.
+pub fn reds_defer(inputs: &[ReadinessInput]) -> bool {
     latest(inputs, ReadinessSignal::RedS).is_some_and(|v| v > 0.0)
 }
 

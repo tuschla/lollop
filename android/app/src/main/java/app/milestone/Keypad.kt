@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,15 +32,44 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.util.Locale
 
 /** Corner shape of a raised keypad key (and the Done key under the grid). */
 private val KeypadKeyShape = RoundedCornerShape(10.dp)
 
-/** Longest buffer [editNumericBuffer] accepts, so the display value never overflows. */
+/** Longest buffer [editNumericBuffer] accepts. */
 private const val NumericBufferMaxLength = 6
+
+/** The smallest size (sp, the [Type.Title] size) a field's value figure steps
+ *  down to before it wraps, and the step. */
+private const val ValueFigureFloorSp = 20
+private const val ValueFigureStepSp = 2
+
+/** The value figure's style in [maxWidthPx]: [base] ([Type.Display]) while the
+ *  figure fits one line, else stepped down to [ValueFigureFloorSp]; the flag is
+ *  false when even the floor does not fit (the figure then wraps). Pure but for
+ *  the measurer. */
+private fun fittedValueStyle(
+    measurer: androidx.compose.ui.text.TextMeasurer,
+    text: String,
+    base: TextStyle,
+    maxWidthPx: Int,
+): Pair<TextStyle, Boolean> {
+    fun fits(s: TextStyle) = measurer.measure(text, s, maxLines = 1, softWrap = false).size.width <= maxWidthPx
+    var sp = base.fontSize.value.toInt()
+    var style = base
+    while (!fits(style)) {
+        if (sp <= ValueFigureFloorSp) return style to false
+        sp = maxOf(ValueFigureFloorSp, sp - ValueFigureStepSp)
+        style = base.copy(fontSize = sp.sp)
+    }
+    return style to true
+}
 
 /**
  * Big numeric value driven by the in-sheet [NumericKeypad] instead of the IME.
@@ -106,17 +137,28 @@ fun KeypadValueField(
             horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
+            // The whole value always shows: Display while it fits one line, stepped
+            // down to the Title size in a narrow well at a large font (a 6-digit
+            // "127.52" in the Edit set dialog at 200 %), then wrapped.
+            BoxWithConstraints(Modifier.weight(1f)) {
+                val measurer = rememberTextMeasurer()
                 // An empty buffer shows the "no value" dash, never a "0" that reads
                 // as an entry (and submits nothing, so it must not show a number).
                 // Light weight: a bold display dash reads as a minus sign.
-                text.ifEmpty { EmptyValuePlaceholder },
-                color = if (text.isEmpty()) OnBgFaint else OnBgBody,
-                style = Type.Display.merge(TabularFigures)
-                    .let { if (text.isEmpty()) it.copy(fontWeight = FontWeight.Light) else it },
-                maxLines = 1,
-                modifier = Modifier.weight(1f),
-            )
+                val shown = text.ifEmpty { EmptyValuePlaceholder }
+                val base = Type.Display.merge(TabularFigures)
+                    .let { if (text.isEmpty()) it.copy(fontWeight = FontWeight.Light) else it }
+                val (style, oneLine) = remember(shown, base, constraints.maxWidth, measurer) {
+                    fittedValueStyle(measurer, shown, base, constraints.maxWidth)
+                }
+                Text(
+                    shown,
+                    color = if (text.isEmpty()) OnBgFaint else OnBgBody,
+                    style = style,
+                    maxLines = if (oneLine) 1 else Int.MAX_VALUE,
+                    softWrap = !oneLine,
+                )
+            }
             // Steps only from a real displayed value: an empty (or unparseable)
             // buffer disables the keys rather than inventing a value from the range floor.
             val base = parseKeypadNumber(text)

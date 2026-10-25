@@ -224,7 +224,7 @@ class GymFloorFlowTest {
         openLoopFor("Back Squat")
         val prescribed = EventDispatcher.model.value!!.week_plan
             .first { it.epoch_day == app.milestone.todayEpochDay() }.items.first { it.exercise == "Back Squat" }.load_kg!!
-        val shown = app.milestone.weightFieldText(prescribed, app.milestone.WeightUnit.Kg)
+        val shown = app.milestone.loadFigure(prescribed, app.milestone.WeightUnit.Kg)
         // A light ramp set typed on the keypad (not the reps/effort chips); the
         // keypad opens under the weight well once the well is tapped.
         rule.onNode(weightWell(shown)).performClick()
@@ -368,7 +368,7 @@ class GymFloorFlowTest {
         val last = item.last_set!!
         val expectedKg = item.load_kg ?: item.suggested_load_kg ?: last.weight_kg
         openLoopFor(item.exercise)
-        rule.assertCountEventually(weightWell(app.milestone.weightFieldText(expectedKg, app.milestone.WeightUnit.Kg)), 1)
+        rule.assertCountEventually(weightWell(app.milestone.loadFigure(expectedKg, app.milestone.WeightUnit.Kg)), 1)
         // The note rides in the weight field's hint slot (joined with Per side), below
         // the well inside the editor's own scroll body.
         rule.onNode(hasText(str(R.string.log_last_time, last.summary), substring = true))

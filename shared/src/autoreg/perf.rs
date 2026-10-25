@@ -134,7 +134,7 @@ pub fn derive_performance(
         }
         for idx in candidates {
             let (day, _, name, _) = sessions[idx];
-            if today_epoch_day - day > E1RM_DELOAD_HOLD_DAYS {
+            if today_epoch_day.saturating_sub(day) > E1RM_DELOAD_HOLD_DAYS {
                 continue;
             }
             let Some(ratio) = ratio_at(idx) else {

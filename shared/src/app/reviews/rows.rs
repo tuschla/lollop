@@ -141,10 +141,18 @@ fn review_deloads_with_reasons(
     if r.bone_pain_red_flag {
         out.push((autoreg::bone_stress_referral(), None));
     }
-    if r.reds_signal_reported || r.compulsive_flag {
+    if weekly_reds_signal(r) {
         out.push((autoreg::reds_referral(), None));
     }
     out
+}
+
+/// A weekly check-in carries a RED-S signal: a positive RED-S screen or
+/// compulsive exercise (safety-049's signal list). One test for the referral
+/// row above and the app's RED-S-dependent refusals (safety-022 deficit,
+/// calculators), so no channel can defer as RED-S without them.
+pub(in crate::app) fn weekly_reds_signal(r: &SessionReview) -> bool {
+    r.reds_signal_reported || r.compulsive_flag
 }
 
 /// Readiness/profile context a [`review_views`] pass needs alongside the review:

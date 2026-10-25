@@ -73,7 +73,9 @@ pub(super) fn latest_tracked_run(model: &Model) -> Option<usize> {
         .enumerate()
         .filter(|(_, r)| !r.track.is_empty())
         .filter(|(_, r)| cutoff.is_none_or(|c| r.observed_at <= c))
-        .max_by_key(|(i, r)| (r.observed_at, *i))
+        // A same-stamp tie goes to the later-logged run by its stable
+        // `entry_id`, not its storage slot (an Undo or amend moves it).
+        .max_by_key(|(i, r)| (r.observed_at, r.entry_id, *i))
         .map(|(i, _)| i)
 }
 
@@ -125,8 +127,9 @@ pub(super) fn is_expirable_perf_signal(input: &ReadinessInput) -> bool {
 }
 
 /// feedback-040 provisional framing: present until ~14 distinct dated days of
-/// logged data (readiness, sets, runs) exist.
-pub(super) fn build_provisional(model: &Model) -> Option<AdjustmentView> {
+/// logged data (readiness, sets, runs) exist. A run counts on the local day it
+/// STARTED (`RunFacts::started`), the day it is credited everywhere else.
+pub(super) fn build_provisional(model: &Model, facts: &RunFacts) -> Option<AdjustmentView> {
     use std::collections::BTreeSet;
     let offset = model.today_utc_offset_sec;
     let mut days: BTreeSet<i64> = model
@@ -134,14 +137,20 @@ pub(super) fn build_provisional(model: &Model) -> Option<AdjustmentView> {
         .iter()
         .map(|i| i.observed_at)
         .chain(model.sets.iter().map(|s| s.observed_at))
-        .chain(model.runs.iter().map(|r| r.observed_at))
         .filter(|t| *t > 0)
         .map(|t| local_day(t, offset))
+        .chain(
+            model
+                .runs
+                .iter()
+                .zip(&facts.started)
+                .filter(|(r, _)| r.observed_at > 0)
+                .map(|(_, &start)| local_day(start, offset)),
+        )
         .collect();
-    // Count check-in days only within the baseline window of the NEWEST check-in.
-    // A check-in older than that is compaction-dropped (log Rule 4, 45-day
-    // retention) and never affects the derived baselines, so counting it would
-    // make a full and a compacted log render a different provisional "N so far".
+    // Count check-in days only within the baseline window of the NEWEST check-in:
+    // an older check-in never affects the derived baselines, so it does not count
+    // towards the provisional "N so far".
     const PROVISIONAL_CHECKIN_WINDOW_DAYS: i64 = 30;
     let newest_checkin_day = model
         .checkins
@@ -690,11 +699,16 @@ impl ReadinessPicture {
     }
 
     /// The rules' adjustments plus, with a clock, the first session after a
-    /// resolved pain or illness hold (the easy session or the return check).
-    pub(super) fn adjustments(&self, model: &Model) -> Vec<Recommended<Adjustment>> {
+    /// resolved pain or illness hold (the easy session or the return check);
+    /// `days` dates each logged run by its start.
+    pub(super) fn adjustments(
+        &self,
+        model: &Model,
+        days: &LoggedDays,
+    ) -> Vec<Recommended<Adjustment>> {
         let mut recs = autoreg::adjustments_in(&self.inputs, &self.rule_ctx());
         if let Some(day) = self.as_of {
-            recs.extend(return_step_on(model, day, self.offset));
+            recs.extend(return_step_on(model, days, day, self.offset));
         }
         recs
     }
@@ -770,10 +784,14 @@ pub(super) fn readiness_picture(
 /// no hold may be active now, and no session (a logged set or run) may have
 /// been done on a day from the end of the hold up to, but not including,
 /// `day`: one session back is easy (or the post-illness return check), then
-/// the plan resumes. Inputs and retractions are taken as they stood on `day`,
-/// so a later retraction never re-judges an earlier day.
+/// the plan resumes. A run counts on the day it STARTED (`days`, the plan
+/// completion attribution), so one begun before the hold's last day and
+/// finished after midnight is not a session back (safety first). Inputs and
+/// retractions are taken as they stood on `day`, so a later retraction never
+/// re-judges an earlier day.
 pub(super) fn return_step_on(
     model: &Model,
+    days: &LoggedDays,
     day: i64,
     offset: i64,
 ) -> Option<Recommended<Adjustment>> {
@@ -811,9 +829,9 @@ pub(super) fn return_step_on(
         .sets
         .iter()
         .map(|s| s.observed_at)
-        .chain(model.runs.iter().map(|r| r.observed_at))
         .filter(|t| *t > 0)
         .map(|t| local_day(t, offset))
+        .chain(days.run_days().iter().flatten().copied())
         .any(|d| d >= ended_day && d < day);
     (!trained_since).then(|| autoreg::return_adjustment(kind))
 }

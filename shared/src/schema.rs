@@ -427,6 +427,11 @@ pub struct RunPrescription {
     /// Strides to finish an easy run with; `None` = no strides.
     #[serde(default)]
     pub strides: Option<StridesAddOn>,
+    /// A long run set to the week's average run because the 25–30 % share
+    /// would be shorter than the other runs (RUN-LONGRUN-001's low-mileage
+    /// guardrail): the card states that rule, not the share.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub long_run_avg_floor: bool,
 }
 
 impl RunPrescription {
@@ -446,6 +451,7 @@ impl RunPrescription {
             cooldown_min: None,
             segments: Vec::new(),
             strides: None,
+            long_run_avg_floor: false,
         }
     }
 }

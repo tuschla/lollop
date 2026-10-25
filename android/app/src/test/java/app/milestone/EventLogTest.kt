@@ -198,11 +198,15 @@ class EventLogTest {
 
     @Test
     fun planAndTodayClearsTouchOnlyTheirOwnFamilies() {
-        // A ClearPlan must not disturb SetToday, sets, or the profile.
+        // A ClearPlan must not disturb SetToday, sets, or the profile. It sweeps
+        // the plan it cleared but stays itself: it is the final plan state.
         val out = EventLog.compact(
             listOf(profile(10), setToday(2), generatePlan(1), set("a"), clearPlan)
         )
-        assertEquals(listOf(profile(10), setToday(2), set("a")), out)
+        assertEquals(listOf(profile(10), setToday(2), set("a"), clearPlan), out)
+        // A later GeneratePlan supersedes it; of two trailing clears the last stays.
+        assertEquals(listOf(generatePlan(3)), EventLog.compact(listOf(generatePlan(1), clearPlan, generatePlan(3))))
+        assertEquals(listOf(clearPlan), EventLog.compact(listOf(clearPlan, generatePlan(1), clearPlan)))
     }
 
     @Test
@@ -228,15 +232,11 @@ class EventLogTest {
         assertEquals(listOf(readiness(ReadinessSignal.WellnessZ), set("a")), out)
     }
 
-    // ── Rule 4: check-in retention window (45 days, lockstep with log.rs) ──────
-
     private val DAY = 86_400L
 
     @Test
-    fun rule4AnchorsOnTheNewestSurvivingCheckinNotAClearedOne() {
-        // A ClearCheckins wipes the pre-clear history (Rule 1); Rule 4 then
-        // anchors on the post-clear check-in, so a lone recent check-in after a
-        // clear is never treated as stale against a wiped older reference.
+    fun aClearSweepsOnlyTheCheckinsBeforeIt() {
+        // Rule 1 is the only check-in reducer (lockstep with log.rs).
         val out = EventLog.compact(
             listOf(checkin(0), checkin(DAY), line(Event.ClearCheckins), checkin(100 * DAY))
         )
@@ -244,32 +244,21 @@ class EventLogTest {
     }
 
     @Test
-    fun rule4KeepsAFullBaselineWindowAndDropsOnlyTheStaleTail() {
-        // A stale week (days 0..6) then a fresh burst (days 60..66): only the old
-        // week ages out; every check-in inside the 45-day window is retained.
+    fun checkinsAreNeverWindowed() {
+        // A later SetToday can move today back to any reading's day, where the core
+        // reads it again, so no check-in is dropped however old (lockstep with
+        // log.rs checkins_are_never_windowed). A stale week, a sparse resting-HR
+        // week and a fresh burst two months later (wellness AND resting HR, so
+        // every channel's newest reading is recent and a per-channel 45-day
+        // window would drop the stale weeks) all survive a day-70 launch.
         val stale = (0L..6L).map { checkin(it * DAY) }
-        val fresh = (60L..66L).map { checkin(it * DAY) }
-        val out = EventLog.compact(stale + fresh)
-        assertEquals(fresh, out)
-    }
-
-    @Test
-    fun rule4PerChannelWindowKeepsASparseChannelAlive() {
-        // Lockstep with log.rs: derive_readiness windows EACH channel on ITS
-        // OWN newest reading, not the log's global newest. Eight resting-HR-ONLY
-        // check-ins on days 0..7 build a full RHR baseline; sleep-ONLY check-ins on
-        // days 60..63 carry NO resting-HR. A global-newest anchor (day 63) would
-        // drop the whole RHR week (>45 days back) and silently vanish the
-        // resting-HR readiness row. The per-channel anchor (min channel newest =
-        // day 7 for RHR) keeps every check-in, so replay is unchanged.
         val rhrWeek = (0L..7L).map {
-            line(Event.SubmitCheckin(it * DAY, restingHrBpm = 50.0 + it))
+            line(Event.SubmitCheckin(it * DAY + 3600, restingHrBpm = 50.0 + it))
         }
-        val sleepBurst = (60L..63L).map {
-            line(Event.SubmitCheckin(it * DAY, sleepQuality = 3))
-        }
-        val out = EventLog.compact(rhrWeek + sleepBurst)
-        assertEquals(rhrWeek + sleepBurst, out)
+        val fresh = (60L..66L).map { checkin(it * DAY) } +
+            line(Event.SubmitCheckin(66 * DAY + 3600, restingHrBpm = 52.0))
+        val log = stale + rhrWeek + listOf(setToday(70)) + fresh
+        assertEquals(log, EventLog.compact(log))
     }
 
     // ── Rule 3: DeleteEntry / AmendSet / AmendRun (lockstep with log.rs) ──
@@ -301,19 +290,18 @@ class EventLogTest {
         line(Event.TrimRunTrack(id, observedAtFallback, from, until))
 
     @Test
-    fun anotherRunsTrimBlocksTheDeletePairDrop() {
+    fun anotherRunsTrimDoesNotBlockTheDeletePairDrop() {
         // A trim belonging to a DIFFERENT run (7_200_006) than the deleted run
-        // (7_200_005) is NOT in the delete's removal chain, so it still counts as a
-        // run line in the window and blocks the spike-unsafe pair-drop. The delete
-        // and its base survive. Lockstep with log.rs
-        // trim_counts_as_a_run_line_for_the_spike_guard.
+        // (7_200_005) is NOT in the delete's removal chain; no run carries another's
+        // distance, so the delete and its base drop around it. Lockstep with log.rs
+        // a_run_delete_drops_its_pair_across_other_run_lines.
         val events = listOf(
             runTrackId(7_200_005L, 0),
             runTrackId(7_200_006L, 0),
             trimRun(7_200_006L, 0, 100, 300),
             delRun(7_200_005L),
         )
-        assertEquals(events, EventLog.compact(events))
+        assertEquals(events.subList(1, 3), EventLog.compact(events))
     }
 
     @Test
@@ -373,16 +361,15 @@ class EventLogTest {
     }
 
     @Test
-    fun runDeleteKeepsBothWhenALaterRunBakedItsBaseline() {
-        // A run logged between the target run and its delete could have baked the
-        // target's distance into its baseline, so the pair is NOT dropped (both
-        // survive), matching log.rs run_line_between. Deleting the LAST run does
-        // compact.
-        val kept = EventLog.compact(listOf(runId(5.0, 2, 0), runId(8.0, 4, 100), delRun(2)))
-        assertEquals(listOf(runId(5.0, 2, 0), runId(8.0, 4, 100), delRun(2)), kept)
+    fun runDeleteCancelsItsEntryEvenWithOtherRunsBetween() {
+        // The core derives every run's card spike baseline from the surviving runs,
+        // so no run carries another's distance: a delete drops its pair whatever
+        // run lines sit between (mirrors log.rs).
+        val out = EventLog.compact(listOf(runId(5.0, 2, 0), runId(8.0, 4, 100), delRun(2)))
+        assertEquals(listOf(runId(8.0, 4, 100)), out)
 
-        val dropped = EventLog.compact(listOf(runId(5.0, 2, 0), runId(8.0, 4, 100), delRun(4)))
-        assertEquals(listOf(runId(5.0, 2, 0)), dropped)
+        val last = EventLog.compact(listOf(runId(5.0, 2, 0), runId(8.0, 4, 100), delRun(4)))
+        assertEquals(listOf(runId(5.0, 2, 0)), last)
     }
 
     // ── Family 15: logged activities (lockstep with log.rs) ──
@@ -590,26 +577,26 @@ class EventLogTest {
 
     @Test
     fun loadSkipsTheRewriteForATinyDropButStillReturnsCompactedLines() {
-        // A routine launch: one superseded SetToday and one aged-out check-in are
-        // the only drops in a log large enough that the bounded rewrite rule calls
-        // them not worth an fsync. The file ON DISK stays untouched while replay
-        // still gets the compacted survivors. Sized from the rule itself, so a
-        // retuned threshold keeps this a below-threshold case.
+        // A routine launch: two superseded SetTodays are the only drops in a log
+        // large enough that the bounded rewrite rule calls them not worth an
+        // fsync. The file ON DISK stays untouched while replay still gets the
+        // compacted survivors. Sized from the rule itself, so a retuned threshold
+        // keeps this a below-threshold case.
         val drops = 2
         val filler = (1..drops * EventLog.REWRITE_MIN_DROPPED_SHARE_INVERSE).map { set("f$it") }
-        val staleCheckin = checkin(0)
-        val freshCheckin = checkin(60 * DAY)
-        val original = filler + listOf(setToday(1), setToday(2), staleCheckin, freshCheckin)
+        val oldCheckin = checkin(DAY)
+        // A recent reading: a windowing rule would anchor on it and drop the old one.
+        val original = filler + listOf(setToday(1), setToday(2), oldCheckin, checkin(60 * DAY), setToday(60))
         assertFalse(EventLog.compactionWorthRewriting(drops, original.size))
         val file = tempLog()
         file.writeText(original.joinToString("\n") + "\n")
 
         val restored = EventLog.load(file)
-        // Compaction still drops the superseded SetToday and the stale check-in...
+        // Compaction still drops the superseded SetTodays (and keeps the check-in)...
         assertFalse(restored.lines.contains(setToday(1)))
-        assertTrue(restored.lines.contains(setToday(2)))
-        assertFalse(restored.lines.contains(staleCheckin))
-        assertTrue(restored.lines.contains(freshCheckin))
+        assertFalse(restored.lines.contains(setToday(2)))
+        assertTrue(restored.lines.contains(setToday(60)))
+        assertTrue(restored.lines.contains(oldCheckin))
         assertEquals(original.size - drops, restored.lines.size)
         // ...but the durable file is left exactly as written.
         assertEquals(original, file.readLines().filter { it.isNotBlank() })

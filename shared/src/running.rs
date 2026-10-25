@@ -1844,7 +1844,10 @@ pub fn track_distance_km_seg(
         .iter()
         .map(|(_, d)| d)
         .sum::<f64>()
+        // `+ 0.0`: an empty f64 sum is -0.0, which a run with no moving leg
+        // would print as "-0.0 km".
         / 1000.0
+        + 0.0
 }
 
 /// Cumulative MOVING distance in metres to each usable fix (`out[0] == 0.0`). A
@@ -1929,7 +1932,9 @@ pub fn track_positive_split_pct_seg(
     }
     let pace1 = dur1 / dist1;
     let pace2 = dur2 / dist2;
-    Some(((pace2 - pace1) / pace1 * 100.0 * 10.0).round() / 10.0)
+    // `+ 0.0` turns a slowdown that rounds to -0.0 into 0.0, so a dead-even
+    // run never reads "-0.0 %".
+    Some(((pace2 - pace1) / pace1 * 100.0 * 10.0).round() / 10.0 + 0.0)
 }
 
 /// One kilometre in metres, the per-km split unit.
@@ -2285,31 +2290,66 @@ pub fn track_variability_index_seg(
 /// Nominal GNSS range error (m) a GPX `<hdop>` multiplies into a horizontal
 /// accuracy: the export writes `accuracy_m / 5` and the shell's importer reads
 /// `hdop × 5` (Gpx.kt `GPS_UERE_NOMINAL_M`), so a fix's accuracy round-trips.
-const GPX_HDOP_UERE_M: f32 = 5.0;
+const GPX_HDOP_UERE_M: f64 = 5.0;
+
+/// The `<hdop>` a fix's accuracy is exported as. Divided in f64 and written as
+/// the shortest f64 decimal: the importer's Double `hdop × 5` then lands within
+/// one f64 ulp of the f32 accuracy, which rounds back to it exactly, so a route
+/// rebuilt from the file (Undo, re-import) keeps every `accuracy_m` bit for bit.
+/// An f32 quotient lost up to one f32 ulp on ~20% of accuracies.
+pub(crate) fn gpx_hdop(accuracy_m: f32) -> f64 {
+    f64::from(accuracy_m) / GPX_HDOP_UERE_M
+}
 
 /// Serialise a fix track to a GPX 1.1 document (the format Strava, Garmin
 /// Connect, Komoot, etc. import). Pure and deterministic: `observed_at` unix
 /// seconds are rendered as RFC 3339 UTC timestamps in-core, never from a live
 /// clock. Elevation is omitted: the shell does not yet capture altitude.
 pub fn export_gpx(points: &[GpsPoint], track_name: &str) -> String {
-    export_gpx_seg(points, track_name, &[])
+    export_gpx_seg(points, track_name, &[], None)
 }
+
+/// XML namespace of lollop's own GPX extension elements. The shell's importer
+/// (Gpx.kt `parseGpxRun`) matches the elements by local name.
+const GPX_LOLLOP_NS: &str = "urn:lollop:gpx:1";
 
 /// [`export_gpx`] that emits one `<trkseg>` per recording segment, using the TRUE
 /// coordinates (no re-anchoring shift), so a paused + relocated run opens in
 /// Strava/Garmin as the real route with a visible gap at each pause instead of a
 /// single continuous line drawn through wrong coordinates. Empty
-/// `segment_starts` is a single `<trkseg>`, identical to [`export_gpx`].
-pub fn export_gpx_seg(points: &[GpsPoint], track_name: &str, segment_starts: &[u32]) -> String {
+/// `segment_starts` and no `logged_at` is a single `<trkseg>`, identical to
+/// [`export_gpx`].
+///
+/// `logged_at` is the run's logged-at stamp (its identity with the entry id).
+/// It is written as `<trk><extensions><lollop:logged_at>` because the track's
+/// last fix is not that stamp: QC drops a standing-still finish and a trim cuts
+/// the end while the run keeps its stamp. Re-importing the file then stamps the
+/// run as the one it came from, so the importer recognises it as already logged.
+pub fn export_gpx_seg(
+    points: &[GpsPoint],
+    track_name: &str,
+    segment_starts: &[u32],
+    logged_at: Option<i64>,
+) -> String {
     let mut s = String::with_capacity(256 + points.len() * 96);
     s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     s.push_str(
         "<gpx version=\"1.1\" creator=\"lollop\" \
-         xmlns=\"http://www.topografix.com/GPX/1/1\">\n",
+         xmlns=\"http://www.topografix.com/GPX/1/1\"",
     );
+    if logged_at.is_some() {
+        let _ = write!(s, " xmlns:lollop=\"{GPX_LOLLOP_NS}\"");
+    }
+    s.push_str(">\n");
     s.push_str("  <trk>\n    <name>");
     xml_escape_into(&mut s, track_name);
     s.push_str("</name>\n");
+    if let Some(at) = logged_at {
+        // GPX 1.1 `trkType`: `<extensions>` comes after `<name>`, before `<trkseg>`.
+        s.push_str("    <extensions><lollop:logged_at>");
+        s.push_str(&unix_to_rfc3339_utc(at));
+        s.push_str("</lollop:logged_at></extensions>\n");
+    }
     for seg in segments(points, segment_starts) {
         if seg.is_empty() {
             continue;
@@ -2317,14 +2357,22 @@ pub fn export_gpx_seg(points: &[GpsPoint], track_name: &str, segment_starts: &[u
         s.push_str("    <trkseg>\n");
         for p in seg {
             s.push_str("      <trkpt lat=\"");
-            let _ = write!(s, "{:.7}", p.lat);
+            // Shortest round-trip decimal (`{}`, never exponent notation): a
+            // route rebuilt from this file (Undo, re-import) is bit-identical,
+            // so its distance, pace and splits come back unchanged. That needs a
+            // correctly rounded reader at both ends: the shell's `toDouble` and
+            // the core's event decode (serde_json `float_roundtrip`, Cargo.toml;
+            // pinned by `a_logged_track_survives_the_event_wire_bit_for_bit`). A
+            // fixed 7 decimals moved fixes by up to 5e-8°, enough to flip a pace
+            // rounding edge.
+            let _ = write!(s, "{}", p.lat);
             s.push_str("\" lon=\"");
-            let _ = write!(s, "{:.7}", p.lon);
+            let _ = write!(s, "{}", p.lon);
             s.push_str("\"><time>");
             s.push_str(&unix_to_rfc3339_utc(p.observed_at));
             s.push_str("</time>");
             if p.accuracy_m.is_finite() && p.accuracy_m > 0.0 {
-                let _ = write!(s, "<hdop>{}</hdop>", p.accuracy_m / GPX_HDOP_UERE_M);
+                let _ = write!(s, "<hdop>{}</hdop>", gpx_hdop(p.accuracy_m));
             }
             s.push_str("</trkpt>\n");
         }
@@ -2351,13 +2399,23 @@ fn xml_escape_into(out: &mut String, text: &str) {
 
 /// Format unix seconds as `YYYY-MM-DDTHH:MM:SSZ` (UTC), pure integer math, no
 /// `chrono`, no clock. Uses Howard Hinnant's civil-from-days algorithm so it is
-/// correct across the whole proleptic Gregorian range.
+/// correct across the whole proleptic Gregorian range. A year outside
+/// 0000–9999 takes the ISO 8601 expanded form java.time's `Instant` writes and
+/// the shell's importer (`Gpx.kt` `parseImportTimeSec`) reads: an explicit sign
+/// and at least four digits (`+10000-01-01T00:00:00Z`, `-0001-…`), never a bare
+/// five-digit year it would read as no timestamp.
 fn unix_to_rfc3339_utc(secs: i64) -> String {
     let days = secs.div_euclid(crate::DAY_SEC);
     let tod = secs.rem_euclid(crate::DAY_SEC);
     let (h, m, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);
     let (y, mo, d) = civil_from_days(days);
-    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
+    let sign = match y {
+        10_000.. => "+",
+        ..0 => "-",
+        _ => "",
+    };
+    let y = y.unsigned_abs();
+    format!("{sign}{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
 }
 
 /// Convert a count of days since the unix epoch (1970-01-01) to a civil

@@ -47,6 +47,10 @@
     <string name="track_perm_denied_caption">lollop can\'t record a route without location. Allow precise location to track this run, or log it by hand.</string>
     <string name="track_perm_coarse_caption">lollop only has approximate location, which can\'t measure a route. Allow precise location to track this run, or log it by hand.</string>
     <string name="track_perm_blocked_caption">Location is blocked for lollop. Allow it in app settings to track this run, or log it by hand.</string>
+    <!-- A crash-recovered run resumed without a location grant: it is on hold until
+         precise location is allowed again, then recording restarts by itself. -->
+    <string name="track_resume_perm_caption">Your run is on hold: lollop lost location access when it closed. Allow precise location to keep recording, or save the run so far.</string>
+    <string name="track_resume_perm_blocked_caption">Your run is on hold: location is blocked for lollop. Allow it in app settings to keep recording, or save the run so far.</string>
     <string name="track_btn_continue">Continue</string>
     <string name="track_btn_allow_location">Allow location</string>
     <string name="track_btn_log_manually">Log run by hand</string>

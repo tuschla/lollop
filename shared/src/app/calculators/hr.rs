@@ -56,19 +56,20 @@ fn push_hr_max_row(
     hr_max: f64,
 ) {
     let hr_max_row = graded((), claims::RUN_HRMAX_001);
-    let (hr_max_text, hr_max_basis) = if let Some(m) = measured {
+    let shown = whole_bpm(hr_max);
+    let (hr_max_text, hr_max_basis) = if measured.is_some() {
         (
-            format!("Measured HRmax: {m:.0} bpm (your logged maximum)"),
+            format!("Measured HRmax: {shown:.0} bpm (your logged maximum)"),
             format!(
-                "Your measured HRmax ({m:.0} bpm) from an all-out effort replaces the age-based \
+                "Your measured HRmax ({shown:.0} bpm) from an all-out effort replaces the age-based \
                  Tanaka estimate and sets the zones below."
             ),
         )
     } else {
         (
-            format!("Estimated HRmax: {hr_max:.0} bpm"),
+            format!("Estimated HRmax: {shown:.0} bpm"),
             format!(
-                "Estimated from your age ({:.0}) with the Tanaka formula ({:.0} − {} × age = {hr_max:.0} bpm). \
+                "Estimated from your age ({:.0}) with the Tanaka formula ({:.0} − {} × age = {shown:.0} bpm). \
                  It is a population average, not your measured maximum. Individuals vary by roughly ±10 bpm.",
                 q.age_years,
                 running::TANAKA_INTERCEPT_BPM,
@@ -138,10 +139,10 @@ fn push_band_rows(
         let (lo_pct, hi_pct) = running::vdot_band_hr_pct(band);
         let (vo2_lo, vo2_hi) = running::vdot_band_vo2max_pct(band);
         let hr_anchored = running::vdot_band_uses_hr(band);
-        let bpm_lo = hr_max * lo_pct / 100.0;
-        let bpm_hi = hr_max * hi_pct / 100.0;
+        let bpm_lo = whole_bpm(hr_max * lo_pct / 100.0);
+        let bpm_hi = whole_bpm(hr_max * hi_pct / 100.0);
         let band_row = graded((), claims::RUN_VDOT_001);
-        let range = if (bpm_hi - bpm_lo).abs() < 0.5 {
+        let range = if bpm_lo == bpm_hi {
             format!("{bpm_lo:.0} bpm")
         } else {
             format!("{bpm_lo:.0}–{bpm_hi:.0} bpm")
@@ -153,8 +154,8 @@ fn push_band_rows(
         // preference targets (running-005 formula: RHR + frac·(HRmax − RHR)).
         let karvonen = match (karvonen_rhr, vo2_hi) {
             (Some(rhr), Some(vo2_hi)) if hr_anchored => Some((
-                load::karvonen_target_hr(rhr, hr_max, vo2_lo / 100.0),
-                load::karvonen_target_hr(rhr, hr_max, vo2_hi / 100.0),
+                whole_bpm(load::karvonen_target_hr(rhr, hr_max, vo2_lo / 100.0)),
+                whole_bpm(load::karvonen_target_hr(rhr, hr_max, vo2_hi / 100.0)),
             )),
             _ => None,
         };
@@ -186,11 +187,11 @@ fn push_band_rows(
             name: plan_views::vdot_band_name(band).to_string(),
             pct_low: lo_pct.round(),
             pct_high: hi_pct.round(),
-            bpm_low: bpm_lo.round(),
-            bpm_high: bpm_hi.round(),
+            bpm_low: bpm_lo,
+            bpm_high: bpm_hi,
             pace_governed: !hr_anchored,
-            karvonen_low_bpm: karvonen.map_or(0.0, |k| k.0.round()),
-            karvonen_high_bpm: karvonen.map_or(0.0, |k| k.1.round()),
+            karvonen_low_bpm: karvonen.map_or(0.0, |k| k.0),
+            karvonen_high_bpm: karvonen.map_or(0.0, |k| k.1),
             row: rows.len() as u32,
         });
         push_guidance_basis(
@@ -261,6 +262,14 @@ fn push_retest_rows(rows: &mut Vec<GuidanceView>, q: &HrZoneQuery) {
     }
 }
 
+/// The ONE bpm rounding (half away from zero) for every heart-rate figure
+/// this table states, prose and structured alike: `{:.0}` on an unrounded
+/// .5 rounds half to EVEN, so formatting the raw value would print 190 beside
+/// a structured 191 (Tanaka at age 25 = 190.5).
+fn whole_bpm(bpm: f64) -> f64 {
+    bpm.round()
+}
+
 /// The same resolved figure as the prose HRmax row above, structured so a
 /// shell reads bpm / measured-vs-estimate / the Tanaka split from data.
 /// The intercept / slope are `running::hr_max_tanaka`'s own constants;
@@ -268,7 +277,7 @@ fn push_retest_rows(rows: &mut Vec<GuidanceView>, q: &HrZoneQuery) {
 fn hr_max_view(q: &HrZoneQuery, measured: Option<f64>, hr_max: f64) -> HrMaxView {
     if measured.is_some() {
         HrMaxView {
-            bpm: hr_max.round(),
+            bpm: whole_bpm(hr_max),
             measured: true,
             age_years: 0.0,
             tanaka_intercept: 0.0,
@@ -276,7 +285,7 @@ fn hr_max_view(q: &HrZoneQuery, measured: Option<f64>, hr_max: f64) -> HrMaxView
         }
     } else {
         HrMaxView {
-            bpm: hr_max.round(),
+            bpm: whole_bpm(hr_max),
             measured: false,
             age_years: q.age_years,
             tanaka_intercept: running::TANAKA_INTERCEPT_BPM,

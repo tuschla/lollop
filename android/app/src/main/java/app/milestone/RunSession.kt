@@ -57,6 +57,15 @@ object RunSession {
     // tight start/stop loop) and clears it on ON_RESUME, Try again or Start.
     val locationFailed = MutableStateFlow(false)
 
+    // A crash-recovered run the user chose to Resume while precise location was not
+    // granted (revoked in Settings, or an "Only this time" grant that lapsed with the
+    // process). Its fixes are restored but nothing records: the service cannot start
+    // a location FGS without the grant. The tracker asks for it and, the moment it is
+    // granted, re-issues the recording start ([RunTrackingService.start]); until then
+    // the run is a capture the runner can still save or discard. Cleared by [reset]
+    // and by the tracker once it restarts recording.
+    val resumeAwaitingLocation = MutableStateFlow(false)
+
     // Monotonic (elapsedRealtime) stamp of the last ACCEPTED fix, set by the service on
     // every plausible fix (preview/armed fixes never reach [add], so it cannot live
     // there). Drives [isFreshLock]'s freshness gate and the signal-loss pill: a lock is
@@ -251,10 +260,10 @@ object RunSession {
             // (dt ≤ 0) accrue NOTHING: no live distance, no moving time. A moving leg
             // accrues its dt as moving time, and, unless it's a jitter spike above
             // [MAX_PLAUSIBLE_SPEED_MPS], its haversine as live distance. The saved
-            // figure applies the SAME stop floor and cap (`running::moving_legs`
-            // feeds both the distance of record and the moving pace), and the core
-            // additionally drops fixes under 2.5 m apart (`qc_track`), so live and
-            // saved distance agree to within that jitter gate.
+            // figure applies the SAME stop floor and cap, and the core additionally
+            // drops fixes under 2.5 m apart (`qc_track`), so this running figure can
+            // differ from the saved one by that jitter gate; the Finish review shows
+            // the core's own figures for the track Save sends ([trackEventForCore]).
             val km = segmentKm(last, p)
             val speedMps = if (dtMs > 0L) km * 1000.0 / (dtMs / 1000.0) else Double.MAX_VALUE
             if (dtMs > 0L && speedMps >= MIN_MOVING_SPEED_MPS) {
@@ -384,14 +393,27 @@ object RunSession {
         rebuildPaceBuckets()
     }
 
+    /** Whether [p], just accepted by [add], opened a new recording segment (a
+     *  Pause/Resume or a long fix gap), so the crash sidecar can record the
+     *  boundary ([ActiveRunStore.append]). False when [p] is not the newest fix. */
+    @Synchronized
+    fun isSegmentStart(p: GpsPoint): Boolean =
+        pointCount > 0 && pointArr[pointCount - 1] == p && segmentStarts.contains(pointCount - 1)
+
+    /** [restore] a run read back from [ActiveRunStore], breaking it at the segment
+     *  boundaries the live run recorded. */
+    fun restore(recovered: RecoveredTrack) = restore(recovered, recovered.segmentStarts)
+
     /**
      * Repopulate an interrupted run recovered from [ActiveRunStore] and put the
-     * session back into recording state. The sidecar carries no explicit pause
-     * markers, so boundaries are re-derived from fix-time gaps; distance is the
-     * same segment-aware sum used live (a single O(n) pass, not per-fix).
+     * session back into recording state. Segments break at [recordedStarts] (the
+     * live run's own boundaries, Pause/Resume included) and at any fix-time gap
+     * over [MAX_FIX_GAP_SEC]; distance and moving time are the same segment-aware
+     * sums used live (a single O(n) pass, not per-fix), so a recovered run never
+     * shows more than it had before the crash.
      */
     @Synchronized
-    fun restore(recovered: List<GpsPoint>) {
+    fun restore(recovered: List<GpsPoint>, recordedStarts: Collection<Int> = emptyList()) {
         segmentStarts.clear()
         // The SPLICE from the last recovered fix to the first LIVE fix after
         // resume is a segment boundary, not a run leg. The app may have been dead
@@ -407,11 +429,12 @@ object RunSession {
         pointArr = arrayOfNulls(maxOf(INITIAL_TRACK_CAP, recovered.size))
         pointCount = 0
         for (pt in recovered) pointArr[pointCount++] = pt
+        val recorded = recordedStarts as? Set<Int> ?: recordedStarts.toHashSet()
         var dist = 0.0
         var movingSec = 0.0
         for (i in 1 until recovered.size) {
             val dtSec = (recovered[i].observedAt - recovered[i - 1].observedAt).toDouble()
-            if (dtSec > MAX_FIX_GAP_SEC) {
+            if (i in recorded || dtSec > MAX_FIX_GAP_SEC) {
                 segmentStarts.add(i)
             } else {
                 // Same MOVING gate as the live path: a leg below the stop floor
@@ -525,6 +548,37 @@ object RunSession {
         return out
     }
 
+    /**
+     * The `LogRunTrack` that saves this run, built under ONE lock so its points and
+     * boundaries agree. No paired HR sensor yet, and the spike baseline is derived
+     * in-core from prior runs, so the shell sends neither figure.
+     * [decimatedTrackForCore] sends the TRUE coordinates thinned to
+     * ~[TRACK_DECIMATION_CAP] fixes (endpoints + every pause boundary kept) so one
+     * saved run can't bloat the append-only log; the paired [decimatedSegmentStarts]
+     * tells the core where the pauses are so it excludes each pause-bridge leg and
+     * breaks the GPX `<trkseg>` there.
+     *
+     * Dated at its LAST GPS fix, NOT "now": a crash-recovery save can run hours after
+     * the run happened, and the of-record History day / weekly-km window / acute-load
+     * spike window must land on WHEN the run occurred. Mirrors the GPX import path
+     * (Gpx.kt). Falls back to now only for an empty track (Save is gated on ≥2 fixes).
+     *
+     * The Finish review previews this same event's figures ([Core.savedFigures]), so
+     * the distance and moving time the runner confirms are the ones History lists.
+     */
+    @Synchronized
+    fun trackEventForCore(entryId: Long, workoutType: WorkoutType?, sessionRpe: Int?): Event.LogRunTrack =
+        Event.LogRunTrack(
+            points = decimatedTrackForCore(),
+            hrPctMax = 0.0,
+            longestRecentKm = 0.0,
+            observedAt = points.value.lastOrNull()?.observedAt ?: AppClock.nowSec(),
+            entryId = entryId,
+            workoutType = workoutType,
+            segmentStarts = decimatedSegmentStarts(),
+            sessionRpe = sessionRpe,
+        )
+
     /** Reset only the live engine-state flags — recording ([tracking]), locate-preview
      *  ([locating]) and [armed] — to the STOPPED state, WITHOUT touching the captured
      *  track or the save/pause bookkeeping (unlike [reset], which wipes the whole
@@ -554,6 +608,7 @@ object RunSession {
         locating.value = false
         lastFix.value = null
         armed.value = false
+        resumeAwaitingLocation.value = false
         locationFailed.value = false
         lastFixElapsedMs.value = 0L
         paused.value = false

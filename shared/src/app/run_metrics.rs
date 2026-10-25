@@ -25,6 +25,9 @@ pub(super) fn longest_logged_run_km(facts: &RunFacts) -> Option<f64> {
 /// One dated run flattened for the weekly-volume system and the load chain.
 pub(super) struct DatedRun {
     pub(super) observed_at: i64,
+    /// When the run started ([`run_started_at`]): the local day/week it counts
+    /// in, the day its card names and plan completion credits.
+    pub(super) started_at: i64,
     pub(super) km: f64,
     pub(super) minutes: f64,
     /// 3-zone classification of the average %HRmax; `None` without HR.
@@ -40,6 +43,17 @@ pub(super) struct RunFacts {
     pub(super) qc: Vec<Option<std::rc::Rc<QcTrack>>>,
     pub(super) km: Vec<f64>,
     pub(super) minutes: Vec<f64>,
+    /// When each run started ([`run_started_at`]: its first QC'd fix, else
+    /// its stamp minus its duration; 0 when undated). A run belongs to the
+    /// local day and week it STARTED in every view and coaching bucket (the
+    /// progress chart, the weekly report, the run anchors, the training-load
+    /// chain, the feedback and mastery day), the day its card names.
+    pub(super) started: Vec<i64>,
+    /// Run indices in chronological order (`observed_at`, then `entry_id`,
+    /// the `runs` order). Float sums walk this order, never storage order:
+    /// an Undo or amend moves a row to the tail, and a rounded total must not
+    /// change with it.
+    pub(super) chrono: Vec<usize>,
 }
 
 impl RunFacts {
@@ -60,11 +74,20 @@ impl RunFacts {
             .zip(&qc)
             .map(|(r, q)| q.as_ref().map_or(r.duration_min, |q| q.moving_min))
             .collect();
+        let started = runs
+            .iter()
+            .zip(&qc)
+            .map(|(r, q)| run_started_at(r, q.as_deref()))
+            .collect();
+        let mut chrono: Vec<usize> = (0..runs.len()).collect();
+        chrono.sort_by_key(|&i| (runs[i].observed_at, runs[i].entry_id));
         Self {
             keys,
             qc,
             km,
             minutes,
+            started,
+            chrono,
         }
     }
 }
@@ -75,6 +98,12 @@ impl RunFacts {
 /// with `observed_at` in `[at − 30 d, at]` count (a future-dated row is excluded
 /// so a back-dated amend can't seed the baseline of an earlier run).
 pub(super) const SPIKE_WINDOW_SEC: i64 = 30 * DAY_SEC;
+
+/// Whether a run at `from` lies in the spike window ending at `at` (the
+/// trailing 30 days, inclusive of `at` itself).
+pub(super) fn in_spike_window(from: i64, at: i64) -> bool {
+    from <= at && at.saturating_sub(from) <= SPIKE_WINDOW_SEC
+}
 
 /// The longest run (km, from `km` aligned with `runs`) in the spike window
 /// ending at `at`, skipping index `exclude` (the run being judged).
@@ -87,28 +116,19 @@ pub(super) fn spike_baseline_km(
     runs.iter()
         .zip(km)
         .enumerate()
-        .filter(|&(i, (r, _))| {
-            Some(i) != exclude
-                && r.observed_at <= at
-                && at.saturating_sub(r.observed_at) <= SPIKE_WINDOW_SEC
-        })
+        .filter(|&(i, (r, _))| Some(i) != exclude && in_spike_window(r.observed_at, at))
         .map(|(_, (_, &k))| k)
         .fold(0.0_f64, f64::max)
 }
 
-/// [`spike_baseline_km`] for the reducer, which holds no [`RunFacts`]: only the
-/// runs inside the window are measured, each through the QC memo.
-pub(super) fn ingest_spike_baseline_km(runs: &[LoggedRun], at: i64) -> f64 {
-    runs.iter()
-        .filter(|r| r.observed_at <= at && at.saturating_sub(r.observed_at) <= SPIKE_WINDOW_SEC)
-        .map(|r| {
-            if r.track.is_empty() {
-                r.distance_km
-            } else {
-                run_qc_keyed(r, run_content_key(r)).distance_km
-            }
-        })
-        .fold(0.0_f64, f64::max)
+/// One run's distance as [`spike_baseline_km`] measures it, for the reducer,
+/// which holds no [`RunFacts`]: a GPS run through the QC memo.
+pub(super) fn spike_km(r: &LoggedRun) -> f64 {
+    if r.track.is_empty() {
+        r.distance_km
+    } else {
+        run_qc_keyed(r, run_content_key(r)).distance_km
+    }
 }
 
 /// A run's QC-gated track plus the two scalars every downstream consumer derives

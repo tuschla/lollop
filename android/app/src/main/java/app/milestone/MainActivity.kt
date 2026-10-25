@@ -56,8 +56,12 @@ class MainActivity : ComponentActivity() {
         // goes straight from the splash to content instead of to a second spinner.
         // Not after an import restart: that in-app start gets the icon-less solid
         // splash, so it lets go at once for the "Restoring your data…" loading screen.
+        // A core found unusable at boot never hydrates a model: let go for its error
+        // screen instead of holding the splash forever.
         val restoringImport = setupPrefs().getInt(KEY_RESTORED_ENTRIES, -1) >= 0
-        installSplashScreen().setKeepOnScreenCondition { !restoringImport && EventDispatcher.model.value == null }
+        installSplashScreen().setKeepOnScreenCondition {
+            !restoringImport && EventDispatcher.model.value == null && !EventDispatcher.coreUnavailable.value
+        }
         super.onCreate(savedInstanceState)
         // osmdroid needs a config + user agent set before any MapView inflates.
         Configuration.getInstance().load(this, getSharedPreferences("osmdroid", Context.MODE_PRIVATE))

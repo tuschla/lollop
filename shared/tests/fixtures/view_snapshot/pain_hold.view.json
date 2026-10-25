@@ -338,7 +338,8 @@
       "spike_has_baseline": true,
       "session_rpe": 5,
       "srpe_load_au": 180.0,
-      "best_effort_labels": []
+      "best_effort_labels": [],
+      "started_at": 1728109440
     }
   ],
   "guidance": [
@@ -392,7 +393,7 @@
     },
     {
       "section": "Strength",
-      "summary": "Strength loading: 80–100% 1RM, 1–5 reps, 3–6 sets, ~1–3 reps left",
+      "summary": "Weights for strength: 80–100% 1RM, 1–5 reps, 3–6 sets, ~1–3 reps left",
       "summary_mi": "",
       "grade": "Strong",
       "citation": "Zatsiorsky & Kraemer 2020, Science and Practice of Strength Training (3rd ed., Human Kinetics); Haff & Triplett 2016, NSCA Essentials of Strength Training and Conditioning (4th ed.)",
@@ -1488,13 +1489,13 @@
   "hr_zones": [],
   "training_load": {
     "ctl": 0.8,
-    "atl": 4.8,
-    "tsb": -3.9,
-    "days": 1,
+    "atl": 3.6,
+    "tsb": -2.8,
+    "days": 3,
     "sessions_counted": 1,
     "sessions_skipped": 10,
     "method": "Heart-rate training load (Lucía 3-zone TRIMP, run-average %HRmax), smoothed into a 42-day fitness average (CTL) and a 7-day fatigue average (ATL)",
-    "summary": "Fitness (CTL) 0.8 · Fatigue (ATL) 4.8 · Form (TSB) -3.9 over 1 days. A running tally of training, not a prediction of performance",
+    "summary": "Fitness (CTL) 0.8 · Fatigue (ATL) 3.6 · Form (TSB) -2.8 over 3 days. A running tally of training, not a prediction of performance",
     "grade": "Moderate",
     "citation": "Banister & Calvert 1975, Aust J Sports Med 7:57-61 (impulse-response fitness-fatigue model)",
     "confidence": 0.65,

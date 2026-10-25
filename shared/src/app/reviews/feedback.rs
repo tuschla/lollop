@@ -34,8 +34,8 @@ pub(in crate::app) struct RunSpike {
 /// evaluates against an empty trailing baseline; `None` (no clock) applies no
 /// guard. The baseline is DERIVED from the current history (the longest OTHER
 /// run in the trailing spike window ending at this run), NOT the per-row
-/// `longest_recent_km` baked at ingest, so deleting the run that seeded it
-/// re-arms the gate on the next view.
+/// `longest_recent_km` (which a tracker's paired history can raise), so
+/// deleting the run that seeded it re-arms the gate on the next view.
 pub(in crate::app) fn latest_run_spike(model: &Model, facts: &RunFacts) -> Option<RunSpike> {
     let cutoff = end_of_local_today_sec(model);
     let (idx, r) = model
@@ -43,9 +43,15 @@ pub(in crate::app) fn latest_run_spike(model: &Model, facts: &RunFacts) -> Optio
         .iter()
         .enumerate()
         .filter(|(_, r)| cutoff.is_none_or(|c| r.observed_at <= c))
-        .max_by_key(|(i, r)| (r.observed_at, *i))?;
+        // A same-stamp tie goes to the later-logged run by its stable
+        // `entry_id` (assigned at first log), not its storage slot, which an
+        // Undo or amend moves to the tail.
+        .max_by_key(|(i, r)| (r.observed_at, r.entry_id, *i))?;
     let baseline = spike_baseline_km(&model.runs, &facts.km, r.observed_at, Some(idx));
-    if baseline <= 0.0 {
+    // The run card's baseline rule too (`is_ratio_base_km`): a base under
+    // MIN_RATIO_BASE_KM is no baseline (a subnormal corrupt-log distance would
+    // divide to an infinite fraction).
+    if !is_ratio_base_km(baseline) {
         return None;
     }
     let km = facts.km[idx];
@@ -54,8 +60,10 @@ pub(in crate::app) fn latest_run_spike(model: &Model, facts: &RunFacts) -> Optio
         frac,
         km,
         baseline_km: km / (1.0 + frac),
+        // The run's day is the local day it STARTED, the plan day its run is
+        // credited to (and the day the freshness window counts from).
         day: (!is_undated(r.observed_at))
-            .then(|| local_day(r.observed_at, model.today_utc_offset_sec)),
+            .then(|| local_day(facts.started[idx], model.today_utc_offset_sec)),
     })
 }
 
@@ -105,8 +113,10 @@ pub(in crate::app) fn feedback_track_split(model: &Model, facts: &RunFacts) -> O
     }
     Some(TrackSplit {
         pct: track_split_pct(model, facts, i)?,
+        // The day the run STARTED, the plan day completion credits it to: the
+        // pacing cue attaches only to a split measured on the judged day.
         day: (!is_undated(r.observed_at))
-            .then(|| local_day(r.observed_at, model.today_utc_offset_sec)),
+            .then(|| local_day(facts.started[i], model.today_utc_offset_sec)),
     })
 }
 

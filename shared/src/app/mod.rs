@@ -72,10 +72,11 @@ pub(crate) use format::sanitize_entry_id;
 // `log.rs` compaction asks which store a legacy `SubmitReview` line replaces.
 pub(crate) use reviews::{submit_review_sets_session, submit_review_sets_weekly};
 
-// `ffi.rs` drives this across the JNI boundary as `crate::app::export_run_gpx`;
-// like the ffi glue it feeds, it is compiled only where the exports exist.
+// `ffi.rs` drives these across the JNI boundary as `crate::app::export_run_gpx`
+// / `crate::app::preview_track_figures`; like the ffi glue they feed, they are
+// compiled only where the exports exist.
 #[cfg(any(target_os = "android", feature = "jni-host", test))]
-pub(crate) use run_views::export_run_gpx;
+pub(crate) use run_views::{export_run_gpx, preview_track_figures};
 
 #[effect(typegen)]
 #[derive(Debug)]
@@ -250,23 +251,21 @@ impl App for Engine {
                 workout_type,
                 session_rpe,
                 avg_hr_bpm,
+                utc_offset_sec,
             } => {
-                let run = logged_run(
-                    &model.runs,
-                    model.profile.as_ref(),
-                    RunFields {
-                        distance_km,
-                        duration_min,
-                        hr_pct_max,
-                        longest_recent_km,
-                        observed_at,
-                        entry_id,
-                        workout_type,
-                        session_rpe,
-                        avg_hr_bpm,
-                    },
-                );
-                model.runs.push(run);
+                let run = logged_run(RunFields {
+                    distance_km,
+                    duration_min,
+                    hr_pct_max,
+                    longest_recent_km,
+                    observed_at,
+                    entry_id,
+                    workout_type,
+                    session_rpe,
+                    avg_hr_bpm,
+                    utc_offset_sec,
+                });
+                store_run(model, run, None);
             }
             Event::LogRunTrack {
                 points,
@@ -278,28 +277,26 @@ impl App for Engine {
                 session_rpe,
                 segment_starts,
                 avg_hr_bpm,
+                utc_offset_sec,
             } => {
                 // Distance and duration derive from the track at `view()`; the
                 // spike baseline is floored like a manual run's, so the gate
                 // works without the shell fabricating a recent-longest figure.
-                let mut run = logged_run(
-                    &model.runs,
-                    model.profile.as_ref(),
-                    RunFields {
-                        distance_km: 0.0,
-                        duration_min: 0.0,
-                        hr_pct_max,
-                        longest_recent_km,
-                        observed_at,
-                        entry_id,
-                        workout_type,
-                        session_rpe,
-                        avg_hr_bpm,
-                    },
-                );
+                let mut run = logged_run(RunFields {
+                    distance_km: 0.0,
+                    duration_min: 0.0,
+                    hr_pct_max,
+                    longest_recent_km,
+                    observed_at,
+                    entry_id,
+                    workout_type,
+                    session_rpe,
+                    avg_hr_bpm,
+                    utc_offset_sec,
+                });
                 run.track = sanitize_track(points);
                 run.track_segment_starts = segment_starts;
-                model.runs.push(run);
+                store_run(model, run, None);
             }
             Event::ClearRuns => model.runs.clear(),
             Event::LogActivity {
@@ -349,7 +346,8 @@ impl App for Engine {
                     sanitize_entry_id(entry_id),
                     observed_at_fallback,
                 ) {
-                    model.runs.remove(pos);
+                    let gone = model.runs.remove(pos);
+                    refresh_spike_baselines(&mut model.runs, &[gone.observed_at]);
                 }
             }
             Event::DeleteEntry {
@@ -412,27 +410,24 @@ impl App for Engine {
                 avg_hr_bpm,
             } => {
                 // A STRICT update matched on the OLD identity, like `AmendSet`.
-                // The replacement is a fresh manual entry, so its spike baseline
-                // is floored over the history without the replaced row.
+                // The replacement is a fresh manual entry; the spike baselines
+                // around both its old and its new date are re-derived.
                 let match_at = amend_match_at(observed_at_fallback, observed_at);
                 if let Some(pos) = find_run(&model.runs, sanitize_entry_id(entry_id), match_at) {
-                    model.runs.remove(pos);
-                    let run = logged_run(
-                        &model.runs,
-                        model.profile.as_ref(),
-                        RunFields {
-                            distance_km,
-                            duration_min,
-                            hr_pct_max,
-                            longest_recent_km,
-                            observed_at,
-                            entry_id,
-                            workout_type,
-                            session_rpe,
-                            avg_hr_bpm,
-                        },
-                    );
-                    model.runs.push(run);
+                    let old = model.runs.remove(pos);
+                    let run = logged_run(RunFields {
+                        distance_km,
+                        duration_min,
+                        hr_pct_max,
+                        longest_recent_km,
+                        observed_at,
+                        entry_id,
+                        workout_type,
+                        session_rpe,
+                        avg_hr_bpm,
+                        utc_offset_sec: None,
+                    });
+                    store_run(model, run, Some(&old));
                 }
             }
             Event::TrimRunTrack {
@@ -442,12 +437,13 @@ impl App for Engine {
                 keep_until_sec,
             } => {
                 // The run is mutated IN PLACE with its identity (entry_id,
-                // observed_at) unchanged, so replay order and other runs' baked
-                // baselines stay stable; every derived figure re-derives from the
-                // sliced track at view(). An inverted range, a no-match, or a
-                // slice that is not a real trim leaves the run untouched (the
-                // shell clamps the slider so an invalid trim is never dispatched;
-                // a persisted no-op line replays as a harmless no-op).
+                // observed_at) unchanged, so its replay order stays stable; every
+                // derived figure re-derives from the sliced track at view(), and
+                // the spike baselines its new distance can move are re-derived
+                // here. An inverted range, a no-match, or a slice that is not a
+                // real trim leaves the run untouched (the shell clamps the slider
+                // so an invalid trim is never dispatched; a persisted no-op line
+                // replays as a harmless no-op).
                 if keep_from_sec <= keep_until_sec
                     && let Some(pos) = find_run(
                         &model.runs,
@@ -460,6 +456,8 @@ impl App for Engine {
                     let run = &mut model.runs[pos];
                     run.track = track;
                     run.track_segment_starts = starts;
+                    let at = run.observed_at;
+                    refresh_spike_baselines(&mut model.runs, &[at]);
                 }
             }
             Event::AmendRunMeta {
@@ -470,8 +468,8 @@ impl App for Engine {
             } => {
                 // In-place meta edit (rating + tag) of any run, GPS included: the
                 // run's identity, distance, time and track are untouched, so its
-                // position in replay order and every other run's baked spike
-                // baseline stay stable (mirrors TrimRunTrack's in-place edit).
+                // position in replay order and every spike baseline stay stable
+                // (mirrors TrimRunTrack's in-place edit).
                 if let Some(pos) = find_run(
                     &model.runs,
                     sanitize_entry_id(entry_id),
@@ -482,10 +480,20 @@ impl App for Engine {
                     run.workout_type = workout_type;
                 }
             }
-            Event::SetProfile(profile) => apply_profile(model, profile),
+            Event::SetProfile(profile) => {
+                apply_profile(model, profile);
+                refresh_run_hr(model);
+            }
             Event::ClearProfile => {
                 model.profile = None;
                 model.profile_history.clear();
+                // Every run falls back to the empty history, including the
+                // ones a legacy undated edit pinned (as a compacted log, which
+                // drops that edit with the history, replays them).
+                for run in &mut model.runs {
+                    run.hr_pinned = false;
+                }
+                refresh_run_hr(model);
             }
             Event::SubmitReview(mut review) => {
                 sanitize_review(&mut review);
@@ -642,8 +650,14 @@ impl App for Engine {
                 utc_offset_sec,
             } => {
                 model.today_epoch_day = Some(epoch_day);
+                // A legacy run row (no logged offset) reads the current
+                // offset; a stamped one keeps its own, so only those move.
+                let offset_changed = model.today_utc_offset_sec != utc_offset_sec;
                 model.today_utc_offset_sec = utc_offset_sec;
                 ingest::refresh_birthday_ages(model);
+                if offset_changed {
+                    refresh_run_hr(model);
+                }
             }
         }
         render()
@@ -672,9 +686,10 @@ impl App for Engine {
         let derived = &picture.derived;
         let readiness_inputs = &picture.inputs;
         let rule_ctx = picture.rule_ctx();
-        let review = review_pipeline(model, picture.adjustments(model));
+        let review = review_pipeline(model, picture.adjustments(model, &cx.days));
         let safety = safety_state(
             model,
+            readiness_inputs,
             autoreg::resolve_safety_in(readiness_inputs, &rule_ctx),
             &review,
         );
@@ -733,7 +748,9 @@ impl App for Engine {
             Some(q) => build_protein_targets(q, reds_present, weight_lb),
             None => (Vec::new(), Vec::new()),
         };
-        let calc_hold = calculator_hold(model.profile.as_ref(), reds_present);
+        // One hold for Today, the plan calculators and the prescriptive
+        // guidance: today's training hold, else a RED-S signal.
+        let calc_hold = calculator_hold(v.safety.hold.as_ref(), reds_present);
         let (hr_zones, hr_max, hr_zone_bands) = match model.hr_zone_query.as_ref() {
             Some(q) => build_hr_zones(q, model.profile.as_ref().and_then(|p| p.measured_hr_max)),
             None => (Vec::new(), None, Vec::new()),
@@ -794,7 +811,7 @@ impl App for Engine {
                         .today_epoch_day
                         .and_then(|today| cx.run_anchors_on(today).1);
                     let (weekly_km, basis) = effective_weekly_km(p, recent_weekly);
-                    build_guidance_measured(p, weekly_km, basis)
+                    build_guidance_measured(p, weekly_km, basis, calc_hold.as_ref())
                 })
                 .unwrap_or_default(),
             feedback,
@@ -860,13 +877,14 @@ impl App for Engine {
             }),
             trend: build_trend(
                 model,
+                &cx.set_index,
                 model.weekly_checkin.as_ref(),
                 derived_wellness_streak,
                 spike,
                 trend_suppressed,
                 weight_lb,
             ),
-            provisional: build_provisional(model),
+            provisional: build_provisional(model, &cx.runs),
             autoreg_source: build_autoreg_source(
                 readiness_inputs,
                 derived_hrv_streak.is_some(),
@@ -915,6 +933,7 @@ impl App for Engine {
             plan_withheld: model
                 .today_epoch_day
                 .and_then(|d| profile_for_day(model, d))
+                .as_deref()
                 .or(model.profile.as_ref())
                 .and_then(crate::plan::plan_withheld),
             activities: activity_views(&model.activities),
@@ -993,14 +1012,24 @@ struct SafetyState {
     /// deferrals. Rendered as Safety guidance rows (build_guidance) AND
     /// reflected in `safety_tier`/`train_blocked` so no shell can miss them.
     gates: Vec<Recommended<Adjustment>>,
+    /// Today's training hold: the first blocking call (Stop / RestDay /
+    /// Defer) in the order [`hold_reason`] reads them: profile gate, then
+    /// readiness, then weekly check-in. The single source for Today's block
+    /// and for the plan calculators and %1RM guidance ([`calculator_hold`]).
+    hold: Option<Recommended<Adjustment>>,
+    /// `hold.is_some()`.
     train_blocked: bool,
     safety_tier: Option<SafetyTier>,
-    /// RED-S flagged on any channel; feeds the safety-022 deficit refusal.
+    /// RED-S flagged on any channel as of today; feeds the safety-022 deficit
+    /// refusal and the calculator hold.
     reds_present: bool,
 }
 
+/// `readiness_inputs` are today's date-scoped readiness inputs (removals in
+/// force today applied): the same inputs the readiness rules ran on.
 fn safety_state(
     model: &Model,
+    readiness_inputs: &[ReadinessInput],
     readiness_tier: Option<SafetyTier>,
     review: &ReviewPipeline,
 ) -> SafetyState {
@@ -1009,15 +1038,18 @@ fn safety_state(
         .as_ref()
         .map(|p| individualization::onboarding_gates(&p.health))
         .unwrap_or_default();
-    let blocks = |r: &Recommended<Adjustment>| {
-        matches!(
-            r.value,
-            Adjustment::Stop | Adjustment::RestDay | Adjustment::Defer { .. }
-        )
-    };
-    let train_blocked = review.recommended.iter().any(blocks)
-        || gates.iter().any(blocks)
-        || review.review_recs.iter().any(blocks);
+    let hold = gates
+        .iter()
+        .chain(&review.recommended)
+        .chain(&review.review_recs)
+        .find(|r| {
+            matches!(
+                r.value,
+                Adjustment::Stop | Adjustment::RestDay | Adjustment::Defer { .. }
+            )
+        })
+        .cloned();
+    let train_blocked = hold.is_some();
 
     // Highest safety tier: the readiness ladder, raised to MedicalReferral when
     // an onboarding gate or a review-carried NFOR/OTS deferral fires: the KB
@@ -1033,22 +1065,20 @@ fn safety_state(
         readiness_tier
     };
 
-    // RED-S from any channel: the readiness signal, the onboarding screen, or
-    // a positive recurring weekly screen (REDS-SCREEN-001) in force or within
-    // the screen window.
-    let reds_present = model
-        .inputs
-        .iter()
-        .filter(|i| i.signal == ReadinessSignal::RedS)
-        .max_by_key(|i| i.observed_at)
-        .is_some_and(|i| i.value > 0.0)
+    // RED-S from any channel as of today: the readiness signal (read by the
+    // same rule, over the same date-scoped inputs, as the readiness hold; a
+    // future-dated all-clear or retraction is not in force yet), the
+    // onboarding screen, or a weekly RED-S signal (screen or compulsive
+    // exercise, REDS-SCREEN-001 / safety-049) in force or within the screen
+    // window.
+    let reds_present = autoreg::reds_defer(readiness_inputs)
         || model.profile.as_ref().is_some_and(|p| p.health.reds_signal)
         || model
             .weekly_checkin
             .as_ref()
-            .is_some_and(|r| r.reds_signal_reported)
+            .is_some_and(weekly_reds_signal)
         || model.weekly_history.iter().any(|r| {
-            r.reds_signal_reported
+            weekly_reds_signal(r)
                 && model.today_epoch_day.is_none_or(|today| {
                     r.observed_at <= 0
                         || today
@@ -1059,6 +1089,7 @@ fn safety_state(
 
     SafetyState {
         gates,
+        hold,
         train_blocked,
         safety_tier,
         reds_present,
@@ -1205,9 +1236,9 @@ fn plan_section(
     // Say what changed on each lift since last time, and why.
     if let Some(ns) = next_session.as_mut() {
         let now_anchors = cx.lift_anchors_now();
-        annotate_last_time(ns, model, now_anchors, weight_lb);
+        annotate_last_time(ns, model, &cx.set_index, now_anchors, weight_lb);
         if let Some(row) = week_plan.iter_mut().find(|s| s.epoch_day == ns.epoch_day) {
-            annotate_last_time(row, model, now_anchors, weight_lb);
+            annotate_last_time(row, model, &cx.set_index, now_anchors, weight_lb);
         }
     }
     let today_session = next_session
@@ -1313,7 +1344,7 @@ fn feedback_section(
     let derived_exec = model
         .today_epoch_day
         .and_then(|t| derive_session_exec(week_plan, t));
-    let mastery = detect_mastery(model, &cx.runs, week_plan);
+    let mastery = detect_mastery(model, &cx.set_index, &cx.runs, week_plan);
     let spike = latest_run_spike(model, &cx.runs);
     let review_recs = &v.review.review_recs;
     let feedback = build_feedback(FeedbackCtx {

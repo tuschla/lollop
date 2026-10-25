@@ -202,6 +202,9 @@ fun RunTrackingScreen(
     // The service could not start the location stream; the locate preview is not
     // re-launched until ON_RESUME, Try again or Start clears it.
     val locateFailed by RunSession.locationFailed.collectAsStateWithLifecycle()
+    // A crash-recovered run resumed without a location grant: held as a capture until
+    // precise location is allowed, then recording restarts (the effect below).
+    val resumeWaiting by RunSession.resumeAwaitingLocation.collectAsStateWithLifecycle()
     // Profile "Show route maps" toggle: when off, no MapView is drawn (no OSM tile
     // egress); GPS recording is unaffected.
     val showRouteMaps by AppSettings.showRouteMaps.collectAsStateWithLifecycle()
@@ -346,6 +349,21 @@ fun RunTrackingScreen(
         }
     }
 
+    // Resume after a location loss: the run was restored without recording because
+    // the grant was missing. The moment it is back (the system prompt's result, or
+    // ON_RESUME after app settings), re-issue the crash-resume recording start. The
+    // flag stays set until the service reports recording, so a failed start
+    // ([locateFailed]) is retried by Try again / the next ON_RESUME, and a Save or
+    // Discard (`exiting`) stands it down.
+    LaunchedEffect(resumeWaiting, hasPermission, locateFailed, exiting) {
+        if (resumeWaiting && hasPermission && !locateFailed && !exiting) {
+            RunTrackingService.start(ctx)
+        }
+    }
+    LaunchedEffect(tracking) {
+        if (tracking) RunSession.resumeAwaitingLocation.value = false
+    }
+
     LaunchedEffect(map) { map.followPreviewFix { follow } }
     LaunchedEffect(map) { map.followTrack { follow } }
 
@@ -451,48 +469,22 @@ fun RunTrackingScreen(
             // can't). This call site only supplies the real effects; the exact
             // NonCancellable / re-throw semantics are enforced there.
             runSaveCriticalSection(
-                // The non-cancellable JNI persist. Dates the saved run at its LAST
-                // GPS fix, NOT "now": a crash-recovery save can run hours after the
-                // run actually happened, and the of-record History day / weekly-km
-                // window / acute-load spike window must land on WHEN the run
-                // occurred, not when it was persisted. Mirrors the GPX import path,
-                // which stamps observedAt = last fix (Gpx.kt). Falls back to now only
-                // for the impossible-here empty track (this send is gated on ≥2
-                // points).
+                // The non-cancellable JNI persist of [RunSession.trackEventForCore],
+                // the very event the Finish review previewed its figures from.
                 send = {
-                    runObservedAt = RunSession.points.value.lastOrNull()?.observedAt
-                        ?: AppClock.nowSec()
                     // Route the persist through the serial consumer as ONE exclusive
                     // turn (no queued event interleaves with it); the JNI itself still
                     // runs on CoreJniDispatcher. runSaveCriticalSection's NonCancellable
                     // wrapper protects the await, so a rotation can't cancel the save.
                     EventDispatcher.exclusive {
                         withContext(CoreJniDispatcher) {
-                            val result = Core.send(
-                                // No paired HR sensor yet, and the spike baseline is derived
-                                // in-core from prior runs; the shell sends neither figure.
-                                // decimatedTrackForCore() sends the TRUE coordinates thinned
-                                // to ~TRACK_DECIMATION_CAP fixes (endpoints + every pause
-                                // boundary always kept) so one saved run can't bloat the
-                                // append-only log; the paired decimatedSegmentStarts() tells
-                                // the core where the pauses are so it excludes each
-                                // pause-bridge leg itself and breaks the GPX <trkseg> there;
-                                // the of-record figures move negligibly (running.rs tests).
-                                Event.LogRunTrack(
-                                    points = RunSession.decimatedTrackForCore(),
-                                    hrPctMax = 0.0,
-                                    longestRecentKm = 0.0,
-                                    observedAt = runObservedAt,
-                                    entryId = entryId,
-                                    // The run type and whole-session effort the runner
-                                    // picked on the Finish review (both optional, null =
-                                    // not given; never fabricated). A tracked run also
-                                    // derives its measured INTERVAL verdict on its own.
-                                    workoutType = workoutType,
-                                    segmentStarts = RunSession.decimatedSegmentStarts(),
-                                    sessionRpe = sessionRpe,
-                                )
-                            )
+                            // The run type and whole-session effort the runner picked on
+                            // the Finish review (both optional, null = not given; never
+                            // fabricated). A tracked run also derives its measured
+                            // INTERVAL verdict on its own.
+                            val event = RunSession.trackEventForCore(entryId, workoutType, sessionRpe)
+                            runObservedAt = event.observedAt
+                            val result = Core.send(event)
                             // A rejected/panicked send, or one accepted in memory whose
                             // log append failed (disk full), must not silently drop the
                             // captured run: throw so the critical section's onFailure
@@ -753,8 +745,12 @@ fun RunTrackingScreen(
                     // appear, so re-requesting silently no-ops; deep-link to app
                     // settings instead, the only place the grant can then be restored.
                     onAllow = { if (prompt == LocationPrompt.Blocked) openAppDetailsSettings(ctx) else requestPermissions() },
-                    onClose = { leaveTracker() },
+                    // A resumed run waiting on the grant holds recorded fixes: ✕ is a
+                    // confirmed discard and Save keeps what was recorded, never a
+                    // silent leave that deletes the run.
+                    onClose = { if (resumeWaiting && unsavedCapture) confirmDiscard = true else leaveTracker() },
                     onLogManually = onLogRunManually?.let { open -> { leaveTracker(); open() } },
+                    onSaveRun = if (resumeWaiting && unsavedCapture) ({ logCaptured() }) else null,
                 )
             } else {
                 // With the sheet filling the frame (route maps off), its content sits
@@ -803,7 +799,7 @@ fun RunTrackingScreen(
                 // start failure / denied notifications = an inline notice. Each carries
                 // an inline action so the state is actionable, not a dead end.
                 if (!locationOn) LocationOffNotice(onOpenSettings = { openLocationSettings(ctx) })
-                if (locateFailed && locationOn && !tracking && !armed && !unsavedCapture) {
+                if (locateFailed && locationOn && !tracking && !armed && (!unsavedCapture || resumeWaiting)) {
                     InlineNotice(
                         stringResource(R.string.track_location_failed_caption),
                         actionLabel = stringResource(R.string.track_btn_try_again),
@@ -1249,26 +1245,6 @@ private const val MIN_AVG_PACE_KM = 0.05
  *  both show the same figure. */
 internal fun averagePaceMinPerKm(elapsedSec: Long, km: Double): Double =
     if (km >= MIN_AVG_PACE_KM && elapsedSec > 0) elapsedSec / 60.0 / km else Double.NaN
-
-/**
- * Moving time (s) over the recorded fixes, on the basis the core derives the saved
- * run's duration from: whole-second fix stamps, legs within a segment only (no leg
- * into a [segmentStarts] index), each leg counted when it clears the stop floor
- * ([MIN_MOVING_SPEED_MPS]). The live clock sums monotonic milliseconds and floors,
- * so the Finish review reads this instead and agrees with History ("1:20", not
- * "1:19"). Pure.
- */
-internal fun recordedMovingSec(points: List<GpsPoint>, segmentStarts: Collection<Int>): Long {
-    val starts = segmentStarts as? Set<Int> ?: segmentStarts.toHashSet()
-    var sec = 0L
-    for (i in 1 until points.size) {
-        if (i in starts) continue
-        val dt = points[i].observedAt - points[i - 1].observedAt
-        if (dt <= 0L) continue
-        if (segmentKm(points[i - 1], points[i]) * 1000.0 / dt >= MIN_MOVING_SPEED_MPS) sec += dt
-    }
-    return sec
-}
 
 /** The recorded fixes as route segments (each [segmentStarts] index opens a new
  *  one, so a pause never draws a bridging line), for the Finish review's route

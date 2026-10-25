@@ -10,6 +10,7 @@ use std::fmt::Write as _;
 pub(in crate::app) fn annotate_last_time(
     ns: &mut SessionPlanView,
     model: &Model,
+    set_index: &SetIndex,
     anchors: &crate::plan::Anchors,
     weight_lb: bool,
 ) {
@@ -23,17 +24,18 @@ pub(in crate::app) fn annotate_last_time(
             continue;
         }
         // Same selection rule as the plan's "Last:" line, on the raw local day.
-        let Some((_, top)) = last_top_set(
+        let Some((_, top_i)) = last_top_set(
             &model.sets,
+            set_index.same_movement_sets(&it.exercise),
             ns.epoch_day,
             |i| {
                 let at = model.sets[i].observed_at;
                 (at > 0).then(|| local_day(at, offset))
             },
-            |s| crate::plan::same_movement(&s.exercise, &it.exercise),
         ) else {
             continue;
         };
+        let top = &model.sets[top_i];
         // "with 2 reps left" from the rated effort (never "@ RPE 8" behind the
         // "?" either: one effort vocabulary everywhere).
         let left = if top.rpe > 0.0 {
@@ -59,7 +61,7 @@ pub(in crate::app) fn annotate_last_time(
                 let derated = anchors
                     .load_frac_for(&it.exercise)
                     .is_some_and(|d| matches!(d.cause, crate::plan::DerateCause::E1rmDrop));
-                let last_e1 = pr_e1rm(top, false);
+                let last_e1 = pr_e1rm(top, set_index.facts(top_i), false);
                 let anchor = anchors.e1rm_for(&it.exercise);
                 let reason = if diff < 0.0 && derated {
                     " because your last session's estimated max came in more than 5% under your best."

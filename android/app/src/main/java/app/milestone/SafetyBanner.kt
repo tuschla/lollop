@@ -8,6 +8,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,14 +39,20 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 
 /**
@@ -250,7 +258,9 @@ internal fun RemoveReportDialog(
 
 /**
  * DO-NOT-TRAIN banner (01-today §C, INVARIANT 3). Pinned above content on every
- * screen; never scrollable, never dismissable. Renders ONLY when the core
+ * screen; never scrolls with the page, never dismissable. It always states the
+ * hold whole (headline, reason, actions); past half the screen height only its
+ * extra text (the paused line, an open "?") scrolls inside it. Renders ONLY when the core
  * actually blocks training (`train_blocked`), a downgrade-class adjustment
  * (HRV/wellness dip) is NOT a hold and renders as an amber inline card on Today,
  * never here; nor is the under-18 pause ([YouthHoldCard]), which asks for no
@@ -308,43 +318,58 @@ private fun SafetyBanner(
     // report, so the "?" fallback copy must not call it one.
     val profileHold = action == HoldAction.ReviewHealth ||
         action == HoldAction.EndIllness || model.hold_reason == "medical_signal"
+    // Sub-line: the characterized pain detail when we have it ("right
+    // knee · sharp · 6/10"), else the reason the hold applies.
+    val pregnancyWarning = model.profile?.health?.pregnancy_warning_sign == true
+    val subLine = holdDetail?.takeIf { action == HoldAction.RemovePain }
+        ?.let { stringResource(R.string.main_pain_prefix, it) }
+        ?: stringResource(holdReasonLineRes(model.hold_reason, tier, pregnancyWarning))
+    // The core's plain "why it's paused and how it clears" line replaces
+    // the generic caption when a resolvable hold is active (an illness
+    // always has one); otherwise the caption names this hold's own way back
+    // (only a PAR-Q-style answer is "cleared", a pregnancy pauses plans
+    // while its answer is on).
+    val resolutions = model.hold_resolutions
+    val pausedText = resolutions.firstOrNull { it.paused_text.isNotBlank() }?.paused_text
+    // The banner stays pinned and is never overlapped, but at a large font on a
+    // short screen it may not take the whole screen: what it adds beyond stating
+    // the hold (the "paused" line, an open "?" panel) stops at a share of the
+    // screen height and scrolls inside the banner, so the destination under it
+    // (and its Log button) keeps room. The headline, the reason and the actions
+    // are never part of that share: they always show whole (INVARIANT 3), the
+    // banner growing past the share when they alone need more.
+    val density = LocalDensity.current
+    val capPx = with(density) { (LocalConfiguration.current.screenHeightDp * BannerMaxScreenFraction).dp.roundToPx() }
+    val padPx = with(density) { Space.Card.dp.roundToPx() }
+    val gapPx = with(density) { Space.Md.dp.roundToPx() }
     Card(
         colors = CardDefaults.cardColors(containerColor = bg),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         shape = RoundedCornerShape(Space.Card.dp),
-        modifier = modifier.fillMaxWidth().then(pulseModifier),
+        modifier = modifier.fillMaxWidth().then(pulseModifier).testTag("safety-banner"),
     ) {
-        Column(Modifier.padding(Space.Card.dp), verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.Md.dp + Space.Xs.dp),
-            ) {
-                Icon(
-                    painterResource(R.drawable.ic_safety_warning_triangle),
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(26.dp),
-                )
-                Text(
-                    stringResource(R.string.main_do_not_train),
-                    color = Color.White,
-                    style = Type.BannerTitle,
-                )
+        val headline: @Composable () -> Unit = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.Md.dp + Space.Xs.dp),
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_safety_warning_triangle),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp),
+                    )
+                    Text(
+                        stringResource(R.string.main_do_not_train),
+                        color = Color.White,
+                        style = Type.BannerTitle,
+                    )
+                }
+                Text(subLine, color = DangerOn, style = Type.Body)
             }
-            // Sub-line: the characterized pain detail when we have it ("right
-            // knee · sharp · 6/10"), else the reason the hold applies.
-            val pregnancyWarning = model.profile?.health?.pregnancy_warning_sign == true
-            val subLine = holdDetail?.takeIf { action == HoldAction.RemovePain }
-                ?.let { stringResource(R.string.main_pain_prefix, it) }
-                ?: stringResource(holdReasonLineRes(model.hold_reason, tier, pregnancyWarning))
-            // The core's plain "why it's paused and how it clears" line replaces
-            // the generic caption when a resolvable hold is active (an illness
-            // always has one); otherwise the caption names this hold's own way back
-            // (only a PAR-Q-style answer is "cleared", a pregnancy pauses plans
-            // while its answer is on).
-            val resolutions = model.hold_resolutions
-            val pausedText = resolutions.firstOrNull { it.paused_text.isNotBlank() }?.paused_text
-            Text(subLine, color = DangerOn, style = Type.Body)
+        }
+        val paused: @Composable () -> Unit = {
             Text(
                 pausedText ?: stringResource(
                     if (model.hold_reason == "pregnancy" && !pregnancyWarning) {
@@ -355,68 +380,105 @@ private fun SafetyBanner(
                 ),
                 color = DangerOn,
                 style = Type.Caption,
+                modifier = Modifier.verticalScroll(rememberScrollState()),
             )
-            val reportHold = action == HoldAction.RemovePain || action == HoldAction.RemoveIllness ||
-                action == HoldAction.ClearReadiness
-            val showAddDetails = onAddDetails != null && reportHold
-            val undoLabel = when (action) {
-                HoldAction.RemovePain, HoldAction.RemoveIllness -> stringResource(R.string.main_remove_report_action)
-                HoldAction.ClearReadiness -> stringResource(R.string.main_logged_by_mistake)
-                HoldAction.ReviewHealth -> stringResource(R.string.main_hold_review_health)
-                HoldAction.EndIllness, HoldAction.CheckAge -> null
-            }
-            val opensProfile = action == HoldAction.ReviewHealth
-            val hasTextActions = showAddDetails || opensProfile || (undoLabel != null && onAction != null)
-            // The way back to training: the core's resolve actions (history kept;
-            // one illness action ends every illness hold). Solid white, the
-            // banner's primary actions.
-            val solidActions = resolutions.filter { it.action_label.isNotBlank() }
-                .map { r -> r.action_label to { onResolveHold(r) } }
-            val disclosureSubject = stringResource(R.string.main_do_not_train_subject)
-            val disclosure: @Composable () -> Unit = {
-                DisclosureButton(whyOpen, tint = Color.White, onTint = bg, subject = disclosureSubject) { whyOpen = !whyOpen }
-            }
-            solidActions.forEachIndexed { i, (label, onClick) ->
-                if (!hasTextActions && i == solidActions.lastIndex) {
-                    // No text actions below: the "?" shares the last action's row
-                    // instead of spending a row of its own.
+        }
+        val reportHold = action == HoldAction.RemovePain || action == HoldAction.RemoveIllness ||
+            action == HoldAction.ClearReadiness
+        val showAddDetails = onAddDetails != null && reportHold
+        val undoLabel = when (action) {
+            HoldAction.RemovePain, HoldAction.RemoveIllness -> stringResource(R.string.main_remove_report_action)
+            HoldAction.ClearReadiness -> stringResource(R.string.main_logged_by_mistake)
+            HoldAction.ReviewHealth -> stringResource(R.string.main_hold_review_health)
+            HoldAction.EndIllness, HoldAction.CheckAge -> null
+        }
+        val opensProfile = action == HoldAction.ReviewHealth
+        val hasTextActions = showAddDetails || opensProfile || (undoLabel != null && onAction != null)
+        // The way back to training: the core's resolve actions (history kept;
+        // one illness action ends every illness hold). Solid white, the
+        // banner's primary actions.
+        val solidActions = resolutions.filter { it.action_label.isNotBlank() }
+            .map { r -> r.action_label to { onResolveHold(r) } }
+        val disclosureSubject = stringResource(R.string.main_do_not_train_subject)
+        val disclosure: @Composable () -> Unit = {
+            DisclosureButton(whyOpen, tint = Color.White, onTint = bg, subject = disclosureSubject) { whyOpen = !whyOpen }
+        }
+        val actions: @Composable () -> Unit = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                solidActions.forEachIndexed { i, (label, onClick) ->
+                    if (!hasTextActions && i == solidActions.lastIndex) {
+                        // No text actions below: the "?" shares the last action's row
+                        // instead of spending a row of its own.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+                        ) {
+                            BannerSolidAction(label, bg, onClick, Modifier.weight(1f))
+                            disclosure()
+                        }
+                    } else {
+                        BannerSolidAction(label, bg, onClick)
+                    }
+                }
+                if (hasTextActions || solidActions.isEmpty()) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top,
                     ) {
-                        BannerSolidAction(label, bg, onClick, Modifier.weight(1f))
+                        // Each text action on its own line (never joined by a stray "·").
+                        Column(Modifier.weight(1f).offset(x = -TextActionInset)) {
+                            if (showAddDetails) {
+                                TextAction(stringResource(R.string.main_add_details), onClick = onAddDetails, tint = Color.White)
+                            }
+                            if (undoLabel != null && onAction != null) {
+                                TextAction(undoLabel, onClick = onAction, tint = Color.White, chevron = opensProfile)
+                            } else if (opensProfile) {
+                                // No Profile flow on this screen (the tracker): the way back as text.
+                                Text(
+                                    stringResource(R.string.main_hold_review_health_hint),
+                                    color = DangerOn,
+                                    style = Type.Caption,
+                                    modifier = Modifier.padding(start = TextActionInset, top = Space.Md.dp),
+                                )
+                            }
+                        }
                         disclosure()
                     }
-                } else {
-                    BannerSolidAction(label, bg, onClick)
                 }
             }
-            if (hasTextActions || solidActions.isEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    // Each text action on its own line (never joined by a stray "·").
-                    Column(Modifier.weight(1f).offset(x = -TextActionInset)) {
-                        if (showAddDetails) {
-                            TextAction(stringResource(R.string.main_add_details), onClick = onAddDetails, tint = Color.White)
-                        }
-                        if (undoLabel != null && onAction != null) {
-                            TextAction(undoLabel, onClick = onAction, tint = Color.White, chevron = opensProfile)
-                        } else if (opensProfile) {
-                            // No Profile flow on this screen (the tracker): the way back as text.
-                            Text(
-                                stringResource(R.string.main_hold_review_health_hint),
-                                color = DangerOn,
-                                style = Type.Caption,
-                                modifier = Modifier.padding(start = TextActionInset, top = Space.Md.dp),
-                            )
-                        }
-                    }
-                    disclosure()
+        }
+        val why: @Composable () -> Unit = {
+            if (whyOpen) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    HoldEvidencePanel(model, profileHold, strong = Color.White, muted = DangerOn)
                 }
             }
-            if (whyOpen) HoldEvidencePanel(model, profileHold, strong = Color.White, muted = DangerOn)
+        }
+        // Reading order: headline + reason, the paused line, the actions, the "?" panel.
+        Layout(listOf(headline, paused, actions, why), Modifier.padding(Space.Card.dp)) { slots, c ->
+            val loose = c.copy(minWidth = 0, minHeight = 0, maxHeight = Constraints.Infinity)
+            val head = slots[0].first().measure(loose)
+            val acts = slots[2].first().measure(loose)
+            // What the cap leaves after the parts that always show whole; the paused
+            // line takes it first (half of it while the "?" panel is open), the panel
+            // the rest. A part with no room left is not shown at all.
+            var room = capPx - 2 * padPx - head.height - gapPx - acts.height
+            val whyM = slots[3].firstOrNull()
+            fun flex(m: Measurable?, share: Int): Placeable? =
+                if (m == null || share <= gapPx) null else m.measure(loose.copy(maxHeight = share - gapPx))
+            val p = flex(slots[1].firstOrNull(), if (whyM != null) room / 2 else room)
+            room -= p?.let { it.height + gapPx } ?: 0
+            val w = flex(whyM, room)
+            val parts = listOfNotNull(head, p, acts, w)
+            val width = if (c.hasBoundedWidth) c.maxWidth else parts.maxOf { it.width }
+            val height = parts.sumOf { it.height } + gapPx * (parts.size - 1)
+            layout(width, height.coerceIn(c.minHeight, c.maxHeight)) {
+                var y = 0
+                for (part in parts) {
+                    part.placeRelative(0, y)
+                    y += part.height + gapPx
+                }
+            }
         }
     }
 }
@@ -514,6 +576,10 @@ internal fun YouthHoldCard(model: ViewModel, onOpenProfile: (ProfileRowId) -> Un
 private const val PulseHalfPeriodMs = 1200
 private const val PulseAlphaMin = 0.15f
 private const val PulseAlphaSpan = 0.4f
+
+/** Share of the screen height past which the pinned DO-NOT-TRAIN banner adds no
+ *  more than its hold statement (its extra text scrolls inside it instead). */
+private const val BannerMaxScreenFraction = 0.5f
 
 /** A solid white full-width action on the danger banner (its primary actions). */
 @Composable

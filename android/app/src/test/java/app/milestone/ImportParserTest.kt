@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 /**
@@ -21,6 +22,9 @@ import org.junit.Test
  *  - [parseHrBpm]: the HR-validation fix: accept only finite 20..=250 bpm, drop
  *    everything else (NaN, `Infinity`, absurd magnitudes, out-of-range), shared
  *    by the GPX and TCX readers.
+ *  - [nonRunSport] and [importedRunEvent]'s sport gate and logged-at stamp: a file
+ *    that names another sport is refused by name, and lollop's own GPX names the
+ *    run's stamp so a re-import is the same run.
  */
 class ImportParserTest {
 
@@ -138,7 +142,7 @@ class ImportParserTest {
         // must clear the core's 30 m QC gate (never a fabricated 5.0 that reads
         // as a great fix).
         val ev = importedRunEvent(
-            listOf(listOf(fixAt(1000, 0.000, null), fixAt(1200, 0.0054, null))),
+            ImportedRun(listOf(listOf(fixAt(1000, 0.000, null), fixAt(1200, 0.0054, null)))),
             measuredHrMax = null,
         )
         assertEquals(2, ev.points.size)
@@ -152,7 +156,7 @@ class ImportParserTest {
         // A real recorded/derived figure (FIT gps_accuracy or GPX hdop) survives
         // to the core untouched, not overwritten by the sentinel.
         val ev = importedRunEvent(
-            listOf(listOf(fixAt(1000, 0.000, 8.0), fixAt(1200, 0.0054, 12.5))),
+            ImportedRun(listOf(listOf(fixAt(1000, 0.000, 8.0), fixAt(1200, 0.0054, 12.5)))),
             measuredHrMax = null,
         )
         assertEquals(8.0, ev.points[0].accuracyM, 1e-9)
@@ -168,11 +172,13 @@ class ImportParserTest {
         // a plain mean (142.5 bpm) would sit ~27 bpm below it.
         val measuredHrMax = 190.0
         val ev = importedRunEvent(
-            listOf(
+            ImportedRun(
                 listOf(
-                    GpxFix(0.0, 0.000, 1000, 170), // held 300 s (~556 m: moving)
-                    GpxFix(0.0, 0.005, 1300, 115), // held 5 s (~2 m: standing)
-                    GpxFix(0.0, 0.00502, 1305, null),
+                    listOf(
+                        GpxFix(0.0, 0.000, 1000, 170), // held 300 s (~556 m: moving)
+                        GpxFix(0.0, 0.005, 1300, 115), // held 5 s (~2 m: standing)
+                        GpxFix(0.0, 0.00502, 1305, null),
+                    ),
                 ),
             ),
             measuredHrMax = measuredHrMax,
@@ -188,11 +194,13 @@ class ImportParserTest {
         // all weights are equal, so the time-weighted result is the old plain mean.
         val measuredHrMax = 200.0
         val ev = importedRunEvent(
-            listOf(
+            ImportedRun(
                 listOf(
-                    GpxFix(0.0, 0.0000, 1000, 100),
-                    GpxFix(0.0, 0.0030, 1100, 120),
-                    GpxFix(0.0, 0.0060, 1200, 140),
+                    listOf(
+                        GpxFix(0.0, 0.0000, 1000, 100),
+                        GpxFix(0.0, 0.0030, 1100, 120),
+                        GpxFix(0.0, 0.0060, 1200, 140),
+                    ),
                 ),
             ),
             measuredHrMax = measuredHrMax,
@@ -237,9 +245,49 @@ class ImportParserTest {
         // System.currentTimeMillis() id would collide within a millisecond, making a
         // later DeleteEntry/AmendRun target the wrong run. EntryIds.next() guarantees
         // a unique id per built run even in a tight loop.
-        val seg = listOf(listOf(GpxFix(0.0, 0.000, 1000, null), GpxFix(0.0, 0.0054, 1200, null)))
+        val seg = ImportedRun(listOf(listOf(GpxFix(0.0, 0.000, 1000, null), GpxFix(0.0, 0.0054, 1200, null))))
         val a = importedRunEvent(seg, measuredHrMax = null)
         val b = importedRunEvent(seg, measuredHrMax = null)
         assertNotEquals(a.entryId, b.entryId)
+    }
+
+    // --- the sport a file names, and lollop's own logged-at stamp --------------
+
+    @Test
+    fun aNamedNonRunningSportIsRecognisedAndAnythingElseStaysImportable() {
+        for (bike in listOf("Biking", "cycling", "Ride", "VirtualRide", "road_biking", "mountain-biking", "ebike", "1 cycling")) {
+            assertEquals(bike, "cycling", nonRunSport(bike))
+        }
+        assertEquals("swimming", nonRunSport("lap_swimming"))
+        assertEquals("skiing", nonRunSport("alpine_skiing"))
+        assertEquals("hiking", nonRunSport("hiking"))
+        assertEquals("walking", nonRunSport("Nordic Walking"))
+        // Running in any word wins; unnamed, generic or unknown labels import.
+        for (run in listOf(null, "", "Running", "trail_running", "treadmill_running", "Run", "jogging", "Other", "Laufen", "9", "strides")) {
+            assertNull(run, nonRunSport(run))
+        }
+    }
+
+    @Test
+    fun aRideNamedByItsFileIsRefusedByName() {
+        val ride = ImportedRun(listOf(listOf(fixAt(1000, 0.000, null), fixAt(1200, 0.0054, null))), sport = "Biking")
+        try {
+            importedRunEvent(ride, measuredHrMax = null)
+            fail("a ride must not import as a run")
+        } catch (e: GpxImportException) {
+            assertEquals(ImportFailure.NotARun, e.reason)
+            assertEquals("cycling", e.detail)
+        }
+    }
+
+    @Test
+    fun aFileNamedLoggedAtStampIsKeptOnlyWhenItFollowsTheTrack() {
+        val segs = listOf(listOf(fixAt(1000, 0.000, null), fixAt(1200, 0.0054, null)))
+        // A standing-still finish or a trimmed end: the run's stamp follows its last fix.
+        assertEquals(1500L, importedRunEvent(ImportedRun(segs, loggedAtSec = 1500), null).observedAt)
+        // None, one before the track ends, or one days later: the last fix.
+        assertEquals(1200L, importedRunEvent(ImportedRun(segs), null).observedAt)
+        assertEquals(1200L, importedRunEvent(ImportedRun(segs, loggedAtSec = 1100), null).observedAt)
+        assertEquals(1200L, importedRunEvent(ImportedRun(segs, loggedAtSec = 1200 + 3 * 86_400L), null).observedAt)
     }
 }

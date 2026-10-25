@@ -1,3 +1,5 @@
+import java.time.Duration
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -208,4 +210,7 @@ tasks.withType<Test>().configureEach {
     environment("ANDROID_LOG_TAGS", "OpenGLRenderer:E *:W")
     // Give the forked test JVM headroom: the real core + Compose + Robolectric.
     maxHeapSize = "2g"
+    // A hang fails the task instead of holding CI until its job timeout: the full
+    // suite runs in well under this.
+    timeout.set(Duration.ofMinutes(30))
 }

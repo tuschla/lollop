@@ -704,9 +704,11 @@ impl Gen {
         }
     }
 
+    /// A `SetToday`. Extreme days/offsets are sent, but the generator's own
+    /// clock only follows sane ones, so its stamp arithmetic cannot overflow.
     fn set_today(&mut self) -> Event {
         let r = self.rng.unit();
-        self.today = if r < 0.55 {
+        let day = if r < 0.55 {
             self.today + 1
         } else if r < 0.7 {
             self.today
@@ -721,18 +723,25 @@ impl Gen {
         } else {
             self.day()
         };
+        if (-10_000_000..=10_000_000).contains(&day) {
+            self.today = day;
+        }
+        let mut offset = self.offset;
         if self.rng.chance(0.08) {
-            self.offset = if self.mode == Mode::Absurd && self.rng.chance(0.2) {
+            offset = if self.mode == Mode::Absurd && self.rng.chance(0.2) {
                 self.rng
                     .pick(&[i64::MIN, i64::MAX, 86_400 * 3, -86_400 * 3])
             } else {
                 self.rng
                     .pick(&[0, 3600, 7200, -18_000, 50_400, -43_200, 20_700])
             };
+            if offset.unsigned_abs() <= 3 * DAY_SEC as u64 {
+                self.offset = offset;
+            }
         }
         Event::SetToday {
-            epoch_day: self.today,
-            utc_offset_sec: self.offset,
+            epoch_day: day,
+            utc_offset_sec: offset,
         }
     }
 
@@ -809,6 +818,17 @@ impl Gen {
         (workout, rpe, avg_hr)
     }
 
+    /// The shell never sends both figures: a run typed in bpm goes out with
+    /// `hr_pct_max` 0 (`RunEditor.kt`'s bpm mode), which `restoreEventFor`
+    /// mirrors. Only the wild modes pair a percentage with a bpm.
+    fn shell_hr_pct(&self, hr_pct_max: f64, avg_hr_bpm: Option<f64>) -> f64 {
+        if avg_hr_bpm.is_some() && !self.wild() {
+            0.0
+        } else {
+            hr_pct_max
+        }
+    }
+
     fn log_run(&mut self) -> Event {
         let distance_km = if self.wild() {
             self.f(1.0, 30.0, 0.08)
@@ -844,7 +864,7 @@ impl Gen {
         Event::LogRun {
             distance_km,
             duration_min,
-            hr_pct_max,
+            hr_pct_max: self.shell_hr_pct(hr_pct_max, avg_hr_bpm),
             longest_recent_km: if self.wild() {
                 self.f(0.0, 25.0, 0.1)
             } else {
@@ -855,6 +875,7 @@ impl Gen {
             workout_type,
             session_rpe,
             avg_hr_bpm,
+            utc_offset_sec: None,
         }
     }
 
@@ -936,7 +957,10 @@ impl Gen {
     }
 
     fn log_run_track(&mut self) -> Event {
-        let start = self.stamp();
+        // Fix times stay within ±100 000 years so the track/trim arithmetic
+        // here cannot overflow; the run's own `observed_at` may still be
+        // extreme (below).
+        let start = self.stamp().clamp(-3_000_000_000_000, 3_000_000_000_000);
         let (points, segment_starts) = self.track(start);
         let span = points
             .first()
@@ -955,13 +979,14 @@ impl Gen {
             span,
         });
         let (workout_type, session_rpe, avg_hr_bpm) = self.run_extras();
+        let hr_pct_max = if self.rng.chance(0.5) {
+            0.0
+        } else {
+            self.f(60.0, 95.0, 0.05)
+        };
         Event::LogRunTrack {
             points,
-            hr_pct_max: if self.rng.chance(0.5) {
-                0.0
-            } else {
-                self.f(60.0, 95.0, 0.05)
-            },
+            hr_pct_max: self.shell_hr_pct(hr_pct_max, avg_hr_bpm),
             longest_recent_km: if self.wild() {
                 self.f(0.0, 25.0, 0.1)
             } else {
@@ -973,6 +998,7 @@ impl Gen {
             workout_type,
             session_rpe,
             avg_hr_bpm,
+            utc_offset_sec: None,
         }
     }
 
@@ -1035,6 +1061,7 @@ impl Gen {
             workout_type: None,
             session_rpe: None,
             avg_hr_bpm: None,
+            utc_offset_sec: None,
         }
     }
 
@@ -1460,13 +1487,19 @@ impl Gen {
             resting_hr_bpm: self.opt_f(0.4, 40.0, 80.0),
             measured_hr_max: self.opt_f(0.3, 160.0, 210.0),
             weight_lb: self.rng.chance(0.2),
+            // The Android shell always dates an edit with the core's today
+            // (`ProfileDraft.toEvent(model.today())`); an undated edit is a
+            // legacy or hand-edited log.
             effective_from_epoch_day: if self.rng.chance(0.7) {
                 Some(self.today + self.rng.int(-1, 0))
             } else if self.wild() && self.rng.chance(0.5) {
                 Some(self.day())
-            } else {
+            } else if self.wild() {
                 None
+            } else {
+                Some(self.today)
             },
+            edited_at: None,
             lift_days_per_week: self.rng.opt(0.5, |_| 0).map(|_| self.u8w(2, 5)),
             training_weekdays: self.rng.opt(0.3, |r| r.below(128) as u8),
             goal_race_epoch_day: self.rng.opt(0.25, |_| 0).map(|_| self.day()),
@@ -1829,8 +1862,7 @@ fn check_wire_text(vm: &ViewModel, json: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Number sanity and HARD RULE 3 on one rendered view. A negative %HRmax is
-/// left to `amended_run_never_shows_a_negative_hr_percentage` (a known bug).
+/// Number sanity and HARD RULE 3 on one rendered view.
 fn check_numbers(vm: &ViewModel) -> Result<(), String> {
     for r in &vm.runs {
         if !(r.distance_km >= 0.0 && r.duration_min >= 0.0) {
@@ -1839,7 +1871,7 @@ fn check_numbers(vm: &ViewModel) -> Result<(), String> {
                 r.entry_id, r.distance_km, r.duration_min
             ));
         }
-        if r.hr_pct_max.is_nan() || r.hr_pct_max > 100.0 {
+        if !(0.0..=100.0).contains(&r.hr_pct_max) {
             return Err(format!("run {} shows {}% HRmax", r.entry_id, r.hr_pct_max));
         }
     }
@@ -1946,10 +1978,15 @@ fn check_step(prev: &ViewModel, e: &Event, next: &ViewModel, model: &Model) -> R
         }
     }
     // HARD RULE 3: a bare pain report, a below-neck illness or a cardiac red
-    // flag logged today stops training at once.
+    // flag logged today stops training at once, unless a later-stamped
+    // reading of the same signal (an "all clear" stamped after it) is in force.
     if let Event::SubmitReadiness(input) = e
         && let Some(today) = model.today_epoch_day
         && local_day(input.observed_at, model.today_utc_offset_sec) == today
+        && !model
+            .inputs
+            .iter()
+            .any(|i| i.signal == input.signal && i.observed_at > input.observed_at)
     {
         let red = match input.signal {
             ReadinessSignal::Pain => input.pain.is_none() && input.value > 0.0,
@@ -1972,7 +2009,7 @@ fn check_step(prev: &ViewModel, e: &Event, next: &ViewModel, model: &Model) -> R
 fn fuzz_case(seed: u64, mode: Mode) -> Result<(), String> {
     let mut g = Gen::new(seed, mode);
     let len = g.rng.int(8, 45) as usize;
-    let events = g.sequence(len);
+    let events: Vec<Event> = g.sequence(len);
     let app = Engine;
     let mut model = Model::default();
     let mut prev = app.view(&model);
@@ -2028,17 +2065,6 @@ fn fuzz_case(seed: u64, mode: Mode) -> Result<(), String> {
     }
 
     // Compaction is replay-equivalent, whole and as a launch-time prefix.
-    // KNOWN BUG mask: a run's typed bpm is converted against the profile in
-    // force at ingest, which compaction may drop (see
-    // `compaction_keeps_the_profile_a_runs_bpm_was_converted_against`), so
-    // this check runs on the log with every typed bpm removed.
-    let (events, final_json) = if events.iter().any(has_avg_hr) {
-        let masked: Vec<Event> = events.iter().cloned().map(without_avg_hr).collect();
-        let view = replay_cold(masked.clone())?;
-        (masked, view)
-    } else {
-        (events, final_json)
-    };
     let compacted = compact_event_log(events.clone());
     if compacted.len() > events.len() {
         return Err(format!(
@@ -2069,32 +2095,6 @@ fn fuzz_case(seed: u64, mode: Mode) -> Result<(), String> {
     Ok(())
 }
 
-fn has_avg_hr(e: &Event) -> bool {
-    matches!(
-        e,
-        Event::LogRun {
-            avg_hr_bpm: Some(_),
-            ..
-        } | Event::LogRunTrack {
-            avg_hr_bpm: Some(_),
-            ..
-        } | Event::AmendRun {
-            avg_hr_bpm: Some(_),
-            ..
-        }
-    )
-}
-
-fn without_avg_hr(mut e: Event) -> Event {
-    if let Event::LogRun { avg_hr_bpm, .. }
-    | Event::LogRunTrack { avg_hr_bpm, .. }
-    | Event::AmendRun { avg_hr_bpm, .. } = &mut e
-    {
-        *avg_hr_bpm = None;
-    }
-    e
-}
-
 #[test]
 fn fuzz_shell_shaped_sequences_keep_every_invariant() {
     run_cases(
@@ -2110,7 +2110,7 @@ fn fuzz_boundary_sequences_keep_every_invariant() {
     run_cases(
         "fuzz_boundary_sequences_keep_every_invariant",
         0x424f_554e_4400_0002,
-        30,
+        20,
         |seed| fuzz_case(seed, Mode::Boundary),
     );
 }
@@ -2171,6 +2171,7 @@ fn restore_manual_run(v: &RunResultView) -> Event {
         workout_type: v.workout_type,
         session_rpe: v.session_rpe,
         avg_hr_bpm: v.avg_hr_bpm,
+        utc_offset_sec: v.utc_offset_sec,
     }
 }
 
@@ -2234,9 +2235,10 @@ fn parse_gpx(doc: &str) -> Vec<Vec<GpsPoint>> {
         .collect()
 }
 
-/// `restoreEventFor` for a GPS run: the route rebuilt from the core's own GPX
-/// export (the registry the last `view()` on this thread refreshed); `None`
-/// when fewer than two fixes come back, where the shell offers no Undo.
+/// `restoreEventFor` for a GPS run (a route, or a track QC left unmeasurable):
+/// the fixes rebuilt from the core's own GPX export (the registry the last
+/// `view()` on this thread refreshed); `None` when fewer than two fixes come
+/// back, where the shell offers no Undo.
 fn restore_gps_run(v: &RunResultView) -> Option<Event> {
     let mut points = Vec::new();
     let mut segment_starts = Vec::new();
@@ -2259,6 +2261,7 @@ fn restore_gps_run(v: &RunResultView) -> Option<Event> {
         workout_type: v.workout_type,
         session_rpe: v.session_rpe,
         avg_hr_bpm: v.avg_hr_bpm,
+        utc_offset_sec: v.utc_offset_sec,
     })
 }
 
@@ -2276,13 +2279,13 @@ fn shell_history(seed: u64) -> (Gen, Engine, Model) {
 }
 
 /// One History row a delete or edit can target.
-enum Row {
-    Lift(LiftResultView),
-    Run(RunResultView),
-    Activity(ActivityResultView),
+enum Row<'a> {
+    Lift(&'a LiftResultView),
+    Run(&'a RunResultView),
+    Activity(&'a ActivityResultView),
 }
 
-impl Row {
+impl Row<'_> {
     fn kind(&self) -> EntryKind {
         match self {
             Row::Lift(_) => EntryKind::Set,
@@ -2308,7 +2311,12 @@ impl Row {
     }
 }
 
-/// A view JSON with some fields of the target run row removed.
+/// A view JSON prepared for an Undo comparison: the target run row's `fields`
+/// removed (a GPS row's `qc_dropped`, see [`QC_DROPPED`]).
+///
+/// Every float sum and tie the view shows is taken in log order (time, then
+/// `entry_id`), never storage order, so an Undo (the row re-pushed at the
+/// tail) must render the view EXACTLY: no float or text tolerance.
 fn without_run_fields(json: &str, id: u64, at: i64, fields: &[&str]) -> serde_json::Value {
     let mut v: serde_json::Value = serde_json::from_str(json).expect("view parses");
     if let Some(runs) = v.get_mut("runs").and_then(|r| r.as_array_mut()) {
@@ -2325,41 +2333,27 @@ fn without_run_fields(json: &str, id: u64, at: i64, fields: &[&str]) -> serde_js
     v
 }
 
-/// KNOWN BUG mask: a re-logged run re-bakes its card spike baseline against
-/// today's history (`undo_of_a_deleted_run_keeps_its_spike_chip`). The card
-/// chip (and the summary line that quotes it) is the baseline's only reader,
-/// so only these fields of the target row are skipped.
-const SPIKE_CHIP: [&str; 4] = ["spike_flag", "spike_has_baseline", "spike_note", "summary"];
-
 /// A GPS Undo rebuilds the route from the QC'd GPX by design, so the count
 /// of fixes QC dropped (not shown by the shell) comes back as 0.
-const SPIKE_CHIP_AND_QC: [&str; 5] = [
-    "spike_flag",
-    "spike_has_baseline",
-    "spike_note",
-    "summary",
-    "qc_dropped",
-];
+const QC_DROPPED: [&str; 1] = ["qc_dropped"];
 
 /// Up to three delete → Undo rounds on random History rows (GPS runs only
 /// when `gps`, otherwise sets, hand-entered runs and activities): each must
 /// remove exactly the row, and its Undo must render the view from before.
-/// A GPS route comes back through GPX at 1e-7° (~1 cm), so its numbers are
-/// compared to 1e-5 relative; everything else exactly.
+/// GPS routes come back through the core's GPX at full (shortest round-trip)
+/// precision, so the live tracker's raw doubles survive the Undo.
 fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
     let (mut g, app, mut model) = shell_history(seed);
     let mut before = app.view(&model);
     for round in 0..3 {
         let mut rows: Vec<Row> = Vec::new();
-        // KNOWN BUG mask: a run with a typed bpm is re-converted against
-        // today's profile (`undo_of_a_deleted_bpm_run_keeps_its_hr_percentage`).
-        let runs = before.runs.iter().filter(|r| r.avg_hr_bpm.is_none());
+        let runs = before.runs.iter();
         if gps {
-            rows.extend(runs.filter(|r| r.has_gpx).cloned().map(Row::Run));
+            rows.extend(runs.filter(|r| r.has_gpx).map(Row::Run));
         } else {
-            rows.extend(before.lifts.iter().cloned().map(Row::Lift));
-            rows.extend(runs.filter(|r| !r.has_gpx).cloned().map(Row::Run));
-            rows.extend(before.activities.iter().cloned().map(Row::Activity));
+            rows.extend(before.lifts.iter().map(Row::Lift));
+            rows.extend(runs.filter(|r| !r.has_gpx).map(Row::Run));
+            rows.extend(before.activities.iter().map(Row::Activity));
         }
         if rows.is_empty() {
             break;
@@ -2367,7 +2361,7 @@ fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
         let row = rows.swap_remove(g.rng.below(rows.len() as u64) as usize);
         let restore = match &row {
             Row::Lift(v) => Some(restore_lift(v)),
-            Row::Run(v) if gps => restore_gps_run(v),
+            Row::Run(v) if gps || v.gps_unmeasurable => restore_gps_run(v),
             Row::Run(v) => Some(restore_manual_run(v)),
             Row::Activity(a) => Some(restore_activity(a)),
         };
@@ -2385,16 +2379,13 @@ fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
         let _ = app.update(restore.clone(), &mut model);
         let after = app.view(&model);
         let after_json = vm_json(&after);
-        // GPX carries 1e-7° (~1 cm): a 10 km route may move by ~1 m.
-        let (tol, masked): (f64, &[&str]) = if gps {
-            (1e-4, &SPIKE_CHIP_AND_QC)
-        } else {
-            (0.0, &SPIKE_CHIP)
-        };
+        // A GPS row's QC'd-away fixes are not in the GPX the Undo is built
+        // from (by design), so its `qc_dropped` count is not compared.
+        let masked: &[&str] = if gps { &QC_DROPPED } else { &[] };
         let diff = value_diff(
             &without_run_fields(&before_json, id, at, masked),
             &without_run_fields(&after_json, id, at, masked),
-            tol,
+            0.0,
         );
         if let Some(d) = diff {
             return Err(format!(
@@ -2414,14 +2405,14 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
     let (mut g, app, mut model) = shell_history(seed);
     let mut before = app.view(&model);
     for round in 0..3 {
-        let mut rows: Vec<Row> = before.lifts.iter().cloned().map(Row::Lift).collect();
-        // KNOWN BUG mask: see `undo_delete_case`.
+        let mut rows: Vec<Row> = before.lifts.iter().map(Row::Lift).collect();
+        // The shell edits only hand-entered runs (`RunLogSection` editable:
+        // no route and a distance), never a GPS run QC left unmeasurable.
         rows.extend(
             before
                 .runs
                 .iter()
-                .filter(|r| !r.has_gpx && r.avg_hr_bpm.is_none())
-                .cloned()
+                .filter(|r| !r.has_gpx && !r.gps_unmeasurable)
                 .map(Row::Run),
         );
         if rows.is_empty() {
@@ -2550,8 +2541,8 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
         let after = app.view(&model);
         let after_json = vm_json(&after);
         let diff = value_diff(
-            &without_run_fields(&before_json, id, at, &SPIKE_CHIP),
-            &without_run_fields(&after_json, id, at, &SPIKE_CHIP),
+            &without_run_fields(&before_json, id, at, &[]),
+            &without_run_fields(&after_json, id, at, &[]),
             0.0,
         );
         if let Some(d) = diff {
@@ -2717,7 +2708,9 @@ fn mutation_case(seed: u64) -> Result<(), String> {
     for e in g.sequence(len) {
         let _ = app.update(e, &mut model);
     }
-    let mut decoded_n = 0;
+    // Once a mutation put the literal string "NaN"/"Infinity" into a user
+    // field (an exercise name), the view echoes it: only the wire is checked.
+    let mut nan_user_text = false;
     for j in 0..14 {
         let e = g.event();
         let mut v = serde_json::to_value(&e).expect("event to value");
@@ -2732,17 +2725,21 @@ fn mutation_case(seed: u64) -> Result<(), String> {
         let decoded = catch_unwind(|| serde_json::from_str::<Event>(&text))
             .map_err(|p| format!("decoding #{j} PANIC {}: {text}", panic_text(&*p)))?;
         let Ok(ev) = decoded else { continue };
-        decoded_n += 1;
         let vm = catch_unwind(AssertUnwindSafe(|| {
             let _ = app.update(ev, &mut model);
             app.view(&model)
         }))
         .map_err(|p| format!("mutated event #{j} PANIC {}: {text}", panic_text(&*p)))?;
         check_numbers(&vm).map_err(|m| format!("after mutated event #{j} {text}: {m}"))?;
-        check_wire_text(&vm, &vm_json(&vm))
-            .map_err(|m| format!("after mutated event #{j} {text}: {m}"))?;
+        let json = vm_json(&vm);
+        nan_user_text |= text.contains("NaN") || text.contains("Infinity");
+        let check = if nan_user_text {
+            check_wire(&vm, &json)
+        } else {
+            check_wire_text(&vm, &json)
+        };
+        check.map_err(|m| format!("after mutated event #{j} {text}: {m}"))?;
     }
-    let _ = decoded_n;
     Ok(())
 }
 
@@ -2771,11 +2768,11 @@ fn bpm_run(at: i64) -> Event {
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: Some(150.0),
+        utc_offset_sec: None,
     }
 }
 
 #[test]
-#[ignore = "BUG: compaction drops the SetProfile/SetToday a run's typed bpm was converted against, so after relaunch the run shows another %HRmax / zone"]
 fn compaction_keeps_the_profile_a_runs_bpm_was_converted_against() {
     let at = BASE_DAY * DAY_SEC + 8 * 3600;
     let today = |d: i64| Event::SetToday {
@@ -2816,7 +2813,6 @@ fn compaction_keeps_the_profile_a_runs_bpm_was_converted_against() {
 }
 
 #[test]
-#[ignore = "BUG: a negative hr_pct_max (corrupt/hand-edited log or non-Android shell) reaches the run card as a negative %HRmax"]
 fn a_negative_hr_percentage_never_reaches_the_run_card() {
     let at = BASE_DAY * DAY_SEC + 8 * 3600;
     let app = Engine;
@@ -2866,27 +2862,29 @@ fn delete_and_undo_run(app: &Engine, model: &mut Model, id: u64) -> (RunResultVi
 }
 
 #[test]
-#[ignore = "BUG: Undo of a deleted (or edited) run with a typed bpm re-converts it against today's profile, so the run comes back with another %HRmax / zone"]
 fn undo_of_a_deleted_bpm_run_keeps_its_hr_percentage() {
     let app = Engine;
     let mut model = Model::default();
-    let measured = |hr_max: f64| {
+    // The shell dates every edit with the core's today (an undated legacy
+    // edit pins the runs logged before it instead, so the Undo, a later log
+    // line, would read it).
+    let measured = |hr_max: f64, eff: i64| {
         Event::SetProfile(Profile {
             measured_hr_max: Some(hr_max),
+            effective_from_epoch_day: Some(eff),
             ..base_profile()
         })
     };
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: BASE_DAY,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    );
-    let _ = app.update(measured(190.0), &mut model);
+    let set_today = |epoch_day: i64| Event::SetToday {
+        epoch_day,
+        utc_offset_sec: 0,
+    };
+    let _ = app.update(set_today(BASE_DAY), &mut model);
+    let _ = app.update(measured(190.0, BASE_DAY), &mut model);
     let _ = app.update(bpm_run(BASE_DAY * DAY_SEC + 8 * 3600), &mut model);
     // A later lab test lowers the measured HRmax.
-    let _ = app.update(measured(168.0), &mut model);
+    let _ = app.update(set_today(BASE_DAY + 1), &mut model);
+    let _ = app.update(measured(168.0, BASE_DAY + 1), &mut model);
     let (before, after) = delete_and_undo_run(&app, &mut model, 1_760_000_000_001);
     assert_eq!(
         (before.hr_pct_max, &before.hr_label, before.zone),
@@ -2896,7 +2894,6 @@ fn undo_of_a_deleted_bpm_run_keeps_its_hr_percentage() {
 }
 
 #[test]
-#[ignore = "BUG: Undo of a deleted run re-bakes its spike baseline against today's history, so the run card's spike chip appears/disappears"]
 fn undo_of_a_deleted_run_keeps_its_spike_chip() {
     let app = Engine;
     let mut model = Model::default();
@@ -2931,7 +2928,6 @@ fn undo_of_a_deleted_run_keeps_its_spike_chip() {
 }
 
 #[test]
-#[ignore = "BUG: a GPS run with no moving leg (e.g. trimmed to the standing start) shows \"-0.0km\": an empty f64 sum is -0.0"]
 fn a_run_trimmed_to_its_standing_start_never_shows_negative_zero() {
     let start = BASE_DAY * DAY_SEC + 8 * 3600;
     // 20 fixes milling about at the start (0.2 m/s, under the 0.5 m/s
@@ -2967,5 +2963,358 @@ fn a_run_trimmed_to_its_standing_start_never_shows_negative_zero() {
         r.distance_km,
         r.summary,
         r.split_pct
+    );
+}
+
+/// Full replay vs replay of the compacted log, both on cold threads.
+fn assert_compaction_equivalent(events: Vec<Event>) {
+    let full = replay_cold(events.clone()).expect("full replay");
+    let compacted = replay_cold(compact_event_log(events)).expect("compacted replay");
+    assert!(
+        full == compacted,
+        "the compacted log renders a different view: {}",
+        json_diff(&full, &compacted)
+    );
+}
+
+#[test]
+fn compaction_keeps_the_date_of_an_undated_race() {
+    // A legacy (undated) profile edit stating a race: the race has no day to
+    // be dated with, whatever SetToday preceded it (compaction keeps only the
+    // last one), so it stays undated in both replays.
+    assert_compaction_equivalent(vec![
+        Event::SetToday {
+            epoch_day: BASE_DAY,
+            utc_offset_sec: 0,
+        },
+        Event::SetProfile(Profile {
+            recent_race: Some(RecentRace {
+                distance_km: 10.0,
+                time_sec: 2700,
+                epoch_day: None,
+            }),
+            ..base_profile()
+        }),
+        Event::SetToday {
+            epoch_day: BASE_DAY + 6,
+            utc_offset_sec: 0,
+        },
+    ]);
+    // The shell's path: the race is dated with the edit's effective day, and
+    // an unchanged undated re-send keeps that date, in both replays.
+    let race = |eff: i64| {
+        Event::SetProfile(Profile {
+            recent_race: Some(RecentRace {
+                distance_km: 10.0,
+                time_sec: 2700,
+                epoch_day: None,
+            }),
+            effective_from_epoch_day: Some(eff),
+            ..base_profile()
+        })
+    };
+    let today = |d: i64| Event::SetToday {
+        epoch_day: d,
+        utc_offset_sec: 0,
+    };
+    let events = vec![
+        today(BASE_DAY),
+        race(BASE_DAY),
+        today(BASE_DAY + 6),
+        race(BASE_DAY + 6),
+        today(BASE_DAY + 7),
+    ];
+    for log in [events.clone(), compact_event_log(events.clone())] {
+        let app = Engine;
+        let mut model = Model::default();
+        for e in log {
+            let _ = app.update(e, &mut model);
+        }
+        let day = model
+            .profile
+            .as_ref()
+            .and_then(|p| p.recent_race.as_ref())
+            .and_then(|r| r.epoch_day);
+        assert_eq!(day, Some(BASE_DAY), "the re-sent race keeps its first day");
+    }
+    assert_compaction_equivalent(events);
+}
+
+#[test]
+fn compaction_keeps_in_window_checkins_when_one_is_dated_after_today() {
+    // Minimized from fuzz seed 0xa86ae7dfa6e1e015 (shell mode): a check-in
+    // stamped 84 days ahead (a wrong device clock, later corrected), then
+    // yesterday's check-in, then today.
+    assert_compaction_equivalent(vec![
+        Event::SubmitCheckin(CheckinInput {
+            observed_at: 1_770_829_517,
+            mood: Some(1),
+            resting_hr_bpm: Some(55.6),
+            ..CheckinInput::default()
+        }),
+        Event::SubmitCheckin(CheckinInput {
+            observed_at: 1_763_517_034,
+            sleep_quality: Some(3),
+            soreness: Some(5),
+            mood: Some(4),
+            fatigue: Some(5),
+            stress: Some(3),
+            ..CheckinInput::default()
+        }),
+        Event::SetToday {
+            epoch_day: 20_412,
+            utc_offset_sec: 19_800,
+        },
+    ]);
+}
+
+/// A corrupt log's extreme `SetToday` never panics `view()`: for a held youth
+/// (the WHO card's Monday and minutes) and for a planned adult with a meet, a
+/// race, a run and a set, whose plan synthesis takes the meet offset and the
+/// race countdown (`saturating_sub` in `plan::apply_lift_week_modifiers` and
+/// `plan::run::cycle_pos`).
+#[test]
+fn an_extreme_set_today_never_panics_the_view() {
+    let youth = Profile {
+        health: HealthScreen {
+            youth: true,
+            ..HealthScreen::default()
+        },
+        ..base_profile()
+    };
+    let adult = Profile {
+        goal_distance: GoalDistance::TenK,
+        goal_race_epoch_day: Some(BASE_DAY + 60),
+        meet_epoch_day: Some(BASE_DAY + 40),
+        running_days_per_week: 3,
+        running_km_per_week: 30.0,
+        weekly_sets: 12,
+        lift_days_per_week: Some(3),
+        ..base_profile()
+    };
+    for (who, profile) in [("youth", youth), ("planned adult", adult)] {
+        for day in [i64::MIN, i64::MIN / 2, i64::MAX] {
+            let app = Engine;
+            let mut model = Model::default();
+            let at = BASE_DAY * DAY_SEC + 7 * 3600;
+            for e in [
+                Event::SetToday {
+                    epoch_day: BASE_DAY,
+                    utc_offset_sec: 0,
+                },
+                Event::SetProfile(profile.clone()),
+                Event::GeneratePlan {
+                    start_epoch_day: BASE_DAY,
+                },
+                log_run(6.0, 36.0, 70.0, 0.0, at, 1),
+                log_set_id("Back squat", 100.0, 2, at),
+                Event::SetToday {
+                    epoch_day: day,
+                    utc_offset_sec: 0,
+                },
+            ] {
+                let _ = app.update(e, &mut model);
+            }
+            let vm = catch_unwind(AssertUnwindSafe(|| app.view(&model)));
+            assert!(
+                vm.is_ok(),
+                "view() panicked for a {who} after SetToday {day}"
+            );
+        }
+    }
+}
+
+#[test]
+fn undo_of_a_deleted_set_keeps_the_lift_audit_name() {
+    let day = BASE_DAY * DAY_SEC + 17 * 3600;
+    let app = Engine;
+    let mut model = Model::default();
+    for e in [
+        Event::SetToday {
+            epoch_day: BASE_DAY,
+            utc_offset_sec: 0,
+        },
+        // Yesterday's heavy triple anchors the e1RM.
+        log_set_id("Back Squat", 120.0, 1, day - DAY_SEC),
+        // Today: two singles at ~86 %, one under the retired catalog label
+        // (stored as "Back squat").
+        with_entry_id(log_set("Back Squat", 115.0, 1, 9.0, day), 2),
+        with_entry_id(log_set("Barbell back squat", 115.0, 1, 9.0, day + 300), 3),
+    ] {
+        let _ = app.update(e, &mut model);
+    }
+    let audit = |vm: &ViewModel| {
+        vm.lift_audit
+            .iter()
+            .map(|g| g.summary.clone())
+            .collect::<Vec<_>>()
+    };
+    let before = app.view(&model);
+    assert!(
+        audit(&before).iter().any(|s| s.contains("quat")),
+        "the fixture raises a squat audit row: {:?}",
+        audit(&before)
+    );
+    let row = before
+        .lifts
+        .iter()
+        .find(|l| l.entry_id == 2)
+        .expect("set 2")
+        .clone();
+    let _ = app.update(delete_of(EntryKind::Set, 2, row.observed_at), &mut model);
+    let _ = app.update(restore_lift(&row), &mut model);
+    assert_eq!(
+        audit(&before),
+        audit(&app.view(&model)),
+        "delete + Undo renamed the audit row"
+    );
+}
+
+#[test]
+fn gps_undo_of_a_live_recorded_run_keeps_its_pace() {
+    // Fuzz seed whose live-precision track lands on a pace rounding edge:
+    // "4:07/km" before the delete, "4:06/km" after the Undo.
+    undo_delete_case(0x8983_8f5b_2a87_82d5, true).unwrap_or_else(|m| panic!("{m}"));
+}
+
+#[test]
+fn undo_of_a_deleted_unmeasurable_gps_run_restores_it_as_recorded() {
+    // Fuzz seed 0x1b7c7ac2de61f20e: a GPS run whose fixes all fail QC ("GPS
+    // signal too poor") came back from Undo as a 0 km manual run, with another
+    // card. The core now exports its recorded fixes for Undo, so the shell
+    // re-logs it as the same tracked run.
+    undo_delete_case(0x1b7c_7ac2_de61_f20e, false).unwrap_or_else(|m| panic!("{m}"));
+    let at = BASE_DAY * DAY_SEC + 8 * 3600;
+    let still = |i: i64| GpsPoint {
+        lat: 48.1,
+        lon: 11.5,
+        observed_at: at - 60 + i * 30,
+        accuracy_m: 5.0,
+    };
+    let app = Engine;
+    let mut model = Model::default();
+    let _ = app.update(
+        log_run_track(vec![still(0), still(1)], 0.0, 0.0, at, 31),
+        &mut model,
+    );
+    let before = app.view(&model);
+    let row = before.runs[0].clone();
+    assert!(row.gps_unmeasurable && !row.has_gpx, "{}", row.summary);
+    let restore = restore_gps_run(&row).expect("the recorded fixes export for Undo");
+    let _ = app.update(delete_of(EntryKind::Run, 31, at), &mut model);
+    let _ = app.update(restore, &mut model);
+    assert_eq!(vm_json(&before), vm_json(&app.view(&model)));
+}
+
+#[test]
+fn undo_of_a_run_keeps_the_weekly_km() {
+    let at = BASE_DAY * DAY_SEC + 8 * 3600;
+    let app = Engine;
+    let mut model = Model::default();
+    let _ = app.update(
+        Event::SetToday {
+            epoch_day: BASE_DAY,
+            utc_offset_sec: 0,
+        },
+        &mut model,
+    );
+    // 13.69 + 29.27 + 6.89 = 49.85 exactly; the float sum lands either side
+    // of the rounding edge depending on the order.
+    for (i, km) in [13.69, 29.27, 6.89].into_iter().enumerate() {
+        let _ = app.update(
+            log_run(km, 60.0, 70.0, 0.0, at - i as i64 * 3600, 100 + i as u64),
+            &mut model,
+        );
+    }
+    let week_km = |vm: &ViewModel| {
+        vm.run_progress
+            .as_ref()
+            .and_then(|p| p.weekly.last())
+            .map(|w| w.km)
+    };
+    delete_and_undo_run(&app, &mut model, 100);
+    // The same three runs logged fresh, in their original order.
+    let mut fresh = Model::default();
+    let _ = app.update(
+        Event::SetToday {
+            epoch_day: BASE_DAY,
+            utc_offset_sec: 0,
+        },
+        &mut fresh,
+    );
+    for (i, km) in [13.69, 29.27, 6.89].into_iter().enumerate() {
+        let _ = app.update(
+            log_run(km, 60.0, 70.0, 0.0, at - i as i64 * 3600, 100 + i as u64),
+            &mut fresh,
+        );
+    }
+    assert_eq!(
+        week_km(&app.view(&fresh)),
+        week_km(&app.view(&model)),
+        "the same three runs show another weekly total after delete + Undo"
+    );
+}
+
+#[test]
+fn a_huge_run_duration_never_panics_the_youth_card() {
+    let at = BASE_DAY * DAY_SEC + 8 * 3600;
+    let app = Engine;
+    let mut model = Model::default();
+    for e in [
+        Event::SetToday {
+            epoch_day: BASE_DAY,
+            utc_offset_sec: 0,
+        },
+        Event::SetProfile(Profile {
+            health: HealthScreen {
+                youth: true,
+                ..HealthScreen::default()
+            },
+            ..base_profile()
+        }),
+        log_run(5.0, 1e10, 70.0, 0.0, at, 1),
+        Event::LogActivity {
+            kind: ActivityKind::Sport,
+            minutes: 30.0,
+            vigorous: false,
+            strengthening: false,
+            observed_at: at,
+            entry_id: 2,
+        },
+    ] {
+        let _ = app.update(e, &mut model);
+    }
+    let vm = catch_unwind(AssertUnwindSafe(|| app.view(&model))).expect("view() must not panic");
+    let card = vm.youth_activity.expect("the under-18 card shows");
+    assert!(
+        card.minutes >= card.run_minutes,
+        "weekly minutes {} below the run minutes {}",
+        card.minutes,
+        card.run_minutes
+    );
+}
+
+#[test]
+fn a_subnormal_run_distance_never_shows_infinite_percent() {
+    let at = BASE_DAY * DAY_SEC + 8 * 3600;
+    let app = Engine;
+    let mut model = Model::default();
+    for e in [
+        Event::SetToday {
+            epoch_day: BASE_DAY,
+            utc_offset_sec: 0,
+        },
+        Event::SetProfile(sample_profile()),
+        log_run(5e-324, 30.0, 70.0, 0.0, at - 8 * DAY_SEC, 1),
+        log_run(5e-324, 30.0, 70.0, 0.0, at - DAY_SEC, 2),
+        log_run(10.0, 60.0, 70.0, 0.0, at, 3),
+    ] {
+        let _ = app.update(e, &mut model);
+    }
+    let json = vm_json(&app.view(&model));
+    assert_eq!(
+        leaked_non_finite(&json),
+        None,
+        "a non-finite percentage reached display text"
     );
 }

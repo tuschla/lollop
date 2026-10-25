@@ -198,8 +198,8 @@ fn session_sport_gates_import() {
 /// paths can be exercised on the real (cycling) Fenix fixture.
 fn track_any_sport(bytes: &[u8]) -> Result<FitTrack, FitError> {
     validate_fit_header(bytes)?;
-    let (records, truncated) = decode_records_salvaging(bytes);
-    track_from_records(&records, truncated)
+    let (scan, truncated) = scan_fit(bytes);
+    scan.into_track(truncated)
 }
 
 /// A 12-byte FIT header (no header CRC) declaring `data_size` message bytes.

@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import java.time.LocalDateTime
 import java.time.ZoneId
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -129,6 +132,27 @@ class HistorySessionsTest {
     }
 
     @Test
+    fun undoOfADeletedUnmeasurableGpsRunRelogsItsRecordedFixesNotAManualRun() {
+        // A GPS run whose fixes all failed QC ("GPS signal too poor") has no route
+        // (has_gpx false) and shows 0 km. Undo must re-log the recorded fixes the
+        // core exports for it, never a 0 km manual LogRun with another card.
+        val run = RunResultView(
+            distance_km = 0.0, observed_at = 2_000L, entry_id = 8L,
+            has_gpx = false, gps_unmeasurable = true, workout_type = "LongRun", session_rpe = 2,
+        )
+        assertEquals(null, restoreEventFor(HistoryEntry.Run(run), emptyList()))
+        val recorded = listOf(
+            listOf(GpxFix(48.1, 11.5, 1_940L, null, accuracyM = 5.0), GpxFix(48.1, 11.5, 1_970L, null, accuracyM = 5.0)),
+        )
+        val ev = restoreEventFor(HistoryEntry.Run(run), recorded) as Event.LogRunTrack
+        assertEquals(8L, ev.entryId)
+        assertEquals(2_000L, ev.observedAt)
+        assertEquals(2, ev.points.size)
+        assertEquals(5.0, ev.points[0].accuracyM, 1e-9)
+        assertEquals(2, ev.sessionRpe)
+    }
+
+    @Test
     fun undoOfADeletedRunRelogsTheEnteredBpmNotTheDerivedPercentage() {
         val run = RunResultView(
             distance_km = 8.0, duration_min = 48.0, hr_pct_max = 82.5, avg_hr_bpm = 152.0,
@@ -141,5 +165,30 @@ class HistorySessionsTest {
         val ev2 = restoreEventFor(HistoryEntry.Run(pctOnly), emptyList()) as Event.LogRun
         assertEquals(null, ev2.avgHrBpm)
         assertEquals(82.5, ev2.hrPctMax, 0.0)
+    }
+
+    @Test
+    fun undoOfADeletedBpmRunResendsTheUtcOffsetItWasLoggedUnder() {
+        // The core echoes the row's logged offset as `utc_offset_sec` (RevLedger
+        // F2): Undo must send it back, or the restored run is converted on the
+        // current clock's day (a different age / profile after a time-zone change).
+        val run = coreJson.decodeFromString<RunResultView>(
+            """{"distance_km":8.0,"duration_min":48.0,"hr_pct_max":90.0,"avg_hr_bpm":162.0,""" +
+                """"utc_offset_sec":7200,"observed_at":3000,"entry_id":9}""",
+        )
+        val manual = restoreEventFor(HistoryEntry.Run(run), emptyList()) as Event.LogRun
+        assertEquals(7200, manual.utcOffsetSec)
+        assertEquals(
+            7200,
+            manual.toJson().jsonObject["LogRun"]!!.jsonObject["utc_offset_sec"]!!.jsonPrimitive.int,
+        )
+        val gps = run.copy(has_gpx = true)
+        val route = listOf(listOf(GpxFix(52.0, 13.0, 2_900L, null), GpxFix(52.001, 13.0, 3_000L, null)))
+        val track = restoreEventFor(HistoryEntry.Run(gps), route) as Event.LogRunTrack
+        assertEquals(7200, track.utcOffsetSec)
+        // A legacy row (no logged offset) stays unstamped.
+        val legacy = restoreEventFor(HistoryEntry.Run(run.copy(utc_offset_sec = null)), emptyList()) as Event.LogRun
+        assertEquals(null, legacy.utcOffsetSec)
+        assertEquals(null, legacy.toJson().jsonObject["LogRun"]!!.jsonObject["utc_offset_sec"])
     }
 }

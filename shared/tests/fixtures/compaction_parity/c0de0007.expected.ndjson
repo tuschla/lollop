@@ -1,0 +1,38 @@
+{"LogSet":{"exercise":"Back Squat","weight_kg":72.0,"reps":3,"rpe":8.0,"observed_at":1763724248,"entry_id":0,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":106.0,"reps":5,"rpe":8.0,"observed_at":1764896878,"entry_id":0,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":109.0,"reps":7,"rpe":8.0,"observed_at":1765235840,"entry_id":0,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":88.0,"reps":7,"rpe":8.0,"observed_at":1766124324,"entry_id":1760000000012,"hold_sec":null}}
+{"SubmitCheckin":{"observed_at":1765875377,"sleep_quality":4,"soreness":3,"mood":5,"fatigue":2,"stress":2,"resting_hr_bpm":51.0,"hrv_rmssd_ms":75.0}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":71.0,"reps":1,"rpe":8.0,"observed_at":1766696806,"entry_id":1760000000015,"hold_sec":null}}
+{"SubmitCheckin":{"observed_at":1766866748,"sleep_quality":1,"soreness":2,"mood":2,"fatigue":1,"stress":2,"resting_hr_bpm":50.0,"hrv_rmssd_ms":68.0}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":74.0,"reps":7,"rpe":8.0,"observed_at":1766987523,"entry_id":1760000000016,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":106.0,"reps":7,"rpe":8.0,"observed_at":1767605023,"entry_id":1760000000018,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":104.0,"reps":6,"rpe":8.0,"observed_at":1767763936,"entry_id":0,"hold_sec":null}}
+{"SubmitCheckin":{"observed_at":1767912800,"sleep_quality":1,"soreness":5,"mood":2,"fatigue":1,"stress":5,"resting_hr_bpm":51.0,"hrv_rmssd_ms":null}}
+{"SubmitCheckin":{"observed_at":1768101710,"sleep_quality":4,"soreness":5,"mood":5,"fatigue":1,"stress":4,"resting_hr_bpm":null,"hrv_rmssd_ms":78.0}}
+{"SubmitCheckin":{"observed_at":1768035392,"sleep_quality":1,"soreness":2,"mood":2,"fatigue":1,"stress":2,"resting_hr_bpm":59.0,"hrv_rmssd_ms":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":79.0,"reps":10,"rpe":8.0,"observed_at":1768475394,"entry_id":0,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":89.0,"reps":1,"rpe":8.0,"observed_at":1768669616,"entry_id":1760000000021,"hold_sec":null}}
+{"SubmitCheckin":{"observed_at":1768925661,"sleep_quality":2,"soreness":4,"mood":2,"fatigue":4,"stress":3,"resting_hr_bpm":null,"hrv_rmssd_ms":null}}
+{"SubmitCheckin":{"observed_at":1769544043,"sleep_quality":3,"soreness":2,"mood":3,"fatigue":2,"stress":4,"resting_hr_bpm":null,"hrv_rmssd_ms":null}}
+{"SubmitCheckin":{"observed_at":1769738040,"sleep_quality":2,"soreness":1,"mood":1,"fatigue":3,"stress":3,"resting_hr_bpm":54.0,"hrv_rmssd_ms":43.0}}
+{"SubmitCheckin":{"observed_at":1769995044,"sleep_quality":4,"soreness":4,"mood":2,"fatigue":2,"stress":1,"resting_hr_bpm":52.0,"hrv_rmssd_ms":null}}
+{"SubmitCheckin":{"observed_at":1770101598,"sleep_quality":2,"soreness":5,"mood":3,"fatigue":5,"stress":5,"resting_hr_bpm":null,"hrv_rmssd_ms":40.0}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":105.0,"reps":7,"rpe":8.0,"observed_at":1770818167,"entry_id":1760000000028,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":99.0,"reps":2,"rpe":8.0,"observed_at":1770927080,"entry_id":1760000000029,"hold_sec":null}}
+{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"General","concurrent_goal":"Strength","weekly_sets":12,"running_days_per_week":3,"running_km_per_week":20.0,"running_km_per_week_set":true,"advanced":false,"female":false,"high_load_block":false,"health":{"youth":false,"parq_positive":false,"medically_cleared":false,"pregnant":false,"pregnancy_warning_sign":false,"injury_or_rehab":false,"reds_signal":false,"symptomatic":false,"acute_illness":false,"parq_yes":0,"cleared_parq_mask":0},"environment":null,"env_temp_c":null,"env_altitude_m":null,"weeks_off":null,"bodyweight_kg":null,"age_years":null,"birth_epoch_day":5773,"resting_hr_bpm":null,"measured_hr_max":null,"weight_lb":false,"resistance_modality":"Weights","effective_from_epoch_day":null,"lift_days_per_week":null,"training_weekdays":null,"goal_race_epoch_day":null,"recent_race":null,"stated_longest_recent_km":null,"layoff_returned_epoch_day":null,"meet_epoch_day":null,"calis_equipment":null,"specialization_muscle":null,"runner_strength":false}}
+{"SubmitCheckin":{"observed_at":1771449140,"sleep_quality":5,"soreness":1,"mood":3,"fatigue":2,"stress":5,"resting_hr_bpm":60.0,"hrv_rmssd_ms":null}}
+{"SubmitCheckin":{"observed_at":1771465931,"sleep_quality":4,"soreness":4,"mood":2,"fatigue":2,"stress":4,"resting_hr_bpm":null,"hrv_rmssd_ms":77.0}}
+{"SubmitCheckin":{"observed_at":1771682413,"sleep_quality":4,"soreness":1,"mood":2,"fatigue":2,"stress":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":64.0,"reps":4,"rpe":8.0,"observed_at":1772088724,"entry_id":1760000000031,"hold_sec":null}}
+{"SubmitCheckin":{"observed_at":1772035268,"sleep_quality":5,"soreness":3,"mood":4,"fatigue":1,"stress":1,"resting_hr_bpm":49.0,"hrv_rmssd_ms":50.0}}
+{"SubmitCheckin":{"observed_at":1772352929,"sleep_quality":3,"soreness":3,"mood":5,"fatigue":2,"stress":4,"resting_hr_bpm":null,"hrv_rmssd_ms":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":64.0,"reps":7,"rpe":8.0,"observed_at":1772478116,"entry_id":1760000000032,"hold_sec":null}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":61.0,"reps":6,"rpe":8.0,"observed_at":1772750042,"entry_id":1760000000033,"hold_sec":null}}
+{"LogRun":{"distance_km":8.0,"duration_min":48.0,"hr_pct_max":41.0,"longest_recent_km":0.0,"observed_at":1772894656,"entry_id":1760000000034,"workout_type":null,"session_rpe":null,"avg_hr_bpm":null,"utc_offset_sec":3600}}
+{"LogSet":{"exercise":"Back Squat","weight_kg":112.0,"reps":10,"rpe":8.0,"observed_at":1773009965,"entry_id":1760000000035,"hold_sec":null}}
+{"LogRun":{"distance_km":13.9,"duration_min":83.4,"hr_pct_max":71.0,"longest_recent_km":0.0,"observed_at":1773126778,"entry_id":1760000000036,"workout_type":null,"session_rpe":null,"avg_hr_bpm":null}}
+{"SubmitCheckin":{"observed_at":1773294826,"sleep_quality":5,"soreness":4,"mood":4,"fatigue":5,"stress":5,"resting_hr_bpm":57.0,"hrv_rmssd_ms":null}}
+{"LogRun":{"distance_km":24.9,"duration_min":149.39999999999998,"hr_pct_max":18.0,"longest_recent_km":0.0,"observed_at":1773597817,"entry_id":1760000000038,"workout_type":null,"session_rpe":null,"avg_hr_bpm":null,"utc_offset_sec":3600}}
+{"LogRunTrack":{"points":[{"lat":48.1,"lon":11.5,"observed_at":1773961421,"accuracy_m":5.0},{"lat":48.10017117117117,"lon":11.5,"observed_at":1773961426,"accuracy_m":5.0},{"lat":48.100342342342344,"lon":11.5,"observed_at":1773961431,"accuracy_m":5.0}],"hr_pct_max":0.0,"longest_recent_km":0.0,"segment_starts":[],"observed_at":1773961751,"entry_id":1760000000039,"workout_type":null,"session_rpe":null,"avg_hr_bpm":136.0,"utc_offset_sec":3600}}
+{"SetToday":{"epoch_day":20531,"utc_offset_sec":3600}}

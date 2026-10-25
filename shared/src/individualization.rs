@@ -281,6 +281,78 @@ pub fn reentry_ramp(weeks_off: f64, days_since_return: i64) -> Recommended<Reent
     )
 }
 
+/// Running re-entry after time off (File 08 load-036, Table 3.4b running
+/// column; RUN-REENTRY-001), as it stands a given number of days after the
+/// return.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RunReEntry {
+    /// Today's restart floor as a fraction of the prior weekly volume: the
+    /// bracket's start, climbing linearly back to 1.0 over `ramp_days`.
+    pub volume_frac: f64,
+    /// Length of the ramp back to the prior volume in days (0 under a week).
+    pub ramp_days: i64,
+    /// `true` while the ramp still runs; `false` once it ended — the break
+    /// then no longer shapes the weekly volume.
+    pub active: bool,
+    /// The long run is built up again (2+ weeks off): runs from before the
+    /// break no longer count as demonstrated long-run capacity.
+    pub rebuild_long_run: bool,
+    /// 4+ weeks off: single runs are judged almost as for a beginner — every
+    /// run's spike ceiling (RUN-SPIKE-001) rests only on the runs logged since
+    /// the return, never on a run from before the break.
+    pub near_novice_spike: bool,
+}
+
+/// Running re-entry bracket by weeks fully off running, `days_since_return`
+/// days after running resumed (a break still running counts as day 0):
+/// <1 wk as planned; 1–2 wk ~90 % of the prior volume; 2–4 wk ~70–80 %
+/// (midpoint) and rebuild the long run; 4–8 wk ~50–60 % (midpoint) and single
+/// runs judged near-novice for spike caps; past 8 weeks "rebuild base". The
+/// table gives no fraction past 8 weeks, so nothing from before the break
+/// floors the restart (fraction 0): the base is rebuilt from the running
+/// logged since the return, as for a new runner whose logged runs replace the
+/// numbers entered (RUN-START-001), never from an invented share.
+///
+/// Table 3.4b is a re-entry RAMP (load-036 applies it to resistance and
+/// running alike) but states the ramp length only in its resistance column:
+/// the same row's window ([`resistance_reentry`]'s `ramp_weeks` top: 1, 2, 4,
+/// 6 weeks) bounds the running ramp too, with the REENTRY-RAMP-001 linear
+/// shape. Once it has run its course the break no longer scales the plan.
+pub fn run_reentry(weeks_off: f64, days_since_return: i64) -> Recommended<RunReEntry> {
+    let start = if weeks_off < 1.0 {
+        1.0
+    } else if weeks_off < 2.0 {
+        0.90
+    } else if weeks_off < 4.0 {
+        0.75
+    } else if weeks_off <= 8.0 {
+        0.55
+    } else {
+        0.0
+    };
+    let ramp_days = if start < 1.0 {
+        resistance_reentry(weeks_off).value.ramp_weeks.1 as i64 * 7
+    } else {
+        0
+    };
+    let t = days_since_return.max(0);
+    let volume_frac = if ramp_days > 0 {
+        start + (1.0 - start) * (t as f64 / ramp_days as f64).min(1.0)
+    } else {
+        1.0
+    };
+    evidence::graded(
+        RunReEntry {
+            volume_frac,
+            ramp_days,
+            active: t < ramp_days,
+            rebuild_long_run: weeks_off >= 2.0,
+            near_novice_spike: weeks_off >= 4.0,
+        },
+        claims::RUN_REENTRY_001,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // 5. Progression & nutrition (File 08 load-031/indiv-008/013/020; DBLPROG/MASTERS/DEFICIT)
 // ---------------------------------------------------------------------------

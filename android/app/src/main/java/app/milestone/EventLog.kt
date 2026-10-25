@@ -20,9 +20,17 @@ import kotlinx.serialization.json.long
  * log file never existed, a log that exists but compacted to zero surviving lines
  * (the user cleared all their data) is a RETURNING user, and the caller must not
  * re-seed the onboarding profile over their deliberate empty state. [maxEntryId]
- * is the largest `entry_id` any intact line carries (0 when none).
+ * is the largest `entry_id` any intact line carries (0 when none). [planRemoved]
+ * is true when the surviving log's last plan line is a `ClearPlan` (the user
+ * removed their plan): compaction keeps that line, so boot can honour the
+ * removal even when the setup prefs' marker was lost.
  */
-data class RestoredLog(val lines: List<String>, val freshInstall: Boolean, val maxEntryId: Long = 0L)
+data class RestoredLog(
+    val lines: List<String>,
+    val freshInstall: Boolean,
+    val maxEntryId: Long = 0L,
+    val planRemoved: Boolean = false,
+)
 
 /**
  * Event-log compaction over raw serde wire lines. Lives outside [Core] (which
@@ -40,7 +48,7 @@ object EventLog {
 
     /** Clear-variant → the member variants its clear supersedes. `DeleteEntry`
      *  belongs to ClearSets, ClearRuns or ClearActivities depending on its `kind`, so it is NOT
-     *  listed statically here: [memberOfClear] resolves it per-line. The review
+     *  listed statically here: its [Facts.deleteClear] resolves it per-line. The review
      *  family is NOT here: a ClearReview / ClearWeeklyCheckin leaves the core's
      *  weekly history intact, so it never sweeps a submit (see the review pass in [compact]). */
     private val families = mapOf(
@@ -66,13 +74,13 @@ object EventLog {
         // them. Lockstep with log.rs classify.
         "ClearPlan" to setOf("GeneratePlan", "MoveSession"),
         // Family 15: other activity minutes (youth weekly activity card). A
-        // DeleteEntry with kind Activity joins it via memberOfClear. Lockstep
+        // DeleteEntry with kind Activity joins it via Facts.deleteClear. Lockstep
         // with log.rs classify.
         "ClearActivities" to setOf("LogActivity"),
     )
 
     /** Last-write-wins singleton variants (assign a scalar model field outright).
-     *  SetProfile is NOT here: it is history-keyed (a dedicated eff-death pass in
+     *  SetProfile is NOT here: it is history-keyed (a dedicated key-death pass in
      *  compact mirrors update()'s profile_history reducer). SubmitReview is NOT
      *  here either: every review is a review-history entry. Lockstep with log.rs. */
     private val singletons = listOf(
@@ -108,30 +116,23 @@ object EventLog {
         "MoveSession", "LogActivity",
     )
 
-    /** Rule 4 retention window (lockstep with log.rs RETAIN_CHECKIN_DAYS): a
-     *  SubmitCheckin more than this many days before the PER-CHANNEL anchor (the
-     *  min over channels present of that channel's own newest reading) is dropped.
-     *  Safely larger than autoreg's 30-day BASELINE_WINDOW_DAYS, so every dropped
-     *  line is already outside the window derive_readiness reads → the drop is
-     *  replay-equivalent. */
-    private const val RETAIN_CHECKIN_DAYS = 45L
-    /** Seconds per day, for the Rule 4 window (matches the core's day size). */
-    private const val CHECKIN_DAY_SEC = 86_400L
-
     /**
      * Drop log lines whose effect on the replayed model is provably nil, returning
      * a shorter but replay-equivalent line list (same relative order of survivors).
      *
-     * The compaction rules (0, 1, 2, 2b, 3, 4) are all grounded in the core's `update` (app/mod.rs): the model stores
+     * The compaction rules (0, 1, 2, 2b, 3) are all grounded in the core's `update` (app/mod.rs): the model stores
      * only raw inputs and derives everything in `view`, and no event's `update`
-     * reads another family's state.
+     * reads another family's state, except for figures that are a pure function of
+     * the surviving model and re-derived whenever their inputs change (a run's
+     * typed-bpm %HRmax, its card spike baseline), which a dropped line cannot move.
      *  0. **An undated RemoveReadiness cancels its submit; a dated one keeps it.**
      *     A dated remove (observed_at > 0) retracts the input, which stays in the
      *     core for the past days it shaped, so both lines survive.
      *  1. **Clear supersedes its family.** A `Clear<F>` empties family F's vec, so
      *     every F event (and the clear) at or before the *last* `Clear<F>` leaves
      *     no residue, F events after it replay against an already-empty vec. The
-     *     review family is the exception (rule 2).
+     *     review family is the exception (rule 2); a last `ClearPlan` that no
+     *     `GeneratePlan` follows is kept, as the record that the plan was removed.
      *  2. **Last write wins for singletons; reviews are a history.** The
      *     calculators assign a scalar model field outright, and nothing else reads
      *     it at update time, so only the last surviving one matters. Every
@@ -139,41 +140,101 @@ object EventLog {
      *     check-ins as a history that dates past days' deload/downgrade windows);
      *     a `ClearReview` / `ClearWeeklyCheckin` is dropped only when a later line
      *     replaces the same store anyway.
-     *  4. **Check-ins age out of a trailing window, PER CHANNEL.** The core windows
-     *     EACH channel (wellness / HRV / resting-HR) on that channel's OWN newest
-     *     reading, so the cutoff anchors on the MIN over channels present of that
-     *     channel's newest reading. A `SubmitCheckin` more than [RETAIN_CHECKIN_DAYS]
-     *     before that anchor is out of window for every channel it carries, so it is
-     *     dropped, deterministic, no clock. Family 0 readiness is never windowed: a
-     *     safety hold lives until explicitly cleared.
+     *  Check-ins (family 12) are never windowed: the core reads a check-in whenever
+     *  it is its channel's newest reading on or before the day judged, and a later
+     *  SetToday can move today back to any reading's day, so only a ClearCheckins
+     *  (rule 1) drops one. Family 0 readiness is never windowed either: a safety
+     *  hold lives until explicitly cleared.
      */
-    fun compact(lines: List<String>): List<String> =
-        compact(lines, lines.map { runCatching { json.parseToJsonElement(it) }.getOrNull() })
+    fun compact(lines: List<String>): List<String> {
+        // Each line's JSON tree lives only while its facts are read off it.
+        val remove = removals(lines.map { factsOf(runCatching { json.parseToJsonElement(it) }.getOrNull()) })
+        return lines.filterIndexed { i, _ -> !remove[i] }
+    }
 
-    /** Core compaction over lines already parsed once into [elems] (null = a torn
-     *  line load() already dropped). Parsing once and threading the elements keeps
-     *  a large LogRunTrack line from being re-parsed by the variant + field reads. */
-    private fun compact(lines: List<String>, elems: List<JsonElement?>): List<String> {
-        val variant = elems.map(::variantOfElement)
-        val remove = BooleanArray(lines.size)
+    /**
+     * What compaction (and [load]'s entry-id high-water mark) reads off one wire
+     * line, taken from its JSON tree once so the tree can be dropped right after.
+     * A LogRunTrack's tree is roughly 12–15× its bytes, so holding every line's
+     * tree through compaction OOMs a multi-year GPS log in a phone heap
+     * (PersistenceTortureTest.aFiveYearLogLoadsInTheMinimumPhoneHeap); these are a
+     * few dozen bytes per line whatever the track size.
+     */
+    private class Facts(
+        /** Serde variant tag; null = not a wire event (never removable). */
+        val variant: String?,
+        /** `entry_id` under the core's clamp, 0 when absent ([entryIdField]). */
+        val entryId: Long = 0L,
+        /** The `signal` of a SubmitReadiness / RemoveReadiness / ResolveHold. */
+        val signal: String? = null,
+        /** A RemoveReadiness / ResolveHold with `observed_at > 0`. */
+        val dated: Boolean = false,
+        /** A log / amend / trim line's `(family, entryId, observedAt)` ([entryIdentityOf]). */
+        val identity: Triple<Int, Long, Long>? = null,
+        /** The `(family, entryId, time)` a DeleteEntry / AmendSet / AmendRun targets. */
+        val target: Triple<Int, Long, Long>? = null,
+        /** False for an AmendSet that fails update's set gate ([setLineValid]). */
+        val valid: Boolean = true,
+        /** The family clear that sweeps a DeleteEntry, by its `kind`. */
+        val deleteClear: String? = null,
+        /** A SubmitReview that replaces the session review ([reviewSetsSession]). */
+        val setsSession: Boolean = false,
+        /** A SetProfile's history key ([profileKey]). */
+        val profileKey: Pair<Long, Long>? = null,
+        /** A SetProfile with no `effective_from_epoch_day` (None-dated). */
+        val undatedProfile: Boolean = false,
+        /** A SetExerciseEnded's `(exercise.trim().lowercase(), epoch_day)` key. */
+        val endedKey: Pair<String, Long>? = null,
+    )
 
-        // Per-line identity cache. [entryIdentityOf] re-parses a whole wire line to
-        // read its (family, entry_id, observed_at); a LogRunTrack line carries the
-        // entire GPS track, so that parse is O(track size). Rule 3's delete/amend
-        // chain-walk below is O(n²) in line count and, uncached, re-parsed each visited
-        // line on every pass — quadratic in the largest track on a cold-start
-        // compaction. Memoize: parse each line's identity at most once, lazily (an
-        // append-only log with no deletes/amends/trims never triggers a parse). Output
-        // stays unchanged: an identity is a pure function of its line.
-        val identityCached = BooleanArray(lines.size)
-        val identityCache = arrayOfNulls<Triple<Int, Long, Long>>(lines.size)
-        fun identityAt(k: Int): Triple<Int, Long, Long>? {
-            if (!identityCached[k]) {
-                identityCache[k] = entryIdentityOf(elems[k], variant[k])
-                identityCached[k] = true
+    private val noFacts = Facts(variant = null)
+
+    private fun factsOf(el: JsonElement?): Facts {
+        val v = variantOfElement(el) ?: return noFacts
+        val id = entryIdField(el, v)
+        return when (v) {
+            "SubmitReadiness" -> Facts(v, id, signal = readinessSignalOf(el, v))
+            "RemoveReadiness", "ResolveHold" ->
+                Facts(v, id, signal = readinessSignalOf(el, v), dated = longField(el, v, "observed_at") > 0L)
+            "DeleteEntry" -> {
+                val (fam, clear) = when (entryKindOf(el)) {
+                    "Set" -> 1 to "ClearSets"
+                    "Run" -> 2 to "ClearRuns"
+                    "Activity" -> 15 to "ClearActivities"
+                    else -> 0 to null
+                }
+                Facts(
+                    v, id,
+                    target = if (clear == null) null else Triple(fam, id, longField(el, v, "observed_at_fallback")),
+                    deleteClear = clear,
+                )
             }
-            return identityCache[k]
+            // Match key must mirror log.rs exactly: an amend targets the OLD
+            // identity, so use observed_at_fallback when nonzero (a re-dated
+            // legacy row), else observed_at.
+            "AmendSet" -> Facts(
+                v, id, identity = entryIdentityOf(el, v), target = Triple(1, id, amendMatchTime(el, v)),
+                valid = setLineValid(el, v),
+            )
+            "AmendRun" -> Facts(v, id, identity = entryIdentityOf(el, v), target = Triple(2, id, amendMatchTime(el, v)))
+            "SubmitReview" -> Facts(v, id, setsSession = reviewSetsSession(el))
+            "SetProfile" -> Facts(
+                v, id, profileKey = profileKey(el),
+                undatedProfile = longFieldOrNull(el, v, "effective_from_epoch_day") == null,
+            )
+            "SetExerciseEnded" -> Facts(
+                v, id,
+                endedKey = (stringField(el, v, "exercise") ?: "").trim().lowercase() to longField(el, v, "epoch_day"),
+            )
+            else -> Facts(v, id, identity = entryIdentityOf(el, v))
         }
+    }
+
+    /** The compaction rules over per-line [facts]: true = the line is dropped. */
+    private fun removals(facts: List<Facts>): BooleanArray {
+        val n = facts.size
+        val variant = facts.map { it.variant }
+        val remove = BooleanArray(n)
 
         // Rule 0 (mirrors log.rs): an UNDATED RemoveReadiness cancels the latest
         // active prior SubmitReadiness with the same signal (the core deletes
@@ -181,19 +242,17 @@ object EventLog {
         // both lines survive and the submit is consumed: a later remove pairs
         // with the next older one, as the core does. An unmatched remove of
         // either kind replays as a no-op and is dropped alone.
-        val consumed = BooleanArray(lines.size)
-        for (j in lines.indices) {
+        val consumed = BooleanArray(n)
+        for (j in 0 until n) {
             // ResolveHold (mirrors log.rs): a dated one retracts EVERY active prior
             // submit of its signal (all lines survive, all consumed); an undated or
             // unmatched one replays as a no-op and is dropped alone.
             if (variant[j] == "ResolveHold") {
-                val rs = readinessSignalOf(elems[j], "ResolveHold") ?: continue
-                val dated = longField(elems[j], "ResolveHold", "observed_at") > 0L
+                val rs = facts[j].signal ?: continue
+                val dated = facts[j].dated
                 var any = false
                 for (k in 0 until j) {
-                    if (!remove[k] && !consumed[k] && variant[k] == "SubmitReadiness" &&
-                        readinessSignalOf(elems[k], "SubmitReadiness") == rs
-                    ) {
+                    if (!remove[k] && !consumed[k] && variant[k] == "SubmitReadiness" && facts[k].signal == rs) {
                         any = true
                         if (dated) consumed[k] = true
                     }
@@ -202,15 +261,14 @@ object EventLog {
                 continue
             }
             if (variant[j] != "RemoveReadiness") continue
-            // Unparsable line → never removable, same contract as variantOf.
-            val signal = readinessSignalOf(elems[j], "RemoveReadiness") ?: continue
+            // Unparsable signal → never removable, same contract as variantOf.
+            val signal = facts[j].signal ?: continue
             val i = (j - 1 downTo 0).firstOrNull {
-                !remove[it] && !consumed[it] && variant[it] == "SubmitReadiness" &&
-                    readinessSignalOf(elems[it], "SubmitReadiness") == signal
+                !remove[it] && !consumed[it] && variant[it] == "SubmitReadiness" && facts[it].signal == signal
             }
             when {
                 i == null -> remove[j] = true
-                longField(elems[j], "RemoveReadiness", "observed_at") > 0L -> consumed[i] = true
+                facts[j].dated -> consumed[i] = true
                 else -> {
                     remove[i] = true
                     remove[j] = true
@@ -230,13 +288,9 @@ object EventLog {
         // strict amend has a row to replace); a delete removes the WHOLE entry (its
         // newest match and, when that is an amend, the base chain down to the log)
         // plus itself. An unmatched delete OR amend is a no-op → dropped alone.
-        // A RUN removal is skipped when ANOTHER run line (one NOT in the delete's
-        // own removal chain) sits between the earliest removed line and this
-        // delete/amend (a run bakes its spike baseline from the runs present when
-        // logged, so removing it could change a later run's baseline). The delete's
-        // own chain (its base LogRunTrack and its trims) is removed together, so
-        // those lines cannot bake any survivor's baseline and are skipped by
-        // runLineBetween; a set carries no such baked state.
+        // No entry carries baked cross-entry state (a set's e1RM chain and a run's
+        // card spike baseline are derived by the core from the surviving rows), so
+        // removing one is exact.
         //
         // INVARIANT (lockstep with log.rs): Rule 3's chain-walk correctness
         // depends on legacy (entry_id 0) rows NEVER being re-dated: the walk keys a
@@ -246,34 +300,20 @@ object EventLog {
         // blocking re-dating. If that pin is lifted, a re-dated legacy
         // Log→Amend→Amend reverts to the original value and a re-dated
         // Log→Amend→Delete resurrects the pre-edit row on the next launch.
-        for (j in lines.indices) {
+        for (j in 0 until n) {
             val v = variant[j] ?: continue
             // An invalid AmendSet (fails update's set gate) replays as a no-op, like
             // an unmatched amend: drop it alone before the telescope search so it
             // cannot collapse a valid prior amend (mirrors log.rs).
-            if (v == "AmendSet" && !setLineValid(elems[j], v)) {
+            if (v == "AmendSet" && !facts[j].valid) {
                 remove[j] = true
                 continue
             }
+            if (v != "DeleteEntry" && v != "AmendSet" && v != "AmendRun") continue
+            val (fam, id, time) = facts[j].target ?: continue
             val isDelete = v == "DeleteEntry"
-            val fam: Int
-            val id: Long
-            val time: Long
-            when (v) {
-                "DeleteEntry" -> {
-                    fam = when (entryKindOf(elems[j])) { "Set" -> 1; "Run" -> 2; "Activity" -> 15; else -> continue }
-                    id = entryIdField(elems[j], v)
-                    time = longField(elems[j], v, "observed_at_fallback")
-                }
-                // Match key must mirror log.rs exactly: an amend targets the OLD
-                // identity, so use observed_at_fallback when nonzero (a re-dated
-                // legacy row), else observed_at.
-                "AmendSet" -> { fam = 1; id = entryIdField(elems[j], v); time = amendMatchTime(elems[j], v) }
-                "AmendRun" -> { fam = 2; id = entryIdField(elems[j], v); time = amendMatchTime(elems[j], v) }
-                else -> continue
-            }
             val i = (j - 1 downTo 0).firstOrNull {
-                !remove[it] && entryIdMatches(identityAt(it), fam, id, time)
+                !remove[it] && entryIdMatches(facts[it].identity, fam, id, time)
             }
             if (i == null) {
                 // Unmatched delete OR amend: a no-op on replay (strict amend) → drop alone.
@@ -291,38 +331,42 @@ object EventLog {
                 while (isAmendLine(variant[removal.last()]) || isTrimLine(variant[removal.last()])) {
                     val last = removal.last()
                     val p = (last - 1 downTo 0).firstOrNull {
-                        !remove[it] && entryIdMatches(identityAt(it), fam, id, time)
+                        !remove[it] && entryIdMatches(facts[it].identity, fam, id, time)
                     } ?: break
                     removal.add(p)
                 }
-                val earliest = removal.last()
-                if (fam != 2 || !runLineBetween(earliest, j, skip = removal) { identityAt(it) }) {
-                    removal.forEach { remove[it] = true }
-                    remove[j] = true
-                }
-                // else: baseline-unsafe → keep the entry and the delete.
+                removal.forEach { remove[it] = true }
+                remove[j] = true
             } else {
                 // Amend: telescope away a superseded prior amend, but keep the base
                 // log line (the strict amend needs a row to replace on replay).
-                if (isAmendLine(variant[i]) && (fam == 1 || !runLineBetween(i, j) { identityAt(it) })) {
+                if (isAmendLine(variant[i])) {
                     remove[i] = true
                 }
             }
         }
 
         for ((clear, members) in families) {
-            val lastClear = variant.indexOfLast { it == clear }
+            val lastClear = variant.lastIndexOf(clear)
             if (lastClear < 0) continue
             for (i in 0..lastClear) {
-                if (variant[i] == clear || variant[i] in members ||
-                    memberOfClear(clear, variant[i], elems[i])
-                ) {
+                if (variant[i] == clear || variant[i] in members || facts[i].deleteClear == clear) {
                     remove[i] = true
                 }
             }
         }
+        // Rule 1's one kept clear (mirrors log.rs): the last ClearPlan survives when
+        // no GeneratePlan follows it, because it is then the log's final plan state.
+        // Replaying it is a no-op on the already-empty plan family, but the line is
+        // the durable record that the user removed their plan: boot reads it
+        // ([RestoredLog.planRemoved]) so a plan the user removed is not
+        // auto-generated again when the setup prefs were lost.
+        val lastClearPlan = variant.lastIndexOf("ClearPlan")
+        if (lastClearPlan >= 0 && (lastClearPlan + 1 until n).none { variant[it] == "GeneratePlan" }) {
+            remove[lastClearPlan] = false
+        }
         for (singleton in singletons) {
-            val survivors = lines.indices.filter { !remove[it] && variant[it] == singleton }
+            val survivors = (0 until n).filter { !remove[it] && variant[it] == singleton }
             survivors.dropLast(1).forEach { remove[it] = true }
         }
 
@@ -334,36 +378,43 @@ object EventLog {
         // ClearWeeklyCheckin or SubmitWeeklyCheckin follows. (log.rs also treats a
         // later weekly-carrying SubmitReview as replacing it; keeping the clear
         // here is the conservative, still replay-equivalent choice.)
-        run {
-            for (j in lines.indices) {
-                val inert = when (variant[j]) {
-                    "ClearReview" -> (j + 1 until lines.size).any {
-                        variant[it] == "ClearReview" ||
-                            (variant[it] == "SubmitReview" && reviewSetsSession(elems[it]))
-                    }
-                    "ClearWeeklyCheckin" -> (j + 1 until lines.size).any {
-                        variant[it] == "ClearWeeklyCheckin" || variant[it] == "SubmitWeeklyCheckin"
-                    }
-                    else -> false
+        for (j in 0 until n) {
+            val inert = when (variant[j]) {
+                "ClearReview" -> (j + 1 until n).any {
+                    variant[it] == "ClearReview" || (variant[it] == "SubmitReview" && facts[it].setsSession)
                 }
-                if (inert) remove[j] = true
+                "ClearWeeklyCheckin" -> (j + 1 until n).any {
+                    variant[it] == "ClearWeeklyCheckin" || variant[it] == "SubmitWeeklyCheckin"
+                }
+                else -> false
             }
+            if (inert) remove[j] = true
         }
 
         // Rule 2 (profile history, mirrors log.rs): a SetProfile line is dead iff a
-        // LATER surviving SetProfile has eff <= its eff (None = -inf). Mirrors
+        // LATER surviving SetProfile has a history key <= its own (profileKey:
+        // effective day, then edited_at), with no pinning edit in between. Mirrors
         // update()'s profile_history reducer, so survivors are exactly the entries
-        // that remain after replay — NOT a plain keep-last singleton; a run of
-        // ascending-dated profiles all survive, a None-dated edit replaces the whole
-        // history. The last line is never dead, so model.profile is always kept.
+        // that remain after replay — NOT a plain keep-last singleton; ascending
+        // profiles (and later same-day edits) all survive, a None-dated edit
+        // replaces the whole history. A None-dated edit also pins the %HRmax of
+        // every run logged before it (read off the history then): once a run line
+        // survives before it, no line at or after it kills an earlier one. The last
+        // line is never dead, so model.profile is always kept.
         run {
-            val profiles = lines.indices.filter { !remove[it] && variant[it] == "SetProfile" }
-            fun effAt(j: Int): Long? =
-                longFieldOrNull(elems[j], "SetProfile", "effective_from_epoch_day")
+            val firstRun = (0 until n).firstOrNull {
+                !remove[it] && (variant[it] == "LogRun" || variant[it] == "LogRunTrack" || variant[it] == "AmendRun")
+            }
+            val profiles = (0 until n).filter { !remove[it] && variant[it] == "SetProfile" }
             for ((a, j) in profiles.withIndex()) {
-                val effJ = effAt(j)
-                if (profiles.subList(a + 1, profiles.size).any { k -> leEff(effAt(k), effJ) }) {
-                    remove[j] = true
+                val keyJ = facts[j].profileKey!!
+                for (k in profiles.subList(a + 1, profiles.size)) {
+                    val pins = firstRun != null && firstRun < k && facts[k].undatedProfile
+                    if (pins) break
+                    if (leKey(facts[k].profileKey!!, keyJ)) {
+                        remove[j] = true
+                        break
+                    }
                 }
             }
         }
@@ -373,12 +424,9 @@ object EventLog {
         // already dropped markers at/before the last ClearSets; only survivors count.
         run {
             val lastEnded = HashMap<Pair<String, Long>, Int>()
-            for (j in lines.indices) {
+            for (j in 0 until n) {
                 if (remove[j] || variant[j] != "SetExerciseEnded") continue
-                val ex = (stringField(elems[j], "SetExerciseEnded", "exercise") ?: "")
-                    .trim().lowercase()
-                val day = longField(elems[j], "SetExerciseEnded", "epoch_day")
-                lastEnded.put(ex to day, j)?.let { remove[it] = true }
+                lastEnded.put(facts[j].endedKey!!, j)?.let { remove[it] = true }
             }
         }
 
@@ -392,53 +440,10 @@ object EventLog {
         // request is the anchor-defining line; keep it and drop the rest. See
         // app/mod.rs Event::GeneratePlan.
         run {
-            val survivors = lines.indices.filter { !remove[it] && variant[it] == "GeneratePlan" }
+            val survivors = (0 until n).filter { !remove[it] && variant[it] == "GeneratePlan" }
             survivors.drop(1).forEach { remove[it] = true }
         }
-
-        // Rule 4 (mirrors log.rs): age check-ins (family 12) out of a trailing
-        // window, PER CHANNEL. derive_readiness windows EACH channel (wellness /
-        // HRV / resting-HR) on THAT channel's OWN newest reading (per_day_series),
-        // NOT the log's global newest: a sparsely-logged channel is still read on
-        // replay. So the cutoff anchors on the MIN over channels PRESENT of that
-        // channel's own newest reading; any check-in older than that is out of
-        // window for every channel it carries, so dropping it is replay-equivalent
-        // (a global-newest anchor could silently vanish a sparse resting-HR/HRV
-        // readiness row, safety-adjacent). Reference is surviving log data, never
-        // a clock. Family 0 readiness is NEVER windowed: a safety hold lives until
-        // cleared.
-        var wellnessNewest: Long? = null
-        var hrvNewest: Long? = null
-        var rhrNewest: Long? = null
-        for (j in lines.indices) {
-            if (remove[j] || variant[j] != "SubmitCheckin") continue
-            val at = longField(elems[j], "SubmitCheckin", "observed_at")
-            // per_day_series skips observed_at <= 0: such readings anchor nothing.
-            if (at <= 0L) continue
-            val hasWellness =
-                doubleFieldOrNull(elems[j], "SubmitCheckin", "sleep_quality") != null ||
-                    doubleFieldOrNull(elems[j], "SubmitCheckin", "soreness") != null ||
-                    doubleFieldOrNull(elems[j], "SubmitCheckin", "fatigue") != null ||
-                    doubleFieldOrNull(elems[j], "SubmitCheckin", "stress") != null ||
-                    doubleFieldOrNull(elems[j], "SubmitCheckin", "mood") != null
-            if (hasWellness) wellnessNewest = maxOf(wellnessNewest ?: at, at)
-            val rhr = doubleFieldOrNull(elems[j], "SubmitCheckin", "resting_hr_bpm")
-            if (rhr != null && rhr > 0.0) rhrNewest = maxOf(rhrNewest ?: at, at)
-            val hrv = doubleFieldOrNull(elems[j], "SubmitCheckin", "hrv_rmssd_ms")
-            if (hrv != null && hrv > 0.0) hrvNewest = maxOf(hrvNewest ?: at, at)
-        }
-        val anchor = listOfNotNull(wellnessNewest, hrvNewest, rhrNewest).minOrNull()
-        if (anchor != null) {
-            val cutoff = anchor - RETAIN_CHECKIN_DAYS * CHECKIN_DAY_SEC
-            for (j in lines.indices) {
-                if (variant[j] == "SubmitCheckin" &&
-                    longField(elems[j], "SubmitCheckin", "observed_at") < cutoff
-                ) {
-                    remove[j] = true
-                }
-            }
-        }
-        return lines.filterIndexed { i, _ -> !remove[i] }
+        return remove
     }
 
     /**
@@ -474,7 +479,7 @@ object EventLog {
         // Rewrite the durable log when compaction bought enough to justify the
         // fsync ([compactionWorthRewriting]) OR the tail is torn: an unparseable
         // line, or a newline-less last line from a kill mid-append. A launch that
-        // shaves a line or two (one superseded SetToday, one aged-out check-in)
+        // shaves a line or two (one superseded SetToday, one superseded edit)
         // replays the result in memory and leaves disk untouched, so a steady-state
         // log isn't rewritten on every boot. A torn tail always forces the rewrite
         // so the atomic write's trailing newline heals it, or the next append glues
@@ -487,9 +492,17 @@ object EventLog {
                 // without fsync can commit the directory metadata (the new name)
                 // before the file's data reaches disk, so a power loss right after
                 // the rename can truncate the WHOLE log to zero/garbage.
-                FileOutputStream(tmp).use {
-                    it.write(kept.joinToString("\n", postfix = "\n").toByteArray())
-                    it.fd.sync()
+                // Streamed line by line: one joined copy of a multi-year log (and its
+                // byte array) would double the boot's peak heap.
+                FileOutputStream(tmp).use { out ->
+                    val w = out.bufferedWriter()
+                    if (kept.isEmpty()) w.write("\n")
+                    for (line in kept) {
+                        w.write(line)
+                        w.write("\n")
+                    }
+                    w.flush()
+                    out.fd.sync()
                 }
                 if (!tmp.renameTo(file)) tmp.delete()
             }
@@ -525,29 +538,44 @@ object EventLog {
     private class Parsed(val restored: RestoredLog, val total: Int, val unparseable: Boolean)
 
     private fun parse(file: File): Parsed {
-        val lines = file.readLines().filter { it.isNotBlank() }
-        // Parse each surviving line exactly ONCE and thread the elements through
-        // compaction, so a large LogRunTrack line isn't re-parsed by the variant +
-        // field reads. A torn mid-append line fails to parse (element null) and is
-        // dropped; a parseable line whose variant this build doesn't recognize DOES
-        // parse and is kept — a future event a newer build wrote, which compaction's
-        // variant reads leave be (forward-compat).
-        val parsed = lines.map { runCatching { json.parseToJsonElement(it) }.getOrNull() }
-        val intact = ArrayList<String>(lines.size)
-        val intactEls = ArrayList<JsonElement?>(lines.size)
+        // STREAMED, bounded memory: each line is parsed exactly once, its [Facts]
+        // taken and its JSON tree dropped before the next line is read, so peak heap
+        // is the line strings plus one line's tree (not every tree at once). A torn
+        // mid-append line fails to parse and is dropped; a parseable line whose
+        // variant this build doesn't recognize DOES parse and is kept — a future
+        // event a newer build wrote, which compaction leaves be (forward-compat).
+        val intact = ArrayList<String>()
+        val facts = ArrayList<Facts>()
+        var total = 0
         var maxEntryId = 0L
-        for (i in lines.indices) {
-            val el = parsed[i] ?: continue
-            intact.add(lines[i])
-            intactEls.add(el)
-            val v = variantOfElement(el)
-            if (v != null) maxEntryId = maxOf(maxEntryId, entryIdField(el, v))
+        file.bufferedReader().use { r ->
+            while (true) {
+                val line = r.readLine() ?: break
+                if (line.isBlank()) continue
+                total++
+                val el = runCatching { json.parseToJsonElement(line) }.getOrNull() ?: continue
+                val f = factsOf(el)
+                intact.add(line)
+                facts.add(f)
+                maxEntryId = maxOf(maxEntryId, f.entryId)
+            }
         }
-        val kept = compact(intact, intactEls)
+        val remove = removals(facts)
+        val kept = ArrayList<String>(intact.size)
+        var lastGenerate = -1
+        var lastClearPlan = -1
+        for (i in intact.indices) {
+            if (remove[i]) continue
+            when (facts[i].variant) {
+                "GeneratePlan" -> lastGenerate = i
+                "ClearPlan" -> lastClearPlan = i
+            }
+            kept.add(intact[i])
+        }
         return Parsed(
-            RestoredLog(kept, freshInstall = false, maxEntryId = maxEntryId),
-            total = lines.size,
-            unparseable = intact.size < lines.size,
+            RestoredLog(kept, freshInstall = false, maxEntryId = maxEntryId, planRemoved = lastClearPlan > lastGenerate),
+            total = total,
+            unparseable = intact.size < total,
         )
     }
 
@@ -569,8 +597,7 @@ object EventLog {
         variantOfElement(runCatching { json.parseToJsonElement(line) }.getOrNull())
 
     /** The variant tag of an already-parsed element (null when it isn't a wire
-     *  event). Compaction reads this off the once-parsed element so a large
-     *  LogRunTrack line is never re-parsed just to read its tag. */
+     *  event). [factsOf] reads this off the line's once-parsed element. */
     private fun variantOfElement(el: JsonElement?): String? = when (el) {
         // A unit variant is a bare JSON string; a string that is not a known unit
         // variant is a shape the core rejects, so it names no event.
@@ -592,16 +619,6 @@ object EventLog {
 
     // ── Rule 3 helpers (lockstep with log.rs) ──────────────────
 
-    /** Whether `clear` supersedes a [DeleteEntry] line by its `kind` (the one
-     *  member whose family is line-dependent, so not in the static [families]). */
-    private fun memberOfClear(clear: String, variant: String?, el: JsonElement?): Boolean =
-        variant == "DeleteEntry" && when (entryKindOf(el)) {
-            "Set" -> clear == "ClearSets"
-            "Run" -> clear == "ClearRuns"
-            "Activity" -> clear == "ClearActivities"
-            else -> false
-        }
-
     /** A single-key struct variant's payload object, or null if it doesn't parse. */
     private fun payloadOf(el: JsonElement?, variant: String): JsonObject? = runCatching {
         (el as JsonObject)[variant]!!.jsonObject
@@ -622,13 +639,18 @@ object EventLog {
             runCatching { it.jsonPrimitive.long }.getOrNull()
         }
 
-    /** `eff(a) <= eff(b)` with null = -inf (undated profile), for the profile-history
-     *  compaction pass. Mirrors log.rs le_eff. */
-    private fun leEff(a: Long?, b: Long?): Boolean = when {
-        a == null -> true
-        b == null -> false
-        else -> a <= b
+    /** A SetProfile line's profile-history key as the core orders it
+     *  (app::history_key, mirrors log.rs profile_key): (effective day, then
+     *  edited_at), null = -inf, compared lexicographically; an undated edit is
+     *  (-inf, -inf). */
+    private fun profileKey(el: JsonElement?): Pair<Long, Long> {
+        val eff = longFieldOrNull(el, "SetProfile", "effective_from_epoch_day")
+            ?: return Pair(Long.MIN_VALUE, Long.MIN_VALUE)
+        return Pair(eff, longFieldOrNull(el, "SetProfile", "edited_at") ?: Long.MIN_VALUE)
     }
+
+    private fun leKey(a: Pair<Long, Long>, b: Pair<Long, Long>): Boolean =
+        a.first < b.first || (a.first == b.first && a.second <= b.second)
 
     /** Per-session review keys (lockstep with reviews.rs `take_session_fields`);
      *  every other key is a weekly/clinical field. */
@@ -681,10 +703,8 @@ object EventLog {
         } ?: 0L
 
     /** A numeric field's value, or null when the key is absent / JSON null /
-     *  non-numeric. Distinguishes "channel present" from "absent" for the Rule 4
-     *  per-channel window, mirrors the Rust `Option<..>` extracts (a None field is
-     *  omitted from the wire by the shell, so an absent key means the channel is
-     *  not carried). */
+     *  non-numeric, mirroring the Rust `Option<..>` fields (a None field is
+     *  omitted from the wire by the shell). */
     private fun doubleFieldOrNull(el: JsonElement?, variant: String, name: String): Double? =
         payloadOf(el, variant)?.get(name)?.let {
             runCatching { it.jsonPrimitive.doubleOrNull }.getOrNull()
@@ -760,25 +780,10 @@ object EventLog {
     /** Whether a precomputed set/run identity matches a delete/amend targeting
      *  `(fam, id, time)`: same family, same id (nonzero) or same observed_at for a
      *  legacy (id 0) row. Mirrors log.rs entry_line_matches. The identity comes from
-     *  [compact]'s per-line cache, so a large LogRunTrack line is parsed once, not on
-     *  every chain-walk visit. */
+     *  the line's [Facts], read when the line was parsed. */
     private fun entryIdMatches(identity: Triple<Int, Long, Long>?, fam: Int, id: Long, time: Long): Boolean {
         val (f, cid, ctime) = identity ?: return false
         if (f != fam) return false
         return if (id != 0L) cid == id else cid == 0L && ctime == time
-    }
-
-    /** Whether any run-family log/amend line sits strictly between `i` and `j`,
-     *  ignoring indices in `skip` (a delete's own removal chain: those lines are
-     *  removed together with the base, so they cannot bake a survivor's
-     *  baseline). A run bakes its spike baseline from the runs present when
-     *  logged, so any OTHER run line in the window blocks the pair-drop (Rule 3).
-     *  Mirrors log.rs run_line_between. */
-    private fun runLineBetween(i: Int, j: Int, skip: List<Int> = emptyList(), identityOf: (Int) -> Triple<Int, Long, Long>?): Boolean {
-        for (k in i + 1 until j) {
-            if (k in skip) continue
-            if (identityOf(k)?.first == 2) return true
-        }
-        return false
     }
 }

@@ -18,7 +18,8 @@ internal const val CoachSummaryWeeks = 4
  * (distance in [distanceUnit] · duration · pace) and the other activities (kind ·
  * minutes · effort). A run of weeks with nothing logged folds into one line.
  * Facts only, straight from the logged rows; no coaching.
- * Undated rows (observed_at 0) have no day and are left out. Pure.
+ * Undated rows (observed_at 0) have no day and are left out; a run is filed under
+ * the day it STARTED ([runDaySec]), the day its History title names. Pure.
  */
 internal fun buildCoachSummary(
     res: Resources,
@@ -34,7 +35,7 @@ internal fun buildCoachSummary(
     val window = firstMonday..today
     fun dayOf(at: Long): Long? = at.takeIf { it > 0L }?.let { localEpochDay(it, zone) }?.takeIf { it in window }
     val lifts = model.lifts.mapNotNull { s -> dayOf(s.observed_at)?.let { it to s } }.groupBy({ it.first }, { it.second })
-    val runs = model.runs.mapNotNull { r -> dayOf(r.observed_at)?.let { it to r } }.groupBy({ it.first }, { it.second })
+    val runs = model.runs.mapNotNull { r -> dayOf(runDaySec(r))?.let { it to r } }.groupBy({ it.first }, { it.second })
     val activities = model.activities.mapNotNull { a -> dayOf(a.observed_at)?.let { it to a } }.groupBy({ it.first }, { it.second })
 
     return buildString {
@@ -66,7 +67,7 @@ internal fun buildCoachSummary(
                 appendLine()
                 appendLine(planDateLabel(day))
                 lifts[day]?.let { sets -> liftLines(res, sets, weightUnit).forEach { appendLine("- $it") } }
-                runs[day]?.sortedBy { it.observed_at }?.forEach { appendLine("- ${runLine(res, it, distanceUnit)}") }
+                runs[day]?.sortedBy(::runDaySec)?.forEach { appendLine("- ${runLine(res, it, distanceUnit)}") }
                 activities[day]?.sortedBy { it.observed_at }?.forEach { appendLine("- ${activityLine(res, it)}") }
             }
         }

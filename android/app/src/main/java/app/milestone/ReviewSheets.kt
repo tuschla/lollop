@@ -60,15 +60,25 @@ fun SessionReviewSheet(
     // hand-logged one.
     var hasPositiveSplit by rememberSaveable { mutableStateOf(false) }
     var positiveSplitPct by rememberSaveable { mutableStateOf(0.0) }
-    var observedAt by rememberSaveable { mutableStateOf(AppClock.nowSec()) }
-    var dirty by rememberSaveable { mutableStateOf(false) }
+    val openedAt = rememberSaveable { AppClock.nowSec() }
+    var observedAt by rememberSaveable { mutableStateOf(openedAt) }
+    // The date row is an edit only when it names another day than the sheet
+    // opened on (confirming the same day is no change); whether anything is
+    // answered is derived from the answers themselves, so switching something
+    // on and back off is unanswered again.
+    val dateEdited = localDayStartSec(observedAt) != localDayStartSec(openedAt)
+    // What a Save would send beyond the blank form: an off day, or (when the run
+    // questions apply) a switched-on run detail. Scale values under a switch that
+    // is off are never sent, so they answer nothing.
+    val answered = badDay || (showRun && (hasDecoupling || hasEasyIntensity || hasPositiveSplit))
+    val dirty = answered || dateEdited
     ReportDirty(dirty, onDirtyChange)
 
     EditorScaffold(
         title = stringResource(R.string.log_review_title),
         dirty = dirty,
         // Nothing answered → nothing to save (no fabricated "fine" review).
-        saveEnabled = dirty,
+        saveEnabled = answered,
         onClose = onClose,
         onSave = {
             onSubmit(
@@ -90,11 +100,11 @@ fun SessionReviewSheet(
                 color = OnBgMuted,
                 style = Type.Caption,
             )
-            SwitchRow(stringResource(R.string.log_switch_off_day), badDay) { badDay = it; dirty = true }
+            SwitchRow(stringResource(R.string.log_switch_off_day), badDay) { badDay = it }
         }
         if (showRun) FormCard {
             Text(stringResource(R.string.log_review_run_header), color = OnBgBody, style = Type.Body)
-            SwitchRow(stringResource(R.string.log_switch_decoupling_recorded), hasDecoupling) { hasDecoupling = it; dirty = true }
+            SwitchRow(stringResource(R.string.log_switch_decoupling_recorded), hasDecoupling) { hasDecoupling = it }
             if (hasDecoupling) {
                 // Tap-scale over 0–30 % in 0.5 steps, not a −/+ stepper.
                 FieldLabel(
@@ -106,21 +116,20 @@ fun SessionReviewSheet(
                     driftPct,
                     { String.format(Locale.US, "%.1f", it) },
                     label = stringResource(R.string.log_field_decoupling_drift),
-                ) { driftPct = it; dirty = true }
+                ) { driftPct = it }
                 // The core only judges drift on a cool, steady, easy effort; leave
                 // this on for a genuine easy run.
-                SwitchRow(stringResource(R.string.log_switch_cool_steady), coolSteady) { coolSteady = it; dirty = true }
+                SwitchRow(stringResource(R.string.log_switch_cool_steady), coolSteady) { coolSteady = it }
             }
-            SwitchRow(stringResource(R.string.log_switch_easy_intensity), hasEasyIntensity) { hasEasyIntensity = it; dirty = true }
+            SwitchRow(stringResource(R.string.log_switch_easy_intensity), hasEasyIntensity) { hasEasyIntensity = it }
             if (hasEasyIntensity) {
                 // Tap-scale over 0–100 % in 5-point steps, not a −/+ stepper.
                 FieldLabel(stringResource(R.string.log_field_time_above_z2), stringResource(R.string.log_value_pct, "$easyPctAboveZ1"))
                 ScrollableScaleRow(FivePercentScale, easyPctAboveZ1, { "$it" }, label = stringResource(R.string.log_field_time_above_z2)) {
                     easyPctAboveZ1 = it
-                    dirty = true
                 }
             }
-            SwitchRow(stringResource(R.string.log_switch_positive_split), hasPositiveSplit) { hasPositiveSplit = it; dirty = true }
+            SwitchRow(stringResource(R.string.log_switch_positive_split), hasPositiveSplit) { hasPositiveSplit = it }
             if (hasPositiveSplit) {
                 // Second half slower than the first, as a percent; the core flags
                 // pacing strictly beyond +3 %. Tap-scale over 0–30 % in 0.5 steps.
@@ -133,10 +142,10 @@ fun SessionReviewSheet(
                     positiveSplitPct,
                     { String.format(Locale.US, "%.1f", it) },
                     label = stringResource(R.string.log_field_second_half_slowdown),
-                ) { positiveSplitPct = it; dirty = true }
+                ) { positiveSplitPct = it }
             }
         }
-        ObservedAtRow(observedAt, withTime = false) { observedAt = it; dirty = true }
+        ObservedAtRow(observedAt, withTime = false) { observedAt = it }
     }
 }
 
@@ -212,19 +221,28 @@ fun WeeklyCheckinSheet(
     val velocityParsed = parseKeypadNumber(velocityText)
     val velocityValid = velocityText.isEmpty() || (velocityParsed != null && velocityParsed in VelocityDropRange)
     var moreDetails by rememberSaveable { mutableStateOf(false) }
-    var observedAt by rememberSaveable { mutableStateOf(AppClock.nowSec()) }
-    var dirty by rememberSaveable { mutableStateOf(false) }
+    val openedAt = rememberSaveable { AppClock.nowSec() }
+    var observedAt by rememberSaveable { mutableStateOf(openedAt) }
+    // The date row is an edit only when it names another day than the sheet
+    // opened on; everything else is derived from the answers themselves, so
+    // ticking a sign and unticking it is unanswered again.
+    val dateEdited = localDayStartSec(observedAt) != localDayStartSec(openedAt)
     var confirmClear by remember { mutableStateOf(false) }
     // In-flight latch for the all-clear, like EditorScaffold's Save: the sheet
     // takes a moment to hide, and a second tap must not send a second check-in.
     var allClearSent by remember { mutableStateOf(false) }
-    ReportDirty(dirty, onDirtyChange)
     val signs = OvertrainingSigns(
         worsePerformance = worsePerformance,
         lowMood = lowMood,
         higherRestingHr = higherRestingHr,
         worseSleep = worseSleep,
     )
+    // Anything the user has said this week. A typed-then-emptied bar speed or an
+    // unticked sign says nothing, and nothing is what an all-"no" Save would invent.
+    val answered = signs.any || failedKeySessions != null || rpeLoadGapSessions != null ||
+        velocityText.isNotEmpty() || compulsive != null || bonePain != null || reds != null
+    val dirty = answered || dateEdited
+    ReportDirty(dirty, onDirtyChange)
     val savedMessage = stringResource(R.string.log_weekly_saved)
     fun submit(review: Event.SubmitReview) {
         onSubmit(Event.SubmitWeeklyCheckin(review))
@@ -236,7 +254,7 @@ fun WeeklyCheckinSheet(
         dirty = dirty,
         // An untouched form would submit a fabricated all-clear week over the
         // stored check-in: nothing to save until the user answers something.
-        saveEnabled = dirty && velocityValid,
+        saveEnabled = answered && velocityValid,
         onClose = onClose,
         onSave = {
             submit(
@@ -262,7 +280,7 @@ fun WeeklyCheckinSheet(
         bottomExtra = {
             // The explicit all-clear, offered while nothing is answered: the user
             // states the quiet week instead of Save inventing one.
-            if (!dirty) {
+            if (!answered) {
                 TextAction(
                     stringResource(R.string.log_weekly_nothing),
                     onClick = {
@@ -284,7 +302,7 @@ fun WeeklyCheckinSheet(
                 label = stringResource(R.string.log_weekly_failed_sessions),
                 values = WeekSessionCounts,
                 selected = failedKeySessions,
-                onSelect = { failedKeySessions = it; dirty = true },
+                onSelect = { failedKeySessions = it },
                 startCaption = sessionsShown.getValue(WeekSessionCounts.first()),
                 endCaption = sessionsShown.getValue(WeekSessionCounts.last()),
                 selectedText = { sessionsShown.getValue(it) },
@@ -299,7 +317,7 @@ fun WeeklyCheckinSheet(
                 label = stringResource(R.string.log_weekly_rpe_gap),
                 values = WeekSessionCounts,
                 selected = rpeLoadGapSessions,
-                onSelect = { rpeLoadGapSessions = it; dirty = true },
+                onSelect = { rpeLoadGapSessions = it },
                 startCaption = sessionsShown.getValue(WeekSessionCounts.first()),
                 endCaption = sessionsShown.getValue(WeekSessionCounts.last()),
                 selectedText = { sessionsShown.getValue(it) },
@@ -321,19 +339,17 @@ fun WeeklyCheckinSheet(
                     format = "%.2f",
                     adjustments = listOf(-0.01, 0.01),
                     onActivate = { velocityFresh = true; velocityKeypad = true },
-                    onText = { velocityText = it; velocityFresh = false; dirty = true },
+                    onText = { velocityText = it; velocityFresh = false },
                 )
                 if (velocityKeypad) {
                     NumericKeypad(
                         onKey = { key ->
                             velocityText = editNumericBuffer(velocityText, key, velocityFresh)
                             velocityFresh = false
-                            dirty = true
                         },
                         onBackspace = {
                             velocityText = velocityText.dropLast(1)
                             velocityFresh = false
-                            dirty = true
                         },
                         onDone = { velocityKeypad = false },
                     )
@@ -345,10 +361,10 @@ fun WeeklyCheckinSheet(
         FormCard {
             FieldLabel(stringResource(R.string.log_weekly_signs_q))
             Text(stringResource(R.string.log_weekly_signs_ctx), color = OnBgMuted, style = Type.Caption)
-            SwitchRow(stringResource(R.string.log_weekly_sign_performance), worsePerformance) { worsePerformance = it; dirty = true }
-            SwitchRow(stringResource(R.string.log_weekly_sign_mood), lowMood) { lowMood = it; dirty = true }
-            SwitchRow(stringResource(R.string.log_weekly_sign_rhr), higherRestingHr) { higherRestingHr = it; dirty = true }
-            SwitchRow(stringResource(R.string.log_weekly_sign_sleep), worseSleep) { worseSleep = it; dirty = true }
+            SwitchRow(stringResource(R.string.log_weekly_sign_performance), worsePerformance) { worsePerformance = it }
+            SwitchRow(stringResource(R.string.log_weekly_sign_mood), lowMood) { lowMood = it }
+            SwitchRow(stringResource(R.string.log_weekly_sign_rhr), higherRestingHr) { higherRestingHr = it }
+            SwitchRow(stringResource(R.string.log_weekly_sign_sleep), worseSleep) { worseSleep = it }
             if (signs.any) {
                 val weekLabels = listOf(
                     stringResource(R.string.log_weekly_signs_lt1),
@@ -358,7 +374,6 @@ fun WeeklyCheckinSheet(
                 FieldLabel(stringResource(R.string.log_weekly_signs_how_long))
                 OptionList(OvertrainingWeeks, signWeeks ?: -1.0, { weekLabels[OvertrainingWeeks.indexOf(it)] }) {
                     signWeeks = it
-                    dirty = true
                 }
             }
         }
@@ -371,12 +386,12 @@ fun WeeklyCheckinSheet(
                 question = stringResource(R.string.log_clinical_compulsive_q),
                 context = stringResource(R.string.log_clinical_compulsive_ctx),
                 checked = compulsive,
-            ) { compulsive = it; dirty = true }
+            ) { compulsive = it }
             ClinicalQuestion(
                 question = stringResource(R.string.log_clinical_bone_q),
                 context = stringResource(R.string.log_clinical_bone_ctx),
                 checked = bonePain,
-            ) { bonePain = it; dirty = true }
+            ) { bonePain = it }
             // AUTOREG-10 / REDS-SCREEN-001: the low-energy screen in the wording
             // that fits the athlete.
             ClinicalQuestion(
@@ -389,9 +404,9 @@ fun WeeklyCheckinSheet(
                 ),
                 context = stringResource(R.string.log_clinical_reds_ctx),
                 checked = reds,
-            ) { reds = it; dirty = true }
+            ) { reds = it }
         }
-        ObservedAtRow(observedAt, withTime = false) { observedAt = it; dirty = true }
+        ObservedAtRow(observedAt, withTime = false) { observedAt = it }
         if (checkinPresent) {
             TextAction(
                 stringResource(R.string.log_weekly_clear),

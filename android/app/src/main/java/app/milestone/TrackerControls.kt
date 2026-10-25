@@ -561,6 +561,11 @@ private fun RunStepCard(res: Resources, progress: StepProgress, onSkip: () -> Un
  * the user actually allowed ([LocationPrompt]), then ✕ (leave, like before Start)
  * beside the primary action, Continue before the system prompt or Allow location
  * after it. Once refused, "Log run by hand" is the way out without GPS.
+ *
+ * [onSaveRun] non-null marks a crash-recovered run waiting on the grant to resume
+ * ([RunSession.resumeAwaitingLocation]): the caption says the run is on hold, the
+ * way out is "Save run" (what was recorded so far), and ✕ discards the run, so
+ * [onClose] must confirm first.
  */
 @Composable
 internal fun LocationPermissionPanel(
@@ -568,21 +573,32 @@ internal fun LocationPermissionPanel(
     onAllow: () -> Unit,
     onClose: () -> Unit,
     onLogManually: (() -> Unit)?,
+    onSaveRun: (() -> Unit)? = null,
 ) {
+    val resuming = onSaveRun != null
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
         Text(
             stringResource(
-                when (prompt) {
-                    LocationPrompt.Rationale -> R.string.track_perm_rationale
-                    LocationPrompt.Denied -> R.string.track_perm_denied_caption
-                    LocationPrompt.CoarseOnly -> R.string.track_perm_coarse_caption
-                    LocationPrompt.Blocked -> R.string.track_perm_blocked_caption
+                when {
+                    resuming && prompt == LocationPrompt.Blocked -> R.string.track_resume_perm_blocked_caption
+                    resuming -> R.string.track_resume_perm_caption
+                    prompt == LocationPrompt.Rationale -> R.string.track_perm_rationale
+                    prompt == LocationPrompt.Denied -> R.string.track_perm_denied_caption
+                    prompt == LocationPrompt.CoarseOnly -> R.string.track_perm_coarse_caption
+                    else -> R.string.track_perm_blocked_caption
                 },
             ),
-            color = if (prompt == LocationPrompt.Rationale) OnBgBody else OnBgMuted,
+            color = if (prompt == LocationPrompt.Rationale || resuming) OnBgBody else OnBgMuted,
             style = Type.Body,
         )
-        if (prompt != LocationPrompt.Rationale && onLogManually != null) {
+        if (onSaveRun != null) {
+            TextAction(
+                stringResource(R.string.track_btn_save_run),
+                onClick = onSaveRun,
+                chevron = true,
+                modifier = Modifier.offset(x = -TextActionInset),
+            )
+        } else if (prompt != LocationPrompt.Rationale && onLogManually != null) {
             // A text action, so no tonal slab sits over the primary below it.
             TextAction(
                 stringResource(R.string.track_btn_log_manually),
@@ -592,7 +608,17 @@ internal fun LocationPermissionPanel(
             )
         }
         ControlRow {
-            ControlCircle(R.drawable.ic_ui_close, stringResource(R.string.main_close), onClick = onClose)
+            if (resuming) {
+                ControlCircle(
+                    R.drawable.ic_ui_close,
+                    stringResource(R.string.track_cd_discard_run),
+                    danger = true,
+                    iconSize = 20.dp,
+                    onClick = onClose,
+                )
+            } else {
+                ControlCircle(R.drawable.ic_ui_close, stringResource(R.string.main_close), onClick = onClose)
+            }
             ControlPill(
                 stringResource(
                     if (prompt == LocationPrompt.Rationale) R.string.track_btn_continue else R.string.track_btn_allow_location,

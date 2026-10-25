@@ -2225,8 +2225,7 @@ fn stale_soreness_reading_does_not_bridge_but_a_recent_one_does() {
     // (SORENESS_RECENCY_DAYS). A maxed-sore day-0 morning followed only by
     // sleep-only check-ins on days 46..=60 leaves the newest soreness reading
     // 60 days behind the global newest check-in → NO Soreness input, so an old
-    // sore morning cannot downgrade sessions indefinitely. This also keeps the
-    // bridge inside compaction Rule 4's retention window (replay-equivalent).
+    // sore morning cannot downgrade sessions indefinitely.
     let mut stale = vec![checkin(0, None, Some(5), None)];
     for d in 46..=60 {
         stale.push(checkin(d, Some(3), None, None));

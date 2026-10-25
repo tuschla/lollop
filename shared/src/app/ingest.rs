@@ -50,33 +50,129 @@ pub(super) struct RunFields {
     pub(super) workout_type: Option<WorkoutType>,
     pub(super) session_rpe: Option<u8>,
     pub(super) avg_hr_bpm: Option<f64>,
+    /// The device's UTC offset when the run was logged (wire `utc_offset_sec`;
+    /// `None` on a legacy line and on an amend, which keeps its row's).
+    pub(super) utc_offset_sec: Option<i64>,
 }
 
-/// The run row to store, with no track. `runs` is the history the new row
-/// joins (for an amend, without the row it replaces): the spike baseline is
-/// floored to the longest run in its trailing 30-day window, so a manual
-/// entry gets the same RUN-SPIKE-001 gate a GPS-tracked one does; an explicit
-/// caller value (paired 30-day history) still wins when larger.
-pub(super) fn logged_run(runs: &[LoggedRun], profile: Option<&Profile>, f: RunFields) -> LoggedRun {
-    let prior_longest = ingest_spike_baseline_km(runs, f.observed_at);
+/// The run row as the wire states it, with no track. Its two figures that read
+/// other state, the typed-bpm %HRmax and the card spike baseline, start at the
+/// wire values; [`store_run`] derives them.
+pub(super) fn logged_run(f: RunFields) -> LoggedRun {
+    let hr_pct_max = sanitize_f64(f.hr_pct_max);
+    let longest_recent_km = sanitize_f64(f.longest_recent_km).max(0.0);
     LoggedRun {
         // A negative distance would subtract from `recent_weekly_km`
         // (nulling the measured plan anchor): clamp it out at ingest.
         distance_km: sanitize_f64(f.distance_km).max(0.0),
         duration_min: sanitize_f64(f.duration_min).max(0.0),
-        hr_pct_max: sanitize_f64(run_targets::logged_hr_pct_max(
-            f.hr_pct_max,
-            f.avg_hr_bpm,
-            profile,
-        )),
-        longest_recent_km: sanitize_f64(f.longest_recent_km).max(prior_longest),
+        hr_pct_max,
+        wire_hr_pct_max: hr_pct_max,
+        longest_recent_km,
+        wire_longest_recent_km: longest_recent_km,
         track: Vec::new(),
+        logged_utc_offset_sec: f.utc_offset_sec,
+        hr_pinned: false,
         track_segment_starts: Vec::new(),
         observed_at: f.observed_at,
         entry_id: sanitize_entry_id(f.entry_id),
         workout_type: f.workout_type,
         session_rpe: f.session_rpe.map(|r| r.min(10)),
         avg_hr_bpm: run_targets::plausible_avg_hr_bpm(f.avg_hr_bpm),
+    }
+}
+
+/// Store a new run row (or an amend's replacement of `replaced`, already
+/// removed, which keeps the original row's logged UTC offset) with its %HRmax
+/// derived, and re-derive the spike baselines its arrival and the old row's
+/// departure can move.
+pub(super) fn store_run(model: &mut Model, mut run: LoggedRun, replaced: Option<&LoggedRun>) {
+    if let Some(old) = replaced {
+        run.logged_utc_offset_sec = old.logged_utc_offset_sec;
+    }
+    run.hr_pct_max = derived_hr_pct_max(model, &run);
+    let at = run.observed_at;
+    model.runs.push(run);
+    match replaced {
+        Some(old) => refresh_spike_baselines(&mut model.runs, &[old.observed_at, at]),
+        None => refresh_spike_baselines(&mut model.runs, &[at]),
+    }
+}
+
+/// A run's stored %HRmax: a plausible typed bpm converted against the HRmax
+/// of the profile in force at the run's instant on the clock it was logged
+/// under (`profile_at` with `logged_utc_offset_sec`, else the current offset
+/// for a legacy row: a birthday's age is that local day's, and an edit made
+/// later that day is not yet in force), else the wire figure. A pure function
+/// of the row and the profile history, never of log order or of where the
+/// viewer is now: a full replay, a compacted one (superseded profiles and
+/// days dropped) and the shell's delete and Undo (which re-sends the row's
+/// offset) all store the same figure, and a later time-zone change moves none.
+pub(super) fn derived_hr_pct_max(model: &Model, run: &LoggedRun) -> f64 {
+    if run.avg_hr_bpm.is_none() {
+        return run.wire_hr_pct_max;
+    }
+    let offset = run
+        .logged_utc_offset_sec
+        .unwrap_or(model.today_utc_offset_sec);
+    let profile = profile_at(model, run.observed_at, offset);
+    sanitize_f64(run_targets::logged_hr_pct_max(
+        run.wire_hr_pct_max,
+        run.avg_hr_bpm,
+        profile.as_deref(),
+    ))
+}
+
+/// Re-derive every typed-bpm run's %HRmax ([`derived_hr_pct_max`]) after the
+/// profile history or the clock's UTC offset (which a legacy row without a
+/// stamped offset reads) changed. A row pinned by a legacy undated edit keeps
+/// its figure.
+pub(super) fn refresh_run_hr(model: &mut Model) {
+    let derived: Vec<(usize, f64)> = model
+        .runs
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.avg_hr_bpm.is_some() && !r.hr_pinned)
+        .map(|(i, r)| (i, derived_hr_pct_max(model, r)))
+        .collect();
+    for (i, pct) in derived {
+        model.runs[i].hr_pct_max = pct;
+    }
+}
+
+/// Re-derive the card spike baseline of every run a change at the stamps in
+/// `changed` can move. A run's baseline is the longest OTHER run in its
+/// trailing spike window ([`in_spike_window`]), floored by the caller-supplied
+/// paired-history value, so a manual entry gets the same RUN-SPIKE-001 chip a
+/// GPS-tracked one does; only runs dated in `[t, t + window]` of a changed
+/// stamp `t` can move. It is a pure function of the surviving rows, so a
+/// replay, a compacted replay and a delete + Undo all show the same chip.
+pub(super) fn refresh_spike_baselines(runs: &mut [LoggedRun], changed: &[i64]) {
+    let affected: Vec<usize> = (0..runs.len())
+        .filter(|&i| {
+            changed
+                .iter()
+                .any(|&t| in_spike_window(t, runs[i].observed_at))
+        })
+        .collect();
+    if affected.is_empty() {
+        return;
+    }
+    // Each run in a window is measured once (a GPS run through the QC memo).
+    let mut km: Vec<Option<f64>> = vec![None; runs.len()];
+    let mut baselines = Vec::with_capacity(affected.len());
+    for &i in &affected {
+        let at = runs[i].observed_at;
+        let mut longest = 0.0_f64;
+        for (j, r) in runs.iter().enumerate() {
+            if j != i && in_spike_window(r.observed_at, at) {
+                longest = longest.max(*km[j].get_or_insert_with(|| spike_km(r)));
+            }
+        }
+        baselines.push((i, runs[i].wire_longest_recent_km.max(longest)));
+    }
+    for (i, baseline) in baselines {
+        runs[i].longest_recent_km = baseline;
     }
 }
 
@@ -167,23 +263,39 @@ pub(super) fn apply_profile(model: &mut Model, mut profile: Profile) {
     {
         *v = sanitize_f64(*v);
     }
+    // A legacy undated edit applies to logged runs from its position in the
+    // log: every run already logged keeps the %HRmax it has now (it replaces
+    // the whole history below, so re-deriving would re-convert all of them).
+    if profile.effective_from_epoch_day.is_none() {
+        for run in &mut model.runs {
+            run.hr_pinned = true;
+        }
+    }
+    let key = history_key(&profile);
     // running-041: a race only anchors paces while it is recent, so a race the
     // shell sent undated is dated when it is first stated (before sanitizing,
-    // so a dropped out-of-range date stays undated). A re-sent unchanged race
-    // keeps the date it already has, so re-saving the profile never makes an
-    // old race look fresh.
+    // so a dropped out-of-range date stays undated): with the date of the same
+    // race on the history entry this edit follows (a re-sent unchanged race
+    // keeps its date, so re-saving the profile never makes an old race look
+    // fresh), else (no such race, or one that entry left undated) with this
+    // edit's effective day, so a race the user re-states today is dated today.
+    // Both are read from data this edit's own history survives with, never
+    // from the clock or a superseded profile, so a compacted replay dates it
+    // the same. An undated legacy edit (no effective day) leaves the race
+    // undated: its day is unknown, so it anchors no paces.
     if let Some(race) = profile.recent_race.as_mut()
         && race.epoch_day.is_none()
     {
         let previous = model
-            .profile
-            .as_ref()
+            .profile_history
+            .iter()
+            .rev()
+            .find(|p| history_key(p) < key)
             .and_then(|p| p.recent_race.as_ref())
             .filter(|p| p.distance_km == race.distance_km && p.time_sec == race.time_sec);
-        race.epoch_day = match previous {
-            Some(p) => p.epoch_day,
-            None => profile.effective_from_epoch_day.or(model.today_epoch_day),
-        };
+        race.epoch_day = previous
+            .and_then(|p| p.epoch_day)
+            .or(profile.effective_from_epoch_day);
     }
     sanitize_planning_fields(&mut profile);
     if !profile.running_km_per_week_set {
@@ -204,14 +316,13 @@ pub(super) fn apply_profile(model: &mut Model, mut profile: Profile) {
     if profile.age_years.is_some_and(|a| a < YOUTH_AGE_YEARS) {
         profile.health.youth = true;
     }
-    // Profile history: an edit effective on day E supersedes every entry
-    // already effective on or after E (a None-dated edit, −∞, replaces the
-    // whole history), so a later goal/weekly-set change never re-prescribes an
-    // already-shown past day. `model.profile` stays the latest applied.
-    let e = eff_key(profile.effective_from_epoch_day);
-    model
-        .profile_history
-        .retain(|p| eff_key(p.effective_from_epoch_day) < e);
+    // Profile history: an edit supersedes every entry at or after its own
+    // [`history_key`] (effective day, then the instant it was made; an
+    // undated edit, −∞, the whole history), so a
+    // later goal/weekly-set change never re-prescribes an already-shown past
+    // day, and an evening edit leaves the morning's in force for the morning.
+    // `model.profile` stays the latest applied.
+    model.profile_history.retain(|p| history_key(p) < key);
     model.profile_history.push(profile.clone());
     model.profile = Some(profile);
 }
@@ -222,7 +333,9 @@ const YOUTH_AGE_YEARS: f64 = 18.0;
 
 /// `SetToday`: re-derive every birthday-carrying profile's age (and with it
 /// the under-18 gate) for the new day, so the age never goes stale and the
-/// gate lifts on the 18th birthday without a profile edit.
+/// gate lifts on the 18th birthday without a profile edit. The stored values
+/// are TODAY's; a past day reads its own day's age through [`aged_on`]
+/// (`profile_for_day`), so the birthday never rewrites the days it held.
 pub(super) fn refresh_birthday_ages(model: &mut Model) {
     let Some(today) = model.today_epoch_day else {
         return;
@@ -234,6 +347,23 @@ pub(super) fn refresh_birthday_ages(model: &mut Model) {
     {
         derive_birthday_age(p, today);
     }
+}
+
+/// `p` as of local day `day`: a birthday-carrying profile's age and under-18
+/// gate are those of `day`, not of today (SAFE-PEDS-001: a day the gate held
+/// stays held after the 18th birthday). Borrowed unless the day's derived
+/// values differ from the stored ones (only across a birthday).
+pub(super) fn aged_on(p: &Profile, day: i64) -> std::borrow::Cow<'_, Profile> {
+    let Some(birth) = p.birth_epoch_day else {
+        return std::borrow::Cow::Borrowed(p);
+    };
+    let age = whole_years_between(birth, day) as f64;
+    if p.age_years == Some(age) && p.health.youth == (age < YOUTH_AGE_YEARS) {
+        return std::borrow::Cow::Borrowed(p);
+    }
+    let mut q = p.clone();
+    derive_birthday_age(&mut q, day);
+    std::borrow::Cow::Owned(q)
 }
 
 /// With a birthday, `age_years` is the whole calendar years lived by `today`

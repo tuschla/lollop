@@ -184,7 +184,8 @@ class LongHistoryUiTest {
             heatDesc,
         )
 
-        // Runs is the default segment here (the newest entry is Sunday's run).
+        // The segment opens on whichever type was logged last; pick Runs explicitly.
+        timed("Runs segment") { rule.selectHistoryFilter(str(R.string.main_segment_runs)) }
         // 16-week chart: total and this week from the data.
         val weekly = hasContentDescription(strPrefix(R.string.history_weekly_desc, 16), substring = true)
         historyList().performScrollToNode(weekly)
@@ -276,11 +277,11 @@ class LongHistoryUiTest {
     // ── 3. The longest run: splits, Show all, full-screen map, trim ───────────
 
     @Test
-    @Ignore("PARKED: trim-confirm dialog matcher + sheet close via scrim not yet verified green")
     fun longestRun_showAllSplits_fullScreenMap_andTrimUpdatesTheRecords() {
         val h = metric
         boot(h)
         rule.selectTab(str(R.string.main_dest_history))
+        rule.selectHistoryFilter(str(R.string.main_segment_runs))
         historyList().performScrollToNode(hasTestTag("history-record"))
         val longestRow = hasTestTag("history-record") and hasText(str(R.string.history_longest_run), substring = true, ignoreCase = true)
         timed("open longest run") {
@@ -349,15 +350,23 @@ class LongHistoryUiTest {
         assertSplitsSane(trimmed)
         val newLongest = after.runs.maxBy { it.distance_km }
         val p = after.run_progress!!
-        assertEquals("records follow the trim: the longest is now the longest remaining run", newLongest.distance_km, p.longest_run_km, 1e-9)
+        // The record is the core's one-decimal summary figure.
+        assertEquals("records follow the trim: the longest is now the longest remaining run", newLongest.distance_km, p.longest_run_km, 0.05)
         assertEquals(newLongest.observed_at, p.longest_run_observed_at)
+        assertTrue("the trimmed run lost its record", p.longest_run_observed_at != h.longestRun.observedAt)
+        // The Records grid on screen follows too.
+        dismissSheet()
+        historyList().performScrollToIndex(0)
+        rule.waitForIdle()
+        historyList().performScrollToNode(hasTestTag("history-record"))
+        val longestCell = recordCells().first { it.any { t -> t.equals(str(R.string.history_longest_run), ignoreCase = true) } }
+        assertTrue("longest cell after the trim: $longestCell", "${trimDecimal(p.longest_run_km)} km" in longestCell)
         assertBudget()
     }
 
     // ── 4. History · Lifts: every session once, the big session sheet, a set ──
 
     @Test
-    @Ignore("PARKED: passed before switching sheet close to the scrim; re-verify")
     fun lifts_everySessionOnceToTheEnd_bigSessionSheet_setDetail_andGlossary() {
         val h = metric
         boot(h)
@@ -436,7 +445,6 @@ class LongHistoryUiTest {
     // ── 5. Today and Profile (calculators, references) over the long history ──
 
     @Test
-    @Ignore("PARKED: calculator sheets are closed via the scrim now; not yet verified green")
     fun todayAndProfile_calculatorsAndReferences_meetEveryInvariant() {
         val h = metric
         boot(h)
@@ -472,12 +480,12 @@ class LongHistoryUiTest {
     // ── 6. Miles + pounds: the same history in the other units ───────────────
 
     @Test
-    @Ignore("PARKED: miles/lb walk passed up to the session sheet; sheet close via scrim not yet verified")
     fun milesAndPounds_tilesChartsRecordsListAndSheetsNeverShowKmOrKg() {
         AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Mi)
         val h = imperial
         boot(h)
         rule.selectTab(str(R.string.main_dest_history))
+        rule.selectHistoryFilter(str(R.string.main_segment_runs))
         val m = model()
 
         val window = AppClock.nowSec() - 7L * 86_400L

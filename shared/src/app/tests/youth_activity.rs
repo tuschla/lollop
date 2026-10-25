@@ -30,6 +30,7 @@ fn run(minutes: f64, rating: Option<u8>, observed_at: i64) -> Event {
         workout_type: None,
         session_rpe: rating,
         avg_hr_bpm: None,
+        utc_offset_sec: None,
     }
 }
 

@@ -20,7 +20,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
-import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppClock
 import app.milestone.ConcurrentGoal
@@ -278,7 +277,7 @@ class ScreenshotRunsTest {
         )
         seedRecordingRun()
         RunSession.startSteps(android.os.SystemClock.elapsedRealtime())
-        lastScenario = ActivityScenario.launch(
+        lastScenario = launchMain(
             Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_TRACKING, true),
         )
         rule.waitUntil(30_000) {

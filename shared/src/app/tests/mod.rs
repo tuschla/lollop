@@ -17,6 +17,7 @@ mod calisthenics;
 mod calisthenics_plan;
 mod completion;
 mod copy_invariants;
+mod differential_calcs;
 mod entry_edits;
 mod event_fuzz;
 mod event_wire;
@@ -31,12 +32,19 @@ mod ingest_sanitize;
 mod lift_audit;
 mod lift_cues;
 mod long_horizon;
+mod mutation_guards;
 mod no_age;
 mod onboarding;
 mod overtraining;
 mod pain_readiness;
+mod parser_fuzz;
 mod readiness_checkin;
 mod readiness_feedback;
+mod review_ledger;
+mod review_plan;
+mod review_robust;
+mod review_runs;
+mod review_tests;
 mod reviews;
 mod run_data;
 mod run_spike;
@@ -44,12 +52,14 @@ mod run_splits;
 mod run_trim;
 mod run_view;
 mod running_plan;
+mod safety_redteam;
 mod schedule;
 mod session_adjustments;
 mod set_logging;
 mod stale_signals;
 mod strength_coaching;
 mod strength_plan;
+mod track_figures_consistency;
 mod training_load;
 mod view_equivalence;
 mod view_wire;
@@ -80,6 +90,7 @@ fn log_run(
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: None,
+        utc_offset_sec: None,
     }
 }
 
@@ -100,6 +111,7 @@ fn log_run_track(
         session_rpe: None,
         segment_starts: Vec::new(),
         avg_hr_bpm: None,
+        utc_offset_sec: None,
     }
 }
 
@@ -122,6 +134,7 @@ fn log_run_track_seg(
         session_rpe: None,
         segment_starts,
         avg_hr_bpm: None,
+        utc_offset_sec: None,
     }
 }
 
@@ -199,6 +212,7 @@ pub(crate) fn base_profile() -> Profile {
         measured_hr_max: None,
         weight_lb: false,
         effective_from_epoch_day: None,
+        edited_at: None,
         lift_days_per_week: None,
         training_weekdays: None,
         goal_race_epoch_day: None,
@@ -232,7 +246,9 @@ fn probe_run(entry_id: u64) -> LoggedRun {
         distance_km: 0.0,
         duration_min: 0.0,
         hr_pct_max: 71.0,
+        wire_hr_pct_max: 71.0,
         longest_recent_km: 3.3,
+        wire_longest_recent_km: 3.3,
         track: vec![
             GpsPoint {
                 lat: 12.5,
@@ -262,6 +278,8 @@ fn probe_run(entry_id: u64) -> LoggedRun {
         track_segment_starts: Vec::new(),
         observed_at: 1_000,
         entry_id,
+        logged_utc_offset_sec: None,
+        hr_pinned: false,
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: None,
@@ -283,7 +301,7 @@ fn run_card(r: &LoggedRun) -> RunResultView {
 
 /// [`build_run_anchors`] over `runs` with their realised distances.
 fn run_anchors(runs: &[LoggedRun], today: i64, offset: i64) -> RunAnchors {
-    build_run_anchors(runs, &RunFacts::new(runs), today, offset)
+    build_run_anchors(&RunFacts::new(runs), today, offset)
 }
 
 const WEEK: i64 = 7 * DAY_SEC;
@@ -385,6 +403,7 @@ fn logrun(distance_km: f64, day: i64) -> Event {
         workout_type: None,
         session_rpe: None,
         avg_hr_bpm: None,
+        utc_offset_sec: None,
     }
 }
 

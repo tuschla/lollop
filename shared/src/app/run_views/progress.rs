@@ -124,8 +124,10 @@ const BEST_EFFORT_TIE_SEC: f64 = 1e-9;
 /// The running-progress view (self-monitoring, ADH-SELFMON-001): the last
 /// [`PROGRESS_WEEKS`] Monday-start local weeks of volume (with the separate
 /// session-RPE load series, LOAD-SRPE-001), the longest run and best efforts.
-/// Future-dated rows are excluded. `None` until a dated run with a distance
-/// exists.
+/// A run counts in the local day/week it STARTED ([`run_started_at`], the day
+/// its card's title and date name), so a Sunday 23:40 run ending after
+/// midnight is Sunday's week. Future-dated rows are excluded. `None` until a
+/// dated run with a distance exists.
 pub(in crate::app) fn build_run_progress(
     model: &Model,
     facts: &RunFacts,
@@ -136,18 +138,22 @@ pub(in crate::app) fn build_run_progress(
         .iter()
         .enumerate()
         .filter(|(_, r)| r.observed_at > 0)
-        .map(|(i, r)| (i, r, local_day(r.observed_at, offset)))
+        .map(|(i, r)| (i, r, local_day(facts.started[i], offset)))
         .collect();
     let today = model
         .today_epoch_day
         .or_else(|| dated.iter().map(|(_, _, d)| *d).max())?;
-    let live: Vec<(usize, &LoggedRun, i64)> =
+    // Chronological (`observed_at`, then `entry_id`), the `runs` order: the
+    // weekly float sums are rounded to 0.1, so summing in storage order would
+    // let an Undo (the re-logged row moves to the tail) move a week by 0.1.
+    let mut live: Vec<(usize, &LoggedRun, i64)> =
         dated.into_iter().filter(|(_, _, d)| *d <= today).collect();
+    live.sort_by_key(|(_, r, _)| (r.observed_at, r.entry_id));
     if !live.iter().any(|(i, ..)| facts.km[*i] > 0.0) {
         return None;
     }
-    let cur_monday = today - mon0_weekday(today);
-    let first_monday = cur_monday - (PROGRESS_WEEKS - 1) * 7;
+    let cur_monday = today.saturating_sub(mon0_weekday(today));
+    let first_monday = cur_monday.saturating_sub((PROGRESS_WEEKS - 1) * 7);
     let mut weekly: Vec<RunWeekView> = (0..PROGRESS_WEEKS)
         .map(|w| RunWeekView {
             week_start_epoch_day: first_monday + w * 7,

@@ -31,7 +31,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
-import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import app.milestone.ActiveRunStore
@@ -81,7 +80,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -118,9 +116,7 @@ internal object ProcessDeath {
         )) {
             Core.javaClass.getDeclaredField(field).apply { isAccessible = true }.set(Core, value)
         }
-        EventDispatcher.model.value = null
-        EventDispatcher.bootHandled = false
-        EventDispatcher.recoveredSidecar = null
+        EventDispatcher.resetForTest()
         RunSession.reset()
         UiMessages.clear()
         HistoryFocus.consume()
@@ -154,7 +150,7 @@ internal object ProcessDeath {
     /** Start the new process's Activity from [state] (back from Recents) and wait
      *  for boot hydration. */
     fun relaunchWithState(rule: ComposeTestRule, state: Bundle) {
-        restored = Robolectric.buildActivity(MainActivity::class.java).setup(state)
+        restored = launchWithSplashWatchdog { Robolectric.buildActivity(MainActivity::class.java).setup(state) }
         rule.waitUntil(30_000) {
             rule.onAllNodes(isRoot()).fetchSemanticsNodes().isNotEmpty() && EventDispatcher.bootHandled
         }
@@ -182,7 +178,6 @@ internal object ProcessDeath {
  * crash sidecar ([ActiveRunStore]) through [RunSession.restore] and checks the
  * resumed run neither loses fixes nor double-counts distance or moving time.
  */
-@Ignore("PARKED: written but never run (owner parked the work before the first gradle run); verify, then BUG-ignore real failures")
 @RunWith(RobolectricTestRunner::class)
 class RestoreRoundtripTest {
 
@@ -288,12 +283,13 @@ class RestoreRoundtripTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
         openLoopFor("Back Squat")
-        rule.typeWeight("62.5")
-        rule.onNode(weightWell("62.5")).assertExists()
+        // A working weight off the 117.5 kg prefill (a light one would be a warm-up).
+        rule.typeWeight("122.5")
+        rule.onNode(weightWell("122.5")).assertExists()
 
         // Rotation with the typed weight not yet saved: the loop and the draft stay.
         recreate()
-        rule.assertCountEventually(weightWell("62.5"), 1)
+        rule.assertCountEventually(weightWell("122.5"), 1)
         rule.assertTextCountEventually(str(R.string.log_set_header_n_of_n, 1, 4), 1)
         assertEquals("a draft is never logged by a rotation", 0, todaysSets("Back Squat").size)
 
@@ -302,7 +298,7 @@ class RestoreRoundtripTest {
         recreate()
         waitForState { todaysSets("Back Squat").size == 1 }
         rule.assertTextCountEventually(str(R.string.log_set_header_n_of_n, 2, 4), 1)
-        assertEquals(listOf(62.5), todaysSets("Back Squat").map { it.weight_kg })
+        assertEquals(listOf(122.5), todaysSets("Back Squat").map { it.weight_kg })
         assertEquals("seeded + one", 2, logCount("LogSet"))
 
         // Backgrounded, killed, restored from Recents: the loop comes back on set 2.
@@ -312,12 +308,12 @@ class RestoreRoundtripTest {
         ProcessDeath.relaunchWithState(rule, state)
         waitForState { todaysSets("Back Squat").size == 1 }
         assertEquals(0, count(hasText(str(R.string.log_set_header_n_of_n, 1, 4))))
-        assertEquals(listOf(62.5), todaysSets("Back Squat").map { it.weight_kg })
+        assertEquals(listOf(122.5), todaysSets("Back Squat").map { it.weight_kg })
 
         // A cold start (no saved state): Today, the set replayed once, no editor.
         ProcessDeath.kill(ctx)
         rule.launchApp()
-        assertEquals(listOf(62.5), todaysSets("Back Squat").map { it.weight_kg })
+        assertEquals(listOf(122.5), todaysSets("Back Squat").map { it.weight_kg })
         assertEquals(0, count(hasText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)))
         assertEquals(2, logCount("LogSet"))
     }
@@ -376,7 +372,7 @@ class RestoreRoundtripTest {
     }
 
     private fun launchOnTracker() {
-        lastScenario = ActivityScenario.launch(
+        lastScenario = launchMain(
             Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_TRACKING, true),
         )
         waitForText(str(R.string.track_btn_stop), timeoutMs = 30_000)
@@ -536,13 +532,17 @@ class RestoreRoundtripTest {
         rule.waitUntil(15_000) { trimThumbs().fetchSemanticsNodes().size == 2 }
         assertEquals("the chosen window survives rotation", keeps, keepsLine())
 
-        // Trim → confirm dialog; rotate with the dialog up, then confirm.
+        // Trim → confirm dialog; rotate with the dialog up, then confirm. The dialog
+        // is told apart from the sheet (itself a dialog window) by its message.
+        val message = hasText(str(R.string.main_trim_confirm_message, 5, 10))
+        val confirmInDialog = hasText(str(R.string.main_trim_confirm)) and hasClickAction() and
+            hasAnyAncestor(isDialog() and androidx.compose.ui.test.hasAnyDescendant(message))
         rule.onNode(hasText(str(R.string.main_trim_confirm)) and hasClickAction()).performScrollTo().performClick()
-        rule.waitUntil(5_000) { count(isDialog()) > 0 }
+        rule.waitUntil(5_000) { count(message) == 1 }
         recreate()
-        rule.waitUntil(15_000) { count(hasText(str(R.string.main_trim_confirm)) and hasAnyAncestor(isDialog())) == 1 }
+        rule.waitUntil(15_000) { count(message) == 1 && count(confirmInDialog) == 1 }
         assertEquals(0, logCount("TrimRunTrack"))
-        rule.onNode(hasText(str(R.string.main_trim_confirm)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
+        rule.onNode(confirmInDialog).performClick()
         waitForState { logCount("TrimRunTrack") == 1 && model.runs.single { it.entry_id == run.entryId }.distance_km < beforeKm - 1.0 }
 
         val trim = payload(logLines().single { EventLog.variantOf(it) == "TrimRunTrack" }, "TrimRunTrack")
@@ -603,7 +603,7 @@ class RestoreRoundtripTest {
             rule.waitForIdle()
             next()
         }
-        rule.onNode(hasText(str(R.string.setup_btn_finish)) and hasClickAction()).performScrollTo().performClick()
+        rule.onNode(hasText(str(R.string.setup_btn_finish)) and hasClickAction()).performClick()
         waitForState(30_000) { EventDispatcher.model.value?.profile != null && EventDispatcher.model.value?.program != null }
 
         // Every answer from before the rotation and the process death landed, once.
@@ -884,8 +884,8 @@ class RestoreRoundtripTest {
     /**
      * A runner pauses at a crossing for 20 s, walks 30 m to the other side and
      * resumes. Live, the Resume opens a new segment, so the walk is neither distance
-     * nor moving time. After a crash the sidecar has no pause marker and the 20 s gap
-     * is under the fix-gap rule, so the recovered run must still not count the walk:
+     * nor moving time. The 20 s gap is under the fix-gap rule, so only the pause
+     * boundary the sidecar records keeps the recovered run from counting the walk:
      * a recovered run never shows more than it had before the crash.
      */
     @Test
@@ -1059,5 +1059,10 @@ class RestoreRoundtripTest {
         val b = runs.single { it.entry_id == 1_000_002L }
         assertEquals("distance", a.distance_km, b.distance_km, 1e-6)
         assertEquals("moving time", a.duration_min, b.duration_min, 1e-6)
+        // The Finish review previews the event Save sends, so it shows exactly the
+        // figures History then lists.
+        val review = Core.savedFigures(RunSession.trackEventForCore(entryId = 1_000_003, workoutType = null, sessionRpe = null))!!
+        assertEquals("review distance", b.distance_km, review.distance_km, 0.0)
+        assertEquals("review moving time", b.duration_min, review.duration_min, 0.0)
     }
 }

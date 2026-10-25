@@ -1,17 +1,24 @@
 use super::*;
 
 /// All dated (`observed_at > 0`) runs with their realised distance, moving
-/// duration, and avg-HR zone, in log order. QC-filtered for GPS tracks.
+/// duration, start and avg-HR zone, chronological ([`RunFacts::chrono`]): the
+/// report's float sums are rounded for display, so summing in storage order
+/// would let an Undo or amend (the row moves to the tail) change a shown
+/// figure. QC-filtered for GPS tracks. A run counts in the local week it
+/// STARTED (`started_at`), like plan completion and the progress chart, so a
+/// Sunday 23:40 run ending after midnight is never this week in one view and
+/// last week in another.
 fn dated_runs(model: &Model, facts: &RunFacts) -> Vec<DatedRun> {
-    model
-        .runs
+    facts
+        .chrono
         .iter()
-        .zip(facts.km.iter().zip(&facts.minutes))
+        .map(|&i| (&model.runs[i], i))
         .filter(|(r, _)| r.observed_at > 0)
-        .map(|(r, (&km, &minutes))| DatedRun {
+        .map(|(r, i)| DatedRun {
             observed_at: r.observed_at,
-            km,
-            minutes,
+            started_at: facts.started[i],
+            km: facts.km[i],
+            minutes: facts.minutes[i],
             zone: (r.hr_pct_max > 0.0).then(|| running::classify_three_zone(r.hr_pct_max)),
         })
         .collect()
@@ -47,6 +54,7 @@ fn is_quality_session_type(session_type: SessionType) -> bool {
 ///   distance and moving time.
 fn is_hard_run(
     r: &LoggedRun,
+    started_at: i64,
     (km, min): (f64, f64),
     offset: i64,
     planned_quality_days: &[i64],
@@ -65,7 +73,7 @@ fn is_hard_run(
     ) {
         return false;
     }
-    if planned_quality_days.contains(&local_day(r.observed_at, offset)) {
+    if planned_quality_days.contains(&local_day(started_at, offset)) {
         return true;
     }
     threshold_slow_pace_sec_per_km
@@ -77,12 +85,20 @@ fn is_hard_run(
 /// max-strength band (STR-HEAVYFREQ-001; File 02 strength-001 80–100 %).
 const HEAVY_LEG_PCT_1RM: f64 = 80.0;
 
-/// Sum of the realised km of `runs` falling in local week `w`, in log order.
+/// A float sum as the report prints it: an empty (or all -0.0) `f64` sum is
+/// -0.0, which would print "-0.0 km" / "-0%", so `+ 0.0` turns it into 0.0.
+/// Every summed figure the report shows goes through it.
+fn sum0(it: impl Iterator<Item = f64>) -> f64 {
+    it.sum::<f64>() + 0.0
+}
+
+/// Sum of the realised km of `runs` that started in local week `w`, in log order.
 fn week_km(runs: &[DatedRun], offset: i64, w: i64) -> f64 {
-    runs.iter()
-        .filter(|r| local_week(r.observed_at, offset) == w)
-        .map(|r| r.km)
-        .sum()
+    sum0(
+        runs.iter()
+            .filter(|r| local_week(r.started_at, offset) == w)
+            .map(|r| r.km),
+    )
 }
 
 /// The most recent logged week's runs and the figures the weekly-report rows
@@ -120,14 +136,14 @@ impl WeekRuns {
             .collect();
         let cur_week = runs
             .iter()
-            .map(|r| local_week(r.observed_at, offset))
+            .map(|r| local_week(r.started_at, offset))
             .max()?;
         let weekly_km = week_km(&runs, offset, cur_week);
         let prev_km = week_km(&runs, offset, cur_week - 1);
         let baseline2_km = week_km(&runs, offset, cur_week - 2);
         let long_run_km = runs
             .iter()
-            .filter(|r| local_week(r.observed_at, offset) == cur_week)
+            .filter(|r| local_week(r.started_at, offset) == cur_week)
             .map(|r| r.km)
             .fold(0.0_f64, f64::max);
 
@@ -150,22 +166,21 @@ impl WeekRuns {
         let hard_runs: Vec<i64> = model
             .runs
             .iter()
-            .zip(cx.runs.km.iter().zip(&cx.runs.minutes))
-            .filter(|(r, _)| {
-                r.observed_at > 0
-                    && cutoff.is_none_or(|c| r.observed_at <= c)
-                    && local_week(r.observed_at, offset) == cur_week
-            })
-            .filter(|&(r, (&km, &min))| {
+            .enumerate()
+            .filter(|(_, r)| r.observed_at > 0 && cutoff.is_none_or(|c| r.observed_at <= c))
+            .map(|(i, r)| (r, cx.runs.started[i], i))
+            .filter(|&(_, start, _)| local_week(start, offset) == cur_week)
+            .filter(|&(r, start, i)| {
                 is_hard_run(
                     r,
-                    (km, min),
+                    start,
+                    (cx.runs.km[i], cx.runs.minutes[i]),
                     offset,
                     &planned_quality_days,
                     threshold_slow_pace,
                 )
             })
-            .map(|(r, _)| r.observed_at)
+            .map(|(r, ..)| r.observed_at)
             .collect();
 
         // Plan-awareness: a recovery week is a PLANNED cut, so the athlete's own logged
@@ -201,7 +216,7 @@ impl WeekRuns {
     fn current(&self) -> impl Iterator<Item = &DatedRun> {
         self.runs
             .iter()
-            .filter(move |r| local_week(r.observed_at, self.offset) == self.cur_week)
+            .filter(move |r| local_week(r.started_at, self.offset) == self.cur_week)
     }
 
     /// The week-over-week ramp baseline and its label suffix. After a recovery
@@ -295,7 +310,9 @@ fn push_increase_row(rows: &mut Vec<GuidanceView>, model: &Model, week: &WeekRun
     }
     let weekly_km = week.weekly_km;
     let (base_km, base_label) = week.ramp_base();
-    if base_km > 0.0 {
+    // A base under MIN_RATIO_BASE_KM is no prior week (a subnormal
+    // corrupt-log distance would divide to "+inf%").
+    if base_km >= MIN_RATIO_BASE_KM {
         let ok = running::weekly_increase_ok(
             base_km,
             weekly_km,
@@ -373,21 +390,23 @@ fn push_volume_cap_row(
     let model = cx.model;
     let (weekly_km, long_run_km) = (week.weekly_km, week.long_run_km);
     let cutoff = week.cutoff;
+    // Summed chronologically ([`RunFacts::chrono`]), never in storage order.
     let hard_km = |kind: running::HardRunKind| -> f64 {
-        model
-            .runs
-            .iter()
-            .zip(&cx.runs.km)
-            .filter(|(r, _)| {
-                r.observed_at > 0
-                    && cutoff.is_none_or(|c| r.observed_at <= c)
-                    && local_week(r.observed_at, week.offset) == week.cur_week
-            })
-            .filter(|(r, _)| {
-                running::classify_hard_run(r.hr_pct_max, r.workout_type.as_ref()) == kind
-            })
-            .map(|(_, &km)| km)
-            .sum()
+        sum0(
+            cx.runs
+                .chrono
+                .iter()
+                .map(|&i| (&model.runs[i], i))
+                .filter(|&(r, i)| {
+                    r.observed_at > 0
+                        && cutoff.is_none_or(|c| r.observed_at <= c)
+                        && local_week(cx.runs.started[i], week.offset) == week.cur_week
+                })
+                .filter(|(r, _)| {
+                    running::classify_hard_run(r.hr_pct_max, r.workout_type.as_ref()) == kind
+                })
+                .map(|(_, i)| cx.runs.km[i]),
+        )
     };
     let threshold_km = hard_km(running::HardRunKind::Threshold);
     let interval_km = hard_km(running::HardRunKind::Interval);
@@ -491,17 +510,17 @@ fn push_long_run_share_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
 /// Easy-share floor (running-011): ~80% of running time easy, counted over
 /// the HR-carrying runs.
 fn push_easy_share_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
-    let hr_minutes: f64 = week
-        .current()
-        .filter(|r| r.zone.is_some())
-        .map(|r| r.minutes)
-        .sum();
+    let hr_minutes = sum0(
+        week.current()
+            .filter(|r| r.zone.is_some())
+            .map(|r| r.minutes),
+    );
     if hr_minutes > 0.0 {
-        let easy_minutes: f64 = week
-            .current()
-            .filter(|r| r.zone == Some(crate::schema::ThreeZone::Z1))
-            .map(|r| r.minutes)
-            .sum();
+        let easy_minutes = sum0(
+            week.current()
+                .filter(|r| r.zone == Some(crate::schema::ThreeZone::Z1))
+                .map(|r| r.minutes),
+        );
         let frac = easy_minutes / hr_minutes;
         let floor = running::easy_share_floor_ok(frac);
         push_guidance(

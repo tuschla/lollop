@@ -7,7 +7,7 @@ use super::*;
 /// quantisation. The plan floors to its step, so the one-decimal value is the
 /// prescription itself and never reads above the spike gate.
 pub(super) fn fmt_run_km(k: f32) -> String {
-    let tenths = (f64::from(k) * 10.0).round() / 10.0;
+    let tenths = shown_km_tenths(f64::from(k));
     if (tenths - tenths.round()).abs() < 1e-9 {
         format!("{tenths:.0} km")
     } else {
@@ -149,6 +149,16 @@ pub(super) fn flatten_run_prescription(
             "Distance stays near your recent long run, then shrinks gradually as that run \
              gets older. Endurance holds for a couple of weeks and then fades slowly, so the \
              plan steps down slowly too. Log a new long run to reset it."
+                .to_string(),
+        ),
+        // The long run was set to the week's average run (RUN-LONGRUN-001's
+        // low-mileage guardrail), above the share the claim statement leads
+        // with: state the rule that set it.
+        claims::RUN_LONGRUN_001 if r.long_run_avg_floor => Some(
+            "Your long run is the length of an average run this week, so it stays your \
+             longest run. With only a few run days, the usual share of 25 to 30% of the week \
+             would be shorter than your other runs. It never goes past twice your average \
+             daily run."
                 .to_string(),
         ),
         _ => None,
