@@ -55,17 +55,24 @@ pub(super) struct RunFields {
     pub(super) utc_offset_sec: Option<i64>,
 }
 
+/// A sanitized wire float clamped to `>= +0.0`. `f64::max` may keep a `-0.0`
+/// input as `-0.0` (the sign of a zero result is unspecified across targets),
+/// so the `+ 0.0` turns it into `+0.0` before it reaches the view.
+fn non_negative(v: f64) -> f64 {
+    sanitize_f64(v).max(0.0) + 0.0
+}
+
 /// The run row as the wire states it, with no track. Its two figures that read
 /// other state, the typed-bpm %HRmax and the card spike baseline, start at the
 /// wire values; [`store_run`] derives them.
 pub(super) fn logged_run(f: RunFields) -> LoggedRun {
     let hr_pct_max = sanitize_f64(f.hr_pct_max);
-    let longest_recent_km = sanitize_f64(f.longest_recent_km).max(0.0);
+    let longest_recent_km = non_negative(f.longest_recent_km);
     LoggedRun {
         // A negative distance would subtract from `recent_weekly_km`
         // (nulling the measured plan anchor): clamp it out at ingest.
-        distance_km: sanitize_f64(f.distance_km).max(0.0),
-        duration_min: sanitize_f64(f.duration_min).max(0.0),
+        distance_km: non_negative(f.distance_km),
+        duration_min: non_negative(f.duration_min),
         hr_pct_max,
         wire_hr_pct_max: hr_pct_max,
         longest_recent_km,
@@ -248,7 +255,7 @@ pub(super) fn apply_profile(model: &mut Model, mut profile: Profile) {
     // `NaN`/`1e300` can't render "inf km" or slip past a gate.
     // `running_km_per_week` also floors at 0 (a negative weekly volume is
     // nonsense and would break the plan's volume math).
-    profile.running_km_per_week = sanitize_f64(profile.running_km_per_week).max(0.0);
+    profile.running_km_per_week = non_negative(profile.running_km_per_week);
     for v in [
         &mut profile.env_temp_c,
         &mut profile.env_altitude_m,
