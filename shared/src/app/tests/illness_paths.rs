@@ -278,3 +278,30 @@ fn only_a_fever_class_illness_asks_about_fever() {
         assert!(confirm.contains("no fever"), "{confirm}");
     }
 }
+
+#[test]
+fn the_illness_line_says_paused_only_when_training_is_paused() {
+    // ready-upd-008: a head cold eases training (short and easy sessions), so
+    // its resolve line must not say training is paused; a fever-class illness
+    // or the profile's ill answer blocks the day, and its line says so.
+    for (severity, profile_ill) in [(1.0, false), (2.0, false), (0.0, true)] {
+        let (app, mut model) = set_up(profile_ill);
+        if severity > 0.0 {
+            ev(
+                &app,
+                &mut model,
+                Event::SubmitReadiness(ReadinessInput {
+                    observed_at: TODAY * DAY_SEC + 3_600,
+                    ..input(ReadinessSignal::Illness, severity)
+                }),
+            );
+        }
+        let vm = app.view(&model);
+        let line = illness_actions(&vm)[0].paused_text.clone();
+        assert_eq!(
+            line.to_lowercase().contains("paused"),
+            vm.train_blocked,
+            "severity {severity}, profile ill {profile_ill}: {line}"
+        );
+    }
+}

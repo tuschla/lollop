@@ -90,7 +90,7 @@ claim_group! {
     ),
     HYP_SETRAMP_001 => claim(
         "HYP-SETRAMP-001",
-        "Set progression: start each muscle near its minimum effective volume and add sets week by week toward the most it can recover from (for example 10, 13, 16, then 20 sets), while moving from about 4 reps left down to about 1.",
+        "Set progression: start each muscle near the fewest sets that build muscle and add sets week by week toward the most it can recover from (for example 10, 13, 16, then 20 sets), while moving from about 4 reps left down to about 1.",
         ExpertOpinion,
         &[CITE_ISRAETEL_2021],
     )
@@ -311,7 +311,7 @@ claim_group! {
     .safety(),
     HYP_MESO_STRUCT_001 => claim(
         "HYP-MESO-STRUCT-001",
-        "Train in blocks of 4–6 hard weeks plus 1 lighter week (3 to 6 hard weeks per lighter week), with a lighter week every 4–8 weeks.",
+        "Train in blocks of 4–6 hard weeks, each followed by 1 lighter week. Programs put a lighter week anywhere from every 4 to every 8 weeks.",
         Moderate,
         &[CITE_ISRAETEL_2021, CITE_BELL_2023],
     )
@@ -415,7 +415,7 @@ claim_group! {
     ),
     HYP_DELOAD_CADENCE_001 => claim(
         "HYP-DELOAD-CADENCE-001",
-        "Taking one lighter week in the middle of a 9-week program did not change muscle growth and slightly slowed lower-body strength gains. Experts place a lighter week about every 4–6 weeks, lasting about a week and made by cutting volume, effort or both, so build in blocks of 4–6 weeks and take a lighter week earlier only when 2 or more fatigue signs appear.",
+        "Taking one lighter week in the middle of a 9-week program did not change muscle growth and slightly slowed lower-body strength gains. A consensus of strength and physique coaches puts a lighter week about every 4–6 weeks, lasting about a week and made by cutting volume, effort or both, so build in blocks of 4–6 weeks and take a lighter week earlier only when 2 or more fatigue signs appear.",
         Weak,
         &[CITE_COLEMAN_2024, CITE_BELL_2023],
     )

@@ -80,7 +80,7 @@ claim_group! {
     .contradicting(&["Novices estimate RIR poorly"]),
     STR_TRAGE_001 => claim(
         "STR-TRAGE-001",
-        "How long you've been training matters most for how much training it takes to keep getting stronger.",
+        "The longer you've trained, the more training it takes to keep getting stronger.",
         Strong,
         &["Rhea et al. 2003, MSSE", "Peterson, Rhea & Alvar 2004"],
     ),
@@ -93,7 +93,7 @@ claim_group! {
     ),
     FEEDBACK_001 => claim(
         "FEEDBACK-001",
-        "How feedback is given matters: it works best when it explains, leaves you the choice and focuses on what you did.",
+        "Feedback works best when it explains, leaves the choice to you and focuses on what you did.",
         Strong,
         &[
             "Deci, Koestner & Ryan 1999",
@@ -109,7 +109,7 @@ claim_group! {
     ),
     SAFE_REDS_001 => claim(
         "SAFE-REDS-001",
-        "Signs of under-eating (RED-S) put training on hold; see a professional.",
+        "Signs of under-eating (RED-S) pause training; see a doctor, a registered dietitian or a mental-health professional.",
         Strong,
         &[CITE_MOUNTJOY_2023],
     )
@@ -117,7 +117,7 @@ claim_group! {
     .safety(),
     SAFE_OTS_001 => claim(
         "SAFE-OTS-001",
-        "Overtraining syndrome calls for real recovery and no increase in training.",
+        "Overtraining syndrome calls for recovery, with no increase in training.",
         Strong,
         &[CITE_MEEUSEN_2013],
     )
@@ -213,7 +213,7 @@ claim_group! {
     ),
     RUN_DIST_001 => claim(
         "RUN-DIST-001",
-        "About 80% easy running is the shared core of every good mix of easy and hard training. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
+        "Effective mixes of easy and hard training share about 80% easy running. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
         Moderate,
         &[
             "Silva Oliveira, Boppre & Fonseca 2024, Sports Med 54(8):2071-2095 (intensity-distribution meta-analysis)",
@@ -338,9 +338,7 @@ claim_group! {
         "RUN-DECOUPLE-001",
         "Heart-rate drift: how much your heart rate rises against your pace from the first half of a steady run to the second. Under 5% is good; over 10% is a warning sign.",
         Weak,
-        &[
-            "Friel 2009, The Triathlete's Training Bible (3rd ed., VeloPress) (<5% good, >10% flag)",
-        ],
+        &["Friel 2009, The Triathlete's Training Bible (3rd ed., VeloPress)"],
     )
     .contradicting(&["Confounded by heat/dehydration"]),
     #[kb_only]

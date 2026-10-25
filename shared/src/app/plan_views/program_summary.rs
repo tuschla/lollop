@@ -16,41 +16,20 @@ pub(super) fn build_program_summary(
     week_index: u32,
 ) -> ProgramSummaryView {
     let g = graded((), crate::plan::summary_claim(profile));
-    let goal_h = human_goal(&program.goal);
     let (muscle_volume, muscle_volume_note) = muscle_volume_rows(profile, meso, week_index);
     ProgramSummaryView {
         name: program.name.clone(),
-        goal: goal_h.clone(),
+        goal: human_goal(&program.goal),
         phase: meso.phase,
         week,
         weeks_total,
         evidence: EvidenceTagView::of(&g),
         why: why_from(
-            Some(format!(
-                "{} built from your profile and logged training.",
-                week_kind(&program.goal, &goal_h)
-            )),
+            Some("Planned from your profile and logged training.".to_string()),
             &g,
         ),
         muscle_volume,
         muscle_volume_note,
-    }
-}
-
-/// "A strength week", "A muscle-building week", "A marathon race week": the
-/// goal as it reads mid-sentence.
-fn week_kind(goal: &crate::schema::Goal, goal_h: &str) -> String {
-    match goal {
-        crate::schema::Goal::Hypertrophy => "A muscle-building week".to_string(),
-        crate::schema::Goal::GeneralEndurance => "An endurance week".to_string(),
-        _ => {
-            let mut c = goal_h.chars();
-            let lower: String = c
-                .next()
-                .map(|f| f.to_lowercase().chain(c).collect())
-                .unwrap_or_default();
-            format!("A {lower} week")
-        }
     }
 }
 
@@ -166,7 +145,7 @@ fn muscle_volume_rows(
     }
     let mut notes: Vec<String> = Vec::new();
     if recovery {
-        notes.push("Lighter week: about half the usual sets, so the counts sit below your targets on purpose.".into());
+        notes.push("Lighter week: about half the usual sets, so counts are below target.".into());
     } else if maintenance {
         notes.push(
             "Running leads your plan, so lifting is kept to what holds the muscle you have.".into(),
@@ -183,7 +162,7 @@ fn muscle_volume_rows(
                 cap(lm.muscle)
             )),
             (Some(_), _) => notes.push(
-                "Focusing on one muscle is for advanced lifters who have stopped growing on their usual number of sets, so every muscle keeps its usual weekly target for now."
+                "Focusing on one muscle is for advanced lifters who have stopped growing on their usual sets, so every muscle keeps its usual weekly target."
                     .into(),
             ),
             (None, _) => notes.push(format!(

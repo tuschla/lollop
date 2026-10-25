@@ -65,8 +65,8 @@ import androidx.compose.ui.unit.dp
  */
 internal enum class HoldAction { RemovePain, RemoveIllness, EndIllness, CheckAge, ReviewHealth, ClearReadiness }
 
-/** Profile health answers that hold training until a professional's OK. */
-private val ProfessionalHoldReasons = setOf("parq", "pregnancy", "reds", "injury_rehab", "symptomatic")
+/** Profile health answers that hold training until a doctor's OK. */
+private val DoctorHoldReasons = setOf("parq", "pregnancy", "reds", "injury_rehab", "symptomatic")
 
 /** [HoldAction] for the core's `hold_reason` (snake_case) or, without one, its tier. */
 internal fun holdAction(holdReason: String?, tier: String?): HoldAction = when (holdReason) {
@@ -74,7 +74,7 @@ internal fun holdAction(holdReason: String?, tier: String?): HoldAction = when (
     "illness" -> HoldAction.RemoveIllness
     "acute_illness_profile" -> HoldAction.EndIllness
     "youth" -> HoldAction.CheckAge
-    in ProfessionalHoldReasons -> HoldAction.ReviewHealth
+    in DoctorHoldReasons -> HoldAction.ReviewHealth
     "medical_signal" -> HoldAction.ClearReadiness
     else -> when (tier) {
         "Pain" -> HoldAction.RemovePain
@@ -124,10 +124,10 @@ private fun holdReasonLineRes(holdReason: String?, tier: String?, pregnancyWarni
     "acute_illness_profile" -> R.string.main_hold_reason_ill_profile
     "youth" -> R.string.main_hold_reason_youth
     "pregnancy" -> if (pregnancyWarning) R.string.main_hold_reason_pregnancy_warning else R.string.main_hold_reason_pregnancy
-    in ProfessionalHoldReasons -> R.string.main_hold_reason_professional
+    in DoctorHoldReasons -> R.string.main_hold_reason_doctor
     "medical_signal" -> R.string.main_hold_reason_medical_signal
     else -> when (tier) {
-        "MedicalReferral" -> R.string.main_hold_reason_professional
+        "MedicalReferral" -> R.string.main_hold_reason_doctor
         "Pain" -> R.string.main_hold_reason_pain
         "Illness" -> R.string.main_hold_reason_illness
         "ObjectivePerformance" -> R.string.main_hold_reason_performance
@@ -195,8 +195,8 @@ internal fun SafetyBannerHost(
     )
 }
 
-/** Confirm for "Logged by mistake? Clear readiness inputs…": every readiness input
- *  and the adjustments (and hold) they produced go. */
+/** Confirm for "Clear today's readings…" (inputs logged by mistake): every readiness
+ *  input and the adjustments (and hold) they produced go. */
 @Composable
 private fun ClearReadinessDialog(visible: Boolean, onDismiss: () -> Unit, onEvent: (Event) -> Unit) {
     ClearConfirmDialog(
@@ -387,7 +387,7 @@ private fun SafetyBanner(
             action == HoldAction.ClearReadiness
         val showAddDetails = onAddDetails != null && reportHold
         val undoLabel = when (action) {
-            HoldAction.RemovePain, HoldAction.RemoveIllness -> stringResource(R.string.main_remove_report_action)
+            HoldAction.RemovePain, HoldAction.RemoveIllness -> stringResource(R.string.main_remove_report)
             HoldAction.ClearReadiness -> stringResource(R.string.main_logged_by_mistake)
             HoldAction.ReviewHealth -> stringResource(R.string.main_hold_review_health)
             HoldAction.EndIllness, HoldAction.CheckAge -> null
@@ -666,18 +666,20 @@ internal fun painSubline(model: ViewModel, echo: PainDetail?): String? {
     if (echo == null) return null
     val parts = buildList {
         echo.location?.let { add(it) }
-        add(painKindLabel(echo.kind))
+        painKindLabel(echo.kind)?.let { add(it) }
         echo.severity?.let { add("$it/10") }
-        if (echo.trend == PainTrend.Rising) add("worsening")
+        // Both trends read "worsening", as in the core's pain_context.
+        if (echo.trend != PainTrend.Stable) add("worsening")
     }
-    return parts.joinToString(" · ")
+    return parts.joinToString(" · ").ifEmpty { null }
 }
 
-/** Plain-language label for a [PainKind]. Display-only. */
+/** Plain-language label for a [PainKind], in the triage choices' words; none for
+ *  "Not sure" (nothing to add to the line). Display-only. */
 // l10n: needs context plumbing (pure display helper, no Context; multi-branch copy)
-private fun painKindLabel(kind: PainKind): String = when (kind) {
-    PainKind.SharpJoint -> "sharp/joint"
-    PainKind.TendonLoadRelated -> "tendon-like"
+private fun painKindLabel(kind: PainKind): String? = when (kind) {
+    PainKind.SharpJoint -> "sharp or joint pain"
+    PainKind.TendonLoadRelated -> "dull ache"
     PainKind.Doms -> "muscle soreness"
-    PainKind.Other -> "not sure"
+    PainKind.Other -> null
 }

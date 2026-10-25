@@ -21,7 +21,7 @@ fn a_stale_felt_easy_rpe_expires_but_a_fresh_one_still_raises_load() {
     let has_increase = |vm: &ViewModel| {
         vm.adjustments
             .iter()
-            .any(|a| a.summary.contains("ahead of plan"))
+            .any(|a| a.summary.contains("to the weight next session"))
     };
 
     // Fresh RPE −2 (yesterday) → a load increase is proposed.
@@ -128,7 +128,7 @@ fn a_stale_e1rm_decline_stays_protective_while_a_stale_increase_expires() {
     let has_increase = |vm: &ViewModel| {
         vm.adjustments
             .iter()
-            .any(|a| a.summary.contains("ahead of plan"))
+            .any(|a| a.summary.contains("to the weight next session"))
     };
 
     // A 21-day-old e1RM DECLINE (ratio 0.85) stays protective: the reduce fires
@@ -287,7 +287,7 @@ fn an_active_review_deload_outranks_a_readiness_load_increase() {
         app.view(&model)
             .adjustments
             .iter()
-            .any(|a| a.summary.contains("ahead of plan")),
+            .any(|a| a.summary.contains("to the weight next session")),
         "readiness alone recommends a load increase"
     );
     app.update(
@@ -302,7 +302,7 @@ fn an_active_review_deload_outranks_a_readiness_load_increase() {
     assert!(
         !vm.adjustments
             .iter()
-            .any(|a| a.summary.contains("ahead of plan")),
+            .any(|a| a.summary.contains("to the weight next session")),
         "an active review deload strips the readiness load increase: {:?}",
         vm.adjustments
             .iter()
@@ -310,7 +310,9 @@ fn an_active_review_deload_outranks_a_readiness_load_increase() {
             .collect::<Vec<_>>()
     );
     assert!(
-        !vm.today_headline.summary.contains("ahead of plan"),
+        !vm.today_headline
+            .summary
+            .contains("to the weight next session"),
         "the headline must not be the load increase: {}",
         vm.today_headline.summary
     );

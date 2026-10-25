@@ -10,7 +10,8 @@
 //! or edge spaces, balanced brackets and quotes, no format placeholders, no
 //! banned words (RIR, "short of failure", workout, load as a user word,
 //! "recovery week"), no kg for a lb user, the miles twin of a km line present
-//! and km-free, and no "today" pinned on an earlier reading.
+//! and km-free, and no "today" pinned on an earlier reading. The same walk
+//! feeds the tone lint (`copy_tone`).
 
 use super::view_equivalence::{END_MON, big_history, ev};
 use super::*;
@@ -75,7 +76,7 @@ fn glued_before(s: &str, i: usize) -> bool {
         .is_some_and(|c| c.is_alphanumeric() || c == '/' || c == '.')
 }
 
-fn is_word_at(s: &str, start: usize, word: &str) -> bool {
+pub(super) fn is_word_at(s: &str, start: usize, word: &str) -> bool {
     let end = start + word.len();
     let before = s[..start].chars().next_back();
     let after = s[end..].chars().next();
@@ -90,7 +91,7 @@ fn has_word_ci(s: &str, word: &str) -> bool {
         .any(|(i, _)| is_word_at(&lower, i, word))
 }
 
-fn has_word(s: &str, word: &str) -> bool {
+pub(super) fn has_word(s: &str, word: &str) -> bool {
     s.match_indices(word).any(|(i, _)| is_word_at(s, i, word))
 }
 
@@ -296,13 +297,13 @@ fn string_violations(key: &str, s: &str, lb: bool) -> Vec<String> {
 /// One distinct violation: the field path (array indices collapsed to `[]`),
 /// the rule, and the first offending string.
 #[derive(Debug)]
-struct Hit {
+pub(super) struct Hit {
     example: String,
     scenario: String,
     count: usize,
 }
 
-type Hits = BTreeMap<(String, String), Hit>;
+pub(super) type Hits = BTreeMap<(String, String), Hit>;
 
 fn record(out: &mut Hits, path: String, rule: String, example: &str, scenario: &str) {
     out.entry((path, rule))
@@ -335,6 +336,12 @@ fn walk(v: &Value, path: &mut String, key: &str, lb: bool, scenario: &str, out: 
                     continue;
                 }
                 record(out, path.clone(), rule, s, scenario);
+            }
+            // Tone (`copy_tone`): rendered copy only, references verbatim.
+            if !dormant && key != "citation" {
+                for rule in super::copy_tone::tone_hits(path, s) {
+                    record(out, path.clone(), rule, s, scenario);
+                }
             }
         }
         Value::Array(items) => {
@@ -930,12 +937,10 @@ fn strings<'a>(v: &'a Value, path: &mut String, out: &mut Vec<(String, &'a str)>
 
 /// Phrases that describe something already logged or reported. On a day with
 /// nothing logged, none of them may be pinned on "today".
-const READING_PHRASES: [&str; 9] = [
+const READING_PHRASES: [&str; 7] = [
     "came up short",
     "today's top set",
     "top set today",
-    "you're stronger today",
-    "you're weaker today",
     "logged today",
     "checked in today",
     "today's run",
@@ -977,7 +982,7 @@ fn today_on_stale(vm: &ViewModel, json: &Value, scenario: &str, out: &mut Hits) 
     }
 }
 
-fn report(hits: &[(&(String, String), &Hit)]) -> String {
+pub(super) fn report(hits: &[(&(String, String), &Hit)]) -> String {
     let mut s = String::new();
     for ((path, rule), h) in hits {
         s.push_str(&format!(
@@ -1139,7 +1144,7 @@ static ALL_HITS: std::sync::LazyLock<Hits> = std::sync::LazyLock::new(|| {
     all
 });
 
-fn all_hits() -> &'static Hits {
+pub(super) fn all_hits() -> &'static Hits {
     &ALL_HITS
 }
 
@@ -1152,7 +1157,7 @@ fn is_known(path: &str, rule: &str) -> bool {
 }
 
 /// The family's hits, minus the known bugs.
-fn assert_family(prefixes: &[&str]) {
+pub(super) fn assert_family(prefixes: &[&str]) {
     let bad: Vec<_> = all_hits()
         .iter()
         .filter(|((path, rule), _)| {

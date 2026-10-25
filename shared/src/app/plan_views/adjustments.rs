@@ -397,7 +397,7 @@ pub(in crate::app) fn apply_adjustments_to_session(
     }
     annotate_adjustments(ns, recommended, weight_lb);
     for it in ns.items.iter_mut() {
-        restate_basis_load(it, weight_lb);
+        restate_basis(it, weight_lb);
     }
 }
 
@@ -542,14 +542,67 @@ impl EffortPass {
     }
 }
 
-/// The why? basis states the load the plan derived ("…: 275 lb."). Once a
-/// fold, a hold or an in-session cue moved the shown load, restate it as
-/// planned against today's, so the session panel reads the load the face
-/// prescribes. Run once, after every load change of the view.
-pub(in crate::app) fn restate_basis_load(it: &mut PrescriptionView, weight_lb: bool) {
-    let Some(from) = it.basis_load_kg.take() else {
+/// The why? basis states the prescription the plan derived ("3×5 at …: 100
+/// kg. Stop each set with about 2 reps left."). Once a fold, a hold or an
+/// in-session cue moved the face, restate it: the load as planned against
+/// today's, the sets×reps and the reps left as today's, so the session panel
+/// reads the prescription the face shows. Run once, after every change of the
+/// view.
+pub(in crate::app) fn restate_basis(it: &mut PrescriptionView, weight_lb: bool) {
+    let Some(rx) = it.basis_rx.take() else {
         return;
     };
+    let lead = sets_reps_lead(it);
+    if lead != rx.lead {
+        replace_lead(&mut it.why.basis, &rx.lead, &lead);
+    }
+    if let (Some(from), Some(to)) = (rx.rir, face_rir(it))
+        && from != to
+    {
+        restate_reps_left(&mut it.why.basis, from, to, i64::from(it.reps_low));
+    }
+    if let Some(from) = rx.load_kg {
+        restate_load(it, from, weight_lb);
+    }
+}
+
+/// Replace the first `old` sets×reps lead that stands as a whole word ("3×5",
+/// not the "3×5" inside "13×5" or "3×5–8").
+fn replace_lead(basis: &mut String, old: &str, new: &str) {
+    let at = basis.match_indices(old).map(|(i, _)| i).find(|&i| {
+        let before_ok = basis[..i].chars().next_back().is_none_or(|c| c == ' ');
+        let after_ok = basis[i + old.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_ascii_digit() && c != '–');
+        before_ok && after_ok
+    });
+    if let Some(i) = at {
+        basis.replace_range(i..i + old.len(), new);
+    }
+}
+
+/// Restate the basis's reps-left clause (in whichever wording the lift arm
+/// used) and the "could lift about N times" weight hint that follows from it.
+fn restate_reps_left(basis: &mut String, from: i64, to: i64, reps: i64) {
+    let at_least = |n: i64| format!("at least {} left", reps_word(n.clamp(0, 255) as u8));
+    for (old, new) in [
+        (with_reps_left(from), with_reps_left(to)),
+        (about_reps_left(from), about_reps_left(to)),
+        (at_least(from), at_least(to)),
+    ] {
+        if basis.contains(&old) {
+            *basis = basis.replacen(&old, &new, 1);
+            break;
+        }
+    }
+    let times = |n: i64| format!("could lift about {} times", reps + n.max(0));
+    *basis = basis.replacen(&times(from), &times(to), 1);
+}
+
+/// Restate the planned load against today's ("…: 100 kg planned, 95 kg
+/// today").
+fn restate_load(it: &mut PrescriptionView, from: f64, weight_lb: bool) {
     let planned = fmt_weight(from, weight_lb);
     let today = match it.load_kg {
         Some(to) if fmt_weight(to, weight_lb) == planned => return,
@@ -573,7 +626,7 @@ pub(in crate::app) fn restate_basis_load(it: &mut PrescriptionView, weight_lb: b
 fn note_load_cut(items: &mut [PrescriptionView], pct: f32, weight_lb: bool) -> bool {
     for it in items.iter_mut() {
         if !it.is_run() && it.load_kg.is_some() {
-            it.adjusted_note = format!("−{pct:.0}% weight today");
+            it.adjusted_note = format!("{pct:.0}% less weight today");
             resync_intensity(it, weight_lb);
         }
     }
@@ -738,7 +791,7 @@ fn apply_safety_easy_day(
 fn note_volume_cut(items: &mut [PrescriptionView], pct: f32) -> bool {
     for it in items.iter_mut() {
         if !it.is_run() && it.adjusted_note.is_empty() {
-            it.adjusted_note = format!("−{pct:.0}% sets today");
+            it.adjusted_note = format!("{pct:.0}% fewer sets today");
         }
     }
     true
@@ -1035,7 +1088,7 @@ fn cut_run_volume(it: &mut PrescriptionView, frac: f64) {
         it.run_volume = Some(cut);
     }
     if it.adjusted_note.is_empty() {
-        it.adjusted_note = format!("−{:.0}% running today", frac * 100.0);
+        it.adjusted_note = format!("{:.0}% less running today", frac * 100.0);
     }
 }
 

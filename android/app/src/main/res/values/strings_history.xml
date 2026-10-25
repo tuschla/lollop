@@ -140,15 +140,15 @@
 
     <!-- Set detail. %1$s = the exercise, %2$s = its relative date ("Deadlift · Yesterday", shown as an overline). -->
     <string name="history_detail_with_date">%1$s · %2$s</string>
-    <string name="history_set_e1rm_label">e1RM</string>
+    <string name="history_set_e1rm_label">Estimated max</string>
     <string name="history_set_load_label">Weight</string>
     <!-- The set's weight as a share of its estimated max. -->
-    <string name="history_pct_e1rm">%1$d%% of e1RM</string>
+    <string name="history_pct_e1rm">%1$d%% of estimated max</string>
     <string name="history_edit_set">Edit set</string>
     <string name="history_delete_set">Delete set</string>
     <string name="history_delete_set_message">This removes the set from your history, charts and totals.</string>
-    <!-- %1$s–%2$s %3$s = the range incl. the set's e1RM, %4$d = the other formulas. -->
-    <string name="history_e1rm_range">e1RM %1$s–%2$s %3$s across this estimate and %4$d other formulas</string>
+    <!-- %1$s–%2$s %3$s = the range across the formulas (the set's own estimate sits inside it), %4$d = how many formulas. -->
+    <string name="history_e1rm_range">Estimated max across %4$d formulas: %1$s–%2$s %3$s</string>
 
     <!-- Lift card set summary, joined by history_sets_separator:
          "3 × 5 @ 120 kg, 1 × 3 @ 125 kg", "2 × 30 s hold · +10 kg". -->
@@ -161,16 +161,16 @@
     <string name="history_sets_hold_loaded">%1$d × %2$d s hold · +%3$s</string>
 
     <!-- Empty states + import on the Runs segment. -->
-    <string name="history_lifts_empty">Your lifting sessions will show up here.</string>
+    <string name="history_lifts_empty">No lifting sessions yet.</string>
     <string name="history_log_set">Log a set</string>
-    <string name="history_runs_empty">Your runs will show up here.</string>
+    <string name="history_runs_empty">No runs yet.</string>
     <string name="history_track_run">Track a run</string>
     <string name="history_import_runs_long">Import from GPX, TCX or FIT</string>
 
     <!-- Today e1RM card: change over the plotted window. %1$s signed figure ("+12.5"),
          %2$s unit, %3$s the first plotted day ("Aug 12"). -->
     <string name="main_e1rm_change_since">%1$s %2$s since %3$s</string>
-    <string name="main_e1rm_change_subject">e1RM change</string>
+    <string name="main_e1rm_change_subject">estimated max change</string>
     <!-- %1$d sessions on the chart, %2$s first day. -->
     <plurals name="main_e1rm_change_why">
         <item quantity="one">The difference between your best estimated max on %2$s and in your latest session (%1$d session on this chart).</item>

@@ -367,7 +367,7 @@ fn illness_card_points_to_i_am_better_not_the_health_answers() {
 #[test]
 fn pregnancy_gate_emits_safe_preg_001_with_reference_target() {
     // safety-045: SAFE-PREG-001 actually emitted; the ~150 min a week figure is
-    // a common guide only, phrased as such.
+    // the guideline reference only, phrased as such.
     let s = HealthScreen {
         pregnant: true,
         ..HealthScreen::default()
@@ -377,7 +377,7 @@ fn pregnancy_gate_emits_safe_preg_001_with_reference_target() {
     match &gates[0].value {
         Adjustment::Defer { reason } => {
             assert!(reason.contains("150 minutes"));
-            assert!(reason.contains("common guide"));
+            assert!(reason.contains("Guideline"));
         }
         other => panic!("expected Defer, got {other:?}"),
     }

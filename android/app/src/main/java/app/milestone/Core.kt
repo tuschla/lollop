@@ -525,7 +525,7 @@ data class ViewModel(
     // offers "Clear weekly check-in" (Event.ClearWeeklyCheckin).
     val weekly_checkin_present: Boolean = false,
     // An illness report is active, or a high resting-HR morning asks for the
-    // illness check: the morning check-in asks "Feeling ill?" first.
+    // illness check: the morning check-in asks the Illness item first.
     val illness_check_prompt: Boolean = false,
     // Every calisthenics ladder with its rungs (empty for a Weights profile): the
     // Log chooser lists them grouped by movement.
@@ -2724,7 +2724,7 @@ sealed interface Event {
         }
     }
 
-    /** "Changed device? Relearn your HRV normal": HRV readings before [observedAt]
+    /** "Relearn your HRV normal" (e.g. after a device change): HRV readings before [observedAt]
      *  stop counting toward the baseline, which starts collecting again. */
     data class RestartHrvBaseline(val observedAt: Long = AppClock.nowSec()) : Event {
         override fun toJson(): JsonElement = buildJsonObject {

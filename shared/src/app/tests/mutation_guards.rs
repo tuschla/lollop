@@ -463,7 +463,7 @@ fn undo_of_a_same_stamp_gps_run_keeps_the_pacing_cue() {
     );
     let fb = serde_json::to_string(&vm.feedback).unwrap();
     assert!(
-        fb.contains("second half was 25% slower"),
+        fb.contains("Second half 25% slower"),
         "fixture: the pacing cue shows: {fb}"
     );
     let diff = undo_diff(&mut m, EntryKind::Run, 7_360_041, at, even_ev);

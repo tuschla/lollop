@@ -31,7 +31,7 @@ pub(in crate::app) fn build_calisthenics_guidance(cx: &ViewCtx) -> Vec<GuidanceV
             "Calisthenics",
             format!(
                 "Muscle-up work starts at {n} strict pull-ups and {n} dips in a set \
-                 (a common coaching threshold; some athletes start earlier).",
+                 (a coaching rule of thumb).",
                 n = cal::MUSCLE_UP_GATE_REPS
             ),
             &graded((), claims::CAL_GATE_NUMBERS_001),
@@ -123,7 +123,7 @@ pub(in crate::app) fn build_calisthenics_guidance(cx: &ViewCtx) -> Vec<GuidanceV
         push_guidance(
             &mut rows,
             "Calisthenics",
-            "Keep breathing through every hold; never hold your breath.".to_string(),
+            "Keep breathing through every hold.".to_string(),
             &graded((), claims::CAL_BP_VALSALVA_001),
         );
     }

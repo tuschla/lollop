@@ -213,14 +213,17 @@ fn assert_no_load_increase(vm: &ViewModel, ctx: &str) {
 #[track_caller]
 fn assert_calculators_held(vm: &ViewModel, ctx: &str) {
     assert!(
-        vm.apre.iter().all(|r| r.summary.contains("on hold")) && !vm.apre.is_empty(),
+        vm.apre
+            .iter()
+            .all(|r| r.summary.contains("training is paused"))
+            && !vm.apre.is_empty(),
         "{ctx}: APRE prescribes a next load through a hold: {:?}",
         vm.apre.iter().map(|r| &r.summary).collect::<Vec<_>>()
     );
     assert!(
         vm.hypertrophy_plan
             .iter()
-            .all(|r| r.summary.contains("on hold"))
+            .all(|r| r.summary.contains("training is paused"))
             && !vm.hypertrophy_plan.is_empty(),
         "{ctx}: the hypertrophy ramp prescribes sets through a hold: {:?}",
         vm.hypertrophy_plan
@@ -246,7 +249,7 @@ fn assert_deficit_refused(vm: &ViewModel, ctx: &str) {
     assert!(
         !vm.protein_targets
             .iter()
-            .any(|r| r.summary.starts_with("Deficit (lean-mass preserving)")),
+            .any(|r| r.summary.starts_with("Eating less to lose weight")),
         "{ctx}: a deficit target is shown: {:?}",
         vm.protein_targets
             .iter()
@@ -1054,7 +1057,11 @@ fn readiness_deferrals_hold_the_plan_calculators_like_profile_gates() {
         s.report(signal, value, local(TODAY, 7));
         let vm = s.vm();
         assert!(vm.train_blocked, "{signal:?}");
-        if !vm.apre.iter().all(|r| r.summary.contains("on hold")) {
+        if !vm
+            .apre
+            .iter()
+            .all(|r| r.summary.contains("training is paused"))
+        {
             failures.push(format!("{signal:?}: APRE {:?}", vm.apre[0].summary));
         }
         if !vm.hypertrophy_ramp.is_empty() {

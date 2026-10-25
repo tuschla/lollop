@@ -243,22 +243,24 @@ fn pain_location(d: &PainDetail) -> Option<&str> {
 }
 
 /// Human display string for a characterized pain report, the safety-banner
-/// sub-line context, e.g. `"Left knee · sharp/joint · 6/10"` or, with no
-/// location reported, `"tendon-like · 3/10"`. Location is included only when the
-/// user supplied one. Empty for a bare (detail-less) report; the caller renders
-/// that generic case itself.
+/// sub-line context, e.g. `"Left knee · sharp or joint pain · 6/10"` or, with
+/// no location reported, `"dull ache · 3/10"`. Location is included only when
+/// the user supplied one; a "not sure" kind adds no kind part. Empty for a bare
+/// (detail-less) report; the caller renders that generic case itself.
 pub(super) fn pain_context(d: &PainDetail) -> String {
     let kind = match d.kind {
-        PainKind::SharpJoint => "sharp/joint",
-        PainKind::TendonLoadRelated => "tendon-like",
-        PainKind::Doms => "muscle soreness",
-        PainKind::Other => "not sure",
+        PainKind::SharpJoint => Some("sharp or joint pain"),
+        PainKind::TendonLoadRelated => Some("dull ache"),
+        PainKind::Doms => Some("muscle soreness"),
+        PainKind::Other => None,
     };
     let mut parts: Vec<String> = Vec::new();
     if let Some(loc) = pain_location(d) {
         parts.push(loc.to_string());
     }
-    parts.push(kind.to_string());
+    if let Some(kind) = kind {
+        parts.push(kind.to_string());
+    }
     if let Some(s) = d.severity {
         parts.push(format!("{s}/10"));
     }
@@ -269,7 +271,7 @@ pub(super) fn pain_context(d: &PainDetail) -> String {
 }
 
 /// Append the reported body-part location to a Defer reason so the headline can
-/// name it, e.g. `"… see a doctor or physiotherapist (Left knee)."`. The
+/// name it, e.g. `"… see a doctor or physio (Left knee)."`. The
 /// base message is preserved verbatim when no location was reported.
 fn with_location(reason: String, d: &PainDetail) -> String {
     match pain_location(d) {
@@ -355,7 +357,7 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
             PainGate::Block(evidence::graded(Adjustment::Stop, claims::SAFE_PAIN_001))
         }
         PainVerdict::StructuralDefer => defer(
-            "Sharp or joint pain that isn't going away. Stop that exercise and see a doctor or physiotherapist.",
+            "Sharp or joint pain that isn't going away: training is paused. See a doctor or physio.",
             claims::SAFE_PAIN_STRUCT_001,
         ),
         PainVerdict::StructuralScoped => PainGate::Scoped(evidence::graded(
@@ -374,7 +376,7 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
             claims::SAFE_PAIN_STRUCT_001,
         )),
         PainVerdict::TendonDefer => defer(
-            "Tendon pain that keeps flaring, even after you've eased off. See a doctor or physiotherapist.",
+            "Tendon pain that keeps flaring after you've eased off: training is paused. See a doctor or physio.",
             claims::SAFE_TENDON_001,
         ),
         // REDUCE load & compressive positions: an easier session, not a stop
@@ -397,7 +399,7 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
         )),
         PainVerdict::Doms => PainGate::Continue,
         PainVerdict::OtherDefer => defer(
-            "Pain that isn't going away. Stop and have a doctor or physiotherapist check it.",
+            "Pain that isn't going away: training is paused. Have a doctor or physio check it.",
             claims::SAFE_PAIN_001,
         ),
     }
@@ -487,6 +489,13 @@ pub fn pain_blocks_progression(inputs: &[ReadinessInput]) -> bool {
 /// action resolves into a graded return (ready-upd-004).
 pub fn pain_hold_active(inputs: &[ReadinessInput]) -> bool {
     matches!(pain_gate(inputs), PainGate::Block(_) | PainGate::Scoped(_))
+}
+
+/// Whether an active pain report stops the whole day (not just the movements
+/// that load the painful part), so the hold's resolve line can say training is
+/// paused rather than that a few exercises are left out.
+pub fn pain_blocks_training(inputs: &[ReadinessInput]) -> bool {
+    matches!(pain_gate(inputs), PainGate::Block(_))
 }
 
 /// Every active pain response that does not block the whole day, deduplicated:

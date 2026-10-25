@@ -120,23 +120,24 @@ fn weekly_report_runs_the_volume_system_over_the_latest_week() {
     }
     let has = |needle: &str| report.iter().any(|r| r.summary.contains(needle));
     assert!(has("over the increase cap"), "rows: {report:#?}");
-    // Long run 20/36 km = 56%: over the ≤25% Daniels single-run cap.
-    assert!(has("over the ≤25% single-run cap"), "rows: {report:#?}");
+    // Long run 20/36 km = 56% under 64 km a week, against a 5.1 km daily
+    // average: one row, over the 2× bound (the 25% share cap is not cited).
+    assert!(
+        has(
+            "Long run 20.0 km is 56% of the week and more than twice your average daily distance (5.1 km)."
+        ),
+        "rows: {report:#?}"
+    );
+    assert!(!has("over the 25% limit"), "rows: {report:#?}");
     assert!(
         has("time in each heart-rate zone"),
         "counting-method note present"
     );
-    assert!(has("Long run 20.0 km"), "share row present");
     assert!(
         report
             .iter()
             .any(|r| r.summary_mi.contains("Long run 12.4 mi")),
-        "the share row carries a miles twin: {report:#?}"
-    );
-    // 20 km long run vs a 5.1 km daily average: over the 2× bound.
-    assert!(
-        has("exceeds 2× your average daily distance"),
-        "daily-avg bound row"
+        "the long-run row carries a miles twin: {report:#?}"
     );
     // Z1 share: 120 of 210 min = 57%, below the 80% easy floor.
     assert!(has("below the ~80% easy floor"), "rows: {report:#?}");

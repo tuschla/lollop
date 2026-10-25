@@ -15,19 +15,14 @@ claim_group! {
         "AUTOREG-SETVOL-001",
         "How your first work set goes (reps against the target, and how hard it felt) decides whether today's session adds a set, drops one or keeps the planned number.",
         Moderate,
-        &[
-            "Helms et al. 2018 (RPE stops)",
-            "Israetel et al. 2021 (RP framework)",
-        ],
+        &["Helms et al. 2018, Front Physiol 9:247", CITE_ISRAETEL_2021],
     )
     .contradicting(&["Novices estimate RIR poorly"]),
     AUTOREG_DELOAD_001 => claim(
         "AUTOREG-DELOAD-001",
         "Signs of built-up fatigue (weights feeling harder than they should, effort creeping up while you feel run-down, or failed key sessions) call for one lighter week.",
         Moderate,
-        &[
-            "Israetel et al. 2021 (RP framework: deload ~50% volume and/or ~10% intensity, ~1 wk)",
-        ],
+        &[CITE_ISRAETEL_2021],
     ),
     AUTOREG_DELOAD_VBT_001 => claim(
         "AUTOREG-DELOAD-VBT-001",
@@ -35,7 +30,7 @@ claim_group! {
         Moderate,
         &[
             "Pearson et al. 2020, IJERPH 17(18):6509 (between-day reliability of velocity-loss thresholds; the 0.06-0.10 m/s drop is practitioner-set)",
-            "Israetel et al. 2021 (RP framework)",
+            CITE_ISRAETEL_2021,
         ],
     ),
     AUTOREG_APRE_001 => claim(
@@ -159,7 +154,7 @@ claim_group! {
     ]),
     AUTOREG_NFOR_001 => claim(
         "AUTOREG-NFOR-001",
-        "Performance dropping for 2 or more weeks with no clear reason, while 2 or more check-in scores stay low, calls for a dedicated recovery block; if it continues, see a professional.",
+        "Performance dropping for 2 or more weeks with no clear reason, while 2 or more check-in scores stay low, calls for a recovery block; if it continues, see a doctor.",
         // File 06 autoreg-042 grades this ExpertOpinion (0.30) despite the
         // Meeusen citation: never overstated to match the Strong File 08
         // safety-042 rule (which reuses SAFE-OTS-001).

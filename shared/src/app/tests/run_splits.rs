@@ -392,10 +392,7 @@ fn split_verdict_bands_match_the_single_core_threshold() {
     let neg = split_verdict_view(-4.0);
     assert_eq!(neg.verdict, SplitVerdict::Negative);
     assert_eq!(neg.label, "NEG SPLIT 4%");
-    assert_eq!(
-        neg.message,
-        "Second half 4% faster than the first. Well paced."
-    );
+    assert_eq!(neg.message, "Second half 4% faster than the first.");
 
     // Every band carries the same FB-PACING-001 evidence tag.
     for v in [&fade, &even, &neg] {

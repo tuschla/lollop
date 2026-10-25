@@ -128,7 +128,7 @@ claim_group! {
         "RUN-PROGRESS-001",
         "Raising weekly distance by more than 30% over two weeks is linked to about 1.6 times the injury risk of rises under 10%. A safer ramp is 5–10% a week: beginners at most 10% (holding 2–3 weeks between increases), experienced runners about 5% or a fixed cap. Increase one thing at a time.",
         Weak,
-        &["Nielsen et al. 2014 (>30%/2wk ~1.6x risk)"],
+        &["Nielsen et al. 2014, J Orthop Sports Phys Ther 44(10):739-747"],
     )
     .contradicting(&["10%/week rule failed its RCT (Buist 2008)"]),
     RUN_HRRECALC_001 => claim(
@@ -394,7 +394,7 @@ claim_group! {
     ),
     RUN_TALKTEST_001 => claim(
         "RUN-TALKTEST-001",
-        "Without a measured heart-rate max or pace, keep easy runs at a pace where you can talk comfortably in full sentences: being able to talk comfortably means you're below the first breathing threshold, where easy running ends.",
+        "Without a measured heart-rate max or pace, keep easy runs at a pace where you can talk in full sentences; that keeps you below the first breathing threshold, where easy running ends.",
         Moderate,
         &[
             "Reed & Pipe 2014, Curr Opin Cardiol 29(5):475-480 (talk test review)",

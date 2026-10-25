@@ -86,7 +86,10 @@ fn pain_blocks_training_with_a_single_stop() {
     assert_eq!(vm.safety_tier, Some(SafetyTier::Pain));
     assert!(vm.train_blocked);
     assert_eq!(vm.adjustments.len(), 1);
-    assert_eq!(vm.adjustments[0].summary, "Stop: do not train");
+    assert_eq!(
+        vm.adjustments[0].summary,
+        "Pain reported: training is paused. Rest the painful area and check it before you train again."
+    );
 }
 
 #[test]
@@ -124,4 +127,40 @@ fn pain_location_surfaces_on_the_readiness_row_detail_through_the_view() {
         "no location must be invented when None, got {:?}",
         no_loc.detail
     );
+}
+
+#[test]
+fn the_pain_hold_line_says_paused_only_when_training_is_paused() {
+    // A scoped sharp-joint stop leaves the rest of the session on: its resolve
+    // line must name what stays out, not claim training is paused. A bare
+    // report stops the whole day, and its line says so.
+    let pain_line = |json: &str| -> (bool, String) {
+        let app = Engine;
+        let mut model = Model::default();
+        let event: Event = serde_json::from_str(json).expect("pain event parses");
+        app.update(event, &mut model).expect_only_render();
+        let vm = app.view(&model);
+        let line = vm
+            .hold_resolutions
+            .iter()
+            .find(|h| h.signal == ReadinessSignal::Pain)
+            .expect("a pain resolve action is offered")
+            .paused_text
+            .clone();
+        (vm.train_blocked, line)
+    };
+    let (blocked, scoped) = pain_line(
+        r#"{"SubmitReadiness":{"signal":"Pain","value":1.0,"observed_at":0,"pain":{"kind":"SharpJoint","severity":6,"trend":"Stable","location":"Left knee"}}}"#,
+    );
+    assert!(!blocked, "a scoped stop must not block the day");
+    assert!(!scoped.to_lowercase().contains("paused"), "{scoped}");
+    assert!(
+        scoped.contains("exercises that load the painful area"),
+        "{scoped}"
+    );
+
+    let (blocked, bare) =
+        pain_line(r#"{"SubmitReadiness":{"signal":"Pain","value":1.0,"observed_at":0}}"#);
+    assert!(blocked);
+    assert!(bare.starts_with("Training is paused"), "{bare}");
 }

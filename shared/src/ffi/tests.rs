@@ -599,7 +599,7 @@ fn critical_speed_event_with_nested_efforts_round_trips_the_bridge() {
     let rows = view["critical_speed"].as_array().expect("cs rows");
     assert!(
         rows.iter()
-            .any(|r| r["summary"].as_str().unwrap().contains("Critical Speed")),
+            .any(|r| r["summary"].as_str().unwrap().contains("Critical speed")),
         "cs fit row present: {rows:?}"
     );
 }

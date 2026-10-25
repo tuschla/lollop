@@ -840,7 +840,7 @@ private fun CoachingNotesRow(count: Int, open: Boolean, onToggle: () -> Unit) {
     }
 }
 
-/** The core's feedback category for a new best ("Recent win"). */
+/** The core's feedback category for a new best ("Result"). */
 private const val WinCategory = "PositiveMastery"
 
 /** The next-time advice that belongs with a win: the first coaching row for a
@@ -1175,7 +1175,12 @@ private fun E1rmTrendCard(trend: E1rmTrend, weightUnit: WeightUnit = WeightUnit.
                 endDot = true,
             )
         }
-        Text(stringResource(R.string.main_e1rm_caption, since), color = OnBgMuted, style = Type.Caption)
+        // The pill above already names the start day; without it the caption does.
+        Text(
+            if (shownDelta != 0.0) stringResource(R.string.main_e1rm_caption_short) else stringResource(R.string.main_e1rm_caption, since),
+            color = OnBgMuted,
+            style = Type.Caption,
+        )
     }
 }
 
@@ -1562,7 +1567,7 @@ private fun HoldResolutionCard(
  * ended by a pain report, with the coaching takeaway (a new best, a derived
  * session note) when the core has one. A run reads its distance and time in
  * the user's unit ("5 of 5.9 mi · 60 min" when under the plan). Then the way
- * on: "How did it go? ›" (the session review) and, when finishing ended
+ * on: "Review session ›" (the session review) and, when finishing ended
  * exercises, "Resume session" ([onResume]). Descriptive, so no evidence chrome
  * of its own; the takeaway keeps its "?". [items] are today's plan items, the
  * status source for an older core that sends none on the row.

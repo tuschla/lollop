@@ -433,14 +433,11 @@ pub(in crate::app) fn split_verdict_view(split_pct: f64) -> SplitVerdictView {
                 "Second half {split_pct:.0}% slower than the first. Start easier so the second half is as fast or faster."
             ),
         ),
-        // feedback-017: even or negative split → pacing-discipline praise.
+        // feedback-017: even or negative split.
         _ if split_pct < -feedback::POSITIVE_SPLIT_FLAG_PCT => (
             SplitVerdict::Negative,
             format!("NEG SPLIT {:.0}%", split_pct.abs()),
-            format!(
-                "Second half {:.0}% faster than the first. Well paced.",
-                split_pct.abs()
-            ),
+            format!("Second half {:.0}% faster than the first.", split_pct.abs()),
         ),
         _ => (
             SplitVerdict::Even,

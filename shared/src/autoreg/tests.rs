@@ -436,7 +436,7 @@ fn pain_location_surfaces_in_signal_detail_and_none_omits_it() {
         "location must surface in the sub-line detail, got {:?}",
         row.detail
     );
-    assert!(row.detail.contains("sharp/joint") && row.detail.contains("6/10"));
+    assert!(row.detail.contains("sharp or joint pain") && row.detail.contains("6/10"));
 
     let no_loc = vec![pain_input_loc(
         PainKind::SharpJoint,
@@ -454,7 +454,7 @@ fn pain_location_surfaces_in_signal_detail_and_none_omits_it() {
         "no location must be fabricated when None, got {:?}",
         row.detail
     );
-    assert_eq!(row.detail, "sharp/joint · 6/10");
+    assert_eq!(row.detail, "sharp or joint pain · 6/10");
 }
 
 #[test]
@@ -1355,7 +1355,7 @@ fn nfor_cluster_mandates_recovery_and_referral() {
     match &d.value {
         Adjustment::Defer { reason } => {
             assert!(reason.contains("recovery"));
-            assert!(reason.contains("professional"));
+            assert!(reason.contains("doctor"));
         }
         other => panic!("expected Defer, got {other:?}"),
     }

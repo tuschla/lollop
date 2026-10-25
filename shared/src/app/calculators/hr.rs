@@ -59,7 +59,7 @@ fn push_hr_max_row(
     let shown = whole_bpm(hr_max);
     let (hr_max_text, hr_max_basis) = if measured.is_some() {
         (
-            format!("Measured HRmax: {shown:.0} bpm (your logged maximum)"),
+            format!("Measured HRmax: {shown:.0} bpm"),
             format!(
                 "Your measured HRmax ({shown:.0} bpm) from an all-out effort replaces the age-based \
                  Tanaka estimate and sets the zones below."
@@ -69,8 +69,8 @@ fn push_hr_max_row(
         (
             format!("Estimated HRmax: {shown:.0} bpm"),
             format!(
-                "Estimated from your age ({:.0}) with the Tanaka formula ({:.0} − {} × age = {shown:.0} bpm). \
-                 It is a population average, not your measured maximum. Individuals vary by roughly ±10 bpm.",
+                "Estimated from your age ({:.0}) with the Tanaka formula ({:.0} − {} × age = {shown:.0} bpm), \
+                 a population average. Individuals vary by about ±10 bpm.",
                 q.age_years,
                 running::TANAKA_INTERCEPT_BPM,
                 running::TANAKA_SLOPE_BPM_PER_YEAR
@@ -96,7 +96,7 @@ fn push_hr_method_row(rows: &mut Vec<GuidanceView>, resting_hr_bpm: Option<f64>)
         let (text, use_karvonen) = match pref.value {
             running::HrMethodPreference::PreferKarvonen => (
                 format!(
-                    "Resting HR {rhr:.0} is below 55, so each zone also shows a heart-rate-reserve range (Karvonen), which suits a low resting HR"
+                    "Resting HR {rhr:.0} is below 55, so each zone also shows a heart-rate-reserve (Karvonen) range"
                 ),
                 true,
             ),
@@ -202,8 +202,8 @@ fn push_band_rows(
                 plan_views::vdot_band_name(band)
             ),
             Some(format!(
-                "This zone works at {vo2_seg} of VO2max (your maximum oxygen uptake), \
-                 from the Daniels tables."
+                "This zone is {vo2_seg} of VO2max (maximum oxygen uptake), per the Daniels \
+                 tables."
             )),
             &band_row,
         );
@@ -219,7 +219,7 @@ fn push_maf_row(rows: &mut Vec<GuidanceView>, age_years: f64) {
         rows,
         "Heart-rate zones",
         format!(
-            "MAF aerobic cap (optional, for base building): 180 − age = {:.0} bpm. With a tested aerobic threshold (LT1), set the cap from that instead",
+            "Optional easy-run cap (MAF): 180 − age = {:.0} bpm. If you have a tested aerobic threshold, use that instead.",
             maf.value
         ),
         &maf,

@@ -422,7 +422,7 @@ fn hr_zones_reach_the_view_and_maf_matches_180_minus_age() {
         let maf = vm
             .hr_zones
             .iter()
-            .find(|r| r.summary.starts_with("MAF aerobic cap"))
+            .find(|r| r.summary.starts_with("Optional easy-run cap (MAF)"))
             .expect("MAF row");
         let want = format!("180 − age = {} bpm", oracle::maf(age));
         assert!(maf.summary.contains(&want), "{} lacks {want}", maf.summary);
@@ -442,8 +442,7 @@ fn hr_zone_prose_states_the_same_bpm_as_the_structured_figures() {
             } else {
                 format!("Estimated HRmax: {} bpm", hm.bpm)
             };
-            if rows[0].summary != format!("{head} (your logged maximum)") && rows[0].summary != head
-            {
+            if rows[0].summary != head {
                 mismatches.push(format!("{what}: {:?} vs bpm {}", rows[0].summary, hm.bpm));
             }
             for b in bands.iter().filter(|b| !b.pace_governed) {
@@ -1642,7 +1641,7 @@ fn cooper_and_critical_speed_match_the_kb_formulas() {
         let (ocs, odp) = oracle::cs_two(efforts[0].distance_m, t1, efforts[1].distance_m, t2);
         let row = &build_critical_speed(&efforts)[0].summary;
         let speed: f64 = row
-            .split("Critical Speed ")
+            .split("Critical speed ")
             .nth(1)
             .unwrap()
             .split(' ')

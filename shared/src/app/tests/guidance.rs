@@ -436,8 +436,8 @@ fn build_reference_sections_are_contiguous_and_cited() {
     // non-empty citation. Match on a load-bearing substring of each summary.
     let card = |needle: &str| rows.iter().find(|r| r.summary.contains(needle));
     for needle in [
-        "Olympic pulling derivatives",
-        "RPE-anchored: top set",
+        "Olympic-lift pulls",
+        "Top set with ~2 reps left",
         "Two-for-two rule",
         "Stall: if e1RM",
         "Double progression",

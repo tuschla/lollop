@@ -1,6 +1,7 @@
 package app.milestone.qa
 
 import android.content.Context
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasClickAction
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.DistanceUnitOverride
@@ -87,8 +89,9 @@ class HistorySessionTest {
         // Tapping the card opens the session sheet: the day's volume in the subtitle,
         // one card per exercise (named in sentence case, never as an overline) with a
         // set table of 48dp rows, each openable for edit/delete, and the ActionRows
-        // footer's single "Delete session" row.
-        rule.onNodeWithText(header).performClick()
+        // footer's single "Delete session" row. The card's own click action, not a tap
+        // at its center, which can land on the estimated-max "?".
+        rule.onNodeWithText(header).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
         val volume = str(R.string.history_session_volume, "3,180", "kg")
         rule.onAllNodesWithText("$header · $volume").assertCountEquals(1)
@@ -118,7 +121,7 @@ class HistorySessionTest {
         rule.selectTab(str(R.string.main_dest_history))
         val header = plural(R.plurals.history_exercise_count, 1, 1) + " · " + plural(R.plurals.history_set_count, 1, 1)
         rule.scrollToText(header)
-        rule.onNodeWithText(header).performClick()
+        rule.onNodeWithText(header).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
         rule.onAllNodesWithTag("lift-set-row")[0].performClick()
         rule.waitForIdle()
@@ -129,7 +132,7 @@ class HistorySessionTest {
         rule.onAllNodesWithText(plural(R.plurals.log_reps_left, 2, 2)).assertCountEquals(1)
         // Key/value facts: the load is a share of the ESTIMATED max.
         rule.onAllNodesWithText(str(R.string.history_set_e1rm_label)).assertCountEquals(1)
-        rule.onAllNodesWithText("of e1RM", substring = true).assertCountEquals(1)
+        rule.onAllNodesWithText("of estimated max", substring = true).assertCountEquals(1)
         // No filled slab: Edit and Delete are ActionRows, and Delete confirms first.
         rule.onAllNodesWithText(str(R.string.main_edit)).assertCountEquals(0)
         rule.onAllNodesWithText(str(R.string.history_edit_set)).assertCountEquals(1)

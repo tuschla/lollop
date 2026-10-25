@@ -398,7 +398,7 @@ class LongHistoryUiTest {
             plural(R.plurals.history_set_count, h.bigSessionSets, h.bigSessionSets)
         historyList().performScrollToNode(hasText(countLine))
         timed("open session sheet") {
-            rule.onNode(hasText(countLine) and hasClickAction()).performClick()
+            rule.onNode(hasText(countLine) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
             rule.waitForIdle()
         }
         val volume = java.text.NumberFormat.getIntegerInstance(Locale.US).format(Math.round(bigSets.filter { it.holdSec == null }.sumOf { it.weightKg * it.reps }))
@@ -417,7 +417,7 @@ class LongHistoryUiTest {
         }
         scrollSheetChecking("session sheet")
 
-        // One set: the sheet shows it large, with its share of e1RM.
+        // One set: the sheet shows it large, with its share of the estimated max.
         val first = bigSets.first()
         rule.onAllNodesWithTag("lift-set-row")[0].performScrollTo()
         timed("open set detail") {
@@ -426,7 +426,7 @@ class LongHistoryUiTest {
         }
         val load = str(R.string.log_set_line_reps, str(R.string.log_value_with_unit, trimDecimal(first.weightKg), "kg"), first.reps)
         rule.assertTextCountEventually(load, 1)
-        rule.onAllNodes(hasText("of e1RM", substring = true)).fetchSemanticsNodes().let { assertEquals(1, it.size) }
+        rule.onAllNodes(hasText("of estimated max", substring = true)).fetchSemanticsNodes().let { assertEquals(1, it.size) }
         sheetChecks("set detail")
         closeTopSheet()
         closeTopSheet()
@@ -542,7 +542,7 @@ class LongHistoryUiTest {
             plural(R.plurals.history_set_count, h.bigSessionSets, h.bigSessionSets)
         historyList().performScrollToNode(hasText(countLine))
         assertNoUnitLeak("Lifts list", "kg")
-        rule.onNode(hasText(countLine) and hasClickAction()).performClick()
+        rule.onNode(hasText(countLine) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
         val lb = java.text.NumberFormat.getIntegerInstance(Locale.US).format(Math.round(kgToLb(bigSets.sumOf { it.weightKg * it.reps })))
         rule.waitForIdle()

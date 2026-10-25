@@ -156,7 +156,7 @@ fn plan_hypertrophy_meso_produces_graded_rows() {
         "Reps left by week:",
         "Peak frequency:",
         "Rest between sets",
-        "Mesocycle shape:",
+        "Block shape:",
     ] {
         assert!(face(prefix), "{prefix} row is not a face row");
     }
@@ -332,7 +332,7 @@ fn compute_hr_zones_builds_graded_hrmax_and_five_bands() {
     // HRmax header + 5 Daniels bands + the MAF base-phase option row.
     assert_eq!(zones.len(), 7, "one HRmax row + five band rows + MAF cap");
     assert!(
-        zones.last().unwrap().summary.contains("MAF aerobic cap"),
+        zones.last().unwrap().summary.contains("easy-run cap (MAF)"),
         "MAF row closes the table: {}",
         zones.last().unwrap().summary
     );
@@ -587,6 +587,54 @@ fn critical_speed_calculator_fits_the_protocol_and_names_violations() {
     assert!(app.view(&model).critical_speed.is_empty());
 }
 
+/// Every protocol violation reads as one whole sentence: the reason follows
+/// "No critical speed estimate: " directly, never spliced after "the protocol".
+#[test]
+fn critical_speed_violations_read_as_whole_sentences() {
+    let e = |distance_m: f64, time_sec: f64| CsEffortIn {
+        distance_m,
+        time_sec,
+    };
+    let cases: [(Vec<CsEffortIn>, &str); 6] = [
+        (
+            vec![e(1200.0, 180.0)],
+            "No critical speed estimate: it needs at least 2 all-out efforts.",
+        ),
+        (
+            vec![
+                e(1000.0, 200.0),
+                e(1500.0, 320.0),
+                e(2000.0, 440.0),
+                e(3000.0, 700.0),
+                e(4000.0, 960.0),
+                e(5000.0, 1220.0),
+            ],
+            "No critical speed estimate: it uses at most 5 all-out efforts.",
+        ),
+        (
+            vec![e(400.0, 60.0), e(5000.0, 1200.0)],
+            "No critical speed estimate: each effort must last 2–30 minutes.",
+        ),
+        (
+            vec![e(1000.0, 300.0), e(1100.0, 300.0)],
+            "No critical speed estimate: the efforts need different durations.",
+        ),
+        (
+            vec![e(500.0, 240.0), e(5000.0, 1200.0)],
+            "No critical speed estimate: the distance reserve (D′) came out negative, so an effort was likely not all-out; re-test.",
+        ),
+        (
+            vec![e(3000.0, 600.0), e(2500.0, 1200.0)],
+            "No critical speed estimate: a longer effort covers no more distance than a shorter one; check the distances and times.",
+        ),
+    ];
+    for (efforts, want) in cases {
+        let rows = build_critical_speed(&efforts);
+        assert_eq!(rows.len(), 1, "{rows:#?}");
+        assert_eq!(rows[0].summary, want);
+    }
+}
+
 #[test]
 fn apre_calculator_applies_the_small_lifter_cap() {
     let app = Engine;
@@ -686,7 +734,7 @@ fn hr_zone_table_extends_with_karvonen_maf_and_recalc_cues() {
     let zones = app.view(&model).hr_zones;
     let has = |needle: &str| zones.iter().any(|z| z.summary.contains(needle));
     assert!(
-        has("heart-rate-reserve range (Karvonen)"),
+        has("heart-rate-reserve (Karvonen) range"),
         "preference row: {zones:#?}"
     );
     // Easy band: %HRR ≈ %VO2max (59–74%), so Karvonen at HRmax 187 / RHR 50 →
@@ -710,7 +758,7 @@ fn hr_zone_table_extends_with_karvonen_maf_and_recalc_cues() {
         "{}",
         rep.summary
     );
-    assert!(has("MAF aerobic cap"), "MAF row");
+    assert!(has("easy-run cap (MAF)"), "MAF row");
     assert!(has("Recompute from a measured HRmax"), "recalc-due row");
     assert!(has("Re-test to set paces"), "pace-retest row");
 }
@@ -734,9 +782,9 @@ fn hypertrophy_plan_decides_the_next_meso_and_states_effort_rules() {
     let plan = app.view(&model).hypertrophy_plan;
     let has = |needle: &str| plan.iter().any(|r| r.summary.contains(needle));
     // sample_profile plans 14 weekly sets → +2 next block.
-    assert!(has("raise next mesocycle to 16 sets/wk"), "{plan:#?}");
+    assert!(has("raise next block to 16 sets/wk"), "{plan:#?}");
     assert!(has("Rest between sets (heavy compounds)"), "rest row");
-    assert!(has("Mesocycle shape"), "meso structure row");
+    assert!(has("Block shape"), "block structure row");
     assert!(
         has("Stop most sets with 1–3 reps left"),
         "default effort band"

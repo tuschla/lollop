@@ -375,9 +375,7 @@ fn trend_tone_provisional_and_signal_source_surface() {
     let vm = app.view(&model);
     let trend = vm.trend.expect("trend row");
     assert!(
-        trend
-            .summary
-            .contains("A lighter week is worth trying first"),
+        trend.summary.contains("Take a lighter week first"),
         "{}",
         trend.summary
     );

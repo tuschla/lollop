@@ -909,8 +909,6 @@ internal fun ProfileEditor(
                     RowHairline()
                     LabeledSwitchRow(
                         label = stringResource(R.string.setup_row_runner_strength),
-                        subtitle = stringResource(R.string.setup_row_runner_strength_sub),
-                        subtitleColor = OnBgFaint,
                         checked = draft.runnerStrength,
                         onCheckedChange = { commit(draft.copy(runnerStrength = it)) },
                     )

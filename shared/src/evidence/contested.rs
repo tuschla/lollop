@@ -3,7 +3,7 @@
 use super::ContestedQuestion;
 
 /// Contested questions (File 09). Engine holds a default lean while open.
-/// `question` is a plain phrase read as "experts still disagree on …";
+/// `question` is a plain phrase read as "experts disagree on …";
 /// `engine_default` says what the app does meanwhile. The KB source of each
 /// row is kept in a comment, never in the shown text.
 pub static CONTESTED_QUESTIONS: &[ContestedQuestion] = &[
@@ -20,7 +20,7 @@ pub static CONTESTED_QUESTIONS: &[ContestedQuestion] = &[
     ContestedQuestion {
         id: "CQ-02",
         question: "whether sets should go all the way to failure",
-        engine_default: "stop with 0–3 reps left",
+        engine_default: "stop most sets with 1–3 reps left (0 only on machines and single-joint lifts)",
         // KB Position A ("failure maximizes stimulus") is an older coaching
         // position with no attributable published reference, left None.
         other_side: None,
@@ -56,7 +56,7 @@ pub static CONTESTED_QUESTIONS: &[ContestedQuestion] = &[
     ContestedQuestion {
         id: "CQ-06",
         question: "how much running holds back lifting gains in real training",
-        engine_default: "shield only power and explosive work from it",
+        engine_default: "keep only power and explosive work away from hard running",
         // KB Position A ("large in high-volume real training") names no holder
         // or reference, left None.
         other_side: None,

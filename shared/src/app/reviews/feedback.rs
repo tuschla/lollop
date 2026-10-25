@@ -246,8 +246,7 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
     };
     let (mut message, mut message_mi) = if held {
         (
-            "Session logged. Today's plan is eased, so keep to it: no extra weight for now."
-                .to_string(),
+            "Session logged. Today's plan is eased: no extra weight for now.".to_string(),
             String::new(),
         )
     } else {
@@ -428,7 +427,7 @@ pub(in crate::app) fn feedback_category_label(cat: FeedbackCategory) -> &'static
         FeedbackCategory::PositiveExecution => "Pacing",
         FeedbackCategory::InformationalNeutral => "Note",
         FeedbackCategory::CorrectiveProcess => "Adjustment",
-        FeedbackCategory::PositiveMastery => "Recent win",
+        FeedbackCategory::PositiveMastery => "Result",
         FeedbackCategory::ContextualBadDay => "Off day",
         FeedbackCategory::ProgressionNudge => "Progression",
     }
@@ -520,10 +519,10 @@ pub(in crate::app) fn feedback_message(m: &MessageCtx) -> String {
         }
         FeedbackCategory::ConcernRecovery => recovery_concern_message(m),
         FeedbackCategory::ConcernBehavior => {
-            "You mentioned feeling driven to train even when tired, sore or unwell. Rest days are part of the plan. A doctor or sports psychologist can help you talk it through.".to_string()
+            "You reported feeling driven to train even when tired, sore or unwell. Keep the planned rest days, and see a doctor or sports psychologist.".to_string()
         }
         FeedbackCategory::ConcernEnergy => {
-            "You reported a sign that your body may be short on energy (missed or irregular periods, lower sex drive or fewer morning erections). See a doctor or sports dietitian soon. They can check whether you eat enough for your training.".to_string()
+            "You reported a sign that your body may be short on energy (missed or irregular periods, lower sex drive or fewer morning erections). See a doctor or sports dietitian soon to check whether you eat enough for your training.".to_string()
         }
         FeedbackCategory::DangerousProgression => spike_message(m),
         FeedbackCategory::IntensityDiscipline => intensity_message(m),
@@ -561,11 +560,11 @@ fn recovery_concern_message(m: &MessageCtx) -> String {
     };
     if m.recovery_week_active {
         format!(
-            "A few signs suggest fatigue is building faster than you recover ({signs}). This week's plan is lighter. If you don't feel better within 1–2 weeks, see a doctor."
+            "Fatigue may be building faster than you recover ({signs}). This week's plan is lighter. If you don't feel better within 1–2 weeks, see a doctor."
         )
     } else {
         format!(
-            "A few signs suggest fatigue is building faster than you recover ({signs}). If you haven't felt better since your weekly check-in, see a doctor. Update your weekly check-in when things change."
+            "Fatigue may be building faster than you recover ({signs}). If you haven't felt better since your weekly check-in, see a doctor."
         )
     }
 }
@@ -575,14 +574,14 @@ fn recovery_concern_message(m: &MessageCtx) -> String {
 fn spike_message(m: &MessageCtx) -> String {
     match (m.spike, m.manual_spike) {
         (Some(s), _) => format!(
-            "This run was {}, {:.0}% longer than your longest in the last 30 days ({}). Big single-run jumps are linked to more injuries, so keep your next long run at or below {}.",
+            "This run was {}, {:.0}% longer than your longest in the last 30 days ({}). Increases this big raise injury risk: keep your next long run at or below {}.",
             fmt_km_or_mi(s.km, m.distance_mi),
             s.frac * 100.0,
             fmt_km_or_mi(s.baseline_km, m.distance_mi),
             fmt_km_or_mi(s.baseline_km * (1.0 + running::SPIKE_FRAC), m.distance_mi)
         ),
         (None, Some(f)) => format!(
-            "That run was {:.0}% longer than your longest in the last 30 days. Big single-run jumps are linked to more injuries, so keep your next long run within {:.0}% of that longest run.",
+            "That run was {:.0}% longer than your longest in the last 30 days. Increases this big raise injury risk: keep your next long run within {:.0}% of that longest run.",
             f * 100.0,
             running::SPIKE_FRAC * 100.0
         ),
@@ -598,7 +597,7 @@ fn spike_message(m: &MessageCtx) -> String {
 fn intensity_message(m: &MessageCtx) -> String {
     match m.trigger {
         Some(Trigger::PositiveSplit) => format!(
-            "Your second half was {:.0}% slower than your first. Start about {} easier next time to hold an even pace.",
+            "Second half {:.0}% slower than the first. Start about {} easier next time to hold an even pace.",
             m.split_pct.unwrap_or(0.0),
             if m.distance_mi { "8 s/mi" } else { "5 s/km" }
         ),
@@ -613,14 +612,11 @@ fn intensity_message(m: &MessageCtx) -> String {
 fn pacing_message(m: &MessageCtx) -> String {
     match m.trigger {
         Some(Trigger::Durability) => format!(
-            "Your heart rate held steady for the pace the whole run (heart-rate drift {:.1}%). Your endurance is solid at this pace.",
+            "Heart rate held steady for the pace the whole run (heart-rate drift {:.1}%).",
             m.drift_pct.unwrap_or(0.0)
         ),
         _ => match m.split_pct {
-            Some(p) if p < -1.0 => format!(
-                "Your second half was {:.0}% faster than your first. Well paced.",
-                p.abs()
-            ),
+            Some(p) if p < -1.0 => format!("Second half {:.0}% faster than the first.", p.abs()),
             _ => "You ran both halves at about the same pace.".to_string(),
         },
     }
@@ -640,9 +636,8 @@ fn neutral_message(m: &MessageCtx) -> String {
             let (a, t) = (l.rir_actual.unwrap_or(0), l.rir_target.unwrap_or(0));
             let who = lift_name.unwrap_or("That");
             format!(
-                "{who} felt harder than planned ({}, target {}). Keep the same weight next time and aim for {}.",
+                "{who} felt harder than planned ({}, target {}). Keep the same weight next time.",
                 reserve(a),
-                reserve(t),
                 reserve(t)
             )
         }
@@ -676,7 +671,7 @@ fn corrective_message(m: &MessageCtx) -> String {
                 let next = if m.lighter_next {
                     format!(" Your next {} session is set about 5% lighter.", o.exercise)
                 } else {
-                    " Keep the same weight next time and aim for every set.".to_string()
+                    " Keep the same weight next time and aim to finish every set.".to_string()
                 };
                 let on = o
                     .day
@@ -745,14 +740,14 @@ fn positive_mastery_message(m: &MessageCtx) -> String {
                         .map(|kg| format!(" at {}", w(kg)))
                         .unwrap_or_default();
                     format!(
-                        "All {} sets of {}{load}{res}, right on target. {}",
+                        "All {} sets of {}{load}{res}, as planned. {}",
                         o.sets_planned,
                         o.exercise,
                         progression_cue(m.double_progression)
                     )
                 }
                 None => format!(
-                    "All sets done{res}, right on target. {}",
+                    "All sets done{res}, as planned. {}",
                     progression_cue(m.double_progression)
                 ),
             }
@@ -829,7 +824,7 @@ fn mastery_message(k: &MasteryKind, m: &MessageCtx) -> String {
             reps - prior_reps
         ),
         MasteryKind::LongestRun { km, prior_km } => format!(
-            "Longest run in 90 days: {} (previous longest {}), built up gradually.",
+            "Longest run in 90 days: {} (previous longest {}).",
             fmt_km_or_mi(*km, m.distance_mi),
             fmt_km_or_mi(*prior_km, m.distance_mi)
         ),

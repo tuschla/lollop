@@ -178,9 +178,11 @@ fn signal_label(
         ReadinessSignal::Pain => pain_label(classify_pain(input)),
         ReadinessSignal::Illness => illness_label(v),
         // File 08 medical-referral red flags (safety-049/043/040).
-        ReadinessSignal::RedS => {
-            red_flag_label(v, "see a professional first", claims::SAFE_REDS_001)
-        }
+        ReadinessSignal::RedS => red_flag_label(
+            v,
+            "see a doctor or registered dietitian first",
+            claims::SAFE_REDS_001,
+        ),
         ReadinessSignal::CardiacRedFlag => {
             red_flag_label(v, "see a doctor before training", claims::SAFE_CVD_001)
         }

@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.location.LocationManager
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
@@ -18,6 +19,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
@@ -184,7 +186,7 @@ class ScreenshotRunsTest {
      * the Lifts | Runs segment shows), and this morning's rated GPS 10K. The core
      * then reports: a 16-week chart against the 30 km plan line, longest run
      * 21.2 km, best efforts 1K / 5K (inside the 10K) / 10K / Half marathon, and
-     * Monday's card (untagged, so titled by its weekday) with "Effort 7/10" and the
+     * Monday's card (untagged, so titled by its weekday) with "Effort 7 of 10" and the
      * Fastest 10K chip. Runs is the default segment (the run is newest).
      */
     private fun seedRunsHistory() {
@@ -319,7 +321,7 @@ class ScreenshotRunsTest {
         // screen.
         rule.scrollToText("Fastest 10K")
         shot("runs-progress-bottom-$s")
-        // The run list itself: today's card (weekday title, Effort 7/10, the Fastest
+        // The run list itself: today's card (weekday title, Effort 7 of 10, the Fastest
         // 10K chip) and the next ones.
         rule.scrollToText(str(R.string.history_run_weekday, "Saturday"))
         shot("runs-card-$s")
@@ -432,7 +434,8 @@ class ScreenshotRunsTest {
         seedLiftHistory()
         val s = suffix(mode)
         shot("runs-lifts-card-$s")
-        rule.onNodeWithText(sessionHeader(3, 8)).performClick()
+        // The card's own click action: a tap at its center can land on the estimated-max "?".
+        rule.onNodeWithText(sessionHeader(3, 8)).performSemanticsAction(SemanticsActions.OnClick)
         waitForText(str(R.string.history_delete_session))
         expandSheetFrom(hasTestTag("lift-set-row"))
         // Per-exercise set rows; "New best" once beside each record exercise's name.

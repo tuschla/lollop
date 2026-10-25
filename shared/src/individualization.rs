@@ -648,7 +648,7 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
     if s.pregnancy_warning_sign {
         // safety-046: warning signs → STOP and DEFER.
         out.push(evidence::graded(Adjustment::Defer {
-            reason: "You reported a pregnancy warning sign. Stop exercising now and contact your provider."
+            reason: "You reported a pregnancy warning sign. Stop exercising now and contact your doctor or midwife."
                 .into(),
         },
         claims::SAFE_PREG_WARN_001,));
@@ -669,7 +669,7 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
         // (ILLNESS-NECK-001) until the user reports it resolved.
         out.push(evidence::graded(
             Adjustment::Defer {
-                reason: "Better means no fever and your symptoms are gone. Then tap I'm better."
+                reason: "Training is paused until you have no fever and your symptoms are gone. Then tap I'm better."
                     .into(),
             },
             claims::ILLNESS_NECK_001,
@@ -692,7 +692,7 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
         // surfaced as context, NOT an engine prescription. The hold banner
         // already says lollop won't plan; the card carries the reference.
         out.push(evidence::graded(Adjustment::Defer {
-            reason: "In an uncomplicated pregnancy, a common guide is about 150 minutes of moderate activity a week, agreed with your provider."
+            reason: "Guideline for an uncomplicated pregnancy: about 150 minutes of moderate activity a week, agreed with your doctor or midwife."
                 .into(),
         },
         claims::SAFE_PREG_001,));
@@ -723,7 +723,7 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
         // safety-049 absolute rule (via onboard-050 screening): never a
         // programming variable: reduce/rest and defer.
         out.push(evidence::graded(Adjustment::Defer {
-            reason: "You reported a sign of under-eating. Ease off training and talk to a doctor, a registered dietitian or a mental-health professional."
+            reason: "You reported a sign of under-eating, so training is paused. Talk to a doctor, a registered dietitian or a mental-health professional."
                 .into(),
         },
         claims::SAFE_REDS_001,));

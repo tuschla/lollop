@@ -6,8 +6,8 @@
     <!-- Ongoing foreground-service notification -->
     <string name="track_notif_channel_name">Run tracking</string>
     <string name="track_notif_locate_title">Finding GPS…</string>
-    <string name="track_notif_locate_text">Tap Start when you\'re ready to record.</string>
-    <string name="track_notif_armed_title">Ready to record</string>
+    <string name="track_notif_locate_text">Tap Start to record.</string>
+    <string name="track_notif_armed_title">Waiting to start</string>
     <string name="track_notif_armed_text">Recording will start on its own.</string>
     <string name="track_notif_recording_title">Tracking run</string>
     <string name="track_notif_paused_title">Run paused</string>
@@ -105,13 +105,13 @@
     <string name="track_notifications_off_caption">Notifications are off. Tracking still works, but the run won\'t show on your lock screen.</string>
     <string name="track_location_failed_caption">GPS couldn\'t start on this phone.</string>
     <string name="track_btn_try_again">Try again</string>
-    <string name="track_battery_caption">Battery optimization can stop long runs.</string>
-    <string name="track_battery_allow">Allow</string>
+    <string name="track_battery_caption">Battery optimization can stop recording on long runs.</string>
+    <string name="track_battery_allow">Allow background use</string>
 
     <!-- Optional start gates (independent checkboxes under one overline); the caption
          explains only what is on. -->
     <string name="track_gates_overline">Start options</string>
-    <string name="track_gates_caption_none">Optional. Without them, recording starts when you tap Start.</string>
+    <string name="track_gates_caption_none">Recording starts when you tap Start.</string>
     <string name="track_gates_caption_precise">Precise start waits for an accurate GPS lock.</string>
     <string name="track_gates_caption_moving">Start on move begins recording once you\'re moving.</string>
     <string name="track_gates_caption_both">Waits for an accurate GPS lock, then starts once you\'re moving.</string>
@@ -134,7 +134,7 @@
 
     <!-- Toasts -->
     <string name="track_toast_save_failed">Couldn\'t save the run. Tap Save run to try again.</string>
-    <string name="track_toast_not_enough_gps">GPS never got a clear enough signal, so there was no run to save.</string>
+    <string name="track_toast_not_enough_gps">No run saved: the GPS signal was never clear enough.</string>
 
     <!-- Discard-confirm dialog -->
     <string name="track_discard_title">Discard this run?</string>
@@ -179,7 +179,7 @@
     <string name="track_step_line">%1$s · %2$s</string>
     <!-- %1$s = the next step's title. -->
     <string name="track_step_next">Next: %1$s</string>
-    <string name="track_step_all_done">All steps done. Tap Stop when you\'re ready.</string>
+    <string name="track_step_all_done">All steps done. Tap Stop to finish.</string>
     <string name="track_step_skip">Skip step</string>
 
     <!-- Manual run editor: average heart rate. -->

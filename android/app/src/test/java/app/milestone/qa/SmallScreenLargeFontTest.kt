@@ -477,7 +477,7 @@ class SmallScreenLargeFontTest {
         rule.waitUntil(10_000) { rule.onAllNodes(hasText(str(R.string.main_do_not_train))).fetchSemanticsNodes().isNotEmpty() }
         assertClean("pain hold")
         val bannerActions = resolveLabels().map { hasText(it) and hasClickAction() } +
-            listOf(hasText(str(R.string.main_remove_report_action)) and hasClickAction(), hasText(str(R.string.main_add_details)) and hasClickAction())
+            listOf(hasText(str(R.string.main_remove_report)) and hasClickAction(), hasText(str(R.string.main_add_details)) and hasClickAction())
         for (a in bannerActions) {
             val s = rule.onNode(a).fetchSemanticsNode()
             val unclipped = Rect(s.positionInRoot, s.size.toSize())

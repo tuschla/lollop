@@ -54,7 +54,7 @@ claim_group! {
     // SAFE-TENDON-001.
     SAFE_PAIN_STRUCT_001 => claim(
         "SAFE-PAIN-STRUCT-001",
-        "Stop that exercise if the pain is sharp, in one spot or along the joint line, changes how you move, or comes with swelling. See a professional if it lasts; it may be an injury.",
+        "Stop that exercise if the pain is sharp, in one spot or along the joint line, changes how you move, or comes with swelling. See a doctor or physio if it lasts; it may be an injury.",
         Moderate,
         &[
             "Silbernagel et al. 2007, Am J Sports Med 35(6):897-906 (pain-monitoring model)",
@@ -64,7 +64,7 @@ claim_group! {
     .safety(),
     SAFE_TENDON_001 => claim(
         "SAFE-TENDON-001",
-        "If tendon pain stays at or below 3–5 out of 10, holds steady during training and for 24 hours after, and isn't getting worse week to week, keep training and keep an eye on it rather than resting completely. If it goes above 5 out of 10, is worse afterwards or rises week to week, train lighter, avoid positions that press on the tendon, and see a professional if it lasts.",
+        "If tendon pain stays at or below 3–5 out of 10, holds steady during training and for 24 hours after, and isn't getting worse week to week, keep training and keep an eye on it rather than resting completely. If it goes above 5 out of 10, is worse afterwards or rises week to week, train lighter, avoid positions that press on the tendon, and see a doctor or physio if it lasts.",
         Moderate,
         &[
             "Silbernagel et al. 2007 pain-monitoring model",
@@ -84,7 +84,7 @@ claim_group! {
     .safety(),
     SAFE_PREG_WARN_001 => claim(
         "SAFE-PREG-WARN-001",
-        "During pregnancy, stop and contact your provider if you notice vaginal bleeding, fluid leaking, regular painful contractions, breathlessness before exercise, dizziness or feeling faint, headache, chest pain, calf pain or swelling, muscle weakness affecting your balance, or the baby moving less. Conditions such as placenta previa after 26 weeks, pre-eclampsia or high blood pressure caused by pregnancy, a weak cervix or severe anemia need a plan from your provider.",
+        "During pregnancy, stop and contact your doctor or midwife if you notice vaginal bleeding, fluid leaking, regular painful contractions, breathlessness before exercise, dizziness or feeling faint, headache, chest pain, calf pain or swelling, muscle weakness affecting your balance, or the baby moving less. Conditions such as placenta previa after 26 weeks, pre-eclampsia or high blood pressure caused by pregnancy, a weak cervix or severe anemia need a plan from your doctor or midwife.",
         Strong,
         &["ACOG Committee Opinion 804, 2020"],
     )
@@ -110,7 +110,7 @@ claim_group! {
     .safety(),
     ILLNESS_RTT_001 => claim(
         "ILLNESS-RTT-001",
-        "After a cold or chest infection, come back step by step. Check your symptoms each day. Make the first session a 10–20 minute test at 60–70% of your normal effort, then recheck after 24 hours. Stop and see a doctor if you get chest pain, breathlessness, dizziness, a racing or pounding heartbeat, unusual tiredness, or muscle or joint pain. The same goes if the work feels harder than usual. After a moderate or severe infection, let a doctor guide your return.",
+        "After a cold or chest infection, return step by step and check your symptoms each day. Make the first session a 10–20 minute test at 60–70% of your normal effort, then recheck after 24 hours. Stop and see a doctor if you get chest pain, breathlessness, dizziness, a racing or pounding heartbeat, unusual tiredness, muscle or joint pain, or the work feels harder than usual. After a moderate or severe infection, let a doctor guide your return.",
         ExpertOpinion,
         &[CITE_SCHWELLNUS_2022],
     )

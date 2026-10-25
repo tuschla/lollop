@@ -308,7 +308,7 @@ class ScreenshotTodayTest {
         scrollTodayTo(hasTestTag("this-week"))
         shot("today-consistency-${suffix(mode)}")
         // The Progress card: the squat's best set per session, captioned
-        // "<exercise> · e1RM" (matched by its fixed tail).
+        // "<exercise> · estimated max" (matched by its fixed tail).
         scrollTodayTo(hasText(str(R.string.main_e1rm_title, "").trim(), substring = true))
         shot("today-progress-${suffix(mode)}")
     }
@@ -583,7 +583,7 @@ class ScreenshotTodayTest {
     @Test fun weeklyCheckinDark() = weeklyCheckin(DarkMode.Dark)
 
     // ── Morning check-in with the illness question asked first ───────────────
-    /** An active head cold makes the check-in ask "Feeling ill?" at the top. */
+    /** An active head cold puts the check-in's Illness item at the top. */
     private fun morningCheckin(mode: DarkMode) {
         theme(mode)
         QaHarness.seedLog(

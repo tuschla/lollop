@@ -161,12 +161,12 @@ fn missed_key_session_emits_reschedule_guidance_without_guilt() {
     );
     // The reasoning sits behind the "?", not on the face.
     assert!(
-        !note.summary.contains("Never double up"),
+        !note.summary.contains("two sessions on one day"),
         "{}",
         note.summary
     );
     assert!(
-        note.why.basis.contains("Never double up"),
+        note.why.basis.contains("two sessions on one day"),
         "{}",
         note.why.basis
     );

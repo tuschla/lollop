@@ -567,7 +567,7 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
         kind: HeadlineKind::AllClear,
         // States the absence of any triggered rule, not a graded claim, so
         // no evidence tag is attached (empty grade; shells render no chip).
-        summary: "Train as planned today. Nothing you've logged calls for a change.".to_string(),
+        summary: "Train as planned today.".to_string(),
         ..TodayHeadlineView::default()
     }
 }
@@ -852,12 +852,19 @@ pub(super) fn hold_resolutions(
 ) -> Vec<HoldResolutionView> {
     let mut out = Vec::new();
     if autoreg::pain_hold_active(inputs) {
+        // A scoped stop leaves the rest of the session on, so its line names
+        // what stays out rather than saying training is paused.
+        let paused_text = if autoreg::pain_blocks_training(inputs) {
+            "Training is paused until you're pain-free through the full movement."
+        } else {
+            "The exercises that load the painful area stay out until you're pain-free through the full movement."
+        };
         out.push(HoldResolutionView {
             signal: ReadinessSignal::Pain,
-            paused_text: "Paused until you're pain-free through the full movement.".into(),
+            paused_text: paused_text.into(),
             action_label: "I'm pain-free now".into(),
             confirm_text:
-                "Pain-free through the full movement? The plan restarts you with an easier session."
+                "Confirm only if you're pain-free through the full movement. The plan restarts with an easier session."
                     .into(),
             ends_profile_illness: false,
         });
@@ -870,16 +877,20 @@ pub(super) fn hold_resolutions(
             "I've recovered"
         };
         let fever = profile_ill || autoreg::illness_stop(inputs);
+        // A head cold eases training but does not pause it (ready-upd-008).
         let (paused_text, check) = if fever {
             (
-                "Paused until your symptoms are gone and you have no fever.",
-                "Symptoms gone and no fever?",
+                "Training is paused until your symptoms are gone and you have no fever.",
+                "Confirm only if your symptoms are gone and you have no fever.",
             )
         } else {
-            ("Paused until your symptoms are gone.", "Symptoms gone?")
+            (
+                "Sessions stay short and easy until your symptoms are gone.",
+                "Confirm only if your symptoms are gone.",
+            )
         };
         let next = if reported {
-            "The plan restarts you with an easier session."
+            "The plan restarts with an easier session."
         } else {
             "Your plan picks up again from today."
         };

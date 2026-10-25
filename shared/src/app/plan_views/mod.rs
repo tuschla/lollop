@@ -30,7 +30,7 @@ use item_render::*;
 use program_summary::*;
 use week_moves::*;
 
-pub(super) use adjustments::{name_modified_exercises, restate_basis_load};
+pub(super) use adjustments::{name_modified_exercises, restate_basis};
 pub(super) use calis_anchors::build_calisthenics_anchors;
 pub(super) use calis_views::build_calisthenics_ladders;
 pub(super) use completion::{LoggedDays, last_top_set};

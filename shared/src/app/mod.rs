@@ -1224,14 +1224,15 @@ fn plan_section(
             }
         }
     }
-    // Every fold, hold and cue has moved its loads: the why? basis restates
-    // the planned load against today's, so the session panel reads the face.
+    // Every fold, hold and cue has moved its numbers: the why? basis restates
+    // the planned prescription against today's, so the session panel reads
+    // the face.
     for it in next_session
         .iter_mut()
         .chain(week_plan.iter_mut())
         .flat_map(|s| s.items.iter_mut())
     {
-        restate_basis_load(it, weight_lb);
+        restate_basis(it, weight_lb);
     }
     // Say what changed on each lift since last time, and why.
     if let Some(ns) = next_session.as_mut() {

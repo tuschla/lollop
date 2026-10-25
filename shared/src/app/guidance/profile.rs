@@ -202,7 +202,7 @@ fn build_safety_guidance(
             claims::ILLNESS_NECK_001 => "You marked yourself ill. ",
             claims::SAFE_CVD_001 => "One of your health answers needs a doctor's OK first. ",
             claims::SAFE_PEDS_001 => {
-                "You're under 18, so lollop won't build a plan. Strength training at your age needs a coach who can watch your technique. It still tracks your activity and everything you log. "
+                "You're under 18, so lollop won't build a plan: strength training at your age needs a coach who can watch your technique. You can still log and track. "
             }
             claims::SAFE_PREG_001 => {
                 "You're pregnant, so lollop won't plan or increase your training. "
@@ -235,7 +235,7 @@ fn build_safety_guidance(
         push_guidance(
             rows,
             "Safety",
-            "Pregnancy: stop and contact your provider if you notice vaginal bleeding, fluid leaking, regular painful contractions, breathlessness before exercise, dizziness or feeling faint, headache, chest pain, calf pain or swelling, muscle weakness affecting your balance, or the baby moving less".to_string(),
+            "Pregnancy: stop and contact your doctor or midwife if you notice vaginal bleeding, fluid leaking, regular painful contractions, breathlessness before exercise, dizziness or feeling faint, headache, chest pain, calf pain or swelling, muscle weakness affecting your balance, or the baby moving less".to_string(),
             &warn,
         );
     }
@@ -308,19 +308,27 @@ fn build_reentry_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
         // The >8 wk bracket carries NO KB load fraction (`load_frac == None`),
         // so render a fresh-start message with no invented percentage (KB Table
         // 3.4b language). The 1-8 wk numeric brackets keep the derate sentence.
+        let weeks = |n: u8| if n == 1 { "week" } else { "weeks" };
+        let off = match weeks_off.round() {
+            n if n < 1.0 => "under a week".to_string(),
+            n => format!("{n:.0} {}", weeks(n as u8)),
+        };
+        let (lo, hi) = re.value.ramp_weeks;
         let summary = match re.value.load_frac {
+            Some(_) if hi == 0 => format!("After {off} off: carry on at your old weights"),
             Some(frac) => format!(
-                "After {weeks_off:.0} wk off: restart at ~{:.0}% of your old weights and build back over {}{}",
+                "After {off} off: restart at ~{:.0}% of your old weights and build back over {} {}{}",
                 frac * 100.0,
-                fmt_u8_range(re.value.ramp_weeks.0, re.value.ramp_weeks.1),
+                fmt_u8_range(lo, hi),
+                weeks(hi),
                 if re.value.treat_as_novice {
-                    " wk. Progress like a beginner until you're back at your old weights"
+                    ". Progress like a beginner until you're back at your old weights"
                 } else {
-                    " wk"
+                    ""
                 }
             ),
             None => format!(
-                "After {weeks_off:.0} wk off: treat it as a fresh start. Rebuild your technique and build back over 4–6+ wk, progressing like a beginner."
+                "After {off} off: treat it as a fresh start. Rebuild your technique and build back over 4–6+ weeks, progressing like a beginner."
             ),
         };
         push_guidance(rows, "Return to training", summary, &re);

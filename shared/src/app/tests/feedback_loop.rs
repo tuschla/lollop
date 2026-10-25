@@ -671,7 +671,7 @@ fn split_fade_copy_mentions_split_not_easy_days() {
     let fb = app.view(&model).feedback.expect("feedback");
     assert_eq!(fb.category, FeedbackCategory::IntensityDiscipline);
     assert!(fb.message.contains("6%"), "{}", fb.message);
-    assert!(fb.message.contains("second half"), "{}", fb.message);
+    assert!(fb.message.contains("Second half"), "{}", fb.message);
     assert!(!fb.message.contains("Easy days"), "{}", fb.message);
 }
 
@@ -857,9 +857,7 @@ fn decline_with_low_wellness_emits_recovery_first() {
     .expect_only_render();
     let trend = app.view(&model).trend.expect("decline row");
     assert!(
-        trend
-            .summary
-            .contains("A lighter week is worth trying first"),
+        trend.summary.contains("Take a lighter week first"),
         "{}",
         trend.summary
     );
@@ -949,7 +947,7 @@ fn protective_adjustment_turns_a_progression_nudge_into_hold_the_plan() {
     .expect_only_render();
     let fb = app.view(&model).feedback.expect("feedback");
     assert_eq!(fb.category, FeedbackCategory::InformationalNeutral);
-    assert!(fb.message.contains("keep to it"), "{}", fb.message);
+    assert!(fb.message.contains("no extra weight"), "{}", fb.message);
     assert!(!fb.message.contains("add load"), "{}", fb.message);
     assert!(fb.evidence.grade.is_none() && fb.evidence.citation.is_empty());
 }

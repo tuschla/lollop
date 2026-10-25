@@ -53,7 +53,7 @@ fn decline_despite_deload_uses_the_strong_rule() {
     let defers: Vec<_> = vm
         .review_adjustments
         .iter()
-        .filter(|a| a.summary.contains("defer") || a.summary.contains("professional"))
+        .filter(|a| a.summary.contains("defer") || a.summary.contains("see a doctor"))
         .collect();
     assert_eq!(defers.len(), 1, "exactly one escalation fires");
     assert_eq!(defers[0].evidence.grade, Some(EvidenceGrade::Strong));

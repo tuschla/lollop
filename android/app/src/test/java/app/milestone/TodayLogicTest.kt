@@ -15,7 +15,7 @@ class TodayLogicTest {
     @Test
     fun holdAction_followsTheHoldReasonBeforeTheTier() {
         // Profile illness and under-18 both arrive as a MedicalReferral tier; the
-        // reason decides the way back, never "a professional's OK" for both.
+        // reason decides the way back, never "a doctor's OK" for both.
         assertEquals(HoldAction.EndIllness, holdAction("acute_illness_profile", "MedicalReferral"))
         assertEquals(HoldAction.CheckAge, holdAction("youth", "MedicalReferral"))
         assertEquals(HoldAction.ReviewHealth, holdAction("parq", "MedicalReferral"))
@@ -32,6 +32,25 @@ class TodayLogicTest {
         assertEquals(HoldAction.RemoveIllness, holdAction(null, "Illness"))
         assertEquals(HoldAction.ReviewHealth, holdAction(null, "MedicalReferral"))
         assertEquals(HoldAction.ClearReadiness, holdAction(null, "HrvTrend"))
+    }
+
+    @Test
+    fun painSubline_fallbackUsesTheTriageWordsAndMatchesTheCore() {
+        val noCore = ViewModel()
+        // The triage choices' words, not "sharp/joint" / "tendon-like".
+        assertEquals(
+            "Left knee · sharp or joint pain · 6/10",
+            painSubline(noCore, PainDetail(PainKind.SharpJoint, severity = 6, trend = PainTrend.Stable, location = "Left knee")),
+        )
+        assertEquals("dull ache · 3/10", painSubline(noCore, PainDetail(PainKind.TendonLoadRelated, severity = 3, trend = PainTrend.Stable)))
+        // "Not sure" adds nothing to the line (never a stray "not sure" fragment).
+        assertEquals("Left knee · 4/10", painSubline(noCore, PainDetail(PainKind.Other, severity = 4, trend = PainTrend.Stable, location = "Left knee")))
+        assertNull(painSubline(noCore, PainDetail(PainKind.Other, trend = PainTrend.Stable)))
+        // Worse the morning after reads "worsening" too, as the core's pain_context does.
+        assertEquals(
+            "muscle soreness · worsening",
+            painSubline(noCore, PainDetail(PainKind.Doms, trend = PainTrend.WorseningAfter24h)),
+        )
     }
 
     @Test

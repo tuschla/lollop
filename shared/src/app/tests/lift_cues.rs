@@ -768,7 +768,11 @@ fn a_held_lift_restates_its_load_in_the_why_basis() {
     let mut it = lift_item("Back squat", 100.0);
     it.hold_load_cap_kg = Some(95.0);
     it.why.basis = "3×5 at 83% of your estimated max (120 kg): 100 kg. Aim for 2 reps left.".into();
-    it.basis_load_kg = Some(100.0);
+    it.basis_rx = Some(BasisRx {
+        load_kg: Some(100.0),
+        lead: "3×5".into(),
+        rir: Some(2),
+    });
     let mut ns = session(vec![it]);
     let hold = graded(
         Adjustment::CapTopEnd {
@@ -783,6 +787,53 @@ fn a_held_lift_restates_its_load_in_the_why_basis() {
         "{basis}"
     );
     assert!(!basis.contains(": 100 kg."), "{basis}");
+}
+
+#[test]
+fn a_lighter_week_restates_sets_and_reps_left_in_the_why_basis() {
+    // copy-review M7: the `?` basis restated only the weight, so one card
+    // read "3×5 … about 2 reps left" under a face of fewer sets and more
+    // reps left.
+    let mut it = lift_item("Bench press", 100.0);
+    it.why.basis = "3×5 at 83% of your estimated max (120 kg): 100 kg. Stop each set with about 2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.".into();
+    it.basis_rx = Some(BasisRx {
+        load_kg: Some(100.0),
+        lead: "3×5".into(),
+        rir: Some(2),
+    });
+    let mut ns = session(vec![it]);
+    let deload = graded(
+        Adjustment::Deload {
+            volume_reduction_pct: 50.0,
+            load_reduction_pct: 10.0,
+            weeks: 1,
+        },
+        claims::RUN_DELOAD_001,
+    );
+    let hold = graded(
+        Adjustment::CapTopEnd {
+            trigger: ReadinessSignal::HrvLnRmssd,
+        },
+        claims::AUTOREG_HRV_LIFT_001,
+    );
+    apply_adjustments_to_session(&mut ns, &[deload, hold], false);
+    let it = &ns.items[0];
+    let PlanIntensity::Rir { rir } = it.intensity else {
+        panic!("{:?}", it.intensity)
+    };
+    assert!(
+        it.sets < 3 && rir > 2,
+        "both moved: {} sets, {rir} left",
+        it.sets
+    );
+    assert_eq!(
+        it.why.basis,
+        format!(
+            "{}×5 at 83% of your estimated max (120 kg): 100 kg planned, {} today. Stop each set with about {rir} reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            it.sets,
+            fmt_weight(it.load_kg.unwrap(), false)
+        )
+    );
 }
 
 /// The load the session `?` panel states for today in a lift's why? basis
@@ -819,6 +870,26 @@ fn assert_panel_states_hero_loads(vm: &ViewModel) {
         if let Some(last) = it.last_set.as_ref().filter(|_| !it.anchored_on_single_set) {
             let last_time = format!("Last time: {} ×", fmt_weight(last.weight_kg, false));
             assert!(basis.contains(&last_time), "{}: {basis}", it.exercise);
+        }
+        // The same sets×reps and reps left as the face, not the plan's
+        // pre-adjustment ones.
+        let lead = it.face_lead.split(" @ ").next().unwrap_or_default();
+        assert!(
+            basis.starts_with(&format!("{lead} ")),
+            "{}: {lead} vs {basis}",
+            it.exercise
+        );
+        if let Some(n) = it
+            .face_detail
+            .split('~')
+            .nth(1)
+            .and_then(|s| s.split(' ').next())
+        {
+            assert!(
+                basis.contains(&format!("about {n} rep")) || basis.contains(&format!("~{n} rep")),
+                "{}: ~{n} vs {basis}",
+                it.exercise
+            );
         }
         checked += 1;
     }

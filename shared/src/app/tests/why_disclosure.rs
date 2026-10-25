@@ -88,25 +88,25 @@ fn contested_guidance_grade_note_names_the_contested_question() {
 #[test]
 fn contested_render_shows_one_opposing_side_when_kb_supplies_it() {
     // CQ-01 carries a KB-sourced opposing citation → the disclosure shows
-    // it as "one view on the other side"; CQ-02 has none → the render stops
-    // at the engine lean and fabricates no opposing view.
+    // it as "another view"; CQ-02 has none → the render stops at the plan's
+    // default and fabricates no opposing view.
     let with = grade_note_str(EvidenceGrade::Strong, Some("CQ-01"));
     assert!(
-        with.contains("contested") && with.contains("What the app does for now:"),
-        "contested render carries the app's lean: {with}"
+        with.contains("Contested:") && with.contains("The plan's default:"),
+        "contested render carries the plan's default: {with}"
     );
     assert!(
-        with.contains("One view on the other side:") && with.to_lowercase().contains("schoenfeld"),
+        with.contains("Another view:") && with.to_lowercase().contains("schoenfeld"),
         "CQ-01's KB opposing cite surfaces: {with}"
     );
 
     let without = grade_note_str(EvidenceGrade::Moderate, Some("CQ-02"));
     assert!(
-        without.contains("contested"),
+        without.contains("Contested:"),
         "CQ-02 still flags the debate: {without}"
     );
     assert!(
-        !without.contains("One view on the other side:"),
+        !without.contains("Another view:"),
         "CQ-02 has no KB opposing cite → no fabricated other side: {without}"
     );
 }
@@ -196,7 +196,7 @@ fn prescription_why_is_a_complete_three_part_disclosure() {
     );
 
     // RIR fallback (no e1RM anchor yet): the improves line is about logging a
-    // set so loads can anchor to a measured e1RM.
+    // set so loads can anchor to an estimated max from it.
     let (app, model) = planned_strength_model(false);
     let ns = app.view(&model).next_session.expect("RIR plan");
     let it = ns
@@ -207,8 +207,8 @@ fn prescription_why_is_a_complete_three_part_disclosure() {
     assert!(it.load_kg.is_none(), "this arm is the unanchored case");
     check(it);
     assert!(
-        it.why.improves.contains("measured max"),
-        "RIR improves points at anchoring to a measured max: {}",
+        it.why.improves.contains("estimated max"),
+        "RIR improves points at anchoring to an estimated max: {}",
         it.why.improves
     );
 }

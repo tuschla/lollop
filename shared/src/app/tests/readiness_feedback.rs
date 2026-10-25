@@ -49,7 +49,7 @@ fn high_load_block_profile_arms_the_saturation_guard() {
     assert!(
         !vm.adjustments
             .iter()
-            .any(|a| a.summary.contains("ahead of plan")),
+            .any(|a| a.summary.contains("to the weight next session")),
         "no auto load-add under parasympathetic saturation"
     );
 
@@ -60,7 +60,7 @@ fn high_load_block_profile_arms_the_saturation_guard() {
         app.view(&model)
             .adjustments
             .iter()
-            .any(|a| a.summary.contains("ahead of plan"))
+            .any(|a| a.summary.contains("to the weight next session"))
     );
 }
 

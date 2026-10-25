@@ -85,7 +85,7 @@ fn push_loading_rows(
     } else {
         format!(
             "Weights for {}: {}% 1RM, {} reps, {} sets, {}",
-            lift_goal_label(p.lift_goal).to_lowercase(),
+            lift_goal_phrase(p.lift_goal),
             fmt_u8_range(lr.value.pct_1rm.0, lr.value.pct_1rm.1),
             fmt_u8_range(lr.value.reps.0, lr.value.reps.1),
             fmt_u8_range(lr.value.sets.0, lr.value.sets.1),
@@ -102,7 +102,7 @@ fn push_loading_rows(
         "Strength",
         format!(
             "Set cutoff for {}: end the set when a rep visibly slows (about {:.0}% bar-speed loss if you track bar speed)",
-            lift_goal_label(p.lift_goal),
+            lift_goal_phrase(p.lift_goal),
             vlt.value * 100.0
         ),
         &vlt,
@@ -307,7 +307,7 @@ fn push_prilepin_row(lr: &Recommended<strength::LoadingRx>, rows: &mut Vec<Guida
             rows,
             "Strength",
             format!(
-                "Prilepin chart at ~{:.0}% 1RM: {} reps a set, {} reps in total is optimal (range {}–{})",
+                "Prilepin chart at ~{:.0}% 1RM: {} reps a set, about {} reps in total (range {}–{})",
                 pct_mid,
                 fmt_u8_range(pr.value.reps_per_set.0, pr.value.reps_per_set.1),
                 pr.value.optimal_total,
@@ -365,7 +365,7 @@ fn push_hypertrophy_rows(
             "{} weekly sets per muscle: {}",
             p.weekly_sets,
             if split.value {
-                "spread them over 2 or more sessions a week so each set stays good"
+                "spread them over 2 or more sessions a week"
             } else {
                 "one session a week is enough"
             }
@@ -399,7 +399,11 @@ fn push_hypertrophy_rows(
     push_guidance(
         rows,
         "Hypertrophy",
-        format!("Weekly sets for muscle growth top out at {}", cap.value),
+        format!(
+            "Weekly growth target: {} sets per muscle, capped at {}",
+            cap.value,
+            hypertrophy::WEEKLY_FRACTIONAL_SET_CEILING
+        ),
         &cap,
     );
 

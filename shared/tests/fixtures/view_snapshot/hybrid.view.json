@@ -5,7 +5,7 @@
   "checked_in_today": true,
   "adjustments": [
     {
-      "summary": "Your latest resting HR is well above your normal: an easier session today. Feeling ill? Answer the illness question in your check-in.",
+      "summary": "Your latest resting HR is well above your normal: an easier session today. If you feel ill, answer the illness question in your check-in.",
       "grade": "Weak",
       "citation": "Buchheit 2014, Front Physiol 5:73 (heart-rate monitoring review)",
       "confidence": 0.4,
@@ -26,7 +26,7 @@
     {
       "summary": "Lighter week: 50% fewer sets, 10% less weight, because sessions felt harder at the same weights while your check-ins stayed low for 3+ days",
       "grade": "Moderate",
-      "citation": "Israetel et al. 2021 (RP framework: deload ~50% volume and/or ~10% intensity, ~1 wk)",
+      "citation": "Israetel, Hoffmann & Smith 2021, Scientific Principles of Hypertrophy Training (Renaissance Periodization)",
       "confidence": 0.65,
       "safety_critical": false,
       "contested": false,
@@ -49,7 +49,7 @@
       "contested": true,
       "why": {
         "basis": "Applied today: no lift goes heavier than your best for the same reps, every lift stops 1 rep earlier, and runs stay easy (zones 1–2). Training guided by heart-rate variability (HRV) means fewer people fail to improve, and it improves fitness measured below max effort.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how much heart-rate variability (HRV) should steer training, so this is contested. What the app does for now: HRV only helps decide between an easier and a harder day. One view on the other side: HRV-guided training improves fitness gains and leaves fewer people who barely respond (Vesterinen; Kiviniemi; Granero-Gallegos 2020).",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on how much heart-rate variability (HRV) should steer training. The plan's default: HRV only helps decide between an easier and a harder day. Another view: HRV-guided training improves fitness gains and leaves fewer people who barely respond (Vesterinen; Kiviniemi; Granero-Gallegos 2020).",
         "improves": "Keep logging morning check-ins. More readings sharpen your HRV normal."
       },
       "neutral": false,
@@ -58,7 +58,7 @@
       "suggests_end_exercise": false
     },
     {
-      "summary": "Bar speed down more than 0.06 m/s on the same weight: you're weaker today, reduce working weights",
+      "summary": "Bar speed down more than 0.06 m/s on the same weight: reduce working weights",
       "grade": "Strong",
       "citation": "Gonzalez-Badillo & Sanchez-Medina 2010, Int J Sports Med 31:347-352 (load-velocity relationship)",
       "confidence": 0.9,
@@ -77,7 +77,7 @@
     {
       "summary": "First set short or harder than planned: drop the last planned set, then tap End exercise",
       "grade": "Moderate",
-      "citation": "Helms et al. 2018 (RPE stops)",
+      "citation": "Helms et al. 2018, Front Physiol 9:247",
       "confidence": 0.65,
       "safety_critical": false,
       "contested": false,
@@ -94,7 +94,7 @@
     {
       "summary": "Heart-rate drift 12.0% (≥10%): the pace was too hard for this distance. Slow down on runs this long until the drift drops",
       "grade": "Weak",
-      "citation": "Friel 2009, The Triathlete's Training Bible (3rd ed., VeloPress) (<5% good, >10% flag)",
+      "citation": "Friel 2009, The Triathlete's Training Bible (3rd ed., VeloPress)",
       "confidence": 0.4,
       "safety_critical": false,
       "contested": false,
@@ -1979,7 +1979,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "How long you've been training matters most for how much training it takes to keep getting stronger.",
+        "basis": "The longer you've trained, the more training it takes to keep getting stronger.",
         "grade_note": "Strong evidence: many good studies agree.",
         "improves": "-"
       },
@@ -2003,7 +2003,7 @@
     },
     {
       "section": "Strength",
-      "summary": "Set cutoff for Strength: end the set when a rep visibly slows (about 20% bar-speed loss if you track bar speed)",
+      "summary": "Set cutoff for strength: end the set when a rep visibly slows (about 20% bar-speed loss if you track bar speed)",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Pareja-Blanco et al. 2017, Scand J Med Sci Sports 27(7):724-735 (velocity-loss thresholds)",
@@ -2067,7 +2067,7 @@
     },
     {
       "section": "Strength",
-      "summary": "Prilepin chart at ~90% 1RM: 1–2 reps a set, 7 reps in total is optimal (range 4–10)",
+      "summary": "Prilepin chart at ~90% 1RM: 1–2 reps a set, about 7 reps in total (range 4–10)",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "A.S. Prilepin 1974 (Soviet weightlifting research, >1,000 elite lifters)",
@@ -2076,7 +2076,7 @@
       "contested": true,
       "why": {
         "basis": "Prilepin's chart sets a ceiling on total reps per session for each weight range (as a % of your one-rep max), with bar speed and form used to check the weight.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on whether Prilepin's chart, built from elite Olympic weightlifters, carries over to powerlifting lifts and beginners, so this is contested. What the app does for now: use it only as a ceiling on reps per session, checked against bar speed and technique.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on whether Prilepin's chart, built from elite Olympic weightlifters, carries over to powerlifting lifts and beginners. The plan's default: use it only as a ceiling on reps per session, checked against bar speed and technique.",
         "improves": "Log your working sets so the app can check each session's reps against the target."
       },
       "training_age": ""
@@ -2099,7 +2099,7 @@
     },
     {
       "section": "Hypertrophy",
-      "summary": "14 weekly sets per muscle: spread them over 2 or more sessions a week so each set stays good",
+      "summary": "14 weekly sets per muscle: spread them over 2 or more sessions a week",
       "summary_mi": "",
       "grade": "ExpertOpinion",
       "citation": "Remmert et al. 2025, SportRxiv preprint 537 (per-session volume meta-regressions; not peer reviewed)",
@@ -2131,7 +2131,7 @@
     },
     {
       "section": "Hypertrophy",
-      "summary": "Weekly sets for muscle growth top out at 14",
+      "summary": "Weekly growth target: 14 sets per muscle, capped at 31",
       "summary_mi": "",
       "grade": "Strong",
       "citation": "Schoenfeld, Ogborn & Krieger 2017, J Sports Sci",
@@ -2140,7 +2140,7 @@
       "contested": true,
       "why": {
         "basis": "More weekly sets build more muscle, with smaller gains from each extra set.",
-        "grade_note": "Strong evidence: many good studies agree. Experts still disagree on how many weekly sets keep adding muscle, so this is contested. What the app does for now: 10–20 hard sets per muscle per week. One view on the other side: More weekly sets keep adding growth with no clear ceiling (Schoenfeld & Krieger).",
+        "grade_note": "Strong evidence: many good studies agree. Contested: experts disagree on how many weekly sets keep adding muscle. The plan's default: 10–20 hard sets per muscle per week. Another view: More weekly sets keep adding growth with no clear ceiling (Schoenfeld & Krieger).",
         "improves": "-"
       },
       "training_age": ""
@@ -2171,7 +2171,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "How long you've been training matters most for how much training it takes to keep getting stronger.",
+        "basis": "The longer you've trained, the more training it takes to keep getting stronger.",
         "grade_note": "Strong evidence: many good studies agree.",
         "improves": "-"
       },
@@ -2219,8 +2219,8 @@
       "safety_critical": false,
       "contested": true,
       "why": {
-        "basis": "About 80% easy running is the shared core of every good mix of easy and hard training. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how runners should split their training between easy and hard, so this is contested. What the app does for now: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. One view on the other side: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
+        "basis": "Effective mixes of easy and hard training share about 80% easy running. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on how runners should split their training between easy and hard. The plan's default: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. Another view: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
         "improves": "-"
       },
       "training_age": ""
@@ -2246,7 +2246,7 @@
       "summary": "Weekly distance grows by at most 5% from one week to the next",
       "summary_mi": "",
       "grade": "Weak",
-      "citation": "Nielsen et al. 2014 (>30%/2wk ~1.6x risk)",
+      "citation": "Nielsen et al. 2014, J Orthop Sports Phys Ther 44(10):739-747",
       "confidence": 0.4,
       "safety_critical": false,
       "contested": false,
@@ -2259,7 +2259,7 @@
     },
     {
       "section": "Running",
-      "summary": "Easy runs: 65–79 %HRmax, RPE 3–4, 30–90 min",
+      "summary": "Easy runs: 65–79% HRmax, effort 3–4 of 10, 30–90 min",
       "summary_mi": "",
       "grade": "ExpertOpinion",
       "citation": "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
@@ -2275,7 +2275,7 @@
     },
     {
       "section": "Running",
-      "summary": "Long runs: 65–80 %HRmax, 10–20% slower than marathon pace, RPE 3–5, up to 150 min",
+      "summary": "Long runs: 65–80% HRmax, 10–20% slower than marathon pace, effort 3–5 of 10, up to 150 min",
       "summary_mi": "",
       "grade": "ExpertOpinion",
       "citation": "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
@@ -2316,14 +2316,14 @@
       "contested": true,
       "why": {
         "basis": "Intervals (VO2max work): about your 3K–5K race pace, 95–100% of your max heart rate, effort 8–9 out of 10, repeats of 3–5 minutes (800–1600 m) with about as long to recover. Keep interval running to 8% of your weekly running or less.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best length for intervals, so this is contested. What the app does for now: intervals chosen to suit your goal and race. One view on the other side: Some coaches favor short repeats of 30 seconds on, 30 seconds off (Ronnestad), others long repeats at threshold pace (Canova).",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best length for intervals. The plan's default: intervals chosen to suit your goal and race. Another view: Some coaches favor short repeats of 30 seconds on, 30 seconds off (Ronnestad), others long repeats at threshold pace (Canova).",
         "improves": "-"
       },
       "training_age": ""
     },
     {
       "section": "Running",
-      "summary": "Strides: 4–8 × 15–30 s controlled-fast (RPE 6–7), 45–120 s recovery, 1–3×/wk",
+      "summary": "Strides: 4–8 × 15–30 s controlled-fast (effort 6–7 of 10), 45–120 s recovery, 1–3×/wk",
       "summary_mi": "",
       "grade": "ExpertOpinion",
       "citation": "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
@@ -2396,14 +2396,14 @@
       "contested": true,
       "why": {
         "basis": "Lifting before endurance work gives a small edge in lower-body strength and power.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
         "improves": "-"
       },
       "training_age": ""
     },
     {
       "section": "Hybrid",
-      "summary": "Running leads: lifting drops to a maintenance dose. Sets stay heavy (80% of your max or more), with about a third of the usual sets and none added through the block. That keeps your strength and leaves recovery for running.",
+      "summary": "Running leads, so lifting drops to a maintenance dose: about a third of the usual sets, still heavy (80% of your max or more), none added through the block.",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Spiering, Mujika, Sharp & Foulis 2021, J Strength Cond Res 35(5):1449-1458 (minimal maintenance dose)",
@@ -2422,7 +2422,7 @@
       "summary": "One side progresses at a time: running builds while lifting holds, because the combined strain of both on tendons has not been studied.",
       "summary_mi": "",
       "grade": "Weak",
-      "citation": "Baar 2014 (evidence gap noted)",
+      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125",
       "confidence": 0.4,
       "safety_critical": true,
       "contested": false,
@@ -2444,7 +2444,7 @@
       "contested": true,
       "why": {
         "basis": "When lifting and running share a week, keep long or hard runs at least 24 hours away from heavy leg sessions, in both directions. When you run 4 or more days or 40+ km (25+ miles) a week, cap lower-body lifting at 2 sessions a week and trim lower-body muscle-building volume by about 20–33%.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
         "improves": "-"
       },
       "training_age": ""
@@ -2460,7 +2460,7 @@
       "contested": true,
       "why": {
         "basis": "Expect smaller strength and muscle gains when you do endurance work more than 3–4 days a week or harder than 80% of your aerobic max (VO2max); cap endurance or expect slower lifting progress.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how much running holds back lifting gains in real training, so this is contested. What the app does for now: shield only power and explosive work from it.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on how much running holds back lifting gains in real training. The plan's default: keep only power and explosive work away from hard running.",
         "improves": "-"
       },
       "training_age": ""
@@ -2476,14 +2476,14 @@
       "contested": true,
       "why": {
         "basis": "Endurance work holds back lifting gains more the more often you do it (correlation −0.26 to −0.35) and the longer each session lasts (−0.29 to −0.75, reaching −0.75 for muscle growth); how long you go continuously matters most. No clear point at which this starts is known.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how much running holds back lifting gains in real training, so this is contested. What the app does for now: shield only power and explosive work from it.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on how much running holds back lifting gains in real training. The plan's default: keep only power and explosive work away from hard running.",
         "improves": "-"
       },
       "training_age": ""
     },
     {
       "section": "Hybrid",
-      "summary": "Running alongside lifting can slightly blunt leg-strength gains (seen in men). For upper-body strength, muscle size and aerobic gains, studies show no difference between men and women.",
+      "summary": "Running alongside lifting can slightly blunt leg-strength gains (seen in men). For upper-body strength, muscle size and aerobic gains, no difference between men and women has been found.",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Huiberts, Wüst & van der Zwaard 2024, Sports Med 54(2):485-503 (concurrent-training moderators meta-analysis)",
@@ -2505,7 +2505,7 @@
     "message_mi": "Heart-rate drift hit 12%: the pace was too hard for this distance, or heat or low fluids pushed it up. Start about 30–50 s/mi slower next time.",
     "suppresses_praise": false,
     "grade": "Weak",
-    "citation": "Friel 2009, The Triathlete's Training Bible (3rd ed., VeloPress) (<5% good, >10% flag)",
+    "citation": "Friel 2009, The Triathlete's Training Bible (3rd ed., VeloPress)",
     "confidence": 0.4,
     "safety_critical": false,
     "contested": false,
@@ -2532,7 +2532,7 @@
       "contested": true,
       "why": {
         "basis": "Spacing lifting and endurance sessions at least 3 hours apart (ideally 6–24) reduces how much one blunts the other in the short term.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
         "improves": "-"
       },
       "training_age": ""
@@ -2564,7 +2564,7 @@
       "contested": true,
       "why": {
         "basis": "Keeping running to 3 days a week while strength or muscle is also a main goal is a cautious default, not a limit backed by evidence. Recent meta-analyses found that how often you combine lifting and running didn't change strength or muscle results; spacing sessions 3+ hours apart and keeping runs shorter matter more.",
-        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on how much running holds back lifting gains in real training, so this is contested. What the app does for now: shield only power and explosive work from it.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Contested: experts disagree on how much running holds back lifting gains in real training. The plan's default: keep only power and explosive work away from hard running.",
         "improves": "-"
       },
       "training_age": ""
@@ -2644,7 +2644,7 @@
       "contested": true,
       "why": {
         "basis": "When lifting and running share a week, keep long or hard runs at least 24 hours away from heavy leg sessions, in both directions. When you run 4 or more days or 40+ km (25+ miles) a week, cap lower-body lifting at 2 sessions a week and trim lower-body muscle-building volume by about 20–33%.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
         "improves": "-"
       },
       "training_age": ""
@@ -2654,7 +2654,7 @@
       "summary": "Never ramp up high running volume and heavy lifting fast in the same week. The combined strain of both on tendons has not been studied, so build one and hold the other",
       "summary_mi": "",
       "grade": "Weak",
-      "citation": "Baar 2014 (evidence gap noted)",
+      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125",
       "confidence": 0.4,
       "safety_critical": true,
       "contested": false,
@@ -2715,7 +2715,7 @@
     },
     {
       "section": "Strength",
-      "summary": "PAP: rest 5–7 min between the heavy set and the jump or sprint",
+      "summary": "Heavy set before a jump or sprint: rest 5–7 min between them",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Seitz & Haff 2016, Sports Med 46(2):231-240",
@@ -2747,7 +2747,7 @@
     },
     {
       "section": "Strength",
-      "summary": "Olympic pulling derivatives: 3–5 sets × 1–3 reps at 85–100% 1RM, 3–5 min rest",
+      "summary": "Olympic-lift pulls: 3–5 sets × 1–3 reps at 85–100% 1RM, 3–5 min rest",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Suchomel, Nimphius & Stone 2016, Sports Med 46(10):1419-1449 (muscular strength in athletic performance)",
@@ -2763,7 +2763,7 @@
     },
     {
       "section": "Strength",
-      "summary": "RPE-anchored: top set at RPE 8, then back-off sets 10–15% lighter",
+      "summary": "Top set with ~2 reps left, then back-off sets 10–15% lighter",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Zourdos et al. 2016, J Strength Cond Res 30(1):267-275 (RIR-based RPE)",
@@ -2947,8 +2947,8 @@
       "safety_critical": false,
       "contested": true,
       "why": {
-        "basis": "About 80% easy running is the shared core of every good mix of easy and hard training. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how runners should split their training between easy and hard, so this is contested. What the app does for now: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. One view on the other side: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
+        "basis": "Effective mixes of easy and hard training share about 80% easy running. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on how runners should split their training between easy and hard. The plan's default: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. Another view: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
         "improves": "-"
       },
       "training_age": ""
@@ -2963,8 +2963,8 @@
       "safety_critical": false,
       "contested": true,
       "why": {
-        "basis": "About 80% easy running is the shared core of every good mix of easy and hard training. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how runners should split their training between easy and hard, so this is contested. What the app does for now: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. One view on the other side: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
+        "basis": "Effective mixes of easy and hard training share about 80% easy running. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on how runners should split their training between easy and hard. The plan's default: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. Another view: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
         "improves": "-"
       },
       "training_age": ""
@@ -3028,7 +3028,7 @@
       "contested": true,
       "why": {
         "basis": "Next steps are framed as things you control (pacing, effort, technique) rather than results; whether these beat specific result goals in sport is still debated.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on whether goals you control (pacing, effort, technique) work better in sport than specific result goals, so this is contested. What the app does for now: next steps are framed as things you control. One view on the other side: Specific, moderately difficult goals improve sport performance in a meta-analysis (Kyllo & Landers 1995), though over a third of sport studies found them no better.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on whether goals you control (pacing, effort, technique) work better in sport than specific result goals. The plan's default: next steps are framed as things you control. Another view: Specific, moderately difficult goals improve sport performance in a meta-analysis (Kyllo & Landers 1995), though over a third of sport studies found them no better.",
         "improves": "-"
       },
       "training_age": ""
@@ -3178,7 +3178,7 @@
       "contested": true,
       "why": {
         "basis": "End most sets with 1–3 reps left. Muscle growth rises steadily as sets get closer to failure, but going all the way isn't needed and isn't worth the extra fatigue.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on whether sets should go all the way to failure, so this is contested. What the app does for now: stop with 0–3 reps left.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on whether sets should go all the way to failure. The plan's default: stop most sets with 1–3 reps left (0 only on machines and single-joint lifts).",
         "improves": "-"
       },
       "training_age": ""
@@ -3233,7 +3233,7 @@
     },
     {
       "section": "chest",
-      "summary": "Mesocycle shape: 4–6 building weeks, then 1 lighter week (every 4–8 weeks)",
+      "summary": "Block shape: 4–6 building weeks, then 1 lighter week (every 4–8 weeks)",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Israetel, Hoffmann & Smith 2021, Scientific Principles of Hypertrophy Training (Renaissance Periodization)",
@@ -3241,7 +3241,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "Train in blocks of 4–6 hard weeks plus 1 lighter week (3 to 6 hard weeks per lighter week), with a lighter week every 4–8 weeks.",
+        "basis": "Train in blocks of 4–6 hard weeks, each followed by 1 lighter week. Programs put a lighter week anywhere from every 4 to every 8 weeks.",
         "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
         "improves": "-"
       },
@@ -3258,7 +3258,7 @@
       "contested": true,
       "why": {
         "basis": "End most sets with 1–3 reps left. Muscle growth rises steadily as sets get closer to failure, but going all the way isn't needed and isn't worth the extra fatigue.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on whether sets should go all the way to failure, so this is contested. What the app does for now: stop with 0–3 reps left.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on whether sets should go all the way to failure. The plan's default: stop most sets with 1–3 reps left (0 only on machines and single-joint lifts).",
         "improves": "-"
       },
       "training_age": ""
@@ -3306,7 +3306,7 @@
       "contested": true,
       "why": {
         "basis": "Muscle grows equally well across about 30–85% of your one-rep max (about 5–30+ reps) when sets end close to failure; heavier weights build more strength.",
-        "grade_note": "Strong evidence: many good studies agree. Experts still disagree on whether muscle growth needs a fixed rep range or works across a wide range of reps, so this is contested. What the app does for now: anywhere from about 5–30+ reps at about 30–85% of your max, taken close to failure, avoiding very light weights under about 30%. One view on the other side: Muscle-building sets belong in a narrower range of 6–12 reps at 70–85% of your max (older American College of Sports Medicine guidance).",
+        "grade_note": "Strong evidence: many good studies agree. Contested: experts disagree on whether muscle growth needs a fixed rep range or works across a wide range of reps. The plan's default: anywhere from about 5–30+ reps at about 30–85% of your max, taken close to failure, avoiding very light weights under about 30%. Another view: Muscle-building sets belong in a narrower range of 6–12 reps at 70–85% of your max (older American College of Sports Medicine guidance).",
         "improves": "-"
       },
       "training_age": ""
@@ -3329,7 +3329,7 @@
     },
     {
       "section": "chest",
-      "summary": "Not growing while recovering easily: raise next mesocycle to 16 sets/wk (from 14)",
+      "summary": "Not growing while recovering easily: raise next block to 16 sets/wk (from 14)",
       "summary_mi": "",
       "grade": "ExpertOpinion",
       "citation": "Israetel, Hoffmann & Smith 2021, Scientific Principles of Hypertrophy Training (Renaissance Periodization)",
@@ -3363,7 +3363,7 @@
   "protein_targets": [
     {
       "section": "Protein",
-      "summary": "Deficit (lean-mass preserving): 144–216 g/day · 1.8–2.7 g/kg × 80 kg",
+      "summary": "Eating less to lose weight: 144–216 g/day · 1.8–2.7 g/kg × 80 kg",
       "summary_mi": "",
       "grade": "Strong",
       "citation": "Helms et al. 2014, Int J Sport Nutr Exerc Metab 24(2):127-138",
@@ -3389,7 +3389,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "Estimated from your age (34) with the Tanaka formula (208 − 0.7 × age = 184 bpm). It is a population average, not your measured maximum. Individuals vary by roughly ±10 bpm.",
+        "basis": "Estimated from your age (34) with the Tanaka formula (208 − 0.7 × age = 184 bpm), a population average. Individuals vary by about ±10 bpm.",
         "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
         "improves": "Log a measured max HR from an all-out effort to replace the age-based estimate."
       },
@@ -3397,7 +3397,7 @@
     },
     {
       "section": "Heart-rate zones",
-      "summary": "Resting HR 52 is below 55, so each zone also shows a heart-rate-reserve range (Karvonen), which suits a low resting HR",
+      "summary": "Resting HR 52 is below 55, so each zone also shows a heart-rate-reserve (Karvonen) range",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Karvonen, Kentala & Mustala 1957, Ann Med Exp Biol Fenn 35:307-315 (heart-rate reserve)",
@@ -3421,7 +3421,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "This zone works at 59–74% of VO2max (your maximum oxygen uptake), from the Daniels tables.",
+        "basis": "This zone is 59–74% of VO2max (maximum oxygen uptake), per the Daniels tables.",
         "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
         "improves": "Add a recent race time so these zones anchor to your own VDOT instead of a default."
       },
@@ -3437,7 +3437,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "This zone works at 80–84% of VO2max (your maximum oxygen uptake), from the Daniels tables.",
+        "basis": "This zone is 80–84% of VO2max (maximum oxygen uptake), per the Daniels tables.",
         "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
         "improves": "Add a recent race time so these zones anchor to your own VDOT instead of a default."
       },
@@ -3453,7 +3453,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "This zone works at 83–88% of VO2max (your maximum oxygen uptake), from the Daniels tables.",
+        "basis": "This zone is 83–88% of VO2max (maximum oxygen uptake), per the Daniels tables.",
         "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
         "improves": "Add a recent race time so these zones anchor to your own VDOT instead of a default."
       },
@@ -3469,7 +3469,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "This zone works at 95–100% of VO2max (your maximum oxygen uptake), from the Daniels tables.",
+        "basis": "This zone is 95–100% of VO2max (maximum oxygen uptake), per the Daniels tables.",
         "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
         "improves": "Add a recent race time so these zones anchor to your own VDOT instead of a default."
       },
@@ -3485,7 +3485,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "This zone works at at least 100% of VO2max (your maximum oxygen uptake), from the Daniels tables.",
+        "basis": "This zone is at least 100% of VO2max (maximum oxygen uptake), per the Daniels tables.",
         "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
         "improves": "Add a recent race time so these zones anchor to your own VDOT instead of a default."
       },
@@ -3493,7 +3493,7 @@
     },
     {
       "section": "Heart-rate zones",
-      "summary": "MAF aerobic cap (optional, for base building): 180 − age = 146 bpm. With a tested aerobic threshold (LT1), set the cap from that instead",
+      "summary": "Optional easy-run cap (MAF): 180 − age = 146 bpm. If you have a tested aerobic threshold, use that instead.",
       "summary_mi": "",
       "grade": "Weak",
       "citation": "Maffetone 2010, The Big Book of Endurance Training and Racing (Skyhorse)",
@@ -3502,7 +3502,7 @@
       "contested": true,
       "why": {
         "basis": "The Maffetone heart-rate cap for base training is 180 minus your age, adjusted: add 5 if you're elite or have trained 2 or more years injury-free and kept improving; subtract 5 if you're returning from injury or illness or get 2 or more colds a year; subtract 10 if you're chronically overtrained, inactive or on medication. It's an option for base training, not the default, and moves toward a measured easy-effort ceiling (your first lactate threshold) when you have that data.",
-        "grade_note": "Weak evidence: based on how the body works or on observation, not direct trials. Experts still disagree on whether the 180-minus-age heart-rate formula is as good as a measured easy-effort ceiling, so this is contested. What the app does for now: a measured ceiling when you have one, else the formula. One view on the other side: The simple 180-minus-age formula is preferable to lab-measured thresholds (Maffetone).",
+        "grade_note": "Weak evidence: based on how the body works or on observation, not direct trials. Contested: experts disagree on whether the 180-minus-age heart-rate formula is as good as a measured easy-effort ceiling. The plan's default: a measured ceiling when you have one, else the formula. Another view: The simple 180-minus-age formula is preferable to lab-measured thresholds (Maffetone).",
         "improves": "-"
       },
       "training_age": ""
@@ -3572,7 +3572,7 @@
       "summary": "Week-over-week 34.0 → 37.6 km (+11%): over the increase cap; hold or trim next week",
       "summary_mi": "Week-over-week 21.1 → 23.4 mi (+11%): over the increase cap; hold or trim next week",
       "grade": "Weak",
-      "citation": "Nielsen et al. 2014 (>30%/2wk ~1.6x risk)",
+      "citation": "Nielsen et al. 2014, J Orthop Sports Phys Ther 44(10):739-747",
       "confidence": 0.4,
       "safety_critical": false,
       "contested": false,
@@ -3593,8 +3593,8 @@
       "safety_critical": false,
       "contested": true,
       "why": {
-        "basis": "About 80% easy running is the shared core of every good mix of easy and hard training. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how runners should split their training between easy and hard, so this is contested. What the app does for now: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. One view on the other side: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
+        "basis": "Effective mixes of easy and hard training share about 80% easy running. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on how runners should split their training between easy and hard. The plan's default: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. Another view: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
         "improves": "-"
       },
       "training_age": ""
@@ -3603,22 +3603,6 @@
       "section": "Weekly volume",
       "summary": "Long run 17.0 km is 45% of the week. The 25% limit applies from 64 km a week; under that, the limit is twice your average daily distance (18.8 km).",
       "summary_mi": "Long run 10.6 mi is 45% of the week. The 25% limit applies from 40 mi a week; under that, the limit is twice your average daily distance (11.7 mi).",
-      "grade": "ExpertOpinion",
-      "citation": "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
-      "confidence": 0.3,
-      "safety_critical": false,
-      "contested": false,
-      "why": {
-        "basis": "Long runs: easy to steady pace (10–20% slower than marathon pace), 65–80% of your max heart rate, effort 3–5 out of 10. A long run is 25–30% of your weekly distance (Daniels caps a single run at 25%), about 2–2.5 hours at most, and when your weekly distance is low, no more than twice your average daily run.",
-        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
-        "improves": "-"
-      },
-      "training_age": ""
-    },
-    {
-      "section": "Weekly volume",
-      "summary": "Long run 17.0 km is 45% of the week (usual share 25–30%)",
-      "summary_mi": "Long run 10.6 mi is 45% of the week (usual share 25–30%)",
       "grade": "ExpertOpinion",
       "citation": "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
       "confidence": 0.3,
@@ -3641,8 +3625,8 @@
       "safety_critical": false,
       "contested": true,
       "why": {
-        "basis": "About 80% easy running is the shared core of every good mix of easy and hard training. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how runners should split their training between easy and hard, so this is contested. What the app does for now: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. One view on the other side: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
+        "basis": "Effective mixes of easy and hard training share about 80% easy running. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on how runners should split their training between easy and hard. The plan's default: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. Another view: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
         "improves": "-"
       },
       "training_age": ""
@@ -3652,13 +3636,13 @@
       "summary": "Running distance up more than 10% (34.0 → 37.6 km) while you also lift: keep the weekly increase to about 10% or less",
       "summary_mi": "Running distance up more than 10% (21.1 → 23.4 mi) while you also lift: keep the weekly increase to about 10% or less",
       "grade": "Moderate",
-      "citation": "Gabbett 2016; ACWR literature (criticized - Impellizzeri 2020: tracking heuristic, not predictor)",
+      "citation": "Gabbett 2016, Br J Sports Med 50(5):273-280; critique: Impellizzeri et al. 2020",
       "confidence": 0.65,
       "safety_critical": true,
       "contested": true,
       "why": {
         "basis": "When you both lift and run, grow weekly running by about 10% at most and avoid sudden jumps. The ratio of this week's load to your usual load is only a tracking aid, never an injury predictor.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on whether the ratio of this week's load to your usual load predicts injury, so this is contested. What the app does for now: that ratio is never used to predict injury. One view on the other side: The ratio predicts injury, with the lowest risk at 0.8–1.3 and danger above 1.5 (Gabbett 2016).",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on whether the ratio of this week's load to your usual load predicts injury. The plan's default: that ratio is never used to predict injury. Another view: The ratio predicts injury, with the lowest risk at 0.8–1.3 and danger above 1.5 (Gabbett 2016).",
         "improves": "-"
       },
       "training_age": ""
@@ -3852,7 +3836,7 @@
       "contested": true,
       "why": {
         "basis": "Prilepin's chart sets a ceiling on total reps per session for each weight range (as a % of your one-rep max), with bar speed and form used to check the weight.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on whether Prilepin's chart, built from elite Olympic weightlifters, carries over to powerlifting lifts and beginners, so this is contested. What the app does for now: use it only as a ceiling on reps per session, checked against bar speed and technique.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on whether Prilepin's chart, built from elite Olympic weightlifters, carries over to powerlifting lifts and beginners. The plan's default: use it only as a ceiling on reps per session, checked against bar speed and technique.",
         "improves": "Log your working sets so the app can check each session's reps against the target."
       },
       "training_age": ""
@@ -3879,7 +3863,7 @@
   "critical_speed": [
     {
       "section": "Critical speed",
-      "summary": "Critical Speed 3.73 m/s (4:28/km) · D′ 529 m from 2 maximal efforts",
+      "summary": "Critical speed 3.73 m/s (4:28/km) · distance reserve D′ 529 m from 2 all-out efforts",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Galbraith/Nicolo et al. 2018 (linearity r=0.979-0.999)",
@@ -3952,14 +3936,14 @@
     "current_load_kg": 100.0
   },
   "trend": {
-    "summary": "Back Squat: your best estimated max over the last 4 weeks is 144.9 kg, up 7% on the 4 weeks before. Next, keep each session's effort on target.",
+    "summary": "Back Squat: best estimated max over the last 4 weeks is 144.9 kg, up 7% on the 4 weeks before.",
     "grade": "ExpertOpinion",
     "citation": "Williamson et al. 2022, Int Rev Sport Exerc Psychol 17(2):1050-1078",
     "confidence": 0.3,
     "safety_critical": false,
     "contested": false,
     "why": {
-      "basis": "When a trend improves, the feedback names your consistency and one next step. A plateau is normal; change one thing at a time. A drop explained by heavy training gets a recovery-first answer and a suggested lighter week.",
+      "basis": "When a trend improves, the feedback says so and names one next step. A plateau is normal; change one thing at a time. A drop explained by heavy training gets a recovery-first answer and a suggested lighter week.",
       "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
       "improves": "-"
     },
@@ -4022,7 +4006,7 @@
     "kind": "adjustment",
     "summary": "Lighter week: 50% fewer sets, 10% less weight, because sessions felt harder at the same weights while your check-ins stayed low for 3+ days",
     "grade": "Moderate",
-    "citation": "Israetel et al. 2021 (RP framework: deload ~50% volume and/or ~10% intensity, ~1 wk)",
+    "citation": "Israetel, Hoffmann & Smith 2021, Scientific Principles of Hypertrophy Training (Renaissance Periodization)",
     "confidence": 0.65,
     "safety_critical": false,
     "contested": false,
@@ -4203,8 +4187,8 @@
         "safety_critical": false,
         "contested": true,
         "why": {
-          "basis": "1×3 at 85% of your estimated max (144.9 kg): 122.5 kg planned, 110 kg today. Aim to finish each set with about 2 reps left; if a set feels much harder than that, today is below your estimate, so stop the exercise there. Last time: 117.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter, for today's adjustment.",
-          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+          "basis": "1×3 at 85% of your estimated max (144.9 kg): 122.5 kg planned, 110 kg today. Stop each set with about 3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 117.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter because of today's adjustment.",
+          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
           "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
         },
         "done": false,
@@ -4275,8 +4259,8 @@
         "safety_critical": false,
         "contested": true,
         "why": {
-          "basis": "1×3 at 85% of your estimated max (172.1 kg): 145 kg planned, 130 kg today. Aim to finish each set with about 2 reps left; if a set feels much harder than that, today is below your estimate, so stop the exercise there. Last time: 147.5 kg × 3 with 2 reps left. Today is 17.5 kg lighter, for today's adjustment.",
-          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+          "basis": "1×3 at 85% of your estimated max (172.1 kg): 145 kg planned, 130 kg today. Stop each set with about 3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 147.5 kg × 3 with 2 reps left. Today is 17.5 kg lighter because of today's adjustment.",
+          "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
           "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
         },
         "done": false,
@@ -4346,7 +4330,7 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "2×3 at 85% of your estimated max (107.9 kg): 90 kg planned, 80 kg today. Aim to finish each set with about 2 reps left; if a set feels much harder than that, today is below your estimate, so stop the exercise there. Last time: 87.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter, for today's adjustment.",
+          "basis": "1×3 at 85% of your estimated max (107.9 kg): 90 kg planned, 80 kg today. Stop each set with about 3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 87.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter because of today's adjustment.",
           "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
           "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
         },
@@ -4402,9 +4386,9 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "2×5 with ~3 reps left. Log a set and the plan sets your weight from it.",
+          "basis": "1×5 with ~4 reps left. Log a set and the plan sets your weight from it.",
           "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
-          "improves": "Log a set of this lift so its weights can follow your measured max instead of an effort target."
+          "improves": "Log a set of this lift so its weights follow your estimated max instead of an effort target."
         },
         "done": false,
         "status": "open",
@@ -4424,7 +4408,7 @@
       }
     ],
     "adjustment": {
-      "summary": "Your latest resting HR is well above your normal: an easier session today. Feeling ill? Answer the illness question in your check-in.",
+      "summary": "Your latest resting HR is well above your normal: an easier session today. If you feel ill, answer the illness question in your check-in.",
       "grade": "Weak",
       "citation": "Buchheit 2014, Front Physiol 5:73 (heart-rate monitoring review)",
       "confidence": 0.4,
@@ -4443,7 +4427,7 @@
     "move_targets": [],
     "moved_from_epoch_day": null,
     "move_note": null,
-    "move_blocked_reason": "No free day left this week works. On Saturday, a hard or long run would come the day before heavy leg work (keep at least 24 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
+    "move_blocked_reason": "No other day this week works. On Saturday, a hard or long run would come the day before heavy leg work (keep at least 24 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
     "credited_from_epoch_day": null
   },
   "week_plan": [
@@ -4505,8 +4489,8 @@
           "safety_critical": false,
           "contested": true,
           "why": {
-            "basis": "1×3 at 85% of your estimated max (144.9 kg): 122.5 kg planned, 110 kg today. Aim to finish each set with about 2 reps left; if a set feels much harder than that, today is below your estimate, so stop the exercise there. Last time: 117.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter, for today's adjustment.",
-            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+            "basis": "1×3 at 85% of your estimated max (144.9 kg): 122.5 kg planned, 110 kg today. Stop each set with about 3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 117.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter because of today's adjustment.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
           "done": false,
@@ -4577,8 +4561,8 @@
           "safety_critical": false,
           "contested": true,
           "why": {
-            "basis": "1×3 at 85% of your estimated max (172.1 kg): 145 kg planned, 130 kg today. Aim to finish each set with about 2 reps left; if a set feels much harder than that, today is below your estimate, so stop the exercise there. Last time: 147.5 kg × 3 with 2 reps left. Today is 17.5 kg lighter, for today's adjustment.",
-            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+            "basis": "1×3 at 85% of your estimated max (172.1 kg): 145 kg planned, 130 kg today. Stop each set with about 3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 147.5 kg × 3 with 2 reps left. Today is 17.5 kg lighter because of today's adjustment.",
+            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
           "done": false,
@@ -4648,7 +4632,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "2×3 at 85% of your estimated max (107.9 kg): 90 kg planned, 80 kg today. Aim to finish each set with about 2 reps left; if a set feels much harder than that, today is below your estimate, so stop the exercise there. Last time: 87.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter, for today's adjustment.",
+            "basis": "1×3 at 85% of your estimated max (107.9 kg): 90 kg planned, 80 kg today. Stop each set with about 3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 87.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter because of today's adjustment.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -4704,9 +4688,9 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "2×5 with ~3 reps left. Log a set and the plan sets your weight from it.",
+            "basis": "1×5 with ~4 reps left. Log a set and the plan sets your weight from it.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
-            "improves": "Log a set of this lift so its weights can follow your measured max instead of an effort target."
+            "improves": "Log a set of this lift so its weights follow your estimated max instead of an effort target."
           },
           "done": false,
           "status": "open",
@@ -4726,7 +4710,7 @@
         }
       ],
       "adjustment": {
-        "summary": "Your latest resting HR is well above your normal: an easier session today. Feeling ill? Answer the illness question in your check-in.",
+        "summary": "Your latest resting HR is well above your normal: an easier session today. If you feel ill, answer the illness question in your check-in.",
         "grade": "Weak",
         "citation": "Buchheit 2014, Front Physiol 5:73 (heart-rate monitoring review)",
         "confidence": 0.4,
@@ -4745,7 +4729,7 @@
       "move_targets": [],
       "moved_from_epoch_day": null,
       "move_note": null,
-      "move_blocked_reason": "No free day left this week works. On Saturday, a hard or long run would come the day before heavy leg work (keep at least 24 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
+      "move_blocked_reason": "No other day this week works. On Saturday, a hard or long run would come the day before heavy leg work (keep at least 24 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
       "credited_from_epoch_day": null
     },
     {
@@ -4908,7 +4892,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "2×5 at 80% of your estimated max (144.9 kg): 115 kg. Aim to finish each set with about 3 reps left; if a set feels much harder than that, today is below your estimate, so stop the exercise there.",
+            "basis": "2×5 at 80% of your estimated max (144.9 kg): 115 kg. Stop each set with about 3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -4982,7 +4966,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "2×5 at 80% of your estimated max (172.1 kg): 137.5 kg. Aim to finish each set with about 3 reps left; if a set feels much harder than that, today is below your estimate, so stop the exercise there.",
+            "basis": "2×5 at 80% of your estimated max (172.1 kg): 137.5 kg. Stop each set with about 3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -5054,7 +5038,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "2×5 at 80% of your estimated max (107.9 kg): 85 kg. Aim to finish each set with about 3 reps left; if a set feels much harder than that, today is below your estimate, so stop the exercise there.",
+            "basis": "2×5 at 80% of your estimated max (107.9 kg): 85 kg. Stop each set with about 3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -5112,7 +5096,7 @@
           "why": {
             "basis": "2×5 with ~3 reps left. Log a set and the plan sets your weight from it.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
-            "improves": "Log a set of this lift so its weights can follow your measured max instead of an effort target."
+            "improves": "Log a set of this lift so its weights follow your estimated max instead of an effort target."
           },
           "done": false,
           "status": "open",
@@ -5135,7 +5119,7 @@
       "move_targets": [],
       "moved_from_epoch_day": null,
       "move_note": null,
-      "move_blocked_reason": "No free day left this week works. On Saturday, a hard or long run would come the day before heavy leg work (keep at least 24 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
+      "move_blocked_reason": "No other day this week works. On Saturday, a hard or long run would come the day before heavy leg work (keep at least 24 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
       "credited_from_epoch_day": null
     },
     {
@@ -5335,7 +5319,7 @@
       "move_targets": [],
       "moved_from_epoch_day": null,
       "move_note": null,
-      "move_blocked_reason": "No free day left this week works. On Saturday, two hard sessions would land on back-to-back days (keep about 48 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
+      "move_blocked_reason": "No other day this week works. On Saturday, two hard sessions would land on back-to-back days (keep about 48 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
       "credited_from_epoch_day": null
     },
     {
@@ -5389,7 +5373,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Distance stays within 10% of your longest run in the last 30 days, so no single run jumps past what you have already trained. It can be a bigger share of your week than usual until your weekly distance catches up.",
+            "basis": "Distance stays within 10% of your longest run in the last 30 days. It can be a bigger share of your week than usual until your weekly distance catches up.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "-"
           },
@@ -5434,7 +5418,7 @@
       "move_targets": [],
       "moved_from_epoch_day": null,
       "move_note": null,
-      "move_blocked_reason": "No free day left this week works. On Saturday, two hard sessions would land on back-to-back days (keep about 48 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
+      "move_blocked_reason": "No other day this week works. On Saturday, two hard sessions would land on back-to-back days (keep about 48 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
       "credited_from_epoch_day": null
     }
   ],
@@ -5450,8 +5434,8 @@
     "safety_critical": false,
     "contested": true,
     "why": {
-      "basis": "A hybrid week built from your profile and logged training.",
-      "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on which way of organizing training weeks works best, so this is contested. What the app does for now: a plan that varies heavy and lighter days through the week; any structured plan works.",
+      "basis": "Planned from your profile and logged training.",
+      "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on which way of organizing training weeks works best. The plan's default: a plan that varies heavy and lighter days through the week; any structured plan works.",
       "improves": "-"
     },
     "muscle_volume": [],

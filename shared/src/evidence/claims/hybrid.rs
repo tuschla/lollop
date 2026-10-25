@@ -68,9 +68,7 @@ claim_group! {
         "HYB-PROG-001",
         "When you both lift and run, grow weekly running by about 10% at most and avoid sudden jumps. The ratio of this week's load to your usual load is only a tracking aid, never an injury predictor.",
         Moderate,
-        &[
-            "Gabbett 2016; ACWR literature (criticized - Impellizzeri 2020: tracking heuristic, not predictor)",
-        ],
+        &["Gabbett 2016, Br J Sports Med 50(5):273-280; critique: Impellizzeri et al. 2020"],
     )
     .contradicting(&[
         "Large runner RCT: 10% rule no better than a standard program",
@@ -143,7 +141,7 @@ claim_group! {
         "HYB-TENDON-001",
         "No study has tested how combined training affects tendon stiffness, so go carefully when raising high running volume and heavy lifting at the same time.",
         Weak,
-        &["Baar 2014 (evidence gap noted)"],
+        &["Baar 2014, Sports Med 44(Suppl 2):S117-S125"],
     )
     .safety(),
     HYB_SEX_001 => claim(

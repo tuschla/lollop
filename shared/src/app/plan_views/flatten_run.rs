@@ -124,14 +124,13 @@ pub(super) fn flatten_run_prescription(
     let run_basis = match rx.claim_id() {
         claims::RUN_SPIKE_001 => Some(format!(
             "Distance stays within {spike_pct:.0}% of your longest run in the last \
-             {LONGEST_RUN_WINDOW_DAYS} days, so no single run jumps past what you have \
-             already trained. It can be a bigger share of your week than usual until your \
-             weekly distance catches up."
+             {LONGEST_RUN_WINDOW_DAYS} days. It can be a bigger share of your week than usual \
+             until your weekly distance catches up."
         )),
         claims::RUN_START_001 => Some(format!(
-            "The distance stays within {spike_pct:.0}% of the longest run you told us you \
-             did in the last month. Once a logged run goes further, or that answer is more \
-             than {LONGEST_RUN_WINDOW_DAYS} days old, the plan follows your logged runs."
+            "The distance stays within {spike_pct:.0}% of the longest run you entered for \
+             the last month. Once a logged run goes further, or that answer is more than \
+             {LONGEST_RUN_WINDOW_DAYS} days old, the plan follows your logged runs."
         )),
         claims::RUN_LONGRUN_TARGET_001 => Some(format!(
             "The long run has reached the most your goal distance needs, or about {:.0} \
@@ -146,19 +145,17 @@ pub(super) fn flatten_run_prescription(
         // The anchoring run is now older than the 30-day window, so its
         // credit is tapering (DETRAIN-001) rather than dropping off a cliff.
         claims::DETRAIN_001 => Some(
-            "Distance stays near your recent long run, then shrinks gradually as that run \
-             gets older. Endurance holds for a couple of weeks and then fades slowly, so the \
-             plan steps down slowly too. Log a new long run to reset it."
+            "Distance stays near your recent long run, then steps down as that run gets older, \
+             since endurance fades slowly after a couple of weeks. Log a new long run to reset it."
                 .to_string(),
         ),
         // The long run was set to the week's average run (RUN-LONGRUN-001's
         // low-mileage guardrail), above the share the claim statement leads
         // with: state the rule that set it.
         claims::RUN_LONGRUN_001 if r.long_run_avg_floor => Some(
-            "Your long run is the length of an average run this week, so it stays your \
-             longest run. With only a few run days, the usual share of 25 to 30% of the week \
-             would be shorter than your other runs. It never goes past twice your average \
-             daily run."
+            "With only a few run days, 25–30% of the week would be shorter than your other \
+             runs, so the long run is set to this week's average run. It never goes past \
+             twice your average daily run."
                 .to_string(),
         ),
         _ => None,
@@ -166,7 +163,7 @@ pub(super) fn flatten_run_prescription(
     let (safety_reason, safety_reason_mi) = {
         let longest = match rx.claim_id() {
             claims::RUN_SPIKE_001 => Some("your longest recent run"),
-            claims::RUN_START_001 => Some("the longest recent run you told us about"),
+            claims::RUN_START_001 => Some("the longest recent run you entered"),
             _ => None,
         };
         match (longest, r.volume) {
@@ -261,7 +258,7 @@ pub(super) fn flatten_run_prescription(
         rpe_target: false,
         hold_load_cap_kg: None,
         pick_load: false,
-        basis_load_kg: None,
+        basis_rx: None,
         load_held: false,
     }
 }

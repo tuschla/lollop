@@ -158,7 +158,7 @@ fn bone_stress_defer(inputs: &[ReadinessInput]) -> bool {
 pub fn bone_stress_referral() -> Recommended<Adjustment> {
     evidence::graded(
         Adjustment::Defer {
-            reason: "Signs of a bone stress injury. Stop running and jumping now and see a doctor as soon as you can.".into(),
+            reason: "Signs of a bone stress injury: training is paused. See a doctor as soon as you can, and don't run or jump until they clear you.".into(),
         },
         claims::SAFE_BSI_001,
     )
@@ -170,7 +170,7 @@ pub fn bone_stress_referral() -> Recommended<Adjustment> {
 pub fn reds_referral() -> Recommended<Adjustment> {
     evidence::graded(
         Adjustment::Defer {
-            reason: "Signs of under-eating (RED-S). Train less and see a doctor, registered dietitian or mental-health professional.".into(),
+            reason: "Signs of under-eating (RED-S): training is paused. See a doctor, a registered dietitian or a mental-health professional.".into(),
         },
         claims::SAFE_REDS_001,
     )

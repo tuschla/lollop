@@ -291,15 +291,17 @@ fn calis_basis(
         format!(
             "{step_of}. Explosive work: every rep as fast and high as you can, about 3 minutes' \
              rest, and stop a set as soon as you slow down, well before your limit. All sets at \
-             {hi} reps{per_side} on 2 sessions moves you up to {next_desc}."
+             {hi} reps{per_side} on 2 sessions in a row moves you up to {next_desc}."
         )
     } else if timed {
-        format!("{step_of}. Clean {hi}-second holds on 2 sessions move you up to {next_desc}.")
+        format!(
+            "{step_of}. Clean {hi}-second holds on 2 sessions in a row move you up to {next_desc}."
+        )
     } else if performance_only {
         format!(
-            "{step_of}. Reaching {hi} reps{per_side} on every set on 2 sessions moves you up to \
-             {next_desc}. Counted on reps, because reps-left guesses are least accurate on \
-             high-rep sets."
+            "{step_of}. Reaching {hi} reps{per_side} on every set on 2 sessions in a row moves \
+             you up to {next_desc}. This step goes by reps, not reps left: reps-left guesses are \
+             least accurate on high-rep sets."
         )
     } else {
         format!(
@@ -311,7 +313,7 @@ fn calis_basis(
     // while harder leave-RIR rungs stop short — say why this one asks for less.
     if !loaded && !timed && !c.ballistic && c.rir.0 == 0 && cal::easy_rung(c.ladder, c.tier) {
         basis.push_str(
-            " Easy versions like this only build strength when taken close to your limit, so this \
+            " Easy versions like this only build muscle when taken close to your limit, so this \
              one asks for fewer reps left than some harder steps.",
         );
     }
@@ -345,7 +347,7 @@ fn calis_basis(
         if let Some(h) = c.harder.and_then(|h| cal::tier(c.ladder, h)) {
             let _ = write!(
                 basis,
-                " Prefer a harder version instead of weight? Choose Harder for {}.",
+                " For a harder version instead of added weight, choose Harder for {}.",
                 h.name
             );
         }
@@ -366,7 +368,7 @@ fn calis_basis(
         };
         let _ = write!(
             basis,
-            " You haven't trained this for a while, so this is {steps} easier to ease back in."
+            " You haven't trained this for a while, so this is {steps} easier."
         );
         if c.retest {
             basis
@@ -386,8 +388,9 @@ fn calis_basis(
         let unit = if timed { "seconds" } else { "clean reps" };
         let _ = write!(
             basis,
-            " New to this movement? Choose Easier or Harder to start at the hardest version you \
-             can do for at least {lo} {unit}, or log one all-out set and the plan places you."
+            " If this movement is new to you, choose Easier or Harder to start at the hardest \
+             version you can do for at least {lo} {unit}, or log one all-out set and the plan \
+             places you."
         );
     }
     basis

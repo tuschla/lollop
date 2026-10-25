@@ -16,13 +16,7 @@ pub(super) fn refresh_lift_summary(it: &mut PrescriptionView, weight_lb: bool) {
         set_named_summary(it, ": ", lead, &[label]);
         return;
     }
-    // Dynamic items show the rep RANGE when the plan gives one (calisthenics
-    // rungs are "5–8"); fixed-rep lifts (reps_high == reps_low) show one figure.
-    let reps = if it.reps_high > it.reps_low {
-        format!("{}–{}", it.reps_low, it.reps_high)
-    } else {
-        it.reps_low.to_string()
-    };
+    let reps = reps_text(it);
     // The face line: load in the headline, then ONE effort statement in the
     // "reps left" vocabulary, then a speed/jump item's execution cue ("move
     // fast"). A %e1RM item shows its load, not the percentage (the percentage
@@ -138,26 +132,68 @@ pub(super) fn reps_left(n: i64) -> String {
     }
 }
 
+/// A basis line's effort clause in the face wording: "with ~2 reps left", or
+/// "to your last good rep" for a zero reserve.
+pub(super) fn with_reps_left(n: i64) -> String {
+    if n <= 0 {
+        reps_left(n)
+    } else {
+        format!("with {}", reps_left(n))
+    }
+}
+
+/// A basis sentence's effort clause: "with about 2 reps left", or "at your
+/// last good rep" for a zero reserve.
+pub(super) fn about_reps_left(n: i64) -> String {
+    match n {
+        n if n <= 0 => "at your last good rep".to_string(),
+        1 => "with about 1 rep left".to_string(),
+        n => format!("with about {n} reps left"),
+    }
+}
+
+/// The face's rep count: the plan's rep RANGE when it gives one
+/// (calisthenics rungs are "5–8"), else the one figure.
+fn reps_text(it: &PrescriptionView) -> String {
+    if it.reps_high > it.reps_low {
+        format!("{}–{}", it.reps_low, it.reps_high)
+    } else {
+        it.reps_low.to_string()
+    }
+}
+
+/// The face's sets×reps lead without the load: `"3×5"`, `"3×8–12"`.
+pub(super) fn sets_reps_lead(it: &PrescriptionView) -> String {
+    format!("{}×{}", it.sets, reps_text(it))
+}
+
+/// The single reps-left number the face shows ([`effort_phrase`]), if it
+/// shows one: a structured target, or the reserve a %e1RM or RPE target
+/// implies. `None` for a band, a prose target, or no target.
+pub(super) fn face_rir(it: &PrescriptionView) -> Option<i64> {
+    let from_rpe = |rpe: f64| crate::strength::rpe_to_rir(rpe).round() as i64;
+    match it.intensity {
+        PlanIntensity::Rir { rir } => Some(i64::from(rir)),
+        PlanIntensity::RirRange { lo, hi } if lo == hi => Some(i64::from(lo)),
+        PlanIntensity::RirRange { .. } => None,
+        PlanIntensity::PercentE1rm { .. } => it.target_rpe.map(from_rpe),
+        PlanIntensity::Prose => it.target_rpe.filter(|_| it.rpe_target).map(from_rpe),
+    }
+}
+
 /// A lift item's effort in the face vocabulary: a structured reps-in-reserve
 /// target as "~N reps left" / "1–2 reps left"; a %e1RM target by the reserve
 /// its percentage implies (`target_rpe`), falling back to the percentage only
 /// when it implies none; an "RPE n" prose target as its reps left; any other
 /// prose target verbatim.
 fn effort_phrase(it: &PrescriptionView, load_shown: bool) -> String {
-    let from_rpe = |rpe: f64| reps_left(crate::strength::rpe_to_rir(rpe).round() as i64);
+    if let Some(n) = face_rir(it) {
+        return reps_left(n);
+    }
     match it.intensity {
-        PlanIntensity::Rir { rir } => reps_left(i64::from(rir)),
-        PlanIntensity::RirRange { lo, hi } if lo == hi => reps_left(i64::from(lo)),
         PlanIntensity::RirRange { lo, hi } => format!("{lo}–{hi} reps left"),
-        PlanIntensity::PercentE1rm { .. } => match (load_shown, it.target_rpe) {
-            (_, Some(rpe)) => from_rpe(rpe),
-            (true, None) => String::new(),
-            (false, None) => it.intensity_label.clone(),
-        },
-        PlanIntensity::Prose => match it.target_rpe {
-            Some(rpe) if it.rpe_target => from_rpe(rpe),
-            _ => it.intensity_label.clone(),
-        },
+        PlanIntensity::PercentE1rm { .. } if load_shown => String::new(),
+        _ => it.intensity_label.clone(),
     }
 }
 

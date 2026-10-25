@@ -187,7 +187,7 @@ pub(in crate::app) fn build_consistency(
             &mut notes,
             "Consistency",
             format!(
-                "Repeating this plan week: last week had {} of {} sessions, so the plan stays here before moving ahead.",
+                "Repeating this plan week: last week had {} of {} sessions.",
                 r.done, r.planned
             ),
             &prog,
@@ -197,7 +197,7 @@ pub(in crate::app) fn build_consistency(
             push_guidance(
                 &mut notes,
                 "Consistency",
-                "No sessions last week. If you've been away for a week or more, add your time off in your profile and the plan eases you back in.".to_string(),
+                "No sessions last week. If you were away a week or more, enter the break in your profile so the plan restarts lighter.".to_string(),
                 &re,
             );
         }
@@ -229,7 +229,8 @@ pub(in crate::app) fn build_consistency(
             .next()
             .map(|c| c.to_lowercase().chain(chars).collect())
             .unwrap_or_default();
-        let never_double = format!("Never double up. {MISSED_SESSION_COSTS_LITTLE}");
+        let never_double =
+            format!("Don't do two sessions on one day to catch up. {MISSED_SESSION_COSTS_LITTLE}");
         match missed.move_targets.first() {
             Some(&t) => {
                 let rs = graded((), claims::ADH_RESCHED_001);
@@ -241,7 +242,7 @@ pub(in crate::app) fn build_consistency(
                 push_guidance_basis(
                     &mut notes,
                     "Consistency",
-                    format!("Missed {day}'s {title}? Move it to {to}, or carry on with the plan."),
+                    format!("Missed {day}'s {title}. Move it to {to}, or carry on with the plan."),
                     Some(format!(
                         "{basis_day} still leaves a rest day before your next hard session. {never_double}"
                     )),
@@ -253,7 +254,7 @@ pub(in crate::app) fn build_consistency(
                 push_guidance_basis(
                     &mut notes,
                     "Consistency",
-                    format!("Missed {day}'s {title}? Carry on with the plan."),
+                    format!("Missed {day}'s {title}. Carry on with the plan."),
                     Some(never_double),
                     &ms,
                 );

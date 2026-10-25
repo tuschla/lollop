@@ -289,9 +289,12 @@ pub(in crate::app) fn build_weekly_report(
             .map(crate::plan::run_slot_count)
             .unwrap_or(7);
         let daily_avg_km = crate::plan::daily_avg_run_km(week.weekly_km, n_run_days);
-        push_volume_cap_row(&mut rows, cx, &week, daily_avg_km);
-        push_daily_avg_row(&mut rows, &week, daily_avg_km);
-        push_long_run_share_row(&mut rows, &week);
+        // A long-run row that already states the share and the daily-average
+        // bound replaces the two rows below, so each fact appears once.
+        if !push_volume_cap_row(&mut rows, cx, &week, daily_avg_km) {
+            push_daily_avg_row(&mut rows, &week, daily_avg_km);
+            push_long_run_share_row(&mut rows, &week);
+        }
     }
     push_easy_share_row(&mut rows, &week);
     push_quality_row(&mut rows, &week);
@@ -380,13 +383,14 @@ fn push_counting_method_row(rows: &mut Vec<GuidanceView>) {
 /// its average %HRmax. A correctly executed tempo counts as threshold, never
 /// interval, volume — one average %HRmax per run cannot be split into zones,
 /// so the tag governs when present. No rep (R) distance is derivable from
-/// logged data, so R is counted as 0.
+/// logged data, so R is counted as 0. Returns whether the row is about the
+/// long run (it then states its share and the daily-average bound).
 fn push_volume_cap_row(
     rows: &mut Vec<GuidanceView>,
     cx: &ViewCtx,
     week: &WeekRuns,
     daily_avg_km: f64,
-) {
+) -> bool {
     let model = cx.model;
     let (weekly_km, long_run_km) = (week.weekly_km, week.long_run_km);
     let cutoff = week.cutoff;
@@ -412,64 +416,72 @@ fn push_volume_cap_row(
     let interval_km = hard_km(running::HardRunKind::Interval);
 
     let caps = running::check_volume_caps(long_run_km, threshold_km, interval_km, 0.0, weekly_km);
-    // The ≤25% single-run share is Daniels' cap for runners at/above ~64
-    // km/wk; below that the KB's operative bound is ≤2× the average daily
-    // distance (running-016). A long run inside the 2× bound under 64 km/wk
-    // is informational, not a violation.
-    if let Some(running::CapViolation::LongRun) = caps.value
-        && weekly_km < running::LONG_RUN_SHARE_SPLIT_KM
-        && long_run_km <= 2.0 * daily_avg_km
-    {
+    if let Some(running::CapViolation::LongRun) = caps.value {
+        // The ≤25% single-run share is Daniels' cap for runners at/above ~64
+        // km/wk; below that the KB's operative bound is ≤2× the average daily
+        // distance (running-016). A long run inside the 2× bound under 64
+        // km/wk is informational, not a violation.
         let pct = long_run_km / weekly_km * 100.0;
-        let cap = 2.0 * daily_avg_km;
+        let daily = running::long_run_within_daily_avg(long_run_km, daily_avg_km);
+        let share_cap_applies = weekly_km >= running::LONG_RUN_SHARE_SPLIT_KM;
         let text = |mi: bool| {
-            format!(
-                "Long run {} is {pct:.0}% of the week. The 25% limit applies from {} a week; under that, the limit is twice your average daily distance ({}).",
-                fmt_km_or_mi(long_run_km, mi),
-                dist_whole(running::LONG_RUN_SHARE_SPLIT_KM, mi),
-                fmt_km_or_mi(cap, mi)
-            )
-        };
-        push_guidance_mi(
-            rows,
-            "Weekly volume",
-            text(false),
-            text(true),
-            &running::long_run_within_daily_avg(long_run_km, daily_avg_km),
-        );
-    } else {
-        let text = |mi: bool| match caps.value {
-            None => format!(
-                "Long run and hard running within weekly limits ({}: long run {}, threshold {}, intervals {})",
-                fmt_km_or_mi(weekly_km, mi),
-                dist_num(long_run_km, mi),
-                dist_num(threshold_km, mi),
-                dist_num(interval_km, mi)
-            ),
-            Some(running::CapViolation::LongRun) => format!(
-                "Long run {} is {:.0}% of the week: over the ≤25% single-run cap",
-                fmt_km_or_mi(long_run_km, mi),
-                long_run_km / weekly_km * 100.0
-            ),
-            Some(running::CapViolation::Threshold) => format!(
-                "Threshold volume {} exceeds the ≤10% weekly cap",
-                fmt_km_or_mi(threshold_km, mi)
-            ),
-            Some(running::CapViolation::Interval) => format!(
-                "Interval volume {} exceeds the ≤8% weekly cap",
-                fmt_km_or_mi(interval_km, mi)
-            ),
-            Some(running::CapViolation::Repetition) => {
-                "Repetition volume exceeds the ≤5% weekly cap".to_string()
+            let long = fmt_km_or_mi(long_run_km, mi);
+            let twice = format!(
+                "more than twice your average daily distance ({})",
+                fmt_km_or_mi(daily_avg_km, mi)
+            );
+            match (share_cap_applies, daily.value) {
+                (true, true) => {
+                    format!(
+                        "Long run {long} is {pct:.0}% of the week: over the 25% limit for one run."
+                    )
+                }
+                (true, false) => format!(
+                    "Long run {long} is {pct:.0}% of the week: over the 25% limit for one run, and {twice}."
+                ),
+                (false, false) => format!("Long run {long} is {pct:.0}% of the week and {twice}."),
+                (false, true) => format!(
+                    "Long run {long} is {pct:.0}% of the week. The 25% limit applies from {} a week; under that, the limit is twice your average daily distance ({}).",
+                    dist_whole(running::LONG_RUN_SHARE_SPLIT_KM, mi),
+                    fmt_km_or_mi(2.0 * daily_avg_km, mi)
+                ),
             }
         };
-        let mi_text = if matches!(caps.value, Some(running::CapViolation::Repetition)) {
-            String::new()
+        let (km, mi) = (text(false), text(true));
+        if share_cap_applies {
+            push_guidance_mi(rows, "Weekly volume", km, mi, &caps);
         } else {
-            text(true)
-        };
-        push_guidance_mi(rows, "Weekly volume", text(false), mi_text, &caps);
+            push_guidance_mi(rows, "Weekly volume", km, mi, &daily);
+        }
+        return true;
     }
+    let text = |mi: bool| match caps.value {
+        Some(running::CapViolation::Threshold) => format!(
+            "Threshold running {} is over 10% of the week's distance",
+            fmt_km_or_mi(threshold_km, mi)
+        ),
+        Some(running::CapViolation::Interval) => format!(
+            "Interval running {} is over 8% of the week's distance",
+            fmt_km_or_mi(interval_km, mi)
+        ),
+        Some(running::CapViolation::Repetition) => {
+            "Repetition running is over 5% of the week's distance".to_string()
+        }
+        _ => format!(
+            "Long run and hard running within weekly limits ({}: long run {}, threshold {}, intervals {})",
+            fmt_km_or_mi(weekly_km, mi),
+            dist_num(long_run_km, mi),
+            dist_num(threshold_km, mi),
+            dist_num(interval_km, mi)
+        ),
+    };
+    let mi_text = if matches!(caps.value, Some(running::CapViolation::Repetition)) {
+        String::new()
+    } else {
+        text(true)
+    };
+    push_guidance_mi(rows, "Weekly volume", text(false), mi_text, &caps);
+    false
 }
 
 /// running-016 alternative long-run bound: ≤2× the average daily distance,
@@ -482,7 +494,7 @@ fn push_daily_avg_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns, daily_avg_k
     if !daily_avg.value {
         let text = |mi: bool| {
             format!(
-                "Long run {} exceeds 2× your average daily distance ({}): outsized relative to the week",
+                "Long run {} is more than twice your average daily distance ({})",
                 fmt_km_or_mi(long_run_km, mi),
                 fmt_km_or_mi(daily_avg_km, mi)
             )

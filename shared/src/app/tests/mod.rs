@@ -17,6 +17,7 @@ mod calisthenics;
 mod calisthenics_plan;
 mod completion;
 mod copy_invariants;
+mod copy_tone;
 mod differential_calcs;
 mod entry_edits;
 mod event_fuzz;

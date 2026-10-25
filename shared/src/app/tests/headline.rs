@@ -67,7 +67,7 @@ fn headline_prioritizes_safety_hold_over_adjustments_and_feedback() {
     assert!(vm.train_blocked);
     assert_eq!(vm.today_headline.kind, HeadlineKind::SafetyHold);
     assert!(
-        vm.today_headline.summary.contains("Stop"),
+        vm.today_headline.summary.contains("training is paused"),
         "{}",
         vm.today_headline.summary
     );
@@ -208,7 +208,7 @@ fn a_sound_aerobic_base_verdict_does_not_headline() {
     let sound = vm
         .review_adjustments
         .iter()
-        .find(|a| a.summary.contains("your endurance is solid"))
+        .find(|a| a.summary.contains("heart rate stayed steady at this pace"))
         .expect("the sound-base verdict renders in the review");
     assert!(sound.neutral, "the sound-base verdict is marked neutral");
     assert_ne!(

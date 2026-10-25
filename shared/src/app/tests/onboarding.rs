@@ -112,7 +112,7 @@ fn gated_profiles_get_no_prescriptive_guidance_or_calculator_numbers() {
         assert!(!vm.hypertrophy_plan[0].summary.contains("sets"));
         assert_eq!(vm.apre.len(), 1, "{health:?}");
         assert!(
-            vm.apre[0].summary.contains("on hold"),
+            vm.apre[0].summary.contains("training is paused"),
             "{}",
             vm.apre[0].summary
         );

@@ -182,7 +182,7 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         rows,
         "Strength",
         format!(
-            "PAP: rest {} min between the heavy set and the jump or sprint",
+            "Heavy set before a jump or sprint: rest {} min between them",
             fmt_u8_range(pap.value.0, pap.value.1)
         ),
         &pap,
@@ -207,7 +207,7 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         rows,
         "Strength",
         format!(
-            "Olympic pulling derivatives: {} sets × {} reps at {}% 1RM, {}–{} min rest",
+            "Olympic-lift pulls: {} sets × {} reps at {}% 1RM, {}–{} min rest",
             fmt_u8_range(od.value.sets.0, od.value.sets.1),
             fmt_u8_range(od.value.reps.0, od.value.reps.1),
             fmt_u8_range(od.value.pct_1rm.0, od.value.pct_1rm.1),
@@ -222,8 +222,8 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         rows,
         "Strength",
         format!(
-            "RPE-anchored: top set at RPE {}, then back-off sets {:.0}–{:.0}% lighter",
-            bo.value.top_set_rpe,
+            "Top set with ~{:.0} reps left, then back-off sets {:.0}–{:.0}% lighter",
+            strength::rpe_to_rir(f64::from(bo.value.top_set_rpe)),
             bo.value.drop_frac.0 * 100.0,
             bo.value.drop_frac.1 * 100.0
         ),

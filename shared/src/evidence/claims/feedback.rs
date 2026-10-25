@@ -55,7 +55,7 @@ claim_group! {
     ),
     FB_TREND_001 => claim(
         "FB-TREND-001",
-        "When a trend improves, the feedback names your consistency and one next step. A plateau is normal; change one thing at a time. A drop explained by heavy training gets a recovery-first answer and a suggested lighter week.",
+        "When a trend improves, the feedback says so and names one next step. A plateau is normal; change one thing at a time. A drop explained by heavy training gets a recovery-first answer and a suggested lighter week.",
         ExpertOpinion,
         &[
             "Williamson et al. 2022, Int Rev Sport Exerc Psychol 17(2):1050-1078",
@@ -64,7 +64,7 @@ claim_group! {
     ),
     FB_RECOVERY_001 => claim(
         "FB-RECOVERY-001",
-        "Two or three warning signs together for one to two weeks (worse performance, low mood, a higher resting heart rate or lower HRV, poor sleep) point to under-recovery; that calls for a calm recovery check rather than praise.",
+        "Two or three warning signs together for one to two weeks (worse performance, low mood, a higher resting heart rate or lower HRV, poor sleep) point to under-recovery; that calls for a recovery check, not praise.",
         Moderate,
         &[
             CITE_MEEUSEN_2013,
@@ -84,7 +84,7 @@ claim_group! {
     .safety(),
     FB_PROVISIONAL_001 => claim(
         "FB-PROVISIONAL-001",
-        "Starting values come from people like you, not from you yet, so treat them as a first guess: they move toward your own numbers as you log.",
+        "For about the first two weeks, the plan uses typical values for your profile answers, then shifts to your own logged numbers.",
         ExpertOpinion,
         &[
             "Kraemer & Ratamess 2004, Med Sci Sports Exerc 36(4):674-688 (ACSM progression models; individualization principle)",
@@ -113,7 +113,7 @@ claim_group! {
     ),
     FB_MASTERY_ANCHOR_001 => claim(
         "FB-MASTERY-ANCHOR-001",
-        "Seeing what you've already achieved helps you stick with training, so wins are named specifically: a new best, a finished session, a hard week done.",
+        "Seeing what you've already done helps people keep training, so feedback names specific results: a new best, a finished session, a hard week done.",
         Strong,
         &[
             "Bandura 1997",

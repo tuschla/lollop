@@ -283,7 +283,7 @@ fn push_execution_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &R
             let (text, neutral) = match v.value {
                 autoreg::VbtReadiness::IncreaseLoad => (
                     format!(
-                        "Bar speed up more than {} m/s on the same weight: you're stronger today, raise working weights",
+                        "Bar speed up more than {} m/s on the same weight: raise working weights",
                         autoreg::VBT_RELIABILITY_M_S
                     ),
                     suppression_active(ctx.readiness_recs, ctx.train_blocked),
@@ -297,7 +297,7 @@ fn push_execution_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &R
                 ),
                 autoreg::VbtReadiness::ReduceLoad => (
                     format!(
-                        "Bar speed down more than {} m/s on the same weight: you're weaker today, reduce working weights",
+                        "Bar speed down more than {} m/s on the same weight: reduce working weights",
                         autoreg::VBT_RELIABILITY_M_S
                     ),
                     false,
@@ -331,7 +331,7 @@ fn push_execution_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &R
         // neutral. A stale review still can't headline it over the prescription.
         let (text, neutral) = match a.value {
             autoreg::SetVolumeAction::AddSet => (
-                "First set went well and you feel normal: add a set today",
+                "First set on target and check-in normal: add a set today",
                 false,
             ),
             autoreg::SetVolumeAction::DropLastSet => (
@@ -450,7 +450,7 @@ fn push_monitoring_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &
         let band = load::decoupling_band(d.drift_pct);
         let text = match band.value {
             load::DecouplingBand::SoundBase => format!(
-                "Heart-rate drift {:.1}% (under {}%): your endurance is solid at this pace",
+                "Heart-rate drift {:.1}% (under {}%): heart rate stayed steady at this pace",
                 d.drift_pct,
                 load::DECOUPLING_SOUND_PCT
             ),
@@ -482,7 +482,7 @@ fn push_hypertrophy_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview) {
         let d = hypertrophy::deload_indicated(n);
         if d.value {
             out.push(to_view_with(
-                "2+ signs of doing too much: take the lighter week now rather than waiting for the scheduled one".to_string(),
+                "2+ signs of doing too much: take the lighter week now".to_string(),
                 &d,
             ));
         }

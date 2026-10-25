@@ -130,7 +130,7 @@ claim_group! {
     ),
     CAL_INTENSITY_FLOOR_001 => claim(
         "CAL-INTENSITY-FLOOR-001",
-        "Bodyweight sets with no or little added weight must end close to failure, with few reps left, to build muscle; a comfortable, easy set isn't enough.",
+        "Bodyweight sets with no or little added weight must end close to failure, with few reps left, to build muscle.",
         Strong,
         &[
             "Lasevicius 2022 (PMID 31895290)",
@@ -177,7 +177,7 @@ claim_group! {
     ),
     CAL_PROG_TRIGGER_001 => claim(
         "CAL-PROG-TRIGGER-001",
-        "The exact order of steps and the move-up rules (rep range, two sessions in a row, reps-left cutoff) are untested convention; no trial has compared alternatives, and only two true experiments exist in all men's rings research.",
+        "The exact order of steps and the move-up rules (rep range, two sessions in a row, reps-left cutoff) are untested convention; no trial has compared alternatives.",
         ExpertOpinion,
         &[
             "Low 2016",
@@ -296,7 +296,7 @@ claim_group! {
     .safety(),
     CAL_INJURY_WRIST_001 => claim(
         "CAL-INJURY-WRIST-001",
-        "About 57% of adult hand-balancers report wrist pain from pinching at the back of the wrist when it bends back under load, whatever the volume. So handstand, handstand push-up and planche work needs pain-free wrist bending under load and a wrist warm-up. (The growth-plate condition \"gymnast's wrist\" affects only young athletes, not adults; Kox 2015.)",
+        "About 57% of adult hand-balancers report wrist pain from pinching at the back of the wrist when it bends back under load, whatever the volume. So handstand, handstand push-up and planche work needs pain-free wrist bending under load and a wrist warm-up.",
         Moderate,
         &[
             "Hanson 2022 (PMID 35480067)",
@@ -321,7 +321,7 @@ claim_group! {
     ),
     CAL_GATE_NUMBERS_001 => claim(
         "CAL-GATE-NUMBERS-001",
-        "Strength checks before advanced moves (pull-up and dip counts before a muscle-up, weeks to adapt between hold stages) haven't been shown to predict injury, and training-load ratios are unproven. So these numbers are expert starting points; a clinician's assessment is the alternative.",
+        "Strength checks before advanced moves (pull-up and dip counts before a muscle-up, weeks to adapt between hold stages) haven't been shown to predict injury, and training-load ratios are unproven. So these numbers are expert starting points; a doctor's or physio's assessment is the alternative.",
         ExpertOpinion,
         &["Bahr 2016 (PMID 27343238)", "Impellizzeri 2020"],
     )

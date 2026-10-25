@@ -757,7 +757,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "How long you've been training matters most for how much training it takes to keep getting stronger.",
+        "basis": "The longer you've trained, the more training it takes to keep getting stronger.",
         "grade_note": "Strong evidence: many good studies agree.",
         "improves": "-"
       },
@@ -781,7 +781,7 @@
     },
     {
       "section": "Strength",
-      "summary": "Set cutoff for Strength: end the set when a rep visibly slows (about 20% bar-speed loss if you track bar speed)",
+      "summary": "Set cutoff for strength: end the set when a rep visibly slows (about 20% bar-speed loss if you track bar speed)",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Pareja-Blanco et al. 2017, Scand J Med Sci Sports 27(7):724-735 (velocity-loss thresholds)",
@@ -845,7 +845,7 @@
     },
     {
       "section": "Strength",
-      "summary": "Prilepin chart at ~90% 1RM: 1–2 reps a set, 7 reps in total is optimal (range 4–10)",
+      "summary": "Prilepin chart at ~90% 1RM: 1–2 reps a set, about 7 reps in total (range 4–10)",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "A.S. Prilepin 1974 (Soviet weightlifting research, >1,000 elite lifters)",
@@ -854,7 +854,7 @@
       "contested": true,
       "why": {
         "basis": "Prilepin's chart sets a ceiling on total reps per session for each weight range (as a % of your one-rep max), with bar speed and form used to check the weight.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on whether Prilepin's chart, built from elite Olympic weightlifters, carries over to powerlifting lifts and beginners, so this is contested. What the app does for now: use it only as a ceiling on reps per session, checked against bar speed and technique.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on whether Prilepin's chart, built from elite Olympic weightlifters, carries over to powerlifting lifts and beginners. The plan's default: use it only as a ceiling on reps per session, checked against bar speed and technique.",
         "improves": "Log your working sets so the app can check each session's reps against the target."
       },
       "training_age": ""
@@ -877,7 +877,7 @@
     },
     {
       "section": "Hypertrophy",
-      "summary": "14 weekly sets per muscle: spread them over 2 or more sessions a week so each set stays good",
+      "summary": "14 weekly sets per muscle: spread them over 2 or more sessions a week",
       "summary_mi": "",
       "grade": "ExpertOpinion",
       "citation": "Remmert et al. 2025, SportRxiv preprint 537 (per-session volume meta-regressions; not peer reviewed)",
@@ -909,7 +909,7 @@
     },
     {
       "section": "Hypertrophy",
-      "summary": "Weekly sets for muscle growth top out at 14",
+      "summary": "Weekly growth target: 14 sets per muscle, capped at 31",
       "summary_mi": "",
       "grade": "Strong",
       "citation": "Schoenfeld, Ogborn & Krieger 2017, J Sports Sci",
@@ -918,7 +918,7 @@
       "contested": true,
       "why": {
         "basis": "More weekly sets build more muscle, with smaller gains from each extra set.",
-        "grade_note": "Strong evidence: many good studies agree. Experts still disagree on how many weekly sets keep adding muscle, so this is contested. What the app does for now: 10–20 hard sets per muscle per week. One view on the other side: More weekly sets keep adding growth with no clear ceiling (Schoenfeld & Krieger).",
+        "grade_note": "Strong evidence: many good studies agree. Contested: experts disagree on how many weekly sets keep adding muscle. The plan's default: 10–20 hard sets per muscle per week. Another view: More weekly sets keep adding growth with no clear ceiling (Schoenfeld & Krieger).",
         "improves": "-"
       },
       "training_age": ""
@@ -949,7 +949,7 @@
       "safety_critical": false,
       "contested": false,
       "why": {
-        "basis": "How long you've been training matters most for how much training it takes to keep getting stronger.",
+        "basis": "The longer you've trained, the more training it takes to keep getting stronger.",
         "grade_note": "Strong evidence: many good studies agree.",
         "improves": "-"
       },
@@ -969,7 +969,7 @@
       "contested": true,
       "why": {
         "basis": "Spacing lifting and endurance sessions at least 3 hours apart (ideally 6–24) reduces how much one blunts the other in the short term.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
         "improves": "-"
       },
       "training_age": ""
@@ -1001,7 +1001,7 @@
       "contested": true,
       "why": {
         "basis": "Keeping running to 3 days a week while strength or muscle is also a main goal is a cautious default, not a limit backed by evidence. Recent meta-analyses found that how often you combine lifting and running didn't change strength or muscle results; spacing sessions 3+ hours apart and keeping runs shorter matter more.",
-        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on how much running holds back lifting gains in real training, so this is contested. What the app does for now: shield only power and explosive work from it.",
+        "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Contested: experts disagree on how much running holds back lifting gains in real training. The plan's default: keep only power and explosive work away from hard running.",
         "improves": "-"
       },
       "training_age": ""
@@ -1081,7 +1081,7 @@
       "contested": true,
       "why": {
         "basis": "When lifting and running share a week, keep long or hard runs at least 24 hours away from heavy leg sessions, in both directions. When you run 4 or more days or 40+ km (25+ miles) a week, cap lower-body lifting at 2 sessions a week and trim lower-body muscle-building volume by about 20–33%.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on the best order and spacing for lifting and running on the same day, so this is contested. What the app does for now: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
         "improves": "-"
       },
       "training_age": ""
@@ -1091,7 +1091,7 @@
       "summary": "Never ramp up high running volume and heavy lifting fast in the same week. The combined strain of both on tendons has not been studied, so build one and hold the other",
       "summary_mi": "",
       "grade": "Weak",
-      "citation": "Baar 2014 (evidence gap noted)",
+      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125",
       "confidence": 0.4,
       "safety_critical": true,
       "contested": false,
@@ -1152,7 +1152,7 @@
     },
     {
       "section": "Strength",
-      "summary": "PAP: rest 5–7 min between the heavy set and the jump or sprint",
+      "summary": "Heavy set before a jump or sprint: rest 5–7 min between them",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Seitz & Haff 2016, Sports Med 46(2):231-240",
@@ -1184,7 +1184,7 @@
     },
     {
       "section": "Strength",
-      "summary": "Olympic pulling derivatives: 3–5 sets × 1–3 reps at 85–100% 1RM, 3–5 min rest",
+      "summary": "Olympic-lift pulls: 3–5 sets × 1–3 reps at 85–100% 1RM, 3–5 min rest",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Suchomel, Nimphius & Stone 2016, Sports Med 46(10):1419-1449 (muscular strength in athletic performance)",
@@ -1200,7 +1200,7 @@
     },
     {
       "section": "Strength",
-      "summary": "RPE-anchored: top set at RPE 8, then back-off sets 10–15% lighter",
+      "summary": "Top set with ~2 reps left, then back-off sets 10–15% lighter",
       "summary_mi": "",
       "grade": "Moderate",
       "citation": "Zourdos et al. 2016, J Strength Cond Res 30(1):267-275 (RIR-based RPE)",
@@ -1384,8 +1384,8 @@
       "safety_critical": false,
       "contested": true,
       "why": {
-        "basis": "About 80% easy running is the shared core of every good mix of easy and hard training. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how runners should split their training between easy and hard, so this is contested. What the app does for now: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. One view on the other side: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
+        "basis": "Effective mixes of easy and hard training share about 80% easy running. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on how runners should split their training between easy and hard. The plan's default: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. Another view: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
         "improves": "-"
       },
       "training_age": ""
@@ -1400,8 +1400,8 @@
       "safety_critical": false,
       "contested": true,
       "why": {
-        "basis": "About 80% easy running is the shared core of every good mix of easy and hard training. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on how runners should split their training between easy and hard, so this is contested. What the app does for now: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. One view on the other side: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
+        "basis": "Effective mixes of easy and hard training share about 80% easy running. A polarized mix (mostly easy plus some very hard work, little in between) gave a small edge in aerobic capacity (VO2max) only to highly trained athletes over blocks shorter than 12 weeks, and no time-trial advantage over other common mixes. The best mix changes with the training phase.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on how runners should split their training between easy and hard. The plan's default: mostly easy with some moderate and a little hard work in base training, shifting to mostly easy plus hard near the race. Another view: Trained runners do best with almost only easy or very hard running, and little in between (Stoggl & Sperlich 2014; Seiler).",
         "improves": "-"
       },
       "training_age": ""
@@ -1465,7 +1465,7 @@
       "contested": true,
       "why": {
         "basis": "Next steps are framed as things you control (pacing, effort, technique) rather than results; whether these beat specific result goals in sport is still debated.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Experts still disagree on whether goals you control (pacing, effort, technique) work better in sport than specific result goals, so this is contested. What the app does for now: next steps are framed as things you control. One view on the other side: Specific, moderately difficult goals improve sport performance in a meta-analysis (Kyllo & Landers 1995), though over a third of sport studies found them no better.",
+        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on whether goals you control (pacing, effort, technique) work better in sport than specific result goals. The plan's default: next steps are framed as things you control. Another view: Specific, moderately difficult goals improve sport performance in a meta-analysis (Kyllo & Landers 1995), though over a third of sport studies found them no better.",
         "improves": "-"
       },
       "training_age": ""
@@ -1564,7 +1564,7 @@
     "safety_critical": false,
     "contested": false,
     "why": {
-      "basis": "Starting values come from people like you, not from you yet, so treat them as a first guess: they move toward your own numbers as you log.",
+      "basis": "For about the first two weeks, the plan uses typical values for your profile answers, then shifts to your own logged numbers.",
       "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
       "improves": "-"
     },
@@ -1585,7 +1585,7 @@
     "contested": true,
     "why": {
       "basis": "Step 7/9 of the push-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Archer push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session.",
-      "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on the order of bodyweight progression steps and when to move up, so this is contested. What the app does for now: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. One view on the other side: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
+      "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Contested: experts disagree on the order of bodyweight progression steps and when to move up. The plan's default: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. Another view: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
       "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
     }
   },
@@ -1729,7 +1729,7 @@
         "contested": true,
         "why": {
           "basis": "Step 7/9 of the push-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Archer push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session.",
-          "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on the order of bodyweight progression steps and when to move up, so this is contested. What the app does for now: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. One view on the other side: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
+          "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Contested: experts disagree on the order of bodyweight progression steps and when to move up. The plan's default: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. Another view: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
           "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
         },
         "done": false,
@@ -1807,7 +1807,7 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "Step 1/6 of the dip progression. Reaching 12 reps on every set on 2 sessions moves you up to Foot-supported dip. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+          "basis": "Step 1/6 of the dip progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Foot-supported dip. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
           "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
           "improves": "Log your reps (or hold time) so the plan can time your next step."
         },
@@ -1880,7 +1880,7 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. Prefer a harder version instead of weight? Choose Harder for L-sit pull-up.",
+          "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. For a harder version instead of added weight, choose Harder for L-sit pull-up.",
           "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
           "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
         },
@@ -1959,7 +1959,7 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions moves you up to Inclined body row. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+          "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Inclined body row. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
           "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
           "improves": "Log your reps (or hold time) so the plan can time your next step."
         },
@@ -2032,7 +2032,7 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions moves you up to Bodyweight squat. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+          "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Bodyweight squat. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
           "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
           "improves": "Log your reps (or hold time) so the plan can time your next step."
         },
@@ -2105,7 +2105,7 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions moves you up to Single-leg glute bridge. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
+          "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions in a row moves you up to Single-leg glute bridge. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
           "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
           "improves": "Log your reps (or hold time) so the plan can time your next step."
         },
@@ -2173,7 +2173,7 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "Step 1/7 of the core progression. Clean 45-second holds on 2 sessions move you up to Long-lever plank.",
+          "basis": "Step 1/7 of the core progression. Clean 45-second holds on 2 sessions in a row move you up to Long-lever plank.",
           "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
           "improves": "Log your reps (or hold time) so the plan can time your next step."
         },
@@ -2264,7 +2264,7 @@
           "contested": true,
           "why": {
             "basis": "Step 7/9 of the push-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Archer push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session.",
-            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on the order of bodyweight progression steps and when to move up, so this is contested. What the app does for now: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. One view on the other side: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Contested: experts disagree on the order of bodyweight progression steps and when to move up. The plan's default: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. Another view: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
             "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
           },
           "done": false,
@@ -2342,7 +2342,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/6 of the dip progression. Reaching 12 reps on every set on 2 sessions moves you up to Foot-supported dip. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/6 of the dip progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Foot-supported dip. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -2415,7 +2415,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. Prefer a harder version instead of weight? Choose Harder for L-sit pull-up.",
+            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. For a harder version instead of added weight, choose Harder for L-sit pull-up.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
           },
@@ -2494,7 +2494,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions moves you up to Inclined body row. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Inclined body row. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -2567,7 +2567,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions moves you up to Bodyweight squat. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Bodyweight squat. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -2640,7 +2640,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions moves you up to Single-leg glute bridge. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions in a row moves you up to Single-leg glute bridge. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -2708,7 +2708,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/7 of the core progression. Clean 45-second holds on 2 sessions move you up to Long-lever plank.",
+            "basis": "Step 1/7 of the core progression. Clean 45-second holds on 2 sessions in a row move you up to Long-lever plank.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -2811,7 +2811,7 @@
           "contested": true,
           "why": {
             "basis": "Step 7/9 of the push-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Archer push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session.",
-            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on the order of bodyweight progression steps and when to move up, so this is contested. What the app does for now: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. One view on the other side: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Contested: experts disagree on the order of bodyweight progression steps and when to move up. The plan's default: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. Another view: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
             "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
           },
           "done": false,
@@ -2889,7 +2889,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/7 of the overhead push progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Elevated pike push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 5 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/7 of the overhead push progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Elevated pike push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 5 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
           },
@@ -2962,7 +2962,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. Prefer a harder version instead of weight? Choose Harder for L-sit pull-up.",
+            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. For a harder version instead of added weight, choose Harder for L-sit pull-up.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
           },
@@ -3041,7 +3041,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions moves you up to Inclined body row. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Inclined body row. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -3114,7 +3114,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions moves you up to Bodyweight squat. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Bodyweight squat. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -3187,7 +3187,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions moves you up to Single-leg glute bridge. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions in a row moves you up to Single-leg glute bridge. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -3228,7 +3228,7 @@
       "move_targets": [],
       "moved_from_epoch_day": null,
       "move_note": null,
-      "move_blocked_reason": "No free day left this week works. On Tuesday, the same muscles would be trained on back-to-back days (keep about 48 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
+      "move_blocked_reason": "No other day this week works. On Tuesday, the same muscles would be trained on back-to-back days (keep about 48 hours between them). If you can't train on the planned day, skip it. One missed session costs little.",
       "credited_from_epoch_day": null
     },
     {
@@ -3288,7 +3288,7 @@
           "contested": true,
           "why": {
             "basis": "Step 7/9 of the push-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Archer push-up. Managing 12+ reps on every set means this step is too easy: you skip ahead after one session.",
-            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Experts still disagree on the order of bodyweight progression steps and when to move up, so this is contested. What the app does for now: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. One view on the other side: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials. Contested: experts disagree on the order of bodyweight progression steps and when to move up. The plan's default: move up a step after hitting the top of the rep range on every set, with at least 1 rep left, in 2 sessions in a row, then restart at the bottom of the range. Another view: Only two randomized trials have tested a step ladder, and neither compared different orders or move-up rules (Malíř 2023 review; Kotarsky 2018; Wei 2023).",
             "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
           },
           "done": false,
@@ -3366,7 +3366,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/6 of the dip progression. Reaching 12 reps on every set on 2 sessions moves you up to Foot-supported dip. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/6 of the dip progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Foot-supported dip. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -3439,7 +3439,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. Prefer a harder version instead of weight? Choose Harder for L-sit pull-up.",
+            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. For a harder version instead of added weight, choose Harder for L-sit pull-up.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
           },
@@ -3518,7 +3518,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions moves you up to Inclined body row. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/7 of the row progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Inclined body row. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -3591,7 +3591,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions moves you up to Bodyweight squat. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/7 of the squat progression. Reaching 12 reps on every set on 2 sessions in a row moves you up to Bodyweight squat. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 8 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -3664,7 +3664,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions moves you up to Single-leg glute bridge. Counted on reps, because reps-left guesses are least accurate on high-rep sets. Easy versions like this only build strength when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. New to this movement? Choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
+            "basis": "Step 1/8 of the hips and hamstrings progression. Reaching 15 reps on every set on 2 sessions in a row moves you up to Single-leg glute bridge. This step goes by reps, not reps left: reps-left guesses are least accurate on high-rep sets. Easy versions like this only build muscle when taken close to your limit, so this one asks for fewer reps left than some harder steps. Managing 16+ reps on every set means this step is too easy: you skip ahead after one session. If this movement is new to you, choose Easier or Harder to start at the hardest version you can do for at least 10 clean reps, or log one all-out set and the plan places you.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -3732,7 +3732,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "Step 1/7 of the core progression. Clean 45-second holds on 2 sessions move you up to Long-lever plank.",
+            "basis": "Step 1/7 of the core progression. Clean 45-second holds on 2 sessions in a row move you up to Long-lever plank.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Log your reps (or hold time) so the plan can time your next step."
           },
@@ -3817,7 +3817,7 @@
     "safety_critical": false,
     "contested": false,
     "why": {
-      "basis": "A strength week built from your profile and logged training.",
+      "basis": "Planned from your profile and logged training.",
       "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
       "improves": "-"
     },

@@ -208,8 +208,8 @@ internal fun RunEffortLine(r: RunResultView) {
 }
 
 /**
- * A History segment (Lifts or Runs) with nothing logged yet: one line saying what
- * will show up here, then the action that fills it ([primaryLabel]) and an optional
+ * A History segment (Lifts or Runs) with nothing logged yet: one line saying it
+ * is empty, then the action that fills it ([primaryLabel]) and an optional
  * second way in ([secondaryLabel], e.g. importing past runs) as a start-aligned
  * [TextAction], never a second slab beside the button (ui-sweep §14). No empty
  * chart or zero tiles.

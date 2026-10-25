@@ -138,7 +138,7 @@ internal fun checkinEchoIsToday(echoObservedAt: Long, nowSec: Long, zone: java.t
  * first answer. The CORE normalizes the retained history into
  * z-scores/deltas/streaks; the user never enters a z-score. One Submit → one
  * [Event.SubmitCheckin] (none when only the illness item was answered), plus an Illness
- * [Event.SubmitReadiness] when the "Feeling ill?" item is answered (asked first
+ * [Event.SubmitReadiness] when the Illness item is answered (asked first
  * when the core raises [illnessPrompt]). The raw-signal editor stays reachable
  * from the Log chooser's "More" group.
  */
@@ -150,7 +150,7 @@ fun MorningCheckinSheet(
     // Mirror unsaved-edits up to a host so its swipe-down dismissal can guard it.
     onDirtyChange: (Boolean) -> Unit = {},
     // The core asks for the illness check (an active illness report, or a high
-    // resting-HR morning): the "Feeling ill?" item moves to the top.
+    // resting-HR morning): the Illness item moves to the top.
     illnessPrompt: Boolean = false,
     // The check-in (null when only the illness question was answered), and the
     // illness answer when one was given (value 0 none, 1 above the neck, 2 below
@@ -448,7 +448,7 @@ private fun CheckinScaleRow(
 }
 
 /**
- * The check-in's "Feeling ill?" item (AUTOREG-4, ILLNESS-RTT-001): fine / head
+ * The check-in's Illness item (AUTOREG-4, ILLNESS-RTT-001): none / head
  * cold only / flu, fever or body aches, the three levels the core's illness
  * gate reads (value 0 / 1 above the neck / 2 below the neck or fever). The
  * question is a [FieldLabel] like every other question (a TalkBack heading); a

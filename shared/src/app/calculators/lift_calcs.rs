@@ -27,7 +27,8 @@ pub(in crate::app) fn push_hold_row(
     push_guidance(
         rows,
         section,
-        "No numbers while your training is on hold for a health reason. See the safety note for what to do next.".to_string(),
+        "No numbers while training is paused. The banner at the top says what to do next."
+            .to_string(),
         hold,
     );
 }
@@ -336,10 +337,10 @@ fn push_ramp_row(
             "No direct sets: compound lifts already train this muscle. Optional direct work: {ramp_str} sets/wk{cap_note}"
         ),
         hypertrophy::VolumeRole::Priority => format!(
-            "Specialization block: weekly set ramp {ramp_str}{cap_note}, starting above your usual target"
+            "Focus block: weekly set ramp {ramp_str}{cap_note}, starting above your usual target"
         ),
         hypertrophy::VolumeRole::Maintenance => format!(
-            "Held at maintenance ({} sets/wk) while another muscle is specialized: {ramp_str}",
+            "Held at maintenance ({} sets/wk) while another muscle has a focus block: {ramp_str}",
             lm.mv
         ),
         hypertrophy::VolumeRole::Standard => format!("Weekly set ramp: {ramp_str}{cap_note}"),
@@ -450,7 +451,7 @@ fn push_execution_rows(rows: &mut Vec<GuidanceView>, section: &str) {
         rows,
         section,
         format!(
-            "Mesocycle shape: {} building weeks, then {} lighter week{} (every {} weeks)",
+            "Block shape: {} building weeks, then {} lighter week{} (every {} weeks)",
             fmt_u8_range(ms.value.accumulation_weeks.0, ms.value.accumulation_weeks.1),
             ms.value.deload_weeks,
             if ms.value.deload_weeks == 1 { "" } else { "s" },
@@ -548,11 +549,11 @@ fn push_next_meso_rows(
         section,
         if next.value > current {
             format!(
-                "Not growing while recovering easily: raise next mesocycle to {} sets/wk (from {current})",
+                "Not growing while recovering easily: raise next block to {} sets/wk (from {current})",
                 next.value
             )
         } else {
-            format!("Next mesocycle: stay at {current} sets/wk")
+            format!("Next block: stay at {current} sets/wk")
         },
         &next,
     );
@@ -588,7 +589,7 @@ fn push_training_age_rows(rows: &mut Vec<GuidanceView>, section: &str, profile: 
                     rows,
                     section,
                     format!(
-                        "New to counting reps left? Start with {} reps left, and now and then take a set to failure to check your count",
+                        "If you're new to counting reps left, start with {} reps left and now and then take a set to failure to check your count",
                         fmt_u8_range(start.value.0, start.value.1)
                     ),
                     &start,
@@ -692,7 +693,7 @@ pub(in crate::app) fn build_protein_targets(
                     &mut rows,
                     "Protein",
                     format!(
-                        "Deficit (lean-mass preserving): {:.0}–{:.0} g/day · {lo:.1}–{hi:.1} g/kg × {}",
+                        "Eating less to lose weight: {:.0}–{:.0} g/day · {lo:.1}–{hi:.1} g/kg × {}",
                         grams(lo),
                         grams(hi),
                         protein_bodyweight(q.bodyweight_kg, weight_lb),

@@ -25,8 +25,8 @@ pub(crate) mod tests;
 pub use derive::{BaselineKind, BaselineStatus, DerivedReadiness, derive_readiness};
 pub use hold::{ReturnKind, TimedInput, last_hold_resolution, return_adjustment};
 pub use pain::{
-    PainRegion, item_spared_by_pain, pain_blocks_progression, pain_hold_active, pain_region,
-    worst_active_pain,
+    PainRegion, item_spared_by_pain, pain_blocks_progression, pain_blocks_training,
+    pain_hold_active, pain_region, worst_active_pain,
 };
 pub use perf::{MovementPerf, PerfSet, derive_performance};
 pub use prescriptions::{

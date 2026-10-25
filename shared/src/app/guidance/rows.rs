@@ -67,14 +67,14 @@ pub(super) fn goal_distance_label(g: GoalDistance) -> &'static str {
     }
 }
 
-/// Human label for a lift goal, matching the Kotlin `LiftGoal.labelRes`
-/// (ProfileEditor.kt: Strength / Muscle / Power). Used in guidance copy so the
-/// row never leaks the raw Debug enum name (e.g. "MaxStrength").
-pub(super) fn lift_goal_label(g: LiftGoal) -> &'static str {
+/// A lift goal as it reads mid-sentence in guidance copy ("Weights for muscle
+/// building: …"), so a row never leaks the raw Debug enum name (e.g.
+/// "MaxStrength") or a capitalized segment label.
+pub(super) fn lift_goal_phrase(g: LiftGoal) -> &'static str {
     match g {
-        LiftGoal::MaxStrength => "Strength",
-        LiftGoal::Power => "Power",
-        LiftGoal::Hypertrophy => "Muscle",
+        LiftGoal::MaxStrength => "strength",
+        LiftGoal::Power => "power",
+        LiftGoal::Hypertrophy => "muscle building",
     }
 }
 

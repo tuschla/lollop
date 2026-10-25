@@ -368,7 +368,7 @@ fn a_logged_shakeout_keeps_the_stated_long_run() {
     assert_eq!(
         item.safety_reason,
         format!(
-            "Capped at {}: at most 10% over the longest recent run you told us about",
+            "Capped at {}: at most 10% over the longest recent run you entered",
             item.summary.split(" · ").next().unwrap()
         )
     );
@@ -379,7 +379,7 @@ fn a_logged_shakeout_keeps_the_stated_long_run() {
     assert_eq!(
         item.safety_reason_mi,
         format!(
-            "Capped at {} mi: at most 10% over the longest recent run you told us about",
+            "Capped at {} mi: at most 10% over the longest recent run you entered",
             mi_txt.strip_suffix(".0").unwrap_or(&mi_txt)
         )
     );

@@ -118,7 +118,7 @@ fn move_blocked_copy(block: &crate::plan::MoveBlock, week_monday: i64) -> String
             "Every day left this week already has a session, and the plan never puts two on one day. {skip}"
         ),
         crate::plan::MoveBlock::Spacing { day, reason } => format!(
-            "No free day left this week works. On {}, {reason}. {skip}",
+            "No other day this week works. On {}, {reason}. {skip}",
             weekday_name(week_monday.saturating_add(*day as i64))
         ),
     }

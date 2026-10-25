@@ -614,7 +614,8 @@ pub struct ConsistencyWeekView {
 pub struct HoldResolutionView {
     /// The signal `Event::ResolveHold` targets: `"Pain"` or `"Illness"`.
     pub signal: ReadinessSignal,
-    /// Why training is paused and how it clears, one plain sentence.
+    /// What the hold keeps off (all training, or only some of it) and how it
+    /// clears, one plain sentence.
     pub paused_text: String,
     /// The banner action label, e.g. "I'm pain-free now".
     pub action_label: String,
@@ -1034,7 +1035,7 @@ pub struct PrescriptionView {
     #[serde(default)]
     pub anchored_on_last: bool,
     /// Set when a readiness adjustment modified this item, e.g.
-    /// `"−10% weight today"`. Empty otherwise.
+    /// `"10% less weight today"`. Empty otherwise.
     #[serde(default)]
     pub adjusted_note: String,
     /// This item is the post-illness return check (ready-upd-003,
@@ -1158,14 +1159,24 @@ pub struct PrescriptionView {
     /// says to pick a weight for the reps-left target. Core-internal.
     #[serde(skip)]
     pub(crate) pick_load: bool,
-    /// The load `why.basis` states: the plan's derived load, before any fold,
-    /// hold or in-session cue moved `load_kg`. Core-internal.
+    /// The prescription `why.basis` states as the plan derived it, before any
+    /// fold, hold or in-session cue moved the face. Core-internal.
     #[serde(skip)]
-    pub(crate) basis_load_kg: Option<f64>,
+    pub(crate) basis_rx: Option<BasisRx>,
     /// A held day (ready-upd-001) clamped `load_kg` to `hold_load_cap_kg`.
     /// Core-internal.
     #[serde(skip)]
     pub(crate) load_held: bool,
+}
+
+/// What a lift's `why.basis` states, so the basis can be restated once the
+/// face moves (`plan_views::restate_basis`): the load, the `"3×5"` sets×reps
+/// lead and the reps left, each as planned. Core-internal.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct BasisRx {
+    pub(crate) load_kg: Option<f64>,
+    pub(crate) lead: String,
+    pub(crate) rir: Option<i64>,
 }
 
 /// What a plan item trains. On the wire a run item is the one with no

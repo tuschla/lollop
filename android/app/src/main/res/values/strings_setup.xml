@@ -66,7 +66,7 @@
     <string name="setup_modality_calis_title">Bodyweight (calisthenics)</string>
     <string name="setup_modality_calis_consequence">Move up to harder bodyweight moves instead of adding weight.</string>
     <!-- Strength / power: optional test or meet date -->
-    <string name="setup_meet_q">Got a test day or meet coming up?</string>
+    <string name="setup_meet_q">Test day or meet date</string>
     <string name="setup_meet_sub">Optional. The weeks before it ease off so you arrive fresh.</string>
     <string name="setup_date_none">No date yet</string>
     <string name="setup_date_pick">Pick a date</string>
@@ -110,10 +110,10 @@
     <string name="setup_goaldist_marathon">Marathon</string>
     <string name="setup_goaldist_general_blurb">Overall endurance, no race on the calendar.</string>
     <string name="setup_goaldist_c25k_blurb">From zero to running 5K without stopping.</string>
-    <string name="setup_goaldist_5k_blurb">Sharpen speed for a fast 5K.</string>
-    <string name="setup_goaldist_10k_blurb">Balance speed and endurance for 10K.</string>
+    <string name="setup_goaldist_5k_blurb">Speed work for a 5K race.</string>
+    <string name="setup_goaldist_10k_blurb">Speed and endurance for a 10K race.</string>
     <!-- %1$s = the half-marathon distance in the user's unit ("21.1 km" / "13.1 mi"). -->
-    <string name="setup_goaldist_half_blurb">Build the endurance to race %1$s.</string>
+    <string name="setup_goaldist_half_blurb">Endurance for a %1$s race.</string>
     <string name="setup_goaldist_marathon_blurb">The longest race, with the most weekly running.</string>
 
     <!-- Race goals: race date + a recent race or time trial -->
@@ -143,8 +143,8 @@
     <string name="setup_days_scale_label">Days per week</string>
     <string name="setup_days_pick_hint">Pick a number of days to continue.</string>
     <plurals name="setup_days_weekdays_hint">
-        <item quantity="one">Tick at least %d day, or pick Any days.</item>
-        <item quantity="other">Tick at least %d days, or pick Any days.</item>
+        <item quantity="one">Pick at least %d day, or choose Any days.</item>
+        <item quantity="other">Pick at least %d days, or choose Any days.</item>
     </plurals>
     <string name="setup_days_lift_split_q">Of those, how many for lifting?</string>
     <!-- The Both-week split: %1$s = setup_days_lift_count, %2$s = setup_days_run_count. -->
@@ -158,7 +158,7 @@
         <item quantity="other">%d run days</item>
     </plurals>
     <!-- %1$d = the lifting-led run-day cap, %2$s = setup_days_rest_count. -->
-    <string name="setup_days_split_capped">With lifting leading, running is capped at %1$d days so it doesn\'t hold back your lifting. The other %2$s are rest days. For more run days, make running lead.</string>
+    <string name="setup_days_split_capped">With lifting leading, running is capped at %1$d days. The other %2$s are rest days. For more run days, make running lead.</string>
     <plurals name="setup_days_rest_count">
         <item quantity="one">%d day</item>
         <item quantity="other">%d days</item>
@@ -255,13 +255,13 @@
     <string name="setup_review_age">Age %1$s</string>
     <string name="setup_review_age_not_given">Age not given</string>
     <string name="setup_review_health">Health</string>
-    <string name="setup_review_health_hold">No plan for now. See a professional first. You can still log and track.</string>
+    <string name="setup_review_health_hold">No plan for now. See a doctor first. You can still log and track.</string>
 
     <!-- Health screen (headers + defer notice; gate rows below are shared) -->
-    <string name="setup_step_health_q">Anything we should know?</string>
-    <string name="setup_step_health_sub">Turn on any that apply. If one does, see a professional before lollop builds a plan.</string>
+    <string name="setup_step_health_q">Health</string>
+    <string name="setup_step_health_sub">Turn on any that apply. Most of them pause the plan until a doctor clears you.</string>
     <string name="setup_health_defer_notice">From your answers, lollop won\'t build a plan for now. You can still log and track.</string>
-    <string name="setup_health_defer_youth">You\'re under 18, so lollop won\'t build a plan. Strength training at your age needs a coach who can watch your technique. It still tracks your activity and everything you log.</string>
+    <string name="setup_health_defer_youth">You\'re under 18, so lollop doesn\'t build plans. Strength training at your age needs a coach who can watch your technique. You can still log and track.</string>
 
     <!-- HealthScreenCopy: shared health-gate rows (wizard health screen + editor Health
          section); one source so the two wordings cannot drift. -->
@@ -269,7 +269,7 @@
          symptoms (not clearable, their consequence shows under the row once on),
          Q6 is the injury/rehab hold; any other Yes unlocks "Cleared by a doctor". -->
     <string name="setup_parq_intro">Turn on any that apply.</string>
-    <string name="setup_parq_symptom_body">See a doctor before training. Your plan stays on hold until you turn this off.</string>
+    <string name="setup_parq_symptom_body">See a doctor before training. Your plan stays paused until you turn this off.</string>
     <string name="setup_parq_legacy">An earlier answer noted a health condition. Answer the questions below to update it.</string>
     <string name="setup_parq_q1">Has a doctor ever said you have a heart condition or high blood pressure?</string>
     <string name="setup_parq_q2">Do you feel pain in your chest at rest, during daily activities, or when you exercise?</string>
@@ -285,16 +285,16 @@
         <item quantity="other">%d apply</item>
     </plurals>
     <string name="setup_health_ill_label">I\'m ill right now (fever, infection)</string>
-    <string name="setup_health_ill_body">lollop holds the plan while you\'re unwell. Turn this off once you\'re better.</string>
+    <string name="setup_health_ill_body">lollop pauses the plan while you\'re unwell. Turn this off once you\'re better.</string>
     <string name="setup_health_cleared_label">Cleared by a doctor</string>
     <string name="setup_health_cleared_body">A doctor has cleared you to train despite the condition above. This doesn\'t cover chest pain or fainting.</string>
     <string name="setup_health_pregnant_label">Currently pregnant</string>
     <string name="setup_health_pregnant_body">lollop won\'t build a plan. Work out your training with your doctor or midwife.</string>
     <string name="setup_health_pregnancy_warning_label">A pregnancy warning sign</string>
     <string name="setup_health_pregnancy_warning_body">Stop exercising and get medical care if you have bleeding, chest pain, breathlessness before you exercise, or the baby moving less.</string>
-    <string name="setup_health_injury_body">lollop doesn\'t build rehab plans. Turn this off once a professional clears you.</string>
+    <string name="setup_health_injury_body">lollop doesn\'t build rehab plans. Turn this off once a doctor or physio clears you.</string>
     <string name="setup_health_reds_label">Signs of under-eating</string>
-    <string name="setup_health_reds_body">Missed periods, rapid weight loss, compulsive exercise or ongoing unexplained tiredness. lollop points you to a professional.</string>
+    <string name="setup_health_reds_body">Missed periods, rapid weight loss, compulsive exercise or ongoing unexplained tiredness. lollop pauses the plan. Turn this off once a doctor or registered dietitian clears you.</string>
 
     <!-- ===================== setup_ : Profile editor ===================== -->
 
@@ -389,7 +389,6 @@
     <string name="setup_muscle_calves">Calves</string>
     <string name="setup_muscle_abs">Abs</string>
     <string name="setup_row_runner_strength">Add 2 short strength sessions a week</string>
-    <string name="setup_row_runner_strength_sub">Makes each stride cost less energy.</string>
     <string name="setup_row_health_questions">Health questions</string>
     <string name="setup_parq_value_clear">None apply</string>
     <string name="setup_parq_value_legacy">Answer again</string>
@@ -425,13 +424,13 @@
     <string name="setup_temp_value">%1$d °C</string>
     <string name="setup_row_env_altitude">Session altitude</string>
     <string name="setup_altitude_value">%1$d m</string>
-    <string name="setup_row_break">Back from a break?</string>
+    <string name="setup_row_break">Back from a break</string>
     <string name="setup_break_none">No break</string>
     <string name="setup_break_weeks_label">How long were you off?</string>
     <string name="setup_break_restart_label">When did you restart?</string>
     <string name="setup_break_value">Since %1$s</string>
     <string name="setup_weeks_value">%1$d wk</string>
-    <string name="setup_row_high_load">High-load block</string>
+    <string name="setup_row_high_load">Hard training block</string>
     <string name="setup_row_high_load_sub">Planned hard weeks. A good morning check-in won\'t add extra training.</string>
 
     <!-- Health &amp; safety group label -->

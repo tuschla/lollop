@@ -58,7 +58,7 @@ pub(in crate::app) fn build_critical_speed(efforts: &[CsEffortIn]) -> Vec<Guidan
                 &mut rows,
                 "Critical speed",
                 format!(
-                    "Critical Speed {:.2} m/s ({pace}) · D′ {:.0} m from {} maximal efforts",
+                    "Critical speed {:.2} m/s ({pace}) · distance reserve D′ {:.0} m from {} all-out efforts",
                     f.cs_m_per_s,
                     f.d_prime_m,
                     cs_efforts.len()
@@ -69,7 +69,7 @@ pub(in crate::app) fn build_critical_speed(efforts: &[CsEffortIn]) -> Vec<Guidan
                 push_guidance(
                     &mut rows,
                     "Critical speed",
-                    "Protocol note: the ideal pairing is one 3–8 min and one 12–30 min effort"
+                    "For a firmer estimate, pair one 3–8 min effort with one 12–30 min effort"
                         .to_string(),
                     &fit,
                 );
@@ -77,25 +77,25 @@ pub(in crate::app) fn build_critical_speed(efforts: &[CsEffortIn]) -> Vec<Guidan
         }
         Err(v) => {
             let why = match v {
-                load::CsProtocolViolation::TooFewEfforts => "needs at least 2 maximal efforts",
-                load::CsProtocolViolation::TooManyEfforts => "uses at most 5 maximal efforts",
+                load::CsProtocolViolation::TooFewEfforts => "it needs at least 2 all-out efforts",
+                load::CsProtocolViolation::TooManyEfforts => "it uses at most 5 all-out efforts",
                 load::CsProtocolViolation::DurationOutOfRange => {
                     "each effort must last 2–30 minutes"
                 }
                 load::CsProtocolViolation::DegenerateDurations => {
-                    "efforts must differ in duration to fit a slope"
+                    "the efforts need different durations"
                 }
                 load::CsProtocolViolation::NegativeDPrime => {
-                    "fitted D′ is negative. A trial was likely not maximal; re-test"
+                    "the distance reserve (D′) came out negative, so an effort was likely not all-out; re-test"
                 }
                 load::CsProtocolViolation::NonPositiveSlope => {
-                    "These efforts imply speed decreasing with duration — re-check the distances and times."
+                    "a longer effort covers no more distance than a shorter one; check the distances and times"
                 }
             };
             push_guidance(
                 &mut rows,
                 "Critical speed",
-                format!("No Critical-Speed estimate: the protocol {why}"),
+                format!("No critical speed estimate: {why}."),
                 &fit,
             );
         }

@@ -57,6 +57,8 @@ pub(super) fn flatten_lift_prescription(
         LiftIntensity::MaxIntent => max_intent_arm(l),
     };
     let intensity_label = intensity.label().unwrap_or(prose_label);
+    // An arm's own basis states the prescription; restated if the face moves.
+    let states_rx = basis.is_some();
     let mut why = why_from(basis, rx);
     if let Some(imp) = improves {
         why.improves = imp;
@@ -134,10 +136,17 @@ pub(super) fn flatten_lift_prescription(
         rpe_target: matches!(l.intensity, LiftIntensity::Rpe(_)),
         hold_load_cap_kg: None,
         pick_load: false,
-        basis_load_kg: load_kg,
+        basis_rx: None,
         load_held: false,
     };
     refresh_lift_summary(&mut it, weight_lb);
+    if states_rx {
+        it.basis_rx = Some(BasisRx {
+            load_kg,
+            lead: sets_reps_lead(&it),
+            rir: face_rir(&it),
+        });
+    }
     it
 }
 
@@ -190,7 +199,7 @@ fn percent_arm(
                 l.sets, reps_txt, with_reps_left(i64::from(rir)), p
             )),
             improves: Some(
-                "Log a heavier set of this lift so its weights can follow your measured max instead of an effort target."
+                "Log a heavier set of this lift so its weights follow your estimated max instead of an effort target."
                     .to_string(),
             ),
             target_rpe: Some(crate::strength::rir_to_rpe(rir as f64)),
@@ -205,9 +214,9 @@ fn percent_arm(
             )
         })
         .unwrap_or_default();
-    let reps_word = if effort_rir == 1 { "rep" } else { "reps" };
     let effort = format!(
-        "Aim to finish each set with about {effort_rir} {reps_word} left; if a set feels much harder than that, today is below your estimate, so stop the exercise there."
+        "Stop each set {}. If a set feels much harder, you're below your estimate today: end the exercise there.",
+        about_reps_left(i64::from(effort_rir))
     );
     let (basis, improves) = match (load, e1) {
         (Some(kg), Some(e)) => {
@@ -240,7 +249,7 @@ fn percent_arm(
             ),
             // No anchor yet: a logged set replaces the estimate with a
             // measured e1RM the load can key off.
-            "Log a set of this lift so its weights can follow your measured max instead of a typical value.",
+            "Log a set of this lift so its weights follow your estimated max instead of a typical value.",
         ),
     };
     LiftArm {
@@ -256,16 +265,6 @@ fn percent_arm(
         improves: Some(improves.to_string()),
         target_rpe: Some(crate::strength::rir_to_rpe(effort_rir as f64)),
         repoint: derate_claim.filter(|_| load.is_some()),
-    }
-}
-
-/// A basis line's effort clause in the face wording: "with ~2 reps left", or
-/// "to your last good rep" for a zero reserve.
-fn with_reps_left(n: i64) -> String {
-    if n <= 0 {
-        reps_left(n)
-    } else {
-        format!("with {}", reps_left(n))
     }
 }
 
@@ -298,7 +297,7 @@ fn rir_arm(
             )),
             // No e1RM anchor: loads are RIR-based until a set is logged.
             improves: Some(
-                "Log a set of this lift so its weights can follow your measured max instead of an effort target."
+                "Log a set of this lift so its weights follow your estimated max instead of an effort target."
                     .to_string(),
             ),
             target_rpe: Some(crate::strength::rir_to_rpe(n as f64)),
@@ -378,7 +377,7 @@ fn rep_range_arm(
     let effort = with_reps_left(i64::from(n));
     let basis = match (load, last) {
         _ if deload => format!(
-            "Lighter week: {}×{reps_txt}{} with at least {} left, about half your usual sets at a lighter weight so you come back fresher.",
+            "Lighter week: {}×{reps_txt}{} with at least {} left, about half your usual sets at a lighter weight.",
             l.sets,
             load.map(|kg| format!(" at {}", fmt_weight(kg, weight_lb)))
                 .unwrap_or_default(),
@@ -428,23 +427,19 @@ fn rep_range_arm(
 /// (STR-E1RM-CHECK-001: a 3–6 rep test set): the athlete picks the weight, and
 /// the logged set sets their working loads.
 fn rpe_arm(l: &crate::schema::LiftPrescription, r: f32, anchors: &crate::plan::Anchors) -> LiftArm {
-    let rir = crate::strength::rpe_to_rir(r as f64);
+    let rir = crate::strength::rpe_to_rir(r as f64).round();
     let calibration = anchors.e1rm_for(&l.exercise).is_none();
-    let reps_word = if rir.round() == 1.0 { "rep" } else { "reps" };
+    let effort = about_reps_left(rir as i64);
     let basis = if calibration {
         format!(
-            "Warm up, then work up to {} set{} of {} with about {:.0} {reps_word} left (a weight you could lift about {:.0} times). Log it with how hard it felt; your working weights for this lift are set from it.",
+            "Warm up, then work up to {} set{} of {} {effort} (a weight you could lift about {:.0} times). Log it with how hard it felt; your working weights for this lift are set from it.",
             l.sets,
             if l.sets == 1 { "" } else { "s" },
             l.reps,
-            rir,
             l.reps as f64 + rir
         )
     } else {
-        format!(
-            "{}×{} with about {:.0} {reps_word} left.",
-            l.sets, l.reps, rir
-        )
+        format!("{}×{} {effort}.", l.sets, l.reps)
     };
     LiftArm {
         load_kg: None,
@@ -454,7 +449,7 @@ fn rpe_arm(l: &crate::schema::LiftPrescription, r: f32, anchors: &crate::plan::A
         anchored_sets: 0,
         basis: Some(basis),
         improves: calibration.then(|| {
-            "Log this set with how hard it felt so the plan can set this lift's weights from your measured max."
+            "Log this set with how hard it felt so the plan can set this lift's weights from it."
                 .to_string()
         }),
         target_rpe: Some(r as f64),

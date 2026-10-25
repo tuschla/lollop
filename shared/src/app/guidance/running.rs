@@ -93,7 +93,7 @@ fn push_runner_strength_row(p: &Profile, rows: &mut Vec<GuidanceView>) {
             push_guidance(
                 rows,
                 "Running",
-                "Add 2 short strength sessions a week: heavy leg work (squats, hip hinges) makes running more economical and can improve race times. Turn on runner strength in your profile and the plan places them away from your hard runs.".to_string(),
+                "Add 2 short strength sessions a week (a profile setting): heavy leg work (squats, hip hinges) makes running more economical. The plan places them away from your hard runs.".to_string(),
                 &rs,
             );
         }
@@ -148,10 +148,10 @@ fn push_session_rx_rows(p: &Profile, rows: &mut Vec<GuidanceView>) {
     let easy = running::workout_rx(running::RunWorkout::EasyGeneralAerobic);
     let mut parts: Vec<String> = Vec::new();
     if let (Some(lo), Some(hi)) = easy.value.pct_hr_max {
-        parts.push(format!("{:.0}–{:.0} %HRmax", lo * 100.0, hi * 100.0));
+        parts.push(format!("{:.0}–{:.0}% HRmax", lo * 100.0, hi * 100.0));
     }
     if let Some((lo, hi)) = easy.value.rpe {
-        parts.push(format!("RPE {lo}–{hi}"));
+        parts.push(format!("effort {lo}–{hi} of 10"));
     }
     if let (Some(lo), Some(hi)) = easy.value.duration_min {
         parts.push(format!("{lo}–{hi} min"));
@@ -167,13 +167,13 @@ fn push_session_rx_rows(p: &Profile, rows: &mut Vec<GuidanceView>) {
     let long = running::run_workout_rx(crate::schema::RunSessionType::LongRun);
     let mut long_parts: Vec<String> = Vec::new();
     if let (Some(lo), Some(hi)) = long.value.pct_hr_max {
-        long_parts.push(format!("{:.0}–{:.0} %HRmax", lo * 100.0, hi * 100.0));
+        long_parts.push(format!("{:.0}–{:.0}% HRmax", lo * 100.0, hi * 100.0));
     }
     if let (Some(lo), Some(hi)) = long.value.pct_slower_than_mp {
         long_parts.push(format!("{lo:.0}–{hi:.0}% slower than marathon pace"));
     }
     if let Some((lo, hi)) = long.value.rpe {
-        long_parts.push(format!("RPE {lo}–{hi}"));
+        long_parts.push(format!("effort {lo}–{hi} of 10"));
     }
     if let (None, Some(hi)) = long.value.duration_min {
         long_parts.push(format!("up to {hi} min"));
@@ -242,7 +242,7 @@ fn push_session_rx_rows(p: &Profile, rows: &mut Vec<GuidanceView>) {
         rows,
         "Running",
         format!(
-            "Strides: {}–{} × {}–{} s controlled-fast (RPE {}–{}), {}–{} s recovery, {}–{}×/wk",
+            "Strides: {}–{} × {}–{} s controlled-fast (effort {}–{} of 10), {}–{} s recovery, {}–{}×/wk",
             strides.value.reps.0,
             strides.value.reps.1,
             strides.value.rep_sec.0,

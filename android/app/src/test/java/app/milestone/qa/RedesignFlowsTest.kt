@@ -435,7 +435,7 @@ class RedesignFlowsTest {
             listOf(QaHarness.strengthProfile(), Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, thisMorning)),
         )
         rule.launchApp()
-        val action = hasText(str(R.string.main_remove_report_action)) and hasClickAction()
+        val action = hasText(str(R.string.main_remove_report)) and hasClickAction()
         waitForAny(action)
         rule.onNode(action).performClick()
         waitForAny(hasText(str(R.string.main_remove_report_message_hold)))

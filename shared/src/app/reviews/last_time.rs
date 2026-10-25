@@ -66,7 +66,7 @@ pub(in crate::app) fn annotate_last_time(
                 let reason = if diff < 0.0 && derated {
                     " because your last session's estimated max came in more than 5% under your best."
                 } else if diff < 0.0 && !it.adjusted_note.is_empty() {
-                    ", for today's adjustment."
+                    " because of today's adjustment."
                 } else if diff > 0.0
                     && let (Some(e), Some(a)) = (last_e1, anchor)
                     && (e - a).abs() <= 0.5

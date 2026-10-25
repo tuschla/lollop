@@ -374,7 +374,7 @@ pub fn unexplained_decline_rest_defer(
 ) -> Option<Recommended<Adjustment>> {
     (decline_weeks >= 2 && wellness_disturbed && despite_deload).then(|| {
         evidence::graded(Adjustment::Defer {
-            reason: "Your performance has dropped for no clear reason for 2+ weeks, with tiredness, low mood or poor sleep, even after a lighter week. Rest, and see a professional to rule out overreaching, overtraining, under-eating (RED-S) or another medical cause."
+            reason: "Performance down for 2+ weeks with no clear cause, plus tiredness, low mood or poor sleep, even after a lighter week. Rest, and see a doctor to rule out overtraining, under-eating (RED-S) or another medical cause."
                 .into(),
         },
         claims::SAFE_OTS_001,)
@@ -392,7 +392,7 @@ pub fn nfor_cluster_defer(
 ) -> Option<Recommended<Adjustment>> {
     (decrement_weeks >= 2 && suppressed_wellness_domains >= 2).then(|| {
         evidence::graded(Adjustment::Defer {
-            reason: "Possible overreaching: your performance has dropped for no clear reason for 2+ weeks, and two or more of your check-in scores are low. Take a recovery break, and see a professional if it doesn't improve."
+            reason: "Possible overreaching: performance down for 2+ weeks with no clear cause, and 2+ check-in scores low. Take a recovery break; see a doctor if it doesn't improve."
                 .into(),
         },
         claims::AUTOREG_NFOR_001,)

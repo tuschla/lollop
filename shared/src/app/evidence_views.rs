@@ -104,7 +104,7 @@ pub(super) fn return_check_headline() -> String {
 
 /// When to stop a return check and see a doctor (ILLNESS-RTT-001), the one
 /// wording the call and its plan item share.
-pub(super) const RETURN_CHECK_STOP: &str = "Stop and see a doctor if you get chest pain, breathlessness, dizziness, a racing or pounding heartbeat, unusual tiredness, or muscle or joint pain. The same goes if the work feels harder than usual.";
+pub(super) const RETURN_CHECK_STOP: &str = "Stop and see a doctor if you get chest pain, breathlessness, dizziness, a racing or pounding heartbeat, unusual tiredness, muscle or joint pain, or the work feels harder than usual.";
 
 /// The HRV hold's reason: it fires on the 7-day mean.
 const HRV_WEEK: &str = "HRV has been below your normal range this week";
@@ -157,7 +157,7 @@ fn hold_reason(r: &Recommended<Adjustment>) -> Option<(&'static str, bool, bool)
     match (&r.value, r.claim_id()) {
         (Adjustment::CapTopEnd { trigger }, _) => Some(match trigger {
             ReadinessSignal::HrvLnRmssd => (HRV_WEEK, true, true),
-            ReadinessSignal::RestingHr => ("Resting HR up 2 mornings running", true, true),
+            ReadinessSignal::RestingHr => ("Resting HR up 2 mornings in a row", true, true),
             ReadinessSignal::Soreness => ("You reported being very sore", false, true),
             _ => ("Your check-in is well below your normal", true, true),
         }),
@@ -245,16 +245,16 @@ pub(super) fn describe_rec(r: &Recommended<Adjustment>) -> String {
     let claim = r.claim_id();
     match (&r.value, claim) {
         (Adjustment::DowngradeSession, claims::WELLNESS_001) => {
-            "Your check-ins have been well below your normal for several days: today is one step easier, with about 5% less weight, stopping 1 rep earlier on every set, and easy runs.".into()
+            "Check-ins well below your normal for several days: today is one step easier (about 5% less weight, 1 rep earlier on every set, easy runs).".into()
         }
         (Adjustment::DowngradeSession, claims::AUTOREG_VL_001) => {
             "Bar speed dropped past your goal's limit within a set: stop 1 rep earlier and add no weight. Runs as planned.".into()
         }
         (Adjustment::DowngradeSession, claims::RUN_DECOUPLE_001) => {
-            "Your heart rate drifted up 10% or more on a steady run: keep runs easy and hold off on harder running; lifts as planned.".into()
+            "Heart rate drifted up 10% or more on a steady run: easy runs only; lifts as planned.".into()
         }
         (Adjustment::DowngradeSession, claims::AUTOREG_RHR_NOISE_001) => {
-            "Your latest resting HR is well above your normal: an easier session today. Feeling ill? Answer the illness question in your check-in.".into()
+            "Your latest resting HR is well above your normal: an easier session today. If you feel ill, answer the illness question in your check-in.".into()
         }
         (Adjustment::DowngradeSession, claims::ILLNESS_NECK_001) => {
             "Until you've recovered: no long or hard sessions and no heavy weights.".into()
@@ -265,15 +265,18 @@ pub(super) fn describe_rec(r: &Recommended<Adjustment>) -> String {
         (Adjustment::Stop, claims::ILLNESS_NECK_001) => {
             "Flu or fever: no training until you've recovered. Your first session back is a short, easy test.".into()
         }
+        (Adjustment::Stop, claims::SAFE_PAIN_001 | claims::SAFE_PAIN_STRUCT_001) => {
+            "Pain reported: training is paused. Rest the painful area and check it before you train again.".into()
+        }
         (Adjustment::DowngradeSession, claims::RETURN_HOLD_001) => {
-            "Welcome back: today's session is easy (3+ reps left on every set, easy runs), then the plan resumes.".into()
+            "First session back is easy (3+ reps left on every set, easy runs), then the plan resumes.".into()
         }
         (Adjustment::DowngradeSession, claims::SAFE_TENDON_001) => {
             "Tendon pain is flaring: an easy session today with lighter weights.".into()
         }
         (Adjustment::ReturnCheck, _) => format!("{}. {RETURN_CHECK_STOP}", return_check_headline()),
         (Adjustment::RestDay, claims::AUTOREG_RHR_NOISE_001) => {
-            "Resting HR has been well above your normal 2 mornings running (or with illness symptoms): take a rest day and check whether you're getting ill.".into()
+            "Resting HR has been well above your normal 2 mornings in a row (or with illness symptoms): take a rest day and check whether you're getting ill.".into()
         }
         (Adjustment::StopItems { location }, _) => format!(
             "Pain ({location}): skip the exercises that load it today. The rest of the session goes ahead without adding weight."
@@ -416,14 +419,14 @@ pub(super) fn grade_note_str(grade: EvidenceGrade, contested_ref: Option<&str>) 
     // AND say what the app does meanwhile, rather than dangling a bare topic
     // label.
     let mut s = format!(
-        "{base} Experts still disagree on {}, so this is contested. What the app does for now: {}.",
+        "{base} Contested: experts disagree on {}. The plan's default: {}.",
         cq.question, cq.engine_default
     );
     // When the KB supplies an attributable opposing reference, show one
     // contradicting side. Left off entirely when the CQ has no KB-sourced
     // opposing cite (`other_side` is None) - never a fabricated "other view".
     if let Some(other) = cq.other_side {
-        s.push_str(" One view on the other side: ");
+        s.push_str(" Another view: ");
         s.push_str(other);
     }
     s
@@ -483,7 +486,7 @@ pub(super) fn describe(a: &Adjustment) -> String {
         // opt-in, unlike a safety cut), so the copy tells the user to apply it.
         // It fires on an easy effort rating or an estimated-max gain.
         Adjustment::IncreaseLoadPct(p) => {
-            format!("You're ahead of plan: you can add about {p:.0}% to the weight next session.")
+            format!("You can add about {p:.0}% to the weight next session.")
         }
         Adjustment::Deload {
             volume_reduction_pct,
@@ -529,7 +532,7 @@ pub(super) fn describe(a: &Adjustment) -> String {
             adjustment,
         } => format!("{exercise}: {}", describe(adjustment)),
         Adjustment::CapTopEnd { .. } => {
-            "Hold progression today: planned weights, stop 1 rep earlier; easy runs".into()
+            "No weight added today: every lift stops 1 rep earlier and runs stay easy".into()
         }
         Adjustment::ReduceVolumePct(p) => format!("Cut today's volume about {p:.0}%"),
         Adjustment::StopItems { location } => {

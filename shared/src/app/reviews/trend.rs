@@ -130,7 +130,7 @@ pub(in crate::app) fn build_trend(
         .is_some_and(|p| p.lift_goal == LiftGoal::Hypertrophy)
     {
         (
-            "add 2 sets a week for the muscles involved in your next training cycle, as long as you're recovering easily",
+            "add 2 sets a week for the muscles involved in the next training cycle, if you're recovering easily",
             claims::HYP_MESO_ADD_001,
         )
     } else {
@@ -194,19 +194,19 @@ pub(in crate::app) fn build_trend(
             let max = fmt_weight(t.current, weight_lb);
             let text = match summary {
                 feedback::TrendSummary::Improving => format!(
-                    "{}: your best estimated max over the last 4 weeks is {max}, up {:.0}% on the 4 weeks before. Next, keep each session's effort on target.",
+                    "{}: best estimated max over the last 4 weeks is {max}, up {:.0}% on the 4 weeks before.",
                     t.exercise,
                     t.delta * 100.0
                 ),
                 feedback::TrendSummary::Plateau => {
                     let text = format!(
-                        "{} has held steady for {} weeks (estimated max {max}). Plateaus like this are common. One change to try: {lever}.",
+                        "{} has held steady for {} weeks (estimated max {max}). Suggested change: {lever}.",
                         t.exercise, t.weeks_flat
                     );
                     return Some(to_view_with(text, &graded(summary, lever_claim)));
                 }
                 feedback::TrendSummary::LoadExplainedDecline => format!(
-                    "{} is down {:.0}% over the last 4 weeks. Low recovery may explain it rather than lost fitness. A lighter week is worth trying first.",
+                    "{} is down {:.0}% over the last 4 weeks, likely from low recovery, not lost fitness. Take a lighter week first.",
                     t.exercise,
                     t.delta.abs() * 100.0,
                 ),
@@ -226,17 +226,13 @@ pub(in crate::app) fn build_trend(
         w.low_recovery,
     );
     let text = match t.value {
-        feedback::TrendSummary::Improving => {
-            "Your lifts are trending up. Next, keep each session's effort on target.".to_string()
-        }
+        feedback::TrendSummary::Improving => "Your lifts are trending up.".to_string(),
         feedback::TrendSummary::Plateau => {
-            let text = format!(
-                "Flat for 4+ weeks. Plateaus like this are common. One change to try: {lever}."
-            );
+            let text = format!("Flat for 4+ weeks. Suggested change: {lever}.");
             return Some(to_view_with(text, &graded(t.value, lever_claim)));
         }
         feedback::TrendSummary::LoadExplainedDecline => {
-            "The dip may come from training load and low recovery rather than lost fitness. A lighter week is worth trying first.".to_string()
+            "Performance is down, likely from training load and low recovery, not lost fitness. Take a lighter week first.".to_string()
         }
         feedback::TrendSummary::Stable => return None,
     };

@@ -33,12 +33,12 @@ pub(super) fn build_hybrid_guidance(
     let maint = graded((), claims::HYB_MAINT_002);
     let (lead_text, building, holding) = match lead {
         Some(crate::plan::HybridLead::Running) => (
-            "Running leads: lifting drops to a maintenance dose. Sets stay heavy (80% of your max or more), with about a third of the usual sets and none added through the block. That keeps your strength and leaves recovery for running.",
+            "Running leads, so lifting drops to a maintenance dose: about a third of the usual sets, still heavy (80% of your max or more), none added through the block.",
             "running",
             "lifting",
         ),
         _ => (
-            "Lifting leads: running stays supportive. Your weekly distance holds steady instead of growing, at the same effort, which keeps your endurance while leaving recovery for lifting.",
+            "Lifting leads, so weekly running distance and effort hold steady instead of growing.",
             "lifting",
             "running",
         ),
@@ -64,7 +64,7 @@ pub(super) fn build_hybrid_guidance(
             )
         } else {
             format!(
-                "You picked {} run days. While lifting leads, your plan schedules {} and shortens the week's distance to match, so each run keeps its usual length. Set Which leads? to Running to keep every run day.",
+                "You picked {} run days. While lifting leads, your plan schedules {} and shortens the week's distance to match, so each run keeps its usual length. Set \"Which leads?\" to Running to keep every run day.",
                 p.running_days_per_week, shape.run_days
             )
         };
@@ -129,10 +129,10 @@ pub(super) fn build_hybrid_guidance(
     let li = hybrid::expect_lower_strength_interference(p.female);
     let text = match li.value {
         hybrid::LowerStrengthInterference::PossibleSmall => {
-            "Running alongside lifting can slightly blunt leg-strength gains (seen in men). For upper-body strength, muscle size and aerobic gains, studies show no difference between men and women."
+            "Running alongside lifting can slightly blunt leg-strength gains (seen in men). For upper-body strength, muscle size and aerobic gains, no difference between men and women has been found."
         }
         hybrid::LowerStrengthInterference::NotShownInWomen => {
-            "In women, running alongside lifting has not been shown to blunt leg-strength gains (few studies so far). For upper-body strength, muscle size and aerobic gains, studies show no difference between men and women."
+            "In women, running alongside lifting has not been shown to blunt leg-strength gains (few studies so far). For upper-body strength, muscle size and aerobic gains, no difference between men and women has been found."
         }
     };
     push_guidance(rows, "Hybrid", text.to_string(), &li);

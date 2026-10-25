@@ -231,7 +231,7 @@ class RandomUiWalkTest {
         settle()
         rule.onNode(hasClickAction() and SemanticsMatcher("a lift session card") { n ->
             n.config.getOrNull(SemanticsProperties.Text).orEmpty().any { LIFT_COUNT.matches(it.text) }
-        }).performClick()
+        }).performSemanticsAction(SemanticsActions.OnClick)
         settle()
         rule.onNode(hasTestTag("lift-set-row")).performClick()
         settle()

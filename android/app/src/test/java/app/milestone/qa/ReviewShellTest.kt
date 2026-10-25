@@ -245,7 +245,7 @@ class ReviewShellTest {
             }
         }
         val labels = EventDispatcher.model.value!!.hold_resolutions.map { it.action_label }.filter { it.isNotBlank() } +
-            listOf(str(R.string.main_remove_report_action), str(R.string.main_add_details))
+            listOf(str(R.string.main_remove_report), str(R.string.main_add_details))
         for (label in labels) {
             val s = rule.onAllNodes(hasText(label) and hasClickAction()).fetchSemanticsNodes().firstOrNull()
             if (s == null) {

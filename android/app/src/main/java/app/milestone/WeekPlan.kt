@@ -461,7 +461,7 @@ private fun planPlainLabel(prog: ProgramSummaryView): String {
     val phaseWord = when (prog.phase) {
         "Base" -> "building a base"
         "Build" -> "building up"
-        "Peak" -> "hardest stretch"
+        "Peak" -> "hardest weeks"
         "Taper" -> "easing off"
         "Deload" -> "lighter week"
         else -> prog.phase.lowercase(Locale.US)

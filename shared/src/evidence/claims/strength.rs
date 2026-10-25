@@ -395,7 +395,7 @@ claim_group! {
     ]),
     DETRAIN_STR_001 => claim(
         "DETRAIN-STR-001",
-        "Strength loss after stopping training grows with the length of the break and is larger in people over 65 or otherwise inactive; a break of one to two months costs a modest amount, never everything.",
+        "Strength loss after stopping training grows with the length of the break and is larger in people over 65 or otherwise inactive; a break of one to two months costs a modest amount.",
         Moderate,
         &[CITE_BOSQUET_2013],
     ),
