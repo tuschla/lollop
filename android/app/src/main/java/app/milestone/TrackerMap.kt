@@ -111,7 +111,9 @@ internal class TrackerMap(ctx: Context, palette: Palette) {
 
     private fun show(marker: Marker, at: GeoPoint) {
         marker.position = at
-        if (!view.overlays.contains(marker)) view.overlays.add(marker)
+        if (view.overlays.contains(marker)) return
+        // osmdroid draws in list order: the start ring stays under the location dot.
+        if (marker === startRing) view.overlays.addBelow(startRing, locationDot) else view.overlays.add(marker)
     }
 
     /**
@@ -248,15 +250,11 @@ private fun MapGridPlaceholder(modifier: Modifier = Modifier) {
 }
 
 /**
- * The map frame above the stat sheet: the live map (when [showMap]) with the one
- * status pill top-left, the OSM attribution bottom-left and Recenter bottom-right;
- * nothing else floats over it. Without a map, only the status pill. Until the runner
- * is [located] (no permission yet, no fix) the map is covered by the neutral grid
- * ground and carries no attribution.
+ * The map frame above the stat sheet: the live map (when [showMap]) with the status
+ * pill, OSM attribution and Recenter, covered by the neutral grid until [located].
  * [showOverlays] is false while the Finish review has collapsed the frame.
- * clipToBounds is load-bearing: osmdroid paints tiles OUTSIDE its interop slot
- * (Compose's view holder doesn't clip), which would over-paint the safety banner's
- * rows above the map.
+ * clipToBounds is load-bearing: osmdroid paints tiles OUTSIDE its interop slot,
+ * which would over-paint the safety banner's rows above the map.
  */
 @Composable
 internal fun TrackerMapFrame(
@@ -311,4 +309,10 @@ internal fun TrackerMapFrame(
             }
         }
     }
+}
+
+/** Insert [item] just below [above] in draw order, or on top when [above] is absent. */
+internal fun <T> MutableList<T>.addBelow(item: T, above: T) {
+    val i = indexOf(above)
+    if (i >= 0) add(i, item) else add(item)
 }

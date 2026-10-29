@@ -9,15 +9,11 @@
 //! Rule ids and table values are transcribed verbatim from
 //! `knowledge-base/extracted/04-running.md`.
 //!
-//! DELIBERATELY NOT IMPLEMENTED: ACWR (acute:chronic workload ratio,
-//! `LOAD-ACWR-001`) is a hard-blocked `MarketingMyth`, formally challenged as
-//! statistically invalid (mathematical coupling → spurious correlation, per
-//! Impellizzeri 2020 / Lolli 2019 / Nielsen 2025) with a retraction request
-//! filed for the Gabbett "sweet spot". No progression gate in this module
-//! consults it; single-session distance spike (`RUN-SPIKE-001`) is the
-//! strongest injury signal we act on instead.
+//! ACWR is not implemented: `LOAD-ACWR-001` is a blocked `MarketingMyth`;
+//! the single-session spike gate (`RUN-SPIKE-001`) is the gate instead.
 
 use crate::evidence::claims;
+use crate::load::MAX_PLAUSIBLE_SPEED_MPS;
 use crate::schema::{
     MesoPhase, Recommended, RunSegment, RunSessionType, RunVolume, ThreeZone, VdotBand, WorkoutType,
 };
@@ -59,11 +55,11 @@ pub fn plausible_measured_hr_max(measured_bpm: Option<f64>) -> Option<f64> {
 // ---------------------------------------------------------------------------
 
 /// Upper bound of zone 1 (below LT1), %HRmax (File 04 running-003 table).
-pub const ZONE1_CEILING_PCT_HRMAX: f64 = 82.0;
+const ZONE1_CEILING_PCT_HRMAX: f64 = 82.0;
 /// Floor of zone 3 and of threshold (T) work, %HRmax (running-003 / running-018).
 pub const THRESHOLD_FLOOR_PCT_HRMAX: f64 = 88.0;
 /// Floor of interval/VO2max (I) work, %HRmax (running-019).
-pub const INTERVAL_FLOOR_PCT_HRMAX: f64 = 95.0;
+const INTERVAL_FLOOR_PCT_HRMAX: f64 = 95.0;
 
 /// Classify an intensity by %HRmax into the LT1/LT2 three-zone model. Rule running-003.
 ///
@@ -180,26 +176,15 @@ pub fn mp_relative_pace_sec_per_km(vdot: f64, workout: RunWorkout) -> Option<(f6
 // 4. Volume caps (prescriptive validators)
 // ---------------------------------------------------------------------------
 
-/// The weekly-share limits from File 04's "Volume caps" section (fractions of weekly volume).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct VolumeCaps {
-    /// Long-run single-run cap (Daniels ≤25 %).
-    pub long_run_max_frac: f64,
-    /// Threshold (T) weekly cap ≤10 %.
-    pub threshold_max_frac: f64,
-    /// Interval (I) weekly cap ≤8 %.
-    pub interval_max_frac: f64,
-    /// Repetition (R) weekly cap ≤5 %.
-    pub repetition_max_frac: f64,
-}
-
-/// Which cap a volume-cap check violated.
+/// Which weekly-share caps a week exceeds (File 04 "Volume caps"; running-016/018/019).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CapViolation {
-    LongRun,
-    Threshold,
-    Interval,
-    Repetition,
+pub struct CapViolations {
+    /// The long run is over [`LONG_RUN_SHARE_MIN`] of the week.
+    pub long_run: bool,
+    /// Threshold (T) work is over [`THRESHOLD_WEEKLY_CAP_FRAC`] of the week.
+    pub threshold: bool,
+    /// Interval (I) work is over [`INTERVAL_WEEKLY_CAP_FRAC`] of the week.
+    pub interval: bool,
 }
 
 /// Long run's share of weekly volume, low end (running-016 / running-046,
@@ -218,73 +203,28 @@ pub const INTERVAL_WEEKLY_CAP_FRAC: f64 = 0.08;
 /// RUN-REPETITION-002).
 pub const REPETITION_WEEKLY_CAP_FRAC: f64 = 0.05;
 
-/// Canonical File 04 weekly volume caps (Daniels). Rule running-016/018/019 + table.
-pub fn default_volume_caps() -> VolumeCaps {
-    VolumeCaps {
-        long_run_max_frac: LONG_RUN_SHARE_MIN,
-        threshold_max_frac: THRESHOLD_WEEKLY_CAP_FRAC,
-        interval_max_frac: INTERVAL_WEEKLY_CAP_FRAC,
-        repetition_max_frac: REPETITION_WEEKLY_CAP_FRAC,
-    }
+/// `km` is at most `cap` (a fraction) of `weekly_km`. A non-positive weekly
+/// total cannot satisfy a share cap.
+fn within_share(km: f64, weekly_km: f64, cap: f64) -> bool {
+    weekly_km > 0.0 && km / weekly_km <= cap
 }
 
-/// True if the long run is within the single-run cap (≤25 % of weekly). Rule running-016.
-///
-/// A non-positive weekly total cannot satisfy a share cap, so returns false.
-pub fn long_run_within_cap(long_run_km: f64, weekly_km: f64) -> bool {
-    if weekly_km <= 0.0 {
-        return false;
-    }
-    long_run_km / weekly_km <= default_volume_caps().long_run_max_frac
-}
-
-/// True if threshold (T) volume is within the ≤10 % weekly cap. Rule running-018.
-pub fn threshold_within_cap(threshold_km: f64, weekly_km: f64) -> bool {
-    if weekly_km <= 0.0 {
-        return false;
-    }
-    threshold_km / weekly_km <= default_volume_caps().threshold_max_frac
-}
-
-/// True if interval (I) volume is within the ≤8 % weekly cap. Rule running-019.
-pub fn interval_within_cap(interval_km: f64, weekly_km: f64) -> bool {
-    if weekly_km <= 0.0 {
-        return false;
-    }
-    interval_km / weekly_km <= default_volume_caps().interval_max_frac
-}
-
-/// True if repetition (R) volume is within the ≤5 % weekly cap. VDOT R row +
-/// volume-caps section (the KB has no dedicated R-session rule).
-pub fn repetition_within_cap(repetition_km: f64, weekly_km: f64) -> bool {
-    if weekly_km <= 0.0 {
-        return false;
-    }
-    repetition_km / weekly_km <= default_volume_caps().repetition_max_frac
-}
-
-/// Check all four caps, returning the first violation (if any). Prescriptive →
-/// RUN-VOLCAP-001 (the Daniels weekly-share caps themselves, ExpertOpinion
-/// floor), not the polarized-vs-threshold distribution claim.
+/// Check the long-run (≤25 %, running-016), threshold (≤10 %, running-018) and
+/// interval (≤8 %, running-019) weekly-share caps; every exceeded cap is set.
+/// Prescriptive → RUN-VOLCAP-001 (the Daniels weekly-share caps themselves,
+/// ExpertOpinion floor), not the polarized-vs-threshold distribution claim.
 pub fn check_volume_caps(
     long_run_km: f64,
     threshold_km: f64,
     interval_km: f64,
-    repetition_km: f64,
     weekly_km: f64,
-) -> Recommended<Option<CapViolation>> {
-    let violation = if !long_run_within_cap(long_run_km, weekly_km) {
-        Some(CapViolation::LongRun)
-    } else if !threshold_within_cap(threshold_km, weekly_km) {
-        Some(CapViolation::Threshold)
-    } else if !interval_within_cap(interval_km, weekly_km) {
-        Some(CapViolation::Interval)
-    } else if !repetition_within_cap(repetition_km, weekly_km) {
-        Some(CapViolation::Repetition)
-    } else {
-        None
+) -> Recommended<CapViolations> {
+    let violations = CapViolations {
+        long_run: !within_share(long_run_km, weekly_km, LONG_RUN_SHARE_MIN),
+        threshold: !within_share(threshold_km, weekly_km, THRESHOLD_WEEKLY_CAP_FRAC),
+        interval: !within_share(interval_km, weekly_km, INTERVAL_WEEKLY_CAP_FRAC),
     };
-    crate::evidence::graded(violation, claims::RUN_VOLCAP_001)
+    crate::evidence::graded(violations, claims::RUN_VOLCAP_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -301,7 +241,7 @@ pub const SPIKE_FRAC: f64 = 0.10;
 /// Strongest running injury signal (Frandsen 2025). A non-positive 30-day
 /// longest (no history) means any real session is unbounded relative to it →
 /// treated as a spike so the gate errs safe.
-pub fn single_session_spike(session_km: f64, longest_30d_km: f64) -> bool {
+pub(crate) fn single_session_spike(session_km: f64, longest_30d_km: f64) -> bool {
     if longest_30d_km <= 0.0 {
         return session_km > 0.0;
     }
@@ -1059,13 +999,11 @@ pub fn quality_mix(goal: GoalDistance, phase: MesoPhase) -> Recommended<&'static
     let mix: &'static [RunSessionType] = match (goal, phase) {
         (_, Deload) | (C25k, _) => &[],
         (General, _) | (_, Base) => &[Tempo],
-        (FiveK, Build) => &[Interval, Tempo],
+        (FiveK, Build | Taper) | (TenK, Peak | Taper) => &[Interval, Tempo],
         (FiveK, Peak) => &[Interval, Repetition],
-        (FiveK, Taper) | (TenK, Peak) | (TenK, Taper) => &[Interval, Tempo],
-        (TenK, Build) | (HalfMarathon, Build) => &[Tempo, Interval],
-        (HalfMarathon, Peak) | (HalfMarathon, Taper) => &[Tempo, RacePace],
-        (Marathon, Build) => &[Tempo, RacePace],
-        (Marathon, Peak) | (Marathon, Taper) => &[RacePace, Tempo],
+        (TenK | HalfMarathon, Build) => &[Tempo, Interval],
+        (HalfMarathon, Peak | Taper) | (Marathon, Build) => &[Tempo, RacePace],
+        (Marathon, Peak | Taper) => &[RacePace, Tempo],
     };
     crate::evidence::graded(mix, claims::RUN_PHASE_TID_001)
 }
@@ -1254,15 +1192,10 @@ pub const PACE_CORRECTION_ALTITUDE_M: f64 = 900.0;
 
 /// Whether pace corrections are triggered (running-041): heat above
 /// [`PACE_CORRECTION_HEAT_C`], altitude above [`PACE_CORRECTION_ALTITUDE_M`].
-/// Returns FLAGS only — the evidence pins trigger
-/// thresholds, never correction magnitudes (sec/km or %), so no adjusted pace is
-/// ever emitted. The ~15 °C heat threshold is a CONSERVATIVE practical trigger,
-/// NOT the physiological degradation onset: marathon pace optimises at ~4–10 °C
-/// air temp and degrades continuously above it (El Helou 2012, PMID 22649525),
-/// with the first statistically-significant slowing at WBGT >~15 °C (Ely 2007,
-/// PMID 17473775) — so 15 °C avoids flagging imperceptible sub-15 °C loss. NB the
-/// engine reads dry-bulb air temp only; true heat stress is WBGT (adds humidity),
-/// so a fixed air-temp trigger under-fires in humid air (documented limitation).
+/// Flags only: the evidence pins trigger thresholds, not correction
+/// magnitudes. 15 °C is a conservative trigger (first significant slowing at
+/// WBGT >~15 °C, Ely 2007, PMID 17473775; optimum ~4–10 °C, El Helou 2012,
+/// PMID 22649525). Dry-bulb air temp only, so humid heat under-fires.
 pub fn pace_correction_triggers(
     temp_c: f64,
     altitude_m: f64,
@@ -1364,15 +1297,6 @@ pub fn hr_method_preference(resting_hr_bpm: f64) -> Recommended<HrMethodPreferen
     crate::evidence::graded(p, claims::RUN_KARVONEN_001)
 }
 
-/// Prefer Karvonen (%HRR) over %HRmax when resting HR is low, where the two
-/// methods diverge substantially (running-005): true below RHR 55; at RHR ≥70
-/// they converge and either is acceptable. Boolean view of
-/// [`hr_method_preference`]. RUN-KARVONEN-001.
-pub fn prefer_karvonen(resting_hr_bpm: f64) -> Recommended<bool> {
-    let p = hr_method_preference(resting_hr_bpm);
-    p.with_value(p.value == HrMethodPreference::PreferKarvonen)
-}
-
 /// Whether HR training zones are due for recalculation (running-006): recompute
 /// every 4–6 weeks off a measured max HR. Due once [`RETEST_DUE_WEEKS`] have
 /// elapsed. RUN-HRRECALC-001 (Strong, safety-critical, stale zones misplace
@@ -1417,18 +1341,11 @@ pub fn vdot_derate_points(goal: GoalDistance, under_mileaged: bool) -> Recommend
 }
 
 /// Derate an optimistic marathon finish-time band for an under-mileaged runner
-/// (running-008/040, option B, "flag AND derate"). The prediction band
-/// `(low_sec, high_sec)` is shifted SLOWER by the same VDOT-point derate that
-/// [`vdot_derate_points`] cites for the marathon: the fast bound is slowed by
-/// the *minimum* derate and the slow bound by the *maximum*, so the displayed
-/// range moves later (pace easier) and widens by the derate's own uncertainty.
-/// `base_vdot` (from the runner's recent race) anchors the point→time
-/// conversion through [`daniels_predict`](crate::load::daniels_predict) at the marathon distance, no
-/// new magnitude is invented, it is the same 2–3 VDOT points the caveat states.
-/// Carries RUN-VDOT-001 so the adjusted number still travels with its grade
-/// (HARD RULE 2). A degenerate band, a VDOT the derate would take to zero or
-/// below, or a prediction that fails is returned unchanged, so no bound ever
-/// renders as a 0:00 finish.
+/// (running-008/040, "flag AND derate"): the fast bound is slowed by the
+/// minimum and the slow bound by the maximum [`vdot_derate_points`], converted
+/// to time through [`daniels_predict`](crate::load::daniels_predict) at
+/// `base_vdot`. RUN-VDOT-001. A degenerate band, a VDOT the derate would take
+/// to zero or below, or a failed prediction returns the band unchanged.
 pub fn marathon_derated_band(
     low_sec: f64,
     high_sec: f64,
@@ -1540,16 +1457,6 @@ pub struct C25kSession {
 }
 
 impl C25kSession {
-    /// Total running seconds in the session (warm-up walk excluded).
-    pub fn run_sec(&self) -> u32 {
-        self.bouts.iter().map(|b| b.run_sec as u32).sum()
-    }
-
-    /// Longest single running bout, seconds.
-    pub fn longest_bout_sec(&self) -> u16 {
-        self.bouts.iter().map(|b| b.run_sec).max().unwrap_or(0)
-    }
-
     /// The session as a `RunVolume`: a uniform run/walk set stays a `RunWalk`
     /// (weeks 1–2); anything else is its whole duration (bouts incl. walks,
     /// warm-up walk excluded), rounded up to whole minutes.
@@ -1727,20 +1634,17 @@ pub fn haversine_m(a: GpsPoint, b: GpsPoint) -> f64 {
     let dlat = (b.lat - a.lat).to_radians();
     let dlon = (b.lon - a.lon).to_radians();
     let h = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
-    // Clamp `h` to `1.0` before `asin`: for near-antipodal (valid) coordinates
-    // rounding can push `h` a hair above 1.0, making `sqrt(h) > 1` and
-    // `asin` return NaN. The clamp is standard haversine insurance, cheap for
-    // any future non-`qc_track` caller that doesn't already drop NaN-speed legs.
+    // Rounding can push `h` a hair above 1.0 for near-antipodal points, and
+    // `asin` of a root above 1 is NaN.
     2.0 * EARTH_RADIUS_M * h.min(1.0).sqrt().asin()
 }
 
 /// One MOVING leg between consecutive fixes as `(dt_seconds, distance_m)`.
 /// `None` when the timestamps don't advance or the ground speed is below the
-/// auto-pause floor (`load::is_stopped`, <0.5 m/s, File 07), so every moving
-/// time/distance derivation pauses on the same legs. Saturating: a corrupt
-/// stamp pair (i64::MIN → i64::MAX) cannot overflow, and the dt gate discards
-/// the saturated value. Distance is raw haversine; callers that need jitter
-/// rejection cap it at [`MAX_PLAUSIBLE_SPEED_MPS`].
+/// auto-pause floor (`load::is_stopped`, <0.5 m/s, File 07). Saturating: a
+/// corrupt stamp pair (i64::MIN → i64::MAX) cannot overflow; the dt or stop
+/// gate then discards the leg. Distance is raw haversine; callers that need
+/// jitter rejection cap it at [`MAX_PLAUSIBLE_SPEED_MPS`].
 pub(crate) fn leg(a: GpsPoint, b: GpsPoint) -> Option<(f64, f64)> {
     let dt = b.observed_at.saturating_sub(a.observed_at) as f64;
     if dt <= 0.0 {
@@ -1750,14 +1654,13 @@ pub(crate) fn leg(a: GpsPoint, b: GpsPoint) -> Option<(f64, f64)> {
     (!crate::load::is_stopped(d / dt)).then_some((dt, d))
 }
 
-/// The subset of fixes good enough to trust, in original order. Shared by
-/// distance, duration, and GPX export so all three describe the same track, an
-/// exported file opened in Strava/Garmin shows the same distance the app does.
-pub fn usable_track(points: &[GpsPoint], max_accuracy_m: f32) -> Vec<GpsPoint> {
+/// The fixes within [`MAX_GPS_ACCURACY_M`], in original order: the accuracy
+/// gate of [`moving_legs`] and [`usable_segments`].
+fn usable_track(points: &[GpsPoint]) -> Vec<GpsPoint> {
     points
         .iter()
         .copied()
-        .filter(|p| p.accuracy_m <= max_accuracy_m)
+        .filter(|p| p.accuracy_m <= MAX_GPS_ACCURACY_M)
         .collect()
 }
 
@@ -1766,10 +1669,9 @@ pub fn usable_track(points: &[GpsPoint], max_accuracy_m: f32) -> Vec<GpsPoint> {
 /// gap in fixes). The leg from `points[i-1]` to `points[i]` at such an index is a
 /// PAUSE BRIDGE the runner may have relocated across, so no track metric may sum
 /// distance or time across it. An EMPTY `segment_starts` (a re-anchored log or
-/// a hand-logged run) yields the WHOLE track as a single segment, so every
-/// metric routed through this reduces BIT-IDENTICALLY to its whole-track form.
-/// Out-of-range, zero, and duplicate indices are ignored,
-/// so a malformed boundary list can only under-split, never panic.
+/// a hand-logged run) yields the whole track as a single segment. Out-of-range,
+/// zero, and duplicate indices are ignored, so a malformed boundary list can
+/// only under-split, never panic.
 pub(crate) fn segments<'a>(points: &'a [GpsPoint], segment_starts: &[u32]) -> Vec<&'a [GpsPoint]> {
     let mut bounds: Vec<usize> = segment_starts
         .iter()
@@ -1792,22 +1694,14 @@ pub(crate) fn segments<'a>(points: &'a [GpsPoint], segment_starts: &[u32]) -> Ve
 }
 
 /// The usable fixes of every segment, flattened in order, each paired with a flag
-/// that is `true` for the FIRST usable fix of its segment, i.e. the leg ENTERING
-/// that fix is a pause bridge and must contribute neither distance nor time.
-/// Accuracy filtering happens PER segment, which yields the same usable set as
-/// filtering the whole track. For an empty `segment_starts` the flag is `true`
-/// only at index 0 (which has no entering leg), so every downstream cumulative
-/// walk is bit-identical to the single-track behaviour it replaces.
-fn usable_segments(
-    points: &[GpsPoint],
-    segment_starts: &[u32],
-    max_accuracy_m: f32,
-) -> (Vec<GpsPoint>, Vec<bool>) {
+/// that is `true` for the first usable fix of its segment: the leg entering it
+/// is a pause bridge and contributes neither distance nor time.
+fn usable_segments(points: &[GpsPoint], segment_starts: &[u32]) -> (Vec<GpsPoint>, Vec<bool>) {
     let mut pts = Vec::with_capacity(points.len());
     let mut is_start = Vec::with_capacity(points.len());
     for seg in segments(points, segment_starts) {
         let mut first = true;
-        for p in usable_track(seg, max_accuracy_m) {
+        for p in usable_track(seg) {
             pts.push(p);
             is_start.push(first);
             first = false;
@@ -1816,31 +1710,11 @@ fn usable_segments(
     (pts, is_start)
 }
 
-/// Total track distance in km: the sum of the MOVING legs. Fixes whose reported
-/// horizontal accuracy is worse than `max_accuracy_m` are dropped first, a leg
-/// below the auto-pause floor (`load::is_stopped`, <0.5 m/s) contributes
-/// nothing, and every leg is capped at [`MAX_PLAUSIBLE_SPEED_MPS`], so GPS
-/// wander accumulated while standing still is not counted as distance. These
-/// are the same gates the displayed pace, variation index and splits apply, so
-/// distance-of-record and moving pace describe the same track. Pure and
-/// order-dependent (order = fix order from the shell). The bare form treats the
-/// whole track as one segment; see [`track_distance_km_seg`] for the
-/// pause-bridge-aware form.
-pub fn track_distance_km(points: &[GpsPoint], max_accuracy_m: f32) -> f64 {
-    track_distance_km_seg(points, max_accuracy_m, &[])
-}
-
-/// [`track_distance_km`] that excludes each pause-bridge leg (a leg entering a
-/// `segments` boundary) so a paused relocation contributes no distance, the
-/// true coordinates stay put (no re-anchoring shift). Stop floor and jitter cap
-/// apply per segment. Empty `segment_starts` is bit-identical to
-/// [`track_distance_km`].
-pub fn track_distance_km_seg(
-    points: &[GpsPoint],
-    max_accuracy_m: f32,
-    segment_starts: &[u32],
-) -> f64 {
-    moving_legs(points, max_accuracy_m, segment_starts)
+/// Total track distance in km: the sum of `moving_legs`, so inaccurate fixes,
+/// stopped legs and pause bridges add nothing and jitter is capped. The
+/// displayed pace, variability index and splits share these gates.
+pub fn track_distance_km(points: &[GpsPoint], segment_starts: &[u32]) -> f64 {
+    moving_legs(points, segment_starts)
         .iter()
         .map(|(_, d)| d)
         .sum::<f64>()
@@ -1850,13 +1724,9 @@ pub fn track_distance_km_seg(
         + 0.0
 }
 
-/// Cumulative MOVING distance in metres to each usable fix (`out[0] == 0.0`). A
-/// leg contributes distance ONLY when it is moving — its timestamps advance and
-/// its ground speed clears the auto-pause floor (`load::is_stopped`, <0.5 m/s) —
-/// and its distance is capped to the plausible-runner ceiling, the SAME gates as
-/// [`moving_legs`]/[`track_distance_km`]. A pause-bridge leg entering a segment
-/// start adds nothing. This keeps the split walk on the headline distance, so a
-/// stopped run's below-floor drift does not inflate the cumulative total.
+/// Cumulative moving distance in metres to each usable fix (`out[0] == 0.0`):
+/// the leg gates and cap of [`moving_legs`], nothing for a pause-bridge leg, so
+/// the split walk sums to [`track_distance_km`].
 fn cumulative_moving_m(usable: &[GpsPoint], is_start: &[bool]) -> Vec<f64> {
     let mut cumulative = Vec::with_capacity(usable.len());
     let mut running_total = 0.0;
@@ -1875,27 +1745,11 @@ fn cumulative_moving_m(usable: &[GpsPoint], is_start: &[bool]) -> Vec<f64> {
 
 /// Second-half-vs-first-half pace slowdown across a track, as a percent (a
 /// *positive split*: positive = the runner slowed in the back half). The track
-/// is split at its halfway distance and each half's pace (time ÷ distance) is
-/// compared; units cancel in the ratio. Purely descriptive, this is a
-/// measurement of the run, not a recommendation. Returns `None` when the track
-/// is too short, degenerate, or non-monotonic to split meaningfully (fewer than
-/// three usable fixes, a zero-distance/zero-duration half). Same accuracy gate
-/// as [`track_distance_km`] so both agree on the track.
-pub fn track_positive_split_pct(points: &[GpsPoint], max_accuracy_m: f32) -> Option<f64> {
-    track_positive_split_pct_seg(points, max_accuracy_m, &[])
-}
-
-/// [`track_positive_split_pct`] that treats each pause-bridge leg as zero distance
-/// and zero time, so the
-/// halfway split and each half's moving pace are measured over the true route
-/// without the relocation displacement. Empty `segment_starts` is bit-identical
-/// to [`track_positive_split_pct`].
-pub fn track_positive_split_pct_seg(
-    points: &[GpsPoint],
-    max_accuracy_m: f32,
-    segment_starts: &[u32],
-) -> Option<f64> {
-    let (usable, is_start) = usable_segments(points, segment_starts, max_accuracy_m);
+/// is split at its halfway moving distance and each half's moving pace is
+/// compared. Descriptive, not a recommendation. `None` for fewer than three
+/// usable fixes or a zero-distance/zero-duration half.
+pub fn track_positive_split_pct(points: &[GpsPoint], segment_starts: &[u32]) -> Option<f64> {
+    let (usable, is_start) = usable_segments(points, segment_starts);
     if usable.len() < 3 {
         return None;
     }
@@ -1913,12 +1767,8 @@ pub fn track_positive_split_pct_seg(
 
     let dist1 = cumulative[split];
     let dist2 = total - dist1;
-    // Each half's time is MOVING seconds only: legs below the auto-pause floor
-    // (`load::is_stopped`, <0.5 m/s) AND pause-bridge legs contribute distance-or-
-    // relocation but no time, so a mid-run café stop or a paused relocation can't
-    // produce a false "FADE" verdict. This matches the moving-time base of the
-    // run's displayed pace, its km-splits, and its VI, which wall-clock halves
-    // would contradict on any run with a pause.
+    // Each half's time is moving seconds only (stopped and pause-bridge legs
+    // add none), the base of the displayed pace, splits and VI.
     let moving_leg = |i: usize| -> f64 {
         if is_start[i] {
             return 0.0;
@@ -1966,48 +1816,25 @@ pub struct RunSplit {
     pub partial: bool,
 }
 
-/// Per-unit run splits from a GPS track: one [`RunSplit`] per completed
-/// `unit_m`-metre interval (pass [`KM_M`] for kilometre splits, [`MILE_M`] for
-/// miles), plus a final PARTIAL split when the track ends mid-unit (so a 5.4 km
-/// run yields 5 full km splits + 1 partial). Split boundaries fall at exact unit
-/// distances (apportioned within the crossing leg at its constant speed), so a
-/// split's pace does not depend on where GPS fixes happened to land, but each
-/// split is TIMED in MOVING seconds and MEASURED in moving distance only: a leg
-/// whose ground speed is below the auto-pause floor (`load::is_stopped`,
-/// <0.5 m/s) or whose timestamps don't advance contributes neither time nor
-/// distance, exactly as `moving_duration_min` / `track_distance_km` exclude it.
-/// So a mid-split café/traffic stop cannot make that split read minutes slower
-/// than the run's own moving-pace average, and the splits sum to the headline
-/// moving distance — an all-stopped track has zero moving distance and yields no
-/// splits. Same accuracy gate as [`track_distance_km`], and the same
-/// moving-distance walk as [`track_positive_split_pct`]. Pure and
-/// order-dependent. Returns an empty vec for a sub-metre unit, an empty /
-/// single-fix / zero-distance track (nothing to split).
-pub fn track_splits(points: &[GpsPoint], max_accuracy_m: f32, unit_m: f64) -> Vec<RunSplit> {
-    track_splits_seg(points, max_accuracy_m, unit_m, &[])
-}
-
-/// Hard cap on emitted splits (see [`track_splits_seg`]), bounding per-`view()`
+/// Hard cap on emitted splits (see [`track_splits`]), bounding per-`view()`
 /// work against a corrupt track. 10 k km/mile splits is far past any real run.
 const MAX_SPLITS: usize = 10_000;
 
-/// [`track_splits`] whose cumulative walk skips each pause-bridge leg (zero
-/// distance, so no split boundary falls inside a paused relocation), letting km
-/// splits continue seamlessly across a pause on the true route. Empty
-/// `segment_starts` is bit-identical to [`track_splits`].
-pub fn track_splits_seg(
-    points: &[GpsPoint],
-    max_accuracy_m: f32,
-    unit_m: f64,
-    segment_starts: &[u32],
-) -> Vec<RunSplit> {
+/// Per-unit run splits from a GPS track: one [`RunSplit`] per completed
+/// `unit_m` ([`KM_M`] or [`MILE_M`]), plus a final partial split when the track
+/// ends mid-unit. Boundaries fall at exact unit distances (apportioned within
+/// the crossing leg at its constant speed). Splits are timed and measured over
+/// moving legs only (see `moving_legs`), so they sum to [`track_distance_km`]
+/// and a stop does not slow a split. Empty for a sub-metre unit or a track with
+/// no moving distance.
+pub fn track_splits(points: &[GpsPoint], unit_m: f64, segment_starts: &[u32]) -> Vec<RunSplit> {
     // Reject a sub-metre unit. The boundary loop below emits one split per
     // `unit_m` of distance, so a tiny unit (a caller bug / corrupt input) would
     // spin for millions of iterations. Every real caller passes km/mile.
     if unit_m < 1.0 {
         return Vec::new();
     }
-    let (usable, is_start) = usable_segments(points, segment_starts, max_accuracy_m);
+    let (usable, is_start) = usable_segments(points, segment_starts);
     if usable.len() < 2 {
         return Vec::new();
     }
@@ -2091,24 +1918,11 @@ pub fn track_splits_seg(
     splits
 }
 
-/// A GPS ground speed above this is jitter, not a real running segment, and is
-/// clamped before the convex weighting so a single noisy fix cannot inflate the
-/// normalized speed. Re-exports the ONE plausible-runner-speed threshold from
-/// `load` (File-07 QC value, 12.0 m/s) so the ingest gate, this clamp, and the
-/// shell live-jitter guard all agree. (On the real path `qc_track` already drops
-/// legs above it, so the clamp is a belt-and-braces guard for raw callers.)
-pub use crate::load::MAX_PLAUSIBLE_SPEED_MPS;
-
-/// Variability-index cutoff at or above which a run reads as interval-like rather
-/// than steady (the verdict is `vi >= INTERVAL_VI_THRESHOLD`). With the rolling
-/// [`INTERVAL_WINDOW_SEC`] smoothing, a steady run, even one with ordinary pace
-/// drift (hills / a negative split, ±~15% swing), sits at ~1.00–1.01, while
-/// genuine reps-plus-recovery sessions sit ~1.11–1.21 (degrading toward the low
-/// end only under heavy GPS noise). 1.10 sits in that gap with margin on BOTH
-/// sides: noisy real intervals (~1.11) still clear it and steady runs stay
-/// comfortably below. An ENGINE HEURISTIC, not a cited threshold (the
-/// KB source, Skiba GOVSS, gives no boundary), hence the RUN-INTERVAL-VI-001 chip
-/// is graded Weak and its copy measures rather than prescribes.
+/// Variability index at or above which a run reads as interval-like. With
+/// `INTERVAL_WINDOW_SEC` smoothing, steady runs sit at ~1.00–1.01 and
+/// rep-plus-recovery sessions at ~1.11–1.21; 1.10 splits the gap. An engine
+/// heuristic (Skiba GOVSS gives no boundary), so RUN-INTERVAL-VI-001 is graded
+/// Weak.
 pub const INTERVAL_VI_THRESHOLD: f64 = 1.10;
 
 /// Graded verdict for whether a run's variability index marks it interval-like
@@ -2122,41 +1936,27 @@ pub fn interval_verdict(variability_index: f64) -> Recommended<bool> {
     )
 }
 
-/// Rolling-average window (seconds) applied to the speed series BEFORE the
-/// 4th-power weighting. This is the crux of the GOVSS/Normalized-Graded-Pace
-/// algorithm and the KB's stated pre-implementation requirement (Skiba 120 s,
-/// GoldenCheetah 30 s): at a 1 Hz GPS cadence the raw per-second leg speed is
-/// dominated by position noise (±a few metres over a ~1–4 m move), and the convex
-/// 4th power AMPLIFIES that noise, so without smoothing a steady run scores high
-/// (false "interval") while genuine rep structure is drowned out. A 30 s window
-/// averages the jitter away (≈30 samples/bin) yet preserves real reps: 800 m reps
-/// (~2.5–3.5 min) and 400 m reps (~1.5–2 min) are many windows long. 30 s (the
-/// GoldenCheetah value) is chosen over Skiba's 120 s so shorter reps still survive.
-pub const INTERVAL_WINDOW_SEC: f64 = 30.0;
+/// Rolling-average window (seconds) applied to the speed series before the
+/// 4th-power weighting (GOVSS / Normalized Graded Pace; Skiba 120 s,
+/// GoldenCheetah 30 s). At 1 Hz the per-second speed is dominated by GPS noise,
+/// which the 4th power amplifies; 30 s averages it away and keeps 400 m reps.
+const INTERVAL_WINDOW_SEC: f64 = 30.0;
 
-/// The MOVING legs of a track as `(dt_seconds, distance_m)`, in order. A leg is
-/// dropped when its timestamps don't advance (`dt <= 0`) or its ground speed is
-/// below the auto-pause floor (`load::is_stopped`, <0.5 m/s), so a café/traffic
-/// stop (the Pause button leaves a ~0-speed bridge leg spanning the gap) is
-/// excluded exactly as `moving_duration_min` excludes it from the displayed pace.
-/// Distance is capped so the implied speed never exceeds [`MAX_PLAUSIBLE_SPEED_MPS`]
-/// (GPS jitter rejection). Same accuracy gate as [`track_distance_km`].
-fn moving_legs(
-    points: &[GpsPoint],
-    max_accuracy_m: f32,
-    segment_starts: &[u32],
-) -> Vec<(f64, f64)> {
-    // Moving legs are computed WITHIN each segment, so the pause-bridge leg
-    // between segments is never formed (a paused relocation is neither moving
-    // time nor moving distance). Empty `segment_starts` → one segment → the
-    // legs of the whole track.
+/// The MOVING legs of a track as `(dt_seconds, distance_m)`, in order: the one
+/// rule behind every moving time and distance. Fixes worse than
+/// [`MAX_GPS_ACCURACY_M`] are dropped, legs are formed within each
+/// [`segments`] segment (a pause bridge is never a leg), a leg that [`leg`]
+/// rejects (timestamps not advancing, speed below the auto-pause floor) is
+/// dropped, and distance is capped at [`MAX_PLAUSIBLE_SPEED_MPS`] × dt (GPS
+/// jitter).
+pub(crate) fn moving_legs(points: &[GpsPoint], segment_starts: &[u32]) -> Vec<(f64, f64)> {
     segments(points, segment_starts)
         .into_iter()
         .flat_map(|seg| {
-            usable_track(seg, max_accuracy_m)
+            usable_track(seg)
                 .windows(2)
                 .filter_map(|w| {
-                    // Cap distance so speed ≤ the plausible-runner ceiling (jitter).
+                    // Cap distance so speed ≤ the plausible-runner ceiling.
                     leg(w[0], w[1]).map(|(dt, d)| (dt, d.min(MAX_PLAUSIBLE_SPEED_MPS * dt)))
                 })
                 .collect::<Vec<_>>()
@@ -2213,31 +2013,13 @@ fn windowed_bin_speeds(legs: &[(f64, f64)], window_s: f64) -> Vec<(f64, f64)> {
 /// ~50 k × 30 s ≈ 17 days of moving time, unreachable for any genuine run.
 const MAX_WINDOW_BINS: usize = 50_000;
 
-/// Normalized speed (m/s): the duration-weighted 4th-power-mean of the
-/// WINDOW-AVERAGED speed series, GOVSS / Normalized-Graded-Pace, flat-ground
-/// (no elevation → normalized *speed*, not grade-adjusted power). The convex
-/// 4th power is what lets a 6×800 m session score above its own average while a
-/// steady run does not (Jensen's inequality). Smoothing over
-/// [`INTERVAL_WINDOW_SEC`] first is essential, see that constant. Returns `None`
-/// for fewer than two usable fixes or no moving time.
-pub fn normalized_speed_mps(points: &[GpsPoint], max_accuracy_m: f32) -> Option<f64> {
-    normalized_speed_mps_seg(points, max_accuracy_m, &[])
-}
-
-/// [`normalized_speed_mps`] over the segment-aware moving legs (pause bridges
-/// excluded). Empty `segment_starts` is bit-identical to [`normalized_speed_mps`].
-pub fn normalized_speed_mps_seg(
-    points: &[GpsPoint],
-    max_accuracy_m: f32,
-    segment_starts: &[u32],
-) -> Option<f64> {
-    if usable_track(points, max_accuracy_m).len() < 2 {
-        return None;
-    }
-    let bins = windowed_bin_speeds(
-        &moving_legs(points, max_accuracy_m, segment_starts),
-        INTERVAL_WINDOW_SEC,
-    );
+/// Normalized speed (m/s): the duration-weighted 4th-power mean of the
+/// [`INTERVAL_WINDOW_SEC`]-averaged speed of `legs` (GOVSS / Normalized Graded
+/// Pace on flat ground, so speed, not power). The convex 4th power scores a
+/// 6×800 m session above its own average while a steady run stays at it.
+/// `None` with no moving time.
+fn normalized_speed(legs: &[(f64, f64)]) -> Option<f64> {
+    let bins = windowed_bin_speeds(legs, INTERVAL_WINDOW_SEC);
     let (mut p4_sum, mut weight_sum) = (0.0, 0.0);
     for &(speed, dur) in &bins {
         p4_sum += dur * speed.powi(4);
@@ -2249,32 +2031,13 @@ pub fn normalized_speed_mps_seg(
     Some((p4_sum / weight_sum).powf(0.25))
 }
 
-/// Variability Index = normalized speed ÷ average MOVING speed for a track.
-/// About 1.0 for an evenly-paced steady run (window smoothing removes GPS noise);
-/// rises above 1.0 as a run becomes more interval-like (hard reps separated by
-/// JOG recovery), because the convex normalized speed weights the fast reps far
-/// above the moving-time average. Both numerator and denominator use the SAME
-/// moving-leg base (paused legs excluded), so a stop can't inflate it. This is
-/// the scalar that lets the engine tell a 6×800 m session from a steady run of
-/// the *same average pace*.
-///
-/// Purely descriptive (a MEASUREMENT of the run, not a recommendation, and not a
-/// load input). Returns `None` when the track has no moving legs or a
-/// non-positive average speed.
-pub fn track_variability_index(points: &[GpsPoint], max_accuracy_m: f32) -> Option<f64> {
-    track_variability_index_seg(points, max_accuracy_m, &[])
-}
-
-/// [`track_variability_index`] over the segment-aware moving legs (both the
-/// normalized speed and the average speed use the same pause-bridge-excluded
-/// base). Empty `segment_starts` is bit-identical to [`track_variability_index`].
-pub fn track_variability_index_seg(
-    points: &[GpsPoint],
-    max_accuracy_m: f32,
-    segment_starts: &[u32],
-) -> Option<f64> {
-    let ns = normalized_speed_mps_seg(points, max_accuracy_m, segment_starts)?;
-    let legs = moving_legs(points, max_accuracy_m, segment_starts);
+/// Variability Index = normalized speed ÷ average moving speed, both over
+/// `moving_legs`. About 1.0 for a steady run, rising as the run becomes
+/// interval-like, so it tells a 6×800 m session from a steady run of the same
+/// average pace. Descriptive, not a load input. `None` with no moving legs.
+pub fn track_variability_index(points: &[GpsPoint], segment_starts: &[u32]) -> Option<f64> {
+    let legs = moving_legs(points, segment_starts);
+    let ns = normalized_speed(&legs)?;
     let dur: f64 = legs.iter().map(|&(dt, _)| dt).sum();
     let dist: f64 = legs.iter().map(|&(_, d)| d).sum();
     if dur <= 0.0 {
@@ -2296,36 +2059,26 @@ const GPX_HDOP_UERE_M: f64 = 5.0;
 /// the shortest f64 decimal: the importer's Double `hdop × 5` then lands within
 /// one f64 ulp of the f32 accuracy, which rounds back to it exactly, so a route
 /// rebuilt from the file (Undo, re-import) keeps every `accuracy_m` bit for bit.
-/// An f32 quotient lost up to one f32 ulp on ~20% of accuracies.
 pub(crate) fn gpx_hdop(accuracy_m: f32) -> f64 {
     f64::from(accuracy_m) / GPX_HDOP_UERE_M
 }
 
-/// Serialise a fix track to a GPX 1.1 document (the format Strava, Garmin
-/// Connect, Komoot, etc. import). Pure and deterministic: `observed_at` unix
-/// seconds are rendered as RFC 3339 UTC timestamps in-core, never from a live
-/// clock. Elevation is omitted: the shell does not yet capture altitude.
-pub fn export_gpx(points: &[GpsPoint], track_name: &str) -> String {
-    export_gpx_seg(points, track_name, &[], None)
-}
-
 /// XML namespace of lollop's own GPX extension elements. The shell's importer
-/// (Gpx.kt `parseGpxRun`) matches the elements by local name.
+/// (Gpx.kt `parseGpxRuns`) matches the elements by local name.
 const GPX_LOLLOP_NS: &str = "urn:lollop:gpx:1";
 
-/// [`export_gpx`] that emits one `<trkseg>` per recording segment, using the TRUE
-/// coordinates (no re-anchoring shift), so a paused + relocated run opens in
-/// Strava/Garmin as the real route with a visible gap at each pause instead of a
-/// single continuous line drawn through wrong coordinates. Empty
-/// `segment_starts` and no `logged_at` is a single `<trkseg>`, identical to
-/// [`export_gpx`].
+/// Serialise a fix track to a GPX 1.1 document (the format Strava, Garmin
+/// Connect, Komoot, etc. import), one `<trkseg>` per recording segment at the
+/// true coordinates, so a paused relocation shows as a gap. `observed_at` is
+/// rendered as RFC 3339 UTC in-core, never from a live clock. Elevation is
+/// omitted: the shell records no altitude.
 ///
 /// `logged_at` is the run's logged-at stamp (its identity with the entry id).
 /// It is written as `<trk><extensions><lollop:logged_at>` because the track's
 /// last fix is not that stamp: QC drops a standing-still finish and a trim cuts
 /// the end while the run keeps its stamp. Re-importing the file then stamps the
 /// run as the one it came from, so the importer recognises it as already logged.
-pub fn export_gpx_seg(
+pub fn export_gpx(
     points: &[GpsPoint],
     track_name: &str,
     segment_starts: &[u32],
@@ -2357,14 +2110,8 @@ pub fn export_gpx_seg(
         s.push_str("    <trkseg>\n");
         for p in seg {
             s.push_str("      <trkpt lat=\"");
-            // Shortest round-trip decimal (`{}`, never exponent notation): a
-            // route rebuilt from this file (Undo, re-import) is bit-identical,
-            // so its distance, pace and splits come back unchanged. That needs a
-            // correctly rounded reader at both ends: the shell's `toDouble` and
-            // the core's event decode (serde_json `float_roundtrip`, Cargo.toml;
-            // pinned by `a_logged_track_survives_the_event_wire_bit_for_bit`). A
-            // fixed 7 decimals moved fixes by up to 5e-8°, enough to flip a pace
-            // rounding edge.
+            // Shortest round-trip decimal (`{}`, never exponent notation), so a
+            // re-imported route is bit-identical.
             let _ = write!(s, "{}", p.lat);
             s.push_str("\" lon=\"");
             let _ = write!(s, "{}", p.lon);
@@ -2408,7 +2155,7 @@ fn unix_to_rfc3339_utc(secs: i64) -> String {
     let days = secs.div_euclid(crate::DAY_SEC);
     let tod = secs.rem_euclid(crate::DAY_SEC);
     let (h, m, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);
-    let (y, mo, d) = civil_from_days(days);
+    let (y, mo, d) = crate::civil_from_days(days);
     let sign = match y {
         10_000.. => "+",
         ..0 => "-",
@@ -2416,22 +2163,6 @@ fn unix_to_rfc3339_utc(secs: i64) -> String {
     };
     let y = y.unsigned_abs();
     format!("{sign}{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
-}
-
-/// Convert a count of days since the unix epoch (1970-01-01) to a civil
-/// `(year, month, day)`. Howard Hinnant, "chrono-Compatible Low-Level Date
-/// Algorithms" (public domain).
-pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 #[cfg(test)]

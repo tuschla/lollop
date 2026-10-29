@@ -60,7 +60,7 @@ class RunEditorHrEffortTest {
             MilestoneTheme {
                 Column(Modifier.fillMaxSize()) {
                     CompositionLocalProvider(LocalEditorPinnedActions provides true) {
-                        LogRunEditor(initial = initial, onSave = onSave)
+                        LogRunEditor(initial = initial, profile = profile, onSave = onSave)
                     }
                 }
             }

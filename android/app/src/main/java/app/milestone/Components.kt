@@ -88,10 +88,13 @@ internal fun Chip(text: String, bg: Color) {
         color = Color.White,
         style = Type.Chip,
         modifier = Modifier
-            .background(bg, RoundedCornerShape(Space.Md.dp - Space.Xs.dp))
-            .padding(horizontal = Space.Md.dp, vertical = Space.Sm.dp - 1.dp),
+            .background(bg, SegmentShape)
+            .chipPadding(),
     )
 }
+
+/** Inner padding of a [Chip] or an outlined chip. */
+internal fun Modifier.chipPadding(): Modifier = padding(horizontal = Space.Md.dp, vertical = Space.Sm.dp - 1.dp)
 
 /**
  * One compact Reference row (02-coach §6): the claim title + its citation
@@ -123,13 +126,15 @@ internal fun guidanceSummary(row: GuidanceView): String =
     if (rememberDistanceUnit() == DistanceUnit.Mi) row.summary_mi.ifBlank { row.summary } else row.summary
 
 /** The irreversible-clear confirmation [AlertDialog] (chrome §6), shared by every
- *  destructive confirm (remove plan or report, delete an entry, discard a run). */
+ *  destructive confirm (remove plan or report, delete an entry, discard a run).
+ *  [confirmColor] is `DangerText` unless the confirm is not destructive. */
 @Composable
 internal fun ClearConfirmDialog(
     visible: Boolean,
     title: String = stringResource(R.string.main_clear_confirm_title_default),
     message: String = stringResource(R.string.main_clear_confirm_message_default),
     confirmLabel: String = stringResource(R.string.main_clear),
+    confirmColor: Color = DangerText,
     onDismiss: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -143,7 +148,7 @@ internal fun ClearConfirmDialog(
                 TextButton(onClick = {
                     onDismiss()
                     onClear()
-                }) { Text(confirmLabel, color = DangerText) }
+                }) { Text(confirmLabel, color = confirmColor) }
             },
             dismissButton = {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }

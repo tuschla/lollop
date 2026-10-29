@@ -4,9 +4,7 @@
 //! velocity cue, prefill targets and honest calisthenics session titles.
 
 use super::*;
-use crate::plan::{
-    Anchors, e1rm_reliable_name, is_isolation_lift, movement_pattern, same_movement, synthesize,
-};
+use crate::plan::{Anchors, is_isolation_lift, movement_pattern, same_movement, synthesize};
 use crate::schema::Prescription;
 
 /// A dated bench set with no recorded RPE (so `effective_reps` == `reps`).
@@ -51,14 +49,7 @@ fn anchor_survives_while_same_movement_training_continues() {
             &mut model,
         )
         .expect_only_render();
-        app.update(
-            Event::SetToday {
-                epoch_day: mon,
-                utc_offset_sec: 0,
-            },
-            &mut model,
-        )
-        .expect_only_render();
+        set_today(&app, &mut model, mon);
         model
     };
     // Read the (deterministic) Heavy-day bench load: 85% of the anchor.
@@ -151,7 +142,6 @@ fn non_catalog_isolation_names_are_e1rm_unreliable() {
         "Dumbbell flies",
     ] {
         assert!(is_isolation_lift(iso), "{iso} should read as isolation");
-        assert!(!e1rm_reliable_name(iso), "{iso} e1RM is unreliable");
     }
     for compound in [
         "Barbell back squat",
@@ -161,7 +151,6 @@ fn non_catalog_isolation_names_are_e1rm_unreliable() {
         "Overhead press",
     ] {
         assert!(!is_isolation_lift(compound), "{compound} is a compound");
-        assert!(e1rm_reliable_name(compound), "{compound} e1RM is reliable");
     }
     // A posterior-chain back extension is a HINGE, never mislabeled isolation
     // even though "extension" is an isolation keyword.
@@ -203,7 +192,7 @@ fn a_lone_isolation_log_does_not_lead_the_dup_week() {
             "{iso} must not lead the DUP week (primary was {primary})"
         );
         assert!(
-            movement_pattern(&primary).is_some() && e1rm_reliable_name(&primary),
+            movement_pattern(&primary).is_some() && !is_isolation_lift(&primary),
             "the DUP primary must be a pattern-classified compound, got {primary}"
         );
     }
@@ -248,14 +237,7 @@ fn lb_user_gets_a_loadable_prescription() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
     let load_kg = app
         .view(&model)
         .week_plan
@@ -546,14 +528,7 @@ fn program_week_cycles_with_the_periodized_block() {
     // The last week of the cycle is the recovery (Deload) week, reached once
     // every earlier week was completed (the plan advances by completed work).
     complete_plan_weeks(&app, &mut model, MON, weeks_total - 1);
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 7 * (weeks_total - 1),
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON + 7 * (weeks_total - 1));
     let last = app.view(&model).program.expect("program present");
     assert_eq!(last.week, weeks_total as u8, "the last cycle position");
     assert_eq!(
@@ -564,14 +539,7 @@ fn program_week_cycles_with_the_periodized_block() {
 
     // One full cycle later the block repeats at week 1 (Build).
     complete_plan_weeks(&app, &mut model, MON + 7 * (weeks_total - 1), 1);
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 7 * weeks_total,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON + 7 * weeks_total);
     let wrapped = app.view(&model).program.expect("program present");
     assert_eq!(wrapped.week, 1, "the week cycles back to 1");
     assert_eq!(wrapped.phase, MesoPhase::Build, "and back to a build week");
@@ -676,24 +644,12 @@ fn sets_logged_under_a_retired_catalog_name_show_the_current_name() {
     // "Plank (front)") reads under the current names everywhere the view
     // names a lift (history rows, which also feed the editor's quick picks,
     // and the plan), while the old- and new-name sets stay one lift.
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(strength_profile()), &mut model)
-        .expect_only_render();
-    for ev in [
+    let history = [
         log_set("Barbell back squat", 120.0, 3, 8.0, (MON - 8) * DAY_SEC),
-        log_set("Back squat", 110.0, 3, 8.0, (MON - 1) * DAY_SEC),
+        log_set("Back squat", 130.0, 3, 8.0, (MON - 1) * DAY_SEC),
         cal_hold("Plank (front)", 30, 7.0, (MON - 1) * DAY_SEC + 600),
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-    ] {
-        app.update(ev, &mut model).expect_only_render();
-    }
+    ];
+    let (app, model) = planned_on(strength_profile(), history, MON);
     let vm = app.view(&model);
     let names: Vec<&str> = vm.lifts.iter().map(|l| l.exercise.as_str()).collect();
     assert!(
@@ -712,8 +668,8 @@ fn sets_logged_under_a_retired_catalog_name_show_the_current_name() {
         .max_by_key(|l| l.observed_at)
         .expect("the newer squat");
     assert!(
-        newer.e1rm_delta_kg.is_some_and(|d| d < 0.0) && !newer.e1rm_pr,
-        "the new-name set compares against the old-name one: {newer:?}"
+        newer.e1rm_pr,
+        "the heavier new-name set beats the old-name one, so they share a chain: {newer:?}"
     );
     let planned: Vec<&str> = vm
         .week_plan

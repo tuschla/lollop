@@ -323,14 +323,7 @@ fn bsi_surveillance_reads_measured_not_stated_mileage() {
         app.update(logrun(70.0, today - 7 * w), &mut model)
             .expect_only_render();
     }
-    app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, today);
     let bsi = app
         .view(&model)
         .guidance
@@ -352,13 +345,13 @@ fn bsi_surveillance_reads_measured_not_stated_mileage() {
 
 #[test]
 fn build_guidance_never_panics_across_the_profile_domain() {
-    // Exhaustive smoke test: build_guidance branches heavily on the profile
-    // and does arithmetic on its integer fields (weekly_sets, running days,
-    // km). Sweep every enum combination against the boundary integers the
-    // Android profile editor can emit (weekly_sets 0..=30, days 0..=7, km
-    // 0..=150) and assert (a) no panic (underflow / div-by-zero) and (b) the
-    // HARD RULE 2 invariant holds everywhere: every surfaced row is
-    // evidence-cited and none is graded MarketingMyth.
+    // Smoke test: build_guidance branches heavily on the profile and does
+    // arithmetic on its integer fields (weekly_sets, running days, km). Sweep
+    // every enum combination against the floor, the step above it and the
+    // ceiling the Android profile editor can emit (weekly_sets 0/1/30, days
+    // 0/1/7, km 0/0.1/150) and assert (a) no panic (underflow /
+    // div-by-zero) and (b) the HARD RULE 2 invariant holds everywhere: every
+    // surfaced row is evidence-cited and none is graded MarketingMyth.
     /// Every profile in `ps` crossed with every value of one field.
     fn cross<T: Copy>(ps: Vec<Profile>, values: &[T], set: fn(&mut Profile, T)) -> Vec<Profile> {
         ps.into_iter()
@@ -468,8 +461,8 @@ fn frequency_guidance_collapses_equal_bounds() {
     // A muscle whose peak set count lands in a fixed-frequency band (chest MRV
     // 22 → 3–3×/wk) must not print a degenerate "3–3×/wk" span; the per-session
     // spread (6–9) stays a real range.
-    let (plan, _) = build_hypertrophy_plan(
-        &HypertrophyPlanQuery {
+    let (plan, _, _) = build_hypertrophy_plan(
+        &HypertrophyInputView {
             muscle: "chest".to_string(),
             weeks: 4,
             not_growing: false,

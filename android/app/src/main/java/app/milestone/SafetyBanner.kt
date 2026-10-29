@@ -20,12 +20,10 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -139,15 +137,10 @@ internal fun holdReasonLineRes(holdReason: String?, tier: String?, pregnancyWarn
 }
 
 /**
- * The DO-NOT-TRAIN banner with everything its actions need: the confirm dialogs
- * for removing a mistaken report / clearing readiness inputs and the confirm for
- * the core's resolve actions ("I'm pain-free now" / "I've recovered" / "I'm
- * better"). One host for every screen that pins the banner (Today's scaffold and
- * the run tracker), so the safety paths never drift apart. The under-18 pause is
- * not pinned: it is Today's calm [YouthHoldCard], so the host renders nothing for it.
- * [onAddDetails] opens the readiness editor and [onOpenProfile] opens Profile at
- * a row; where a screen has no such flow (null) the banner states the way back
- * as text instead.
+ * The DO-NOT-TRAIN banner with the confirm dialogs its actions need, the one
+ * host for every screen that pins it (Today and the run tracker). The under-18
+ * pause renders nothing here (it is Today's [YouthHoldCard]). Without
+ * [onAddDetails] / [onOpenProfile] the banner states the way back as text.
  */
 @Composable
 internal fun SafetyBannerHost(
@@ -181,10 +174,12 @@ internal fun SafetyBannerHost(
         onAddDetails = onAddDetails,
         onResolveHold = { resolveHoldSignal = it.signal },
     )
-    ClearReadinessDialog(
+    ClearConfirmDialog(
         visible = confirmReadiness,
+        title = stringResource(R.string.main_clear_readiness_title),
+        message = stringResource(R.string.main_clear_readiness_message),
         onDismiss = { confirmReadiness = false },
-        onEvent = onEvent,
+        onClear = { onEvent(Event.ClearReadiness) },
     )
     RemoveReportDialog(signal = removeReport, onDismiss = { removeReport = null }, onEvent = onEvent, model = model, lastPain = lastPain)
     HoldResolveDialog(
@@ -192,20 +187,6 @@ internal fun SafetyBannerHost(
         model = model,
         onDismiss = { resolveHoldSignal = null },
         onEvent = onEvent,
-    )
-}
-
-/** Confirm for "Clear today's readings…" (inputs logged by mistake): every readiness
- *  input and the adjustments (and hold) they produced go. */
-@Composable
-private fun ClearReadinessDialog(visible: Boolean, onDismiss: () -> Unit, onEvent: (Event) -> Unit) {
-    ClearConfirmDialog(
-        visible = visible,
-        title = stringResource(R.string.main_clear_readiness_title),
-        message = stringResource(R.string.main_clear_readiness_message),
-        confirmLabel = stringResource(R.string.main_clear),
-        onDismiss = onDismiss,
-        onClear = { onEvent(Event.ClearReadiness) },
     )
 }
 
@@ -220,17 +201,16 @@ internal fun RemoveReportDialog(
     signal: ReadinessSignal?,
     onDismiss: () -> Unit,
     onEvent: (Event) -> Unit,
-    // The live model (whether the report holds training, the illness level) and
-    // the pain report as entered here: they word the dialog and rebuild the
-    // report for "Report removed · Undo". Without them there is no Undo.
-    model: ViewModel? = null,
-    lastPain: PainDetail? = null,
+    // Words the dialog (does the report hold training) and rebuilds the report
+    // for "Report removed · Undo", with [lastPain] as entered in triage.
+    model: ViewModel,
+    lastPain: PainDetail?,
 ) {
     if (signal == null) return
     val illness = signal == ReadinessSignal.Illness
     val removed = stringResource(R.string.main_report_removed)
     val undo = stringResource(R.string.log_undo)
-    val holds = model?.train_blocked ?: true
+    val holds = model.train_blocked
     ClearConfirmDialog(
         visible = true,
         title = stringResource(if (illness) R.string.main_remove_illness_title else R.string.main_remove_pain_title),
@@ -238,7 +218,7 @@ internal fun RemoveReportDialog(
         confirmLabel = stringResource(R.string.main_delete),
         onDismiss = onDismiss,
         onClear = {
-            val row = model?.readiness_summary?.firstOrNull { it.signal == signal.name }
+            val row = model.readiness_summary.firstOrNull { it.signal == signal.name }
             val restore: Event? = when {
                 illness && row != null -> Event.SubmitReadiness(signal, row.value, AppClock.nowSec())
                 !illness && lastPain != null -> Event.SubmitReadiness(signal, 1.0, AppClock.nowSec(), pain = lastPain)
@@ -257,23 +237,12 @@ internal fun RemoveReportDialog(
 }
 
 /**
- * DO-NOT-TRAIN banner (01-today §C, INVARIANT 3). Pinned above content on every
- * screen; never scrolls with the page, never dismissable. It always states the
- * hold whole (headline, reason, actions); past half the screen height only its
- * extra text (the paused line, an open "?") scrolls inside it. Renders ONLY when the core
- * actually blocks training (`train_blocked`), a downgrade-class adjustment
- * (HRV/wellness dip) is NOT a hold and renders as an amber inline card on Today,
- * never here; nor is the under-18 pause ([YouthHoldCard]), which asks for no
- * stop and sits above the weekly activity it encourages. Safety is a rule, not a
- * probability: the "?" disclosure
- * shows grade + citation but NO confidence meter. `holdDetail` is the
- * body-part/character sub-line for a characterized Pain report. The reason line
- * and the one way back follow [action]; the core's resolve actions ("I'm
- * pain-free now" / "I've recovered") and "I'm better" are the solid white
- * buttons, then "Add details" and the undo / resolve path each on its own line,
- * with the "?" at the end of that block (or beside the last solid button when
- * there are no text actions). Captions on the danger fill use
- * [DangerOn] (AA at caption size; translucent white is not).
+ * DO-NOT-TRAIN banner (01-today §C, INVARIANT 3): pinned above content, never
+ * dismissable, only while the core blocks training (`train_blocked`). It always
+ * states the hold whole (headline, reason, actions); only its extra text scrolls
+ * inside it. The "?" shows grade + citation, never a confidence meter.
+ * [holdDetail] is the characterized pain sub-line; the reason line and the one
+ * way back follow [action].
  */
 @Composable
 private fun SafetyBanner(
@@ -484,24 +453,16 @@ private fun SafetyBanner(
 }
 
 /**
- * The evidence behind the hold, verbatim from the core (never invented here),
- * under a hold card's open "?". Prefers the headline's "safety_hold" rung:
- * build_headline resolves the DOMINANT hold source including gates-only medical
- * referrals, which emit NO adjustment row; falls back to the safety-critical
- * adjustment. Safety is a rule, not a probability: grade + citation only, NO
- * confidence meter. Without either, a plain line says what kind of hold it is
- * ([profileHold]: a profile answer, else a reported signal). [strong] tints the
- * summary, [muted] the rest.
+ * The evidence behind the hold ([holdEvidence]) under a hold card's open "?":
+ * grade + citation, no confidence meter. Without any, a plain line says what
+ * kind of hold it is ([profileHold]: a profile answer, else a reported signal).
  */
 @Composable
 private fun HoldEvidencePanel(model: ViewModel, profileHold: Boolean, strong: Color, muted: Color) {
-    val hold = model.today_headline?.takeIf {
-        it.kind == "safety_hold" && it.summary.isNotBlank()
-    }
-    val adj = remember(model.adjustments) { dominantSafetyAdjustment(model) }
-    val holdSummary = hold?.summary ?: adj?.summary
-    val holdGrade = hold?.grade ?: adj?.grade
-    val holdCitation = hold?.citation ?: adj?.citation
+    val hold = remember(model.today_headline, model.adjustments) { holdEvidence(model) }
+    val holdSummary = hold?.summary
+    val holdGrade = hold?.grade
+    val holdCitation = hold?.citation
     if (holdSummary != null) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
             Text(holdSummary, color = strong, style = Type.Caption)
@@ -600,10 +561,9 @@ private fun BannerSolidAction(label: String, onFill: Color, onClick: () -> Unit,
 
 /**
  * Confirm for the core's resolve actions ("I'm pain-free now" / "I've recovered"
- * / "I'm better"): its own action label + confirm copy, then
- * [holdResolutionEvents]. Resolving is not destructive (the reports stay in
- * history), so the confirm is the Accent action, not the danger-red clear
- * dialog. Renders nothing while [resolution] is null.
+ * / "I'm better"), then [holdResolutionEvents]. Resolving keeps the reports in
+ * history, so the confirm is Accent, not danger red. Renders nothing while
+ * [resolution] is null.
  */
 @Composable
 internal fun HoldResolveDialog(
@@ -613,22 +573,24 @@ internal fun HoldResolveDialog(
     onEvent: (Event) -> Unit,
 ) {
     if (resolution == null) return
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(Space.Card.dp),
-        title = { Text(resolution.action_label) },
-        text = { Text(resolution.confirm_text) },
-        confirmButton = {
-            TextButton(onClick = {
-                onDismiss()
-                holdResolutionEvents(resolution, model.profile, model.today(), AppClock.nowSec()).forEach(onEvent)
-            }) { Text(stringResource(R.string.main_resolve_hold_confirm), color = Accent) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }
-        },
+    ClearConfirmDialog(
+        visible = true,
+        title = resolution.action_label,
+        message = resolution.confirm_text,
+        confirmLabel = stringResource(R.string.main_resolve_hold_confirm),
+        confirmColor = Accent,
+        onDismiss = onDismiss,
+        onClear = { holdResolutionEvents(resolution, model.profile, model.today(), AppClock.nowSec()).forEach(onEvent) },
     )
 }
+
+/** The evidence behind the active hold: the headline's "safety_hold" rung (it
+ *  also covers a gates-only medical referral, which emits no adjustment row),
+ *  else the top safety-critical adjustment. */
+internal fun holdEvidence(model: ViewModel): AdjustmentView? =
+    model.today_headline?.takeIf { it.kind == "safety_hold" && it.summary.isNotBlank() }
+        ?.let { AdjustmentView(it.summary, it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.why) }
+        ?: dominantSafetyAdjustment(model)
 
 /**
  * What confirming [resolution] sends: [Event.ResolveHold] dated [nowSec] (every

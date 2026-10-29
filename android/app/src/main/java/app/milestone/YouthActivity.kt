@@ -15,20 +15,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -216,15 +212,6 @@ fun LogActivityEditor(
     val minutes = parseKeypadNumber(minutesText)
     val minutesValid = minutes != null && minutes in ActivityMinutesMin..ActivityMinutesMax
     val savedText = stringResource(R.string.activity_saved)
-    // The keypad opens below the minutes field, often past the sheet's fold:
-    // scroll it whole into view so every key (and "0") is reachable at once.
-    val keypadRequester = remember { BringIntoViewRequester() }
-    LaunchedEffect(keypadOpen) {
-        if (keypadOpen) {
-            withFrameNanos { }
-            keypadRequester.bringIntoView()
-        }
-    }
 
     EditorScaffold(
         title = stringResource(R.string.activity_editor_title),
@@ -261,26 +248,13 @@ fun LogActivityEditor(
                 },
                 hintColor = if (minutesText.isNotEmpty() && !minutesValid) DangerText else OnBgMuted,
             )
-            if (keypadOpen) {
-                Box(Modifier.bringIntoViewRequester(keypadRequester)) {
-                    NumericKeypad(
-                        onKey = { key ->
-                            minutesText = editNumericBuffer(minutesText, key, fresh)
-                            fresh = false
-                            dirty = true
-                        },
-                        onBackspace = {
-                            minutesText = minutesText.dropLast(1)
-                            fresh = false
-                            dirty = true
-                        },
-                        allowDecimal = false,
-                    )
-                }
+            // Opens below the minutes field, often past the sheet's fold.
+            KeypadPanel(keypadOpen) {
+                NumericKeypad(minutesText, fresh, { minutesText = it; fresh = false; dirty = true }, allowDecimal = false)
             }
             ActivityEffortField(vigorous) { vigorous = it; dirty = true }
             Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-                SwitchRow(stringResource(R.string.activity_strengthening), strengthening) {
+                LabeledSwitchRow(stringResource(R.string.activity_strengthening), strengthening) {
                     strengthening = it
                     strengtheningSet = true
                     dirty = true
@@ -293,7 +267,7 @@ fun LogActivityEditor(
 }
 
 /** What the activity was: every [ActivityKind] as one pick-one chip, laid out in
- *  balanced rows of equal-width cells (as the run type field). */
+ *  balanced rows of equal-width cells. */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun ActivityKindField(selected: ActivityKind?, onSelect: (ActivityKind) -> Unit) {

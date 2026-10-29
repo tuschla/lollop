@@ -215,14 +215,7 @@ fn lift_audit_sums_only_the_latest_lifting_day() {
         )
         .expect_only_render();
     }
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 1,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON + 1);
     let vm = app.view(&model);
     let rows: Vec<_> = vm
         .lift_audit
@@ -264,14 +257,7 @@ fn an_unrecorded_rpe_fabricates_no_rir() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
     let vm = app.view(&model);
     assert!(
         !vm.lift_audit
@@ -329,11 +315,63 @@ fn weights_profile_still_audits_a_barbell_lift_sharing_a_tier_name() {
     let anchors = build_plan_anchors(
         SetIndex::new(&model.sets).with_facts(&model.sets),
         AnchorCtx::default(),
-        0,
+        1,
         0,
     );
     assert!(
         anchors.e1rm_for("Bulgarian split squat").is_some(),
         "a Weights user's barbell lift still anchors an e1RM"
+    );
+}
+
+#[test]
+fn a_set_dated_after_today_does_not_change_todays_audit() {
+    let today = MON + 7 * 2_857;
+    let log = |future: bool| {
+        let app = Engine;
+        let mut model = Model::default();
+        let mut events = vec![
+            Event::SetProfile(strength_profile()),
+            set_today_ev(today),
+            log_set(
+                "Back Squat",
+                100.0,
+                5,
+                8.0,
+                (today - 7) * DAY_SEC + 17 * 3_600,
+            ),
+        ];
+        for i in 0..5 {
+            events.push(log_set(
+                "Back Squat",
+                100.0,
+                5,
+                8.0,
+                today * DAY_SEC + 17 * 3_600 + i * 300,
+            ));
+        }
+        if future {
+            events.push(log_set(
+                "Back Squat",
+                160.0,
+                5,
+                8.0,
+                (today + 3) * DAY_SEC + 17 * 3_600,
+            ));
+        }
+        for ev in events {
+            app.update(ev, &mut model).expect_only_render();
+        }
+        app.view(&model).lift_audit
+    };
+    let without = log(false);
+    assert!(
+        without.iter().any(|r| r.summary.starts_with("Back Squat")),
+        "today's 5×5 gets a Prilepin row: {without:?}"
+    );
+    assert_eq!(
+        log(true),
+        without,
+        "a set 3 days ahead changed today's audit"
     );
 }

@@ -70,7 +70,7 @@ internal fun rememberDistanceUnit(): DistanceUnit =
  * top record. No type icon: the Runs list holds nothing but runs.
  */
 @Composable
-internal fun RunCard(r: RunResultView, nowMillis: Long, onClick: (() -> Unit)? = null) {
+internal fun RunCard(r: RunResultView, nowMillis: Long, onClick: () -> Unit) {
     val unit = rememberDistanceUnit()
     PlainCard(onClick = onClick) {
         Row(
@@ -107,8 +107,9 @@ internal fun RunCard(r: RunResultView, nowMillis: Long, onClick: (() -> Unit)? =
         // Only the findings that ask for something (a real spike, a fading split,
         // SAFETY); neutral notes and praise wait in the detail sheet.
         RunFindings(r, face = true)
-        // The run's single most significant record ("Fastest 10K").
-        RunRecordChips(r, face = true)
+        // The run's single most significant record ("Fastest 10K"): the core orders
+        // the labels by distance.
+        r.best_effort_labels.lastOrNull()?.let { RecordChip(it) }
     }
 }
 
@@ -120,7 +121,7 @@ internal fun RunCard(r: RunResultView, nowMillis: Long, onClick: (() -> Unit)? =
  */
 @Composable
 internal fun RunHrRow(r: RunResultView, explain: Boolean) {
-    if (!r.hasHrReading()) return
+    if (r.hr_label.isBlank()) return
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
@@ -212,7 +213,7 @@ internal fun RunFindings(r: RunResultView, face: Boolean, showSplit: Boolean = t
                             }
                         }
                         if (shownSplit != null) {
-                            if (splitChip) Chip(shownSplit.label, splitVerdictColor(shownSplit.verdict, status))
+                            if (splitChip) Chip(shownSplit.label, if (shownSplit.verdict == "fade") status.warn else ChipNeutral)
                             if (splitSafety) Chip(stringResource(R.string.main_chip_safety), status.danger)
                         }
                         if (shownInterval != null) {
@@ -240,17 +241,7 @@ internal fun RunFindings(r: RunResultView, face: Boolean, showSplit: Boolean = t
                 DisclosureButton(whyOpen, subject = stringResource(R.string.history_findings_subject)) { whyOpen = !whyOpen }
             }
         }
-        if (hasWhy && whyOpen) {
-            if (grades.isNotEmpty() || contested) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-                    grades.forEach { GradeChip(it) }
-                    if (contested) Chip(stringResource(R.string.main_chip_contested), status.warn)
-                }
-            }
-            citations.forEach {
-                Text(citationLabel(it), color = OnBgFaint, style = Type.Caption)
-            }
-        }
+        if (hasWhy && whyOpen) ClaimMarkers(grades, contested, citations)
     }
 }
 
@@ -265,7 +256,7 @@ internal enum class SplitTag { Fastest, Slowest }
 internal data class SplitBar(val fraction: Float, val tone: SplitTone, val deltaSec: Int?, val tag: SplitTag?)
 
 /**
- * Bars for the SPLITS rows (spec §2.5, a refinement of UD 2026-08-20): length is
+ * Bars for the SPLITS rows (spec §2.5): length is
  * speed normalised on `[SplitBarBaseline × slowest speed, fastest speed]`, so the
  * fastest split fills the track and one 5% slower reads about 75%. With 3 or more
  * full splits only the fastest is `Accent` (the rest `AccentFaint`), else every full
@@ -502,7 +493,6 @@ private fun splitSpoken(res: Resources, s: RunSplitView, bar: SplitBar, distance
  * and one "?" holding the grade, CONTESTED marker and citation.
  */
 @Composable
-@OptIn(ExperimentalLayoutApi::class)
 private fun SplitVerdictLine(split: SplitVerdictView, run: RunResultView) {
     val status = LocalStatusColors.current
     val hasWhy = split.grade.isNotBlank() || split.citation.isNotBlank() || split.contested
@@ -518,28 +508,15 @@ private fun SplitVerdictLine(split: SplitVerdictView, run: RunResultView) {
             }
         }
         if (hasWhy && open) {
-            if (split.grade.isNotBlank() || split.contested) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-                    if (split.grade.isNotBlank()) GradeChip(split.grade)
-                    if (split.contested) Chip(stringResource(R.string.main_chip_contested), status.warn)
-                }
-            }
-            if (split.citation.isNotBlank()) Text(citationLabel(split.citation), color = OnBgFaint, style = Type.Caption)
+            ClaimMarkers(
+                grades = listOfNotNull(split.grade.takeIf { it.isNotBlank() }),
+                contested = split.contested,
+                citations = listOfNotNull(split.citation.takeIf { it.isNotBlank() }),
+            )
         }
     }
 }
 
-// Neutral informational chip ground: a plain slate that carries NO semantic
-// meaning. Used where a chip states a fact without valence (even/negative
-// split). Deliberately not a `StatusColors` token.
+/** Chip ground for an even / negative split verdict: a neutral slate with no
+ *  valence (only a fade gets the semantic warn). Not a `StatusColors` token. */
 private val ChipNeutral = Color(0xFF334155)
-
-/**
- * Chip ground for the core's split verdict. Only a fade gets the semantic warn;
- * even/negative splits are neutral facts. An unknown future verdict falls back
- * to neutral rather than inventing a valence.
- */
-private fun splitVerdictColor(verdict: String, status: StatusColors): Color = when (verdict) {
-    "fade" -> status.warn
-    else -> ChipNeutral // "even", "negative", unknown
-}

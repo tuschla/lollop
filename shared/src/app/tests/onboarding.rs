@@ -91,15 +91,6 @@ fn gated_profiles_get_no_prescriptive_guidance_or_calculator_numbers() {
             &mut model,
         )
         .expect_only_render();
-        app.update(
-            Event::ComputeApre {
-                scheme: crate::autoreg::ApreScheme::Apre6,
-                reps: 10,
-                current_load_kg: 100.0,
-            },
-            &mut model,
-        )
-        .expect_only_render();
         let vm = app.view(&model);
         assert!(
             vm.guidance
@@ -109,14 +100,14 @@ fn gated_profiles_get_no_prescriptive_guidance_or_calculator_numbers() {
             vm.guidance.iter().map(|g| &g.section).collect::<Vec<_>>()
         );
         assert_eq!(vm.hypertrophy_plan.len(), 1, "{health:?}");
-        assert!(!vm.hypertrophy_plan[0].summary.contains("sets"));
-        assert_eq!(vm.apre.len(), 1, "{health:?}");
         assert!(
-            vm.apre[0].summary.contains("training is paused"),
+            vm.hypertrophy_plan[0]
+                .summary
+                .contains("training is paused"),
             "{}",
-            vm.apre[0].summary
+            vm.hypertrophy_plan[0].summary
         );
-        assert!(vm.apre[0].evidence.safety_critical);
+        assert!(vm.hypertrophy_plan[0].evidence.safety_critical);
     }
 }
 
@@ -383,17 +374,6 @@ const D_2026_03_12: i64 = 20524;
 const BORN_2008_10_18: i64 = 14170;
 const D_2026_10_17: i64 = 20743;
 const D_2026_10_18: i64 = 20744;
-
-fn set_today(app: &Engine, model: &mut Model, epoch_day: i64) {
-    app.update(
-        Event::SetToday {
-            epoch_day,
-            utc_offset_sec: 0,
-        },
-        model,
-    )
-    .expect_only_render();
-}
 
 #[test]
 fn birthday_age_is_derived_and_ticks_over_on_the_birthday() {

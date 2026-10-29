@@ -37,3 +37,6 @@ pub(super) const CITE_SORIANO_2015: &str =
 pub(super) const CITE_LOW_2016: &str = "Low 2016, Overcoming Gravity (2nd ed.)";
 pub(super) const CITE_NHS_C25K: &str =
     "NHS Better Health, Couch to 5K running plan (nhs.uk, accessed 2026)";
+pub(super) const CITE_PFITZINGER_2009: &str =
+    "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)";
+pub(super) const CITE_BAAR_2014: &str = "Baar 2014, Sports Med 44(Suppl 2):S117-S125";

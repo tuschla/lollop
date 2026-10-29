@@ -9,8 +9,8 @@
 //! number the engine states the gap instead of inventing one.
 //!
 //! **HARD RULE 2 — every recommendation carries its evidence.** A value that
-//! advises the athlete travels as `Recommended<T>` with an `Evidence{grade,
-//! citation}` and a `ConfidenceTag` (`evidence::graded`, keyed by claim id), so
+//! advises the athlete travels as `Recommended<T>` tagged with its `ClaimId`
+//! (`evidence::graded`), whose registry entry holds the grade and citation, so
 //! a shell can always show how strongly a number is backed and which claim
 //! produced it. When two claims could face a figure, the badge names the one
 //! that actually set it. A claim graded `MarketingMyth` is hard-blocked: it can
@@ -32,6 +32,7 @@ pub mod autoreg;
 pub mod calisthenics;
 pub mod evidence;
 pub mod feedback;
+#[cfg(any(target_os = "android", feature = "jni-host", test))]
 pub mod ffi;
 pub mod fit;
 pub mod hybrid;
@@ -47,22 +48,35 @@ pub mod strength;
 /// Seconds per day: the one deterministic day bucket every module shares.
 pub(crate) const DAY_SEC: i64 = 86_400;
 
-/// LOCAL epoch day for a UTC `observed_at`, shifted by the shell's
-/// `today_utc_offset_sec`. The single day-bucketing convention shared by the plan
-/// strip's day attribution, the weekly running report, the lift/provisional
-/// audits, readiness derivation and compaction, so a set logged 23:30 local lands
-/// on the SAME calendar day everywhere. Carries the same DST/travel limitation as
-/// the plan strip: past entries are bucketed with TODAY's offset (the only offset
-/// on the wire). Saturating, so a corrupt wire stamp cannot overflow.
+/// LOCAL epoch day for a UTC `observed_at` shifted by `offset` seconds. The one
+/// day-bucketing convention the app views share, so a set logged 23:30 local
+/// lands on the same calendar day everywhere. Saturating, so a corrupt wire
+/// stamp cannot overflow.
 pub(crate) fn local_day(observed_at: i64, offset: i64) -> i64 {
     observed_at.saturating_add(offset).div_euclid(DAY_SEC)
 }
 
+/// Convert a count of days since the unix epoch (1970-01-01) to a civil
+/// `(year, month, day)`. Howard Hinnant, "chrono-Compatible Low-Level Date
+/// Algorithms" (public domain).
+pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
 pub use app::{
-    ActivityKind, ActivityResultView, AdjustmentView, ApreInputView, BaselineStatusView,
-    CheckinEchoView, CsEffortIn, Decouple, E1rmRangeView, Effect, Engine, EntryKind, Event,
-    FeedbackView, GradeDefView, GuidanceView, HrMaxView, HrZoneInputView, HypertrophyInputView,
-    IntervalExec, IntervalVerdictView, LiftExec, LiftResultView, Model, PrescriptionView, Profile,
+    ActivityKind, ActivityResultView, AdjustmentView, BaselineStatusView, CheckinEchoView,
+    Decouple, E1rmRangeView, Effect, Engine, EntryKind, Event, FeedbackView, GradeDefView,
+    GuidanceView, HrMaxView, HrZoneInputView, HypertrophyInputView, IntervalExec,
+    IntervalVerdictView, LiftExec, LiftResultView, Model, PrescriptionView, Profile,
     ProgramSummaryView, ProteinFigureView, ProteinInputView, RacePredictionView,
     ReadinessSignalView, ResistanceModality, RunResultView, RunSplitView, SessionPlanView,
     SessionReview, SignalGroupView, SplitVerdictView, TodayHeadlineView, TrainingLoadView,

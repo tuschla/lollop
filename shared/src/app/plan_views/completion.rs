@@ -166,10 +166,9 @@ fn set_credit(
         return near_heaviest;
     }
     let bar = match (it.load_kg, it.added_kg.filter(|a| *a > 0.0)) {
-        // Judge against the lower of the prescribed and the load actually
-        // shown after a readiness/deload load cut, so following the shown
+        // The load shown after a readiness/deload cut, so following the shown
         // session is full work.
-        (Some(load), _) => load.min(load * (1.0 - fold.load_frac)),
+        (Some(load), _) => load * (1.0 - fold.load_frac),
         (None, Some(added)) => added,
         (None, None) => return near_heaviest,
     };
@@ -206,6 +205,24 @@ fn item_set_summary(s: &LoggedSet, weight_lb: bool) -> String {
         base
     } else {
         format!("{} × {}", fmt_weight(s.weight_kg, weight_lb), s.reps)
+    }
+}
+
+impl ItemSetView {
+    /// `s` as an item shows it, not yet judged (not qualifying, lighter or short).
+    fn of(s: &LoggedSet, weight_lb: bool) -> Self {
+        ItemSetView {
+            entry_id: s.entry_id,
+            observed_at: s.observed_at,
+            weight_kg: s.weight_kg,
+            reps: s.reps,
+            rpe: s.rpe,
+            hold_sec: s.hold_sec,
+            qualifies: false,
+            lighter: false,
+            short: false,
+            summary: item_set_summary(s, weight_lb),
+        }
     }
 }
 
@@ -250,19 +267,12 @@ pub(in crate::app) fn apply_last_sets(
             continue;
         };
         let s = &model.sets[i];
-        let summary = item_set_summary(s, weight_lb);
-        it.last_set = Some(ItemSetView {
-            entry_id: s.entry_id,
-            observed_at: s.observed_at,
-            weight_kg: s.weight_kg,
-            reps: s.reps,
-            rpe: s.rpe,
-            hold_sec: s.hold_sec,
+        let last = ItemSetView {
             qualifies: true,
-            lighter: false,
-            short: false,
-            summary: summary.clone(),
-        });
+            ..ItemSetView::of(s, weight_lb)
+        };
+        let summary = last.summary.clone();
+        it.last_set = Some(last);
         let age_days = epoch_day.saturating_sub(set_day);
         if it.load_kg.is_none()
             && s.weight_kg > 0.0
@@ -322,11 +332,7 @@ pub(in crate::app) fn apply_last_sets(
                     "Start from {} ({reason}), then adjust to hit the target effort.",
                     fmt_weight(suggested, weight_lb)
                 );
-                it.why.basis = if it.why.basis.is_empty() {
-                    line
-                } else {
-                    format!("{} {line}", it.why.basis)
-                };
+                it.why.append_basis(&line);
             }
         }
         // `Last: 60 kg × 8`, the one "last time" wording every item face uses.
@@ -511,6 +517,16 @@ pub(super) struct DayJudge<'r> {
     pub(super) recs: &'r [Recommended<Adjustment>],
 }
 
+impl<'r> DayJudge<'r> {
+    pub(super) fn new(day: i64, recs: &'r [Recommended<Adjustment>]) -> Self {
+        Self {
+            day,
+            fold: fold_completion_adjustments(recs),
+            recs,
+        }
+    }
+}
+
 /// Whether a localized pain report in `recs` stops this item: the region rule
 /// `annotate_adjustments` applies (safety-038 "stop that exercise").
 fn pain_stopped(it: &PrescriptionView, recs: &[Recommended<Adjustment>]) -> bool {
@@ -623,6 +639,29 @@ fn any_work_logged(items: &[PrescriptionView]) -> bool {
     })
 }
 
+/// A session's status once every item is finished: `done` when every item is
+/// done, `done_lighter` when all are finished (done, short, lighter, skipped
+/// or stopped) with some work; `None` otherwise or with no items.
+pub(in crate::app) fn finished_status(items: &[PrescriptionView]) -> Option<SessionStatus> {
+    use ItemStatus::*;
+    if items.is_empty() {
+        return None;
+    }
+    if items.iter().all(|it| it.status == Done) {
+        return Some(SessionStatus::Done);
+    }
+    let finished = items.iter().all(|it| {
+        matches!(
+            it.status,
+            Done | DoneLighter | DoneShort | Skipped | SkippedPain | StoppedPain
+        )
+    });
+    let worked = items
+        .iter()
+        .any(|it| matches!(it.status, Done | DoneLighter | DoneShort | StoppedPain));
+    (finished && worked).then_some(SessionStatus::DoneLighter)
+}
+
 /// A flattened session's status from its item statuses. A day before the plan
 /// started is `before_plan` (never "missed", never counted); a past day reads
 /// `done` / `done_lighter` / `partial` (some work, under the lighter credit) /
@@ -636,7 +675,6 @@ fn session_status(
     today: i64,
     start: i64,
 ) -> SessionStatus {
-    use ItemStatus::*;
     if epoch_day < start {
         return SessionStatus::BeforePlan;
     }
@@ -653,23 +691,11 @@ fn session_status(
             SessionStatus::Planned
         };
     }
-    if items.iter().all(|it| it.status == Done) {
-        return SessionStatus::Done;
-    }
-    let finished = items.iter().all(|it| {
-        matches!(
-            it.status,
-            Done | DoneLighter | DoneShort | Skipped | SkippedPain | StoppedPain
-        )
-    });
-    let worked = items
-        .iter()
-        .any(|it| matches!(it.status, Done | DoneLighter | DoneShort | StoppedPain));
-    if finished && worked {
-        SessionStatus::DoneLighter
+    if let Some(status) = finished_status(items) {
+        status
     } else if epoch_day == today {
         SessionStatus::Planned
-    } else if items.iter().all(|it| it.status == SkippedPain) {
+    } else if items.iter().all(|it| it.status == ItemStatus::SkippedPain) {
         SessionStatus::Blocked
     } else if most_work_logged(items) {
         SessionStatus::DoneLighter
@@ -820,19 +846,16 @@ fn judge_lift_item(it: &mut PrescriptionView, judge: &DayJudge, ctx: &FlattenCtx
         model,
         weight_lb,
         session_days,
+        set_index,
         ..
     } = *ctx;
     let fold = judge.fold;
     let step = movement_step_kg(weight_lb);
-    let mut day_sets: Vec<&LoggedSet> = model
-        .sets
+    let mut day_sets: Vec<&LoggedSet> = set_index
+        .same_movement_sets(&it.exercise)
         .iter()
-        .enumerate()
-        .filter(|(i, srec)| {
-            session_days.get(*i).copied().flatten() == Some(judge.day)
-                && crate::plan::same_movement(&it.exercise, &srec.exercise)
-        })
-        .map(|(_, srec)| srec)
+        .filter(|&&i| session_days.get(i).copied().flatten() == Some(judge.day))
+        .map(|&i| &model.sets[i])
         .collect();
     day_sets.sort_by(|a, b| a.chrono_cmp(b));
     let heaviest = day_sets
@@ -848,16 +871,10 @@ fn judge_lift_item(it: &mut PrescriptionView, judge: &DayJudge, ctx: &FlattenCtx
             sets_done = sets_done.saturating_add(1);
         }
         logged.push(ItemSetView {
-            entry_id: srec.entry_id,
-            observed_at: srec.observed_at,
-            weight_kg: srec.weight_kg,
-            reps: srec.reps,
-            rpe: srec.rpe,
-            hold_sec: srec.hold_sec,
             qualifies: q,
             lighter: credit == SetCredit::Lighter,
             short: q && short_of_target(it, srec.reps, srec.hold_sec),
-            summary: item_set_summary(srec, weight_lb),
+            ..ItemSetView::of(srec, weight_lb)
         });
     }
     it.sets_done = sets_done;

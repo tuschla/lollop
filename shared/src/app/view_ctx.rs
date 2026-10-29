@@ -109,12 +109,7 @@ thread_local! {
 
 /// The memoized [`SetIndex`] of `sets`, whose fingerprint is `sets_fp`.
 fn set_index(sets: &[LoggedSet], sets_fp: u64) -> Rc<SetIndex> {
-    let hit = SET_INDEX_CACHE.with(|c| {
-        c.borrow()
-            .get_if(|k| *k == sets_fp)
-            .filter(|idx| idx.name_of.len() == sets.len())
-            .cloned()
-    });
+    let hit = SET_INDEX_CACHE.with(|c| c.borrow().get_if(|k| *k == sets_fp).cloned());
     hit.unwrap_or_else(|| {
         #[cfg(test)]
         SET_INDEX_BUILDS.with(|c| c.set(c.get() + 1));

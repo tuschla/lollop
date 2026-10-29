@@ -89,7 +89,7 @@ fn pace_rounds_to_the_nearest_second_and_zero_pads() {
     assert_eq!(fmt_mss(-5.0), "0:00");
     assert_eq!(fmt_clock(3599.6), "1:00:00");
     assert_eq!(fmt_clock(3599.4), "59:59");
-    // A tiny critical speed (huge s/km) is not clipped by a 32-bit cast.
+    // A tiny speed (huge s/km) is not clipped by a 32-bit cast.
     assert_eq!(fmt_mss(1.0e10), "166666666:40");
 }
 
@@ -99,26 +99,7 @@ fn gps_tracked_run_derives_distance_and_pace_from_fixes() {
     let mut model = Model::default();
 
     // ~1.11 km along the equator (0 → 0.01° lon) over 400 s.
-    let points = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.0,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.005,
-            observed_at: 200,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.01,
-            observed_at: 400,
-            accuracy_m: 5.0,
-        },
-    ];
+    let points = vec![gps(0.0, 0), gps(0.005, 200), gps(0.01, 400)];
     // Distinctive (entry_id, observed_at) so the process-global GPX registry
     // this test reads back can't be clobbered by a parallel test's run.
     app.update(
@@ -167,16 +148,12 @@ fn gps_run_of_only_noise_fixes_offers_no_route() {
     // misleading.
     let points = vec![
         GpsPoint {
-            lat: 0.0,
-            lon: 0.0,
-            observed_at: 0,
             accuracy_m: 80.0,
+            ..gps(0.0, 0)
         },
         GpsPoint {
-            lat: 0.0,
-            lon: 0.01,
-            observed_at: 400,
             accuracy_m: 120.0,
+            ..gps(0.01, 400)
         },
     ];
     // Distinctive (entry_id, observed_at) so the global GPX registry read
@@ -219,20 +196,7 @@ fn gps_run_of_only_noise_fixes_offers_no_route() {
 fn gps_run_without_hr_reports_unknown_zone_not_fabricated_z1() {
     let app = Engine;
     let mut model = Model::default();
-    let points = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.0,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.01,
-            observed_at: 400,
-            accuracy_m: 5.0,
-        },
-    ];
+    let points = vec![gps(0.0, 0), gps(0.01, 400)];
     // hr_pct_max = 0.0 → no HR sample → zone must not be fabricated.
     app.update(log_run_track(points, 0.0, 0.0, 0, 0), &mut model)
         .expect_only_render();
@@ -401,37 +365,20 @@ fn view_list_cache_shrinks_but_still_serves_a_hit() {
 fn run_view_differentiates_interval_from_steady_same_average() {
     // Two GPS runs with identical total distance (~445 m) and duration (120 s)
     // → identical average pace. The interval run mixes hard reps with standing
-    // recovery; the steady run holds an even pace. The engine must rate them
-    // differently now (RUN-INTERVAL-VI-001), not identically.
-    let g = |lon: f64, t: i64| GpsPoint {
-        lat: 0.0,
-        lon,
-        observed_at: t,
-        accuracy_m: 5.0,
-    };
+    // recovery; the steady run holds an even pace. The engine rates them
+    // differently (RUN-INTERVAL-VI-001).
     let steady = LoggedRun {
-        distance_km: 0.0,
-        duration_min: 0.0,
-        hr_pct_max: 0.0,
-        wire_hr_pct_max: 0.0,
         longest_recent_km: 5.0,
         wire_longest_recent_km: 5.0,
         // Four even ~111 m / 30 s segments (~3.71 m/s throughout).
         track: vec![
-            g(0.000, 0),
-            g(0.001, 30),
-            g(0.002, 60),
-            g(0.003, 90),
-            g(0.004, 120),
+            gps(0.000, 0),
+            gps(0.001, 30),
+            gps(0.002, 60),
+            gps(0.003, 90),
+            gps(0.004, 120),
         ],
-        track_segment_starts: Vec::new(),
-        observed_at: 0,
-        entry_id: 0,
-        logged_utc_offset_sec: None,
-        hr_pinned: false,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: None,
+        ..logged_run(0.0, 0.0, 0.0, 0)
     };
     // Interval with JOG recovery (recovery legs stay above the 0.5 m/s
     // auto-pause floor, so moving time, and therefore average moving pace,
@@ -439,11 +386,11 @@ fn run_view_differentiates_interval_from_steady_same_average() {
     // ~200 m hard reps (~6.7 m/s) each followed by a ~22 m jog (~0.74 m/s).
     let interval = LoggedRun {
         track: vec![
-            g(0.0000, 0),
-            g(0.0018, 30),
-            g(0.0020, 60),
-            g(0.0038, 90),
-            g(0.0040, 120),
+            gps(0.0000, 0),
+            gps(0.0018, 30),
+            gps(0.0020, 60),
+            gps(0.0038, 90),
+            gps(0.0040, 120),
         ],
         ..steady.clone()
     };
@@ -491,36 +438,11 @@ fn run_splits_carry_numeric_seconds_per_unit_consistent_with_pace() {
     // ~2.2 km along the equator (0 → 0.02° lon) over 600 s → ≥2 full-km
     // splits plus a trailing partial, so every branch is exercised.
     let points = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.000,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.005,
-            observed_at: 150,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.010,
-            observed_at: 300,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.015,
-            observed_at: 450,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.020,
-            observed_at: 600,
-            accuracy_m: 5.0,
-        },
+        gps(0.000, 0),
+        gps(0.005, 150),
+        gps(0.010, 300),
+        gps(0.015, 450),
+        gps(0.020, 600),
     ];
     app.update(
         log_run_track(points, 70.0, 12.0, 9_091_001, 9_091_001),
@@ -561,66 +483,16 @@ fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx() {
     // "teleport" the QC gate would normally drop: the segment boundary must
     // suppress that gate so segment 2 survives.
     let relocation = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.000,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.001,
-            observed_at: 10,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.002,
-            observed_at: 20,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.003,
-            observed_at: 30,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.004,
-            observed_at: 40,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.000,
-            observed_at: 100,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.001,
-            observed_at: 110,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.002,
-            observed_at: 120,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.003,
-            observed_at: 130,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.004,
-            observed_at: 140,
-            accuracy_m: 5.0,
-        },
+        gps(0.000, 0),
+        gps(0.001, 10),
+        gps(0.002, 20),
+        gps(0.003, 30),
+        gps(0.004, 40),
+        gps(1.000, 100),
+        gps(1.001, 110),
+        gps(1.002, 120),
+        gps(1.003, 130),
+        gps(1.004, 140),
     ];
 
     // With the boundary: distance is the two ~445 m segments (~0.89 km), NOT
@@ -677,4 +549,15 @@ fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx() {
         naive_run.distance_km,
     );
     assert!(naive_run.qc_dropped >= 5, "the 5 seg-2 fixes were dropped");
+}
+
+#[test]
+fn run_card_cache_key_covers_the_logged_offset() {
+    // The card echoes the logged offset, so two rows equal except for it must
+    // not share a cached card.
+    let mut r = probe_run(700_101);
+    r.logged_utc_offset_sec = Some(3_600);
+    assert_eq!(run_card(&r).utc_offset_sec, Some(3_600));
+    r.logged_utc_offset_sec = Some(-18_000);
+    assert_eq!(run_card(&r).utc_offset_sec, Some(-18_000));
 }

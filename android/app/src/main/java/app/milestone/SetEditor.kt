@@ -2,7 +2,6 @@ package app.milestone
 
 import android.os.Build
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,17 +16,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,12 +33,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -55,7 +44,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -148,61 +136,6 @@ private fun UndoRow(text: String, undoDescription: String, onUndo: () -> Unit) {
 /** Lines the "Logged …" text may take beside Undo before Undo moves under it. */
 private const val UndoRowMaxLinesBeside = 2
 
-/** Exercise search well (UI sweep §8): the keypad field's look, a `BgSunken` well
- *  in a 1dp [ChoiceCellBorder] hairline (1.5dp `Accent` while focused), with a
- *  `ui-search` 18dp glyph, a Bold value and an `OnBgFaint` "Search exercises"
- *  placeholder. No dropdown; typing filters the quick-pick chips below it. The
- *  keyboard capitalises the first word and its Done key folds it, so it never
- *  stays up over the in-form keypad. The field names itself with the hint (as the
- *  glossary's search well does), so it keeps an accessible name once it holds text. */
-@Composable
-private fun ExerciseSearchField(value: String, onChange: (String) -> Unit, onFocusChange: (Boolean) -> Unit = {}) {
-    val focusManager = LocalFocusManager.current
-    var focused by remember { mutableStateOf(false) }
-    val hint = stringResource(R.string.log_exercise_search_hint)
-    val shape = RoundedCornerShape(Space.Card.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = ActionMinHeight)
-            .clip(shape)
-            .background(BgSunken)
-            .border(if (focused) 1.5.dp else 1.dp, if (focused) Accent else ChoiceCellBorder, shape)
-            .padding(Space.Card.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
-    ) {
-        Icon(
-            painterResource(R.drawable.ic_ui_search),
-            contentDescription = null,
-            tint = OnBgFaint,
-            modifier = Modifier.size(18.dp),
-        )
-        BasicTextField(
-            value = value,
-            onValueChange = onChange,
-            singleLine = true,
-            textStyle = Type.Body.copy(fontWeight = FontWeight.Bold, color = OnBgBody),
-            cursorBrush = SolidColor(Accent),
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Sentences,
-                imeAction = ImeAction.Done,
-            ),
-            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-            modifier = Modifier.weight(1f).testTag("exercise-search").semantics { contentDescription = hint }.onFocusChanged {
-                focused = it.isFocused
-                onFocusChange(it.isFocused)
-            },
-            decorationBox = { inner ->
-                if (value.isEmpty()) {
-                    Text(hint, color = OnBgFaint, style = Type.Body)
-                }
-                inner()
-            },
-        )
-    }
-}
-
 /**
  * Manual lift-set entry. Emits a real [Event.LogSet] with the user's own
  * exercise / weight / reps / RPE; the e1RM + RIR derivation lives in the Rust
@@ -212,9 +145,6 @@ private fun ExerciseSearchField(value: String, onChange: (String) -> Unit, onFoc
  * Exercise quick-pick chips sit over the free-text field: today's open plan
  * items, then the user's own recent lifts, then the rest of the week's plan,
  * filtered by what is typed.
- *
- * Shell-thinness: no live "→ e1RM …" preview. e1RM is derived only in the
- * core, after submit; a preview would need a core query, never Kotlin math.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -287,25 +217,29 @@ fun LogSetEditor(
     // only a hint on the scale), an untouched Save logs it unrated (0.0, which the
     // core reads as "not recorded"), and it is never carried into the next set.
     var fields by rememberSaveable(stateSaver = SetEditorState.Saver) { mutableStateOf(SetEditorState.from(seed)) }
-    // Case-insensitive canonical names of today's prescribed hold rungs.
-    val holdSet = remember(holdExercises) { holdExercises.map { it.trim().lowercase() }.toSet() }
+    // Canonical names of today's prescribed hold rungs.
+    val holdSet = remember(holdExercises) { holdExercises.mapTo(HashSet(), ::nameKey) }
     // Hold mode follows the CURRENT exercise: a prescribed hold rung, OR editing an
     // existing hold set while its exercise is unchanged. Renaming an edited hold set
     // to a barbell lift drops hold mode (so it can't emit a "Bench — 30 s hold" row
     // or pollute the Bench e1RM with a phantom 1-rep set).
-    val holdMode = fields.exercise.trim().lowercase() in holdSet ||
+    val holdMode = nameKey(fields.exercise) in holdSet ||
         (initial?.hold_sec != null && fields.exercise.trim() == initial.exercise.trim())
     // A pure-bodyweight rung (prescribed added load 0) has no weight to enter, so
     // the field + keypad below are hidden. Follows the CURRENT exercise like
     // holdMode; in EDIT mode only when the logged weight is already 0, so editing a
     // weighted set can never silently drop its load.
-    val bodyweightSet = remember(bodyweightExercises) { bodyweightExercises.map { it.trim().lowercase() }.toSet() }
-    val bodyweightMode = fields.exercise.trim().lowercase() in bodyweightSet &&
+    val bodyweightSet = remember(bodyweightExercises) { bodyweightExercises.mapTo(HashSet(), ::nameKey) }
+    val bodyweightMode = nameKey(fields.exercise) in bodyweightSet &&
         (initial?.weight_kg ?: 0.0) == 0.0
     // Auto-manage the (added-)load buffer only for a blank, no-load editor as the
     // user types a hold-rung name: reset to "0" (hold) / "" (reps). A reseeded or
     // hand-entered load (weightVerbatim set / weightFresh cleared) is left untouched.
+    // Saveable, so a rotation (a new composition, same mode) does not reset it again.
+    var appliedHoldMode by rememberSaveable { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(holdMode) {
+        if (appliedHoldMode == holdMode) return@LaunchedEffect
+        appliedHoldMode = holdMode
         if (initial == null && fields.weightFresh && fields.weightVerbatim == null) {
             fields = fields.copy(weightText = if (holdMode) "0" else "")
         }
@@ -364,13 +298,6 @@ fun LogSetEditor(
     // row steps aside, so the keypad's bottom row and the "+ Add" row are never
     // under it (and a key tap can never land on an effort cell).
     var searchFocused by remember { mutableStateOf(false) }
-    val keypadRequester = remember { BringIntoViewRequester() }
-    LaunchedEffect(keypadOpen) {
-        if (keypadOpen) {
-            withFrameNanos { }
-            keypadRequester.bringIntoView()
-        }
-    }
 
     // The open plan item this exercise belongs to (by name), if any. Never a run
     // item, so a free set on a run day shows no run prescription.
@@ -548,7 +475,7 @@ fun LogSetEditor(
         loggedHere += 1
     }
 
-    val nextItem = if (loop && liveItem?.done == true) nextOpenItem(planSession?.items.orEmpty(), fields.exercise) else null
+    val nextItem = if (loop && liveItem?.done == true) nextOpenItem(planSession.items, fields.exercise) else null
     val primary = loopPrimaryAction(loop, liveItem, nextItem, fields.exercise.isNotBlank(), dirty)
     val primaryLabel = when (primary) {
         LoopPrimary.Save -> null
@@ -685,7 +612,7 @@ fun LogSetEditor(
                             liveItem?.let { AppliedCueLoads.record(it, kg) }
                         }
                     },
-                    onEndExercise = if (cue?.suggests_end_exercise == true && liveItem != null && planSession != null) {
+                    onEndExercise = if (cue?.suggests_end_exercise == true && liveItem != null) {
                         { endExerciseWithUndo(ctx.resources, liveItem, planSession.epoch_day, onSave) }
                     } else {
                         null
@@ -787,13 +714,21 @@ fun LogSetEditor(
                 // Save emits the weight as displayed and another exercise's verbatim
                 // load never rides along. An EDIT keeps its lossless verbatim:
                 // renaming a set must not drift its stored weight.
-                ExerciseSearchField(
+                // No dropdown: typing filters the quick-pick chips below. Done folds
+                // the keyboard, so it never stays up over the in-form keypad.
+                SearchWell(
                     value = fields.exercise,
                     onChange = {
                         fields = fields.copy(exercise = it, weightVerbatim = if (initial == null) null else fields.weightVerbatim)
                         keypadOpen = false
                         dirty = true
                     },
+                    hint = stringResource(R.string.log_exercise_search_hint),
+                    testTag = "exercise-search",
+                    imeAction = ImeAction.Done,
+                    verticalPadding = Space.Card.dp,
+                    bold = true,
+                    capitalization = KeyboardCapitalization.Sentences,
                     onFocusChange = { searchFocused = it },
                 )
                 FlowRow(
@@ -874,7 +809,8 @@ fun LogSetEditor(
                             weightSuffix(weightUnit), fields.weightText,
                             active = keypadOpen,
                             invalid = !weightEmpty && !weightValid,
-                            min = 0.0, max = weightMax, format = "%.1f",
+                            // kg keeps a two-decimal load (101.25) through a chip; lb is a half-pound grid.
+                            min = 0.0, max = weightMax, format = if (weightUnit == WeightUnit.Lb) "%.1f" else "%.2f",
                             adjustments = plateSteps(weightUnit),
                             onActivate = { focusManager.clearFocus(); keypadOpen = true },
                             // Only the ± chips report a whole new value (keys go through the
@@ -885,20 +821,13 @@ fun LogSetEditor(
                     }
                     // The keypad shows only while the weight is being typed (tap the
                     // well), right under it; the ± chips cover a plate change.
-                    if (keypadOpen) {
-                        Box(Modifier.bringIntoViewRequester(keypadRequester)) {
-                            NumericKeypad(
-                                onKey = { key ->
-                                    fields = fields.copy(weightText = editNumericBuffer(fields.weightText, key, fields.weightFresh), weightFresh = false)
-                                    dirty = true
-                                },
-                                onBackspace = {
-                                    fields = fields.copy(weightText = fields.weightText.dropLast(1), weightFresh = false)
-                                    dirty = true
-                                },
-                                onDone = { keypadOpen = false },
-                            )
-                        }
+                    KeypadPanel(keypadOpen) {
+                        NumericKeypad(
+                            fields.weightText,
+                            fields.weightFresh,
+                            { fields = fields.copy(weightText = it, weightFresh = false); dirty = true },
+                            onDone = { keypadOpen = false },
+                        )
                     }
                 }
                 // Hold (calisthenics static rung): seconds instead of reps. Otherwise a
@@ -986,7 +915,7 @@ private fun Modifier.shownOnly(shown: Boolean): Modifier =
 
 /** A cell's reps-left figure: "4+", "3" … "0". */
 private fun repsLeftFigure(rpe: Double): String {
-    val rir = (10.0 - rpe).coerceAtLeast(0.0)
+    val rir = repsLeft(rpe)
     return if (rir >= 4.0) "4+" else "${rir.toInt()}"
 }
 

@@ -1,7 +1,8 @@
 //! The under-18 weekly activity card (YOUTH-PA-001, WHO 2020 ages 5-17):
-//! this local Mon–Sun week's logged runs, lift sessions and other activities
-//! against the WHO reference. Tracking and information only; the youth plan
-//! hold is untouched. Counting rules: `extracted/08` youth-pa-001.
+//! this local Mon–Sun week's logged runs, lift sessions and other activities up
+//! to today (a run counts on the day it started) against the WHO reference.
+//! Tracking and information only; the youth plan hold is untouched. Counting
+//! rules: `extracted/08` youth-pa-001.
 
 use super::*;
 
@@ -12,16 +13,19 @@ const LIFT_SPAN_CAP_MIN: f64 = 180.0;
 /// (WHO: vigorous is usually 7-8 on a 0-10 scale).
 const VIGOROUS_RATING: u8 = 7;
 
-/// Every logged activity, chronological (`observed_at`, then `entry_id`), the
-/// `lifts` / `runs` order.
+/// Every logged activity, chronological ([`chrono_cmp`]), the `lifts` / `runs`
+/// order.
 pub(super) fn activity_views(acts: &[LoggedActivity]) -> Vec<ActivityResultView> {
     let mut ordered: Vec<&LoggedActivity> = acts.iter().collect();
-    ordered.sort_by(|a, b| {
-        a.observed_at
-            .cmp(&b.observed_at)
-            .then(a.entry_id.cmp(&b.entry_id))
-    });
+    ordered.sort_by(|a, b| chrono_cmp(a, b));
     ordered.into_iter().map(to_activity_view).collect()
+}
+
+/// Log order for activities: `observed_at`, then `entry_id`.
+fn chrono_cmp(a: &LoggedActivity, b: &LoggedActivity) -> std::cmp::Ordering {
+    a.observed_at
+        .cmp(&b.observed_at)
+        .then(a.entry_id.cmp(&b.entry_id))
 }
 
 fn to_activity_view(a: &LoggedActivity) -> ActivityResultView {
@@ -45,9 +49,10 @@ pub(super) fn build_youth_activity(cx: &ViewCtx) -> Option<YouthActivityView> {
     let offset = model.today_utc_offset_sec;
     // Saturating: a corrupt log's SetToday near i64::MIN/MAX must not overflow.
     let monday = today.saturating_sub(mon0_weekday(today));
-    // The local day of a dated entry inside this week, as an index 0..7.
+    let end_of_today = end_of_local_today_sec(model)?;
+    // The local day of a dated entry inside this week up to today, as an index 0..7.
     let week_day = |observed_at: i64| {
-        if is_undated(observed_at) {
+        if is_undated(observed_at) || observed_at > end_of_today {
             return None;
         }
         let d = local_day(observed_at, offset).saturating_sub(monday);
@@ -57,10 +62,11 @@ pub(super) fn build_youth_activity(cx: &ViewCtx) -> Option<YouthActivityView> {
     let mut strengthening = [false; 7];
 
     let mut run_minutes = 0.0;
-    // Chronological (`RunFacts::chrono`): the minute total is a float sum.
+    // Chronological (`RunFacts::chrono`): the minute total is a float sum. A run
+    // counts on the day it started; `started` is 0 (undated) for an undated run.
     for &i in &cx.runs.chrono {
         let (r, min) = (&model.runs[i], cx.runs.minutes[i]);
-        let Some(d) = week_day(r.observed_at) else {
+        let Some(d) = week_day(cx.runs.started[i]) else {
             continue;
         };
         if min.is_finite() && min > 0.0 {
@@ -103,11 +109,7 @@ pub(super) fn build_youth_activity(cx: &ViewCtx) -> Option<YouthActivityView> {
         strengthening[d] |= a.strengthening;
         week_entries.push(a);
     }
-    week_entries.sort_by(|a, b| {
-        a.observed_at
-            .cmp(&b.observed_at)
-            .then(a.entry_id.cmp(&b.entry_id))
-    });
+    week_entries.sort_by(|a, b| chrono_cmp(a, b));
     // Summed chronologically, never in storage order (an Undo re-pushes a row).
     let activity_minutes: f64 = week_entries.iter().map(|a| a.minutes).sum();
 

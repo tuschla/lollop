@@ -44,8 +44,12 @@ pub enum PainRegion {
 /// particular must never be scoped (a possible cardiac red flag).
 pub fn pain_region(location: &str) -> Option<PainRegion> {
     let l = location.to_ascii_lowercase();
+    let tokens = || {
+        l.split(|c: char| !c.is_ascii_alphabetic())
+            .filter(|t| !t.is_empty())
+    };
     let has = |words: &[&str]| {
-        l.split(|c: char| !c.is_ascii_alphabetic()).any(|t| {
+        tokens().any(|t| {
             words
                 .iter()
                 .any(|w| t == *w || t.strip_suffix('s') == Some(*w))
@@ -92,9 +96,12 @@ pub fn pain_region(location: &str) -> Option<PainRegion> {
         "trap",
         "collarbone",
     ]);
+    // Spine words always count, so a back-plus-limb location is two regions.
     // "Back" alone is the spine; "back of the knee" is the knee.
-    let back =
-        !lower && !upper && has(&["back", "spine", "lumbar", "spinal", "sacrum", "tailbone"]);
+    let back = has(&["spine", "lumbar", "spinal", "sacrum", "tailbone"])
+        || tokens()
+            .zip(tokens().skip(1).map(Some).chain([None]))
+            .any(|(t, next)| matches!(t, "back" | "backs") && next != Some("of"));
     // A location naming more than one region (e.g. "knee and shoulder") is not
     // one movement family: keep the whole-day stop.
     match (lower, upper, back) {
@@ -405,9 +412,8 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
     }
 }
 
-/// Severity rank of a graded verdict for choosing the WORST active pain report.
-/// Block (stop/defer) dominates Adjust (modify/monitor), which dominates
-/// Continue (DOMS); None is the absence of any active report.
+/// Severity rank of a graded verdict for choosing the WORST active pain report:
+/// Block > Scoped > Adjust > Continue; 0 is the absence of any active report.
 fn pain_gate_rank(gate: &PainGate) -> u8 {
     match gate {
         PainGate::Block(_) => 4,
@@ -418,20 +424,10 @@ fn pain_gate_rank(gate: &PainGate) -> u8 {
     }
 }
 
-/// The single Pain report that decides the verdict: the WORST currently-active
-/// report, not merely the newest.
-///
-/// A pain-clear (a `Pain` reading with `value <= 0`) supersedes every earlier
-/// report; only reports logged AFTER the most recent clear are active. Among
-/// those, the highest-severity grade wins (Block > Scoped > Adjust > Continue)
-/// so a later, milder pain at a different site can never displace an unresolved
-/// red-flag stop: latest-wins would let a tolerable ache, or a DOMS report,
-/// silently drop a sharp-joint hold. Ties within a grade keep latest-wins (the
-/// most recent report of that grade). `None` when no active report remains.
-///
-/// One selection point for the gate, the readiness row/banner, and the undo, so
-/// they can never name different body parts (the row shows THIS report's detail,
-/// and `RemoveReadiness(Pain)` removes THIS report to lift the hold).
+/// The Pain report that decides the verdict: among reports logged after the
+/// newest pain-clear, the highest grade (Block > Scoped > Adjust > Continue),
+/// newest within a grade. A later, milder report never displaces a red-flag
+/// stop. The gate, the readiness row and the undo all read this one report.
 pub fn worst_active_pain(inputs: &[ReadinessInput]) -> Option<&ReadinessInput> {
     let mut worst: Option<&ReadinessInput> = None;
     let mut worst_rank = 0u8;
@@ -454,15 +450,20 @@ pub fn worst_active_pain(inputs: &[ReadinessInput]) -> Option<&ReadinessInput> {
 /// Pain reports still active: positive `Pain` readings logged after the most
 /// recent pain-clear (a `Pain` reading with `value <= 0`), in input order.
 fn active_pain_reports(inputs: &[ReadinessInput]) -> impl Iterator<Item = &ReadinessInput> {
-    let cleared_at = inputs
-        .iter()
-        .filter(|i| i.signal == ReadinessSignal::Pain && i.value <= 0.0)
-        .map(|i| i.observed_at)
-        .max();
+    let cleared_at = latest_pain_clear(inputs).map(|i| i.observed_at);
     inputs
         .iter()
         .filter(|i| i.signal == ReadinessSignal::Pain && i.value > 0.0)
         .filter(move |i| cleared_at.is_none_or(|c| i.observed_at > c))
+}
+
+/// The newest pain-clear (a `Pain` reading with `value <= 0`). A report stamped
+/// in the same second is cleared by it.
+pub(super) fn latest_pain_clear(inputs: &[ReadinessInput]) -> Option<&ReadinessInput> {
+    inputs
+        .iter()
+        .filter(|i| i.signal == ReadinessSignal::Pain && i.value <= 0.0)
+        .max_by_key(|i| i.observed_at)
 }
 
 /// Resolve the pain verdict over the [`worst_active_pain`] report.
@@ -470,13 +471,9 @@ pub(super) fn pain_gate(inputs: &[ReadinessInput]) -> PainGate {
     worst_active_pain(inputs).map_or(PainGate::None, grade_pain)
 }
 
-/// Whether the active Pain reports gate *difficulty progression* — i.e. any
-/// graded pain verdict other than "continue". Shares `pain_gate`'s semantics
-/// exactly (worst active Pain report since the last pain-clear, kind-graded per
-/// File 08 Table 4.1): a lone `Doms` report is normal training discomfort
-/// (Table 4.1 row 1, "continue") and does NOT gate progression, and a pain-clear
-/// reading (`value 0`) re-opens it. The calisthenics anchor builder uses this to
-/// freeze `advance_ready` without duplicating the Table 4.1 mapping.
+/// Whether the active Pain reports gate difficulty progression: any graded
+/// verdict other than "continue" (File 08 Table 4.1). A lone DOMS report does
+/// not gate; a pain-clear re-opens progression.
 pub fn pain_blocks_progression(inputs: &[ReadinessInput]) -> bool {
     matches!(
         pain_gate(inputs),

@@ -59,16 +59,13 @@ fun metersToDisplay(meters: Double, unit: DistanceUnit): Double = when (unit) {
     DistanceUnit.Mi -> meters / METERS_PER_MILE
 }
 
-/** A pace expressed as minutes-per-km → minutes-per-mile. Pure. */
-fun paceKmToMi(minPerKm: Double): Double = minPerKm * (METERS_PER_MILE / 1000.0)
-
 /**
  * A canonical pace (minutes-per-km, the core's unit) → pace in the chosen unit's
  * denominator (min/km stays as-is; min/mi is the km pace scaled up). Pure.
  */
 fun paceInUnit(minPerKm: Double, unit: DistanceUnit): Double = when (unit) {
     DistanceUnit.Km -> minPerKm
-    DistanceUnit.Mi -> paceKmToMi(minPerKm)
+    DistanceUnit.Mi -> miToKm(minPerKm) // min/km × km/mi = min/mi
 }
 
 /** Kilometers → miles. Pure. */
@@ -77,16 +74,13 @@ fun kmToMi(km: Double): Double = km / (METERS_PER_MILE / 1000.0)
 /** Miles → kilometers. Pure. */
 fun miToKm(mi: Double): Double = mi * (METERS_PER_MILE / 1000.0)
 
-/** Miles → kilometers for the WIRE: rounds the converted value to 2 decimals so a
- *  freshly mi-entered distance doesn't put a full binary double on the wire (6.2 mi
- *  → 9.977932800000001 km unrounded vs 9.98 rounded), which a later km-mode display
- *  (the exact/lossless km paths) would render verbatim. 0.01 km = 10 m is far below
- *  the 0.01 mi (≈16 m) display step, and the round-trip is stable at the fields'
- *  display precision. Use ONLY at the mi→km SAVE boundary (LogRunEditor distance,
- *  RaceFinishPredictor weekly volume) — the km-native untouched-prefill paths stay
- *  exact (they emit the original km verbatim), and the km→mi range bounds stay exact
- *  too; only the emitted wire value rounds. Mirrors [lbToKgWire]. */
-internal fun miToKmWire(mi: Double): Double = Math.round(miToKm(mi) * 100.0) / 100.0
+/** Miles → kilometers for the WIRE, rounded to 2 decimals (0.01 km, below the 0.01 mi
+ *  display step), so a mi-entered distance doesn't put a full binary double on the
+ *  wire (6.2 mi → 9.977932800000001 km) that a later km display would render
+ *  verbatim. Use only at the mi→km save boundary; km-native paths stay exact. */
+internal fun miToKmWire(mi: Double): Double = round2(miToKm(mi))
+
+private fun round2(x: Double): Double = Math.round(x * 100.0) / 100.0
 
 /**
  * Weight units. As with distance, the core (crux) reasons in SI (kilograms) and its
@@ -106,16 +100,9 @@ fun kgToLb(kg: Double): Double = kg * LB_PER_KG
 /** Pounds → kilograms. Pure. */
 fun lbToKg(lb: Double): Double = lb / LB_PER_KG
 
-/** Pounds → kilograms for the WIRE: rounds the converted value to 2 decimals so a
- *  freshly lb-entered figure doesn't put a full binary double on the wire
- *  (225 lb → 102.05828325225797 kg unrounded vs 102.06 rounded), which a later
- *  kg-mode display (the exact/lossless kg paths) would render verbatim. 0.01 kg is
- *  far below the 0.1 lb display step, and the round-trip is stable: 102.06 kg →
- *  225.0004 lb still formats "225.0" at the app-wide %.1f lb precision. Use ONLY at
- *  the lb→kg SAVE boundary (LogSetEditor save, ProteinForm compute) — the kg-native
- *  untouched-prefill paths stay exact (they emit the original kg verbatim), and the
- *  kg→lb range bounds stay exact too; only the emitted wire value rounds. */
-internal fun lbToKgWire(lb: Double): Double = Math.round(lbToKg(lb) * 100.0) / 100.0
+/** Pounds → kilograms for the WIRE (225 lb → 102.06 kg, not 102.05828325225797);
+ *  see [miToKmWire]. 102.06 kg still formats "225.0" lb. */
+internal fun lbToKgWire(lb: Double): Double = round2(lbToKg(lb))
 
 /** The short unit label for a weight, e.g. "82.5 kg" / "182 lb". Pure. */
 fun weightSuffix(u: WeightUnit): String = when (u) {
@@ -139,37 +126,40 @@ fun localeWeightUnit(locale: Locale = Locale.getDefault()): WeightUnit =
 const val BODYWEIGHT_MIN_KG: Double = 30.0
 const val BODYWEIGHT_MAX_KG: Double = 250.0
 
-/** Round to one decimal, the display precision of every bodyweight field. */
-private fun bodyweightRound1(v: Double): Double = Math.round(v * 10.0) / 10.0
+/** Round to one decimal, the display precision of every bodyweight and distance field. */
+private fun roundTenth(v: Double): Double = Math.round(v * 10.0) / 10.0
 
 /**
- * Bodyweight KEYPAD conversion (ProfileEditor "You · Bodyweight", GuidedSetup
- * "About you"). The core stores canonical kg; the field shows and parses the
- * display unit. Pure.
- *
- * [bodyweightBounds] is the accepted range in the display unit: 30–250 kg, or the
- * converted bounds rounded to the 0.1 lb display step (66.1–551.2 lb) so a value
- * converted on a unit toggle never lands just outside its own range.
- * [bodyweightDisplay] is a canonical kg reading in the display unit at 0.1 precision;
- * [bodyweightBufferText] is that figure as keypad text ("80", "176.4").
- * [bodyweightDisplayToKg] maps a typed display value back to canonical kg for the
- * wire: kg stays exact, lb rounds via [lbToKgWire] (the SAVE boundary every lb
- * weight field uses).
+ * Bodyweight keypad conversion: the core stores canonical kg, the field shows the
+ * display unit at 0.1 precision. The lb bounds are rounded to that step so a value
+ * converted on a unit toggle stays inside them; lb goes back to kg via [lbToKgWire].
  */
 fun bodyweightBounds(unit: WeightUnit): ClosedFloatingPointRange<Double> =
     if (unit == WeightUnit.Lb) {
-        bodyweightRound1(kgToLb(BODYWEIGHT_MIN_KG))..bodyweightRound1(kgToLb(BODYWEIGHT_MAX_KG))
+        roundTenth(kgToLb(BODYWEIGHT_MIN_KG))..roundTenth(kgToLb(BODYWEIGHT_MAX_KG))
     } else {
         BODYWEIGHT_MIN_KG..BODYWEIGHT_MAX_KG
     }
 
 fun bodyweightDisplay(kg: Double, unit: WeightUnit): Double =
-    bodyweightRound1(if (unit == WeightUnit.Lb) kgToLb(kg) else kg)
+    roundTenth(if (unit == WeightUnit.Lb) kgToLb(kg) else kg)
 
 fun bodyweightBufferText(kg: Double, unit: WeightUnit): String = trimDecimal(bodyweightDisplay(kg, unit))
 
 fun bodyweightDisplayToKg(value: Double, unit: WeightUnit): Double =
     if (unit == WeightUnit.Lb) lbToKgWire(value) else value
+
+/** A km range shown in the user's distance unit. */
+fun distanceBounds(km: ClosedFloatingPointRange<Double>, unit: DistanceUnit): ClosedFloatingPointRange<Double> =
+    if (unit == DistanceUnit.Mi) roundTenth(kmToMi(km.start))..roundTenth(kmToMi(km.endInclusive)) else km
+
+/** A canonical km value as the keypad buffer in the display unit. */
+fun distanceBufferText(km: Double, unit: DistanceUnit): String =
+    trimDecimal(if (unit == DistanceUnit.Mi) roundTenth(kmToMi(km)) else km)
+
+/** A typed display-unit distance back to canonical km. */
+fun displayToKm(value: Double, unit: DistanceUnit): Double =
+    if (unit == DistanceUnit.Mi) miToKmWire(value) else value
 
 /**
  * Weekly running-volume SCALE in the user's distance unit (ProfileEditor
@@ -218,3 +208,7 @@ internal fun trimDecimal(v: Double): String {
     val trimmed = if (oneDecimal.endsWith(".0")) oneDecimal.dropLast(2) else oneDecimal
     return if (trimmed == "-0") "0" else trimmed
 }
+
+/** A kg weight in [unit], trimmed like [trimDecimal] ("102.5", "226"). Pure. */
+internal fun weightFigure(kg: Double, unit: WeightUnit): String =
+    trimDecimal(if (unit == WeightUnit.Lb) kgToLb(kg) else kg)

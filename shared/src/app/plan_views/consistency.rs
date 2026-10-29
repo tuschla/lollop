@@ -121,11 +121,6 @@ pub(super) fn discipline(t: SessionType) -> Option<Discipline> {
     }
 }
 
-/// [`discipline`] of a flattened row.
-fn row_discipline(row: &SessionPlanView) -> Option<Discipline> {
-    discipline(row.session_type)
-}
-
 /// How far (days) a same-discipline session logged on another day of the week
 /// may sit from a planned one and still be credited to it, and how far a
 /// "Missed …" nudge looks for one before nagging. Kept inside the plan week,
@@ -151,19 +146,11 @@ pub(in crate::app) fn build_consistency(
     let records = plan_week_records(model, days, week_monday)?;
     let planned_rows: Vec<&SessionPlanView> = week
         .iter()
-        .filter(|s| {
-            s.session_type != SessionType::Rest
-                && s.status != SessionStatus::BeforePlan
-                && s.epoch_day >= start
-        })
+        .filter(|s| s.session_type != SessionType::Rest && s.epoch_day >= start)
         .collect();
     let this_week_planned = planned_rows.len();
     let this_week_done = planned_rows.iter().filter(|s| s.status.is_done()).count();
-    let recent: Vec<&PlanWeekRecord> = {
-        let mut r: Vec<&PlanWeekRecord> = records.iter().rev().take(RECENT_WEEKS).collect();
-        r.reverse();
-        r
-    };
+    let recent = &records[records.len().saturating_sub(RECENT_WEEKS)..];
     let (done_sum, planned_sum) = recent
         .iter()
         .filter(|r| !r.partial)
@@ -213,7 +200,7 @@ pub(in crate::app) fn build_consistency(
         let from = s.epoch_day.saturating_sub(w).max(start);
         let to = s.epoch_day.saturating_add(w);
         from <= to
-            && row_discipline(s)
+            && discipline(s.session_type)
                 .is_some_and(|k| logged[k as usize].range(from..=to).next().is_some())
     };
     if !hold

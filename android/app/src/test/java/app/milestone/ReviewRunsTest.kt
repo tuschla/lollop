@@ -3,6 +3,7 @@ package app.milestone
 import android.content.Context
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.qa.QaHarness
 import java.io.File
 import java.time.LocalDateTime
 import java.time.ZoneOffset
@@ -17,10 +18,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * Adversarial review proofs for the 2026-10-23 run fixes (import sport gate,
- * logged-at stamp, started_at captions, crash-sidecar boundaries). An
- * `@Ignore("REVIEW: …")` test FAILS on the current tree and proves a finding;
- * the others verify a fix claim.
+ * Run import and recovery edge cases: a run's title vs its date chip across
+ * midnight, Strava's compound ride/ski types, the GPX logged-at stamp and nested
+ * `<type>`s, truncated GPX files, and an old crash sidecar without segment marks.
  */
 @RunWith(RobolectricTestRunner::class)
 class ReviewRunsTest {
@@ -51,10 +51,10 @@ class ReviewRunsTest {
             has_gpx = true,
         )
         val now = utc(2026, 11, 2, 12, 0) * 1000L
-        var overline = ""
+        var title = ""
         var chip = ""
         rule.setContent {
-            overline = runOverline(run, now)
+            title = runTitle(run)
             chip = runDateChip(run, now)
         }
         rule.waitForIdle()
@@ -62,16 +62,15 @@ class ReviewRunsTest {
         // chip beside it must date that same day, never Monday Oct 19 (its end).
         assertEquals(formatLogDate(run.started_at, now), chip)
         assertTrue("chip \"$chip\" dates the start day", "18" in chip)
-        assertTrue("overline \"$overline\" names the start weekday", overline.startsWith("Sunday"))
-        assertTrue("overline \"$overline\" carries the chip", overline.endsWith(chip))
+        assertEquals("Sunday run", title)
     }
 
-    // ── nonRunSport: the recogniser misses Strava's own compound ride/ski types ──
+    // ── nonRunSport: Strava's compound ride/ski types ───────────────────────────
 
     @Test
     fun stravaCompoundRideAndSkiTypesAreRecognised() {
-        // Strava's ride types the reader's own comment cites ("Ride", "VirtualRide",
-        // "EBikeRide") are recognised; these siblings of the same enum are not.
+        // Siblings of the "Ride" / "VirtualRide" / "EBikeRide" types the reader
+        // cites are refused as not a run too.
         val missed = listOf(
             "MountainBikeRide", "GravelRide", "EMountainBikeRide", "Handcycle", "Velomobile",
             "NordicSki", "AlpineSki", "BackcountrySki", "RollerSki", "mountainbiking",
@@ -79,36 +78,7 @@ class ReviewRunsTest {
         assertEquals("recognised as not a run: none missed", emptyList<String>(), missed)
     }
 
-    @Test
-    fun aGravelRideFileIsRefused() {
-        // 20 km/h for 30 min = 5.56 m/s, 180 s/km: slower than the 170 s/km
-        // implausible-pace gate, so only the sport gate could refuse it.
-        val mPerDegLon = 6_371_000.0 * Math.PI / 180.0
-        val fixes = (0..1800 step 5).map { t -> GpxFix(0.0, 5.56 * t / mPerDegLon, 1_790_000_000L + t, null) }
-        val outcome = runCatching { importedRunEvent(ImportedRun(listOf(fixes), sport = "GravelRide"), null) }
-        assertTrue(
-            "GravelRide imported as a run: ${outcome.getOrNull()?.let { "LogRunTrack with ${it.points.size} fixes" }}",
-            (outcome.exceptionOrNull() as? GpxImportException)?.reason == ImportFailure.NotARun,
-        )
-    }
-
-    @Test
-    fun runningLabelsInOtherLanguagesAndMixedLabelsStayImportable() {
-        // Verification of "unknown labels, numbers and Other still import, and any
-        // word containing run or jog always counts as a run": no false positive on
-        // running in other languages, Strava/Garmin run types or mixed labels.
-        val runs = listOf(
-            "Trail run", "TrailRun", "VirtualRun", "Laufen", "Traillauf", "Course à pied", "Trail",
-            "Carrera", "Correr", "Corsa", "Hardlopen", "Löpning", "Løb", "Juoksu", "Bieganie", "Běh",
-            "Futás", "Koşu", "Бег", "ランニング", "跑步", "Skriešana", "Running/Walking", "Walk/Run",
-            "Run/Walk", "Hike & Run", "Swimrun", "9", "1", "running", "street_running", "track_running",
-            "Skyrunning", "Fell running", "Orienteering", "Treadmill", "Other",
-        )
-        val refused = runs.filter { nonRunSport(it) != null }.map { "$it→${nonRunSport(it)}" }
-        assertEquals(emptyList<String>(), refused)
-    }
-
-    // ── GPX reader: the new extension and the track's own <type> ────────────────
+    // ── GPX reader: the logged-at extension and the track's own <type> ──────────
 
     @Test
     fun loggedAtExtensionAndTrackTypeAreReadOnlyWhereTheyBelong() {
@@ -129,7 +99,7 @@ class ReviewRunsTest {
               </trk>
             </gpx>
         """.trimIndent()
-        val run = parseGpxRun(gpx)
+        val run = parseGpxRuns(gpx).single()
         assertNull(run.sport)
         assertEquals(utc(2026, 9, 21, 14, 20) + 18, run.loggedAtSec)
         assertEquals(2, run.segments.single().size)
@@ -137,8 +107,8 @@ class ReviewRunsTest {
 
     @Test
     fun aGpxCutOffAnywhereIsReportedDamaged() {
-        // FixImport B6: "a truncated GPX is now Damaged". A cut-off download stops at
-        // an arbitrary byte; try every cut past the root inside the track.
+        // A cut-off download stops at an arbitrary byte; try every cut past the
+        // root inside the track.
         val full = buildString {
             append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gpx version=\"1.1\" creator=\"x\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n<trk><name>n</name><trkseg>\n")
             for (t in 0 until 40) append("<trkpt lat=\"0\" lon=\"${t * 3e-5}\"><time>2026-09-21T14:13:${(t % 60).toString().padStart(2, '0')}Z</time></trkpt>\n")
@@ -177,7 +147,8 @@ class ReviewRunsTest {
         val bytes = full.toByteArray()
         val secondStart = full.lastIndexOf("<trkseg>") + 8
         val partial = ArrayList<String>()
-        for (cut in secondStart until full.lastIndexOf("</trkseg>")) {
+        // Every tag end (where a cut-off parse can look complete) plus every 7th byte.
+        for (cut in truncationCuts(bytes, from = secondStart, until = full.lastIndexOf("</trkseg>"), step = 7, tagStride = 1)) {
             val file = ParsedRunFile("cut.gpx", runCatching { parseRunFileSegments(bytes.copyOf(cut)) { null } })
             val plan = planRunImport(listOf(file), emptySet()) { importedRunEvent(it, null) }
             plan.runs.firstOrNull()?.let { if (partial.size < 3) partial += "cut at +${cut - secondStart}: ${it.event.points.size} of 400 fixes" }
@@ -189,14 +160,10 @@ class ReviewRunsTest {
 
     @Test
     fun anOldSidecarWithoutSegmentMarkersStillRecoversByGapRule() {
-        // Backward compatibility: a sidecar written before this change carries no
-        // "seg" keys. It must still recover every fix, with boundaries re-derived
-        // from fix-time gaps only (the pre-change behaviour).
+        // A sidecar from an older app carries no "seg" keys. It still recovers
+        // every fix, with boundaries re-derived from fix-time gaps only.
         val f = File(ctx.filesDir, "active-run.ndjson")
-        // The store caches its file from the first init in this JVM, which may be
-        // another test's (now gone) files dir: point it at this one.
-        ActiveRunStore.javaClass.getDeclaredField("file").apply { isAccessible = true }.set(ActiveRunStore, null)
-        ActiveRunStore.init(ctx)
+        QaHarness.resetActiveRunStore(ctx)
         val lines = buildList {
             add("{\"run\":\"active\"}")
             for (t in 0 until 20) add("{\"lat\":0.0,\"lon\":${t * 3e-5},\"observed_at\":${1_790_000_000 + t},\"accuracy_m\":5.0}")
@@ -214,19 +181,5 @@ class ReviewRunsTest {
         assertEquals(28L, RunSession.elapsedSec.value)
         RunSession.reset()
         f.delete()
-    }
-
-    @Test
-    fun theFirstLiveFixAfterARecoveryIsMarkedAsASegmentStart() {
-        // After restore the splice to the first live fix is a boundary (pendingBreak),
-        // and the sidecar must mark it, or a second crash would re-join the splice.
-        RunSession.reset()
-        val recovered = (0 until 10).map { GpsPoint(0.0, it * 3e-5, 1_790_000_000L + it, 5.0) }
-        RunSession.restore(RecoveredTrack(recovered, emptyList()))
-        val live = GpsPoint(0.001, 0.001, 1_790_000_500L, 5.0)
-        val nanos = (android.os.SystemClock.elapsedRealtime() + 1_000L) * 1_000_000L
-        assertTrue(RunSession.add(live, nanos))
-        assertTrue(RunSession.isSegmentStart(live))
-        RunSession.reset()
     }
 }

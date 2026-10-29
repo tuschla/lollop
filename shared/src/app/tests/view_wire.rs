@@ -13,7 +13,6 @@ use std::fmt;
 use serde::Serialize;
 use serde::ser;
 
-use super::view_equivalence::{END_MON, big_history, ev};
 use super::*;
 
 /// A serializer that discards everything except non-finite floats, which it
@@ -305,19 +304,13 @@ fn finite_floats_flags_a_non_finite_value_with_its_path() {
     assert_eq!(check.bad, ["open.[] = inf"]);
 }
 
-#[test]
-fn rich_view_model_serializes_only_finite_floats() {
-    // The 420-day hybrid history behind the view-equivalence pins: lifts, GPS
-    // runs, check-ins, a plan and the calculators all populated.
-    let (app, mut model) = big_history(420);
-    let _ = app.update(
-        ev(serde_json::json!({"SetToday": {"epoch_day": END_MON, "utc_offset_sec": 0}})),
-        &mut model,
-    );
+/// Every float `vm` serializes is finite: a non-finite one serializes as JSON
+/// null, which Kotlin's non-null decode rejects. `view_equivalence` runs it on
+/// the 420-day hybrid history behind its pins (lifts, GPS runs, check-ins, a
+/// plan and the calculators all populated).
+pub(super) fn assert_only_finite_floats(vm: &ViewModel) {
     let mut check = FiniteFloats::default();
-    app.view(&model)
-        .serialize(&mut check)
-        .expect("walk succeeds");
+    vm.serialize(&mut check).expect("walk succeeds");
     assert!(
         check.floats > 1_000,
         "the walk reached the view's numbers: {}",

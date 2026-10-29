@@ -32,9 +32,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 /** Opacity of the live figures while paused. */
 private const val PAUSED_FIGURE_ALPHA = 0.6f
 
-/** The no-data-yet figure: an em dash in the faint tone, never a bare hyphen. */
-internal const val NO_VALUE = "—"
-
 /** Starting size (sp) of a live figure beside the map. */
 internal const val LIVE_FIGURE_MAX_SP = 36
 
@@ -52,21 +49,11 @@ private const val LIVE_FIGURE_LEADING_SP = 4
 private const val LIVE_FIGURE_SUFFIX_SP = 13
 
 /**
- * The live stat readouts: ONE primary row of three equal figures (MOVING · DISTANCE ·
- * PACE NOW, each at the same display size so the eye finds them at arm's length),
- * with the whole-run average under PACE NOW, then one muted caption with the last
- * completed N-minute slice. A leaf, so the per-fix [RunSession.elapsedSec]/
- * [RunSession.distanceKm]/[RunSession.currentPaceMinPerKm]/[RunSession.paceBucketsFlow]
- * updates recompose ONLY these figures, not the whole tracking screen. The primary pace
- * is the CURRENT (rolling-window) pace, so a rep, hill or surge reads within ~30 s.
- * Following a plan, a status line under PACE NOW says what to do about it against
- * [paceTarget] ([PaceStatusLine]; null = nothing to judge) while the figure itself
- * stays in the body tone, and DISTANCE shows what is left of [planKm] (a single-step
- * plan's distance). Paused, the figures dim and MOVING says so. A value with no data
- * yet shows a faint "—" (pace) or "0.00" (distance), never a bare hyphen. Live
- * factual progress from the raw fixes only; the of-record figures are the core's on
- * save. For screen readers the whole block is ONE node with units spelled out (no
- * "5:12 · /km" fragments).
+ * The live readouts: MOVING · DISTANCE · PACE NOW at one size, the whole-run average
+ * under PACE NOW, then the last completed N-minute slice. A leaf, so per-fix updates
+ * recompose only these figures. Following a plan, PACE NOW gets a cue against
+ * [paceTarget] and DISTANCE shows what is left of [planKm]. Screen readers get ONE
+ * node with units spelled out.
  */
 @Composable
 internal fun TrackerStats(
@@ -87,8 +74,8 @@ internal fun TrackerStats(
     val avgPaceMinPerKm = averagePaceMinPerKm(elapsedSec, liveKm)
     // While paused nothing is moving "now": the window is stale until the next segment.
     val nowPace = if (paused) Double.NaN else currentPace
-    val nowText = if (nowPace.isFinite()) formatPaceMinutes(paceInUnit(nowPace, unit)) else NO_VALUE
-    val avgText = if (avgPaceMinPerKm.isFinite()) formatPaceMinutes(paceInUnit(avgPaceMinPerKm, unit)) else NO_VALUE
+    val nowText = if (nowPace.isFinite()) formatPaceMinutes(paceInUnit(nowPace, unit)) else EmptyValuePlaceholder
+    val avgText = if (avgPaceMinPerKm.isFinite()) formatPaceMinutes(paceInUnit(avgPaceMinPerKm, unit)) else EmptyValuePlaceholder
     val distanceText = distanceFigure(liveKm, unit)
     val cue = paceTarget?.let { paceCue(nowPace, it.pace_fast_sec_per_km, it.pace_slow_sec_per_km) }
     val cueSpoken = when (cue) {
@@ -274,7 +261,7 @@ private fun PaceStatusLine(cue: PaceCue) {
 
 /** A duration read aloud with words, e.g. "1 hour 2 minutes 3 seconds"; zero
  *  leading parts are dropped ("12 minutes 3 seconds"). */
-private fun spokenDuration(res: Resources, totalSec: Long): String {
+internal fun spokenDuration(res: Resources, totalSec: Long): String {
     val s = totalSec.coerceAtLeast(0L)
     val h = (s / 3600).toInt()
     val m = ((s % 3600) / 60).toInt()
@@ -287,8 +274,8 @@ private fun spokenDuration(res: Resources, totalSec: Long): String {
 }
 
 /** A canonical pace (min/km) read aloud in the user's unit, e.g. "5 minutes 15
- *  seconds per kilometre", or "not available yet" when unknown. */
-private fun spokenPace(res: Resources, minPerKm: Double, unit: DistanceUnit): String {
+ *  seconds per kilometer", or "not available yet" when unknown. */
+internal fun spokenPace(res: Resources, minPerKm: Double, unit: DistanceUnit): String {
     if (!minPerKm.isFinite() || minPerKm <= 0.0) return res.getString(R.string.track_cd_not_available)
     val secPerUnit = Math.round(paceInUnit(minPerKm, unit) * 60.0)
     return res.getString(

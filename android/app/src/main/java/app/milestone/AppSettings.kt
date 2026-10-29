@@ -1,8 +1,12 @@
 package app.milestone
 
 import android.content.Context
-import java.io.File
+import android.content.SharedPreferences
+import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
+
+/** Default live-tracking pace bucket, in minutes (AppSettings and RunSession). */
+internal const val DEFAULT_PACE_BUCKET_MINUTES = 4
 
 /** Light/dark selection: follow the OS, or force one. */
 enum class DarkMode { System, Light, Dark }
@@ -24,12 +28,6 @@ object AppSettings {
     private const val KEY_SHOW_MAPS = "show_route_maps"
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on_tracking"
     private const val KEY_REST_ALERT = "rest_alert"
-
-    /** The core's event log (Core.restore): present = an install already in use. */
-    private const val EVENT_LOG = "event-log.ndjson"
-
-    /** Default live-tracking pace bucket, in minutes. */
-    private const val DEFAULT_PACE_BUCKET_MINUTES = 4
 
     // A fresh install boots into Paper with the dynamic (Material You) accent ON;
     // without dynamic colour (API < 31) Paper keeps its own ink accent.
@@ -88,17 +86,21 @@ object AppSettings {
      */
     private fun pinFirstTheme(ctx: Context) {
         val prefs = prefs(ctx)
-        val existingInstall = File(ctx.filesDir, EVENT_LOG).exists()
-        prefs.edit()
-            .putString(KEY_THEME, (if (existingInstall) AppTheme.Rose else AppTheme.Paper).name)
-            .putBoolean(KEY_DYNAMIC, prefs.getBoolean(KEY_DYNAMIC, !existingInstall))
-            .apply()
+        val existingInstall = eventLogFile(ctx.filesDir).exists()
+        prefs.edit {
+            putString(KEY_THEME, (if (existingInstall) AppTheme.Rose else AppTheme.Paper).name)
+            putBoolean(KEY_DYNAMIC, prefs.getBoolean(KEY_DYNAMIC, !existingInstall))
+        }
     }
 
-    fun setDynamicAccent(ctx: Context, enabled: Boolean) {
-        dynamicAccent.value = enabled
-        prefs(ctx).edit().putBoolean(KEY_DYNAMIC, enabled).apply()
+    /** Set [flow] to [value] and persist it with [write]. */
+    private fun <T> set(ctx: Context, flow: MutableStateFlow<T>, value: T, write: SharedPreferences.Editor.() -> Unit) {
+        flow.value = value
+        prefs(ctx).edit(action = write)
     }
+
+    fun setDynamicAccent(ctx: Context, enabled: Boolean) =
+        set(ctx, dynamicAccent, enabled) { putBoolean(KEY_DYNAMIC, enabled) }
 
     /**
      * Select [selected]. Changing theme also sets the system accent: ON for Paper
@@ -109,45 +111,33 @@ object AppSettings {
      */
     fun setTheme(ctx: Context, selected: AppTheme) {
         val prefs = prefs(ctx)
-        val edit = prefs.edit().putString(KEY_THEME, selected.name)
-        if (prefs.getString(KEY_THEME, null) != selected.name) {
-            val dynamic = selected == AppTheme.Paper
-            dynamicAccent.value = dynamic
-            edit.putBoolean(KEY_DYNAMIC, dynamic)
-        }
+        val changed = prefs.getString(KEY_THEME, null) != selected.name
+        val dynamic = selected == AppTheme.Paper
+        if (changed) dynamicAccent.value = dynamic
         theme.value = selected
-        edit.apply()
+        prefs.edit {
+            putString(KEY_THEME, selected.name)
+            if (changed) putBoolean(KEY_DYNAMIC, dynamic)
+        }
     }
 
-    fun setDarkMode(ctx: Context, mode: DarkMode) {
-        darkMode.value = mode
-        prefs(ctx).edit().putString(KEY_DARKMODE, mode.name).apply()
-    }
+    fun setDarkMode(ctx: Context, mode: DarkMode) =
+        set(ctx, darkMode, mode) { putString(KEY_DARKMODE, mode.name) }
 
-    fun setPaceBucketMinutes(ctx: Context, n: Int) {
-        paceBucketMinutes.value = n
-        prefs(ctx).edit().putInt(KEY_PACE_BUCKET, n).apply()
-    }
+    fun setPaceBucketMinutes(ctx: Context, n: Int) =
+        set(ctx, paceBucketMinutes, n) { putInt(KEY_PACE_BUCKET, n) }
 
-    fun setDistanceUnitOverride(ctx: Context, override: DistanceUnitOverride) {
-        distanceUnitOverride.value = override
-        prefs(ctx).edit().putString(KEY_DISTANCE_UNIT, override.name).apply()
-    }
+    fun setDistanceUnitOverride(ctx: Context, override: DistanceUnitOverride) =
+        set(ctx, distanceUnitOverride, override) { putString(KEY_DISTANCE_UNIT, override.name) }
 
-    fun setShowRouteMaps(ctx: Context, enabled: Boolean) {
-        showRouteMaps.value = enabled
-        prefs(ctx).edit().putBoolean(KEY_SHOW_MAPS, enabled).apply()
-    }
+    fun setShowRouteMaps(ctx: Context, enabled: Boolean) =
+        set(ctx, showRouteMaps, enabled) { putBoolean(KEY_SHOW_MAPS, enabled) }
 
-    fun setKeepScreenOn(ctx: Context, enabled: Boolean) {
-        keepScreenOn.value = enabled
-        prefs(ctx).edit().putBoolean(KEY_KEEP_SCREEN_ON, enabled).apply()
-    }
+    fun setKeepScreenOn(ctx: Context, enabled: Boolean) =
+        set(ctx, keepScreenOn, enabled) { putBoolean(KEY_KEEP_SCREEN_ON, enabled) }
 
-    fun setRestAlert(ctx: Context, enabled: Boolean) {
-        restAlert.value = enabled
-        prefs(ctx).edit().putBoolean(KEY_REST_ALERT, enabled).apply()
-    }
+    fun setRestAlert(ctx: Context, enabled: Boolean) =
+        set(ctx, restAlert, enabled) { putBoolean(KEY_REST_ALERT, enabled) }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 }

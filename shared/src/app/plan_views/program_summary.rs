@@ -101,12 +101,6 @@ fn muscle_volume_rows(
             format!("{x:.1}")
         }
     };
-    let cap = |m: &str| -> String {
-        let mut c = m.chars();
-        c.next()
-            .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
-            .unwrap_or_default()
-    };
     let mut rows = Vec::new();
     let mut uncovered: Vec<&str> = Vec::new();
     for (muscle, got) in delivered {
@@ -120,7 +114,7 @@ fn muscle_volume_rows(
             uncovered.push(muscle);
         }
         let ind = indirect(muscle);
-        let mut label = format!("{}: {} sets", cap(muscle), fmt_sets(got));
+        let mut label = format!("{}: {} sets", capitalize_first(muscle), fmt_sets(got));
         if ind >= 0.05 && ind < got - 0.05 {
             let _ = write!(label, " ({} from compound lifts)", fmt_sets(ind));
         }
@@ -137,7 +131,7 @@ fn muscle_volume_rows(
             }
         }
         rows.push(MuscleVolumeView {
-            muscle: cap(muscle),
+            muscle: capitalize_first(muscle),
             target_sets: if no_targets { 0 } else { target },
             delivered_sets: (got * 10.0).round() / 10.0,
             label,
@@ -159,7 +153,7 @@ fn muscle_volume_rows(
         match (crate::hypertrophy::resolve_muscle(raw), ta) {
             (Some(lm), crate::individualization::TrainingAge::Advanced) => notes.push(format!(
                 "{} gets extra sets this block, and the other muscles get enough to keep what you have.",
-                cap(lm.muscle)
+                capitalize_first(lm.muscle)
             )),
             (Some(_), _) => notes.push(
                 "Focusing on one muscle is for advanced lifters who have stopped growing on their usual sets, so every muscle keeps its usual weekly target."

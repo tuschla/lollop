@@ -33,12 +33,6 @@ impl EvidenceTagView {
     }
 }
 
-impl<T> From<&Recommended<T>> for EvidenceTagView {
-    fn from(r: &Recommended<T>) -> Self {
-        EvidenceTagView::of(r)
-    }
-}
-
 /// Wire form of an optional grade: the variant name, or `""` for none.
 pub(crate) mod grade_or_empty {
     use crate::schema::EvidenceGrade;
@@ -117,16 +111,11 @@ pub struct AdjustmentView {
     /// improve it).
     #[serde(default)]
     pub why: WhyView,
-    /// True for a *neutral* verdict row: a graded "hold / no change" call that
-    /// carries no real `Adjustment` (e.g. VBT bar-speed within the ±0.06 m/s
-    /// reliability band, or a first-work-set outcome that keeps the planned set
-    /// count). Such rows still render in the readiness section, but must never
-    /// displace the prescription headline — `model.review` is a persisted
-    /// singleton, so a stale "nothing changed" verdict would otherwise outrank
-    /// "Next: `<session>`" forever. `build_headline` skips these in its `best`
-    /// chain.
-    #[serde(default)]
-    pub neutral: bool,
+    /// True for a neutral "hold / no change" verdict row that carries no real
+    /// `Adjustment`. It renders in the readiness section but never wins the
+    /// Today headline (`build_headline`).
+    #[serde(skip)]
+    pub(crate) neutral: bool,
     /// For an item-scoped in-session cue (a first-set or top-set call on ONE
     /// lift): the plan item's exact exercise name. `None` for session-wide rows.
     #[serde(default)]
@@ -168,24 +157,10 @@ pub struct LiftResultView {
     pub rpe_recorded: bool,
     /// Cross-checked e1RM range across Epley/Brzycki/Lombardi (strength-005/
     /// 006). `None` when the estimate is unreliable per strength-006 (0 reps,
-    /// >10 reps, or an isolation lift), the shell should then suggest a 3–6
-    /// > rep test set instead of showing a false range.
+    /// more than 10 reps, or an isolation lift); the shell then suggests a 3–6
+    /// rep test set instead of showing a false range.
     #[serde(default)]
     pub cross_check: Option<E1rmRangeView>,
-    /// e1RM change vs the previous logged set of the same exercise, kg
-    /// (rounded to 0.1). `None` for the first logged set of an exercise -
-    /// there is nothing to compare against. Factual measurement (like pace or
-    /// zone), NOT a `Recommended`: it states what changed, not whether the
-    /// athlete is "improving"/"declining": that judgment is the trend arm
-    /// (feedback-027/028/029, `feedback::trend_summary`, FB-TREND-001), which
-    /// a shell must not phrase from this delta alone.
-    #[serde(default)]
-    pub e1rm_delta_kg: Option<f64>,
-    /// Direction of `e1rm_delta_kg` (flat when the 0.1 kg-rounded delta is
-    /// zero). `None` when `e1rm_delta_kg` is `None`. Same factual-measurement
-    /// caveat as the delta.
-    #[serde(default)]
-    pub e1rm_direction: Option<crate::feedback::TrendDirection>,
     pub summary: String,
     /// When the set was logged, unix seconds; 0 when undated. A shell dates the
     /// history card from this; the core does no formatting (it holds no clock).
@@ -202,12 +177,11 @@ pub struct LiftResultView {
     pub hold_sec: Option<u16>,
     /// `true` when this set's e1RM beats every PRIOR e1RM logged for the same
     /// exercise (a neutral PR marker for the history card; the first set of an
-    /// exercise is never flagged). Serde-default.
+    /// exercise is never flagged).
     #[serde(default)]
     pub e1rm_pr: bool,
     /// Load × reps lifted in this set, kg; `0.0` for a timed hold. The one
     /// tonnage definition a shell sums for a session's or a week's volume.
-    /// Serde-default.
     #[serde(default)]
     pub tonnage_kg: f64,
 }
@@ -233,11 +207,15 @@ pub struct E1rmRangeView {
 /// statement carries that caveat).
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct TrainingLoadView {
-    /// Chronic Training Load (fitness): EWMA τ=42 d of daily load.
+    /// Chronic Training Load (fitness): EWMA τ=42 d of daily load. This and
+    /// `atl`/`tsb` are the figures behind `summary`; not on the wire.
+    #[serde(skip)]
     pub ctl: f64,
     /// Acute Training Load (fatigue): EWMA τ=7 d of daily load.
+    #[serde(skip)]
     pub atl: f64,
     /// Training Stress Balance (form) entering the next day: CTL − ATL.
+    #[serde(skip)]
     pub tsb: f64,
     /// Days the daily chain spans: from the first counted session through local
     /// today (the last counted session when the shell set no today), at most
@@ -262,19 +240,14 @@ pub struct TrainingLoadView {
 /// heart-rate load. Derived from the run-progress weekly series.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct SrpeLoadView {
-    /// Load this local week (Monday start), arbitrary units.
+    /// Load this local week (Monday start), arbitrary units; the figure behind
+    /// `summary`, not on the wire.
+    #[serde(skip)]
     pub week_au: f64,
-    /// Load last week, arbitrary units.
-    pub prev_week_au: f64,
-    /// Rated runs this week / runs this week still unrated.
-    pub rated_runs: u32,
-    pub unrated_runs: u32,
     pub method: String,
     pub summary: String,
-    #[serde(with = "grade_or_empty")]
-    pub grade: Option<EvidenceGrade>,
-    pub citation: String,
-    pub confidence: f32,
+    #[serde(flatten)]
+    pub evidence: EvidenceTagView,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -300,10 +273,6 @@ pub struct ViewModel {
     /// `ClearReview`, so a shell renders them under the review, not the
     /// readiness section.
     pub review_adjustments: Vec<AdjustmentView>,
-    /// True when a persisted per-session review is present, so a shell can show
-    /// a "Clear review" affordance (dispatching `ClearReview`).
-    #[serde(default)]
-    pub review_present: bool,
     /// True when a weekly check-in is in force, so a shell can offer "Clear
     /// weekly check-in" (dispatching `ClearWeeklyCheckin`).
     #[serde(default)]
@@ -351,7 +320,7 @@ pub struct ViewModel {
     pub weekly_report: Vec<GuidanceView>,
     /// Running progress: 16-week weekly volume (+ its separate session-RPE
     /// load), longest run and best efforts with PR identity. `None` until a
-    /// dated run with a measurable distance exists. Serde-default.
+    /// dated run with a measurable distance exists.
     #[serde(default)]
     pub run_progress: Option<RunProgressView>,
     /// Lift-session audit rows for the most recent dated lifting day:
@@ -359,15 +328,6 @@ pub struct ViewModel {
     /// when bodyweight + a squat e1RM are known. Empty otherwise.
     #[serde(default)]
     pub lift_audit: Vec<GuidanceView>,
-    /// The last requested Cooper 12-min-test estimate, as graded rows.
-    #[serde(default)]
-    pub cooper: Vec<GuidanceView>,
-    /// The last requested Critical-Speed protocol fit, as graded rows.
-    #[serde(default)]
-    pub critical_speed: Vec<GuidanceView>,
-    /// The last requested APRE next-load adjustment, as graded rows.
-    #[serde(default)]
-    pub apre: Vec<GuidanceView>,
     /// Raw calculator inputs echoed back so shells rehydrate their forms after a
     /// log replay / process death, keeping the core the single source of truth.
     /// Each is a sibling of its result field above; `None`/empty until queried.
@@ -385,12 +345,6 @@ pub struct ViewModel {
     /// block has zero weeks.
     #[serde(default)]
     pub hypertrophy_ramp: Vec<u8>,
-    #[serde(default)]
-    pub cooper_input: Option<f64>,
-    #[serde(default)]
-    pub critical_speed_input: Vec<CsEffortIn>,
-    #[serde(default)]
-    pub apre_input: Option<ApreInputView>,
     /// The feedback-027/028/029 longitudinal trend message, derived from the
     /// logged lifts (best estimated max over the last 4 weeks vs the 4 before,
     /// ±5 % noise band); `None` when nothing decisive.
@@ -407,18 +361,13 @@ pub struct ViewModel {
     /// readiness input exists.
     #[serde(default)]
     pub autoreg_source: Option<AdjustmentView>,
-    /// KB-honest per-signal readiness summary: the latest state of every
-    /// observed readiness signal, judged by the SAME File 06/08 thresholds the
-    /// adjustment rules use, each citing the rule's evidence. Deliberately NO
-    /// composite 0–100 readiness score, the KB defines none (HARD RULE 1).
-    /// Metrics first, then the red-flag block (see `signal_groups`).
+    /// The latest state of every observed readiness signal, judged by the
+    /// adjustment rules' own thresholds and citing their evidence; metrics
+    /// first, then the red-flag block. No composite score: the KB defines none.
     #[serde(default)]
     pub readiness_summary: Vec<ReadinessSignalView>,
-    /// The single highest-priority call for today (usability-ia-spec §7), in
-    /// rank order: train-blocked safety hold > safety-critical feedback (a
-    /// medical referral) > real adjustment (deload/readiness) > prescription
-    /// (next session) > non-critical feedback > all-clear default.
-    /// Prioritization is coaching logic, so it lives here, not in shells.
+    /// The single highest-priority call for today; the rank order is on
+    /// `readiness::build_headline`.
     #[serde(default)]
     pub today_headline: TodayHeadlineView,
     /// Static signal→group metadata for every readiness signal (in picker
@@ -428,7 +377,7 @@ pub struct ViewModel {
     pub signal_groups: std::borrow::Cow<'static, [SignalGroupView]>,
     /// The most recent morning check-in, echoed back so the shell can rehydrate
     /// the check-in sheet and show that today's check-in is recorded. `None`
-    /// until any check-in exists. Additive/serde-default.
+    /// until any check-in exists.
     #[serde(default)]
     pub checkin_today: Option<CheckinEchoView>,
     /// Honest "collecting your baseline" status for each check-in channel that
@@ -684,9 +633,6 @@ pub struct CalisItemView {
     pub ladder: crate::schema::LadderId,
     /// Prescribed rung index.
     pub rung: u8,
-    /// Rungs on this ladder.
-    #[serde(default)]
-    pub rung_count: u8,
     /// "Easier" / "Harder" choices (nearest rung the equipment allows). Choosing
     /// one sends `Event::SetCalisthenicsRung{ladder, rung}`; the item then
     /// shows that rung the same day.
@@ -698,11 +644,6 @@ pub struct CalisItemView {
     /// load (kg)" field even when the suggested `added_kg` is 0.
     #[serde(default)]
     pub load_capable: bool,
-    /// Straight-arm skill hold: the clean test hold (seconds) done once at the
-    /// end of a session, once a week, that advances the rung; the working holds
-    /// are `hold_low_sec..hold_high_sec`. 0 = no separate test.
-    #[serde(default)]
-    pub test_hold_sec: u16,
     /// Ballistic power item: max intent, never to failure (no RPE prefill).
     #[serde(default)]
     pub ballistic: bool,
@@ -877,15 +818,10 @@ pub enum HeadlineKind {
     AllClear,
 }
 
-/// The core-owned "today's call" headline: one field carrying the
-/// highest-priority call for today so no
-/// shell re-implements the ranking. `kind` is the priority bucket that won, in
-/// rank order: `"safety_hold"` (train-blocked) > `"feedback"` when
-/// `safety_critical` (a medical referral) > `"adjustment"` (a real
-/// deload/readiness call) > `"prescription"` (the next session) > `"feedback"`
-/// (non-critical) > `"all_clear"`. The
-/// all-clear default states the ABSENCE of any triggered rule: it makes no
-/// evidence-bearing claim, so its evidence fields are empty.
+/// The core-owned "today's call" headline, so no shell re-implements the
+/// ranking. `kind` is the priority bucket that won; the rank order is on
+/// `readiness::build_headline`. The all-clear default makes no evidence-bearing
+/// claim, so its evidence fields are empty.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct TodayHeadlineView {
     pub kind: HeadlineKind,
@@ -964,23 +900,22 @@ pub struct PrescriptionView {
     /// readiness adjustments (CapRpe, load reductions) mutate directly; the
     /// label is re-rendered FROM it, so no adjustment path parses the display
     /// string. `Prose` (the default) is the free-text label.
-    #[serde(default)]
-    pub intensity: PlanIntensity,
+    #[serde(skip)]
+    pub(crate) intensity: PlanIntensity,
     /// Rest between sets, seconds (0 for runs).
     #[serde(default)]
     pub rest_sec: u16,
     /// For an interval/repetition run, the rep count. `0` for a continuous
     /// run or a lift: the `summary` then carries the whole-session volume. When
     /// nonzero the `summary` already reads as "`N × <rep_volume> · <pace>`".
-    #[serde(default)]
-    pub rep_count: u8,
+    #[serde(skip)]
+    pub(crate) rep_count: u8,
     /// For an interval/repetition run, the per-rep volume label, e.g. `"4 min"`
     /// or `"800 m"`. Empty for a continuous run or a lift.
     #[serde(default)]
     pub rep_volume: String,
     /// True for a timed-hold calisthenics prescription (lever/plank/dead-hang):
-    /// `rep_volume` carries "20–45 s hold" and `reps_low/high` stay 0. Kotlin
-    /// default `false`; additive, so old shells ignore it.
+    /// `rep_volume` carries "20–45 s hold" and `reps_low/high` stay 0.
     #[serde(default)]
     pub timed_hold: bool,
     /// Target proximity-to-failure as an RPE for prefilling a log entry:
@@ -1093,7 +1028,7 @@ pub struct PrescriptionView {
     pub run_logged_min: f64,
     /// For a run item: numeric pace / heart-rate / effort targets.
     /// `None` for lifts/calisthenics. The `intensity_label` already reads the
-    /// numbers; this carries them structured. Serde-default.
+    /// numbers; this carries them structured.
     #[serde(default)]
     pub run_target: Option<RunTargetView>,
     /// Calisthenics plan item data (ladder, rung, Easier/Harder, added-load
@@ -1103,7 +1038,7 @@ pub struct PrescriptionView {
     /// For a run item: the numeric session structure a tracker can step
     /// through (warm-up, reps + recovery, cool-down, strides, run/walk bouts).
     /// `None` for lifts/calisthenics and for a plain continuous run with no
-    /// warm-up. Serde-default; additive.
+    /// warm-up.
     #[serde(default)]
     pub run_structure: Option<RunStructureView>,
     /// The bold name line of a lift / calisthenics face (`"Back squat"`): the
@@ -1179,28 +1114,10 @@ pub(crate) struct BasisRx {
     pub(crate) rir: Option<i64>,
 }
 
-/// What a plan item trains. On the wire a run item is the one with no
-/// exercise name; a calisthenics item carries `calis`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ItemKind {
-    Lift,
-    Calisthenics,
-    Run,
-}
-
 impl PrescriptionView {
-    pub fn kind(&self) -> ItemKind {
-        if self.exercise.is_empty() {
-            ItemKind::Run
-        } else if self.calis.is_some() {
-            ItemKind::Calisthenics
-        } else {
-            ItemKind::Lift
-        }
-    }
-
+    /// A run item is the one with no exercise name.
     pub fn is_run(&self) -> bool {
-        self.kind() == ItemKind::Run
+        self.exercise.is_empty()
     }
 }
 
@@ -1466,10 +1383,14 @@ pub struct RacePredictionView {
     pub goal_label: String,
     /// Formatted finish time (`"41:30"`) or range (`"41:30–43:00"`).
     pub predicted: String,
-    /// True when the two methods agreed (single time); false = range.
+    /// True when the two methods agreed (single time); false = range. This and
+    /// the bounds are the figures behind `predicted`; not on the wire.
+    #[serde(skip)]
     pub agreed: bool,
     /// Range bounds in seconds (equal when `agreed`); 0.0 on degenerate input.
+    #[serde(skip)]
     pub low_sec: f64,
+    #[serde(skip)]
     pub high_sec: f64,
     pub summary: String,
     #[serde(flatten)]
@@ -1494,21 +1415,27 @@ pub struct RacePredictionView {
     pub weeks_since_race: Option<u8>,
 }
 
-/// The raw heart-rate-zone query echoed back so a shell rehydrates its form
-/// (`app/mod.rs` `hr_zone_input`). Sibling to the `hr_zones` result rows.
+/// The heart-rate-zone query, stored on the model and echoed back so a shell
+/// rehydrates its form. Sibling to the `hr_zones` result rows.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct HrZoneInputView {
     pub age_years: f64,
+    /// Resting HR, bpm: arms the running-005 %HRmax-vs-Karvonen method
+    /// preference and the Karvonen band targets. `None` = %HRmax only.
     #[serde(default)]
     pub resting_hr_bpm: Option<f64>,
+    /// Weeks since HR zones were last recalculated off a measured max
+    /// (running-006: recompute every 4–6 weeks). `None` = untracked.
     #[serde(default)]
     pub weeks_since_recalc: Option<u8>,
+    /// Weeks since training paces were last re-tested (running-041: re-test
+    /// every 4–6 weeks). `None` = untracked.
     #[serde(default)]
     pub weeks_since_pace_test: Option<u8>,
 }
 
-/// The raw protein query echoed back so a shell rehydrates its form
-/// (`app/mod.rs` `protein_input`). Sibling to the `protein_targets` result rows.
+/// The absolute-protein-target query, stored on the model and echoed back so a
+/// shell rehydrates its form. Sibling to the `protein_targets` result rows.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct ProteinInputView {
     pub bodyweight_kg: f64,
@@ -1537,7 +1464,7 @@ pub struct HrMaxView {
 
 /// Structured form of a protein target, so a shell never regex-scrapes it out
 /// of the `protein_targets` summary rows. One per emitted row (masters and/or
-/// deficit). Additive / serde-default.
+/// deficit).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ProteinFigureView {
     /// Which target this is: `"masters"` or `"deficit"`.
@@ -1589,10 +1516,12 @@ pub struct HrZoneBandView {
 /// The hypertrophy plan's figures, structured so a shell shows the plan as
 /// numbers (landmarks, reps-left schedule, frequency, rest, block shape) without
 /// scraping `hypertrophy_plan`. `face_rows` lists the rows these figures stand
-/// for. Additive / serde-default.
+/// for.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct HypertrophyFiguresView {
     /// Weekly-set landmarks: minimum (MEV), productive range (MAV), max (MRV).
+    /// MEV is stated in the rows, not on the wire.
+    #[serde(skip)]
     pub min_sets: u8,
     pub productive_low: u8,
     pub productive_high: u8,
@@ -1625,23 +1554,17 @@ pub enum ProteinTargetKind {
     Deficit,
 }
 
-/// The raw hypertrophy-plan query echoed back so a shell rehydrates its form
-/// (`app/mod.rs` `hypertrophy_input`). Sibling to the `hypertrophy_plan` result rows.
+/// The hypertrophy-plan query, stored on the model and echoed back so a shell
+/// rehydrates its form. Sibling to the `hypertrophy_plan` result rows.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct HypertrophyInputView {
     pub muscle: String,
     pub weeks: u8,
+    /// The muscle is not growing on the current volume (hypertrophy-008).
     pub not_growing: bool,
+    /// Recovery from the current volume is easy (hypertrophy-008; with
+    /// `not_growing` → +2 sets next mesocycle).
     pub recovering_easily: bool,
-}
-
-/// The raw APRE query echoed back so a shell rehydrates its form
-/// (`app/mod.rs` `apre_input`). Sibling to the `apre` result rows.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct ApreInputView {
-    pub scheme: autoreg::ApreScheme,
-    pub reps: u8,
-    pub current_load_kg: f64,
 }
 
 /// The one resolved coaching message for a session, flattened for shells.
@@ -1659,25 +1582,13 @@ pub struct FeedbackView {
     #[serde(default)]
     pub message_mi: String,
     /// True when this message suppresses all competing praise this cycle.
-    pub suppresses_praise: bool,
+    #[serde(skip)]
+    pub(crate) suppresses_praise: bool,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
-    /// Verbosity personalization (feedback-023/024): cap on takeaways the
-    /// shell should render for this user (beginner: 1).
-    #[serde(default)]
-    pub max_takeaways: u8,
-    /// Cap on metrics surfaced (advanced: up to 3; beginner: 1).
-    #[serde(default)]
-    pub max_metrics: u8,
-    /// Always include the "why" (mandatory for beginners).
-    #[serde(default)]
-    pub rationale_mandatory: bool,
-    /// Keep jargon minimal (beginners).
-    #[serde(default)]
-    pub minimize_jargon: bool,
     /// Praise copy must name a concrete mastery experience, a specific PR,
-    /// completed session, or barrier overcome (feedback-005).
-    #[serde(default)]
+    /// completed session, or barrier overcome (feedback-005). Not on the wire.
+    #[serde(skip)]
     pub anchor_mastery: bool,
     /// The three-part "why?" disclosure (basis → why this grade → what would
     /// improve it).
@@ -1748,7 +1659,9 @@ pub struct IntervalVerdictView {
     pub label: String,
     /// Evidence-backed copy explaining the differentiation honestly.
     pub message: String,
-    /// The variability index itself (normalized speed ÷ average speed), 2 dp.
+    /// The variability index itself (normalized speed ÷ average speed), 2 dp;
+    /// the figure behind `verdict`, not on the wire.
+    #[serde(skip)]
     pub variability_index: f64,
     #[serde(flatten)]
     pub evidence: EvidenceTagView,
@@ -1807,19 +1720,19 @@ pub struct RunResultView {
     #[serde(default)]
     pub duration_min: f64,
     /// The run's average % HRmax as logged (0.0 = no HR sample). Echoed for the
-    /// manual-run edit prefill. Serde-default.
+    /// manual-run edit prefill.
     #[serde(default)]
     pub hr_pct_max: f64,
     /// Core-owned heart-rate line for the run card, rendered verbatim: the
     /// average bpm the athlete entered when known ("148 bpm · Z2"), else the
     /// whole-percent %HRmax ("HR 80% · Z2"); the zone is left off when `zone`
-    /// is `"-"`. Empty when the run has no heart-rate figure. Serde-default.
+    /// is `"-"`. Empty when the run has no heart-rate figure.
     #[serde(default)]
     pub hr_label: String,
     /// The average heart rate the athlete entered, bpm, exactly as stored
     /// (`hr_pct_max` is then derived from it). `None` when not entered. A shell
     /// re-logging the run (delete → undo) sends it back as `avg_hr_bpm` so the
-    /// restored run is identical. Serde-default.
+    /// restored run is identical.
     #[serde(default)]
     pub avg_hr_bpm: Option<f64>,
     /// The device's UTC offset the run was logged under (the row's stamped
@@ -1835,7 +1748,9 @@ pub struct RunResultView {
     pub spike_note: String,
     /// Second-half pace slowdown percent for a GPS-tracked run (a positive split;
     /// positive = slowed in the back half). `None` for a hand-entered run or a
-    /// track too short/degenerate to split. Descriptive, not a prescription.
+    /// track too short/degenerate to split. Feeds `split` and the pacing
+    /// feedback; not on the wire.
+    #[serde(skip)]
     pub split_pct: Option<f64>,
     /// Core-owned pacing verdict + chip data for `split_pct` (feedback-016/017).
     /// `None` when `split_pct` is `None` and when the track has fewer than two
@@ -1858,39 +1773,22 @@ pub struct RunResultView {
     /// user. Only the zero-distance fallback ("GPS signal too poor to measure
     /// this run", no unit) is surfaced, in `RunCard`.
     pub summary: String,
-    /// Evidence backing the spike gate.
-    pub citation: String,
-    /// Evidence grade backing the spike gate, e.g. `"Strong"`; empty for an
-    /// unmeasurable run (no gate ran).
-    #[serde(default, with = "grade_or_empty")]
-    pub grade: Option<EvidenceGrade>,
-    /// Confidence score of the spike-gate claim (0.0 when no gate ran).
-    #[serde(default)]
-    pub confidence: f32,
-    /// Whether the spike-gate claim is safety-critical.
-    #[serde(default)]
-    pub safety_critical: bool,
-    /// Whether the spike-gate claim is contested.
-    #[serde(default)]
-    pub contested: bool,
+    /// Evidence of the spike gate; empty for an unmeasurable run (no gate ran).
+    #[serde(flatten)]
+    pub evidence: EvidenceTagView,
     /// GPS fixes dropped by the quality gates before distance/pace were
     /// derived (File 07 QC: accuracy >30 m, implied speed >12 m/s, <2.5 m
-    /// move, or a non-advancing timestamp). 0 for a hand-entered run.
-    #[serde(default)]
+    /// move, or a non-advancing timestamp). 0 for a hand-entered run. Not on
+    /// the wire.
+    #[serde(skip)]
     pub qc_dropped: u32,
     /// Whether this run has an exportable GPS route (≥2 QC-passing fixes). The
-    /// full GPX document (a ~0.5 MB string) stays out of the list payload, which
-    /// is re-serialized over JNI on every event; the shell reads this cheap flag
-    /// to decide whether to offer the map / share affordances and fetches the
-    /// document on demand via the `exportGpx` FFI query. A hand-entered run has
-    /// no route.
+    /// GPX document itself is fetched on demand via the `exportGpx` FFI query.
     #[serde(default)]
     pub has_gpx: bool,
-    /// A GPS run whose fixes all fail the QC gates ("GPS signal too poor"):
-    /// no route (`has_gpx` false), but still a tracked run. `exportGpx` returns
-    /// its recorded fixes for this run only so the shell's Undo of a delete can
-    /// re-log it as recorded (`LogRunTrack`), never as a 0 km manual run. Sent
-    /// only when true, so every other run keeps its wire.
+    /// A GPS run whose fixes all fail the QC gates: no route (`has_gpx` false),
+    /// but `exportGpx` returns its recorded fixes so an undone delete re-logs it
+    /// as tracked. Omitted when false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub gps_unmeasurable: bool,
     /// When the run was logged, unix seconds; 0 when undated. A shell dates the
@@ -1919,24 +1817,21 @@ pub struct RunResultView {
     pub spike_has_baseline: bool,
     /// Whole-session effort, CR-10 (0–10), as rated by the athlete
     /// (LOAD-SRPE-001). `None` = unrated: the shell may offer "Rate this run"
-    /// via `Event::AmendRunMeta`. Serde-default.
+    /// via `Event::AmendRunMeta`.
     #[serde(default)]
     pub session_rpe: Option<u8>,
     /// Session-RPE load in arbitrary units = moving minutes × `session_rpe`
     /// (Foster; LOAD-SRPE-001). `None` when unrated or unmeasurable. A separate
-    /// measure from the heart-rate load, never added to it. Serde-default.
+    /// measure from the heart-rate load, never added to it.
     #[serde(default)]
     pub srpe_load_au: Option<f64>,
     /// Best-effort records this run currently holds, e.g. `["Fastest 5K"]`
-    /// (see [`RunProgressView::best_efforts`]). Empty otherwise. Serde-default.
+    /// (see [`RunProgressView::best_efforts`]). Empty otherwise.
     #[serde(default)]
     pub best_effort_labels: Vec<String>,
-    /// When the run STARTED, unix seconds; 0 when undated. `observed_at` is
-    /// when it was logged, which for a tracked or imported run is its LAST
-    /// fix: a GPS run starts at the first fix of its QC'd track (the route and
-    /// GPX begin there), a hand-entered run at `observed_at` minus its
-    /// duration (the editor's stamp defaults to the moment it is logged). A
-    /// shell names, titles and captions a run by this. Serde-default.
+    /// When the run started, unix seconds; 0 when undated. For a GPS run the
+    /// first QC'd fix, for a hand-entered run `observed_at` minus its duration.
+    /// A shell names, titles and captions a run by this.
     #[serde(default)]
     pub started_at: i64,
 }
@@ -1961,10 +1856,8 @@ pub struct RunProgressView {
     /// from GPS splits (fastest contiguous stretch) or a whole hand-logged run
     /// of that distance. Only distances with an effort are listed.
     pub best_efforts: Vec<BestEffortView>,
-    pub citation: String,
-    #[serde(with = "grade_or_empty")]
-    pub grade: Option<EvidenceGrade>,
-    pub confidence: f32,
+    #[serde(flatten)]
+    pub evidence: EvidenceTagView,
 }
 
 /// One Monday-start local week of running.
@@ -1973,16 +1866,14 @@ pub struct RunWeekView {
     /// Local epoch day of the week's Monday.
     pub week_start_epoch_day: i64,
     pub km: f64,
-    pub longest_km: f64,
     pub runs: u32,
-    pub moving_min: f64,
     /// Session-RPE load for the week (sum of minutes × CR-10 over rated runs;
     /// LOAD-SRPE-001), its own series. 0 when nothing was rated.
     #[serde(default)]
     pub srpe_load_au: f64,
     /// Rated runs counted in `srpe_load_au`.
-    #[serde(default)]
-    pub rated_runs: u32,
+    #[serde(skip)]
+    pub(crate) rated_runs: u32,
 }
 
 /// The fastest known effort over one standard distance.
@@ -1995,13 +1886,12 @@ pub struct BestEffortView {
     pub time_sec: u32,
     /// `h:mm:ss` / `m:ss` finish time.
     pub time_label: String,
-    /// Average pace over the effort, `m:ss /km`.
-    pub pace_label: String,
     /// The run holding the record (identity for the shell's PR chip).
     pub entry_id: u64,
     pub observed_at: i64,
     /// `true` when measured from a stretch of a longer GPS run; `false` for a
-    /// whole run of that distance.
+    /// whole run of that distance. Not on the wire.
+    #[serde(skip)]
     pub from_split: bool,
 }
 
@@ -2022,14 +1912,20 @@ pub struct RunTargetView {
     /// Empty without a pace anchor.
     pub pace_label_km: String,
     pub pace_label_mi: String,
-    /// Heart-rate range in bpm (0 = not given). Not given for interval /
-    /// repetition work, where pace governs and heart rate lags.
+    /// Heart-rate range in bpm (0 = not given), the figures behind `hr_label`;
+    /// not on the wire. Not given for interval / repetition work, where pace
+    /// governs and heart rate lags.
+    #[serde(skip)]
     pub hr_low_bpm: u32,
+    #[serde(skip)]
     pub hr_high_bpm: u32,
     /// e.g. `"150–162 bpm"` / `"≤ 143 bpm"`; empty when not given.
     pub hr_label: String,
-    /// CR-10 effort band (both 0 when the evidence states none).
+    /// CR-10 effort band (both 0 when the evidence states none), the figures
+    /// behind `effort_cue`; not on the wire.
+    #[serde(skip)]
     pub rpe_low: u8,
+    #[serde(skip)]
     pub rpe_high: u8,
     /// Always-present plain effort cue, e.g. `"effort 3–4 of 10, easy enough to
     /// talk in full sentences"`.
@@ -2040,18 +1936,16 @@ pub struct RunTargetView {
     pub effort_detail: String,
     /// The fitness score behind the paces (0 = none) and the heart-rate figures
     /// used (0 = unknown), so a downgrade can re-derive the easy band.
-    #[serde(default)]
-    pub vdot: f64,
-    #[serde(default)]
-    pub hr_max_bpm: f64,
-    #[serde(default)]
-    pub hr_max_measured: bool,
-    #[serde(default)]
-    pub hr_rest_bpm: f64,
+    #[serde(skip)]
+    pub(crate) vdot: f64,
+    #[serde(skip)]
+    pub(crate) hr_max_bpm: f64,
+    #[serde(skip)]
+    pub(crate) hr_max_measured: bool,
+    #[serde(skip)]
+    pub(crate) hr_rest_bpm: f64,
     /// Evidence for the numeric anchor (pace: RUN-VDOT-001; heart rate:
     /// RUN-HRMAX-001; talk test: RUN-TALKTEST-001).
-    pub citation: String,
-    #[serde(with = "grade_or_empty")]
-    pub grade: Option<EvidenceGrade>,
-    pub confidence: f32,
+    #[serde(flatten)]
+    pub evidence: EvidenceTagView,
 }

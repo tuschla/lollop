@@ -84,7 +84,7 @@ fn is_hard_run(kind: RunSessionType) -> bool {
 
 /// Cost of `first` on one day followed by `second` the next day, plus the
 /// plain-language reason when the pair breaks a spacing rule.
-pub(crate) fn adjacent_cost(first: DayLoad, second: DayLoad) -> (i32, Option<&'static str>) {
+fn adjacent_cost(first: DayLoad, second: DayLoad) -> (i32, Option<&'static str>) {
     use DayLoad::*;
     let spread = if first != Rest && second != Rest {
         CONSECUTIVE
@@ -228,18 +228,12 @@ fn trim_kinds(kinds: &[RunSessionType], n: usize) -> Vec<RunSessionType> {
     if kinds.len() <= n {
         return kinds.to_vec();
     }
-    let mut keep: Vec<RunSessionType> = kinds
-        .iter()
-        .copied()
-        .filter(|k| *k == RunSessionType::LongRun)
-        .collect();
-    keep.extend(kinds.iter().copied().filter(|k| super::run::is_quality(*k)));
-    keep.extend(
-        kinds
-            .iter()
-            .copied()
-            .filter(|k| *k != RunSessionType::LongRun && !super::run::is_quality(*k)),
-    );
+    let mut keep = kinds.to_vec();
+    keep.sort_by_key(|k| match k {
+        RunSessionType::LongRun => 0,
+        k if super::run::is_quality(*k) => 1,
+        _ => 2,
+    });
     keep.truncate(n);
     keep
 }

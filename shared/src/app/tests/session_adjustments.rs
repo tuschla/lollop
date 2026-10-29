@@ -182,14 +182,7 @@ fn low_wrapped_next_session_is_not_folded_with_todays_adjustment() {
     // Monday (+7). Today's transient readiness downgrade must NOT paint that
     // future-dated session: it would be a wrong-week deload.
     let (app, mut model) = planned_strength_model(true);
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 5,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON + 5);
     // A single-day HRV suppression → non-blocking DowngradeSession for TODAY.
     app.update(
         Event::SubmitReadiness(ReadinessInput {
@@ -235,14 +228,7 @@ fn low_wrapped_next_session_still_blanks_under_a_safety_hold() {
     // The blocking/safety path is unchanged: a hold blanks the wrapped
     // session regardless of its date (HARD RULE 3).
     let (app, mut model) = planned_strength_model(true);
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 5,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON + 5);
     // Generic pain report → hard Stop → train_blocked.
     app.update(
         Event::SubmitReadiness(ReadinessInput {
@@ -294,14 +280,7 @@ fn downgrade_caps_a_run_item_not_just_a_note() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
     // A multi-day HRV downtrend → DowngradeSession.
     for d in 0..3 {
         app.update(
@@ -412,7 +391,7 @@ fn readiness_adjustments_resync_the_prefill_rpe_target() {
 
 #[test]
 fn tolerable_knee_tendon_pain_eases_only_the_lifts_that_load_the_knee() {
-    // final-today F1/#9: a 3/10 stable knee tendon report eases the leg lifts
+    // A 3/10 stable knee tendon report eases the leg lifts
     // (no load, a face that says what to load) and holds the upper body at
     // its held load with one rep more in reserve, never stacked.
     let mut bench = lift_item("Bench press", 85.0);
@@ -480,5 +459,47 @@ fn an_unlocated_tendon_report_still_eases_every_lift() {
         ns.items
             .iter()
             .all(|it| it.face_lead.contains("pick a weight"))
+    );
+}
+
+/// The calisthenics view fixture (today 20003, an all-calisthenics hero) with
+/// one readiness input that touches no calisthenics item: the hero is
+/// unchanged and not marked adjusted.
+fn assert_unchanged_and_not_adjusted(input: &str) {
+    let mut model = snapshot_fixture_model(include_str!(
+        "../../../tests/fixtures/view_snapshot/calisthenics.events.ndjson"
+    ));
+    let before = Engine.view(&model).next_session.expect("hero");
+    assert_eq!(before.status, SessionStatus::Next);
+    let event: Event = serde_json::from_str(input).unwrap();
+    let _ = Engine.update(event, &mut model);
+    let vm = Engine.view(&model);
+    assert!(!vm.adjustments.is_empty(), "the readiness call is live");
+    let after = vm.next_session.expect("hero");
+    assert_eq!(before.items, after.items, "the call changes no item");
+    assert_eq!(
+        after.status,
+        SessionStatus::Next,
+        "adjustment = {:?}",
+        after.adjustment
+    );
+}
+
+/// Aerobic decoupling (RUN_DECOUPLE_001) leaves lifts alone, and the day has
+/// no run.
+#[test]
+fn decoupling_on_a_lift_only_day_does_not_mark_it_adjusted() {
+    // 2024-10-07 08:00 UTC = local day 20003.
+    assert_unchanged_and_not_adjusted(
+        r#"{"SubmitReadiness":{"signal":"AerobicDecoupling","value":14.0,"observed_at":1728288000,"streak":1,"pain":null,"effort_min":40.0}}"#,
+    );
+}
+
+/// A session-wide RPE load cut (AUTOREG_RIR_001) on a day with no prescribed
+/// weight (calisthenics rungs carry none).
+#[test]
+fn load_cut_on_a_day_without_loads_does_not_mark_it_adjusted() {
+    assert_unchanged_and_not_adjusted(
+        r#"{"SubmitReadiness":{"signal":"Rpe","value":2.0,"observed_at":1728288000,"streak":1,"pain":null,"effort_min":null}}"#,
     );
 }

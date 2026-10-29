@@ -3,10 +3,10 @@
 
 use super::*;
 
-/// A Monday epoch day (mon0_weekday == 0); today is its Wednesday.
+/// A Monday epoch day (mon0_weekday == 0); today is its Sunday, so the whole
+/// week is on or before today.
 const MONDAY: i64 = MON + 7 * 2_900;
-const TODAY: i64 = MONDAY + 2;
-const HOUR: i64 = 3_600;
+const TODAY: i64 = MONDAY + 6;
 
 fn at(day: i64, hour: i64, min: i64) -> i64 {
     day * DAY_SEC + hour * HOUR + min * 60
@@ -20,18 +20,12 @@ fn youth() -> Profile {
 }
 
 fn run(minutes: f64, rating: Option<u8>, observed_at: i64) -> Event {
-    Event::LogRun {
-        distance_km: minutes / 6.0,
-        duration_min: minutes,
-        hr_pct_max: 0.0,
-        longest_recent_km: 50.0,
-        observed_at,
-        entry_id: 0,
-        workout_type: None,
-        session_rpe: rating,
-        avg_hr_bpm: None,
-        utc_offset_sec: None,
-    }
+    with_run_meta(
+        log_run_at(minutes / 6.0, minutes, 0.0, observed_at),
+        None,
+        rating,
+        None,
+    )
 }
 
 fn activity(
@@ -104,10 +98,7 @@ fn week_log(profile: Profile) -> Vec<Event> {
         run(50.0, Some(9), at(MONDAY + 7, 7, 0)),
         // Undated: listed, never bucketed into a week.
         activity(ActivityKind::Walking, 20.0, true, true, 0, 14),
-        Event::SetToday {
-            epoch_day: TODAY,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(TODAY),
     ]
 }
 
@@ -150,10 +141,7 @@ fn a_rating_below_seven_is_not_a_vigorous_day() {
     let (app, model) = replay(vec![
         Event::SetProfile(youth()),
         run(30.0, Some(6), at(MONDAY, 7, 0)),
-        Event::SetToday {
-            epoch_day: TODAY,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(TODAY),
     ]);
     let y = app.view(&model).youth_activity.unwrap();
     assert_eq!((y.vigorous_days, y.strengthening_days), (0, 1));
@@ -165,10 +153,7 @@ fn lift_minutes_cap_at_three_hours_a_day() {
         Event::SetProfile(youth()),
         log_set("Back Squat", 60.0, 5, 7.0, at(MONDAY, 8, 0)),
         log_set("Back Squat", 60.0, 5, 7.0, at(MONDAY, 20, 0)),
-        Event::SetToday {
-            epoch_day: TODAY,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(TODAY),
     ]);
     let y = app.view(&model).youth_activity.unwrap();
     assert_eq!(y.lift_minutes, 180);
@@ -194,6 +179,38 @@ fn days_are_local_days() {
     ]);
     let y = app.view(&model).youth_activity.unwrap();
     assert_eq!((y.activity_minutes, y.vigorous_days), (30, 1));
+}
+
+#[test]
+fn a_run_counts_in_the_week_it_started() {
+    // 40 min, stamped at its end Monday 00:20: it started Sunday 23:40.
+    let (app, model) = replay(vec![
+        Event::SetProfile(youth()),
+        run(40.0, None, at(MONDAY, 0, 20)),
+        set_today_ev(MONDAY),
+    ]);
+    let y = app.view(&model).youth_activity.expect("youth card");
+    assert_eq!((y.run_minutes, y.strengthening_days), (0, 0));
+}
+
+#[test]
+fn days_after_today_do_not_count() {
+    // Today is Wednesday; the activity is stamped Friday.
+    let (app, model) = replay(vec![
+        Event::SetProfile(youth()),
+        activity(
+            ActivityKind::Sport,
+            30.0,
+            true,
+            false,
+            at(MONDAY + 4, 10, 0),
+            21,
+        ),
+        set_today_ev(MONDAY + 2),
+    ]);
+    let y = app.view(&model).youth_activity.expect("youth card");
+    assert_eq!((y.activity_minutes, y.vigorous_days), (0, 0));
+    assert!(y.week_entries.is_empty());
 }
 
 #[test]
@@ -226,19 +243,9 @@ fn the_card_follows_a_birthday_out_of_the_youth_band() {
             birth_epoch_day: Some(BORN),
             ..strength_profile()
         }),
-        Event::SetToday {
-            epoch_day: D_2026_10_17,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(D_2026_10_17),
     ]);
     assert!(app.view(&model).youth_activity.is_some());
-    app.update(
-        Event::SetToday {
-            epoch_day: D_2026_10_17 + 1,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, D_2026_10_17 + 1);
     assert_eq!(app.view(&model).youth_activity, None);
 }

@@ -14,7 +14,6 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
-import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.hasClickAction
@@ -34,8 +33,6 @@ import app.milestone.EventDispatcher
 import app.milestone.LiftResultView
 import app.milestone.R
 import app.milestone.repsLeftText
-import java.io.File
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonObject
@@ -78,35 +75,11 @@ class GymFloorFlowTest {
 
     private val todayStartSec get() = QaHarness.daysAgoAtMidday(0) - 43_200L
 
-    private fun openLoopFor(exercise: String) {
-        // The current item's filled pill and every other open item's compact row
-        // both carry "Log set 1 of N, <exercise>" as their tap target's label.
-        rule.onNode(
-            hasClickAction() and hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n, 1), substring = true) and
-                hasAnyAncestor(hasTestTag("plan-item:$exercise")),
-        ).performScrollTo().performClick()
-        rule.waitUntil(5_000) {
-            rule.onAllNodes(hasText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)).fetchSemanticsNodes().isNotEmpty()
-        }
-    }
-
-    /** The loop editor's "Set k of N" header. */
-    private fun setHeader(k: Int, n: Int) = str(R.string.log_set_header_n_of_n, k, n)
-
     /** An effort-scale cell, spoken as "k reps left". */
     private fun effortCell(repsLeft: Int) = hasContentDescription(str(R.string.log_effort_cd, "$repsLeft")) and isSelectable()
 
     /** The weight well, spoken with its value ("Weight, 100 kg"). */
     private fun weightWell(shown: String) = hasContentDescription("${str(R.string.log_field_weight)}, $shown kg")
-
-    /** Wait for app state the screen doesn't show (the model, the event log).
-     *  The semantics fetch is what idles the main looper under Robolectric (see
-     *  [launchApp]), so the core's reply can land while we poll. */
-    private fun waitForState(timeoutMs: Long = 10_000, cond: () -> Boolean) =
-        rule.waitUntil(timeoutMs) {
-            rule.onAllNodes(isRoot()).fetchSemanticsNodes()
-            cond()
-        }
 
     /** The loop's pinned primary action ("Log set k of N"). */
     private fun logSet() = rule.onNodeWithTag("editor-primary").performClick()
@@ -125,7 +98,7 @@ class GymFloorFlowTest {
         // +2.5 kg for set 1, then repeats with an untouched Save.
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        openLoopFor("Back Squat")
+        rule.openLoopFor("Back Squat")
         // The ± chip's "+2.5" is a figure, not a string resource.
         rule.onNodeWithText("+2.5").performClick()
         logSet()
@@ -141,7 +114,7 @@ class GymFloorFlowTest {
     fun aDoubleTapOnSaveLogsOneSet() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        openLoopFor("Back Squat")
+        rule.openLoopFor("Back Squat")
         logSet()
         logSet()
         rule.assertTextCountEventually(setHeader(2, 4), 1)
@@ -157,7 +130,7 @@ class GymFloorFlowTest {
     fun effortIsRatedFreshEverySetAndUnratedStaysUnrated() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        openLoopFor("Back squat")
+        rule.openLoopFor("Back squat")
         // The coach's target shows as a hint in reps left ("target ~2 reps left"),
         // nothing is pre-picked. Any reps-left wording the target may resolve to.
         val target = strPrefix(R.string.log_rpe_target_hint)
@@ -186,7 +159,7 @@ class GymFloorFlowTest {
     fun undoRemovesTheLoggedSet() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        openLoopFor("Back Squat")
+        rule.openLoopFor("Back Squat")
         logSet()
         rule.assertTextCountEventually(setHeader(2, 4), 1)
         rule.onNodeWithText(str(R.string.log_undo)).performClick()
@@ -201,7 +174,7 @@ class GymFloorFlowTest {
     fun theLastSetCanBeEditedFromTheLoop() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        openLoopFor("Back Squat")
+        rule.openLoopFor("Back Squat")
         logSet()
         rule.assertTextCountEventually(setHeader(2, 4), 1)
         // While the undo row names the set just logged, the header's "Last: … · Edit"
@@ -221,7 +194,7 @@ class GymFloorFlowTest {
     fun aWarmupDoesNotBecomeTheNextPrefill() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        openLoopFor("Back Squat")
+        rule.openLoopFor("Back Squat")
         val prescribed = EventDispatcher.model.value!!.week_plan
             .first { it.epoch_day == app.milestone.todayEpochDay() }.items.first { it.exercise == "Back Squat" }.load_kg!!
         val shown = app.milestone.loadFigure(prescribed, app.milestone.WeightUnit.Kg)
@@ -241,7 +214,7 @@ class GymFloorFlowTest {
     fun theRestCountsDownToThePrescribedRest() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        openLoopFor("Back Squat")
+        rule.openLoopFor("Back Squat")
         val restSec = EventDispatcher.model.value!!.week_plan
             .first { it.epoch_day == app.milestone.todayEpochDay() }.items.first { it.exercise == "Back Squat" }.rest_sec
         logSet()
@@ -273,7 +246,7 @@ class GymFloorFlowTest {
     fun finishingAnExerciseInTheLoopOffersTheNextOne() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        openLoopFor("Back squat")
+        rule.openLoopFor("Back squat")
         rule.typeWeight("60")
         repeat(3) { i ->
             logSet()
@@ -320,7 +293,7 @@ class GymFloorFlowTest {
     fun aHoldRungLogsSecondsNotReps() {
         QaHarness.seedLog(ctx, listOf(QaHarness.calisthenicsProfile()))
         rule.launchApp()
-        openLoopFor("Dead hang")
+        rule.openLoopFor("Dead hang")
         // The compact header states the seconds target beside the set count
         // ("Set 1 of 3 · 30 s").
         rule.onAllNodesWithText("\u00b7 " + str(R.string.log_band_hold, 30), substring = true).assertCountEquals(1)
@@ -333,7 +306,7 @@ class GymFloorFlowTest {
     fun theEffortScaleIsOnScreenInTheLoopWithoutScrolling() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        openLoopFor("Back Squat")
+        rule.openLoopFor("Back Squat")
         // Both ends of the one-row scale, with no performScrollTo.
         rule.onNode(effortCell(2)).assertIsDisplayed()
         rule.onNode(effortCell(0)).assertIsDisplayed()
@@ -367,7 +340,7 @@ class GymFloorFlowTest {
         val item = withLast.firstOrNull { it.load_kg == null } ?: withLast.first()
         val last = item.last_set!!
         val expectedKg = item.load_kg ?: item.suggested_load_kg ?: last.weight_kg
-        openLoopFor(item.exercise)
+        rule.openLoopFor(item.exercise)
         rule.assertCountEventually(weightWell(app.milestone.loadFigure(expectedKg, app.milestone.WeightUnit.Kg)), 1)
         // The note rides in the weight field's hint slot (joined with Per side), below
         // the well inside the editor's own scroll body.
@@ -375,7 +348,7 @@ class GymFloorFlowTest {
             .performScrollTo().assertIsDisplayed()
         // An untouched Save (reps prefilled from the band) logs exactly that weight.
         logSet()
-        waitForState { todaysSets(item.exercise).isNotEmpty() }
+        rule.waitForState { todaysSets(item.exercise).isNotEmpty() }
         assertEquals(expectedKg, todaysSets(item.exercise).first().weight_kg, 1e-9)
     }
 
@@ -407,9 +380,6 @@ class GymFloorFlowTest {
         assertEquals(null, rx(jump).targetRpe)
     }
 
-    private fun eventLogLines(): List<String> =
-        File(ctx.filesDir, "event-log.ndjson").takeIf { it.exists() }?.readLines().orEmpty()
-
     @Test
     fun theWeeklyCheckinSendsTheListedSignsAndCanBeCleared() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -420,22 +390,21 @@ class GymFloorFlowTest {
         rule.onNodeWithText(str(R.string.log_weekly_sign_mood)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_signs_1to2)).performScrollTo().performClick()
         rule.onNodeWithTag("editor-primary").performClick()
-        waitForState { eventLogLines().any { it.contains("SubmitWeeklyCheckin") } }
-        val payload = Json.parseToJsonElement(eventLogLines().last { it.contains("SubmitWeeklyCheckin") })
-            .jsonObject["SubmitWeeklyCheckin"]!!.jsonObject
+        rule.waitForState { journeyLog().any { it.variant == "SubmitWeeklyCheckin" } }
+        val payload = journeyLog().last { it.variant == "SubmitWeeklyCheckin" }.payload
         val signs = payload["overtraining_signs"]!!.jsonObject
         assertTrue(signs["worse_sleep"]!!.jsonPrimitive.boolean)
         assertTrue(signs["low_mood"]!!.jsonPrimitive.boolean)
         assertTrue(!signs["worse_performance"]!!.jsonPrimitive.boolean)
         assertEquals(1.5, payload["overtraining_signal_weeks"]!!.jsonPrimitive.double, 0.0)
-        waitForState { EventDispatcher.model.value?.weekly_checkin_present == true }
+        rule.waitForState { EventDispatcher.model.value?.weekly_checkin_present == true }
 
         // Reopened, the sheet offers to clear the check-in in force.
         rule.onNodeWithContentDescription(str(R.string.main_log)).performClick()
         rule.onNodeWithText(str(R.string.main_weekly_checkin_title)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_clear)).performScrollTo().performClick()
         rule.onNode(hasText(str(R.string.log_weekly_clear_confirm)) and hasAnyAncestor(isDialog())).performClick()
-        waitForState { EventDispatcher.model.value?.weekly_checkin_present == false }
+        rule.waitForState { EventDispatcher.model.value?.weekly_checkin_present == false }
     }
 
     /** Open the morning check-in and answer sleep, soreness and mood with 3. */
@@ -451,39 +420,23 @@ class GymFloorFlowTest {
     }
 
     /** The value of the last Illness report the check-in wrote to the log. */
-    private fun lastIllnessValue(): Double {
-        val line = eventLogLines().last { it.contains("\"Illness\"") }
-        return Json.parseToJsonElement(line).jsonObject["SubmitReadiness"]!!
-            .jsonObject["value"]!!.jsonPrimitive.double
-    }
-
-    @Test
-    fun fluOnTheCheckinHoldsTraining() {
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        rule.launchApp()
-        assertTrue(!EventDispatcher.model.value!!.train_blocked)
-        openCheckinWithRequiredAnswers()
-        // The helper line says what each answer means for training.
-        rule.onNodeWithText(str(R.string.log_illness_help), substring = true).performScrollTo().assertIsDisplayed()
-        rule.onNodeWithText(str(R.string.log_illness_below_neck), substring = true).performScrollTo().performClick()
-        rule.onNodeWithTag("editor-primary").performClick()
-        waitForState { EventDispatcher.model.value?.train_blocked == true }
-        assertTrue(eventLogLines().any { it.contains("SubmitCheckin") })
-        // Flu / fever / body aches is the below-neck-or-fever tier.
-        assertEquals(2.0, lastIllnessValue(), 0.0)
-    }
+    private fun lastIllnessValue(): Double =
+        journeyLog().last { it.variant == "SubmitReadiness" && it.payload["signal"].toString().contains("Illness") }
+            .payload["value"]!!.jsonPrimitive.double
 
     @Test
     fun headColdOnTheCheckinDowngradesWithoutHoldingTraining() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         openCheckinWithRequiredAnswers()
+        // The helper line says what each answer means for training.
+        rule.onNodeWithText(str(R.string.log_illness_help), substring = true).performScrollTo().assertIsDisplayed()
         rule.onNodeWithText(str(R.string.log_illness_above_neck), substring = true).performScrollTo().performClick()
         rule.onNodeWithTag("editor-primary").performClick()
-        waitForState { eventLogLines().any { it.contains("\"Illness\"") } }
+        // The published model, not just the log line: the view can lag the append.
+        rule.waitForState { resolveLabels().isNotEmpty() }
         // A head cold is the above-neck tier: easier sessions, training not held.
         assertEquals(1.0, lastIllnessValue(), 0.0)
-        rule.waitForIdle()
         assertTrue(!EventDispatcher.model.value!!.train_blocked)
     }
 

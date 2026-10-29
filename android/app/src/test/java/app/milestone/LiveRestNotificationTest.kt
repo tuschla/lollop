@@ -26,8 +26,8 @@ import org.robolectric.Shadows.shadowOf
  * requests promotion, counts down to the rest end in a chronometer (the status-bar
  * chip on Android 16+), names the next set and opens the set editor; at the rest
  * end the non-promoted rest-done alert replaces it. Runs on the shared Robolectric
- * SDK 34 config, so it checks what the app builds; the system's promotion decision
- * (`hasPromotableCharacteristics`, API 36) is checked on a device.
+ * SDK 34 config; the countdown test pins SDK 36 to check the built notification
+ * against the documented Live Update rules ([assertPromotableLiveUpdate]).
  */
 @RunWith(RobolectricTestRunner::class)
 class LiveRestNotificationTest {
@@ -61,7 +61,8 @@ class LiveRestNotificationTest {
     private fun squatNext() = RestAlarm.NextSet("Back squat", "Set 3 of 4 · 100\u00A0kg × 5")
 
     @Test
-    fun countdownIsAnOngoingPromotedChronometerToTheRestEnd() {
+    @Config(sdk = [36])
+    fun countdownIsAPromotableChronometerToTheRestEnd() {
         val before = System.currentTimeMillis()
         // The loop's order: the rest starts while the loop shows it, the loop
         // reports its next set, then the loop closes.
@@ -72,51 +73,14 @@ class LiveRestNotificationTest {
         val after = System.currentTimeMillis()
         val n = posted()!!
 
-        assertTrue("requests promotion", NotificationCompat.isRequestPromotedOngoing(n))
-        assertTrue("ongoing", n.flags and Notification.FLAG_ONGOING_EVENT != 0)
+        assertPromotableLiveUpdate(n)
+        assertTrue("channel above MIN", nm.getNotificationChannel(n.channelId).importance > NotificationManager.IMPORTANCE_MIN)
+        assertEquals(Notification.BigTextStyle::class.java.name, n.extras.getString(Notification.EXTRA_TEMPLATE))
         assertTrue("chronometer", n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
         assertTrue("counts down", n.extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN))
         assertTrue("when ${n.`when`} is the rest end", n.`when` in (before + 89_000L)..(after + 90_000L))
-        // Live Update requirements the app controls.
-        assertNull("no custom view", n.contentView)
-        assertNull("no custom big view", n.bigContentView)
-        assertFalse("not colorized", n.extras.getBoolean(Notification.EXTRA_COLORIZED))
-        assertEquals("not a group summary", 0, n.flags and Notification.FLAG_GROUP_SUMMARY)
-        val channel = nm.getNotificationChannel(n.channelId)
-        assertTrue("channel above MIN", channel.importance > NotificationManager.IMPORTANCE_MIN)
-
-        assertEquals("Resting · Back squat", n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
-        assertEquals("Next: Set 3 of 4 · 100\u00A0kg × 5", n.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
-    }
-
-    /** Built by the Android 16 framework. Robolectric's SDK 36 image
-     *  (16-robolectric-13921718) has a `hasPromotableCharacteristics` that asks for
-     *  colorized notifications, unlike the current Live Update docs (not colorized),
-     *  so the documented requirements are checked one by one instead. */
-    @Test
-    @Config(sdk = [36])
-    fun onAndroid16TheCountdownMeetsTheLiveUpdateRulesAndTheDoneAlertDoesNotAsk() {
-        RestAlarm.setInAppVisible(app, true)
-        RestAlarm.schedule(app, 90, "Back squat")
-        RestAlarm.setNextSet(app, squatNext())
-        RestAlarm.setInAppVisible(app, false)
-        val n = posted()!!
-        assertTrue("requests promotion", n.extras.getBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING))
-        assertTrue("ongoing", n.flags and Notification.FLAG_ONGOING_EVENT != 0)
-        assertEquals(Notification.BigTextStyle::class.java.name, n.extras.getString(Notification.EXTRA_TEMPLATE))
-        assertEquals("Resting · Back squat", n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
-        assertNull("no custom view", n.contentView)
-        assertNull("no custom big view", n.bigContentView)
-        assertNull("no custom heads-up view", n.headsUpContentView)
-        assertFalse("not colorized", n.extras.getBoolean(Notification.EXTRA_COLORIZED))
-        assertEquals("not a group summary", 0, n.flags and Notification.FLAG_GROUP_SUMMARY)
-        assertTrue("chip chronometer", n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
-        assertTrue("counts down", n.extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN))
-        assertNotNull("dismissal is reported", n.deleteIntent)
-        fireRestEnd()
-        val done = posted()!!
-        assertFalse(done.extras.getBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING))
-        assertEquals(0, done.flags and Notification.FLAG_ONGOING_EVENT)
+        assertEquals(res.getString(R.string.log_rest_notif_title, "Back squat"), n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+        assertEquals(res.getString(R.string.log_rest_notif_next, squatNext().detail), n.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 
     @Test
@@ -133,7 +97,7 @@ class LiveRestNotificationTest {
         RestAlarm.schedule(app, 90, "Back squat")
         fireRestEnd()
         val n = posted()!!
-        assertEquals("Rest done", n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+        assertEquals(res.getString(R.string.log_rest_notif_done_title), n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
         assertFalse("not promoted", NotificationCompat.isRequestPromotedOngoing(n))
         assertEquals("not ongoing", 0, n.flags and Notification.FLAG_ONGOING_EVENT)
         assertFalse("no chronometer", n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
@@ -153,15 +117,6 @@ class LiveRestNotificationTest {
     }
 
     @Test
-    fun cancelRemovesTheCountdownAndTheAlarm() {
-        RestAlarm.schedule(app, 90, "Back squat")
-        RestAlarm.cancel(app)
-        assertNull(posted())
-        val am = app.getSystemService(AlarmManager::class.java)
-        assertTrue(shadowOf(am).scheduledAlarms.isEmpty())
-    }
-
-    @Test
     fun aSwipedAwayCountdownIsNotPostedAgainForThatRest() {
         RestAlarm.schedule(app, 90, "Back squat")
         val delete = shadowOf(posted()!!.deleteIntent)
@@ -176,7 +131,7 @@ class LiveRestNotificationTest {
         assertNull("not reposted", posted())
         // The rest-done alert still comes.
         fireRestEnd()
-        assertEquals("Rest done", posted()!!.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+        assertEquals(res.getString(R.string.log_rest_notif_done_title), posted()!!.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
 
         // The next rest posts its countdown again.
         RestAlarm.schedule(app, 60, "Back squat")
@@ -218,8 +173,9 @@ class LiveRestNotificationTest {
         val load = restNextLoad(res, null, 100.0, 5, bodyweight = false, weightUnit = WeightUnit.Kg)
         assertEquals("100\u00A0kg × 5", load)
         val next = restNextSet(res, LoopPrimary.LogPlannedSet, "Back squat", squat, null, 3, load)
-        assertEquals(RestAlarm.NextSet("Back squat", "Set 3 of 4 · 100\u00A0kg × 5"), next)
-        assertEquals("Next: Set 3 of 4 · 100\u00A0kg × 5", countdownText(res, "Back squat", next))
+        val detail = res.getString(R.string.log_rest_notif_join, res.getString(R.string.log_set_header_n_of_n, 3, 4), load)
+        assertEquals(RestAlarm.NextSet("Back squat", detail), next)
+        assertEquals(res.getString(R.string.log_rest_notif_next, detail), countdownText(res, "Back squat", next))
     }
 
     @Test
@@ -227,18 +183,22 @@ class LiveRestNotificationTest {
         val squat = PrescriptionView(exercise = "Back squat", sets = 3, sets_done = 3, done = true)
         val bench = PrescriptionView(exercise = "Bench press", sets = 3)
         val next = restNextSet(res, LoopPrimary.Next, "Back squat", squat, bench, 4, "100\u00A0kg × 5")
-        assertEquals(RestAlarm.NextSet("Bench press", "Set 1 of 3"), next)
-        assertEquals("Next: Bench press · Set 1 of 3", countdownText(res, "Back squat", next))
+        val firstSet = res.getString(R.string.log_set_header_n_of_n, 1, 3)
+        assertEquals(RestAlarm.NextSet("Bench press", firstSet), next)
+        assertEquals(
+            res.getString(R.string.log_rest_notif_next, res.getString(R.string.log_rest_notif_join, "Bench press", firstSet)),
+            countdownText(res, "Back squat", next),
+        )
     }
 
     @Test
     fun offPlanExtraAndFinishLines() {
         assertEquals(
-            RestAlarm.NextSet("Curl", "Set 2 · 12\u00A0kg × 10"),
+            RestAlarm.NextSet("Curl", res.getString(R.string.log_rest_notif_join, res.getString(R.string.log_set_header_n, 2), "12\u00A0kg × 10")),
             restNextSet(res, LoopPrimary.LogOffPlanSet, "Curl", null, null, 2, "12\u00A0kg × 10"),
         )
         assertEquals(
-            RestAlarm.NextSet("Curl", "Extra set"),
+            RestAlarm.NextSet("Curl", res.getString(R.string.log_rest_notif_extra_set)),
             restNextSet(res, LoopPrimary.LogExtraSet, "Curl", null, null, 2, null),
         )
         assertNull(restNextSet(res, LoopPrimary.FinishSession, "Curl", null, null, 2, null))

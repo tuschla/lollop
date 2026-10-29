@@ -162,13 +162,9 @@ fn build_guidance_measured_uncached(
         &vs,
     );
 
-    // Representative training-age->years count, reused by the running weekly
-    // volume-increase cap and the hybrid lower-body interference check. The KB
-    // caps only distinguish sub-1-year runners, so no precise figure is needed.
-    let age_years = match age {
-        individualization::TrainingAge::Novice => 0.5,
-        _ => 2.0,
-    };
+    // Training-age years for the running weekly volume-increase cap and the
+    // hybrid lower-body interference check.
+    let age_years = crate::plan::training_age_years(age);
 
     if running {
         build_running_guidance(p, age, age_years, &mut rows);
@@ -216,7 +212,8 @@ fn build_safety_guidance(
             &gate,
         );
     }
-    // Pregnancy avoid-list (safety-047) travels with the safety-045 deferral.
+    // Pregnancy avoid-list (safety-047) travels with the safety-045 deferral,
+    // then every warning sign, so the user knows when to stop (safety-046).
     if p.health.pregnant {
         let pre = individualization::pregnancy_precautions();
         push_guidance(
@@ -228,9 +225,6 @@ fn build_safety_guidance(
             ),
             &pre,
         );
-    }
-    // safety-046: every warning sign, so the user knows when to stop.
-    if p.health.pregnant {
         let warn = graded((), claims::SAFE_PREG_WARN_001);
         push_guidance(
             rows,
@@ -254,17 +248,15 @@ fn build_safety_guidance(
             )
         };
         push_guidance_mi(rows, "Safety", bsi_text(false), bsi_text(true), &bsi);
-        // hybrid-024 energy-availability guard: the higher-risk cohorts
-        // (high-volume endurance, leaner, female) get named vigilance.
-        let ea = hybrid::energy_availability_guard(true, false, p.female.unwrap_or(false));
-        if ea.value {
-            push_guidance(
-                rows,
-                "Safety",
-                "High running volume makes under-eating more likely (RED-S). Eat enough to match your training".to_string(),
-                &ea,
-            );
-        }
+        // hybrid-024 energy-availability guard: high-volume endurance is one
+        // of its higher-risk cohorts.
+        let ea = graded((), claims::HYB_EA_001);
+        push_guidance(
+            rows,
+            "Safety",
+            "High running volume makes under-eating more likely (RED-S). Eat enough to match your training".to_string(),
+            &ea,
+        );
     }
 }
 
@@ -290,11 +282,9 @@ fn build_environment_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
                 "Altitude (above ~2,500 m): go easier until your body adjusts".to_string()
             }
             Environment::Cold => "Cold: extend the warm-up".to_string(),
-            Environment::Neutral => "Neutral environment: no modifier".to_string(),
+            Environment::Neutral => return,
         };
-        if env != Environment::Neutral {
-            push_guidance(rows, "Environment", text, &m);
-        }
+        push_guidance(rows, "Environment", text, &m);
     }
 }
 
@@ -317,15 +307,10 @@ fn build_reentry_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
         let summary = match re.value.load_frac {
             Some(_) if hi == 0 => format!("After {off} off: carry on at your old weights"),
             Some(frac) => format!(
-                "After {off} off: restart at ~{:.0}% of your old weights and build back over {} {}{}",
+                "After {off} off: restart at ~{:.0}% of your old weights and build back over {} {}",
                 frac * 100.0,
                 fmt_u8_range(lo, hi),
-                weeks(hi),
-                if re.value.treat_as_novice {
-                    ". Progress like a beginner until you're back at your old weights"
-                } else {
-                    ""
-                }
+                weeks(hi)
             ),
             None => format!(
                 "After {off} off: treat it as a fresh start. Rebuild your technique and build back over 4–6+ weeks, progressing like a beginner."

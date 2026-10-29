@@ -76,22 +76,20 @@ pub(in crate::app) fn build_training_load(
         atl = load::atl(atl, l);
     }
     let span_days = end - start + 1;
-    let tsb = load::tsb(ctl, atl);
-    let round1 = |x: f64| (x * 10.0).round() / 10.0;
+    let tsb = round_tenths(load::tsb(ctl, atl));
+    let (ctl, atl) = (round_tenths(ctl), round_tenths(atl));
     let g = graded((), claims::LOAD_PMC_001);
     Some(TrainingLoadView {
-        ctl: round1(ctl),
-        atl: round1(atl),
-        tsb: round1(tsb),
+        ctl,
+        atl,
+        tsb,
         days: span_days as u32,
         sessions_counted: counted,
         sessions_skipped: skipped,
         method: "Heart-rate training load (Lucía 3-zone TRIMP, run-average %HRmax), smoothed into a 42-day fitness average (CTL) and a 7-day fatigue average (ATL)".to_string(),
         summary: format!(
             "Fitness (CTL) {:.1} · Fatigue (ATL) {:.1} · Form (TSB) {:+.1} over {} days. A running tally of training, not a prediction of performance",
-            round1(ctl),
-            round1(atl),
-            round1(tsb),
+            ctl, atl, tsb,
             span_days
         ),
         evidence: EvidenceTagView::of(&g),
@@ -117,9 +115,6 @@ pub(in crate::app) fn build_srpe_load(p: &RunProgressView) -> Option<SrpeLoadVie
     let g = graded((), claims::LOAD_SRPE_001);
     Some(SrpeLoadView {
         week_au: cur.srpe_load_au,
-        prev_week_au: prev_au,
-        rated_runs: cur.rated_runs,
-        unrated_runs: unrated,
         method: "Effort load: minutes of running × your 0–10 rating of the whole run, given about 30 minutes afterwards. Kept separate from heart-rate load.".to_string(),
         summary: if cur.rated_runs == 0 {
             format!(
@@ -143,9 +138,7 @@ pub(in crate::app) fn build_srpe_load(p: &RunProgressView) -> Option<SrpeLoadVie
                 }
             )
         },
-        grade: Some(g.grade()),
-        citation: g.reference().to_owned(),
-        confidence: g.confidence(),
+        evidence: EvidenceTagView::of(&g),
     })
 }
 

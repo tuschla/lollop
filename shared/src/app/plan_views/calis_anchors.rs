@@ -219,13 +219,8 @@ pub(in crate::app) fn build_calisthenics_anchors<'a>(
     use crate::plan::CalisAnchor;
     use std::collections::BTreeMap;
 
-    // An ACTIVE, gating pain report suppresses difficulty progression on every
-    // ladder (never advance through joint/tendon pain, CAL-GATE-NUMBERS-001).
-    // Keyed off the authoritative File 08 Table 4.1 gate
-    // (`autoreg::pain_blocks_progression`), NOT a bare "any Pain signal ever":
-    // the WORST active pain report decides, a `value 0` pain-clear re-opens advance,
-    // and normal training soreness (`Doms`, Table 4.1 "continue") never freezes
-    // it. The whole-session SafetyTier::Pain block still governs independently.
+    // An active gating pain report (File 08 Table 4.1, `pain_blocks_progression`)
+    // freezes progression on every ladder (CAL-GATE-NUMBERS-001); DOMS never does.
     let pain_present = crate::autoreg::pain_blocks_progression(inputs);
     let day_of = |t: i64| local_day(t, utc_offset_sec);
 
@@ -334,17 +329,19 @@ pub(in crate::app) fn build_calisthenics_anchors<'a>(
                 .collect();
             let r_ts = at_r.first().map_or(first_ts, |s| s.observed_at);
             let dated = first_ts > 0;
-            if st.is_none() {
-                st = Some(CalisState {
-                    rung: r,
-                    entry: CalisEntry::Logged,
-                    days: vec![(day, at_r)],
-                    since_ts: r_ts,
-                    last_day: dated.then_some(day),
-                });
-                continue;
-            }
-            let Some(cur) = st.as_mut() else { continue };
+            let cur = match st.as_mut() {
+                Some(cur) => cur,
+                None => {
+                    st = Some(CalisState {
+                        rung: r,
+                        entry: CalisEntry::Logged,
+                        days: vec![(day, at_r)],
+                        since_ts: r_ts,
+                        last_day: dated.then_some(day),
+                    });
+                    continue;
+                }
+            };
             let gap = cur.last_day.filter(|_| dated).map_or(0, |d| day - d);
             let re = cal::reentry(gap).value;
             let cur_tier = &l.tiers[cur.rung as usize];

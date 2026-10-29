@@ -69,6 +69,21 @@ class HistorySessionsTest {
     }
 
     @Test
+    fun exerciseSpellingsMergeLikeTheCoreUnderTheFirstLoggedName() {
+        val lifts = listOf(
+            set("Squat", at("2026-10-01T09:00")).copy(e1rm_kg = 116.7),
+            set("squat ", at("2026-10-03T09:00"), kg = 110.0).copy(e1rm_kg = 128.3, e1rm_pr = true),
+            set(" SQUAT", at("2026-10-03T09:10"), kg = 105.0).copy(e1rm_kg = 122.5),
+        )
+        val sessions = groupLiftSessions(lifts, berlin)
+        assertEquals(listOf("squat "), sessions.first().exercises.map { it.first })
+        assertEquals(2, sessions.first().exercises.single().second.size)
+        val series = bestE1rmByExerciseDay(sessions)
+        assertEquals(setOf("squat"), series.keys)
+        assertEquals(listOf(116.7, 128.3), series.getValue("squat").map { it.second })
+    }
+
+    @Test
     fun heatmapMarksALiftingDayOnceAndCountsEachRun() {
         val day = at("2026-09-14T18:00:00")
         val lifts = (0 until 20).map { set("Squat", day + it * 60L) }

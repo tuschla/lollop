@@ -5,7 +5,7 @@
 use std::borrow::Cow;
 
 use super::latest_input;
-use super::pain::{PainVerdict, classify_pain, pain_context, worst_active_pain};
+use super::pain::{PainVerdict, classify_pain, latest_pain_clear, pain_context, worst_active_pain};
 use super::rules::{
     DECOUPLING_MIN_EFFORT_MIN, E1RM_DELOAD_RATIO, E1RM_DELOAD_STREAK, E1rmOutcome, HRV_SWC_LOWER_Z,
     HRV_SWC_UPPER_Z, RPE_DELTA_ABOVE, RPE_DELTA_BELOW, RPE_DELTA_WELL_ABOVE, RPE_DELTA_WELL_BELOW,
@@ -68,8 +68,8 @@ pub struct SignalState {
     /// Qualitative state, e.g. `"below normal"` / `"well above normal: rest"`.
     pub state: String,
     /// Extra display context for the shell, e.g. the pain sub-line
-    /// `"Left knee · sharp/joint · 6/10"`. Empty for signals that carry no
-    /// characterizing detail. Display-only, never a graded claim.
+    /// `"Left knee · sharp or joint pain · 6/10"`. Empty for signals that carry
+    /// no characterizing detail. Display-only, never a graded claim.
     pub detail: String,
     /// Registry claim of the rule whose threshold judged the state. `None`
     /// when the row is a plain factual echo (a recorded-only signal with no
@@ -122,7 +122,7 @@ pub fn signal_states_in(
                 state.into_owned()
             };
             // Display-only sub-line context: only a characterized pain report
-            // carries one (e.g. "Left knee · sharp/joint · 6/10").
+            // carries one (e.g. "Left knee · sharp or joint pain · 6/10").
             let detail = match (signal, &input.pain) {
                 (ReadinessSignal::Pain, Some(d)) if v > 0.0 => pain_context(d),
                 _ => String::new(),
@@ -144,11 +144,11 @@ pub fn signal_states_in(
 /// The reading a signal's row displays. The Pain row/banner names the SAME
 /// report the gate holds on (the worst active report), not merely the newest:
 /// a later milder ache would otherwise mislabel a red-flag stop and mis-target
-/// the "remove" undo. It falls back to the latest reading (a clear) when
-/// nothing is active.
+/// the "remove" undo. It falls back to the newest pain-clear when nothing is
+/// active.
 fn displayed_input(inputs: &[ReadinessInput], signal: ReadinessSignal) -> Option<&ReadinessInput> {
     if signal == ReadinessSignal::Pain {
-        worst_active_pain(inputs).or_else(|| latest_input(inputs, signal))
+        worst_active_pain(inputs).or_else(|| latest_pain_clear(inputs))
     } else {
         latest_input(inputs, signal)
     }

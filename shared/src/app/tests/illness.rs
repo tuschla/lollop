@@ -26,7 +26,7 @@ fn day_before_the_long_run() -> (Engine, Model, i64) {
         &mut model,
     )
     .expect_only_render();
-    set_day(&app, &mut model, MON);
+    set_today(&app, &mut model, MON);
     let long_day = app
         .view(&model)
         .week_plan
@@ -35,7 +35,7 @@ fn day_before_the_long_run() -> (Engine, Model, i64) {
         .expect("a running week has a long run")
         .epoch_day;
     assert!(long_day > MON, "fixture: the long run is not on Monday");
-    set_day(&app, &mut model, long_day - 1);
+    set_today(&app, &mut model, long_day - 1);
     let vm = app.view(&model);
     let eve = vm
         .week_plan
@@ -55,17 +55,6 @@ fn day_before_the_long_run() -> (Engine, Model, i64) {
         ns.items[0].summary
     );
     (app, model, long_day)
-}
-
-fn set_day(app: &Engine, model: &mut Model, epoch_day: i64) {
-    app.update(
-        Event::SetToday {
-            epoch_day,
-            utc_offset_sec: 0,
-        },
-        model,
-    )
-    .expect_only_render();
 }
 
 fn report_illness(app: &Engine, model: &mut Model, value: f64, at: i64) {
@@ -149,7 +138,7 @@ fn a_head_cold_today_turns_tomorrows_long_run_into_a_short_easy_run() {
 fn a_short_run_under_a_head_cold_completes_the_day() {
     let (app, mut model, long_day) = day_before_the_long_run();
     report_illness(&app, &mut model, 1.0, (long_day - 1) * DAY_SEC + 3_600);
-    set_day(&app, &mut model, long_day);
+    set_today(&app, &mut model, long_day);
     app.update(
         log_run_at(2.5, 15.0, 60.0, long_day * DAY_SEC + 9 * 3_600),
         &mut model,
@@ -232,13 +221,13 @@ fn flu_rests_every_upcoming_day_then_the_return_check_then_the_plan() {
     );
 
     // The return check is done on the long-run day: the plan resumes.
-    set_day(&app, &mut model, long_day);
+    set_today(&app, &mut model, long_day);
     app.update(
         log_run_at(2.5, 15.0, 60.0, long_day * DAY_SEC + 9 * 3_600),
         &mut model,
     )
     .expect_only_render();
-    set_day(&app, &mut model, long_day + 1);
+    set_today(&app, &mut model, long_day + 1);
     let vm = app.view(&model);
     let ns = vm.next_session.expect("the next planned session");
     assert!(ns.epoch_day > long_day);

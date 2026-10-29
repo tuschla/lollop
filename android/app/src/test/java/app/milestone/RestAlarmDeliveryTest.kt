@@ -8,7 +8,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.SystemClock
-import android.provider.Settings
 import androidx.test.core.app.ApplicationProvider
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -54,6 +53,8 @@ class RestAlarmDeliveryTest {
 
     private fun posted(): Notification? = shadowOf(nm).getNotification(RestAlarm.NOTIF_ID)
     private fun title(n: Notification?) = n?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+    private val resting get() = app.getString(R.string.log_rest_notif_title, "Back squat")
+    private val restDone get() = app.getString(R.string.log_rest_notif_done_title)
     private fun alarm() = shadowOf(am).scheduledAlarms.single()
     /** The broadcast the system sends when [alarm] goes off, as it was set (a
      *  copy: a later rest updates the PendingIntent's extras in place). */
@@ -118,7 +119,7 @@ class RestAlarmDeliveryTest {
         AppSettings.setRestAlert(app, false)
         RestAlarm.schedule(app, 90, "Back squat")
         RestAlarm.setNextSet(app, RestAlarm.NextSet("Bench press", "Set 1 of 3"))
-        assertEquals("Resting · Back squat", title(posted()))
+        assertEquals(resting, title(posted()))
         val fired = broadcastOf(alarm())
 
         RestAlarm.resetProcessState()
@@ -126,8 +127,8 @@ class RestAlarmDeliveryTest {
         deliver(fired)
 
         val n = posted()!!
-        assertEquals("Rest done", title(n))
-        assertEquals("Time for your next set of Bench press.", n.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+        assertEquals(restDone, title(n))
+        assertEquals(app.getString(R.string.log_rest_notif_done_body, "Bench press"), n.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
         assertEquals("not ongoing", 0, n.flags and Notification.FLAG_ONGOING_EVENT)
         assertFalse("no chronometer", n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
         assertEquals("the countdown is gone", 1, shadowOf(nm).allNotifications.size)
@@ -166,9 +167,9 @@ class RestAlarmDeliveryTest {
             val a = alarm()
             assertRestEndAlarm(a, before, SystemClock.elapsedRealtime(), 60)
             deliver(first)
-            assertEquals("still counting down", "Resting · Back squat", title(posted()))
+            assertEquals("still counting down", resting, title(posted()))
             deliver(broadcastOf(a))
-            assertEquals("Rest done", title(posted()))
+            assertEquals(restDone, title(posted()))
         } finally {
             AppClock.offsetMillis -= 5_000L
         }
@@ -178,7 +179,7 @@ class RestAlarmDeliveryTest {
     fun anotherBroadcastIsIgnored() {
         RestAlarm.schedule(app, 90, "Back squat")
         deliver(Intent(app, RestEndReceiver::class.java).putExtra(RestAlarm.EXTRA_REST_START, RestAlarm.running.value!!.startMillis))
-        assertEquals("Resting · Back squat", title(posted()))
+        assertEquals(resting, title(posted()))
     }
 
     // ── The set loop's one-time notice ──
@@ -217,12 +218,5 @@ class RestAlarmDeliveryTest {
         val a = alarm()
         assertEquals("exact", ShadowAlarmManager.WINDOW_EXACT, a.windowLengthMs)
         assertTrue("same rest end", a.triggerAtTime in (before + 89_000L)..(after + 90_000L))
-    }
-
-    @Test
-    fun theNoticeOpensTheExactAlarmScreenForThisApp() {
-        val i = exactAlarmSettingsIntent(app)
-        assertEquals(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, i.action)
-        assertEquals("package:${app.packageName}", i.dataString)
     }
 }

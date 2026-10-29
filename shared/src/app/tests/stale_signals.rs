@@ -31,14 +31,7 @@ fn a_stale_felt_easy_rpe_expires_but_a_fresh_one_still_raises_load() {
         &mut fresh,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut fresh,
-    )
-    .expect_only_render();
+    set_today(&app, &mut fresh, today);
     assert!(
         has_increase(&app.view(&fresh)),
         "a fresh felt-easy RPE still raises load"
@@ -51,14 +44,7 @@ fn a_stale_felt_easy_rpe_expires_but_a_fresh_one_still_raises_load() {
         &mut stale,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut stale,
-    )
-    .expect_only_render();
+    set_today(&app, &mut stale, today);
     assert!(
         !has_increase(&app.view(&stale)),
         "a 21-day-old RPE must expire"
@@ -90,14 +76,7 @@ fn a_stale_felt_easy_rpe_expires_but_a_fresh_one_still_raises_load() {
         &mut stale_pain,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut stale_pain,
-    )
-    .expect_only_render();
+    set_today(&app, &mut stale_pain, today);
     assert!(
         app.view(&stale_pain).train_blocked,
         "a stale pain report must still hold - safety never expires"
@@ -139,14 +118,7 @@ fn a_stale_e1rm_decline_stays_protective_while_a_stale_increase_expires() {
         &mut decline,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut decline,
-    )
-    .expect_only_render();
+    set_today(&app, &mut decline, today);
     assert!(
         has_reduce(&app.view(&decline)),
         "a stale protective e1RM decline must NOT expire into optimism"
@@ -159,14 +131,7 @@ fn a_stale_e1rm_decline_stays_protective_while_a_stale_increase_expires() {
         &mut increase,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut increase,
-    )
-    .expect_only_render();
+    set_today(&app, &mut increase, today);
     assert!(
         !has_increase(&app.view(&increase)),
         "a stale increase-driving e1RM must still expire (conservative)"
@@ -225,14 +190,7 @@ fn a_stale_review_deload_expires() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, today);
     let vm = app.view(&model);
     assert!(
         !vm.review_adjustments

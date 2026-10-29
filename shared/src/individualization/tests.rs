@@ -81,7 +81,7 @@ fn reentry_ramp_climbs_to_full_and_ends() {
     // >8 wk: no fraction while the window runs, then the window ends.
     let long = reentry_ramp(12.0, 10).value;
     assert_eq!(long.frac, None);
-    assert!(long.active && long.treat_as_novice);
+    assert!(long.active && long.treat_as_novice());
     assert!(!reentry_ramp(12.0, 42).value.active);
     assert_eq!(reentry_ramp(6.0, 0).claim_id(), claims::REENTRY_RAMP_001);
 }
@@ -95,7 +95,7 @@ fn reentry_brackets_scale_with_time_off() {
     let long = resistance_reentry(12.0).value;
     // >8 wk: KB states no fraction, treat as novice, drop the anchor.
     assert_eq!(long.load_frac, None);
-    assert!(long.treat_as_novice);
+    assert!(long.treat_as_novice());
     // Monotonic non-increasing load fraction across the numeric brackets.
     assert!(resistance_reentry(6.0).value.load_frac < resistance_reentry(3.0).value.load_frac);
 }
@@ -106,19 +106,17 @@ fn reentry_includes_exactly_eight_weeks() {
     // a scaled re-entry (0.70 load), not the >8 wk treat-as-novice arm.
     let eight = resistance_reentry(8.0).value;
     assert_eq!(eight.load_frac, Some(0.70));
-    assert!(!eight.treat_as_novice);
+    assert!(!eight.treat_as_novice());
     // Just past 8 weeks drops the anchor and treats as novice.
     let past = resistance_reentry(8.5).value;
     assert_eq!(past.load_frac, None);
-    assert!(past.treat_as_novice);
+    assert!(past.treat_as_novice());
 }
 
 #[test]
 fn progression_and_nutrition_targets() {
     let inc = novice_load_increment().value;
     assert_eq!((inc.upper_kg, inc.lower_kg), (2.5, 5.0));
-    assert!(double_progression_add_load(true).value);
-    assert!(!double_progression_add_load(false).value);
     assert_eq!(masters_protein_target().value.g_per_kg, (1.2, 1.6));
     assert_eq!(
         deficit_protein_target(false)
@@ -148,14 +146,7 @@ fn novice_stall_response() {
     assert!(novice_stall_action(2, true, false).value.is_none());
     assert!(novice_stall_action(3, false, false).value.is_none());
     let o = novice_stall_action(3, true, false).value.unwrap();
-    assert_eq!(
-        (
-            o.deload_frac,
-            o.scope_single_lift,
-            o.transition_to_intermediate
-        ),
-        (0.10, true, false)
-    );
+    assert_eq!((o.deload_frac, o.transition_to_intermediate), (0.10, false));
     assert!(
         novice_stall_action(3, true, true)
             .value

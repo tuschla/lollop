@@ -282,17 +282,6 @@ fn table_4_is_complete_and_verbatim() {
     );
 }
 
-#[test]
-fn sfr_favors_machines_cables_and_stable_isolation() {
-    let squat = exercise_entry("Back squat").unwrap();
-    assert_eq!(squat.sfr_tier_with(&[Barbell]), SfrTier::Low);
-    let hack = exercise_entry("Hack squat / leg press").unwrap();
-    assert_eq!(hack.sfr_tier_with(&[Machine]), SfrTier::High);
-    // Stable isolation is high-SFR even on free weights.
-    let curl = exercise_entry("Incline DB curl").unwrap();
-    assert_eq!(curl.sfr_tier_with(&[Dumbbell]), SfrTier::High);
-}
-
 // -- hyp-031 --
 #[test]
 fn meso_structure_is_4_to_6_plus_1_deload() {
@@ -440,6 +429,7 @@ fn rep_ranges_sit_inside_table_2() {
         assert!(lo >= window.0 && hi <= window.1, "{class:?}");
         assert!(hi < 25, "never at the 25-rep edge");
     }
-    assert_eq!(pct_1rm_for_reps_in_reserve(8, 2).round(), 75.0);
-    assert_eq!(pct_1rm_for_reps_in_reserve(6, 2).round(), 79.0);
+    let pct = crate::strength::pct_1rm_leaving_rir;
+    assert_eq!(pct(8, 2).round(), 75.0);
+    assert_eq!(pct(6, 2).round(), 79.0);
 }

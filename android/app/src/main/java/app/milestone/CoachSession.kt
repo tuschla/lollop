@@ -32,10 +32,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.core.content.edit
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -126,11 +128,9 @@ internal object EventDispatcher {
     // results raises ONE notice rather than one per event.
     @Volatile private var staleReported = false
 
-    // The once-per-process boot gate (guided-setup decision + run recovery),
-    // hoisted here from a rememberSaveable local. Process-scoped: it survives
-    // rotation (same process) so the boot effect doesn't re-run and clobber
-    // mid-setup answers, and resets on process death — which is exactly when
-    // the ActiveRunStore recovery check in the boot effect must re-run.
+    // The once-per-process boot gate (guided-setup decision + run recovery).
+    // Survives rotation so the boot effect doesn't clobber mid-setup answers, and
+    // resets on process death, when the ActiveRunStore recovery check must re-run.
     var bootHandled = false
 
     // The crash-recovery sidecar fixes read ONCE at boot when a resume prompt is
@@ -209,7 +209,7 @@ internal object EventDispatcher {
         consumer = startConsumer(channel)
         sender = coreSender
         batchSender = coreBatchSender
-        while (noticeChannel.tryReceive().isSuccess) Unit
+        while (noticeChannel.tryReceive().isSuccess) {}
         model.value = null
         coreUnavailable.value = false
         bootHandled = false
@@ -265,11 +265,10 @@ internal enum class CoreNotice {
 }
 
 /**
- * Boot + session state for the Coach screen, hoisted out of [CoachScreen] so the
- * screen splits into a state holder ([rememberCoachSession]) + chrome/router
- * ([CoachScaffold]). Every field DELEGATES to the exact MutableState the factory
- * created with remember / rememberSaveable, so each symbol keeps its original
- * persistence tier unchanged: the holder aliases the state, it never re-tiers it.
+ * Boot + session state for the Coach screen: a state holder
+ * ([rememberCoachSession]) for [CoachScaffold]. Every field delegates to the
+ * MutableState the factory created, so each keeps its remember/rememberSaveable
+ * tier (see the factory).
  */
 @Stable
 internal class CoachSession(
@@ -286,41 +285,27 @@ internal class CoachSession(
     /** A pending [OpenDest] from an open intent; [CoachScaffold] applies and clears it. */
     val openRequest: MutableStateFlow<OpenDest?>,
 ) {
-    var loaded by loadedState                     // remember (composition-local)
-    var model by modelState                       // remember (composition-local)
-    var showSetup by showSetupState               // rememberSaveable
-    var setupInitial by setupInitialState         // rememberSaveable
-    var showTracker by showTrackerState           // rememberSaveable
-    var showResumePrompt by showResumePromptState // rememberSaveable
-    var lastPain by lastPainState                 // remember (composition-local)
+    var loaded by loadedState
+    var model by modelState
+    var showSetup by showSetupState
+    var setupInitial by setupInitialState
+    var showTracker by showTrackerState
+    var showResumePrompt by showResumePromptState
+    var lastPain by lastPainState
 }
 
 @Composable
-private fun rememberCoachSession(
-    openTrackingRequest: MutableStateFlow<Boolean>,
-    openRequest: MutableStateFlow<OpenDest?>,
-): CoachSession {
+private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): CoachSession {
     val ctx = LocalContext.current
-    // Replay the persisted event log; on a fresh install (the log file never
-    // existed) seed a representative profile so the engine still renders content
-    // on first frame. Core.restore distinguishes that from a log that exists but
-    // compacted to empty (a returning user who cleared everything), the latter
-    // must NOT be re-seeded through onboarding.
-    // Core.restore replays the whole compacted log through JNI (a GPS run is
-    // thousands of points), heavy enough to jank the first frame if done inline
-    // during composition. Do it on a background dispatcher with a brief loading
-    // state, then hydrate the model. `loaded` gates the UI until it's ready.
+    val res = LocalResources.current
     // Seed from the process-level EventDispatcher.model so a rotation renders the
-    // last content instantly instead of the blocking spinner; a genuine cold start
-    // (flow still null) still shows the spinner once while the boot effect hydrates.
+    // last content instantly; a cold start (flow still null) shows the splash while
+    // the boot effect below restores the log off the main thread and hydrates.
     val loadedState = remember { mutableStateOf(EventDispatcher.model.value != null) }
     val modelState = remember { mutableStateOf(EventDispatcher.model.value ?: ViewModel()) }
-    // The process-level serial consumer publishes each post-event model to that
-    // flow; collect it into the local state. On recreation this re-seeds `model`
-    // from the freshest snapshot the process-level consumer holds (subsumes the old
-    // bootCache), so no event drained while the previous Activity was being torn
-    // down is ever lost. `loaded` stays owned by the boot effect below so the UI is
-    // still gated until the once-per-process setup/recovery decision has run.
+    // Every post-event model the serial consumer publishes, including those drained
+    // while a previous Activity was torn down. `loaded` stays owned by the boot
+    // effect, so the UI is gated until the once-per-process setup decision has run.
     LaunchedEffect(Unit) {
         EventDispatcher.model.collect { vm -> if (vm != null) modelState.value = vm }
     }
@@ -334,7 +319,7 @@ private fun rememberCoachSession(
                 CoreNotice.NotSaved -> R.string.main_save_failed
                 CoreNotice.Unreadable -> R.string.main_data_unreadable
             }
-            Toast.makeText(ctx, ctx.getString(text), Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, text, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -349,7 +334,7 @@ private fun rememberCoachSession(
     // first-run pass (null) touches the onboarding pref on complete/skip.
     val setupInitialState = rememberSaveable { mutableStateOf<ProfileDraft?>(null) }
     val setupPrefs = remember { ctx.setupPrefs() }
-    val markOnboardingDone = { setupPrefs.edit().putBoolean("onboarding_done", true).apply() }
+    val markOnboardingDone = { setupPrefs.edit { putBoolean("onboarding_done", true) } }
 
     // rememberSaveable, not remember: a config change (rotation) recreates this
     // Activity, and a plain remember would reset this to false, bouncing the user
@@ -357,9 +342,8 @@ private fun rememberCoachSession(
     // recording. The saveable flag keeps them on the map across recreation.
     val showTrackerState = rememberSaveable { mutableStateOf(false) }
 
-    // A crash-recovery sidecar is never auto-resumed anymore; the user is asked
-    // first (consent), and a stale sidecar (newest fix older than RESUME_STALE_SEC)
-    // is discarded outright so it can't silently become a garbage multi-hour run.
+    // A crash-recovery sidecar is offered for resume, never resumed unasked; a
+    // stale sidecar (newest fix older than RESUME_STALE_SEC) is discarded outright.
     val showResumePromptState = rememberSaveable { mutableStateOf(false) }
 
     // The (local epoch-day, utc-offset-sec) the core was last told is "today".
@@ -375,17 +359,10 @@ private fun rememberCoachSession(
     // Not persisted across process death (the core's persisted detail covers that).
     val lastPainState = remember { mutableStateOf<PainDetail?>(null) }
 
-    // One dispatch path so shell-side echoes (lastPain) stay in lockstep with the
-    // core. Every onEvent below routes through this instead of Core.send directly.
-    //
-    // `Core.send` (JNI update + view() + full kotlinx.serialization decode) is
-    // moved OFF the main thread so a tap never blocks the UI as history grows. Events
-    // are enqueued on the PROCESS-scoped [EventDispatcher], whose single consumer
-    // drains them STRICTLY IN ORDER on CoreJniDispatcher (see its comment). Living
-    // at process scope is what makes a mid-drain rotation lossless: the composition
-    // is torn down, the queue + consumer are not. The synchronous shell-side echoes
-    // below still run on the CALLER (main) thread, in call order, BEFORE the event
-    // is enqueued, so their semantics are unchanged.
+    // One dispatch path so shell-side echoes (lastPain, the plan-cleared marker) stay
+    // in lockstep with the core. The echoes run on the caller (main) thread in call
+    // order before the event is enqueued on the process-scoped [EventDispatcher],
+    // whose single consumer applies events in order off the main thread.
     val echo: (Event) -> Unit = { e ->
         when {
             e is Event.SubmitReadiness && e.pain != null -> lastPainState.value = e.pain
@@ -395,10 +372,10 @@ private fun rememberCoachSession(
             e is Event.ClearReadiness -> lastPainState.value = null
             // Plan-cleared marker (persisted): a "Remove plan" must STICK across
             // rotation AND relaunch, so the boot auto-GeneratePlan is gated on it
-            // below. Generating any plan (the PlanPromptCard, or a guided-setup
+            // below. Generating any plan (the plan prompt card, or a guided-setup
             // completion) clears the marker so auto-generation resumes normally.
-            e is Event.ClearPlan -> setupPrefs.edit().putBoolean(KEY_PLAN_CLEARED, true).apply()
-            e is Event.GeneratePlan -> setupPrefs.edit().putBoolean(KEY_PLAN_CLEARED, false).apply()
+            e is Event.ClearPlan -> setupPrefs.edit { putBoolean(KEY_PLAN_CLEARED, true) }
+            e is Event.GeneratePlan -> setupPrefs.edit { putBoolean(KEY_PLAN_CLEARED, false) }
         }
     }
     val dispatch: (Event) -> Unit = { e ->
@@ -438,8 +415,9 @@ private fun rememberCoachSession(
             // x86_64 phone under translation, every JNI call returning null) would
             // otherwise boot onto an EMPTY model: the "Set up your training" screen
             // over a user who has data, inviting a re-setup on a dead engine. Probe it
-            // before the log is touched and show the error state instead.
-            if (!withContext(CoreJniDispatcher) { Core.probe() }) return@exclusive null
+            // before the log is touched and show the error state instead. A re-run
+            // (rotation) after a handled boot skips the probe: it already passed.
+            if (!EventDispatcher.bootHandled && !withContext(CoreJniDispatcher) { Core.probe() }) return@exclusive null
             fresh = withContext(CoreJniDispatcher) { Core.restore(ctx) }
             // A fresh install renders the empty Today and routes first-run into the
             // guided setup, which writes user-asserted profile values.
@@ -471,7 +449,7 @@ private fun rememberCoachSession(
             // the ClearPlan never landed, so clear the stale marker to re-arm boot
             // auto-generation to match the visible state.
             if (v.program != null && setupPrefs.getBoolean(KEY_PLAN_CLEARED, false)) {
-                setupPrefs.edit().putBoolean(KEY_PLAN_CLEARED, false).apply()
+                setupPrefs.edit { putBoolean(KEY_PLAN_CLEARED, false) }
             }
             // The other direction: the log itself records a removal (compaction keeps
             // a final ClearPlan, [RestoredLog.planRemoved]), so a log that ends with
@@ -482,22 +460,14 @@ private fun rememberCoachSession(
             if (!EventDispatcher.bootHandled && v.program == null && Core.restoredPlanRemoved &&
                 !setupPrefs.getBoolean(KEY_PLAN_CLEARED, false)
             ) {
-                setupPrefs.edit().putBoolean(KEY_PLAN_CLEARED, true).apply()
+                setupPrefs.edit { putBoolean(KEY_PLAN_CLEARED, true) }
             }
-            // Auto-generate the plan on boot for a set-up user who has NO plan
-            // yet, so they land on the real prescription-led Coach/Today (next-session
-            // hero + week strip + prescription headline) with ZERO manual taps. Gated on
-            // `program == null` so an EXISTING plan is never touched here: re-firing
-            // would otherwise re-anchor the week to today (stuck "week 1", wiped
-            // done/missed history). The core also preserves an existing anchor as a
-            // backstop; this gate additionally lets a session ClearPlan hold until the
-            // next launch. Guided-setup completion fires its own GeneratePlan (below)
-            // so the zero-tap promise also holds in the very first session.
-            // The KEY_PLAN_CLEARED marker makes a "Remove plan" durable: once the user
-            // removes their plan we do NOT auto-regenerate it here (on rotation OR a
-            // later relaunch): they regenerate from the PlanPromptCard, which clears
-            // the marker. Because a re-run boot block queues AFTER this exclusive turn,
-            // it observes program != null and cannot double-fire GeneratePlan.
+            // Auto-generate the plan on boot for a set-up user with no plan, so they
+            // land on today's prescription with zero taps. Gated on `program == null`
+            // (re-firing would re-anchor the week to today) and on KEY_PLAN_CLEARED, so
+            // a "Remove plan" holds across rotation and relaunch until the user
+            // generates one from the plan prompt card. A re-run boot block queues
+            // after this turn, sees program != null, and cannot fire twice.
             if (v.profile != null && v.program == null &&
                 !setupPrefs.getBoolean(KEY_PLAN_CLEARED, false)
             ) {
@@ -536,9 +506,9 @@ private fun rememberCoachSession(
             // A data import just restarted the process: confirm what it restored.
             val restoredEntries = setupPrefs.getInt(KEY_RESTORED_ENTRIES, -1)
             if (restoredEntries >= 0) {
-                setupPrefs.edit().remove(KEY_RESTORED_ENTRIES).apply()
+                setupPrefs.edit { remove(KEY_RESTORED_ENTRIES) }
                 UiMessages.post(
-                    UiMessage(ctx.resources.getQuantityString(R.plurals.main_restored_entries, restoredEntries, restoredEntries)),
+                    UiMessage(res.getQuantityString(R.plurals.main_restored_entries, restoredEntries, restoredEntries)),
                 )
             }
             // An interrupted GPS run's crash-durable sidecar. Do NOT auto-resume;
@@ -571,33 +541,8 @@ private fun rememberCoachSession(
         session.loaded = true
     }
 
-    // These two effects belong to the session but must only be live once the boot
-    // gate has passed (in the original CoachScreen they sat AFTER the `!loaded`
-    // early-return). The `if (session.loaded)` guard reproduces that exactly: they
-    // enter composition only when loaded, and never during the loading spinner.
+    // Live only once the boot gate has passed, never during the loading spinner.
     if (session.loaded) {
-        // Live tracking state: the notification-tap reentry. The request flag is
-        // consumed exactly once; it only opens the tracker when a run is genuinely
-        // live (a stale notification tap after the run ended must not open a dead
-        // screen).
-        val openTracking by openTrackingRequest.collectAsState()
-        LaunchedEffect(openTracking) {
-            if (openTracking) {
-                // Open the tracker whenever the service is live in ANY state:
-                // recording, merely ARMED, or a locate-only preview. A Notification
-                // tap or "Stop" while armed/locating (recording not yet started, so
-                // `tracking` is still false) must land on the tracker so the user can
-                // cancel it — consuming and dropping the request here would strand the
-                // service (armed → auto-starts a run the user meant to cancel; locate →
-                // GPS radio left on with its one visible affordance leading nowhere). A
-                // stale tap after the service stopped opens nothing (all flags false).
-                if (RunSession.tracking.value || RunSession.armed.value || RunSession.locating.value) {
-                    session.showTracker = true
-                }
-                openTrackingRequest.value = false
-            }
-        }
-
         // An app process left alive across local midnight (or moved across a
         // timezone / DST boundary) keeps the core dating the plan to the day the boot
         // effect sent; "Next"/week-number/missed-status freeze on yesterday while the
@@ -690,14 +635,14 @@ internal fun ResumeRunDialog(session: CoachSession) {
                 session.showResumePrompt = false
                 EventDispatcher.recoveredSidecar = null
                 if (!liveRun()) ActiveRunStore.clear()
-            }) { Text(stringResource(R.string.main_discard), color = LocalStatusColors.current.danger) }
+            }) { Text(stringResource(R.string.main_discard), color = DangerText) }
         },
     )
 }
 
 @Composable
-internal fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>, openRequest: MutableStateFlow<OpenDest?>) {
-    val session = rememberCoachSession(openTrackingRequest, openRequest)
+internal fun CoachScreen(openRequest: MutableStateFlow<OpenDest?>) {
+    val session = rememberCoachSession(openRequest)
 
     val coreUnavailable by EventDispatcher.coreUnavailable.collectAsState()
     if (coreUnavailable) {

@@ -268,17 +268,9 @@ fn push_load_progression_row(
         // regions since the bands differ (upper is more conservative).
         let upper = strength::weekly_pct_increment(true);
         let lower = strength::weekly_pct_increment(false);
-        // Render each bound faithfully: some bands carry a half-percent (e.g.
-        // 2.5%), so a whole-number format would understate the cited value. Drop
-        // the decimal only when the bound is whole.
-        let pct = |frac: f64| -> String {
-            let v = frac * 100.0;
-            if v.fract().abs() < 1e-9 {
-                format!("{v:.0}")
-            } else {
-                format!("{v:.1}")
-            }
-        };
+        // Some bands carry a half-percent (e.g. 2.5%), so a whole-number format
+        // would understate the cited value.
+        let pct = |frac: f64| fmt_rounded(frac * 100.0);
         push_guidance(
             rows,
             "Strength",

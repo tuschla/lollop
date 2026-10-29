@@ -1,7 +1,7 @@
 package app.milestone
 
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -10,20 +10,30 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins the serde wire form the Rust core expects: unit variants encode as a bare
- * string, struct variants as a single-key object with snake_case fields. A drift
- * here means the FFI silently rejects (or mis-reads) the event, so these guard
- * the Kotlin→Rust contract without needing the native library.
+ * Pins the serde wire form between the shell and the Rust core: events encode as
+ * the core expects (unit variants as a bare string, struct variants as a
+ * single-key object with snake_case fields) and the view JSON decodes into the
+ * Kotlin view classes. A drift here means the FFI silently rejects or mis-reads
+ * data, so these guard the contract without the native library.
  */
 class EventJsonTest {
 
     private fun obj(e: Event) = (e.toJson() as JsonObject)
 
+    /** A SetProfile with only the eight required fields; tests `copy` in the rest. */
+    private fun profile() = Event.SetProfile(
+        ProgressionCadence.WeekToWeek, LiftGoal.MaxStrength, GoalDistance.TenK,
+        ConcurrentGoal.Strength, 12, 4, 45.0, false,
+    )
+
     @Test
-    fun unitVariantsAreBareStrings() {
-        assertEquals("\"ClearSets\"", Event.ClearSets.toJson().toString())
-        assertEquals("\"ClearRuns\"", Event.ClearRuns.toJson().toString())
-        assertEquals("\"ClearProtein\"", Event.ClearProtein.toJson().toString())
+    fun everyUnitEventIsItsBareVariantName() {
+        // Each `data object` Event encodes as the bare Rust variant name.
+        val units = Event::class.java.declaredClasses.mapNotNull { c ->
+            runCatching { c.getField("INSTANCE").get(null) }.getOrNull() as? Event
+        }
+        assertTrue("found ${units.size} unit events", units.size >= 13)
+        for (u in units) assertEquals("\"${u.javaClass.simpleName}\"", u.toJson().toString())
     }
 
     @Test
@@ -40,12 +50,8 @@ class EventJsonTest {
 
     @Test
     fun setProfileEmitsTheEightRequiredFields() {
-        val fields = obj(
-            Event.SetProfile(
-                ProgressionCadence.WeekToWeek, LiftGoal.MaxStrength, GoalDistance.TenK,
-                ConcurrentGoal.Strength, 12, 4, 45.0, true,
-            )
-        )["SetProfile"]!!.jsonObject
+        val fields = obj(profile().copy(advanced = true))["SetProfile"]!!.jsonObject
+        // Unset optional fields are omitted, so the core's serde defaults fill them.
         assertEquals(
             setOf(
                 "progression_cadence", "lift_goal", "goal_distance", "concurrent_goal",
@@ -56,20 +62,12 @@ class EventJsonTest {
         // Enum values are the variant name verbatim (serde reads these).
         assertEquals("WeekToWeek", fields["progression_cadence"]!!.jsonPrimitive.content)
         assertEquals("TenK", fields["goal_distance"]!!.jsonPrimitive.content)
-        // Person fields absent by default → wire stays the old
-        // eight-field shape, so old cores replay it identically.
-        assertFalse(fields.containsKey("female"))
-        assertFalse(fields.containsKey("bodyweight_kg"))
-        assertFalse(fields.containsKey("age_years"))
-        assertFalse(fields.containsKey("birth_epoch_day"))
     }
 
     @Test
     fun setProfileEmitsCoachingInputsAndRungEvent() {
         val fields = obj(
-            Event.SetProfile(
-                ProgressionCadence.WeekToWeek, LiftGoal.MaxStrength, GoalDistance.TenK,
-                ConcurrentGoal.Strength, 12, 3, 30.0, false,
+            profile().copy(
                 liftDaysPerWeek = 4, trainingWeekdays = 0b1100000, goalRaceEpochDay = 20400L,
                 recentRace = RecentRace(5.0, 1575), statedLongestRecentKm = 12.0,
                 layoffReturnedEpochDay = 20360L, meetEpochDay = 20420L,
@@ -102,9 +100,7 @@ class EventJsonTest {
     @Test
     fun setProfileEmitsPersonFieldsWhenSet() {
         val fields = obj(
-            Event.SetProfile(
-                ProgressionCadence.EverySession, LiftGoal.Hypertrophy, GoalDistance.General,
-                ConcurrentGoal.Hypertrophy, 10, 0, 0.0, false,
+            profile().copy(
                 female = true, bodyweightKg = 62.5, ageYears = 34.0,
                 restingHrBpm = 54.0, measuredHrMax = 188.0,
             )
@@ -129,9 +125,7 @@ class EventJsonTest {
     @Test
     fun setProfileOmitsFemaleWhenUnanswered() {
         val fields = obj(
-            Event.SetProfile(
-                ProgressionCadence.WeekToWeek, LiftGoal.MaxStrength, GoalDistance.TenK,
-                ConcurrentGoal.Strength, 12, 4, 45.0, false,
+            profile().copy(
                 female = null, bodyweightKg = 80.0,
             )
         )["SetProfile"]!!.jsonObject
@@ -142,9 +136,7 @@ class EventJsonTest {
     @Test
     fun setProfileEmitsAnExplicitMaleAnswer() {
         val fields = obj(
-            Event.SetProfile(
-                ProgressionCadence.WeekToWeek, LiftGoal.MaxStrength, GoalDistance.TenK,
-                ConcurrentGoal.Strength, 12, 4, 45.0, false,
+            profile().copy(
                 female = false,
             )
         )["SetProfile"]!!.jsonObject
@@ -157,9 +149,7 @@ class EventJsonTest {
         // autoreg-029, the environment modifiers and REENTRY-001 reachable. Each
         // rides the wire in the snake_case name / bare-variant form the core parses.
         val fields = obj(
-            Event.SetProfile(
-                ProgressionCadence.WeekToWeek, LiftGoal.MaxStrength, GoalDistance.TenK,
-                ConcurrentGoal.Strength, 12, 4, 45.0, false,
+            profile().copy(
                 highLoadBlock = true, environment = Environment.Heat,
                 envTempC = 28.0, envAltitudeM = 1800.0, weeksOff = 6.0,
             )
@@ -173,20 +163,9 @@ class EventJsonTest {
     }
 
     @Test
-    fun setProfileOmitsAdvancedContextFieldsWhenUnset() {
-        // Unset advanced fields are omitted so the line stays identical to the
-        // legacy wire and the core's serde defaults fill None/false.
-        val fields = obj(
-            Event.SetProfile(
-                ProgressionCadence.WeekToWeek, LiftGoal.MaxStrength, GoalDistance.TenK,
-                ConcurrentGoal.Strength, 12, 4, 45.0, false,
-            )
-        )["SetProfile"]!!.jsonObject
-        assertFalse(fields.containsKey("high_load_block"))
-        assertFalse(fields.containsKey("environment"))
-        assertFalse(fields.containsKey("env_temp_c"))
-        assertFalse(fields.containsKey("env_altitude_m"))
-        assertFalse(fields.containsKey("weeks_off"))
+    fun setProfileEmitsTheEffectiveDayWhenSet() {
+        val fields = obj(profile().copy(effectiveFromEpochDay = 20354L))["SetProfile"]!!.jsonObject
+        assertEquals(20354L, fields["effective_from_epoch_day"]!!.jsonPrimitive.content.toLong())
     }
 
     @Test
@@ -217,34 +196,24 @@ class EventJsonTest {
     }
 
     @Test
-    fun submitReviewOmitsNullOptionalsButKeepsRequiredFlags() {
-        val fields = obj(Event.SubmitReview(overtrainingSignalCount = 2))["SubmitReview"]!!.jsonObject
-        // Required always present.
+    fun submitReviewKeepsRequiredFlagsAndTheStampAndOmitsNullOptionals() {
+        val fields = obj(
+            Event.SubmitReview(overtrainingSignalCount = 2, observedAt = 1_700_000_777L)
+        )["SubmitReview"]!!.jsonObject
         assertEquals(2, fields["overtraining_signal_count"]!!.jsonPrimitive.content.toInt())
         assertTrue(fields.containsKey("bone_pain_red_flag"))
         assertTrue(fields.containsKey("bad_day"))
+        // The log stamp always rides the wire, so a backdated review keeps its day.
+        assertEquals(1_700_000_777L, fields["observed_at"]!!.jsonPrimitive.content.toLong())
         // Null optionals are omitted (serde skips them on the Rust side too).
         assertFalse(fields.containsKey("decoupling"))
     }
 
     @Test
-    fun readinessSignalEnumCoversMedicalReferralTiers() {
-        // These top-of-ladder signals must exist or the safety tier is unreachable.
+    fun readinessSignalsIncludeTheReferralTiersAndSorenessInSchemaOrder() {
+        // The top-of-ladder signals must exist or the safety tier is unreachable.
         val names = ReadinessSignal.entries.map { it.name }
         assertTrue(names.containsAll(listOf("Pain", "Illness", "RedS", "CardiacRedFlag", "BoneStress")))
-        val fields = obj(Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, 42L))["SubmitReadiness"]!!.jsonObject
-        assertEquals("Pain", fields["signal"]!!.jsonPrimitive.content)
-        assertEquals(42L, fields["observed_at"]!!.jsonPrimitive.content.toLong())
-        // Wire contract: a bare readiness report still sends streak (0)
-        // and OMITS the pain object entirely (serde reads it as None).
-        assertEquals(0, fields["streak"]!!.jsonPrimitive.content.toInt())
-        assertFalse(fields.containsKey("pain"))
-    }
-
-    @Test
-    fun readinessSignalEnumIncludesSorenessInSchemaOrder() {
-        val names = ReadinessSignal.entries.map { it.name }
-        assertTrue(names.contains("Soreness"))
         // schema.rs orders Soreness between Pain and Illness: the manual picker
         // iterates entries, so wrong ordering would misplace it in the UI.
         assertEquals(names.indexOf("Pain") + 1, names.indexOf("Soreness"))
@@ -252,13 +221,16 @@ class EventJsonTest {
     }
 
     @Test
-    fun sorenessIsSubmittableOnTheWire() {
+    fun aBareReadinessReportSendsStreakZeroAndNoPainObject() {
         val fields = obj(
             Event.SubmitReadiness(ReadinessSignal.Soreness, 6.0, 1_600_000_000L),
         )["SubmitReadiness"]!!.jsonObject
         assertEquals("Soreness", fields["signal"]!!.jsonPrimitive.content)
         assertEquals(6.0, fields["value"]!!.jsonPrimitive.content.toDouble(), 1e-9)
         assertEquals(1_600_000_000L, fields["observed_at"]!!.jsonPrimitive.content.toLong())
+        assertEquals(0, fields["streak"]!!.jsonPrimitive.content.toInt())
+        // serde reads the absent pain object as None.
+        assertFalse(fields.containsKey("pain"))
     }
 
     @Test
@@ -271,7 +243,6 @@ class EventJsonTest {
                 signal = ReadinessSignal.Pain,
                 value = 1.0,
                 observedAt = 100L,
-                streak = 2,
                 pain = PainDetail(
                     kind = PainKind.TendonLoadRelated,
                     severity = 4,
@@ -281,7 +252,7 @@ class EventJsonTest {
                 ),
             )
         )["SubmitReadiness"]!!.jsonObject
-        assertEquals(2, fields["streak"]!!.jsonPrimitive.content.toInt())
+        assertEquals(0, fields["streak"]!!.jsonPrimitive.content.toInt())
         val pain = fields["pain"]!!.jsonObject
         assertEquals("TendonLoadRelated", pain["kind"]!!.jsonPrimitive.content)
         assertEquals(4, pain["severity"]!!.jsonPrimitive.content.toInt())
@@ -291,23 +262,9 @@ class EventJsonTest {
     }
 
     @Test
-    fun painDetailOmitsLocationWhenAbsent() {
-        // location is optional (serde default None on the Rust side): omitted
-        // from the wire when the user didn't pick a body area.
-        val pain = obj(
-            Event.SubmitReadiness(
-                ReadinessSignal.Pain, 1.0, 5L,
-                pain = PainDetail(PainKind.SharpJoint, 7, PainTrend.Stable),
-            )
-        )["SubmitReadiness"]!!.jsonObject["pain"]!!.jsonObject
-        assertEquals("SharpJoint", pain["kind"]!!.jsonPrimitive.content)
-        assertFalse(pain.containsKey("location"))
-    }
-
-    @Test
-    fun painDetailOmitsSeverityWhenUnrated() {
-        // The triage sheet pre-selects no severity: an unrated report sends no
-        // number at all (serde default None), never an invented 0–10 value.
+    fun painDetailOmitsAnUnpickedLocationAndAnUnratedSeverity() {
+        // Both are optional (serde default None): no body area picked sends no
+        // location, and an unrated report sends no number, never an invented 0–10.
         val pain = obj(
             Event.SubmitReadiness(
                 ReadinessSignal.Pain, 1.0, 5L,
@@ -315,14 +272,14 @@ class EventJsonTest {
             )
         )["SubmitReadiness"]!!.jsonObject["pain"]!!.jsonObject
         assertEquals("Other", pain["kind"]!!.jsonPrimitive.content)
+        assertFalse(pain.containsKey("location"))
         assertFalse(pain.containsKey("severity"))
     }
 
     @Test
     fun submitReadinessEmitsEffortMinOnlyWhenPresent() {
-        // AerobicDecoupling is duration-gated (valid only >20 min); the
-        // editor now sends the run length so the core can validate it instead of
-        // silently discarding a None-duration reading. effort_min is snake_case,
+        // AerobicDecoupling is duration-gated (valid only >20 min), so the editor
+        // sends the run length for the core to validate. effort_min is snake_case,
         // matching ReadinessInput's serde field, and OMITTED when not supplied.
         val withDuration = obj(
             Event.SubmitReadiness(
@@ -341,11 +298,9 @@ class EventJsonTest {
     }
 
     @Test
-    fun viewModelDecodesCoreSplitVerdictAndE1rmDelta() {
-        // Rust→Kotlin side of the contract: the additive history fields
-        // (runs[i].split, lifts[i].e1rm_delta_kg/e1rm_direction) decode, and
-        // their absence (hand-entered run / first set) stays null: the shell
-        // renders these purely from the wire, no local thresholds/arithmetic.
+    fun viewModelDecodesCoreSplitVerdict() {
+        // runs[i].split decodes, and its absence (hand-entered run) stays null:
+        // the shell renders it purely from the wire, no local thresholds.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
             """{"safety_tier":null,"train_blocked":false,"adjustments":[],
@@ -369,10 +324,6 @@ class EventJsonTest {
                    "summary":"","citation":"","observed_at":4}],
                 "guidance":[],"feedback":null,"reference":[]}"""
         )
-        assertEquals(null, vm.lifts[0].e1rm_delta_kg)
-        assertEquals(null, vm.lifts[0].e1rm_direction)
-        assertEquals(2.9, vm.lifts[1].e1rm_delta_kg!!, 1e-9)
-        assertEquals("up", vm.lifts[1].e1rm_direction)
         val split = vm.runs[0].split!!
         assertEquals("fade", split.verdict)
         assertEquals("FADE +5%", split.label)
@@ -397,16 +348,6 @@ class EventJsonTest {
         )
         assertEquals(10000, vm.lifts[0].reps)
         assertEquals(9223372036854775807L, vm.lifts[0].entry_id)
-    }
-
-    @Test
-    fun submitReviewCarriesObservedAt() {
-        // Backdating: the review's log stamp always rides the wire (serde
-        // default on the Rust side keeps old logs replayable without it).
-        val fields = obj(
-            Event.SubmitReview(overtrainingSignalCount = 0, observedAt = 1_700_000_777L)
-        )["SubmitReview"]!!.jsonObject
-        assertEquals(1_700_000_777L, fields["observed_at"]!!.jsonPrimitive.content.toLong())
     }
 
     @Test
@@ -449,15 +390,6 @@ class EventJsonTest {
         assertTrue(vm.readiness_summary[1].safety_critical)
         assertEquals("safety_hold", vm.today_headline!!.kind)
         assertEquals("red_flag", vm.signal_groups.first { it.signal == "Pain" }.group)
-        // Pre-headline core (fields absent) must still decode: null/empty.
-        val old = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
-                "review_adjustments":[],"input_count":0,"lifts":[],"runs":[],
-                "guidance":[],"feedback":null,"reference":[]}"""
-        )
-        assertEquals(null, old.today_headline)
-        assertTrue(old.readiness_summary.isEmpty())
-        assertTrue(old.signal_groups.isEmpty())
     }
 
     @Test
@@ -505,29 +437,14 @@ class EventJsonTest {
         val strong = vm.grade_definitions.first { it.grade == "Strong" }
         assertTrue(strong.definition.contains("meta-analyses"))
         assertEquals(0.9f, strong.confidence, 1e-6f)
-
-        // Old core (no why?, no grade_definitions) decodes to empty defaults -
-        // the shell falls back to the legacy restatement / hardcoded legend.
-        val old = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,
-                "adjustments":[
-                  {"summary":"Take a rest day","grade":"Strong","citation":"x",
-                   "confidence":0.9,"safety_critical":true,"contested":false}],
-                "review_adjustments":[],"input_count":0,"lifts":[],"runs":[],
-                "guidance":[],"feedback":null,"reference":[]}"""
-        )
-        assertEquals("", old.adjustments[0].why.basis)
-        assertEquals("", old.adjustments[0].why.grade_note)
-        assertTrue(old.grade_definitions.isEmpty())
     }
 
     @Test
     fun viewModelDecodesTrainingLoadWeeklyReportLiftAuditCrossCheckAndDisclosures() {
-        // The core sections the shell used to silently drop via
-        // ignoreUnknownKeys now decode — training_load (CTL/ATL/TSB bookkeeping),
-        // weekly_report (overuse rows), lift_audit, trend, provisional +
-        // autoreg_source (feedback-040/047/048 honesty disclosures), and
-        // LiftResultView.cross_check (strength-006 multi-formula e1RM range).
+        // The core's training_load (session counts, method), weekly_report
+        // (overuse rows), lift_audit, trend, provisional + autoreg_source
+        // (feedback-040/047/048 honesty disclosures) and LiftResultView.cross_check
+        // (strength-006 multi-formula e1RM range) decode.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
             """{"safety_tier":null,"train_blocked":false,"adjustments":[],
@@ -564,9 +481,7 @@ class EventJsonTest {
                   "grade":"Moderate","citation":"autoreg-047","confidence":0.6,
                   "safety_critical":false,"contested":false}}"""
         )
-        assertEquals(45.2, vm.training_load!!.ctl, 1e-9)
-        assertEquals(-7.5, vm.training_load.tsb, 1e-9)
-        assertEquals(12, vm.training_load.sessions_counted)
+        assertEquals(12, vm.training_load!!.sessions_counted)
         assertTrue(vm.training_load.method.contains("TRIMP"))
         assertEquals(1, vm.weekly_report.size)
         assertTrue(vm.weekly_report[0].safety_critical)
@@ -580,92 +495,37 @@ class EventJsonTest {
         assertEquals(150.2, cc.low_kg, 1e-9)
         assertEquals(155.0, cc.high_kg, 1e-9)
         assertEquals(3, cc.formulas)
-
-        // Old core (all seven sections absent) still decodes — null/empty, and the
-        // lift row carries no cross_check (old-core wire back-compat).
-        val old = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
-                "review_adjustments":[],"input_count":0,
-                "lifts":[
-                  {"exercise":"Bench","weight_kg":80.0,"reps":5,"rpe":8.0,
-                   "e1rm_kg":93.3,"pct_1rm":85.0,"rir":2.0,"summary":"Bench",
-                   "observed_at":0}],
-                "runs":[],"guidance":[],"feedback":null,"reference":[]}"""
-        )
-        assertEquals(null, old.training_load)
-        assertTrue(old.weekly_report.isEmpty())
-        assertTrue(old.lift_audit.isEmpty())
-        assertEquals(null, old.trend)
-        assertEquals(null, old.provisional)
-        assertEquals(null, old.autoreg_source)
-        assertEquals(null, old.lifts[0].cross_check)
     }
 
     @Test
-    fun submitCheckinEmitsSnakeCaseAndOmitsAbsentOptionals() {
-        // The morning check-in wire form. Answered items ride the
-        // wire as snake_case; an unset watch number is OMITTED (serde reads None),
-        // so the core never fabricates a channel the user didn't provide.
-        val fields = obj(
+    fun submitCheckinEmitsAnsweredItemsAndOmitsUnansweredOnes() {
+        // Answered items ride the wire as snake_case. An unanswered optional item
+        // (watch numbers, the KB short-form's fatigue and stress) is OMITTED so the
+        // core reads None and never fabricates a channel the user didn't provide.
+        val full = obj(
             Event.SubmitCheckin(
-                observedAt = 1_700_000_000L,
-                sleepQuality = 2,
-                soreness = 4,
-                mood = 3,
-                restingHrBpm = 52.0,
-                // hrvRmssdMs left null → omitted.
+                observedAt = 1_700_000_000L, sleepQuality = 2, soreness = 4, mood = 3,
+                restingHrBpm = 52.0, fatigue = 5, stress = 1,
             )
         )["SubmitCheckin"]!!.jsonObject
-        assertEquals(1_700_000_000L, fields["observed_at"]!!.jsonPrimitive.content.toLong())
-        assertEquals(2, fields["sleep_quality"]!!.jsonPrimitive.content.toInt())
-        assertEquals(4, fields["soreness"]!!.jsonPrimitive.content.toInt())
-        assertEquals(3, fields["mood"]!!.jsonPrimitive.content.toInt())
-        assertEquals(52.0, fields["resting_hr_bpm"]!!.jsonPrimitive.content.toDouble(), 1e-9)
-        assertFalse(fields.containsKey("hrv_rmssd_ms"))
-    }
-
-    @Test
-    fun submitCheckinEncodesFatigueAndStressWhenSetAndOmitsThemWhenUnset() {
-        // Fatigue + stress complete the KB 5-item short-form. Both are
-        // optional 1–5 items; an answered one rides the wire as snake_case, an
-        // unanswered one is OMITTED so the core reads None (backward-compatible).
-        val withBoth = obj(
-            Event.SubmitCheckin(
-                observedAt = 1_700_000_000L,
-                sleepQuality = 2,
-                soreness = 4,
-                mood = 3,
-                fatigue = 5,
-                stress = 1,
-            )
+        assertEquals(1_700_000_000L, full["observed_at"]!!.jsonPrimitive.content.toLong())
+        assertEquals(2, full["sleep_quality"]!!.jsonPrimitive.content.toInt())
+        assertEquals(4, full["soreness"]!!.jsonPrimitive.content.toInt())
+        assertEquals(3, full["mood"]!!.jsonPrimitive.content.toInt())
+        assertEquals(52.0, full["resting_hr_bpm"]!!.jsonPrimitive.content.toDouble(), 1e-9)
+        assertEquals(5, full["fatigue"]!!.jsonPrimitive.content.toInt())
+        assertEquals(1, full["stress"]!!.jsonPrimitive.content.toInt())
+        assertFalse(full.containsKey("hrv_rmssd_ms"))
+        val bare = obj(
+            Event.SubmitCheckin(observedAt = 1_700_000_000L, sleepQuality = 2, soreness = 4, mood = 3)
         )["SubmitCheckin"]!!.jsonObject
-        assertEquals(5, withBoth["fatigue"]!!.jsonPrimitive.content.toInt())
-        assertEquals(1, withBoth["stress"]!!.jsonPrimitive.content.toInt())
-
-        // A legacy 3-item check-in (fatigue/stress left null) omits both keys —
-        // matching the earlier wire form the core already replays.
-        val without = obj(
-            Event.SubmitCheckin(
-                observedAt = 1_700_000_000L,
-                sleepQuality = 2,
-                soreness = 4,
-                mood = 3,
-            )
-        )["SubmitCheckin"]!!.jsonObject
-        assertFalse(without.containsKey("fatigue"))
-        assertFalse(without.containsKey("stress"))
-    }
-
-    @Test
-    fun clearCheckinsIsABareStringUnitVariant() {
-        assertEquals("\"ClearCheckins\"", Event.ClearCheckins.toJson().toString())
+        assertFalse(bare.containsKey("fatigue"))
+        assertFalse(bare.containsKey("stress"))
     }
 
     @Test
     fun viewModelDecodesCheckinEchoAndBaselineStatus() {
-        // Rust→Kotlin contract for the check-in view surface: the echoed check-in
-        // (rehydration) and the honest "collecting baseline" rows decode, and
-        // their absence on an old core stays null/empty.
+        // The echoed check-in (rehydration) and the "collecting baseline" rows decode.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
             """{"safety_tier":null,"train_blocked":false,"adjustments":[],
@@ -681,21 +541,12 @@ class EventJsonTest {
         assertEquals(null, vm.checkin_today.hrv_rmssd_ms)
         assertEquals("WellnessZ", vm.baseline_status[0].signal)
         assertEquals(1, vm.baseline_status[0].have)
-
-        // Old core (fields absent) still decodes to null/empty.
-        val old = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
-                "review_adjustments":[],"input_count":0,"lifts":[],"runs":[],
-                "guidance":[],"feedback":null,"reference":[]}"""
-        )
-        assertEquals(null, old.checkin_today)
-        assertTrue(old.baseline_status.isEmpty())
     }
 
     @Test
     fun logRunTrackNestsPointsWithSnakeCaseFields() {
         val fields = obj(
-            Event.LogRunTrack(listOf(GpsPoint(52.5, 13.4, 1000L, 4.5)), 80.0, 10.0, 1_700_000_500L)
+            Event.LogRunTrack(listOf(GpsPoint(52.5, 13.4, 1000L, 4.5)), 80.0, 1_700_000_500L)
         )["LogRunTrack"]!!.jsonObject
         val pt = fields["points"]!!.let { (it as kotlinx.serialization.json.JsonArray)[0] }.jsonObject
         assertEquals(52.5, pt["lat"]!!.jsonPrimitive.content.toDouble(), 1e-9)
@@ -723,7 +574,6 @@ class EventJsonTest {
                     GpsPoint(0.0, 1.001, 80L, 5.0),
                 ),
                 hrPctMax = 0.0,
-                longestRecentKm = 0.0,
                 observedAt = 0L,
                 segmentStarts = listOf(2),
             )
@@ -757,44 +607,31 @@ class EventJsonTest {
         // Untagged (null) → the key is ABSENT on the wire, so the event matches
         // serde's `#[serde(default)]` shape and old logs/replay are unaffected.
         val untagged = obj(
-            Event.LogRun(8.0, 48.0, 70.0, 12.0, 1_700_000_000L)
+            Event.LogRun(8.0, 48.0, 70.0, 1_700_000_000L)
         )["LogRun"]!!.jsonObject
         assertFalse(untagged.containsKey("workout_type"))
 
         // Tagged → the field carries the EXACT serde variant string (the Rust
         // `WorkoutType` deserializes external-form, so it must be the bare name).
         val tagged = obj(
-            Event.LogRun(8.0, 48.0, 70.0, 12.0, 1_700_000_000L, workoutType = WorkoutType.Interval)
+            Event.LogRun(8.0, 48.0, 70.0, 1_700_000_000L, workoutType = WorkoutType.Interval)
         )["LogRun"]!!.jsonObject
         assertEquals("Interval", tagged["workout_type"]!!.jsonPrimitive.content)
 
         // Same contract on the GPS + amend events.
         val track = obj(
-            Event.LogRunTrack(listOf(GpsPoint(0.0, 0.0, 0L, 5.0)), 0.0, 0.0, 0L, workoutType = WorkoutType.LongRun)
+            Event.LogRunTrack(listOf(GpsPoint(0.0, 0.0, 0L, 5.0)), 0.0, 0L, workoutType = WorkoutType.LongRun)
         )["LogRunTrack"]!!.jsonObject
         assertEquals("LongRun", track["workout_type"]!!.jsonPrimitive.content)
         val amend = obj(
-            Event.AmendRun(9L, 5.0, 30.0, 0.0, 0.0, 1_700_000_000L, workoutType = WorkoutType.Recovery)
+            Event.AmendRun(9L, 5.0, 30.0, 0.0, 1_700_000_000L, workoutType = WorkoutType.Recovery)
         )["AmendRun"]!!.jsonObject
         assertEquals("Recovery", amend["workout_type"]!!.jsonPrimitive.content)
-
-        // Every enum name is the wire string the Rust side matches, incl. the
-        // multi-word variant (a rename either side is a silent drop → pin it).
-        assertEquals("Steady", WorkoutType.Steady.name)
-        assertEquals("LongRun", WorkoutType.LongRun.name)
     }
 
     @Test
-    fun runResultViewDecodesWorkoutTypeAndBackCompatOldShape() {
+    fun runResultViewMapsItsWorkoutTypeLabel() {
         val json = coreJson
-        // Back-compat: an earlier run row (no workout_type key) still decodes → null.
-        val old = json.decodeFromString<RunResultView>(
-            """{"zone":"Z2","pace":"5:00/km","distance_km":10.0,"summary":"","citation":"",
-                "observed_at":0}"""
-        )
-        assertEquals(null, old.workout_type)
-        assertEquals(null, WorkoutType.fromWire(old.workout_type))
-
         // A tagged run row echoes the label, and fromWire maps it back to the enum.
         val tagged = json.decodeFromString<RunResultView>(
             """{"zone":"Z2","pace":"5:00/km","distance_km":10.0,"summary":"","citation":"",
@@ -813,6 +650,24 @@ class EventJsonTest {
         assertEquals(null, WorkoutType.fromWire(future.workout_type))
     }
 
+    @Test
+    fun amendRunMetaUsesSnakeCaseWireNames() {
+        val f = obj(Event.AmendRunMeta(42L, 1_700_000_000L, 7, WorkoutType.LongRun))["AmendRunMeta"]!!.jsonObject
+        assertEquals(42L, f["entry_id"]!!.jsonPrimitive.content.toLong())
+        assertEquals(1_700_000_000L, f["observed_at_fallback"]!!.jsonPrimitive.content.toLong())
+        assertEquals(7, f["session_rpe"]!!.jsonPrimitive.content.toInt())
+        assertEquals("LongRun", f["workout_type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun amendRunMetaSendsAClearedRatingOrTagAsAnExplicitNull() {
+        // The core REPLACES both fields, so a cleared one travels as an explicit
+        // JSON null, never dropped.
+        val f = obj(Event.AmendRunMeta(42L, 0L, null, null))["AmendRunMeta"]!!.jsonObject
+        assertEquals(JsonNull, f["session_rpe"])
+        assertEquals(JsonNull, f["workout_type"])
+    }
+
     // ── Coach-as-planner events ─────────────────────────────────────────
 
     @Test
@@ -828,42 +683,23 @@ class EventJsonTest {
     }
 
     @Test
-    fun clearPlanIsABareString() {
-        assertEquals("\"ClearPlan\"", Event.ClearPlan.toJson().toString())
+    fun todayCoachingEventsCarryTheirDaysAndSignal() {
+        val move = obj(Event.MoveSession(20_360L, 20_366L))["MoveSession"]!!.jsonObject
+        assertEquals(20_360L, move["from_epoch_day"]!!.jsonPrimitive.content.toLong())
+        assertEquals(20_366L, move["to_epoch_day"]!!.jsonPrimitive.content.toLong())
+        val hold = obj(Event.ResolveHold(ReadinessSignal.Illness, 1_759_700_000L))["ResolveHold"]!!.jsonObject
+        assertEquals("Illness", hold["signal"]!!.jsonPrimitive.content)
+        assertEquals(1_759_700_000L, hold["observed_at"]!!.jsonPrimitive.content.toLong())
+        val restart = obj(Event.RestartHrvBaseline(1_759_700_000L))["RestartHrvBaseline"]!!.jsonObject
+        assertEquals(1_759_700_000L, restart["observed_at"]!!.jsonPrimitive.content.toLong())
     }
 
     // ── Structured HRmax / protein / spike-baseline fields ──────────────
 
     @Test
-    fun oldShapeViewModelDecodesWithoutWave2Fields() {
-        // Back-compat: a ViewModel blob from an OLD core (before hr_max,
-        // protein_figures, runs[i].spike_has_baseline existed) must still decode,
-        // with the new fields falling to their defaults (null / empty / false) -
-        // no crash, so a stale replay or a mixed core/shell build stays safe.
-        val json = coreJson
-        val vm = json.decodeFromString<ViewModel>(
-            """{"safety_tier":null,"train_blocked":false,"adjustments":[],
-                "review_adjustments":[],"input_count":1,
-                "runs":[
-                  {"zone":"Z2","pace":"5:30/km","distance_km":5.0,"spike_flag":true,
-                   "spike_note":"First run logged - no prior run to gauge a spike against.",
-                   "summary":"","citation":"","observed_at":4}],
-                "guidance":[],"feedback":null,"reference":[],
-                "protein_targets":[],"hr_zones":[]}"""
-        )
-        assertEquals(null, vm.hr_max)
-        assertTrue(vm.protein_figures.isEmpty())
-        // The run decodes and spike_has_baseline defaults to false (a first run
-        // with no baseline), the shell reads this instead of scraping spike_note.
-        assertFalse(vm.runs[0].spike_has_baseline)
-        assertTrue(vm.runs[0].spike_flag)
-    }
-
-    @Test
-    fun wave2ViewModelDecodesStructuredFields() {
-        // Rust→Kotlin: the Wave 2 structured fields decode with the core's exact
-        // serde names, replacing the deleted prose scrapes (hrMaxRegex,
-        // proteinPerDayRegex, spike_note.contains).
+    fun viewModelDecodesHrMaxProteinFiguresAndSpikeBaseline() {
+        // The structured HRmax, protein and spike-baseline fields decode with the
+        // core's serde names.
         val json = coreJson
         val vm = json.decodeFromString<ViewModel>(
             """{"safety_tier":null,"train_blocked":false,"adjustments":[],
@@ -907,8 +743,7 @@ class EventJsonTest {
     }
 
     @Test
-    fun clearActivitiesIsABareStringAndDeleteEntryTargetsAnActivity() {
-        assertEquals("\"ClearActivities\"", Event.ClearActivities.toJson().toString())
+    fun deleteEntryTargetsAnActivity() {
         assertEquals(
             """{"DeleteEntry":{"kind":"Activity","entry_id":123,"observed_at_fallback":1760000000}}""",
             Event.DeleteEntry(Event.EntryKind.Activity, 123L, observedAtFallback = 1_760_000_000L).toJson().toString(),
@@ -933,9 +768,93 @@ class EventJsonTest {
         assertEquals(3, y.target_days)
         assertEquals("Strong", y.grade)
         assertEquals("WHO 2020", y.why.basis)
-        // Both fields default when an older core omits them.
-        val old = coreJson.decodeFromString(ViewModel.serializer(), "{}")
-        assertTrue(old.activities.isEmpty())
-        assertEquals(null, old.youth_activity)
+    }
+
+    @Test
+    fun aViewFromAnOlderCoreDecodesToDefaults() {
+        // A view or row without the newer fields (an older core, a stale replay)
+        // decodes with null / empty / false in their place, never a crash.
+        val vm = coreJson.decodeFromString(
+            ViewModel.serializer(),
+            """{"adjustments":[
+                  {"summary":"Take a rest day","grade":"Strong","citation":"x",
+                   "confidence":0.9,"safety_critical":true,"contested":false}],
+                "lifts":[
+                  {"exercise":"Bench","weight_kg":80.0,"reps":5,"rpe":8.0,
+                   "e1rm_kg":93.3,"pct_1rm":85.0,"rir":2.0,"summary":"Bench","observed_at":0}],
+                "runs":[
+                  {"zone":"Z2","pace":"5:30/km","distance_km":5.0,"spike_flag":true,
+                   "spike_note":"","summary":"","citation":"","observed_at":4}]}""",
+        )
+        assertEquals(null, vm.today_headline)
+        assertTrue(vm.readiness_summary.isEmpty())
+        assertTrue(vm.signal_groups.isEmpty())
+        assertTrue(vm.grade_definitions.isEmpty())
+        assertEquals(null, vm.training_load)
+        assertTrue(vm.weekly_report.isEmpty())
+        assertTrue(vm.lift_audit.isEmpty())
+        assertEquals(null, vm.trend)
+        assertEquals(null, vm.provisional)
+        assertEquals(null, vm.autoreg_source)
+        assertEquals(null, vm.checkin_today)
+        assertTrue(vm.baseline_status.isEmpty())
+        assertEquals(null, vm.hr_max)
+        assertTrue(vm.protein_figures.isEmpty())
+        assertTrue(vm.activities.isEmpty())
+        assertEquals(null, vm.youth_activity)
+        assertEquals("", vm.adjustments.single().why.basis)
+        assertEquals("", vm.adjustments.single().why.grade_note)
+        assertEquals(null, vm.lifts.single().cross_check)
+        val run = vm.runs.single()
+        assertTrue(run.spike_flag)
+        assertFalse(run.spike_has_baseline)
+        assertEquals(null, run.workout_type)
+        assertEquals(null, WorkoutType.fromWire(run.workout_type))
+    }
+
+    @Test
+    fun todayViewFieldsDecode() {
+        val vm = coreJson.decodeFromString(
+            ViewModel.serializer(),
+            """
+            {"session_done":{"epoch_day":20352,"title":"Heavy day","items":[{"exercise":"Back Squat","summary":"3 of 3 sets","met":true}]},
+             "hold_resolutions":[{"signal":"Pain","paused_text":"Paused.","action_label":"I'm pain-free now","confirm_text":"Sure?"}],
+             "consistency":{"this_week_done":2,"this_week_planned":3,"weeks":[{"week_monday_epoch_day":20345,"done":3,"planned":3}],"share_pct":100,"repeating_week":false,"notes":[]},
+             "next_session":{"epoch_day":20352,"title":"Heavy day","session_type":"Lift(MaxEffort)","status":"next","items":[],
+               "move_targets":[20358],"moved_from_epoch_day":20350,"move_note":null},
+             "program":{"name":"x","goal":"y","phase":"Build","week":1,"weeks_total":4,"grade":"Strong","citation":"c","confidence":0.9,
+               "safety_critical":false,"contested":false,
+               "muscle_volume":[{"muscle":"Side delts","target_sets":12,"delivered_sets":12.0,"label":"Side delts: 12 sets · target 12"}],
+               "muscle_volume_note":"note"}}
+            """.trimIndent(),
+        )
+        assertEquals("Heavy day", vm.session_done?.title)
+        assertTrue(vm.session_done!!.items.single().met)
+        assertEquals("I'm pain-free now", vm.hold_resolutions.single().action_label)
+        assertEquals(2, vm.consistency?.this_week_done)
+        assertEquals(listOf(20_358L), vm.next_session?.move_targets)
+        assertEquals(20_350L, vm.next_session?.moved_from_epoch_day)
+        assertEquals("Side delts", vm.program?.muscle_volume?.single()?.muscle)
+    }
+
+    @Test
+    fun structuredFaceFieldsDecode() {
+        val vm = coreJson.decodeFromString(
+            ViewModel.serializer(),
+            """
+            {"next_session":{"epoch_day":20352,"title":"Heavy day","session_type":"Lift(MaxEffort)","status":"next","items":[
+               {"exercise":"Back Squat","summary":"Back Squat: 5×3 @ 100 kg · ~2 reps left","face_name":"Back Squat",
+                "face_detail":"5×3 @ 100 kg · ~2 reps left","face_lead":"5×3 @ 100 kg",
+                "anchored_on":"Last: 95 kg × 3, 3, 3","anchored_on_last":true}]},
+             "calisthenics_ladders":[{"ladder":"Core","pattern":"Core","rungs":[{"rung":0,"name":"Plank","target":"20–45 s hold","available":true,"timed_hold":true}]}],
+             "guidance":[{"section":"Profile","summary":"Training age: Novice","training_age":"Novice"}]}
+            """.trimIndent(),
+        )
+        val item = vm.next_session!!.items.single()
+        assertEquals("Back Squat" to "5×3 @ 100 kg · ~2 reps left", item.face_name to item.face_detail)
+        assertEquals("5×3 @ 100 kg", item.face_lead)
+        assertTrue(item.anchored_on_last)
+        assertTrue(vm.calisthenics_ladders.single().rungs.single().timed_hold)
+        assertEquals("Novice", vm.guidance.single().training_age)
     }
 }

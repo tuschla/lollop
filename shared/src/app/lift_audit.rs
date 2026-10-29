@@ -42,10 +42,6 @@ pub(super) fn build_lift_audit(cx: &ViewCtx) -> Vec<GuidanceView> {
     let model = cx.model;
     use std::collections::BTreeMap;
     let mut rows = Vec::new();
-    // Calisthenics ladder work is governed by rep-max-at-tier, not %1RM/e1RM/
-    // Prilepin (CAL-E1RM-001): for a Calisthenics profile a set named like a
-    // leverage rung is excluded from every %1RM-derived audit row. A Weights
-    // profile is unaffected — a loaded "Bulgarian split squat" still audits.
     let calis = model
         .profile
         .as_ref()
@@ -81,9 +77,7 @@ pub(super) fn build_lift_audit(cx: &ViewCtx) -> Vec<GuidanceView> {
         // out; counting a warm-up pyramid would drag the mean under 70 % or
         // push the rep max past 6 and silence the check.
         let anchors = cx.lift_anchors_now();
-        // Chronological (`observed_at`, then `entry_id`), the `lifts` order, so
-        // the display spelling and the float sums do not depend on storage
-        // order (an Undo or amend re-pushes a set to the tail).
+        // Log order (`observed_at`, then `entry_id`), the `lifts` order.
         let mut day_sets: Vec<&LoggedSet> = model
             .sets
             .iter()
@@ -100,7 +94,7 @@ pub(super) fn build_lift_audit(cx: &ViewCtx) -> Vec<GuidanceView> {
         }
         let working_floor = 1.0 - strength::rpe_anchored_back_off().value.drop_frac.1;
         let mut by_exercise: BTreeMap<String, (u32, f64, u32, u32, &str)> = BTreeMap::new();
-        for s in day_sets {
+        for &s in &day_sets {
             let k = key(s);
             if s.weight_kg + 1e-9 < working_floor * heaviest.get(&k).copied().unwrap_or(0.0) {
                 continue;
@@ -170,11 +164,8 @@ pub(super) fn build_lift_audit(cx: &ViewCtx) -> Vec<GuidanceView> {
 
         // hypertrophy-020: RIR estimates are only ~±1-rep accurate at 0–5 RIR;
         // beyond that the report is a guess: say so once for the day.
-        if let Some(worst_rir) = model
-            .sets
+        if let Some(worst_rir) = day_sets
             .iter()
-            .filter(|s| local_day(s.observed_at, offset) == last_day)
-            .filter(|s| include(s))
             // An unrecorded RPE (0.0) carries no RIR: it must not fabricate a
             // "~10 RIR" reliability row.
             .filter(|s| s.rpe > 0.0)
@@ -198,11 +189,8 @@ pub(super) fn build_lift_audit(cx: &ViewCtx) -> Vec<GuidanceView> {
         // strength-006: when a set that day sits outside the reliable e1RM
         // window, point at the preferred 3–6-rep test set instead of trusting
         // formula output.
-        if model
-            .sets
+        if day_sets
             .iter()
-            .filter(|s| local_day(s.observed_at, offset) == last_day)
-            .filter(|s| include(s))
             .any(|s| s.reps > strength::E1RM_RELIABLE_REP_CAP)
         {
             let test = strength::e1rm_test_set_reps();
@@ -224,26 +212,18 @@ pub(super) fn build_lift_audit(cx: &ViewCtx) -> Vec<GuidanceView> {
     if let Some(bw) = model.profile.as_ref().and_then(|p| p.bodyweight_kg)
         && bw > 0.0
     {
-        // Only a reliable, recent BARBELL BACK SQUAT anchors the 1.5×BW gate:
-        // machine/unilateral squats ("leg press", "hack squat", split squats) and
-        // high-rep (>10) sets do not estimate a trustworthy 1RM (strength-006/033).
-        // A "smith"/"machine" token on the raw name is rejected before the
-        // equipment-insensitive match, so a guided-bar Smith-machine back squat
-        // never clears a free-barbell plyometric gate.
+        // Only a reliable, recent barbell back squat (`plan::is_back_squat`, the
+        // plan's own depth-jump gate) anchors the 1.5×BW gate; high-rep (>10)
+        // sets do not estimate a trustworthy 1RM (strength-006/033).
         let recent_cutoff =
             today_end.map(|end| end.saturating_sub(SQUAT_ANCHOR_RECENCY_DAYS * DAY_SEC));
         // The name test is a pure function of the name: run it once per
         // distinct name, and only on sets inside the recency window.
         let mut back_squat: std::collections::HashMap<&str, bool> = Default::default();
         let mut is_back_squat = |name| -> bool {
-            *back_squat.entry(name).or_insert_with(|| {
-                crate::plan::movement_pattern(name) == Some(crate::plan::MovementPattern::Squat)
-                    && !name.split(|c: char| !c.is_ascii_alphanumeric()).any(|t| {
-                        t.eq_ignore_ascii_case("smith") || t.eq_ignore_ascii_case("machine")
-                    })
-                    && crate::plan::same_movement("Barbell back squat", name)
-                    && crate::plan::e1rm_reliable_name(name)
-            })
+            *back_squat
+                .entry(name)
+                .or_insert_with(|| crate::plan::is_back_squat(name))
         };
         let squat_e1rm = model
             .sets
@@ -333,23 +313,14 @@ pub(super) fn lift_views(sets: &[LoggedSet], sets_fp: u64, weight_lb: bool) -> V
 
 /// The uncached lift-list derivation (see [`lift_views`]).
 fn lift_views_uncached(sets: &[LoggedSet], weight_lb: bool) -> Vec<LiftResultView> {
-    // Chronological (observed_at) order, tie-broken by `entry_id` (the shell's
-    // monotonic epoch-MILLIS log id) so same-second sets keep a deterministic
-    // order regardless of Vec position. `AmendSet` removes+pushes its row to the
-    // Vec tail carrying the SAME `entry_id`; keying the sort on `entry_id` (not
-    // insertion order) keeps the amended set in its original slot among ties, so
-    // both History display and the per-exercise e1RM delta chain are stable
-    // across amends. Legacy rows (`entry_id == 0`) fall back to the stable sort's
-    // insertion order. A backdated set still slots into its true position.
+    // Log order: `observed_at`, then `entry_id` (an amend or Undo re-pushes a
+    // row at the tail with the same id); legacy `entry_id == 0` ties keep their
+    // logged order through the stable sort.
     let mut ordered: Vec<&LoggedSet> = sets.iter().collect();
-    ordered.sort_by(|a, b| {
-        a.observed_at
-            .cmp(&b.observed_at)
-            .then(a.entry_id.cmp(&b.entry_id))
-    });
+    ordered.sort_by_key(|s| (s.observed_at, s.entry_id));
     // Per distinct exercise name, resolved once (a history repeats a handful
-    // of names thousands of times): its trend chain and isolation class.
-    // Key the trend on the trimmed, lowercased name so "Squat" and "squat"
+    // of names thousands of times): its PR chain and isolation class.
+    // Key the chain on the trimmed, lowercased name so "Squat" and "squat"
     // share one chain. This is NOT the plan anchors' `movement_key`: "Smith
     // machine back squat" and "Back squat" keep separate chains here. A
     // retired catalog label ("Barbell back squat") was stored under its
@@ -357,9 +328,8 @@ fn lift_views_uncached(sets: &[LoggedSet], weight_lb: bool) -> Vec<LiftResultVie
     let mut names: std::collections::HashMap<&str, (usize, bool)> =
         std::collections::HashMap::new();
     let mut chain_of: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    // Per chain: the previous e1RM and the best prior e1RM (the neutral PR
-    // marker).
-    let mut chains: Vec<(Option<f64>, Option<f64>)> = Vec::new();
+    // Per chain: the best prior e1RM (the neutral PR marker).
+    let mut chains: Vec<Option<f64>> = Vec::new();
     ordered
         .into_iter()
         .map(|s| {
@@ -369,28 +339,24 @@ fn lift_views_uncached(sets: &[LoggedSet], weight_lb: bool) -> Vec<LiftResultVie
                     .entry(s.exercise.trim().to_lowercase())
                     .or_insert(next);
                 if chain == chains.len() {
-                    chains.push((None, None));
+                    chains.push(None);
                 }
                 (chain, crate::plan::is_isolation_lift(&s.exercise))
             });
-            let (last_e1rm, best_e1rm) = &mut chains[chain];
-            let mut view = to_lift_view(s, *last_e1rm, isolation, weight_lb);
-            // A hold carries no e1RM (its field is zeroed): keep the previous
-            // real e1RM as the trend anchor so an interleaved hold never breaks
-            // the same-exercise delta chain.
-            if s.hold_sec.is_none() {
-                *last_e1rm = Some(view.e1rm_kg);
-                if view.e1rm_kg > 0.0 {
-                    // A PR beats every PRIOR e1RM of the exercise (the first
-                    // set of an exercise is not flagged: nothing to beat).
-                    match *best_e1rm {
-                        Some(best) if view.e1rm_kg > best + 0.05 => {
-                            view.e1rm_pr = true;
-                            *best_e1rm = Some(view.e1rm_kg);
-                        }
-                        Some(_) => {}
-                        None => *best_e1rm = Some(view.e1rm_kg),
+            let best_e1rm = &mut chains[chain];
+            let mut view = to_lift_view(s, isolation, weight_lb);
+            // A hold carries no e1RM (its field is zeroed), so it never sets
+            // or breaks a PR.
+            if s.hold_sec.is_none() && view.e1rm_kg > 0.0 {
+                // A PR beats every PRIOR e1RM of the exercise (the first set of
+                // an exercise is not flagged: nothing to beat).
+                match *best_e1rm {
+                    Some(best) if view.e1rm_kg > best + 0.05 => {
+                        view.e1rm_pr = true;
+                        *best_e1rm = Some(view.e1rm_kg);
                     }
+                    Some(_) => {}
+                    None => *best_e1rm = Some(view.e1rm_kg),
                 }
             }
             view
@@ -399,15 +365,8 @@ fn lift_views_uncached(sets: &[LoggedSet], weight_lb: bool) -> Vec<LiftResultVie
 }
 
 /// Derive strength metrics for one logged set (Epley e1RM, RIR from RPE).
-/// `prev_e1rm_kg` is the same exercise's previous e1RM (already 0.1-rounded),
-/// `None` for its first logged set; `isolation` is
-/// [`crate::plan::is_isolation_lift`] of its name.
-pub(super) fn to_lift_view(
-    s: &LoggedSet,
-    prev_e1rm_kg: Option<f64>,
-    isolation: bool,
-    weight_lb: bool,
-) -> LiftResultView {
+/// `isolation` is [`crate::plan::is_isolation_lift`] of its name.
+pub(super) fn to_lift_view(s: &LoggedSet, isolation: bool, weight_lb: bool) -> LiftResultView {
     // A timed hold is isometric time, not a rep-max, so it has NO e1RM / %1RM /
     // cross-check / trend (a hold has no e1RM; CAL-E1RM-001). Its numeric
     // strength fields stay zeroed and the delta/direction stay `None`, so a
@@ -417,7 +376,7 @@ pub(super) fn to_lift_view(
     let e1rm_kg = if hold {
         0.0
     } else {
-        (strength::e1rm_epley_rpe(s.weight_kg, s.reps, s.rpe) * 10.0).round() / 10.0
+        round_tenths(strength::e1rm_epley_rpe(s.weight_kg, s.reps, s.rpe))
     };
     let pct_1rm = if hold {
         0.0
@@ -438,30 +397,12 @@ pub(super) fn to_lift_view(
     } else {
         let check = strength::e1rm_cross_check(s.weight_kg, s.reps, s.rpe, isolation);
         check.value.map(|c| E1rmRangeView {
-            low_kg: (c.low_kg * 10.0).round() / 10.0,
-            high_kg: (c.high_kg * 10.0).round() / 10.0,
+            low_kg: round_tenths(c.low_kg),
+            high_kg: round_tenths(c.high_kg),
             formulas: c.formulas_used,
             evidence: EvidenceTagView::of(&check),
         })
     };
-    // Delta of two 0.1-rounded values, re-rounded to kill float dust; direction
-    // is factual (what changed), never an improving/declining judgment, that
-    // phrasing belongs to the trend rules (see the field docs). A hold carries no
-    // e1RM, so it has no delta/direction.
-    let e1rm_delta_kg = if hold {
-        None
-    } else {
-        prev_e1rm_kg.map(|p| ((e1rm_kg - p) * 10.0).round() / 10.0)
-    };
-    let e1rm_direction = e1rm_delta_kg.map(|d| {
-        if d > 0.0 {
-            TrendDirection::Up
-        } else if d < 0.0 {
-            TrendDirection::Down
-        } else {
-            TrendDirection::Flat
-        }
-    });
     LiftResultView {
         exercise: s.exercise.clone(),
         weight_kg: s.weight_kg,
@@ -472,8 +413,6 @@ pub(super) fn to_lift_view(
         rir,
         rpe_recorded,
         cross_check,
-        e1rm_delta_kg,
-        e1rm_direction,
         summary: if let Some(sec) = s.hold_sec {
             // A timed-hold set renders "<name> - <s> s hold", never reps×load→e1RM
             // (a hold has no e1RM; CAL-E1RM-001 / CAL-PROG-STATIC-001).

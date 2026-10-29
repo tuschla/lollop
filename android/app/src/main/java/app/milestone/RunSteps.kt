@@ -1,7 +1,6 @@
 package app.milestone
 
 import android.content.res.Resources
-import java.util.Locale
 
 /**
  * The guided-workout step machine for a planned run. A prescribed
@@ -27,9 +26,7 @@ internal data class RunStep(
     val durationSec: Int = 0,
     val distanceM: Int = 0,
     val matchPreviousRep: Boolean = false,
-) {
-    val open: Boolean get() = durationSec <= 0 && distanceM <= 0 && !matchPreviousRep
-}
+)
 
 /**
  * The ordered steps for [s]. Run/walk bouts win over [RunStructureView.reps] when
@@ -56,9 +53,9 @@ internal fun buildRunSteps(s: RunStructureView): List<RunStep> {
             }
             if (k < s.reps) {
                 when {
-                    s.recovery_m > 0 -> out += RunStep(RunStepKind.Recovery, k, s.reps - 1, distanceM = s.recovery_m)
-                    s.recovery_sec > 0 -> out += RunStep(RunStepKind.Recovery, k, s.reps - 1, durationSec = s.recovery_sec)
-                    s.recovery_equal_to_rep -> out += RunStep(RunStepKind.Recovery, k, s.reps - 1, matchPreviousRep = true)
+                    s.recovery_m > 0 -> out += RunStep(RunStepKind.Recovery, distanceM = s.recovery_m)
+                    s.recovery_sec > 0 -> out += RunStep(RunStepKind.Recovery, durationSec = s.recovery_sec)
+                    s.recovery_equal_to_rep -> out += RunStep(RunStepKind.Recovery, matchPreviousRep = true)
                 }
             }
         }
@@ -70,7 +67,7 @@ internal fun buildRunSteps(s: RunStructureView): List<RunStep> {
         for (k in 1..s.strides_reps) {
             out += RunStep(RunStepKind.Stride, k, s.strides_reps, durationSec = s.strides_sec)
             if (k < s.strides_reps && s.strides_recovery_sec > 0) {
-                out += RunStep(RunStepKind.StrideRecovery, k, s.strides_reps - 1, durationSec = s.strides_recovery_sec)
+                out += RunStep(RunStepKind.StrideRecovery, durationSec = s.strides_recovery_sec)
             }
         }
     }
@@ -93,42 +90,28 @@ internal data class StepProgress(
 }
 
 /**
- * Walks [steps] on active time and distance. [advance] is fed the monotonic clock
- * ([nowMs]), the live run distance and the pause flag: while paused the active clock
- * does not move (and the tracker records no distance), so a step freezes exactly
- * where it was. It returns true when the step changed, the tracker's cue to buzz and
- * beep. A large tick can cross several short steps at once; each is consumed in turn
- * with its own overshoot carried forward, so the guide never falls behind the run.
+ * Walks [steps] on active time and distance, the first step starting at [nowMs] /
+ * [distanceM]. [advance] is fed the monotonic clock, the live run distance and the
+ * pause flag: while paused the active clock does not move (and the tracker records
+ * no distance), so a step freezes exactly where it was. It returns true when the step
+ * changed, the tracker's cue to buzz and beep. A large tick can cross several short
+ * steps at once; each is consumed in turn with its own overshoot carried forward, so
+ * the guide never falls behind the run.
  */
-internal class RunStepMachine(val steps: List<RunStep>) {
+internal class RunStepMachine(val steps: List<RunStep>, nowMs: Long, distanceM: Double) {
     private var index = 0
-    private var started = false
-    private var lastNowMs = 0L
+    private var lastNowMs = nowMs
     private var activeMs = 0L
     private var stepStartActiveMs = 0L
-    private var stepStartDistanceM = 0.0
-    private var lastDistanceM = 0.0
+    private var stepStartDistanceM = distanceM
+    private var lastDistanceM = distanceM
     // Active ms the most recent rep took, for a "recover as long as the rep" step.
     private var lastRepMs = 0L
 
     val finished: Boolean get() = index >= steps.size
 
-    /** Begin the first step at [nowMs] / [distanceM]. Idempotent. */
-    fun start(nowMs: Long, distanceM: Double) {
-        if (started) return
-        started = true
-        lastNowMs = nowMs
-        lastDistanceM = distanceM
-        stepStartActiveMs = 0L
-        stepStartDistanceM = distanceM
-    }
-
     /** Advance the clocks; true when at least one step boundary was crossed. */
     fun advance(nowMs: Long, distanceM: Double, paused: Boolean): Boolean {
-        if (!started) {
-            start(nowMs, distanceM)
-            return false
-        }
         val dt = (nowMs - lastNowMs).coerceAtLeast(0L)
         lastNowMs = nowMs
         if (!paused) activeMs += dt
@@ -195,12 +178,6 @@ internal class RunStepMachine(val steps: List<RunStep>) {
     }
 }
 
-/** Remaining-time readout for a step: "m:ss". */
-internal fun formatStepSeconds(sec: Int): String {
-    val s = sec.coerceAtLeast(0)
-    return String.format(Locale.US, "%d:%02d", s / 60, s % 60)
-}
-
 /** A step's title, e.g. "Rep 2 of 6", "Warm-up", "Walk 3 of 8". */
 internal fun runStepTitle(res: Resources, step: RunStep): String = when (step.kind) {
     RunStepKind.WarmUp -> res.getString(R.string.track_step_warmup)
@@ -218,7 +195,7 @@ internal fun runStepTitle(res: Resources, step: RunStep): String = when (step.ki
  *  hint. Empty once finished. */
 internal fun runStepRemaining(res: Resources, p: StepProgress): String = when {
     p.step == null -> ""
-    p.remainingSec != null -> res.getString(R.string.track_step_left, formatStepSeconds(p.remainingSec))
+    p.remainingSec != null -> res.getString(R.string.track_step_left, formatElapsed(p.remainingSec.toLong()))
     p.remainingM != null -> res.getString(R.string.track_step_left, res.getString(R.string.track_step_metres, p.remainingM))
     else -> res.getString(R.string.track_step_open)
 }

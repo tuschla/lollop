@@ -9,7 +9,6 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -21,12 +20,9 @@ import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.PrescriptionView
 import app.milestone.R
-import java.io.File
 import java.util.Locale
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import org.junit.After
@@ -62,36 +58,14 @@ class OwnerRegressionJourneyTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    private fun eventLogLines(): List<String> =
-        File(ctx.filesDir, "event-log.ndjson").takeIf { it.exists() }?.readLines().orEmpty()
-
-    /** Wait for app state the screen doesn't show; the semantics fetch idles the looper. */
-    private fun waitForState(timeoutMs: Long = 10_000, cond: () -> Boolean) =
-        rule.waitUntil(timeoutMs) {
-            rule.onAllNodes(isRoot()).fetchSemanticsNodes()
-            cond()
-        }
-
     private fun rest(sec: Long = 90) {
         AppClock.offsetMillis += sec * 1000L
     }
-
-    private fun setHeader(k: Int, n: Int) = str(R.string.log_set_header_n_of_n, k, n)
 
     private fun logSet() = rule.onNodeWithTag("editor-primary").performClick()
 
     private fun primaryReads(label: String) {
         rule.assertCountEventually(hasTestTag("editor-primary") and hasText(label), 1)
-    }
-
-    private fun openLoopFor(exercise: String) {
-        rule.onNode(
-            hasClickAction() and hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n, 1), substring = true) and
-                hasAnyAncestor(hasTestTag("plan-item:$exercise")),
-        ).performScrollTo().performClick()
-        rule.waitUntil(5_000) {
-            rule.onAllNodes(hasText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)).fetchSemanticsNodes().isNotEmpty()
-        }
     }
 
     private fun todaysItems(): List<PrescriptionView> =
@@ -112,7 +86,7 @@ class OwnerRegressionJourneyTest {
             listOf(
                 QaHarness.strengthProfile(),
                 Event.LogRun(
-                    distanceKm = 8.0, durationMin = 45.0, hrPctMax = 0.0, longestRecentKm = 0.0,
+                    distanceKm = 8.0, durationMin = 45.0, hrPctMax = 0.0,
                     observedAt = at, entryId = entryId, avgHrBpm = 152.0,
                 ),
             ),
@@ -131,20 +105,21 @@ class OwnerRegressionJourneyTest {
         rule.waitForIdle()
         rule.onNode(hasText(str(R.string.run_delete_message))).assertExists()
         rule.onNode(hasText(str(R.string.main_delete)) and hasClickAction()).performClick()
-        waitForState { EventDispatcher.model.value!!.runs.none { it.entry_id == entryId } }
+        rule.waitForState { EventDispatcher.model.value!!.runs.none { it.entry_id == entryId } }
         rule.assertTextCountEventually(str(R.string.history_run_deleted), 1)
 
         rule.onNode(hasText(str(R.string.log_undo)) and hasClickAction()).performClick()
-        waitForState { EventDispatcher.model.value!!.runs.any { it.entry_id == entryId } }
+        rule.waitForState { EventDispatcher.model.value!!.runs.any { it.entry_id == entryId } }
         val restored = EventDispatcher.model.value!!.runs.single { it.entry_id == entryId }
         assertEquals("the restored run keeps its bpm", 152.0, restored.avg_hr_bpm ?: 0.0, 0.0)
 
         // The durable restore carries the bpm (and leaves the % for the core to derive).
-        val lines = eventLogLines()
-        val deleteAt = lines.indexOfLast { it.contains("\"DeleteEntry\"") }
-        assertTrue("the delete is logged: $lines", deleteAt >= 0)
-        val restore = lines.drop(deleteAt + 1).last { it.contains("\"LogRun\"") }
-        val payload = Json.parseToJsonElement(restore).jsonObject["LogRun"]!!.jsonObject
+        val log = journeyLog()
+        val deleteAt = log.indexOfLast { it.variant == "DeleteEntry" }
+        assertTrue("the delete is logged: $log", deleteAt >= 0)
+        val restoreEvent = log.drop(deleteAt + 1).last { it.variant == "LogRun" }
+        val restore = restoreEvent.toString()
+        val payload = restoreEvent.payload
         assertEquals(entryId, payload["entry_id"]!!.jsonPrimitive.long)
         assertEquals(restore, 152.0, payload["avg_hr_bpm"]?.jsonPrimitive?.double ?: 0.0, 0.0)
         assertEquals(restore, 0.0, payload["hr_pct_max"]!!.jsonPrimitive.double, 0.0)
@@ -175,7 +150,7 @@ class OwnerRegressionJourneyTest {
             ctx,
             listOf(
                 QaHarness.strengthProfile(),
-                Event.LogRunTrack(points = points, hrPctMax = 0.0, longestRecentKm = 0.0, observedAt = at, entryId = entryId),
+                Event.LogRunTrack(points = points, hrPctMax = 0.0, observedAt = at, entryId = entryId),
             ),
         )
         rule.launchApp()
@@ -189,11 +164,11 @@ class OwnerRegressionJourneyTest {
         rule.onNodeWithTag("run-delete").performScrollTo().performClick()
         rule.waitForIdle()
         rule.onNode(hasText(str(R.string.main_delete)) and hasClickAction()).performClick()
-        waitForState { EventDispatcher.model.value!!.runs.none { it.entry_id == entryId } }
+        rule.waitForState { EventDispatcher.model.value!!.runs.none { it.entry_id == entryId } }
         rule.assertTextCountEventually(str(R.string.history_run_deleted), 1)
 
         rule.onNode(hasText(str(R.string.log_undo)) and hasClickAction()).performClick()
-        waitForState { EventDispatcher.model.value!!.runs.any { it.entry_id == entryId } }
+        rule.waitForState { EventDispatcher.model.value!!.runs.any { it.entry_id == entryId } }
         val restored = EventDispatcher.model.value!!.runs.single { it.entry_id == entryId }
         assertTrue("the restored run keeps its route", restored.has_gpx)
         assertEquals("same observed_at", before.observed_at, restored.observed_at)
@@ -207,7 +182,7 @@ class OwnerRegressionJourneyTest {
         rule.launchApp()
         val items = todaysItems()
         assertTrue("scenario: several lifts today: $items", items.size >= 2 && items.none { it.done })
-        openLoopFor(items.first().exercise)
+        rule.openLoopFor(items.first().exercise)
         items.forEachIndexed { i, item ->
             rule.assertCountEventually(hasTestTag("loop-exercise") and hasText(item.exercise), 1)
             val n = app.milestone.plannedSetCount(item)
@@ -241,7 +216,7 @@ class OwnerRegressionJourneyTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         val squat = todaysItems().first().exercise
-        openLoopFor(squat)
+        rule.openLoopFor(squat)
         val n = app.milestone.plannedSetCount(todaysItems().first())
         assertTrue("scenario: sets remain after two", n > 2)
         // Set 1 as prescribed, then set 2 short of the planned reps (a missed set):
@@ -252,7 +227,7 @@ class OwnerRegressionJourneyTest {
         rest()
         rule.onNode(hasText("1") and hasAnyAncestor(hasTestTag("reps-scale"))).performScrollTo().performClick()
         logSet()
-        waitForState { todaysItems().first { it.exercise == squat }.logged_sets.size == 2 }
+        rule.waitForState { todaysItems().first { it.exercise == squat }.logged_sets.size == 2 }
         val endLabel = str(R.string.log_cue_end_exercise)
         val inLoopEnd = hasText(endLabel) and hasClickAction() and noDescription
         rule.assertCountEventually(inLoopEnd, 1)
@@ -260,21 +235,20 @@ class OwnerRegressionJourneyTest {
         rule.onNode(inLoopEnd).performClick()
 
         val epochDay = app.milestone.todayEpochDay()
-        waitForState { todaysItems().first { it.exercise == squat }.ended_early }
+        rule.waitForState { todaysItems().first { it.exercise == squat }.ended_early }
         rule.assertTextCountEventually(str(R.string.plan_ended_msg, squat, done, n), 1)
         rule.assertTextCountEventually(str(R.string.plan_item_complete), 1)
 
         // The snackbar's Undo (the loop's own "Logged … · Undo" row is spoken with
         // its set, so it carries a description).
         rule.onNode(hasText(str(R.string.log_undo)) and hasClickAction() and noDescription).performClick()
-        waitForState { !todaysItems().first { it.exercise == squat }.ended_early }
+        rule.waitForState { !todaysItems().first { it.exercise == squat }.ended_early }
         rule.assertTextCountEventually(str(R.string.plan_item_complete), 0)
         rule.assertTextCountEventually(setHeader(done + 1, n), 1)
         assertEquals(done, todaysItems().first { it.exercise == squat }.sets_done)
 
         // Durable: an ended=true marker, then the Undo's ended=false for the same day.
-        val ends = eventLogLines().filter { it.contains("\"SetExerciseEnded\"") }
-            .map { Json.parseToJsonElement(it).jsonObject["SetExerciseEnded"]!!.jsonObject }
+        val ends = journeyLog().filter { it.variant == "SetExerciseEnded" }.map { it.payload }
             .filter { it["exercise"]!!.jsonPrimitive.content == squat && it["epoch_day"]!!.jsonPrimitive.long == epochDay }
         assertEquals("$ends", listOf(true, false), ends.map { it["ended"]!!.jsonPrimitive.boolean })
         // Still loggable from the loop's primary.

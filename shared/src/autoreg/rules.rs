@@ -2,7 +2,7 @@
 //! ready-upd-001..007, their threshold constants, the §5 safety ladder, and the
 //! illness / resting-HR / medical-referral predicates.
 
-use super::pain::{PainGate, active_pain_responses, pain_gate};
+use super::pain::{PainGate, active_pain_responses, pain_blocks_progression, pain_gate};
 use super::perf::{MovementPerf, perf_adjustments};
 use super::prescriptions::hrv_saturation_hold;
 use super::{latest, latest_input};
@@ -201,13 +201,6 @@ fn medical_referral(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>
 // Readiness-stream rules (thresholds verbatim from File 06)
 // ---------------------------------------------------------------------------
 
-// Threshold constants: the SINGLE SOURCE OF TRUTH for every numeric band of
-// the readiness rules. Both the adjustment rules AND the readiness rows
-// (`signals.rs`, the displayed "why") read these named constants, so an applied
-// adjustment and the text that explains it can never silently desync. Values
-// are verbatim from File 06; changing a value here moves the rule and its
-// explanation together. Do not re-inline these literals on either side.
-
 /// RPE delta (actual − target) bands (autoreg-001/002/004/005).
 pub(super) const RPE_DELTA_WELL_ABOVE: f64 = 2.0;
 pub(super) const RPE_DELTA_ABOVE: f64 = 1.0;
@@ -341,23 +334,27 @@ pub(super) fn e1rm_gate(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment
             e1rm_decline_deload(),
             claims::AUTOREG_DELOAD_001,
         )],
-        // Includes a single-session >10% drop: File 06 §5 conflict table -
-        // "performance down >10% → trust performance → reduce load" (one
-        // session reduces; only the ≥2-session streak deloads). autoreg-006's
-        // second clause caps today's session at planned RPE − 1 alongside the
-        // ~5% top-set cut.
+        outcome => e1rm_session_recs(outcome, |a| a),
+    }
+}
+
+/// Today's session adjustments for an e1RM outcome, each passed through `wrap`
+/// (AUTOREG-E1RM-GATE-001). Reduce (including a single-session >10% drop: File
+/// 06 §5 "trust performance → reduce load") cuts the top-set load ~5% and caps
+/// the session at planned RPE − 1 (autoreg-006); Increase adds load
+/// (autoreg-007). The multi-session Deload arm is the caller's.
+pub(super) fn e1rm_session_recs(
+    outcome: E1rmOutcome,
+    wrap: impl Fn(Adjustment) -> Adjustment,
+) -> Vec<Recommended<Adjustment>> {
+    let gate = |a| evidence::graded(wrap(a), claims::AUTOREG_E1RM_GATE_001);
+    match outcome {
         E1rmOutcome::Reduce => vec![
-            evidence::graded(
-                Adjustment::ReduceLoadPct(E1RM_REDUCE_LOAD_PCT),
-                claims::AUTOREG_E1RM_GATE_001,
-            ),
-            evidence::graded(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001),
+            gate(Adjustment::ReduceLoadPct(E1RM_REDUCE_LOAD_PCT)),
+            gate(Adjustment::CapRpe(1)),
         ],
-        E1rmOutcome::Increase => vec![evidence::graded(
-            Adjustment::IncreaseLoadPct(E1RM_INCREASE_LOAD_PCT),
-            claims::AUTOREG_E1RM_GATE_001,
-        )],
-        E1rmOutcome::Stable => Vec::new(),
+        E1rmOutcome::Increase => vec![gate(Adjustment::IncreaseLoadPct(E1RM_INCREASE_LOAD_PCT))],
+        E1rmOutcome::Deload | E1rmOutcome::Stable => Vec::new(),
     }
 }
 
@@ -398,13 +395,12 @@ pub(super) fn e1rm_decline_deload() -> Adjustment {
 }
 
 /// Goal-dependent velocity-loss termination threshold, as whole-percent. The
-/// single source of the goal→VL map is `strength::vl_termination_threshold` (a
-/// fraction); this maps the top-level `Goal` onto its `LiftGoal` and scales to
-/// percent, so the two files can never drift (reconciling autoreg-010's
-/// "10% power" against strength-018's grouping: power 10% / max-strength 20% /
-/// hypertrophy 40%). Each goal uses its band ceiling, the maximum VL the plan
-/// would ever prescribe, so exceeding it is beyond-plan fatigue. A non-lifting
-/// or absent goal → the 20% max-strength default (the conservative fallback).
+/// goal→VL map lives in `strength::vl_termination_threshold` (a fraction; its
+/// doc reconciles autoreg-010 with strength-018); this maps the top-level `Goal`
+/// onto its `LiftGoal` and scales to percent. Each goal uses its band ceiling,
+/// the maximum VL the plan would ever prescribe, so exceeding it is beyond-plan
+/// fatigue. A non-lifting or absent goal → the 20% max-strength default (the
+/// conservative fallback).
 pub(super) fn vl_threshold_pct(goal: Option<&Goal>) -> f64 {
     let lift_goal = match goal {
         Some(Goal::Power) => LiftGoal::Power,
@@ -668,38 +664,30 @@ fn perf_decline(recs: &[Recommended<Adjustment>]) -> bool {
     })
 }
 
-/// Highest safety tier triggered by the inputs (File 06 §5 ladder).
+/// Highest safety tier triggered by the inputs (File 06 §5 ladder), checked
+/// highest-first: the first hit wins.
 ///
 /// Pain outranks Illness, which outranks all objective/subjective/HRV tiers.
 /// Returns `None` when no safety condition fires. autoreg-041/043/046.
 pub fn resolve_safety_in(inputs: &[ReadinessInput], ctx: &RuleContext) -> Option<SafetyTier> {
-    let mut tier: Option<SafetyTier> = None;
-    let mut raise = |t: SafetyTier| {
-        tier = Some(match tier {
-            Some(cur) if cur >= t => cur,
-            _ => t,
-        });
-    };
-
     // Tier 0, medical red flags: defer to a professional, overrides all
     // training adjustments including pain (File 08 §5 safety-040/043/049).
     if medical_referral(inputs).is_some() {
-        raise(SafetyTier::MedicalReferral);
+        return Some(SafetyTier::MedicalReferral);
     }
     // Tier 1, pain overrides everything else (autoreg-043; File 08 Table 4.1).
     // Any characterized non-DOMS pain (structural, scoped structural, tendon,
     // other) sits at the Pain tier even when its response is a scoped stop or a
     // modify/reduce; DOMS is normal training discomfort and raises no tier.
-    match pain_gate(inputs) {
-        PainGate::Block(_) | PainGate::Scoped(_) | PainGate::Adjust(_) => raise(SafetyTier::Pain),
-        PainGate::Continue | PainGate::None => {}
+    if pain_blocks_progression(inputs) {
+        return Some(SafetyTier::Pain);
     }
     // Tier 2, illness / fever gates regardless of readiness (autoreg-045/046),
     // plus the corroborated resting-HR rest day (stop level on ≥2 mornings or
     // with symptoms, ready-upd-002): it blocks training like the illness stop.
     let rhr = rhr_verdict(inputs, ctx);
     if illness_active(inputs) || rhr == RhrVerdict::Rest {
-        raise(SafetyTier::Illness);
+        return Some(SafetyTier::Illness);
     }
     // Tier 3, objective within-session performance (e1RM drop / velocity loss).
     // A load *increase* signals high readiness, never a safety concern, only
@@ -708,25 +696,21 @@ pub fn resolve_safety_in(inputs: &[ReadinessInput], ctx: &RuleContext) -> Option
         || vl_stop(inputs, ctx.goal).is_some()
         || perf_decline(&perf_adjustments(ctx.perf))
     {
-        raise(SafetyTier::ObjectivePerformance);
+        return Some(SafetyTier::ObjectivePerformance);
     }
     // Tier 4, persistent multi-day subjective suppression: ≥3 days of
     // wellness z ≤ −1 (§5 tier-4 definition). A single-day z ≤ −1.5
     // (autoreg-030) does NOT raise this tier.
     if wellness_multiday(inputs) {
-        raise(SafetyTier::SubjectiveMultiDay);
+        return Some(SafetyTier::SubjectiveMultiDay);
     }
     // Tier 5, HRV rolling baseline (autoreg-028).
     if hrv_downgrade(inputs).is_some() {
-        raise(SafetyTier::HrvTrend);
+        return Some(SafetyTier::HrvTrend);
     }
     // Tier 6, resting-HR markers: a corroborated ≥2-day elevation or a single
     // stop-level morning without symptoms (likely noise, ready-upd-002).
-    if matches!(rhr, RhrVerdict::Hold | RhrVerdict::Spike) {
-        raise(SafetyTier::SingleDayMarker);
-    }
-
-    tier
+    matches!(rhr, RhrVerdict::Hold | RhrVerdict::Spike).then_some(SafetyTier::SingleDayMarker)
 }
 
 /// Whether auto load-adds are withheld today (autoreg-044 / autoreg-029): any
@@ -737,16 +721,11 @@ pub fn resolve_safety_in(inputs: &[ReadinessInput], ctx: &RuleContext) -> Option
 /// saturation guard. The plan-side per-item first-set rule strips its
 /// increases on the same predicate.
 pub fn increase_hold(inputs: &[ReadinessInput], ctx: &RuleContext) -> bool {
-    let pain_any = matches!(
-        pain_gate(inputs),
-        PainGate::Scoped(_) | PainGate::Adjust(_) | PainGate::Block(_)
-    );
     let suppressed = hrv_downgrade(inputs).is_some()
-        || wellness_downgrade_in(inputs, ctx).is_some()
         || latest(inputs, ReadinessSignal::WellnessZ).is_some_and(|z| z <= WELLNESS_MULTIDAY_Z)
         || soreness_downgrade(inputs).is_some()
         || rhr_verdict(inputs, ctx) != RhrVerdict::Normal
-        || pain_any
+        || pain_blocks_progression(inputs)
         || illness_active(inputs);
     // An e1RM *increase* (ratio > 1.05) is not a decline and does not suppress.
     let objective_perf_down = vl_stop(inputs, ctx.goal).is_some()

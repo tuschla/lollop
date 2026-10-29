@@ -356,14 +356,7 @@ fn rir_item_carries_last_set_and_a_suggested_load() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
     let item = app
         .view(&model)
         .week_plan
@@ -415,7 +408,7 @@ fn rir_row_item(anchors: &crate::plan::Anchors, age_days: i64, reps: u8) -> Pres
 
 #[test]
 fn no_start_weight_after_a_break_the_plan_treats_as_a_fresh_start() {
-    // A3: past the 8-week horizon (DETRAIN-STR-001) or inside a declared
+    // Past the 8-week horizon (DETRAIN-STR-001) or inside a declared
     // >8 wk re-entry (REENTRY-001: treat as novice) the plan carries no load,
     // so "Start from …" must not bring the pre-break weight back.
     let none = crate::plan::Anchors::default();
@@ -434,7 +427,7 @@ fn no_start_weight_after_a_break_the_plan_treats_as_a_fresh_start() {
 
 #[test]
 fn start_weight_after_a_six_week_gap_is_derated() {
-    // A3: 31–56 days since the set → the detraining credit (70 %) scales the
+    // 31–56 days since the set → the detraining credit (70 %) scales the
     // suggestion, never the full pre-gap load.
     let item = rir_row_item(&crate::plan::Anchors::default(), 40, 5);
     assert_eq!(item.suggested_load_kg, Some(40.0), "60 × 0.70 = 42 → 40");
@@ -443,7 +436,7 @@ fn start_weight_after_a_six_week_gap_is_derated() {
 
 #[test]
 fn start_weight_is_lightened_for_a_higher_rep_target() {
-    // A3: 60 kg × 8 @ RPE 7 is 11 reps of capacity; 12 reps at 3 RIR needs
+    // 60 kg × 8 @ RPE 7 is 11 reps of capacity; 12 reps at 3 RIR needs
     // 15. Epley scales it to 60 × (1 + 11/30) / (1 + 15/30) ≈ 54.7 → 52.5.
     let item = rir_row_item(&crate::plan::Anchors::default(), 3, 12);
     assert_eq!(item.suggested_load_kg, Some(52.5));
@@ -451,7 +444,7 @@ fn start_weight_is_lightened_for_a_higher_rep_target() {
 
 #[test]
 fn an_undeclared_gap_ramps_back_instead_of_jumping_to_full_load() {
-    // A2: squat e1RM 150 on days 0/3/7, then nothing until day 47. Day 47 is
+    // Squat e1RM 150 on days 0/3/7, then nothing until day 47. Day 47 is
     // prescribed at the 70 % detraining credit; the light session logged that
     // day must not restore 100 % on day 48 (REENTRY-001 4–8 wk: 70 %, ramp
     // 2–4 weeks). Rated or not, the next load stays on the re-entry ramp.
@@ -489,7 +482,7 @@ fn an_undeclared_gap_ramps_back_instead_of_jumping_to_full_load() {
 
 #[test]
 fn an_open_ended_effort_set_is_a_lower_bound_for_the_anchor() {
-    // C11: "4+ reps left" (RPE 6) counts its reps as performed, like an
+    // "4+ reps left" (RPE 6) counts its reps as performed, like an
     // unrated set: it can raise the anchor only by what was actually lifted
     // and never cuts it.
     let base = set("Back Squat", 100.0, 5, 8.0, 0);
@@ -509,7 +502,7 @@ fn an_open_ended_effort_set_is_a_lower_bound_for_the_anchor() {
 
 #[test]
 fn warm_up_sets_do_not_silence_the_prilepin_audit() {
-    // B3: a warm-up ramp (STR-WARMUP-001) is not working volume. 5×3 at the
+    // A warm-up ramp (STR-WARMUP-001) is not working volume. 5×3 at the
     // top load is 15 reps above 90 % (Prilepin 4–10): the row must fire even
     // though the warm-ups would pull the day's mean intensity under 70 %.
     let mut model = Model::default();
@@ -597,14 +590,7 @@ fn twenty_rep_leg_press_does_not_anchor_a_pct_1rm_load() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
     let ns = app
         .view(&model)
         .next_session
@@ -647,14 +633,7 @@ fn stale_pr_does_not_revive_on_a_light_set() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: mon,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, mon);
     let ns = app
         .view(&model)
         .next_session
@@ -965,14 +944,7 @@ fn zero_weight_set_does_not_anchor_a_load() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
     let vm = app.view(&model);
     let ns = vm.next_session.expect("a plan renders");
     for it in ns.items.iter().filter(|i| !i.exercise.is_empty()) {

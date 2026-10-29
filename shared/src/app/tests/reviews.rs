@@ -145,7 +145,7 @@ fn clearing_the_weekly_checkin_drops_its_week_deloads() {
     assert!(!vm.review_adjustments.is_empty());
     assert!(vm.weekly_checkin_present);
     assert!(
-        !vm.review_present,
+        model.review.is_none(),
         "a weekly-only payload sets no session review"
     );
 
@@ -488,14 +488,7 @@ fn vbt_increase_row_expires_after_seven_days() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, today);
     let vm = app.view(&model);
     assert!(
         !vm.review_adjustments

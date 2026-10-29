@@ -168,27 +168,18 @@ fun RunTrackingScreen(
     }
 
     val tracking by RunSession.tracking.collectAsStateWithLifecycle()
-    // Coarse "has any captured fix" signal: only flips false↔true (empty↔non-empty),
-    // NOT per fix, so a recording run doesn't recompose this screen every fix. The
-    // per-fix track itself is read where it's needed: the map's flow collectors and
-    // the save/recenter callbacks read RunSession.points.value directly.
-    val hasPoints by remember {
-        RunSession.points.map { it.isNotEmpty() }.distinctUntilChanged()
-    }.collectAsStateWithLifecycle(initialValue = RunSession.points.value.isNotEmpty())
+    // Coarse "has any captured fix" signal: flips only empty↔non-empty, so a
+    // recording run doesn't recompose this screen every fix. The map's collectors and
+    // the save/recenter callbacks read RunSession.points.value where they need it.
+    val hasPoints by RunSession.hasPoints.collectAsStateWithLifecycle()
     // Same coarse signal for the locate preview's fix, so Recenter only shows once
     // there is a position to centre on.
     val hasPreviewFix by remember {
         RunSession.lastFix.map { it != null }.distinctUntilChanged()
-    }.collectAsStateWithLifecycle(initialValue = RunSession.lastFix.value != null)
-    // Rotation escape hatch: a captured-but-unsaved run is DERIVED from RunSession
-    // (the service is stopped yet raw fixes are still held), not kept in a volatile
-    // `remember` that dies on rotation / Back+reopen. The locate-only preview records no
-    // points, so `!tracking && hasPoints` is precise: it can only be a track awaiting
-    // save (failed Core.send / stop not confirmed). While true the control row
-    // shows Save/Discard (never Start), the locate-restart effect and BackHandler stand
-    // down, and Start refuses, so the captured run is never silently cleared (Back) or
-    // merged into the next (Start).
-    val unsavedCapture = hasUnsavedCapture(tracking, if (hasPoints) 1 else 0)
+    }.collectAsStateWithLifecycle(initialValue = false)
+    // While true the control row shows Save/Discard (never Start), and the
+    // locate-restart effect and BackHandler stand down ([hasUnsavedCapture]).
+    val unsavedCapture = hasUnsavedCapture(tracking, hasPoints)
     val paused by RunSession.paused.collectAsStateWithLifecycle()
     // Locate-only preview: the service acquires GPS on open but records nothing until
     // Start. The lock readout + preview dot are driven from RunSession.lastFix in the
@@ -390,7 +381,7 @@ fun RunTrackingScreen(
         // merely armed leaves no sidecar and no false recovery prompt. Clear any stale
         // pause and optimistically publish `armed` so the control row flips instantly.
         RunSession.plannedRun.value = if (followPlan) planItem else null
-        RunSession.paused.value = false
+        RunSession.setPaused(false)
         RunSession.armed.value = true
         RunTrackingService.arm(ctx, preciseGate, movingGate)
         requestNotificationsOnce()
@@ -409,45 +400,27 @@ fun RunTrackingScreen(
         onFinish(null)
     }
 
-    // Discard the current session and leave without logging anything.
+    // Discard the current session and leave without logging anything. Refused while
+    // a save holds [RunSession.saving] (see [claimSaving]): the confirm dialog can
+    // still fire after a save started.
     fun discardRun() {
-        // A discard must never run while a save is in flight: the in-flight send
-        // lambda re-reads RunSession.points/decimatedTrackForCore, and reset() here
-        // would empty the session out from under it (an empty-track row / lost run).
-        // RunSession.saving is the CAS-claimed critical-section flag; bail if a save
-        // owns it. The Discard control is gated on !stopping too, but the confirm
-        // dialog's onClear can still fire after a save started, so self-guard.
         if (RunSession.saving.value) return
         leaveTracker()
     }
 
-    // Guards a double Stop tap / double-save while the coroutine below awaits the
-    // service's confirmation; a second pass would log the same run twice. Backed by
-    // the PROCESS singleton [RunSession.saving] (not rememberSaveable): process scope
-    // means a rotation DURING the in-flight (NonCancellable) save can neither
-    // resurrect it to false while the captured points are still present (a recomposed
-    // Save button re-enabled before reset() cleared the session would double-save)
-    // nor orphan it true after a failed save. reset() clears it once the persist
-    // lands, so Save/Discard stay disabled until the save resolves.
+    // Save/Discard/Stop are disabled while a save holds [RunSession.saving]
+    // (process-scoped, so a rotation mid-save neither re-enables nor strands them).
     val stopping by RunSession.saving.collectAsStateWithLifecycle()
+    val runSavedText = stringResource(R.string.log_run_saved)
+    val viewLabel = stringResource(R.string.import_view)
+    val saveFailedText = stringResource(R.string.track_toast_save_failed)
+    val notEnoughGpsText = stringResource(R.string.track_toast_not_enough_gps)
 
-    // Log the currently-captured track (RunSession.trackForCore) to the core, drop
-    // the sidecar, and leave. Off the main thread, LogRunTrack pushes thousands of
-    // points through JNI + view(). Always sources the live RunSession track, so no
-    // remembered copy can go stale across a rotation between capture and retry.
+    // Log the captured track ([RunSession.trackEventForCore]) to the core, drop the
+    // sidecar, and leave. Always reads the live RunSession track, so no remembered
+    // copy can go stale across a rotation. [ownsSaving]: stopAndLog already holds the
+    // [claimSaving] claim and hands it over.
     fun logCaptured(ownsSaving: Boolean = false, sessionRpe: Int? = finishRpe, workoutType: WorkoutType? = finishType) {
-        // CAS entry gate for the double-log / discard-mid-save race. The Save/Discard
-        // buttons are gated on `!stopping`, but a rotation can recompose a stale
-        // enabled button and two taps can arrive in the same frame, so the authority
-        // is the atomic compareAndSet on RunSession.saving, NOT the button state:
-        // exactly ONE caller flips false→true and proceeds; a losing concurrent caller
-        // (a second Save tap, or a Save racing the auto-log-on-stop) sees the CAS fail
-        // and returns before any second Core.send. A held `saving` also keeps a
-        // Discard tap from racing the in-flight send into a degenerate empty-track row.
-        // [ownsSaving] is the stopAndLog→logCaptured handoff: stopAndLog already won
-        // the claim, so re-CASing here would fail on the already-true flag and wrongly
-        // bail — skip the CAS and proceed. Reset to false only on failure; success
-        // navigates away via onFinish ([RunSession.reset] releases the flag).
         if (!claimSaving(RunSession.saving, ownsSaving)) return
         // Committed to leaving: RunSession.reset() lands before onFinish, and the
         // locate-restart effect must not start a LOCATE service in that gap.
@@ -457,8 +430,6 @@ fun RunTrackingScreen(
         // saving flag) must land on main. A host whose effect dispatcher doesn't
         // dispatch (Compose's test environment) would otherwise continue on the IO
         // thread, where Toast throws and the save never finishes.
-        val runSavedText = ctx.getString(R.string.log_run_saved)
-        val viewLabel = ctx.getString(R.string.import_view)
         scope.launch(Dispatchers.Main.immediate, start = CoroutineStart.ATOMIC) {
             // The saved run's identity, for the confirmation's "View".
             val entryId = EntryIds.next()
@@ -514,37 +485,25 @@ fun RunTrackingScreen(
                     onFinish(vm)
                 },
                 onFailure = {
-                    // Save failed: KEEP the captured run + its crash-recovery sidecar
-                    // and surface a Save/Discard affordance; never drop to Start
-                    // (which would truncate the sidecar) and never lose the run. The
-                    // captured fixes stay in RunSession.points, so the derived
-                    // `unsavedCapture` holds the Save/Discard row up without any
-                    // remembered state.
+                    // Keep the captured run and its sidecar: the fixes stay in
+                    // RunSession.points, so `unsavedCapture` re-shows Save/Discard.
                     RunSession.saving.value = false
                     exiting = false
-                    Toast.makeText(ctx, ctx.getString(R.string.track_toast_save_failed), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, saveFailedText, Toast.LENGTH_SHORT).show()
                 },
             )
         }
     }
 
     fun stopAndLog(sessionRpe: Int?, workoutType: WorkoutType?) {
-        // Claim the save critical section atomically (same CAS as logCaptured): a
-        // double Stop tap, or a Stop racing a Save, admits exactly one. stopAndLog
-        // OWNS the flag from here and hands ownership to logCaptured(ownsSaving = true)
-        // so the send path doesn't re-CAS; the stop-failure early returns below
-        // release it (saving.value = false, or reset()) since no send will run.
+        // Claims [RunSession.saving] (see [claimSaving]) and hands it to
+        // logCaptured(ownsSaving = true); every early exit below releases it.
         if (!claimSaving(RunSession.saving)) return
         // Committing to end the session: suppress the locate-restart effect so the
         // service doesn't re-acquire while we finish.
         exiting = true
-        // ATOMIC start: a rotation can cancel `scope` before this coroutine's first
-        // dispatch. A DEFAULT-start launch would then drop the body entirely, so the
-        // claim taken just above (no send ran yet) would be stranded — the recomposed
-        // Save/Discard row stuck disabled. ATOMIC guarantees the body starts and
-        // reaches the stop-confirm wait, whose CancellationException catch releases it.
-        // Main-pinned for the same reason as [logCaptured]: the toasts and onFinish
-        // below must run on the main thread.
+        // ATOMIC start: a rotation can cancel `scope` before the first dispatch, and
+        // a dropped body would strand the claim. Main-pinned like [logCaptured].
         scope.launch(Dispatchers.Main.immediate, start = CoroutineStart.ATOMIC) {
             try {
                 RunTrackingService.stop(ctx)
@@ -553,22 +512,15 @@ fun RunTrackingScreen(
                 // immediately would drop tail fixes still in flight.
                 val stopConfirmed = withTimeoutOrNull(STOP_CONFIRM_TIMEOUT_MS) { RunSession.tracking.first { !it } }
                 if (stopConfirmed == null) {
-                    // The stop never confirmed within the window: the engine may still be
-                    // registered, so snapshotting now would log an unconfirmed stop with a
-                    // possibly-truncated track. Mirror the failure path — keep the captured
-                    // fixes (derived `unsavedCapture` re-shows Save/Discard), toast
-                    // save-failed, release the save claim. Nothing was persisted.
+                    // The engine may still be registered, so the track may be
+                    // incomplete: keep the fixes, release the claim, save nothing.
                     RunSession.saving.value = false
-                    Toast.makeText(ctx, ctx.getString(R.string.track_toast_save_failed), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, saveFailedText, Toast.LENGTH_SHORT).show()
                     return@launch
                 }
                 val captured = RunSession.points.value
                 if (captured.size < 2) {
-                    Toast.makeText(
-                        ctx,
-                        ctx.getString(R.string.track_toast_not_enough_gps),
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    Toast.makeText(ctx, notEnoughGpsText, Toast.LENGTH_LONG).show()
                     ActiveRunStore.clear()
                     RunSession.reset()
                     onFinish(null)
@@ -578,22 +530,15 @@ fun RunTrackingScreen(
                 // Save here means keep it.
                 logCaptured(ownsSaving = true, sessionRpe = sessionRpe, workoutType = workoutType)
             } catch (e: CancellationException) {
-                // A rotation cancelling the snapshot wait is not a save failure -
-                // nothing was persisted here (Core.send lives in logCaptured). Release
-                // the save claim before re-throwing: it was CAS-claimed at the top of
-                // stopAndLog and no send will run, so leaving it latched would strand
-                // the recomposed Save/Discard row disabled forever. The captured fixes
-                // stay in RunSession.points, so `unsavedCapture` re-shows Save/Discard.
+                // A rotation cancelled the stop-confirm wait: nothing was persisted, so
+                // release the claim (else Save/Discard stay disabled) and re-throw.
                 RunSession.saving.value = false
                 throw e
             } catch (e: Exception) {
-                // Stop/snapshot failed before logging: don't brick or lose the run.
-                // The service is already stopped and the captured fixes stay in
-                // RunSession.points, so the derived `unsavedCapture` shows a
-                // Save/Discard affordance; Start (which truncates the sidecar)
-                // is never what appears. Nothing to remember.
+                // Stop/snapshot failed before logging: keep the fixes, so
+                // `unsavedCapture` shows Save/Discard rather than Start.
                 RunSession.saving.value = false
-                Toast.makeText(ctx, ctx.getString(R.string.track_toast_save_failed), Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, saveFailedText, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -616,7 +561,7 @@ fun RunTrackingScreen(
         when (t.effect) {
             FinishEffect.None -> {}
             FinishEffect.PauseRecording -> {
-                RunSession.paused.value = true
+                RunSession.setPaused(true)
                 // Preselect the run type from the plan being followed (visible and
                 // one tap to change or clear); a free run starts untagged.
                 val followed = RunSession.plannedRun.value
@@ -624,7 +569,7 @@ fun RunTrackingScreen(
                     finishType = workoutTypeForPlan(model.next_session?.session_type, followed.run_target?.band)
                 }
             }
-            FinishEffect.ResumeRecording -> RunSession.paused.value = false
+            FinishEffect.ResumeRecording -> RunSession.setPaused(false)
             FinishEffect.SaveRun -> stopAndLog(finishRpe, finishType)
             FinishEffect.DiscardRun -> discardRun()
         }
@@ -652,13 +597,18 @@ fun RunTrackingScreen(
     // (its own confirm). Saveable so a rotation while the confirm is up doesn't
     // dismiss it silently: it gates a no-undo delete of a captured run.
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
-    CaptureDiscardDialog(
-        visible = confirmDiscard,
-        onDismiss = { confirmDiscard = false },
-        onDiscard = { discardRun() },
-    )
+    if (confirmDiscard) {
+        DiscardRunDialog(
+            enabled = !stopping,
+            onCancel = { confirmDiscard = false },
+            onConfirm = {
+                confirmDiscard = false
+                discardRun()
+            },
+        )
+    }
     if (finishStep == FinishStep.ConfirmDiscard) {
-        FinishDiscardDialog(
+        DiscardRunDialog(
             enabled = !stopping,
             onCancel = { onFinishAction(FinishAction.CancelDiscard) },
             onConfirm = { onFinishAction(FinishAction.ConfirmDiscard) },
@@ -866,8 +816,8 @@ fun RunTrackingScreen(
                         onLeave = { leaveTracker() },
                         onStartNow = { RunTrackingService.startNow(ctx) },
                         onStart = { armTracking() },
-                        onPause = { RunSession.paused.value = true },
-                        onResume = { RunSession.paused.value = false },
+                        onPause = { RunSession.setPaused(true) },
+                        onResume = { RunSession.setPaused(false) },
                         onStop = { onFinishAction(FinishAction.Stop) },
                     )
                 }
@@ -888,7 +838,7 @@ private fun ColumnScope.DragHandle() {
             .align(Alignment.CenterHorizontally)
             .width(DragHandleWidth)
             .height(DragHandleHeight)
-            .clip(RoundedCornerShape(100))
+            .clip(PillShape)
             .background(OnBgBody.copy(alpha = DRAG_HANDLE_ALPHA)),
     )
 }
@@ -908,19 +858,8 @@ private fun openAppDetailsSettings(ctx: Context) {
 
 /** This app's notification settings (its details page before API 26). */
 private fun openNotificationSettings(ctx: Context) {
-    runCatching {
-        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-        } else {
-            appDetailsIntent(ctx)
-        }
-        ctx.startActivity(intent)
-    }
+    runCatching { ctx.startActivity(appNotificationSettingsIntent(ctx)) }
 }
-
-private fun appDetailsIntent(ctx: Context): Intent =
-    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null))
 
 /**
  * Ask the system to exempt this app from battery optimization. The direct
@@ -957,60 +896,31 @@ private const val KEY_START_MOVING = "run_start_moving"
 private const val KEY_LOCATION_ASKED = "run_location_asked"
 
 /**
- * A captured-but-not-yet-saved run exists when the foreground service is no
- * longer recording yet raw fixes are still held in [RunSession]. The locate-only
- * preview records NO points: it only reads `lastFix`, so a stopped session with
- * a non-empty point list can ONLY be a captured track awaiting save (after a failed
- * `Core.send` or an unconfirmed stop), never a live locate preview.
- *
- * DERIVED (not `remember`ed) precisely so it survives configuration changes:
- * rotation or system-Back + reopen recreate the Composable and drop every
- * `remember`, but [RunSession] is a process-lifetime singleton whose `points`/
- * `tracking` persist. A volatile flag would read null after rotation → the control
- * row would fall to Back/Start, and Back silently clears the crash sidecar while
- * Start truncates it and merges the two tracks. Keying off this fn instead keeps
- * Save/Discard on screen no matter how many times the screen is recreated.
+ * A captured run awaits save when the service no longer records yet fixes are still
+ * held (a failed save or an unconfirmed stop); the locate preview records none.
+ * Derived from the process-scoped [RunSession], not `remember`ed, so Save/Discard
+ * survive rotation and Back+reopen instead of falling to Back (clears the sidecar)
+ * or Start (truncates it).
  */
-internal fun hasUnsavedCapture(tracking: Boolean, pointCount: Int): Boolean =
-    !tracking && pointCount > 0
+internal fun hasUnsavedCapture(tracking: Boolean, hasPoints: Boolean): Boolean =
+    !tracking && hasPoints
 
 /**
- * Atomically claim the save critical-section flag for the save/discard entry race.
- * A single [MutableStateFlow.compareAndSet] false→true admits exactly ONE caller:
- * concurrent Save taps, or a Save racing the auto-log-on-stop (`stopAndLog`), see the
- * loser get false and bail before any second `Core.send` (double-log) fires. The held
- * flag also blocks a `discardRun` from resetting the session under an in-flight send.
- * When [ownsSaving] the caller already won the claim (`stopAndLog` handing off to
- * `logCaptured`), so this is a no-op returning true — re-CASing would fail on the
- * already-true flag and wrongly bail. Pure (the flag is a parameter) so the
- * "exactly one send" double-tap contract is JVM-testable without a Compose harness;
- * [RunSession.reset] (or the save-failure path) releases the flag back to false.
+ * Claim [saving] for one save: the false→true compareAndSet admits exactly one caller
+ * among a double Save tap, Save vs stopAndLog, and blocks a Discard under an in-flight
+ * send. [ownsSaving]: the caller already holds the claim (stopAndLog → logCaptured).
+ * Released by [RunSession.reset] or a save-failure path.
  */
 internal fun claimSaving(saving: MutableStateFlow<Boolean>, ownsSaving: Boolean = false): Boolean =
     ownsSaving || saving.compareAndSet(expect = false, update = true)
 
 /**
- * Critical section for saving a captured run: persist the run, then tear down
- * the in-memory session; as ONE unit that must survive the caller's scope being
- * cancelled mid-save (a rotation cancels `rememberCoroutineScope`).
- *
- * [send] is the non-cancellable JNI persist; by the time it returns, `Core.send`
- * has already APPENDED the run to the event log. [clearSidecar] then drops the
- * crash-recovery sidecar and [resetSession] empties the session; both ORDERED
- * after the append and run inside the SAME `NonCancellable` block as [send], so a
- * rotation can never tear the clear/reset off an already-persisted run (which is
- * exactly the double-log: skipped clear/reset + the failure path re-showing
- * Save/Discard for a run that is already in the log → duplicate on retry / phantom
- * on discard). [finish] (navigation) runs in its own `NonCancellable` block; if the
- * caller was cancelled it may be skipped, which is harmless; [resetSession]
- * already emptied the session, so the recomposed screen is clean (non-unsaved).
- *
- * A [CancellationException] is RE-THROWN, never routed to [onFailure]: the persist
- * + clear + reset already completed inside `NonCancellable`, so treating the cancel
- * as a failed save would resurrect the Save/Discard affordance for a logged run.
- * Any OTHER exception means the persist itself failed BEFORE clear/reset ran (they
- * are sequenced after [send] inside the same block), so [onFailure] fires with the
- * captured run + sidecar still intact for a retry.
+ * Save a captured run as one unit that survives the caller's scope being cancelled
+ * (rotation): [send] persists (appends to the event log), then [clearSidecar] and
+ * [resetSession] run in the same `NonCancellable` IO block, so a persisted run is
+ * never left re-savable. [finish] (navigation) may be skipped on cancel, harmlessly.
+ * A [CancellationException] is re-thrown, never sent to [onFailure]; any other
+ * exception means [send] failed before clear/reset, with the run intact for a retry.
  */
 internal suspend fun <T> runSaveCriticalSection(
     send: suspend () -> T,
@@ -1105,7 +1015,7 @@ internal fun finishTransition(step: FinishStep, action: FinishAction): FinishTra
 internal fun plannedRunToday(model: ViewModel): PrescriptionView? {
     val ns = model.next_session ?: return null
     if (ns.epoch_day != model.today()) return null
-    if (ns.status != "next" && ns.status != "adjusted") return null
+    if (!ns.actionable) return null
     if (sessionDiscipline(ns.session_type) != "Run") return null
     val open = ns.items.filter { !it.done }
     return open.firstOrNull { it.run_target != null || it.run_structure != null } ?: open.firstOrNull()
@@ -1141,7 +1051,7 @@ internal fun workoutTypeForPlan(sessionType: String?, band: String?): WorkoutTyp
 internal fun runTargetLines(res: Resources, t: RunTargetView?, unit: DistanceUnit): List<String> {
     if (t == null) return emptyList()
     val out = ArrayList<String>(3)
-    val pace = if (unit == DistanceUnit.Mi) t.pace_label_mi.ifBlank { t.pace_label_km } else t.pace_label_km.ifBlank { t.pace_label_mi }
+    val pace = paceLabel(t, unit)
     if (pace.isNotBlank()) out += res.getString(R.string.track_target_pace, pace)
     if (t.hr_label.isNotBlank()) out += res.getString(R.string.track_target_hr, t.hr_label)
     if (t.effort_detail.isNotBlank()) out += res.getString(R.string.plan_face_effort, t.effort_detail)
@@ -1152,15 +1062,14 @@ internal fun runTargetLines(res: Resources, t: RunTargetView?, unit: DistanceUni
  *  9:00–9:50 /mi · ≤ 140 bpm · effort 3–5 of 10"), or null without targets. */
 internal fun runTargetSummary(res: Resources, t: RunTargetView?, unit: DistanceUnit): String? {
     if (t == null) return null
-    val pace = if (unit == DistanceUnit.Mi) t.pace_label_mi.ifBlank { t.pace_label_km } else t.pace_label_km.ifBlank { t.pace_label_mi }
-    val parts = listOf(pace, t.hr_label, t.effort_cue).filter { it.isNotBlank() }
+    val parts = listOf(paceLabel(t, unit), t.hr_label, t.effort_cue).filter { it.isNotBlank() }
     if (parts.isEmpty()) return null
     return res.getString(R.string.track_plan_targets_line, parts.joinToString(" · "))
 }
 
-/** The planned distance (km) a run item leads with ("7 km"), or null when its
- *  head is not a plain distance (a structural "6 × 800 m", minutes, bouts). */
-internal fun plannedRunKm(item: PrescriptionView): Double? = item.run_head_km
+/** The target pace label in [unit], falling back to the other unit's label. */
+private fun paceLabel(t: RunTargetView, unit: DistanceUnit): String =
+    if (unit == DistanceUnit.Mi) t.pace_label_mi.ifBlank { t.pace_label_km } else t.pace_label_km.ifBlank { t.pace_label_mi }
 
 /** The planned distance (km) of a SINGLE-STEP planned run (a continuous run: no
  *  warm-up / reps / strides guide), for the live "X to go" line; null for a guided
@@ -1168,14 +1077,14 @@ internal fun plannedRunKm(item: PrescriptionView): Double? = item.run_head_km
 internal fun singleStepPlanKm(item: PrescriptionView): Double? {
     val steps = item.run_structure?.let { buildRunSteps(it) }.orEmpty()
     if (steps.size > 1) return null
-    return plannedRunKm(item)?.takeIf { it > 0.0 }
+    return item.run_head_km?.takeIf { it > 0.0 }
 }
 
 /** The plan preview's headline: the item's name plus its leading distance, never the
- *  targets (those are the lines below it). A plain distance lead ([plannedRunKm]) is
+ *  targets (those are the lines below it). A plain distance lead (`run_head_km`) is
  *  re-expressed in the user's unit; any other lead ("6 × 800 m") is kept verbatim. */
 internal fun runPlanHeadline(item: PrescriptionView, unit: DistanceUnit): String {
-    val km = plannedRunKm(item)
+    val km = item.run_head_km
     val leadShown = if (km != null) {
         "${trimDecimal(Math.round(metersToDisplay(km * 1000.0, unit) * 10.0) / 10.0)} ${unit.distanceLabel}"
     } else {

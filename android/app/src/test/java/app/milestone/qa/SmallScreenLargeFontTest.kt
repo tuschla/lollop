@@ -79,10 +79,6 @@ class SmallScreenLargeFontTest {
 
     // ── Layout checks ───────────────────────────────────────────────────────
 
-    private val checkedKinds = setOf(
-        "forbidden-text", "unlabeled-action", "small-touch-target", "duplicate-action-in-card", "clipped-action",
-    )
-
     private val logFab get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
 
     private fun dp(px: Float) = with(rule.density) { px.toDp().value }
@@ -91,8 +87,8 @@ class SmallScreenLargeFontTest {
     private fun layoutProblems(): List<String> {
         rule.waitForIdle()
         val out = mutableListOf<String>()
-        UxInvariants.check(rule, rule.density, checkClipping = true)
-            .filter { it.kind in checkedKinds }
+        UxInvariants.check(rule, rule.density)
+            .filter { it.kind in UxInvariants.KINDS }
             .forEach { out += it.toString() }
         // Text cut-offs live on the unmerged text nodes.
         fun walkText(n: SemanticsNode) {
@@ -430,7 +426,7 @@ class SmallScreenLargeFontTest {
             ctx,
             listOf(
                 hybridProfile(),
-                Event.LogRunTrack(points = points, hrPctMax = 0.0, longestRecentKm = 0.0, observedAt = end, entryId = end * 1000),
+                Event.LogRunTrack(points = points, hrPctMax = 0.0, observedAt = end, entryId = end * 1000),
             ),
         )
         rule.launchApp()

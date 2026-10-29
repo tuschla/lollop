@@ -172,7 +172,6 @@ class ImportExportRoundtripTest {
         Event.LogRunTrack(
             points = points,
             hrPctMax = 0.0,
-            longestRecentKm = 0.0,
             // What the tracker stamps: the run's last fix (RunTracking's save).
             observedAt = points.last().observedAt,
             entryId = entryId,
@@ -336,6 +335,28 @@ class ImportExportRoundtripTest {
         assertEquals(2, again.duplicates)
     }
 
+    @Test
+    fun aStrayTrkptAfterTheTrksegOrOutsideTheTrkIsIgnored() {
+        // A 2-point segment, then a <trkpt> after </trkseg> and one outside <trk>.
+        // Both are valid coordinates, so only the <trk>/<trkseg> containment gate
+        // can drop them; appended, they would join the committed segment.
+        val gpx = """
+            <gpx>
+              <trk>
+                <trkseg>
+                  <trkpt lat="10.0" lon="20.0"><time>2020-01-01T00:00:00Z</time></trkpt>
+                  <trkpt lat="10.1" lon="20.1"><time>2020-01-01T00:00:01Z</time></trkpt>
+                </trkseg>
+                <trkpt lat="10.2" lon="20.2"><time>2020-01-01T00:00:02Z</time></trkpt>
+              </trk>
+              <trkpt lat="10.3" lon="20.3"><time>2020-01-01T00:00:03Z</time></trkpt>
+            </gpx>
+        """.trimIndent()
+        val segments = parseGpx(gpx)
+        assertEquals("one committed segment", 1, segments.size)
+        assertEquals("only the two in-segment fixes are kept", 2, segments[0].size)
+    }
+
     // ═══ Odd files ══════════════════════════════════════════════════════════════
 
     @Test
@@ -445,7 +466,7 @@ class ImportExportRoundtripTest {
             }
         }
         val e = runCatching { readCappedBytes(endless) }.exceptionOrNull()
-        assertTrue("got $e", e is GpxImportException && e.reason == ImportFailure.TooLarge)
+        assertTrue("got $e", e is ImportException && e.reason == ImportFailure.TooLarge)
         assertTrue("stopped near the cap, read $served bytes", served <= 33L * 1024 * 1024)
     }
 
@@ -522,7 +543,7 @@ class ImportExportRoundtripTest {
                     if (day == 9 && k == 1) amendTarget = set
                     if (day == 12 && k == 3) deleteTarget = set
                 }
-                1 -> out += Event.LogRun(5.0 + rnd.nextInt(3), 30.0 + rnd.nextInt(10), 0.0, 0.0, noon, noon * 1000)
+                1 -> out += Event.LogRun(5.0 + rnd.nextInt(3), 30.0 + rnd.nextInt(10), 0.0, noon, noon * 1000)
                 else -> if (gpsRun == null) {
                     val (pts, starts) = synthRun(seed = 24, startSec = noon - 3600, n = 1200, pauseAt = setOf(700))
                     gpsRun = trackEvent(pts, starts).also { out += it }

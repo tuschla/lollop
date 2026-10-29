@@ -1,27 +1,12 @@
 //! Hypertrophy programming calculators (knowledge-base File 03 -
 //! Evidence-Graded Hypertrophy Programming Logic).
 //!
-//! Pure, deterministic look-ups + arithmetic: per-muscle weekly volume
-//! landmarks (Table 1), rep/load prescription by exercise class (Table 2),
-//! volume→frequency mapping (Table 3), rest defaults (Table 5), the RP
-//! accumulation set-ramp and RIR schedule. No IO, no clocks, no randomness.
-//!
-//! Also: load interchangeability + effort/RIR rules (hyp-012/017/018/020/021/
-//! 022/023), exercise selection + Table 4 substitution (hyp-027/028/029/030),
-//! mesocycle structure + progression drivers (hyp-031/033/037/044), tempo and
-//! supersets (hyp-040/041), and the intermediate default program (hyp-043).
-//!
-//! Numbers transcribed verbatim from File 03. Every prescriptive value is
-//! wrapped in [`Recommended`] via [`Recommended::new`], which forces attached evidence
-//! and confidence from the compile-time registry (`crate::evidence`). Claim ids:
-//! HYP-VOL-001, HYP-LANDMARKS-001, HYP-REPLOAD-001, HYP-FREQ-001, HYP-REST-001,
-//! HYP-REST-002, HYP-RIR-RAMP-001, HYP-VOL-DOSE-001, plus the "File 03
-//! (hypertrophy) rule claims" block in `crate::evidence` (HYP-LOADRANGE/
-//! VOLRAMP-SAFE/SKILL-RIR/RIR-DEFAULT/RIR-ACC/FAIL-SAFE/CUT-OBJ/VEL-CHECK/SFR/
-//! LENGTHSEL/SUBST/PAIN-SWAP/MESO-STRUCT/DOUBLEPROG/LAYOFF/TEMPO/SUPERSET/
-//! DEFAULT-PROG/SPEC-BLOCK-001). Section 7b adds the any-name class / muscle
-//! resolution, fractional delivered volume, block targets, specialization and
-//! double progression the hypertrophy week (`plan::hypertrophy`) is built on.
+//! Pure look-ups + arithmetic, numbers transcribed verbatim from File 03:
+//! per-muscle volume landmarks (Table 1), rep/load by exercise class (Table 2),
+//! volume→frequency (Table 3), the exercise catalog (Table 4), rest defaults
+//! (Table 5), the accumulation set ramp and RIR schedule, any-name class /
+//! muscle resolution, and double progression. Every prescriptive value is a
+//! [`Recommended`] carrying its registered claim.
 
 use crate::evidence;
 use crate::evidence::claims;
@@ -136,18 +121,10 @@ pub fn landmarks_for(muscle: &str) -> Option<&'static VolumeLandmarks> {
         .find(|l| l.muscle.eq_ignore_ascii_case(muscle))
 }
 
-/// Bridge the Table 4 exercise-muscle vocabulary onto the Table 1 landmark keys:
-/// Table 4 names some heads (upper chest, lats/mid-back, gastroc) that Table 1
-/// folds into a real group containment (chest, back, calves). Lookup plumbing,
-/// not a KB claim. Unmapped names pass through unchanged.
-///
-/// Delts are NOT folded (HARD RULE 1): Table 1 has ONLY "Side delts" and
-/// "Rear delts" rows — the front delt is a distinct head, not contained in the
-/// side delts. So only explicit side-delt phrasing resolves to the Side delts
-/// row and explicit rear-delt phrasing to the Rear delts row (both already via
-/// the identity pass-through); the generic "delts" (e.g. Overhead press) and
-/// "front delt" carry no Table 1 row and fall through to `None`, i.e. the honest
-/// no-landmark fallback rather than borrowing Side delts' permissive band.
+/// Fold Table 4 muscle names onto Table 1 landmark keys: upper chest → chest,
+/// lats / mid-back → back, gastrocnemius → calves. Delts have no Table 1 row
+/// (only "Side delts" / "Rear delts", matched as-is) and fall through to
+/// `None`. Lookup plumbing, not a KB claim.
 fn landmark_key(muscle: &str) -> &str {
     if muscle.eq_ignore_ascii_case("upper chest") {
         "chest"
@@ -364,7 +341,7 @@ pub const MIN_SETS_PER_EXERCISE: u8 = 2;
 
 /// The weekly-set target above which a muscle's work must be split across ≥2
 /// sessions (File 03 hypertrophy-025).
-pub const WEEKLY_SPLIT_THRESHOLD: u8 = 12;
+const WEEKLY_SPLIT_THRESHOLD: u8 = 12;
 
 /// Clamp a proposed weekly growth-target set count to the ~31-set ceiling
 /// (File 03 hypertrophy-003).
@@ -627,8 +604,7 @@ pub fn failure_allowed(class: ExerciseClass, machine: bool) -> Recommended<bool>
 }
 
 // ---------------------------------------------------------------------------
-// 7. Exercise selection + substitution (File 03 hypertrophy-027/028/029/030;
-//    Table 4)
+// 7. Exercise catalog (File 03 Table 4)
 // ---------------------------------------------------------------------------
 
 /// Equipment category used by the Table 4 map.
@@ -650,13 +626,6 @@ pub enum LongLengthBias {
     High,
 }
 
-/// Stimulus-to-fatigue tier (File 03 hypertrophy-027, categorical).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SfrTier {
-    Low,
-    High,
-}
-
 /// One row of File 03 Table 4 (exercise → primary muscle → equipment →
 /// long-length bias), transcribed verbatim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -672,35 +641,6 @@ pub struct ExerciseEntry {
     pub long_length: LongLengthBias,
     /// Verbatim Table 4 qualifier (e.g. "High (deep)", "High at top").
     pub long_length_note: &'static str,
-}
-
-impl ExerciseEntry {
-    /// SFR tier when performed on the given equipment (File 03 hypertrophy-027,
-    /// categorical): machines, cables, and stable isolation are high-SFR;
-    /// heavy deadlifts / high-skill free weights are low-SFR.
-    pub fn sfr_tier_with(&self, used: &[Equipment]) -> SfrTier {
-        let machine_or_cable = used
-            .iter()
-            .any(|e| matches!(e, Equipment::Machine | Equipment::Cable));
-        if machine_or_cable || matches!(self.class, ExerciseClass::Isolation) {
-            SfrTier::High
-        } else {
-            SfrTier::Low
-        }
-    }
-
-    /// Stability when performed with the given available equipment: true when
-    /// this exercise itself offers a machine/cable path present in `used`
-    /// (machine/cable paths are externally stabilized; free-weight/bodyweight
-    /// are not — derived from hypertrophy-027's "stable isolation / machines /
-    /// cables" grouping). Per-candidate: unlike a constant "is any machine
-    /// available", this discriminates so a pain-driven swap ranks a stabilized
-    /// option above an unstable one for the SAME available equipment.
-    pub fn stable_with(&self, used: &[Equipment]) -> bool {
-        self.equipment
-            .iter()
-            .any(|eq| used.contains(eq) && matches!(eq, Equipment::Machine | Equipment::Cable))
-    }
 }
 
 use Equipment::{Barbell, Bodyweight, Cable, Dumbbell, Machine};
@@ -894,7 +834,7 @@ pub fn exercise_entry(name: &str) -> Option<&'static ExerciseEntry> {
 /// insensitive) name first, then the same movement after equipment/punctuation
 /// normalization (`plan::same_movement`), so "Barbell bench press" resolves to
 /// the "Bench press" row. Lookup plumbing, not a KB claim.
-pub fn catalog_entry(name: &str) -> Option<&'static ExerciseEntry> {
+fn catalog_entry(name: &str) -> Option<&'static ExerciseEntry> {
     exercise_entry(name).or_else(|| {
         let key = crate::plan::movement_key(name);
         EXERCISES
@@ -937,13 +877,13 @@ const MACHINE_NEEDLES: &[&str] = &[
     "sled",
 ];
 
-/// Table 2 exercise class for ANY exercise name: the Table 4
-/// row's own class when the name is in the catalog; otherwise an isolation
-/// name is [`ExerciseClass::Isolation`], a machine/cable compound is
-/// [`ExerciseClass::ModerateCompound`], and any other name with a core
-/// movement pattern ("Front squat", "Deadlift", "Dumbbell bench press") is a
-/// [`ExerciseClass::HeavyCompound`]. An unclassifiable name takes the moderate
-/// class (mid-window reps, ~90 s rest), never the heavy one.
+/// Table 2 exercise class for ANY exercise name: the Table 4 row's own class
+/// when the name is in the catalog; otherwise an isolation name
+/// ([`crate::plan::is_isolation_lift`]) is [`ExerciseClass::Isolation`], a
+/// machine/cable compound is [`ExerciseClass::ModerateCompound`], and any other
+/// name with a core movement pattern ("Front squat", "Deadlift", "Dumbbell bench
+/// press") is a [`ExerciseClass::HeavyCompound`]. An unclassifiable name takes
+/// the moderate class (mid-window reps, ~90 s rest), never the heavy one.
 pub fn classify(name: &str) -> ExerciseClass {
     if let Some(e) = catalog_entry(name) {
         return e.class;
@@ -952,17 +892,10 @@ pub fn classify(name: &str) -> ExerciseClass {
         return ExerciseClass::Isolation;
     }
     let lower = name.to_ascii_lowercase();
-    if crate::plan::movement_pattern(name).is_some() {
-        if MACHINE_NEEDLES.iter().any(|n| lower.contains(n)) {
-            ExerciseClass::ModerateCompound
-        } else {
-            ExerciseClass::HeavyCompound
-        }
-    } else if ISOLATION_MUSCLE_NEEDLES
-        .iter()
-        .any(|(needle, _)| lower.contains(needle))
+    if crate::plan::movement_pattern(name).is_some()
+        && !MACHINE_NEEDLES.iter().any(|n| lower.contains(n))
     {
-        ExerciseClass::Isolation
+        ExerciseClass::HeavyCompound
     } else {
         ExerciseClass::ModerateCompound
     }
@@ -997,7 +930,6 @@ const ISOLATION_MUSCLE_NEEDLES: &[(&str, &str)] = &[
     ("calves", "calves"),
     ("rear delt", "rear delts"),
     ("reverse fly", "rear delts"),
-    ("reverse flye", "rear delts"),
     ("face pull", "rear delts"),
     ("lateral raise", "side delts"),
     ("side raise", "side delts"),
@@ -1009,7 +941,6 @@ const ISOLATION_MUSCLE_NEEDLES: &[(&str, &str)] = &[
     ("curl", "biceps"),
     ("pec deck", "chest"),
     ("fly", "chest"),
-    ("flye", "chest"),
     ("flies", "chest"),
     ("hip thrust", "glutes"),
     ("glute", "glutes"),
@@ -1017,6 +948,16 @@ const ISOLATION_MUSCLE_NEEDLES: &[(&str, &str)] = &[
     ("sit-up", "abs"),
     ("leg raise", "abs"),
 ];
+
+/// The Table 1 muscle an isolation-named exercise trains directly: the first
+/// [`ISOLATION_MUSCLE_NEEDLES`] fragment the name contains.
+pub(crate) fn isolation_muscle(name: &str) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    ISOLATION_MUSCLE_NEEDLES
+        .iter()
+        .find(|(needle, _)| lower.contains(needle))
+        .map(|&(_, muscle)| muscle)
+}
 
 /// Name fragments of a VERTICAL press: Table 4's "Overhead press" trains the
 /// delts (no Table 1 row) with triceps as the listed secondary, not the chest.
@@ -1043,11 +984,7 @@ pub fn muscle_credits(name: &str) -> Vec<(&'static str, f32)> {
         }
         return out;
     }
-    let lower = name.to_ascii_lowercase();
-    if let Some((_, m)) = ISOLATION_MUSCLE_NEEDLES
-        .iter()
-        .find(|(needle, _)| lower.contains(needle))
-    {
+    if let Some(m) = isolation_muscle(name) {
         add_credit(&mut out, m, 1.0);
         return out;
     }
@@ -1062,6 +999,7 @@ pub fn muscle_credits(name: &str) -> Vec<(&'static str, f32)> {
             add_credit(&mut out, "glutes", 0.5);
         }
         Some(MovementPattern::Push) => {
+            let lower = name.to_ascii_lowercase();
             if !VERTICAL_PRESS_NEEDLES.iter().any(|n| lower.contains(n)) {
                 add_credit(&mut out, "chest", 1.0);
             }
@@ -1149,7 +1087,7 @@ pub fn volume_role(
 
 /// The specialized muscle's landmark row when a specialization block applies
 /// (advanced training age + a known muscle), else `None`.
-pub fn specialization_target(
+fn specialization_target(
     specialization: Option<&str>,
     ta: TrainingAge,
 ) -> Option<&'static VolumeLandmarks> {
@@ -1259,15 +1197,6 @@ pub fn block_rir(week: u8, block_weeks: u8, novice: bool) -> Recommended<u8> {
     } else {
         evidence::graded(rir, claims::HYP_RIR_RAMP_001)
     }
-}
-
-/// %1RM at which `reps` leave `rir` reps in reserve, from the Epley model the
-/// engine uses everywhere ([`crate::strength::pct_1rm_at_effective_reps`] at
-/// `reps + rir`), so a first exposure to a lift anchored only by its e1RM lands
-/// on the target effort: 8 @ 2 RIR → 75 %, 6 @ 2 → 79 %. Pure arithmetic over
-/// strength-005; `f32` for the `PercentOneRm` wire field.
-pub fn pct_1rm_for_reps_in_reserve(reps: u8, rir: u8) -> f32 {
-    crate::strength::pct_1rm_at_effective_reps(f64::from(reps) + f64::from(rir)) as f32
 }
 
 /// Smallest load step once the top of the rep range is reached

@@ -17,11 +17,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,13 +77,10 @@ private fun fittedValueStyle(
 
 /**
  * Big numeric value driven by the in-sheet [NumericKeypad] instead of the IME.
- * The text buffer IS the display AND the submit source, the caller parses
- * exactly what is shown, so the
- * display-committed invariant holds structurally: an unparseable or
- * out-of-range buffer flags [invalid] (danger border + range hint) and the
- * caller blocks its submit. The one-tap relative-adjust chips stay.
- * [active] outlines the field the shared keypad currently edits; tapping the
- * field calls [onActivate] so a multi-field form can switch targets.
+ * [text] is both the display and the submit source; the caller flags an
+ * unparseable or out-of-range buffer as [invalid] (danger border + range hint)
+ * and blocks its submit. [active] outlines the field the shared keypad edits;
+ * tapping the field calls [onActivate] so a multi-field form can retarget it.
  */
 @Composable
 fun KeypadValueField(
@@ -104,7 +105,6 @@ fun KeypadValueField(
     unitClickDescription: String? = null,
 ) {
     val status = LocalStatusColors.current
-    val shape = RoundedCornerShape(Space.Card.dp)
     Column(Modifier.fillMaxWidth()) {
         FieldLabel(
             label,
@@ -116,24 +116,9 @@ fun KeypadValueField(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(shape)
-                // A recessed well with a constant hairline, so an unfocused field
-                // still reads as an editable box (not a static readout) on any
-                // card ground; focus/invalid only strengthen the outline.
-                .background(BgSunken)
-                .border(
-                    when {
-                        invalid -> BorderStroke(1.5.dp, status.danger)
-                        active -> BorderStroke(1.5.dp, Accent)
-                        else -> BorderStroke(1.dp, ChoiceCellBorder)
-                    },
-                    shape,
-                )
-                .clickable(role = Role.Button) { onActivate() }
                 // TalkBack hears the field name with its value ("Age, 35 years"), not
                 // the bare number, and an empty field is not announced as "0".
-                .semantics { contentDescription = if (text.isEmpty()) label else "$label, $text $unit" }
-                .padding(Space.Card.dp),
+                .keypadWell(invalid, active, if (text.isEmpty()) label else "$label, $text $unit", onActivate),
             horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -227,12 +212,34 @@ fun KeypadValueField(
                 )
                 else -> hint.orEmpty()
             },
-            color = if (invalid) status.danger else hintColor,
+            color = if (invalid) DangerText else hintColor,
             style = Type.Caption.merge(TabularFigures),
             minLines = 1,
             modifier = Modifier.padding(top = Space.Xs.dp),
         )
     }
+}
+
+/** The keypad field's recessed well: a constant hairline, so an unfocused field
+ *  still reads as an editable box on any ground; [active] or [invalid] strengthen
+ *  the outline. A tap calls [onActivate]; TalkBack hears [description]. */
+@Composable
+internal fun Modifier.keypadWell(invalid: Boolean, active: Boolean, description: String, onActivate: () -> Unit): Modifier {
+    val status = LocalStatusColors.current
+    val shape = RoundedCornerShape(Space.Card.dp)
+    return clip(shape)
+        .background(BgSunken)
+        .border(
+            when {
+                invalid -> BorderStroke(1.5.dp, status.danger)
+                active -> BorderStroke(1.5.dp, Accent)
+                else -> BorderStroke(1.dp, ChoiceCellBorder)
+            },
+            shape,
+        )
+        .clickable(role = Role.Button) { onActivate() }
+        .semantics { contentDescription = description }
+        .padding(Space.Card.dp)
 }
 
 /**
@@ -297,6 +304,41 @@ fun NumericKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit, allowDecimal: 
     }
 }
 
+/** [NumericKeypad] editing the buffer [text]: each key or backspace reports the
+ *  new buffer to [onBuffer]; [fresh] makes the first key replace the old value. */
+@Composable
+fun NumericKeypad(
+    text: String,
+    fresh: Boolean,
+    onBuffer: (String) -> Unit,
+    allowDecimal: Boolean = true,
+    onDone: (() -> Unit)? = null,
+) = NumericKeypad(
+    onKey = { onBuffer(editNumericBuffer(text, it, fresh)) },
+    onBackspace = { onBuffer(text.dropLast(1)) },
+    allowDecimal = allowDecimal,
+    onDone = onDone,
+)
+
+/** Shows [content] (a keypad) while [open] and scrolls it into view when it
+ *  opens, then [alsoReveal] (the field it types into), so a short window never
+ *  leaves the keypad below the fold. */
+@Composable
+fun KeypadPanel(
+    open: Boolean,
+    alsoReveal: BringIntoViewRequester? = null,
+    content: @Composable () -> Unit,
+) {
+    if (!open) return
+    val requester = remember { BringIntoViewRequester() }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        requester.bringIntoView()
+        alsoReveal?.bringIntoView()
+    }
+    Box(Modifier.bringIntoViewRequester(requester)) { content() }
+}
+
 /** One raised [NumericKeypad] key: a digit, the decimal point or backspace. */
 @Composable
 private fun KeypadKey(key: Char, onKey: (Char) -> Unit, onBackspace: () -> Unit, modifier: Modifier) {
@@ -334,18 +376,19 @@ private fun KeypadKey(key: Char, onKey: (Char) -> Unit, onBackspace: () -> Unit,
 
 /**
  * Apply one keypad key to a numeric text buffer. `replaceAll` implements
- * calculator-style entry: the first digit after (re)activating a field starts
- * a fresh number instead of appending to the old one. A second decimal point
- * is ignored; a leading '.' becomes "0."; length is capped so the display
- * can't overflow. Pure string editing, parsing/validation stay with the caller.
+ * calculator-style entry: the first key after (re)activating a field starts a
+ * fresh number. A second decimal point is ignored, a leading '.' becomes "0.",
+ * a digit replaces a lone "0", and the length is capped at
+ * [NumericBufferMaxLength]. Parsing and validation stay with the caller.
  */
 fun editNumericBuffer(text: String, key: Char, replaceAll: Boolean): String {
     val base = if (replaceAll) "" else text
+    if (base.length >= NumericBufferMaxLength) return base
     if (key == '.') {
         if (base.contains('.')) return base
         return if (base.isEmpty()) "0." else "$base."
     }
-    if (base.length >= NumericBufferMaxLength) return base
+    if (base == "0") return "$key"
     return base + key
 }
 

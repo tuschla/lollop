@@ -27,9 +27,7 @@ import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.RecentRace
 import app.milestone.ResistanceModality
-import app.milestone.AppSettings
 import app.milestone.todayEpochDay
-import com.github.takahirom.roborazzi.captureScreenRoboImage
 import java.util.Locale
 import org.junit.After
 import org.junit.Before
@@ -66,14 +64,6 @@ class ScreenshotSetupTest {
 
     @After
     fun tearDown() = QaHarness.teardown()
-
-    private fun theme(mode: DarkMode) = AppSettings.setDarkMode(ctx, mode)
-
-    private val DarkMode.suffix get() = if (this == DarkMode.Dark) "dark" else "light"
-
-    @OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)
-    private fun shot(name: String) =
-        rule.captureWithoutRipples { captureScreenRoboImage("src/test/screenshots/$name.png") }
 
     // ── Scrolling ──────────────────────────────────────────────────────────
 
@@ -112,9 +102,9 @@ class ScreenshotSetupTest {
 
     /** Walk to [name], answer it as the walk does (so the captured screen shows its
      *  selected state and the follow-ups an answer reveals), then capture it: once
-     *  for a short screen, or top / [mid] / bottom for a tall one. */
-    private fun setupStep(mode: DarkMode, name: String, tall: Boolean, mid: SemanticsMatcher? = null) {
-        theme(mode)
+     *  for a screen that fits, or top and bottom for a tall one. */
+    private fun setupStep(mode: DarkMode, name: String, tall: Boolean) {
+        useDarkMode(mode)
         rule.launchAppExpectingSetup()
         GuidedSetupWalk.walk(rule, stopAt = name)
         GuidedSetupWalk.bothPath.single { it.name == name }.answer(rule)
@@ -122,52 +112,46 @@ class ScreenshotSetupTest {
         // Each answer scrolls its option into view; start every capture set at the top.
         scrollScreen(toEnd = false)
         if (!tall) {
-            shot("setup-step-$name-${mode.suffix}")
+            rule.shot("setup-step-$name-${mode.suffix}")
             return
         }
-        shot("setup-step-$name-top-${mode.suffix}")
-        if (mid != null) {
-            scrollToTop(mid)
-            shot("setup-step-$name-mid-${mode.suffix}")
-        }
+        rule.shot("setup-step-$name-top-${mode.suffix}")
         scrollScreen(toEnd = true)
-        shot("setup-step-$name-bottom-${mode.suffix}")
+        rule.shot("setup-step-$name-bottom-${mode.suffix}")
     }
-
-    private val healthMid get() = hasText(str(R.string.setup_parq_q4))
 
     @Test fun setupTrainLight() = setupStep(DarkMode.Light, "train", tall = false)
     @Test fun setupTrainDark() = setupStep(DarkMode.Dark, "train", tall = false)
 
-    @Test fun setupLiftGoalLight() = setupStep(DarkMode.Light, "lift-goal", tall = true)
-    @Test fun setupLiftGoalDark() = setupStep(DarkMode.Dark, "lift-goal", tall = true)
+    @Test fun setupLiftGoalLight() = setupStep(DarkMode.Light, "lift-goal", tall = false)
+    @Test fun setupLiftGoalDark() = setupStep(DarkMode.Dark, "lift-goal", tall = false)
 
     @Test fun setupPlacementLight() = setupStep(DarkMode.Light, "placement", tall = true)
     @Test fun setupPlacementDark() = setupStep(DarkMode.Dark, "placement", tall = true)
 
-    @Test fun setupRunGoalLight() = setupStep(DarkMode.Light, "run-goal", tall = true)
-    @Test fun setupRunGoalDark() = setupStep(DarkMode.Dark, "run-goal", tall = true)
+    @Test fun setupRunGoalLight() = setupStep(DarkMode.Light, "run-goal", tall = false)
+    @Test fun setupRunGoalDark() = setupStep(DarkMode.Dark, "run-goal", tall = false)
 
-    @Test fun setupRaceLight() = setupStep(DarkMode.Light, "race", tall = true)
-    @Test fun setupRaceDark() = setupStep(DarkMode.Dark, "race", tall = true)
+    @Test fun setupRaceLight() = setupStep(DarkMode.Light, "race", tall = false)
+    @Test fun setupRaceDark() = setupStep(DarkMode.Dark, "race", tall = false)
 
     @Test fun setupLeadLight() = setupStep(DarkMode.Light, "lead", tall = false)
     @Test fun setupLeadDark() = setupStep(DarkMode.Dark, "lead", tall = false)
 
-    @Test fun setupDaysLight() = setupStep(DarkMode.Light, "days", tall = true)
-    @Test fun setupDaysDark() = setupStep(DarkMode.Dark, "days", tall = true)
+    @Test fun setupDaysLight() = setupStep(DarkMode.Light, "days", tall = false)
+    @Test fun setupDaysDark() = setupStep(DarkMode.Dark, "days", tall = false)
 
-    @Test fun setupLevelLight() = setupStep(DarkMode.Light, "level", tall = true)
-    @Test fun setupLevelDark() = setupStep(DarkMode.Dark, "level", tall = true)
+    @Test fun setupLevelLight() = setupStep(DarkMode.Light, "level", tall = false)
+    @Test fun setupLevelDark() = setupStep(DarkMode.Dark, "level", tall = false)
 
-    @Test fun setupRunNowLight() = setupStep(DarkMode.Light, "run-now", tall = true)
-    @Test fun setupRunNowDark() = setupStep(DarkMode.Dark, "run-now", tall = true)
+    @Test fun setupRunNowLight() = setupStep(DarkMode.Light, "run-now", tall = false)
+    @Test fun setupRunNowDark() = setupStep(DarkMode.Dark, "run-now", tall = false)
 
-    @Test fun setupAboutLight() = setupStep(DarkMode.Light, "about", tall = true)
-    @Test fun setupAboutDark() = setupStep(DarkMode.Dark, "about", tall = true)
+    @Test fun setupAboutLight() = setupStep(DarkMode.Light, "about", tall = false)
+    @Test fun setupAboutDark() = setupStep(DarkMode.Dark, "about", tall = false)
 
-    @Test fun setupHealthLight() = setupStep(DarkMode.Light, "health", tall = true, mid = healthMid)
-    @Test fun setupHealthDark() = setupStep(DarkMode.Dark, "health", tall = true, mid = healthMid)
+    @Test fun setupHealthLight() = setupStep(DarkMode.Light, "health", tall = true)
+    @Test fun setupHealthDark() = setupStep(DarkMode.Dark, "health", tall = true)
 
     @Test fun setupReviewLight() = setupStep(DarkMode.Light, "review", tall = true)
     @Test fun setupReviewDark() = setupStep(DarkMode.Dark, "review", tall = true)
@@ -176,10 +160,10 @@ class ScreenshotSetupTest {
     @Test
     fun setupReviewFontScale130() {
         RuntimeEnvironment.setFontScale(1.3f)
-        theme(DarkMode.Light)
+        useDarkMode(DarkMode.Light)
         rule.launchAppExpectingSetup()
         GuidedSetupWalk.walk(rule, stopAt = "review")
-        shot("setup-step-review-fontscale130-light")
+        rule.shot("setup-step-review-fontscale130-light")
     }
 
     // ── Profile: coaching-input rows ───────────────────────────────────────
@@ -256,7 +240,7 @@ class ScreenshotSetupTest {
     /** Profile for [profile], with "Your plan answers" unfolded and its header
      *  pinned under the top edge, so the coaching-input rows are on screen. */
     private fun openProfile(mode: DarkMode, profile: Event) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(profile))
         rule.launchApp()
         rule.selectTab(str(R.string.main_dest_profile))
@@ -277,7 +261,7 @@ class ScreenshotSetupTest {
     /** Open [labelId]'s picker at the top of the screen, capture, close it again. */
     private fun openRowShot(labelId: Int, name: String) {
         toggleRow(labelId)
-        shot(name)
+        rule.shot(name)
         toggleRow(labelId)
     }
 
@@ -286,27 +270,27 @@ class ScreenshotSetupTest {
         openProfile(mode, hybridProfile())
         // The plan answers header, the PLAN card (Focus Both, which leads, training
         // days, experience, re-run setup) and the top of the LIFTING card.
-        shot("profile-hybrid-top-$s")
+        rule.shot("profile-hybrid-top-$s")
         // The one Training days control open: lift / run day scales + weekdays.
         openRowShot(R.string.setup_row_weekdays, "profile-hybrid-days-open-$s")
         // The LIFTING card (goal, modality, priority muscle, sets per muscle) and the
         // start of RUNNING (goal distance, race date, recent race, weekly distance).
         // Each group label renders as an uppercase accent overline.
         scrollToTop(hasText(str(R.string.setup_section_lifting).uppercase(Locale.US)))
-        shot("profile-hybrid-mid-$s")
+        rule.shot("profile-hybrid-mid-$s")
         // Longest run, YOU, HEALTH & SAFETY (health questions "1 applies").
         scrollToTop(row(R.string.setup_row_longest_run))
-        shot("profile-hybrid-lower-$s")
+        rule.shot("profile-hybrid-lower-$s")
         // TRAINING CONTEXT (environment, back from a break "Since …", high-load).
         scrollToTop(hasText(str(R.string.setup_section_context).uppercase(Locale.US)))
-        shot("profile-hybrid-context-$s")
+        rule.shot("profile-hybrid-context-$s")
         openRowShot(R.string.setup_row_priority_muscle, "profile-hybrid-priority-muscle-open-$s")
         openRowShot(R.string.setup_row_recent_race, "profile-hybrid-recent-race-open-$s")
         // The seven PAR-Q+ questions (Q5 Yes + cleared), then the rest of them below.
         toggleRow(R.string.setup_row_health_questions)
-        shot("profile-hybrid-health-open-top-$s")
+        rule.shot("profile-hybrid-health-open-top-$s")
         scrollToTop(hasText(str(R.string.setup_parq_q5)))
-        shot("profile-hybrid-health-open-bottom-$s")
+        rule.shot("profile-hybrid-health-open-bottom-$s")
         toggleRow(R.string.setup_row_health_questions)
         // Weeks off scale + restart date.
         openRowShot(R.string.setup_row_break, "profile-hybrid-break-open-$s")
@@ -316,7 +300,7 @@ class ScreenshotSetupTest {
         val s = mode.suffix
         openProfile(mode, calisProfile())
         // Bodyweight modality, lift days, meet date, equipment, training days.
-        shot("profile-calis-top-$s")
+        rule.shot("profile-calis-top-$s")
         openRowShot(R.string.setup_row_meet, "profile-calis-meet-open-$s")
         openRowShot(R.string.setup_row_equipment, "profile-calis-equipment-open-$s")
         openRowShot(R.string.setup_row_weekdays, "profile-calis-weekdays-open-$s")
@@ -328,7 +312,7 @@ class ScreenshotSetupTest {
         // Goal distance, race date, recent race (not set), running rows, longest
         // run, the runner-strength switch.
         scrollToTop(row(R.string.setup_row_goal_distance))
-        shot("profile-runner-mid-$s")
+        rule.shot("profile-runner-mid-$s")
     }
 
     @Test fun profileHybridLight() = profileHybrid(DarkMode.Light)
@@ -349,7 +333,7 @@ class ScreenshotSetupTest {
         rule.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(overline)
         rule.waitForIdle()
         scrollToTop(overline)
-        shot("profile-calculators-${mode.suffix}")
+        rule.shot("profile-calculators-${mode.suffix}")
     }
 
     @Test fun profileCalculatorsLight() = profileCalculators(DarkMode.Light)
@@ -361,6 +345,6 @@ class ScreenshotSetupTest {
         RuntimeEnvironment.setFontScale(1.3f)
         openProfile(DarkMode.Light, hybridProfile())
         toggleRow(R.string.setup_row_health_questions)
-        shot("profile-hybrid-health-open-fontscale130-light")
+        rule.shot("profile-hybrid-health-open-fontscale130-light")
     }
 }

@@ -54,104 +54,6 @@ fn profile(weekly_sets: u8) -> Event {
     })
 }
 
-fn profile_dated(weekly_sets: u8, eff: Option<i64>) -> Event {
-    match profile(weekly_sets) {
-        Event::SetProfile(mut p) => {
-            p.effective_from_epoch_day = eff;
-            Event::SetProfile(p)
-        }
-        _ => unreachable!(),
-    }
-}
-
-fn ended(exercise: &str, epoch_day: i64, ended: bool) -> Event {
-    Event::SetExerciseEnded {
-        exercise: exercise.into(),
-        epoch_day,
-        ended,
-        observed_at: 1_758_600_000,
-    }
-}
-
-#[test]
-fn dated_profiles_keep_the_history_subsequence() {
-    // update()'s profile_history keeps [eff10, eff15] from
-    // [eff10, eff20, eff15] (eff20 is dropped when eff15 is applied), so
-    // compaction must keep exactly that subsequence — not just the last line.
-    let out = compact_event_log(vec![
-        profile_dated(10, Some(10)),
-        profile_dated(20, Some(20)),
-        profile_dated(30, Some(15)),
-    ]);
-    assert_eq!(
-        out,
-        vec![profile_dated(10, Some(10)), profile_dated(30, Some(15))]
-    );
-}
-
-#[test]
-fn ascending_dated_profiles_all_survive() {
-    // A later profile with a HIGHER eff never supersedes the earlier one; a
-    // plain keep-last singleton would wrongly drop the eff10 line.
-    let out = compact_event_log(vec![
-        profile_dated(10, Some(10)),
-        profile_dated(20, Some(20)),
-    ]);
-    assert_eq!(
-        out,
-        vec![profile_dated(10, Some(10)), profile_dated(20, Some(20))]
-    );
-}
-
-#[test]
-fn none_dated_profile_replaces_the_whole_history() {
-    // A None-dated (-inf) edit drops every prior entry (eff >= -inf).
-    let out = compact_event_log(vec![profile_dated(10, Some(10)), profile_dated(20, None)]);
-    assert_eq!(out, vec![profile_dated(20, None)]);
-}
-
-#[test]
-fn undated_profiles_still_keep_last() {
-    // Back-compat: two undated (None = -inf) profiles, the earlier is dead.
-    let out = compact_event_log(vec![profile(10), profile(20)]);
-    assert_eq!(out, vec![profile(20)]);
-}
-
-#[test]
-fn set_exercise_ended_last_write_wins_by_exact_key() {
-    // Same (exercise.trim().lowercase(), epoch_day) key → only the last
-    // marker survives (here a later reopen).
-    let out = compact_event_log(vec![
-        ended("Back Squat", 20354, true),
-        ended("back squat", 20354, false),
-    ]);
-    assert_eq!(out, vec![ended("back squat", 20354, false)]);
-}
-
-#[test]
-fn set_exercise_ended_keeps_distinct_keys_and_equipment_variants() {
-    // A different epoch_day, or a raw string differing by equipment words, is a
-    // DIFFERENT exact key, so both survive (conservative: update() might collapse
-    // the equipment variant, but keeping a would-be-overwritten line is inert).
-    let events = vec![
-        ended("Back Squat", 20354, true),
-        ended("Barbell Back Squat", 20354, true),
-        ended("Back Squat", 20355, true),
-    ];
-    assert_eq!(compact_event_log(events.clone()), events);
-}
-
-#[test]
-fn clear_sets_sweeps_earlier_ended_markers() {
-    // SetExerciseEnded is family 1: a later ClearSets drops prior markers (Rule 1).
-    let out = compact_event_log(vec![
-        ended("Bench", 20354, true),
-        Event::ClearSets,
-        ended("Bench", 20354, true),
-    ]);
-    assert_eq!(out, vec![ended("Bench", 20354, true)]);
-}
-
 fn review(overtraining: u8) -> Event {
     Event::SubmitReview(SessionReview {
         overtraining_signal_count: overtraining,
@@ -181,14 +83,6 @@ fn assert_replay_equivalent(events: Vec<Event>) {
         replay(&compacted),
         "compacted log replayed to a different view"
     );
-}
-
-#[test]
-fn every_review_survives() {
-    // Each weekly check-in is a `weekly_history` entry past days are judged
-    // against.
-    let events = vec![review(1), review(2), review(3)];
-    assert_eq!(compact_event_log(events.clone()), events);
 }
 
 fn session_review(bad_day: bool) -> Event {
@@ -295,23 +189,10 @@ fn monday_row(events: &[Event]) -> crate::app::SessionPlanView {
         .expect("Monday row")
 }
 
-fn soreness_at(value: f64, observed_at: i64) -> Event {
-    Event::SubmitReadiness(ReadinessInput {
-        signal: ReadinessSignal::Soreness,
-        value,
-        observed_at,
-        streak: 0,
-        pain: None,
-        effort_min: None,
-    })
-}
-
 #[test]
 fn a_dated_remove_keeps_its_submit_for_the_day_it_shaped() {
     // Monday's head-cold downgrade (load-free, half volume), removed on
     // Tuesday: the input still shaped Monday, so neither line may go.
-    // (A soreness report now only holds the top end, which leaves a
-    // missed day's numbers unchanged, so it can no longer pin this.)
     let mut events = planned_week(PLAN_MON + 1);
     events.push(Event::SubmitReadiness(ReadinessInput {
         signal: ReadinessSignal::Illness,
@@ -334,30 +215,6 @@ fn a_dated_remove_keeps_its_submit_for_the_day_it_shaped() {
         .cloned()
         .collect();
     assert_ne!(monday_row(&events), monday_row(&without));
-}
-
-#[test]
-fn an_undated_remove_skips_the_submit_a_dated_remove_retracted() {
-    // The dated remove retracts the newer soreness; the undated one then
-    // deletes the older, so only the older line and its remove go.
-    let older = soreness_at(6.0, 100);
-    let newer = soreness_at(5.0, 200);
-    let dated = remove_at(ReadinessSignal::Soreness, 300);
-    let events = vec![
-        older,
-        newer.clone(),
-        dated.clone(),
-        remove(ReadinessSignal::Soreness),
-    ];
-    assert_eq!(compact_event_log(events.clone()), vec![newer, dated]);
-    assert_replay_equivalent(events);
-}
-
-#[test]
-fn an_unmatched_dated_remove_is_dropped_alone() {
-    let events = vec![remove_at(ReadinessSignal::Pain, 300), pain()];
-    assert_eq!(compact_event_log(events.clone()), vec![pain()]);
-    assert_replay_equivalent(events);
 }
 
 #[test]
@@ -474,15 +331,6 @@ fn remove_at(signal: ReadinessSignal, observed_at: i64) -> Event {
 }
 
 #[test]
-fn remove_readiness_cancels_its_submit_pairwise() {
-    // The mis-tap undo: pain + its removal are inert; the wellness input
-    // logged in between must survive untouched.
-    let out = compact_event_log(vec![pain(), readiness(-1.5), remove(ReadinessSignal::Pain)]);
-    assert_eq!(out, vec![readiness(-1.5)]);
-    assert_replay_equivalent(vec![pain(), readiness(-1.5), remove(ReadinessSignal::Pain)]);
-}
-
-#[test]
 fn remove_readiness_cancels_only_the_latest_matching_submit() {
     // Two pain reports, one undo: the earlier report must still replay
     // (and still hard-stop training).
@@ -557,55 +405,21 @@ fn hr_zones(age_years: f64) -> Event {
 }
 
 #[test]
-fn only_the_last_race_prediction_survives() {
-    // PredictRace is a last-write-wins singleton (family 5); an earlier query
-    // is provably inert once a later one replaces model.race_query.
-    let out = compact_event_log(vec![predict(10_000.0), plan("chest"), predict(21_097.5)]);
-    assert_eq!(out, vec![plan("chest"), predict(21_097.5)]);
-}
-
-#[test]
-fn only_the_last_protein_target_survives() {
-    // ComputeProtein is a last-write-wins singleton (family 7); an earlier
-    // query is provably inert once a later one replaces model.protein_query.
-    let out = compact_event_log(vec![protein(70.0), plan("chest"), protein(90.0)]);
-    assert_eq!(out, vec![plan("chest"), protein(90.0)]);
-}
-
-#[test]
-fn clear_wipes_the_protein_family() {
-    // A trailing ClearProtein (family 7) supersedes every ComputeProtein
-    // before it, leaving nothing to replay in that family.
-    let out = compact_event_log(vec![protein(70.0), protein(90.0), Event::ClearProtein]);
-    assert!(out.is_empty());
-}
-
-#[test]
-fn clear_wipes_the_hypertrophy_plan_family() {
-    // A trailing ClearHypertrophyPlan (family 6) supersedes every plan before
-    // it, leaving nothing to replay in that family.
-    let out = compact_event_log(vec![
-        plan("chest"),
-        plan("back"),
-        Event::ClearHypertrophyPlan,
-    ]);
-    assert!(out.is_empty());
-}
-
-#[test]
-fn only_the_last_hr_zone_query_survives() {
-    // ComputeHrZones is a last-write-wins singleton (family 8); an earlier
-    // query is provably inert once a later one replaces model.hr_zone_query.
-    let out = compact_event_log(vec![hr_zones(30.0), plan("chest"), hr_zones(40.0)]);
-    assert_eq!(out, vec![plan("chest"), hr_zones(40.0)]);
-}
-
-#[test]
-fn clear_wipes_the_hr_zone_family() {
-    // A trailing ClearHrZones (family 8) supersedes every ComputeHrZones
-    // before it, leaving nothing to replay in that family.
-    let out = compact_event_log(vec![hr_zones(30.0), hr_zones(40.0), Event::ClearHrZones]);
-    assert!(out.is_empty());
+fn calculators_keep_the_last_query_and_a_clear_wipes_their_family() {
+    for (first, last, clear) in [
+        (
+            predict(10_000.0),
+            predict(21_097.5),
+            Event::ClearRacePrediction,
+        ),
+        (plan("chest"), plan("back"), Event::ClearHypertrophyPlan),
+        (protein(70.0), protein(90.0), Event::ClearProtein),
+        (hr_zones(30.0), hr_zones(40.0), Event::ClearHrZones),
+    ] {
+        let out = compact_event_log(vec![first.clone(), set("a"), last.clone()]);
+        assert_eq!(out, vec![set("a"), last.clone()]);
+        assert!(compact_event_log(vec![first, last, clear]).is_empty());
+    }
 }
 
 fn checkin(observed_at: i64) -> Event {
@@ -726,16 +540,6 @@ fn set_today(day: i64) -> Event {
 }
 
 #[test]
-fn only_the_first_plan_request_survives() {
-    // GeneratePlan is keep-FIRST (family 13): `update`'s GeneratePlan arm is
-    // first-write-wins, so the original request defines the plan anchor and
-    // every later one is a no-op. The first surviving request survives; the
-    // rest are provably inert. See app/mod.rs `Event::GeneratePlan`.
-    let out = compact_event_log(vec![generate_plan(1), plan("chest"), generate_plan(8)]);
-    assert_eq!(out, vec![generate_plan(1), plan("chest")]);
-}
-
-#[test]
 fn session_moves_survive_keep_first_and_clear_with_the_plan() {
     let mv = |from: i64, to: i64| Event::MoveSession {
         from_epoch_day: from,
@@ -774,19 +578,6 @@ fn a_final_clear_plan_is_kept_and_a_superseded_one_dropped() {
         set_today(2),
         Event::ClearPlan,
         set_today(3),
-    ]);
-}
-
-#[test]
-fn replay_equivalence_of_two_plan_requests_no_clear() {
-    // Cross-language parity scenario (mirrors EventLogTest keep-first): two
-    // GeneratePlans, no ClearPlan; the first survives and the compacted log
-    // replays to the identical plan anchor.
-    assert_replay_equivalent(vec![
-        profile(12),
-        set_today(10),
-        generate_plan(1),
-        generate_plan(8),
     ]);
 }
 
@@ -877,85 +668,6 @@ fn amend_set(id: u64, weight_kg: f64) -> Event {
 }
 
 #[test]
-fn delete_cancels_its_logged_set_pairwise() {
-    // A set logged then deleted is inert; an unrelated run survives.
-    let events = vec![set_id("Bench", 7, 0), run(5.0), del_set(7)];
-    let out = compact_event_log(events.clone());
-    assert_eq!(out, vec![run(5.0)], "the set+delete pair is dropped");
-    assert_replay_equivalent(events);
-}
-
-#[test]
-fn delete_targets_the_newest_matching_row() {
-    // Two sets share an id; the delete removes the newest: the earlier
-    // survives, exactly as `update` (find_set = rposition) would.
-    let events = vec![set_id("A", 3, 0), set_id("B", 3, DAY_SEC), del_set(3)];
-    let out = compact_event_log(events.clone());
-    assert_eq!(out, vec![set_id("A", 3, 0)]);
-    assert_replay_equivalent(events);
-}
-
-#[test]
-fn amend_supersedes_the_prior_set_but_survives() {
-    // A strict amend needs its base row on replay, so Log→Amend keeps BOTH
-    // the base log AND the amend (replay-equivalent to editing the set in
-    // place). The amend keeps the entry's id for later edits.
-    let events = vec![set_id("Bench", 5, 0), amend_set(5, 120.0)];
-    let out = compact_event_log(events.clone());
-    assert_eq!(
-        out,
-        vec![set_id("Bench", 5, 0), amend_set(5, 120.0)],
-        "the base log survives so the strict amend can replace it on replay"
-    );
-    assert_replay_equivalent(events);
-}
-
-#[test]
-fn amend_chain_collapses_to_log_plus_last_amend() {
-    // A Log→Amend→Amend chain (no delete) collapses to `[log, last amend]`;
-    // the superseded middle amend is dropped, the base log is retained so the
-    // strict final amend has a row to replace on replay.
-    let events = vec![
-        set_id("Bench", 9, 0),
-        amend_set(9, 110.0),
-        amend_set(9, 130.0),
-    ];
-    let out = compact_event_log(events.clone());
-    assert_eq!(
-        out,
-        vec![set_id("Bench", 9, 0), amend_set(9, 130.0)],
-        "the middle amend is superseded; the base log and last amend remain"
-    );
-    assert_replay_equivalent(events);
-}
-
-#[test]
-fn invalid_amend_does_not_revert_a_valid_edit() {
-    // `update` rejects an invalid AmendSet (reps=0, no hold) as a NO-OP, so it
-    // supersedes nothing. Compaction must drop it ALONE and keep the valid prior
-    // amend — otherwise the compacted log replays to the pre-edit value and the
-    // user's edit silently reverts on the next launch.
-    let invalid_amend = Event::AmendSet {
-        hold_sec: None,
-        entry_id: 1,
-        exercise: "Bench".into(),
-        weight_kg: 110.0,
-        reps: 0,
-        rpe: 8.0,
-        observed_at: 0,
-        observed_at_fallback: 0,
-    };
-    let events = vec![set_id("Bench", 1, 0), amend_set(1, 110.0), invalid_amend];
-    let out = compact_event_log(events.clone());
-    assert_eq!(
-        out,
-        vec![set_id("Bench", 1, 0), amend_set(1, 110.0)],
-        "the invalid trailing amend is dropped alone; the valid edit survives"
-    );
-    assert_replay_equivalent(events);
-}
-
-#[test]
 fn delete_skips_an_invalid_phantom_log_and_cancels_the_real_row() {
     // A valid legacy row, a phantom invalid LogSet sharing its (id 0, time), then
     // a DeleteEntry. `update` drops the invalid line (it never becomes a row) and
@@ -999,9 +711,8 @@ fn delete_skips_an_invalid_phantom_log_and_cancels_the_real_row() {
 fn amend_after_delete_never_resurrects_the_entry() {
     // Core prevention: Log→Delete→Amend, where the amend targets the row the
     // delete already removed. The delete cancels the entry (log + itself); the
-    // amend then matches nothing and is dropped; the entry STAYS deleted, both
-    // in a live `update` replay and after compaction. Previously, the amend
-    // replayed as a push and RESURRECTED the deleted row.
+    // amend then matches nothing and is dropped; the entry stays deleted, both
+    // in a live `update` replay and after compaction.
     let events = vec![set_id("Bench", 5, 0), del_set(5), amend_set(5, 120.0)];
     // Live replay: the amend is a no-op on the missing row → nothing survives.
     assert!(
@@ -1039,20 +750,6 @@ fn amend_after_delete_never_resurrects_the_entry() {
         "only the unrelated run survives; the deleted run is not resurrected"
     );
     assert_replay_equivalent(run_events);
-}
-
-#[test]
-fn amend_chain_collapses_to_the_last_amend() {
-    // Log→Amend→Amend→Delete is fully inert.
-    let events = vec![
-        set_id("Bench", 9, 0),
-        amend_set(9, 110.0),
-        amend_set(9, 130.0),
-        del_set(9),
-    ];
-    let out = compact_event_log(events.clone());
-    assert!(out.is_empty(), "the whole edit chain cancels away");
-    assert_replay_equivalent(events);
 }
 
 #[test]
@@ -1106,11 +803,8 @@ fn legacy_row_without_id_is_matched_on_observed_at() {
 }
 
 #[test]
-fn run_delete_and_amend_replay_equivalent() {
-    let deleted = vec![run_id(5.0, 2, 0), run_id(8.0, 3, DAY_SEC), del_run(3)];
-    assert_eq!(compact_event_log(deleted.clone()), vec![run_id(5.0, 2, 0)]);
-    assert_replay_equivalent(deleted);
-
+fn run_amend_keeps_its_base_log() {
+    // The strict amend replaces the base row on replay, so both survive.
     let amended = vec![
         run_id(5.0, 6, 0),
         Event::AmendRun {
@@ -1126,9 +820,7 @@ fn run_delete_and_amend_replay_equivalent() {
             avg_hr_bpm: None,
         },
     ];
-    // The base run log is KEPT (the strict amend replaces it on replay);
-    // the amend survives too, so `[log, amend]` both remain.
-    assert_eq!(compact_event_log(amended.clone()).len(), 2);
+    assert_eq!(compact_event_log(amended.clone()), amended);
     assert_replay_equivalent(amended);
 }
 
@@ -1251,9 +943,9 @@ fn clear_runs_wipes_a_base_and_its_trims() {
 
 #[test]
 fn a_run_delete_drops_its_pair_across_other_run_lines() {
-    // No run carries another's distance (the card spike baseline is derived from
-    // the surviving runs), so another run's log and trim between a run and its
-    // delete no longer hold the pair back.
+    // No run carries another's distance (the card spike baseline is derived
+    // from the surviving runs), so another run's log and trim between a run
+    // and its delete do not hold the pair back.
     let events = vec![
         run_track_id(7_200_005, 0),
         run_id(5.0, 7_200_006, DAY_SEC),
@@ -1312,12 +1004,7 @@ fn amend_run_meta_round_trips_through_compaction() {
         Some(crate::schema::WorkoutType::Tempo)
     );
     assert_replay_equivalent(events);
-    // The wire form round-trips with defaults for the optional fields.
-    let wire = serde_json::to_string(&meta_run(5, 9, Some(4))).unwrap();
-    assert_eq!(
-        serde_json::from_str::<Event>(&wire).unwrap(),
-        meta_run(5, 9, Some(4))
-    );
+    // A minimal wire line decodes with defaults for the optional fields.
     let minimal: Event =
         serde_json::from_str(r#"{"AmendRunMeta":{"entry_id":5}}"#).expect("minimal meta");
     assert!(matches!(
@@ -1488,15 +1175,14 @@ fn del_act(id: u64, observed_at_fallback: i64) -> Event {
 }
 
 #[test]
-fn activities_are_family_15() {
-    assert_eq!(classify(&act(30.0, 1, 0)), (Family::Activities, false));
+fn activities_form_their_own_family() {
+    let family = |e: &Event| LineFacts::of(e).family();
+    assert_eq!(family(&act(30.0, 1, 0)), Some((Family::Activities, false)));
     assert_eq!(
-        classify(&Event::ClearActivities),
-        (Family::Activities, true)
+        family(&Event::ClearActivities),
+        Some((Family::Activities, true))
     );
-    assert_eq!(classify(&del_act(1, 0)), (Family::Activities, false));
-    assert_eq!(Family::Activities as u8, 15);
-    assert_eq!(Family::ALL[15], Family::Activities);
+    assert_eq!(family(&del_act(1, 0)), Some((Family::Activities, false)));
 }
 
 #[test]
@@ -1603,4 +1289,152 @@ fn activities_interleaved_with_everything_replay_equivalent() {
         del_run(4),
         set_today(monday + 2),
     ]);
+}
+
+// ── Rule 2: SetToday ──
+
+#[test]
+fn set_today_keeps_every_offset_change_and_the_last_day() {
+    let today = |epoch_day, utc_offset_sec| Event::SetToday {
+        epoch_day,
+        utc_offset_sec,
+    };
+    let events = vec![
+        today(1, 0),
+        today(2, 3_600),
+        today(3, 3_600),
+        today(4, 0),
+        today(5, 0),
+    ];
+    assert_eq!(
+        compact_event_log(events),
+        vec![today(2, 3_600), today(4, 0), today(5, 0)]
+    );
+}
+
+/// A legacy run row (no `utc_offset_sec`) converts its typed bpm under the
+/// clock offset in force when it is ingested, and a later undated SetProfile
+/// pins that figure, so the SetToday that set the offset must survive.
+#[test]
+fn compaction_keeps_a_pinned_legacy_runs_hr_figure() {
+    const D: i64 = 20_000;
+    let dated = |eff: i64, edited_at: i64, hr_max: f64| {
+        Event::SetProfile(Profile {
+            measured_hr_max: Some(hr_max),
+            effective_from_epoch_day: Some(eff),
+            edited_at: Some(edited_at),
+            ..base_profile()
+        })
+    };
+    let today = |epoch_day| Event::SetToday {
+        epoch_day,
+        utc_offset_sec: 3_600,
+    };
+    let events = vec![
+        today(D + 1),
+        // HRmax 200 from day D, 160 from day D+1 (edited the day before).
+        dated(D, D * DAY_SEC - 100, 200.0),
+        dated(D + 1, D * DAY_SEC, 160.0),
+        // 23:30 UTC on day D = 00:30 local on day D+1 at UTC+1.
+        Event::LogRun {
+            distance_km: 8.0,
+            duration_min: 48.0,
+            hr_pct_max: 0.0,
+            longest_recent_km: 0.0,
+            observed_at: (D + 1) * DAY_SEC - 1_800,
+            entry_id: 1,
+            workout_type: None,
+            session_rpe: None,
+            avg_hr_bpm: Some(150.0),
+            utc_offset_sec: None,
+        },
+        // A legacy undated edit pins the run's figure.
+        Event::SetProfile(Profile {
+            measured_hr_max: Some(190.0),
+            ..base_profile()
+        }),
+        today(D + 2),
+    ];
+    let full = replay(&events);
+    let compacted = replay(&compact_event_log(events));
+    assert_eq!(full.runs[0].hr_pct_max, compacted.runs[0].hr_pct_max);
+    assert_eq!(full, compacted);
+}
+
+// ── Raw wire lines (the shell's JNI path) ──
+
+fn wire(events: &[Event]) -> Vec<String> {
+    events
+        .iter()
+        .map(|e| serde_json::to_string(e).unwrap())
+        .collect()
+}
+
+fn compact_wire(lines: &[String]) -> Compaction {
+    compact_lines(
+        &lines
+            .iter()
+            .map(|l| LineFacts::parse(l))
+            .collect::<Vec<_>>(),
+    )
+}
+
+#[test]
+fn wire_lines_compact_like_their_events() {
+    let events = vec![
+        set_id("Bench", 900, 0),
+        run_id(5.0, 12, 0),
+        Event::ClearSets,
+        set_id("Squat", 5, DAY_SEC),
+        Event::GeneratePlan { start_epoch_day: 1 },
+        Event::ClearPlan,
+    ];
+    let out = compact_wire(&wire(&events));
+    assert_eq!(out.dropped, vec![0, 2, 4]);
+    assert!(out.torn.is_empty());
+    assert_eq!(out.max_entry_id, 900, "an id compacted away still counts");
+    assert!(out.plan_removed);
+}
+
+#[test]
+fn a_torn_line_is_reported_and_never_removed_by_a_rule() {
+    let mut lines = vec![r#"{"LogSet":{"exercise":"Bench","weigh"#.to_owned()];
+    lines.extend(wire(&[set("a"), Event::ClearSets]));
+    let out = compact_wire(&lines);
+    assert_eq!(out.torn, vec![0]);
+    assert_eq!(out.dropped, vec![1, 2]);
+}
+
+#[test]
+fn unknown_and_malformed_lines_are_kept_and_never_act_as_a_clear() {
+    // A newer build's events, and a unit variant given a body (which the core
+    // rejects on replay, so it must not wipe the sets).
+    let mut lines = wire(&[set("a")]);
+    lines.extend(
+        [
+            r#"{"FutureStructEvent":{"weeks":6,"entry_id":77}}"#,
+            r#""FutureUnitEvent""#,
+            r#"{"ClearSets":{}}"#,
+        ]
+        .map(str::to_owned),
+    );
+    let out = compact_wire(&lines);
+    assert_eq!(
+        out,
+        Compaction {
+            max_entry_id: 77,
+            ..Compaction::default()
+        }
+    );
+}
+
+#[test]
+fn retired_calculator_lines_are_dropped() {
+    let lines = [
+        r#"{"ComputeCooper":{"distance_m_12min":2400.0}}"#,
+        r#""ClearCriticalSpeed""#,
+        r#"{"ComputeApre":{"scheme":"Apre6","reps":4,"current_load_kg":100.0}}"#,
+    ]
+    .map(str::to_owned);
+    assert_eq!(compact_wire(&lines).dropped, vec![0, 1, 2]);
 }

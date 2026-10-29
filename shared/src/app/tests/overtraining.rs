@@ -114,27 +114,11 @@ fn mrv_cluster_and_threshold_retest_surface_in_review() {
 
 #[test]
 fn unscheduled_deload_row_rides_on_sustained_overtraining_signals() {
-    // Two signs over half a week is a noisy patch, not under-recovery
-    // (feedback-036 duration condition): no concern, no easier week.
+    // Two signs lasting a week or more (feedback-036 duration condition): one
+    // easier-week row carries the action. Under a week:
+    // `feedback_loop::single_week_two_signals_under_one_week_does_not_fire_concern`.
     let app = Engine;
     let mut model = Model::default();
-    app.update(
-        Event::SubmitWeeklyCheckin(SessionReview {
-            overtraining_signal_count: 2,
-            overtraining_signal_weeks: Some(0.5),
-            ..SessionReview::default()
-        }),
-        &mut model,
-    )
-    .expect_only_render();
-    let vm = app.view(&model);
-    assert!(
-        vm.review_adjustments.is_empty(),
-        "{:#?}",
-        vm.review_adjustments
-    );
-    assert!(vm.feedback.is_none(), "{:?}", vm.feedback);
-    // Lasting a week or more: one easier-week row carries the action.
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
             overtraining_signal_count: 2,

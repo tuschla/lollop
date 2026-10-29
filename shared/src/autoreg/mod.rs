@@ -22,6 +22,7 @@ mod signals;
 #[cfg(test)]
 pub(crate) mod tests;
 
+pub(crate) use derive::LONG_BASELINE_WINDOW_DAYS;
 pub use derive::{BaselineKind, BaselineStatus, DerivedReadiness, derive_readiness};
 pub use hold::{ReturnKind, TimedInput, last_hold_resolution, return_adjustment};
 pub use pain::{
@@ -30,8 +31,7 @@ pub use pain::{
 };
 pub use perf::{MovementPerf, PerfSet, derive_performance};
 pub use prescriptions::{
-    ApreScheme, AutoregSource, SetVolumeAction, VbtReadiness, apre_load_adjustment_capped_kg,
-    apre_load_adjustment_kg, autoreg_source, deload_from_failed_sessions,
+    AutoregSource, SetVolumeAction, VbtReadiness, autoreg_source, deload_from_failed_sessions,
     deload_from_rpe_creep_and_wellness, deload_from_rpe_load_gap, deload_from_velocity_drop,
     hrv_single_day_downgrade, hrv_suppressed_recovery_day, interval_pace_autoreg, mrv_signs_deload,
     nfor_cluster_defer, rpe_stop_reached, set_volume_action, slow_easy_pace_if_over_cap,

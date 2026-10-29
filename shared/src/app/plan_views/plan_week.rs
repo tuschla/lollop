@@ -305,7 +305,7 @@ fn plan_snapshots(f: &PlanFrame) -> Option<(Rc<PlanSnapshots>, Rc<PastReadiness>
         anchors.longest_recent_run_km = longest_recent;
         anchors.recent_weekly_km = recent_weekly;
         anchors.longest_run_detrained = detrained;
-        let stated_longest_on = stated_longest_since(model, day_profile);
+        let stated_longest_on = stated_since(model, day_profile, |q| q.stated_longest_recent_km);
         anchors.stated_longest_in_window =
             stated_longest_on.is_some_and(|d| through.saturating_sub(d) <= LONGEST_RUN_WINDOW_DAYS);
         // An undeclared break from running (RUN-REENTRY-001), unless the
@@ -314,7 +314,10 @@ fn plan_snapshots(f: &PlanFrame) -> Option<(Rc<PlanSnapshots>, Rc<PastReadiness>
         // (RUN-START-001), so it counts through the long-run rebuild.
         anchors.run_break = build_run_break(&model.runs, &cx.runs, through, offset)
             .filter(|b| {
-                stated_weekly_since(model, day_profile).is_none_or(|s| s <= b.last_run_epoch_day)
+                stated_since(model, day_profile, |q| {
+                    Some(q.running_km_per_week).filter(|km| *km > 0.0)
+                })
+                .is_none_or(|s| s <= b.last_run_epoch_day)
             })
             .map(|b| crate::plan::RunBreak {
                 stated_longest_after: stated_longest_on.is_some_and(|s| s > b.last_run_epoch_day),
@@ -454,8 +457,6 @@ fn week_rows(f: &PlanFrame, snapshots: &PlanSnapshots, recs: &WeekRecs) -> Vec<S
         week_monday,
         ..
     } = *f;
-    let session_days = &cx.days.sets;
-    let run_days = &cx.days.runs;
     let ctx = f.flatten_ctx();
     let (cur_anchors, cur_program) = (&snapshots.current.0, &snapshots.current.1);
     // The athlete's session moves for this week (ADH-RESCHED-001): `source[d]`
@@ -488,8 +489,8 @@ fn week_rows(f: &PlanFrame, snapshots: &PlanSnapshots, recs: &WeekRecs) -> Vec<S
         let day = week_monday.saturating_add(d as i64);
         let window = day >= start && day <= today;
         [
-            window && session_days.contains(&Some(day)),
-            window && run_days.contains(&Some(day)),
+            window && cx.days.by_discipline[Discipline::Sets as usize].contains(&day),
+            window && cx.days.by_discipline[Discipline::Run as usize].contains(&day),
         ]
     });
     let spare: [[bool; 2]; 7] = std::array::from_fn(|d| {
@@ -505,11 +506,7 @@ fn week_rows(f: &PlanFrame, snapshots: &PlanSnapshots, recs: &WeekRecs) -> Vec<S
             continue;
         };
         let day_recs = recs.on(epoch_day, today);
-        let judge = DayJudge {
-            day: epoch_day,
-            fold: fold_completion_adjustments(&day_recs),
-            recs: &day_recs,
-        };
+        let judge = DayJudge::new(epoch_day, &day_recs);
         let mut row = flatten_session(s, epoch_day, a, &judge, &ctx);
         // A swapped or shifted session: a past day with none of its own
         // discipline logged is credited with the nearest spare same-discipline
@@ -529,18 +526,8 @@ fn week_rows(f: &PlanFrame, snapshots: &PlanSnapshots, recs: &WeekRecs) -> Vec<S
             candidates.sort_by_key(|&t| (t.abs_diff(d), t));
             for t in candidates {
                 let from_day = week_monday.saturating_add(t as i64);
-                let from_recs = completion_recs_for_day(
-                    from_day,
-                    today,
-                    &recs.past,
-                    &recs.today,
-                    &recs.windows,
-                );
-                let from_judge = DayJudge {
-                    day: from_day,
-                    fold: fold_completion_adjustments(&from_recs),
-                    recs: &from_recs,
-                };
+                let from_recs = recs.on(from_day, today);
+                let from_judge = DayJudge::new(from_day, &from_recs);
                 let credited = flatten_session(s, epoch_day, a, &from_judge, &ctx);
                 if credited.status.is_done() {
                     row = credited;
@@ -618,11 +605,7 @@ fn resolve_next_session(
                 let epoch_day = next_monday.saturating_add(s.day as i64);
                 // Dated a week out, so nothing is logged/attributed against it:
                 // `flatten_session` sees no matching sets, so nothing is done.
-                let judge = DayJudge {
-                    day: epoch_day,
-                    fold: fold_completion_adjustments(&recs.illness),
-                    recs: &recs.illness,
-                };
+                let judge = DayJudge::new(epoch_day, &recs.illness);
                 let mut n = flatten_session(s, epoch_day, cur_anchors, &judge, &f.flatten_ctx());
                 n.status = SessionStatus::Next;
                 recs.fold_illness_into(&mut n, weight_lb);
@@ -674,12 +657,7 @@ fn resolve_next_session(
             annotate_adjustments(ns, std::slice::from_ref(&r), weight_lb);
             refresh_item_statuses(&mut ns.items, std::slice::from_ref(&r));
         }
-        // Today's transient readiness/review adjustments fold only into a
-        // session dated today; a future session carries an active illness hold
-        // (folded above) or the return step. A BLOCKING/safety hold blanks the
-        // session above regardless of date (HARD RULE 3).
-        // Mirror the resolved next-session row back into the week strip so its
-        // deload-folded sets/done match the hero.
+        // Mirror the resolved row into the week strip.
         if let Some(row) = week.iter_mut().find(|s| s.epoch_day == ns.epoch_day) {
             *row = ns.clone();
         }

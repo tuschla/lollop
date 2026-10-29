@@ -17,22 +17,6 @@ fn racer_profile(today: i64) -> Profile {
     }
 }
 
-/// A run prescription through the wire shape (new optional structure fields
-/// default), so the test does not depend on the struct's full field list.
-fn run_rx(
-    volume: serde_json::Value,
-    intensity: serde_json::Value,
-    claim: ClaimId,
-) -> Recommended<Prescription> {
-    let rx: crate::schema::RunPrescription = serde_json::from_value(serde_json::json!({
-        "volume": volume,
-        "intensity": intensity,
-        "repeats": null,
-    }))
-    .expect("run prescription wire shape");
-    graded(Prescription::Run(rx), claim)
-}
-
 fn flatten_with_targets(
     kind: RunSessionType,
     rx: Recommended<Prescription>,
@@ -72,9 +56,16 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
         run_vdot: Some(vdot),
         ..Default::default()
     };
-    let rx = run_rx(
-        serde_json::json!({"DistanceKm": 5.0}),
-        serde_json::json!({"HrPercentMax": {"lo": 88.0, "hi": 92.0, "hrr_hi": null}}),
+    let rx = graded(
+        Prescription::Run(crate::schema::RunPrescription::new(
+            crate::schema::RunVolume::DistanceKm(5.0),
+            crate::schema::RunIntensity::HrPercentMax {
+                lo: Some(88.0),
+                hi: Some(92.0),
+                hrr_hi: None,
+            },
+            None,
+        )),
         claims::RUN_TEMPO_001,
     );
     let it = flatten_with_targets(RunSessionType::Tempo, rx, &anchors, &model, today);
@@ -105,7 +96,10 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
         "{}",
         it.intensity_label
     );
-    assert_eq!(t.citation, graded((), claims::RUN_VDOT_001).reference());
+    assert_eq!(
+        t.evidence.citation,
+        graded((), claims::RUN_VDOT_001).reference()
+    );
     // A stale race (>8 weeks) is not an anchor.
     let mut stale = racer_profile(today);
     stale.recent_race.as_mut().unwrap().epoch_day = Some(today - 70);
@@ -131,14 +125,7 @@ fn easy_run_without_anchors_shows_the_talk_test_cue() {
             &mut model,
         )
         .expect_only_render();
-        app.update(
-            Event::SetToday {
-                epoch_day: MON,
-                utc_offset_sec: 0,
-            },
-            &mut model,
-        )
-        .expect_only_render();
+        set_today(&app, &mut model, MON);
         (app, model)
     };
     let it = planned_long_run_item(&app, &model);
@@ -153,7 +140,10 @@ fn easy_run_without_anchors_shows_the_talk_test_cue() {
         "{}",
         it.intensity_label
     );
-    assert_eq!(t.citation, graded((), claims::RUN_TALKTEST_001).reference());
+    assert_eq!(
+        t.evidence.citation,
+        graded((), claims::RUN_TALKTEST_001).reference()
+    );
 }
 
 #[test]
@@ -173,14 +163,7 @@ fn easy_run_shows_bpm_from_measured_hrmax_and_pace_from_race() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
     let it = planned_long_run_item(&app, &model);
     let t = it.run_target.clone().expect("run items carry a target");
     assert!(
@@ -233,50 +216,47 @@ fn downgrade_re_resolves_the_easy_band() {
     );
 }
 
-/// A straight eastward GPS track along the equator: `(metres, seconds)` legs
-/// sampled every `step_s` seconds, starting at `t0`.
-fn equator_track(t0: i64, legs: &[(f64, f64)], step_s: i64) -> Vec<GpsPoint> {
-    let origin = GpsPoint {
-        lat: 0.0,
-        lon: 0.0,
-        observed_at: 0,
-        accuracy_m: 5.0,
+#[test]
+fn downgrade_keeps_anchors_from_interval_and_hills() {
+    // An interval shows no bpm and a hill session neither pace nor bpm; both
+    // still carry the anchors, so their downgrade reads like a direct easy run.
+    use super::super::run_targets::{
+        HrAnchor, TargetBand, downgrade_run_target_to_easy, resolve_target,
     };
-    let m_per_deg = crate::running::haversine_m(origin, GpsPoint { lon: 1.0, ..origin });
-    let mut pts = vec![GpsPoint {
-        observed_at: t0,
-        ..origin
-    }];
-    let (mut lon, mut t) = (0.0_f64, t0);
-    for &(metres, speed) in legs {
-        let n = (metres / speed / step_s as f64).round() as i64;
-        let per = metres / n as f64;
-        for _ in 0..n {
-            lon += per / m_per_deg;
-            t += step_s;
-            pts.push(GpsPoint {
-                lon,
-                observed_at: t,
-                ..origin
-            });
-        }
+    use crate::schema::RunIntensity;
+    let hr = HrAnchor {
+        max_bpm: 190.0,
+        measured: true,
+        rest_bpm: 0.0,
+    };
+    let easy = resolve_target(
+        TargetBand::Easy,
+        &RunIntensity::Vdot(VdotBand::Easy),
+        Some(50.0),
+        hr,
+    );
+    assert!(!easy.hr_label.is_empty() && !easy.pace_label_km.is_empty());
+    for (band, iv) in [
+        (TargetBand::Interval, RunIntensity::Vdot(VdotBand::Interval)),
+        (TargetBand::Hills, RunIntensity::ThreeZone(ThreeZone::Z3)),
+    ] {
+        let mut it = PrescriptionView {
+            intensity_label: "Easy".into(),
+            run_target: Some(resolve_target(band, &iv, Some(50.0), hr)),
+            ..Default::default()
+        };
+        downgrade_run_target_to_easy(&mut it);
+        let e = it.run_target.expect("target");
+        assert_eq!(
+            (e.hr_label.as_str(), e.pace_label_km.as_str()),
+            (easy.hr_label.as_str(), easy.pace_label_km.as_str()),
+            "{band:?} downgraded to easy"
+        );
     }
-    pts
 }
 
 fn track_event(points: Vec<GpsPoint>, at: i64, id: u64, rpe: Option<u8>) -> Event {
-    Event::LogRunTrack {
-        points,
-        hr_pct_max: 0.0,
-        longest_recent_km: 50.0,
-        segment_starts: Vec::new(),
-        observed_at: at,
-        entry_id: id,
-        workout_type: None,
-        session_rpe: rpe,
-        avg_hr_bpm: None,
-        utc_offset_sec: None,
-    }
+    with_run_meta(log_run_track(points, 0.0, 50.0, at, id), None, rpe, None)
 }
 
 #[test]
@@ -300,7 +280,7 @@ fn tracked_run_with_session_rpe_carries_srpe_load() {
     // The separate weekly series carries it; the HR load does not.
     let s = vm.srpe_load.expect("a rated run opens the sRPE series");
     assert_eq!(s.week_au, 280.0);
-    assert_eq!(s.rated_runs, 1);
+    assert!(s.summary.contains("(1 rated run)"), "{}", s.summary);
     assert!(
         vm.training_load.is_none(),
         "an HR-less run adds no heart-rate load"
@@ -467,18 +447,7 @@ fn heavy_squat_at(at: i64) -> Event {
 }
 
 fn tagged_run(km: f64, minutes: f64, hr: f64, wt: Option<WorkoutType>, at: i64) -> Event {
-    Event::LogRun {
-        distance_km: km,
-        duration_min: minutes,
-        hr_pct_max: hr,
-        longest_recent_km: 50.0,
-        observed_at: at,
-        entry_id: 0,
-        workout_type: wt,
-        session_rpe: None,
-        avg_hr_bpm: None,
-        utc_offset_sec: None,
-    }
+    with_run_meta(log_run_at(km, minutes, hr, at), wt, None, None)
 }
 
 const CAP3_WARN: &str = "keep ≥24 h between";
@@ -525,14 +494,7 @@ fn untagged_run_at_threshold_pace_counts_as_hard_with_a_race_anchor() {
     let mut model = Model::default();
     app.update(Event::SetProfile(racer_profile(705)), &mut model)
         .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: 705,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, 705);
     app.update(tagged_run(10.0, 48.3, 0.0, None, W + 8 * 3600), &mut model)
         .expect_only_render();
     app.update(
@@ -631,19 +593,147 @@ fn same_day_7h_gap_gets_spacing_note_not_cap3_warning() {
     );
 }
 
-fn manual_run_bpm(id: u64, avg_hr_bpm: Option<f64>) -> Event {
-    Event::LogRun {
-        distance_km: 8.0,
-        duration_min: 45.0,
-        hr_pct_max: 70.0,
-        longest_recent_km: 0.0,
-        observed_at: 700 * DAY_SEC,
-        entry_id: id,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm,
-        utc_offset_sec: None,
+#[test]
+fn air_squat_without_rpe_is_not_heavy_leg_work() {
+    // A bodyweight air squat with no RPE has no knowable intensity, so it is not
+    // heavy leg work and does not trip the heavy-leg/long-run spacing guard.
+    let app = Engine;
+    let mut model = Model::default();
+    let t = 100 * WEEK;
+    app.update(log_set("Air squat", 0.0, 5, 0.0, t), &mut model)
+        .expect_only_render();
+    app.update(log_run_at(14.0, 80.0, 90.0, t + 10 * 3600), &mut model)
+        .expect_only_render();
+    let report = app.view(&model).weekly_report;
+    assert!(
+        !report.iter().any(|r| r.summary.contains(CAP3_WARN)),
+        "bodyweight air squat is not heavy leg work: {report:#?}"
+    );
+}
+
+#[test]
+fn light_leg_work_and_a_short_run_raise_no_gap_flag() {
+    // The heavy-leg ↔ long-run guard fires only on squat/hinge work at ≥80%
+    // 1RM. Light calf work (not a squat/hinge pattern) next to a short run is
+    // not a heavy-leg/long-run collision.
+    let app = Engine;
+    let mut model = Model::default();
+    let noon = W + 12 * 3600;
+    for i in 0..3 {
+        app.update(
+            log_set("Calf raise", 100.0, 15, 8.0, noon + i * 60),
+            &mut model,
+        )
+        .expect_only_render();
     }
+    app.update(log_run_at(3.0, 18.0, 70.0, noon + 10 * 3600), &mut model)
+        .expect_only_render();
+    let report = app.view(&model).weekly_report;
+    assert!(
+        !report.iter().any(|r| r.summary.contains(CAP3_WARN)),
+        "light calf work + a short run must not raise a spacing flag: {report:#?}"
+    );
+}
+
+// A long run is the week's LONGEST run over an external full-week basis.
+
+/// A 3-day, 17 km/wk endurance-priority hybrid.
+fn hybrid_17km_profile() -> Profile {
+    Profile {
+        weekly_sets: 4,
+        running_days_per_week: 3,
+        running_km_per_week: 17.0,
+        ..sample_profile()
+    }
+}
+
+/// A stored 3 × 150 kg @ RPE 9 back squat at `at`.
+fn stored_heavy_squat(at: i64) -> LoggedSet {
+    LoggedSet {
+        exercise: "Back Squat".to_string(),
+        weight_kg: 150.0,
+        reps: 3,
+        rpe: 9.0,
+        observed_at: at,
+        entry_id: 0,
+        hold_sec: None,
+    }
+}
+
+/// A 3-run week (easy 5 / tempo 4 / long 8 km): only the 8 km run is the long
+/// run. Mondays start local weeks (day ≡ 4 mod 7), so days 4–10 are one week.
+fn three_run_week() -> Vec<LoggedRun> {
+    [(5.0, 5), (4.0, 6), (8.0, 9)] // Tue easy, Wed tempo, Sat long
+        .map(|(km, day)| logged_run(km, km * 6.0, 70.0, day * DAY_SEC + 8 * 3600))
+        .to_vec()
+}
+
+fn cap3_flagged(model: &Model) -> bool {
+    build_weekly_report(&ViewCtx::new(model), &[])
+        .iter()
+        .any(|r| r.summary.contains(CAP3_WARN))
+}
+
+#[test]
+fn easy_run_near_leg_day_is_not_treated_as_a_long_run() {
+    // A heavy squat Mon 20:00 and the easy 5 km Tue 08:00 are ~12 h apart, but
+    // the 5 km run is 29% of a partial-week total only — it is NOT the week's
+    // longest run, so it must not trip the heavy-leg/long-run CAP-3 spacing flag.
+    // The actual long run (8 km, Sat) is 5 days from the squat, well clear.
+    let model = Model {
+        profile: Some(hybrid_17km_profile()),
+        runs: three_run_week(),
+        sets: vec![stored_heavy_squat(4 * DAY_SEC + 20 * 3600)], // Mon evening
+        ..Default::default()
+    };
+    assert!(
+        !cap3_flagged(&model),
+        "an easy 5 km run near leg day is not a long run"
+    );
+}
+
+#[test]
+fn heavy_squat_close_to_the_actual_long_run_still_flags() {
+    // Positive control: move the heavy squat to Fri 20:00, ~12 h before the 8 km
+    // long run on Sat 08:00. The 8 km run IS the week's longest and clears 25% of
+    // the 17 km full-week basis, so CAP-3 must fire.
+    let model = Model {
+        profile: Some(hybrid_17km_profile()),
+        runs: three_run_week(),
+        sets: vec![stored_heavy_squat(8 * DAY_SEC + 20 * 3600)], // Fri evening
+        ..Default::default()
+    };
+    assert!(
+        cap3_flagged(&model),
+        "a heavy squat ~12 h from the long run flags"
+    );
+}
+
+#[test]
+fn a_pure_lifters_lone_jog_after_squats_is_not_a_long_run() {
+    // A lifter with no planned mileage logs a single 3 km recovery jog the morning
+    // after heavy squats. With no external basis (no plan, no other runs in the
+    // trailing 7 days) the jog cannot certify itself as a long run, so CAP-3 stays
+    // silent instead of flagging the recovery jog.
+    let model = Model {
+        profile: Some(base_profile()),
+        runs: vec![logged_run(3.0, 18.0, 70.0, 5 * DAY_SEC + 8 * 3600)], // Tue morning
+        sets: vec![stored_heavy_squat(4 * DAY_SEC + 20 * 3600)],         // Mon evening, ~12 h prior
+        ..Default::default()
+    };
+    assert!(
+        !cap3_flagged(&model),
+        "a lone recovery jog with no external basis"
+    );
+}
+
+fn manual_run_bpm(id: u64, avg_hr_bpm: Option<f64>) -> Event {
+    with_run_meta(
+        log_run(8.0, 45.0, 70.0, 0.0, 700 * DAY_SEC, id),
+        None,
+        None,
+        avg_hr_bpm,
+    )
 }
 
 fn hr_pct_after(profile: Profile, events: Vec<Event>) -> f64 {
@@ -759,14 +849,7 @@ fn hybrid_and_running_ramp_rows_agree_on_the_rebound_after_a_recovery_week() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: monday(rec + 1) + 6,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, monday(rec + 1) + 6);
     let report = app.view(&model).weekly_report;
     let has = |needle: &str| report.iter().any(|r| r.summary.contains(needle));
     assert!(
@@ -823,18 +906,12 @@ fn trivial_gps_run_gets_no_pacing_verdict() {
 }
 
 fn rated_bpm_run(avg_hr_bpm: Option<f64>, hr_pct_max: f64, session_rpe: Option<u8>) -> Event {
-    Event::LogRun {
-        distance_km: 8.0,
-        duration_min: 45.0,
-        hr_pct_max,
-        longest_recent_km: 0.0,
-        observed_at: 700 * DAY_SEC,
-        entry_id: 1,
-        workout_type: None,
+    with_run_meta(
+        log_run(8.0, 45.0, hr_pct_max, 0.0, 700 * DAY_SEC, 1),
+        None,
         session_rpe,
         avg_hr_bpm,
-        utc_offset_sec: None,
-    }
+    )
 }
 
 fn run_view_after(profile: Profile, event: Event) -> RunResultView {
@@ -892,18 +969,8 @@ fn race_labels_name_the_classic_distances() {
 fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_weeks() {
     let app = Engine;
     let mut model = Model::default();
-    let set_today = |model: &mut Model, epoch_day: i64| {
-        app.update(
-            Event::SetToday {
-                epoch_day,
-                utc_offset_sec: 0,
-            },
-            model,
-        )
-        .expect_only_render();
-    };
     let today = 704;
-    set_today(&mut model, today);
+    set_today(&app, &mut model, today);
     // The shell stamps every profile edit effective today; the race is dated
     // with that day (an undated legacy edit has no day to date it with).
     let mut p = running_profile();
@@ -938,7 +1005,7 @@ fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_week
     // Re-saving the profile with the same race keeps its first date, so the
     // race still goes stale.
     let later = today + 9 * 7;
-    set_today(&mut model, later);
+    set_today(&app, &mut model, later);
     p.effective_from_epoch_day = Some(later);
     app.update(Event::SetProfile(p.clone()), &mut model)
         .expect_only_render();
@@ -968,14 +1035,7 @@ fn an_undated_race_in_an_undated_profile_edit_stays_undated() {
     // the last SetToday) agrees, and the race of unknown age sets no paces.
     let app = Engine;
     let mut model = Model::default();
-    app.update(
-        Event::SetToday {
-            epoch_day: 704,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, 704);
     let mut p = running_profile();
     p.effective_from_epoch_day = None;
     p.recent_race = Some(RecentRace {
@@ -1048,22 +1108,16 @@ fn bpm_model() -> (Engine, Model) {
 
 #[test]
 fn deleting_then_re_logging_a_bpm_run_from_its_view_is_identical() {
-    // Undo re-sent the derived %HRmax without the bpm, so the
-    // card turned "152 bpm · Z2" into "HR 82% · Z2".
+    // Undo re-sends the run from its view: the entered bpm must survive, so
+    // the card stays "152 bpm · Z2" and never turns into "HR 82% · Z2".
     let (app, mut model) = bpm_model();
     let _ = app.update(
-        Event::LogRun {
-            distance_km: 8.0,
-            duration_min: 48.0,
-            hr_pct_max: 0.0,
-            longest_recent_km: 0.0,
-            observed_at: 100 * DAY_SEC,
-            entry_id: 7,
-            workout_type: None,
-            session_rpe: Some(5),
-            avg_hr_bpm: Some(152.0),
-            utc_offset_sec: None,
-        },
+        with_run_meta(
+            log_run(8.0, 48.0, 0.0, 0.0, 100 * DAY_SEC, 7),
+            None,
+            Some(5),
+            Some(152.0),
+        ),
         &mut model,
     );
     let before = app.view(&model).runs[0].clone();
@@ -1083,18 +1137,19 @@ fn deleting_then_re_logging_a_bpm_run_from_its_view_is_identical() {
     );
     assert!(app.view(&model).runs.is_empty());
     let _ = app.update(
-        Event::LogRun {
-            distance_km: before.distance_km,
-            duration_min: before.duration_min,
-            hr_pct_max: before.hr_pct_max,
-            longest_recent_km: 0.0,
-            observed_at: before.observed_at,
-            entry_id: before.entry_id,
-            workout_type: before.workout_type,
-            session_rpe: before.session_rpe,
-            avg_hr_bpm: before.avg_hr_bpm,
-            utc_offset_sec: None,
-        },
+        with_run_meta(
+            log_run(
+                before.distance_km,
+                before.duration_min,
+                before.hr_pct_max,
+                0.0,
+                before.observed_at,
+                before.entry_id,
+            ),
+            before.workout_type,
+            before.session_rpe,
+            before.avg_hr_bpm,
+        ),
         &mut model,
     );
     assert_eq!(app.view(&model).runs[0], before);
@@ -1104,10 +1159,12 @@ fn deleting_then_re_logging_a_bpm_run_from_its_view_is_identical() {
 fn a_tracked_run_keeps_its_entered_bpm() {
     let (app, mut model) = bpm_model();
     let t0 = 100 * DAY_SEC;
-    let mut ev = track_event(equator_track(t0, &[(4000.0, 3.0)], 5), t0, 9, None);
-    if let Event::LogRunTrack { avg_hr_bpm, .. } = &mut ev {
-        *avg_hr_bpm = Some(150.0);
-    }
+    let ev = with_run_meta(
+        log_run_track(equator_track(t0, &[(4000.0, 3.0)], 5), 0.0, 50.0, t0, 9),
+        None,
+        None,
+        Some(150.0),
+    );
     let _ = app.update(ev, &mut model);
     let run = &app.view(&model).runs[0];
     assert_eq!(run.avg_hr_bpm, Some(150.0));
@@ -1119,23 +1176,17 @@ fn a_tracked_run_keeps_its_entered_bpm() {
 fn gps_qc_drops_teleport_and_stuck_time_fixes_and_reports_the_count() {
     let app = Engine;
     let mut model = Model::default();
-    let p = |lon: f64, at: i64| GpsPoint {
-        lat: 0.0,
-        lon,
-        observed_at: at,
-        accuracy_m: 5.0,
-    };
     app.update(
         log_run_track(
             vec![
-                p(0.000, 0),
-                p(0.001, 20),
+                gps(0.000, 0),
+                gps(0.001, 20),
                 // Teleport: ~11 km implied in 1 s (>12 m/s), dropped.
-                p(0.100, 21),
-                p(0.002, 40),
+                gps(0.100, 21),
+                gps(0.002, 40),
                 // Non-advancing timestamp, dropped.
-                p(0.0025, 40),
-                p(0.003, 60),
+                gps(0.0025, 40),
+                gps(0.003, 60),
             ],
             78.0,
             12.0,
@@ -1165,29 +1216,9 @@ fn gps_timestamp_arithmetic_saturates_without_panicking() {
     // A track carrying i64::MAX / i64::MIN stamps must not overflow
     // the dt subtraction (a debug panic) nor corrupt distance. The saturated
     // dt is then discarded/handled by the existing dt gates.
-    let pts = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.000,
-            observed_at: i64::MIN,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.001,
-            observed_at: i64::MAX,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.002,
-            observed_at: 10,
-            accuracy_m: 5.0,
-        },
-    ];
+    let pts = vec![gps(0.000, i64::MIN), gps(0.001, i64::MAX), gps(0.002, 10)];
     let qc = qc_track(&pts, &[]);
-    let dist =
-        running::track_distance_km_seg(&qc.track, running::MAX_GPS_ACCURACY_M, &qc.seg_starts);
+    let dist = running::track_distance_km(&qc.track, &qc.seg_starts);
     assert!(
         dist.is_finite() && dist >= 0.0,
         "distance stays finite: {dist}"
@@ -1205,26 +1236,8 @@ fn a_short_stop_swallowed_by_the_jitter_gate_is_not_moving_time() {
     // dropped by the <2.5 m gate), then running on. The merged leg spans 7 s
     // for ~3.5 m (0.5 m/s, just over the auto-pause floor), so the stand was
     // counted as running; only the 1 s after the last standing fix moves.
-    let m_per_deg = running::haversine_m(
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.0,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.0,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-    );
-    let at = |m: f64, t: i64| GpsPoint {
-        lat: 0.0,
-        lon: m / m_per_deg,
-        observed_at: t,
-        accuracy_m: 5.0,
-    };
+    let m_per_deg = running::haversine_m(gps(0.0, 0), gps(1.0, 0));
+    let at = |m: f64, t: i64| gps(m / m_per_deg, t);
     let mut pts: Vec<GpsPoint> = (0..=20).map(|s| at(3.0 * s as f64, s)).collect();
     let stop = 60.0;
     for s in 1..=6 {

@@ -292,7 +292,7 @@ pub struct Session {
 // ---------------------------------------------------------------------------
 
 /// Proximity-to-failure / load anchor for a lift set (File 02).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LiftIntensity {
     /// 65–100.
     PercentOneRm(f32),
@@ -300,8 +300,6 @@ pub enum LiftIntensity {
     Rpe(f32),
     /// Reps in reserve, 0–10.
     Rir(u8),
-    /// Mean concentric velocity target, m/s (0.15–1.30, exercise-specific).
-    VelocityMs(f32),
     /// A ballistic bodyweight movement (jumps): every rep at maximal intent
     /// (jump as high as possible), no load and no effort target — the stimulus
     /// is the intent itself (STR-POWER-SELECT-001).
@@ -309,7 +307,7 @@ pub enum LiftIntensity {
 }
 
 /// A prescribed lift: the set/rep/load/rest contract for one exercise.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LiftPrescription {
     pub exercise: String,
     pub sets: u8,
@@ -323,19 +321,17 @@ pub struct LiftPrescription {
     /// Top of the target rep RANGE when the lift is prescribed as a range
     /// (hypertrophy double progression: work from `reps` up to `reps_max`,
     /// then add load). `None` = a fixed rep target of `reps`.
-    #[serde(default)]
     pub reps_max: Option<u8>,
     /// Explicit working load in kg carried forward from the athlete's own last
     /// working sets (hypertrophy double progression: same load, or the
     /// smallest increment once the top of the range was reached). `None` =
     /// no explicit load; a `PercentOneRm` intensity still resolves against the
     /// e1RM anchor at render time.
-    #[serde(default)]
     pub load_kg: Option<f32>,
 }
 
 /// Running intensity, in whichever zone model anchors the session (File 04 §1).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RunIntensity {
     /// 3-zone lactate model: Z1 < LT1, Z2 = LT1–LT2, Z3 > LT2.
     ThreeZone(ThreeZone),
@@ -349,10 +345,6 @@ pub enum RunIntensity {
         hi: Option<f32>,
         hrr_hi: Option<f32>,
     },
-    /// Pace in seconds per km.
-    PaceSecPerKm(u16),
-    /// % of critical power / FTP.
-    PowerPercentCp(f32),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -375,7 +367,7 @@ pub enum VdotBand {
 /// Session volume target: a duration, a distance, or a beginner run/walk
 /// interval set (running-025 C25K: `rounds` repeats of `run_sec` running then
 /// `walk_sec` walking).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RunVolume {
     DurationMin(u16),
     DistanceKm(f32),
@@ -388,7 +380,7 @@ pub enum RunVolume {
 
 /// One run/walk bout of a beginner session (NHS Couch to 5K): run for
 /// `run_sec`, then walk for `walk_sec` (0 on the final bout).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunSegment {
     pub run_sec: u16,
     pub walk_sec: u16,
@@ -396,41 +388,34 @@ pub struct RunSegment {
 
 /// Strides added to the end of an easy run (running-020): `reps` × `rep_sec`
 /// controlled-fast efforts with `recovery_sec` of easy jogging/walking between.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StridesAddOn {
     pub reps: u8,
     pub rep_sec: u16,
     pub recovery_sec: u16,
 }
 
-/// A prescribed run (continuous or as repeats). Every field after `repeats` is
-/// serde-default so older persisted/wire rows decode unchanged.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+/// A prescribed run (continuous or as repeats).
+#[derive(Debug, Clone, PartialEq)]
 pub struct RunPrescription {
     pub volume: RunVolume,
     pub intensity: RunIntensity,
     /// For interval/repetition work: (rep count, rep volume).
     pub repeats: Option<(u8, RunVolume)>,
     /// Recovery between reps; `None` for a continuous run.
-    #[serde(default)]
     pub recovery: Option<RepRecovery>,
     /// Easy warm-up before the main set, minutes (C25K: the brisk walk).
-    #[serde(default)]
     pub warmup_min: Option<u16>,
     /// Easy cool-down after the main set, minutes.
-    #[serde(default)]
     pub cooldown_min: Option<u16>,
     /// Ordered run/walk bouts of a beginner session (C25K), the last bout's
     /// walk 0; empty for every other run.
-    #[serde(default)]
     pub segments: Vec<RunSegment>,
     /// Strides to finish an easy run with; `None` = no strides.
-    #[serde(default)]
     pub strides: Option<StridesAddOn>,
     /// A long run set to the week's average run because the 25–30 % share
     /// would be shorter than the other runs (RUN-LONGRUN-001's low-mileage
     /// guardrail): the card states that rule, not the share.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub long_run_avg_floor: bool,
 }
 
@@ -457,7 +442,7 @@ impl RunPrescription {
 }
 
 /// Easy-jog recovery between interval / repetition reps.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepRecovery {
     /// A known number of seconds.
     Seconds(u16),
@@ -498,7 +483,7 @@ pub enum LadderId {
 /// lowering plus a pause at the hardest point, used on the easier rung after a
 /// failed step up so the jump back is smaller. Total time per rep stays within
 /// the 0.5–8 s window the evidence supports.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TempoBridge {
     pub eccentric_sec: u8,
     pub pause_sec: u8,
@@ -506,7 +491,7 @@ pub struct TempoBridge {
 
 /// A per-rung working band: reps for dynamic rungs, hold seconds for timed
 /// (skill/core) rungs. The band top doubles as the tier-advance trigger.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TierTarget {
     Reps { low: u8, high: u8 },
     HoldSec { low: u16, high: u16 },
@@ -515,7 +500,7 @@ pub enum TierTarget {
 /// A prescribed calisthenics rung: the tier/target/RIR/rest contract for one
 /// pattern. Load is the leverage tier (not a bar weight); `added_kg` is set only
 /// on one of the ladder's `weighted_rungs`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CalisthenicsPrescription {
     pub ladder: LadderId,
     pub tier: u8,
@@ -535,54 +520,41 @@ pub struct CalisthenicsPrescription {
     pub added_kg: Option<f64>,
     /// The rung accepts external load (one of the ladder's `weighted_rungs`), even while
     /// the suggested load is 0 kg, so the shell shows the added-load field.
-    #[serde(default)]
     pub load_capable: bool,
     /// Tempo bridge on this rung (after a failed step up), if any.
-    #[serde(default)]
     pub tempo_bridge: Option<TempoBridge>,
     /// Straight-arm skill holds: the clean test-hold seconds that advance the
     /// rung (one test hold at the end, once a week); `target` is the working hold.
-    #[serde(default)]
     pub test_hold_sec: Option<u16>,
     /// Ballistic power item (jumps / plyometric push-ups): maximal intent,
     /// never to failure.
-    #[serde(default)]
     pub ballistic: bool,
     /// Nearest easier / harder rung the athlete's equipment allows.
-    #[serde(default)]
     pub easier: Option<u8>,
-    #[serde(default)]
     pub harder: Option<u8>,
     /// The newest session hit the advance target but its last set was not
     /// rated, so the rung cannot advance yet.
-    #[serde(default)]
     pub needs_effort_rating: bool,
     /// Rungs stepped down after a break from this exercise (CAL-REENTRY-001).
-    #[serde(default)]
     pub reentry_steps: u8,
     /// The break was long enough (> 8 weeks) to re-test the starting rung.
-    #[serde(default)]
     pub retest: bool,
     /// The plain rung needs equipment the athlete lacks; this is the nearest
     /// rung that does not (CAL-EQUIP-001).
-    #[serde(default)]
     pub substituted: bool,
     /// No set logged and no rung chosen for this ladder yet.
-    #[serde(default)]
     pub unplaced: bool,
     /// A horizontal row with no bar or rings in the athlete's kit: done under a
     /// sturdy table, gripping its edge (CAL-EQUIP-001 "table/inverted rows for
     /// pulling").
-    #[serde(default)]
     pub table_row: bool,
     /// Reps on every set that mark the rung as far too easy, so the plan skips
     /// a step after one session (CAL-PLACE-001); `None` where skipping never
     /// applies (loaded, straight-arm, leave-RIR, timed, ballistic, last rung).
-    #[serde(default)]
     pub skip_reps: Option<u16>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Prescription {
     Lift(LiftPrescription),
     Run(RunPrescription),
@@ -775,7 +747,7 @@ pub struct PainDetail {
 /// the numeric `value` convention (0 = none, 1 = above-neck, ≥2 = below-neck /
 /// any fever) into a self-documenting category, the autoregulation layer
 /// branches on the enum, never on raw float literals.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IllnessSeverity {
     /// No illness signal → no adjustment.
     None,
@@ -950,7 +922,7 @@ pub enum SafetyTier {
 
 /// Adjustments the autoregulation layer can emit (File 06 §4).
 /// Always shipped as `Recommended<Adjustment>`, evidence attached.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Adjustment {
     /// Reduce load for remaining sets by this % (e.g. RPE ≥ target + 2).
     ReduceLoadPct(f32),
@@ -976,10 +948,7 @@ pub enum Adjustment {
     /// "avoid complete rest". `location` is the user's own words (empty when
     /// none was given); a location that maps to a body region scopes the
     /// modification to the movements that load it.
-    ModifyAndMonitor {
-        #[serde(default)]
-        location: String,
-    },
+    ModifyAndMonitor { location: String },
     /// Insert a full rest day.
     RestDay,
     /// Non-negotiable stop (pain, fever, RHR +10 bpm). Safety override.
@@ -1035,7 +1004,7 @@ impl Adjustment {
 ///
 /// Serializes to its bare variant name (external form), so the Kotlin shell can
 /// mirror the strings by `WorkoutType.name`; renaming a variant is a wire break.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WorkoutType {
     /// Continuous even-effort run.
     Steady,

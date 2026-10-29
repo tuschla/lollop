@@ -2,9 +2,7 @@ use super::*;
 use crate::schema::EvidenceGrade;
 
 #[test]
-fn lombardi_and_backoff_and_vl() {
-    assert!((e1rm_lombardi(100.0, 1) - 100.0).abs() < 1e-9);
-    assert!(e1rm_lombardi(100.0, 5) > 100.0);
+fn back_off_and_vl_thresholds() {
     let b = rpe_anchored_back_off().value;
     assert_eq!((b.top_set_rpe, b.drop_frac), (8, (0.10, 0.15)));
     assert_eq!(vl_termination_threshold(LiftGoal::MaxStrength).value, 0.20);
@@ -147,45 +145,6 @@ fn plyo_caps_rise_with_level() {
         plyo_foot_contact_cap(TrainingAge::Advanced).value,
         (120, 140)
     );
-    assert!(
-        plyo_foot_contact_cap(TrainingAge::Advanced).value.1
-            > plyo_foot_contact_cap(TrainingAge::Novice).value.1
-    );
-}
-
-#[test]
-fn epley_100kg_5reps_is_about_116_7() {
-    let e = e1rm_epley(100.0, 5);
-    assert!((e - 116.666_666).abs() < 1e-3, "got {e}");
-}
-
-#[test]
-fn brzycki_sanity() {
-    // 100 kg x 5 -> 100 * 36 / 32 = 112.5
-    let b = e1rm_brzycki(100.0, 5);
-    assert!((b - 112.5).abs() < 1e-6, "got {b}");
-    // A single rep must equal (near) the load itself: 100 * 36 / 36 = 100.
-    assert!((e1rm_brzycki(100.0, 1) - 100.0).abs() < 1e-6);
-    // Higher reps estimate a higher 1RM than fewer reps at equal load.
-    assert!(e1rm_brzycki(100.0, 8) > e1rm_brzycki(100.0, 3));
-}
-
-#[test]
-fn brzycki_high_reps_stay_finite() {
-    // At/above 37 reps the raw denominator (37 − reps) is zero/negative,
-    // which would return +∞ or a negative 1RM. The domain clamp keeps every
-    // rep count finite and positive (BUGS: e1rm_brzycki unbounded).
-    let at_cap = e1rm_brzycki(100.0, BRZYCKI_MAX_REPS); // reps = 36
-    assert!(at_cap.is_finite() && at_cap > 0.0, "got {at_cap}");
-    for reps in [37u32, 40, 100] {
-        let b = e1rm_brzycki(100.0, reps);
-        assert!(b.is_finite() && b > 0.0, "reps {reps} gave {b}");
-        // Above the domain the estimate saturates at the cap value rather
-        // than exploding.
-        assert_eq!(b, at_cap, "reps {reps} should clamp to the cap");
-    }
-    // The clamp must not perturb results inside the valid domain.
-    assert!((e1rm_brzycki(100.0, 5) - 112.5).abs() < 1e-6);
 }
 
 #[test]
@@ -267,16 +226,6 @@ fn prilepin_table_nonempty_and_sorted() {
     assert_eq!(PRILEPIN.last().unwrap().pct_max, 100);
 }
 
-#[test]
-fn recommend_attaches_registered_evidence() {
-    let rx = graded(LiftDummy, claims::AUTOREG_RIR_001);
-    assert_eq!(rx.grade(), EvidenceGrade::Strong);
-    assert_eq!(rx.claim_id(), claims::AUTOREG_RIR_001);
-}
-
-#[derive(Debug, PartialEq)]
-struct LiftDummy;
-
 // -- File 02 rules --
 
 #[test]
@@ -292,7 +241,6 @@ fn e1rm_reliability_gate_and_cross_check() {
         .expect("reliable");
     assert!(c.formulas_used >= 2);
     assert!(c.low_kg <= e1rm_epley(100.0, 5) && e1rm_epley(100.0, 5) <= c.high_kg);
-    assert!(c.low_kg <= e1rm_brzycki(100.0, 5) && e1rm_brzycki(100.0, 5) <= c.high_kg);
     assert!(c.low_kg <= c.high_kg);
     // Unreliability gate returns None instead of a number.
     assert!(e1rm_cross_check(100.0, 11, 0.0, false).value.is_none());
@@ -393,7 +341,9 @@ fn one_rm_test_gate_is_safety_critical() {
 }
 
 #[test]
-fn epley_single_is_identity() {
+fn epley_e1rm_reference_values() {
+    // 100 kg × 5 = 100 · (1 + 5/30).
+    assert!((e1rm_epley(100.0, 5) - 116.666_666).abs() < 1e-3);
     // A single IS the 1RM, never +3.3 %.
     assert_eq!(e1rm_epley(140.0, 1), 140.0);
     assert_eq!(e1rm_epley_rpe(140.0, 1, 0.0), 140.0);
@@ -467,7 +417,7 @@ fn weekly_ramp_never_prescribes_below_one_rep_in_reserve() {
 
 #[test]
 fn open_ended_effort_is_a_lower_bound_not_four_extra_reps() {
-    // C11: "4+ reps left" (RPE 6) is outside the trusted 1–3 RIR window,
+    // "4+ reps left" (RPE 6) is outside the trusted 1–3 RIR window,
     // so the set counts its reps as performed, exactly like an unrated set.
     assert!(!rpe_is_exact(6.0));
     assert!(!rpe_is_exact(0.0));

@@ -1,7 +1,7 @@
 //! Tone lint over every string the core renders (the `copy_invariants` view
-//! sweep; references verbatim and dormant fields skipped). Owner, 2026-10-25:
-//! the copy must read neutral and factual, like a tool, not a product selling
-//! or motivating. The rules are objective markers of that voice: exclamation
+//! sweep; references verbatim and dormant fields skipped), enforcing
+//! `planning/design/writing.md`: neutral and factual, like a tool. The rules
+//! are objective markers of that voice: exclamation
 //! marks, emojis, "we/us/our", a hype/AI word list, rhetorical question
 //! openers ("First time? Pick…"), stock phrases ("Let's", "Ready to", "It's
 //! important to note") and em dashes in sentences (a lone `—` no-value

@@ -151,33 +151,6 @@ fn female_bsi_referral_appends_clinician_prompt() {
 }
 
 #[test]
-fn feedback_verbosity_tracks_training_age() {
-    // feedback-023/024: WeekToWeek cadence (intermediate) → beginner-style
-    // conservative defaults; MonthToMonth (advanced) → 2-3 metric density.
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(sample_profile()), &mut model)
-        .expect_only_render();
-    app.update(Event::SubmitReview(SessionReview::default()), &mut model)
-        .expect_only_render();
-    let fb = app.view(&model).feedback.expect("feedback present");
-    assert_eq!((fb.max_takeaways, fb.max_metrics), (1, 1));
-    assert!(fb.rationale_mandatory && fb.minimize_jargon);
-
-    app.update(
-        Event::SetProfile(Profile {
-            progression_cadence: ProgressionCadence::MonthToMonth,
-            ..sample_profile()
-        }),
-        &mut model,
-    )
-    .expect_only_render();
-    let fb = app.view(&model).feedback.expect("feedback present");
-    assert_eq!((fb.max_takeaways, fb.max_metrics), (1, 3));
-    assert!(!fb.minimize_jargon);
-}
-
-#[test]
 fn overtraining_duration_condition_flows_through_review() {
     // feedback-036: two signals over half a week must NOT fire the
     // recovery concern; over a full week it must.

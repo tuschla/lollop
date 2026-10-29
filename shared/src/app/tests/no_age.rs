@@ -1,26 +1,11 @@
-//! Age is optional (owner decision 2026-10-17; KB onboard-050 note): a
-//! profile with no age is an adult. It plans normally, has no youth hold, no
-//! masters adjustments and no Tanaka HRmax, so run targets fall back to a
-//! measured HRmax or to the effort cues.
+//! Age is optional (KB onboard-050 note): a profile with no age is an adult.
+//! It plans normally, has no youth hold, no masters adjustments and no Tanaka
+//! HRmax, so run targets fall back to a measured HRmax or to the effort cues.
 
 use super::*;
 
 fn planned(profile: Profile) -> (Engine, Model) {
-    let app = Engine;
-    let mut model = Model::default();
-    for ev in [
-        Event::SetProfile(profile),
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-    ] {
-        app.update(ev, &mut model).expect_only_render();
-    }
-    (app, model)
+    planned_on(profile, [], MON)
 }
 
 fn no_age(p: Profile) -> Profile {

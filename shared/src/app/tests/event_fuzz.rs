@@ -25,7 +25,6 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::*;
-use crate::autoreg::ApreScheme;
 use crate::compact_event_log;
 use crate::schema::{LadderId, PainDetail, PainKind, PainTrend};
 
@@ -100,27 +99,13 @@ fn env_seed() -> Option<u64> {
     }
 }
 
-fn splitmix(mut x: u64) -> u64 {
-    x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
-    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    x ^ (x >> 31)
-}
-
-fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
-    p.downcast_ref::<String>()
-        .cloned()
-        .or_else(|| p.downcast_ref::<&str>().map(|s| (*s).to_owned()))
-        .unwrap_or_else(|| "<non-string panic>".into())
-}
-
 /// Run `case` over `FUZZ_ITERS` (else `default`) seeds derived from `salt`,
 /// or the one `FUZZ_SEED`; fail naming every failing seed (first 5).
 fn run_cases(name: &str, salt: u64, default: usize, case: impl Fn(u64) -> Result<(), String>) {
     let seeds: Vec<u64> = match env_seed() {
         Some(s) => vec![s],
         None => (0..env_iters(default) as u64)
-            .map(|i| splitmix(salt ^ i.wrapping_mul(0x2545_f491_4f6c_dd1d)))
+            .map(|i| SplitMix(salt ^ i.wrapping_mul(0x2545_f491_4f6c_dd1d)).next())
             .collect(),
     };
     let mut failures = Vec::new();
@@ -154,100 +139,6 @@ fn short(e: &Event) -> String {
         s.push('…');
     }
     s
-}
-
-fn vm_json(vm: &ViewModel) -> String {
-    serde_json::to_string(vm).expect("a ViewModel always serializes")
-}
-
-/// The first path where two JSON values differ, with both values
-/// (shortened). Numbers within `rel_tol` (relative) count as equal.
-fn value_diff(a: &serde_json::Value, b: &serde_json::Value, rel_tol: f64) -> Option<String> {
-    fn walk(
-        a: &serde_json::Value,
-        b: &serde_json::Value,
-        tol: f64,
-        path: &mut String,
-    ) -> Option<String> {
-        use serde_json::Value as V;
-        match (a, b) {
-            (V::Object(x), V::Object(y)) => {
-                for (k, va) in x {
-                    let len = path.len();
-                    path.push('.');
-                    path.push_str(k);
-                    match y.get(k) {
-                        None => return Some(format!("{path}: only on the left")),
-                        Some(vb) => {
-                            if let Some(d) = walk(va, vb, tol, path) {
-                                return Some(d);
-                            }
-                        }
-                    }
-                    path.truncate(len);
-                }
-                y.keys()
-                    .find(|k| !x.contains_key(*k))
-                    .map(|k| format!("{path}.{k}: only on the right"))
-            }
-            (V::Array(x), V::Array(y)) => {
-                for (i, (va, vb)) in x.iter().zip(y).enumerate() {
-                    let len = path.len();
-                    path.push_str(&format!("[{i}]"));
-                    if let Some(d) = walk(va, vb, tol, path) {
-                        return Some(d);
-                    }
-                    path.truncate(len);
-                }
-                (x.len() != y.len()).then(|| format!("{path}: length {} vs {}", x.len(), y.len()))
-            }
-            _ if a == b => None,
-            (V::Number(x), V::Number(y))
-                if x.as_f64()
-                    .zip(y.as_f64())
-                    .is_some_and(|(x, y)| (x - y).abs() <= tol * x.abs().max(y.abs())) =>
-            {
-                None
-            }
-            _ => {
-                let cut = |v: &V| {
-                    let s = v.to_string();
-                    if s.len() > 160 {
-                        format!("{}…", &s[..char_floor(&s, 160)])
-                    } else {
-                        s
-                    }
-                };
-                Some(format!("{path}: {} vs {}", cut(a), cut(b)))
-            }
-        }
-    }
-    walk(a, b, rel_tol, &mut String::new())
-}
-
-/// The first path where two view JSON documents differ.
-fn json_diff(a: &str, b: &str) -> String {
-    let va: serde_json::Value = serde_json::from_str(a).expect("left view parses");
-    let vb: serde_json::Value = serde_json::from_str(b).expect("right view parses");
-    value_diff(&va, &vb, 0.0).unwrap_or_else(|| "byte-different but JSON-equal".into())
-}
-
-/// Replay `events` from an empty model on a fresh thread, so every
-/// thread-local view cache starts cold, and return the final view JSON.
-fn replay_cold(events: Vec<Event>) -> Result<String, String> {
-    std::thread::Builder::new()
-        .stack_size(16 << 20)
-        .spawn(move || {
-            let app = Engine;
-            let mut model = Model::default();
-            for e in events {
-                let _ = app.update(e, &mut model);
-            }
-            vm_json(&app.view(&model))
-        })
-        .expect("spawn replay thread")
-        .join()
-        .map_err(|p| format!("cold replay PANIC {}", panic_text(&*p)))
 }
 
 // ── Generator ─────────────────────────────────────────────────────────────
@@ -694,9 +585,6 @@ impl Gen {
                 Event::ClearHypertrophyPlan,
                 Event::ClearProtein,
                 Event::ClearHrZones,
-                Event::ClearCooper,
-                Event::ClearCriticalSpeed,
-                Event::ClearApre,
             ]),
             K::ClearSets => Event::ClearSets,
             K::ClearRuns => Event::ClearRuns,
@@ -1537,7 +1425,7 @@ impl Gen {
     }
 
     fn calculator(&mut self) -> Event {
-        match self.rng.below(7) {
+        match self.rng.below(4) {
             0 => Event::PredictRace {
                 recent_distance_m: self.f(1500.0, 42_195.0, 0.15),
                 recent_time_sec: self.f(300.0, 15_000.0, 0.15),
@@ -1559,31 +1447,11 @@ impl Gen {
                 masters: self.rng.chance(0.5),
                 deficit: self.rng.chance(0.5),
             },
-            3 => Event::ComputeHrZones {
+            _ => Event::ComputeHrZones {
                 age_years: self.f(12.0, 85.0, 0.15),
                 resting_hr_bpm: self.opt_f(0.5, 40.0, 80.0),
                 weeks_since_recalc: self.rng.opt(0.3, |_| 0).map(|_| self.u8w(0, 12)),
                 weeks_since_pace_test: self.rng.opt(0.3, |_| 0).map(|_| self.u8w(0, 12)),
-            },
-            4 => Event::ComputeCooper {
-                distance_m_12min: self.f(1000.0, 4000.0, 0.15),
-            },
-            5 => {
-                let n = self.rng.int(0, 6);
-                let efforts = (0..n)
-                    .map(|_| CsEffortIn {
-                        distance_m: self.f(400.0, 5000.0, 0.1),
-                        time_sec: self.f(60.0, 1500.0, 0.1),
-                    })
-                    .collect();
-                Event::ComputeCriticalSpeed { efforts }
-            }
-            _ => Event::ComputeApre {
-                scheme: self
-                    .rng
-                    .pick(&[ApreScheme::Apre3, ApreScheme::Apre6, ApreScheme::Apre10]),
-                reps: self.u8w(0, 15),
-                current_load_kg: self.f(20.0, 200.0, 0.15),
             },
         }
     }
@@ -1820,16 +1688,6 @@ fn check_wire(vm: &ViewModel, json: &str) -> Result<(), String> {
     serde_json::from_str::<ViewModel>(json)
         .map_err(|e| format!("view JSON does not decode: {e}"))?;
     Ok(())
-}
-
-/// The largest char boundary of `s` at or below `i` (MSRV 1.90 predates
-/// `str::floor_char_boundary`).
-fn char_floor(s: &str, i: usize) -> usize {
-    let mut i = i.min(s.len());
-    while !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
 }
 
 /// A display string that leaked a non-finite float ("NaN km", "inf", "∞").
@@ -2311,37 +2169,18 @@ impl Row<'_> {
     }
 }
 
-/// A view JSON prepared for an Undo comparison: the target run row's `fields`
-/// removed (a GPS row's `qc_dropped`, see [`QC_DROPPED`]).
-///
-/// Every float sum and tie the view shows is taken in log order (time, then
-/// `entry_id`), never storage order, so an Undo (the row re-pushed at the
-/// tail) must render the view EXACTLY: no float or text tolerance.
-fn without_run_fields(json: &str, id: u64, at: i64, fields: &[&str]) -> serde_json::Value {
-    let mut v: serde_json::Value = serde_json::from_str(json).expect("view parses");
-    if let Some(runs) = v.get_mut("runs").and_then(|r| r.as_array_mut()) {
-        for r in runs {
-            let is_target =
-                r["entry_id"].as_u64() == Some(id) && r["observed_at"].as_i64() == Some(at);
-            if let (true, Some(m)) = (is_target, r.as_object_mut()) {
-                for k in fields {
-                    m.remove(*k);
-                }
-            }
-        }
-    }
-    v
+fn json_value(json: &str) -> serde_json::Value {
+    serde_json::from_str(json).expect("view parses")
 }
-
-/// A GPS Undo rebuilds the route from the QC'd GPX by design, so the count
-/// of fixes QC dropped (not shown by the shell) comes back as 0.
-const QC_DROPPED: [&str; 1] = ["qc_dropped"];
 
 /// Up to three delete → Undo rounds on random History rows (GPS runs only
 /// when `gps`, otherwise sets, hand-entered runs and activities): each must
 /// remove exactly the row, and its Undo must render the view from before.
 /// GPS routes come back through the core's GPX at full (shortest round-trip)
-/// precision, so the live tracker's raw doubles survive the Undo.
+/// precision, so the live tracker's raw doubles survive the Undo. Every float
+/// sum and tie the view shows is taken in log order (time, then `entry_id`),
+/// never storage order, so an Undo (the row re-pushed at the tail) must render
+/// the view EXACTLY: no float or text tolerance.
 fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
     let (mut g, app, mut model) = shell_history(seed);
     let mut before = app.view(&model);
@@ -2379,14 +2218,7 @@ fn undo_delete_case(seed: u64, gps: bool) -> Result<(), String> {
         let _ = app.update(restore.clone(), &mut model);
         let after = app.view(&model);
         let after_json = vm_json(&after);
-        // A GPS row's QC'd-away fixes are not in the GPX the Undo is built
-        // from (by design), so its `qc_dropped` count is not compared.
-        let masked: &[&str] = if gps { &QC_DROPPED } else { &[] };
-        let diff = value_diff(
-            &without_run_fields(&before_json, id, at, masked),
-            &without_run_fields(&after_json, id, at, masked),
-            0.0,
-        );
+        let diff = value_diff(&json_value(&before_json), &json_value(&after_json), 0.0);
         if let Some(d) = diff {
             return Err(format!(
                 "round {round}: delete + Undo of {kind:?} {id}@{at} changed the view: {d} (undo event {})",
@@ -2510,7 +2342,7 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
             Row::Activity(_) => unreachable!("activities have no edit"),
         };
         let kind = row.kind();
-        let (id, at) = row.id();
+        let (id, _) = row.id();
         let before_json = vm_json(&before);
         let _ = app.update(edit.clone(), &mut model);
         let mid = app.view(&model);
@@ -2540,11 +2372,7 @@ fn undo_edit_case(seed: u64) -> Result<(), String> {
         let _ = app.update(undo.clone(), &mut model);
         let after = app.view(&model);
         let after_json = vm_json(&after);
-        let diff = value_diff(
-            &without_run_fields(&before_json, id, at, &[]),
-            &without_run_fields(&after_json, id, at, &[]),
-            0.0,
-        );
+        let diff = value_diff(&json_value(&before_json), &json_value(&after_json), 0.0);
         if let Some(d) = diff {
             return Err(format!(
                 "round {round}: edit + Undo changed the view: {d} (edit {}, undo {})",
@@ -2775,14 +2603,10 @@ fn bpm_run(at: i64) -> Event {
 #[test]
 fn compaction_keeps_the_profile_a_runs_bpm_was_converted_against() {
     let at = BASE_DAY * DAY_SEC + 8 * 3600;
-    let today = |d: i64| Event::SetToday {
-        epoch_day: d,
-        utc_offset_sec: 0,
-    };
     // A later profile edit (here: the measured HRmax removed) supersedes the
     // one the run was converted against.
     let profile_edit = vec![
-        today(BASE_DAY),
+        set_today_ev(BASE_DAY),
         Event::SetProfile(Profile {
             measured_hr_max: Some(190.0),
             ..base_profile()
@@ -2793,22 +2617,16 @@ fn compaction_keeps_the_profile_a_runs_bpm_was_converted_against() {
     // The birthday-derived age (Tanaka HRmax) at log time, superseded by a
     // later SetToday: compaction keeps only the last day line.
     let birthday = vec![
-        today(BASE_DAY),
+        set_today_ev(BASE_DAY),
         Event::SetProfile(Profile {
             birth_epoch_day: Some(BASE_DAY - 40 * 365),
             ..base_profile()
         }),
         bpm_run(at),
-        today(BASE_DAY + 1),
+        set_today_ev(BASE_DAY + 1),
     ];
     for (name, events) in [("profile edit", profile_edit), ("later SetToday", birthday)] {
-        let full = replay_cold(events.clone()).expect("full replay");
-        let compacted = replay_cold(compact_event_log(events)).expect("compacted replay");
-        assert!(
-            full == compacted,
-            "{name}: the compacted log renders the run differently: {}",
-            json_diff(&full, &compacted)
-        );
+        assert_compaction_equivalent(name, events);
     }
 }
 
@@ -2875,15 +2693,11 @@ fn undo_of_a_deleted_bpm_run_keeps_its_hr_percentage() {
             ..base_profile()
         })
     };
-    let set_today = |epoch_day: i64| Event::SetToday {
-        epoch_day,
-        utc_offset_sec: 0,
-    };
-    let _ = app.update(set_today(BASE_DAY), &mut model);
+    set_today(&app, &mut model, BASE_DAY);
     let _ = app.update(measured(190.0, BASE_DAY), &mut model);
     let _ = app.update(bpm_run(BASE_DAY * DAY_SEC + 8 * 3600), &mut model);
     // A later lab test lowers the measured HRmax.
-    let _ = app.update(set_today(BASE_DAY + 1), &mut model);
+    set_today(&app, &mut model, BASE_DAY + 1);
     let _ = app.update(measured(168.0, BASE_DAY + 1), &mut model);
     let (before, after) = delete_and_undo_run(&app, &mut model, 1_760_000_000_001);
     assert_eq!(
@@ -2898,13 +2712,7 @@ fn undo_of_a_deleted_run_keeps_its_spike_chip() {
     let app = Engine;
     let mut model = Model::default();
     let at = BASE_DAY * DAY_SEC + 8 * 3600;
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: BASE_DAY,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    );
+    set_today(&app, &mut model, BASE_DAY);
     // Today's 20 km run first, then a 5 km run from two days ago logged late.
     let _ = app.update(log_run(20.0, 110.0, 70.0, 0.0, at, 11), &mut model);
     let _ = app.update(
@@ -2966,40 +2774,26 @@ fn a_run_trimmed_to_its_standing_start_never_shows_negative_zero() {
     );
 }
 
-/// Full replay vs replay of the compacted log, both on cold threads.
-fn assert_compaction_equivalent(events: Vec<Event>) {
-    let full = replay_cold(events.clone()).expect("full replay");
-    let compacted = replay_cold(compact_event_log(events)).expect("compacted replay");
-    assert!(
-        full == compacted,
-        "the compacted log renders a different view: {}",
-        json_diff(&full, &compacted)
-    );
-}
-
 #[test]
 fn compaction_keeps_the_date_of_an_undated_race() {
     // A legacy (undated) profile edit stating a race: the race has no day to
     // be dated with, whatever SetToday preceded it (compaction keeps only the
     // last one), so it stays undated in both replays.
-    assert_compaction_equivalent(vec![
-        Event::SetToday {
-            epoch_day: BASE_DAY,
-            utc_offset_sec: 0,
-        },
-        Event::SetProfile(Profile {
-            recent_race: Some(RecentRace {
-                distance_km: 10.0,
-                time_sec: 2700,
-                epoch_day: None,
+    assert_compaction_equivalent(
+        "legacy undated race",
+        vec![
+            set_today_ev(BASE_DAY),
+            Event::SetProfile(Profile {
+                recent_race: Some(RecentRace {
+                    distance_km: 10.0,
+                    time_sec: 2700,
+                    epoch_day: None,
+                }),
+                ..base_profile()
             }),
-            ..base_profile()
-        }),
-        Event::SetToday {
-            epoch_day: BASE_DAY + 6,
-            utc_offset_sec: 0,
-        },
-    ]);
+            set_today_ev(BASE_DAY + 6),
+        ],
+    );
     // The shell's path: the race is dated with the edit's effective day, and
     // an unchanged undated re-send keeps that date, in both replays.
     let race = |eff: i64| {
@@ -3013,16 +2807,12 @@ fn compaction_keeps_the_date_of_an_undated_race() {
             ..base_profile()
         })
     };
-    let today = |d: i64| Event::SetToday {
-        epoch_day: d,
-        utc_offset_sec: 0,
-    };
     let events = vec![
-        today(BASE_DAY),
+        set_today_ev(BASE_DAY),
         race(BASE_DAY),
-        today(BASE_DAY + 6),
+        set_today_ev(BASE_DAY + 6),
         race(BASE_DAY + 6),
-        today(BASE_DAY + 7),
+        set_today_ev(BASE_DAY + 7),
     ];
     for log in [events.clone(), compact_event_log(events.clone())] {
         let app = Engine;
@@ -3037,7 +2827,7 @@ fn compaction_keeps_the_date_of_an_undated_race() {
             .and_then(|r| r.epoch_day);
         assert_eq!(day, Some(BASE_DAY), "the re-sent race keeps its first day");
     }
-    assert_compaction_equivalent(events);
+    assert_compaction_equivalent("re-sent race", events);
 }
 
 #[test]
@@ -3045,27 +2835,30 @@ fn compaction_keeps_in_window_checkins_when_one_is_dated_after_today() {
     // Minimized from fuzz seed 0xa86ae7dfa6e1e015 (shell mode): a check-in
     // stamped 84 days ahead (a wrong device clock, later corrected), then
     // yesterday's check-in, then today.
-    assert_compaction_equivalent(vec![
-        Event::SubmitCheckin(CheckinInput {
-            observed_at: 1_770_829_517,
-            mood: Some(1),
-            resting_hr_bpm: Some(55.6),
-            ..CheckinInput::default()
-        }),
-        Event::SubmitCheckin(CheckinInput {
-            observed_at: 1_763_517_034,
-            sleep_quality: Some(3),
-            soreness: Some(5),
-            mood: Some(4),
-            fatigue: Some(5),
-            stress: Some(3),
-            ..CheckinInput::default()
-        }),
-        Event::SetToday {
-            epoch_day: 20_412,
-            utc_offset_sec: 19_800,
-        },
-    ]);
+    assert_compaction_equivalent(
+        "check-in dated after today",
+        vec![
+            Event::SubmitCheckin(CheckinInput {
+                observed_at: 1_770_829_517,
+                mood: Some(1),
+                resting_hr_bpm: Some(55.6),
+                ..CheckinInput::default()
+            }),
+            Event::SubmitCheckin(CheckinInput {
+                observed_at: 1_763_517_034,
+                sleep_quality: Some(3),
+                soreness: Some(5),
+                mood: Some(4),
+                fatigue: Some(5),
+                stress: Some(3),
+                ..CheckinInput::default()
+            }),
+            Event::SetToday {
+                epoch_day: 20_412,
+                utc_offset_sec: 19_800,
+            },
+        ],
+    );
 }
 
 /// A corrupt log's extreme `SetToday` never panics `view()`: for a held youth
@@ -3098,20 +2891,14 @@ fn an_extreme_set_today_never_panics_the_view() {
             let mut model = Model::default();
             let at = BASE_DAY * DAY_SEC + 7 * 3600;
             for e in [
-                Event::SetToday {
-                    epoch_day: BASE_DAY,
-                    utc_offset_sec: 0,
-                },
+                set_today_ev(BASE_DAY),
                 Event::SetProfile(profile.clone()),
                 Event::GeneratePlan {
                     start_epoch_day: BASE_DAY,
                 },
                 log_run(6.0, 36.0, 70.0, 0.0, at, 1),
                 log_set_id("Back squat", 100.0, 2, at),
-                Event::SetToday {
-                    epoch_day: day,
-                    utc_offset_sec: 0,
-                },
+                set_today_ev(day),
             ] {
                 let _ = app.update(e, &mut model);
             }
@@ -3130,10 +2917,7 @@ fn undo_of_a_deleted_set_keeps_the_lift_audit_name() {
     let app = Engine;
     let mut model = Model::default();
     for e in [
-        Event::SetToday {
-            epoch_day: BASE_DAY,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(BASE_DAY),
         // Yesterday's heavy triple anchors the e1RM.
         log_set_id("Back Squat", 120.0, 1, day - DAY_SEC),
         // Today: two singles at ~86 %, one under the retired catalog label
@@ -3211,13 +2995,7 @@ fn undo_of_a_run_keeps_the_weekly_km() {
     let at = BASE_DAY * DAY_SEC + 8 * 3600;
     let app = Engine;
     let mut model = Model::default();
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: BASE_DAY,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    );
+    set_today(&app, &mut model, BASE_DAY);
     // 13.69 + 29.27 + 6.89 = 49.85 exactly; the float sum lands either side
     // of the rounding edge depending on the order.
     for (i, km) in [13.69, 29.27, 6.89].into_iter().enumerate() {
@@ -3235,13 +3013,7 @@ fn undo_of_a_run_keeps_the_weekly_km() {
     delete_and_undo_run(&app, &mut model, 100);
     // The same three runs logged fresh, in their original order.
     let mut fresh = Model::default();
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: BASE_DAY,
-            utc_offset_sec: 0,
-        },
-        &mut fresh,
-    );
+    set_today(&app, &mut fresh, BASE_DAY);
     for (i, km) in [13.69, 29.27, 6.89].into_iter().enumerate() {
         let _ = app.update(
             log_run(km, 60.0, 70.0, 0.0, at - i as i64 * 3600, 100 + i as u64),
@@ -3261,10 +3033,7 @@ fn a_huge_run_duration_never_panics_the_youth_card() {
     let app = Engine;
     let mut model = Model::default();
     for e in [
-        Event::SetToday {
-            epoch_day: BASE_DAY,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(BASE_DAY),
         Event::SetProfile(Profile {
             health: HealthScreen {
                 youth: true,
@@ -3272,7 +3041,9 @@ fn a_huge_run_duration_never_panics_the_youth_card() {
             },
             ..base_profile()
         }),
-        log_run(5.0, 1e10, 70.0, 0.0, at, 1),
+        // Started today at 08:00 (the day the card buckets it), so its
+        // 1e10 minutes reach the weekly total.
+        log_run(5.0, 1e10, 70.0, 0.0, at + 600_000_000_000, 1),
         Event::LogActivity {
             kind: ActivityKind::Sport,
             minutes: 30.0,
@@ -3300,10 +3071,7 @@ fn a_subnormal_run_distance_never_shows_infinite_percent() {
     let app = Engine;
     let mut model = Model::default();
     for e in [
-        Event::SetToday {
-            epoch_day: BASE_DAY,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(BASE_DAY),
         Event::SetProfile(sample_profile()),
         log_run(5e-324, 30.0, 70.0, 0.0, at - 8 * DAY_SEC, 1),
         log_run(5e-324, 30.0, 70.0, 0.0, at - DAY_SEC, 2),

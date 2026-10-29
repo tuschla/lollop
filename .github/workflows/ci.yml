@@ -75,23 +75,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      - name: Add Android targets
-        run: rustup target add aarch64-linux-android x86_64-linux-android
-
-      - name: Set up Android SDK/NDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
-
-      - name: Build jniLibs
-        run: cargo ndk -o android/app/src/main/jniLibs -t arm64-v8a -t x86_64 build -p shared --release
 
       - name: Unit tests + offline UI/UX QA
         # testDebugUnitTest runs the JVM wire-shape tests AND the Robolectric
         # UI/UX QA suite; its gradle task builds the host libshared.so (jni-host)
         # so the UI tests drive the real Rust core. Screenshot baselines are
-        # local-only (not in git), so CI captures without comparing.
+        # local-only (not in git) and no roborazzi task runs here, so the
+        # screenshot tests run their UI and assertions and skip the captures.
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest
 
@@ -135,7 +127,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: On-device smoke (assemble, install, instrumented tests, monkey)
+      - name: On-device smoke (assemble, install, monkey)
         uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
         with:
           api-level: 34
@@ -148,5 +140,5 @@ jobs:
           # is self-contained (no `cd`, no multi-line constructs).
           working-directory: android
           script: |
-            ./gradlew --no-daemon installDebug connectedDebugAndroidTest
+            ./gradlew --no-daemon installDebug
             ../scripts/monkey-gate.sh

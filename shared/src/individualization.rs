@@ -11,7 +11,7 @@
 //! REENTRY-001).
 
 use crate::evidence;
-use crate::evidence::claims;
+use crate::evidence::{ClaimId, claims};
 use crate::schema::{Adjustment, HealthScreen, Recommended};
 
 // ---------------------------------------------------------------------------
@@ -178,7 +178,7 @@ pub fn min_muscle_exposures_per_week() -> Recommended<u8> {
 // 4. Re-entry after a layoff (File 08 Table 3.4b; REENTRY-001)
 // ---------------------------------------------------------------------------
 
-/// Conservative resistance re-entry prescription after a training gap.
+/// Conservative re-entry prescription after a training gap (one Table 3.4b row).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReEntry {
     /// Fraction of prior working loads to start at. `None` when the KB gives no
@@ -187,11 +187,20 @@ pub struct ReEntry {
     pub load_frac: Option<f64>,
     /// Weeks to ramp back to full load (min, max).
     pub ramp_weeks: (u8, u8),
-    /// True once the layoff is long enough to treat the lifter as a novice again.
-    pub treat_as_novice: bool,
+    /// Running restart as a fraction of the prior weekly volume (the table's
+    /// running column, RUN-REENTRY-001); 0 past 8 weeks, where the table says
+    /// "rebuild base" and gives no fraction.
+    pub run_volume_frac: f64,
 }
 
-/// Resistance re-entry bracket by weeks off (File 08 Table 3.4b, conservative
+impl ReEntry {
+    /// The >8 wk bracket: no KB load fraction, so the lifter restarts as a novice.
+    pub fn treat_as_novice(&self) -> bool {
+        self.load_frac.is_none()
+    }
+}
+
+/// Re-entry bracket by weeks off (File 08 Table 3.4b, conservative
 /// ExpertOpinion default extrapolated from Mujika & Padilla 2000). Hold
 /// intensity where possible, rebuild volume. REENTRY-001 (ExpertOpinion, not
 /// the Moderate detraining-timeline claim).
@@ -200,25 +209,25 @@ pub fn resistance_reentry(weeks_off: f64) -> Recommended<ReEntry> {
         ReEntry {
             load_frac: Some(1.00),
             ramp_weeks: (0, 0),
-            treat_as_novice: false,
+            run_volume_frac: 1.0,
         }
     } else if weeks_off < 2.0 {
         ReEntry {
             load_frac: Some(0.90),
             ramp_weeks: (1, 1),
-            treat_as_novice: false,
+            run_volume_frac: 0.90,
         }
     } else if weeks_off < 4.0 {
         ReEntry {
             load_frac: Some(0.825),
             ramp_weeks: (1, 2),
-            treat_as_novice: false,
+            run_volume_frac: 0.75,
         }
     } else if weeks_off <= 8.0 {
         ReEntry {
             load_frac: Some(0.70),
             ramp_weeks: (2, 4),
-            treat_as_novice: false,
+            run_volume_frac: 0.55,
         }
     } else {
         // >8 wk: KB Table 3.4b states no load fraction, "treat as novice
@@ -228,10 +237,20 @@ pub fn resistance_reentry(weeks_off: f64) -> Recommended<ReEntry> {
         ReEntry {
             load_frac: None,
             ramp_weeks: (4, 6),
-            treat_as_novice: true,
+            run_volume_frac: 0.0,
         }
     };
     evidence::graded(r, claims::REENTRY_001)
+}
+
+/// REENTRY-RAMP-001 linear ramp: `f0` on day 0, climbing to 1.0 over
+/// `ramp_days` (1.0 when there is no window).
+fn linear_ramp(f0: f64, t: i64, ramp_days: i64) -> f64 {
+    if ramp_days <= 0 {
+        1.0
+    } else {
+        f0 + (1.0 - f0) * (t as f64 / ramp_days as f64).min(1.0)
+    }
 }
 
 /// Where a declared layoff's re-entry ramp stands `days_since_return` days
@@ -250,8 +269,13 @@ pub struct ReentryRamp {
     /// `true` while the window is still running (`t < ramp_days`); `false`
     /// once it has ended — the layoff then no longer shapes any load.
     pub active: bool,
+}
+
+impl ReentryRamp {
     /// The >8 wk "treat as a fresh novice" bracket.
-    pub treat_as_novice: bool,
+    pub fn treat_as_novice(&self) -> bool {
+        self.frac.is_none()
+    }
 }
 
 /// Evaluate the re-entry ramp for `weeks_off` declared weeks off, `t =
@@ -263,19 +287,11 @@ pub fn reentry_ramp(weeks_off: f64, days_since_return: i64) -> Recommended<Reent
     let ramp_days = re.ramp_weeks.1 as i64 * 7;
     let t = days_since_return.max(0);
     let active = ramp_days > 0 && t < ramp_days && re.load_frac.is_none_or(|f| f < 1.0);
-    let frac = re.load_frac.map(|f0| {
-        if ramp_days <= 0 {
-            1.0
-        } else {
-            f0 + (1.0 - f0) * (t as f64 / ramp_days as f64).min(1.0)
-        }
-    });
     evidence::graded(
         ReentryRamp {
-            frac,
+            frac: re.load_frac.map(|f0| linear_ramp(f0, t, ramp_days)),
             ramp_days,
             active,
-            treat_as_novice: re.treat_as_novice,
         },
         claims::REENTRY_RAMP_001,
     )
@@ -307,43 +323,17 @@ pub struct RunReEntry {
 /// days after running resumed (a break still running counts as day 0):
 /// <1 wk as planned; 1–2 wk ~90 % of the prior volume; 2–4 wk ~70–80 %
 /// (midpoint) and rebuild the long run; 4–8 wk ~50–60 % (midpoint) and single
-/// runs judged near-novice for spike caps; past 8 weeks "rebuild base". The
-/// table gives no fraction past 8 weeks, so nothing from before the break
-/// floors the restart (fraction 0): the base is rebuilt from the running
-/// logged since the return, as for a new runner whose logged runs replace the
-/// numbers entered (RUN-START-001), never from an invented share.
-///
-/// Table 3.4b is a re-entry RAMP (load-036 applies it to resistance and
-/// running alike) but states the ramp length only in its resistance column:
-/// the same row's window ([`resistance_reentry`]'s `ramp_weeks` top: 1, 2, 4,
-/// 6 weeks) bounds the running ramp too, with the REENTRY-RAMP-001 linear
-/// shape. Once it has run its course the break no longer scales the plan.
+/// runs judged near-novice for spike caps; past 8 weeks "rebuild base" from
+/// the running logged since the return (fraction 0, RUN-START-001).
+/// Ramp window = [`resistance_reentry`]'s `ramp_weeks.1` (Table 3.4b;
+/// REENTRY-RAMP-001).
 pub fn run_reentry(weeks_off: f64, days_since_return: i64) -> Recommended<RunReEntry> {
-    let start = if weeks_off < 1.0 {
-        1.0
-    } else if weeks_off < 2.0 {
-        0.90
-    } else if weeks_off < 4.0 {
-        0.75
-    } else if weeks_off <= 8.0 {
-        0.55
-    } else {
-        0.0
-    };
-    let ramp_days = if start < 1.0 {
-        resistance_reentry(weeks_off).value.ramp_weeks.1 as i64 * 7
-    } else {
-        0
-    };
+    let re = resistance_reentry(weeks_off).value;
+    let ramp_days = re.ramp_weeks.1 as i64 * 7;
     let t = days_since_return.max(0);
-    let volume_frac = if ramp_days > 0 {
-        start + (1.0 - start) * (t as f64 / ramp_days as f64).min(1.0)
-    } else {
-        1.0
-    };
     evidence::graded(
         RunReEntry {
-            volume_frac,
+            volume_frac: linear_ramp(re.run_volume_frac, t, ramp_days),
             ramp_days,
             active: t < ramp_days,
             rebuild_long_run: weeks_off >= 2.0,
@@ -377,13 +367,6 @@ pub fn novice_load_increment() -> Recommended<LoadIncrement> {
         },
         claims::DBLPROG_001,
     )
-}
-
-/// Double progression: once the top of the rep range is hit on every set, add
-/// load and drop to the range bottom (File 08 load-031). Returns `true` when the
-/// engine should add load this session. DBLPROG-001.
-pub fn double_progression_add_load(top_of_range_all_sets: bool) -> Recommended<bool> {
-    evidence::graded(top_of_range_all_sets, claims::DBLPROG_001)
 }
 
 /// Daily protein target as g/kg bodyweight (min, max) for a goal context
@@ -467,8 +450,6 @@ pub fn youth_activity_targets() -> Recommended<YouthActivityTargets> {
 pub struct NoviceStallOutcome {
     /// Fraction to deload the stalling lift (0.10).
     pub deload_frac: f64,
-    /// Isolate the stalling lift only, do not touch other lifts.
-    pub scope_single_lift: bool,
     /// If it stalls again after the re-ramp, transition THAT lift to
     /// intermediate weekly progression.
     pub transition_to_intermediate: bool,
@@ -487,7 +468,6 @@ pub fn novice_stall_action(
     let outcome = if consecutive_failed_sessions >= 3 && adequate_recovery {
         Some(NoviceStallOutcome {
             deload_frac: 0.10,
-            scope_single_lift: true,
             transition_to_intermediate: stalled_again_after_reramp,
         })
     } else {
@@ -557,7 +537,7 @@ pub struct EnvironmentModifier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Environment {
     Heat,
-    /// Altitude above the [`ALTITUDE_THRESHOLD_M`] trigger.
+    /// Altitude above ~2,500 m (File 08 indiv-025).
     Altitude,
     Cold,
     Neutral,
@@ -566,7 +546,7 @@ pub enum Environment {
 /// Altitude trigger threshold in metres (File 08 indiv-025: ">~2,500 m").
 /// The only altitude number the KB states (besides the pregnancy avoid-list's
 /// identical 2,500 m in safety-047).
-pub const ALTITUDE_THRESHOLD_M: f64 = 2_500.0;
+const ALTITUDE_THRESHOLD_M: f64 = 2_500.0;
 
 /// Environment-specific modifier (File 08 §1.5; ENV-001, ExpertOpinion -
 /// safety-critical via the heat-illness STOP branch). Heat: reduce intensity,
@@ -638,97 +618,82 @@ pub fn pregnancy_precautions() -> Recommended<PregnancyPrecautions> {
 /// Run the Stage-0 onboarding gates (File 08 onboard-050: screen → route →
 /// classify) over the health screen, returning EVERY deferral that fires, each
 /// cited to its own safety rule. An empty vec = screen clear, programming may
-/// proceed. Deterministic order: acute pregnancy warning first, then the
-/// onboard-050 route order (PAR-Q+ → pregnancy → injury → pediatric → RED-S).
+/// proceed. Deterministic order: pregnancy warning sign → symptoms → acute
+/// illness → PAR-Q+ → pregnancy → injury → pediatric → RED-S.
 ///
 /// safety-000 global precedence: none of these deferrals may ever be
 /// overridden to satisfy a user's stated goal, safety > goals (HARD RULE 3).
 pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
-    let mut out = Vec::new();
-    if s.pregnancy_warning_sign {
+    let gates: [(bool, &str, ClaimId); 8] = [
         // safety-046: warning signs → STOP and DEFER.
-        out.push(evidence::graded(Adjustment::Defer {
-            reason: "You reported a pregnancy warning sign. Stop exercising now and contact your doctor or midwife."
-                .into(),
-        },
-        claims::SAFE_PREG_WARN_001,));
-    }
-    if s.symptomatic_any() {
-        // onboard-051/052 (SCREEN-ACSM-001): chest pain or dizziness/fainting
-        // → STOP + DEFER regardless of activity status. Deliberately NOT
-        // cleared by `medically_cleared`: a prior clearance answer does not
-        // cover a current symptom.
-        out.push(evidence::graded(Adjustment::Defer {
-            reason: "You reported chest pain, dizziness or fainting. See a doctor before you train, then update your health answers."
-                .into(),
-        },
-        claims::SCREEN_ACSM_001,));
-    }
-    if s.acute_illness {
-        // File 08 acute illness → DEFER; fever / infection = no training
-        // (ILLNESS-NECK-001) until the user reports it resolved.
-        out.push(evidence::graded(
-            Adjustment::Defer {
-                reason: "Training is paused until you have no fever and your symptoms are gone. Then tap I'm better."
-                    .into(),
-            },
+        (
+            s.pregnancy_warning_sign,
+            "You reported a pregnancy warning sign. Stop exercising now and contact your doctor or midwife.",
+            claims::SAFE_PREG_WARN_001,
+        ),
+        // onboard-051/052: chest pain or dizziness/fainting → STOP + DEFER
+        // regardless of activity status. Not cleared by `medically_cleared`: a
+        // prior clearance answer does not cover a current symptom.
+        (
+            s.symptomatic_any(),
+            "You reported chest pain, dizziness or fainting. See a doctor before you train, then update your health answers.",
+            claims::SCREEN_ACSM_001,
+        ),
+        // File 08 acute illness: fever / infection = no training until the
+        // user reports it resolved.
+        (
+            s.acute_illness,
+            "Training is paused until you have no fever and your symptoms are gone. Then tap I'm better.",
             claims::ILLNESS_NECK_001,
-        ));
-    }
-    if s.parq_followup_uncleared() {
+        ),
         // safety-044 + onboard-050: positive PAR-Q+/ACSM screen → medical
-        // clearance gate before any prescription. Every follow-up Yes must be
+        // clearance before any prescription; every follow-up Yes must be
         // covered by the clearance (a Yes added later gates again).
-        out.push(evidence::graded(Adjustment::Defer {
-            reason: "Once a doctor has cleared you, turn on \"Cleared by a doctor\" in your health answers."
-                .into(),
-        },
-        claims::SAFE_CVD_001,));
-    }
-    if s.pregnant {
-        // safety-045: no autonomous prescription/progression in pregnancy;
-        // provider clearance + individualization. The ~150 min a week moderate
-        // figure is the KB's reference target for uncomplicated pregnancy -
-        // surfaced as context, NOT an engine prescription. The hold banner
-        // already says lollop won't plan; the card carries the reference.
-        out.push(evidence::graded(Adjustment::Defer {
-            reason: "Guideline for an uncomplicated pregnancy: about 150 minutes of moderate activity a week, agreed with your doctor or midwife."
-                .into(),
-        },
-        claims::SAFE_PREG_001,));
-    }
-    if s.injury_any() {
+        (
+            s.parq_followup_uncleared(),
+            "Once a doctor has cleared you, turn on \"Cleared by a doctor\" in your health answers.",
+            claims::SAFE_CVD_001,
+        ),
+        // safety-045: no autonomous prescription in pregnancy. The ~150 min a
+        // week is the KB's reference for an uncomplicated pregnancy, shown as
+        // context, not an engine prescription.
+        (
+            s.pregnant,
+            "Guideline for an uncomplicated pregnancy: about 150 minutes of moderate activity a week, agreed with your doctor or midwife.",
+            claims::SAFE_PREG_001,
+        ),
         // safety-048: the engine never prescribes rehabilitation.
-        out.push(evidence::graded(Adjustment::Defer {
-            reason: "You have an injury, recent surgery or ongoing rehab. lollop doesn't plan rehab. Follow your doctor or physio, and update your health answers once they clear you."
-                .into(),
-        },
-        claims::SAFE_INJURY_001,));
-    }
-    if s.youth {
-        // safety-011: pediatric/adolescent, supervision + technique-first;
-        // never autonomous maximal loading or 1RM testing. The engine builds
-        // no plan at all for this gate (the hold banner says so); the card
-        // carries the KB's how-to.
-        out.push(evidence::graded(
-            Adjustment::Defer {
-                reason:
-                    "Put technique ahead of weight, and skip near-max weights and 1-rep-max tests."
-                        .into(),
-            },
+        (
+            s.injury_any(),
+            "You have an injury, recent surgery or ongoing rehab. lollop doesn't plan rehab. Follow your doctor or physio, and update your health answers once they clear you.",
+            claims::SAFE_INJURY_001,
+        ),
+        // safety-011: supervision + technique first; never autonomous maximal
+        // loading or 1RM testing. No plan is built; the card carries the how-to.
+        (
+            s.youth,
+            "Put technique ahead of weight, and skip near-max weights and 1-rep-max tests.",
             claims::SAFE_PEDS_001,
-        ));
-    }
-    if s.reds_signal {
-        // safety-049 absolute rule (via onboard-050 screening): never a
-        // programming variable: reduce/rest and defer.
-        out.push(evidence::graded(Adjustment::Defer {
-            reason: "You reported a sign of under-eating, so training is paused. Talk to a doctor, a registered dietitian or a mental-health professional."
-                .into(),
-        },
-        claims::SAFE_REDS_001,));
-    }
-    out
+        ),
+        // safety-049 absolute rule: never a programming variable.
+        (
+            s.reds_signal,
+            "You reported a sign of under-eating, so training is paused. Talk to a doctor, a registered dietitian or a mental-health professional.",
+            claims::SAFE_REDS_001,
+        ),
+    ];
+    gates
+        .into_iter()
+        .filter(|(fires, ..)| *fires)
+        .map(|(_, reason, claim)| {
+            evidence::graded(
+                Adjustment::Defer {
+                    reason: reason.into(),
+                },
+                claim,
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]

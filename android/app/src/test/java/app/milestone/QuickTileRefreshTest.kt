@@ -11,6 +11,7 @@ import android.service.quicksettings.TileService
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.widget.TodayWidgetReceiver
 import app.milestone.widget.WidgetDayKind
+import app.milestone.widget.WidgetMidnight
 import app.milestone.widget.WidgetSnapshot
 import app.milestone.widget.WidgetSnapshotStore
 import java.io.File
@@ -117,7 +118,6 @@ class QuickTileRefreshTest {
         taken()
         for (action in listOf(
             TodayWidgetReceiver.ACTION_MIDNIGHT,
-            Intent.ACTION_DATE_CHANGED,
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED,
             Intent.ACTION_LOCALE_CHANGED,
@@ -145,6 +145,11 @@ class QuickTileRefreshTest {
         // After cleared app data (the flag gone), the next draw restores it and the tick.
         service.onStartListening()
         assertTrue(QuickTileService.isAdded(ctx))
+        assertNotNull(alarms.nextScheduledAlarm)
+        // A reboot clears alarms but not the flag: the next draw re-arms the tick.
+        WidgetMidnight.cancel(ctx)
+        assertNull(alarms.nextScheduledAlarm)
+        service.onStartListening()
         assertNotNull(alarms.nextScheduledAlarm)
     }
 }

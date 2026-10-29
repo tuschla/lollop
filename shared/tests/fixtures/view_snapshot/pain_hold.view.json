@@ -16,14 +16,12 @@
         "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
         "improves": "-"
       },
-      "neutral": false,
       "exercise": null,
       "suggested_load_kg": null,
       "suggests_end_exercise": false
     }
   ],
   "review_adjustments": [],
-  "review_present": false,
   "weekly_checkin_present": false,
   "input_count": 1,
   "lifts": [
@@ -46,8 +44,6 @@
         "safety_critical": false,
         "contested": false
       },
-      "e1rm_delta_kg": null,
-      "e1rm_direction": null,
       "summary": "Back Squat 120kg × 3 @RPE9.0 → e1RM 136kg (~88%1RM, 1.0 RIR)",
       "observed_at": 1727460000,
       "entry_id": 1,
@@ -74,8 +70,6 @@
         "safety_critical": false,
         "contested": false
       },
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Back Squat 120kg × 3 @RPE9.0 → e1RM 136kg (~88%1RM, 1.0 RIR)",
       "observed_at": 1727546400,
       "entry_id": 2,
@@ -102,8 +96,6 @@
         "safety_critical": false,
         "contested": false
       },
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Back Squat 120kg × 3 @RPE9.0 → e1RM 136kg (~88%1RM, 1.0 RIR)",
       "observed_at": 1727632800,
       "entry_id": 3,
@@ -130,8 +122,6 @@
         "safety_critical": false,
         "contested": false
       },
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Back Squat 120kg × 3 @RPE9.0 → e1RM 136kg (~88%1RM, 1.0 RIR)",
       "observed_at": 1727719200,
       "entry_id": 4,
@@ -158,8 +148,6 @@
         "safety_critical": false,
         "contested": false
       },
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Back Squat 120kg × 3 @RPE9.0 → e1RM 136kg (~88%1RM, 1.0 RIR)",
       "observed_at": 1727805600,
       "entry_id": 5,
@@ -186,8 +174,6 @@
         "safety_critical": false,
         "contested": false
       },
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Back Squat 120kg × 3 @RPE9.0 → e1RM 136kg (~88%1RM, 1.0 RIR)",
       "observed_at": 1727892000,
       "entry_id": 6,
@@ -214,8 +200,6 @@
         "safety_critical": false,
         "contested": false
       },
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Back Squat 120kg × 3 @RPE9.0 → e1RM 136kg (~88%1RM, 1.0 RIR)",
       "observed_at": 1727978400,
       "entry_id": 7,
@@ -242,8 +226,6 @@
         "safety_critical": false,
         "contested": false
       },
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Back Squat 120kg × 3 @RPE9.0 → e1RM 136kg (~88%1RM, 1.0 RIR)",
       "observed_at": 1728064800,
       "entry_id": 8,
@@ -270,8 +252,6 @@
         "safety_critical": false,
         "contested": false
       },
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Back Squat 120kg × 3 @RPE9.0 → e1RM 136kg (~88%1RM, 1.0 RIR)",
       "observed_at": 1728151200,
       "entry_id": 9,
@@ -298,8 +278,6 @@
         "safety_critical": false,
         "contested": false
       },
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Back Squat 120kg × 3 @RPE9.0 → e1RM 136kg (~88%1RM, 1.0 RIR)",
       "observed_at": 1728237600,
       "entry_id": 10,
@@ -319,17 +297,15 @@
       "avg_hr_bpm": 145.0,
       "spike_flag": false,
       "spike_note": "",
-      "split_pct": null,
       "split": null,
       "interval": null,
       "workout_type": null,
       "summary": "6.0km @ 6:00/km (Z1)",
-      "citation": "Frandsen et al. 2025, BJSM 59(17):1203-1210 (n=5,205; 588,071 sessions)",
       "grade": "Moderate",
+      "citation": "Frandsen et al. 2025, BJSM 59(17):1203-1210 (n=5,205; 588,071 sessions)",
       "confidence": 0.65,
       "safety_critical": true,
       "contested": false,
-      "qc_dropped": 0,
       "has_gpx": false,
       "observed_at": 1728111600,
       "entry_id": 100,
@@ -927,7 +903,7 @@
       "summary": "Two sessions on one day: ideally 6–24 h apart, at least 3 h",
       "summary_mi": "",
       "grade": "Moderate",
-      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125 (AMPK-mTOR molecular interference)",
+      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125",
       "confidence": 0.65,
       "safety_critical": false,
       "contested": true,
@@ -991,7 +967,7 @@
       "summary": "Do your most important session when you're freshest: early in the week or right after a rest day",
       "summary_mi": "",
       "grade": "ExpertOpinion",
-      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125 (schedule priority quality when fresh)",
+      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125",
       "confidence": 0.3,
       "safety_critical": false,
       "contested": false,
@@ -1488,9 +1464,6 @@
   "protein_targets": [],
   "hr_zones": [],
   "training_load": {
-    "ctl": 0.8,
-    "atl": 3.6,
-    "tsb": -2.8,
     "days": 3,
     "sessions_counted": 1,
     "sessions_skipped": 10,
@@ -1503,15 +1476,13 @@
     "contested": false
   },
   "srpe_load": {
-    "week_au": 0.0,
-    "prev_week_au": 180.0,
-    "rated_runs": 0,
-    "unrated_runs": 0,
     "method": "Effort load: minutes of running × your 0–10 rating of the whole run, given about 30 minutes afterwards. Kept separate from heart-rate load.",
     "summary": "No rated runs this week · last week 180",
     "grade": "Moderate",
     "citation": "Foster et al. 2001, J Strength Cond Res 15(1):109-115 (session-RPE method)",
-    "confidence": 0.65
+    "confidence": 0.65,
+    "safety_critical": false,
+    "contested": false
   },
   "weekly_report": [
     {
@@ -1568,155 +1539,109 @@
       {
         "week_start_epoch_day": 19898,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19905,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19912,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19919,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19926,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19933,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19940,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19947,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19954,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19961,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19968,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19975,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19982,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19989,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       },
       {
         "week_start_epoch_day": 19996,
         "km": 6.0,
-        "longest_km": 6.0,
         "runs": 1,
-        "moving_min": 36.0,
-        "srpe_load_au": 180.0,
-        "rated_runs": 1
+        "srpe_load_au": 180.0
       },
       {
         "week_start_epoch_day": 20003,
         "km": 0.0,
-        "longest_km": 0.0,
         "runs": 0,
-        "moving_min": 0.0,
-        "srpe_load_au": 0.0,
-        "rated_runs": 0
+        "srpe_load_au": 0.0
       }
     ],
     "planned_weekly_km": 40.0,
     "longest_run_km": 6.0,
     "longest_run_observed_at": 1728111600,
     "best_efforts": [],
-    "citation": "Michie et al. 2009, Health Psychol 28(6):690-701 (behaviour-change techniques meta-regression)",
     "grade": "Moderate",
-    "confidence": 0.65
+    "citation": "Michie et al. 2009, Health Psychol 28(6):690-701 (behaviour-change techniques meta-regression)",
+    "confidence": 0.65,
+    "safety_critical": false,
+    "contested": false
   },
   "lift_audit": [
     {
@@ -1736,16 +1661,10 @@
       "training_age": ""
     }
   ],
-  "cooper": [],
-  "critical_speed": [],
-  "apre": [],
   "hr_zone_input": null,
   "protein_input": null,
   "hypertrophy_input": null,
   "hypertrophy_ramp": [],
-  "cooper_input": null,
-  "critical_speed_input": [],
-  "apre_input": null,
   "trend": null,
   "provisional": {
     "summary": "Starting weights are typical values; they adapt as you log (day 11 of about 14).",
@@ -1759,7 +1678,6 @@
       "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
       "improves": "-"
     },
-    "neutral": false,
     "exercise": null,
     "suggested_load_kg": null,
     "suggests_end_exercise": false
@@ -1776,7 +1694,6 @@
       "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
       "improves": "-"
     },
-    "neutral": false,
     "exercise": null,
     "suggested_load_kg": null,
     "suggests_end_exercise": false
@@ -1953,9 +1870,7 @@
         "reps_high": 3,
         "load_kg": null,
         "intensity_label": "light and pain-free; change the movement if it hurts",
-        "intensity": "Prose",
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "",
         "timed_hold": false,
         "target_rpe": 7.0,
@@ -1988,7 +1903,7 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "5×3 at 85% of your estimated max (136 kg): 115 kg planned, pick the weight today. Stop each set with about 2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 120 kg × 3 with 1 rep left.",
+          "basis": "5×3 at 85% of your estimated max (136 kg): 115 kg planned, pick the weight today. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 120 kg × 3 with 1 rep left.",
           "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
           "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
         },
@@ -2016,9 +1931,7 @@
         "reps_high": 5,
         "load_kg": null,
         "intensity_label": "light and pain-free; change the movement if it hurts",
-        "intensity": "Prose",
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "",
         "timed_hold": false,
         "target_rpe": 6.0,
@@ -2040,7 +1953,7 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "3×5 with ~3 reps left. Log a set and the plan sets your weight from it.",
+          "basis": "3×5 with ~4 reps left. Log a set and the plan sets your weight from it.",
           "grade_note": "Strong evidence: many good studies agree.",
           "improves": "Log a set of this lift so its weights follow your estimated max instead of an effort target."
         },
@@ -2068,13 +1981,7 @@
         "reps_high": 5,
         "load_kg": null,
         "intensity_label": "RIR 4",
-        "intensity": {
-          "Rir": {
-            "rir": 4
-          }
-        },
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "",
         "timed_hold": false,
         "target_rpe": 6.0,
@@ -2124,13 +2031,7 @@
         "reps_high": 5,
         "load_kg": null,
         "intensity_label": "RIR 4",
-        "intensity": {
-          "Rir": {
-            "rir": 4
-          }
-        },
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "",
         "timed_hold": false,
         "target_rpe": 6.0,
@@ -2185,7 +2086,6 @@
         "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
         "improves": "-"
       },
-      "neutral": false,
       "exercise": null,
       "suggested_load_kg": null,
       "suggests_end_exercise": false
@@ -2211,9 +2111,7 @@
           "reps_high": 3,
           "load_kg": null,
           "intensity_label": "light and pain-free; change the movement if it hurts",
-          "intensity": "Prose",
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 7.0,
@@ -2246,7 +2144,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "5×3 at 85% of your estimated max (136 kg): 115 kg planned, pick the weight today. Stop each set with about 2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 120 kg × 3 with 1 rep left.",
+            "basis": "5×3 at 85% of your estimated max (136 kg): 115 kg planned, pick the weight today. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 120 kg × 3 with 1 rep left.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -2274,9 +2172,7 @@
           "reps_high": 5,
           "load_kg": null,
           "intensity_label": "light and pain-free; change the movement if it hurts",
-          "intensity": "Prose",
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 6.0,
@@ -2298,7 +2194,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "3×5 with ~3 reps left. Log a set and the plan sets your weight from it.",
+            "basis": "3×5 with ~4 reps left. Log a set and the plan sets your weight from it.",
             "grade_note": "Strong evidence: many good studies agree.",
             "improves": "Log a set of this lift so its weights follow your estimated max instead of an effort target."
           },
@@ -2326,13 +2222,7 @@
           "reps_high": 5,
           "load_kg": null,
           "intensity_label": "RIR 4",
-          "intensity": {
-            "Rir": {
-              "rir": 4
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 6.0,
@@ -2382,13 +2272,7 @@
           "reps_high": 5,
           "load_kg": null,
           "intensity_label": "RIR 4",
-          "intensity": {
-            "Rir": {
-              "rir": 4
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 6.0,
@@ -2443,7 +2327,6 @@
           "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
           "improves": "-"
         },
-        "neutral": false,
         "exercise": null,
         "suggested_load_kg": null,
         "suggests_end_exercise": false
@@ -2468,9 +2351,7 @@
           "reps_high": 0,
           "load_kg": null,
           "intensity_label": "65–79% HRmax (120–146 bpm) · effort 3–4 of 10, easy enough to talk in full sentences",
-          "intensity": "Prose",
           "rest_sec": 0,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": null,
@@ -2509,20 +2390,14 @@
             "pace_slow_sec_per_km": 0,
             "pace_label_km": "",
             "pace_label_mi": "",
-            "hr_low_bpm": 120,
-            "hr_high_bpm": 146,
             "hr_label": "120–146 bpm",
-            "rpe_low": 3,
-            "rpe_high": 4,
             "effort_cue": "effort 3–4 of 10, easy enough to talk in full sentences",
             "effort_detail": "3–4 of 10, easy enough to talk in full sentences",
-            "vdot": 0.0,
-            "hr_max_bpm": 184.2,
-            "hr_max_measured": false,
-            "hr_rest_bpm": 52.0,
-            "citation": "Tanaka, Monahan & Seals 2001, J Am Coll Cardiol 37(1):153-6 (PMID 11153730)",
             "grade": "Moderate",
-            "confidence": 0.65
+            "citation": "Tanaka, Monahan & Seals 2001, J Am Coll Cardiol 37(1):153-6 (PMID 11153730)",
+            "confidence": 0.65,
+            "safety_critical": false,
+            "contested": false
           },
           "calis": null,
           "run_structure": null,
@@ -2557,14 +2432,7 @@
           "reps_high": 5,
           "load_kg": 107.5,
           "intensity_label": "80% e1RM",
-          "intensity": {
-            "PercentE1rm": {
-              "pct": 80,
-              "reduced_from": null
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 7.0,
@@ -2602,7 +2470,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "6×5 at 80% of your estimated max (136 kg): 107.5 kg. Stop each set with about 3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "basis": "6×5 at 80% of your estimated max (136 kg): 107.5 kg. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -2630,13 +2498,7 @@
           "reps_high": 5,
           "load_kg": null,
           "intensity_label": "RIR 3",
-          "intensity": {
-            "Rir": {
-              "rir": 3
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 7.0,
@@ -2686,13 +2548,7 @@
           "reps_high": 5,
           "load_kg": null,
           "intensity_label": "RIR 3",
-          "intensity": {
-            "Rir": {
-              "rir": 3
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 7.0,
@@ -2742,13 +2598,7 @@
           "reps_high": 5,
           "load_kg": null,
           "intensity_label": "RIR 3",
-          "intensity": {
-            "Rir": {
-              "rir": 3
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 7.0,
@@ -2825,9 +2675,7 @@
           "reps_high": 0,
           "load_kg": null,
           "intensity_label": "88–92% HRmax (162–169 bpm) · effort 6–7 of 10",
-          "intensity": "Prose",
           "rest_sec": 0,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": null,
@@ -2866,20 +2714,14 @@
             "pace_slow_sec_per_km": 0,
             "pace_label_km": "",
             "pace_label_mi": "",
-            "hr_low_bpm": 162,
-            "hr_high_bpm": 169,
             "hr_label": "162–169 bpm",
-            "rpe_low": 6,
-            "rpe_high": 7,
             "effort_cue": "effort 6–7 of 10",
             "effort_detail": "6–7 of 10",
-            "vdot": 0.0,
-            "hr_max_bpm": 184.2,
-            "hr_max_measured": false,
-            "hr_rest_bpm": 52.0,
-            "citation": "Tanaka, Monahan & Seals 2001, J Am Coll Cardiol 37(1):153-6 (PMID 11153730)",
             "grade": "Moderate",
-            "confidence": 0.65
+            "citation": "Tanaka, Monahan & Seals 2001, J Am Coll Cardiol 37(1):153-6 (PMID 11153730)",
+            "confidence": 0.65,
+            "safety_critical": false,
+            "contested": false
           },
           "calis": null,
           "run_structure": {
@@ -2937,9 +2779,7 @@
           "reps_high": 0,
           "load_kg": null,
           "intensity_label": "65–80% HRmax (120–147 bpm) · effort 3–5 of 10, easy enough to talk in full sentences",
-          "intensity": "Prose",
           "rest_sec": 0,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": null,
@@ -2978,20 +2818,14 @@
             "pace_slow_sec_per_km": 0,
             "pace_label_km": "",
             "pace_label_mi": "",
-            "hr_low_bpm": 120,
-            "hr_high_bpm": 147,
             "hr_label": "120–147 bpm",
-            "rpe_low": 3,
-            "rpe_high": 5,
             "effort_cue": "effort 3–5 of 10, easy enough to talk in full sentences",
             "effort_detail": "3–5 of 10, easy enough to talk in full sentences",
-            "vdot": 0.0,
-            "hr_max_bpm": 184.2,
-            "hr_max_measured": false,
-            "hr_rest_bpm": 52.0,
-            "citation": "Tanaka, Monahan & Seals 2001, J Am Coll Cardiol 37(1):153-6 (PMID 11153730)",
             "grade": "Moderate",
-            "confidence": 0.65
+            "citation": "Tanaka, Monahan & Seals 2001, J Am Coll Cardiol 37(1):153-6 (PMID 11153730)",
+            "confidence": 0.65,
+            "safety_critical": false,
+            "contested": false
           },
           "calis": null,
           "run_structure": null,

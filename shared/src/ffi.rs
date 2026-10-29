@@ -22,35 +22,24 @@
 // fallible calls are matched, never unwrapped.
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
-// Everything above `mod tests` is glue consumed only by the JNI exports in
-// `mod android` (android target or the `jni-host` QA feature) and by the tests,
-// so each item carries that exact cfg: a plain host build compiles none of it,
-// and a helper that genuinely becomes unused is still flagged.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
-use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 use crux_core::{
     Core,
     bridge::{Bridge, JsonFfiFormat},
 };
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 use serde::Serialize;
 
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 use crate::app::Engine;
 
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 type JsonBridge = Bridge<Engine, JsonFfiFormat>;
 
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 static BRIDGE: LazyLock<Mutex<JsonBridge>> =
     LazyLock::new(|| Mutex::new(Bridge::new(Core::default())));
 
 /// The plain-string FIT error envelope, used when the parser panics or its
 /// payload cannot be produced. Kotlin reads any `{"error":…}` without an
 /// object body as a damaged file.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 const FIT_FALLBACK_ERR: &str = r#"{"error":"Couldn't read this FIT file"}"#;
 
 /// Lock the bridge, recovering the guard even if the mutex was poisoned.
@@ -59,26 +48,14 @@ const FIT_FALLBACK_ERR: &str = r#"{"error":"Couldn't read this FIT file"}"#;
 /// module-level panic-firewall note). The bridge holds plain serde model data
 /// with no cross-field lock invariant, so reusing the inner value after a
 /// poison is safe; recover it rather than crash.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 fn lock_bridge() -> MutexGuard<'static, JsonBridge> {
-    BRIDGE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    BRIDGE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Replace the global bridge with a fresh `Engine` bridge, discarding a
-/// poisoned or otherwise wedged core.
-///
-/// A panic inside an `update` arm poisons crux's *inner* model `RwLock` (held
-/// under the [`Core`]'s own `RwLock`, not the outer [`Mutex`] this module
-/// recovers), so every later `update`/`view` would re-panic on that inner
-/// `.expect(...)` and the session would freeze for the process lifetime. The
-/// panic firewall therefore swaps in a fresh bridge (see [`catch_panic`]); the
-/// shell then replays the persisted event log into the clean core (the
-/// offending event was never persisted), exactly like a cold-start restore.
-/// Also the reset hook host-side test isolation uses.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
-pub(crate) fn reset_bridge() {
+/// poisoned core (see [`catch_panic`]). Also the reset hook for host-side test
+/// isolation.
+fn reset_bridge() {
     *lock_bridge() = Bridge::new(Core::default());
 }
 
@@ -86,13 +63,11 @@ pub(crate) fn reset_bridge() {
 /// shared by the panic firewall and the FIT import. `error` is the only
 /// top-level key, so the serialized text starts with `{"error"`, the prefix
 /// `Core.kt`'s `isCoreErrorEnvelope` checks.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 #[derive(Serialize)]
 struct ErrorEnvelope<'a> {
     error: ErrorBody<'a>,
 }
 
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 #[derive(Serialize)]
 struct ErrorBody<'a> {
     kind: &'a str,
@@ -102,7 +77,6 @@ struct ErrorBody<'a> {
 
 /// Serialize the error envelope. Serializing three strings cannot fail; the
 /// fallback only keeps this path free of `unwrap`.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 fn error_envelope(kind: &str, context: &str, message: &str) -> Vec<u8> {
     serde_json::to_vec(&ErrorEnvelope {
         error: ErrorBody {
@@ -132,7 +106,6 @@ fn error_envelope(kind: &str, context: &str, message: &str) -> Vec<u8> {
 /// reset would be pure loss — it returns the non-resetting `panic` kind, which the
 /// shell already handles by keeping the last good view. `AssertUnwindSafe` is
 /// sound: the only state crossing the boundary is the global bridge.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 fn catch_panic(context: &str, reset: bool, f: impl FnOnce() -> Vec<u8>) -> Vec<u8> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(out) => out,
@@ -164,7 +137,6 @@ fn catch_panic(context: &str, reset: bool, f: impl FnOnce() -> Vec<u8>) -> Vec<u
 ///
 /// A *panic* inside the core (as opposed to a serde error) is caught by
 /// [`catch_panic`] and returned as a structured error object.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 fn process_event(event: &[u8]) -> Vec<u8> {
     catch_panic("update", true, || {
         let mut out = Vec::new();
@@ -176,10 +148,7 @@ fn process_event(event: &[u8]) -> Vec<u8> {
 }
 
 /// Serialize the current view model as JSON. A panic or a serialization error
-/// surfaces as the non-resetting `panic` error object (see [`catch_panic`]):
-/// `view` only takes the model READ guard, which neither can poison, so the
-/// bridge stays healthy and is not replaced. Never a process abort.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
+/// returns the non-resetting `panic` error object (see [`catch_panic`]).
 fn current_view() -> Vec<u8> {
     catch_panic("view", false, || {
         let mut out = Vec::new();
@@ -190,32 +159,13 @@ fn current_view() -> Vec<u8> {
     })
 }
 
-/// Parse Garmin/ANT `.fit` activity bytes ([`crate::fit::parse_fit`]) into a
-/// JSON payload for the Android shell's tracker import. This is deliberately
-/// NOT routed through the bridge/model/event log, it is pure data ingestion
-/// (mirrors how `running.rs` treats an already-decoded `GpsPoint` track), so
-/// the shell converts the result into its own `LogRunTrack` event itself.
-/// Nothing here is recommendation-bearing, so no `Evidence` is attached
-/// (evidence gating covers coaching claims, not raw sensor ingest).
-///
-/// Success: [`crate::fit::FitTrack`]'s serialization,
-/// `{"segments":[[{"lat":..,"lon":..,"time_sec":..,"hr_bpm":123,"accuracy_m":8.0}, ...], ...]}`
-/// (`hr_bpm` and `accuracy_m` are each omitted when absent, never a fabricated
-/// 0/null placeholder, `accuracy_m` is present only when the FIT file actually
-/// recorded `record.gps_accuracy`, so the shell can tell a real device figure
-/// from "unknown" and apply its own sentinel; see `Gpx.kt`'s `importedRunEvent`).
-/// Failure: `{"error":{"kind":K,"context":C,"message":M}}`, the same object shape
-/// as the panic envelope ([`crate::fit::FitError::kind`]: `not_fit`, `damaged`,
-/// `no_track`, `not_a_run`; `context` is the recorded sport in plain lowercase
-/// words for `not_a_run`, e.g. `"cycling"`, `"too_short"` for a `no_track` whose
-/// track fails [`crate::fit::import_gate`], else empty; `message` is the
-/// plain-language toast). A panic inside the parser degrades to the
-/// plain-string [`FIT_FALLBACK_ERR`] form.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
+/// Parse `.fit` bytes ([`crate::fit::parse_fit`], then
+/// [`crate::fit::import_gate`]) into the tracker-import JSON. Pure ingestion: no
+/// bridge, model or event log; the shell builds its own `LogRunTrack` event.
+/// Success: the [`crate::fit::FitTrack`] serialization. Failure: the
+/// [`ErrorEnvelope`] object filled from [`crate::fit::FitError`]. A parser panic
+/// returns [`FIT_FALLBACK_ERR`] and leaves the bridge untouched.
 fn parse_fit_json(bytes: &[u8]) -> Vec<u8> {
-    // FIT parsing never touches the bridge, so a fitparser panic must NOT reset
-    // the engine (only update resets the bridge): catch it here and return
-    // the plain FIT error envelope, leaving the model untouched.
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(
         || match crate::fit::parse_fit(bytes)
             .and_then(|track| crate::fit::import_gate(&track).map(|()| track))
@@ -235,7 +185,6 @@ fn parse_fit_json(bytes: &[u8]) -> Vec<u8> {
 /// Finish review shows exactly what History will list. Input is the event's
 /// own wire JSON, the bytes Save then sends; anything else (or a panic)
 /// returns the `{"error":…}` envelope. Pure: no bridge, model or log.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
 fn track_figures_json(event: &[u8]) -> Vec<u8> {
     #[derive(Serialize)]
     struct Figures {
@@ -271,24 +220,20 @@ mod tests;
 
 #[cfg(any(target_os = "android", feature = "jni-host"))]
 mod android {
-    //! Every fallible JNI step degrades in place rather than `.expect()`-panicking
-    //! across the `extern "system"` boundary (since Rust 1.81 an unwind out of
-    //! such a fn aborts the process, which the shell can never intercept).
-    //!
     //! Each export runs its body through `EnvUnowned::with_env`, which wraps it
     //! in its own `catch_unwind`, and resolves the outcome with
     //! `LogErrorAndDefault`. The bodies always return `Ok`, so the policy only
     //! ever sees a panic escaping the JNI glue itself, which it logs and maps to
     //! a null return. Not `ThrowRuntimeExAndDefault`: `Core.kt` never catches
     //! exceptions from these calls. Core panics never reach the policy:
-    //! [`super::catch_panic`] turns them into error payloads first and, on the
-    //! update path, resets the bridge, which `with_env`'s generic catch cannot do.
+    //! [`super::catch_panic`] turns them into error payloads first.
 
     use super::{
         FIT_FALLBACK_ERR, current_view, parse_fit_json, process_event, track_figures_json,
     };
+    use crate::log::{LineFacts, compact_lines};
     use jni::errors::LogErrorAndDefault;
-    use jni::objects::{JByteArray, JClass, JString};
+    use jni::objects::{JByteArray, JClass, JObjectArray, JString};
     use jni::sys::jlong;
     use jni::{Env, EnvUnowned};
 
@@ -405,12 +350,10 @@ mod android {
 
     /// Build the GPX 1.1 document for ONE logged run on demand, located by
     /// the same `(entry_id, observed_at)` identity the delete/amend matcher uses
-    /// (a legacy `entry_id` of 0 is disambiguated by `observed_at`). The list
-    /// payload no longer carries a per-run GPX string — that was a ~0.5 MB blob
-    /// re-serialized over JNI + re-parsed on every event; the shell calls this
-    /// only for the one run it inspects (its `has_gpx` flag already gates the map
-    /// / share affordances). Returns an empty string for a hand-entered run, an
-    /// unknown id, or a track with no exportable route.
+    /// (a legacy `entry_id` of 0 is disambiguated by `observed_at`). The shell
+    /// calls this only for the run it inspects (its `has_gpx` flag gates the
+    /// map / share affordances). Returns an empty string for a hand-entered run,
+    /// an unknown id, or a track with no exportable route.
     ///
     /// A core panic degrades to an empty string via the explicit `catch_unwind`
     /// (`with_env`'s own catch would return null instead). The core query reads
@@ -453,6 +396,42 @@ mod android {
                 Err(_) => FALLBACK.to_string(),
             };
             Ok(string_or_null(env, &json, FALLBACK))
+        })
+        .resolve::<LogErrorAndDefault>()
+    }
+
+    /// Compact the shell's event log ([`compact_lines`]): takes its lines,
+    /// returns the [`crate::log::Compaction`] verdict as JSON. Each line is
+    /// parsed as it is read, so a multi-year GPS log is never held decoded.
+    /// Null when a line can't be read or a panic escapes: the shell then keeps
+    /// every line.
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_app_milestone_Core_compactLog<'local>(
+        mut env: EnvUnowned<'local>,
+        _class: JClass<'local>,
+        lines: JObjectArray<'local, JString<'local>>,
+    ) -> JString<'local> {
+        env.with_env(|env| -> jni::errors::Result<_> {
+            let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                || -> jni::errors::Result<String> {
+                    let n = lines.len(env)?;
+                    let mut facts = Vec::with_capacity(n);
+                    for i in 0..n {
+                        let line = env.with_local_frame(1, |env| -> jni::errors::Result<_> {
+                            lines.get_element(env, i)?.try_to_string(env)
+                        })?;
+                        facts.push(LineFacts::parse(&line));
+                    }
+                    Ok(serde_json::to_string(&compact_lines(&facts)).unwrap_or_default())
+                },
+            ));
+            match verdict {
+                Ok(Ok(json)) if !json.is_empty() => Ok(string_or_null(env, &json, "")),
+                _ => {
+                    env.exception_clear();
+                    Ok(JString::default())
+                }
+            }
         })
         .resolve::<LogErrorAndDefault>()
     }

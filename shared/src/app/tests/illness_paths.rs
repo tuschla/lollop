@@ -1,4 +1,4 @@
-//! The two ways a user says they are ill (owner report 2026-10-17): an illness
+//! The two ways a user says they are ill: an illness
 //! report from the morning check-in and the profile's "I'm ill right now"
 //! answer. Either one holds training; the banner offers ONE illness action
 //! that ends both (the shell sends `ResolveHold` plus the profile switch-off
@@ -114,7 +114,20 @@ fn the_profile_illness_answer_offers_the_one_im_better_action() {
 #[test]
 fn a_reported_illness_alone_keeps_ive_recovered_and_the_return_check() {
     let (app, mut model) = set_up(false);
+    let wellness = ReadinessInput {
+        observed_at: TODAY * DAY_SEC + 1_800,
+        ..input(ReadinessSignal::WellnessZ, 0.2)
+    };
+    ev(&app, &mut model, Event::SubmitReadiness(wellness.clone()));
     report_flu(&app, &mut model);
+    ev(
+        &app,
+        &mut model,
+        Event::SubmitReadiness(ReadinessInput {
+            observed_at: TODAY * DAY_SEC + 5_400,
+            ..input(ReadinessSignal::Illness, 2.0)
+        }),
+    );
     let vm = app.view(&model);
     assert!(vm.train_blocked);
     let actions = illness_actions(&vm);
@@ -129,18 +142,16 @@ fn a_reported_illness_alone_keeps_ive_recovered_and_the_return_check() {
     confirm_illness_action(&app, &mut model);
     let vm = app.view(&model);
     assert!(!vm.train_blocked);
+    assert!(vm.hold_resolutions.is_empty());
     let ns = vm.next_session.expect("today's session");
     assert_eq!(ns.items.len(), 1);
-    assert!(
-        ns.items[0].summary.starts_with("Return check"),
-        "{}",
-        ns.items[0].summary
-    );
+    assert!(ns.items[0].return_check, "{}", ns.items[0].summary);
     assert_eq!(
         model.retracted_inputs.len(),
-        1,
-        "the report stays in history"
+        2,
+        "every illness report is retracted and stays in history"
     );
+    assert!(model.inputs.contains(&wellness), "other inputs untouched");
 }
 
 #[test]
@@ -163,7 +174,7 @@ fn one_tap_ends_a_reported_illness_and_the_profile_answer_together() {
     assert!(!model.profile.as_ref().unwrap().health.acute_illness);
     let ns = vm.next_session.expect("today's session");
     assert!(
-        ns.items[0].summary.starts_with("Return check"),
+        ns.items[0].return_check,
         "the resolved report still leads into the return check: {}",
         ns.items[0].summary
     );

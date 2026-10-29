@@ -543,11 +543,11 @@ impl EffortPass {
 }
 
 /// The why? basis states the prescription the plan derived ("3×5 at …: 100
-/// kg. Stop each set with about 2 reps left."). Once a fold, a hold or an
+/// kg. Stop each set with ~2 reps left."). Once a fold, a hold or an
 /// in-session cue moved the face, restate it: the load as planned against
-/// today's, the sets×reps and the reps left as today's, so the session panel
-/// reads the prescription the face shows. Run once, after every change of the
-/// view.
+/// today's, the sets×reps and the reps left as today's (a pick-a-weight
+/// face's reserve included), so the session panel reads the prescription the
+/// face shows. Run once, after every change of the view.
 pub(in crate::app) fn restate_basis(it: &mut PrescriptionView, weight_lb: bool) {
     let Some(rx) = it.basis_rx.take() else {
         return;
@@ -556,7 +556,7 @@ pub(in crate::app) fn restate_basis(it: &mut PrescriptionView, weight_lb: bool) 
     if lead != rx.lead {
         replace_lead(&mut it.why.basis, &rx.lead, &lead);
     }
-    if let (Some(from), Some(to)) = (rx.rir, face_rir(it))
+    if let (Some(from), Some(to)) = (rx.rir, shown_rir(it))
         && from != to
     {
         restate_reps_left(&mut it.why.basis, from, to, i64::from(it.reps_low));
@@ -582,13 +582,13 @@ fn replace_lead(basis: &mut String, old: &str, new: &str) {
     }
 }
 
-/// Restate the basis's reps-left clause (in whichever wording the lift arm
-/// used) and the "could lift about N times" weight hint that follows from it.
+/// Restate the basis's reps-left clause ("with ~2 reps left", or a lighter
+/// week's "with at least 2 reps left") and the "could lift about N times"
+/// weight hint that follows from it.
 fn restate_reps_left(basis: &mut String, from: i64, to: i64, reps: i64) {
     let at_least = |n: i64| format!("at least {} left", reps_word(n.clamp(0, 255) as u8));
     for (old, new) in [
         (with_reps_left(from), with_reps_left(to)),
-        (about_reps_left(from), about_reps_left(to)),
         (at_least(from), at_least(to)),
     ] {
         if basis.contains(&old) {
@@ -622,15 +622,18 @@ fn restate_load(it: &mut PrescriptionView, from: f64, weight_lb: bool) {
 }
 
 /// `ReduceLoadPct`: the weight is already cut by the fold; annotate the
-/// affected items and re-render their label off the folded numbers.
+/// affected items and re-render their label off the folded numbers. A day
+/// with no prescribed weight is unchanged.
 fn note_load_cut(items: &mut [PrescriptionView], pct: f32, weight_lb: bool) -> bool {
+    let mut any_changed = false;
     for it in items.iter_mut() {
         if !it.is_run() && it.load_kg.is_some() {
             it.adjusted_note = format!("{pct:.0}% less weight today");
             resync_intensity(it, weight_lb);
+            any_changed = true;
         }
     }
-    true
+    any_changed
 }
 
 /// `Deload`: volume + load are already folded (runs included); annotate and
@@ -717,10 +720,12 @@ fn apply_one_level_downgrade(
 ) -> bool {
     let lifts = lift_downgrade(r);
     let runs = downgrade_eases_runs(r);
+    let mut any_changed = false;
     for (i, it) in items.iter_mut().enumerate() {
         if it.is_run() {
             if runs {
                 cap_run_item_easy(it, r, "one step easier today");
+                any_changed = true;
             }
             continue;
         }
@@ -730,6 +735,7 @@ fn apply_one_level_downgrade(
             LiftDowngrade::Hold => {
                 if eased > 0 || effort.clamped[i] {
                     it.adjusted_note = hold_note(eased);
+                    any_changed = true;
                 }
             }
             LiftDowngrade::OneLevel => {
@@ -742,11 +748,12 @@ fn apply_one_level_downgrade(
                 } else {
                     format!("one step easier: stop {earlier} earlier")
                 };
+                any_changed = true;
             }
         }
         resync_intensity(it, weight_lb);
     }
-    true
+    any_changed
 }
 
 /// A safety easy day (reactive tendon pain, a head cold, the first session
@@ -762,22 +769,18 @@ fn apply_safety_easy_day(
         claims::ILLNESS_NECK_001 => "head cold: light, half the sets",
         _ => "easy today: protect the sore tendon",
     };
-    let lift_label = "keep it easy";
     for it in items.iter_mut() {
         if it.is_run() && head_cold(r) {
             // A head cold never keeps a long or hard run: every run becomes
             // one short easy run, or rest.
             cap_run_for_head_cold(it);
         } else if it.is_run() {
-            // Actually CAP the run target: swap the hard intensity for an easy
-            // zone (keeping the bounded volume), not just add a note. The plan
-            // never renders a hard run above readiness.
             cap_run_item_easy(it, r, note);
         } else {
             let label = if it.timed_hold {
                 "easy: shorter holds, stop well before your form breaks"
             } else {
-                lift_label
+                "keep it easy"
             };
             ease_lift_item(it, label, note, weight_lb);
         }
@@ -811,17 +814,22 @@ fn apply_pain_stop(
     let Some(region) = crate::autoreg::pain_region(location) else {
         return false;
     };
+    let mut any_changed = false;
     for (idx, it) in items.iter_mut().enumerate() {
         if crate::autoreg::item_spared_by_pain(region, &it.exercise) {
-            if clamped[idx] && it.adjusted_note.is_empty() {
-                it.adjusted_note = hold_note(0);
+            if clamped[idx] {
+                if it.adjusted_note.is_empty() {
+                    it.adjusted_note = hold_note(0);
+                }
+                any_changed = true;
             }
             continue;
         }
         stop_item_for_pain(it, location, r);
         stopped[idx] = true;
+        any_changed = true;
     }
-    true
+    any_changed
 }
 
 /// `ModifyAndMonitor`: tolerable, stable tendon pain (Table 4.1 / safety-039):
@@ -1115,10 +1123,7 @@ fn stop_item_for_pain(it: &mut PrescriptionView, location: &str, r: &Recommended
     it.anchored_on_single_set = false;
     it.adjusted_note =
         format!("Stopped for {location} pain. Skip it, or swap in a movement that doesn't hurt.");
-    it.evidence = EvidenceTagView::of(r);
-    it.safety_reason.clear();
-    it.safety_reason_mi.clear();
-    it.why = why_from(None, r);
+    repoint_evidence(it, r, None);
 }
 
 /// The one-item post-illness return check (ready-upd-003, ILLNESS-RTT-001):
@@ -1158,21 +1163,8 @@ fn cap_run_for_head_cold(it: &mut PrescriptionView) {
     ));
     it.run_structure = None;
     it.intensity = PlanIntensity::Prose;
-    it.intensity_label = EASY_RUN_LABEL.into();
-    crate::app::run_targets::downgrade_run_target_to_easy(it);
-    let label = it.intensity_label.clone();
-    let vol = it.run_volume;
-    set_run_summary(
-        it,
-        vol.and_then(RunAmount::label),
-        vol.and_then(RunAmount::shown_km),
-        &label,
-        EASY_RUN_LABEL,
-    );
+    set_easy_run_face(it);
     it.adjusted_note = "Head cold: short easy run only, or rest".into();
-    it.evidence = EvidenceTagView::of(&r);
-    it.safety_reason.clear();
-    it.safety_reason_mi.clear();
-    it.why = why_from(None, &r);
+    repoint_evidence(it, &r, None);
     it.done = it.run_logged_km > 0.0 || it.run_logged_min > 0.0;
 }

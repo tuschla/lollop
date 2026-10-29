@@ -10,18 +10,13 @@
 use super::*;
 use std::fmt::Write as _;
 
-/// Oldest recent race (weeks) still trusted as a pace anchor: running-041's
-/// "input recent race ≤6–8 wk" outer edge (`running::race_input_freshness`
-/// Stale beyond it).
-const RACE_ANCHOR_MAX_WEEKS: i64 = 8;
-
 /// The pace-anchor VDOT the plan sizes and renders against on a day
 /// (`plan::Anchors::run_vdot`): the profile's recent race, when it is fresh
-/// enough to train off (≤8 weeks, running-041 / RUN-RETEST-001). An undated
-/// race has no provable freshness, and a race run before a layoff the athlete
-/// is returning from (`weeks_off`) measures fitness they no longer have, so
-/// neither anchors paces; nor does a future-dated or stale one. `None` without
-/// a usable race.
+/// enough to train off (not Stale per `running::race_input_freshness`, i.e.
+/// ≤8 weeks, running-041 / RUN-RETEST-001). An undated race has no provable
+/// freshness, and a race run before a layoff the athlete is returning from
+/// (`weeks_off`) measures fitness they no longer have, so neither anchors
+/// paces; nor does a future-dated or stale one. `None` without a usable race.
 pub(super) fn pace_anchor_vdot(profile: &Profile, today_epoch_day: i64) -> Option<f64> {
     let race = profile.recent_race.as_ref()?;
     if !race.distance_km.is_finite() || race.distance_km <= 0.0 || race.time_sec == 0 {
@@ -32,7 +27,8 @@ pub(super) fn pace_anchor_vdot(profile: &Profile, today_epoch_day: i64) -> Optio
     if age < 0 {
         return None;
     }
-    if age / 7 > RACE_ANCHOR_MAX_WEEKS {
+    let weeks = u8::try_from(age / 7).unwrap_or(u8::MAX);
+    if running::race_input_freshness(weeks).value == running::RaceInputFreshness::Stale {
         return None;
     }
     if profile.weeks_off.is_some_and(|w| w > 0.0)
@@ -191,7 +187,9 @@ pub(super) fn band_for(
     let long = kind == Some(RunSessionType::LongRun);
     let easy = |b: TargetBand| if long { TargetBand::LongRun } else { b };
     match *intensity {
-        RunIntensity::Vdot(VdotBand::Easy) => Some(easy(TargetBand::Easy)),
+        RunIntensity::Vdot(VdotBand::Easy) | RunIntensity::ThreeZone(ThreeZone::Z1) => {
+            Some(easy(TargetBand::Easy))
+        }
         RunIntensity::Vdot(VdotBand::Marathon) => Some(TargetBand::Marathon),
         RunIntensity::Vdot(VdotBand::Threshold) => Some(TargetBand::Threshold),
         RunIntensity::Vdot(VdotBand::Interval) => Some(TargetBand::Interval),
@@ -219,20 +217,17 @@ pub(super) fn band_for(
                 TargetBand::Interval
             })
         }
-        RunIntensity::ThreeZone(ThreeZone::Z1) => Some(easy(TargetBand::Easy)),
-        RunIntensity::ThreeZone(_)
-        | RunIntensity::PaceSecPerKm(_)
-        | RunIntensity::PowerPercentCp(_) => None,
+        RunIntensity::ThreeZone(_) => None,
     }
 }
 
 /// Recovery pace floor: running-014 "≥20 % slower than marathon pace". Read
 /// conservatively so BOTH interpretations hold (pace ≥1.20× MP pace and speed
 /// ≤0.80× MP speed): the floor is MP pace × 1.25. MP pace is the athlete's
-/// Daniels marathon prediction ÷ 42.195 km.
+/// Daniels marathon prediction ÷ the marathon distance in km.
 fn recovery_pace_floor(vdot: f64) -> Option<f64> {
-    let mp_sec = load::daniels_predict(vdot, 42_195.0);
-    (mp_sec > 0.0).then(|| mp_sec / 42.195 * 1.25)
+    let mp_sec = load::daniels_predict(vdot, running::MARATHON_M);
+    (mp_sec > 0.0).then(|| mp_sec / (running::MARATHON_M / running::KM_M) * 1.25)
 }
 
 /// Pace (fast, slow) seconds per km for a band; `fast == 0` marks a
@@ -316,13 +311,21 @@ pub(super) fn resolve_target(
         band: band.word().to_string(),
         ..Default::default()
     };
+    // The anchors are kept even when this band shows no pace or bpm, so a
+    // downgrade can re-derive the easy band from them.
+    let vdot = vdot.filter(|v| v.is_finite() && *v > 0.0);
+    t.vdot = vdot.unwrap_or(0.0);
+    if hr.max_bpm > 0.0 {
+        t.hr_max_bpm = hr.max_bpm;
+        t.hr_max_measured = hr.measured;
+        t.hr_rest_bpm = hr.rest_bpm;
+    }
     let mut evidence: Option<Recommended<()>> = None;
 
     // Pace (running-007 VDOT bands off the CURRENT race fitness).
-    if let Some(v) = vdot.filter(|v| v.is_finite() && *v > 0.0)
+    if let Some(v) = vdot
         && let Some((fast, slow)) = band_pace(band, v)
     {
-        t.vdot = (v * 10.0).round() / 10.0;
         t.pace_fast_sec_per_km = fast.round() as u32;
         t.pace_slow_sec_per_km = slow.round() as u32;
         t.pace_label_km = pace_label(fast, slow, "km", 1.0);
@@ -352,13 +355,8 @@ pub(super) fn resolve_target(
             (Some(l), None) => format!("≥ {l:.0} bpm"),
             (None, None) => String::new(),
         };
-        if !t.hr_label.is_empty() {
-            t.hr_max_bpm = hr.max_bpm;
-            t.hr_max_measured = hr.measured;
-            t.hr_rest_bpm = hr.rest_bpm;
-            if evidence.is_none() {
-                evidence = Some(graded((), claims::RUN_HRMAX_001));
-            }
+        if !t.hr_label.is_empty() && evidence.is_none() {
+            evidence = Some(graded((), claims::RUN_HRMAX_001));
         }
     }
 
@@ -393,9 +391,7 @@ pub(super) fn resolve_target(
     };
     t.effort_detail = detail;
     if let Some(g) = evidence {
-        t.citation = g.reference().to_owned();
-        t.grade = Some(g.grade());
-        t.confidence = g.confidence();
+        t.evidence = EvidenceTagView::of(&g);
     }
     t
 }
@@ -426,23 +422,8 @@ fn target_label(base: &str, t: &RunTargetView, feel: &str) -> String {
 /// hard"), and the effort cue that follows says how hard in numbers.
 fn base_label(original: &str, band: TargetBand, intensity: &RunIntensity) -> String {
     match intensity {
-        RunIntensity::Vdot(_) => {
-            let w = band.plain();
-            let mut c = w.chars();
-            c.next()
-                .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
-                .unwrap_or_default()
-        }
+        RunIntensity::Vdot(_) => capitalize_first(band.plain()),
         _ => original.to_string(),
-    }
-}
-
-/// Seconds as "90 s" / "2 min" / "2.5 min".
-fn fmt_secs(s: u32) -> String {
-    match (s / 60, s % 60) {
-        (m, 0) if m >= 1 => format!("{m} min"),
-        (m, 30) if m >= 1 => format!("{m}.5 min"),
-        _ => format!("{s} s"),
     }
 }
 
@@ -458,7 +439,11 @@ fn structure_suffix(it: &PrescriptionView) -> String {
     let mut out = String::new();
     if it.rep_count > 0 {
         if s.recovery_sec > 0 {
-            let _ = write!(out, " · {} easy jog between reps", fmt_secs(s.recovery_sec));
+            let _ = write!(
+                out,
+                " · {} easy jog between reps",
+                fmt_secs_min(s.recovery_sec, 1)
+            );
         } else if s.recovery_m > 0 {
             let _ = write!(out, " · {} m easy jog between reps", s.recovery_m);
         } else if s.recovery_equal_to_rep {
@@ -481,7 +466,11 @@ fn structure_suffix(it: &PrescriptionView) -> String {
             s.strides_reps, s.strides_sec
         );
         if s.strides_recovery_sec > 0 {
-            let _ = write!(out, ", {} easy between", fmt_secs(s.strides_recovery_sec));
+            let _ = write!(
+                out,
+                ", {} easy between",
+                fmt_secs_min(s.strides_recovery_sec, 1)
+            );
         }
     }
     out

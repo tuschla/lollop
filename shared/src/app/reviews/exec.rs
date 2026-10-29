@@ -18,8 +18,8 @@ pub(in crate::app) struct LiftOutcome {
     pub(in crate::app) sets_done: u8,
     pub(in crate::app) sets_planned: u8,
     pub(in crate::app) reps_target: u8,
-    /// Every planned set reached the target reps (an item ended early with
-    /// fewer qualifying sets did not).
+    /// Every planned set reached the target reps: short sets and an item
+    /// ended early with fewer sets do not count.
     pub(in crate::app) reps_met: bool,
     /// Fewest reps in reserve over the qualifying sets, from the logged RPE
     /// (`None` when no set was rated: never invented).
@@ -35,7 +35,7 @@ pub(in crate::app) struct LiftOutcome {
 
 /// The run work on a completed plan day, with the volume shown for it that day
 /// (distance or time, whichever the plan stated).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(in crate::app) struct RunOutcome {
     pub(in crate::app) km: f64,
     pub(in crate::app) min: f64,
@@ -97,6 +97,7 @@ fn lift_outcome(it: &PrescriptionView) -> LiftOutcome {
         .map(|s| strength::rpe_to_rir(s.rpe).round().clamp(0.0, 10.0) as u8)
         .min();
     let sets_planned = it.sets.max(1);
+    let short = qualifying.iter().filter(|s| s.short).count();
     LiftOutcome {
         exercise: it.exercise.clone(),
         load_kg: top.map(|s| s.weight_kg).filter(|w| *w > 0.0).or(it.load_kg),
@@ -104,7 +105,7 @@ fn lift_outcome(it: &PrescriptionView) -> LiftOutcome {
         sets_done: it.sets_done,
         sets_planned,
         reps_target: it.reps_low,
-        reps_met: it.sets_done >= sets_planned,
+        reps_met: usize::from(it.sets_done).saturating_sub(short) >= usize::from(sets_planned),
         rir_actual,
         rir_target: target_rir(it),
         planned_kg: it.load_kg,
@@ -140,12 +141,7 @@ pub(in crate::app) fn derive_session_exec(
             ..lift_outcome(it)
         })
         .collect();
-    let mut run = RunOutcome {
-        km: 0.0,
-        min: 0.0,
-        planned_km: None,
-        planned_min: None,
-    };
+    let mut run = RunOutcome::default();
     for it in day.items.iter().filter(|it| it.is_run()) {
         run.km += it.run_logged_km;
         run.min += it.run_logged_min;
@@ -223,10 +219,9 @@ pub(in crate::app) fn build_session_done(
 /// shown for the day (at the precision shown), else "8.1 km of 9.5 km"; `mi`
 /// states the distances in miles.
 pub(super) fn run_done_message(r: &RunOutcome, mi: bool) -> String {
-    let tenths = |x: f64| (x * 10.0).round() / 10.0;
     let d = |km: f64| fmt_km_or_mi(km, mi);
     match (r.planned_km, r.planned_min) {
-        (Some(p), _) if r.km > 0.0 && tenths(r.km) < tenths(p) => {
+        (Some(p), _) if r.km > 0.0 && round_tenths(r.km) < round_tenths(p) => {
             format!("Run done: {} of {} in {:.0} min.", d(r.km), d(p), r.min)
         }
         (_, Some(p)) if r.min.round() < p.round() => {

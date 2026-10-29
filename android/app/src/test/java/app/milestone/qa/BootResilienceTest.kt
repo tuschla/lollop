@@ -9,7 +9,6 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
-import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
@@ -42,8 +41,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 /**
- * Boot resilience, two emulator findings (bugs2 B1 + the core-unavailable
- * observation):
+ * Boot resilience:
  *
  *  - A run resumed from the crash-recovery prompt after its location grant was
  *    revoked must not fire a recording start it can't satisfy; it waits for the
@@ -90,21 +88,14 @@ class BootResilienceTest {
     }
 
     private fun clearSidecar() {
-        ActiveRunStore.javaClass.getDeclaredField("file").apply { isAccessible = true }.set(ActiveRunStore, null)
-        ActiveRunStore.init(ctx)
+        QaHarness.resetActiveRunStore(ctx)
         ActiveRunStore.clearSync()
         File(ctx.filesDir, "active-run.ndjson").delete()
     }
 
-    private fun waitForState(timeoutMs: Long = 15_000, cond: () -> Boolean) =
-        rule.waitUntil(timeoutMs) {
-            rule.onAllNodes(isRoot()).fetchSemanticsNodes()
-            cond()
-        }
-
     private fun count(text: String) = rule.onAllNodes(hasText(text, substring = true)).fetchSemanticsNodes().size
 
-    private fun waitForText(text: String, timeoutMs: Long = 15_000) = waitForState(timeoutMs) { count(text) > 0 }
+    private fun waitForText(text: String, timeoutMs: Long = 15_000) = rule.waitForState(timeoutMs) { count(text) > 0 }
 
     /** Every service start the app issued since the last drain, by action. */
     private fun drainStartedServiceActions(): List<String?> {
@@ -145,7 +136,7 @@ class BootResilienceTest {
     fun resumingWithoutLocationWaitsForTheGrantThenRestartsRecording() {
         val n = interruptedRunWithLocationRevoked()
         resumeFromPrompt()
-        waitForState { RunSession.resumeAwaitingLocation.value && RunSession.points.value.size == n }
+        rule.waitForState { RunSession.resumeAwaitingLocation.value && RunSession.points.value.size == n }
         waitForText(str(R.string.track_resume_perm_caption))
         assertFalse("nothing records before the grant", RunSession.tracking.value)
         assertEquals("no recording start without a grant", emptyList<String?>(), drainStartedServiceActions())
@@ -155,14 +146,14 @@ class BootResilienceTest {
         // The user allows location from the tracker's rationale (Continue).
         shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         rule.onNode(hasText(str(R.string.track_btn_continue)) and hasClickAction()).performClick()
-        waitForState { "app.milestone.action.START" in drainStartedServiceActions() }
+        rule.waitForState { "app.milestone.action.START" in drainStartedServiceActions() }
 
         // The service the platform would start for that intent records again: the
         // crash-resume start path, with the restored fixes kept.
         Robolectric.buildService(RunTrackingService::class.java, Intent(ctx, RunTrackingService::class.java).setAction("app.milestone.action.START"))
             .create()
             .startCommand(0, 1)
-        waitForState { RunSession.tracking.value && !RunSession.resumeAwaitingLocation.value }
+        rule.waitForState { RunSession.tracking.value && !RunSession.resumeAwaitingLocation.value }
         waitForText(str(R.string.track_btn_stop))
         assertEquals(n, RunSession.points.value.size)
         assertFalse(RunSession.locationFailed.value)
@@ -175,14 +166,14 @@ class BootResilienceTest {
         waitForText(str(R.string.track_resume_perm_caption))
         // ✕ on the waiting run asks before deleting anything.
         rule.onNode(androidx.compose.ui.test.hasContentDescription(str(R.string.track_cd_discard_run)) and hasClickAction()).performClick()
-        waitForState { rule.onAllNodes(isDialog()).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForState { rule.onAllNodes(isDialog()).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(n, RunSession.points.value.size)
         assertTrue("the sidecar survives the unconfirmed ✕", File(ctx.filesDir, "active-run.ndjson").length() > 0)
         rule.onNode(hasText(str(R.string.main_cancel)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
         // Save keeps what was recorded before the revoke.
-        waitForState { rule.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty() }
+        rule.waitForState { rule.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty() }
         rule.onNode(hasText(str(R.string.track_btn_save_run)) and hasClickAction()).performClick()
-        waitForState { EventDispatcher.model.value?.runs?.size == 1 }
+        rule.waitForState { EventDispatcher.model.value?.runs?.size == 1 }
         assertEquals(1, logFile.readLines().count { "LogRunTrack" in it })
         assertFalse(RunSession.resumeAwaitingLocation.value)
     }
@@ -229,7 +220,7 @@ class BootResilienceTest {
         // main-dispatched consumer, so blocking main on it would deadlock.
         var exported: Boolean? = null
         EventDispatcher.scope.launch { exported = exportDataTo(ctx, Uri.fromFile(out)) }
-        waitForState(30_000) { exported != null }
+        rule.waitForState(30_000) { exported != null }
         assertEquals("export works without the core", true, exported)
         assertEquals(seeded.map { it.toJson().toString() }, out.readLines().filter { it.isNotBlank() })
     }

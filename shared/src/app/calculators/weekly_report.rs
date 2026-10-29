@@ -1,45 +1,55 @@
 use super::*;
 
-/// All dated (`observed_at > 0`) runs with their realised distance, moving
-/// duration, start and avg-HR zone, chronological ([`RunFacts::chrono`]): the
-/// report's float sums are rounded for display, so summing in storage order
-/// would let an Undo or amend (the row moves to the tail) change a shown
-/// figure. QC-filtered for GPS tracks. A run counts in the local week it
-/// STARTED (`started_at`), like plan completion and the progress chart, so a
-/// Sunday 23:40 run ending after midnight is never this week in one view and
-/// last week in another.
-fn dated_runs(model: &Model, facts: &RunFacts) -> Vec<DatedRun> {
+/// One dated run of the weekly report.
+struct DatedRun {
+    /// Index into `model.runs`.
+    idx: usize,
+    observed_at: i64,
+    /// When the run started ([`run_started_at`]): the local day/week it counts
+    /// in, the day its card names and plan completion credits.
+    started_at: i64,
+    km: f64,
+    minutes: f64,
+    /// 3-zone classification of the average %HRmax; `None` without HR.
+    zone: Option<crate::schema::ThreeZone>,
+    /// Threshold/interval class from the workout tag or average %HRmax.
+    hard: running::HardRunKind,
+}
+
+/// Dated (`observed_at > 0`) runs at or before `cutoff`, with their realised
+/// distance, moving duration, start and avg-HR zone, chronological
+/// ([`RunFacts::chrono`]): the report's float sums are rounded for display, so
+/// summing in storage order would let an Undo or amend (the row moves to the
+/// tail) change a shown figure. QC-filtered for GPS tracks. A run counts in the
+/// local week it STARTED (`started_at`), like plan completion and the progress
+/// chart, so a Sunday 23:40 run ending after midnight is never this week in one
+/// view and last week in another.
+fn dated_runs(model: &Model, facts: &RunFacts, cutoff: Option<i64>) -> Vec<DatedRun> {
     facts
         .chrono
         .iter()
         .map(|&i| (&model.runs[i], i))
-        .filter(|(r, _)| r.observed_at > 0)
+        .filter(|(r, _)| r.observed_at > 0 && cutoff.is_none_or(|c| r.observed_at <= c))
         .map(|(r, i)| DatedRun {
+            idx: i,
             observed_at: r.observed_at,
             started_at: facts.started[i],
             km: facts.km[i],
             minutes: facts.minutes[i],
             zone: (r.hr_pct_max > 0.0).then(|| running::classify_three_zone(r.hr_pct_max)),
+            hard: running::classify_hard_run(r.hr_pct_max, r.workout_type.as_ref()),
         })
         .collect()
 }
 
-/// Representative training-age years for the running progression caps
-/// (running-031 splits only novice `<1 yr` from everyone else). Same mapping
-/// `build_guidance` uses; without a profile the engine keeps its beginner-safe
-/// posture and treats the athlete as a novice.
+/// Training-age years for the running progression caps
+/// ([`crate::plan::training_age_years`]); without a profile the athlete reads
+/// as a novice.
 fn training_age_years(profile: Option<&Profile>) -> f64 {
-    match profile.map(|p| individualization::training_age_from_cadence(p.progression_cadence).value)
-    {
-        Some(individualization::TrainingAge::Novice) | None => 0.5,
-        Some(_) => 2.0,
-    }
-}
-
-/// Whether a planned day is a quality run (threshold, interval, repetition,
-/// race-pace or hill work), the sessions running-023's spacing rule governs.
-fn is_quality_session_type(session_type: SessionType) -> bool {
-    matches!(session_type, SessionType::Run(k) if crate::plan::is_quality_run(k))
+    let ta = profile.map_or(individualization::TrainingAge::Novice, |p| {
+        individualization::training_age_from_cadence(p.progression_cadence).value
+    });
+    crate::plan::training_age_years(ta)
 }
 
 /// Whether a logged run counts as a HARD session for the running-023 spacing
@@ -50,34 +60,30 @@ fn is_quality_session_type(session_type: SessionType) -> bool {
 ///   quality day (running-012: the session-goal count is valid for plan
 ///   design), or its average pace is at/faster than the slow end of the
 ///   athlete's threshold band (running-007 VDOT table), so phone-only runs
-///   without heart rate are judged too. `(km, min)` is the run's realised
-///   distance and moving time.
+///   without heart rate are judged too.
 fn is_hard_run(
-    r: &LoggedRun,
-    started_at: i64,
-    (km, min): (f64, f64),
+    r: &DatedRun,
+    workout_type: Option<&WorkoutType>,
     offset: i64,
     planned_quality_days: &[i64],
     threshold_slow_pace_sec_per_km: Option<f64>,
 ) -> bool {
-    if running::classify_hard_run(r.hr_pct_max, r.workout_type.as_ref())
-        != running::HardRunKind::None
-    {
+    if r.hard != running::HardRunKind::None {
         return true;
     }
     if matches!(
-        r.workout_type,
+        workout_type,
         Some(
             WorkoutType::Steady | WorkoutType::Easy | WorkoutType::Recovery | WorkoutType::LongRun
         )
     ) {
         return false;
     }
-    if planned_quality_days.contains(&local_day(started_at, offset)) {
+    if planned_quality_days.contains(&local_day(r.started_at, offset)) {
         return true;
     }
     threshold_slow_pace_sec_per_km
-        .is_some_and(|slow| km > 0.0 && min > 0.0 && min * 60.0 / km <= slow)
+        .is_some_and(|slow| r.km > 0.0 && r.minutes > 0.0 && r.minutes * 60.0 / r.km <= slow)
 }
 
 /// Heavy leg work for the hybrid-012 / CAP-3 spacing check (HYB-CAP-001): a
@@ -107,8 +113,6 @@ struct WeekRuns {
     /// Every dated run at or before the end of local today, in log order. A
     /// future-dated (mis-imported) run never counts toward any week.
     runs: Vec<DatedRun>,
-    /// End of local today (`end_of_local_today_sec`); later runs are future-dated.
-    cutoff: Option<i64>,
     offset: i64,
     /// The most recent NON-future logged week.
     cur_week: i64,
@@ -116,7 +120,7 @@ struct WeekRuns {
     prev_km: f64,
     baseline2_km: f64,
     long_run_km: f64,
-    /// `observed_at` of this week's HARD runs ([`is_hard_run`]), log order.
+    /// `observed_at` of this week's HARD runs ([`is_hard_run`]), chronological.
     hard_runs: Vec<i64>,
     recovery_this_week: bool,
     prev_was_recovery: bool,
@@ -130,10 +134,7 @@ impl WeekRuns {
         // Anchor "this week" on the most recent NON-future logged week, so a
         // mis-imported 2030 run can't hijack the weekly guidance until it's deleted.
         let cutoff = end_of_local_today_sec(model);
-        let runs: Vec<DatedRun> = dated_runs(model, &cx.runs)
-            .into_iter()
-            .filter(|r| cutoff.is_none_or(|c| r.observed_at <= c))
-            .collect();
+        let runs = dated_runs(model, &cx.runs, cutoff);
         let cur_week = runs
             .iter()
             .map(|r| local_week(r.started_at, offset))
@@ -151,7 +152,9 @@ impl WeekRuns {
         // check and the CAP-3 heavy-leg spacing.
         let planned_quality_days: Vec<i64> = week_plan
             .iter()
-            .filter(|s| is_quality_session_type(s.session_type))
+            .filter(
+                |s| matches!(s.session_type, SessionType::Run(k) if crate::plan::is_quality_run(k)),
+            )
             .map(|s| s.epoch_day)
             .collect();
         let pace_day = model
@@ -163,24 +166,19 @@ impl WeekRuns {
             .and_then(|p| crate::app::run_targets::pace_anchor_vdot(p, pace_day))
             .and_then(|v| load::vdot_band_pace_sec_per_km(v, crate::schema::VdotBand::Threshold))
             .map(|(_, slow)| slow);
-        let hard_runs: Vec<i64> = model
-            .runs
+        let hard_runs: Vec<i64> = runs
             .iter()
-            .enumerate()
-            .filter(|(_, r)| r.observed_at > 0 && cutoff.is_none_or(|c| r.observed_at <= c))
-            .map(|(i, r)| (r, cx.runs.started[i], i))
-            .filter(|&(_, start, _)| local_week(start, offset) == cur_week)
-            .filter(|&(r, start, i)| {
+            .filter(|r| local_week(r.started_at, offset) == cur_week)
+            .filter(|r| {
                 is_hard_run(
                     r,
-                    start,
-                    (cx.runs.km[i], cx.runs.minutes[i]),
+                    model.runs[r.idx].workout_type.as_ref(),
                     offset,
                     &planned_quality_days,
                     threshold_slow_pace,
                 )
             })
-            .map(|(r, ..)| r.observed_at)
+            .map(|r| r.observed_at)
             .collect();
 
         // Plan-awareness: a recovery week is a PLANNED cut, so the athlete's own logged
@@ -199,7 +197,6 @@ impl WeekRuns {
 
         Some(Self {
             runs,
-            cutoff,
             offset,
             cur_week,
             weekly_km,
@@ -289,10 +286,9 @@ pub(in crate::app) fn build_weekly_report(
             .map(crate::plan::run_slot_count)
             .unwrap_or(7);
         let daily_avg_km = crate::plan::daily_avg_run_km(week.weekly_km, n_run_days);
-        // A long-run row that already states the share and the daily-average
-        // bound replaces the two rows below, so each fact appears once.
-        if !push_volume_cap_row(&mut rows, cx, &week, daily_avg_km) {
-            push_daily_avg_row(&mut rows, &week, daily_avg_km);
+        // A long-run row states the share itself; the default band row is for
+        // a week whose long run is within it.
+        if !push_volume_cap_row(&mut rows, &week, daily_avg_km) {
             push_long_run_share_row(&mut rows, &week);
         }
     }
@@ -382,125 +378,80 @@ fn push_counting_method_row(rows: &mut Vec<GuidanceView>) {
 /// the T/I shares, each run classified by its workout-type tag or (untagged)
 /// its average %HRmax. A correctly executed tempo counts as threshold, never
 /// interval, volume — one average %HRmax per run cannot be split into zones,
-/// so the tag governs when present. No rep (R) distance is derivable from
-/// logged data, so R is counted as 0. Returns whether the row is about the
-/// long run (it then states its share and the daily-average bound).
-fn push_volume_cap_row(
-    rows: &mut Vec<GuidanceView>,
-    cx: &ViewCtx,
-    week: &WeekRuns,
-    daily_avg_km: f64,
-) -> bool {
-    let model = cx.model;
+/// so the tag governs when present. Each exceeded cap gets its own row.
+/// Returns whether a long-run row was pushed.
+fn push_volume_cap_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns, daily_avg_km: f64) -> bool {
     let (weekly_km, long_run_km) = (week.weekly_km, week.long_run_km);
-    let cutoff = week.cutoff;
-    // Summed chronologically ([`RunFacts::chrono`]), never in storage order.
-    let hard_km = |kind: running::HardRunKind| -> f64 {
-        sum0(
-            cx.runs
-                .chrono
-                .iter()
-                .map(|&i| (&model.runs[i], i))
-                .filter(|&(r, i)| {
-                    r.observed_at > 0
-                        && cutoff.is_none_or(|c| r.observed_at <= c)
-                        && local_week(cx.runs.started[i], week.offset) == week.cur_week
-                })
-                .filter(|(r, _)| {
-                    running::classify_hard_run(r.hr_pct_max, r.workout_type.as_ref()) == kind
-                })
-                .map(|(_, i)| cx.runs.km[i]),
-        )
-    };
+    let hard_km = |kind| sum0(week.current().filter(|r| r.hard == kind).map(|r| r.km));
     let threshold_km = hard_km(running::HardRunKind::Threshold);
     let interval_km = hard_km(running::HardRunKind::Interval);
 
-    let caps = running::check_volume_caps(long_run_km, threshold_km, interval_km, 0.0, weekly_km);
-    if let Some(running::CapViolation::LongRun) = caps.value {
-        // The ≤25% single-run share is Daniels' cap for runners at/above ~64
-        // km/wk; below that the KB's operative bound is ≤2× the average daily
-        // distance (running-016). A long run inside the 2× bound under 64
-        // km/wk is informational, not a violation.
+    let caps = running::check_volume_caps(long_run_km, threshold_km, interval_km, weekly_km);
+    let v = caps.value;
+    if v.long_run {
+        // The ≤25% single-run share is Daniels' cap at/above ~64 km/wk; below
+        // that the KB's operative bound is ≤2× the average daily distance
+        // (running-016), and a long run inside it is informational.
         let pct = long_run_km / weekly_km * 100.0;
-        let daily = running::long_run_within_daily_avg(long_run_km, daily_avg_km);
-        let share_cap_applies = weekly_km >= running::LONG_RUN_SHARE_SPLIT_KM;
-        let text = |mi: bool| {
-            let long = fmt_km_or_mi(long_run_km, mi);
-            let twice = format!(
-                "more than twice your average daily distance ({})",
-                fmt_km_or_mi(daily_avg_km, mi)
-            );
-            match (share_cap_applies, daily.value) {
-                (true, true) => {
+        if weekly_km >= running::LONG_RUN_SHARE_SPLIT_KM {
+            let text = |mi: bool| {
+                format!(
+                    "Long run {} is {pct:.0}% of the week: over the 25% limit for one run.",
+                    fmt_km_or_mi(long_run_km, mi)
+                )
+            };
+            push_guidance_mi(rows, "Weekly volume", text(false), text(true), &caps);
+        } else {
+            let daily = running::long_run_within_daily_avg(long_run_km, daily_avg_km);
+            let text = |mi: bool| {
+                let long = fmt_km_or_mi(long_run_km, mi);
+                if daily.value {
                     format!(
-                        "Long run {long} is {pct:.0}% of the week: over the 25% limit for one run."
+                        "Long run {long} is {pct:.0}% of the week. The 25% limit applies from {} a week; under that, the limit is twice your average daily distance ({}).",
+                        dist_whole(running::LONG_RUN_SHARE_SPLIT_KM, mi),
+                        fmt_km_or_mi(2.0 * daily_avg_km, mi)
+                    )
+                } else {
+                    format!(
+                        "Long run {long} is {pct:.0}% of the week and more than twice your average daily distance ({}).",
+                        fmt_km_or_mi(daily_avg_km, mi)
                     )
                 }
-                (true, false) => format!(
-                    "Long run {long} is {pct:.0}% of the week: over the 25% limit for one run, and {twice}."
-                ),
-                (false, false) => format!("Long run {long} is {pct:.0}% of the week and {twice}."),
-                (false, true) => format!(
-                    "Long run {long} is {pct:.0}% of the week. The 25% limit applies from {} a week; under that, the limit is twice your average daily distance ({}).",
-                    dist_whole(running::LONG_RUN_SHARE_SPLIT_KM, mi),
-                    fmt_km_or_mi(2.0 * daily_avg_km, mi)
-                ),
-            }
-        };
-        let (km, mi) = (text(false), text(true));
-        if share_cap_applies {
-            push_guidance_mi(rows, "Weekly volume", km, mi, &caps);
-        } else {
-            push_guidance_mi(rows, "Weekly volume", km, mi, &daily);
+            };
+            push_guidance_mi(rows, "Weekly volume", text(false), text(true), &daily);
         }
-        return true;
     }
-    let text = |mi: bool| match caps.value {
-        Some(running::CapViolation::Threshold) => format!(
-            "Threshold running {} is over 10% of the week's distance",
-            fmt_km_or_mi(threshold_km, mi)
-        ),
-        Some(running::CapViolation::Interval) => format!(
-            "Interval running {} is over 8% of the week's distance",
-            fmt_km_or_mi(interval_km, mi)
-        ),
-        Some(running::CapViolation::Repetition) => {
-            "Repetition running is over 5% of the week's distance".to_string()
-        }
-        _ => format!(
-            "Long run and hard running within weekly limits ({}: long run {}, threshold {}, intervals {})",
-            fmt_km_or_mi(weekly_km, mi),
-            dist_num(long_run_km, mi),
-            dist_num(threshold_km, mi),
-            dist_num(interval_km, mi)
-        ),
-    };
-    let mi_text = if matches!(caps.value, Some(running::CapViolation::Repetition)) {
-        String::new()
-    } else {
-        text(true)
-    };
-    push_guidance_mi(rows, "Weekly volume", text(false), mi_text, &caps);
-    false
-}
-
-/// running-016 alternative long-run bound: ≤2× the average daily distance,
-/// averaged over RUN days (not calendar days) so the report and the plan
-/// agree via `daily_avg_run_km`. Only shown when violated: the share row
-/// already states the primary band.
-fn push_daily_avg_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns, daily_avg_km: f64) {
-    let long_run_km = week.long_run_km;
-    let daily_avg = running::long_run_within_daily_avg(long_run_km, daily_avg_km);
-    if !daily_avg.value {
+    if v.threshold {
         let text = |mi: bool| {
             format!(
-                "Long run {} is more than twice your average daily distance ({})",
-                fmt_km_or_mi(long_run_km, mi),
-                fmt_km_or_mi(daily_avg_km, mi)
+                "Threshold running {} is over 10% of the week's distance",
+                fmt_km_or_mi(threshold_km, mi)
             )
         };
-        push_guidance_mi(rows, "Weekly volume", text(false), text(true), &daily_avg);
+        push_guidance_mi(rows, "Weekly volume", text(false), text(true), &caps);
     }
+    if v.interval {
+        let text = |mi: bool| {
+            format!(
+                "Interval running {} is over 8% of the week's distance",
+                fmt_km_or_mi(interval_km, mi)
+            )
+        };
+        push_guidance_mi(rows, "Weekly volume", text(false), text(true), &caps);
+    }
+    if !(v.long_run || v.threshold || v.interval) {
+        let text = |mi: bool| {
+            format!(
+                "Long run and hard running within weekly limits ({}: long run {}, threshold {}, intervals {})",
+                fmt_km_or_mi(weekly_km, mi),
+                dist_num(long_run_km, mi),
+                dist_num(threshold_km, mi),
+                dist_num(interval_km, mi)
+            )
+        };
+        push_guidance_mi(rows, "Weekly volume", text(false), text(true), &caps);
+    }
+    v.long_run
 }
 
 /// Long-run share vs the running-016 default band.
@@ -681,6 +632,7 @@ fn push_heavy_leg_spacing_row(rows: &mut Vec<GuidanceView>, cx: &ViewCtx, week: 
     // bodyweight set with no RPE has no knowable intensity and is not heavy.
     let anchors = cx.lift_anchors_now();
     let spaced_runs = spaced_run_times(model, week);
+    let same_day_floor = f64::from(hybrid::session_spacing().value.ideal_min_hours);
     // Closest heavy-leg pairing per kind: (gap hours, same local day).
     let mut warn_h: Option<f64> = None;
     let mut same_day_ok_h: Option<f64> = None;
@@ -703,7 +655,6 @@ fn push_heavy_leg_spacing_row(rows: &mut Vec<GuidanceView>, cx: &ViewCtx, week: 
             if hybrid::heavy_leg_run_gap_ok(h).value {
                 continue;
             }
-            let same_day_floor = f64::from(hybrid::session_spacing().value.ideal_min_hours);
             if set_day == run_day && h >= same_day_floor {
                 same_day_ok_h = Some(same_day_ok_h.map_or(h, |m| m.min(h)));
             } else {

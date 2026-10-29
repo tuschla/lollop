@@ -88,9 +88,9 @@ class SetLoggingLogicTest {
     @Test
     fun theRestReadoutFollowsTheRunningRestWhateverTheExercise() {
         // A scheduled 3:00 rest, 100 s in: 80 s left, whatever item is on screen.
-        assertEquals(RestFace.Counting(80, 180), restFace(1_000_000, 1_180_000, lastSetSec = null, itemRestSec = 0, nowMillis = 1_100_000))
+        assertEquals(RestFace.Counting(80), restFace(1_000_000, 1_180_000, lastSetSec = null, itemRestSec = 0, nowMillis = 1_100_000))
         // Rounded up, so "0:01" shows until the rest is really over.
-        assertEquals(RestFace.Counting(1, 180), restFace(1_000_000, 1_180_000, null, 120, 1_179_500))
+        assertEquals(RestFace.Counting(1), restFace(1_000_000, 1_180_000, null, 120, 1_179_500))
         assertEquals(RestFace.Over(20), restFace(1_000_000, 1_180_000, null, 120, 1_200_000))
         // Past the window the rest belongs to an earlier bout.
         assertNull(restFace(1_000_000, 1_180_000, null, 120, 1_000_000 + (RestReadoutWindowSec + 1) * 1000L))

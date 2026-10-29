@@ -1,94 +1,14 @@
-//! REVIEW (RevRobust): differential proofs for the `SetIndex` memo, the
-//! per-thread view caches, the storage-order fixes and the ratio-base
-//! thresholds. Knobs: `REVIEW_SEQS`, `REVIEW_STEPS`, `REVIEW_SEED`.
+//! Differential guards for the `SetIndex` memo, the per-thread view caches,
+//! the storage-order tie rules and the ratio-base thresholds. Knobs:
+//! `REVIEW_SEQS`, `REVIEW_STEPS`, `REVIEW_SEED`.
 
 use super::*;
-
-/// xorshift64*: deterministic, dependency-free.
-struct Rng(u64);
-
-impl Rng {
-    fn next(&mut self) -> u64 {
-        let mut x = self.0;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.0 = x;
-        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
-    }
-    fn below(&mut self, n: u64) -> u64 {
-        self.next() % n.max(1)
-    }
-    fn chance(&mut self, p: f64) -> bool {
-        (self.next() >> 11) as f64 / (1u64 << 53) as f64 <= p
-    }
-    fn pick<T: Clone>(&mut self, v: &[T]) -> T {
-        v[self.below(v.len() as u64) as usize].clone()
-    }
-}
 
 fn env_or(key: &str, default: u64) -> u64 {
     std::env::var(key)
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default)
-}
-
-fn json(vm: &ViewModel) -> String {
-    serde_json::to_string(vm).expect("a ViewModel always serializes")
-}
-
-/// The first JSON path where two view documents differ.
-fn first_diff(a: &str, b: &str) -> String {
-    fn walk(a: &serde_json::Value, b: &serde_json::Value, path: String) -> Option<String> {
-        use serde_json::Value as V;
-        match (a, b) {
-            (V::Object(x), V::Object(y)) => {
-                for (k, va) in x {
-                    match y.get(k) {
-                        Some(vb) => {
-                            if let Some(d) = walk(va, vb, format!("{path}.{k}")) {
-                                return Some(d);
-                            }
-                        }
-                        None => return Some(format!("{path}.{k} missing on right")),
-                    }
-                }
-                y.keys()
-                    .find(|k| !x.contains_key(*k))
-                    .map(|k| format!("{path}.{k} missing on left"))
-            }
-            (V::Array(x), V::Array(y)) => {
-                for (i, (va, vb)) in x.iter().zip(y).enumerate() {
-                    if let Some(d) = walk(va, vb, format!("{path}[{i}]")) {
-                        return Some(d);
-                    }
-                }
-                (x.len() != y.len()).then(|| format!("{path}: len {} vs {}", x.len(), y.len()))
-            }
-            _ => (a != b).then(|| format!("{path}: {a} vs {b}")),
-        }
-    }
-    let va: serde_json::Value = serde_json::from_str(a).unwrap();
-    let vb: serde_json::Value = serde_json::from_str(b).unwrap();
-    walk(&va, &vb, String::new()).unwrap_or_else(|| "JSON-equal".into())
-}
-
-/// Replay `events` on a fresh thread (every thread-local cache cold).
-fn cold_view(events: Vec<Event>) -> String {
-    std::thread::Builder::new()
-        .stack_size(16 << 20)
-        .spawn(move || {
-            let app = Engine;
-            let mut model = Model::default();
-            for e in events {
-                let _ = app.update(e, &mut model);
-            }
-            json(&app.view(&model))
-        })
-        .expect("spawn")
-        .join()
-        .expect("cold replay panicked")
 }
 
 /// Names that collide on movement key, case, whitespace, equipment words,
@@ -187,7 +107,7 @@ const D0: i64 = 20_300;
 /// renamed to aliases), runs, clock moves, profile flips (unit, modality,
 /// goal), plan (re)generation, ended exercises and moved sessions.
 struct Gen {
-    rng: Rng,
+    rng: XorShift,
     today: i64,
     offset: i64,
     next_id: u64,
@@ -201,7 +121,7 @@ struct Gen {
 impl Gen {
     fn new(seed: u64) -> Self {
         Self {
-            rng: Rng(seed | 1),
+            rng: XorShift(seed | 1),
             today: D0,
             offset: 0,
             next_id: 1_700_000_000_000,
@@ -409,16 +329,18 @@ impl Gen {
     }
 }
 
-/// Memo staleness, differential: after EVERY event of many random lives, the
-/// view rendered on this (warm-cache, shared across lives) thread equals the
-/// view a cold thread renders by replaying the same prefix.
+/// Memo staleness, differential: after every 5th event (and the last) of many
+/// random lives, the view rendered on this (warm-cache, shared across lives)
+/// thread equals the view a cold thread renders by replaying the same prefix.
+/// Every warm view also prints no negative zero ("-0.0", "-0 ", "-0%", …) in
+/// any string; the failure lists each distinct offending string shape.
 #[test]
 fn review_incremental_view_equals_cold_replay_every_step() {
     let seqs = env_or("REVIEW_SEQS", 12);
     let steps = env_or("REVIEW_STEPS", 45);
     let seed = env_or("REVIEW_SEED", 0xC0FFEE);
     let app = Engine;
-    let mut checked = 0usize;
+    let mut negative_zero: std::collections::BTreeMap<String, usize> = Default::default();
     for s in 0..seqs {
         let mut g = Gen::new(seed.wrapping_add(s.wrapping_mul(0x9E37_79B9)));
         let mut events = g.init();
@@ -430,17 +352,34 @@ fn review_incremental_view_equals_cold_replay_every_step() {
             let e = g.step();
             events.push(e.clone());
             let _ = app.update(e.clone(), &mut model);
-            let warm = json(&app.view(&model));
-            let cold = cold_view(events.clone());
-            checked += 1;
+            let warm = vm_json(&app.view(&model));
+            for piece in warm.split('"') {
+                let neg = ["-0.0", "-0 ", "-0%", "-0,", "-0)", "−0.0", "−0 "]
+                    .iter()
+                    .any(|p| piece.contains(p));
+                if neg {
+                    let shape: String = piece
+                        .chars()
+                        .map(|c| if c.is_ascii_digit() { '9' } else { c })
+                        .collect();
+                    *negative_zero.entry(shape).or_default() += 1;
+                }
+            }
+            if step % 5 != 4 && step + 1 != steps {
+                continue;
+            }
+            let cold = replay_cold(events.clone()).expect("cold replay");
             assert!(
                 warm == cold,
                 "seq {s} step {step}: warm view != cold replay after {e:?}\n  first diff: {}",
-                first_diff(&warm, &cold)
+                json_diff(&warm, &cold)
             );
         }
     }
-    eprintln!("review_incremental_view_equals_cold_replay_every_step: {checked} steps equal");
+    assert!(
+        negative_zero.is_empty(),
+        "negative zero in view strings: {negative_zero:#?}"
+    );
 }
 
 /// The storage-order claim ("Undo or amend moves a row to the tail and no
@@ -454,7 +393,6 @@ fn review_undo_and_identical_amend_never_change_the_view() {
     let steps = env_or("REVIEW_STEPS", 45);
     let seed = env_or("REVIEW_SEED", 0xC0FFEE);
     let app = Engine;
-    let mut checked = 0usize;
     for s in 0..seqs {
         let mut g = Gen::new(seed.wrapping_add(s.wrapping_mul(0x9E37_79B9)) ^ 0x55);
         let mut model = Model::default();
@@ -466,7 +404,7 @@ fn review_undo_and_identical_amend_never_change_the_view() {
             let _ = app.update(e, &mut model);
         }
         for probe in 0..8 {
-            let before = json(&app.view(&model));
+            let before = vm_json(&app.view(&model));
             let (label, evs): (String, Vec<Event>) = match probe % 3 {
                 0 if !g.sets.is_empty() => {
                     let row = g.rng.pick(&g.sets);
@@ -517,8 +455,7 @@ fn review_undo_and_identical_amend_never_change_the_view() {
             for e in evs {
                 let _ = app.update(e, &mut model);
             }
-            let after = json(&app.view(&model));
-            checked += 1;
+            let after = vm_json(&app.view(&model));
             if before != after {
                 for d in all_diffs(&before, &after) {
                     let key: String = d
@@ -537,7 +474,6 @@ fn review_undo_and_identical_amend_never_change_the_view() {
             }
         }
     }
-    eprintln!("review_undo_and_identical_amend_never_change_the_view: {checked} probes");
     assert!(
         seen.is_empty(),
         "view fields that changed on Undo / identical amend (count, first example):\n{}",
@@ -659,10 +595,6 @@ fn review_set_index_matches_per_call_classifiers() {
         })
         .collect();
     let idx = SetIndex::new(&sets);
-    eprintln!(
-        "review_set_index_matches_per_call_classifiers: {} names",
-        names.len()
-    );
     let mut mismatches = Vec::new();
     for i in 0..sets.len() {
         let f = idx.facts(i);
@@ -777,7 +709,7 @@ fn legacy_same_second_sets_render_alike_in_either_storage_order() {
         ab,
         ba,
         "storage order changed the plan card: {}",
-        first_diff(&ab, &ba)
+        json_diff(&ab, &ba)
     );
 }
 
@@ -786,48 +718,44 @@ fn legacy_same_second_sets_render_alike_in_either_storage_order() {
 /// shell's red SPIKE alarm, "Longer than your recent longest run") and the
 /// feedback safety gate share one baseline rule (`is_ratio_base_km`), so a
 /// base under `MIN_RATIO_BASE_KM` is "no earlier run" for both and the two
-/// spike verdicts on one screen agree.
+/// spike verdicts on one screen agree. A 3 km base is the control: both warn.
 #[test]
 fn review_spike_card_and_gate_agree_on_a_sub_50m_baseline() {
-    let app = Engine;
-    let mut model = Model::default();
-    let today = D0;
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    );
-    let _ = app.update(Event::SetProfile(running_profile()), &mut model);
-    let _ = app.update(
-        log_run(0.04, 1.0, 60.0, 0.0, (today - 2) * DAY_SEC + 8 * 3600, 1),
-        &mut model,
-    );
-    let _ = app.update(
-        log_run(8.0, 48.0, 70.0, 0.0, today * DAY_SEC + 8 * 3600, 2),
-        &mut model,
-    );
-    let vm = app.view(&model);
-    let card = vm
-        .runs
-        .iter()
-        .find(|r| r.entry_id == 2)
-        .expect("the 8 km card");
-    let gate = vm
-        .feedback
-        .as_ref()
-        .is_some_and(|f| f.message.contains("longer than your longest"));
-    let card_alarm = card.spike_flag && card.spike_has_baseline;
-    assert_eq!(
-        card_alarm,
-        gate,
-        "card: spike_flag {} has_baseline {} note {:?}; feedback: {:?}",
-        card.spike_flag,
-        card.spike_has_baseline,
-        card.spike_note,
-        vm.feedback.as_ref().map(|f| &f.message)
-    );
+    for (base_km, warns) in [(0.04, false), (3.0, true)] {
+        let app = Engine;
+        let mut model = Model::default();
+        let today = D0;
+        set_today(&app, &mut model, today);
+        let _ = app.update(Event::SetProfile(running_profile()), &mut model);
+        let _ = app.update(
+            log_run(base_km, 1.0, 60.0, 0.0, (today - 2) * DAY_SEC + 8 * 3600, 1),
+            &mut model,
+        );
+        let _ = app.update(
+            log_run(8.0, 48.0, 70.0, 0.0, today * DAY_SEC + 8 * 3600, 2),
+            &mut model,
+        );
+        let vm = app.view(&model);
+        let card = vm
+            .runs
+            .iter()
+            .find(|r| r.entry_id == 2)
+            .expect("the 8 km card");
+        let gate = vm
+            .feedback
+            .as_ref()
+            .is_some_and(|f| f.message.contains("longer than your longest"));
+        let card_alarm = card.spike_flag && card.spike_has_baseline;
+        assert_eq!(
+            (card_alarm, gate),
+            (warns, warns),
+            "{base_km} km base: card spike_flag {} has_baseline {} note {:?}; feedback: {:?}",
+            card.spike_flag,
+            card.spike_has_baseline,
+            card.spike_note,
+            vm.feedback.as_ref().map(|f| &f.message)
+        );
+    }
 }
 
 /// The weekly report's hard-run sums (`hard_km` in `push_volume_cap_row`) are
@@ -840,13 +768,7 @@ fn review_weekly_report_never_prints_negative_zero() {
     let app = Engine;
     let mut model = Model::default();
     let today = D0;
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    );
+    set_today(&app, &mut model, today);
     let _ = app.update(Event::SetProfile(running_profile()), &mut model);
     // Five easy 5 km runs this week (D0 is a Thursday): the long run is 25 %
     // of the week, so the row is "within weekly limits" and prints all three.
@@ -864,7 +786,7 @@ fn review_weekly_report_never_prints_negative_zero() {
         report.iter().any(|s| s.contains("within weekly limits")),
         "fixture: the limits row renders, got {report:?}"
     );
-    let vm = json(&view);
+    let vm = vm_json(&view);
     let hits: Vec<&str> = vm
         .split('"')
         .filter(|s| s.contains("-0.0") || s.contains("-0 ") || s.contains("-0,"))
@@ -913,41 +835,6 @@ fn review_calis_added_load_survives_identical_amend() {
     );
 }
 
-/// Every string of every view across random lives: no "-0.0" / "-0 " / "-0%"
-/// (negative zero printed). Lists each distinct offending string shape.
-#[test]
-fn review_no_negative_zero_in_random_lives() {
-    let seqs = env_or("REVIEW_SEQS", 12);
-    let steps = env_or("REVIEW_STEPS", 45);
-    let seed = env_or("REVIEW_SEED", 0xC0FFEE);
-    let app = Engine;
-    let mut seen: std::collections::BTreeMap<String, usize> = Default::default();
-    for s in 0..seqs {
-        let mut g = Gen::new(seed.wrapping_add(s.wrapping_mul(0x9E37_79B9)) ^ 0xAA);
-        let mut model = Model::default();
-        for e in g.init() {
-            let _ = app.update(e, &mut model);
-        }
-        for _ in 0..steps {
-            let _ = app.update(g.step(), &mut model);
-            let vm = json(&app.view(&model));
-            for piece in vm.split('"') {
-                let neg = ["-0.0", "-0 ", "-0%", "-0,", "-0)", "−0.0", "−0 "]
-                    .iter()
-                    .any(|p| piece.contains(p));
-                if neg {
-                    let shape: String = piece
-                        .chars()
-                        .map(|c| if c.is_ascii_digit() { '9' } else { c })
-                        .collect();
-                    *seen.entry(shape).or_default() += 1;
-                }
-            }
-        }
-    }
-    assert!(seen.is_empty(), "negative zero in view strings: {seen:#?}");
-}
-
 /// One hard run this week (88 % HRmax, no easy run): `push_easy_share_row`
 /// sums zero easy minutes over an empty iterator (-0.0), and prints
 /// "Easy (Z1) share -0% of run time".
@@ -955,13 +842,7 @@ fn review_no_negative_zero_in_random_lives() {
 fn review_easy_share_never_prints_negative_zero() {
     let app = Engine;
     let mut model = Model::default();
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: D0,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    );
+    set_today(&app, &mut model, D0);
     let _ = app.update(Event::SetProfile(running_profile()), &mut model);
     let _ = app.update(
         log_run(8.0, 40.0, 88.0, 0.0, D0 * DAY_SEC + 8 * 3600, 1),
@@ -1024,11 +905,7 @@ fn review_extreme_days_never_panic_the_view() {
                     let _ = app.view(&model);
                 });
                 if let Err(p) = r {
-                    let msg = p
-                        .downcast_ref::<String>()
-                        .cloned()
-                        .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
-                        .unwrap_or_default();
+                    let msg = panic_text(&*p);
                     panics.push(format!("today {today} start {start} at {at}: {msg}"));
                 }
             }
@@ -1062,7 +939,7 @@ fn undo_each_entry_diffs(
     }
     let mut diffs = Vec::new();
     for (kind, entry_id, at, e) in entries {
-        let before = json(&app.view(&model));
+        let before = vm_json(&app.view(&model));
         let _ = app.update(
             Event::DeleteEntry {
                 kind,
@@ -1072,11 +949,11 @@ fn undo_each_entry_diffs(
             &mut model,
         );
         let _ = app.update(e, &mut model);
-        let after = json(&app.view(&model));
+        let after = vm_json(&app.view(&model));
         if before != after {
             diffs.push(format!(
                 "Undo of {kind:?} {entry_id}: {}",
-                first_diff(&before, &after)
+                json_diff(&before, &after)
             ));
         }
     }
@@ -1090,13 +967,7 @@ fn undo_each_entry_diffs(
 /// "87%", vs "88%"). Replaces the `FUZZ_SEED=0x33fb24393cdfcb91` replay.
 #[test]
 fn undo_of_a_run_keeps_the_weekly_easy_share() {
-    let setup = vec![
-        Event::SetToday {
-            epoch_day: D0,
-            utc_offset_sec: 0,
-        },
-        Event::SetProfile(running_profile()),
-    ];
+    let setup = vec![set_today_ev(D0), Event::SetProfile(running_profile())];
     // Mon–Thu of D0's week (D0 is a Thursday): three easy runs, one hard.
     let runs: Vec<(EntryKind, u64, i64, Event)> =
         [(20.1, 65.0), (21.4, 65.0), (37.6, 65.0), (11.3, 88.0)]
@@ -1145,13 +1016,7 @@ fn undo_of_a_run_keeps_the_weekly_easy_share() {
 /// `FUZZ_SEED=0xbcf5ea6d20e1a264` replay.
 #[test]
 fn undo_of_a_tied_longest_run_keeps_the_feedback() {
-    let setup = vec![
-        Event::SetToday {
-            epoch_day: D0,
-            utc_offset_sec: 0,
-        },
-        Event::SetProfile(running_profile()),
-    ];
+    let setup = vec![set_today_ev(D0), Event::SetProfile(running_profile())];
     let at = |d: i64, h: i64| d * DAY_SEC + h * 3600;
     let runs = vec![
         (
@@ -1188,10 +1053,7 @@ fn a_near_zero_prior_best_never_reads_as_a_trend() {
         let app = Engine;
         let mut model = Model::default();
         for e in [
-            Event::SetToday {
-                epoch_day: D0,
-                utc_offset_sec: 0,
-            },
+            set_today_ev(D0),
             Event::SetProfile(strength_profile()),
             with_entry_id(
                 log_set(

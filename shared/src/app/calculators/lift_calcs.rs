@@ -1,6 +1,6 @@
 use super::*;
 
-/// The hold that keeps the plan calculators (hypertrophy plan, APRE) and the
+/// The hold that keeps the hypertrophy-plan calculator and the
 /// prescriptive guidance from giving load or volume numbers: today's training
 /// hold (`SafetyState::hold`: a profile gate, a readiness Stop / RestDay /
 /// Defer, or a weekly-check-in deferral; the same call that blocks Today),
@@ -31,81 +31,6 @@ pub(in crate::app) fn push_hold_row(
             .to_string(),
         hold,
     );
-}
-
-/// APRE next-load adjustment (File 06 autoreg-015…021 with the autoreg-019
-/// small-lifter cap), as one graded row. Under a [`calculator_hold`] the row
-/// names the hold instead.
-pub(in crate::app) fn build_apre(
-    q: &ApreQuery,
-    weight_lb: bool,
-    hold: Option<&Recommended<Adjustment>>,
-) -> Vec<GuidanceView> {
-    let mut rows = Vec::new();
-    if let Some(hold) = hold {
-        push_hold_row(&mut rows, "APRE", hold);
-        return rows;
-    }
-    let adj = autoreg::apre_load_adjustment_capped_kg(q.scheme, q.reps, q.current_load_kg);
-    let (lo, hi) = adj.value;
-    let label = match q.scheme {
-        autoreg::ApreScheme::Apre3 => "APRE-3",
-        autoreg::ApreScheme::Apre6 => "APRE-6",
-        autoreg::ApreScheme::Apre10 => "APRE-10",
-    };
-    let unit = weight_suffix(weight_lb);
-    let load = weight_num(q.current_load_kg, weight_lb);
-    let text = if lo == 0.0 && hi == 0.0 {
-        format!(
-            "{label}: {} reps on the AMRAP set at {load:.0} {unit}: keep the same weight",
-            q.reps
-        )
-    } else {
-        let (lo, hi) = if weight_lb {
-            apre_source_lb(q)
-        } else {
-            (lo, hi)
-        };
-        let fmt = |v: f64| if weight_lb { fmt_lb(v) } else { fmt_kg(v) };
-        let signed = |v: f64| {
-            if v < 0.0 {
-                format!("-{}", fmt(-v))
-            } else {
-                format!("+{}", fmt(v))
-            }
-        };
-        format!(
-            "{label}: {} reps on the AMRAP set at {load:.0} {unit}: change the next weight by {} to {} {unit}",
-            q.reps,
-            signed(lo),
-            signed(hi)
-        )
-    };
-    push_guidance(&mut rows, "APRE", text, &adj);
-    rows
-}
-
-/// The APRE adjustment in the source's own pounds for a lb profile. Mann 2010
-/// states the increments in lb (±5 / ±10 / ±15 lb); the engine's kg table is
-/// those exact values halved onto kg plate steps (`apre_load_adjustment_kg`),
-/// so doubling it recovers the source figures instead of converting a kg plate
-/// back into an unloadable "+5.5 lb". The autoreg-019 small-lifter cap is
-/// applied in lb as the KB states it (+15 lb on 100 lb = +15 %: each positive
-/// bound capped at `load_lb × bound / 100`); load cuts are never capped.
-fn apre_source_lb(q: &ApreQuery) -> (f64, f64) {
-    const SOURCE_LB_PER_TABLE_KG: f64 = 2.0;
-    const CAP_REFERENCE_LB: f64 = 100.0;
-    let (lo, hi) = autoreg::apre_load_adjustment_kg(q.scheme, q.reps).value;
-    let load_lb = q.current_load_kg * LB_PER_KG;
-    let cap = |kg: f64| {
-        let lb = kg * SOURCE_LB_PER_TABLE_KG;
-        if lb > 0.0 && load_lb > 0.0 {
-            lb.min(load_lb * lb / CAP_REFERENCE_LB)
-        } else {
-            lb
-        }
-    };
-    (cap(lo), cap(hi))
 }
 
 /// Weekly set ramp across the accumulation block: the SAME
@@ -143,7 +68,6 @@ fn block_ramp(
         let days = crate::plan::week_shape(p).lift_days;
         let fitted: Vec<u8> = crate::plan::hypertrophy_block_targets(p, ta, weeks, days)
             .iter()
-            .take(usize::from(weeks))
             .map(|week| {
                 week.iter()
                     .find(|t| t.muscle == lm.muscle)
@@ -165,42 +89,24 @@ fn block_ramp(
     (ramp, role, optional_only, session_trimmed && !optional_only)
 }
 
-/// The weekly set counts of the planner's ramp row, for a compact summary
-/// elsewhere (the Profile calculator row). Empty whenever the planner shows no
-/// ramp: a calculator hold, an unknown muscle, or a zero-week block.
-pub(in crate::app) fn hypertrophy_ramp(
-    q: &HypertrophyPlanQuery,
-    profile: Option<&Profile>,
-    hold: Option<&Recommended<Adjustment>>,
-) -> Vec<u8> {
-    if hold.is_some() || q.weeks == 0 {
-        return Vec::new();
-    }
-    let Some(lm) = hypertrophy::resolve_muscle(&q.muscle) else {
-        return Vec::new();
-    };
-    let ta =
-        profile.map(|p| individualization::training_age_from_cadence(p.progression_cadence).value);
-    block_ramp(lm, profile, ta, q.weeks).0.value
-}
-
 /// Build a graded per-week hypertrophy accumulation plan for one muscle. Every
 /// row carries its own evidence + confidence via [`push_guidance`] (HARD RULE 2);
 /// no training numbers are invented: all come from [`hypertrophy`]. An unknown
 /// muscle yields a single explanatory row (no fabricated landmarks). `weeks == 0`
 /// yields no plan rows beyond the landmarks context. Alongside the rows it
-/// returns the plan's figures (`None` whenever no ramp is shown), each figure
-/// computed by the same engine call as the row it stands for.
+/// returns the plan's figures and the weekly set ramp (`None` / empty whenever
+/// no ramp is shown), each figure computed by the same engine call as the row
+/// it stands for.
 pub(in crate::app) fn build_hypertrophy_plan(
-    q: &HypertrophyPlanQuery,
+    q: &HypertrophyInputView,
     profile: Option<&Profile>,
     hold: Option<&Recommended<Adjustment>>,
-) -> (Vec<GuidanceView>, Option<HypertrophyFiguresView>) {
+) -> (Vec<GuidanceView>, Option<HypertrophyFiguresView>, Vec<u8>) {
     let mut rows = Vec::new();
     let section = q.muscle.clone();
     if let Some(hold) = hold {
         push_hold_row(&mut rows, &section, hold);
-        return (rows, None);
+        return (rows, None, Vec::new());
     }
 
     let Some(lm) = hypertrophy::resolve_muscle(&q.muscle) else {
@@ -211,12 +117,17 @@ pub(in crate::app) fn build_hypertrophy_plan(
             &mut rows,
             &section,
             format!(
-                "\"{}\" is not a known muscle. Pick one of: chest, back, quads, hamstrings, glutes, side delts, rear delts, biceps, triceps, calves, abs",
-                q.muscle
+                "\"{}\" is not a known muscle. Pick one of: {}",
+                q.muscle,
+                hypertrophy::LANDMARKS
+                    .iter()
+                    .map(|l| l.muscle)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
             &note,
         );
-        return (rows, None);
+        return (rows, None, Vec::new());
     };
 
     // Landmarks row, landmarks are a raw engine value, not a Recommended, so
@@ -235,7 +146,7 @@ pub(in crate::app) fn build_hypertrophy_plan(
     // `weeks == 0` is degenerate: the ramp is empty and there is no schedule to
     // show, so stop after the landmarks context rather than emit empty rows.
     if q.weeks == 0 {
-        return (rows, None);
+        return (rows, None, Vec::new());
     }
 
     let ta =
@@ -253,11 +164,11 @@ pub(in crate::app) fn build_hypertrophy_plan(
     );
     let novice = ta == Some(individualization::TrainingAge::Novice);
     let dose_row = rows.len() as u32;
-    push_dose_rows(&mut rows, &section, lm, &ramp.value, q.weeks, novice);
+    let (rir_by_week, freq) = push_dose_rows(&mut rows, &section, lm, &ramp.value, q.weeks, novice);
     let rest_row = rows.len() as u32;
-    push_rest_rows(&mut rows, &section);
+    let [heavy, isolation] = push_rest_rows(&mut rows, &section);
     let shape_row = rows.len() as u32;
-    push_execution_rows(&mut rows, &section);
+    let ms = push_execution_rows(&mut rows, &section);
     push_next_meso_rows(&mut rows, &section, lm, q, profile, &ramp.value);
     push_training_age_rows(&mut rows, &section, profile);
 
@@ -269,19 +180,13 @@ pub(in crate::app) fn build_hypertrophy_plan(
         face_rows.push(ramp_row);
     }
     face_rows.extend([dose_row, dose_row + 1, rest_row, rest_row + 1, shape_row]);
-    let peak_sets = ramp.value.iter().copied().max().unwrap_or(lm.mrv);
-    let freq = hypertrophy::frequency_for_weekly_sets(peak_sets).value;
-    let heavy = hypertrophy::rest_sec_for(hypertrophy::ExerciseClass::HeavyCompound).value;
-    let isolation = hypertrophy::rest_sec_for(hypertrophy::ExerciseClass::Isolation).value;
-    let ms = hypertrophy::meso_structure().value;
-    let figures = (!ramp.value.is_empty()).then(|| HypertrophyFiguresView {
+    let ramp = ramp.value;
+    let figures = (!ramp.is_empty()).then_some(HypertrophyFiguresView {
         min_sets: lm.mev,
         productive_low: lm.mav.0,
         productive_high: lm.mav.1,
         max_sets: lm.mrv,
-        rir_by_week: (1..=q.weeks)
-            .map(|w| hypertrophy::block_rir(w, q.weeks, novice).value)
-            .collect(),
+        rir_by_week,
         freq_low: freq.freq.0,
         freq_high: freq.freq.1,
         per_session_low: freq.per_session.0,
@@ -295,7 +200,7 @@ pub(in crate::app) fn build_hypertrophy_plan(
         deload_weeks: ms.deload_weeks,
         face_rows,
     });
-    (rows, figures)
+    (rows, figures, ramp)
 }
 
 /// The weekly set-ramp row ([`block_ramp`]), worded for the muscle's role.
@@ -349,7 +254,8 @@ fn push_ramp_row(
 }
 
 /// The block's dose rows: the RIR schedule, peak-week frequency and the
-/// per-session cap check.
+/// per-session cap check. Returns the RIR by week and the frequency the rows
+/// state.
 fn push_dose_rows(
     rows: &mut Vec<GuidanceView>,
     section: &str,
@@ -357,7 +263,7 @@ fn push_dose_rows(
     ramp: &[u8],
     weeks: u8,
     novice: bool,
-) {
+) -> (Vec<u8>, hypertrophy::FrequencyRx) {
     // RIR schedule across the block, the plan's own `block_rir`: held inside
     // the 1–3 default band (a novice runs the 4 → 2 calibration ramp). The
     // first week's Recommended carries the grade.
@@ -406,20 +312,27 @@ fn push_dose_rows(
             &over_cap,
         );
     }
+    (rir_vals, freq.value)
 }
 
 /// hypertrophy-013/039 rest prescriptions per exercise class, so the plan
-/// states how long to rest, not only how much to lift.
-fn push_rest_rows(rows: &mut Vec<GuidanceView>, section: &str) {
-    for (label, class) in [
+/// states how long to rest, not only how much to lift. Returns the
+/// (heavy compound, isolation) windows, s.
+fn push_rest_rows(rows: &mut Vec<GuidanceView>, section: &str) -> [(u16, u16); 2] {
+    let mut windows = [(0, 0); 2];
+    for (slot, (label, class)) in [
         ("heavy compounds", hypertrophy::ExerciseClass::HeavyCompound),
         (
             "machines and isolation work",
             hypertrophy::ExerciseClass::Isolation,
         ),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let rest = hypertrophy::rest_sec_for(class);
         let (lo, hi) = rest.value;
+        windows[slot] = rest.value;
         // Whole minutes read as "2–3 min"; a 90 s floor as "90 s–2 min".
         let window = if lo.is_multiple_of(60) && hi.is_multiple_of(60) {
             format!("{}–{} min", lo / 60, hi / 60)
@@ -440,11 +353,13 @@ fn push_rest_rows(rows: &mut Vec<GuidanceView>, section: &str) {
             &rest,
         );
     }
+    windows
 }
 
 /// How to execute the block: mesocycle shape, proximity to failure, where
 /// failure is allowed, the high-skill guard, load interchangeability and tempo.
-fn push_execution_rows(rows: &mut Vec<GuidanceView>, section: &str) {
+/// Returns the mesocycle shape the first row states.
+fn push_execution_rows(rows: &mut Vec<GuidanceView>, section: &str) -> hypertrophy::MesoStructure {
     // hypertrophy-031: the block's macro-shape (accumulate : deload cadence).
     let ms = hypertrophy::meso_structure();
     push_guidance(
@@ -528,6 +443,7 @@ fn push_execution_rows(rows: &mut Vec<GuidanceView>, section: &str) {
         ),
         &tempo,
     );
+    ms.value
 }
 
 /// The next-mesocycle volume decision and the first-week jump check.
@@ -535,7 +451,7 @@ fn push_next_meso_rows(
     rows: &mut Vec<GuidanceView>,
     section: &str,
     lm: &hypertrophy::VolumeLandmarks,
-    q: &HypertrophyPlanQuery,
+    q: &HypertrophyInputView,
     profile: Option<&Profile>,
     ramp: &[u8],
 ) {
@@ -641,7 +557,7 @@ fn protein_bodyweight(kg: f64, weight_lb: bool) -> String {
 /// `individualization::deficit_protein_target` (File 08 safety-022) and the row
 /// becomes the safety-critical deferral instead of a number.
 pub(in crate::app) fn build_protein_targets(
-    q: &ProteinQuery,
+    q: &ProteinInputView,
     reds_present: bool,
     weight_lb: bool,
 ) -> (Vec<GuidanceView>, Vec<ProteinFigureView>) {
@@ -658,6 +574,16 @@ pub(in crate::app) fn build_protein_targets(
     // The prose row and the structured figure share one rounding so the card
     // and the profile row can never show different gram counts.
     let grams = |g_per_kg: f64| (q.bodyweight_kg * g_per_kg).round();
+    // The figure for the row just pushed (`rows_len` = rows after the push).
+    let fig = |kind, (lo, hi): (f64, f64), refused, rows_len: usize| ProteinFigureView {
+        kind,
+        low_g_per_day: grams(lo),
+        high_g_per_day: grams(hi),
+        refused,
+        low_g_per_kg: lo,
+        high_g_per_kg: hi,
+        row: rows_len as u32 - 1,
+    };
 
     if q.masters {
         let r = individualization::masters_protein_target();
@@ -673,15 +599,7 @@ pub(in crate::app) fn build_protein_targets(
             ),
             &r,
         );
-        figures.push(ProteinFigureView {
-            kind: ProteinTargetKind::Masters,
-            low_g_per_day: grams(lo),
-            high_g_per_day: grams(hi),
-            refused: false,
-            low_g_per_kg: lo,
-            high_g_per_kg: hi,
-            row: rows.len() as u32 - 1,
-        });
+        figures.push(fig(ProteinTargetKind::Masters, (lo, hi), false, rows.len()));
     }
 
     if q.deficit {
@@ -700,29 +618,18 @@ pub(in crate::app) fn build_protein_targets(
                     ),
                     &r,
                 );
-                figures.push(ProteinFigureView {
-                    kind: ProteinTargetKind::Deficit,
-                    low_g_per_day: grams(lo),
-                    high_g_per_day: grams(hi),
-                    refused: false,
-                    low_g_per_kg: lo,
-                    high_g_per_kg: hi,
-                    row: rows.len() as u32 - 1,
-                });
+                figures.push(fig(ProteinTargetKind::Deficit, (lo, hi), false, rows.len()));
             }
             None => {
                 // safety-022: the deficit is refused, not silently omitted -
                 // the user sees why, cited to the RED-S deferral.
                 push_guidance(&mut rows, "Protein", DEFICIT_REFUSAL.to_string(), &r);
-                figures.push(ProteinFigureView {
-                    kind: ProteinTargetKind::Deficit,
-                    low_g_per_day: 0.0,
-                    high_g_per_day: 0.0,
-                    refused: true,
-                    low_g_per_kg: 0.0,
-                    high_g_per_kg: 0.0,
-                    row: rows.len() as u32 - 1,
-                });
+                figures.push(fig(
+                    ProteinTargetKind::Deficit,
+                    (0.0, 0.0),
+                    true,
+                    rows.len(),
+                ));
             }
         }
     }

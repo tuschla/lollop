@@ -103,6 +103,16 @@ class UnitsTest {
     }
 
     @Test
+    fun theMileDistanceCeilingSitsOnTheFieldGridAndSavesWithinTheKmLimit() {
+        val max = runDistanceMax(DistanceUnit.Mi)
+        // A ± chip coerced to the ceiling prints a value the field accepts.
+        val chipped = String.format(Locale.US, "%.2f", (62.0 + 0.5).coerceIn(0.0, max))
+        assertTrue("chip result $chipped must be <= $max", chipped.toDouble() <= max)
+        assertEquals(100.0, miToKmWire(max), 1e-9)
+        assertEquals(100.0, runDistanceMax(DistanceUnit.Km), 0.0)
+    }
+
+    @Test
     fun bodyweightKeypadHonorsUnitAndRoundTrips() {
         // kg entries are exact; display rounds to the 0.1 field precision.
         assertEquals("80", bodyweightBufferText(80.0, WeightUnit.Kg))

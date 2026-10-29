@@ -9,7 +9,7 @@ import org.junit.Test
 /** The guided-run step machine (URH-1): pure, so every cue boundary is pinned here. */
 class RunStepMachineTest {
 
-    private fun machine(s: RunStructureView) = RunStepMachine(buildRunSteps(s)).also { it.start(0L, 0.0) }
+    private fun machine(s: RunStructureView) = RunStepMachine(buildRunSteps(s), 0L, 0.0)
 
     @Test
     fun sixBy800WithJogRecovery_advancesOnDistance() {
@@ -96,7 +96,7 @@ class RunStepMachineTest {
             ),
             steps.map { it.kind },
         )
-        val m = RunStepMachine(steps).also { it.start(0L, 0.0) }
+        val m = RunStepMachine(steps, 0L, 0.0)
         var t = 300_000L
         assertTrue(m.advance(t, 0.0, paused = false))
         for (k in 1..3) {
@@ -138,9 +138,9 @@ class RunStepMachineTest {
             ),
             steps.map { it.kind },
         )
-        val m = RunStepMachine(steps).also { it.start(0L, 0.0) }
+        val m = RunStepMachine(steps, 0L, 0.0)
         assertTrue(m.advance(600_000L, 2_000.0, paused = false))
-        assertTrue(m.progress().step!!.open)
+        assertEquals("the main step is open", RunStep(RunStepKind.Main), m.progress().step)
         assertNull(m.progress().remainingSec)
         assertNull(m.progress().remainingM)
         // An open step never ends on its own.

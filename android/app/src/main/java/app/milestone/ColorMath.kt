@@ -117,10 +117,7 @@ private fun oklabFitsSrgb(lightness: Double, a: Double, b: Double): Boolean =
 
 // ── Dynamic-color WCAG-AA contrast guard ──────────────────────────────────────
 // Material You's `dynamic.primary` is wallpaper-derived and carries no contrast
-// guarantee, unlike the hand-tuned theme accents (ratios documented at each palette
-// definition). These pure helpers keep a dynamic accent legible under the app's
-// on-accent text (bgTop) by nudging only its lightness (hue preserved) until it
-// clears AA, or falling back to the theme accent.
+// guarantee, unlike the hand-tuned theme accents (ThemeContrastTest).
 
 /** WCAG 2.x AA minimum contrast ratio for normal-size text. */
 internal const val WCAG_AA_NORMAL = 4.5
@@ -151,27 +148,28 @@ internal fun contrastRatio(a: Color, b: Color): Double {
 }
 
 /**
- * Return `primary` if it already clears AA against `onAccent`; otherwise step its
- * HSL lightness AWAY from the on-accent tone (a dark on-accent needs a lighter
- * fill, a light one a darker fill) in small increments, keeping hue + saturation,
- * and return the first shade that passes. If none passes within the lightness
- * range, return `fallback` (the theme's own AA-verified accent).
+ * This palette with the Material You [primary] as its accent, guarded to clear AA
+ * on every ground ([Palette.bgTop], [Palette.bgElevated], [Palette.bgSunken]):
+ * [primary] as is if it passes; else its HSL lightness stepped away from the
+ * grounds (hue and saturation kept) to the first shade that passes; else the
+ * palette's own accent.
  */
-internal fun accentPassingContrast(primary: Color, onAccent: Color, fallback: Color): Color {
-    if (contrastRatio(primary, onAccent) >= WCAG_AA_NORMAL) return primary
+internal fun Palette.withDynamicAccent(primary: Color): Palette {
+    fun passes(c: Color) = contrastRatio(c, bgTop) >= WCAG_AA_NORMAL &&
+        contrastRatio(c, bgElevated) >= WCAG_AA_NORMAL &&
+        contrastRatio(c, bgSunken) >= WCAG_AA_NORMAL
+    if (passes(primary)) return copy(accent = primary)
     val (h, s, l0) = rgbToHsl(primary)
-    // A dark on-accent (dark-theme bgTop) → lighten toward 1.0; a light on-accent
-    // (light-theme bgTop) → darken toward 0.0. This is the direction of increasing
-    // separation from the fixed on-accent text tone.
-    val towardLight = relativeLuminance(onAccent) < 0.5
+    // Dark grounds need a lighter accent, light grounds a darker one.
+    val towardLight = relativeLuminance(bgTop) < 0.5
     val step = 0.04
     var l = l0
     repeat(25) {
         l = if (towardLight) (l + step).coerceAtMost(1.0) else (l - step).coerceAtLeast(0.0)
         val candidate = hslToColor(h, s, l)
-        if (contrastRatio(candidate, onAccent) >= WCAG_AA_NORMAL) return candidate
+        if (passes(candidate)) return copy(accent = candidate)
     }
-    return fallback
+    return this
 }
 
 /** sRGB [Color] → HSL (hue degrees 0…360, saturation + lightness 0…1). */

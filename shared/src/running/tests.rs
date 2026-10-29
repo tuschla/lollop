@@ -11,8 +11,8 @@ fn pt(lat: f64, lon: f64, t: i64) -> GpsPoint {
 
 #[test]
 fn windowed_bins_correct_normally_and_bounded_when_dt_is_corrupt() {
-    // Fix (normal): a 90 s leg at 3 m/s resamples into three full 30 s bins,
-    // each averaging 3 m/s: the smoothing behaviour is unchanged.
+    // Normal: a 90 s leg at 3 m/s resamples into three full 30 s bins, each
+    // averaging 3 m/s.
     let normal = windowed_bin_speeds(&[(90.0, 270.0)], INTERVAL_WINDOW_SEC);
     assert_eq!(normal.len(), 3, "90 s / 30 s window = 3 bins");
     for (speed, dur) in &normal {
@@ -29,20 +29,20 @@ fn windowed_bins_correct_normally_and_bounded_when_dt_is_corrupt() {
 
 #[test]
 fn track_splits_reject_sub_metre_unit_and_bound_a_corrupt_track() {
-    // A normal km split still works (fix half of the pair).
+    // A normal km split works.
     let track = vec![pt(0.0, 0.0, 0), pt(0.0, 0.02, 300)]; // ~2.2 km, 5 min
     assert!(
-        !track_splits(&track, 30.0, KM_M).is_empty(),
-        "km splits still work"
+        !track_splits(&track, KM_M, &[]).is_empty(),
+        "km splits work"
     );
     // A sub-metre unit is rejected up front: the boundary loop below emits
     // one split per unit, so a tiny unit would iterate millions of times.
     assert!(
-        track_splits(&track, 30.0, 0.5).is_empty(),
+        track_splits(&track, 0.5, &[]).is_empty(),
         "sub-metre unit rejected"
     );
     assert!(
-        track_splits(&track, 30.0, 0.0).is_empty(),
+        track_splits(&track, 0.0, &[]).is_empty(),
         "zero unit rejected"
     );
     // Even at a legit unit, a corrupt long track cannot emit unbounded splits.
@@ -51,7 +51,7 @@ fn track_splits_reject_sub_metre_unit_and_bound_a_corrupt_track() {
     // 12 m/s distance (~24 000 km) still overruns the split cap.
     let corrupt = vec![pt(0.0, 0.0, 0), pt(0.0, 120.0, 2_000_000)];
     assert_eq!(
-        track_splits(&corrupt, 30.0, KM_M).len(),
+        track_splits(&corrupt, KM_M, &[]).len(),
         MAX_SPLITS,
         "splits capped"
     );
@@ -90,7 +90,7 @@ fn positive_split_detects_back_half_slowdown() {
         pt(0.0, 0.003, 40),
         pt(0.0, 0.004, 60),
     ];
-    let split = track_positive_split_pct(&track, 30.0).expect("split");
+    let split = track_positive_split_pct(&track, &[]).expect("split");
     assert!((split - 100.0).abs() < 1.0, "got {split}");
 }
 
@@ -103,16 +103,15 @@ fn even_pace_run_reports_no_meaningful_split() {
         pt(0.0, 0.003, 30),
         pt(0.0, 0.004, 40),
     ];
-    let split = track_positive_split_pct(&track, 30.0).expect("split");
+    let split = track_positive_split_pct(&track, &[]).expect("split");
     assert!(split.abs() < 1.0, "got {split}");
 }
 
 #[test]
 fn mid_run_pause_does_not_produce_a_false_positive_split() {
     // Evenly paced ~3.7 m/s throughout, but with a 10-min standstill in the
-    // SECOND half (the app's Pause button leaves a ~0-speed bridge leg). With
-    // wall-clock halves this read a massive "FADE" (back half ~11× slower);
-    // moving-time halves must see it as the even run it is.
+    // SECOND half (the app's Pause button leaves a ~0-speed bridge leg).
+    // Moving-time halves see it as the even run it is.
     let track = vec![
         pt(0.0, 0.000, 0),
         pt(0.0, 0.001, 30),
@@ -121,7 +120,7 @@ fn mid_run_pause_does_not_produce_a_false_positive_split() {
         pt(0.0, 0.003, 690),
         pt(0.0, 0.004, 720),
     ];
-    let split = track_positive_split_pct(&track, 30.0).expect("split");
+    let split = track_positive_split_pct(&track, &[]).expect("split");
     assert!(
         split.abs() < 1.0,
         "paused steady run falsely split: {split}"
@@ -131,7 +130,7 @@ fn mid_run_pause_does_not_produce_a_false_positive_split() {
 #[test]
 fn positive_split_needs_three_usable_fixes() {
     let track = vec![pt(0.0, 0.0, 0), pt(0.0, 0.001, 10)];
-    assert!(track_positive_split_pct(&track, 30.0).is_none());
+    assert!(track_positive_split_pct(&track, &[]).is_none());
 }
 
 /// Even-pace straight track along the equator: constant longitude step +
@@ -148,7 +147,7 @@ fn even_equator_track(legs: usize, dlon_deg: f64, dt_s: i64) -> Vec<GpsPoint> {
 fn splits_even_pace_all_full_splits_equal_pace() {
     // 50 legs × ~111.19 m ≈ 5.56 km at a constant ~3.71 m/s.
     let track = even_equator_track(50, 0.001, 30);
-    let km = track_splits(&track, 30.0, KM_M);
+    let km = track_splits(&track, KM_M, &[]);
     let full: Vec<_> = km.iter().filter(|s| !s.partial).collect();
     assert_eq!(full.len(), 5, "≈5.56 km → 5 full km splits");
     let p0 = full[0].pace_sec_per_unit;
@@ -181,7 +180,7 @@ fn splits_mid_run_stop_does_not_inflate_split_pace() {
     track.push(pt(0.0, 0.005, 5 * 30 + 300));
     track.extend((6..=50).map(|i| pt(0.0, i as f64 * 0.001, i * 30 + 300)));
 
-    let km = track_splits(&track, 30.0, KM_M);
+    let km = track_splits(&track, KM_M, &[]);
     let full: Vec<_> = km.iter().filter(|s| !s.partial).collect();
     assert_eq!(full.len(), 5, "≈5.56 km → 5 full km splits");
     // Moving average: 1000 m at ~3.7065 m/s ≈ 269.8 s/km.
@@ -208,18 +207,18 @@ fn splits_mid_run_stop_does_not_inflate_split_pace() {
 fn splits_all_stopped_track_match_zero_moving_headline() {
     // A track covered entirely below the 0.5 m/s stop floor (~111.19 m legs
     // over 300 s each, ~0.37 m/s) has zero MOVING distance, so its headline
-    // `track_distance_km` is 0. The split walk now counts only moving legs, so
+    // `track_distance_km` is 0. The split walk counts only moving legs, so
     // it agrees: no phantom split for distance the headline excludes.
     let track: Vec<GpsPoint> = (0..=4)
         .map(|i| pt(0.0, i as f64 * 0.001, i * 300))
         .collect();
     assert_eq!(
-        track_distance_km(&track, 30.0),
+        track_distance_km(&track, &[]),
         0.0,
         "headline is zero moving km"
     );
     assert!(
-        track_splits(&track, 30.0, KM_M).is_empty(),
+        track_splits(&track, KM_M, &[]).is_empty(),
         "an all-stopped track yields no splits, matching its zero headline"
     );
 }
@@ -228,7 +227,7 @@ fn splits_all_stopped_track_match_zero_moving_headline() {
 fn splits_final_partial_is_flagged() {
     // ≈5.56 km → the 6th km split is partial (~0.56 km).
     let track = even_equator_track(50, 0.001, 30);
-    let km = track_splits(&track, 30.0, KM_M);
+    let km = track_splits(&track, KM_M, &[]);
     let last = km.last().expect("a split");
     assert!(last.partial, "final split flagged partial");
     assert!(last.distance_m < KM_M, "partial covers < 1 km");
@@ -243,8 +242,8 @@ fn splits_km_and_mi_counts_differ_for_same_track() {
     // Same ≈5.56 km track: 5 full + 1 partial km (6) vs 3 full + 1 partial mi
     // (4), since 5.56 km ≈ 3.45 mi.
     let track = even_equator_track(50, 0.001, 30);
-    let km = track_splits(&track, 30.0, KM_M);
-    let mi = track_splits(&track, 30.0, MILE_M);
+    let km = track_splits(&track, KM_M, &[]);
+    let mi = track_splits(&track, MILE_M, &[]);
     assert_eq!(km.len(), 6, "km splits");
     assert_eq!(mi.len(), 4, "mile splits");
     assert_eq!(mi.iter().filter(|s| !s.partial).count(), 3, "3 full miles");
@@ -255,7 +254,7 @@ fn splits_km_and_mi_counts_differ_for_same_track() {
 fn splits_under_one_unit_is_single_partial() {
     // ~445 m: under a km → one partial split, index 1.
     let track = even_equator_track(4, 0.001, 30);
-    let km = track_splits(&track, 30.0, KM_M);
+    let km = track_splits(&track, KM_M, &[]);
     assert_eq!(km.len(), 1);
     assert_eq!(km[0].index, 1);
     assert!(km[0].partial);
@@ -264,19 +263,19 @@ fn splits_under_one_unit_is_single_partial() {
 
 #[test]
 fn splits_degenerate_tracks_are_empty() {
-    assert!(track_splits(&[], 30.0, KM_M).is_empty(), "empty track");
+    assert!(track_splits(&[], KM_M, &[]).is_empty(), "empty track");
     assert!(
-        track_splits(&[pt(0.0, 0.0, 0)], 30.0, KM_M).is_empty(),
+        track_splits(&[pt(0.0, 0.0, 0)], KM_M, &[]).is_empty(),
         "single fix"
     );
     // Zero-distance track (all fixes stacked) → nothing to split.
     let stacked = vec![pt(0.0, 0.0, 0), pt(0.0, 0.0, 10), pt(0.0, 0.0, 20)];
     assert!(
-        track_splits(&stacked, 30.0, KM_M).is_empty(),
+        track_splits(&stacked, KM_M, &[]).is_empty(),
         "zero distance"
     );
     // Non-positive unit.
-    assert!(track_splits(&even_equator_track(50, 0.001, 30), 30.0, 0.0).is_empty());
+    assert!(track_splits(&even_equator_track(50, 0.001, 30), 0.0, &[]).is_empty());
 }
 
 #[test]
@@ -306,12 +305,12 @@ fn variability_index_separates_interval_from_steady_same_average() {
     ];
 
     // Same average by construction (both span 120 s): sanity-check that first.
-    let ds = track_distance_km(&steady, 30.0);
-    let di = track_distance_km(&interval, 30.0);
+    let ds = track_distance_km(&steady, &[]);
+    let di = track_distance_km(&interval, &[]);
     assert!((ds - di).abs() < 0.001, "distances differ: {ds} vs {di}");
 
-    let vi_steady = track_variability_index(&steady, 30.0).expect("steady VI");
-    let vi_interval = track_variability_index(&interval, 30.0).expect("interval VI");
+    let vi_steady = track_variability_index(&steady, &[]).expect("steady VI");
+    let vi_interval = track_variability_index(&interval, &[]).expect("interval VI");
 
     // Steady ≈ 1.0; interval well above it (jog-recovery 4th-power mean ~1.5).
     assert!((vi_steady - 1.0).abs() < 0.03, "steady VI {vi_steady}");
@@ -322,15 +321,15 @@ fn variability_index_separates_interval_from_steady_same_average() {
     );
 
     // Normalized speed exceeds the plain average for the interval run.
-    let ns = normalized_speed_mps(&interval, 30.0).expect("interval NS");
+    let ns = normalized_speed(&moving_legs(&interval, &[])).expect("interval NS");
     let avg = di * 1000.0 / 120.0;
     assert!(ns > avg, "NS {ns} should exceed avg {avg}");
 }
 
 #[test]
 fn variability_index_needs_two_usable_fixes() {
-    assert!(normalized_speed_mps(&[pt(0.0, 0.0, 0)], 30.0).is_none());
-    assert!(track_variability_index(&[pt(0.0, 0.0, 0)], 30.0).is_none());
+    assert!(normalized_speed(&moving_legs(&[pt(0.0, 0.0, 0)], &[])).is_none());
+    assert!(track_variability_index(&[pt(0.0, 0.0, 0)], &[]).is_none());
 }
 
 /// Build a DENSE (1 Hz) GPS track from a speed profile `(speed_mps,
@@ -367,56 +366,10 @@ fn noisy_track(profile: &[(f64, i64)], jitter_deg: f64) -> Vec<GpsPoint> {
     pts
 }
 
-#[test]
-fn steady_noisy_1hz_run_is_not_flagged_interval() {
-    // A genuinely STEADY 5-min run at ~3 m/s, sampled 1 Hz with ~3 m lateral
-    // GPS jitter. Per-second leg speeds swing wildly; without the rolling
-    // window the 4th-power mean would read this as an "interval". With the
-    // window, jitter averages out → VI must stay steady.
-    let track = noisy_track(&[(3.0, 300)], 0.000_03);
-    let vi = track_variability_index(&track, 30.0).expect("vi");
-    assert!(
-        vi < INTERVAL_VI_THRESHOLD,
-        "steady noisy run wrongly flagged interval: VI {vi}"
-    );
-}
-
-#[test]
-fn short_noisy_1hz_run_is_not_flagged_interval() {
-    // The exact failure the user reported: a short ~1 km steady run (≈5.5 min
-    // at 3 m/s) sampled 1 Hz with jitter must NOT read as interval.
-    let track = noisy_track(&[(3.0, 330)], 0.000_03);
-    let vi = track_variability_index(&track, 30.0).expect("vi");
-    assert!(
-        vi < INTERVAL_VI_THRESHOLD,
-        "short steady run wrongly flagged: VI {vi}"
-    );
-}
-
-#[test]
-fn interval_noisy_1hz_run_is_flagged() {
-    // A real 1 Hz interval session at realistic (~1 m) GPS jitter: 4× (90 s
-    // hard @ ~5 m/s, then 90 s jog @ ~2 m/s). The rep structure spans many
-    // 30 s windows, so it survives smoothing and flags interval. (Under
-    // pathologically heavy high-frequency noise VI can still fall under the
-    // cutoff: the metric is Weak-graded; this guards the realistic case.)
-    let mut profile = Vec::new();
-    for _ in 0..4 {
-        profile.push((5.0, 90));
-        profile.push((2.0, 90));
-    }
-    let track = noisy_track(&profile, 0.000_01);
-    let vi = track_variability_index(&track, 30.0).expect("vi");
-    assert!(
-        vi >= INTERVAL_VI_THRESHOLD,
-        "interval run not flagged: VI {vi}"
-    );
-}
-
 /// Save-time GPS decimation (shell `RunSession.decimatedTrackForCore`): keep
-/// every `stride`-th fix plus the endpoints. These tests prove the core's
-/// of-record figures survive that lossy thinning at strides 2 and 3: the
-/// shell may hand the core fewer points, and the verdicts must not move.
+/// every `stride`-th fix plus the endpoints. Stride 1 is the full 1 Hz track;
+/// at strides 2 and 3 the shell hands the core fewer points, and the
+/// of-record verdicts must not move.
 fn decimate(points: &[GpsPoint], stride: usize) -> Vec<GpsPoint> {
     assert!(stride >= 1);
     if points.len() < 3 {
@@ -432,12 +385,13 @@ fn decimate(points: &[GpsPoint], stride: usize) -> Vec<GpsPoint> {
 
 #[test]
 fn decimation_preserves_the_steady_vi_verdict() {
-    // A genuinely steady noisy run reads steady (VI < threshold); thinning it
-    // ×2 and ×3 must keep that verdict, fewer points, same call.
+    // A steady 5-min run at ~3 m/s with ~3 m lateral GPS jitter. Per-second
+    // leg speeds swing wildly; the 30 s rolling window averages the jitter
+    // out, so VI reads steady at 1 Hz and after ×2 and ×3 thinning.
     let full = noisy_track(&[(3.0, 300)], 0.000_03);
-    for stride in [2usize, 3] {
+    for stride in [1usize, 2, 3] {
         let thinned = decimate(&full, stride);
-        let vi = track_variability_index(&thinned, 30.0).expect("vi");
+        let vi = track_variability_index(&thinned, &[]).expect("vi");
         assert!(
             vi < INTERVAL_VI_THRESHOLD,
             "steady run flipped to interval after ×{stride} decimation: VI {vi}"
@@ -447,18 +401,20 @@ fn decimation_preserves_the_steady_vi_verdict() {
 
 #[test]
 fn decimation_preserves_the_interval_vi_verdict() {
-    // A real interval session (4× 90 s hard / 90 s jog) flags interval; the
-    // 30 s rolling window still gets ~10–15 samples/bin at a 2–3 s cadence,
-    // so the verdict survives ×2 and ×3 thinning.
+    // A 1 Hz interval session at realistic (~1 m) GPS jitter: 4× (90 s hard
+    // @ ~5 m/s, then 90 s jog @ ~2 m/s). The reps span many 30 s windows, so
+    // the verdict survives smoothing at 1 Hz and ×2/×3 thinning (~10–15
+    // samples per window at a 2–3 s cadence). Heavy high-frequency noise can
+    // still pull VI under the cutoff: the metric is Weak-graded.
     let mut profile = Vec::new();
     for _ in 0..4 {
         profile.push((5.0, 90));
         profile.push((2.0, 90));
     }
     let full = noisy_track(&profile, 0.000_01);
-    for stride in [2usize, 3] {
+    for stride in [1usize, 2, 3] {
         let thinned = decimate(&full, stride);
-        let vi = track_variability_index(&thinned, 30.0).expect("vi");
+        let vi = track_variability_index(&thinned, &[]).expect("vi");
         assert!(
             vi >= INTERVAL_VI_THRESHOLD,
             "interval run lost its verdict after ×{stride} decimation: VI {vi}"
@@ -485,9 +441,9 @@ fn decimation_preserves_distance_within_one_percent() {
         noisy_track(&[(3.0, 600)], 0.000_004),
         noisy_track(&profile, 0.000_004),
     ] {
-        let full_km = track_distance_km(&track, 30.0);
+        let full_km = track_distance_km(&track, &[]);
         for stride in [2usize, 3] {
-            let thinned_km = track_distance_km(&decimate(&track, stride), 30.0);
+            let thinned_km = track_distance_km(&decimate(&track, stride), &[]);
             let err = (thinned_km - full_km).abs() / full_km;
             assert!(
                 err <= 0.01,
@@ -505,8 +461,8 @@ fn decimation_preserves_the_positive_split_sign() {
     let positive = noisy_track(&[(4.0, 150), (2.5, 150)], 0.000_01);
     let negative = noisy_track(&[(2.5, 150), (4.0, 150)], 0.000_01);
     for stride in [2usize, 3] {
-        let ps_pos = track_positive_split_pct(&decimate(&positive, stride), 30.0).expect("pos");
-        let ps_neg = track_positive_split_pct(&decimate(&negative, stride), 30.0).expect("neg");
+        let ps_pos = track_positive_split_pct(&decimate(&positive, stride), &[]).expect("pos");
+        let ps_neg = track_positive_split_pct(&decimate(&negative, stride), &[]).expect("neg");
         assert!(
             ps_pos > 0.0,
             "positive-split run lost its sign after ×{stride}: {ps_pos}"
@@ -532,7 +488,7 @@ fn steady_run_with_a_mid_run_pause_stays_steady() {
         pt(0.0, 0.003, 690), // ~3.7 m/s
         pt(0.0, 0.004, 720), // ~3.7 m/s
     ];
-    let vi = track_variability_index(&steady_paused, 30.0).expect("vi");
+    let vi = track_variability_index(&steady_paused, &[]).expect("vi");
     assert!(
         vi < INTERVAL_VI_THRESHOLD,
         "paused steady wrongly flagged: VI {vi}"
@@ -550,14 +506,14 @@ fn normalized_speed_clamps_gps_jitter_spike() {
         pt(5.0, 5.000, 31), // ~780 km in 1 s → clamp to MAX_PLAUSIBLE_SPEED_MPS
         pt(5.0, 5.001, 61),
     ];
-    let ns = normalized_speed_mps(&spiky, 30.0).expect("ns");
+    let ns = normalized_speed(&moving_legs(&spiky, &[])).expect("ns");
     assert!(ns <= MAX_PLAUSIBLE_SPEED_MPS + 1e-9, "NS {ns} not clamped");
 }
 
 #[test]
 fn track_distance_sums_segments_and_drops_noisy_fixes() {
     let clean = vec![pt(0.0, 0.0, 0), pt(0.0, 0.001, 10), pt(0.0, 0.002, 20)];
-    let d = track_distance_km(&clean, 30.0);
+    let d = track_distance_km(&clean, &[]);
     // Two equal ~111.3 m equatorial-lon segments ≈ 0.2226 km.
     assert!((d - 0.2226).abs() < 0.001, "got {d}");
 
@@ -572,7 +528,7 @@ fn track_distance_sums_segments_and_drops_noisy_fixes() {
         },
         pt(0.0, 0.002, 20),
     ];
-    let d2 = track_distance_km(&noisy, 30.0);
+    let d2 = track_distance_km(&noisy, &[]);
     assert!((d2 - 0.2226).abs() < 0.001, "got {d2}");
 }
 
@@ -590,7 +546,7 @@ fn export_gpx_wraps_fixes_and_escapes_name() {
         pt(52.52, 13.405, 1_700_000_000),
         pt(52.521, 13.406, 1_700_000_030),
     ];
-    let gpx = export_gpx(&track, "Tom & \"Jerry\" <run>'s");
+    let gpx = export_gpx(&track, "Tom & \"Jerry\" <run>'s", &[], None);
     assert!(gpx.starts_with("<?xml version=\"1.0\""));
     assert!(gpx.contains("<gpx version=\"1.1\""));
     // All five XML predefined entities are escaped so the name cannot break
@@ -611,7 +567,7 @@ fn export_gpx_writes_accuracy_as_hdop_the_importer_reads_back() {
     b.accuracy_m = 12.5;
     let mut unknown = pt(52.522, 13.407, 1_700_000_060);
     unknown.accuracy_m = 0.0;
-    let gpx = export_gpx(&[a, b, unknown], "run");
+    let gpx = export_gpx(&[a, b, unknown], "run", &[], None);
     assert!(gpx.contains("</time><hdop>1</hdop></trkpt>"), "{gpx}");
     assert!(gpx.contains("<hdop>2.5</hdop>"), "{gpx}");
     assert_eq!(
@@ -629,26 +585,6 @@ fn export_gpx_writes_accuracy_as_hdop_the_importer_reads_back() {
         .parse()
         .unwrap();
     assert_eq!((hdop * GPX_HDOP_UERE_M) as f32, 12.5);
-}
-
-#[test]
-fn usable_track_drops_noisy_fixes() {
-    let track = vec![
-        pt(52.52, 13.405, 0),
-        GpsPoint {
-            lat: 52.60,
-            lon: 13.50,
-            observed_at: 30,
-            accuracy_m: 80.0, // beyond the gate → excluded
-        },
-        pt(52.521, 13.406, 60),
-    ];
-    // The GPX must carry the same fixes distance uses, the noisy one gone.
-    let usable = usable_track(&track, MAX_GPS_ACCURACY_M);
-    assert_eq!(usable.len(), 2);
-    let gpx = export_gpx(&usable, "run");
-    assert_eq!(gpx.matches("<trkpt ").count(), 2);
-    assert!(!gpx.contains("lat=\"52.6\""));
 }
 
 #[test]
@@ -685,14 +621,15 @@ fn vdot_table_values_verbatim() {
 
 #[test]
 fn long_run_cap_pass_and_fail() {
+    let long_run = |km: f64, weekly: f64| check_volume_caps(km, 0.0, 0.0, weekly).value.long_run;
     // 12 km of a 50 km week = 24 % ≤ 25 %: pass.
-    assert!(long_run_within_cap(12.0, 50.0));
+    assert!(!long_run(12.0, 50.0));
     // Exactly 25 %: pass (cap is inclusive).
-    assert!(long_run_within_cap(12.5, 50.0));
+    assert!(!long_run(12.5, 50.0));
     // 15 km of 50 km = 30 %: fail.
-    assert!(!long_run_within_cap(15.0, 50.0));
+    assert!(long_run(15.0, 50.0));
     // Zero weekly volume cannot satisfy a share cap.
-    assert!(!long_run_within_cap(5.0, 0.0));
+    assert!(long_run(5.0, 0.0));
 }
 
 #[test]
@@ -708,10 +645,7 @@ fn spike_true_just_above_10pct_false_at_or_below() {
 }
 
 #[test]
-fn hr_method_and_recalc() {
-    assert!(prefer_karvonen(50.0).value);
-    assert!(!prefer_karvonen(55.0).value);
-    assert!(!prefer_karvonen(72.0).value);
+fn hr_zone_recalc_due_from_four_weeks() {
     assert!(!hr_zone_recalc_due(3).value);
     assert!(hr_zone_recalc_due(4).value);
 }
@@ -882,13 +816,19 @@ fn deload_cadence_defaults_and_conservative() {
 }
 
 #[test]
-fn check_volume_caps_flags_first_violation() {
-    // All within caps: None.
-    let ok = check_volume_caps(12.0, 4.0, 3.0, 2.0, 50.0);
-    assert_eq!(ok.value, None);
-    // Long run over 25 %: LongRun wins (checked first).
-    let bad = check_volume_caps(20.0, 4.0, 3.0, 2.0, 50.0);
-    assert_eq!(bad.value, Some(CapViolation::LongRun));
+fn check_volume_caps_flags_every_violation() {
+    let ok = check_volume_caps(12.0, 4.0, 3.0, 50.0).value;
+    assert!(!(ok.long_run || ok.threshold || ok.interval));
+    // Long run 40 %, threshold 16 %, interval 6 %: the first two are set.
+    let bad = check_volume_caps(20.0, 8.0, 3.0, 50.0).value;
+    assert_eq!(
+        bad,
+        CapViolations {
+            long_run: true,
+            threshold: true,
+            interval: false
+        }
+    );
 }
 
 #[test]
@@ -922,9 +862,9 @@ fn workout_rx_bands_verbatim() {
 
 #[test]
 fn recovery_rx_has_open_lower_hr_and_both_ceilings() {
-    // running-014: KB gives NO lower HR bound (the 0.65 floor was
-    // invented), <76 %HRmax AND <70 %HRR ceilings, pace ≥20 % slower than
-    // MP with no upper slowness bound, RPE 2–3, 20–40 min.
+    // running-014: KB gives NO lower HR bound, <76 %HRmax AND <70 %HRR
+    // ceilings, pace ≥20 % slower than MP with no upper slowness bound,
+    // RPE 2–3, 20–40 min.
     let r = run_workout_rx(RunSessionType::Recovery);
     assert_eq!(r.value.pct_hr_max, (None, Some(0.76)));
     assert_eq!(r.value.pct_hrr_max, Some(0.70));
@@ -949,9 +889,8 @@ fn easy_ga_is_distinct_from_recovery() {
 
 #[test]
 fn long_run_rx_has_no_duration_floor() {
-    // running-016: no duration floor in the KB (the 60-min floor was
-    // invented); soft time-cap ~2:00–2:30 → 150-min outer ceiling; pace
-    // MP −10–20 %; 65–80 %HRmax; RPE 3–5.
+    // running-016: no duration floor in the KB; soft time-cap ~2:00–2:30 →
+    // 150-min outer ceiling; pace MP −10–20 %; 65–80 %HRmax; RPE 3–5.
     let lr = run_workout_rx(RunSessionType::LongRun).value;
     assert_eq!(lr.duration_min, (None, Some(150)));
     assert_eq!(lr.pct_hr_max, (Some(0.65), Some(0.80)));
@@ -1022,8 +961,8 @@ fn long_run_guardrails() {
     assert!(!long_run_within_daily_avg(10.0, 0.0).value);
     // long_run_share_default() carries RUN-LONGRUN-001 / running-016's 25–30 %.
     assert_eq!(long_run_share_default().value, (0.25, 0.30));
-    // goal_week_plan is reconciled onto the 25–30% band (running-016 wins;
-    // running-024's uncited 20% lower bound was corrected up).
+    // goal_week_plan uses the 25–30% band (running-016 over running-024's
+    // uncited 20% lower bound).
     assert_eq!(
         goal_week_plan(GoalDistance::General, false)
             .value
@@ -1160,7 +1099,7 @@ fn equivalency_guards_the_zero_sentinel() {
 #[test]
 fn equivalency_cites_the_equivalency_claim_not_vdot() {
     // running-039 is the Riegel/Daniels equivalency combiner (RUN-EQUIV-001),
-    // NOT the VDOT-fitness estimate (RUN-VDOT-001). Guards the citation fix.
+    // NOT the VDOT-fitness estimate (RUN-VDOT-001).
     let r = race_equivalency(3600.0, 3636.0);
     assert_eq!(r.claim_id(), claims::RUN_EQUIV_001,);
     assert_eq!(r.grade(), crate::schema::EvidenceGrade::Moderate);
@@ -1204,42 +1143,35 @@ fn reanchored_equivalent() -> Vec<GpsPoint> {
 }
 
 #[test]
-fn empty_starts_is_bit_identical_to_the_single_track_metrics() {
-    // Every track fn's segment-aware form must reduce EXACTLY to the
-    // whole-track form when there is no interior boundary, the regression net
-    // for re-anchored logs and hand-logged runs. A start of 0 (index 0
-    // never has an entering leg) and an out-of-range index are both no-ops.
+fn zero_and_out_of_range_segment_starts_are_no_ops() {
+    // Index 0 never has an entering leg and 999 is past the track, so both
+    // leave every track metric equal to the empty-`segment_starts` form.
     let t = reanchored_equivalent(); // one continuous run with slight structure
-    for starts in [&[][..], &[0][..], &[999][..]] {
+    for starts in [&[0][..], &[999][..]] {
         assert_eq!(
-            track_distance_km(&t, 30.0),
-            track_distance_km_seg(&t, 30.0, starts),
-            "distance parity, starts={starts:?}",
+            track_distance_km(&t, &[]),
+            track_distance_km(&t, starts),
+            "distance, starts={starts:?}",
         );
         assert_eq!(
-            track_positive_split_pct(&t, 30.0),
-            track_positive_split_pct_seg(&t, 30.0, starts),
-            "split parity, starts={starts:?}",
+            track_positive_split_pct(&t, &[]),
+            track_positive_split_pct(&t, starts),
+            "split, starts={starts:?}",
         );
         assert_eq!(
-            track_splits(&t, 30.0, KM_M),
-            track_splits_seg(&t, 30.0, KM_M, starts),
-            "km-splits parity, starts={starts:?}",
+            track_splits(&t, KM_M, &[]),
+            track_splits(&t, KM_M, starts),
+            "km splits, starts={starts:?}",
         );
         assert_eq!(
-            normalized_speed_mps(&t, 30.0),
-            normalized_speed_mps_seg(&t, 30.0, starts),
-            "NS parity, starts={starts:?}",
+            track_variability_index(&t, &[]),
+            track_variability_index(&t, starts),
+            "VI, starts={starts:?}",
         );
         assert_eq!(
-            track_variability_index(&t, 30.0),
-            track_variability_index_seg(&t, 30.0, starts),
-            "VI parity, starts={starts:?}",
-        );
-        assert_eq!(
-            export_gpx(&t, "run"),
-            export_gpx_seg(&t, "run", starts, None),
-            "gpx parity, starts={starts:?}",
+            export_gpx(&t, "run", &[], None),
+            export_gpx(&t, "run", starts, None),
+            "gpx, starts={starts:?}",
         );
     }
 }
@@ -1247,10 +1179,10 @@ fn empty_starts_is_bit_identical_to_the_single_track_metrics() {
 #[test]
 fn segmented_distance_excludes_the_pause_bridge() {
     let t = relocation_fixture();
-    // Without boundaries the bridge leg is still counted, now capped at the
+    // Without boundaries the bridge leg is counted, capped at the
     // plausible-runner ceiling (12 m/s × 60 s ≈ 0.72 km) instead of its raw
-    // ~111 km, so it still swamps the two real segments.
-    let naive = track_distance_km(&t, 30.0);
+    // ~111 km, so it swamps the two real segments.
+    let naive = track_distance_km(&t, &[]);
     let capped_bridge_km = MAX_PLAUSIBLE_SPEED_MPS * 60.0 / 1000.0;
     assert!(
         (naive - (0.889 + capped_bridge_km)).abs() < 0.05,
@@ -1258,12 +1190,12 @@ fn segmented_distance_excludes_the_pause_bridge() {
     );
     // With the boundary at index 5 the bridge contributes nothing → only the
     // two ~445 m segments remain (~0.89 km).
-    let seg = track_distance_km_seg(&t, 30.0, &[5]);
+    let seg = track_distance_km(&t, &[5]);
     assert!((seg - 0.889).abs() < 0.05, "segmented distance {seg}");
     // And it equals the distance of the re-anchored equivalent (bit-identical
     // route length, no shift needed).
     assert!(
-        (seg - track_distance_km(&reanchored_equivalent(), 30.0)).abs() < 1e-9,
+        (seg - track_distance_km(&reanchored_equivalent(), &[])).abs() < 1e-9,
         "segmented == re-anchored distance",
     );
 }
@@ -1281,7 +1213,7 @@ fn standing_still_wander_is_not_distance_of_record() {
         pt(0.0, run_leg_deg, 20),
         pt(0.0, run_leg_deg + wander_deg, 80),
     ];
-    let d = track_distance_km(&t, 30.0);
+    let d = track_distance_km(&t, &[]);
     let run_leg_km = haversine_m(t[0], t[1]) / 1000.0;
     let wander_km = haversine_m(t[1], t[2]) / 1000.0;
     assert!(
@@ -1301,19 +1233,19 @@ fn segmented_vi_and_split_match_the_reanchored_equivalent() {
     // The re-anchored track is the oracle: the segment-aware metrics on
     // the TRUE coords must equal it (equatorial relocation ⇒ exact).
     assert_eq!(
-        track_variability_index_seg(&t, 30.0, &[5]),
-        track_variability_index(&re, 30.0),
+        track_variability_index(&t, &[5]),
+        track_variability_index(&re, &[]),
         "VI parity vs re-anchored",
     );
     assert_eq!(
-        track_positive_split_pct_seg(&t, 30.0, &[5]),
-        track_positive_split_pct(&re, 30.0),
+        track_positive_split_pct(&t, &[5]),
+        track_positive_split_pct(&re, &[]),
         "split parity vs re-anchored",
     );
     // Raw splits agree to f64 rounding (the equatorial re-anchor translation is
     // exact only up to the last ULP, so compare per field with a tolerance).
-    let seg_splits = track_splits_seg(&t, 30.0, KM_M, &[5]);
-    let re_splits = track_splits(&re, 30.0, KM_M);
+    let seg_splits = track_splits(&t, KM_M, &[5]);
+    let re_splits = track_splits(&re, KM_M, &[]);
     assert_eq!(seg_splits.len(), re_splits.len(), "same split count");
     for (a, b) in seg_splits.iter().zip(&re_splits) {
         assert_eq!(a.index, b.index);
@@ -1327,7 +1259,7 @@ fn segmented_vi_and_split_match_the_reanchored_equivalent() {
 #[test]
 fn gpx_emits_one_trkseg_per_segment_with_true_coords() {
     let t = relocation_fixture();
-    let gpx = export_gpx_seg(&t, "paused run", &[5], None);
+    let gpx = export_gpx(&t, "paused run", &[5], None);
     // Two recording segments → two <trkseg> blocks with a gap between.
     assert_eq!(gpx.matches("<trkseg>").count(), 2, "two segments\n{gpx}");
     assert_eq!(gpx.matches("</trkseg>").count(), 2);
@@ -1336,10 +1268,9 @@ fn gpx_emits_one_trkseg_per_segment_with_true_coords() {
     assert!(gpx.contains("lon=\"1\""), "true seg-2 coord\n{gpx}");
     // Every real fix is still emitted (10 points across the two segments).
     assert_eq!(gpx.matches("<trkpt").count(), 10);
-    // Empty starts → a single <trkseg>, byte-identical to the bare export.
-    let flat = export_gpx_seg(&t, "paused run", &[], None);
+    // Empty starts → a single <trkseg>.
+    let flat = export_gpx(&t, "paused run", &[], None);
     assert_eq!(flat.matches("<trkseg>").count(), 1);
-    assert_eq!(flat, export_gpx(&t, "paused run"));
 }
 
 #[test]
@@ -1347,7 +1278,7 @@ fn gpx_names_the_runs_logged_at_stamp_before_its_track() {
     // A run logged after its last kept fix (a standing-still finish, a trim):
     // the document names the stamp in lollop's namespaced track extension.
     let t = relocation_fixture();
-    let gpx = export_gpx_seg(&t, "run", &[], Some(1_700_000_000));
+    let gpx = export_gpx(&t, "run", &[], Some(1_700_000_000));
     assert!(gpx.contains(" xmlns:lollop=\"urn:lollop:gpx:1\">"), "{gpx}");
     let ext = "<extensions><lollop:logged_at>2023-11-14T22:13:20Z</lollop:logged_at></extensions>";
     let at = gpx.find(ext).expect("the stamp is written");
@@ -1408,24 +1339,6 @@ fn c25k_matches_the_nhs_bout_table() {
         RunVolume::DurationMin(30)
     );
     assert_eq!(c25k_session_rx(1, 1).claim_id(), claims::RUN_C25K_002);
-}
-
-#[test]
-fn c25k_longest_bout_monotone_and_reaches_20min_by_week5() {
-    // The week's hardest (last) run: its longest continuous bout never
-    // shrinks week to week, and the 20-minute run arrives in week 5.
-    let longest: Vec<u16> = (1..=9)
-        .map(|w| c25k_session_rx(w, 3).value.longest_bout_sec())
-        .collect();
-    for w in 1..longest.len() {
-        assert!(
-            longest[w] >= longest[w - 1],
-            "week {} regressed: {longest:?}",
-            w + 1
-        );
-    }
-    assert_eq!(longest[4], 1200);
-    assert_eq!(longest[8], 1800);
 }
 
 #[test]

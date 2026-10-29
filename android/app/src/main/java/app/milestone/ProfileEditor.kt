@@ -16,7 +16,6 @@ import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -51,20 +50,6 @@ import java.io.Serializable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-
-/**
- * The three training modalities the Focus row (and the guided setup) map onto the
- * volume fields: Lift = weekly_sets>0 & no running; Run = running>0 & no lifting;
- * Both = both sides carry volume. A short enum → rendered as segmented buttons.
- */
-enum class Focus { Lift, Run, Both }
-
-internal val Focus.labelRes: Int
-    get() = when (this) {
-        Focus.Lift -> R.string.setup_focus_lift
-        Focus.Run -> R.string.setup_focus_run
-        Focus.Both -> R.string.setup_focus_both
-    }
 
 /**
  * Durable stash of one side's answers while that side is switched OFF, so a later
@@ -155,17 +140,17 @@ internal data class StashedLift(val days: Int?, val goal: LiftGoal, val weeklySe
  * [withoutSide] does. Null = ask in the guided setup. Both always asks (which side
  * leads is never stashed).
  */
-internal fun ProfileDraft.resumedSide(target: Focus, lift: StashedLift?, run: StashedRun?, today: Long): ProfileDraft? = when (target) {
-    Focus.Lift -> lift?.takeIf { s ->
+internal fun ProfileDraft.resumedSide(target: Modality, lift: StashedLift?, run: StashedRun?, today: Long): ProfileDraft? = when (target) {
+    Modality.Lift -> lift?.takeIf { s ->
         weeklySets == 0 && s.weeklySets > 0 && s.days != null && s.days in LIFT_DAYS && weekdaysCover(s.weekdays, s.days)
     }?.let { s ->
         copy(weeklySets = s.weeklySets, liftDaysPerWeek = s.days, liftGoal = s.goal, trainingWeekdays = s.weekdays)
-            .withoutSide(Focus.Lift)
+            .withoutSide(Modality.Lift)
     }
-    Focus.Run -> run?.takeIf { s ->
-        runningDaysPerWeek == 0 && s.goal != null && s.days in dayOptions(Modality.Run) && weekdaysCover(s.weekdays, s.days)
+    Modality.Run -> run?.takeIf { s ->
+        runningDaysPerWeek == 0 && s.days in dayOptions(Modality.Run) && weekdaysCover(s.weekdays, s.days)
     }?.let { s ->
-        val goal = s.goal ?: GoalDistance.General
+        val goal = s.goal ?: return@let null
         copy(
             runningDaysPerWeek = s.days,
             runningKmPerWeek = s.km ?: 0.0,
@@ -174,9 +159,9 @@ internal fun ProfileDraft.resumedSide(target: Focus, lift: StashedLift?, run: St
             goalRaceEpochDay = s.raceEpochDay?.takeIf { it > today && goal.isRace },
             liftDaysPerWeek = null,
             trainingWeekdays = s.weekdays,
-        ).withoutSide(Focus.Run)
+        ).withoutSide(Modality.Run)
     }
-    Focus.Both -> null
+    Modality.Both -> null
 }
 
 /**
@@ -233,10 +218,9 @@ internal fun parqRevealItem(id: ProfileRowId?, health: HealthScreen): ParqItem? 
 }
 
 /**
- * Plain data holder for the [Event.SetProfile] fields. Kept separate from the
- * event so the editor can mutate a draft locally and emit a `SetProfile` per
- * committed change (the event log compacts SetProfile last-write-wins, so
- * apply-on-change costs nothing at replay).
+ * Plain data holder for the [Event.SetProfile] fields: the editor mutates a draft
+ * and emits a `SetProfile` per committed change. Every field is re-sent by each
+ * SetProfile (last-write-wins), so the draft carries all of them.
  */
 data class ProfileDraft(
     val progressionCadence: ProgressionCadence,
@@ -250,12 +234,7 @@ data class ProfileDraft(
     // 0.0 on the wire and the engine picks its own conservative start.
     val runningKmPerWeekSet: Boolean = true,
     val advanced: Boolean,
-    // Consolidated person data. Carried on the draft so every
-    // SetProfile the editor emits re-sends it; otherwise a training-field edit
-    // would last-write-wins away the person data set in the guided setup.
-    // Null until the user answers, so the editor's Sex row can read "Not set"
-    // instead of silently defaulting to Male; an answered Male is sent as an
-    // explicit false so it survives the round trip.
+    // Null until answered (the Sex row reads "Not set"); Male is an explicit false.
     val female: Boolean? = null,
     val bodyweightKg: Double? = null,
     // With a birthday, the core's derived age (echoed each day); without one, a
@@ -263,29 +242,20 @@ data class ProfileDraft(
     val ageYears: Double? = null,
     val restingHrBpm: Double? = null,
     val measuredHrMax: Double? = null,
-    // Display-unit preference. Carried on the draft so every SetProfile
-    // re-sends it; otherwise any profile edit would last-write-wins the unit
-    // back to kg.
+    // Display-unit preference.
     val weightLb: Boolean = false,
-    // Stage-0 onboarding health screen. Carried on the draft so every
-    // SetProfile re-sends it (else a training-field edit would last-write-wins
-    // away the health gates). youth is core-derived from age; never set here.
+    // Onboarding health screen. youth is core-derived from age; never set here.
     val health: HealthScreen = HealthScreen(),
-    // Resistance-training modality: barbell/machine "Weights" (default) or
-    // bodyweight "Calisthenics". Carried on the draft so every SetProfile
-    // re-sends it; a Weights value emits nothing (matching the legacy wire).
+    // "Weights" (default, emits nothing on the wire) or "Calisthenics".
     val resistanceModality: ResistanceModality = ResistanceModality.Weights,
-    // Advanced training-context fields (mirror app::Profile). Carried on the
-    // draft so every SetProfile re-sends them (else a training-field edit would
-    // last-write-wins them away). All default to unset so a plain profile emits
-    // the legacy wire.
+    // Training-context fields (mirror app::Profile); unset by default, so a plain
+    // profile emits the legacy wire.
     val highLoadBlock: Boolean = false,
     val environment: Environment? = null,
     val envTempC: Double? = null,
     val envAltitudeM: Double? = null,
     val weeksOff: Double? = null,
-    // Coaching inputs (mirror app::Profile). Carried on the draft so every
-    // SetProfile re-sends them; null/false = unanswered (legacy wire).
+    // Coaching inputs (mirror app::Profile); null/false = unanswered (legacy wire).
     val liftDaysPerWeek: Int? = null,
     val trainingWeekdays: Int? = null,
     val goalRaceEpochDay: Long? = null,
@@ -418,6 +388,9 @@ data class ProfileDraft(
     }
 }
 
+/** The kg|lb the profile shows weights in. */
+internal val ProfileDraft.weightUnit: WeightUnit get() = if (weightLb) WeightUnit.Lb else WeightUnit.Kg
+
 // Human-readable labels for the profile pickers. Display-only, the wire value is
 // still each variant's `.name` (see Event.SetProfile), so these strings can change
 // freely. Exhaustive `when` (no `else`) so a new variant fails to compile until it
@@ -457,9 +430,16 @@ internal fun ProfileDraft.withLiftGoal(goal: LiftGoal): ProfileDraft {
 }
 
 /** The two-way "Which leads?" answer mapped onto the concurrent goal (same mapping
- *  the guided setup uses). */
-internal fun ProfileDraft.withLead(lead: BothPriority): ProfileDraft =
-    copy(concurrentGoal = leadingConcurrentGoal(lead, liftGoal))
+ *  the guided setup uses), with the day counts fitted to that lead's caps. */
+internal fun ProfileDraft.withLead(lead: BothPriority): ProfileDraft {
+    val liftDays = liftDaysPerWeek?.coerceIn(hybridLiftDayRange(lead))
+    val runMax = hybridRunDayOptions(liftDays ?: HYBRID_DEFAULT_LIFT_DAYS, lead).last
+    return copy(
+        concurrentGoal = leadingConcurrentGoal(lead, liftGoal),
+        liftDaysPerWeek = liftDays,
+        runningDaysPerWeek = runningDaysPerWeek.coerceAtMost(runMax),
+    )
+}
 
 internal val Environment.labelRes: Int
     get() = when (this) {
@@ -470,22 +450,15 @@ internal val Environment.labelRes: Int
     }
 
 /**
- * User-editable training profile. Drives the `SetProfile` event, so all
- * evidence-cited guidance is user-driven.
+ * User-editable training profile. Every committed edit calls [onApply] with the
+ * new draft at once (no separate Apply step).
  *
- * Applies on every change: each committed edit immediately calls [onApply] with
- * the new draft, so a picker tap or the Advanced switch takes effect the moment
- * it is touched, with no separate "Apply" step to forget. The event log compacts
- * `SetProfile` last-write-wins, so per-tap events never bloat the replay.
- *
- * [distanceUnit] is the resolved km|mi display unit: the running-distance rows
- * show and pick in it, while the wire stays canonical km. [today] (the core's
- * local epoch day) bounds the date rows: race/meet dates are future-only, the
- * restart date is today or earlier. [onRerunSetup] opens the guided setup seeded
- * from this profile: null = the plain "Re-run guided setup" row at the end of the
- * Plan card; a [Modality] = a Focus switch that needs the new side's answers.
- * [focusRow] (e.g. a hold banner's "Check age") expands that row and brings it
- * into view once; [onFocusHandled] tells the caller the request was taken.
+ * [distanceUnit] is the km|mi the running rows show; the wire stays km. [today]
+ * (the core's local epoch day) bounds the date rows: race/meet dates are
+ * future-only, the restart date today or earlier. [onRerunSetup] opens the
+ * guided setup: null = a plain re-run; a [Modality] = a Focus switch that needs
+ * the new side's answers. [focusRow] expands that row and brings it into view
+ * once; [onFocusHandled] tells the caller the request was taken.
  */
 @Composable
 internal fun ProfileEditor(
@@ -498,21 +471,9 @@ internal fun ProfileEditor(
     onApply: (ProfileDraft) -> Unit,
 ) {
     val ctx = LocalContext.current
-    // rememberSaveable, not remember: this editor lives in a LazyColumn item, so it
-    // is disposed when scrolled out of view. Plain remember would discard the draft
-    // on scroll-away; the saveable draft survives that disposal (and process death /
-    // rotation). ProfileDraft is Serializable so the autoSaver can bundle it.
-    //
-    // KEYED on `initial` (SAFETY / HARD RULE 3): an unkeyed saveable outlives the
-    // incoming profile, so after "Re-run guided setup", which rewrites the core
-    // profile, including the health gates, the stale pre-setup draft would survive
-    // and, on the next field edit (apply-on-change re-sends every field via
-    // last-write-wins SetProfile), silently revert the just-set values. That could
-    // re-raise a just-cleared medical deferral or drop a just-raised gate. Keying on
-    // the incoming profile identity invalidates the draft the moment the core echoes
-    // a different profile, so a fresh setup always wins. Normal apply-on-change edits
-    // round-trip (`from(toEvent())` is stable), so the key is unchanged there and the
-    // draft is NOT reset mid-edit.
+    // Saveable: this item leaves composition when scrolled away. Keyed on
+    // `initial` so a new core profile (e.g. after a re-run setup) replaces a stale
+    // draft that the next edit would otherwise re-send over it (HARD RULE 3).
     var draft by rememberSaveable(initial) { mutableStateOf(initial) }
     // Commit-and-apply: the single funnel every edit goes through.
     val commit: (ProfileDraft) -> Unit = {
@@ -535,35 +496,31 @@ internal fun ProfileEditor(
         }
     }
 
-    // Modality derivation: which sides carry volume drives which rows and groups show.
+    // Which sides carry volume drives which rows and groups show.
     val lift = draft.weeklySets > 0
     val run = draft.runningDaysPerWeek > 0
     val both = lift && run
-    val focus = when {
-        both -> Focus.Both
-        run -> Focus.Run
-        else -> Focus.Lift
-    }
+    val focus = modalityOf(draft) ?: Modality.Lift
 
     // A Focus change reprograms the week, so it is confirmed first. Turning a side
     // ON needs that side's answers: a side set up before resumes from its stash
     // when every answer is there, else the guided setup asks them, seeded. Only
     // dropping a side applies here otherwise. Nothing invented is ever written.
-    var pendingFocus by rememberSaveable { mutableStateOf<Focus?>(null) }
+    var pendingFocus by rememberSaveable { mutableStateOf<Modality?>(null) }
     pendingFocus?.let { target ->
-        val addsSide = (target != Focus.Run && !lift) || (target != Focus.Lift && !run)
+        val addsSide = (target != Modality.Run && !lift) || (target != Modality.Lift && !run)
         val resumed = remember(target, draft) {
             if (addsSide) draft.resumedSide(target, ModalityStash.lift(ctx), ModalityStash.run(ctx), today) else null
         }
         val copy = focusSwitchCopy(focus, target)
         val title = if (resumed != null) {
-            stringResource(if (target == Focus.Lift) R.string.setup_focus_resume_lift_title else R.string.setup_focus_resume_run_title)
+            stringResource(if (target == Modality.Lift) R.string.setup_focus_resume_lift_title else R.string.setup_focus_resume_run_title)
         } else {
             stringResource(copy.titleRes)
         }
         val body = if (resumed != null) {
             val days = pluralStringResource(R.plurals.setup_days_count, resumed.trainingDayTotal(), resumed.trainingDayTotal())
-            if (target == Focus.Lift) {
+            if (target == Modality.Lift) {
                 stringResource(R.string.setup_focus_resume_lift_body, stringResource(resumed.liftGoal.labelRes), days)
             } else {
                 stringResource(R.string.setup_focus_resume_run_body, stringResource(resumed.goalDistance.labelRes), days)
@@ -581,11 +538,11 @@ internal fun ProfileEditor(
                     pendingFocus = null
                     open = null
                     // A side switched off: keep its answers for a later switch back.
-                    if (target == Focus.Lift && run) ModalityStash.stashRun(ctx, draft)
-                    if (target == Focus.Run && lift) ModalityStash.stashLift(ctx, draft)
+                    if (target == Modality.Lift && run) ModalityStash.stashRun(ctx, draft)
+                    if (target == Modality.Run && lift) ModalityStash.stashLift(ctx, draft)
                     when {
                         resumed != null -> commit(resumed)
-                        addsSide -> onRerunSetup(target.modality)
+                        addsSide -> onRerunSetup(target)
                         else -> commit(draft.withoutSide(target))
                     }
                 }) {
@@ -606,9 +563,9 @@ internal fun ProfileEditor(
             // (re-tapping the active segment does nothing).
             SegmentedEnumRow(
                 label = stringResource(R.string.setup_row_focus),
-                values = listOf(Focus.Lift, Focus.Run, Focus.Both),
+                values = Modality.entries.toList(),
                 current = focus,
-                display = { ctx.getString(it.labelRes) },
+                display = { ctx.getString(it.focusLabelRes) },
                 onSelect = { if (it != focus) pendingFocus = it },
             )
             RowHairline()
@@ -620,14 +577,7 @@ internal fun ProfileEditor(
                     label = stringResource(R.string.setup_row_which_leads),
                     values = BothPriority.entries.toList(),
                     current = draft.concurrentGoal.lead(),
-                    display = {
-                        ctx.getString(
-                            when (it) {
-                                BothPriority.LiftLean -> R.string.setup_lead_lifting
-                                BothPriority.RunLean -> R.string.setup_lead_running
-                            },
-                        )
-                    },
+                    display = { ctx.getString(it.labelRes) },
                 ) { commit(draft.withLead(it)) }
                 RowHairline()
             }
@@ -657,23 +607,25 @@ internal fun ProfileEditor(
                 }
                 val workTotal = work.trainingDayTotal()
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                    val lead = work.concurrentGoal.lead()
                     if (lift) {
-                        // 2–5 for a lifting plan; a run-led hybrid lifts at most 3
-                        // (the engine holds lifting to maintenance there).
+                        // A run-led hybrid lifts at most 3 days (maintenance).
                         val liftLabel = stringResource(if (both) R.string.setup_row_lift_days else R.string.setup_days_scale_label)
-                        val liftMax = if (both && work.concurrentGoal == ConcurrentGoal.EndurancePriority) HYBRID_CAPPED_DAYS else LIFT_DAYS.last
+                        val liftOptions = if (both) hybridLiftDayRange(lead) else dayOptions(Modality.Lift)
                         FieldLabel(liftLabel)
-                        ChoiceScaleRow((LIFT_DAYS.first..liftMax).toList(), work.shownLiftDays(), { "$it" }, label = liftLabel) {
-                            stage(work.copy(liftDaysPerWeek = it))
+                        ChoiceScaleRow(liftOptions.toList(), work.shownLiftDays(), { "$it" }, label = liftLabel) { days ->
+                            val runMax = hybridRunDayOptions(days, lead).last
+                            stage(work.copy(liftDaysPerWeek = days, runningDaysPerWeek = work.runningDaysPerWeek.coerceAtMost(runMax)))
                         }
                     }
                     if (run) {
-                        // Starts at 1, not 0: dropping running is the Focus row's job.
-                        // While lifting leads a hybrid runs at most 3 days.
+                        // The setup's ranges: a runner trains 2–7 days; a hybrid
+                        // runs the rest of the week beside its lift days, at most 3
+                        // while lifting leads. Dropping running is the Focus row's job.
                         val runLabel = stringResource(if (both) R.string.setup_row_running_days else R.string.setup_days_scale_label)
-                        val runMax = if (both && work.concurrentGoal != ConcurrentGoal.EndurancePriority) HYBRID_CAPPED_DAYS else WEEK_DAYS
+                        val runOptions = if (both) hybridRunDayOptions(work.shownLiftDays(), lead) else dayOptions(Modality.Run)
                         FieldLabel(runLabel)
-                        ChoiceScaleRow((1..runMax).toList(), work.runningDaysPerWeek, { "$it" }, label = runLabel) {
+                        ChoiceScaleRow(runOptions.toList(), work.runningDaysPerWeek, { "$it" }, label = runLabel) {
                             stage(work.copy(runningDaysPerWeek = it))
                         }
                     }
@@ -682,7 +634,7 @@ internal fun ProfileEditor(
                     if (!weekdaysCover(work.trainingWeekdays, workTotal)) {
                         Text(
                             pluralStringResource(R.plurals.setup_days_weekdays_hint, workTotal, workTotal),
-                            color = LocalStatusColors.current.danger,
+                            color = DangerText,
                             style = Type.Caption,
                         )
                     }
@@ -763,28 +715,29 @@ internal fun ProfileEditor(
                         open == ProfileRowId.PriorityMuscle,
                         { toggle(ProfileRowId.PriorityMuscle) },
                         stringResource(R.string.setup_row_priority_muscle),
-                        draft.specializationMuscle?.let { m -> PRIORITY_MUSCLES.firstOrNull { it.first == m }?.let { stringResource(it.second) } ?: m },
+                        draft.specializationMuscle?.let { m -> PRIORITY_MUSCLES[m]?.let { stringResource(it) } ?: m },
                         placeholder = stringResource(R.string.setup_priority_none),
                     ) {
                         OptionList(
-                            listOf<String?>(null) + PRIORITY_MUSCLES.map { it.first },
+                            listOf<String?>(null) + PRIORITY_MUSCLES.keys,
                             draft.specializationMuscle,
-                            { key -> ctx.getString(PRIORITY_MUSCLES.firstOrNull { it.first == key }?.second ?: R.string.setup_priority_none) },
+                            { key -> ctx.getString(PRIORITY_MUSCLES[key] ?: R.string.setup_priority_none) },
                         ) {
                             commit(draft.copy(specializationMuscle = it))
                             open = null
                         }
                     }
                 } else {
-                    // A test/meet date shapes the taper and peak.
+                    // A test/meet date shapes the taper and peak; a past one no longer does.
+                    val meet = draft.meetEpochDay?.takeIf { it > today }
                     ProfileRow(
                         open == ProfileRowId.Meet,
                         { toggle(ProfileRowId.Meet) },
                         stringResource(R.string.setup_row_meet),
-                        draft.meetEpochDay?.let { epochDayLabel(it) },
+                        meet?.let { epochDayLabel(it) },
                         placeholder = stringResource(R.string.setup_date_none),
                     ) {
-                        DateAnswerRow(draft.meetEpochDay?.takeIf { it > today }, today, future = true, noneLabel = stringResource(R.string.setup_date_none)) {
+                        DateAnswerRow(meet, today, future = true, noneLabel = stringResource(R.string.setup_date_none)) {
                             commit(draft.copy(meetEpochDay = it))
                         }
                     }
@@ -825,14 +778,15 @@ internal fun ProfileEditor(
                 }
                 if (draft.goalDistance.isRace) {
                     RowHairline()
+                    val raceDay = draft.goalRaceEpochDay?.takeIf { it > today }
                     ProfileRow(
                         open == ProfileRowId.RaceDate,
                         { toggle(ProfileRowId.RaceDate) },
                         stringResource(R.string.setup_row_race_date),
-                        draft.goalRaceEpochDay?.let { epochDayLabel(it) },
+                        raceDay?.let { epochDayLabel(it) },
                         placeholder = stringResource(R.string.setup_date_none),
                     ) {
-                        DateAnswerRow(draft.goalRaceEpochDay?.takeIf { it > today }, today, future = true, noneLabel = stringResource(R.string.setup_date_none)) {
+                        DateAnswerRow(raceDay, today, future = true, noneLabel = stringResource(R.string.setup_date_none)) {
                             commit(draft.copy(goalRaceEpochDay = it))
                         }
                     }
@@ -933,7 +887,7 @@ internal fun ProfileEditor(
         // You: consolidated person data, entered once here; the protein /
         // HR-zone calculators (Profile → Calculators) prefill from it. All optional: "Not set" until given.
         ProfileGroup(stringResource(R.string.setup_section_you)) {
-            ProfileRow(open == ProfileRowId.Sex, { toggle(ProfileRowId.Sex) }, stringResource(R.string.setup_sex_label), sexLabel(draft.female)) {
+            ProfileRow(open == ProfileRowId.Sex, { toggle(ProfileRowId.Sex) }, stringResource(R.string.setup_sex_label), stringResource(sexLabelRes(draft.female))) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
                     // Full-width rows (not a segmented cell row) so "Prefer not to
                     // say" never clips at large font sizes; it stores no answer (null).
@@ -992,7 +946,7 @@ internal fun ProfileEditor(
                 ) { day -> commit(draft.copy(birthEpochDay = day, ageYears = ageOnDay(day, today).toDouble())) }
             }
             RowHairline()
-            val bwUnit = if (draft.weightLb) WeightUnit.Lb else WeightUnit.Kg
+            val bwUnit = draft.weightUnit
             val bwLabel = stringResource(R.string.setup_row_bodyweight)
             ProfileRow(
                 open == ProfileRowId.Bodyweight,
@@ -1063,7 +1017,7 @@ internal fun ProfileEditor(
                 open == ProfileRowId.HealthQuestions,
                 { toggle(ProfileRowId.HealthQuestions) },
                 stringResource(R.string.setup_row_health_questions),
-                parqValue(draft.health),
+                healthSummary(draft.health, count = draft.health.parqYesCount),
                 revealRequest = reveal?.pickerRow == ProfileRowId.HealthQuestions && !parqInner,
                 onRevealed = { reveal = null },
                 revealOnExpand = !parqInner,
@@ -1173,9 +1127,9 @@ internal fun ProfileEditor(
     }
 }
 
-/** Hypertrophy priority-muscle keys: the Table 1 landmark keys the core resolves
- *  (shared/src/hypertrophy.rs LANDMARKS), with their display labels. */
-internal val PRIORITY_MUSCLES: List<Pair<String, Int>> = listOf(
+/** Hypertrophy priority-muscle keys (the Table 1 landmark keys the core resolves,
+ *  shared/src/hypertrophy.rs LANDMARKS) → display labels, in display order. */
+internal val PRIORITY_MUSCLES: Map<String, Int> = mapOf(
     "chest" to R.string.setup_muscle_chest,
     "back" to R.string.setup_muscle_back,
     "quads" to R.string.setup_muscle_quads,
@@ -1189,37 +1143,21 @@ internal val PRIORITY_MUSCLES: List<Pair<String, Int>> = listOf(
     "abs" to R.string.setup_muscle_abs,
 )
 
-/** The PAR-Q+ summary row value: "None apply" / "2 apply" / "Answer again". */
-@Composable
-private fun parqValue(health: HealthScreen): String = when {
-    health.parqYesCount > 0 -> pluralStringResource(R.plurals.setup_health_flag_count, health.parqYesCount, health.parqYesCount)
-    health.legacyParq -> stringResource(R.string.setup_parq_value_legacy)
-    else -> stringResource(R.string.setup_parq_value_clear)
-}
-
-/** The guided-setup modality a Focus segment stands for. */
-internal val Focus.modality: Modality
-    get() = when (this) {
-        Focus.Lift -> Modality.Lift
-        Focus.Run -> Modality.Run
-        Focus.Both -> Modality.Both
-    }
-
 /** Copy for the Focus-switch confirm: title, body and confirm label. */
 internal class FocusSwitchCopy(val titleRes: Int, val bodyRes: Int, val confirmRes: Int)
 
-internal fun focusSwitchCopy(from: Focus, to: Focus): FocusSwitchCopy = when (to) {
-    Focus.Lift -> if (from == Focus.Both) {
+internal fun focusSwitchCopy(from: Modality, to: Modality): FocusSwitchCopy = when (to) {
+    Modality.Lift -> if (from == Modality.Both) {
         FocusSwitchCopy(R.string.setup_focus_to_lift_only_title, R.string.setup_focus_to_lift_only_body, R.string.setup_focus_switch_confirm)
     } else {
         FocusSwitchCopy(R.string.setup_focus_to_lift_title, R.string.setup_focus_to_lift_body, R.string.setup_focus_answer_lift)
     }
-    Focus.Run -> if (from == Focus.Both) {
+    Modality.Run -> if (from == Modality.Both) {
         FocusSwitchCopy(R.string.setup_focus_to_run_only_title, R.string.setup_focus_to_run_only_body, R.string.setup_focus_switch_confirm)
     } else {
         FocusSwitchCopy(R.string.setup_focus_to_run_title, R.string.setup_focus_to_run_body, R.string.setup_focus_answer_run)
     }
-    Focus.Both -> if (from == Focus.Run) {
+    Modality.Both -> if (from == Modality.Run) {
         FocusSwitchCopy(R.string.setup_focus_add_lift_title, R.string.setup_focus_add_lift_body, R.string.setup_focus_answer_lift)
     } else {
         FocusSwitchCopy(R.string.setup_focus_add_run_title, R.string.setup_focus_add_run_body, R.string.setup_focus_answer_run)
@@ -1229,15 +1167,15 @@ internal fun focusSwitchCopy(from: Focus, to: Focus): FocusSwitchCopy = when (to
 /** A Both profile with one side dropped ([keep] = the side that stays). The
  *  concurrent goal follows the guided setup's mapping: lift-only = the lift
  *  goal, run-only = endurance priority. */
-internal fun ProfileDraft.withoutSide(keep: Focus): ProfileDraft = when (keep) {
-    Focus.Lift -> copy(
+internal fun ProfileDraft.withoutSide(keep: Modality): ProfileDraft = when (keep) {
+    Modality.Lift -> copy(
         runningDaysPerWeek = 0,
         runningKmPerWeek = 0.0,
         runningKmPerWeekSet = true,
         concurrentGoal = liftGoal.toConcurrent(),
     )
-    Focus.Run -> copy(weeklySets = 0, concurrentGoal = ConcurrentGoal.EndurancePriority)
-    Focus.Both -> this
+    Modality.Run -> copy(weeklySets = 0, concurrentGoal = ConcurrentGoal.EndurancePriority)
+    Modality.Both -> this
 }
 
 /** Lift days as the Training days row shows them: unanswered = what the engine
@@ -1266,24 +1204,21 @@ private fun RecentRaceEditor(race: RecentRace?, onChange: (RecentRace?) -> Unit)
     var distance by rememberSaveable { mutableStateOf(race?.let { RaceDistance.of(it.distance_km) }) }
     var digits by rememberSaveable { mutableStateOf(race?.let { raceTimeDigits(it.time_sec) } ?: "") }
     var fresh by rememberSaveable { mutableStateOf(true) }
-    val sec = raceTimeSec(digits)
-    val d = distance
-    val invalid = d != null && digits.isNotEmpty() && (sec == null || !plausibleRaceTime(d.km, sec))
+    val invalid = distance != null && digits.isNotEmpty() && recentRaceOf(distance, digits) == null
     fun edit(next: String) {
         digits = next
         fresh = false
-        val s = raceTimeSec(next)
-        if (d != null && s != null && plausibleRaceTime(d.km, s)) onChange(RecentRace(d.km, s))
+        recentRaceOf(distance, next)?.let(onChange)
     }
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-        ChipChoiceRow(listOf<RaceDistance?>(null) + RaceDistance.entries, distance, { stringResource(it?.labelRes ?: R.string.setup_dont_know) }) { pick ->
+        RaceDistanceChips(distance) { pick ->
             distance = pick
             fresh = true
             if (pick == null) {
                 digits = ""
                 onChange(null)
             } else {
-                raceTimeSec(digits)?.takeIf { plausibleRaceTime(pick.km, it) }?.let { onChange(RecentRace(pick.km, it)) }
+                recentRaceOf(pick, digits)?.let(onChange)
             }
         }
         if (distance != null) {
@@ -1324,12 +1259,6 @@ internal fun sexLabelRes(female: Boolean?): Int = when (female) {
     null -> R.string.setup_sex_not_saying
 }
 
-/** The Sex row's value. The Profile exists only after setup, where no sex (null)
- *  is the "Prefer not to say" answer (or the question left unanswered: the same
- *  "not said"), never an unset field. */
-@Composable
-private fun sexLabel(female: Boolean?): String = stringResource(sexLabelRes(female))
-
 /**
  * Keypad entry for one Profile person number. The buffer starts from the stored
  * value (or empty) and is exactly what is shown; every keystroke that leaves an
@@ -1344,7 +1273,7 @@ private fun ProfileKeypadEditor(
     seedText: String?,
     range: ClosedFloatingPointRange<Double>,
     format: String,
-    // Whole-number fields (age, heart rates) get no decimal key that would do nothing.
+    // Whole-number fields (heart rates) get no decimal key that would do nothing.
     allowDecimal: Boolean = false,
     hint: String? = null,
     onValid: (Double) -> Unit,
@@ -1387,18 +1316,8 @@ private fun ProfileKeypadEditor(
                 hint = hint,
             )
         }
-        NumericKeypad(
-            onKey = { key -> edit(editNumericBuffer(text, key, fresh)) },
-            onBackspace = { edit(text.dropLast(1)) },
-            allowDecimal = allowDecimal,
-        )
+        NumericKeypad(text, fresh, edit, allowDecimal = allowDecimal)
     }
-}
-
-/** The 1dp hairline between grouped profile rows (04-profile §1). */
-@Composable
-private fun RowHairline() {
-    HorizontalDivider(thickness = 1.dp, color = OnBgBody.copy(alpha = HairlineAlpha.Row))
 }
 
 /**
@@ -1435,24 +1354,13 @@ private fun ActionRow(label: String, onClick: () -> Unit) {
 }
 
 /**
- * A profile field as a tap-row (04-profile §1): label left (the same `OnBgBody`
- * as the segmented and switch rows), value Bold + `ui-chevron-right` right;
- * tapping toggles an inline [content] picker below it (full-width OptionList /
- * scale rows / keypad, no anchored dropdowns, no steppers as primary). ≥48dp
- * whole-row tap target; edits apply immediately. TalkBack hears whether the
- * picker is expanded or collapsed.
- *
- * A null [value] is an unanswered field: [placeholder] (default "Not set") is
- * shown faint and regular so empty rows never read as data. The value sits at the
- * right while it fits on one line in ~40% of the row; a longer value (or a large
- * font scale) moves under the label, left-aligned, so neither column wraps into
- * a ragged sliver. Expanding scrolls the row with its open picker into view once
- * the layout settles; [revealRequest] (a cross-tab "Check age") does the same for
- * a row opened from elsewhere, then reports [onRevealed]. With [revealContent] (a
- * keypad picker) the whole picker wins over the row's label: when the row is
- * taller than the space left under a pinned banner, the label scrolls under it
- * and the field and every key stay above the navigation bar. [revealOnExpand]
- * false leaves the scrolling to a [RevealTarget] inside the picker.
+ * A profile field as a tap-row (04-profile §1): label left, value bold right
+ * (under the label when it does not fit on one line), chevron; tapping toggles the
+ * inline [content] picker below. A null [value] shows [placeholder] (default "Not
+ * set") faint. Expanding scrolls the row and its picker into view; [revealRequest]
+ * does the same for a row opened from elsewhere, then reports [onRevealed]. With
+ * [revealContent] (a keypad picker) the whole picker wins over the row's label.
+ * [revealOnExpand] false leaves the scrolling to a [RevealTarget] in the picker.
  */
 @Composable
 private fun ProfileRow(

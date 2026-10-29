@@ -26,36 +26,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Rest-end alert for the gym-floor set loop. After a logged set with a
- * prescribed rest, an alarm fires when the rest is over. While the loop's rest
- * readout is on a resumed screen the in-app cue (haptic + spoken announcement)
- * covers it and no notification is posted. Once the sheet is closed, the app is
- * backgrounded or the screen is off, a silent ongoing countdown notification
- * shows the rest ticking down and the set the loop logs next; a tap opens the set
- * editor (`OpenDest.LogSet`). At zero an alerting notification (channel sound +
- * vibration, both user-adjustable in the system channel settings, and silenced
- * entirely by the Profile "Rest timer alert" toggle) replaces it and says the
- * rest is done. Nothing is posted without the notification permission; the
- * in-app readout still works.
- *
- * On Android 16+ the countdown requests promotion to a Live Update
- * (`setRequestPromotedOngoing`): the status-bar chip shows the count-down
- * chronometer to the rest end. The system promotes it only while the user allows
- * it for the app (`POST_PROMOTED_NOTIFICATIONS`); otherwise, and on older
- * versions, it is the same countdown notification in the shade. The rest-done
- * alert is not promoted, so the chip ends with the rest. A countdown the user
- * swiped away is not posted again for that rest.
- *
- * The rest end is an [AlarmManager] alarm that sends an immutable broadcast
- * PendingIntent to [RestEndReceiver], so it fires after the app is cached, frozen
- * or killed (an in-process `OnAlarmListener` is dropped once the app is frozen).
- * The rest's start, exercise and next exercise are saved, so the receiver posts
- * the alert from a fresh process. The alarm is exact
- * (`setExactAndAllowWhileIdle`) below Android 12 and while the user allows exact
- * alarms (`SCHEDULE_EXACT_ALARM`, off by default for new installs from Android
- * 14); otherwise it is inexact (`setAndAllowWhileIdle`), which the system may
- * deliver late but still delivers. The first rest started without exact alarms
- * raises [exactAlarmPrompt], the set loop's one-time notice.
+ * Rest-end alert for the gym-floor set loop. While the loop's rest readout is on
+ * a resumed screen the in-app cue covers the rest; otherwise a silent ongoing
+ * countdown (a promoted Live Update on Android 16+) shows it, and at zero an
+ * alerting "rest done" notification replaces it. The rest end is an [AlarmManager]
+ * broadcast to [RestEndReceiver] with the rest saved in prefs, so the alert posts
+ * even from a fresh process. The alarm is exact while the user allows exact alarms
+ * (always below Android 12), else inexact: the system may deliver it late.
  */
 internal object RestAlarm {
     private const val CHANNEL_COUNTDOWN = "rest_countdown"
@@ -93,10 +70,9 @@ internal object RestAlarm {
      *  the rest-done alert may come late while the app is in the background. */
     val exactAlarmPrompt: StateFlow<Boolean> = _exactAlarmPrompt.asStateFlow()
 
-    // Wall-clock end of the running rest ([AppClock] millis) and its exercise;
-    // null until a rest starts and again once it ends or is cancelled.
+    // Wall-clock end of the running rest ([AppClock] millis); null until a rest
+    // starts and again once it ends or is cancelled.
     private var endAtMillis: Long? = null
-    private var exercise: String = ""
     private var inAppVisible = false
     // What the loop logs next, kept current by the open loop.
     private var nextSet: NextSet? = null
@@ -114,7 +90,6 @@ internal object RestAlarm {
         val now = AppClock.nowMillis()
         val restMs = restSec * 1000L
         endAtMillis = now + restMs
-        exercise = exerciseName
         _running.value = RestRun(now, now + restMs, exerciseName)
         prefs(app).edit { putLong(KEY_START, now).putString(KEY_EXERCISE, exerciseName) }
         if (!inAppVisible) postCountdown(app)
@@ -132,7 +107,7 @@ internal object RestAlarm {
             restEndIntent(app).putExtra(EXTRA_REST_START, startMillis),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val exact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms()
+        val exact = exactAlarmsAllowed(app)
         if (exact) {
             am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, op)
         } else {
@@ -206,7 +181,7 @@ internal object RestAlarm {
 
     /** Exact alarms are allowed: always below Android 12, then the user's
      *  `SCHEDULE_EXACT_ALARM` grant. */
-    internal fun exactAlarmsAllowed(ctx: Context): Boolean =
+    private fun exactAlarmsAllowed(ctx: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             ctx.getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() == true
 
@@ -247,14 +222,14 @@ internal object RestAlarm {
 
     private fun postCountdown(app: Context) {
         val end = endAtMillis ?: return
-        val start = _running.value?.startMillis ?: return
+        val run = _running.value ?: return
         val leftMs = end - AppClock.nowMillis()
         if (leftMs <= 0 || dismissed || !canNotify(app)) return
         ensureChannels(app)
-        val text = countdownText(app.resources, exercise, nextSet)
+        val text = countdownText(app.resources, run.exercise, nextSet)
         val b = NotificationCompat.Builder(app, CHANNEL_COUNTDOWN)
             .setSmallIcon(R.drawable.ic_stat_mark)
-            .setContentTitle(app.getString(R.string.log_rest_notif_title, exercise))
+            .setContentTitle(app.getString(R.string.log_rest_notif_title, run.exercise))
             // A live countdown chronometer to the rest end (system wall time);
             // a promoted Live Update shows it in the status-bar chip.
             .setUsesChronometer(true)
@@ -267,7 +242,7 @@ internal object RestAlarm {
             .setSilent(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(openPendingIntent(app, OpenDest.LogSet))
-            .setDeleteIntent(dismissIntent(app, start))
+            .setDeleteIntent(dismissIntent(app, run.startMillis))
             .setTimeoutAfter(leftMs)
         if (text != null) {
             b.setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
@@ -293,7 +268,6 @@ internal object RestAlarm {
      *  saved rest, the alarm and anything posted stay. */
     internal fun resetProcessState() {
         endAtMillis = null
-        exercise = ""
         inAppVisible = false
         nextSet = null
         dismissed = false
@@ -421,10 +395,6 @@ internal fun openExactAlarmSettings(ctx: Context) {
     try {
         ctx.startActivity(exactAlarmSettingsIntent(ctx))
     } catch (_: ActivityNotFoundException) {
-        runCatching {
-            ctx.startActivity(
-                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null)),
-            )
-        }
+        runCatching { ctx.startActivity(appDetailsIntent(ctx)) }
     }
 }

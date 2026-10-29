@@ -94,6 +94,21 @@ private fun weekDayStatusPhrase(status: String): String = when (status) {
 internal fun isReturnCheckItem(item: PrescriptionView, sessionType: String): Boolean =
     item.return_check && sessionDiscipline(sessionType) == "Lift"
 
+/** A plan item tracked or logged as a run: any item of a run session, or an
+ *  item with no exercise; never the return check. */
+internal fun isRunItem(item: PrescriptionView, sessionType: String): Boolean =
+    !isReturnCheckItem(item, sessionType) && (sessionDiscipline(sessionType) == "Run" || item.exercise.isEmpty())
+
+/** What a week day's sessions can do: log an item or a run dated to that day,
+ *  end or reopen an exercise, move a session. */
+internal class WeekActions(
+    val onLogItem: (PrescriptionView, Long) -> Unit,
+    val onLogRun: (Long) -> Unit,
+    val onEndExercise: (PrescriptionView, Long) -> Unit,
+    val onReopen: (PrescriptionView, Long) -> Unit,
+    val onMove: (from: Long, to: Long) -> Unit,
+)
+
 /** The (summary, citation) of [ns]'s adjustment when the session is the return
  *  check: its item already states the dose and the stop list, so the adjustment
  *  card behind it is not shown again. Null for any other session. */
@@ -125,7 +140,7 @@ internal fun SessionMoveNotes(s: SessionPlanView) {
  * never silently vanishes. Emits nothing when there is neither.
  */
 @Composable
-internal fun SessionMoveAction(s: SessionPlanView, today: Long, onMove: (Long, Long) -> Unit, modifier: Modifier = Modifier) {
+internal fun SessionMoveAction(s: SessionPlanView, today: Long, onMove: (Long, Long) -> Unit) {
     val blockedReason = s.move_blocked_reason?.takeIf { it.isNotBlank() }
     if (s.move_targets.isEmpty() && blockedReason == null) return
     var picking by rememberSaveable(s.epoch_day) { mutableStateOf(false) }
@@ -133,7 +148,6 @@ internal fun SessionMoveAction(s: SessionPlanView, today: Long, onMove: (Long, L
         stringResource(R.string.main_move_short),
         onClick = { picking = true },
         description = stringResource(R.string.plan_secondary_action_cd, stringResource(R.string.main_move_session), s.title),
-        modifier = modifier,
         tint = OnBgMuted,
     )
     if (!picking) return
@@ -192,38 +206,23 @@ internal fun SessionMoveAction(s: SessionPlanView, today: Long, onMove: (Long, L
 }
 
 /**
- * The one coaching note the This-week face shows: the most actionable of the
- * core's extra consistency notes. `notes[0]` is the core's done/planned summary
- * (the face states the count itself, so it is never on the face); after it the
- * core emits, in order (`build_consistency`), the repeated-plan-week note and its
- * re-entry hint (only while [ConsistencyView.repeating_week]), then the
- * missed-session note (exactly when a week row reads "missed"). The missed-session
- * move/carry-on suggestion wins, else the re-entry hint ("add your time off");
- * the "repeating this plan week" explanation never reaches the face.
+ * The one coaching note the This-week face shows. After `notes[0]` (the count,
+ * which the face states itself) the core emits, in order, the repeating-week
+ * note and its re-entry hint (only while [ConsistencyView.repeating_week]),
+ * then the missed-session note. The last note after the repeating-week note
+ * wins, so the missed-session move beats the re-entry hint and the repeating-week
+ * explanation stays behind the "?".
  */
-private fun consistencyFaceNote(c: ConsistencyView, week: List<SessionPlanView>): GuidanceView? {
-    val extra = c.notes.drop(1)
-    return when {
-        extra.isEmpty() -> null
-        week.any { it.status == "missed" } -> extra.last()
-        c.repeating_week -> extra.getOrNull(1)
-        else -> null
-    }
-}
+private fun consistencyFaceNote(c: ConsistencyView): GuidanceView? =
+    c.notes.drop(if (c.repeating_week) 2 else 1).lastOrNull()
 
 /**
- * "This week" as ONE minimal card: one plain count line ("2 of 4 sessions
- * done"), at most ONE coaching note (the most actionable, [consistencyFaceNote]),
- * the week strip, and the plan footer (the plan summary as a compact
- * plain-language caption, never the raw "name · phase - week X of Y" internals).
- * No streak, no loss framing, no red, no unlabeled chart. ONE "?"
- * serves the whole block, on the first row: behind it sit the share of planned
- * sessions done over the recent plan weeks, every other note (e.g. why the plan
- * repeats a week) with its evidence (grade + citation + why), the plan's
- * evidence, and the quiet "Remove plan" action (confirm-gated, never an instant
- * ClearPlan). While the panel is open the face note moves into it, so no line
- * shows twice. A Hypertrophy plan adds a collapsed "Weekly sets per muscle" table
- * (core rows).
+ * "This week" as ONE card: the count line ("2 of 4 sessions done"), at most one
+ * coaching note ([consistencyFaceNote]), the week strip and the plan footer in
+ * plain words. One "?" serves the block: behind it the recent-weeks share, every
+ * other note with its evidence, the plan's evidence and the confirm-gated
+ * "Remove plan"; while it is open the face note moves into it. A Hypertrophy
+ * plan adds the weekly sets per muscle. [actions] null = a read-only week.
  */
 @Composable
 internal fun ThisWeekCard(
@@ -235,29 +234,25 @@ internal fun ThisWeekCard(
     // One quiet closing line (the "nothing logged yet" hint), or null.
     footnote: String?,
     onRemovePlan: () -> Unit,
-    onLogItem: (PrescriptionView, Long) -> Unit,
-    onLogRun: (Long) -> Unit,
-    onEndExercise: (PrescriptionView, Long) -> Unit,
-    onReopen: (PrescriptionView, Long) -> Unit,
-    onMove: (from: Long, to: Long) -> Unit,
+    actions: WeekActions?,
     heroDay: Long,
     // The day open under the strip (-1 = none), hoisted so a move can open its target.
     selectedDay: Long,
     onSelectDay: (Long) -> Unit,
-    readOnly: Boolean = false,
 ) {
-    // Keyed on the plan's identity so an open "?" panel resets when the plan
-    // changes (mirrors EvidenceCard's saveable keying).
+    // A week with nothing planned has nothing to count.
+    val counted = consistency?.takeIf { week.isNotEmpty() && it.this_week_planned > 0 }
+    // Keyed on the plan's identity so an open "?" panel resets when the plan changes.
     var expanded by rememberSaveable(program?.name, program?.citation) { mutableStateOf(false) }
-    val notes = consistency?.notes.orEmpty()
-    val faceNote = consistency?.let { consistencyFaceNote(it, week) }
+    val notes = counted?.notes.orEmpty()
+    val faceNote = counted?.let(::consistencyFaceNote)
     val hiddenNotes = notes.drop(1).filterNot { it === faceNote }
     val hasDisclosure = notes.isNotEmpty() || program != null
     val panel: @Composable () -> Unit = {
         if (expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
                 // The count line's own evidence, led by the recent-weeks share.
-                consistency?.share_pct?.let { pct ->
+                counted?.share_pct?.let { pct ->
                     Text(stringResource(R.string.main_consistency_share, pct), color = OnBgBody, style = Type.Caption)
                 }
                 notes.firstOrNull()?.let { n ->
@@ -268,7 +263,6 @@ internal fun ThisWeekCard(
                         confidence = n.confidence,
                         contested = n.contested,
                         showConfidence = true,
-                        extraDetail = null,
                     )
                 }
                 // The face note (moved in here while open), then every note that
@@ -282,7 +276,6 @@ internal fun ThisWeekCard(
                         confidence = n.confidence,
                         contested = n.contested,
                         showConfidence = true,
-                        extraDetail = null,
                     )
                 }
                 program?.let { prog ->
@@ -293,7 +286,6 @@ internal fun ThisWeekCard(
                         confidence = prog.confidence,
                         contested = prog.contested,
                         showConfidence = true,
-                        extraDetail = null,
                     )
                     // Remove plan, a destructive action, kept OFF the main face and
                     // revealed only inside the "?" disclosure.
@@ -313,14 +305,14 @@ internal fun ThisWeekCard(
     }
     Box(Modifier.testTag("this-week")) {
         PlainCard {
-            if (consistency != null) {
+            if (counted != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         pluralStringResource(
                             R.plurals.main_week_done_count,
-                            consistency.this_week_planned,
-                            consistency.this_week_done,
-                            consistency.this_week_planned,
+                            counted.this_week_planned,
+                            counted.this_week_done,
+                            counted.this_week_planned,
                         ),
                         color = OnBgBody,
                         style = Type.Body,
@@ -340,20 +332,15 @@ internal fun ThisWeekCard(
                     week,
                     today = today,
                     weightUnit = weightUnit,
-                    onLogItem = onLogItem,
-                    onLogRun = onLogRun,
-                    onEndExercise = onEndExercise,
-                    onReopen = onReopen,
-                    onMove = onMove,
+                    actions = actions,
                     heroDay = heroDay,
                     selectedDay = selectedDay,
                     onSelectDay = onSelectDay,
-                    readOnly = readOnly,
                 )
             }
             // The one "nothing logged yet" hint closes the week itself, only when
             // no "0 of N sessions done" line above already says it.
-            if (consistency == null) footnote?.let { Text(it, color = OnBgFaint, style = Type.Caption) }
+            if (counted == null) footnote?.let { Text(it, color = OnBgFaint, style = Type.Caption) }
             program?.let { prog ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -363,9 +350,9 @@ internal fun ThisWeekCard(
                         modifier = Modifier.weight(1f),
                     )
                     // No count row above to carry it: the block's one "?" sits here.
-                    if (consistency == null) DisclosureButton(expanded, subject = planPlainLabel(prog)) { expanded = !expanded }
+                    if (counted == null) DisclosureButton(expanded, subject = planPlainLabel(prog)) { expanded = !expanded }
                 }
-                if (consistency == null) panel()
+                if (counted == null) panel()
                 if (prog.muscle_volume.isNotEmpty()) MuscleVolumeSection(prog)
             }
         }
@@ -449,15 +436,10 @@ private fun MuscleVolumeSection(prog: ProgramSummaryView) {
     }
 }
 
-/**
- * A plain-language one-liner for the plan footer: "Strength · building up ·
- * week 5 of 6". Takes the descriptive tail of the core's `name` (an older core
- * raw-concats "Hybrid - strength + running"), sentence-cased, and turns the enum
- * phase word into human copy. Never touches wire values, display only.
- */
+/** A plain-language one-liner for the plan footer: "Strength · building up ·
+ *  week 5 of 6", the phase enum turned into human copy. Display only. */
 // l10n: needs context plumbing (pure display helper, no Context; multi-branch copy)
 private fun planPlainLabel(prog: ProgramSummaryView): String {
-    val focus = prog.name.substringAfter(" - ", prog.name).replaceFirstChar { it.titlecase(Locale.US) }
     val phaseWord = when (prog.phase) {
         "Base" -> "building a base"
         "Build" -> "building up"
@@ -466,7 +448,7 @@ private fun planPlainLabel(prog: ProgramSummaryView): String {
         "Deload" -> "lighter week"
         else -> prog.phase.lowercase(Locale.US)
     }
-    return "$focus · $phaseWord · week ${prog.week} of ${prog.weeks_total}"
+    return "${prog.name} · $phaseWord · week ${prog.week} of ${prog.weeks_total}"
 }
 
 /** Least height of a week-strip day's glyph slot (the ✓ or the dot); the slot
@@ -491,20 +473,14 @@ private val DayDotSize = 8.dp
 private fun WeekStrip(
     week: List<SessionPlanView>,
     today: Long,
-    weightUnit: WeightUnit = WeightUnit.Kg,
-    onLogItem: (PrescriptionView, Long) -> Unit = { _, _ -> },
-    onLogRun: (Long) -> Unit = {},
-    onEndExercise: (PrescriptionView, Long) -> Unit = { _, _ -> },
-    onReopen: (PrescriptionView, Long) -> Unit = { _, _ -> },
-    onMove: (from: Long, to: Long) -> Unit = { _, _ -> },
+    weightUnit: WeightUnit,
+    // Null on a read-only week: the strip logs, moves and reopens nothing.
+    actions: WeekActions?,
     // The day the hero card shows: its move control lives there, not twice.
-    heroDay: Long = -1L,
+    heroDay: Long,
     // The open day (-1 = none) and its setter: hoisted to Today.
-    selectedDay: Long = -1L,
-    onSelectDay: (Long) -> Unit = {},
-    // A training hold is active: the strip shows the week but logs, moves and
-    // reopens nothing.
-    readOnly: Boolean = false,
+    selectedDay: Long,
+    onSelectDay: (Long) -> Unit,
 ) {
     val measurer = rememberTextMeasurer()
     // The widest word a day column shows (bold, as today's weekday is), so the
@@ -565,7 +541,7 @@ private fun WeekStrip(
                         // What the strip's single glyph leaves out: the day a swap
                         // was done on, a lighter or partly done day.
                         val creditedFrom = s.credited_from_epoch_day
-                            ?.takeIf { (s.status == "done" || s.status == "done_lighter") && it != s.epoch_day }
+                            ?.takeIf { s.isDone && it != s.epoch_day }
                         val statusLine = when {
                             creditedFrom != null && s.status == "done_lighter" ->
                                 stringResource(R.string.main_week_done_on_lighter, planDateLabel(creditedFrom))
@@ -579,7 +555,7 @@ private fun WeekStrip(
                     // "Move" for a day the core says can still move (a missed day
                     // can be made up): a quiet trailing action, never its own row.
                     // The hero's own day keeps that control on the hero only.
-                    if (!readOnly && s.epoch_day != heroDay) SessionMoveAction(s, today, onMove)
+                    if (actions != null && s.epoch_day != heroDay) SessionMoveAction(s, today, actions.onMove)
                     if (s.items.isNotEmpty()) {
                         DisclosureButton(evidenceOpen, subject = s.title) { evidenceOpen = !evidenceOpen }
                     }
@@ -587,7 +563,7 @@ private fun WeekStrip(
                 // Moved here / why a move was refused.
                 SessionMoveNotes(s)
                 val isCheck = { item: PrescriptionView -> isReturnCheckItem(item, s.session_type) }
-                val isRun = { item: PrescriptionView -> !isCheck(item) && item.exercise.isEmpty() }
+                val isRun = { item: PrescriptionView -> isRunItem(item, s.session_type) }
                 if (evidenceOpen) SessionItemsEvidence(s.items, isRun, isCheck)
                 if (s.items.isEmpty()) {
                     Text(
@@ -607,8 +583,8 @@ private fun WeekStrip(
                     // rows, no empty slots. Settled items collapse to a ✓ row; an
                     // exercise ended early stays reopenable on today's and past days,
                     // including once the whole day reads done and leaves the hero.
-                    val pastActionable = !readOnly && s.epoch_day < today && s.status == "missed"
-                    val reopenable = !readOnly && s.epoch_day <= today
+                    val pastActionable = actions != null && s.epoch_day < today && s.status == "missed"
+                    val reopenable = actions != null && s.epoch_day <= today
                     val (openItems, doneItems) = s.items.partition { !it.done }
                     val current = if (pastActionable) openItems.firstOrNull() else null
                     val logRunLabel = stringResource(R.string.main_log_run_title)
@@ -617,9 +593,9 @@ private fun WeekStrip(
                             OpenPlanItemCard(
                                 item = item,
                                 isRun = isRun(item),
-                                onLog = { onLogItem(item, s.epoch_day) },
-                                onTrack = { onLogRun(s.epoch_day) },
-                                onEndExercise = { onEndExercise(item, s.epoch_day) },
+                                onLog = { actions?.onLogItem(item, s.epoch_day) },
+                                onTrack = { actions?.onLogRun(s.epoch_day) },
+                                onEndExercise = { actions?.onEndExercise(item, s.epoch_day) },
                                 runActionLabel = logRunLabel,
                                 weightUnit = weightUnit,
                                 isCheck = isCheck(item),
@@ -630,7 +606,7 @@ private fun WeekStrip(
                                 isRun = isRun(item),
                                 isCheck = isCheck(item),
                                 actionLabel = if (pastActionable) planItemActionLabel(item, isRun(item), isCheck(item), logRunLabel) else null,
-                                onClick = { if (isRun(item)) onLogRun(s.epoch_day) else onLogItem(item, s.epoch_day) },
+                                onClick = { if (isRun(item)) actions?.onLogRun(s.epoch_day) else actions?.onLogItem(item, s.epoch_day) },
                             )
                         }
                     }
@@ -639,7 +615,7 @@ private fun WeekStrip(
                             item = item,
                             isRun = isRun(item),
                             reopenable = reopenable,
-                            onReopen = { onReopen(item, s.epoch_day) },
+                            onReopen = { actions?.onReopen(item, s.epoch_day) },
                             isCheck = isCheck(item),
                         )
                     }
@@ -661,24 +637,13 @@ private fun WeekStripDay(
     modifier: Modifier = Modifier,
 ) {
     val status = LocalStatusColors.current
-    // Per-day status → dot appearance. Filled = a settled call
-    // (next/done/adjusted/blocked); a hollow ring = still open
-    // (planned) or open-and-past (missed). GREEN (the done mark)
-    // marks a completed day, NOT hrZone1's teal, which means "easy
-    // aerobic zone" everywhere else. Rest days render no dot at all
-    // (handled below). "missed" wears a neutral hollow ring and
-    // "partial" (some work logged, under the lighter credit) a
-    // half-filled one, both neutral
-    // (OnBgMuted), NOT danger red: a skipped planned day is not a
-    // safety event, and red is reserved for real safety states.
-    // Only "blocked" (a safety hold) keeps danger.
+    // Filled = settled; hollow = open; red only for blocked.
     val (dotColor, dotFilled) = when (s.status) {
         "next" -> Accent to true
         "adjusted" -> status.warn to true
         "blocked" -> status.danger to true
         "done", "done_lighter" -> status.done to true
         "missed", "partial" -> OnBgMuted to false
-        "rest" -> OnBgFaint to false
         else -> OnBgFaint to false // planned
     }
     val isToday = s.epoch_day == today
@@ -686,9 +651,8 @@ private fun WeekStripDay(
     // A day before the plan started is neither planned nor missed: a
     // neutral dash, no dot, nothing to count.
     val beforePlan = s.status == "before_plan"
-    val isDone = s.status == "done" || s.status == "done_lighter"
     // Done by a same-discipline session on another day ("Done Tue").
-    val creditedFrom = s.credited_from_epoch_day?.takeIf { isDone && it != s.epoch_day }
+    val creditedFrom = s.credited_from_epoch_day?.takeIf { s.isDone && it != s.epoch_day }
     // One spoken description per day column: the weekday, its discipline,
     // and its status (the dot's fill/colour is a purely visual cue).
     val todayPrefix = stringResource(R.string.main_a11y_today_prefix)
@@ -749,7 +713,7 @@ private fun WeekStripDay(
                 s.status == "rest" || beforePlan -> Unit
                 // Non-colour done cue (a11y): a ✓ glyph, not hue alone, so
                 // a colour-blind user can answer "did I finish?" at a glance.
-                isDone -> Text(
+                s.isDone -> Text(
                     "\u2713",
                     color = status.done,
                     style = DayDoneGlyphStyle,

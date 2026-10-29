@@ -5,8 +5,7 @@
 //! compared against that lift's best over the previous 14 local days.
 
 use super::rules::{
-    E1RM_DELOAD_RATIO, E1RM_INCREASE_LOAD_PCT, E1RM_REDUCE_LOAD_PCT, E1rmOutcome,
-    e1rm_decline_deload, e1rm_ratio_outcome,
+    E1RM_DELOAD_RATIO, E1rmOutcome, e1rm_decline_deload, e1rm_ratio_outcome, e1rm_session_recs,
 };
 use crate::evidence::{self, claims};
 use crate::schema::{Adjustment, Recommended};
@@ -55,7 +54,7 @@ fn scored_e1rm(s: &PerfSet) -> Option<f64> {
     (s.weight_kg > 0.0
         && s.rpe >= E1RM_MIN_RPE
         && strength::e1rm_reliable(strength::effective_reps(s.reps, s.rpe), false).value
-        && crate::plan::e1rm_reliable_name(s.exercise))
+        && !crate::plan::is_isolation_lift(s.exercise))
     .then(|| strength::e1rm_epley_rpe(s.weight_kg, s.reps, s.rpe))
 }
 
@@ -72,33 +71,29 @@ pub fn derive_performance(
     today_epoch_day: i64,
     utc_offset_sec: i64,
 ) -> Vec<MovementPerf> {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
+    let mut ordered: Vec<&PerfSet> = sets.iter().filter(|s| s.observed_at > 0).collect();
+    ordered.sort_by_key(|s| s.observed_at);
+    // One movement key per distinct exercise name, not per set.
+    let mut keys: HashMap<&str, Vec<String>> = HashMap::new();
+    for s in &ordered {
+        keys.entry(s.exercise)
+            .or_insert_with(|| crate::plan::movement_key(s.exercise));
+    }
     // Per local day: (top weight, first top-set e1RM, its exercise name, best e1RM).
     type DaySlot<'a> = (f64, f64, &'a str, f64);
     // movement key → local day → DaySlot.
-    let mut by_lift: BTreeMap<Vec<String>, BTreeMap<i64, DaySlot>> = BTreeMap::new();
-    // One movement key per distinct exercise name, not per set.
-    let mut keys: std::collections::HashMap<&str, Vec<String>> = std::collections::HashMap::new();
-    let mut ordered: Vec<&PerfSet> = sets.iter().filter(|s| s.observed_at > 0).collect();
-    ordered.sort_by_key(|s| s.observed_at);
+    let mut by_lift: BTreeMap<&[String], BTreeMap<i64, DaySlot>> = BTreeMap::new();
     for s in ordered {
         let Some(e) = scored_e1rm(s) else { continue };
         let day = crate::local_day(s.observed_at, utc_offset_sec);
         if day > today_epoch_day {
             continue;
         }
-        let key = keys
-            .entry(s.exercise)
-            .or_insert_with(|| crate::plan::movement_key(s.exercise));
-        if !by_lift.contains_key(key) {
-            by_lift.insert(key.clone(), BTreeMap::new());
-        }
-        let Some(days) = by_lift.get_mut(key) else {
-            continue;
-        };
-        let slot = days
+        let slot = by_lift
+            .entry(keys[s.exercise].as_slice())
+            .or_default()
             .entry(day)
-            // (top weight, first top-set e1RM, name, best e1RM of the day)
             .or_insert((s.weight_kg, e, s.exercise, e));
         if s.weight_kg > slot.0 {
             *slot = (s.weight_kg, e, s.exercise, slot.3.max(e));
@@ -184,23 +179,7 @@ pub(super) fn perf_adjustments(perf: &[MovementPerf]) -> Vec<Recommended<Adjustm
         };
         // Today's session is cut per item; the deload arm is the multi-session
         // verdict above, so today's ratio is classified without its streak.
-        match e1rm_ratio_outcome(p.ratio, 0) {
-            E1rmOutcome::Reduce => {
-                out.push(evidence::graded(
-                    item(Adjustment::ReduceLoadPct(E1RM_REDUCE_LOAD_PCT)),
-                    claims::AUTOREG_E1RM_GATE_001,
-                ));
-                out.push(evidence::graded(
-                    item(Adjustment::CapRpe(1)),
-                    claims::AUTOREG_E1RM_GATE_001,
-                ));
-            }
-            E1rmOutcome::Increase => out.push(evidence::graded(
-                item(Adjustment::IncreaseLoadPct(E1RM_INCREASE_LOAD_PCT)),
-                claims::AUTOREG_E1RM_GATE_001,
-            )),
-            E1rmOutcome::Deload | E1rmOutcome::Stable => {}
-        }
+        out.extend(e1rm_session_recs(e1rm_ratio_outcome(p.ratio, 0), item));
     }
     out
 }

@@ -19,18 +19,12 @@ use crate::schema::Recommended;
 // ---------------------------------------------------------------------------
 
 /// Epley estimated 1RM: `weight * (1 + reps/30)` (File 02 strength-005).
-/// Domain: reps >= 1 (the e1RM formulas are undefined below one rep).
-///
-/// A single (`reps == 1`) IS the 1RM: it returns `weight` unchanged, matching
-/// [`est_pct_1rm`]'s "a genuine single-rep max reads as its own 100 %" (File 02
-/// strength-005). The raw formula's +3.3 % at one rep would bias every anchor
-/// built from a single upward.
+/// Domain: reps >= 1 (the e1RM formulas are undefined below one rep). A single
+/// IS the 1RM and returns `weight` unchanged ([`e1rm_epley_frac`]), matching
+/// [`est_pct_1rm`]'s single-rep 100 %.
 pub fn e1rm_epley(weight: f64, reps: u32) -> f64 {
     debug_assert!(reps >= 1, "e1RM formulas are defined for reps >= 1");
-    if reps <= 1 {
-        return weight;
-    }
-    weight * (1.0 + reps as f64 / 30.0)
+    e1rm_epley_frac(weight, f64::from(reps))
 }
 
 /// Epley e1RM over a FRACTIONAL effective rep count (reps performed plus a
@@ -54,26 +48,6 @@ pub fn e1rm_epley_frac(weight: f64, effective_reps: f64) -> f64 {
 /// every %1RM-from-reps estimate delegates to.
 pub fn pct_1rm_at_effective_reps(effective_reps: f64) -> f64 {
     100.0 / e1rm_epley_frac(1.0, effective_reps)
-}
-
-/// Highest rep count for which the Brzycki denominator `37 − reps` stays
-/// positive. At 37 reps it is zero (division by zero → +∞) and above it goes
-/// negative (a negative 1RM); the estimator is only defined below 37 reps.
-const BRZYCKI_MAX_REPS: u32 = 36;
-
-/// Brzycki estimated 1RM: `weight * 36 / (37 - reps)` (File 02 strength-005).
-///
-/// Domain-gated: the raw formula is undefined at 37 reps and returns +∞ / a
-/// negative 1RM at or above it, and this is a `pub` fn callable with an
-/// unvalidated rep count. Reps are clamped into the formula's valid domain
-/// (`BRZYCKI_MAX_REPS`) so the return is always finite and positive; the
-/// estimate is only *accurate* in the 1–10 window noted in
-/// strength-005/strength-006. Results at reps ≤ 36 are unchanged.
-/// Domain: reps >= 1 (the e1RM formulas are undefined below one rep).
-pub fn e1rm_brzycki(weight: f64, reps: u32) -> f64 {
-    debug_assert!(reps >= 1, "e1RM formulas are defined for reps >= 1");
-    let reps = reps.min(BRZYCKI_MAX_REPS);
-    weight * 36.0 / (37.0 - reps as f64)
 }
 
 // ---------------------------------------------------------------------------
@@ -148,11 +122,8 @@ pub fn e1rm_epley_rpe(weight: f64, reps: u32, rpe: f64) -> f64 {
 /// disagree. ESTIMATE ONLY: accurate at 2–10 reps (±5%), diverges ±15–20% above
 /// 10 reps (strength-005/006).
 ///
-/// Two documented clamps at the domain edges, applied in ALL builds:
-/// - `reps == 0` is the degenerate sentinel (a %1RM is undefined) → `0.0`.
-/// - a single to failure is a true 1RM → `100.0`. The raw Epley inverse has a
-///   known r=1 discontinuity (it yields 96.77 %, not 100 %), so a genuine
-///   single-rep max must read as its own 100 %, never sub-max (strength-005).
+/// `reps == 0` (a %1RM is undefined) → `0.0`; a single to failure reads as
+/// its own 100 % via [`e1rm_epley_frac`].
 pub fn est_pct_1rm(reps: u32, rpe: f64) -> f64 {
     if reps == 0 {
         return 0.0;
@@ -200,21 +171,11 @@ pub struct PrilepinRow {
     pub total_range: (u16, u16),
 }
 
-/// Prilepin's chart, transcribed verbatim from File 02 (strength-011).
-///
-/// | %1RM   | Reps/set | Optimal total | Total range |
-/// |--------|----------|---------------|-------------|
-/// | <70%   | 3–6      | 24            | 18–30       |
-/// | 70–80% | 3–6      | 18            | 12–24       |
-/// | 80–90% | 2–4      | 15            | 10–20       |
-/// | >90%   | 1–2      | 7             | 4–10        |
-///
-/// Band bounds are encoded as half-open on the verbatim breakpoints (69, 79,
-/// 89, 100) so every intensity 0–100% resolves to exactly one row. The final
-/// row transcribes the KB's ">90%" band, which has NO upper bound in the
-/// source, supra-maximal intensities (>100%, e.g. accommodating resistance or
-/// overload work) resolve to it via [`prilepin_for`]; `pct_max: 100` is only
-/// the table-encoding sentinel, not a KB ceiling.
+/// Prilepin's chart, transcribed verbatim from File 02 (strength-011): <70 %,
+/// 70–80 %, 80–90 %, >90 %. Bands are closed whole-percent ranges (0–69, 70–79,
+/// 80–89, 90–100) that [`prilepin_for`] matches after rounding; the KB's ">90%"
+/// band has no upper bound, so `pct_max: 100` is an encoding sentinel and
+/// supra-maximal intensities resolve to it.
 pub static PRILEPIN: &[PrilepinRow] = &[
     PrilepinRow {
         pct_min: 0,
@@ -311,10 +272,10 @@ pub struct LoadingRx {
 ///
 /// The Power band is the ENVELOPE of the KB's load spectrum (0-60%
 /// ballistic/jump; 30-70% loaded power; 70-95% weightlifting pulls → 0-95%
-/// overall); never prescribe the whole envelope to one exercise. The
-/// KB states only "never to failure; high RIR" for power with NO number, so the
-/// Power band's `rir` is `None` (the old numeric 3-5 was an invented encoding);
-/// callers state the qualitative "stop before bar speed drops" instruction.
+/// overall); never prescribe the whole envelope to one exercise. The KB states
+/// only "never to failure; high RIR" for power with no number, so the Power
+/// band's `rir` is `None`; callers state the qualitative "stop before bar speed
+/// drops" instruction.
 ///
 /// Hypertrophy `rest_sec` is `(30, 120)`: strength-003's `parameters:` line
 /// gives `rest_sec 30-120`, and the statement's headline "30-90 s" carries the
@@ -554,19 +515,7 @@ pub fn olympic_derivative_rx() -> Recommended<OlympicDerivativeRx> {
 }
 
 // ---------------------------------------------------------------------------
-// 9. Lombardi e1RM (File 02 strength-005, third estimator)
-// ---------------------------------------------------------------------------
-
-/// Lombardi estimated 1RM: `weight * reps^0.10` (File 02 strength-005). Same
-/// 1–10 rep accuracy window (±5%) as Epley/Brzycki; treat as approximate.
-/// Domain: reps >= 1 (the e1RM formulas are undefined below one rep).
-pub fn e1rm_lombardi(weight: f64, reps: u32) -> f64 {
-    debug_assert!(reps >= 1, "e1RM formulas are defined for reps >= 1");
-    weight * (reps as f64).powf(0.10)
-}
-
-// ---------------------------------------------------------------------------
-// 10. RPE-anchored top set + back-offs (File 02 strength-015; STR-BACKOFF-001)
+// 9. RPE-anchored top set + back-offs (File 02 strength-015; STR-BACKOFF-001)
 // ---------------------------------------------------------------------------
 
 /// An RPE-anchored top-set / back-off scheme (File 02 strength-015).
@@ -591,18 +540,14 @@ pub fn rpe_anchored_back_off() -> Recommended<BackOffRx> {
 }
 
 // ---------------------------------------------------------------------------
-// 11. Velocity-loss set termination by goal (File 02 strength-018; AUTOREG-VL-001)
+// 10. Velocity-loss set termination by goal (File 02 strength-018; AUTOREG-VL-001)
 // ---------------------------------------------------------------------------
 
 /// Velocity-loss fraction at which to terminate the set for a given goal (File
-/// 02 strength-018, reconciled with autoreg-010): ≥10% VL for power (preserves
-/// peak bar velocity), ≥20% VL for max strength (preserves 1RM), ≥40% VL
-/// permitted for hypertrophy. AUTOREG-VL-001. The KB sources conflicted —
-/// strength-018 grouped power with max-strength at 20% while autoreg-010 states
-/// "10% power"; VBT literature terminates power work at ~10% VL, so Power is
-/// split out here to 0.10. This is the SINGLE SOURCE of the goal→VL map;
-/// `autoreg::vl_threshold_pct` delegates to it (as whole-percent) so the two
-/// files can never drift.
+/// 02 strength-018; AUTOREG-VL-001): 10 % power, 20 % max strength, 40 %
+/// hypertrophy. strength-018 groups power with max strength at 20 %; autoreg-010
+/// and the VBT literature end power work at ~10 %, so Power is 0.10. The one
+/// goal→VL map; `autoreg::vl_threshold_pct` delegates to it.
 pub fn vl_termination_threshold(goal: LiftGoal) -> Recommended<f64> {
     let vl = match goal {
         LiftGoal::Power => 0.10,
@@ -613,7 +558,7 @@ pub fn vl_termination_threshold(goal: LiftGoal) -> Recommended<f64> {
 }
 
 // ---------------------------------------------------------------------------
-// 12. Periodization phase tables (File 02 strength-021 linear / 022 block)
+// 11. Periodization phase tables (File 02 strength-021 linear / 022 block)
 // ---------------------------------------------------------------------------
 
 /// A per-phase loading prescription. Fields the knowledge base leaves
@@ -728,7 +673,7 @@ pub fn block_phase_rx(phase: BlockPhase) -> Recommended<PhaseRx> {
 }
 
 // ---------------------------------------------------------------------------
-// 13. Depth-jump readiness gate (File 02 strength-033; SAFETY, ExpertOpinion)
+// 12. Depth-jump readiness gate (File 02 strength-033; SAFETY, ExpertOpinion)
 // ---------------------------------------------------------------------------
 
 /// Back-squat 1RM, as a multiple of bodyweight, required before high-intensity
@@ -747,7 +692,7 @@ pub fn depth_jump_ready(squat_1rm: f64, bodyweight: f64) -> Recommended<bool> {
 }
 
 // ---------------------------------------------------------------------------
-// 14. e1RM reliability gate + cross-check (File 02 strength-006)
+// 13. e1RM reliability gate + cross-check (File 02 strength-006)
 // ---------------------------------------------------------------------------
 
 /// Rep count above which estimated 1RM is unreliable (File 02 strength-006).
@@ -820,7 +765,7 @@ pub fn e1rm_test_set_reps() -> Recommended<(u8, u8)> {
 }
 
 // ---------------------------------------------------------------------------
-// 15. DUP day parameters (File 02 strength-023; contested CQ-03)
+// 14. DUP day parameters (File 02 strength-023; contested CQ-03)
 // ---------------------------------------------------------------------------
 
 /// A DUP training day's focus (File 02 strength-023 example week).
@@ -901,12 +846,13 @@ pub fn dup_day_rx(day: DupDay) -> Recommended<DupDayRx> {
 /// failure on heavy free-weight compounds (HYP-FAIL-SAFE-001).
 pub const MIN_STRENGTH_RIR: u8 = 1;
 
-/// Highest whole %1RM at which `reps` still leave `rir` reps in reserve on the
-/// Epley model the engine reads effort from ([`pct_1rm_at_effective_reps`] at
-/// `reps + rir`, strength-005, the inverse of [`expected_rir_at_pct`]), floored
-/// so the reserve is never rounded away: 5 reps @ 1 RIR → 83 %, 3 @ 1 → 88 %.
-pub fn max_pct_leaving_rir(reps: u8, rir: u8) -> u8 {
-    pct_1rm_at_effective_reps(f64::from(reps) + f64::from(rir)).floor() as u8
+/// %1RM at which `reps` still leave `rir` reps in reserve on the Epley model
+/// the engine reads effort from ([`pct_1rm_at_effective_reps`] at `reps + rir`,
+/// strength-005, the inverse of [`expected_rir_at_pct`]). A whole-percent load
+/// floors it so the reserve is never rounded away: 5 reps @ 1 RIR → 83 %,
+/// 3 @ 1 → 88 %.
+pub fn pct_1rm_leaving_rir(reps: u8, rir: u8) -> f64 {
+    pct_1rm_at_effective_reps(f64::from(reps) + f64::from(rir))
 }
 
 /// This week's %1RM inside a day's cited band, progressed across the load
@@ -918,7 +864,7 @@ pub fn max_pct_leaving_rir(reps: u8, rir: u8) -> u8 {
 ///
 /// The rep count is held, so the ramp is also capped where the prescribed
 /// `reps` would leave fewer than [`MIN_STRENGTH_RIR`] in reserve
-/// ([`max_pct_leaving_rir`]): the band top is never paired with the rep top
+/// ([`pct_1rm_leaving_rir`], floored): the band top is never paired with the rep top
 /// (strength-022 bands, STR-INTENT-001). Lower body: Heavy ×3
 /// 85→87→88→88, HeavyVolume ×5 80→82→83→83, Power ×3 50→51→53→54.
 pub fn pct_for_week(
@@ -933,36 +879,32 @@ pub fn pct_for_week(
         .round()
         .clamp(band.0 as f64, band.1 as f64) as u8;
     graded(
-        pct.min(max_pct_leaving_rir(reps, MIN_STRENGTH_RIR)),
+        pct.min(pct_1rm_leaving_rir(reps, MIN_STRENGTH_RIR).floor() as u8),
         claims::STR_PCTPROG_001,
     )
 }
 
+/// Days since a lift was last trained that still earn its anchor full credit:
+/// normal training gaps (DETRAIN-STR-001).
+pub(crate) const FULL_CREDIT_DAYS: i64 = 30;
+
 /// Working-load credit for a lift anchor whose movement has not been trained
-/// for `days_since_trained` days. Full credit inside 30 days (normal training
-/// gaps); past that the resistance re-entry bracket for that many weeks off
+/// for `days_since_trained` days. Full credit inside [`FULL_CREDIT_DAYS`]; past
+/// that the resistance re-entry bracket for that many weeks off
 /// (REENTRY-001, File 08 Table 3.4b: 4–8 wk → 70 %); past 8 weeks `None` — the
 /// KB gives no fraction and directs a fresh, novice-style start, so the anchor
 /// is dropped. Strength losses over 1–2 months are modest, never a reset to
 /// zero (DETRAIN-STR-001, Bosquet 2013), which is why this never tapers to 0.
 pub fn lift_detrain_credit(days_since_trained: i64) -> Recommended<Option<f64>> {
-    const FULL_CREDIT_DAYS: i64 = 30;
     if days_since_trained <= FULL_CREDIT_DAYS {
         return graded(Some(1.0), claims::DETRAIN_STR_001);
     }
     let re = crate::individualization::resistance_reentry(days_since_trained as f64 / 7.0).value;
-    graded(
-        if re.treat_as_novice {
-            None
-        } else {
-            re.load_frac
-        },
-        claims::DETRAIN_STR_001,
-    )
+    graded(re.load_frac, claims::DETRAIN_STR_001)
 }
 
 // ---------------------------------------------------------------------------
-// 16. 1RM testing readiness gate (File 02 strength-040; SAFETY)
+// 15. 1RM testing readiness gate (File 02 strength-040; SAFETY)
 // ---------------------------------------------------------------------------
 
 /// Readiness context for a 1RM test attempt (File 02 strength-040).

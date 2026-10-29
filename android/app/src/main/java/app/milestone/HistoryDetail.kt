@@ -6,10 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,7 +31,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 /** The [Event.DeleteEntry] for a logged entry: by entry_id, with observed_at as
@@ -67,7 +64,7 @@ internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>):
         if (!v.has_gpx && !v.gps_unmeasurable) {
             Event.LogRun(
                 distanceKm = v.distance_km, durationMin = v.duration_min, hrPctMax = loggedHrPctMax(v),
-                longestRecentKm = 0.0, observedAt = v.observed_at, entryId = v.entry_id,
+                observedAt = v.observed_at, entryId = v.entry_id,
                 workoutType = WorkoutType.fromWire(v.workout_type), sessionRpe = v.session_rpe,
                 avgHrBpm = v.avg_hr_bpm, utcOffsetSec = v.utc_offset_sec,
             )
@@ -85,7 +82,7 @@ internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>):
                 null
             } else {
                 Event.LogRunTrack(
-                    points = points, hrPctMax = loggedHrPctMax(v), longestRecentKm = 0.0,
+                    points = points, hrPctMax = loggedHrPctMax(v),
                     observedAt = v.observed_at, entryId = v.entry_id,
                     workoutType = WorkoutType.fromWire(v.workout_type), segmentStarts = starts,
                     sessionRpe = v.session_rpe, avgHrBpm = v.avg_hr_bpm, utcOffsetSec = v.utc_offset_sec,
@@ -136,7 +133,7 @@ internal fun postUndoable(text: String, undoLabel: String, undo: List<Event>) {
 }
 
 /**
- * The entry detail → edit/delete flow. Tapping a History or Today card sets
+ * The entry detail → edit/delete flow. Tapping a History card sets
  * [selected]; this hosts the detail bottom sheet, the pre-filled keypad editor
  * (emitting AmendSet/AmendRun) and the run's trim sheet. Each detail sheet confirms
  * a delete itself; the delete then lands with a "deleted · Undo" message (Undo is
@@ -148,8 +145,10 @@ internal fun postUndoable(text: String, undoLabel: String, undo: List<Event>) {
 internal fun EntryActionSheets(
     selected: HistoryEntry?,
     recentExercises: List<String>,
-    holdExercises: Set<String> = emptySet(),
-    weightUnit: WeightUnit = WeightUnit.Kg,
+    holdExercises: Set<String>,
+    weightUnit: WeightUnit,
+    // The athlete's profile, for the run editor's bpm entry.
+    profile: ProfileView?,
     // The caller's ticking wall clock, so a sheet left open across midnight
     // re-labels "Today" instead of freezing at its composition time.
     nowMillis: Long,
@@ -157,7 +156,7 @@ internal fun EntryActionSheets(
     onEvent: (Event) -> Unit,
     // The weekly session-effort load, for the evidence behind a rated run's "?"
     // (grade + citation). Null until a run is rated.
-    srpeLoad: SrpeLoadView? = null,
+    srpeLoad: SrpeLoadView?,
 ) {
     if (selected == null) return
     val ctx = LocalContext.current
@@ -238,6 +237,7 @@ internal fun EntryActionSheets(
                     )
                     is HistoryEntry.Run -> LogRunEditor(
                         initial = selected.v,
+                        profile = profile,
                         onClose = { editDirty = false; editing = false },
                         onDirtyChange = { editDirty = it },
                         onSave = saveEdit,
@@ -298,7 +298,6 @@ internal fun EntryActionSheets(
                 is HistoryEntry.Run -> RunDetailContent(
                     run = selected.v,
                     route = route,
-                    nowMillis = nowMillis,
                     srpeLoad = srpeLoad,
                     onEdit = { editing = true },
                     onTrim = { trimming = true },
@@ -349,7 +348,7 @@ internal fun EntryActionSheets(
 @Composable
 private fun EntryDetailContent(
     entry: HistoryEntry.Lift,
-    weightUnit: WeightUnit = WeightUnit.Kg,
+    weightUnit: WeightUnit,
     nowMillis: Long,
     onEdit: () -> Unit,
     onDelete: (restore: Event?) -> Unit,
@@ -431,7 +430,6 @@ private fun EntryDetailContent(
                     stringResource(R.string.history_edit_set),
                     painterResource(R.drawable.ic_ui_edit),
                     onClick = onEdit,
-                    chevron = true,
                     testTag = "set-detail-edit",
                 ),
             ),

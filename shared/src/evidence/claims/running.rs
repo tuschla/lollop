@@ -4,7 +4,7 @@
 //! `contradicting` rather than silently resolved.
 
 use crate::evidence::cite::{
-    CITE_BOSQUET_2007, CITE_DANIELS_2022, CITE_MEEUSEN_2013, CITE_NHS_C25K,
+    CITE_BOSQUET_2007, CITE_DANIELS_2022, CITE_MEEUSEN_2013, CITE_NHS_C25K, CITE_PFITZINGER_2009,
 };
 use crate::evidence::claim;
 use crate::schema::EvidenceGrade::{ExpertOpinion, Moderate, Strong, Weak};
@@ -17,7 +17,7 @@ claim_group! {
         Moderate,
         &[
             CITE_DANIELS_2022,
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
+            CITE_PFITZINGER_2009,
             "RCT protocol NCT06111144 (3:1 load:recovery structure)",
         ],
     ),
@@ -79,8 +79,8 @@ claim_group! {
     // average speed (variability index > 1). Graded WEAK/ExpertOpinion
     // honestly: Skiba's GOVSS is a self-published, non-peer-reviewed white
     // paper, and the app has no elevation → no grade adjustment (normalized
-    // *speed*, not power). `running::normalized_speed_mps` /
-    // `track_variability_index` compute it. See the KB file's caveats.
+    // *speed*, not power). `running::track_variability_index` computes it.
+    // See the KB file's caveats.
     RUN_INTERVAL_VI_001 => claim(
         "RUN-INTERVAL-VI-001",
         "The variability index compares your GPS speed, weighted toward the fast stretches, with your average speed. It stays near 1.0 on steady runs and rises above 1.0 on interval-like runs, so the GPS track alone tells them apart without heart rate. It assumes flat ground, with no adjustment for hills.",
@@ -95,6 +95,7 @@ claim_group! {
     ]),
     // File 07 "Cooper test": VO2max ~= (d_meters - 504.9)/44.73 from a
     // 12-min max run. [Moderate]
+    #[kb_only]
     LOAD_COOPER_001 => claim(
         "LOAD-COOPER-001",
         "The Cooper test estimates your aerobic fitness (VO2max) from how far you run in 12 minutes: (meters covered − 504.9) ÷ 44.73.",
@@ -105,10 +106,7 @@ claim_group! {
         "RUN-WORKOUT-001",
         "Each run type has its own pace, heart-rate, effort and duration targets, taken from standard coaching tables.",
         ExpertOpinion,
-        &[
-            CITE_DANIELS_2022,
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
-        ],
+        &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
     ),
     RUN_MAF_001 => claim(
         "RUN-MAF-001",
@@ -182,20 +180,14 @@ claim_group! {
         "RUN-DOWNWEEK-001",
         "Insert an unscheduled down week when >=2 overtraining signals fire (RHR +5-7 bpm >=3 days, HRV downtrend, rising RPE, disrupted sleep/soreness/mood, standard-workout performance down >3-5%).",
         ExpertOpinion,
-        &[
-            CITE_MEEUSEN_2013,
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
-        ],
+        &[CITE_MEEUSEN_2013, CITE_PFITZINGER_2009],
     )
     .safety(),
     RUN_VOLCAP_001 => claim(
         "RUN-VOLCAP-001",
         "Daniels' weekly limits by run type: long run up to 25–30% of your weekly running (about 2–2.5 hours at most), threshold running up to 10%, intervals up to 8%, repetitions up to 5%.",
         ExpertOpinion,
-        &[
-            CITE_DANIELS_2022,
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
-        ],
+        &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
     )
     .contradicting(&[
         "The threshold and interval band caps rest on stronger evidence than the long-run share, which is a coaching convention - the whole set is registered at the more conservative expert-opinion floor",
@@ -204,10 +196,7 @@ claim_group! {
         "RUN-TEMPO-001",
         "Tempo (threshold) runs: about your 15K-to-half-marathon race pace (about 90% of marathon pace), 88–92% of your max heart rate, effort 6–7 out of 10, for 20–40 minutes in one go or as cruise intervals (long repeats with short rests). Keep threshold running to 10% of your weekly running or less.",
         Moderate,
-        &[
-            CITE_DANIELS_2022,
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
-        ],
+        &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
     ),
     RUN_INTERVAL_001 => claim(
         "RUN-INTERVAL-001",
@@ -226,6 +215,7 @@ claim_group! {
             "Swain & Leutholtz 1997, Med Sci Sports Exerc 29(3):410-414 (%HRR = %VO2 reserve)",
         ],
     ),
+    #[kb_only]
     RUN_CS_PROTOCOL_001 => claim(
         "RUN-CS-PROTOCOL-001",
         "Critical speed, about the pace at your second lactate threshold, is estimated from 2–5 all-out efforts of different lengths: mostly 2–20 minutes, never under 2 or over 30 minutes, ideally one of 3–8 minutes and one of 12–30. A negative distance reserve in the result means the efforts weren't all-out. Avoid pairs that are too similar (1500 m and a mile) or too far apart (800 m and a half marathon).",
@@ -250,9 +240,7 @@ claim_group! {
         "RUN-RECOVERY-001",
         "Recovery runs: at least 20% slower than marathon pace, under 76% of your max heart rate and under 70% of your heart-rate reserve, effort 2–3 out of 10, for 20–40 minutes.",
         ExpertOpinion,
-        &[
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
-        ],
+        &[CITE_PFITZINGER_2009],
     )
     .contradicting(&[
         "KB internal inconsistency: the statement gives <76%HRmax AND <70%HRR (different reference scales) while the parameters line collapses them to <70-76%HRmax; the engine carries both ceilings and lets the stricter govern (conservative)",
@@ -261,19 +249,13 @@ claim_group! {
         "RUN-EASY-001",
         "Easy runs: 15–25% slower than marathon pace, 65–79% of your max heart rate, effort 3–4 out of 10, for 30–90 minutes.",
         ExpertOpinion,
-        &[
-            CITE_DANIELS_2022,
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
-        ],
+        &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
     ),
     RUN_LONGRUN_001 => claim(
         "RUN-LONGRUN-001",
         "Long runs: easy to steady pace (10–20% slower than marathon pace), 65–80% of your max heart rate, effort 3–5 out of 10. A long run is 25–30% of your weekly distance (Daniels caps a single run at 25%), about 2–2.5 hours at most, and when your weekly distance is low, no more than twice your average daily run.",
         ExpertOpinion,
-        &[
-            CITE_DANIELS_2022,
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
-        ],
+        &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
     )
     .contradicting(&[
         "Two KB long-run-share figures conflicted (25-30% vs 20-30%); resolved in favour of 25-30% (Daniels' prescribed long-run share for >=64 km/wk; the 20% lower bound was uncited) - the planner uses 0.25.",
@@ -283,7 +265,7 @@ claim_group! {
         "Marathon-pace runs: your marathon race pace, 80–85% of your max heart rate, effort 5–6 out of 10, in blocks of 8–26 km (about 5–16 miles).",
         ExpertOpinion,
         &[
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
+            CITE_PFITZINGER_2009,
             "Canova & Arcelli 1999, Marathon Training: A Scientific Approach (IAAF/International Athletic Foundation)",
         ],
     ),
@@ -327,17 +309,14 @@ claim_group! {
         "RUN-ONEVAR-001",
         "Increase one thing at a time: distance or intensity, not both in the same week.",
         ExpertOpinion,
-        &[
-            CITE_DANIELS_2022,
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
-        ],
+        &[CITE_DANIELS_2022, CITE_PFITZINGER_2009],
     ),
     RUN_DELOAD_DEPTH_001 => claim(
         "RUN-DELOAD-DEPTH-001",
         "On a lighter week, cut distance by 20–40% (10–30% at high mileage, up to 50% at low mileage), ease the intensity too, and drop one hard session. No source sets how much to ease intensity or where high and low mileage start.",
         ExpertOpinion,
         &[
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
+            CITE_PFITZINGER_2009,
             "RCT protocol NCT06111144 (3:1 load:recovery structure)",
         ],
     ),
@@ -388,7 +367,7 @@ claim_group! {
         ExpertOpinion,
         &[
             CITE_DANIELS_2022,
-            "Pfitzinger & Douglas 2009, Advanced Marathoning (2nd ed., Human Kinetics)",
+            CITE_PFITZINGER_2009,
             "Doherty et al. 2020, J Sci Med Sport 23(2):182-188",
         ],
     ),

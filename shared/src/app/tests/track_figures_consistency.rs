@@ -6,19 +6,6 @@
 
 use super::*;
 
-/// Metres per degree of longitude on the equator for the core's haversine
-/// (R = 6 371 000 m), so `x` metres east is `x / M_PER_DEG` degrees.
-const M_PER_DEG: f64 = 6_371_000.0 * std::f64::consts::PI / 180.0;
-
-fn fix(x_m: f64, t: i64) -> GpsPoint {
-    GpsPoint {
-        lat: 0.0,
-        lon: x_m / M_PER_DEG,
-        observed_at: t,
-        accuracy_m: 5.0,
-    }
-}
-
 /// Track of a runner who stands still for `stand_s` seconds after the first
 /// fix (identical fixes, 1 Hz), then runs east at 3 m/s for `run_s` seconds,
 /// with the first stride covering `first_stride_m` (≥ 2.5 m, so the core

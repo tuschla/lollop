@@ -19,7 +19,6 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppSettings
 import app.milestone.ConcurrentGoal
 import app.milestone.DarkMode
 import app.milestone.Event
@@ -27,7 +26,6 @@ import app.milestone.GoalDistance
 import app.milestone.LiftGoal
 import app.milestone.ProgressionCadence
 import app.milestone.R
-import com.github.takahirom.roborazzi.captureScreenRoboImage
 import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -60,10 +58,6 @@ class CalculatorResultsTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    @OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)
-    private fun shot(name: String) =
-        rule.captureWithoutRipples { captureScreenRoboImage("src/test/screenshots/$name.png") }
-
     /** Lifts and runs, so all four calculators are offered. */
     private fun hybridProfile(): Event = Event.SetProfile(
         progressionCadence = ProgressionCadence.WeekToWeek,
@@ -90,7 +84,7 @@ class CalculatorResultsTest {
 
     /** Seed the profile and every calculator query, open Profile and tap [titleRes]'s row. */
     private fun openCalculator(titleRes: Int, mode: DarkMode = DarkMode.Light) {
-        AppSettings.setDarkMode(ctx, mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(hybridProfile()) + queries)
         rule.launchApp()
         rule.selectTab(str(R.string.main_dest_profile))
@@ -147,7 +141,7 @@ class CalculatorResultsTest {
         val card = rule.onNode(result).fetchSemanticsNode()
         assertTrue(card.size.height <= ctx.resources.displayMetrics.heightPixels)
         assertHeadlineIsLargest()
-        shot("calc-hr-zones-result-light")
+        rule.shot("calc-hr-zones-result-light")
         // Its "?" stacks the evidence of every claim on the card.
         rule.onNode(oneQuestion).performClick()
         rule.waitForIdle()
@@ -157,7 +151,7 @@ class CalculatorResultsTest {
     @Test
     fun hrZonesDark() {
         openCalculator(R.string.main_tool_hr_title, DarkMode.Dark)
-        shot("calc-hr-zones-result-dark")
+        rule.shot("calc-hr-zones-result-dark")
     }
 
     @Test
@@ -169,7 +163,7 @@ class CalculatorResultsTest {
             rule.onNode(hasText(str(label), substring = true)).assertExists()
         }
         assertHeadlineIsLargest()
-        shot("calc-volume-planner-result-light")
+        rule.shot("calc-volume-planner-result-light")
     }
 
     @Test
@@ -181,7 +175,7 @@ class CalculatorResultsTest {
         rule.onNode(hasTestTag("calc-headline") and hasText(grams), useUnmergedTree = true).assertExists()
         rule.onNode(hasText(str(R.string.main_calc_protein_caption))).assertExists()
         assertHeadlineIsLargest()
-        shot("calc-protein-result-light")
+        rule.shot("calc-protein-result-light")
     }
 
     @Test
@@ -190,7 +184,7 @@ class CalculatorResultsTest {
         assertOpensOnTheResult()
         rule.onNode(hasText(str(R.string.main_calc_race_caption, "10K"))).assertExists()
         assertHeadlineIsLargest()
-        shot("calc-race-predictor-result-light")
+        rule.shot("calc-race-predictor-result-light")
     }
 
     @Test
@@ -215,7 +209,7 @@ class CalculatorResultsTest {
         rule.onNode(hasContentDescription(str(R.string.main_explain, hrmax)) and hasClickAction()).performScrollTo().performClick()
         rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag("glossary-search")).fetchSemanticsNodes().isNotEmpty() }
         rule.waitForIdle()
-        shot("sheet-glossary-light")
+        rule.shot("sheet-glossary-light")
         val search = rule.onNode(hasTestTag("glossary-search"))
         search.performTextInput("tonn")
         rule.waitForIdle()
@@ -245,12 +239,12 @@ class CalculatorResultsTest {
         openReferences()
         val strength = hasText("Strength") and hasClickAction()
         rule.onNode(strength).assertExists()
-        shot("sheet-evidence-references-light")
+        rule.shot("sheet-evidence-references-light")
         rule.onNode(strength).performClick()
         rule.waitForIdle()
         rule.onNode(strength).assert(
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, str(R.string.ui_cd_expanded)),
         )
-        shot("sheet-evidence-references-expanded-light")
+        rule.shot("sheet-evidence-references-expanded-light")
     }
 }

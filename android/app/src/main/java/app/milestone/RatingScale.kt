@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -34,6 +35,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
@@ -41,24 +43,14 @@ import kotlin.math.roundToInt
 private val RatingLabelInset = 2.dp
 
 /**
- * The ONE control for a 0–N rating (VDS §6, UI sweep §0.4): a single segmented
- * track with one contiguous segment per value, 40dp visual inside a 48dp touch row.
- * Above it, [label] at the start and the picked value's word ([selectedText], e.g.
- * "5 · Hard") at the end; the word slot is always composed, so picking never moves
- * the layout. Below it, the endpoint words [startCaption] / [endCaption].
- *
- * [values] are in display order, left to right; a reversed core scale (soreness
- * 5→1) is passed reversed, never re-sorted. Unrated ([selected] null): no segment
- * is filled and the word slot is empty. Tapping the picked segment again clears it
- * when [clearable].
- *
- * The track is ONE adjustable accessibility node ("Effort, 5 of 10, Hard"; swipe up
- * or down to change), with [spokenText] as its state. [hint] is a quiet note in the
- * word slot while nothing is picked ("optional", "Last time: 4"), never a selection.
- * Each segment keeps the test tag "$testTag-<value>" in the unmerged tree, so a
- * test click on it picks it.
- * When a value's digits do not fit their segment at the current font scale, the
- * track falls back to [ChoiceScaleRow]'s balanced rows.
+ * The 0–N rating control: one segmented track (one segment per value) with [label]
+ * and the picked value's word ([selectedText]) above it and [startCaption] /
+ * [endCaption] below. [values] are in display order, start to end; a reversed core
+ * scale is passed reversed. Unrated ([selected] null) fills nothing; tapping the
+ * picked segment clears it when [clearable]. [hint] fills the word slot while
+ * nothing is picked. The track is one adjustable accessibility node with
+ * [spokenText] as its state; segments keep the tag "$testTag-<value>". When the
+ * digits do not fit their segments, it falls back to [ChoiceScaleRow].
  */
 @Composable
 fun RatingScale(
@@ -137,6 +129,7 @@ private fun RatingTrack(
 ) {
     val trackFill = ChoiceCellFill
     val last = values.lastIndex
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val index = values.indexOf(selected)
     val state = selected?.let(spokenText) ?: stringResource(R.string.rating_unrated)
     val currentSelected by rememberUpdatedState(selected)
@@ -148,12 +141,12 @@ private fun RatingTrack(
             .height(ActionMinHeight)
             .testTag(testTag)
             .segmentTrackGround(trackFill, SegmentTouchInset)
-            .pointerInput(values) {
+            .pointerInput(values, rtl) {
                 detectTapGestures { pos ->
                     val pad = SegmentTrackPadding.toPx()
                     val span = (size.width - pad * 2f).coerceAtLeast(1f)
                     val i = ((pos.x - pad) / span * values.size).toInt().coerceIn(0, last)
-                    val v = values[i]
+                    val v = values[if (rtl) last - i else i]
                     currentOnSelect(if (currentClearable && v == currentSelected) null else v)
                 }
             }

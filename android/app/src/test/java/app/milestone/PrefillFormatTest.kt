@@ -22,8 +22,8 @@ class PrefillFormatTest {
 
     @Test
     fun fractionsArePreservedNotRounded() {
-        // The old `%.1f` weight prefill rounded 100.25 → "100.3"; the old `%.2f`
-        // distance prefill rounded 42.195 → "42.20". Both must now survive intact.
+        // A fixed `%.1f` / `%.2f` format would round 100.25 → "100.3" and
+        // 42.195 → "42.20"; the prefill keeps every digit.
         assertEquals("100.25", fmtLosslessPrefill(100.25))
         assertEquals("42.195", fmtLosslessPrefill(42.195))
         assertEquals("50.25", fmtLosslessPrefill(50.25))
@@ -92,7 +92,7 @@ class PrefillFormatTest {
     }
 
     @Test
-    fun untouched_mi_prefill_round_trips_exact_km() {
+    fun untouchedMiPrefillRoundTripsExactKm() {
         // A mi prefill the user never edits must re-emit the stored km verbatim: the
         // km→mi→km round-trip rounds to 2 dp (miToKmWire), which would drift 42.195.
         val stored = RunResultView(distance_km = 42.195)

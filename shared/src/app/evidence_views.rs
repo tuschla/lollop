@@ -3,13 +3,6 @@
 
 use super::*;
 
-/// Evidence-grade rank for headline priority: the `EvidenceGrade` declaration
-/// order (Strong > Moderate > Weak > ExpertOpinion > MarketingMyth); a row
-/// with no grade sorts last.
-pub(super) fn grade_rank(grade: Option<EvidenceGrade>) -> i32 {
-    grade.map_or(-1, |g| g as i32)
-}
-
 /// Flatten one evidence-wrapped adjustment into a shell-facing row: the call,
 /// the exercise an item-scoped call names, its safety-ladder tier (for the
 /// headline ranking) and, for a progression hold, a why? basis that states the
@@ -319,13 +312,10 @@ pub(super) fn describe_rec(r: &Recommended<Adjustment>) -> String {
 pub(super) fn to_view_with<T>(summary: String, r: &Recommended<T>) -> AdjustmentView {
     AdjustmentView {
         summary,
-        evidence: r.into(),
+        evidence: EvidenceTagView::of(r),
         // The basis is the claim statement; the improves/grade lines carry the
         // KB-grounded explanation.
         why: why_from(None, r),
-        // Real graded adjustments default to non-neutral; the two "no change"
-        // review verdicts (VBT hold, hold planned sets) flip this on the row.
-        neutral: false,
         ..AdjustmentView::default()
     }
 }
@@ -352,26 +342,7 @@ fn grade_definitions_impl() -> Vec<GradeDefView> {
     ]
     .into_iter()
     .map(|g| {
-        // Plain words for the legend (File 09 grade meanings without the
-        // research vocabulary).
-        let (label, definition) = match g {
-            EvidenceGrade::Strong => ("Strong", "Many good studies agree."),
-            EvidenceGrade::Moderate => (
-                "Moderate",
-                "Some good studies support it, but it isn't settled yet.",
-            ),
-            EvidenceGrade::Weak => (
-                "Weak",
-                "Based on how the body works or on observation, not direct trials.",
-            ),
-            EvidenceGrade::ExpertOpinion => (
-                "Expert opinion",
-                "What experienced coaches do; not yet tested in trials.",
-            ),
-            EvidenceGrade::MarketingMyth => {
-                ("Myth", "Studies contradict it, so the app never uses it.")
-            }
-        };
+        let (label, definition) = grade_words(g);
         GradeDefView {
             grade: g,
             label: label.to_string(),
@@ -380,6 +351,29 @@ fn grade_definitions_impl() -> Vec<GradeDefView> {
         }
     })
     .collect()
+}
+
+/// Plain-word label and definition of each grade (the File 09 meanings without
+/// the research vocabulary), shared by the legend and the why-sheet grade note.
+fn grade_words(g: EvidenceGrade) -> (&'static str, &'static str) {
+    match g {
+        EvidenceGrade::Strong => ("Strong", "Many good studies agree."),
+        EvidenceGrade::Moderate => (
+            "Moderate",
+            "Some good studies support it, but it isn't settled yet.",
+        ),
+        EvidenceGrade::Weak => (
+            "Weak",
+            "Based on how the body works or on observation, not direct trials.",
+        ),
+        EvidenceGrade::ExpertOpinion => (
+            "Expert opinion",
+            "What experienced coaches do; not yet tested in trials.",
+        ),
+        EvidenceGrade::MarketingMyth => {
+            ("Myth", "Studies contradict it, so the app never uses it.")
+        }
+    }
 }
 
 /// Compose the "why?" triad from a `Recommended<T>`, optionally overriding the
@@ -399,21 +393,16 @@ pub(super) fn why_from<T>(basis_override: Option<String>, r: &Recommended<T>) ->
 /// contested question (`contested_ref`, e.g. `"CQ-01"`) appended when the
 /// claim is under active debate.
 pub(super) fn grade_note_str(grade: EvidenceGrade, contested_ref: Option<&str>) -> String {
+    let (label, definition) = grade_words(grade);
+    let first = char::from(definition.as_bytes()[0].to_ascii_lowercase());
+    let rest = &definition[1..];
     let base = match grade {
-        EvidenceGrade::Strong => "Strong evidence: many good studies agree.",
-        EvidenceGrade::Moderate => {
-            "Moderate evidence: some good studies support it, but it isn't settled yet."
-        }
-        EvidenceGrade::Weak => {
-            "Weak evidence: based on how the body works or on observation, not direct trials."
-        }
-        EvidenceGrade::ExpertOpinion => {
-            "Expert opinion: what experienced coaches do; not yet tested in trials."
-        }
         EvidenceGrade::MarketingMyth => return String::new(),
+        EvidenceGrade::ExpertOpinion => format!("{label}: {first}{rest}"),
+        _ => format!("{label} evidence: {first}{rest}"),
     };
     let Some(cq) = contested_ref.and_then(crate::evidence::contested_question) else {
-        return base.to_string();
+        return base;
     };
     // Honour the deck's "here's both sides" promise: name the open question
     // AND say what the app does meanwhile, rather than dangling a bare topic

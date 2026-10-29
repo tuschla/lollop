@@ -60,8 +60,7 @@ pub(super) fn arranged_loads(source: &[u16; 7], sessions: &[Session]) -> [crate:
 pub(super) fn idle_days(days: &LoggedDays, week_monday: i64, today: i64, start: i64) -> [bool; 7] {
     std::array::from_fn(|d| {
         let day = week_monday.saturating_add(d as i64);
-        day < start
-            || (day < today && !days.sets.contains(&Some(day)) && !days.runs.contains(&Some(day)))
+        day < start || (day < today && !days.active.contains(&day))
     })
 }
 

@@ -5,7 +5,6 @@
   "checked_in_today": false,
   "adjustments": [],
   "review_adjustments": [],
-  "review_present": false,
   "weekly_checkin_present": false,
   "input_count": 0,
   "lifts": [
@@ -19,8 +18,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": null,
-      "e1rm_direction": null,
       "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
       "observed_at": 1726509600,
       "entry_id": 1,
@@ -38,8 +35,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
       "observed_at": 1726509600,
       "entry_id": 2,
@@ -57,8 +52,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
       "observed_at": 1726509600,
       "entry_id": 3,
@@ -76,8 +69,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": null,
-      "e1rm_direction": null,
       "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
       "observed_at": 1726509600,
       "entry_id": 4,
@@ -95,8 +86,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
       "observed_at": 1726509600,
       "entry_id": 5,
@@ -114,8 +103,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
       "observed_at": 1726509600,
       "entry_id": 6,
@@ -133,8 +120,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": null,
-      "e1rm_direction": null,
       "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
       "observed_at": 1726682400,
       "entry_id": 7,
@@ -152,8 +137,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
       "observed_at": 1726682400,
       "entry_id": 8,
@@ -171,8 +154,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
       "observed_at": 1726682400,
       "entry_id": 9,
@@ -190,8 +171,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
       "observed_at": 1726855200,
       "entry_id": 10,
@@ -209,8 +188,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
       "observed_at": 1726855200,
       "entry_id": 11,
@@ -228,8 +205,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
       "observed_at": 1726855200,
       "entry_id": 12,
@@ -247,8 +222,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
       "observed_at": 1727114400,
       "entry_id": 13,
@@ -266,8 +239,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
       "observed_at": 1727114400,
       "entry_id": 14,
@@ -285,8 +256,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
       "observed_at": 1727114400,
       "entry_id": 15,
@@ -304,8 +273,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
       "observed_at": 1727114400,
       "entry_id": 16,
@@ -323,8 +290,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
       "observed_at": 1727114400,
       "entry_id": 17,
@@ -342,8 +307,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
       "observed_at": 1727114400,
       "entry_id": 18,
@@ -361,8 +324,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
       "observed_at": 1727287200,
       "entry_id": 19,
@@ -380,8 +341,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
       "observed_at": 1727287200,
       "entry_id": 20,
@@ -399,8 +358,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
       "observed_at": 1727287200,
       "entry_id": 21,
@@ -418,8 +375,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
       "observed_at": 1727460000,
       "entry_id": 22,
@@ -437,8 +392,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
       "observed_at": 1727460000,
       "entry_id": 23,
@@ -456,8 +409,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
       "observed_at": 1727460000,
       "entry_id": 24,
@@ -475,8 +426,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
       "observed_at": 1727719200,
       "entry_id": 25,
@@ -494,8 +443,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
       "observed_at": 1727719200,
       "entry_id": 26,
@@ -513,8 +460,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 12 @RPE8.0 → e1RM 0kg (~68%1RM, 2.0 RIR)",
       "observed_at": 1727719200,
       "entry_id": 27,
@@ -532,8 +477,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
       "observed_at": 1727719200,
       "entry_id": 28,
@@ -551,8 +494,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
       "observed_at": 1727719200,
       "entry_id": 29,
@@ -570,8 +511,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Pull-up 0kg × 6 @RPE8.0 → e1RM 0kg (~79%1RM, 2.0 RIR)",
       "observed_at": 1727719200,
       "entry_id": 30,
@@ -589,8 +528,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
       "observed_at": 1727892000,
       "entry_id": 31,
@@ -608,8 +545,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
       "observed_at": 1727892000,
       "entry_id": 32,
@@ -627,8 +562,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Squat 0kg × 20 @RPE8.0 → e1RM 0kg (~58%1RM, 2.0 RIR)",
       "observed_at": 1727892000,
       "entry_id": 33,
@@ -646,8 +579,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
       "observed_at": 1728064800,
       "entry_id": 34,
@@ -665,8 +596,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
       "observed_at": 1728064800,
       "entry_id": 35,
@@ -684,8 +613,6 @@
       "rir": 2.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": 0.0,
-      "e1rm_direction": "flat",
       "summary": "Push-up 0kg × 14 @RPE8.0 → e1RM 0kg (~65%1RM, 2.0 RIR)",
       "observed_at": 1728064800,
       "entry_id": 36,
@@ -703,8 +630,6 @@
       "rir": 3.0,
       "rpe_recorded": true,
       "cross_check": null,
-      "e1rm_delta_kg": null,
-      "e1rm_direction": null,
       "summary": "Plank - 30 s hold",
       "observed_at": 1728176400,
       "entry_id": 37,
@@ -963,7 +888,7 @@
       "summary": "Two sessions on one day: ideally 6–24 h apart, at least 3 h",
       "summary_mi": "",
       "grade": "Moderate",
-      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125 (AMPK-mTOR molecular interference)",
+      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125",
       "confidence": 0.65,
       "safety_critical": false,
       "contested": true,
@@ -1027,7 +952,7 @@
       "summary": "Do your most important session when you're freshest: early in the week or right after a rest day",
       "summary_mi": "",
       "grade": "ExpertOpinion",
-      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125 (schedule priority quality when fresh)",
+      "citation": "Baar 2014, Sports Med 44(Suppl 2):S117-S125",
       "confidence": 0.3,
       "safety_critical": false,
       "contested": false,
@@ -1545,16 +1470,10 @@
       "training_age": ""
     }
   ],
-  "cooper": [],
-  "critical_speed": [],
-  "apre": [],
   "hr_zone_input": null,
   "protein_input": null,
   "hypertrophy_input": null,
   "hypertrophy_ramp": [],
-  "cooper_input": null,
-  "critical_speed_input": [],
-  "apre_input": null,
   "trend": null,
   "provisional": {
     "summary": "Starting weights are typical values; they adapt as you log (day 10 of about 14).",
@@ -1568,7 +1487,6 @@
       "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
       "improves": "-"
     },
-    "neutral": false,
     "exercise": null,
     "suggested_load_kg": null,
     "suggests_end_exercise": false
@@ -1699,14 +1617,7 @@
         "reps_high": 8,
         "load_kg": null,
         "intensity_label": "RIR 1–2",
-        "intensity": {
-          "RirRange": {
-            "lo": 1,
-            "hi": 2
-          }
-        },
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "",
         "timed_hold": false,
         "target_rpe": 8.0,
@@ -1743,7 +1654,6 @@
         "calis": {
           "ladder": "HorizontalPush",
           "rung": 6,
-          "rung_count": 9,
           "easier": {
             "rung": 5,
             "name": "Decline push-up",
@@ -1759,7 +1669,6 @@
             "timed_hold": false
           },
           "load_capable": false,
-          "test_hold_sec": 0,
           "ballistic": false,
           "needs_effort_rating": false
         },
@@ -1778,14 +1687,7 @@
         "reps_high": 12,
         "load_kg": null,
         "intensity_label": "RIR 0–1",
-        "intensity": {
-          "RirRange": {
-            "lo": 0,
-            "hi": 1
-          }
-        },
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "",
         "timed_hold": false,
         "target_rpe": 9.0,
@@ -1822,7 +1724,6 @@
         "calis": {
           "ladder": "Dip",
           "rung": 0,
-          "rung_count": 6,
           "easier": null,
           "harder": {
             "rung": 1,
@@ -1832,7 +1733,6 @@
             "timed_hold": false
           },
           "load_capable": false,
-          "test_hold_sec": 0,
           "ballistic": false,
           "needs_effort_rating": false
         },
@@ -1851,14 +1751,7 @@
         "reps_high": 8,
         "load_kg": null,
         "intensity_label": "RIR 1–2",
-        "intensity": {
-          "RirRange": {
-            "lo": 1,
-            "hi": 2
-          }
-        },
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "",
         "timed_hold": false,
         "target_rpe": 8.0,
@@ -1895,7 +1788,6 @@
         "calis": {
           "ladder": "VerticalPull",
           "rung": 4,
-          "rung_count": 8,
           "easier": {
             "rung": 3,
             "name": "Negative pull-up",
@@ -1911,7 +1803,6 @@
             "timed_hold": false
           },
           "load_capable": true,
-          "test_hold_sec": 0,
           "ballistic": false,
           "needs_effort_rating": false
         },
@@ -1930,14 +1821,7 @@
         "reps_high": 12,
         "load_kg": null,
         "intensity_label": "RIR 0–1",
-        "intensity": {
-          "RirRange": {
-            "lo": 0,
-            "hi": 1
-          }
-        },
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "",
         "timed_hold": false,
         "target_rpe": 9.0,
@@ -1974,7 +1858,6 @@
         "calis": {
           "ladder": "HorizontalPull",
           "rung": 0,
-          "rung_count": 7,
           "easier": null,
           "harder": {
             "rung": 1,
@@ -1984,7 +1867,6 @@
             "timed_hold": false
           },
           "load_capable": false,
-          "test_hold_sec": 0,
           "ballistic": false,
           "needs_effort_rating": false
         },
@@ -2003,14 +1885,7 @@
         "reps_high": 12,
         "load_kg": null,
         "intensity_label": "RIR 0–1",
-        "intensity": {
-          "RirRange": {
-            "lo": 0,
-            "hi": 1
-          }
-        },
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "",
         "timed_hold": false,
         "target_rpe": 9.0,
@@ -2047,7 +1922,6 @@
         "calis": {
           "ladder": "Squat",
           "rung": 0,
-          "rung_count": 7,
           "easier": null,
           "harder": {
             "rung": 1,
@@ -2057,7 +1931,6 @@
             "timed_hold": false
           },
           "load_capable": false,
-          "test_hold_sec": 0,
           "ballistic": false,
           "needs_effort_rating": false
         },
@@ -2076,14 +1949,7 @@
         "reps_high": 15,
         "load_kg": null,
         "intensity_label": "RIR 0–1",
-        "intensity": {
-          "RirRange": {
-            "lo": 0,
-            "hi": 1
-          }
-        },
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "",
         "timed_hold": false,
         "target_rpe": 9.0,
@@ -2120,7 +1986,6 @@
         "calis": {
           "ladder": "Hinge",
           "rung": 0,
-          "rung_count": 8,
           "easier": null,
           "harder": {
             "rung": 1,
@@ -2130,7 +1995,6 @@
             "timed_hold": false
           },
           "load_capable": false,
-          "test_hold_sec": 0,
           "ballistic": false,
           "needs_effort_rating": false
         },
@@ -2149,9 +2013,7 @@
         "reps_high": 0,
         "load_kg": null,
         "intensity_label": "hold until you almost can't",
-        "intensity": "Prose",
         "rest_sec": 180,
-        "rep_count": 0,
         "rep_volume": "20–45 s hold",
         "timed_hold": true,
         "target_rpe": null,
@@ -2188,7 +2050,6 @@
         "calis": {
           "ladder": "Core",
           "rung": 0,
-          "rung_count": 7,
           "easier": null,
           "harder": {
             "rung": 1,
@@ -2198,7 +2059,6 @@
             "timed_hold": true
           },
           "load_capable": false,
-          "test_hold_sec": 0,
           "ballistic": false,
           "needs_effort_rating": false
         },
@@ -2234,14 +2094,7 @@
           "reps_high": 8,
           "load_kg": null,
           "intensity_label": "RIR 1–2",
-          "intensity": {
-            "RirRange": {
-              "lo": 1,
-              "hi": 2
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 8.0,
@@ -2278,7 +2131,6 @@
           "calis": {
             "ladder": "HorizontalPush",
             "rung": 6,
-            "rung_count": 9,
             "easier": {
               "rung": 5,
               "name": "Decline push-up",
@@ -2294,7 +2146,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -2313,14 +2164,7 @@
           "reps_high": 12,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -2357,7 +2201,6 @@
           "calis": {
             "ladder": "Dip",
             "rung": 0,
-            "rung_count": 6,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -2367,7 +2210,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -2386,14 +2228,7 @@
           "reps_high": 8,
           "load_kg": null,
           "intensity_label": "RIR 1–2",
-          "intensity": {
-            "RirRange": {
-              "lo": 1,
-              "hi": 2
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 8.0,
@@ -2430,7 +2265,6 @@
           "calis": {
             "ladder": "VerticalPull",
             "rung": 4,
-            "rung_count": 8,
             "easier": {
               "rung": 3,
               "name": "Negative pull-up",
@@ -2446,7 +2280,6 @@
               "timed_hold": false
             },
             "load_capable": true,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -2465,14 +2298,7 @@
           "reps_high": 12,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -2509,7 +2335,6 @@
           "calis": {
             "ladder": "HorizontalPull",
             "rung": 0,
-            "rung_count": 7,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -2519,7 +2344,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -2538,14 +2362,7 @@
           "reps_high": 12,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -2582,7 +2399,6 @@
           "calis": {
             "ladder": "Squat",
             "rung": 0,
-            "rung_count": 7,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -2592,7 +2408,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -2611,14 +2426,7 @@
           "reps_high": 15,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -2655,7 +2463,6 @@
           "calis": {
             "ladder": "Hinge",
             "rung": 0,
-            "rung_count": 8,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -2665,7 +2472,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -2684,9 +2490,7 @@
           "reps_high": 0,
           "load_kg": null,
           "intensity_label": "hold until you almost can't",
-          "intensity": "Prose",
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "20–45 s hold",
           "timed_hold": true,
           "target_rpe": null,
@@ -2723,7 +2527,6 @@
           "calis": {
             "ladder": "Core",
             "rung": 0,
-            "rung_count": 7,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -2733,7 +2536,6 @@
               "timed_hold": true
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -2781,14 +2583,7 @@
           "reps_high": 8,
           "load_kg": null,
           "intensity_label": "RIR 1–2",
-          "intensity": {
-            "RirRange": {
-              "lo": 1,
-              "hi": 2
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 8.0,
@@ -2825,7 +2620,6 @@
           "calis": {
             "ladder": "HorizontalPush",
             "rung": 6,
-            "rung_count": 9,
             "easier": {
               "rung": 5,
               "name": "Decline push-up",
@@ -2841,7 +2635,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -2860,14 +2653,7 @@
           "reps_high": 8,
           "load_kg": null,
           "intensity_label": "RIR 1–2",
-          "intensity": {
-            "RirRange": {
-              "lo": 1,
-              "hi": 2
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 8.0,
@@ -2904,7 +2690,6 @@
           "calis": {
             "ladder": "VerticalPush",
             "rung": 0,
-            "rung_count": 7,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -2914,7 +2699,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -2933,14 +2717,7 @@
           "reps_high": 8,
           "load_kg": null,
           "intensity_label": "RIR 1–2",
-          "intensity": {
-            "RirRange": {
-              "lo": 1,
-              "hi": 2
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 8.0,
@@ -2977,7 +2754,6 @@
           "calis": {
             "ladder": "VerticalPull",
             "rung": 4,
-            "rung_count": 8,
             "easier": {
               "rung": 3,
               "name": "Negative pull-up",
@@ -2993,7 +2769,6 @@
               "timed_hold": false
             },
             "load_capable": true,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -3012,14 +2787,7 @@
           "reps_high": 12,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -3056,7 +2824,6 @@
           "calis": {
             "ladder": "HorizontalPull",
             "rung": 0,
-            "rung_count": 7,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -3066,7 +2833,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -3085,14 +2851,7 @@
           "reps_high": 12,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -3129,7 +2888,6 @@
           "calis": {
             "ladder": "Squat",
             "rung": 0,
-            "rung_count": 7,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -3139,7 +2897,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -3158,14 +2915,7 @@
           "reps_high": 15,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -3202,7 +2952,6 @@
           "calis": {
             "ladder": "Hinge",
             "rung": 0,
-            "rung_count": 8,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -3212,7 +2961,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -3258,14 +3006,7 @@
           "reps_high": 8,
           "load_kg": null,
           "intensity_label": "RIR 1–2",
-          "intensity": {
-            "RirRange": {
-              "lo": 1,
-              "hi": 2
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 8.0,
@@ -3302,7 +3043,6 @@
           "calis": {
             "ladder": "HorizontalPush",
             "rung": 6,
-            "rung_count": 9,
             "easier": {
               "rung": 5,
               "name": "Decline push-up",
@@ -3318,7 +3058,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -3337,14 +3076,7 @@
           "reps_high": 12,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -3381,7 +3113,6 @@
           "calis": {
             "ladder": "Dip",
             "rung": 0,
-            "rung_count": 6,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -3391,7 +3122,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -3410,14 +3140,7 @@
           "reps_high": 8,
           "load_kg": null,
           "intensity_label": "RIR 1–2",
-          "intensity": {
-            "RirRange": {
-              "lo": 1,
-              "hi": 2
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 8.0,
@@ -3454,7 +3177,6 @@
           "calis": {
             "ladder": "VerticalPull",
             "rung": 4,
-            "rung_count": 8,
             "easier": {
               "rung": 3,
               "name": "Negative pull-up",
@@ -3470,7 +3192,6 @@
               "timed_hold": false
             },
             "load_capable": true,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -3489,14 +3210,7 @@
           "reps_high": 12,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -3533,7 +3247,6 @@
           "calis": {
             "ladder": "HorizontalPull",
             "rung": 0,
-            "rung_count": 7,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -3543,7 +3256,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -3562,14 +3274,7 @@
           "reps_high": 12,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -3606,7 +3311,6 @@
           "calis": {
             "ladder": "Squat",
             "rung": 0,
-            "rung_count": 7,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -3616,7 +3320,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -3635,14 +3338,7 @@
           "reps_high": 15,
           "load_kg": null,
           "intensity_label": "RIR 0–1",
-          "intensity": {
-            "RirRange": {
-              "lo": 0,
-              "hi": 1
-            }
-          },
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "",
           "timed_hold": false,
           "target_rpe": 9.0,
@@ -3679,7 +3375,6 @@
           "calis": {
             "ladder": "Hinge",
             "rung": 0,
-            "rung_count": 8,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -3689,7 +3384,6 @@
               "timed_hold": false
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },
@@ -3708,9 +3402,7 @@
           "reps_high": 0,
           "load_kg": null,
           "intensity_label": "hold until you almost can't",
-          "intensity": "Prose",
           "rest_sec": 180,
-          "rep_count": 0,
           "rep_volume": "20–45 s hold",
           "timed_hold": true,
           "target_rpe": null,
@@ -3747,7 +3439,6 @@
           "calis": {
             "ladder": "Core",
             "rung": 0,
-            "rung_count": 7,
             "easier": null,
             "harder": {
               "rung": 1,
@@ -3757,7 +3448,6 @@
               "timed_hold": true
             },
             "load_capable": false,
-            "test_hold_sec": 0,
             "ballistic": false,
             "needs_effort_rating": false
           },

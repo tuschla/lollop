@@ -3,7 +3,6 @@ package app.milestone.qa
 import android.Manifest
 import android.app.Application
 import android.content.Context
-import android.content.Intent
 import android.os.Bundle
 import android.os.Parcel
 import androidx.compose.ui.semantics.SemanticsActions
@@ -44,13 +43,13 @@ import app.milestone.DistanceUnit
 import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.EventLog
 import app.milestone.GoalDistance
 import app.milestone.GpsPoint
 import app.milestone.HistoryFocus
 import app.milestone.LiftGoal
 import app.milestone.LiftResultView
 import app.milestone.MainActivity
+import app.milestone.OpenDest
 import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.RecentRace
@@ -58,6 +57,7 @@ import app.milestone.RunSession
 import app.milestone.TRACK_DECIMATION_CAP
 import app.milestone.UiMessages
 import app.milestone.runDistLabel
+import app.milestone.openIntent
 import app.milestone.segmentKm
 import app.milestone.todayEpochDay
 import app.milestone.utcOffsetSec
@@ -68,9 +68,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import org.junit.After
@@ -227,12 +225,6 @@ class RestoreRoundtripTest {
         rule.waitForIdle()
     }
 
-    private fun waitForState(timeoutMs: Long = 15_000, cond: () -> Boolean) =
-        rule.waitUntil(timeoutMs) {
-            rule.onAllNodes(isRoot()).fetchSemanticsNodes()
-            cond()
-        }
-
     private fun waitForText(text: String, substring: Boolean = false, timeoutMs: Long = 15_000) =
         rule.waitUntil(timeoutMs) { rule.onAllNodes(hasText(text, substring = substring)).fetchSemanticsNodes().isNotEmpty() }
 
@@ -241,12 +233,7 @@ class RestoreRoundtripTest {
 
     private fun count(m: SemanticsMatcher) = rule.onAllNodes(m).fetchSemanticsNodes().size
 
-    private fun logLines(): List<String> =
-        File(ctx.filesDir, "event-log.ndjson").takeIf { it.exists() }?.readLines()?.filter { it.isNotBlank() }.orEmpty()
-
-    private fun logCount(variant: String) = logLines().count { EventLog.variantOf(it) == variant }
-
-    private fun payload(line: String, variant: String) = Json.parseToJsonElement(line).jsonObject[variant]!!.jsonObject
+    private fun logCount(variant: String) = journeyLog().count { it.variant == variant }
 
     private val model get() = checkNotNull(EventDispatcher.model.value)
 
@@ -268,21 +255,13 @@ class RestoreRoundtripTest {
     private fun todaysSets(exercise: String): List<LiftResultView> =
         model.lifts.filter { it.exercise == exercise && it.observed_at >= todayStartSec }
 
-    private fun openLoopFor(exercise: String) {
-        rule.onNode(
-            hasClickAction() and hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n, 1), substring = true) and
-                hasAnyAncestor(hasTestTag("plan-item:$exercise")),
-        ).performScrollTo().performClick()
-        waitForText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)
-    }
-
     private fun weightWell(shown: String) = hasContentDescription("${str(R.string.log_field_weight)}, $shown kg")
 
     @Test
     fun aHalfFilledSetSurvivesRotationAndProcessDeathAndIsLoggedExactlyOnce() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        openLoopFor("Back Squat")
+        rule.openLoopFor("Back Squat")
         // A working weight off the 117.5 kg prefill (a light one would be a warm-up).
         rule.typeWeight("122.5")
         rule.onNode(weightWell("122.5")).assertExists()
@@ -296,7 +275,7 @@ class RestoreRoundtripTest {
         // Save, and rotate before the core has even answered.
         rule.onNodeWithTag("editor-primary").performClick()
         recreate()
-        waitForState { todaysSets("Back Squat").size == 1 }
+        rule.waitForState { todaysSets("Back Squat").size == 1 }
         rule.assertTextCountEventually(str(R.string.log_set_header_n_of_n, 2, 4), 1)
         assertEquals(listOf(122.5), todaysSets("Back Squat").map { it.weight_kg })
         assertEquals("seeded + one", 2, logCount("LogSet"))
@@ -306,7 +285,7 @@ class RestoreRoundtripTest {
         assertSavedStateFitsABinderTransaction(size)
         ProcessDeath.kill(ctx)
         ProcessDeath.relaunchWithState(rule, state)
-        waitForState { todaysSets("Back Squat").size == 1 }
+        rule.waitForState { todaysSets("Back Squat").size == 1 }
         assertEquals(0, count(hasText(str(R.string.log_set_header_n_of_n, 1, 4))))
         assertEquals(listOf(122.5), todaysSets("Back Squat").map { it.weight_kg })
 
@@ -345,9 +324,9 @@ class RestoreRoundtripTest {
 
         rule.pickRating("checkin-mood", 3)
         rule.onNodeWithTag("editor-primary").performClick()
-        waitForState { logCount("SubmitCheckin") == 1 && model.checked_in_today }
+        rule.waitForState { logCount("SubmitCheckin") == 1 && model.checked_in_today }
         recreate()
-        waitForState { EventDispatcher.model.value != null }
+        rule.waitForState { EventDispatcher.model.value != null }
         assertEquals("one check-in after a rotation", 1, logCount("SubmitCheckin"))
 
         ProcessDeath.kill(ctx)
@@ -362,19 +341,8 @@ class RestoreRoundtripTest {
 
     // ═══ 3. The run Finish review ═══════════════════════════════════════════════
 
-    /** 21 fixes, ~30 m every 10 s (600 m, 200 s), recording, as the service leaves them. */
-    private fun seedRecordingRun() {
-        val t0 = AppClock.nowSec() - 400
-        for (i in 0..20) {
-            RunSession.add(GpsPoint(52.5200 + i * 0.00027, 13.4050, t0 + i * 10L, 5.0), (1_000L + i * 10L) * 1_000_000_000L)
-        }
-        RunSession.tracking.value = true
-    }
-
     private fun launchOnTracker() {
-        lastScenario = launchMain(
-            Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_TRACKING, true),
-        )
+        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
         waitForText(str(R.string.track_btn_stop), timeoutMs = 30_000)
     }
 
@@ -393,13 +361,13 @@ class RestoreRoundtripTest {
         } finally {
             rule.mainClock.autoAdvance = true
         }
-        waitForState { logCount("LogRunTrack") >= 1 && !RunSession.saving.value && RunSession.points.value.isEmpty() }
+        rule.waitForState { logCount("LogRunTrack") >= 1 && !RunSession.saving.value && RunSession.points.value.isEmpty() }
     }
 
     @Test
     fun theFinishReviewSurvivesRotationWithItsRatingAndTheRunSavesOnce() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        seedRecordingRun()
+        QaHarness.seedRecordingRun()
         launchOnTracker()
         stopToFinishReview()
         rule.pickRating("effort-scale", 7)
@@ -415,9 +383,9 @@ class RestoreRoundtripTest {
 
         saveRunAndAwait()
         recreate()
-        waitForState { model.runs.size == 1 }
+        rule.waitForState { model.runs.size == 1 }
         assertEquals("one run after a rotation", 1, logCount("LogRunTrack"))
-        val saved = payload(logLines().single { EventLog.variantOf(it) == "LogRunTrack" }, "LogRunTrack")
+        val saved = journeyLog().single { it.variant == "LogRunTrack" }.payload
         assertEquals(7, saved["session_rpe"]!!.jsonPrimitive.int)
         assertEquals("Interval", saved["workout_type"]!!.jsonPrimitive.content)
         assertEquals(0, count(hasText(str(R.string.track_finish_title))))
@@ -431,15 +399,8 @@ class RestoreRoundtripTest {
 
     // ═══ 4 + 6. An open run detail sheet, its rate sheet and the trim sheet ═════
 
-    /** 10.1 km at an even 5:00 /km (1011 fixes, 10 m every 3 s) ending at 07:00. */
-    private fun gpsTenK(): Event.LogRunTrack {
-        val end = QaHarness.daysAgoAtMidday(0) - 5 * 3600
-        val start = end - 1010 * 3L
-        val points = (0 until 1011).map { i ->
-            GpsPoint(lat = 47.0 + i * 10.0 / 111_195.0, lon = 8.0, observedAt = start + i * 3L, accuracyM = 5.0)
-        }
-        return Event.LogRunTrack(points = points, hrPctMax = 0.0, longestRecentKm = 0.0, observedAt = end, entryId = end * 1000)
-    }
+    /** This morning's 10K, finished at 07:00. */
+    private fun gpsTenK() = QaHarness.gpsTenK(QaHarness.daysAgoAtMidday(0) - 5 * 3600 - 1010 * 3L)
 
     private fun runnerProfile(): Event = Event.SetProfile(
         progressionCadence = ProgressionCadence.WeekToWeek,
@@ -459,7 +420,7 @@ class RestoreRoundtripTest {
      *  the way the app's own "View" action does. */
     private fun openRunDetail(run: Event.LogRunTrack) {
         val older = QaHarness.daysAgoAtMidday(3)
-        QaHarness.seedLog(ctx, listOf(runnerProfile(), Event.LogRun(6.0, 33.0, 0.0, 0.0, older, older * 1000), run))
+        QaHarness.seedLog(ctx, listOf(runnerProfile(), Event.LogRun(6.0, 33.0, 0.0, older, older * 1000), run))
         rule.launchApp()
         HistoryFocus.request(run.entryId, run.observedAt)
         waitForTag("run-trim")
@@ -483,7 +444,7 @@ class RestoreRoundtripTest {
         assertEquals("the unsaved rating is kept", picked, ratingState("effort-scale"))
         assertEquals(0, logCount("AmendRunMeta"))
         rule.onNodeWithTag("run-rate-save").performClick()
-        waitForState { model.runs.firstOrNull { it.entry_id == run.entryId }?.session_rpe == 6 }
+        rule.waitForState { model.runs.firstOrNull { it.entry_id == run.entryId }?.session_rpe == 6 }
         assertEquals(1, logCount("AmendRunMeta"))
 
         // Killed in the background with the detail open; back from Recents.
@@ -494,7 +455,7 @@ class RestoreRoundtripTest {
         waitForTag("run-trim")
         assertEquals(2, model.runs.size)
         assertEquals(6, model.runs.single { it.entry_id == run.entryId }.session_rpe)
-        assertEquals(1, logLines().count { it.contains("\"LogRunTrack\"") })
+        assertEquals(1, logCount("LogRunTrack"))
     }
 
     /** The two thumbs of the trim [androidx.compose.material3.RangeSlider], start first. */
@@ -543,9 +504,9 @@ class RestoreRoundtripTest {
         rule.waitUntil(15_000) { count(message) == 1 && count(confirmInDialog) == 1 }
         assertEquals(0, logCount("TrimRunTrack"))
         rule.onNode(confirmInDialog).performClick()
-        waitForState { logCount("TrimRunTrack") == 1 && model.runs.single { it.entry_id == run.entryId }.distance_km < beforeKm - 1.0 }
+        rule.waitForState { logCount("TrimRunTrack") == 1 && model.runs.single { it.entry_id == run.entryId }.distance_km < beforeKm - 1.0 }
 
-        val trim = payload(logLines().single { EventLog.variantOf(it) == "TrimRunTrack" }, "TrimRunTrack")
+        val trim = journeyLog().single { it.variant == "TrimRunTrack" }.payload
         assertEquals("start kept from the chosen second", (first + 300).toDouble(), trim["keep_from_sec"]!!.jsonPrimitive.long.toDouble(), 1.0)
         assertEquals("end kept to the chosen second", (last - 600).toDouble(), trim["keep_until_sec"]!!.jsonPrimitive.long.toDouble(), 1.0)
         val trimmedKm = model.runs.single { it.entry_id == run.entryId }.distance_km
@@ -604,7 +565,7 @@ class RestoreRoundtripTest {
             next()
         }
         rule.onNode(hasText(str(R.string.setup_btn_finish)) and hasClickAction()).performClick()
-        waitForState(30_000) { EventDispatcher.model.value?.profile != null && EventDispatcher.model.value?.program != null }
+        rule.waitForState(30_000) { EventDispatcher.model.value?.profile != null && EventDispatcher.model.value?.program != null }
 
         // Every answer from before the rotation and the process death landed, once.
         assertEquals(1, logCount("SetProfile"))
@@ -669,7 +630,7 @@ class RestoreRoundtripTest {
             rule.onNode(hasText("$k") and hasClickAction() and hasAnyAncestor(hasTestTag("numeric-keypad"))).performScrollTo().performClick()
         }
         rule.onNode(hasText(str(R.string.log_btn_compute_protein)) and hasClickAction()).performScrollTo().performClick()
-        waitForState { model.protein_input?.bodyweight_kg == 95.0 }
+        rule.waitForState { model.protein_input?.bodyweight_kg == 95.0 }
         val second = model.protein_figures.single()
         assertTrue("the answer moved with the weight", second.high_g_per_day > first.high_g_per_day)
         val headline = "${Math.round(second.low_g_per_day)}–${Math.round(second.high_g_per_day)}"
@@ -729,7 +690,7 @@ class RestoreRoundtripTest {
                 profile,
                 Event.GeneratePlan(todayEpochDay() - 10),
                 QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(3)),
-                Event.LogRun(8.0, 44.0, 0.0, 0.0, runAt, runAt * 1000),
+                Event.LogRun(8.0, 44.0, 0.0, runAt, runAt * 1000),
             ),
         )
         rule.launchApp()
@@ -737,17 +698,17 @@ class RestoreRoundtripTest {
         val beforeProfile = checkNotNull(before.profile)
 
         rule.selectTab(str(R.string.main_dest_profile))
-        tapProfileOption(hasText(AppTheme.Meadow.label) and isSelectable())
+        tapProfileOption(hasText(AppTheme.Meadow.name) and isSelectable())
         tapProfileOption(segment(str(R.string.main_unit_mi)))
         tapProfileOption(segment(app.milestone.weightSuffix(app.milestone.WeightUnit.Lb)))
-        waitForState { model.profile?.weight_lb == true }
+        rule.waitForState { model.profile?.weight_lb == true }
         assertEquals(AppTheme.Meadow, AppSettings.theme.value)
         assertEquals(DistanceUnitOverride.Mi, AppSettings.distanceUnitOverride.value)
 
         recreate()
         assertEquals(AppTheme.Meadow, AppSettings.theme.value)
-        rule.onAllNodes(hasScrollToNodeAction())[0].performScrollToNode(hasText(AppTheme.Meadow.label) and isSelectable())
-        rule.onNode(hasText(AppTheme.Meadow.label) and isSelectable()).assertIsSelected()
+        rule.onAllNodes(hasScrollToNodeAction())[0].performScrollToNode(hasText(AppTheme.Meadow.name) and isSelectable())
+        rule.onNode(hasText(AppTheme.Meadow.name) and isSelectable()).assertIsSelected()
 
         // Cold start: only what was saved can bring them back.
         ProcessDeath.kill(ctx)
@@ -763,7 +724,7 @@ class RestoreRoundtripTest {
         // and every logged number are untouched by the two unit flips.
         rule.selectTab(str(R.string.main_dest_profile))
         tapProfileOption(segment(app.milestone.weightSuffix(app.milestone.WeightUnit.Kg)))
-        waitForState { model.profile?.weight_lb == false }
+        rule.waitForState { model.profile?.weight_lb == false }
         assertEquals(beforeProfile, model.profile)
         assertEquals(before.program, model.program)
         assertEquals(before.week_plan, model.week_plan)
@@ -803,7 +764,10 @@ class RestoreRoundtripTest {
      *  marks a Pause/Resume boundary before those indices. */
     private fun feedLive(points: List<GpsPoint>, t0: Long, baseElapsedMs: Long, pauseBefore: Set<Int> = emptySet()) {
         points.forEachIndexed { i, p ->
-            if (i in pauseBefore) RunSession.markResumeBoundary()
+            if (i in pauseBefore) {
+                RunSession.setPaused(true)
+                RunSession.setPaused(false)
+            }
             val nanos = (baseElapsedMs + (p.observedAt - t0) * 1000L) * 1_000_000L
             if (RunSession.add(p, nanos)) ActiveRunStore.append(p)
         }
@@ -960,7 +924,7 @@ class RestoreRoundtripTest {
         rule.launchApp()
         rule.assertTextCountEventually(str(R.string.main_resume_run_title), 1)
         rule.onNode(hasText(str(R.string.main_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
-        waitForState { RunSession.tracking.value && RunSession.points.value.size == pts.size }
+        rule.waitForState { RunSession.tracking.value && RunSession.points.value.size == pts.size }
         assertEquals(live.km, RunSession.distanceKm.value, 1e-9)
         assertEquals(live.sec.toDouble(), RunSession.elapsedSec.value.toDouble(), 1.0)
         waitForText(str(R.string.track_btn_stop))
@@ -974,7 +938,7 @@ class RestoreRoundtripTest {
         stopToFinishReview()
         saveRunAndAwait()
         assertEquals(1, logCount("LogRunTrack"))
-        waitForState { model.runs.size == 1 }
+        rule.waitForState { model.runs.size == 1 }
         val saved = model.runs.single()
         assertTrue("saved ${saved.distance_km} km vs live ${live.km} km", abs(saved.distance_km - live.km) <= 0.02 * live.km + 0.01)
         assertEquals(pts.last().observedAt, saved.observed_at)
@@ -1043,7 +1007,7 @@ class RestoreRoundtripTest {
         ActiveRunStore.begin(ctx)
         feedLive(pts, t0, baseElapsedMs = 5_000)
         val uninterrupted = Event.LogRunTrack(
-            points = RunSession.decimatedTrackForCore(), hrPctMax = 0.0, longestRecentKm = 0.0,
+            points = RunSession.decimatedTrackForCore(), hrPctMax = 0.0,
             observedAt = pts.last().observedAt, entryId = 1_000_001, segmentStarts = RunSession.decimatedSegmentStarts(),
         )
         dieAndRecover()

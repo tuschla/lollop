@@ -171,915 +171,172 @@ const fn mk(
 }
 
 // §3.1 Horizontal push (push-up family). Weighted at the terminal (one-arm) rung.
+#[rustfmt::skip]
 static HORIZONTAL_PUSH_TIERS: &[Tier] = &[
-    mk(
-        "Wall push-up",
-        reps(8, 12),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Incline push-up (high)",
-        reps(5, 8),
-        false,
-        Some((0.41, 0.41)),
-        PUSHUP,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Incline push-up (low)",
-        reps(5, 8),
-        false,
-        Some((0.55, 0.55)),
-        PUSHUP,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Knee push-up",
-        reps(5, 8),
-        false,
-        Some((0.49, 0.53)),
-        PUSHUP,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Full push-up",
-        reps(5, 8),
-        false,
-        Some((0.64, 0.75)),
-        PUSHUP,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Decline push-up",
-        reps(5, 8),
-        false,
-        Some((0.70, 0.74)),
-        PUSHUP,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Pseudo-planche push-up",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Archer push-up",
-        reps(5, 8),
-        true,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
+    mk("Wall push-up",           reps(8, 12), false, None,               INF,    SelfLimiting, false, false),
+    mk("Incline push-up (high)", reps(5, 8),  false, Some((0.41, 0.41)), PUSHUP, SelfLimiting, false, false),
+    mk("Incline push-up (low)",  reps(5, 8),  false, Some((0.55, 0.55)), PUSHUP, SelfLimiting, false, false),
+    mk("Knee push-up",           reps(5, 8),  false, Some((0.49, 0.53)), PUSHUP, SelfLimiting, false, false),
+    mk("Full push-up",           reps(5, 8),  false, Some((0.64, 0.75)), PUSHUP, SelfLimiting, false, false),
+    mk("Decline push-up",        reps(5, 8),  false, Some((0.70, 0.74)), PUSHUP, SelfLimiting, false, false),
+    mk("Pseudo-planche push-up", reps(5, 8),  false, None,               INF,    SelfLimiting, false, false),
+    mk("Archer push-up",         reps(5, 8),  true,  None,               INF,    SelfLimiting, false, false),
     // One-arm work leaves reps in reserve (§2.8: failure discouraged on
     // skill/lever/one-arm work — form breakdown and connective-tissue risk).
-    mk(
-        "One-arm push-up",
-        reps(3, 8),
-        true,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
+    mk("One-arm push-up",        reps(3, 8),  true,  None,               INF,    LeaveRir(1),  false, false),
 ];
 
 // §3.2 Dip family.
+#[rustfmt::skip]
 static DIP_TIERS: &[Tier] = &[
-    mk(
-        "Bench dip",
-        reps(8, 12),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Foot-supported dip",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Straight-bar dip",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Full parallel-bar dip",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Ring dip",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
-    mk(
-        "Weighted dip",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
+    mk("Bench dip",             reps(8, 12), false, None, INF, SelfLimiting, false, false),
+    mk("Foot-supported dip",    reps(5, 8),  false, None, INF, SelfLimiting, false, false),
+    mk("Straight-bar dip",      reps(5, 8),  false, None, INF, SelfLimiting, false, false),
+    mk("Full parallel-bar dip", reps(5, 8),  false, None, INF, SelfLimiting, false, false),
+    mk("Ring dip",              reps(5, 8),  false, None, INF, LeaveRir(1),  false, false),
+    mk("Weighted dip",          reps(5, 8),  false, None, INF, LeaveRir(1),  false, false),
 ];
 
 // §3.3 Vertical push (pike → HSPU). All rungs wrist-gated.
+#[rustfmt::skip]
 static VERTICAL_PUSH_TIERS: &[Tier] = &[
-    mk(
-        "Pike push-up",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        true,
-        false,
-    ),
-    mk(
-        "Elevated pike push-up",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        true,
-        false,
-    ),
-    mk(
-        "Wall handstand push-up (partial)",
-        reps(3, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        true,
-        false,
-    ),
-    mk(
-        "Wall handstand push-up (full)",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        true,
-        false,
-    ),
-    mk(
-        "Deficit wall handstand push-up",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        true,
-        false,
-    ),
-    mk(
-        "Freestanding handstand push-up",
-        reps(3, 5),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        false,
-    ),
-    mk(
-        "Weighted handstand push-up",
-        reps(3, 5),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        false,
-    ),
+    mk("Pike push-up",                     reps(5, 8), false, None, INF, SelfLimiting, true, false),
+    mk("Elevated pike push-up",            reps(5, 8), false, None, INF, SelfLimiting, true, false),
+    mk("Wall handstand push-up (partial)", reps(3, 8), false, None, INF, SelfLimiting, true, false),
+    mk("Wall handstand push-up (full)",    reps(5, 8), false, None, INF, SelfLimiting, true, false),
+    mk("Deficit wall handstand push-up",   reps(5, 8), false, None, INF, SelfLimiting, true, false),
+    mk("Freestanding handstand push-up",   reps(3, 5), false, None, INF, LeaveRir(1),  true, false),
+    mk("Weighted handstand push-up",       reps(3, 5), false, None, INF, LeaveRir(1),  true, false),
 ];
 
 // §3.4 Horizontal pull (row family). Body-row rungs carry the measured
 // inverted-row fraction (CAL-LOAD-ROW-001, ~69.5-75.7% at the hands).
+#[rustfmt::skip]
 static HORIZONTAL_PULL_TIERS: &[Tier] = &[
-    mk(
-        "High-incline row",
-        reps(8, 12),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
+    mk("High-incline row",       reps(8, 12), false, None,                 INF, SelfLimiting, false, false),
     // Only the horizontal body row matches Vural's measured suspension-row
     // geometry (~69.5-75.7% BW). The inclined (easier) and feet-elevated (~full
     // BW per calis-load.md §1d) rungs are different leverages the study did not
     // measure → inferred, no invented %BW surfaced.
-    mk(
-        "Inclined body row",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Horizontal body row",
-        reps(5, 8),
-        false,
-        Some((0.695, 0.757)),
-        ROW,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Feet-elevated body row",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Ring row",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Archer row",
-        reps(5, 8),
-        true,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
+    mk("Inclined body row",      reps(5, 8),  false, None,                 INF, SelfLimiting, false, false),
+    mk("Horizontal body row",    reps(5, 8),  false, Some((0.695, 0.757)), ROW, SelfLimiting, false, false),
+    mk("Feet-elevated body row", reps(5, 8),  false, None,                 INF, SelfLimiting, false, false),
+    mk("Ring row",               reps(5, 8),  false, None,                 INF, SelfLimiting, false, false),
+    mk("Archer row",             reps(5, 8),  true,  None,                 INF, SelfLimiting, false, false),
     // One-arm work leaves reps in reserve (§2.8).
-    mk(
-        "One-arm row",
-        reps(3, 8),
-        true,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
+    mk("One-arm row",            reps(3, 8),  true,  None,                 INF, LeaveRir(1),  false, false),
 ];
 
 // §3.5 Vertical pull (pull-up family). Weighted pull-up reachable at rung 4
 // (Full pull-up) in parallel with the one-arm leverage branch (rungs 5–6
 // advance by rung; the one-arm top takes load again).
+#[rustfmt::skip]
 static VERTICAL_PULL_TIERS: &[Tier] = &[
-    mk(
-        "Dead hang",
-        hold(30, 30),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Scapular pulls",
-        reps(8, 12),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Assisted pull-up",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Negative pull-up",
-        reps(3, 5),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
-    mk(
-        "Full pull-up",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "L-sit pull-up",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
+    mk("Dead hang",                hold(30, 30), false, None, INF, SelfLimiting, false, false),
+    mk("Scapular pulls",           reps(8, 12),  false, None, INF, SelfLimiting, false, false),
+    mk("Assisted pull-up",         reps(5, 8),   false, None, INF, SelfLimiting, false, false),
+    mk("Negative pull-up",         reps(3, 5),   false, None, INF, LeaveRir(1),  false, false),
+    mk("Full pull-up",             reps(5, 8),   false, None, INF, SelfLimiting, false, false),
+    mk("L-sit pull-up",            reps(5, 8),   false, None, INF, SelfLimiting, false, false),
     // One-arm work leaves reps in reserve (§2.8).
-    mk(
-        "One-arm assisted pull-up",
-        reps(3, 5),
-        true,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
-    mk(
-        "One-arm pull-up",
-        reps(1, 5),
-        true,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
+    mk("One-arm assisted pull-up", reps(3, 5),   true,  None, INF, LeaveRir(1),  false, false),
+    mk("One-arm pull-up",          reps(1, 5),   true,  None, INF, LeaveRir(1),  false, false),
 ];
 
 // §3.6 Squat (knee-dominant). Split-squat family = 0.59 front-leg share; pistol
 // = 1.0 BW on the stance leg.
+#[rustfmt::skip]
 static SQUAT_TIERS: &[Tier] = &[
-    mk(
-        "Assisted squat",
-        reps(8, 12),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Bodyweight squat",
-        reps(8, 15),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
+    mk("Assisted squat",        reps(8, 12), false, None,               INF,     SelfLimiting, false, false),
+    mk("Bodyweight squat",      reps(8, 15), false, None,               INF,     SelfLimiting, false, false),
     // The 0.59 front-leg share is Bulgarian-specific (rear foot elevated, Arakawa
     // 2025); a floor-foot static lunge shares more to the rear leg → inferred.
-    mk(
-        "Split squat",
-        reps(8, 12),
-        true,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Bulgarian split squat",
-        reps(8, 12),
-        true,
-        Some((0.59, 0.59)),
-        SPLITSQ,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Assisted pistol squat",
-        reps(5, 8),
-        true,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Pistol squat",
-        reps(5, 8),
-        true,
-        Some((1.0, 1.0)),
-        PISTOL,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Weighted pistol squat",
-        reps(5, 8),
-        true,
-        Some((1.0, 1.0)),
-        PISTOL,
-        LeaveRir(1),
-        false,
-        false,
-    ),
+    mk("Split squat",           reps(8, 12), true,  None,               INF,     SelfLimiting, false, false),
+    mk("Bulgarian split squat", reps(8, 12), true,  Some((0.59, 0.59)), SPLITSQ, SelfLimiting, false, false),
+    mk("Assisted pistol squat", reps(5, 8),  true,  None,               INF,     SelfLimiting, false, false),
+    mk("Pistol squat",          reps(5, 8),  true,  Some((1.0, 1.0)),   PISTOL,  SelfLimiting, false, false),
+    mk("Weighted pistol squat", reps(5, 8),  true,  Some((1.0, 1.0)),   PISTOL,  LeaveRir(1),  false, false),
 ];
 
 // §3.7 Hinge (posterior chain), culminating in the Nordic curl (CAL-PREVENT-NORDIC-001).
+#[rustfmt::skip]
 static HINGE_TIERS: &[Tier] = &[
-    mk(
-        "Glute bridge",
-        reps(10, 15),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Single-leg glute bridge",
-        reps(8, 12),
-        true,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Back extension",
-        reps(10, 15),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Single-leg Romanian deadlift",
-        reps(8, 12),
-        true,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
+    mk("Glute bridge",                 reps(10, 15), false, None, INF, SelfLimiting, false, false),
+    mk("Single-leg glute bridge",      reps(8, 12),  true,  None, INF, SelfLimiting, false, false),
+    mk("Back extension",               reps(10, 15), false, None, INF, SelfLimiting, false, false),
+    mk("Single-leg Romanian deadlift", reps(8, 12),  true,  None, INF, SelfLimiting, false, false),
     // Every Nordic rung is a "not to failure" movement (CAL-EFAIL-SAFE-001
     // names the Nordic in its disallowed set; safety_critical).
-    mk(
-        "Assisted Nordic curl",
-        reps(5, 8),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
-    mk(
-        "Negative Nordic curl",
-        reps(3, 6),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
-    mk(
-        "Full Nordic curl",
-        reps(3, 6),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
-    mk(
-        "Weighted Nordic curl",
-        reps(3, 6),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
+    mk("Assisted Nordic curl",         reps(5, 8),   false, None, INF, LeaveRir(1),  false, false),
+    mk("Negative Nordic curl",         reps(3, 6),   false, None, INF, LeaveRir(1),  false, false),
+    mk("Full Nordic curl",             reps(3, 6),   false, None, INF, LeaveRir(1),  false, false),
+    mk("Weighted Nordic curl",         reps(3, 6),   false, None, INF, LeaveRir(1),  false, false),
 ];
 
 // §3.8 Core / anti-extension. Timed rungs progress in seconds.
+#[rustfmt::skip]
 static CORE_TIERS: &[Tier] = &[
-    mk(
-        "Front plank",
-        hold(20, 45),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Long-lever plank",
-        hold(20, 30),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Hollow-body hold",
-        hold(15, 30),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Ab-wheel from knees",
-        reps(5, 10),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Hanging leg raise",
-        reps(8, 12),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Standing ab-wheel",
-        reps(3, 6),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
-    mk(
-        "Dragon flag",
-        reps(3, 6),
-        false,
-        None,
-        INF,
-        SelfLimiting,
-        false,
-        false,
-    ),
+    mk("Front plank",         hold(20, 45), false, None, INF, SelfLimiting, false, false),
+    mk("Long-lever plank",    hold(20, 30), false, None, INF, SelfLimiting, false, false),
+    mk("Hollow-body hold",    hold(15, 30), false, None, INF, SelfLimiting, false, false),
+    mk("Ab-wheel from knees", reps(5, 10),  false, None, INF, SelfLimiting, false, false),
+    mk("Hanging leg raise",   reps(8, 12),  false, None, INF, SelfLimiting, false, false),
+    mk("Standing ab-wheel",   reps(3, 6),   false, None, INF, SelfLimiting, false, false),
+    mk("Dragon flag",         reps(3, 6),   false, None, INF, SelfLimiting, false, false),
 ];
 
 // §3.3 skill row — Handstand balance (skill track). All rungs wrist-gated.
+#[rustfmt::skip]
 static HANDSTAND_TIERS: &[Tier] = &[
-    mk(
-        "Wall walk",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        false,
-    ),
-    mk(
-        "Chest-to-wall handstand",
-        hold(15, 30),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        false,
-    ),
-    mk(
-        "Freestanding kick-up",
-        hold(3, 10),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        false,
-    ),
-    mk(
-        "Freestanding handstand",
-        hold(10, 30),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        false,
-    ),
+    mk("Wall walk",               hold(5, 15),  false, None, INF, LeaveRir(1), true, false),
+    mk("Chest-to-wall handstand", hold(15, 30), false, None, INF, LeaveRir(1), true, false),
+    mk("Freestanding kick-up",    hold(3, 10),  false, None, INF, LeaveRir(1), true, false),
+    mk("Freestanding handstand",  hold(10, 30), false, None, INF, LeaveRir(1), true, false),
 ];
 
 // §3.9 Front lever (straight-arm skill track, tendon-rate-limited).
+#[rustfmt::skip]
 static FRONT_LEVER_TIERS: &[Tier] = &[
-    mk(
-        "Tuck front lever",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        true,
-    ),
-    mk(
-        "Advanced tuck front lever",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        true,
-    ),
-    mk(
-        "Straddle front lever",
-        hold(5, 10),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        true,
-    ),
-    mk(
-        "Full front lever",
-        hold(5, 10),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        true,
-    ),
-    mk(
-        "Front lever pulls",
-        reps(3, 6),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        true,
-    ),
+    mk("Tuck front lever",          hold(5, 15), false, None, INF, LeaveRir(1), false, true),
+    mk("Advanced tuck front lever", hold(5, 15), false, None, INF, LeaveRir(1), false, true),
+    mk("Straddle front lever",      hold(5, 10), false, None, INF, LeaveRir(1), false, true),
+    mk("Full front lever",          hold(5, 10), false, None, INF, LeaveRir(1), false, true),
+    mk("Front lever pulls",         reps(3, 6),  false, None, INF, LeaveRir(1), false, true),
 ];
 
 // §3.9 Planche (straight-arm skill track; wrist-gated + tendon-rate-limited).
+#[rustfmt::skip]
 static PLANCHE_TIERS: &[Tier] = &[
-    mk(
-        "Planche lean",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        true,
-    ),
-    mk(
-        "Tuck planche",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        true,
-    ),
-    mk(
-        "Advanced tuck planche",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        true,
-    ),
-    mk(
-        "Straddle planche",
-        hold(5, 10),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        true,
-    ),
-    mk(
-        "Full planche",
-        hold(5, 10),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        true,
-    ),
-    mk(
-        "Planche push-up",
-        reps(3, 6),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        true,
-        true,
-    ),
+    mk("Planche lean",          hold(5, 15), false, None, INF, LeaveRir(1), true, true),
+    mk("Tuck planche",          hold(5, 15), false, None, INF, LeaveRir(1), true, true),
+    mk("Advanced tuck planche", hold(5, 15), false, None, INF, LeaveRir(1), true, true),
+    mk("Straddle planche",      hold(5, 10), false, None, INF, LeaveRir(1), true, true),
+    mk("Full planche",          hold(5, 10), false, None, INF, LeaveRir(1), true, true),
+    mk("Planche push-up",       reps(3, 6),  false, None, INF, LeaveRir(1), true, true),
 ];
 
 // §3.9 Back lever (easiest straight-arm lever; often the entry skill).
+#[rustfmt::skip]
 static BACK_LEVER_TIERS: &[Tier] = &[
-    mk(
-        "German hang",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        true,
-    ),
-    mk(
-        "Tuck back lever",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        true,
-    ),
-    mk(
-        "Advanced tuck back lever",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        true,
-    ),
+    mk("German hang",              hold(5, 15), false, None, INF, LeaveRir(1), false, true),
+    mk("Tuck back lever",          hold(5, 15), false, None, INF, LeaveRir(1), false, true),
+    mk("Advanced tuck back lever", hold(5, 15), false, None, INF, LeaveRir(1), false, true),
     // Back lever advances uniformly at ~10-15 s clean across the progression
     // (calis-progression.md §3.9), unlike the front-lever/planche end-tier taper.
-    mk(
-        "Straddle back lever",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        true,
-    ),
-    mk(
-        "Full back lever",
-        hold(5, 15),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        true,
-    ),
+    mk("Straddle back lever",      hold(5, 15), false, None, INF, LeaveRir(1), false, true),
+    mk("Full back lever",          hold(5, 15), false, None, INF, LeaveRir(1), false, true),
 ];
 
 // §3.10 Muscle-up (dynamic combination skill track; the rung-0 prereq GATE is
 // NOT a tier — it is [`muscle_up_gate_met`], applied when the calisthenics
 // anchors are built).
+#[rustfmt::skip]
 static MUSCLE_UP_TIERS: &[Tier] = &[
-    mk(
-        "Explosive pull-up",
-        reps(3, 5),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
-    mk(
-        "Muscle-up transition drill",
-        reps(3, 5),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
-    mk(
-        "Negative muscle-up",
-        reps(2, 3),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
-    mk(
-        "Strict muscle-up",
-        reps(1, 5),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
-    mk(
-        "Weighted muscle-up",
-        reps(1, 3),
-        false,
-        None,
-        INF,
-        LeaveRir(1),
-        false,
-        false,
-    ),
+    mk("Explosive pull-up",          reps(3, 5), false, None, INF, LeaveRir(1), false, false),
+    mk("Muscle-up transition drill", reps(3, 5), false, None, INF, LeaveRir(1), false, false),
+    mk("Negative muscle-up",         reps(2, 3), false, None, INF, LeaveRir(1), false, false),
+    mk("Strict muscle-up",           reps(1, 5), false, None, INF, LeaveRir(1), false, false),
+    mk("Weighted muscle-up",         reps(1, 3), false, None, INF, LeaveRir(1), false, false),
 ];
 
 // Power ladders (CAL-POWER-LADDER-001, 13-calisthenics-addendum cal-add-006):
@@ -1087,70 +344,18 @@ static MUSCLE_UP_TIERS: &[Tier] = &[
 // they need a ~1.5×BW back squat first (PLYO-PREREQ-001), which a bodyweight
 // profile cannot show. 3–5 reps at maximal intent, never to failure
 // (STR-PWR-001: 1–5 reps stopped before speed drops).
+#[rustfmt::skip]
 static JUMP_TIERS: &[Tier] = &[
-    mk(
-        "Vertical jump",
-        reps(3, 5),
-        false,
-        None,
-        INF,
-        Ballistic,
-        false,
-        false,
-    ),
-    mk(
-        "Broad jump",
-        reps(3, 5),
-        false,
-        None,
-        INF,
-        Ballistic,
-        false,
-        false,
-    ),
-    mk(
-        "Single-leg hop",
-        reps(3, 5),
-        true,
-        None,
-        INF,
-        Ballistic,
-        false,
-        false,
-    ),
+    mk("Vertical jump",  reps(3, 5), false, None, INF, Ballistic, false, false),
+    mk("Broad jump",     reps(3, 5), false, None, INF, Ballistic, false, false),
+    mk("Single-leg hop", reps(3, 5), true,  None, INF, Ballistic, false, false),
 ];
 
+#[rustfmt::skip]
 static PLYO_PUSH_TIERS: &[Tier] = &[
-    mk(
-        "Incline plyometric push-up",
-        reps(3, 5),
-        false,
-        None,
-        INF,
-        Ballistic,
-        false,
-        false,
-    ),
-    mk(
-        "Plyometric push-up",
-        reps(3, 5),
-        false,
-        None,
-        INF,
-        Ballistic,
-        false,
-        false,
-    ),
-    mk(
-        "Clap push-up",
-        reps(3, 5),
-        false,
-        None,
-        INF,
-        Ballistic,
-        false,
-        false,
-    ),
+    mk("Incline plyometric push-up", reps(3, 5), false, None, INF, Ballistic, false, false),
+    mk("Plyometric push-up",         reps(3, 5), false, None, INF, Ballistic, false, false),
+    mk("Clap push-up",               reps(3, 5), false, None, INF, Ballistic, false, false),
 ];
 
 /// Every leverage ladder (8 dynamic + 5 skill tracks + 2 power ladders). The
@@ -1160,127 +365,23 @@ pub static LADDERS: &[Ladder] = &LADDER_ROWS;
 
 /// Fixed-size backing array of [`LADDERS`], so [`ladder`]'s constant indices
 /// are bounds-checked at compile time.
+#[rustfmt::skip]
 static LADDER_ROWS: [Ladder; 15] = [
-    Ladder {
-        id: HorizontalPush,
-        pattern: "Push-up",
-        skill: false,
-        tiers: HORIZONTAL_PUSH_TIERS,
-        weighted_rungs: &[8],
-        power: false,
-    },
-    Ladder {
-        id: Dip,
-        pattern: "Dip",
-        skill: false,
-        tiers: DIP_TIERS,
-        weighted_rungs: &[5],
-        power: false,
-    },
-    Ladder {
-        id: VerticalPush,
-        pattern: "Overhead push",
-        skill: false,
-        tiers: VERTICAL_PUSH_TIERS,
-        weighted_rungs: &[6],
-        power: false,
-    },
-    Ladder {
-        id: HorizontalPull,
-        pattern: "Row",
-        skill: false,
-        tiers: HORIZONTAL_PULL_TIERS,
-        weighted_rungs: &[6],
-        power: false,
-    },
-    Ladder {
-        id: VerticalPull,
-        pattern: "Pull-up",
-        skill: false,
-        tiers: VERTICAL_PULL_TIERS,
-        weighted_rungs: &[4, 7],
-        power: false,
-    },
-    Ladder {
-        id: Squat,
-        pattern: "Squat",
-        skill: false,
-        tiers: SQUAT_TIERS,
-        weighted_rungs: &[6],
-        power: false,
-    },
-    Ladder {
-        id: Hinge,
-        pattern: "Hips and hamstrings",
-        skill: false,
-        tiers: HINGE_TIERS,
-        weighted_rungs: &[7],
-        power: false,
-    },
-    Ladder {
-        id: Core,
-        pattern: "Core",
-        skill: false,
-        tiers: CORE_TIERS,
-        weighted_rungs: &[6],
-        power: false,
-    },
-    Ladder {
-        id: Handstand,
-        pattern: "Handstand",
-        skill: true,
-        tiers: HANDSTAND_TIERS,
-        weighted_rungs: &[],
-        power: false,
-    },
-    Ladder {
-        id: FrontLever,
-        pattern: "Front lever",
-        skill: true,
-        tiers: FRONT_LEVER_TIERS,
-        weighted_rungs: &[4],
-        power: false,
-    },
-    Ladder {
-        id: Planche,
-        pattern: "Planche",
-        skill: true,
-        tiers: PLANCHE_TIERS,
-        weighted_rungs: &[5],
-        power: false,
-    },
-    Ladder {
-        id: BackLever,
-        pattern: "Back lever",
-        skill: true,
-        tiers: BACK_LEVER_TIERS,
-        weighted_rungs: &[],
-        power: false,
-    },
-    Ladder {
-        id: MuscleUp,
-        pattern: "Muscle-up",
-        skill: true,
-        tiers: MUSCLE_UP_TIERS,
-        weighted_rungs: &[4],
-        power: false,
-    },
-    Ladder {
-        id: Jump,
-        pattern: "Jump",
-        skill: false,
-        tiers: JUMP_TIERS,
-        weighted_rungs: &[],
-        power: true,
-    },
-    Ladder {
-        id: PlyoPush,
-        pattern: "Explosive push-up",
-        skill: false,
-        tiers: PLYO_PUSH_TIERS,
-        weighted_rungs: &[],
-        power: true,
-    },
+    Ladder { id: HorizontalPush, pattern: "Push-up",             skill: false, tiers: HORIZONTAL_PUSH_TIERS, weighted_rungs: &[8],    power: false },
+    Ladder { id: Dip,            pattern: "Dip",                 skill: false, tiers: DIP_TIERS,             weighted_rungs: &[5],    power: false },
+    Ladder { id: VerticalPush,   pattern: "Overhead push",       skill: false, tiers: VERTICAL_PUSH_TIERS,   weighted_rungs: &[6],    power: false },
+    Ladder { id: HorizontalPull, pattern: "Row",                 skill: false, tiers: HORIZONTAL_PULL_TIERS, weighted_rungs: &[6],    power: false },
+    Ladder { id: VerticalPull,   pattern: "Pull-up",             skill: false, tiers: VERTICAL_PULL_TIERS,   weighted_rungs: &[4, 7], power: false },
+    Ladder { id: Squat,          pattern: "Squat",               skill: false, tiers: SQUAT_TIERS,           weighted_rungs: &[6],    power: false },
+    Ladder { id: Hinge,          pattern: "Hips and hamstrings", skill: false, tiers: HINGE_TIERS,           weighted_rungs: &[7],    power: false },
+    Ladder { id: Core,           pattern: "Core",                skill: false, tiers: CORE_TIERS,            weighted_rungs: &[6],    power: false },
+    Ladder { id: Handstand,      pattern: "Handstand",           skill: true,  tiers: HANDSTAND_TIERS,       weighted_rungs: &[],     power: false },
+    Ladder { id: FrontLever,     pattern: "Front lever",         skill: true,  tiers: FRONT_LEVER_TIERS,     weighted_rungs: &[4],    power: false },
+    Ladder { id: Planche,        pattern: "Planche",             skill: true,  tiers: PLANCHE_TIERS,         weighted_rungs: &[5],    power: false },
+    Ladder { id: BackLever,      pattern: "Back lever",          skill: true,  tiers: BACK_LEVER_TIERS,      weighted_rungs: &[],     power: false },
+    Ladder { id: MuscleUp,       pattern: "Muscle-up",           skill: true,  tiers: MUSCLE_UP_TIERS,       weighted_rungs: &[4],    power: false },
+    Ladder { id: Jump,           pattern: "Jump",                skill: false, tiers: JUMP_TIERS,            weighted_rungs: &[],     power: true },
+    Ladder { id: PlyoPush,       pattern: "Explosive push-up",   skill: false, tiers: PLYO_PUSH_TIERS,       weighted_rungs: &[],     power: true },
 ];
 
 /// Everyday names for canonical rungs, so a set logged as "Pull-ups", "Dips"
@@ -1485,18 +586,23 @@ enum Need {
 
 fn rung_need(id: LadderId, idx: u8) -> Option<Need> {
     match (id, idx) {
-        (VerticalPull | FrontLever | BackLever | MuscleUp, _) => Some(Need::Hang),
+        (VerticalPull | FrontLever | BackLever | MuscleUp, _)
+        | (HorizontalPull, 5..=6)
+        | (Core, 4) => Some(Need::Hang),
         (Dip, 4) | (HorizontalPull, 4) => Some(Need::Rings),
         (Dip, 1..=3) | (Dip, 5) => Some(Need::DipSupport),
-        (HorizontalPull, 5..=6) | (Core, 4) => Some(Need::Hang),
         _ => None,
     }
 }
 
 /// Whether a rung can be done with this equipment. Floor, wall, table and
 /// bench variants need nothing; hanging/pulling rungs need a bar or rings;
-/// bar-dip rungs need dip bars or rings; ring-specific rungs need rings.
+/// bar-dip rungs need dip bars or rings; ring-specific rungs need rings. A
+/// rung past the ladder's end is never available.
 pub fn rung_available(id: LadderId, idx: u8, kit: Kit) -> bool {
+    if idx as usize >= ladder(id).tiers.len() {
+        return false;
+    }
     match rung_need(id, idx) {
         None => true,
         Some(Need::Hang) => kit.hang(),
@@ -1527,14 +633,17 @@ pub fn available_above(id: LadderId, from: u8, kit: Kit) -> Option<u8> {
 
 /// The nearest available rung strictly below `from`.
 pub fn available_below(id: LadderId, from: u8, kit: Kit) -> Option<u8> {
-    (0..from).rev().find(|&i| rung_available(id, i, kit))
+    let len = ladder(id).tiers.len() as u8;
+    (0..from.min(len))
+        .rev()
+        .find(|&i| rung_available(id, i, kit))
 }
 
 /// `idx` itself when available, else the nearest easier available rung, else
 /// the nearest harder one (`None` when the ladder needs equipment the athlete
 /// lacks entirely).
 pub fn nearest_available(id: LadderId, idx: u8, kit: Kit) -> Option<u8> {
-    if (idx as usize) < ladder(id).tiers.len() && rung_available(id, idx, kit) {
+    if rung_available(id, idx, kit) {
         return Some(idx);
     }
     available_below(id, idx, kit).or_else(|| available_above(id, idx, kit))
@@ -1562,11 +671,11 @@ pub fn tier_advance_met(qualifying_consecutive_sessions: u8) -> Recommended<bool
 /// Days a straight-arm lever tier must be held before advancing: the 4–6 wk
 /// low end of tendon adaptation (CAL-GATE-NUMBERS-001 engine default,
 /// contested CQ-F11-02; CAL-TENDON-001 rate-limit).
-pub const STRAIGHT_ARM_ACCLIMATION_DAYS: i64 = 28;
+const STRAIGHT_ARM_ACCLIMATION_DAYS: i64 = 28;
 
 /// Straight-arm static acclimation (CAL-GATE-NUMBERS-001 engine default,
 /// contested CQ-F11-02): tendon adapts on a weeks-to-months timescale, so a
-/// straight-arm lever tier must be held ≥ [`STRAIGHT_ARM_ACCLIMATION_DAYS`]
+/// straight-arm lever tier must be held ≥ `STRAIGHT_ARM_ACCLIMATION_DAYS` (28)
 /// before advancing (CAL-TENDON-001 rate-limit).
 pub fn static_acclimation_ok(days_at_current_tier: i64) -> Recommended<bool> {
     graded(
@@ -1608,14 +717,13 @@ pub const NOVICE_RIR: (u8, u8) = (
 /// "high-rep": low-load work that must approach failure
 /// (CAL-INTENSITY-FLOOR-001) and where self-reported reps in reserve are least
 /// accurate (CAL-RIR-ACC-001, Halperin 2022: worse above 12 reps).
-pub const HIGH_REP_BAND_TOP: u16 = 12;
+const HIGH_REP_BAND_TOP: u16 = 12;
 
 /// True for an "easy high-rep" rung (CAL-INTENSITY-FLOOR-001): an unloaded
-/// self-limiting rung whose band reaches ≥ [`HIGH_REP_BAND_TOP`] (or a hold),
+/// self-limiting rung whose band reaches ≥ `HIGH_REP_BAND_TOP` (or a hold),
 /// and so is every easier rung of its ladder. A high-rep rung sitting ABOVE a
-/// low-rep rung
-/// (hanging leg raise over the knee ab-wheel) is not "easy", so the effort
-/// target never drops toward failure as the ladder gets harder.
+/// low-rep rung (hanging leg raise over the knee ab-wheel) is not "easy", so
+/// the effort target never drops toward failure as the ladder gets harder.
 pub fn easy_rung(id: LadderId, idx: u8) -> bool {
     let tiers = ladder(id).tiers;
     (idx as usize) < tiers.len()
@@ -1670,7 +778,7 @@ pub fn rir_band(
 
 /// True when advancing this rung keys on reps/hold achieved ONLY, never on a
 /// reported RIR ceiling: ballistic work, and unloaded self-limiting holds or
-/// rep bands reaching [`HIGH_REP_BAND_TOP`]+ (`target` = the prescribed working
+/// rep bands reaching `HIGH_REP_BAND_TOP`+ (`target` = the prescribed working
 /// band), where self-reported reps in reserve are least accurate
 /// (CAL-RIR-ACC-001).
 pub fn performance_gated(tier: &Tier, target: TierTarget, loaded: bool) -> bool {
@@ -1744,10 +852,10 @@ const STRENGTH_GOAL_SKIP_REPS: u16 = 16;
 /// Multi-rung skip threshold (CAL-PLACE-001, contested CQ-F11-01): reps at or
 /// above 1.5× the working band top — or `STRENGTH_GOAL_SKIP_REPS` on a
 /// strength/power goal, where such a set has become an endurance stimulus —
-/// mean the rung is far too
-/// easy, so the plan steps more than one rung after a single session. Only for
-/// unloaded self-limiting rep rungs: never on straight-arm, leave-RIR, timed or
-/// ballistic work (tendon and failure-safety rules).
+/// mean the rung is far too easy, so the plan steps more than one rung after a
+/// single session. Only for unloaded self-limiting rep rungs: never on
+/// straight-arm, leave-RIR, timed or ballistic work (tendon and failure-safety
+/// rules).
 pub fn skip_threshold(tier: &Tier, goal: LiftGoal) -> Recommended<Option<u16>> {
     let th = if tier.straight_arm
         || tier.target.is_timed()
@@ -1810,14 +918,14 @@ pub fn reentry(gap_days: i64) -> Recommended<Reentry> {
 }
 
 /// Plate grid for added calisthenics load (kg): the smallest common plate.
-pub const LOAD_GRID_KG: f64 = 1.25;
+const LOAD_GRID_KG: f64 = 1.25;
 
 /// The pounds-profile plate grid in kg: the 2.5 lb small plate (1 lb =
 /// 0.45359237 kg exactly), so a lb user never sees a fractional-lb load.
-pub const LOAD_GRID_LB_IN_KG: f64 = 2.5 * 0.45359237;
+const LOAD_GRID_LB_IN_KG: f64 = 2.5 * 0.45359237;
 
 /// The added-load plate grid in kg for the profile's display unit.
-pub fn load_grid_kg(weight_lb: bool) -> f64 {
+fn load_grid_kg(weight_lb: bool) -> f64 {
     if weight_lb {
         LOAD_GRID_LB_IN_KG
     } else {
@@ -1837,10 +945,10 @@ pub fn floor_to_load_grid(kg: f64, weight_lb: bool) -> f64 {
 pub const LOAD_STEP_SYSTEM_FRAC: f64 = 0.025;
 
 /// One added-load step at a weighted rung (STR-LOADPROG-001: add 2–10% once
-/// the target is beaten; the conservative low end): [`LOAD_STEP_SYSTEM_FRAC`] of the system load
-/// (bodyweight + added) with a one-plate minimum, rounded UP to the plate grid
-/// (1.25 kg, or 2.5 lb for a pounds profile). With no bodyweight on the
-/// profile the step is one plate.
+/// the target is beaten; the conservative low end): [`LOAD_STEP_SYSTEM_FRAC`]
+/// of the system load (bodyweight + added) with a one-plate minimum, rounded
+/// UP to the plate grid (1.25 kg, or 2.5 lb for a pounds profile). With no
+/// bodyweight on the profile the step is one plate.
 pub fn load_step_kg(
     bodyweight_kg: Option<f64>,
     added_kg: f64,
@@ -1866,16 +974,15 @@ pub fn effective_load_kg(tier: &Tier, bodyweight_kg: f64, added_kg: f64) -> Opti
 /// Highest effective rep count a calisthenics e1RM is estimated from
 /// (CAL-E1RM-001: "≤ ~12 reps"); distinct from the barbell
 /// [`crate::strength::E1RM_RELIABLE_REP_CAP`].
-pub const CALIS_E1RM_REP_CAP: u32 = 12;
+const CALIS_E1RM_REP_CAP: u32 = 12;
 
 /// Estimated 1-rep max on TOTAL system load for a loaded ladder set
 /// (CAL-E1RM-001: e1RM only for weighted calisthenics, on system load, at
-/// ≤ [`CALIS_E1RM_REP_CAP`] reps). System load = measured %BW × bodyweight +
-/// added; for the weighted (two-arm) pull-up bodyweight + added, since a
-/// pull-up moves ~90–100%
-/// of bodyweight (CAL-LOAD-PULL-001). `None` for an unloaded set, too many
-/// reps, no bodyweight, or a rung with no known fraction (the one-arm top has
-/// none).
+/// ≤ `CALIS_E1RM_REP_CAP` (12) reps). System load = measured %BW ×
+/// bodyweight + added; for the weighted (two-arm) pull-up bodyweight + added,
+/// since a pull-up moves ~90–100% of bodyweight (CAL-LOAD-PULL-001). `None`
+/// for an unloaded set, too many reps, no bodyweight, or a rung with no known
+/// fraction (the one-arm top has none).
 pub fn system_load_e1rm(
     id: LadderId,
     idx: u8,
@@ -1913,7 +1020,7 @@ pub fn ballistic_sets(tier: &Tier) -> Recommended<u8> {
 
 /// Beginner plyometric contact ceiling per item (PLYO-001: beginner 80–100
 /// contacts per session; the low end).
-pub const PLYO_CONTACT_CAP: u32 = 80;
+pub(crate) const PLYO_CONTACT_CAP: u32 = 80;
 
 /// Rest between ballistic sets, seconds (STR-PWR-001: 3–5 min; the low end).
 pub const BALLISTIC_REST_SEC: u16 = 180;

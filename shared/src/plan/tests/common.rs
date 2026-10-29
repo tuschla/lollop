@@ -20,8 +20,7 @@ pub(super) fn long_run_km(prog: &Program) -> Option<f64> {
         .and_then(|s| match &s.prescriptions[0].value {
             Prescription::Run(r) => match r.volume {
                 RunVolume::DistanceKm(km) => Some(km as f64),
-                RunVolume::DurationMin(_) => None,
-                RunVolume::RunWalk { .. } => None,
+                _ => None,
             },
             _ => None,
         })

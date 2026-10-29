@@ -52,17 +52,11 @@ import androidx.compose.ui.unit.dp
 import java.util.Locale
 
 /**
- * Today (01-today + 02-coach, merged: the Coach tab is folded into Today so one
- * screen owns the day). Order: readiness strip →
- * today's call → adjustments & feedback (directly below the call, they can
- * carry safety-relevant guidance and must never sit below the fold) → plan
- * (next-session hero, this week) → e1RM trend. The calculators live on Profile.
- * States: B. empty "Get started" (then the plan prompt); C. safety override
- * (the global banner dominates; latest guidance + the read-only week).
- *
- * "Today's call" renders the CORE-owned `today_headline` (safety hold >
- * adjustment > feedback > all-clear), prioritization is coaching logic and
- * lives in the core; the shell never computes it.
+ * Today: the status cards, the readiness strip, the hero (the next session, else
+ * the plan or setup prompt), this week, then the e1RM trend. While training is
+ * blocked the pinned banner carries the call; Today then shows only a hold card
+ * the banner does not state, what still works and the read-only week. The call
+ * is the core's `today_headline`; the shell never ranks it.
  */
 @Composable
 internal fun TodayDestination(
@@ -83,12 +77,6 @@ internal fun TodayDestination(
     // Re-runs guided setup seeded from the profile (a profile with nothing to plan).
     onRerunSetup: () -> Unit = {},
 ) {
-    val headline = model.today_headline
-    // Last logged activity: the view lists are chronological oldest-first -
-    // lastOrNull() is the most recent of each. Used for the hasActivity signal;
-    // Today shows no recent-activity list (History owns that).
-    val lastLift = model.lifts.lastOrNull()
-    val lastRun = model.runs.lastOrNull()
     // Removing the generated plan is confirm-gated.
     var confirmRemovePlan by rememberSaveable { mutableStateOf(false) }
     // The day open under the week strip, hoisted so a move opens its target day.
@@ -115,20 +103,15 @@ internal fun TodayDestination(
         model.checkin_today != null ||
         model.readiness_summary.isNotEmpty() ||
         model.baseline_status.isNotEmpty()
-    val hasActivity = lastLift != null || lastRun != null
-    val hasAnything = hasCoachSignal || hasActivity
+    val hasAnything = hasCoachSignal || model.lifts.isNotEmpty() || model.runs.isNotEmpty()
 
     val trend = remember(model.lifts, model.next_session, model.week_plan) { e1rmTrend(model) }
 
     // Modality gating: the e1RM trend is a lifting signal. A not-yet-set-up
     // user (profile == null) still sees it.
     val showLifting = model.profile == null || model.showLifting()
-    // Weight display unit for kg figures on Today (the e1RM trend card).
     val weightUnit = model.weightUnit()
-
-    // Memoized so the Today list doesn't re-run the priority sort every
-    // recomposition (mirrors the SafetyBanner lookup).
-    val safetyCard = remember(model.adjustments) { dominantSafetyAdjustment(model) }
+    val hold = remember(model.today_headline, model.adjustments) { holdEvidence(model) }
 
     LazyColumn(
         state = listState,
@@ -146,46 +129,24 @@ internal fun TodayDestination(
             if (youthPause) {
                 item { YouthHoldCard(model, onOpenProfile) }
             }
-            // C. Safety override: the banner (global, pinned above) dominates and
-            // carries the call ("DO NOT TRAIN"), the reason, the way back and the
-            // hold's evidence behind its "?". A hold the banner (or the youth
-            // card) states in full ([bannerStatesHold]) gets nothing on Today that
-            // repeats it. Any other hold (a medical referral, a review deferral)
-            // keeps the core's own hold summary as one SAFETY card, since its
-            // instruction is more specific than the banner. Prefer the core's OWN hold resolution:
-            // build_headline's "safety_hold" rung already picks the dominant source
-            // (onboarding gate > readiness stop > review deferral) WITH its
-            // evidence, including a gates-only medical-referral hold, which
-            // produces NO adjustment row at all; the highest-priority safety
-            // adjustment stays as the fallback.
-            val hold = headline?.takeIf { it.kind == "safety_hold" && it.summary.isNotBlank() }
+            // A hold the banner (or the youth card) states in full gets nothing
+            // here. Any other (a medical referral, a review deferral) keeps the
+            // core's own hold summary as one card: its instruction is more
+            // specific than the banner's.
             val pregnancyWarning = model.profile?.health?.pregnancy_warning_sign == true
-            if (!bannerStatesHold(model.hold_reason, model.safety_tier, pregnancyWarning) && (hold != null || safetyCard != null)) {
+            if (hold != null && !bannerStatesHold(model.hold_reason, model.safety_tier, pregnancyWarning)) {
                 item {
-                    // Safety hold card: no confidence; safety is a rule, not a
-                    // probability. Grade + citation stay behind the "?".
-                    if (hold != null) {
-                        EvidenceCard(
-                            hold.summary, hold.grade, hold.citation,
-                            hold.confidence, hold.safety_critical, hold.contested,
-                            confidenceInWhy = false, why = hold.why,
-                            status = StatusTone.Adjusted,
-                            statusOverline = stringResource(R.string.main_status_on_hold),
-                        )
-                    } else if (safetyCard != null) {
-                        EvidenceCard(
-                            safetyCard.summary, safetyCard.grade, safetyCard.citation,
-                            safetyCard.confidence, safetyCard.safety_critical, safetyCard.contested,
-                            confidenceInWhy = false, why = safetyCard.why,
-                            status = StatusTone.Adjusted,
-                            statusOverline = stringResource(R.string.main_status_on_hold),
-                        )
-                    }
+                    // Safety is a rule, not a probability: no confidence meter.
+                    EvidenceCard(
+                        hold.summary, hold.grade, hold.citation,
+                        hold.confidence, hold.safety_critical, hold.contested,
+                        confidenceInWhy = false, why = hold.why,
+                        status = StatusTone.Adjusted,
+                        statusOverline = stringResource(R.string.main_status_on_hold),
+                    )
                 }
             }
-            // What still works while training is paused, so the blocked screen
-            // isn't a dead end. Logging stays on the Log button (no tiles here). The
-            // youth card already says what still works.
+            // What still works while training is paused (the youth card says it itself).
             if (!youthPause) {
                 item {
                     Text(
@@ -203,51 +164,31 @@ internal fun TodayDestination(
                     YouthActivityCard(activity, onLog = { onOpenSheet(LogMode.Activity) }, onEvent = onEvent)
                 }
             }
-            // The week stays in view, read-only (held days read "on hold"), so the
-            // paused screen still shows where the plan stands. Nothing here logs
-            // or moves a session while the hold is active.
+            // The week stays in view, read-only (held days read "on hold").
             if (model.week_plan.isNotEmpty() || model.program != null) {
                 item { SectionOverline(stringResource(R.string.main_overline_this_week)) }
                 item {
                     ThisWeekCard(
-                        consistency = model.consistency
-                            ?.takeIf { model.week_plan.isNotEmpty() && it.this_week_planned > 0 },
+                        consistency = model.consistency,
                         week = model.week_plan,
                         today = model.today(),
                         weightUnit = weightUnit,
                         program = model.program,
                         footnote = null,
                         onRemovePlan = { confirmRemovePlan = true },
-                        onLogItem = { _, _ -> },
-                        onLogRun = {},
-                        onEndExercise = { _, _ -> },
-                        onReopen = { _, _ -> },
-                        onMove = { _, _ -> },
+                        actions = null,
                         heroDay = -1L,
                         selectedDay = weekSelectedDay,
                         onSelectDay = { weekSelectedDay = it },
-                        readOnly = true,
                     )
                 }
             }
-            // Today shows no recent-activity copy here (History owns that).
             return@LazyColumn
         }
 
-        // 1. Status cards, then the readiness strip, then the hero (all inside
-        // TodayHeroCard). The strip shows passive per-signal qualitative pills
-        // only; every signal is logged through the Log button / check-in, never
-        // from the strip. Deliberately NO ring and NO 0–100 number (INVARIANT 1).
-        // Render NOTHING when there is no readiness data at all: gate on actual
-        // pills (measured signals or building baselines), not `hasAnything`, so an
-        // empty strip never mounts (no caption either).
+        // The readiness strip mounts only with a pill or a baseline caption to show:
+        // passive per-signal states, no ring, no 0–100 number (INVARIANT 1).
         val hasReadinessPills = model.stripReadinessRows().isNotEmpty() || model.baseline_status.isNotEmpty()
-
-        // 2. Today hero: one card merging Today's call + feedback +
-        // adjustments + the next-session/plan-state card. The call/adjustments
-        // portion only renders when there's signal; the plan-state card always
-        // renders (a set-up user sees their next session; a profile-less user
-        // sees the setup prompt). Evidence chrome is unchanged.
         item {
             TodayHeroCard(
                 model = model,
@@ -269,34 +210,29 @@ internal fun TodayDestination(
             )
         }
 
-        // 3. This week: the planned-vs-done count, the week strip and the plan
-        // footer as ONE card under one overline, only when a plan exists (the
-        // hero already renders the next-session card itself). The plan summary is
-        // a compact plain-language footer with a confirm-gated "Remove plan".
+        // This week: the count, the strip and the plan footer as one card, only
+        // when a plan exists.
         val nextSession = model.next_session
         val showWeek = nextSession != null && (model.week_plan.isNotEmpty() || model.program != null)
         if (showWeek) {
             item { SectionOverline(stringResource(R.string.main_overline_this_week)) }
             item {
                 ThisWeekCard(
-                    // Planned vs done: one neutral count line, never
-                    // a streak, a loss, or an unlabeled chart. A week with nothing
-                    // planned has nothing to count.
-                    consistency = model.consistency
-                        ?.takeIf { model.week_plan.isNotEmpty() && it.this_week_planned > 0 },
+                    consistency = model.consistency,
                     week = model.week_plan,
                     today = model.today(),
                     weightUnit = weightUnit,
                     program = model.program,
-                    // Minimal empty state: nothing logged yet. Anchored as the
-                    // week card's last line, where the empty week shows.
+                    // Nothing logged yet: the week card's last line.
                     footnote = if (!hasAnything) stringResource(R.string.main_today_empty) else null,
                     onRemovePlan = { confirmRemovePlan = true },
-                    onLogItem = onLogPastItem,
-                    onLogRun = onLogPastRun,
-                    onEndExercise = { item, day -> endExerciseWithUndo(res, item, day, onEvent) },
-                    onReopen = { item, day -> if (item.exercise.isNotBlank()) onEvent(Event.SetExerciseEnded(item.exercise, day, ended = false)) },
-                    onMove = moveSession,
+                    actions = WeekActions(
+                        onLogItem = onLogPastItem,
+                        onLogRun = onLogPastRun,
+                        onEndExercise = { item, day -> endExerciseWithUndo(res, item, day, onEvent) },
+                        onReopen = { item, day -> reopenExercise(item, day, onEvent) },
+                        onMove = moveSession,
+                    ),
                     heroDay = nextSession.epoch_day,
                     selectedDay = weekSelectedDay,
                     onSelectDay = { weekSelectedDay = it },
@@ -304,8 +240,7 @@ internal fun TodayDestination(
             }
         }
 
-        // Minimal empty state with no plan to host it: no tiles; everything logs
-        // via the Log button. Shown only when there's genuinely nothing yet.
+        // Nothing yet and no week card to carry the hint.
         if (!hasAnything && !showWeek) {
             item {
                 Text(
@@ -316,18 +251,13 @@ internal fun TodayDestination(
             }
         }
 
-        // Progress: the e1RM trend of the plan's main lift (else the most recently
-        // logged weighted lift), gated on showLifting. Rendered only with at least
-        // three sessions of real e1RMs: fewer is not a trend (a bodyweight/hold set
-        // has no e1RM). The last Today section.
+        // Progress: the e1RM trend of the plan's main lift, the last section.
         if (trend != null && showLifting) {
             item { SectionOverline(stringResource(R.string.main_overline_progress)) }
             item { E1rmTrendCard(trend, weightUnit) }
         }
     }
 
-    // Remove-plan confirm: honest copy, reuses the ClearConfirmDialog pattern.
-    // Confirm dispatches Event.ClearPlan.
     ClearConfirmDialog(
         visible = confirmRemovePlan,
         title = stringResource(R.string.main_remove_plan_title),
@@ -339,67 +269,68 @@ internal fun TodayDestination(
 }
 
 /**
- * Today's card stack (ui-sweep §5): the status cards (safety ones first, then
- * the adjusted ones, each an `Adjusted` [StatusCard] via [EvidenceCard]
- * `status`), the remaining coaching (a graded win, the ungraded all-clear as a
- * PlainCard), the [readinessStrip], then the session-done moment and the
- * plan-state card: the next session, else the plan prompt (profile set) or the
- * setup prompt (no profile). Evidence chrome is unchanged (summary + SAFETY on
- * the face, everything else behind the "?").
- *
- * Coaching adjustments read as ONE card per exercise, the newest cue winning
- * ([coachingPerExercise]); once today's session is done the adjustments that
- * shaped it are spent and only safety calls and next-time notes stay. A new best
- * and its lift's next-time advice share one card ([winAdviceFor]); while the
- * session is under way, two or more non-safety coaching notes fold into one "N
- * coaching notes" row ([CoachingNotesRow]) so the session stays near the top. An
- * active pain report that does not block training still offers "Remove report"
- * (a mistaken report must always be undoable), next to the core's "I'm pain-free
- * now" when it has one. An adjustment is stated once: the session card wears the
- * "Adjusted" chip instead of repeating the prose.
- *
- * [hasSignal] gates the call/feedback/adjustments block so a brand-new user
- * sees only the setup prompt; the plan-state
- * card always renders. The train_blocked safety branch is handled by the caller and
- * never reaches here.
+ * Which cards Today's stack shows, decided from the model alone ([todayCards];
+ * [TodayHeroCard] renders them). [renderedKeys] are the (summary, citation)
+ * pairs already on a card above the session, so the session card never repeats
+ * one; [foldCount] notes fold into one row once there are two or more.
  */
-@Composable
-private fun TodayHeroCard(
-    model: ViewModel,
-    hasSignal: Boolean,
-    onEvent: (Event) -> Unit,
-    onStartSetup: () -> Unit,
-    onLogItem: (PrescriptionView) -> Unit = {},
-    onTrackRun: () -> Unit = {},
-    onOpenSheet: (LogMode) -> Unit = {},
-    // Moves a session (posts "Moved to … · Undo").
-    onMove: (from: Long, to: Long) -> Unit = { _, _ -> },
-    // The pain report as last entered here (its body area), for "Report removed · Undo".
-    lastPain: PainDetail? = null,
-    onOpenProfile: (ProfileRowId) -> Unit = {},
-    onRerunSetup: () -> Unit = {},
-    // The readiness strip, placed between the status cards and the hero.
-    readinessStrip: (@Composable () -> Unit)? = null,
+internal class TodayCards(
+    val showHeadline: Boolean,
+    val headlineAdjustment: AdjustmentView?,
+    // The headline hosts the hold's safety rows / the session-wide coaching rows.
+    val headlineHosts: Boolean,
+    val headlineHostsGeneral: Boolean,
+    // The headline is a status card (an adjustment or a safety call).
+    val headlineIsStatus: Boolean,
+    val showFeedback: Boolean,
+    val doneOwnsFeedback: Boolean,
+    val sessionDone: SessionDoneView?,
+    val todayItems: List<PrescriptionView>,
+    val hostAdjustment: AdjustmentView?,
+    val safetyRows: List<AdjustmentView>,
+    val groupFaceText: String,
+    val softResolutions: List<HoldResolutionView>,
+    val foldedResolution: HoldResolutionView?,
+    val painReported: Boolean,
+    val generalHost: AdjustmentView?,
+    val generalRows: List<AdjustmentView>,
+    val winAdvice: AdjustmentView?,
+    val coachingCards: List<AdjustmentView>,
+    val foldHeadline: Boolean,
+    val foldFeedback: Boolean,
+    val foldCount: Int,
+    val sessionAdjustment: AdjustmentView?,
+    val sessionAdjustmentCard: AdjustmentView?,
+    val renderedKeys: Set<Pair<String, String>>,
+    val metaOnFace: List<AdjustmentView>,
+    val sessionMeta: List<AdjustmentView>,
 ) {
+    val hasSafetyHost: Boolean get() = headlineHosts || hostAdjustment != null
+    val folded: Boolean get() = foldCount >= 2
+}
+
+/**
+ * Today's card selection (training not blocked). Coaching adjustments read as one
+ * card per exercise ([coachingPerExercise]); once today's session is done the
+ * adjustments that shaped it are spent and only safety calls and next-time notes
+ * stay. One safety card hosts each hold, its other safety rows behind its "?". A
+ * new best and its lift's next-time advice share one card ([winAdviceFor]).
+ * [hasSignal] false (a brand-new user) leaves only the plan-state card. Pure.
+ */
+internal fun todayCards(model: ViewModel, hasSignal: Boolean, distanceUnit: DistanceUnit): TodayCards {
     val headline = model.today_headline
     val fb = model.feedback
     val showFeedback = fb != null && headline?.kind != "feedback"
     val today = model.today()
-    // Today's session is complete: the done card owns the non-safety coaching
-    // takeaway (a PR, a derived session note) so it renders ONCE, inside the
-    // moment it belongs to. A safety-critical message keeps its own card.
     val sessionDone = model.session_done?.takeIf { it.items.isNotEmpty() }
+    // The done card owns a non-safety takeaway; a safety one keeps its own card.
     val doneOwnsFeedback = sessionDone != null && showFeedback && !fb.safety_critical
-    // Today's adjustments (first-set checks, in-session cues) reshape today's
-    // session; once it is done they are spent, and an in-session cue ("…for the
-    // remaining sets") is spent as soon as its own exercise is settled. Safety
-    // calls always stay.
-    val settledToday = remember(model.week_plan, today) {
-        model.week_plan.firstOrNull { it.epoch_day == today }?.items.orEmpty()
-            .filter { it.exercise.isNotBlank() && (it.done || it.status in SettledItemStatuses) }
-            .map { it.exercise.trim().lowercase(Locale.ROOT) }
-            .toSet()
-    }
+    val todayItems = model.week_plan.firstOrNull { it.epoch_day == today }?.items.orEmpty()
+    // An in-session cue is spent as soon as its own exercise is settled.
+    val settledToday = todayItems
+        .filter { it.exercise.isNotBlank() && (it.done || it.status in SettledItemStatuses) }
+        .map { it.exercise.trim().lowercase(Locale.ROOT) }
+        .toSet()
     val spent = { a: AdjustmentView ->
         !a.safety_critical && (
             sessionDone != null ||
@@ -407,123 +338,168 @@ private fun TodayHeroCard(
                     a.exercise?.trim()?.lowercase(Locale.ROOT) in settledToday)
             )
     }
-    // Dedup key is (summary, citation): several rules emit the same summary
-    // string, so matching on text alone would vanish the second rule's evidence.
+    // Dedup key is (summary, citation): several rules emit the same summary.
     val isHeadline = { a: AdjustmentView ->
-        headline?.kind == "adjustment" &&
-            a.summary == headline.summary && a.citation == headline.citation
+        headline?.kind == "adjustment" && a.summary == headline.summary && a.citation == headline.citation
     }
-    // A post-illness return check states its advice on the session's own item,
-    // so the adjustment behind it gets no card above the session.
+    // A return check states its advice on its own item: no card for it above.
     val sessionOwned = returnCheckAdjustmentKey(model.next_session)
     val ownedBySession = { a: AdjustmentView -> (a.summary to a.citation) == sessionOwned }
     val headlineAdjustment = model.adjustments.firstOrNull(isHeadline)
     val showHeadline = headline != null && headline.kind != "prescription" &&
         headlineAdjustment?.let(spent) != true &&
         !(headline.kind == "adjustment" && (headline.summary to headline.citation) == sessionOwned)
-    // Priority sort + headline dedupe is pure work over the wire lists, memoize
-    // it so it doesn't re-run on every unrelated recomposition (only when the
-    // adjustment lists or the headline actually change).
-    val listedAdjustments = remember(model.adjustments, headline, sessionDone, settledToday, sessionOwned) {
-        model.adjustments.byAdjustmentPriority().filterNot(isHeadline).filterNot(spent).filterNot(ownedBySession)
-    }
-    val listedReviewAdjustments = remember(model.review_adjustments, headline) {
+    val listed = model.adjustments.byAdjustmentPriority().filterNot(isHeadline).filterNot(spent).filterNot(ownedBySession) +
         model.review_adjustments.byAdjustmentPriority().filterNot(isHeadline)
-    }
     val nextSession = model.next_session
-    // A training-plan rest day today: stated plainly on the hero instead of
-    // only showing the next (future) session.
-    val restToday = model.week_plan.any { it.epoch_day == today && it.status == "rest" }
-    val weightUnit = model.weightUnit()
-    // A resolvable hold that does NOT block training (an eased illness, an
-    // item-scoped pain stop) has no banner: its "I've recovered" action lives here.
-    val softResolutions = if (model.train_blocked) emptyList() else model.hold_resolutions.filter { it.action_label.isNotBlank() }
-    var resolveSignal by rememberSaveable { mutableStateOf<String?>(null) }
-    // A pain report that does not block training (it eases or stops one
-    // exercise) is still undoable from Today, with the banner's own wording.
-    val painReported = !model.train_blocked && model.readiness_summary.any { it.signal == "Pain" }
-    var removePain by rememberSaveable { mutableStateOf(false) }
-    // The area an active pain report names: an exercise it stopped after some
-    // sets (status stopped_pain) reads "Stopped · <area>", never a done ✓.
-    val painArea = painAreaLabel(lastPain?.location, model.readiness_summary.firstOrNull { it.signal == "Pain" }?.detail)
+    // A resolvable hold that does not block training has no banner: its
+    // "I've recovered" action lives on Today.
+    val softResolutions = model.hold_resolutions.filter { it.action_label.isNotBlank() }
 
-    // One safety card per hold: the first safety-critical card (the headline when
-    // it is one, else the top safety adjustment) hosts the group. It keeps the
-    // SAFETY chip and its single "?" and reads call + one supporting line + the
-    // hold's "I've recovered" action; the hold's other safety adjustments (e.g.
-    // "Head-cold rule: easier and shorter today" under "Head cold: about 50% fewer
-    // sets…") sit inside that same "?" panel, never stacked on the face.
     val headlineHosts = hasSignal && showHeadline && headline.grade.isNotEmpty() && headline.safety_critical
-    val safetyListed = if (hasSignal) (listedAdjustments + listedReviewAdjustments).filter { it.safety_critical } else emptyList()
+    val safetyListed = if (hasSignal) listed.filter { it.safety_critical } else emptyList()
     val hostAdjustment = if (headlineHosts) null else safetyListed.firstOrNull()
     val hasSafetyHost = headlineHosts || hostAdjustment != null
-    val safetyRows: List<AdjustmentView> = if (!hasSafetyHost) {
-        emptyList()
-    } else {
-        safetyListed.filterNot { it === hostAdjustment }
-    }
-    // The coaching (non-safety) adjustment cards: one per exercise.
-    val coaching = remember(listedAdjustments, listedReviewAdjustments, headlineAdjustment, showHeadline) {
-        coachingPerExercise(
-            headlineExercise = headlineAdjustment?.exercise?.takeIf { showHeadline },
-            candidates = (listedAdjustments + listedReviewAdjustments).filterNot { it.safety_critical },
-        )
-    }
-    // The session's own (non-safety) adjustment. The hero never restates its prose
-    // (ui-sweep §5 dedupe): it wears the "Adjusted" chip, and the prose lives in a
-    // status card above, its own card unless another adjustment card already speaks.
+    val safetyRows = if (hasSafetyHost) safetyListed.filterNot { it === hostAdjustment } else emptyList()
+    val foldedResolution = if (hasSafetyHost) softResolutions.firstOrNull() else null
+    val coaching = coachingPerExercise(
+        headlineExercise = headlineAdjustment?.exercise?.takeIf { showHeadline },
+        candidates = listed.filterNot { it.safety_critical },
+    )
+    // The session's own non-safety adjustment: its prose is a status card above
+    // the session unless another adjustment card already speaks.
     val sessionAdjustment = nextSession?.adjustment?.takeIf {
         nextSession.status == "adjusted" && !it.safety_critical && (it.summary to it.citation) != sessionOwned
     }
     val adjustedAbove = hasSignal && (
-        headlineHosts || hostAdjustment != null || coaching.isNotEmpty() ||
+        hasSafetyHost || coaching.isNotEmpty() ||
             (showHeadline && headline.kind == "adjustment" && headline.grade.isNotEmpty())
         )
-    // Every (summary, citation) already rendered as its own card above the
-    // session, so the session card never repeats one of them (one render per
-    // adjustment).
-    val baseKeys: Set<Pair<String, String>> = remember(hasSignal, headline, showHeadline, fb, safetyListed, coaching, sessionOwned) {
-        if (!hasSignal) {
-            setOfNotNull(sessionOwned)
-        } else {
-            buildSet {
-                if (showHeadline) add(headline.summary to headline.citation)
-                if (showFeedback) add(fb.message to fb.citation)
-                safetyListed.forEach { add(it.summary to it.citation) }
-                coaching.forEach { add(it.summary to it.citation) }
-                sessionOwned?.let(::add)
-            }
+    val baseKeys: Set<Pair<String, String>> = if (!hasSignal) {
+        setOfNotNull(sessionOwned)
+    } else {
+        buildSet {
+            if (showHeadline) add(headline.summary to headline.citation)
+            if (showFeedback) add(fb.message to fb.citation)
+            safetyListed.forEach { add(it.summary to it.citation) }
+            coaching.forEach { add(it.summary to it.citation) }
+            sessionOwned?.let(::add)
         }
     }
     val sessionAdjustmentCard = sessionAdjustment?.takeIf { !adjustedAbove && (it.summary to it.citation) !in baseKeys }
-    val renderedKeys = sessionAdjustmentCard?.let { baseKeys + (it.summary to it.citation) } ?: baseKeys
-    // Engine-meta disclosures (how provisional the call is, which signal source
-    // drives autoregulation) are not actionable: they live in the session card's
-    // "?" panel, never on the face. While a hold or safety adjustment is active
-    // they are dropped entirely: "loads stay at plan" contradicts the hold that
-    // just changed the loads. With no session card to host them, only a
-    // safety-critical one keeps a card of its own.
+    // Engine-meta disclosures sit in the session card's "?". While a hold or a
+    // safety adjustment is active they are dropped ("loads stay at plan" would
+    // contradict it); without a session card only a safety-critical one stays.
     val holdActive = hasSafetyHost || model.hold_resolutions.isNotEmpty()
     val meta = if (hasSignal && !holdActive) listOfNotNull(model.provisional, model.autoreg_source) else emptyList()
-    val metaOnFace = if (nextSession == null) meta.filter { it.safety_critical } else emptyList()
-    val sessionMeta = if (nextSession != null) meta else emptyList()
-    val foldedResolution = if (hasSafetyHost) softResolutions.firstOrNull() else null
-    val groupFaceText = foldedResolution?.paused_text.orEmpty().ifBlank { safetyRows.firstOrNull()?.summary.orEmpty() }
-    val painOnHost = painReported && hasSafetyHost
-    val groupFooter: (@Composable () -> Unit)? = if (groupFaceText.isNotBlank()) {
-        { HoldGroupLine(safetyRows, foldedResolution?.paused_text.orEmpty()) }
+    // Session-wide coaching (no exercise named) reads as one card: an adjustment
+    // headline speaking session-wide hosts it, else the first such row.
+    val headlineHostsGeneral = hasSignal && showHeadline && headline.kind == "adjustment" &&
+        headline.grade.isNotEmpty() && !headlineHosts && headlineAdjustment?.exercise.isNullOrBlank()
+    val coachGeneral = coaching.filter { it.exercise.isNullOrBlank() }
+    val generalHost = if (headlineHostsGeneral) null else coachGeneral.firstOrNull()
+    val generalRows = coachGeneral.filterNot { it === generalHost }
+    val winText = when {
+        fb == null || fb.safety_critical || fb.grade.isBlank() || fb.category != WinCategory -> null
+        showFeedback && !doneOwnsFeedback -> feedbackMessage(fb, distanceUnit)
+        showHeadline && headline.kind == "feedback" -> headline.summary
+        else -> null
+    }
+    val winAdvice = winText?.let { winAdviceFor(it, coaching) }
+    val coachingCards = coaching.filterNot { a -> generalRows.any { it === a } || a === winAdvice }
+    // While today's session is under way its non-safety notes fold into one row,
+    // so the session stays near the top.
+    val inProgress = hasSignal && sessionDone == null &&
+        todayItems.any { it.done || it.ended_early || it.logged_sets.isNotEmpty() }
+    val foldHeadline = inProgress && showHeadline && headline.grade.isNotEmpty() &&
+        !headline.safety_critical && (headline.kind == "adjustment" || headline.kind == "feedback")
+    val foldFeedback = inProgress && showFeedback && !doneOwnsFeedback && !fb.safety_critical
+    return TodayCards(
+        showHeadline = showHeadline,
+        headlineAdjustment = headlineAdjustment,
+        headlineHosts = headlineHosts,
+        headlineHostsGeneral = headlineHostsGeneral,
+        headlineIsStatus = showHeadline && headline.grade.isNotEmpty() && (headline.kind == "adjustment" || headlineHosts),
+        showFeedback = showFeedback,
+        doneOwnsFeedback = doneOwnsFeedback,
+        sessionDone = sessionDone,
+        todayItems = todayItems,
+        hostAdjustment = hostAdjustment,
+        safetyRows = safetyRows,
+        groupFaceText = foldedResolution?.paused_text.orEmpty().ifBlank { safetyRows.firstOrNull()?.summary.orEmpty() },
+        softResolutions = softResolutions,
+        foldedResolution = foldedResolution,
+        painReported = model.readiness_summary.any { it.signal == "Pain" },
+        generalHost = generalHost,
+        generalRows = generalRows,
+        winAdvice = winAdvice,
+        coachingCards = coachingCards,
+        foldHeadline = foldHeadline,
+        foldFeedback = foldFeedback,
+        foldCount = (if (foldHeadline) 1 else 0) + (if (foldFeedback) 1 else 0) +
+            (if (inProgress) coachingCards.size else 0),
+        sessionAdjustment = sessionAdjustment,
+        sessionAdjustmentCard = sessionAdjustmentCard,
+        renderedKeys = sessionAdjustmentCard?.let { baseKeys + (it.summary to it.citation) } ?: baseKeys,
+        metaOnFace = if (nextSession == null) meta.filter { it.safety_critical } else emptyList(),
+        sessionMeta = if (nextSession != null) meta else emptyList(),
+    )
+}
+
+/**
+ * Today's card stack (ui-sweep §5), as [todayCards] picks it: the safety status
+ * cards, the other status cards, the remaining coaching (a graded win, the
+ * ungraded all-clear as a plain card), the [readinessStrip], the session-done
+ * moment, then the plan-state card. An active pain report always offers "Remove
+ * report". Only runs while training is not blocked.
+ */
+@Composable
+private fun TodayHeroCard(
+    model: ViewModel,
+    hasSignal: Boolean,
+    onEvent: (Event) -> Unit,
+    onStartSetup: () -> Unit,
+    onLogItem: (PrescriptionView) -> Unit,
+    onTrackRun: () -> Unit,
+    onOpenSheet: (LogMode) -> Unit,
+    // Moves a session (posts "Moved to … · Undo").
+    onMove: (from: Long, to: Long) -> Unit,
+    // The pain report as last entered here (its body area), for "Report removed · Undo".
+    lastPain: PainDetail?,
+    onOpenProfile: (ProfileRowId) -> Unit,
+    onRerunSetup: () -> Unit,
+    // The readiness strip, placed between the status cards and the hero.
+    readinessStrip: (@Composable () -> Unit)?,
+) {
+    val headline = model.today_headline
+    val fb = model.feedback
+    val today = model.today()
+    val nextSession = model.next_session
+    val distanceUnit = rememberDistanceUnit()
+    val res = LocalContext.current.resources
+    val c = remember(model, hasSignal, distanceUnit) { todayCards(model, hasSignal, distanceUnit) }
+    var resolveSignal by rememberSaveable { mutableStateOf<String?>(null) }
+    var removePain by rememberSaveable { mutableStateOf(false) }
+    var notesOpen by rememberSaveable(today) { mutableStateOf(false) }
+    // The area an active pain report names: an exercise it stopped reads
+    // "Stopped · <area>", never a done ✓.
+    val painArea = painAreaLabel(lastPain?.location, model.readiness_summary.firstOrNull { it.signal == "Pain" }?.detail)
+    val painOnHost = c.painReported && c.hasSafetyHost
+    // The hold group: call + one supporting line + its action on the face, the
+    // other safety rows behind the host's "?".
+    val groupFooter: (@Composable () -> Unit)? = if (c.groupFaceText.isNotBlank()) {
+        { Text(c.groupFaceText, color = OnBgMuted, style = Type.Caption) }
     } else {
         null
     }
-    val groupPanel: (@Composable () -> Unit)? = if (safetyRows.isNotEmpty()) {
-        { HoldGroupPanel(safetyRows, groupFaceText) }
+    val groupPanel: (@Composable () -> Unit)? = if (c.safetyRows.isNotEmpty()) {
+        { HoldGroupPanel(c.safetyRows, c.groupFaceText) }
     } else {
         null
     }
-    val groupActionLabel = foldedResolution?.action_label
-    val groupOnAction: (() -> Unit)? = foldedResolution?.let { r -> { resolveSignal = r.signal } }
-    // Status-card overlines (ui-sweep §5): what the card is about, in words, so
-    // colour is never the only signal.
+    val groupActionLabel = c.foldedResolution?.action_label
+    val groupOnAction: (() -> Unit)? = c.foldedResolution?.let { r -> { resolveSignal = r.signal } }
+    // Status-card overlines say what the card is about, so colour is never the only signal.
     val illnessActive = model.hold_resolutions.any { it.signal == "Illness" } ||
         model.readiness_summary.any { it.signal == "Illness" }
     val painOverline = painArea?.let { stringResource(R.string.main_status_pain_area, it) }
@@ -532,8 +508,8 @@ private fun TodayHeroCard(
     val adjustedOverline = stringResource(R.string.main_status_adjusted_today)
     val coachNoteOverline = stringResource(R.string.main_status_coach_note)
     val safetyOverline = when {
-        foldedResolution?.signal == "Pain" || (foldedResolution == null && painReported) -> painOverline
-        foldedResolution?.signal == "Illness" || illnessActive -> unwellOverline
+        c.foldedResolution?.signal == "Pain" || (c.foldedResolution == null && c.painReported) -> painOverline
+        c.foldedResolution?.signal == "Illness" || illnessActive -> unwellOverline
         else -> adjustedOverline
     }
     val coachOverline = { a: AdjustmentView? ->
@@ -544,92 +520,49 @@ private fun TodayHeroCard(
         }
     }
     val removeReportLabel = stringResource(R.string.main_remove_report)
-    // Session-wide coaching (no exercise named, e.g. a check-in's and an HRV
-    // dip's "stop a rep earlier") reads as ONE card: an adjustment headline speaking
-    // session-wide hosts them, else the first of them does; the others are lines
-    // under its summary with their evidence behind its one "?".
-    val headlineHostsGeneral = hasSignal && showHeadline && headline.kind == "adjustment" &&
-        headline.grade.isNotEmpty() && !headlineHosts && headlineAdjustment?.exercise.isNullOrBlank()
-    val coachGeneral = coaching.filter { it.exercise.isNullOrBlank() }
-    val generalHost = if (headlineHostsGeneral) null else coachGeneral.firstOrNull()
-    val generalRows = coachGeneral.filterNot { it === generalHost }
-    val generalFooter: (@Composable () -> Unit)? = if (generalRows.isNotEmpty()) {
-        { generalRows.forEach { Text(it.summary, color = OnBgBody, style = Type.Body) } }
+    val generalFooter: (@Composable () -> Unit)? = if (c.generalRows.isNotEmpty()) {
+        { c.generalRows.forEach { Text(it.summary, color = OnBgBody, style = Type.Body) } }
     } else {
         null
     }
-    val generalPanel: (@Composable () -> Unit)? = if (generalRows.isNotEmpty()) {
-        { Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) { generalRows.forEach { PanelAdjustment(it) } } }
+    val generalPanel: (@Composable () -> Unit)? = if (c.generalRows.isNotEmpty()) {
+        { Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) { c.generalRows.forEach { PanelAdjustment(it) } } }
     } else {
         null
     }
-    val distanceUnit = rememberDistanceUnit()
-    val res = LocalContext.current.resources
-    // A new best and the same lift's next-time advice read as ONE card: the win,
-    // the advice under it, the advice's evidence inside the win's "?".
-    val winText = when {
-        fb == null || fb.safety_critical || fb.grade.isBlank() || fb.category != WinCategory -> null
-        showFeedback && !doneOwnsFeedback -> feedbackMessage(fb, distanceUnit)
-        showHeadline && headline.kind == "feedback" -> headline.summary
-        else -> null
-    }
-    val winAdvice = winText?.let { winAdviceFor(it, coaching) }
-    val winFooter: (@Composable () -> Unit)? = winAdvice?.let { a -> { Text(a.summary, color = OnBgBody, style = Type.Body) } }
-    val winPanel: (@Composable () -> Unit)? = winAdvice?.let { a -> { PanelAdjustment(a) } }
-    val coachingCards = coaching.filterNot { a -> generalRows.any { it === a } || a === winAdvice }
-    // While today's session is under way, its coaching notes (the call when it is
-    // a cue or a win, the feedback, the per-exercise cues) fold into ONE row, so
-    // the session itself stays near the top. Safety cards never fold.
-    val todayItems = model.week_plan.firstOrNull { it.epoch_day == today }?.items.orEmpty()
-    val inProgress = hasSignal && sessionDone == null &&
-        todayItems.any { it.done || it.ended_early || it.logged_sets.isNotEmpty() }
-    val foldHeadline = inProgress && showHeadline && headline.grade.isNotEmpty() &&
-        !headline.safety_critical && (headline.kind == "adjustment" || headline.kind == "feedback")
-    val foldFeedback = inProgress && showFeedback && !doneOwnsFeedback && !fb.safety_critical
-    val foldCount = (if (foldHeadline) 1 else 0) + (if (foldFeedback) 1 else 0) +
-        (if (inProgress) coachingCards.size else 0)
-    val folded = foldCount >= 2
-    var notesOpen by rememberSaveable(today) { mutableStateOf(false) }
+    val winFooter: (@Composable () -> Unit)? = c.winAdvice?.let { a -> { Text(a.summary, color = OnBgBody, style = Type.Body) } }
+    val winPanel: (@Composable () -> Unit)? = c.winAdvice?.let { a -> { PanelAdjustment(a) } }
 
-    // Today's call, the core-owned headline. A downgrade-class ADJUSTMENT (or a
-    // safety call) is an `Adjusted` [StatusCard] (headline IS the call, no
-    // confidence meter on the face); a graded feedback headline keeps the full
-    // EvidenceCard; the ungraded all-clear is a plain card with no chrome.
-    //
-    // A "prescription" headline ("Next: Recovery run - 30 min · 76% HRmax")
-    // restates the session NextSessionCard renders below, so it gets no
-    // card of its own: NextSessionCard IS the hero face (its title serves
-    // as the headline).
+    // Today's call. An adjustment (or a safety call) is an `Adjusted` status card;
+    // a graded feedback headline keeps the full EvidenceCard; the ungraded
+    // all-clear is a plain card. A "prescription" headline restates the session
+    // card, so it gets none.
     val headlineCard: @Composable () -> Unit = {
-        if (showHeadline) {
+        if (c.showHeadline && headline != null) {
             if (headline.grade.isNotEmpty()) {
                 val isAdjustment = headline.kind == "adjustment"
-                val hostsWin = winAdvice != null && headline.kind == "feedback"
+                val hostsWin = c.winAdvice != null && headline.kind == "feedback"
                 EvidenceCard(
                     headline.summary, headline.grade, headline.citation,
                     headline.confidence, headline.safety_critical, headline.contested,
-                    // All chrome (grade + confidence) lives behind the "?";
-                    // confidenceInWhy keeps the figure in-panel for the
-                    // adjustment / graded feedback.
-                    confidenceInWhy = true,
-                    status = if (isAdjustment || headlineHosts) StatusTone.Adjusted else null,
-                    statusOverline = if (headlineHosts) safetyOverline else coachOverline(headlineAdjustment),
+                    status = if (isAdjustment || c.headlineHosts) StatusTone.Adjusted else null,
+                    statusOverline = if (c.headlineHosts) safetyOverline else coachOverline(c.headlineAdjustment),
                     why = headline.why,
                     footer = when {
-                        headlineHosts -> groupFooter
-                        headlineHostsGeneral -> generalFooter
+                        c.headlineHosts -> groupFooter
+                        c.headlineHostsGeneral -> generalFooter
                         hostsWin -> winFooter
                         else -> null
                     },
                     panelExtra = when {
-                        headlineHosts -> groupPanel
-                        headlineHostsGeneral -> generalPanel
+                        c.headlineHosts -> groupPanel
+                        c.headlineHostsGeneral -> generalPanel
                         hostsWin -> winPanel
                         else -> null
                     },
-                    actionLabel = if (headlineHosts) groupActionLabel else null,
-                    onAction = if (headlineHosts) groupOnAction else null,
-                    secondaryActionLabel = if (headlineHosts && painOnHost) removeReportLabel else null,
+                    actionLabel = if (c.headlineHosts) groupActionLabel else null,
+                    onAction = if (c.headlineHosts) groupOnAction else null,
+                    secondaryActionLabel = if (c.headlineHosts && painOnHost) removeReportLabel else null,
                     onSecondaryAction = { removePain = true },
                     actionPrimary = false,
                     proseSummary = isAdjustment,
@@ -646,7 +579,7 @@ private fun TodayHeroCard(
         }
     }
     val feedbackCard: @Composable () -> Unit = {
-        if (showFeedback && !doneOwnsFeedback) {
+        if (c.showFeedback && !c.doneOwnsFeedback && fb != null) {
             val message = feedbackMessage(fb, distanceUnit)
             if (fb.grade.isBlank()) {
                 // An ungraded note asserts no claim: no evidence chrome, like the all-clear.
@@ -663,10 +596,10 @@ private fun TodayHeroCard(
         }
     }
     val coachingCard: @Composable (AdjustmentView) -> Unit = { a ->
-        val hostsGeneral = a === generalHost
+        val hostsGeneral = a === c.generalHost
         EvidenceCard(
             a.summary, a.grade, a.citation, a.confidence, a.safety_critical, a.contested,
-            confidenceInWhy = true, why = a.why,
+            why = a.why,
             status = StatusTone.Adjusted,
             statusOverline = coachOverline(a),
             footer = if (hostsGeneral) generalFooter else null,
@@ -674,19 +607,14 @@ private fun TodayHeroCard(
             proseSummary = true,
         )
     }
-    val headlineIsStatus = showHeadline && headline.grade.isNotEmpty() && (headline.kind == "adjustment" || headlineHosts)
 
-    // Order (ui-sweep §5): safety status cards, then the other status cards, then
-    // the remaining coaching (a win, the all-clear), the readiness strip, and the
-    // hero. Cards sit Space.Md apart.
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-        if (hasSignal && headlineHosts) headlineCard()
-        // The safety host carries the hold's other safety rows behind its "?".
+        if (hasSignal && c.headlineHosts) headlineCard()
         if (hasSignal) {
-            hostAdjustment?.let { a ->
+            c.hostAdjustment?.let { a ->
                 EvidenceCard(
                     a.summary, a.grade, a.citation, a.confidence, a.safety_critical, a.contested,
-                    confidenceInWhy = true, why = a.why,
+                    why = a.why,
                     status = StatusTone.Adjusted,
                     statusOverline = safetyOverline,
                     footer = groupFooter,
@@ -699,16 +627,16 @@ private fun TodayHeroCard(
                 )
             }
         }
-        softResolutions.filterNot { it === foldedResolution }.forEach { r ->
+        c.softResolutions.filterNot { it === c.foldedResolution }.forEach { r ->
             HoldResolutionCard(
                 r,
                 overline = if (r.signal == "Pain") painOverline else unwellOverline,
                 onResolve = { resolveSignal = r.signal },
-                onRemoveReport = if (painReported && !hasSafetyHost && r.signal == "Pain") ({ removePain = true }) else null,
+                onRemoveReport = if (c.painReported && !c.hasSafetyHost && r.signal == "Pain") ({ removePain = true }) else null,
             )
         }
         // A pain report with no card of its own above still gets its undo.
-        if (painReported && !hasSafetyHost && softResolutions.none { it.signal == "Pain" }) {
+        if (c.painReported && !c.hasSafetyHost && c.softResolutions.none { it.signal == "Pain" }) {
             StatusCard(
                 tone = StatusTone.Adjusted,
                 overline = painOverline,
@@ -720,83 +648,96 @@ private fun TodayHeroCard(
             }
         }
         if (hasSignal) {
-            if (folded) {
-                CoachingNotesRow(foldCount, notesOpen) { notesOpen = !notesOpen }
+            if (c.folded) {
+                CoachingNotesRow(c.foldCount, notesOpen) { notesOpen = !notesOpen }
                 if (notesOpen) {
-                    if (foldHeadline) headlineCard()
-                    if (foldFeedback) feedbackCard()
-                    coachingCards.forEach { coachingCard(it) }
+                    if (c.foldHeadline) headlineCard()
+                    if (c.foldFeedback) feedbackCard()
+                    c.coachingCards.forEach { coachingCard(it) }
                 }
             } else {
-                if (headlineIsStatus && !headlineHosts) headlineCard()
-                coachingCards.forEach { coachingCard(it) }
+                if (c.headlineIsStatus && !c.headlineHosts) headlineCard()
+                c.coachingCards.forEach { coachingCard(it) }
             }
         }
-        // The session's own adjustment when no card above speaks for it: its prose
-        // lives here, the hero only wears the "Adjusted" chip.
-        sessionAdjustmentCard?.let { coachingCard(it) }
+        // The session's own adjustment when no card above speaks for it.
+        c.sessionAdjustmentCard?.let { coachingCard(it) }
         if (hasSignal) {
-            if (!headlineIsStatus && !(folded && foldHeadline)) headlineCard()
-            // Safety-critical engine meta with no hold to contradict (meta is
-            // empty while one is active).
-            metaOnFace.forEach { m ->
+            if (!c.headlineIsStatus && !(c.folded && c.foldHeadline)) headlineCard()
+            c.metaOnFace.forEach { m ->
                 EvidenceCard(
                     m.summary, m.grade, m.citation, m.confidence, m.safety_critical, m.contested,
-                    confidenceInWhy = true, why = m.why,
+                    why = m.why,
                 )
             }
-            if (!(folded && foldFeedback)) feedbackCard()
+            if (!(c.folded && c.foldFeedback)) feedbackCard()
         }
         readinessStrip?.let { strip -> Box(Modifier.padding(vertical = Space.Sm.dp)) { strip() } }
-        // The session-done moment: what was done, per item, plus the
-        // coaching takeaway when there is one, and the way back into the session.
-        sessionDone?.let { done ->
+        c.sessionDone?.let { done ->
             // Finishing ends every open exercise; resuming reopens them all and
             // returns to the first one's set loop.
-            val ended = todayItems.filter { it.ended_early && it.exercise.isNotBlank() }
+            val ended = c.todayItems.filter { it.ended_early && it.exercise.isNotBlank() }
             SessionDoneCard(
                 done,
-                feedback = if (doneOwnsFeedback) fb else null,
-                items = todayItems,
+                feedback = if (c.doneOwnsFeedback) fb else null,
                 painArea = painArea,
                 onResume = ended.firstOrNull()?.let { first ->
                     {
-                        ended.forEach { onEvent(Event.SetExerciseEnded(it.exercise, today, ended = false)) }
+                        ended.forEach { reopenExercise(it, today, onEvent) }
                         onLogItem(first)
                     }
                 },
                 onReview = { onOpenSheet(LogMode.Review) },
             )
         }
-        // Plan-state card, always. Lead with the concrete next session; else offer
-        // to generate a plan (profile set) or route into guided setup (no profile -
-        // the one setup entry point on this screen).
+        // The plan-state card, always: the next session, else the way to a plan.
         when {
             nextSession != null -> NextSessionCard(
                 nextSession,
                 painArea = painArea,
                 today = today,
-                restToday = restToday,
-                renderedKeys = renderedKeys,
-                adjusted = sessionAdjustment != null,
-                coachStatus = sessionMeta,
-                weightUnit = weightUnit,
+                restToday = model.week_plan.any { it.epoch_day == today && it.status == "rest" },
+                renderedKeys = c.renderedKeys,
+                adjusted = c.sessionAdjustment != null,
+                coachStatus = c.sessionMeta,
+                weightUnit = model.weightUnit(),
                 ladders = model.calisthenics_ladders,
                 liftDaysLogged = remember(model.lifts) { loggedLiftDays(model.lifts) },
                 onLogItem = onLogItem,
                 onTrackRun = onTrackRun,
                 onEndExercise = { endExerciseWithUndo(res, it, today, onEvent) },
-                onReopen = { if (it.exercise.isNotBlank()) onEvent(Event.SetExerciseEnded(it.exercise, today, ended = false)) },
+                onReopen = { reopenExercise(it, today, onEvent) },
                 onSetRung = { ladder, rung -> onEvent(Event.SetCalisthenicsRung(ladder, rung, AppClock.nowSec())) },
                 onMove = onMove,
             )
-            model.profile != null -> when (val withheld = model.plan_withheld) {
+            model.profile != null -> when (model.plan_withheld) {
                 // GeneratePlan can build a plan: one tap makes it appear.
-                null -> PlanPromptCard { onEvent(Event.GeneratePlan(today)) }
-                // It can't: never a dead button, say why and where to fix it.
-                else -> PlanWithheldCard(withheld, holdProfileRow(model.hold_reason, model.profile?.health), onOpenProfile, onRerunSetup)
+                null -> PromptCard(
+                    stringResource(R.string.main_plan_prompt_title),
+                    stringResource(R.string.main_plan_prompt_body),
+                    stringResource(R.string.main_plan_prompt_cta),
+                ) { onEvent(Event.GeneratePlan(today)) }
+                // It can't: say why and where to fix it, never a dead button.
+                "health_hold" -> PromptCard(
+                    stringResource(R.string.main_plan_withheld_health_title),
+                    stringResource(R.string.main_plan_withheld_health_body),
+                    stringResource(R.string.main_hold_review_health),
+                ) { onOpenProfile(holdProfileRow(model.hold_reason, model.profile.health)) }
+                // Nothing to plan: guided setup re-runs from the profile's answers.
+                else -> PromptCard(
+                    stringResource(R.string.main_plan_withheld_empty_title),
+                    stringResource(R.string.main_plan_withheld_empty_body),
+                    stringResource(R.string.main_plan_withheld_empty_cta),
+                    onRerunSetup,
+                )
             }
-            else -> SetupPromptCard(onStartSetup)
+            // No profile yet: the plan is built from it, so this is the one setup entry point.
+            else -> PromptCard(
+                stringResource(R.string.main_setup_prompt_title),
+                stringResource(R.string.main_setup_prompt_body),
+                stringResource(R.string.main_setup_prompt_cta),
+                onStartSetup,
+            )
         }
     }
     HoldResolveDialog(
@@ -872,12 +813,12 @@ internal fun coachingPerExercise(headlineExercise: String?, candidates: List<Adj
     }
 }
 
-/** Distinct local days with at least one logged lift set. */
+/** Distinct local days with at least one logged (dated) lift set. */
 private fun loggedLiftDays(lifts: List<LiftResultView>): Int {
     val zone = java.time.ZoneId.systemDefault()
     return lifts.asSequence()
         .filter { it.observed_at > 0L }
-        .map { java.time.Instant.ofEpochSecond(it.observed_at).atZone(zone).toLocalDate() }
+        .map { localEpochDay(it.observed_at, zone) }
         .distinct()
         .count()
 }
@@ -897,29 +838,16 @@ private val hardwareOnlySignals = setOf(
 )
 
 /**
- * Readiness strip (01-today §A.1):
- * overline + one qualitative pill per MEASURED signal (from `readiness_summary`),
- * plus one quiet caption per channel still collecting its baseline (no pill: a
- * progress note is not a reading). PASSIVE status only; every signal is logged
- * through the Log button / check-in, not from the strip. No headline sentence here (it
- * lives on the hero card; dedupe), no "-" placeholders, hardware-only signals
- * stay hidden until an integration exists, and a signal an active hold card on
- * the hero already states (e.g. the head cold behind "I've recovered") is not
- * repeated as a pill. No composite score (INVARIANT 1). The one exception to
- * "passive" is a SUSPENDED HRV baseline (readings jumped, e.g. a new device): it
- * cannot recover on its own, so its one line carries the restart action.
+ * Readiness strip (01-today §A.1): one qualitative pill per measured signal and
+ * one caption per channel still building its baseline. Passive status only
+ * (logging is the Log button's), no composite score (INVARIANT 1); hardware-only
+ * signals and a signal a hold card already states are left out. A suspended HRV
+ * baseline cannot recover on its own, so its line carries the restart action.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ReadinessStrip(model: ViewModel, onEvent: (Event) -> Unit = {}, onCheckin: () -> Unit = {}) {
+private fun ReadinessStrip(model: ViewModel, onEvent: (Event) -> Unit, onCheckin: () -> Unit) {
     val measuredRows = model.stripReadinessRows()
-    // Channels still collecting a baseline: an honest progress caption instead
-    // of a fabricated number.
-    val collecting = model.baseline_status
-    // No empty-state here: with zero readiness data the strip renders NOTHING, no
-    // caption, no "Readiness -" line. The Today mount site skips this composable
-    // entirely when [hasReadinessPills] is false (see the mount gate), so this only
-    // ever runs with at least one pill or baseline caption to show.
     PlainCard {
         TileOverline(stringResource(R.string.main_overline_readiness), color = Accent)
         if (measuredRows.isNotEmpty()) {
@@ -927,18 +855,15 @@ private fun ReadinessStrip(model: ViewModel, onEvent: (Event) -> Unit = {}, onCh
                 horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp + Space.Xs.dp),
                 verticalArrangement = Arrangement.spacedBy(Space.Sm.dp + Space.Xs.dp),
             ) {
-                // Only signals that actually have data, states verbatim from the core.
-                // The face carries the KB-judged state only, never the raw unit-less
-                // reading (a z-score / ln rMSSD / bpm delta is jargon without a key).
+                // The core's judged state only, never the raw reading (a z-score or
+                // ln rMSSD is jargon without a key).
                 measuredRows.forEach { row ->
                     SignalPill(
                         label = readinessPillLabel(row.signal),
                         // A reading from an earlier check-in never passes as today's; a
                         // stale row's core state ("out of date") already says so.
                         state = if (row.from_today || row.stale) row.state else stringResource(R.string.main_readiness_earlier, row.state),
-                        color = OnBgMuted,
                         safetyCritical = row.safety_critical,
-                        holdActive = model.train_blocked,
                     )
                 }
             }
@@ -953,28 +878,20 @@ private fun ReadinessStrip(model: ViewModel, onEvent: (Event) -> Unit = {}, onCh
                 modifier = Modifier.offset(x = -TextActionInset),
             )
         }
-        // Mid-collection channels: still building a baseline, a sparse week, or a
-        // paused baseline, each as one plain caption line under the friendly
-        // signal name ("HRV", never "HRV (rMSSD)").
-        collecting.forEach { b ->
+        model.baseline_status.forEach { b ->
             val label = readinessPillLabel(b.signal).ifBlank { b.label }
             val line = when (b.kind) {
                 "SparseWeek" -> stringResource(R.string.main_sparse_week, label, b.have, b.need)
                 "Suspended" -> stringResource(R.string.main_baseline_paused, label)
                 else -> stringResource(R.string.main_building_baseline, label, b.have, b.need)
             }
+            Text(line, color = OnBgMuted, style = Type.Caption)
             if (b.kind == "Suspended" && b.signal == "HrvLnRmssd") {
-                // A suspended HRV baseline: its one line plus the restart action.
-                // Why it paused rides in the session card's "?" (the coach-status
-                // line), so it is not restated here.
-                Text(line, color = OnBgMuted, style = Type.Caption)
                 TextAction(
                     stringResource(R.string.main_restart_hrv_baseline),
                     onClick = { onEvent(Event.RestartHrvBaseline()) },
                     modifier = Modifier.offset(x = -TextActionInset),
                 )
-            } else {
-                Text(line, color = OnBgMuted, style = Type.Caption)
             }
         }
     }
@@ -987,41 +904,20 @@ private fun ReadinessStrip(model: ViewModel, onEvent: (Event) -> Unit = {}, onCh
 private fun ViewModel.stripReadinessRows() =
     readiness_summary.filter { row ->
         row.signal !in hardwareOnlySignals &&
-            (hold_resolutions.none { it.signal == row.signal } || (row.signal == "Pain" && !train_blocked))
+            (hold_resolutions.none { it.signal == row.signal } || row.signal == "Pain")
     }
 
+/** One readiness pill. A safety-critical signal is marked by more than colour: a
+ *  warning glyph on the warn fill (the amber tier of the adjustment it drives);
+ *  the pill speaks as one node. */
 @Composable
-private fun SignalPill(
-    label: String,
-    state: String,
-    color: Color,
-    safetyCritical: Boolean = false,
-    // A training hold is active: only then does a safety pill wear danger red.
-    holdActive: Boolean = false,
-) {
-    // A safety-critical signal is marked BY MORE THAN COLOUR (WCAG 1.4.1): a leading
-    // warning glyph reads the alarm even where the tint can't (colour-blind / mono).
-    // The whole pill carries one spoken description naming the signal, its state, and
-    // "safety critical" when applicable, instead of two disconnected label/value reads.
+private fun SignalPill(label: String, state: String, safetyCritical: Boolean) {
     val desc = "$label: $state" + if (safetyCritical) stringResource(R.string.main_safety_critical_suffix) else ""
-    // Proportional severity: red is reserved for a training hold (the same red as
-    // DO NOT TRAIN). With a hold active the pill renders on the DANGER SURFACE
-    // (danger ground + DangerOn text, ≈4.9:1); a safety signal that only eases
-    // training (an above-the-neck cold) uses the warn fill with white text
-    // (≈4.9:1, Theme.kt), the amber tier of the adjustment it drives.
-    // Non-critical pills keep the muted BgTop chip.
-    val status = LocalStatusColors.current
-    val fill = when {
-        !safetyCritical -> BgTop
-        holdActive -> status.danger
-        else -> status.warn
-    }
-    val onFill = if (holdActive) DangerOn else Color.White
-    val onPill = if (safetyCritical) onFill else color
+    val onPill = if (safetyCritical) Color.White else OnBgMuted
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(100))
-            .background(fill)
+            .clip(PillShape)
+            .background(if (safetyCritical) LocalStatusColors.current.warn else BgTop)
             .padding(horizontal = Space.Md.dp + Space.Xs.dp, vertical = Space.Sm.dp)
             .clearAndSetSemantics { contentDescription = desc },
         horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
@@ -1039,7 +935,7 @@ private fun SignalPill(
         // of opening a second column beside it.
         Text(
             buildAnnotatedString {
-                withStyle(SpanStyle(color = if (safetyCritical) onFill else OnBgFaint)) { append(label) }
+                withStyle(SpanStyle(color = if (safetyCritical) onPill else OnBgFaint)) { append(label) }
                 append(" ")
                 withStyle(SpanStyle(color = onPill)) { append(state) }
             },
@@ -1049,7 +945,7 @@ private fun SignalPill(
 }
 
 /** The Progress card's data: one lift's best e1RM per session, oldest first. */
-private class E1rmTrend(
+internal class E1rmTrend(
     val exercise: String,
     val series: List<Double>,
     val firstDay: java.time.LocalDate,
@@ -1058,19 +954,20 @@ private class E1rmTrend(
 /** The e1RM trend for the plan's main lift (the first lift of the next session,
  *  then of the week plan), else the most recently logged weighted lift: the best
  *  core-derived e1RM of each logged day, oldest → newest. Null with fewer than
- *  three sessions (fewer is not a trend). A bodyweight/hold set has no e1RM. */
-private fun e1rmTrend(model: ViewModel): E1rmTrend? {
-    val weighted = model.lifts.filter { it.hold_sec == null && it.e1rm_kg > 0.0 }
+ *  three dated sessions (fewer is not a trend). A bodyweight/hold set has no
+ *  e1RM; an undated set belongs to no session. */
+internal fun e1rmTrend(model: ViewModel): E1rmTrend? {
+    val weighted = model.lifts.filter { it.hold_sec == null && it.e1rm_kg > 0.0 && it.observed_at > 0L }
     if (weighted.isEmpty()) return null
     val zone = java.time.ZoneId.systemDefault()
     fun build(exercise: String): E1rmTrend? {
         val sets = weighted.filter { it.exercise.equals(exercise, ignoreCase = true) }
-        val byDay = sets.groupBy { java.time.Instant.ofEpochSecond(it.observed_at).atZone(zone).toLocalDate() }.toSortedMap()
+        val byDay = sets.groupBy { localEpochDay(it.observed_at, zone) }.toSortedMap()
         if (byDay.size < 3) return null
         return E1rmTrend(
             exercise = exercise,
             series = byDay.values.map { day -> day.maxOf { it.e1rm_kg } },
-            firstDay = byDay.firstKey(),
+            firstDay = java.time.LocalDate.ofEpochDay(byDay.firstKey()),
         )
     }
     val planLifts = (listOfNotNull(model.next_session) + model.week_plan)
@@ -1082,16 +979,14 @@ private fun e1rmTrend(model: ViewModel): E1rmTrend? {
 }
 
 /**
- * e1RM trend card (01-today §A.3), self-explanatory at a glance: a sentence-case
- * title "<exercise> · e1RM" with its glossary "?", the latest best as the big
- * figure, a labelled change pill measured over the SAME window the sparkline draws
- * ("+12.5 kg since Aug 12": first point → latest point, so the pill can never
- * contradict the line) with its own "?" line, the sparkline, and a caption naming
- * what one point is and the period ("Best set per session since Aug 12"). Every
- * number is core-derived; the pill states a difference, never a verdict.
+ * e1RM trend card (01-today §A.3): "<exercise> · e1RM" with its glossary "?", the
+ * latest best as the big figure, a change pill over the same window the
+ * sparkline draws ("+12.5 kg since Aug 12", so the two never disagree), the
+ * sparkline and a caption naming what one point is. The pill states a
+ * difference, never a verdict.
  */
 @Composable
-private fun E1rmTrendCard(trend: E1rmTrend, weightUnit: WeightUnit = WeightUnit.Kg) {
+private fun E1rmTrendCard(trend: E1rmTrend, weightUnit: WeightUnit) {
     val latest = trend.series.last()
     val unit = weightSuffix(weightUnit)
     val since = remember(trend.firstDay) { trend.firstDay.format(localizedDayFormatter("MMMd")) }
@@ -1168,11 +1063,9 @@ private fun E1rmTrendCard(trend: E1rmTrend, weightUnit: WeightUnit = WeightUnit.
             }
             Sparkline(
                 trend.series.map { it.toFloat() },
-                color = Accent,
                 modifier = Modifier
                     .width(140.dp)
                     .height(40.dp),
-                endDot = true,
             )
         }
         // The pill above already names the start day; without it the caption does.
@@ -1184,68 +1077,50 @@ private fun E1rmTrendCard(trend: E1rmTrend, weightUnit: WeightUnit = WeightUnit.
     }
 }
 
-/** A kg weight rendered in the chosen unit, trimmed to one decimal like the metric
- *  faces (a whole value drops the ".0"). Conversion via Units.kt (kg → lb). */
-internal fun weightFigure(kg: Double, unit: WeightUnit): String =
-    trimDecimal(if (unit == WeightUnit.Lb) kgToLb(kg) else kg)
-
 /**
- * The Today hero session card, self-describing: a "TODAY'S SESSION" / "NEXT
- * SESSION" overline, a discipline icon beside the title, and ONE "?" on the title
- * row whose panel holds every piece of evidence the card rests on (the engine
- * status lines, the session's adjustment, each item's grade/citation/why), so no
- * item carries a disclosure of its own.
+ * The Today hero session card: a "TODAY'S SESSION" / "NEXT SESSION" overline, the
+ * title with its discipline icon, and ONE "?" whose panel holds all the
+ * evidence the card rests on (engine status lines [coachStatus], the session's
+ * adjustment, each item's grade and citation).
  *
- * Items: in today's actionable session the CURRENT item (the first open one) is a
- * full [OpenPlanItemCard] with its slots, "Skip exercise" and the one filled
- * "Log set k of N" action, which keeps the per-set gym-floor loop one tap away;
- * every other open item is one compact tappable [PlanItemRow] (a tap logs it). Any
- * other session (a future NEXT SESSION, a blocked day) is a read-only preview:
- * compact rows, no controls, no empty slots, since it cannot be logged yet.
- * Settled items collapse to a ✓ row below. A hold empties the items (the plan
- * never renders load numbers through a hold).
- *
- * [restToday] states a plan rest day as one quiet line above a future-dated
- * session. [renderedKeys] are (summary, citation) pairs already rendered as cards
- * above the hero; the session's own adjustment is stated on the face only when it
- * is not one of them (once, as one line; a safety-critical one keeps its SAFETY
- * card). [coachStatus] is the engine-meta disclosure (provisional /
- * autoregulation source): panel only, never on the face. A session the athlete
- * moved says where from; one that can move offers "Move session" ([onMove]).
+ * In today's actionable session the first open item is a full
+ * [OpenPlanItemCard] and every other open item a [PlanItemRow] a tap logs; any
+ * other session is a read-only preview. Settled items collapse to a ✓ row. The
+ * session's adjustment is stated on the face only when it is not already in
+ * [renderedKeys] (a safety-critical one keeps its SAFETY card).
  */
 @Composable
 private fun NextSessionCard(
     ns: SessionPlanView,
     today: Long,
-    restToday: Boolean = false,
-    renderedKeys: Set<Pair<String, String>> = emptySet(),
+    restToday: Boolean,
+    renderedKeys: Set<Pair<String, String>>,
     // A non-safety adjustment reshaped the session: the title wears the
     // "Adjusted" chip (its prose lives in the status card above).
-    adjusted: Boolean = false,
-    coachStatus: List<AdjustmentView> = emptyList(),
-    weightUnit: WeightUnit = WeightUnit.Kg,
-    ladders: List<CalisLadderView> = emptyList(),
+    adjusted: Boolean,
+    coachStatus: List<AdjustmentView>,
+    weightUnit: WeightUnit,
+    ladders: List<CalisLadderView>,
     // Distinct days with logged lifts: the first few sessions spell the
     // prescription out for a newcomer.
-    liftDaysLogged: Int = Int.MAX_VALUE,
-    onLogItem: (PrescriptionView) -> Unit = {},
-    onTrackRun: () -> Unit = {},
-    onEndExercise: (PrescriptionView) -> Unit = {},
-    onReopen: (PrescriptionView) -> Unit = {},
-    onSetRung: (CalisLadder, Int) -> Unit = { _, _ -> },
-    onMove: (from: Long, to: Long) -> Unit = { _, _ -> },
+    liftDaysLogged: Int,
+    onLogItem: (PrescriptionView) -> Unit,
+    onTrackRun: () -> Unit,
+    onEndExercise: (PrescriptionView) -> Unit,
+    onReopen: (PrescriptionView) -> Unit,
+    onSetRung: (CalisLadder, Int) -> Unit,
+    onMove: (from: Long, to: Long) -> Unit,
     // The area an active pain report names (a settled row it stopped reads
     // "Stopped · <area>").
-    painArea: String? = null,
+    painArea: String?,
 ) {
     val status = LocalStatusColors.current
     val isToday = ns.epoch_day == today
     val discipline = sessionDiscipline(ns.session_type)
-    // The exact gate the Log sheet's "Today's plan" fast-path uses: only today's
-    // live/adjusted session is actionable; a future NEXT SESSION stays informational.
-    val actionable = isToday && (ns.status == "next" || ns.status == "adjusted")
+    // Only today's live/adjusted session is actionable; a future NEXT SESSION stays informational.
+    val actionable = isToday && ns.actionable
     val isCheck = { item: PrescriptionView -> isReturnCheckItem(item, ns.session_type) }
-    val isRun = { item: PrescriptionView -> !isCheck(item) && (discipline == "Run" || item.exercise.isEmpty()) }
+    val isRun = { item: PrescriptionView -> isRunItem(item, ns.session_type) }
     // The session's adjustment, unless it already renders as its own card above.
     val adjustment = ns.adjustment?.takeIf { ns.status == "adjusted" && (it.summary to it.citation) !in renderedKeys }
     val hasEvidence = ns.items.isNotEmpty() || coachStatus.isNotEmpty() || adjustment != null
@@ -1432,7 +1307,7 @@ private fun RestPill(run: RestAlarm.RestRun) {
         color = OnBgBody,
         style = Type.Chip.merge(TabularFigures),
         modifier = Modifier
-            .clip(RoundedCornerShape(100))
+            .clip(PillShape)
             .background(AccentTint)
             .padding(horizontal = Space.Md.dp, vertical = Space.Sm.dp)
             .clearAndSetSemantics { contentDescription = desc },
@@ -1500,22 +1375,8 @@ private fun PanelAdjustment(a: AdjustmentView, showSummary: Boolean = true) {
             confidence = a.confidence,
             contested = a.contested,
             showConfidence = !a.safety_critical,
-            extraDetail = null,
         )
     }
-}
-
-/**
- * The one supporting line under a hold's safety call: the core's plain
- * "paused until…" line when the card also carries the hold's resolve action
- * (it explains that action), else the hold's first follow-up adjustment. It has
- * no "?" of its own: the follow-up rows' evidence sits in the host card's single
- * "?" panel ([HoldGroupPanel]), so the card reads call + one line + action.
- */
-@Composable
-private fun HoldGroupLine(rows: List<AdjustmentView>, pausedText: String) {
-    val faceText = pausedText.ifBlank { rows.firstOrNull()?.summary.orEmpty() }
-    if (faceText.isNotBlank()) Text(faceText, color = OnBgMuted, style = Type.Caption)
 }
 
 /** The hold's follow-up safety rows inside its host card's "?" panel: each row's
@@ -1559,30 +1420,20 @@ private fun HoldResolutionCard(
 }
 
 /**
- * The session-done moment: once today's planned session is
- * complete, its title and one line per item in the hero's own verdict (its
- * status) with the hero's own marks: a green ✓ for work done, with the status
- * spelled out ("· short reps", "· lighter") when it fell short of the plan, and a
- * neutral dash with "Skipped" / "Stopped · <area>" for an exercise skipped or
- * ended by a pain report, with the coaching takeaway (a new best, a derived
- * session note) when the core has one. A run reads its distance and time in
- * the user's unit ("5 of 5.9 mi · 60 min" when under the plan). Then the way
- * on: "Review session ›" (the session review) and, when finishing ended
- * exercises, "Resume session" ([onResume]). Descriptive, so no evidence chrome
- * of its own; the takeaway keeps its "?". [items] are today's plan items, the
- * status source for an older core that sends none on the row.
+ * The session-done moment: the session's title, one line per item with the
+ * plan rows' own marks and words ([SettledMark], [settledLabel]; a run in the
+ * user's unit), the coaching takeaway when the core has one, then "Review
+ * session ›" and, when finishing ended exercises, "Resume session" ([onResume]).
  */
 @Composable
 private fun SessionDoneCard(
     done: SessionDoneView,
     feedback: FeedbackView?,
-    items: List<PrescriptionView> = emptyList(),
     // The area an active pain report names: a row it stopped reads "Stopped · <area>".
-    painArea: String? = null,
-    onResume: (() -> Unit)? = null,
-    onReview: () -> Unit = {},
+    painArea: String?,
+    onResume: (() -> Unit)?,
+    onReview: () -> Unit,
 ) {
-    val status = LocalStatusColors.current
     val distanceUnit = rememberDistanceUnit()
     Box(Modifier.testTag("session-done")) {
         PlainCard {
@@ -1593,23 +1444,10 @@ private fun SessionDoneCard(
                 style = Type.Title,
             )
             done.items.forEach { row ->
-                val rowStatus = row.status.ifBlank {
-                    items.firstOrNull { it.exercise.equals(row.exercise, ignoreCase = true) }?.status.orEmpty()
-                }
-                val skippedLabel = when (rowStatus) {
-                    "stopped_pain" -> stoppedLabel(painArea)
-                    "skipped_pain" -> stringResource(R.string.plan_skipped_pain)
-                    "skipped" -> stringResource(R.string.plan_skipped)
-                    else -> null
-                }
+                val skipped = row.status in SkippedItemStatuses
                 val summary = sessionDoneRunLine(row, distanceUnit) ?: row.summary
-                val line = skippedLabel ?: when {
-                    summary.isBlank() -> summary
-                    rowStatus == "done_short" -> stringResource(R.string.plan_done_short, summary)
-                    rowStatus == "done_lighter" -> stringResource(R.string.plan_done_lighter, summary)
-                    else -> summary
-                }
-                val desc = if (row.met && skippedLabel == null) {
+                val line = settledLabel(row.status, summary, painArea)
+                val desc = if (row.met && !skipped) {
                     stringResource(R.string.main_session_done_met_cd, row.exercise, summary)
                 } else {
                     stringResource(R.string.main_session_done_status_cd, row.exercise, line)
@@ -1620,14 +1458,7 @@ private fun SessionDoneCard(
                         .clearAndSetSemantics { contentDescription = desc },
                     horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
                 ) {
-                    // The hero's marks: ✓ = work done (its line says when it fell
-                    // short), a dash a deliberate skip or a pain stop; never a red
-                    // failure mark.
-                    Text(
-                        if (skippedLabel != null) "\u2013" else "\u2713",
-                        color = if (skippedLabel != null) OnBgMuted else status.done,
-                        style = Type.Body.copy(fontWeight = FontWeight.Bold),
-                    )
+                    SettledMark(skipped)
                     Column(modifier = Modifier.weight(1f)) {
                         Text(row.exercise, color = OnBgBody, style = Type.Body)
                         if (line.isNotBlank()) {
@@ -1637,7 +1468,7 @@ private fun SessionDoneCard(
                 }
             }
             feedback?.let { fb ->
-                val message = feedbackMessage(fb, rememberDistanceUnit())
+                val message = feedbackMessage(fb, distanceUnit)
                 if (fb.grade.isBlank()) {
                     // An ungraded note asserts no claim: plain text, no evidence chrome.
                     Text(message, color = OnBgBody, style = Type.Body)
@@ -1690,95 +1521,24 @@ private fun sessionDoneRunLine(row: SessionDoneItemView, unit: DistanceUnit): St
     return listOfNotNull(distText, minText).joinToString(" \u00b7 ").ifBlank { null }
 }
 
-/** The "Plan my training" call-to-action shown when a profile exists, no plan
- *  has been generated yet and the core can build one (`plan_withheld` null). */
+/** A plan-state card with one way forward: a title, a body and a full-width action. */
 @Composable
-private fun PlanPromptCard(onGenerate: () -> Unit) {
+private fun PromptCard(title: String, body: String, cta: String, onClick: () -> Unit) {
     PlainCard {
-        Text(stringResource(R.string.main_plan_prompt_title), color = OnBgBody, style = Type.Title)
-        Text(
-            stringResource(R.string.main_plan_prompt_body),
-            color = OnBgMuted,
-            style = Type.Body,
-        )
-        PrimaryButton(
-            stringResource(R.string.main_plan_prompt_cta),
-            onGenerate,
-            Modifier.fillMaxWidth(),
-        )
+        Text(title, color = OnBgBody, style = Type.Title)
+        Text(body, color = OnBgMuted, style = Type.Body)
+        PrimaryButton(cta, onClick, Modifier.fillMaxWidth())
     }
 }
 
-/** In place of "Plan my training" when the core can't build a plan
- *  ([withheld], `plan_withheld`): why, and the way to fix it, so the plan card
- *  never offers a tap that does nothing: a health hold opens its own answer
- *  ([healthRow]) in Profile; a profile with nothing to plan re-runs guided setup
- *  from its answers ([onRerunSetup]), whose Finish plans the training. */
-@Composable
-private fun PlanWithheldCard(
-    withheld: String,
-    healthRow: ProfileRowId,
-    onOpenProfile: (ProfileRowId) -> Unit,
-    onRerunSetup: () -> Unit,
-) {
-    val health = withheld == "health_hold"
-    PlainCard {
-        Text(
-            stringResource(if (health) R.string.main_plan_withheld_health_title else R.string.main_plan_withheld_empty_title),
-            color = OnBgBody,
-            style = Type.Title,
-        )
-        Text(
-            stringResource(if (health) R.string.main_plan_withheld_health_body else R.string.main_plan_withheld_empty_body),
-            color = OnBgMuted,
-            style = Type.Body,
-        )
-        PrimaryButton(
-            stringResource(if (health) R.string.main_hold_review_health else R.string.main_plan_withheld_empty_cta),
-            { if (health) onOpenProfile(healthRow) else onRerunSetup() },
-            Modifier.fillMaxWidth(),
-        )
-    }
-}
-
-/** Shown on Today when no profile exists yet: the plan is built from the profile,
- *  so route the user into guided setup rather than leaving the plan section blank. */
-@Composable
-private fun SetupPromptCard(onStartSetup: () -> Unit) {
-    PlainCard {
-        Text(stringResource(R.string.main_setup_prompt_title), color = OnBgBody, style = Type.Title)
-        Text(
-            stringResource(R.string.main_setup_prompt_body),
-            color = OnBgMuted,
-            style = Type.Body,
-        )
-        PrimaryButton(
-            stringResource(R.string.main_setup_prompt_cta),
-            onStartSetup,
-            Modifier.fillMaxWidth(),
-        )
-    }
-}
-
-/**
- * Display label for a wire readiness-signal name. Falls back to the raw wire
- * name for a signal the shell hasn't caught up to.
- */
-@Composable
-private fun readinessSignalLabel(wire: String): String =
-    ReadinessSignal.entries.firstOrNull { it.name == wire }?.let { stringResource(it.labelRes) } ?: wire
-
-/**
- * Readiness-strip pill name: the copy deck's friendly name where one exists
- * (deck says "HRV", not the wire's "HRV (ln rMSSD)"); every other signal keeps
- * its full label. Display-only, the wire value never changes.
- */
+/** Readiness-strip pill name: the short form where one exists ("HRV", not the
+ *  wire's "HRV (ln rMSSD)"), else the signal's full label, else the wire name. */
 @Composable
 private fun readinessPillLabel(wire: String): String = when (wire) {
-    "HrvLnRmssd" -> "HRV"
-    "WellnessZ" -> "Wellness"
-    "EstimatedOneRm" -> "Strength"
-    "Rpe" -> "Effort"
-    "RestingHr" -> "Resting HR"
-    else -> readinessSignalLabel(wire)
+    "HrvLnRmssd" -> stringResource(R.string.main_pill_hrv)
+    "WellnessZ" -> stringResource(R.string.main_pill_wellness)
+    "EstimatedOneRm" -> stringResource(R.string.main_pill_strength)
+    "Rpe" -> stringResource(R.string.main_pill_effort)
+    "RestingHr" -> stringResource(R.string.main_pill_resting_hr)
+    else -> ReadinessSignal.entries.firstOrNull { it.name == wire }?.let { stringResource(it.labelRes) } ?: wire
 }

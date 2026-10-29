@@ -8,12 +8,7 @@
 //! CONCERN_INJURY / CONCERN_BEHAVIOR / CONCERN_RECOVERY (and the dangerous
 //! single-session progression warning) short-circuits execution evaluation and
 //! suppresses every competing praise/progression message in the same cycle
-//! (File 05 §6.5). Contested metrics (ACWR, the 10% rule) may never become a
-//! hard injury claim, the registry hard-blocks them.
-//!
-//! Claim ids: FEEDBACK-001, FB-PROCESS-GOAL-001, AUTOREG-RIR-001, RUN-DECOUPLE-001,
-//! RUN-SPIKE-001, SAFE-BSI-001, SAFE-OTS-001, SAFE-REDS-001, LOAD-ACWR-001,
-//! MYTH-POSITIVITY.
+//! (File 05 §6.5).
 
 use crate::evidence;
 use crate::evidence::claims;
@@ -370,9 +365,6 @@ pub struct FeedbackVerbosity {
     pub rationale_mandatory: bool,
     /// Minimize jargon (beginners).
     pub minimize_jargon: bool,
-    /// Lead with the single biggest lever (advanced, but true for both, since
-    /// beginners are capped at one takeaway anyway).
-    pub lead_with_single_lever: bool,
 }
 
 /// Verbosity/metric-density defaults by experience (feedback-023/024).
@@ -383,7 +375,6 @@ pub fn verbosity_for_experience(advanced: bool) -> Recommended<FeedbackVerbosity
             max_metrics: 3,
             rationale_mandatory: false,
             minimize_jargon: false,
-            lead_with_single_lever: true,
         }
     } else {
         FeedbackVerbosity {
@@ -391,7 +382,6 @@ pub fn verbosity_for_experience(advanced: bool) -> Recommended<FeedbackVerbosity
             max_metrics: 1,
             rationale_mandatory: true,
             minimize_jargon: true,
-            lead_with_single_lever: true,
         }
     };
     evidence::graded(v, claims::FB_VERBOSITY_001)
@@ -501,7 +491,7 @@ pub const PROVISIONAL_BASELINE_DAYS: u16 = 14;
 /// Whether a recommendation must be framed as a provisional population default
 /// still converging on the user (feedback-040): true until a stable per-user
 /// baseline exists ([`PROVISIONAL_BASELINE_DAYS`] days of data). Callers should
-/// lower the surfaced `ConfidenceTag` and show "using population default until
+/// lower the surfaced confidence and show "using population default until
 /// N days" copy. FB-PROVISIONAL-001 (ExpertOpinion, feedback-040).
 pub fn provisional_until_baseline(days_of_data: u16) -> Recommended<bool> {
     evidence::graded(

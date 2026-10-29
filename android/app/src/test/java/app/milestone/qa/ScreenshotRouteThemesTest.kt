@@ -19,15 +19,13 @@ import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.GpsPoint
 import app.milestone.R
-import com.github.takahirom.roborazzi.captureScreenRoboImage
 import java.util.Locale
 import org.junit.After
-import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
+import org.robolectric.ParameterizedRobolectricTestRunner
 
 /**
  * The run detail sheet's route surfaces in every theme, light and dark, with map
@@ -35,8 +33,8 @@ import org.robolectric.RobolectricTestRunner
  * (stats + route card with its start/finish markers, labels and numbered miles on a
  * 3.18 mi loop) and the trim sheet (token slider, dashed trimmed ends).
  */
-@RunWith(RobolectricTestRunner::class)
-class ScreenshotRouteThemesTest {
+@RunWith(ParameterizedRobolectricTestRunner::class)
+class ScreenshotRouteThemesTest(private val theme: AppTheme, private val mode: DarkMode) {
 
     @get:Rule
     val rule = createEmptyComposeRule()
@@ -58,18 +56,15 @@ class ScreenshotRouteThemesTest {
         AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
     }
 
-    @OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)
-    private fun shot(name: String) =
-        rule.captureWithoutRipples { captureScreenRoboImage("src/test/screenshots/$name.png") }
-
     private fun waitFor(matcher: SemanticsMatcher) {
         rule.waitUntil(10_000) { rule.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
         rule.waitForIdle()
     }
 
-    private fun capture(theme: AppTheme, mode: DarkMode) {
+    @Test
+    fun capture() {
         AppSettings.setTheme(ctx, theme)
-        AppSettings.setDarkMode(ctx, mode)
+        useDarkMode(mode)
         // Each theme's own accent (picking Paper turns the system accent on).
         AppSettings.setDynamicAccent(ctx, false)
         val at = QaHarness.daysAgoAtMidday(1)
@@ -81,39 +76,25 @@ class ScreenshotRouteThemesTest {
         rule.onNodeWithText(title).performClick()
         waitFor(hasTestTag("run-trim"))
         val name = "route-${theme.name.lowercase()}"
-        val s = if (mode == DarkMode.Dark) "dark" else "light"
-        shot("$name-detail-$s")
+        val s = mode.suffix
+        rule.shot("$name-detail-$s")
         rule.onNode(hasContentDescription(str(R.string.runmap_open_full)) and hasClickAction()).performClick()
         waitFor(hasContentDescription(str(R.string.runmap_fit_route)))
-        shot("$name-full-$s")
+        rule.shot("$name-full-$s")
         rule.onNode(hasContentDescription(str(R.string.runmap_close)) and hasClickAction()).performClick()
         rule.waitForIdle()
         rule.onNodeWithTag("run-trim").performScrollTo().performClick()
         waitFor(hasText(str(R.string.trim_hint)))
-        shot("$name-trim-$s")
-    }
-
-    @Test fun roseLight() = capture(AppTheme.Rose, DarkMode.Light)
-
-    @Test fun roseDark() = capture(AppTheme.Rose, DarkMode.Dark)
-
-    @Test fun meadowLight() = capture(AppTheme.Meadow, DarkMode.Light)
-
-    @Test fun meadowDark() = capture(AppTheme.Meadow, DarkMode.Dark)
-
-    @Test fun irisLight() = capture(AppTheme.Iris, DarkMode.Light)
-
-    @Test fun irisDark() = capture(AppTheme.Iris, DarkMode.Dark)
-
-    @Test fun paperLight() = capture(AppTheme.Paper, DarkMode.Light)
-
-    @Test fun paperDark() = capture(AppTheme.Paper, DarkMode.Dark)
-
-    @Test fun coversEveryTheme() {
-        assertEquals(AppTheme.entries.toSet(), setOf(AppTheme.Rose, AppTheme.Meadow, AppTheme.Iris, AppTheme.Paper))
+        rule.shot("$name-trim-$s")
     }
 
     companion object {
+        /** Every theme × light and dark. */
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun themes(): List<Array<Any>> =
+            AppTheme.entries.flatMap { t -> listOf(DarkMode.Light, DarkMode.Dark).map { arrayOf<Any>(t, it) } }
+
         /** A 5.12 km (3.18 mi) rectangular loop, 1600 m east-west by 960 m north-south,
          *  run clockwise from the south-west corner: one clean fix every 3 s, 10 m apart. */
         fun loopRun(observedAt: Long): Event {
@@ -140,7 +121,6 @@ class ScreenshotRouteThemesTest {
             return Event.LogRunTrack(
                 points = points,
                 hrPctMax = 0.0,
-                longestRecentKm = 0.0,
                 observedAt = observedAt,
                 entryId = observedAt * 1000,
             )

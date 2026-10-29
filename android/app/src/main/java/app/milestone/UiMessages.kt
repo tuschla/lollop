@@ -74,7 +74,7 @@ internal object UiMessages {
 
     /** Drops queued messages; for a fresh process-scoped state between QA scenarios. */
     fun clear() {
-        while (channel.tryReceive().isSuccess) Unit
+        while (channel.tryReceive().isSuccess) { }
     }
 }
 

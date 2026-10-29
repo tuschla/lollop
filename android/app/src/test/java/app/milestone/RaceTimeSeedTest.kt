@@ -36,8 +36,8 @@ class RaceTimeSeedTest {
 
     @Test
     fun secondsBufferIsNeverSixty() {
-        // The pre-fix bug: any t whose fractional remainder rounded to 60. Sweep a
-        // range with a .7 fraction (the worst case for the old `round(t % 60)`) and
+        // A t whose fractional remainder rounds to 60 must carry. Sweep a range
+        // with a .7 fraction (the worst case for a naive `round(t % 60)`) and
         // assert the seconds buffer stays in 0..59 for every reachable time.
         for (t in 0..7200) {
             val (_, sec) = raceTimeSeed(t + 0.7)

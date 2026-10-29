@@ -85,14 +85,7 @@ fn extreme_wire_values_do_not_panic_or_poison_the_view() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: i64::MAX,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, i64::MAX);
     let vm = app.view(&model); // must not panic
     // A finite serializable view is produced.
     assert!(serde_json::to_string(&vm).is_ok());
@@ -157,8 +150,6 @@ fn calculator_events_1e300_inputs_never_serialize_to_null() {
     assert!(pred.evidence.confidence.is_finite());
     let pred_json = serde_json::to_value(pred).unwrap();
     for key in [
-        "low_sec",
-        "high_sec",
         "confidence",
         "recent_distance_m",
         "recent_time_sec",
@@ -219,14 +210,7 @@ fn submit_events_1e300_inputs_never_serialize_to_null() {
         )
         .expect_only_render();
     }
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 7,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON + 7);
     app.update(
         Event::SubmitReadiness(ReadinessInput {
             effort_min: Some(1.0e300),
@@ -324,4 +308,22 @@ fn delete_by_an_out_of_range_entry_id_matches_the_clamped_row() {
         app.view(&model).lifts.is_empty(),
         "a delete carrying the same out-of-range id must remove the clamped row"
     );
+}
+
+#[test]
+fn infinite_gps_accuracy_fails_the_accuracy_gate() {
+    // An in-process event can carry ±inf / NaN accuracy (the JSON wire
+    // cannot). +inf is the worst possible fix: it must clamp to a huge
+    // accuracy that the 30 m gate drops, never read as a perfect 0 m fix.
+    let app = Engine;
+    let mut model = Model::default();
+    let mut pts = vec![gps(0.0, 1_000), gps(0.001, 1_030), gps(0.002, 1_060)];
+    pts[1].accuracy_m = f32::INFINITY;
+    pts[2].accuracy_m = f32::NAN;
+    app.update(log_run_track(pts, 0.0, 0.0, 1_060, 1), &mut model)
+        .expect_only_render();
+    let stored: Vec<f32> = model.runs[0].track.iter().map(|p| p.accuracy_m).collect();
+    assert_eq!(stored[0], 5.0);
+    assert!(stored[1] > crate::running::MAX_GPS_ACCURACY_M, "{stored:?}");
+    assert_eq!(stored[2], 0.0, "NaN reads as no accuracy reported");
 }

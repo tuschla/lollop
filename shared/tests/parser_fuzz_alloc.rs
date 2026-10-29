@@ -143,8 +143,8 @@ fn a_plain_run_fit_parses_within_a_bounded_heap_per_input_byte() {
     assert!(ok);
     let per = peak / bytes.len();
     eprintln!("run FIT: {} bytes, peak {peak} B ({per} B/B)", bytes.len());
-    // Measured 38 B/B while parse_fit kept every decoded message, 2 B/B since it
-    // folds them one at a time (2026-10-25).
+    // parse_fit folds decoded messages one at a time (about 2 B/B); keeping
+    // every message costs about 38 B/B.
     assert!(
         per <= MAX_BYTES_PER_INPUT_BYTE,
         "{per} B of heap per input byte"
@@ -163,7 +163,8 @@ fn an_array_heavy_fit_parses_within_a_bounded_heap_per_input_byte() {
     }
     for messages in sizes {
         let bytes = array_fit(messages);
-        let (_, peak) = peak_during(|| import(&bytes));
+        let (ok, peak) = peak_during(|| import(&bytes));
+        assert!(!ok, "a FIT without fixes must not import");
         let per = peak / bytes.len();
         eprintln!(
             "array FIT: {} bytes, peak {peak} B ({per} B/B)",

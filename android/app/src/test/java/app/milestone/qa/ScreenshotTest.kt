@@ -11,8 +11,6 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.DarkMode
 import app.milestone.R
-import app.milestone.AppSettings
-import com.github.takahirom.roborazzi.captureScreenRoboImage
 import java.util.Locale
 import org.junit.Before
 import org.junit.After
@@ -27,10 +25,10 @@ import org.robolectric.RobolectricTestRunner
  *
  *   ./gradlew :app:recordRoborazziDebug   # (re)record baselines after an
  *                                         # intentional UI change
- *   ./gradlew :app:verifyRoborazziDebug   # fail CI on any unexpected pixel diff
+ *   ./gradlew :app:verifyRoborazziDebug   # compare against the baselines
  *
- * Baselines live under src/test/screenshots/ (committed); diffs/actuals land in
- * build/outputs/roborazzi.
+ * Baselines live under src/test/screenshots/ (local, gitignored); diffs/actuals
+ * land in build/outputs/roborazzi.
  */
 @RunWith(RobolectricTestRunner::class)
 class ScreenshotTest {
@@ -49,12 +47,6 @@ class ScreenshotTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    private fun theme(mode: DarkMode) = AppSettings.setDarkMode(ctx, mode)
-
-    @OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)
-    private fun shot(name: String) =
-        rule.captureWithoutRipples { captureScreenRoboImage("src/test/screenshots/$name.png") }
-
     private val logButton get() = hasClickAction() and hasContentDescription(str(R.string.main_log))
 
     private fun openToday() {
@@ -69,70 +61,32 @@ class ScreenshotTest {
         rule.launchApp()
     }
 
-    // ── Today ──────────────────────────────────────────────────────────────
-    @Test fun todayLight() { theme(DarkMode.Light); openToday(); shot("today-light") }
-
-    @Test fun todayDark() { theme(DarkMode.Dark); openToday(); shot("today-dark") }
-
-    // ── History ────────────────────────────────────────────────────────────
-    @Test fun historyLight() { theme(DarkMode.Light); openToday(); rule.selectTab(str(R.string.main_dest_history)); shot("history-light") }
-
-    @Test fun historyDark() { theme(DarkMode.Dark); openToday(); rule.selectTab(str(R.string.main_dest_history)); shot("history-dark") }
+    // Today, History and the Log chooser in the default theme are the Rose captures
+    // of [ScreenshotThemesTest]; the guided setup is [ScreenshotSetupTest].
 
     // ── Profile ────────────────────────────────────────────────────────────
-    @Test fun profileLight() { theme(DarkMode.Light); openToday(); rule.selectTab(str(R.string.main_dest_profile)); shot("profile-light") }
+    @Test fun profileLight() { useDarkMode(DarkMode.Light); openToday(); rule.selectTab(str(R.string.main_dest_profile)); rule.shot("profile-light") }
 
-    @Test fun profileDark() { theme(DarkMode.Dark); openToday(); rule.selectTab(str(R.string.main_dest_profile)); shot("profile-dark") }
-
-    // ── Log chooser ────────────────────────────────────────────────────────
-    @Test fun logChooserLight() { theme(DarkMode.Light); openToday(); openChooser(); shot("log-chooser-light") }
-
-    @Test fun logChooserDark() { theme(DarkMode.Dark); openToday(); openChooser(); shot("log-chooser-dark") }
+    @Test fun profileDark() { useDarkMode(DarkMode.Dark); openToday(); rule.selectTab(str(R.string.main_dest_profile)); rule.shot("profile-dark") }
 
     // ── Set editor ─────────────────────────────────────────────────────────
-    @Test fun setEditorLight() { theme(DarkMode.Light); openToday(); openEditor(); shot("set-editor-light") }
+    @Test fun setEditorLight() { useDarkMode(DarkMode.Light); openToday(); openEditor(); rule.shot("set-editor-light") }
 
-    @Test fun setEditorDark() { theme(DarkMode.Dark); openToday(); openEditor(); shot("set-editor-dark") }
-
-    // A free set once its exercise is picked: weight, reps and effort appear together.
-    @Test fun setEditorPickedLight() {
-        theme(DarkMode.Light); openToday(); openEditor()
-        rule.onNode(androidx.compose.ui.test.hasText("Back Squat") and androidx.compose.ui.test.isSelectable()).performClick()
-        rule.waitForIdle()
-        shot("set-editor-picked-light")
-    }
+    @Test fun setEditorDark() { useDarkMode(DarkMode.Dark); openToday(); openEditor(); rule.shot("set-editor-dark") }
 
     // ── Pain triage: severity as one 0–10 rating row ─────────────────────────
     @Test fun painTriageLight() {
-        theme(DarkMode.Light); openToday(); openChooser()
+        useDarkMode(DarkMode.Light); openToday(); openChooser()
         rule.onNodeWithText(str(R.string.main_report_pain)).performScrollTo().performClick()
         rule.waitForIdle()
         rule.pickRating("pain-severity", 6)
-        shot("pain-triage-light")
+        rule.shot("pain-triage-light")
     }
 
     // ── Per-set loop editor (opened from a plan item) ──────────────────────
-    @Test fun setLoopLight() { theme(DarkMode.Light); openToday(); openLoop(); shot("set-loop-light") }
+    @Test fun setLoopLight() { useDarkMode(DarkMode.Light); openToday(); openLoop(); rule.shot("set-loop-light") }
 
-    @Test fun setLoopDark() { theme(DarkMode.Dark); openToday(); openLoop(); shot("set-loop-dark") }
-
-    // ── Guided setup (fresh install), Both path ────────────────────────────
-    @Test fun setupTrainLight() { theme(DarkMode.Light); openSetup("train"); shot("setup-train-light") }
-
-    @Test fun setupTrainDark() { theme(DarkMode.Dark); openSetup("train"); shot("setup-train-dark") }
-
-    @Test fun setupAboutLight() { theme(DarkMode.Light); openSetup("about"); shot("setup-about-light") }
-
-    @Test fun setupAboutDark() { theme(DarkMode.Dark); openSetup("about"); shot("setup-about-dark") }
-
-    @Test fun setupReviewLight() { theme(DarkMode.Light); openSetup("review"); shot("setup-review-light") }
-
-    @Test fun setupReviewDark() { theme(DarkMode.Dark); openSetup("review"); shot("setup-review-dark") }
-
-    private fun openSetup(screen: String) {
-        rule.launchAppExpectingSetup()
-        GuidedSetupWalk.walk(rule, stopAt = screen)
-    }
+    @Test fun setLoopDark() { useDarkMode(DarkMode.Dark); openToday(); openLoop(); rule.shot("set-loop-dark") }
 
     private fun openChooser() {
         rule.onNode(logButton).performClick()

@@ -1,14 +1,14 @@
-//! Compaction golden corpus, shared with the Kotlin shell. Each
-//! `<case>.in.ndjson` is a raw event log in serde wire form; the matching
-//! `<case>.expected.ndjson` is the replay-equivalent survivor set. The Android
-//! `EventLog.compact` reads the identical directory (see
-//! `EventLogTest.compactionGoldenFixtures`), so both implementations are graded
-//! against one corpus and cannot drift apart silently.
+//! Compaction golden corpus. Each `<case>.in.ndjson` is a raw event log in
+//! serde wire form; the matching `<case>.expected.ndjson` is the
+//! replay-equivalent survivor set. Both entry points are graded: the decoded
+//! [`compact_event_log`] and the raw-line [`compact_lines`] the Android shell
+//! calls over JNI.
 
 use std::fs;
 use std::path::Path;
 
 use crux_core::App;
+use shared::log::{LineFacts, compact_lines};
 use shared::{Engine, Event, Model, compact_event_log};
 
 /// The events of one fixture file; a failure names the file.
@@ -37,13 +37,31 @@ fn replayed_view(events: &[Event]) -> String {
 #[test]
 fn compaction_golden_fixtures() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/compaction");
-    let mut cases: Vec<String> = fs::read_dir(&dir)
+    let names: Vec<String> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("missing fixtures dir {}: {e}", dir.display()))
         .filter_map(|e| e.ok())
         .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    let mut cases: Vec<String> = names
+        .iter()
         .filter_map(|n| n.strip_suffix(".in.ndjson").map(str::to_owned))
         .collect();
     cases.sort();
+    // Every other file must be the expected half of a case; an orphan
+    // `.expected.ndjson` (or stray file) would otherwise grade nothing.
+    let orphans: Vec<&String> = names
+        .iter()
+        .filter(|n| {
+            !n.ends_with(".in.ndjson")
+                && n.strip_suffix(".expected.ndjson")
+                    .is_none_or(|case| !cases.iter().any(|c| c == case))
+        })
+        .collect();
+    assert!(
+        orphans.is_empty(),
+        "files without a matching .in.ndjson in {}: {orphans:?}",
+        dir.display()
+    );
     assert!(
         !cases.is_empty(),
         "no compaction fixtures found in {}",
@@ -60,6 +78,24 @@ fn compaction_golden_fixtures() {
             "compacting {} diverged from {}",
             in_path.display(),
             expected_path.display(),
+        );
+        let raw = fs::read_to_string(&in_path).expect("fixture reads");
+        let lines: Vec<&str> = raw.lines().filter(|l| !l.trim().is_empty()).collect();
+        let verdict = compact_lines(
+            &lines
+                .iter()
+                .map(|l| LineFacts::parse(l))
+                .collect::<Vec<_>>(),
+        );
+        let kept: Vec<Event> = (0..lines.len())
+            .filter(|i| !verdict.dropped.contains(i))
+            .map(|i| serde_json::from_str(lines[i]).expect("fixture line decodes"))
+            .collect();
+        assert_eq!(
+            kept,
+            expected,
+            "raw-line compaction of {} diverged",
+            in_path.display()
         );
         // The survivor set must render exactly what the full log renders.
         assert!(

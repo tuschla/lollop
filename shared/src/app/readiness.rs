@@ -1,6 +1,6 @@
-//! Readiness assembly helpers: performance-signal expiry, run-spike and
-//! track-split signals, provisional/autoreg source rows, the Today headline,
-//! check-in/baseline echoes, and the readiness signal groups.
+//! Readiness assembly helpers: performance-signal expiry, provisional/autoreg
+//! source rows, the Today headline, check-in/baseline echoes, and the readiness
+//! signal groups.
 
 use super::*;
 
@@ -37,48 +37,6 @@ pub(super) fn to_baseline_status_view(s: &autoreg::BaselineStatus) -> BaselineSt
     }
 }
 
-/// Second-half slowdown of the most recent GPS-tracked run, if any (the
-/// feedback path reads it with the run's day and tag via
-/// `feedback_track_split`).
-#[cfg(test)]
-pub(super) fn latest_track_split(model: &Model) -> Option<f64> {
-    let facts = RunFacts::new(&model.runs);
-    latest_tracked_run(model).and_then(|i| track_split_pct(model, &facts, i))
-}
-
-/// Run `i`'s second-half slowdown, read straight off its memoized run card:
-/// the SAME QC'd track the row renders and the SAME
-/// `track_positive_split_pct_seg` computation, so the coaching cue and the run
-/// chip can never disagree. Only a run long enough for the card's own pacing
-/// verdict (two full km splits) has one: a fragment's halves say nothing about
-/// pacing. The measurement is descriptive (like pace or zone), so feeding it
-/// to the resolver introduces no unevidenced claim.
-pub(super) fn track_split_pct(model: &Model, facts: &RunFacts, i: usize) -> Option<f64> {
-    let r = model.runs.get(i)?;
-    let v = to_run_view(r, facts.keys[i], facts.qc[i].as_deref());
-    v.split.and(v.split_pct)
-}
-
-/// Index of the chronologically latest tracked run (ties → most recently
-/// logged), so a backdated GPS run never masquerades as "the latest session"
-/// here. A FUTURE-dated import (a mis-timestamped 2030 GPX) is excluded so its
-/// positive-split can't hijack "the most recent session" — the same guard the
-/// weekly-report / CTL-ATL builders apply (`end_of_local_today_sec`); `None`
-/// (no clock supplied) keeps the no-guard behavior.
-pub(super) fn latest_tracked_run(model: &Model) -> Option<usize> {
-    let cutoff = end_of_local_today_sec(model);
-    model
-        .runs
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| !r.track.is_empty())
-        .filter(|(_, r)| cutoff.is_none_or(|c| r.observed_at <= c))
-        // A same-stamp tie goes to the later-logged run by its stable
-        // `entry_id`, not its storage slot (an Undo or amend moves it).
-        .max_by_key(|(i, r)| (r.observed_at, r.entry_id, *i))
-        .map(|(i, _)| i)
-}
-
 /// Readiness window (days) after which a performance signal that can drive a
 /// load INCREASE is treated as stale and dropped. An engine heuristic (the KB
 /// gives no expiry parameter), chosen conservatively (a fortnight). Only the
@@ -100,19 +58,8 @@ pub(super) fn end_of_local_today_sec(model: &Model) -> Option<i64> {
     })
 }
 
-/// Whether this performance-signal READING is stale-expirable: only when its
-/// VALUE drives (or is adjacent to) a load INCREASE, so dropping it as stale is
-/// CONSERVATIVE. The gate is direction-aware, not signal-type-only — the SAME
-/// channel carries both directions, so a PROTECTIVE reading (a below-baseline
-/// e1RM decline, ratio < 1.0, or an above-target RPE) is NEVER expired: dropping
-/// it is anti-conservative and would silently expire a stale decline into
-/// optimism (HARD RULE 3). `Rpe`/`EstimatedOneRm` are the two
-/// `IncreaseLoadPct` producers; `BarVelocity` is the recorded VBT-increase input
-/// with no protective gate of its own (the protective velocity signal is the
-/// separate `VelocityLoss` channel, which is not expirable here). Every other
-/// signal — the velocity-loss stop, aerobic decoupling, wellness/HRV/RHR
-/// suppression, and all pain/illness/RED-S/soreness flags — is protective and
-/// never reaches the expiry window.
+/// Whether a reading drives a load increase (RPE below target, e1RM ratio > 1,
+/// bar velocity). Only those expire; protective readings never do (HARD RULE 3).
 pub(super) fn is_expirable_perf_signal(input: &ReadinessInput) -> bool {
     match input.signal {
         // RPE below target proposes an increase; on/above target holds or reduces.
@@ -151,7 +98,6 @@ pub(super) fn build_provisional(model: &Model, facts: &RunFacts) -> Option<Adjus
     // Count check-in days only within the baseline window of the NEWEST check-in:
     // an older check-in never affects the derived baselines, so it does not count
     // towards the provisional "N so far".
-    const PROVISIONAL_CHECKIN_WINDOW_DAYS: i64 = 30;
     let newest_checkin_day = model
         .checkins
         .iter()
@@ -161,7 +107,7 @@ pub(super) fn build_provisional(model: &Model, facts: &RunFacts) -> Option<Adjus
     for c in &model.checkins {
         if c.observed_at > 0 {
             let d = local_day(c.observed_at, offset);
-            if newest_checkin_day.is_none_or(|n| n - d < PROVISIONAL_CHECKIN_WINDOW_DAYS) {
+            if newest_checkin_day.is_none_or(|n| n - d < autoreg::LONG_BASELINE_WINDOW_DAYS) {
                 days.insert(d);
             }
         }
@@ -324,6 +270,14 @@ pub(super) fn adjustment_tier(r: &Recommended<Adjustment>) -> Option<SafetyTier>
     Some(tier)
 }
 
+/// Whether an adjustment takes training off today (stop, rest day, deferral).
+pub(super) fn blocks_training(r: &Recommended<Adjustment>) -> bool {
+    matches!(
+        r.value,
+        Adjustment::Stop | Adjustment::RestDay | Adjustment::Defer { .. }
+    )
+}
+
 /// Why training is on hold (contract C2), the most specific reason first: a
 /// profile health gate (it stops the plan itself), then the readiness block in
 /// the ladder order the rule layer applies (medical red flag > pain > illness),
@@ -354,12 +308,6 @@ pub(super) fn hold_reason(
             HoldReason::AcuteIllnessProfile
         });
     }
-    let blocking = |r: &&Recommended<Adjustment>| {
-        matches!(
-            r.value,
-            Adjustment::Stop | Adjustment::RestDay | Adjustment::Defer { .. }
-        )
-    };
     let reason = |r: &Recommended<Adjustment>| {
         let claim = r.claim_id();
         if claim == claims::SAFE_REDS_001 {
@@ -375,7 +323,7 @@ pub(super) fn hold_reason(
     recommended
         .iter()
         .chain(review_recs)
-        .find(blocking)
+        .find(|r| blocks_training(r))
         .map(reason)
         .or(Some(HoldReason::MedicalSignal))
 }
@@ -437,6 +385,18 @@ pub(super) struct HeadlineInputs<'a> {
     pub(super) prescription: Option<&'a SessionPlanView>,
 }
 
+/// The single highest-priority call for today (usability-ia-spec §7). The
+/// first rung that applies wins:
+/// 1. `SafetyHold` when training is blocked: the blocking onboarding gate,
+///    then readiness stop, then review deferral.
+/// 2. Referral feedback: safety-critical and in an injury, energy or behavior
+///    concern category.
+/// 3. The best non-neutral adjustment, when it is at `SafetyTier::Illness` or
+///    above.
+/// 4. Any other safety-critical feedback (e.g. a run-load spike).
+/// 5. The best non-neutral adjustment below `Illness` (or untiered).
+/// 6. `Prescription`: the next planned session, unless it is blocked.
+/// 7. Any other feedback, then `AllClear`.
 pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
     let &HeadlineInputs {
         train_blocked,
@@ -461,12 +421,7 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
         why: fb.why.clone(),
     };
     if train_blocked {
-        let blocks = |r: &&Recommended<Adjustment>| {
-            matches!(
-                r.value,
-                Adjustment::Stop | Adjustment::RestDay | Adjustment::Defer { .. }
-            )
-        };
+        let blocks = |r: &&Recommended<Adjustment>| blocks_training(r);
         // Same dominance order view() uses for the tier: onboarding gates
         // (medical referral), then readiness stops, then review deferrals.
         if let Some(stop) = gates
@@ -495,21 +450,10 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
     {
         return from_feedback(fb);
     }
-    // The safety/adjustment call OUTRANKS the prescription rung. When any
-    // readiness/pain adjustment is active (e.g. a tolerable-pain day), the
-    // headline IS that call, "modify & monitor", "easier session", never the
-    // full-load next session. Ranked on the §5 ladder first (Pain > Illness >
-    // objective performance > multi-day subjective > HRV trend > single-day
-    // markers; HARD RULE 3), then safety-critical, grade and confidence; the
-    // FIRST of equals wins, so the rule layer's own ordering (pain responses
-    // lead) decides ties.
-    let rank = |v: &AdjustmentView| {
-        (
-            v.tier,
-            v.evidence.safety_critical,
-            grade_rank(v.evidence.grade),
-        )
-    };
+    // The best adjustment ranks on the §5 ladder first (HARD RULE 3), then
+    // safety-critical, grade and confidence; the FIRST of equals wins, so the
+    // rule layer's own ordering (pain responses lead) decides ties.
+    let rank = |v: &AdjustmentView| (v.tier, v.evidence.safety_critical, v.evidence.grade);
     let best = adjustments
         .iter()
         .chain(review_adjustments.iter())
@@ -529,7 +473,7 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
             _ => Some(v),
         });
     // Other safety-critical feedback (a recovery concern, a run-load spike)
-    // sits below Pain and Illness calls but above every lower rung.
+    // outranks every adjustment below Illness.
     let critical_feedback = feedback.filter(|fb| fb.evidence.safety_critical);
     if let Some(v) = best {
         if let Some(fb) = critical_feedback
@@ -542,10 +486,7 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
     if let Some(fb) = critical_feedback {
         return from_feedback(fb);
     }
-    // Prescription rung: with no active adjustment, the highest
-    // non-safety call is the concrete next session. Only when a plan is set and
-    // not blocked; otherwise fall through to feedback/all-clear. The session
-    // card states the session, so this rung carries no summary of its own.
+    // The session card states the session, so this rung carries no summary.
     if let Some(ns) = prescription
         && ns.status != SessionStatus::Blocked
         && let Some(first) = ns.items.first()
@@ -557,9 +498,7 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
             why: first.why.clone(),
         };
     }
-    // Non-critical post-session feedback: safety-critical feedback already
-    // returned above (it outranks the prescription), so anything reaching here
-    // is informational and correctly ranks below the prescription rung.
+    // Only non-critical feedback reaches here.
     if let Some(fb) = feedback {
         return from_feedback(fb);
     }
@@ -575,21 +514,16 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
 /// Static signal→group metadata for every readiness signal, in picker order
 /// (metrics before the red-flag block).
 pub(super) fn build_signal_groups() -> std::borrow::Cow<'static, [SignalGroupView]> {
-    // Static signal→group metadata, identical every call, memoize (see
-    // `build_reference`).
-    static CACHE: std::sync::LazyLock<Vec<SignalGroupView>> =
-        std::sync::LazyLock::new(build_signal_groups_impl);
+    static CACHE: std::sync::LazyLock<Vec<SignalGroupView>> = std::sync::LazyLock::new(|| {
+        autoreg::ALL_SIGNALS
+            .iter()
+            .map(|&s| SignalGroupView {
+                signal: s,
+                group: autoreg::signal_group(s),
+            })
+            .collect()
+    });
     std::borrow::Cow::Borrowed(&CACHE)
-}
-
-fn build_signal_groups_impl() -> Vec<SignalGroupView> {
-    autoreg::ALL_SIGNALS
-        .iter()
-        .map(|&s| SignalGroupView {
-            signal: s,
-            group: autoreg::signal_group(s),
-        })
-        .collect()
 }
 
 /// Logged sets dated on or before local day `through` as performance-derivation
@@ -634,10 +568,10 @@ pub(super) fn effective_high_load_block(
     load_weeks >= 2 && cycle_len > 0 && idx % cycle_len == load_weeks - 1
 }
 
-/// Whether readiness input `input` is dated on or before local day `day` (an
-/// undated legacy input always counts).
-fn input_dated_by(input: &ReadinessInput, day: i64, offset: i64) -> bool {
-    is_undated(input.observed_at) || local_day(input.observed_at, offset) <= day
+/// Whether a row stamped `at` is dated on or before local day `day` (an undated
+/// legacy row always counts).
+fn dated_through(at: i64, day: i64, offset: i64) -> bool {
+    is_undated(at) || local_day(at, offset) <= day
 }
 
 /// The manual readiness inputs dated on or before local day `dated_by` as they
@@ -657,7 +591,7 @@ pub(super) fn manual_inputs_on(
         .filter(|r| local_day(r.retracted_at, offset) > shown_on)
         .map(|r| &r.input)
         .chain(model.inputs.iter())
-        .filter(|i| input_dated_by(i, dated_by, offset))
+        .filter(|i| dated_through(i.observed_at, dated_by, offset))
         .cloned()
         .collect()
 }
@@ -737,9 +671,7 @@ pub(super) fn readiness_picture(
         (None, _) => false,
     };
     let all = checkins_for_derivation(model);
-    let dated = |c: &CheckinInput| {
-        c.observed_at <= 0 || as_of.is_none_or(|d| local_day(c.observed_at, offset) <= d)
-    };
+    let dated = |c: &CheckinInput| as_of.is_none_or(|d| dated_through(c.observed_at, d, offset));
     let checkins: std::borrow::Cow<'_, [CheckinInput]> = if all.iter().all(dated) {
         all
     } else {
@@ -795,7 +727,7 @@ pub(super) fn return_step_on(
     day: i64,
     offset: i64,
 ) -> Option<Recommended<Adjustment>> {
-    let dated_by = |at: i64| at <= 0 || local_day(at, offset) <= day;
+    let dated_by = |at: i64| dated_through(at, day, offset);
     let timeline: Vec<autoreg::TimedInput> = model
         .inputs
         .iter()

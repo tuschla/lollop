@@ -88,9 +88,7 @@ private const val CardFrameInsetDp = 24f
 /** Route inset from the free rectangle (between the chrome) on the full-screen map. */
 private const val FullScreenFrameInsetDp = 48f
 /** Framing never zooms past street level, so a short route keeps its surroundings. */
-private const val MaxFrameZoom = 17.0
-/** World size in px at [MaxFrameZoom] (256px tiles), the tile-less canvas's zoom cap. */
-private const val MaxWorldPx = 256.0 * (1 shl 17)
+internal const val MaxFrameZoom = 17.0
 /** Pinch range on the tile-less full-screen canvas, relative to the fitted route. */
 private const val MinUserScale = 0.5f
 private const val MaxUserScale = 32f
@@ -408,7 +406,7 @@ private fun FullScreenRouteMap(
                     Box(
                         Modifier
                             .size(ActionMinHeight)
-                            .clip(RoundedCornerShape(100))
+                            .clip(PillShape)
                             .clickable(role = Role.Button, onClick = onClose)
                             .semantics { traversalIndex = -1f },
                         contentAlignment = Alignment.Center,
@@ -471,13 +469,12 @@ private fun FullScreenRouteMap(
 /** "Fit route": a 56dp `BgElevated` @ [MapChromeAlpha] circle with a hairline (spec §3.3). */
 @Composable
 private fun FitRouteButton(onClick: () -> Unit) {
-    val shape = RoundedCornerShape(100)
     Box(
         Modifier
             .size(LargeControlHeight)
-            .clip(shape)
+            .clip(PillShape)
             .background(BgElevated.copy(alpha = MapChromeAlpha))
-            .border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Control), shape)
+            .border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Control), PillShape)
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -550,12 +547,11 @@ private class TileMapState {
     var theme: Palette? = null
     var frameKey: List<Any?>? = null
     var fits = 0
-    var track: RouteTrack? = null
     var insetPx = 0f
 
     /** Fits the route box into the free area (between the overlay's insets) with [insetPx]. */
     fun fit(map: MapView, animated: Boolean) {
-        val t = track ?: return
+        val t = overlay.track ?: return
         val w = map.width
         val h = map.height
         if (w <= 0 || h <= 0) return
@@ -617,7 +613,6 @@ private fun TileRouteLayer(
             state.overlay.options = options
             state.overlay.topPx = topPx
             state.overlay.bottomPx = bottomPx
-            state.track = track
             state.insetPx = insetPx
             val key = listOf<Any?>(track, insetPx, topPx, bottomPx)
             if (state.frameKey != key) {
@@ -670,7 +665,7 @@ private fun PlainRouteLayer(
         Modifier
     }
     Canvas(modifier.then(gestures)) {
-        fit.fit(track, size.width, size.height, insetPx, topPx.toFloat(), bottomPx.toFloat(), MaxWorldPx, scale, pan.x, pan.y)
+        fit.fit(track, size.width, size.height, insetPx, topPx.toFloat(), bottomPx.toFloat(), scale, pan.x, pan.y)
         bounds.set(0f, topPx.toFloat(), size.width, size.height - bottomPx)
         drawIntoCanvas { renderer.draw(it.nativeCanvas, track, fit, bounds, options) }
     }
@@ -687,7 +682,6 @@ private fun PlainRouteLayer(
 @Composable
 fun TrimRouteMap(
     segments: List<List<GpxFix>>,
-    entryId: Long,
     keepFromSec: Long,
     keepUntilSec: Long,
     modifier: Modifier = Modifier,
@@ -696,7 +690,7 @@ fun TrimRouteMap(
     if (track.isEmpty) return
     val tiles by AppSettings.showRouteMaps.collectAsStateWithLifecycle()
     val style = rememberRouteStyle()
-    val renderer = remember(style, entryId) { RouteRenderer(style) }
+    val renderer = remember(style) { RouteRenderer(style) }
     val options = remember(keepFromSec, keepUntilSec) {
         RouteDrawOptions(distanceMarkers = false, trim = true, keepFromSec = keepFromSec, keepUntilSec = keepUntilSec)
     }
@@ -721,13 +715,12 @@ fun TrimRouteMap(
 /** A 48dp round button floating over a map (full-screen route, tracker Recenter). */
 @Composable
 internal fun MapOverlayButton(icon: Int, description: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(100)
     Box(
         modifier = modifier
             .size(ActionMinHeight)
-            .clip(shape)
+            .clip(PillShape)
             .background(BgElevated)
-            .border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Control), shape)
+            .border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Control), PillShape)
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -783,40 +776,4 @@ internal fun frameLongitudes(lons: List<Double>): LonBounds {
 internal fun frameRoute(lats: List<Double>, lons: List<Double>): BoundingBox {
     val lon = frameLongitudes(lons)
     return BoundingBox(lats.max(), lon.east, lats.min(), lon.west)
-}
-
-/**
- * One parsed GPX fix reduced to what the trim preview needs: its absolute
- * epoch-second timestamp, the cumulative haversine distance (km) and the cumulative
- * MOVING seconds from the track start up to this point. PREVIEW figures ONLY — the
- * of-record distance/duration are always re-derived in the core after a trim event.
- */
-data class TimedTrackPoint(val timeSec: Long, val cumKm: Double, val movingSec: Double)
-
-/**
- * Parsed route [segments] reshaped for the trim preview: every fix flattened into one
- * time-ordered list carrying its epoch-second time, the cumulative distance in km
- * (the same running haversine sum [RouteTrack] colours by) and the cumulative moving
- * time. A segment gap (a GPS pause between `<trkseg>`s) adds neither; within a
- * segment a leg adds its seconds only when it clears [STOPPED_SPEED_MPS], the
- * core's moving-leg rule (`running::leg`), so standing still counts no time either.
- */
-fun timedTrackFromSegments(segments: List<List<GpxFix>>): List<TimedTrackPoint> {
-    val out = ArrayList<TimedTrackPoint>()
-    var runningM = 0.0
-    var movingSec = 0.0
-    for (seg in segments) {
-        var prev: GpxFix? = null
-        for (fix in seg) {
-            if (prev != null) {
-                val legM = haversineM(prev.lat, prev.lon, fix.lat, fix.lon)
-                runningM += legM
-                val dt = (fix.timeSec - prev.timeSec).toDouble()
-                if (dt > 0.0 && legM / dt >= STOPPED_SPEED_MPS) movingSec += dt
-            }
-            out += TimedTrackPoint(fix.timeSec, runningM / 1000.0, movingSec)
-            prev = fix
-        }
-    }
-    return out
 }

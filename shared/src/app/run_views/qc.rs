@@ -7,22 +7,9 @@ use super::*;
 /// undefined), an implied speed over 12 m/s (`load::gps_speed_plausible`,
 /// impossible for a runner), and a move under 2.5 m (`load::gps_point_accept`,
 /// the Apple jitter/auto-pause pattern; the vertical-rate arm passes 0.0
-/// because fixes carry no altitude).
-///
-/// Stops are judged over a window, never leg by leg: at 1 Hz a standing
-/// runner's jitter or drift of a few metres reads as metres per second. Before
-/// a fix is gated against the last survivor `s`, the look-ahead window of fixes
-/// still within GPS uncertainty of `s` ([`stop_window`]) is checked for a
-/// STANDING fix (under 2.5 m from `s` and below the File 07 auto-pause floor,
-/// <0.5 m/s, measured from `s`). If there is one, the runner stood at `s`:
-/// every fix of the window is standing except the stride out at its end (the
-/// fixes moving steadily away from `s`, [`stride_out_start`]). The window's
-/// last fix before the stride out that is still below the floor from `s` is
-/// kept, so the leg into it is no move (no distance, no time) and the stride
-/// out of it is a normal moving leg;
-/// distance, moving time, splits and every other `running::*_seg` walk see
-/// the same legs. A fix the 2.5 m gate passes inside the window (jitter wider
-/// than 2.5 m, an outlier) therefore never becomes the next reference point.
+/// because fixes carry no altitude). Stops are judged over a [`StopWindow`],
+/// never leg by leg: a stop keeps one fix, so the leg into it is no move and
+/// the stride out of it ([`stride_out_start`]) is a normal moving leg.
 ///
 /// The pass ([`qc_pass`]) repeats on its own output until every gate accepts
 /// the track unchanged: windows are cut from the raw stream, so a single pass
@@ -252,7 +239,7 @@ pub(in crate::app) struct QcFixes {
 /// Moving time over a QC'd track, minutes: interval seconds where the implied
 /// speed clears the File 07 stop gate (`load::is_stopped`, <0.5 m/s counts as
 /// stopped, the auto-pause rule), so standing time never dilutes pace. The
-/// same `running::leg` gate picks the legs `running::track_distance_km_seg`
+/// same `running::leg` gate picks the legs `running::track_distance_km`
 /// sums, so distance and moving time always describe the same legs; a
 /// standing spell ends at the standing fix [`qc_track`] keeps, so only the
 /// stride out of it moves.
@@ -285,20 +272,10 @@ pub(in crate::app) fn run_content_key(r: &LoggedRun) -> u64 {
     r.duration_min.to_bits().hash(&mut h);
     r.hr_pct_max.to_bits().hash(&mut h);
     r.longest_recent_km.to_bits().hash(&mut h);
-    // Small enum-or-None: hash a stable discriminant code, never a `format!`
-    // allocation (this runs per run per view across several readers).
-    let wt_code: u8 = match r.workout_type {
-        None => 0,
-        Some(crate::schema::WorkoutType::Steady) => 1,
-        Some(crate::schema::WorkoutType::Interval) => 2,
-        Some(crate::schema::WorkoutType::Tempo) => 3,
-        Some(crate::schema::WorkoutType::LongRun) => 4,
-        Some(crate::schema::WorkoutType::Recovery) => 5,
-        Some(crate::schema::WorkoutType::Easy) => 6,
-    };
-    wt_code.hash(&mut h);
+    r.workout_type.hash(&mut h);
     r.session_rpe.hash(&mut h);
     r.avg_hr_bpm.map(f64::to_bits).hash(&mut h);
+    r.logged_utc_offset_sec.hash(&mut h);
     r.track_segment_starts.hash(&mut h);
     for p in &r.track {
         p.lat.to_bits().hash(&mut h);
@@ -329,8 +306,7 @@ pub(in crate::app) fn run_qc_keyed(r: &LoggedRun, key: u64) -> std::rc::Rc<QcTra
 /// distance and moving time over the same legs.
 fn qc_figures(points: &[GpsPoint], segment_starts: &[u32]) -> QcTrack {
     let qc = qc_track(points, segment_starts);
-    let distance_km =
-        running::track_distance_km_seg(&qc.track, running::MAX_GPS_ACCURACY_M, &qc.seg_starts);
+    let distance_km = running::track_distance_km(&qc.track, &qc.seg_starts);
     let moving_min = moving_duration_min(&qc);
     QcTrack {
         track: qc.track,

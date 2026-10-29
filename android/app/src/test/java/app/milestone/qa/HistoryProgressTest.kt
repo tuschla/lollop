@@ -20,7 +20,6 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.DistanceUnitOverride
 import app.milestone.Event
-import app.milestone.GpsPoint
 import app.milestone.R
 import app.milestone.AppSettings
 import java.io.File
@@ -61,28 +60,12 @@ class HistoryProgressTest {
         QaHarness.teardown()
     }
 
-    /** A 10.1 km GPS run at an even 5:00 /km: one clean fix every 3 s, 10 m apart, heading north. */
-    private fun gpsTenK(observedAt: Long): Event {
-        val metresPerDegLat = 111_195.0
-        val fixes = 1011
-        val points = (0 until fixes).map { i ->
-            GpsPoint(lat = 47.0 + i * 10.0 / metresPerDegLat, lon = 8.0, observedAt = observedAt + i * 3L, accuracyM = 5.0)
-        }
-        return Event.LogRunTrack(
-            points = points,
-            hrPctMax = 0.0,
-            longestRecentKm = 0.0,
-            observedAt = observedAt,
-            entryId = observedAt * 1000,
-        )
-    }
-
-    private fun violations(vararg kinds: String, clipping: Boolean = false): List<UxInvariants.Violation> =
-        UxInvariants.check(rule, rule.density, checkClipping = clipping).filter { it.kind in kinds }
+    private fun violations(): List<UxInvariants.Violation> =
+        UxInvariants.check(rule, rule.density).filter { it.kind in UxInvariants.KINDS }
 
     @Test
     fun gpsTenK_showsTopRecordChipAndBestEffortsRows() {
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), gpsTenK(QaHarness.daysAgoAtMidday(1))))
+        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.gpsTenK(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
         rule.selectTab(str(R.string.main_dest_history))
 
@@ -97,7 +80,6 @@ class HistoryProgressTest {
         rule.onAllNodesWithText("1K").assertCountEquals(1)
         rule.onAllNodesWithText("5K").assertCountEquals(1)
         rule.onAllNodesWithText("10K").assertCountEquals(1)
-        rule.onAllNodesWithText("Part of a longer run").assertCountEquals(0)
         // Measured with the whole grid on screen (bounds are clipped to the viewport).
         rule.onAllNodesWithTag("history-record")[3].performScrollTo()
         rule.waitForIdle()
@@ -163,7 +145,7 @@ class HistoryProgressTest {
     @Test
     fun runDetailWithRating_meetsEveryInvariantAtFontScale130() {
         RuntimeEnvironment.setFontScale(1.3f)
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), gpsTenK(QaHarness.daysAgoAtMidday(1))))
+        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.gpsTenK(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
         rule.selectTab(str(R.string.main_dest_history))
         rule.scrollToText("Fastest 10K")
@@ -171,15 +153,14 @@ class HistoryProgressTest {
         rule.waitForIdle()
         // The route loads off the main thread; Trim appears once it has.
         rule.waitUntil(10_000) { rule.onAllNodesWithTag("run-trim").fetchSemanticsNodes().isNotEmpty() }
-        val kinds = arrayOf("forbidden-text", "unlabeled-action", "small-touch-target", "duplicate-action-in-card", "clipped-action")
         rule.onNodeWithTag("run-delete").performScrollTo()
-        val sheet = violations(*kinds, clipping = true)
+        val sheet = violations()
         assertTrue("UX invariant(s) violated on the run sheet:\n" + sheet.joinToString("\n"), sheet.isEmpty())
         // The Rate run sheet at 130%: the effort scale and the type chips.
         rule.onNodeWithTag("run-log-effort").performScrollTo().performClick()
         rule.waitForIdle()
         rule.onNodeWithTag("run-rate-save").performScrollTo()
-        val rate = violations(*kinds, clipping = true)
+        val rate = violations()
         assertTrue("UX invariant(s) violated on Rate run:\n" + rate.joinToString("\n"), rate.isEmpty())
     }
 

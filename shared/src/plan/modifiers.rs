@@ -184,7 +184,6 @@ pub(super) fn apply_deload_week(sessions: &mut [Session], goal: LiftGoal) {
                 LiftIntensity::PercentOneRm(p) => LiftIntensity::PercentOneRm(p * load_frac),
                 LiftIntensity::Rir(r) => LiftIntensity::Rir(r.max(DELOAD_MIN_RIR)),
                 LiftIntensity::Rpe(x) => LiftIntensity::Rpe(x.min(DELOAD_MAX_RPE)),
-                LiftIntensity::VelocityMs(v) => LiftIntensity::VelocityMs(v),
                 LiftIntensity::MaxIntent => LiftIntensity::MaxIntent,
             };
             l.load_kg = l.load_kg.map(|kg| kg * load_frac);

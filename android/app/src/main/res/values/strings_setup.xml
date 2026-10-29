@@ -263,8 +263,8 @@
     <string name="setup_health_defer_notice">From your answers, lollop won\'t build a plan for now. You can still log and track.</string>
     <string name="setup_health_defer_youth">You\'re under 18, so lollop doesn\'t build plans. Strength training at your age needs a coach who can watch your technique. You can still log and track.</string>
 
-    <!-- HealthScreenCopy: shared health-gate rows (wizard health screen + editor Health
-         section); one source so the two wordings cannot drift. -->
+    <!-- Health-gate rows shared by the wizard health screen and the editor Health
+         section (ParqQuestions, CurrentHealthRows). -->
     <!-- PAR-Q+ (onboard-051): seven plain-language yes/no questions. Q2/Q3 are
          symptoms (not clearable, their consequence shows under the row once on),
          Q6 is the injury/rehab hold; any other Yes unlocks "Cleared by a doctor". -->
@@ -298,7 +298,7 @@
 
     <!-- ===================== setup_ : Profile editor ===================== -->
 
-    <!-- Focus row (Focus enum segment labels) -->
+    <!-- Focus row (Modality.focusLabelRes segment labels) -->
     <string name="setup_row_focus">Focus</string>
     <string name="setup_focus_lift">Lift</string>
     <string name="setup_focus_run">Run</string>

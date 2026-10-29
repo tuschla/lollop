@@ -37,8 +37,9 @@ internal fun ViewModel.today(): Long = today_epoch_day ?: todayEpochDay()
 internal fun utcOffsetSec(): Int = java.util.TimeZone.getDefault().getOffset(AppClock.nowMillis()) / 1000
 
 /**
- * Friendly log date for a history card from a unix-seconds stamp: "2 hours ago",
- * "Yesterday", "Jul 15". Empty for an undated entry.
+ * Friendly log date for a history card from a unix-seconds stamp, in whole days
+ * ("Yesterday", "3 days ago"), a date ("Jul 15") from a week back. Empty for an
+ * undated entry.
  */
 internal fun formatLogDate(epochSec: Long, nowMillis: Long = AppClock.nowMillis()): String =
     if (epochSec <= 0L) {

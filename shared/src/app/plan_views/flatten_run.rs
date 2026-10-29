@@ -7,29 +7,17 @@ use super::*;
 /// quantisation. The plan floors to its step, so the one-decimal value is the
 /// prescription itself and never reads above the spike gate.
 pub(super) fn fmt_run_km(k: f32) -> String {
-    let tenths = shown_km_tenths(f64::from(k));
-    if (tenths - tenths.round()).abs() < 1e-9 {
-        format!("{tenths:.0} km")
-    } else {
-        format!("{tenths:.1} km")
-    }
+    format!("{} km", fmt_rounded(round_tenths(f64::from(k))))
 }
 
 /// Render a C25K run/walk interval set (running-025): `rounds` repeats of a run
 /// then a walk, each shown as minutes once it reaches 2 min, e.g.
 /// "8 × (60 s run / 90 s walk)".
 fn run_walk_label(run_sec: u16, walk_sec: u16, rounds: u8) -> String {
-    let secs = |s: u16| -> String {
-        match (s / 60, s % 60) {
-            (m, 0) if m >= 2 => format!("{m} min"),
-            (m, 30) if m >= 2 => format!("{m}.5 min"),
-            _ => format!("{s} s"),
-        }
-    };
     format!(
         "{rounds} × ({} run / {} walk)",
-        secs(run_sec),
-        secs(walk_sec)
+        fmt_secs_min(run_sec.into(), 2),
+        fmt_secs_min(walk_sec.into(), 2)
     )
 }
 
@@ -195,8 +183,6 @@ pub(super) fn flatten_run_prescription(
         RunIntensity::ThreeZone(ThreeZone::Z1) => "Zone 1 (easy)".into(),
         RunIntensity::ThreeZone(ThreeZone::Z2) => "Zone 2 (steady)".into(),
         RunIntensity::ThreeZone(ThreeZone::Z3) => "Zone 3 (hard)".into(),
-        RunIntensity::PaceSecPerKm(s) => format!("{}/km", fmt_mss(f64::from(s))),
-        RunIntensity::PowerPercentCp(p) => format!("{p:.0}% of critical power"),
     };
     // Rep-structured runs lead with the honest "N × <rep> · <pace>";
     // continuous runs keep the whole-session "<vol> · <pace>".
@@ -208,58 +194,22 @@ pub(super) fn flatten_run_prescription(
     let summary = format!("{head} · {label}");
     PrescriptionView {
         summary,
-        exercise: String::new(),
-        sets: 0,
-        reps_low: 0,
-        reps_high: 0,
-        load_kg: None,
         intensity_label: label,
         // A run target (pace/zone/HRmax) is never RIR/load-adjustable.
         intensity: PlanIntensity::Prose,
-        rest_sec: 0,
         rep_count,
         rep_volume: rep_volume.unwrap_or_default(),
-        timed_hold: false,
-        target_rpe: None,
-        hold_low_sec: 0,
-        hold_high_sec: 0,
-        added_kg: None,
-        anchored_on: String::new(),
-        anchored_on_last: false,
-        anchored_on_single_set: false,
-        adjusted_note: String::new(),
-        return_check: false,
         safety_reason,
         safety_reason_mi,
         evidence: EvidenceTagView::of(rx),
         why: why_from(run_basis, rx),
-        done: false,
-        sets_done: 0,
-        logged_sets: Vec::new(),
-        ended_early: false,
-        run_logged_km: 0.0,
-        run_logged_min: 0.0,
-        run_target: None,
-        calis: None,
-        last_set: None,
-        suggested_load_kg: None,
-        plates_per_side: Vec::new(),
-        effort_cue: String::new(),
         run_structure: run_structure_view(r),
-        face_name: String::new(),
-        face_detail: String::new(),
         face_lead: head.clone(),
         run_head: head,
         run_head_km: run_volume.and_then(RunAmount::shown_km),
-        status: ItemStatus::Open,
         run_volume,
         rep_amount: r.repeats.map(|(_, rv)| RunAmount::of(rv)),
-        run_lighter: false,
-        rpe_target: false,
-        hold_load_cap_kg: None,
-        pick_load: false,
-        basis_rx: None,
-        load_held: false,
+        ..PrescriptionView::default()
     }
 }
 

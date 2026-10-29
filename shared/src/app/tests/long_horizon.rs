@@ -31,37 +31,10 @@
 //!   History totals agree with the entries actually logged;
 //! - units: a pound user sees no kilogram text, `*_mi` strings carry no km;
 //! - view build time stays bounded as the history grows.
-//!
-//! Scenarios that expose a real defect live in their own `#[ignore = "BUG:
-//! …"]` tests at the bottom; the archetype lives stay green.
 
 use super::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
-
-// ── Deterministic randomness ───────────────────────────────────────────────
-
-/// The `view_equivalence` 64-bit LCG (Knuth MMIX constants).
-struct Lcg(u64);
-
-impl Lcg {
-    fn next(&mut self) -> f64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        (self.0 >> 11) as f64 / (1u64 << 53) as f64
-    }
-    fn chance(&mut self, p: f64) -> bool {
-        self.next() < p
-    }
-    fn range(&mut self, lo: f64, hi: f64) -> f64 {
-        lo + (hi - lo) * self.next()
-    }
-    fn int(&mut self, lo: u32, hi: u32) -> u32 {
-        lo + ((self.next() * f64::from(hi - lo + 1)) as u32).min(hi - lo)
-    }
-}
 
 // ── Calendar helpers ───────────────────────────────────────────────────────
 
@@ -72,17 +45,6 @@ fn wd(d: i64) -> i64 {
 
 fn monday_of(d: i64) -> i64 {
     d - wd(d)
-}
-
-/// Epoch day of a civil date (Hinnant's `days_from_civil`).
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let m = i64::from(m);
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(d) - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
 }
 
 /// 2026-01-05, a Monday: the first simulated day of every life.
@@ -295,6 +257,23 @@ fn first_load(ex: &str) -> f64 {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ItemKind {
+    Lift,
+    Calisthenics,
+    Run,
+}
+
+fn kind(it: &PrescriptionView) -> ItemKind {
+    if it.is_run() {
+        ItemKind::Run
+    } else if it.calis.is_some() {
+        ItemKind::Calisthenics
+    } else {
+        ItemKind::Lift
+    }
+}
+
 /// Main-set distance of a run item, km: the plain distance head, else an
 /// estimate from the structure or the minutes the summary leads with.
 fn item_km(it: &PrescriptionView) -> f64 {
@@ -353,9 +332,6 @@ fn one_rir_load(e1rm: f64, reps: u8) -> f64 {
 
 /// Number keys that may legitimately go negative on the wire.
 const SIGNED_KEYS: &[&str] = &[
-    "tsb",
-    "e1rm_delta_kg",
-    "split_pct",
     "delta_pct",
     "delta_bpm",
     "delta",
@@ -449,10 +425,7 @@ impl Sim {
             hits: BTreeMap::new(),
             failures: Vec::new(),
         };
-        sim.send(Event::SetToday {
-            epoch_day: START,
-            utc_offset_sec: 0,
-        });
+        sim.send(set_today_ev(START));
         sim.set_profile(Profile {
             effective_from_epoch_day: Some(START),
             ..profile
@@ -590,7 +563,7 @@ impl Sim {
         let lb = self.profile.weight_lb;
         let mut hour = self.rng.range(6.5, 19.0);
         for it in ns.items.iter().filter(|i| !i.done) {
-            match it.kind() {
+            match kind(it) {
                 ItemKind::Run => {
                     let f = if lighter {
                         0.7
@@ -1570,7 +1543,7 @@ impl Sim {
             .filter(|s| s.epoch_day >= self.today && !s.status.is_done())
         {
             let through = (row.epoch_day - 1).min(self.today);
-            for it in row.items.iter().filter(|i| i.kind() == ItemKind::Lift) {
+            for it in row.items.iter().filter(|i| kind(i) == ItemKind::Lift) {
                 // STR-INTENT-001 / HYP-FAIL-SAFE-001: never below 1 RIR.
                 if it.target_rpe.is_some_and(|r| r > 9.0 + 1e-9) {
                     bad.push(format!("{}: target RPE {:?}", it.summary, it.target_rpe));
@@ -1707,7 +1680,7 @@ impl Sim {
                 _ => 0.70,
             };
             for row in vm.week_plan.iter().filter(|s| s.epoch_day >= self.today) {
-                for it in row.items.iter().filter(|i| i.kind() == ItemKind::Lift) {
+                for it in row.items.iter().filter(|i| kind(i) == ItemKind::Lift) {
                     let ex = norm(&it.exercise);
                     let Some(&(ratio, pre_e)) = re.pre_lifts.get(&ex) else {
                         continue;
@@ -1977,17 +1950,17 @@ impl Sim {
             for (m, w) in &self.weeks {
                 eprintln!("  week {:>3}: {w:?}", (m - START) / 7);
             }
+            eprintln!(
+                "[{}] {} views, max {:?}, mean {:?}, {} sets, {} runs, hits {:?}",
+                self.name,
+                self.n_views,
+                self.max_view,
+                avg,
+                self.sets.len(),
+                self.runs.len(),
+                self.hits
+            );
         }
-        eprintln!(
-            "[{}] {} views, max {:?}, mean {:?}, {} sets, {} runs, hits {:?}",
-            self.name,
-            self.n_views,
-            self.max_view,
-            avg,
-            self.sets.len(),
-            self.runs.len(),
-            self.hits
-        );
         assert!(self.failures.is_empty(), "{}", self.failures.join("\n"));
         for c in must_hit {
             assert!(
@@ -2347,7 +2320,9 @@ fn pregnancy_hold_then_return() {
 
 /// The 18th birthday of a profile entered as 17 on day 21: the plan is
 /// withheld (SAFE-PEDS-001) with the WHO activity card shown instead
-/// (YOUTH-PA-001) until the birthday, then the plan resumes.
+/// (YOUTH-PA-001) until the birthday, then the plan resumes. The days before
+/// the birthday stay held once it lifts the gate, never planned sessions
+/// shown as missed.
 fn youth_life(days: i64) -> Sim {
     let birth = days_from_civil(2008, 5, 20);
     let birthday = days_from_civil(2026, 5, 20);
@@ -2396,7 +2371,7 @@ fn under_eighteen_turns_eighteen() {
     sim.finish(&["hold blocks", "gate lifts", "week strip", "history"]);
 }
 
-// ── Known defects, pinned ──────────────────────────────────────────────────
+// ── Targeted scenarios ─────────────────────────────────────────────────────
 
 /// The highest planned week km and long run over the last `n` weeks (a
 /// recovery week among them does not hide the level reached).
@@ -2434,13 +2409,7 @@ fn run_as_prescribed(
 ) -> Vec<(f64, f64)> {
     let mut weeks = Vec::new();
     for d in from..from + days {
-        let _ = app.update(
-            Event::SetToday {
-                epoch_day: d,
-                utc_offset_sec: 0,
-            },
-            m,
-        );
+        let _ = app.update(set_today_ev(d), m);
         let vm = app.view(m);
         if wd(d) == 0 {
             weeks.push(week_run_km(&vm));
@@ -2464,10 +2433,7 @@ fn start_runner(p: Profile) -> (Engine, Model) {
     let app = Engine;
     let mut m = Model::default();
     for e in [
-        Event::SetToday {
-            epoch_day: START,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(START),
         Event::SetProfile(Profile {
             effective_from_epoch_day: Some(START),
             ..p
@@ -2572,16 +2538,6 @@ fn hypertrophy_lifter_restarts_carried_loads_lighter_after_three_weeks_off() {
     sim.finish(&["re-entry", "lift caps"]);
 }
 
-/// SAFE-PEDS-001: the days before the 18th birthday were held (no plan, the
-/// WHO card instead). Once the birthday lifts the gate, those past days of
-/// the week must stay held, not turn into planned sessions shown as missed.
-#[test]
-fn turning_eighteen_keeps_the_held_days_held() {
-    let birthday = days_from_civil(2026, 5, 20);
-    let sim = youth_life(birthday - START + 3);
-    sim.finish(&["hold blocks", "gate lifts", "week strip"]);
-}
-
 /// The owner's bound (a view under 250 ms in a debug build on a three-year
 /// history), pinned deterministically: wall-clock time on a loaded test box
 /// is not a gate. A lifter logging every set (four days a week, six
@@ -2619,10 +2575,7 @@ fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
     let send = |m: &mut Model, e: Event| {
         let _ = app.update(e, m);
     };
-    let today = |d: i64| Event::SetToday {
-        epoch_day: d,
-        utc_offset_sec: 0,
-    };
+    let today = set_today_ev;
     // (SetIndex builds, name classifications, wall time) of one view.
     let measured = |m: &Model| {
         let (b0, c0) = (
@@ -2689,9 +2642,6 @@ fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
         let (_, b3, c3, w3) = measured(&m);
         rows.push((id, [(b1, c1, w1), (b2, c2, w2), (b3, c3, w3)]));
     }
-    eprintln!(
-        "(sets, [(SetIndex builds, name classifications, wall)] after the day changes / one more set / next day): {rows:?}"
-    );
     for (sets, views) in &rows {
         let [(b1, ..), (b2, ..), (b3, ..)] = *views;
         assert!(

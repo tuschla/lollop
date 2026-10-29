@@ -58,10 +58,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 import java.util.TimeZone
 
 /** True under a host that pins the editors' primary action to a bottom bar and
@@ -107,6 +104,9 @@ fun EditorScaffold(
     keepOpenAfterSave: Boolean = false,
     // What the primary action does; "Save" when null.
     actionLabel: String? = null,
+    // A safety commit ("Report pain"): danger fill, and the button never looks
+    // blocked (HARD RULE 3); the latch still swallows re-taps.
+    danger: Boolean = false,
     bottomExtra: @Composable ColumnScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -120,7 +120,7 @@ fun EditorScaffold(
     var lastCommitAt by remember { mutableStateOf<Long?>(null) }
     val haptic = LocalHapticFeedback.current
     val label = actionLabel ?: stringResource(R.string.main_save)
-    val enabled = saveEnabled && !submitted
+    val enabled = saveEnabled && (danger || !submitted)
     val commit: () -> Unit = {
         if (keepOpenAfterSave) {
             val now = AppClock.nowMillis()
@@ -135,6 +135,16 @@ fun EditorScaffold(
         }
     }
     val requestClose: () -> Unit = { if (dirty) confirmDiscard = true else onClose() }
+    val primary: @Composable () -> Unit = {
+        PrimaryButton(
+            label,
+            commit,
+            Modifier.fillMaxWidth().testTag("editor-primary"),
+            enabled = enabled,
+            minHeight = LargeControlHeight,
+            danger = danger,
+        )
+    }
     // System Back is the close button: inside the host sheet or dialog, so the
     // discard confirm opens OVER the editor and "Keep editing" really keeps it.
     // A host that scrolls the editor itself keeps its own Back while clean.
@@ -173,13 +183,7 @@ fun EditorScaffold(
             ) {
                 bottomExtra()
                 // The pinned primary action, tagged `editor-primary`.
-                PrimaryButton(
-                    label,
-                    commit,
-                    Modifier.fillMaxWidth().testTag("editor-primary"),
-                    enabled = enabled,
-                    minHeight = LargeControlHeight,
-                )
+                primary()
             }
         }
     } else {
@@ -192,13 +196,7 @@ fun EditorScaffold(
             bottomExtra()
             // The same full-width primary at the end of the form as the pinned
             // editors, so Save sits in one place in every editor.
-            PrimaryButton(
-                label,
-                commit,
-                Modifier.fillMaxWidth().testTag("editor-primary"),
-                enabled = enabled,
-                minHeight = LargeControlHeight,
-            )
+            primary()
         }
     }
     if (confirmDiscard) {
@@ -234,9 +232,8 @@ internal fun ReportDirty(dirty: Boolean, onDirtyChange: (Boolean) -> Unit) {
     LaunchedEffect(dirty) { onDirtyChange(dirty) }
 }
 
-/** A keypad buffer as a number; null while it is empty or incomplete. The
- *  keypad types '.', a ',' decimal (a locale-formatted prefill) parses too. */
-internal fun parseKeypadNumber(text: String): Double? = text.replace(',', '.').toDoubleOrNull()
+/** A keypad buffer as a number; null while it is empty or incomplete. */
+internal fun parseKeypadNumber(text: String): Double? = text.toDoubleOrNull()
 
 /** An editor's top row: `ui-close` (a 48dp target) and the centered title. The
  *  primary action lives at the bottom, so the right side only balances the
@@ -298,7 +295,7 @@ internal fun planDayObservedAt(epochDay: Long): Long =
 
 /**
  * Backdating control for every log editor: a compact chip stating when the
- * entry is logged ("Today · 14:32" / "Jul 15 · 09:10"), defaulting to now.
+ * entry is logged ("Today · 14:32" / "15 Jul · 09:10"), defaulting to now.
  * Tapping opens a Material 3 date picker (future dates unselectable); [withTime]
  * (sets/runs) chains a time picker after the date. The result is clamped to
  * now so a future stamp can never be submitted. Date-only editors
@@ -323,14 +320,14 @@ fun ObservedAtRow(
     var showDate by rememberSaveable { mutableStateOf(false) }
     var showTime by rememberSaveable { mutableStateOf(false) }
     var pendingDayUtcMillis by rememberSaveable { mutableStateOf<Long?>(null) }
-    // Set when the last pick landed in the future and was clamped back to now, so
-    // the row can say so instead of silently moving the stamp.
-    var clamped by rememberSaveable { mutableStateOf(false) }
+    // The stamp a future pick was clamped to, so the row can say so instead of
+    // silently moving it; a stamp set from outside (the next set) hides the note.
+    var clampedTo by rememberSaveable { mutableStateOf<Long?>(null) }
     // Clamp a picked instant to now and record whether it had to, then emit it.
     fun commit(dayMillis: Long, hour: Int, minute: Int) {
         val raw = localInstantSeconds(dayMillis, hour, minute)
         val now = AppClock.nowSec()
-        clamped = raw > now
+        clampedTo = if (raw > now) now else null
         onChange(minOf(raw, now))
     }
 
@@ -376,7 +373,7 @@ fun ObservedAtRow(
         // Always-composed single-line slot: empty until a future pick is clamped,
         // so surfacing the clamp never re-measures the sheet mid-edit.
         Text(
-            if (clamped) stringResource(R.string.log_future_clamped) else "",
+            if (clampedTo == epochSec) stringResource(R.string.log_future_clamped) else "",
             color = OnBgMuted,
             style = Type.Caption,
             maxLines = 1,
@@ -481,30 +478,17 @@ internal fun latestSelectableDayUtcMillis(nowMillis: Long, zone: java.time.ZoneI
     java.time.Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
         .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
 
-/** "Today · 14:32" / "Jul 15 · 09:10" / date-only variants for the chip. The date
- *  renders in the device locale ("15 Jul", "7月15日", …) and the time honours the
- *  device 12/24-hour setting ([use24h], resolved from the Context by the caller).
- *  Pure formatting only: the wire's `observed_at` epoch is untouched. */
+/** "Today · 14:32" / "15 Jul · 09:10" / date-only variants for the chip. The date
+ *  uses the locale's day/month order ([localizedDayFormatter]) and the time the
+ *  device 12/24-hour setting ([use24h], resolved from the Context by the caller). */
 private fun formatObservedAt(epochSec: Long, withTime: Boolean, use24h: Boolean, todayLabel: String): String {
-    val now = Calendar.getInstance().apply { timeInMillis = AppClock.nowMillis() }
-    val then = Calendar.getInstance().apply { timeInMillis = epochSec * 1000L }
-    val sameDay = now.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
-        now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
-    val locale = Locale.getDefault()
-    val day = if (sameDay) todayLabel else SimpleDateFormat("MMM d", locale).format(Date(epochSec * 1000L))
-    return if (withTime) {
-        val timePattern = if (use24h) "HH:mm" else "h:mm a"
-        "$day · ${SimpleDateFormat(timePattern, locale).format(Date(epochSec * 1000L))}"
-    } else {
-        day
-    }
+    val zone = java.time.ZoneId.systemDefault()
+    val then = java.time.Instant.ofEpochSecond(epochSec).atZone(zone)
+    val today = java.time.Instant.ofEpochMilli(AppClock.nowMillis()).atZone(zone).toLocalDate()
+    val day = if (then.toLocalDate() == today) todayLabel else then.format(localizedDayFormatter("MMMd"))
+    if (!withTime) return day
+    return "$day · ${then.format(localizedDayFormatter(if (use24h) "Hmm" else "hmm"))}"
 }
-
-/** An editor toggle row: [LabeledSwitchRow] (a `Type.Body` label over an optional
- *  `Type.Caption` [hint]) with the change handler as the trailing lambda. */
-@Composable
-internal fun SwitchRow(label: String, checked: Boolean, hint: String? = null, onChange: (Boolean) -> Unit) =
-    LabeledSwitchRow(label = label, checked = checked, onCheckedChange = onChange, subtitle = hint)
 
 /** A quiet disclosure row ("More", "More details"): an Accent label with the
  *  shared row chevron, turned down while [expanded]. A whole-row ≥48dp target,

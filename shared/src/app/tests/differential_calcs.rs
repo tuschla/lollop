@@ -141,18 +141,6 @@ mod oracle {
     pub const MASTERS_G_PER_KG: (f64, f64) = (1.2, 1.6);
     pub const DEFICIT_G_PER_KG: (f64, f64) = (1.8, 2.7);
 
-    /// 07-data-harvesting.md:176 — Cooper `(d − 504.9)/44.73`.
-    pub fn cooper(d: f64) -> f64 {
-        (d - 504.9) / 44.73
-    }
-
-    /// 07-data-harvesting.md:179-180 — CS from two efforts
-    /// `CS = (D2 − D1)/(T2 − T1)`, `D′` the intercept of `D = CS·t + D′`.
-    pub fn cs_two(d1: f64, t1: f64, d2: f64, t2: f64) -> (f64, f64) {
-        let cs = (d2 - d1) / (t2 - t1);
-        (cs, d2 - cs * t2)
-    }
-
     /// 04-running.md:395 — MAF cap `180 − age` (no adjustment).
     pub fn maf(age: f64) -> f64 {
         180.0 - age
@@ -253,8 +241,8 @@ const BANDS: [VdotBand; 5] = [
     VdotBand::Repetition,
 ];
 
-fn hr_query(age: f64, rhr: Option<f64>) -> HrZoneQuery {
-    HrZoneQuery {
+fn hr_query(age: f64, rhr: Option<f64>) -> HrZoneInputView {
+    HrZoneInputView {
         age_years: age,
         resting_hr_bpm: rhr,
         weeks_since_recalc: None,
@@ -345,7 +333,7 @@ fn hr_zone_table_uses_measured_max_and_refuses_out_of_window_ages() {
         for age in [0.0, 13.0, 40.0, 100.0, 130.0] {
             let (_, hm, bands) = build_hr_zones(&hr_query(age, None), Some(m));
             let hm = hm.expect("measured max needs no age");
-            assert!(hm.measured && hm.bpm == m);
+            assert!(hm.measured && hm.bpm == m && hm.tanaka_intercept == 0.0);
             for b in bands.iter().filter(|b| !b.pace_governed) {
                 assert!(
                     rounds_to(b.bpm_low, m * b.pct_low / 100.0)
@@ -362,6 +350,11 @@ fn hr_zone_table_uses_measured_max_and_refuses_out_of_window_ages() {
                 "age {age} measured {measured:?}"
             );
             assert_eq!(rows.len(), 1, "one explanatory row");
+            assert!(
+                rows[0].summary.contains("between 5 and 100"),
+                "{}",
+                rows[0].summary
+            );
         }
     }
 }
@@ -644,13 +637,7 @@ fn race_prediction_reaches_the_view_with_the_marathon_derate_only_slowing() {
 
         for (longest, derated) in [(12.0, true), (32.0, false)] {
             let mut m = Model::default();
-            let _ = app.update(
-                Event::SetToday {
-                    epoch_day: 20_000,
-                    utc_offset_sec: 0,
-                },
-                &mut m,
-            );
+            let _ = app.update(set_today_ev(20_000), &mut m);
             let _ = app.update(
                 log_run(
                     longest,
@@ -942,7 +929,7 @@ fn logged_set_e1rm_pct_and_rir_match_kb_formulas_over_weight_rep_rpe_grid() {
         let w = 20.0 + 0.25 * f64::from(wi);
         for reps in 1..=15 {
             for rpe in rpes {
-                let v = to_lift_view(&set(w, reps, rpe), None, false, false);
+                let v = to_lift_view(&set(w, reps, rpe), false, false);
                 let eff = oracle_eff(reps, rpe);
                 // 02:54 Epley. Convention (app-stated, strength-005): one
                 // effective rep IS the 1RM; between 1 and 2 effective reps the
@@ -988,7 +975,7 @@ fn logged_set_e1rm_pct_and_rir_match_kb_formulas_over_weight_rep_rpe_grid() {
                         if eff >= 2.0 {
                             oracle::epley(w, eff)
                         } else {
-                            to_lift_view(&set(w, reps, rpe), None, false, false).e1rm_kg
+                            to_lift_view(&set(w, reps, rpe), false, false).e1rm_kg
                         },
                         oracle::brzycki_kb(w, eff),
                         oracle::lombardi(w, eff),
@@ -1022,7 +1009,7 @@ fn e1rm_is_monotone_in_weight_reps_and_reserve() {
             let mut prev = 0.0;
             for wi in 0..=560 {
                 let w = 20.0 + 0.5 * f64::from(wi);
-                let e = to_lift_view(&set(w, reps, rpe), None, false, false).e1rm_kg;
+                let e = to_lift_view(&set(w, reps, rpe), false, false).e1rm_kg;
                 assert!(e >= prev, "{w}×{reps}@{rpe}");
                 assert!(
                     e >= w - 0.05,
@@ -1036,7 +1023,7 @@ fn e1rm_is_monotone_in_weight_reps_and_reserve() {
         for rpe in rpes {
             let mut prev = 0.0;
             for reps in 1..=20 {
-                let e = to_lift_view(&set(w, reps, rpe), None, false, false).e1rm_kg;
+                let e = to_lift_view(&set(w, reps, rpe), false, false).e1rm_kg;
                 assert!(e >= prev, "{w}×{reps}@{rpe}");
                 prev = e;
             }
@@ -1045,7 +1032,7 @@ fn e1rm_is_monotone_in_weight_reps_and_reserve() {
             // Exact RPE 6.5 → 10: less in reserve → a lower (never higher) e1RM.
             let mut prev = f64::INFINITY;
             for rpe in [6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0] {
-                let e = to_lift_view(&set(w, reps, rpe), None, false, false).e1rm_kg;
+                let e = to_lift_view(&set(w, reps, rpe), false, false).e1rm_kg;
                 assert!(e <= prev, "{w}×{reps}@{rpe}");
                 prev = e;
             }
@@ -1077,7 +1064,7 @@ fn logged_set_reaches_the_view_with_the_same_metrics_and_lb_display() {
         let _ = app.update(log_set("Back squat", w, reps, rpe, 1_000_000), &mut model);
         let vm = app.view(&model);
         let got = vm.lifts.first().expect("one lift");
-        let want = to_lift_view(&set(w, reps, rpe), None, false, lb);
+        let want = to_lift_view(&set(w, reps, rpe), false, lb);
         assert_eq!(
             (got.e1rm_kg, got.pct_1rm, got.rir),
             (want.e1rm_kg, want.pct_1rm, want.rir)
@@ -1119,7 +1106,7 @@ fn e1rm_exact(w: f64, reps: u32, rpe: f64) -> f64 {
 #[test]
 fn prescribed_pct_1rm_for_reps_in_reserve_inverts_epley() {
     // strength-005 (02:54) inverted: the %1RM at which `reps` leave `rir` in
-    // reserve is 100/(1 + (reps+rir)/30); `max_pct_leaving_rir` floors it so
+    // reserve is 100/(1 + (reps+rir)/30); a whole-percent load floors it so
     // the reserve is never rounded away.
     for reps in 1..=20u8 {
         for rir in 0..=5u8 {
@@ -1129,10 +1116,10 @@ fn prescribed_pct_1rm_for_reps_in_reserve_inverts_epley() {
             } else {
                 100.0 * 30.0 / (30.0 + eff)
             };
-            let got = f64::from(hypertrophy::pct_1rm_for_reps_in_reserve(reps, rir));
+            let got = strength::pct_1rm_leaving_rir(reps, rir);
             if eff >= 2.0 {
                 assert!((got - want).abs() < 1e-4, "{reps}@{rir}: {got} vs {want}");
-                let floor = strength::max_pct_leaving_rir(reps, rir);
+                let floor = got.floor() as u8;
                 assert_eq!(f64::from(floor), want.floor(), "{reps}@{rir}");
                 // A load at the floored % really leaves ≥ rir in reserve on Epley.
                 let reps_possible = 30.0 * (100.0 / f64::from(floor) - 1.0);
@@ -1354,10 +1341,6 @@ fn clock_and_pace_formatting_match_the_oracle_including_half_second_carries() {
         (-1.0, "0:00"),
     ] {
         assert_eq!(fmt_clock(s), want, "{s}");
-        assert_eq!(
-            fmt_race_clock(s.max(0.0)).as_str(),
-            if s <= 0.0 { "-" } else { want }
-        );
     }
 }
 
@@ -1367,7 +1350,7 @@ fn clock_and_pace_formatting_match_the_oracle_including_half_second_carries() {
 fn protein_figures_match_kb_g_per_kg_over_bodyweight_grid() {
     for tenth in 200..=3000 {
         let bw = f64::from(tenth) / 10.0;
-        let q = ProteinQuery {
+        let q = ProteinInputView {
             bodyweight_kg: bw,
             masters: true,
             deficit: true,
@@ -1400,7 +1383,7 @@ fn protein_figures_match_kb_g_per_kg_over_bodyweight_grid() {
     // Monotone in bodyweight; nothing for a non-positive bodyweight.
     let mut prev = (0.0, 0.0);
     for tenth in 200..=3000 {
-        let q = ProteinQuery {
+        let q = ProteinInputView {
             bodyweight_kg: f64::from(tenth) / 10.0,
             masters: true,
             deficit: false,
@@ -1410,7 +1393,7 @@ fn protein_figures_match_kb_g_per_kg_over_bodyweight_grid() {
         prev = (f.low_g_per_day, f.high_g_per_day);
     }
     for bw in [0.0, -10.0] {
-        let q = ProteinQuery {
+        let q = ProteinInputView {
             bodyweight_kg: bw,
             masters: true,
             deficit: true,
@@ -1595,78 +1578,6 @@ fn hypertrophy_profile_ramp_never_drops_within_the_accumulation_block() {
     );
 }
 
-// ─── Cooper, Critical Speed ────────────────────────────────────────────────
-
-#[test]
-fn cooper_and_critical_speed_match_the_kb_formulas() {
-    let mut prev = f64::NEG_INFINITY;
-    for d in (510..=5000).step_by(5) {
-        let d = f64::from(d);
-        let row = &build_cooper(d)[0].summary;
-        let shown: f64 = row
-            .split("VO2max ")
-            .nth(1)
-            .unwrap()
-            .split(' ')
-            .next()
-            .unwrap()
-            .parse()
-            .unwrap();
-        assert!(
-            (shown - oracle::cooper(d)).abs() <= 0.05 + 1e-9,
-            "{d}: {row}"
-        );
-        assert!(shown >= prev, "monotone at {d}");
-        prev = shown;
-    }
-    for d in [0.0, 300.0, 504.9, f64::NAN] {
-        assert!(build_cooper(d)[0].summary.contains("too short"), "{d}");
-    }
-    let mut rng = Rng(0x5eed_0006);
-    for _ in 0..3000 {
-        let cs = rng.range(2.0, 6.5);
-        let dp = rng.range(50.0, 400.0);
-        let t1 = rng.range(150.0, 480.0);
-        let t2 = rng.range(720.0, 1500.0);
-        let efforts = [
-            CsEffortIn {
-                distance_m: cs * t1 + dp,
-                time_sec: t1,
-            },
-            CsEffortIn {
-                distance_m: cs * t2 + dp,
-                time_sec: t2,
-            },
-        ];
-        let (ocs, odp) = oracle::cs_two(efforts[0].distance_m, t1, efforts[1].distance_m, t2);
-        let row = &build_critical_speed(&efforts)[0].summary;
-        let speed: f64 = row
-            .split("Critical speed ")
-            .nth(1)
-            .unwrap()
-            .split(' ')
-            .next()
-            .unwrap()
-            .parse()
-            .unwrap();
-        let dprime: f64 = row
-            .split("D′ ")
-            .nth(1)
-            .unwrap()
-            .split(' ')
-            .next()
-            .unwrap()
-            .parse()
-            .unwrap();
-        assert!((speed - ocs).abs() <= 0.005 + 1e-9, "{row} vs {ocs}");
-        assert!((dprime - odp).abs() <= 0.5 + 1e-6, "{row} vs {odp}");
-        assert!(
-            row.contains(&format!("({}/km)", oracle::mss(1000.0 / ocs))),
-            "{row}"
-        );
-    }
-}
-
 // ─── Training load: Lucia TRIMP → CTL / ATL / TSB ───────────────────────────
 
 /// A seeded history: `days` days ending on `last_day`, a run on ~60% of days.
@@ -1708,13 +1619,7 @@ fn oracle_load(runs: &[(i64, f64, f64)], through_day: i64) -> (f64, f64) {
 fn load_model(runs: &[(i64, f64, f64)], today: i64) -> (Engine, Model) {
     let app = Engine;
     let mut m = Model::default();
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
-        &mut m,
-    );
+    let _ = app.update(set_today_ev(today), &mut m);
     for (i, &(d, minutes, pct)) in runs.iter().enumerate() {
         let km = minutes / 6.0;
         let _ = app.update(

@@ -4,15 +4,6 @@
 use super::*;
 
 #[test]
-fn view_echoes_the_entry_id_for_the_shell() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(log_set_id("Bench", 100.0, 4242, 0), &mut model)
-        .expect_only_render();
-    assert_eq!(app.view(&model).lifts[0].entry_id, 4242);
-}
-
-#[test]
 fn delete_entry_removes_the_targeted_set_by_id() {
     let app = Engine;
     let mut model = Model::default();
@@ -102,26 +93,7 @@ fn amend_after_delete_is_a_no_op_never_resurrects() {
     // Same for a run.
     let mut model = Model::default();
     app.update(
-        log_run_track(
-            vec![
-                GpsPoint {
-                    lat: 0.0,
-                    lon: 0.0,
-                    observed_at: 0,
-                    accuracy_m: 5.0,
-                },
-                GpsPoint {
-                    lat: 0.01,
-                    lon: 0.0,
-                    observed_at: 300,
-                    accuracy_m: 5.0,
-                },
-            ],
-            0.0,
-            0.0,
-            10,
-            42,
-        ),
+        log_run_track(vec![gps(0.0, 0), gps(0.01, 300)], 0.0, 0.0, 10, 42),
         &mut model,
     )
     .expect_only_render();
@@ -161,26 +133,7 @@ fn delete_entry_removes_a_gps_tracked_run() {
     let app = Engine;
     let mut model = Model::default();
     app.update(
-        log_run_track(
-            vec![
-                GpsPoint {
-                    lat: 0.0,
-                    lon: 0.0,
-                    observed_at: 0,
-                    accuracy_m: 5.0,
-                },
-                GpsPoint {
-                    lat: 0.01,
-                    lon: 0.0,
-                    observed_at: 300,
-                    accuracy_m: 5.0,
-                },
-            ],
-            0.0,
-            0.0,
-            10,
-            99,
-        ),
+        log_run_track(vec![gps(0.0, 0), gps(0.01, 300)], 0.0, 0.0, 10, 99),
         &mut model,
     )
     .expect_only_render();
@@ -303,7 +256,7 @@ fn clearing_sets_and_runs_empties_their_views() {
 }
 
 #[test]
-fn backdated_set_slots_into_the_e1rm_chain_chronologically() {
+fn backdated_set_slots_into_the_pr_chain_chronologically() {
     let app = Engine;
     let mut model = Model::default();
     // Today's set first, then a BACKDATED earlier set of the same lift.
@@ -312,24 +265,14 @@ fn backdated_set_slots_into_the_e1rm_chain_chronologically() {
     app.update(log_set("Back Squat", 95.0, 5, 8.0, 1_000_000), &mut model)
         .expect_only_render();
     let vm = app.view(&model);
-    // Chronological view order: the backdated set renders first…
+    // Chronological view order: the backdated set renders first and has
+    // nothing to beat…
     assert_eq!(vm.lifts[0].observed_at, 1_000_000);
     assert_eq!(vm.lifts[0].weight_kg, 95.0);
-    assert!(
-        vm.lifts[0].e1rm_delta_kg.is_none(),
-        "first in time has no baseline"
-    );
-    // …and the later set's delta compares against it (95→100 kg ⇒ up).
+    assert!(!vm.lifts[0].e1rm_pr, "first in time has no baseline");
+    // …and the later set is judged against it (95→100 kg ⇒ PR).
     assert_eq!(vm.lifts[1].observed_at, 2_000_000);
-    assert_eq!(vm.lifts[1].e1rm_direction, Some(TrendDirection::Up));
-    let expected = ((strength::e1rm_epley_rpe(100.0, 5, 8.0) * 10.0).round()
-        - (strength::e1rm_epley_rpe(95.0, 5, 8.0) * 10.0).round())
-        / 10.0;
-    assert!(
-        (vm.lifts[1].e1rm_delta_kg.unwrap() - expected).abs() < 1e-9,
-        "delta {:?} vs expected {expected}",
-        vm.lifts[1].e1rm_delta_kg
-    );
+    assert!(vm.lifts[1].e1rm_pr);
 }
 
 // ── A zero-rep set with no hold is rejected (no fabricated e1RM) ──
@@ -370,13 +313,13 @@ fn a_zero_rep_set_with_no_hold_is_rejected() {
     let _ = app.view(&model); // must not panic
 }
 
-// ── Amending a same-second set preserves display + e1RM-chain order ──
+// ── Amending a same-second set preserves display + PR-chain order ──
 #[test]
 fn amend_of_a_same_second_set_preserves_order() {
     // Two Bench sets at the SAME second, distinct entry ids. AmendSet
     // remove+pushes the first set to the Vec tail; keying the history sort on
     // entry_id (not insertion order) keeps it ahead of the second set, so the
-    // display order and the per-exercise e1RM-delta chain stay stable.
+    // display order and the per-exercise PR chain stay stable.
     let app = Engine;
     let mut model = Model::default();
     let t = MON * DAY_SEC;
@@ -411,8 +354,8 @@ fn amend_of_a_same_second_set_preserves_order() {
     );
     assert!((lifts[0].weight_kg - 110.0).abs() < f64::EPSILON);
     assert_eq!(lifts[1].entry_id, 2000);
-    // The e1RM-delta chain still compares the second set against the first.
-    assert!(lifts[1].e1rm_delta_kg.is_some(), "chain intact after amend");
+    // The PR chain still judges the heavier second set against the first.
+    assert!(lifts[1].e1rm_pr, "chain intact after amend");
 }
 
 // ── Amending a legacy (id 0) row whose DATE changed does not duplicate ──

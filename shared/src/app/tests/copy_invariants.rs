@@ -18,27 +18,6 @@ use super::*;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-const HOUR: i64 = 3_600;
-
-/// Deterministic 0..1 sequence (same LCG as `view_equivalence`).
-struct Lcg(u64);
-
-impl Lcg {
-    fn next(&mut self) -> f64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        (self.0 >> 11) as f64 / (1u64 << 53) as f64
-    }
-
-    fn pick(&mut self, lo: u8, hi: u8) -> u8 {
-        lo + (self.next() * f64::from(hi - lo + 1))
-            .floor()
-            .min(f64::from(hi - lo)) as u8
-    }
-}
-
 // ── String scanning ─────────────────────────────────────────────────────────
 
 /// A numeric token: `[0-9]+([.:][0-9]+)*`, as a byte span of the string.
@@ -316,14 +295,10 @@ fn record(out: &mut Hits, path: String, rule: String, example: &str, scenario: &
 }
 
 /// Wire strings no shell renders: the shell model has no such field
-/// (`LiftResultView.summary` is a CLI/debug line), or the calculator has no UI
-/// (Cooper, Critical Speed, APRE: "those calculators have no UI",
-/// `AppScaffold.kt`). Only the numeric-sanity family applies to them.
+/// (`LiftResultView.summary` is a CLI/debug line). Only the numeric-sanity
+/// family applies to them.
 fn is_dormant(path: &str) -> bool {
     path == "lifts[].summary"
-        || ["cooper", "critical_speed", "apre"]
-            .iter()
-            .any(|root| path == *root || path.starts_with(&format!("{root}[]")))
 }
 
 /// Every violation in `view`, keyed by (path, rule).
@@ -449,16 +424,6 @@ fn at(d: i64, hour: i64, offset: i64) -> i64 {
     d * DAY_SEC + hour * HOUR - offset
 }
 
-fn today(app: &Engine, model: &mut Model, d: i64, offset: i64) {
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: d,
-            utc_offset_sec: offset,
-        },
-        model,
-    );
-}
-
 /// A short GPS track heading north at `pace` s/km.
 fn track(start: i64, km: f64, pace: f64) -> Vec<GpsPoint> {
     let n = ((km * pace) / 5.0) as usize + 1;
@@ -478,16 +443,6 @@ fn track(start: i64, km: f64, pace: f64) -> Vec<GpsPoint> {
 fn send(app: &Engine, model: &mut Model, log: &mut Vec<Event>, e: Event) {
     log.push(e.clone());
     let _ = app.update(e, model);
-}
-
-/// Replays an event list into a fresh model.
-fn replay(events: &[Event]) -> (Engine, Model) {
-    let app = Engine;
-    let mut model = Model::default();
-    for e in events {
-        let _ = app.update(e.clone(), &mut model);
-    }
-    (app, model)
 }
 
 /// The event log of `days` of follow-the-plan training for `profile`,
@@ -523,15 +478,7 @@ fn drive(profile: Profile, seed: u64, days: i64, end: i64, offset: i64) -> Vec<E
         id
     };
     for d in start..=end {
-        send(
-            &app,
-            &mut model,
-            &mut log,
-            Event::SetToday {
-                epoch_day: d,
-                utc_offset_sec: offset,
-            },
-        );
+        send(&app, &mut model, &mut log, set_today_off_ev(d, offset));
         if d == plan_day {
             send(
                 &app,
@@ -670,9 +617,6 @@ fn calculators(app: &Engine, model: &mut Model) {
         json!({"ComputeHrZones": {"age_years": 41.0, "resting_hr_bpm": 55.0}}),
         json!({"ComputeProtein": {"bodyweight_kg": 74.0, "masters": false, "deficit": true}}),
         json!({"PlanHypertrophyMeso": {"muscle": "chest", "weeks": 4, "not_growing": false, "recovering_easily": true}}),
-        json!({"ComputeCooper": {"distance_m_12min": 2_650.0}}),
-        json!({"ComputeCriticalSpeed": {"efforts": [{"distance_m": 1_200.0, "time_sec": 210.0}, {"distance_m": 5_000.0, "time_sec": 1_260.0}]}}),
-        json!({"ComputeApre": {"scheme": "Apre6", "reps": 9, "current_load_kg": 82.5}}),
     ] {
         let _ = app.update(ev(e), model);
     }
@@ -999,13 +943,13 @@ fn sweep_empty(hits: &mut Hits) {
     let app = Engine;
     let mut model = Model::default();
     collect(&app, &model, "empty", false, hits);
-    today(&app, &mut model, END_MON, 0);
+    set_today(&app, &mut model, END_MON);
     collect(&app, &model, "empty+today", true, hits);
     for (name, p) in archetypes(END_MON) {
         let mut model = Model::default();
         let _ = app.update(Event::SetProfile(p), &mut model);
         collect(&app, &model, &format!("{name}/no-today"), false, hits);
-        today(&app, &mut model, END_MON, 0);
+        set_today(&app, &mut model, END_MON);
         collect(&app, &model, &format!("{name}/no-logs"), true, hits);
         let _ = app.update(
             Event::GeneratePlan {
@@ -1067,7 +1011,7 @@ fn sweep_archetype(i: usize, name: &str, p: Profile) -> Hits {
         let tag = format!("{name}/{oname}");
         collect(&app, &model, &tag, false, &mut hits);
         for later in [1, 3] {
-            today(&app, &mut model, end + later, offset);
+            let _ = app.update(set_today_off_ev(end + later, offset), &mut model);
             // Overlays are dated on `end`, so only `plain` is truly stale.
             let stale = oname == "plain";
             collect(&app, &model, &format!("{tag}/+{later}d"), stale, &mut hits);
@@ -1082,7 +1026,7 @@ fn sweep_long_history() -> Hits {
     let mut hits = Hits::new();
     let (app, mut model) = big_history(420);
     for d in [END_MON, END_MON + 2, END_MON - 1, END_MON + 9] {
-        today(&app, &mut model, d, 0);
+        set_today(&app, &mut model, d);
         // END_MON carries the session straddling its midnight; later days
         // have nothing logged.
         collect(&app, &model, &format!("big/kg/{d}"), d > END_MON, &mut hits);
@@ -1093,7 +1037,7 @@ fn sweep_long_history() -> Hits {
     };
     let _ = app.update(Event::SetProfile(p), &mut model);
     for d in [END_MON, END_MON + 2] {
-        today(&app, &mut model, d, 0);
+        set_today(&app, &mut model, d);
         collect(&app, &model, &format!("big/lb/{d}"), d > END_MON, &mut hits);
     }
     hits
@@ -1148,21 +1092,11 @@ pub(super) fn all_hits() -> &'static Hits {
     &ALL_HITS
 }
 
-/// Known bugs: (path, rule prefix). Excluded from the family tests so those
-/// keep guarding everything else; each has its own ignored `BUG:` test.
-const KNOWN: &[(&str, &str)] = &[];
-
-fn is_known(path: &str, rule: &str) -> bool {
-    KNOWN.iter().any(|(p, r)| path == *p && rule.starts_with(r))
-}
-
-/// The family's hits, minus the known bugs.
+/// The family's hits.
 pub(super) fn assert_family(prefixes: &[&str]) {
     let bad: Vec<_> = all_hits()
         .iter()
-        .filter(|((path, rule), _)| {
-            prefixes.iter().any(|p| rule.starts_with(p)) && !is_known(path, rule)
-        })
+        .filter(|((_, rule), _)| prefixes.iter().any(|p| rule.starts_with(p)))
         .collect();
     assert!(
         bad.is_empty(),
@@ -1172,7 +1106,7 @@ pub(super) fn assert_family(prefixes: &[&str]) {
     );
 }
 
-/// The known bug at `path` / `rule` is gone.
+/// No hit of `rule` at `path`.
 fn assert_fixed(path: &str, rule: &str) {
     let bad: Vec<_> = all_hits()
         .iter()
@@ -1264,7 +1198,7 @@ fn copy_never_pins_today_on_an_earlier_reading() {
     assert_family(&["today:"]);
 }
 
-// ── Fixed copy bugs (each once a KNOWN entry above) ─────────────────────────
+// ── Single rules pinned at one path ───────────────────────────────────────
 
 #[test]
 fn guidance_weight_heading_never_says_loading() {

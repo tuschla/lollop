@@ -153,6 +153,58 @@ fn trim(
     }
 }
 
+// ── GPS and logged-run fixtures ────────────────────────────────────────────
+
+/// A 5 m-accuracy fix on the equator at longitude `lon`, unix-seconds `t`.
+fn gps(lon: f64, t: i64) -> GpsPoint {
+    GpsPoint {
+        lat: 0.0,
+        lon,
+        observed_at: t,
+        accuracy_m: 5.0,
+    }
+}
+
+/// A straight eastward GPS track along the equator: `(metres, m/s)` legs
+/// sampled every `step_s` seconds, starting at `t0`.
+fn equator_track(t0: i64, legs: &[(f64, f64)], step_s: i64) -> Vec<GpsPoint> {
+    let m_per_deg = crate::running::haversine_m(gps(0.0, 0), gps(1.0, 0));
+    let mut pts = vec![gps(0.0, t0)];
+    let (mut lon, mut t) = (0.0_f64, t0);
+    for &(metres, speed) in legs {
+        let n = (metres / speed / step_s as f64).round() as i64;
+        let per = metres / n as f64;
+        for _ in 0..n {
+            lon += per / m_per_deg;
+            t += step_s;
+            pts.push(gps(lon, t));
+        }
+    }
+    pts
+}
+
+/// A stored hand-logged run (no track, no meta) of `km` in `minutes` at
+/// `hr`% HRmax, stamped `at`.
+pub(in crate::app) fn logged_run(km: f64, minutes: f64, hr: f64, at: i64) -> LoggedRun {
+    LoggedRun {
+        distance_km: km,
+        duration_min: minutes,
+        hr_pct_max: hr,
+        wire_hr_pct_max: hr,
+        longest_recent_km: 0.0,
+        wire_longest_recent_km: 0.0,
+        track: Vec::new(),
+        track_segment_starts: Vec::new(),
+        observed_at: at,
+        entry_id: 0,
+        logged_utc_offset_sec: None,
+        hr_pinned: false,
+        workout_type: None,
+        session_rpe: None,
+        avg_hr_bpm: None,
+    }
+}
+
 // ── Set and profile fixtures ───────────────────────────────────────────────
 
 /// A `LogSet` of `weight_kg` × `reps` @ `rpe` at unix-seconds `at`, with no
@@ -176,6 +228,35 @@ fn with_entry_id(mut ev: Event, id: u64) -> Event {
         unreachable!("with_entry_id takes a LogSet")
     };
     *entry_id = id;
+    ev
+}
+
+/// `ev` (a [`log_run`] or [`log_run_track`] event) carrying the optional run
+/// meta: workout tag, session RPE and average HR in bpm.
+fn with_run_meta(
+    mut ev: Event,
+    tag: Option<WorkoutType>,
+    rpe: Option<u8>,
+    bpm: Option<f64>,
+) -> Event {
+    let (Event::LogRun {
+        workout_type,
+        session_rpe,
+        avg_hr_bpm,
+        ..
+    }
+    | Event::LogRunTrack {
+        workout_type,
+        session_rpe,
+        avg_hr_bpm,
+        ..
+    }) = &mut ev
+    else {
+        unreachable!("with_run_meta takes a LogRun or LogRunTrack")
+    };
+    *workout_type = tag;
+    *session_rpe = rpe;
+    *avg_hr_bpm = bpm;
     ev
 }
 
@@ -305,11 +386,37 @@ fn run_anchors(runs: &[LoggedRun], today: i64, offset: i64) -> RunAnchors {
     build_run_anchors(&RunFacts::new(runs), today, offset)
 }
 
+const HOUR: i64 = 3_600;
 const WEEK: i64 = 7 * DAY_SEC;
 
 fn log_run_at(km: f64, minutes: f64, hr: f64, at: i64) -> Event {
     // 50.0 longest_recent_km quiets the spike gate; not under test here.
     log_run(km, minutes, hr, 50.0, at, 0)
+}
+
+/// `SetToday` to `epoch_day` at UTC.
+fn set_today_ev(epoch_day: i64) -> Event {
+    Event::SetToday {
+        epoch_day,
+        utc_offset_sec: 0,
+    }
+}
+
+/// Move the shell's clock to `epoch_day` (UTC).
+fn set_today(app: &Engine, model: &mut Model, epoch_day: i64) {
+    app.update(set_today_ev(epoch_day), model)
+        .expect_only_render();
+}
+
+/// Epoch day of a civil date (Hinnant's `days_from_civil`).
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let m = i64::from(m);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(d) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
 }
 
 // ── Coach-as-planner ────────────────────────
@@ -325,6 +432,44 @@ fn strength_profile() -> Profile {
 // Monday epoch-day: mon0_weekday(4) == 0, so day-0 (Heavy) lands on `today`.
 const MON: i64 = 4;
 
+/// A Monday (`mon0_weekday == 0`) whose unix timestamps are positive, so dated
+/// inputs, reviews and removals take their dated (windowed) paths.
+const POS_MON: i64 = 20_353;
+
+/// `profile` set, `history` replayed, then a plan generated from `start` with
+/// today on `start` (UTC).
+fn planned_on(
+    profile: Profile,
+    history: impl IntoIterator<Item = Event>,
+    start: i64,
+) -> (Engine, Model) {
+    let app = Engine;
+    let mut model = Model::default();
+    app.update(Event::SetProfile(profile), &mut model)
+        .expect_only_render();
+    for ev in history {
+        app.update(ev, &mut model).expect_only_render();
+    }
+    app.update(
+        Event::GeneratePlan {
+            start_epoch_day: start,
+        },
+        &mut model,
+    )
+    .expect_only_render();
+    set_today(&app, &mut model, start);
+    (app, model)
+}
+
+/// The week-strip row for `epoch_day`.
+fn day_row(app: &Engine, model: &Model, epoch_day: i64) -> SessionPlanView {
+    app.view(model)
+        .week_plan
+        .into_iter()
+        .find(|s| s.epoch_day == epoch_day)
+        .expect("a week-strip row for the day")
+}
+
 fn planned_strength_model(with_set: bool) -> (Engine, Model) {
     planned_strength_model_on(MON, with_set)
 }
@@ -332,38 +477,13 @@ fn planned_strength_model(with_set: bool) -> (Engine, Model) {
 /// [`planned_strength_model`] with the plan starting (and today) on Monday
 /// epoch-day `mon`.
 fn planned_strength_model_on(mon: i64, with_set: bool) -> (Engine, Model) {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(strength_profile()), &mut model)
-        .expect_only_render();
-    if with_set {
-        // A pre-plan baseline set (dated the day BEFORE the plan starts): it
-        // seeds the e1RM anchor (day-independent) WITHOUT logging today's
-        // session, so `today` (mon) stays the unlogged upcoming session the
-        // next-session/readiness tests exercise. Tests that need TODAY logged
-        // (done-day advancement) log it explicitly.
-        app.update(
-            log_set("Back Squat", 120.0, 3, 8.0, (mon - 1) * DAY_SEC),
-            &mut model,
-        )
-        .expect_only_render();
-    }
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: mon,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: mon,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    (app, model)
+    // A pre-plan baseline set (dated the day BEFORE the plan starts): it
+    // seeds the e1RM anchor (day-independent) WITHOUT logging today's
+    // session, so `today` (mon) stays the unlogged upcoming session the
+    // next-session/readiness tests exercise. Tests that need TODAY logged
+    // (done-day advancement) log it explicitly.
+    let baseline = with_set.then(|| log_set("Back Squat", 120.0, 3, 8.0, (mon - 1) * DAY_SEC));
+    planned_on(strength_profile(), baseline, mon)
 }
 
 /// Log one Back Squat set on every day of `weeks` plan weeks starting at the
@@ -439,26 +559,7 @@ fn cal_hold(exercise: &str, sec: u16, rpe: f64, at: i64) -> Event {
 }
 
 fn planned_calisthenics() -> (Engine, Model) {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(calisthenics_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    (app, model)
+    planned_on(calisthenics_profile(), [], MON)
 }
 
 /// The first week-plan prescription whose exercise maps to `ladder`, if any.
@@ -468,6 +569,16 @@ fn cal_item(vm: &ViewModel, ladder: Lad) -> Option<PrescriptionView> {
         .flat_map(|s| s.items.iter())
         .find(|it| crate::calisthenics::tier_by_name(&it.exercise).map(|(l, _)| l) == Some(ladder))
         .cloned()
+}
+
+/// The model after replaying a `tests/fixtures/view_snapshot` event log.
+fn snapshot_fixture_model(ndjson: &str) -> Model {
+    let mut model = Model::default();
+    for line in ndjson.lines().filter(|l| !l.trim().is_empty()) {
+        let event: Event = serde_json::from_str(line).expect("fixture line");
+        let _ = Engine.update(event, &mut model);
+    }
+    model
 }
 
 // ── Rendered-session fixtures ──────────────────────────────────────────────
@@ -549,4 +660,338 @@ fn assert_sections_contiguous(rows: &[GuidanceView], ctx: &dyn std::fmt::Debug) 
             runs.push(s);
         }
     }
+}
+
+// ── Seeded generators ──────────────────────────────────────────────────────
+
+/// Deterministic 0..1 sequence (64-bit LCG, Knuth MMIX constants): the same
+/// stream on every run and platform, so the `view_equivalence` pins hold.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self) -> f64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (self.0 >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    fn chance(&mut self, p: f64) -> bool {
+        self.next() < p
+    }
+
+    fn range(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + (hi - lo) * self.next()
+    }
+
+    /// In `lo..=hi`.
+    fn int(&mut self, lo: u32, hi: u32) -> u32 {
+        lo + ((self.next() * f64::from(hi - lo + 1)) as u32).min(hi - lo)
+    }
+
+    /// In `lo..=hi`.
+    fn pick(&mut self, lo: u8, hi: u8) -> u8 {
+        lo + (self.next() * f64::from(hi - lo + 1))
+            .floor()
+            .min(f64::from(hi - lo)) as u8
+    }
+}
+
+/// xorshift64*: deterministic, dependency-free.
+struct XorShift(u64);
+
+impl XorShift {
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    /// In [0, 1).
+    fn unit(&mut self) -> f64 {
+        (self.next() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// `next() % n`, in `0..n` (`n` = 0 reads as 1).
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n.max(1)
+    }
+
+    /// `floor(unit() × n)`, in `0..n`.
+    fn scaled(&mut self, n: u64) -> u64 {
+        (self.unit() * n as f64) as u64
+    }
+
+    fn chance(&mut self, p: f64) -> bool {
+        self.unit() <= p
+    }
+
+    fn pick<T: Clone>(&mut self, v: &[T]) -> T {
+        v[self.below(v.len() as u64) as usize].clone()
+    }
+}
+
+/// SplitMix64: a seedable stream; `SplitMix(x).next()` is one step from `x`.
+struct SplitMix(u64);
+
+impl SplitMix {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// In `0..n`; `n` = 0 gives 0 without a draw.
+    fn below(&mut self, n: u64) -> u64 {
+        if n == 0 { 0 } else { self.next() % n }
+    }
+
+    /// `next() % n` as an index, in `0..n` (`n` = 0 reads as 1, one draw).
+    fn index(&mut self, n: usize) -> usize {
+        (self.next() % n.max(1) as u64) as usize
+    }
+
+    /// In `lo..=hi`.
+    fn int(&mut self, lo: i64, hi: i64) -> i64 {
+        lo + self.below((hi - lo + 1) as u64) as i64
+    }
+
+    /// In [0, 1).
+    fn unit(&mut self) -> f64 {
+        (self.next() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    fn chance(&mut self, p: f64) -> bool {
+        self.unit() < p
+    }
+
+    fn pick<T: Clone>(&mut self, xs: &[T]) -> T {
+        xs[self.below(xs.len() as u64) as usize].clone()
+    }
+}
+
+// ── Replay and view diffs ──────────────────────────────────────────────────
+
+/// `events` replayed on a fresh model.
+fn replay(events: &[Event]) -> (Engine, Model) {
+    let app = Engine;
+    let mut model = Model::default();
+    for e in events {
+        let _ = app.update(e.clone(), &mut model);
+    }
+    (app, model)
+}
+
+fn vm_json(vm: &ViewModel) -> String {
+    serde_json::to_string(vm).expect("a ViewModel always serializes")
+}
+
+fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<String>()
+        .cloned()
+        .or_else(|| p.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+        .unwrap_or_else(|| "<non-string panic>".into())
+}
+
+/// `events` replayed from an empty model on a fresh thread, so every
+/// thread-local view cache starts cold: the final view JSON, or the panic.
+fn replay_cold(events: Vec<Event>) -> Result<String, String> {
+    std::thread::Builder::new()
+        .stack_size(32 << 20)
+        .spawn(move || {
+            let app = Engine;
+            let mut model = Model::default();
+            for e in events {
+                let _ = app.update(e, &mut model);
+            }
+            vm_json(&app.view(&model))
+        })
+        .expect("spawn replay thread")
+        .join()
+        .map_err(|p| format!("cold replay PANIC {}", panic_text(&*p)))
+}
+
+/// The largest char boundary of `s` at or before byte `i`.
+fn char_floor(s: &str, i: usize) -> usize {
+    let mut i = i.min(s.len());
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Up to `len` bytes of `s` from `before` bytes ahead of byte `at`, cut on
+/// char boundaries: the context of a hit in a failure message.
+fn excerpt(s: &str, at: usize, before: usize, len: usize) -> &str {
+    let lo = char_floor(s, at.saturating_sub(before));
+    &s[lo..char_floor(s, lo + len)]
+}
+
+/// The first path where two JSON values differ, with both values
+/// (shortened). Numbers within `rel_tol` (relative) count as equal.
+fn value_diff(a: &serde_json::Value, b: &serde_json::Value, rel_tol: f64) -> Option<String> {
+    fn walk(
+        a: &serde_json::Value,
+        b: &serde_json::Value,
+        tol: f64,
+        path: &mut String,
+    ) -> Option<String> {
+        use serde_json::Value as V;
+        match (a, b) {
+            (V::Object(x), V::Object(y)) => {
+                for (k, va) in x {
+                    let len = path.len();
+                    path.push('.');
+                    path.push_str(k);
+                    match y.get(k) {
+                        None => return Some(format!("{path}: only on the left")),
+                        Some(vb) => {
+                            if let Some(d) = walk(va, vb, tol, path) {
+                                return Some(d);
+                            }
+                        }
+                    }
+                    path.truncate(len);
+                }
+                y.keys()
+                    .find(|k| !x.contains_key(*k))
+                    .map(|k| format!("{path}.{k}: only on the right"))
+            }
+            (V::Array(x), V::Array(y)) => {
+                for (i, (va, vb)) in x.iter().zip(y).enumerate() {
+                    let len = path.len();
+                    path.push_str(&format!("[{i}]"));
+                    if let Some(d) = walk(va, vb, tol, path) {
+                        return Some(d);
+                    }
+                    path.truncate(len);
+                }
+                (x.len() != y.len()).then(|| format!("{path}: length {} vs {}", x.len(), y.len()))
+            }
+            _ if a == b => None,
+            (V::Number(x), V::Number(y))
+                if x.as_f64()
+                    .zip(y.as_f64())
+                    .is_some_and(|(x, y)| (x - y).abs() <= tol * x.abs().max(y.abs())) =>
+            {
+                None
+            }
+            _ => {
+                let cut = |v: &V| {
+                    let s = v.to_string();
+                    if s.len() > 160 {
+                        format!("{}…", &s[..char_floor(&s, 160)])
+                    } else {
+                        s
+                    }
+                };
+                Some(format!("{path}: {} vs {}", cut(a), cut(b)))
+            }
+        }
+    }
+    walk(a, b, rel_tol, &mut String::new())
+}
+
+/// The first path where two view JSON documents differ.
+fn json_diff(a: &str, b: &str) -> String {
+    let va: serde_json::Value = serde_json::from_str(a).expect("left view parses");
+    let vb: serde_json::Value = serde_json::from_str(b).expect("right view parses");
+    value_diff(&va, &vb, 0.0).unwrap_or_else(|| "byte-different but JSON-equal".into())
+}
+
+/// The full log and its compaction (`compact_event_log`, what the shell
+/// replays after a relaunch) render the same view on cold threads.
+fn assert_compaction_equivalent(name: &str, events: Vec<Event>) {
+    let full = replay_cold(events.clone()).expect("full replay");
+    let compacted = replay_cold(crate::compact_event_log(events)).expect("compacted replay");
+    assert!(
+        full == compacted,
+        "{name}: the compacted log renders a different view: {}",
+        json_diff(&full, &compacted)
+    );
+}
+
+// ── Clock, lifter, GPS and run-stamp fixtures ──────────────────────────────
+
+/// `SetToday` to `epoch_day` at UTC offset `utc_offset_sec`.
+fn set_today_off_ev(epoch_day: i64, utc_offset_sec: i64) -> Event {
+    Event::SetToday {
+        epoch_day,
+        utc_offset_sec,
+    }
+}
+
+/// A Monday (`long_horizon`'s START, 2026-01-05).
+const DAY0: i64 = 20_458;
+
+/// Metres per degree of longitude on the equator for the core's haversine
+/// (R = 6 371 000 m), so `x` metres east is `x / M_PER_DEG` degrees.
+const M_PER_DEG: f64 = 6_371_000.0 * std::f64::consts::PI / 180.0;
+
+/// A 5 m-accuracy fix `x_m` metres east of (0, 0) at unix second `t`.
+fn fix(x_m: f64, t: i64) -> GpsPoint {
+    gps(x_m / M_PER_DEG, t)
+}
+
+/// `ev` (a [`log_run`] or [`log_run_track`] event) stamped with the device's
+/// UTC offset at logging time, as the shell logs it.
+fn stamped(mut ev: Event, offset: i64) -> Event {
+    let (Event::LogRun { utc_offset_sec, .. } | Event::LogRunTrack { utc_offset_sec, .. }) =
+        &mut ev
+    else {
+        unreachable!("stamped takes a LogRun or LogRunTrack")
+    };
+    *utc_offset_sec = Some(offset);
+    ev
+}
+
+/// A hypertrophy lifter (16 sets, 4 lift days, plan from [`DAY0`]) who logs
+/// three sets of each `(exercise, kg, reps, seconds after 18:00)` of `lifts`,
+/// in order, on Mondays and Thursdays for six weeks, then stops lifting.
+/// Returns the model and the last lift day.
+fn hypertrophy_lifter(lifts: &[(&str, f64, u32, i64)]) -> (Model, i64) {
+    let app = Engine;
+    let mut m = Model::default();
+    set_today(&app, &mut m, DAY0);
+    let _ = app.update(
+        Event::SetProfile(Profile {
+            weekly_sets: 16,
+            lift_days_per_week: Some(4),
+            lift_goal: LiftGoal::Hypertrophy,
+            concurrent_goal: ConcurrentGoal::Hypertrophy,
+            effective_from_epoch_day: Some(DAY0),
+            ..base_profile()
+        }),
+        &mut m,
+    );
+    let _ = app.update(
+        Event::GeneratePlan {
+            start_epoch_day: DAY0,
+        },
+        &mut m,
+    );
+    let mut id = 0;
+    for w in 0..6 {
+        for wd in [0, 3] {
+            let d = DAY0 + 7 * w + wd;
+            set_today(&app, &mut m, d);
+            for k in 0..3 {
+                for &(exercise, kg, reps, after) in lifts {
+                    id += 1;
+                    let t = d * DAY_SEC + 64_800 + k * 120 + after;
+                    let _ = app.update(
+                        with_entry_id(log_set(exercise, kg, reps, 8.0, t), id),
+                        &mut m,
+                    );
+                }
+            }
+        }
+    }
+    (m, DAY0 + 7 * 5 + 3)
 }

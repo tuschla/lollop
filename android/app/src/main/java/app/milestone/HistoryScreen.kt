@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.dp
 import java.util.Locale
 import kotlinx.coroutines.launch
 
-/** Which logged type History shows (INVARIANT 4: two options, no "All"). */
+/** Which logged type History shows: two options, no "All". */
 private enum class HistoryFilter { Lifts, Runs }
 
 /** Precomputed History month scaffolding: [jumpTargets] maps each month
@@ -119,13 +119,13 @@ internal fun HistoryDestination(
     }
     var manualFilter by rememberSaveable { mutableStateOf<HistoryFilter?>(null) }
     val filter = manualFilter ?: defaultFilter
-    val hasAny = model.lifts.isNotEmpty() || model.runs.isNotEmpty()
     // Modality filtering: show the Lifts|Runs segment only when BOTH sides
     // are relevant: either the profile programs that modality, or the user has
     // logged that type. Otherwise render the single available list with no
     // segment, defaulting to whichever side has data / is programmed.
     val liftsPresent = model.lifts.isNotEmpty()
     val runsPresent = model.runs.isNotEmpty()
+    val hasAny = liftsPresent || runsPresent
     val showLifting = model.showLifting()
     val showRunning = model.showRunning()
     // Weight display unit for every kg figure on this screen (lift faces, e1RM,
@@ -159,9 +159,11 @@ internal fun HistoryDestination(
     }
     // Lifts render as SESSIONS (one card per local day), grouped once per model
     // change; local-day bucketing stays in the shell (device zone) so the core is
-    // clock-free. The open session sheet is keyed by its day (a saveable string).
-    val zone = remember { java.time.ZoneId.systemDefault() }
-    val liftSessions = remember(model.lifts) { groupLiftSessions(model.lifts, zone) }
+    // clock-free. The zone is re-read on every composition (the minute ticker
+    // recomposes), so a time-zone change rebuckets everything together. The open
+    // session sheet is keyed by its day (a saveable string).
+    val zone = java.time.ZoneId.systemDefault()
+    val liftSessions = remember(model.lifts, zone) { groupLiftSessions(model.lifts, zone) }
     // Per-exercise best-e1RM-per-session series for the session sheet's trend lines.
     val e1rmSeries = remember(liftSessions) { bestE1rmByExerciseDay(liftSessions) }
     var selectedSessionKey by rememberSaveable { mutableStateOf<String?>(null) }
@@ -214,6 +216,7 @@ internal fun HistoryDestination(
                 .toSet()
         },
         weightUnit = weightUnit,
+        profile = model.profile,
         nowMillis = nowMillis,
         onDismiss = { selectedKey = null },
         onEvent = onEvent,
@@ -243,16 +246,17 @@ internal fun HistoryDestination(
     // header/entry tally). A wrong offset would scroll to the wrong row.
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    // No runs → no progress chart (an empty chart only reads as noise); the empty
-    // state below carries the actions instead.
-    val showRunProgress = activeFilter == HistoryFilter.Runs && runsPresent
+    // The core sends run progress only once a dated run has a distance; without it
+    // both charts would be empty, so the empty state below carries the actions instead.
+    val runProgress = model.run_progress?.takeIf { activeFilter == HistoryFilter.Runs }
+    val showRunProgress = runProgress != null
     val runRecords = model.run_progress?.takeIf { it.longest_run_km > 0.0 || it.best_efforts.isNotEmpty() }
     val showRunRecords = activeFilter == HistoryFilter.Runs && runRecords != null
     val monthFmt = remember { localizedDayFormatter("yMMMM") }
     // The Runs stream, newest first by START (a run belongs to the day it started,
     // the day its title and date chip name), shared by the month headers and the cards.
     val runStream = remember(model.runs) { historyRunStream(model.runs) }
-    val monthNav = remember(activeFilter, liftSessions, runStream, showSegment, showRunProgress, showRunRecords) {
+    val monthNav = remember(activeFilter, liftSessions, runStream, showSegment, showRunProgress, showRunRecords, zone) {
         // One stamp per stream card: a lift SESSION (its first set) or a run's start.
         val stamps: List<Long> = when (activeFilter) {
             HistoryFilter.Runs -> runStream.map(::runDaySec)
@@ -275,17 +279,8 @@ internal fun HistoryDestination(
         contentPadding = PaddingValues(Space.Screen.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // 1. Rolling-7-day stat strip: factual aggregates of the LAST 7 DAYS.
-        // The strip is a "how's it going" glance (the historical views, 12-week
-        // heatmap + full list: sit below); an all-time tonnage only ever grows
-        // and stops meaning anything at a glance. A calendar-week window would read
-        // 0 all week for a weekend runner whose runs land in the prior locale week;
-        // a ROLLING 7 days (now − 7 days) always reflects recent work. Reading a
-        // clock in the shell is fine: the determinism HARD RULE governs `shared/`,
-        // not Kotlin (the heatmap below already reads the wall clock for "today").
-        // The strip and the heatmap cover
-        // ALL activity, so both sit above the Lifts | Runs filter. With nothing
-        // logged at all, the empty line at the bottom stands alone.
+        // 1. Stat strip over the rolling last 7 days (now − 7 days) of ALL activity,
+        // so it sits above the Lifts | Runs filter. Nothing logged: only the empty line below.
         if (hasAny) {
             item {
                 val nowSec = nowMillis / 1000
@@ -349,7 +344,7 @@ internal fun HistoryDestination(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                     SectionOverline(stringResource(R.string.main_overline_last_12_weeks))
-                    val days = remember(model.lifts, model.runs) {
+                    val days = remember(model.lifts, model.runs, zone) {
                         historyActivityDays(model.lifts, model.runs, zone)
                     }
                     ContributionHeatmap(days, todayLocalDay, weeks = 12) { day ->
@@ -380,14 +375,14 @@ internal fun HistoryDestination(
         // 2b. Runs: progress at the top (visualizations first). ONE compact distance
         // chart (16-week weekly vs the plan, or the last 14 days), then the records
         // grid (longest run + best efforts); a record opens its run.
-        if (showRunProgress) {
+        if (runProgress != null) {
             item(key = "run-progress") {
                 // Garmin-style per-day distance, a factual aggregation (sum of
                 // distance_km per local day the run started) over the same local-day
                 // bucketing as the heatmap, shown in the user's distance unit.
-                val kmByDay = remember(model.runs) { runKmByDay(model.runs, zone) }
+                val kmByDay = remember(model.runs, zone) { runKmByDay(model.runs, zone) }
                 RunProgressSection(
-                    progress = model.run_progress,
+                    progress = runProgress,
                     kmByDay = kmByDay,
                     todayLocalDay = todayLocalDay,
                     unit = distanceUnit,
@@ -432,6 +427,7 @@ internal fun HistoryDestination(
                     LiftSessionCard(
                         session = s,
                         nowMillis = nowMillis,
+                        todayLocalDay = todayLocalDay,
                         weightUnit = weightUnit,
                         onClick = { selectedSessionKey = s.key },
                     )
@@ -532,7 +528,7 @@ private fun MonthHeader(month: String, jumpMonths: List<String>?, onJump: (Strin
 /** The jump-to-month glyph size (VDS icon size). */
 private val IconSize = 24.dp
 
-/** A tapped History/Today entry, routed to the detail sheet. */
+/** A tapped History entry, routed to the detail sheet. */
 internal sealed interface HistoryEntry {
     data class Lift(val v: LiftResultView) : HistoryEntry
     data class Run(val v: RunResultView) : HistoryEntry

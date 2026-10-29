@@ -1,5 +1,5 @@
-//! Training load (CTL/ATL/TSB) and the weekly report's volume system, ramp
-//! guard and heavy-leg / hard-run spacing.
+//! Training load (CTL/ATL/TSB) and the weekly report's volume system and ramp
+//! guard.
 
 use super::*;
 
@@ -52,8 +52,8 @@ fn training_load_chains_lucia_trimp_into_ctl_atl_tsb() {
 fn training_load_day_loop_is_bounded_against_a_mis_unit_timestamp() {
     // A run logged with a MILLISECOND observed_at (1.7e12) next to a normal
     // seconds run would, without a cap, make the CTL/ATL day loop iterate
-    // over ~19.7M epoch-days inside view(): a data-reachable hang (HIGH
-    // bug). The accumulation window must stay bounded to MAX_LOAD_DAYS
+    // over ~19.7M epoch-days inside view(): a data-reachable hang. The
+    // accumulation window must stay bounded to MAX_LOAD_DAYS
     // regardless of the raw span between the two stamps.
     let app = Engine;
     let mut model = Model::default();
@@ -182,14 +182,7 @@ fn weekly_report_does_not_flag_the_planned_rebound_off_a_recovery_week() {
     // Today is the Wednesday of block-week 4, the day of that week's second
     // run, so the whole 40 km rebound week is in view (a Monday "today" would
     // hide the Wednesday run as future-dated and show only 20 km).
-    app.update(
-        Event::SetToday {
-            epoch_day: 704 + 4 * 7 + 2,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, 704 + 4 * 7 + 2);
     let report = app.view(&model).weekly_report;
     let has = |needle: &str| report.iter().any(|r| r.summary.contains(needle));
     assert!(
@@ -232,51 +225,6 @@ fn weekly_report_hybrid_ramp_guard_fires_for_a_lifting_runner() {
             .summary
             .contains("keep the weekly increase to about 10% or less")),
         "hybrid-021 guard row expected: {report:#?}"
-    );
-}
-
-#[test]
-fn weekly_report_flags_heavy_leg_work_too_close_to_a_hard_run() {
-    let app = Engine;
-    let mut model = Model::default();
-    let t = 100 * WEEK;
-    // 18:00; the run is the next morning (a cross-day pair). A same-day pair
-    // ≥6 h apart gets the softer same-day note instead.
-    app.update(
-        log_set("Barbell back squat", 120.0, 5, 8.0, t + 18 * 3600),
-        &mut model,
-    )
-    .expect_only_render();
-    // The week's long run 10 h later (04:00 next day): inside the 24 h buffer.
-    app.update(log_run_at(14.0, 80.0, 90.0, t + 28 * 3600), &mut model)
-        .expect_only_render();
-
-    let report = app.view(&model).weekly_report;
-    let row = report
-        .iter()
-        .find(|r| r.summary.contains("keep ≥24 h between"))
-        .expect("heavy-leg/run spacing row");
-    assert!(row.summary.contains("10 h apart"), "{}", row.summary);
-}
-
-#[test]
-fn air_squat_without_rpe_is_not_heavy_leg_work() {
-    // A bodyweight air squat with no RPE has no knowable intensity, so it is not
-    // heavy leg work and does not trip the heavy-leg/long-run spacing guard.
-    let app = Engine;
-    let mut model = Model::default();
-    let t = 100 * WEEK;
-    app.update(log_set("Air squat", 0.0, 5, 0.0, t), &mut model)
-        .expect_only_render();
-    app.update(log_run_at(14.0, 80.0, 90.0, t + 10 * 3600), &mut model)
-        .expect_only_render();
-    let report = app.view(&model).weekly_report;
-    assert!(
-        !report
-            .iter()
-            .any(|r| r.summary.contains("keep ≥24 h between")),
-        "bodyweight air squat is not heavy leg work: {:?}",
-        report.iter().map(|r| &r.summary).collect::<Vec<_>>()
     );
 }
 

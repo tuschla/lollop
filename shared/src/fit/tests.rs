@@ -57,7 +57,7 @@ fn a_fit_looking_header_with_no_data_still_errors_cleanly() {
     // still not a usable track" path without needing a real fixture.
     let mut header = vec![12u8, 0x10, 0x94, 0x08, 0, 0, 0, 0];
     header.extend_from_slice(b".FIT");
-    assert!(parse_fit(&header).is_err());
+    assert_eq!(parse_fit(&header), Err(FitError::NoTrack));
 }
 
 #[test]
@@ -81,7 +81,8 @@ fn a_recording_cut_off_before_its_crc_still_imports_its_fixes() {
     bytes.truncate(bytes.len() - 40);
     let track = track_any_sport(&bytes).expect("fixes decoded before the cut survive");
     let total: usize = track.segments.iter().map(Vec::len).sum();
-    assert!(total >= 2, "salvaged the decoded fixes, got {total}");
+    // The cut 40 bytes hold no positioned record: all 19 fixes survive.
+    assert_eq!(total, 19, "salvaged the decoded fixes");
 }
 
 #[test]
@@ -108,7 +109,7 @@ fn a_chained_oversized_header_is_rejected_without_panicking() {
     ]);
     let track = track_any_sport(&bytes).expect("the real file's fixes survive the bad trailer");
     let total: usize = track.segments.iter().map(Vec::len).sum();
-    assert!(total >= 2, "salvaged the real sub-file, got {total}");
+    assert_eq!(total, 19, "salvaged every fix of the real sub-file");
 }
 
 #[test]
@@ -308,26 +309,6 @@ fn happy_path_second_fixture_also_parses_without_hr() {
             .all(|f| f.accuracy_m.is_none()),
         "this fixture has no gps_accuracy field → accuracy stays None"
     );
-}
-
-/// FIT CRC-16 (ANT variant) over a byte slice, mirrors fitparser's own
-/// `de::crc::get_crc`. Needed to hand-encode a valid FIT file below (the
-/// trailing 2-byte data CRC is validated by `from_bytes` by default).
-fn fit_crc(data: &[u8]) -> u16 {
-    const TABLE: [u16; 16] = [
-        0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401, 0xA001, 0x6C00, 0x7800,
-        0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
-    ];
-    let mut crc: u16 = 0;
-    for &byte in data {
-        let mut tmp = TABLE[(crc & 0xF) as usize];
-        crc = (crc >> 4) & 0x0FFF;
-        crc = crc ^ tmp ^ TABLE[(byte & 0xF) as usize];
-        tmp = TABLE[(crc & 0xF) as usize];
-        crc = (crc >> 4) & 0x0FFF;
-        crc = crc ^ tmp ^ TABLE[((byte >> 4) & 0xF) as usize];
-    }
-    crc
 }
 
 /// One `record` definition (local type 0, global mesg 20, little-endian) with

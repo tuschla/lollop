@@ -44,7 +44,8 @@ pub(super) fn build_hybrid_guidance(
         ),
     };
     push_guidance(rows, "Hybrid", lead_text.to_string(), &maint);
-    let dual = hybrid::conservative_dual_progression(true, true);
+    // hybrid-025: tendon-stiffness evidence gap → progress one side at a time.
+    let dual = graded((), claims::HYB_TENDON_001);
     push_guidance(
         rows,
         "Hybrid",
@@ -71,8 +72,7 @@ pub(super) fn build_hybrid_guidance(
         push_guidance(rows, "Hybrid", text, &ef);
     }
 
-    if let Some(llc) = hybrid::lower_lift_cap(shape.run_days.min(u8::MAX as usize) as u8, weekly_km)
-    {
+    if let Some(llc) = hybrid::lower_lift_cap(shape.run_days, weekly_km) {
         let mid = (llc.value.volume_reduction_frac.0 + llc.value.volume_reduction_frac.1) / 2.0;
         let llc_text = |mi: bool| {
             format!(
@@ -114,7 +114,7 @@ pub(super) fn build_hybrid_guidance(
         push_guidance(rows, "Hybrid", text, &ie);
         // hybrid-004: name the strongest lever when interference is expected.
         if ie.value {
-            let im = hybrid::interference_moderators();
+            let im = graded((), claims::HYB_DURATION_001);
             push_guidance(
                 rows,
                 "Hybrid",

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -65,13 +64,12 @@ internal fun CalculatorResultCard(
     claims: List<CalcClaim>,
     notes: List<GuidanceView>,
     onClear: () -> Unit,
-    modifier: Modifier = Modifier,
     details: (@Composable () -> Unit)? = null,
 ) {
     val status = LocalStatusColors.current
     var expanded by rememberSaveable(overline, headlines.firstOrNull()?.value) { mutableStateOf(false) }
     val glossaryKeys = (claims.map { it.row } + notes).flatMap { glossaryKeysIn(it.summary) }.distinct()
-    Box(modifier.fillMaxWidth().testTag("calc-result")) {
+    Box(Modifier.fillMaxWidth().testTag("calc-result")) {
         PlainCard {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -88,7 +86,7 @@ internal fun CalculatorResultCard(
                 }
             }
             headlines.forEachIndexed { i, h ->
-                if (i > 0) CalcHairline()
+                if (i > 0) RowHairline()
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
                     Text(h.value, color = OnBgBody, style = Type.Display.merge(TabularFigures), modifier = Modifier.testTag("calc-headline"))
                     Text(h.caption, color = OnBgMuted, style = Type.Caption)
@@ -96,9 +94,9 @@ internal fun CalculatorResultCard(
                 }
             }
             if (expanded) {
-                CalcHairline()
+                RowHairline()
                 claims.forEachIndexed { i, c ->
-                    if (i > 0) CalcHairline()
+                    if (i > 0) RowHairline()
                     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
                         Text(stripClaimIds(guidanceSummary(c.row)), color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
                         WhyDetail(
@@ -117,11 +115,11 @@ internal fun CalculatorResultCard(
                 }
             }
             if (details != null) {
-                CalcHairline()
+                RowHairline()
                 details()
             }
             notes.forEach { n ->
-                CalcHairline()
+                RowHairline()
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
                     if (n.safety_critical) Chip(stringResource(R.string.main_chip_safety), status.danger)
                     Text(
@@ -131,7 +129,7 @@ internal fun CalculatorResultCard(
                     )
                 }
             }
-            CalcHairline()
+            RowHairline()
             TextAction(
                 stringResource(R.string.main_calc_clear),
                 onClick = onClear,
@@ -142,10 +140,19 @@ internal fun CalculatorResultCard(
     }
 }
 
-/** The row hairline inside a result card. */
+/** A calculator result without structured figures: the core's rows as plain
+ *  [EvidenceCard]s, then "Clear result". */
 @Composable
-private fun CalcHairline() {
-    HorizontalDivider(thickness = 1.dp, color = OnBgBody.copy(alpha = HairlineAlpha.Row))
+private fun PlainCalcRows(rows: List<GuidanceView>, overline: String, onClear: () -> Unit) {
+    rows.forEach {
+        EvidenceCard(guidanceSummary(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section, why = it.why)
+    }
+    TextAction(
+        stringResource(R.string.main_calc_clear),
+        onClick = onClear,
+        modifier = Modifier.offset(x = -TextActionInset),
+        description = stringResource(R.string.main_calc_clear_subject, overline),
+    )
 }
 
 /** "65–79" for a range, "100" when both ends round to the same figure. */
@@ -192,10 +199,7 @@ internal fun ProteinResult(model: ViewModel, onClear: () -> Unit) {
     val rows = model.protein_targets
     val figures = model.protein_figures.filter { !it.refused && it.row in rows.indices }
     if (figures.isEmpty()) {
-        rows.forEach {
-            EvidenceCard(guidanceSummary(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section, why = it.why)
-        }
-        TextAction(stringResource(R.string.main_calc_clear), onClick = onClear, modifier = Modifier.offset(x = -TextActionInset))
+        PlainCalcRows(rows, stringResource(R.string.main_calc_protein_overline), onClear)
         return
     }
     val bwKg = model.protein_input?.bodyweight_kg
@@ -247,10 +251,7 @@ internal fun HrZonesResult(model: ViewModel, onClear: () -> Unit) {
     val hm = model.hr_max
     val bands = model.hr_zone_bands.filter { it.row in rows.indices }
     if (hm == null || bands.isEmpty()) {
-        rows.forEach {
-            EvidenceCard(guidanceSummary(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section, why = it.why)
-        }
-        TextAction(stringResource(R.string.main_calc_clear), onClick = onClear, modifier = Modifier.offset(x = -TextActionInset))
+        PlainCalcRows(rows, stringResource(R.string.main_calc_hr_overline), onClear)
         return
     }
     // The age estimate's Tanaka split rides under the HRmax claim (a measured
@@ -348,7 +349,7 @@ private fun HrZoneTable(bands: List<HrZoneBandView>) {
         }
         Column {
             rows.forEachIndexed { i, r ->
-                if (i > 0) CalcHairline()
+                if (i > 0) RowHairline()
                 HrZoneRow(r, stacked)
             }
         }
@@ -408,10 +409,7 @@ internal fun VolumeResult(model: ViewModel, onClear: () -> Unit) {
     val ramp = model.hypertrophy_ramp
     val input = model.hypertrophy_input
     if (fig == null || ramp.isEmpty() || input == null) {
-        rows.forEach {
-            EvidenceCard(guidanceSummary(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, why = it.why)
-        }
-        TextAction(stringResource(R.string.main_calc_clear), onClick = onClear, modifier = Modifier.offset(x = -TextActionInset))
+        PlainCalcRows(rows, stringResource(R.string.main_calc_volume_overline), onClear)
         return
     }
     val headline = if (ramp.first() == ramp.last()) "${ramp.first()}" else stringResource(R.string.main_calc_ramp, ramp.first(), ramp.last())
@@ -444,7 +442,7 @@ internal fun VolumeResult(model: ViewModel, onClear: () -> Unit) {
                 ),
             )
             kv.forEachIndexed { i, (label, value) ->
-                if (i > 0) CalcHairline()
+                if (i > 0) RowHairline()
                 KeyValueRow(label, value, emphasis = true)
             }
         }

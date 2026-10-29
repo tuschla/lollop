@@ -8,6 +8,7 @@ import app.milestone.HealthScreen
 import app.milestone.OpenDest
 import app.milestone.PrescriptionView
 import app.milestone.ProfileView
+import app.milestone.R
 import app.milestone.SessionDoneItemView
 import app.milestone.SessionDoneView
 import app.milestone.SessionPlanView
@@ -33,6 +34,10 @@ class WidgetSnapshotTest {
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
     private val res get() = ctx.resources
     private val day = 20_389L // Tue 2025-10-28
+
+    private fun str(id: Int, vararg args: Any): String = res.getString(id, *args)
+    private fun item(name: String, detail: String) = str(R.string.widget_item_line, name, detail)
+    private fun weekDone(done: Int, planned: Int) = res.getQuantityString(R.plurals.main_week_done_count, planned, done, planned)
 
     @Before
     fun clean() {
@@ -154,21 +159,31 @@ class WidgetSnapshotTest {
         assertFalse(snap.sessionDone)
         assertFalse(snap.trackable)
         val f = widgetFace(snap, day, res)
-        assertEquals("Today · ${planDateLabel(day)}", f.overline)
+        assertEquals(str(R.string.widget_overline_day, str(R.string.widget_overline_today), planDateLabel(day)), f.overline)
         assertEquals("Lower body", f.title)
         // Open items first, settled ones after.
-        assertEquals(listOf("Romanian deadlift · 3 × 8 @ 80 kg", "Squat · Done"), f.items)
-        assertEquals("2 of 4 sessions done", f.week)
+        assertEquals(listOf(item("Romanian deadlift", "3 × 8 @ 80 kg"), item("Squat", str(R.string.widget_item_done))), f.items)
+        assertEquals(weekDone(2, 4), f.week)
         assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
     }
 
     @Test
-    fun doneLiftDaySaysSo() {
-        val ns = SessionPlanView(day, "Lower body", "Lift(MaxEffort)", "done", listOf(lift("Squat", "3 × 5 @ 100 kg", done = true)))
-        val m = model(ns).copy(session_done = SessionDoneView(day, "Lower body", listOf(SessionDoneItemView("Squat", met = true, status = "done"))))
+    fun finishedDayShowsSessionDoneAndTheNextSession() {
+        // Once today's session is done the core moves next_session to a later day and
+        // keeps today's row done in week_plan (calendar_edges.rs, "the hero moves on").
+        val today = SessionPlanView(day, "Lower body", "Lift(MaxEffort)", "done", listOf(lift("Squat", "3 × 5 @ 100 kg", done = true)))
+        val next = SessionPlanView(day + 2, "Upper body", "Lift(Hypertrophy)", "next", listOf(lift("Bench", "")))
+        val m = model(next, week = listOf(today, next))
+            .copy(session_done = SessionDoneView(day, "Lower body", listOf(SessionDoneItemView("Squat", met = true, status = "done"))))
         val snap = widgetSnapshotOf(m, DistanceUnit.Km)
+        assertEquals(WidgetDayKind.Lift, snap.kind)
         assertTrue(snap.sessionDone)
-        assertEquals(listOf("Session done"), widgetFace(snap, day, res).lead)
+        assertFalse(snap.trackable)
+        val f = widgetFace(snap, day, res)
+        assertEquals("Lower body", f.title)
+        assertEquals(listOf(str(R.string.widget_session_done), str(R.string.widget_next, "Upper body", planDateLabel(day + 2))), f.lead)
+        assertEquals(listOf(item("Squat", str(R.string.widget_item_done))), f.items)
+        assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
     }
 
     @Test
@@ -179,9 +194,9 @@ class WidgetSnapshotTest {
         assertTrue(snap.trackable)
         val f = widgetFace(snap, day, res)
         assertEquals("Easy run", f.title)
-        assertEquals(listOf("Run · 8 km easy"), f.items)
+        assertEquals(listOf(item(str(R.string.main_run), "8 km easy")), f.items)
         assertEquals(listOf(OpenDest.Track, OpenDest.Log), f.actions.map { it.dest })
-        assertEquals("Track run", f.actions.first().label)
+        assertEquals(str(R.string.main_plan_item_track), f.actions.first().label)
         // Once the run is logged, no Track run.
         val logged = widgetSnapshotOf(model(ns.copy(items = listOf(PrescriptionView(face_lead = "8 km easy", done = true)))), DistanceUnit.Km)
         assertFalse(logged.trackable)
@@ -200,17 +215,17 @@ class WidgetSnapshotTest {
         assertEquals(WidgetDayKind.Rest, snap.kind)
         assertTrue(snap.restDay)
         val f = widgetFace(snap, day, res)
-        assertEquals("Rest day", f.title)
-        assertEquals(listOf("Next: Upper body, ${planDateLabel(day + 1)}"), f.lead)
-        assertEquals("2 of 4 sessions done", f.week)
+        assertEquals(str(R.string.widget_rest_day), f.title)
+        assertEquals(listOf(str(R.string.widget_next, "Upper body", planDateLabel(day + 1))), f.lead)
+        assertEquals(weekDone(2, 4), f.week)
         assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
         // No plan day today at all (before the plan starts) reads as no session.
         val none = widgetSnapshotOf(model(next, week = listOf(next)), DistanceUnit.Km)
-        assertEquals("No session today", widgetFace(none, day, res).title)
+        assertEquals(str(R.string.widget_no_session), widgetFace(none, day, res).title)
     }
 
     @Test
-    fun holdSaysTrainingIsPausedAndWhy() {
+    fun holdSaysTrainingIsPausedButNotWhy() {
         val ns = SessionPlanView(day, "Lower body", "Lift(MaxEffort)", "blocked", listOf(lift("Squat", "3 × 5 @ 100 kg")))
         val m = model(ns).copy(train_blocked = true, hold_reason = "pain", safety_tier = "Pain")
         val snap = widgetSnapshotOf(m, DistanceUnit.Km)
@@ -218,23 +233,18 @@ class WidgetSnapshotTest {
         // A paused day carries no session, items, week count or Track run.
         assertTrue(snap.items.isEmpty() && snap.title.isEmpty() && snap.weekPlanned == 0 && !snap.trackable)
         val f = widgetFace(snap, day, res)
-        assertEquals("Training paused", f.title)
+        assertEquals(str(R.string.main_status_on_hold), f.title)
         assertEquals(WidgetTone.Paused, f.tone)
-        assertEquals(listOf("You reported pain today."), f.lead)
+        assertEquals(listOf(str(R.string.widget_paused_body)), f.lead)
         assertNull(f.week)
         assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
-        // The pregnancy warning sign keeps its own wording.
+        // A home screen never names the health reason behind a hold.
         val warn = m.copy(hold_reason = "pregnancy", safety_tier = "MedicalReferral", profile = ProfileView(health = HealthScreen(pregnant = true, pregnancy_warning_sign = true)))
-        assertEquals(
-            listOf("You noted a pregnancy warning sign. Stop exercising and contact your doctor or midwife."),
-            face(warn).lead,
-        )
-        // A tier without a reason falls back to the tier's line.
-        assertEquals(listOf("Your HRV has been well below your normal."), face(m.copy(hold_reason = null, safety_tier = "HrvTrend")).lead)
+        assertEquals(f.title to f.lead, face(warn).let { it.title to it.lead })
     }
 
     @Test
-    fun underEighteenShowsThePlanPauseAndActivity() {
+    fun underEighteenPauseIsGenericAndNotInTheDangerColour() {
         val m = model().copy(
             train_blocked = true,
             hold_reason = "youth",
@@ -243,15 +253,10 @@ class WidgetSnapshotTest {
         val snap = widgetSnapshotOf(m, DistanceUnit.Km)
         assertEquals(WidgetDayKind.Paused, snap.kind)
         val f = widgetFace(snap, day, res)
-        assertEquals("Plans paused under 18", f.title)
-        assertEquals(WidgetTone.Calm, f.tone)
-        assertEquals(
-            listOf("150 of 420 active minutes this week", "Logging, history and your weekly activity still work."),
-            f.lead,
-        )
+        assertEquals(str(R.string.main_status_on_hold), f.title)
+        assertEquals(listOf(str(R.string.widget_paused_body)), f.lead)
+        assertTrue(f.tone != WidgetTone.Paused)
         assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
-        // Before the activity card exists, only the pause line.
-        assertEquals(listOf("Logging, history and your weekly activity still work."), face(m.copy(youth_activity = null)).lead)
     }
 
     @Test
@@ -259,18 +264,18 @@ class WidgetSnapshotTest {
         val noPlan = widgetSnapshotOf(model(), DistanceUnit.Km)
         assertEquals(WidgetDayKind.NoPlan, noPlan.kind)
         val f = widgetFace(noPlan, day, res)
-        assertEquals("No plan yet", f.title)
-        assertEquals(listOf("Open lollop to make a plan."), f.lead)
+        assertEquals(str(R.string.widget_no_plan), f.title)
+        assertEquals(listOf(str(R.string.widget_no_plan_body)), f.lead)
         assertNull(f.week)
         assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
-        assertEquals("Nothing to plan yet", face(model().copy(plan_withheld = "nothing_to_plan")).title)
-        assertEquals("Your plan is paused", face(model().copy(plan_withheld = "health_hold")).title)
+        assertEquals(str(R.string.main_plan_withheld_empty_title), face(model().copy(plan_withheld = "nothing_to_plan")).title)
+        assertEquals(str(R.string.main_plan_withheld_health_title), face(model().copy(plan_withheld = "health_hold")).title)
 
         val setup = widgetSnapshotOf(model(profile = null), DistanceUnit.Km)
         assertEquals(WidgetDayKind.Setup, setup.kind)
         val s = widgetFace(setup, day, res)
-        assertEquals("Not set up yet", s.title)
-        assertEquals(listOf("Open lollop to answer the setup questions."), s.lead)
+        assertEquals(str(R.string.widget_setup_title), s.title)
+        assertEquals(listOf(str(R.string.widget_setup_body)), s.lead)
         assertTrue(s.actions.isEmpty())
     }
 
@@ -278,10 +283,10 @@ class WidgetSnapshotTest {
     fun cutItemsEndInACount() {
         val f = WidgetFace("o", "t", WidgetTone.Normal, lead = listOf("lead"), items = listOf("a", "b", "c", "d"))
         assertEquals(listOf("lead"), visibleLines(f, 1, res))
-        assertEquals(listOf("lead", "a", "3 more items"), visibleLines(f, 3, res))
+        assertEquals(listOf("lead", "a", res.getQuantityString(R.plurals.widget_more_items, 3, 3)), visibleLines(f, 3, res))
         assertEquals(listOf("lead", "a", "b", "c", "d"), visibleLines(f, 5, res))
         assertEquals(listOf("lead", "a", "b", "c", "d"), visibleLines(f, 6, res))
         // A count never stands in for a single item: that slot shows the item.
-        assertEquals(listOf("lead", "2 more items"), visibleLines(f.copy(items = listOf("a", "b")), 2, res))
+        assertEquals(listOf("lead", res.getQuantityString(R.plurals.widget_more_items, 2, 2)), visibleLines(f.copy(items = listOf("a", "b")), 2, res))
     }
 }

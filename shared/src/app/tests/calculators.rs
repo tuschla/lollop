@@ -1,6 +1,6 @@
-//! Coach calculators end to end: race prediction, HR zones, protein, critical
-//! speed, Cooper, APRE and the hypertrophy meso planner; each is graded, echoes
-//! its inputs and refuses degenerate queries.
+//! Coach calculators end to end: race prediction, HR zones, protein and the
+//! hypertrophy meso planner; each is graded, echoes its inputs and refuses
+//! degenerate queries.
 
 use super::*;
 
@@ -390,25 +390,6 @@ fn compute_hr_zones_builds_graded_hrmax_and_five_bands() {
 }
 
 #[test]
-fn compute_hr_zones_rejects_implausible_age() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(
-        Event::ComputeHrZones {
-            age_years: 0.0,
-            resting_hr_bpm: None,
-            weeks_since_recalc: None,
-            weeks_since_pace_test: None,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let zones = app.view(&model).hr_zones;
-    assert_eq!(zones.len(), 1, "bad age yields a single explanatory row");
-    assert!(zones[0].summary.contains("between 5 and 100"));
-}
-
-#[test]
 fn coach_query_builders_never_panic_on_degenerate_inputs() {
     // The four Coach tool builders take free-form numeric/string queries from
     // the shell (a text field the user can leave empty, zero, or negative).
@@ -448,7 +429,7 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
         for &weeks in &[0u8, 1, 12, 255] {
             cited_non_myth(
                 &build_hypertrophy_plan(
-                    &HypertrophyPlanQuery {
+                    &HypertrophyInputView {
                         muscle: muscle.to_string(),
                         weeks,
                         not_growing: false,
@@ -471,7 +452,7 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
                     for &lb in &[false, true] {
                         cited_non_myth(
                             &build_protein_targets(
-                                &ProteinQuery {
+                                &ProteinInputView {
                                     bodyweight_kg: bw,
                                     masters: m,
                                     deficit: d,
@@ -492,7 +473,7 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
     for &age in &[-1.0, 0.0, 4.9, 5.0, 30.0, 100.0, 100.1, 200.0] {
         cited_non_myth(
             &build_hr_zones(
-                &HrZoneQuery {
+                &HrZoneInputView {
                     age_years: age,
                     resting_hr_bpm: None,
                     weeks_since_recalc: None,
@@ -503,218 +484,6 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
             .0,
         );
     }
-}
-
-#[test]
-fn cooper_calculator_estimates_vo2max_and_refuses_the_floor() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(
-        Event::ComputeCooper {
-            distance_m_12min: 2400.0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let rows = app.view(&model).cooper;
-    assert_eq!(rows.len(), 1);
-    // (2400 − 504.9)/44.73 ≈ 42.4 ml/kg/min.
-    assert!(rows[0].summary.contains("42.4"), "{}", rows[0].summary);
-    assert_eq!(rows[0].evidence.grade, Some(EvidenceGrade::Moderate));
-
-    app.update(
-        Event::ComputeCooper {
-            distance_m_12min: 400.0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let rows = app.view(&model).cooper;
-    assert!(rows[0].summary.contains("too short"), "{}", rows[0].summary);
-
-    app.update(Event::ClearCooper, &mut model)
-        .expect_only_render();
-    assert!(app.view(&model).cooper.is_empty());
-}
-
-#[test]
-fn critical_speed_calculator_fits_the_protocol_and_names_violations() {
-    let app = Engine;
-    let mut model = Model::default();
-    // Ideal pair: 1200 m / 3 min + 5000 m / 20 min.
-    app.update(
-        Event::ComputeCriticalSpeed {
-            efforts: vec![
-                CsEffortIn {
-                    distance_m: 1200.0,
-                    time_sec: 180.0,
-                },
-                CsEffortIn {
-                    distance_m: 5000.0,
-                    time_sec: 1200.0,
-                },
-            ],
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let rows = app.view(&model).critical_speed;
-    assert_eq!(rows.len(), 1, "ideal pairing → no protocol note: {rows:#?}");
-    // CS = 3800/1020 ≈ 3.73 m/s, D′ = 1200 − 3.73·180 ≈ 529 m.
-    assert!(rows[0].summary.contains("3.73"), "{}", rows[0].summary);
-    assert!(rows[0].summary.contains("529"), "{}", rows[0].summary);
-
-    // A single effort violates the 2-effort minimum, explained not faked.
-    app.update(
-        Event::ComputeCriticalSpeed {
-            efforts: vec![CsEffortIn {
-                distance_m: 1200.0,
-                time_sec: 180.0,
-            }],
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let rows = app.view(&model).critical_speed;
-    assert!(
-        rows[0].summary.contains("at least 2"),
-        "{}",
-        rows[0].summary
-    );
-
-    app.update(Event::ClearCriticalSpeed, &mut model)
-        .expect_only_render();
-    assert!(app.view(&model).critical_speed.is_empty());
-}
-
-/// Every protocol violation reads as one whole sentence: the reason follows
-/// "No critical speed estimate: " directly, never spliced after "the protocol".
-#[test]
-fn critical_speed_violations_read_as_whole_sentences() {
-    let e = |distance_m: f64, time_sec: f64| CsEffortIn {
-        distance_m,
-        time_sec,
-    };
-    let cases: [(Vec<CsEffortIn>, &str); 6] = [
-        (
-            vec![e(1200.0, 180.0)],
-            "No critical speed estimate: it needs at least 2 all-out efforts.",
-        ),
-        (
-            vec![
-                e(1000.0, 200.0),
-                e(1500.0, 320.0),
-                e(2000.0, 440.0),
-                e(3000.0, 700.0),
-                e(4000.0, 960.0),
-                e(5000.0, 1220.0),
-            ],
-            "No critical speed estimate: it uses at most 5 all-out efforts.",
-        ),
-        (
-            vec![e(400.0, 60.0), e(5000.0, 1200.0)],
-            "No critical speed estimate: each effort must last 2–30 minutes.",
-        ),
-        (
-            vec![e(1000.0, 300.0), e(1100.0, 300.0)],
-            "No critical speed estimate: the efforts need different durations.",
-        ),
-        (
-            vec![e(500.0, 240.0), e(5000.0, 1200.0)],
-            "No critical speed estimate: the distance reserve (D′) came out negative, so an effort was likely not all-out; re-test.",
-        ),
-        (
-            vec![e(3000.0, 600.0), e(2500.0, 1200.0)],
-            "No critical speed estimate: a longer effort covers no more distance than a shorter one; check the distances and times.",
-        ),
-    ];
-    for (efforts, want) in cases {
-        let rows = build_critical_speed(&efforts);
-        assert_eq!(rows.len(), 1, "{rows:#?}");
-        assert_eq!(rows[0].summary, want);
-    }
-}
-
-#[test]
-fn apre_calculator_applies_the_small_lifter_cap() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(
-        Event::ComputeApre {
-            scheme: autoreg::ApreScheme::Apre6,
-            reps: 9,
-            current_load_kg: 50.0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let rows = app.view(&model).apre;
-    assert!(
-        rows[0].summary.contains("+2.5 to +5 kg"),
-        "{}",
-        rows[0].summary
-    );
-
-    // Small lifter: the +kg band shrinks proportionally under the 50 kg ref.
-    app.update(
-        Event::ComputeApre {
-            scheme: autoreg::ApreScheme::Apre6,
-            reps: 9,
-            current_load_kg: 30.0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let rows = app.view(&model).apre;
-    assert!(
-        rows[0].summary.contains("+1.5 to +3 kg"),
-        "{}",
-        rows[0].summary
-    );
-
-    app.update(Event::ClearApre, &mut model)
-        .expect_only_render();
-    assert!(app.view(&model).apre.is_empty());
-}
-
-#[test]
-fn apre_for_a_lb_profile_shows_the_source_pound_increments() {
-    // Mann 2010 states APRE in lb: APRE-6 at 9 reps is +5 to +10 lb, never a
-    // 2.5 kg plate converted back to "+5.5 lb". Under 100 lb the same
-    // autoreg-019 cap applies in lb (+10 lb on 100 lb = +10 %).
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(
-        Event::SetProfile(Profile {
-            weight_lb: true,
-            ..sample_profile()
-        }),
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::ComputeApre {
-            scheme: autoreg::ApreScheme::Apre6,
-            reps: 9,
-            current_load_kg: 185.0 / LB_PER_KG,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let s = &app.view(&model).apre[0].summary;
-    assert!(s.contains("+5 to +10 lb"), "{s}");
-    assert!(!s.contains("5.5"), "{s}");
-    app.update(
-        Event::ComputeApre {
-            scheme: autoreg::ApreScheme::Apre6,
-            reps: 9,
-            current_load_kg: 60.0 / LB_PER_KG,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let s = &app.view(&model).apre[0].summary;
-    assert!(s.contains("+3 to +6 lb"), "{s}");
 }
 
 #[test]
@@ -794,6 +563,9 @@ fn hypertrophy_plan_decides_the_next_meso_and_states_effort_rules() {
     assert!(has("Tempo: controlled"), "tempo row");
 }
 
+/// The marathon-optimism caveat on a race prediction.
+const MARATHON_OPTIMISM: &str = "marathon predictions come out too fast";
+
 #[test]
 fn race_prediction_notes_flag_stale_input_and_marathon_optimism() {
     let app = Engine;
@@ -820,13 +592,13 @@ fn race_prediction_notes_flag_stale_input_and_marathon_optimism() {
             .any(|n| n.summary.contains("Race or time-trial again"))
     );
     assert!(
-        pred.notes.iter().any(
-            |n| n.summary.contains("marathon predictions come out too fast")
+        pred.notes
+            .iter()
+            .any(|n| n.summary.contains(MARATHON_OPTIMISM)
                 && n.summary.contains("about 2–3 VDOT points")
                 && n.summary.contains("20.0 km")
                 && n.summary_mi.contains("12.4 mi")
-                && !n.summary_mi.contains("km")
-        ),
+                && !n.summary_mi.contains("km")),
         "optimism note carries the running-008 derate and a miles twin: {:#?}",
         pred.notes
     );
@@ -884,7 +656,7 @@ fn marathon_under_mileage_flags_and_derates_the_displayed_band() {
         under
             .notes
             .iter()
-            .any(|n| n.summary.contains("marathon predictions come out too fast")),
+            .any(|n| n.summary.contains(MARATHON_OPTIMISM)),
         "caveat retained: {:#?}",
         under.notes
     );
@@ -892,7 +664,7 @@ fn marathon_under_mileage_flags_and_derates_the_displayed_band() {
         !supported
             .notes
             .iter()
-            .any(|n| n.summary.contains("marathon predictions come out too fast")),
+            .any(|n| n.summary.contains(MARATHON_OPTIMISM)),
         "well-supported marathon carries no optimism caveat: {:#?}",
         supported.notes
     );
@@ -925,7 +697,7 @@ fn marathon_under_mileage_flags_and_derates_the_displayed_band() {
         assert!(
             a.notes
                 .iter()
-                .all(|n| !n.summary.contains("marathon predictions come out too fast")),
+                .all(|n| !n.summary.contains(MARATHON_OPTIMISM)),
             "no marathon caveat leaks onto {goal} m: {:#?}",
             a.notes
         );
@@ -983,7 +755,7 @@ fn race_prediction_absurd_goal_is_degenerate_not_infinite() {
 fn calculators_echo_their_inputs_for_form_rehydration() {
     // Each calculator's result view must carry back the raw query it was
     // computed from, so a shell rehydrates its form after a log replay
-    // instead of resetting to hardcoded defaults (the "it reset" bug).
+    // instead of resetting to hardcoded defaults.
     let app = Engine;
     let mut model = Model::default();
 
@@ -1027,38 +799,6 @@ fn calculators_echo_their_inputs_for_form_rehydration() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::ComputeCooper {
-            distance_m_12min: 2_750.0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::ComputeCriticalSpeed {
-            efforts: vec![
-                CsEffortIn {
-                    distance_m: 1_200.0,
-                    time_sec: 200.0,
-                },
-                CsEffortIn {
-                    distance_m: 3_000.0,
-                    time_sec: 600.0,
-                },
-            ],
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::ComputeApre {
-            scheme: autoreg::ApreScheme::Apre6,
-            reps: 9,
-            current_load_kg: 185.0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
 
     let v = app.view(&model);
 
@@ -1083,41 +823,17 @@ fn calculators_echo_their_inputs_for_form_rehydration() {
     assert_eq!(hy.muscle, "back");
     assert_eq!(hy.weeks, 6);
     assert!(hy.not_growing && !hy.recovering_easily);
-
-    assert_eq!(v.cooper_input, Some(2_750.0));
-    assert_eq!(v.critical_speed_input.len(), 2);
-    assert_eq!(v.critical_speed_input[0].distance_m, 1_200.0);
-
-    let ap = v.apre_input.expect("apre input");
-    assert_eq!(ap.scheme, autoreg::ApreScheme::Apre6);
-    assert_eq!(ap.reps, 9);
-    assert_eq!(ap.current_load_kg, 185.0);
 }
 
 // ── Wire contract: HR zones consume the profile's measured HRmax ──
 #[test]
-fn measured_hr_max_supersedes_the_tanaka_estimate() {
-    let q = HrZoneQuery {
+fn an_implausible_measured_hr_max_falls_back_to_tanaka() {
+    let q = HrZoneInputView {
         age_years: 30.0,
         resting_hr_bpm: None,
         weeks_since_recalc: None,
         weeks_since_pace_test: None,
     };
-    // Tanaka(30) = 187; a measured 200 must drive the table instead.
-    let (rows, hr_max, _) = build_hr_zones(&q, Some(200.0));
-    let hrmax_row = rows
-        .iter()
-        .find(|r| r.summary.contains("HRmax"))
-        .expect("an HRmax row is present");
-    assert!(
-        hrmax_row.summary.contains("200") && hrmax_row.summary.to_lowercase().contains("measured"),
-        "the measured max must be shown: {}",
-        hrmax_row.summary
-    );
-    // The structured figure mirrors the prose: measured, no Tanaka split.
-    let m = hr_max.expect("structured hr_max present");
-    assert!(m.measured && m.bpm == 200.0 && m.tanaka_intercept == 0.0);
-    // Implausible measured values fall back to the age estimate.
     let (rows, hr_max, _) = build_hr_zones(&q, Some(9999.0));
     let hrmax_row = rows.iter().find(|r| r.summary.contains("HRmax")).unwrap();
     assert!(
@@ -1128,4 +844,73 @@ fn measured_hr_max_supersedes_the_tanaka_estimate() {
     // Fell back to Tanaka → the estimate carries the 208 − 0.7 × age split.
     let e = hr_max.expect("structured hr_max present");
     assert!(!e.measured && e.bpm == 187.0 && e.tanaka_intercept == 208.0 && e.tanaka_slope == 0.7);
+}
+
+/// A measured HRmax bypasses the age gate, but the MAF row (180 − age) needs an
+/// age inside the Tanaka range, so an out-of-range age gets no MAF row.
+#[test]
+fn maf_row_skipped_when_age_out_of_range_with_measured_max() {
+    for age in [0.0, 130.0] {
+        let q = HrZoneInputView {
+            age_years: age,
+            resting_hr_bpm: None,
+            weeks_since_recalc: None,
+            weeks_since_pace_test: None,
+        };
+        let (rows, hm, _) = build_hr_zones(&q, Some(190.0));
+        assert!(hm.is_some_and(|h| h.measured));
+        let maf: Vec<_> = rows
+            .iter()
+            .filter(|r| r.summary.contains("MAF"))
+            .map(|r| r.summary.clone())
+            .collect();
+        assert!(maf.is_empty(), "age {age}: {maf:?}");
+    }
+}
+
+/// A degenerate prediction ("-") carries no freshness or marathon-derate note:
+/// there is no prediction for them to qualify.
+#[test]
+fn degenerate_race_view_has_no_prediction_notes() {
+    let q = RaceQuery {
+        recent_distance_m: 5000.0,
+        recent_time_sec: 0.0,
+        goal_distance_m: 42_195.0,
+        weekly_km: 40.0,
+        weeks_since_race: Some(12),
+    };
+    let v = to_race_view(&q, Some(10.0));
+    assert_eq!(v.predicted, "-");
+    let notes: Vec<_> = v.notes.iter().map(|n| n.summary.clone()).collect();
+    assert!(notes.is_empty(), "{notes:#?}");
+}
+
+/// At ≥ 64 km a week the long-run row states only the 25% share cap: the
+/// twice-the-daily-average bound is the low-mileage rule (running-016).
+#[test]
+fn high_mileage_long_run_row_does_not_apply_the_low_mileage_rule() {
+    let hybrid = include_str!("../../../tests/fixtures/view_snapshot/hybrid.events.ndjson");
+    let mut profile: serde_json::Value =
+        serde_json::from_str(hybrid.lines().next().unwrap()).unwrap();
+    profile["SetProfile"]["running_days_per_week"] = 6.into();
+    let mut model = snapshot_fixture_model(&profile.to_string());
+    let monday = 20_003_i64;
+    for (i, km) in [30.0, 10.0, 10.0, 10.0, 10.0].into_iter().enumerate() {
+        let at = (monday + i as i64) * DAY_SEC + 36_000;
+        let _ = Engine.update(log_run_at(km, km * 6.0, 70.0, at), &mut model);
+    }
+    let _ = Engine.update(set_today_ev(monday + 6), &mut model);
+    let report = Engine.view(&model).weekly_report;
+    let long: Vec<&str> = report
+        .iter()
+        .map(|r| r.summary.as_str())
+        .filter(|s| s.starts_with("Long run ") && !s.starts_with("Long run and"))
+        .collect();
+    assert!(long.iter().any(|s| s.contains("25% limit")), "{report:#?}");
+    assert!(
+        !long
+            .iter()
+            .any(|s| s.contains("twice your average daily distance")),
+        "{long:#?}"
+    );
 }

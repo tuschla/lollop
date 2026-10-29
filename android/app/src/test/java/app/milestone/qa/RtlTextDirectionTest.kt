@@ -1,23 +1,35 @@
 package app.milestone.qa
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import app.milestone.DistanceUnit
 import app.milestone.MilestoneTheme
+import app.milestone.R
+import app.milestone.RowChevron
+import app.milestone.RunDistanceBars
+import app.milestone.StatusCardFooter
 import app.milestone.TabularFigures
 import app.milestone.Type
 import java.util.Locale
@@ -36,7 +48,8 @@ import org.robolectric.annotation.Config
  * English-only copy must still read left to right. Before the fix every
  * paragraph took the RTL layout direction as its base direction, so neutral
  * characters at the edges were reordered: the plan target "5.5 km" rendered as
- * "km 5.5" and a coach note's final '.' jumped to the start of the line.
+ * "km 5.5" and a coach note's final '.' jumped to the start of the line. The
+ * mirrored layout itself is covered too: canvas-ordered chart ticks, the chevron.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "+ar")
@@ -160,5 +173,78 @@ class RtlTextDirectionTest {
         val right = with(rule.density) { 300.dp.toPx() }
         assertTrue("RTL: first child $first must end at the right edge (${right}px)", first.right >= right - 1f)
         assertTrue("RTL: last child $last must start at the left edge", last.left <= 1f)
+    }
+
+    /** A chart canvas draws oldest-left in every direction, so its date ticks stay
+     *  in canvas order: "Today" under the newest (rightmost) bar. */
+    @Test
+    fun chartAxisTicks_followTheCanvas_underArabic() {
+        rule.setContent {
+            MilestoneTheme {
+                Box(Modifier.width(300.dp)) {
+                    RunDistanceBars(emptyMap(), todayLocalDay = 20_000L, unit = DistanceUnit.Km, days = 14, chartHeight = 96.dp)
+                }
+            }
+        }
+        val today = rule.onNodeWithText(rule.activity.getString(R.string.main_today_axis)).fetchSemanticsNode().boundsInRoot
+        val right = with(rule.density) { 300.dp.toPx() }
+        assertTrue("RTL: \"Today\" $today must end at the right edge (${right}px), under today's bar", today.right >= right - 1f)
+    }
+
+    /** The row chevron points to the end edge (left under RTL), and down when expanded. */
+    @Test
+    fun rowChevron_pointsToTheEndEdge_andDownWhenExpanded_underArabic() {
+        rule.setContent {
+            MilestoneTheme {
+                Column {
+                    for (expanded in listOf(false, true)) {
+                        Box(Modifier.testTag("chevron-$expanded").background(Color.White)) {
+                            RowChevron(expanded, tint = Color.Black)
+                        }
+                    }
+                }
+            }
+        }
+        fun ink(expanded: Boolean): Pair<Float, Float> {
+            val px = rule.onNodeWithTag("chevron-$expanded").captureToImage().toPixelMap()
+            // Mean ink x along the middle row, and mean ink y down the middle column,
+            // as fractions of the glyph box: the tip is the only ink on each.
+            val row = (0 until px.width).filter { px[it, px.height / 2].red < 0.5f }
+            val col = (0 until px.height).filter { px[px.width / 2, it].red < 0.5f }
+            return (row.average() / px.width).toFloat() to (col.average() / px.height).toFloat()
+        }
+        val (collapsedX, _) = ink(expanded = false)
+        assertTrue("RTL: a collapsed chevron points left, tip at x=$collapsedX of the box", collapsedX < 0.5f)
+        val (_, expandedY) = ink(expanded = true)
+        assertTrue("RTL: an expanded chevron points down, tip at y=$expandedY of the box", expandedY > 0.5f)
+    }
+
+    private fun footer(direction: LayoutDirection): Pair<androidx.compose.ui.geometry.Rect, androidx.compose.ui.geometry.Rect> {
+        rule.setContent {
+            MilestoneTheme {
+                CompositionLocalProvider(LocalLayoutDirection provides direction) {
+                    Box(Modifier.width(360.dp)) {
+                        StatusCardFooter(primaryLabel = "Resolve", onPrimary = {}, secondaryLabel = "Remove", onSecondary = {})
+                    }
+                }
+            }
+        }
+        val primary = rule.onNodeWithText("Resolve").fetchSemanticsNode().boundsInRoot
+        val secondary = rule.onNodeWithText("Remove").fetchSemanticsNode().boundsInRoot
+        return secondary to primary
+    }
+
+    /** A status card footer puts its secondary action at the start edge and the
+     *  main one at the end: right and left under RTL. */
+    @Test
+    fun statusCardFooter_secondaryAtTheStart_underArabic() {
+        val (secondary, primary) = footer(LayoutDirection.Rtl)
+        assertTrue("RTL: secondary $secondary must sit right of primary $primary", secondary.left >= primary.right)
+    }
+
+    @Test
+    fun statusCardFooter_secondaryAtTheStart_leftToRight() {
+        val (secondary, primary) = footer(LayoutDirection.Ltr)
+        assertTrue("LTR: secondary $secondary must sit left of primary $primary", secondary.right <= primary.left)
     }
 }

@@ -37,9 +37,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 // ── Lift sessions (History "Lifts" stream) ─────────────────────────────────
@@ -57,12 +55,17 @@ internal data class LiftSession(val epochDay: Long?, val sets: List<LiftResultVi
     /** Stable, saveable selection + list key. */
     val key: String = epochDay?.toString() ?: "undated"
 
-    /** Exercises in first-logged order, each with its own sets in logged order. */
-    val exercises: List<Pair<String, List<LiftResultView>>> = sets.groupBy { it.exercise }.toList()
+    /** Exercises in first-logged order, keyed by [exerciseKey] and named by their
+     *  first-logged spelling, each with its own sets in logged order. */
+    val exercises: List<Pair<String, List<LiftResultView>>> =
+        sets.groupBy { exerciseKey(it.exercise) }.values.map { it.first().exercise to it }
 
     /** Stamp of the session's first set (0 when undated): dates the card and its month header. */
     val firstObservedAt: Long get() = sets.firstOrNull()?.observed_at ?: 0L
 }
+
+/** The key the core chains an exercise's e1RM and PRs on: trimmed, lowercased name. */
+internal fun exerciseKey(name: String): String = name.trim().lowercase()
 
 /**
  * Group the set stream into per-local-day sessions, newest day first; undated
@@ -110,7 +113,7 @@ internal fun historyActivityDays(
 }
 
 /**
- * Per exercise, its best e1RM of each dated session in ascending day order: the
+ * Per [exerciseKey], its best e1RM of each dated session in ascending day order: the
  * factual series behind the session sheet's e1RM change line (one point per
  * session, so warm-up sets don't count as a change within a day). Holds and sets
  * without an estimate (e1RM 0) contribute nothing.
@@ -121,7 +124,7 @@ internal fun bestE1rmByExerciseDay(sessions: List<LiftSession>): Map<String, Lis
         val day = s.epochDay ?: continue
         for ((name, sets) in s.exercises) {
             val best = bestE1rmKg(sets) ?: continue
-            out.getOrPut(name) { ArrayList() } += day to best
+            out.getOrPut(exerciseKey(name)) { ArrayList() } += day to best
         }
     }
     return out
@@ -164,28 +167,32 @@ internal fun exerciseSetsSummary(res: Resources, sets: List<LiftResultView>, wei
 private fun sameSetShape(a: LiftResultView, b: LiftResultView): Boolean =
     a.hold_sec == b.hold_sec && a.reps == b.reps && a.weight_kg == b.weight_kg
 
-/** Date skeleton of a session title: abbreviated weekday, month and day, ordered and
- *  punctuated per locale by [android.text.format.DateFormat.getBestDateTimePattern]. */
+/** Date skeleton of a session title: abbreviated weekday, month and day. */
 private const val SESSION_DATE_SKELETON = "EEEMMMd"
 
 /** Session title: the local date ("Mon, Sep 21", device locale), or "Undated sets". */
 @Composable
 private fun liftSessionTitle(session: LiftSession): String {
     val day = session.epochDay ?: return stringResource(R.string.history_session_undated)
-    val locale = Locale.getDefault()
-    val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, SESSION_DATE_SKELETON)
-    return LocalDate.ofEpochDay(day).format(DateTimeFormatter.ofPattern(pattern, locale))
+    return localizedDayFormatter(SESSION_DATE_SKELETON).formatEpochDay(day)
 }
 
-/** Session header: date title + "3 exercises · 12 sets". On the list card ([badge])
- *  a "Today" / "Yesterday" chip marks the two most recent days (quicker to read than
- *  the date); older days, and the sheet, rely on the date title alone, so the day is
- *  never stated twice. No type icon: the Lifts list holds nothing but lift sessions. */
+/** "3 exercises · 12 sets", the count line under a session's date on its card and sheet. */
 @Composable
-private fun LiftSessionHeader(session: LiftSession, nowMillis: Long, badge: Boolean) {
-    val today = localEpochDay(nowMillis / 1000, ZoneId.systemDefault())
+private fun sessionCounts(session: LiftSession): List<String> {
     val exercises = session.exercises.size
     val sets = session.sets.size
+    return listOf(
+        pluralStringResource(R.plurals.history_exercise_count, exercises, exercises),
+        pluralStringResource(R.plurals.history_set_count, sets, sets),
+    )
+}
+
+/** Card header: date title + "3 exercises · 12 sets", and a "Today" / "Yesterday" chip
+ *  on the two most recent days ([todayLocalDay]); older days rely on the date title
+ *  alone, so the day is never stated twice. */
+@Composable
+private fun LiftSessionHeader(session: LiftSession, nowMillis: Long, todayLocalDay: Long) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -198,14 +205,13 @@ private fun LiftSessionHeader(session: LiftSession, nowMillis: Long, badge: Bool
                 color = OnBgBody,
             )
             Text(
-                pluralStringResource(R.plurals.history_exercise_count, exercises, exercises) + " · " +
-                    pluralStringResource(R.plurals.history_set_count, sets, sets),
+                sessionCounts(session).joinToString(" · "),
                 color = OnBgFaint,
                 style = Type.Caption.merge(TabularFigures),
             )
         }
         val day = session.epochDay
-        if (badge && day != null && today - day in 0L..1L) {
+        if (day != null && todayLocalDay - day in 0L..1L) {
             DateBadge(formatLogDate(session.firstObservedAt, nowMillis))
         }
     }
@@ -281,11 +287,13 @@ private fun sessionVolume(sets: List<LiftResultView>, weightUnit: WeightUnit): S
 internal fun LiftSessionCard(
     session: LiftSession,
     nowMillis: Long,
+    // The screen's local day, bucketed in the same zone as the sessions.
+    todayLocalDay: Long,
     weightUnit: WeightUnit,
     onClick: () -> Unit,
 ) {
     PlainCard(onClick = onClick) {
-        LiftSessionHeader(session, nowMillis, badge = true)
+        LiftSessionHeader(session, nowMillis, todayLocalDay)
         val glossaryAt = session.firstE1rmIndex()
         session.exercises.forEachIndexed { i, (name, sets) ->
             Column(
@@ -363,7 +371,7 @@ internal fun LiftSessionSheet(
             val glossaryAt = session.firstE1rmIndex()
             session.exercises.forEachIndexed { i, (name, sets) ->
                 val series = session.epochDay?.let { day ->
-                    e1rmSeries[name].orEmpty().filter { it.first <= day }.map { it.second }
+                    e1rmSeries[exerciseKey(name)].orEmpty().filter { it.first <= day }.map { it.second }
                 }.orEmpty()
                 ExerciseSetsCard(
                     name = name,
@@ -389,7 +397,6 @@ internal fun LiftSessionSheet(
                 model.trend?.let { t ->
                     EvidenceCard(
                         t.summary, t.grade, t.citation, t.confidence, t.safety_critical, t.contested,
-                        confidenceInWhy = true,
                         border = if (t.safety_critical) null else hairline,
                         why = t.why,
                     )
@@ -436,17 +443,13 @@ internal fun LiftSessionSheet(
 /** The session sheet's title: the day, then "3 exercises · 9 sets · 4,690 lb lifted". */
 @Composable
 private fun LiftSessionSheetHeader(session: LiftSession, weightUnit: WeightUnit) {
-    val exercises = session.exercises.size
-    val sets = session.sets.size
-    val volume = sessionVolume(session.sets, weightUnit)
+    val volume = sessionVolume(session.sets, weightUnit)?.let {
+        stringResource(R.string.history_session_volume, it, weightSuffix(weightUnit))
+    }
     Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
         Text(liftSessionTitle(session), style = Type.Title, color = OnBgBody)
         Text(
-            listOfNotNull(
-                pluralStringResource(R.plurals.history_exercise_count, exercises, exercises),
-                pluralStringResource(R.plurals.history_set_count, sets, sets),
-                volume?.let { stringResource(R.string.history_session_volume, it, weightSuffix(weightUnit)) },
-            ).joinToString(" · "),
+            (sessionCounts(session) + listOfNotNull(volume)).joinToString(" · "),
             color = OnBgMuted,
             style = Type.Caption.merge(TabularFigures),
         )

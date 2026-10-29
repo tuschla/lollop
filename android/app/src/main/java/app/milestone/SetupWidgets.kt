@@ -1,9 +1,7 @@
 package app.milestone
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,9 +25,9 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DatePickerState
 import androidx.compose.material3.DisplayMode
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
@@ -70,25 +68,6 @@ import java.time.LocalDate
 
 // ── Health screen ───────────────────────────────────────────────────────────
 
-/** Health-screen row copy shared by the guided setup's health screen and the full
- *  [ProfileEditor] health section, so the two wordings cannot drift. Backed by a
- *  single set of string resources, exposed as @Composable getters so both screens
- *  read the same localized text. */
-internal object HealthScreenCopy {
-    val PARQ_INTRO: String @Composable get() = stringResource(R.string.setup_parq_intro)
-    val PARQ_LEGACY: String @Composable get() = stringResource(R.string.setup_parq_legacy)
-    val CLEARED_LABEL: String @Composable get() = stringResource(R.string.setup_health_cleared_label)
-    val CLEARED_BODY: String @Composable get() = stringResource(R.string.setup_health_cleared_body)
-    val ILL_LABEL: String @Composable get() = stringResource(R.string.setup_health_ill_label)
-    val ILL_BODY: String @Composable get() = stringResource(R.string.setup_health_ill_body)
-    val PREGNANT_LABEL: String @Composable get() = stringResource(R.string.setup_health_pregnant_label)
-    val PREGNANT_BODY: String @Composable get() = stringResource(R.string.setup_health_pregnant_body)
-    val PREGNANCY_WARNING_LABEL: String @Composable get() = stringResource(R.string.setup_health_pregnancy_warning_label)
-    val PREGNANCY_WARNING_BODY: String @Composable get() = stringResource(R.string.setup_health_pregnancy_warning_body)
-    val REDS_LABEL: String @Composable get() = stringResource(R.string.setup_health_reds_label)
-    val REDS_BODY: String @Composable get() = stringResource(R.string.setup_health_reds_body)
-}
-
 /** One PAR-Q+ question in plain language (onboard-051). */
 internal val ParqItem.questionRes: Int
     get() = when (this) {
@@ -102,15 +81,11 @@ internal val ParqItem.questionRes: Int
     }
 
 /**
- * The seven PAR-Q+ questions + the "Cleared by a doctor" follow-up they unlock,
- * shared by the wizard's health step and the Profile health section. Every change
- * goes through [onChange] with the whole new [HealthScreen]; the gate flags are
- * re-derived from the answers ([HealthScreen.withParqAnswer]) so a hidden stale
- * flag can never defeat (or pin) a gate (HARD RULE 3). [showIntro] = false where
- * the screen's own headline already says "Turn on any that apply" (the wizard).
- * [leadingDivider] = false where the first question opens its own card.
- * [revealItem] / [revealClearance] scroll that row into view (a hold banner's
- * deep link), then [onRevealed].
+ * The seven PAR-Q+ questions + the "Cleared by a doctor" follow-up they unlock.
+ * Every change goes through [onChange] with the whole new [HealthScreen], the gate
+ * flags re-derived from the answers ([HealthScreen.withParqAnswer]) so a hidden
+ * stale flag never defeats or pins a gate (HARD RULE 3). [revealItem] /
+ * [revealClearance] scroll that row into view, then [onRevealed].
  */
 @Composable
 internal fun ParqQuestions(
@@ -123,9 +98,9 @@ internal fun ParqQuestions(
     onRevealed: () -> Unit = {},
     onChange: (HealthScreen) -> Unit,
 ) {
-    if (showIntro) Text(HealthScreenCopy.PARQ_INTRO, color = OnBgMuted, style = Type.Caption)
+    if (showIntro) Text(stringResource(R.string.setup_parq_intro), color = OnBgMuted, style = Type.Caption)
     if (health.legacyParq) {
-        Text(HealthScreenCopy.PARQ_LEGACY, color = OnBgMuted, style = Type.Caption)
+        Text(stringResource(R.string.setup_parq_legacy), color = OnBgMuted, style = Type.Caption)
     }
     // A raised answer says what it means under its row: a chest-pain or fainting Yes
     // (once, on the first symptom answered Yes) and the bone/joint Yes (the
@@ -150,8 +125,8 @@ internal fun ParqQuestions(
         divider()
         RevealTarget(revealClearance, onRevealed) {
             LabeledSwitchRow(
-                label = HealthScreenCopy.CLEARED_LABEL,
-                subtitle = HealthScreenCopy.CLEARED_BODY,
+                label = stringResource(R.string.setup_health_cleared_label),
+                subtitle = stringResource(R.string.setup_health_cleared_body),
                 checked = health.medically_cleared,
                 onCheckedChange = { onChange(health.withClearance(it)) },
             )
@@ -174,8 +149,8 @@ internal fun CurrentHealthRows(
 ) {
     RevealTarget(reveal == ProfileRowId.Ill, onRevealed) {
         LabeledSwitchRow(
-            label = HealthScreenCopy.ILL_LABEL,
-            subtitle = HealthScreenCopy.ILL_BODY.takeIf { health.acute_illness },
+            label = stringResource(R.string.setup_health_ill_label),
+            subtitle = stringResource(R.string.setup_health_ill_body).takeIf { health.acute_illness },
             checked = health.acute_illness,
             onCheckedChange = { onChange(health.copy(acute_illness = it)) },
         )
@@ -183,8 +158,8 @@ internal fun CurrentHealthRows(
     divider()
     RevealTarget(reveal == ProfileRowId.Pregnant, onRevealed) {
         LabeledSwitchRow(
-            label = HealthScreenCopy.PREGNANT_LABEL,
-            subtitle = HealthScreenCopy.PREGNANT_BODY.takeIf { health.pregnant },
+            label = stringResource(R.string.setup_health_pregnant_label),
+            subtitle = stringResource(R.string.setup_health_pregnant_body).takeIf { health.pregnant },
             checked = health.pregnant,
             // Turning pregnant OFF clears the warning sign, whose row would otherwise
             // vanish while the flag stays true (a hidden, un-liftable hold).
@@ -195,8 +170,8 @@ internal fun CurrentHealthRows(
         divider()
         RevealTarget(reveal == ProfileRowId.PregnancyWarning, onRevealed) {
             LabeledSwitchRow(
-                label = HealthScreenCopy.PREGNANCY_WARNING_LABEL,
-                subtitle = HealthScreenCopy.PREGNANCY_WARNING_BODY,
+                label = stringResource(R.string.setup_health_pregnancy_warning_label),
+                subtitle = stringResource(R.string.setup_health_pregnancy_warning_body),
                 checked = health.pregnancy_warning_sign,
                 onCheckedChange = { onChange(health.copy(pregnancy_warning_sign = it)) },
             )
@@ -205,25 +180,26 @@ internal fun CurrentHealthRows(
     divider()
     RevealTarget(reveal == ProfileRowId.Reds, onRevealed) {
         LabeledSwitchRow(
-            label = HealthScreenCopy.REDS_LABEL,
-            subtitle = HealthScreenCopy.REDS_BODY,
+            label = stringResource(R.string.setup_health_reds_label),
+            subtitle = stringResource(R.string.setup_health_reds_body),
             checked = health.reds_signal,
             onCheckedChange = { onChange(health.copy(reds_signal = it)) },
         )
     }
 }
 
-/** The review's Health value: how many health answers apply ("None apply",
- *  "2 apply"), or the re-answer prompt for a pre-questions flag. */
+/** How many health answers apply ("None apply", "2 apply"), or the re-answer
+ *  prompt for a pre-questions flag. [count] defaults to every answer (the review);
+ *  the Profile PAR-Q+ row passes the PAR-Q+ answers alone. */
 @Composable
-internal fun healthSummary(health: HealthScreen): String {
-    val flagged = health.parqYesCount +
-        listOf(health.acute_illness, health.pregnant, health.pregnancy_warning_sign, health.reds_signal).count { it }
-    return when {
-        flagged > 0 -> pluralStringResource(R.plurals.setup_health_flag_count, flagged, flagged)
-        health.legacyParq -> stringResource(R.string.setup_parq_value_legacy)
-        else -> stringResource(R.string.setup_parq_value_clear)
-    }
+internal fun healthSummary(
+    health: HealthScreen,
+    count: Int = health.parqYesCount +
+        listOf(health.acute_illness, health.pregnant, health.pregnancy_warning_sign, health.reds_signal).count { it },
+): String = when {
+    count > 0 -> pluralStringResource(R.plurals.setup_health_flag_count, count, count)
+    health.legacyParq -> stringResource(R.string.setup_parq_value_legacy)
+    else -> stringResource(R.string.setup_parq_value_clear)
 }
 
 // ── Answer copy ─────────────────────────────────────────────────────────────
@@ -354,12 +330,9 @@ private fun Modifier.chipAction(selected: Boolean, role: Role, enabled: Boolean,
 }
 
 /** One content-sized answer chip (≥48dp), drawn as the shared [choiceCell] so it
- *  reads as a tap target on any ground (screen or card) and matches the scale
- *  cells beside it. [role] as in [ChoiceChip]: RadioButton (default) for an option
- *  of a pick-one group; Checkbox for an independent toggle, which carries a corner
- *  check while on so its state never rests on colour alone. Short labels (weekday
- *  names) get the tighter padding so a week fits one row. A disabled chip is
- *  faded and inert. */
+ *  reads as a tap target on any ground. [role] as in [ChoiceChip]: RadioButton
+ *  (default) for an option of a pick-one group; Checkbox for an independent toggle,
+ *  with a corner check while on. A disabled chip is faded and inert. */
 @Composable
 internal fun AnswerChip(
     label: String,
@@ -383,7 +356,7 @@ internal fun AnswerChip(
             label,
             color = choiceCellContent(selected),
             style = Type.Body,
-            modifier = Modifier.padding(horizontal = if (label.length <= 3) Space.Md.dp else Space.Card.dp, vertical = Space.Md.dp),
+            modifier = Modifier.padding(horizontal = answerChipPadding(label), vertical = Space.Md.dp),
         )
         if (role == Role.Checkbox && selected) {
             // In the corner padding, so it never shifts or squeezes the label.
@@ -396,6 +369,10 @@ internal fun AnswerChip(
         }
     }
 }
+
+/** An [AnswerChip]'s side padding: short labels (weekday names) get the tighter
+ *  one so a week fits one row. */
+private fun answerChipPadding(label: String): Dp = if (label.length <= 3) Space.Md.dp else Space.Card.dp
 
 /** Wrapping pill choices (content-sized, so long labels like "Prefer not to say"
  *  wrap to a new line instead of clipping at large font sizes). Nothing is
@@ -413,6 +390,12 @@ internal fun <T> ChipChoiceRow(options: List<T>, current: T?, label: @Composable
     }
 }
 
+/** The recent-race distance chips; null is "I don't know". */
+@Composable
+internal fun RaceDistanceChips(current: RaceDistance?, onPick: (RaceDistance?) -> Unit) {
+    ChipChoiceRow(listOf<RaceDistance?>(null) + RaceDistance.entries, current, { stringResource(it?.labelRes ?: R.string.setup_dont_know) }, onPick)
+}
+
 /** "Any days" (null mask, the default) on its own line, then Mon–Sun as equal
  *  multi-select cells: one row of seven when the widest day name fits, else a
  *  balanced 4 + 3, so no weekday is ever orphaned onto a line of its own. */
@@ -426,8 +409,10 @@ internal fun WeekdayChips(mask: Int?, onChange: (Int?) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
         AnswerChip(stringResource(R.string.setup_weekdays_any), selected = mask == null) { onChange(null) }
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val widest = names.maxOf { measurer.measure(it, style = Type.Body, maxLines = 1, softWrap = false).size.width }
-            val cell = maxOf(ActionMinHeight, with(density) { widest.toDp() } + Space.Md.dp * 2)
+            val widest = names.maxOf { name ->
+                with(density) { measurer.measure(name, style = Type.Body, maxLines = 1, softWrap = false).size.width.toDp() } + answerChipPadding(name) * 2
+            }
+            val cell = maxOf(ActionMinHeight, widest)
             val perRow = if (cell * WEEK_DAYS + gap * (WEEK_DAYS - 1) <= maxWidth) WEEK_DAYS else 4
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -468,7 +453,35 @@ internal fun EquipmentChips(equipment: CalisEquipment?, onChange: (CalisEquipmen
 
 // ── Date and race-time answers ──────────────────────────────────────────────
 
+/** DatePicker days are UTC-midnight stamps whose Y/M/D is the picked date, so a
+ *  local epoch day maps to and from them exactly. */
 private const val DAY_MS = 86_400_000L
+
+/** The picked day as a local epoch day. */
+@OptIn(ExperimentalMaterial3Api::class)
+private fun DatePickerState.pickedDay(): Long? = selectedDateMillis?.let { Math.floorDiv(it, DAY_MS) }
+
+/** The date picker dialog of a date answer: OK (enabled once [pick] is set) sends
+ *  it to [onPick]; either button closes through [onDismiss]. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EpochDayPickerDialog(state: DatePickerState, pick: Long?, onPick: (Long) -> Unit, onDismiss: () -> Unit) {
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    pick?.let(onPick)
+                    onDismiss()
+                },
+                enabled = pick != null,
+            ) { Text(stringResource(R.string.log_ok)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }
+        },
+    ) { DatePicker(state) }
+}
 
 /**
  * A date answer: an optional "No date yet" pill ([noneLabel]) and a calendar pill
@@ -496,8 +509,6 @@ internal fun DateAnswerRow(value: Long?, today: Long, future: Boolean, noneLabel
     }
     if (picking) {
         val todayYear = LocalDate.ofEpochDay(today).year
-        // DatePicker days are UTC-midnight stamps whose Y/M/D is the picked date,
-        // so a local epoch day maps to and from them exactly.
         val state = rememberDatePickerState(
             initialSelectedDateMillis = (value ?: today.takeIf { !future })?.let { it * DAY_MS },
             selectableDates = object : SelectableDates {
@@ -509,18 +520,7 @@ internal fun DateAnswerRow(value: Long?, today: Long, future: Boolean, noneLabel
                 override fun isSelectableYear(year: Int): Boolean = if (future) year >= todayYear else year <= todayYear
             },
         )
-        DatePickerDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    state.selectedDateMillis?.let { onChange(Math.floorDiv(it, DAY_MS)) }
-                    picking = false
-                }) { Text(stringResource(R.string.log_ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.main_cancel)) }
-            },
-        ) { DatePicker(state) }
+        EpochDayPickerDialog(state, state.pickedDay(), onPick = onChange, onDismiss = { picking = false })
     }
 }
 
@@ -531,16 +531,11 @@ internal fun birthdayLabel(birthDay: Long, today: Long): String =
 
 /**
  * The birthday answer (setup About step, Profile › Age): a calendar pill showing
- * [birthdayLabel] (or "Pick your birthday"; [pickLabel] where the birthday is
- * already shown above it) that opens the date picker in typed-date mode, so a
- * year decades back is entered directly instead of paged to; the calendar stays
- * one toggle away, opening on the birthday or [birthdayPickerStart], its year
- * list limited to plausible years. Only birthdays giving an age inside
- * [AGE_RANGE] on [today] are selectable, so no future date; OK stays disabled
- * until one is picked, while the typed field says what is wrong. Beside the pill
- * a "Prefer not to say" chip ([skipped] while chosen) makes the pair a radio
- * group: [onSkip] answers with no birthday and no age. [hint] is a caption under
- * the pair (the youth hold, a legacy age's prompt, or what no age changes).
+ * [birthdayLabel] (or [pickLabel] where the birthday already shows above it)
+ * beside a "Prefer not to say" chip ([skipped] while chosen; [onSkip] answers
+ * with no birthday and no age). The picker opens in typed-date mode and only
+ * accepts birthdays giving an age inside [AGE_RANGE] on [today]. [hint] is a
+ * caption under the pair.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -573,8 +568,6 @@ internal fun BirthdayAnswer(
     if (picking) {
         val range = birthdayRange(today)
         val years = LocalDate.ofEpochDay(range.first).year..LocalDate.ofEpochDay(range.last).year
-        // DatePicker days are UTC-midnight stamps whose Y/M/D is the picked date,
-        // so a local epoch day maps to and from them exactly.
         val state = rememberDatePickerState(
             initialSelectedDateMillis = birthDay?.let { it * DAY_MS },
             initialDisplayedMonthMillis = birthdayPickerStart(birthDay, today) * DAY_MS,
@@ -586,22 +579,7 @@ internal fun BirthdayAnswer(
                 override fun isSelectableYear(year: Int): Boolean = year in years
             },
         )
-        val picked = state.selectedDateMillis?.let { Math.floorDiv(it, DAY_MS) }?.takeIf { it in range }
-        DatePickerDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        picked?.let(onChange)
-                        picking = false
-                    },
-                    enabled = picked != null,
-                ) { Text(stringResource(R.string.log_ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.main_cancel)) }
-            },
-        ) { DatePicker(state) }
+        EpochDayPickerDialog(state, state.pickedDay()?.takeIf { it in range }, onPick = onChange, onDismiss = { picking = false })
     }
 }
 
@@ -631,10 +609,7 @@ private fun DateChip(label: String, selected: Boolean, role: Role, onClick: () -
 @Composable
 internal fun RaceTimeField(digits: String, active: Boolean, invalid: Boolean, onActivate: () -> Unit) {
     val label = stringResource(R.string.setup_recent_race_time_label)
-    val status = LocalStatusColors.current
-    val shape = RoundedCornerShape(Space.Card.dp)
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-        // Same field caption as the keypad fields (KeypadValueField).
         FieldLabel(label)
         val shown = raceTimeDisplay(digits)
         Text(
@@ -644,22 +619,10 @@ internal fun RaceTimeField(digits: String, active: Boolean, invalid: Boolean, on
             maxLines = 1,
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(shape)
-                .background(BgSunken)
-                .border(
-                    when {
-                        invalid -> BorderStroke(1.5.dp, status.danger)
-                        active -> BorderStroke(1.5.dp, Accent)
-                        else -> BorderStroke(1.dp, ChoiceCellBorder)
-                    },
-                    shape,
-                )
-                .clickable(role = Role.Button) { onActivate() }
-                .semantics { contentDescription = if (digits.isEmpty()) label else "$label, $shown" }
-                .padding(Space.Card.dp),
+                .keypadWell(invalid, active, if (digits.isEmpty()) label else "$label, $shown", onActivate),
         )
         if (invalid) {
-            Text(stringResource(R.string.setup_recent_race_time_invalid), color = status.danger, style = Type.Caption)
+            Text(stringResource(R.string.setup_recent_race_time_invalid), color = DangerText, style = Type.Caption)
         }
     }
 }
@@ -697,11 +660,7 @@ internal fun ReviewCard(rows: List<ReviewEntry>, reveal: SetupStep?, onRevealed:
     ) {
         rows.forEachIndexed { i, row ->
             if (i > 0) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = Space.Card.dp),
-                    thickness = 1.dp,
-                    color = OnBgBody.copy(alpha = HairlineAlpha.Row),
-                )
+                RowHairline(Modifier.padding(horizontal = Space.Card.dp))
             }
             val lines = row.value.split('\n')
             Row(

@@ -50,7 +50,8 @@ cargo ndk -o android/app/src/main/jniLibs -t arm64-v8a -t x86_64 build -p shared
 echo "==> Android: $([[ $RUN_TESTS == 1 ]] && echo 'unit tests (incl. UI/UX QA) + ')debug + release APKs"
 GRADLE_TASKS=(assembleDebug assembleRelease)
 # testDebugUnitTest runs the offline UI/UX QA (Robolectric); verifyRoborazziDebug
-# gates the committed screenshot baselines. Both build the host core first.
+# compares against the local screenshot baselines (gitignored). Both build the
+# host core first.
 [[ $RUN_TESTS == 1 ]] && GRADLE_TASKS=(testDebugUnitTest verifyRoborazziDebug "${GRADLE_TASKS[@]}")
 (cd android && ./gradlew -q "${GRADLE_TASKS[@]}")
 
@@ -76,5 +77,5 @@ ls -la android/app/build/outputs/apk/debug/app-debug.apk "$SIGNED_APK"
 
 if [[ $RUN_QA == 1 ]]; then
   echo "==> On-device UI/UX smoke (emulator)"
-  scripts/qa-emulator.sh
+  QA_SKIP_BUILD=1 scripts/qa-emulator.sh
 fi

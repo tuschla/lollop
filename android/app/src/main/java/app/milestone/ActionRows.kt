@@ -2,7 +2,6 @@ package app.milestone
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,17 +22,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
-/** One row of an [ActionRows] block. [chevron] when it opens something. */
+/** One row of an [ActionRows] block; it opens something, so it wears a chevron. */
 internal data class ActionRowItem(
     val label: String,
     val icon: Painter,
     val onClick: () -> Unit,
-    val chevron: Boolean = false,
-    val description: String? = null,
     val testTag: String? = null,
 )
 
@@ -59,19 +54,16 @@ internal data class DestructiveAction(
 internal fun ActionRows(
     rows: List<ActionRowItem>,
     destructive: DestructiveAction? = null,
-    modifier: Modifier = Modifier,
 ) {
     var confirming by rememberSaveable { mutableStateOf(false) }
-    Box(modifier.fillMaxWidth()) {
-        PlainCard(contentPadding = PaddingValues(0.dp), spacing = 0.dp) {
-            rows.forEachIndexed { i, row ->
-                if (i > 0) HorizontalDivider(color = Hairline)
-                ActionRowLine(row.label, row.icon, OnBgMuted, OnBgBody, row.chevron, row.description, row.testTag, row.onClick)
-            }
-            destructive?.let { d ->
-                if (rows.isNotEmpty()) HorizontalDivider(color = Hairline)
-                ActionRowLine(d.label, d.icon, DangerText, DangerText, false, null, d.testTag) { confirming = true }
-            }
+    PlainCard(contentPadding = PaddingValues(0.dp), spacing = 0.dp) {
+        rows.forEachIndexed { i, row ->
+            if (i > 0) HorizontalDivider(color = Hairline)
+            ActionRowLine(row.label, row.icon, OnBgMuted, OnBgBody, chevron = true, row.testTag, row.onClick)
+        }
+        destructive?.let { d ->
+            if (rows.isNotEmpty()) HorizontalDivider(color = Hairline)
+            ActionRowLine(d.label, d.icon, DangerText, DangerText, chevron = false, d.testTag) { confirming = true }
         }
     }
     destructive?.let { d ->
@@ -93,7 +85,6 @@ private fun ActionRowLine(
     iconTint: Color,
     labelColor: Color,
     chevron: Boolean,
-    description: String?,
     tag: String?,
     onClick: () -> Unit,
 ) {
@@ -103,7 +94,6 @@ private fun ActionRowLine(
             .heightIn(min = LargeControlHeight)
             .clickable(role = Role.Button, onClick = onClick)
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
-            .semantics { if (description != null) contentDescription = description }
             .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.Card.dp),

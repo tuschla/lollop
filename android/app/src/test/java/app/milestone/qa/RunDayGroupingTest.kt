@@ -168,6 +168,23 @@ class RunDayGroupingTest {
         assertEquals(1, rule.onAllNodesWithText("Saturday run").fetchSemanticsNodes().size)
     }
 
+    /** Without a run that has a distance the core sends no run progress, and the
+     *  daily chart would have nothing to draw: History shows no PROGRESS block. */
+    @Test
+    @Config(qualifiers = "w411dp-h2400dp")
+    fun historyShowsNoProgressChartUntilARunHasADistance() {
+        val nowSec = System.currentTimeMillis() / 1000
+        val unmeasurable = RunResultView(
+            distance_km = 0.0, duration_min = 30.0, entry_id = 1, gps_unmeasurable = true,
+            started_at = nowSec - 5400, observed_at = nowSec - 3600,
+            summary = "GPS signal too poor to measure this run",
+        )
+        rule.setContent { MilestoneTheme { HistoryDestination(model = ViewModel(runs = listOf(unmeasurable))) } }
+        rule.waitForIdle()
+        assertEquals(1, rule.onAllNodesWithText(unmeasurable.summary).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("PROGRESS").fetchSemanticsNodes().size)
+    }
+
     /** Overlapping runs (a long run with a short one logged inside it) end in the
      *  other order than they start: History's stream is in START order, so a month
      *  is one contiguous block with one header (a repeated header would repeat its

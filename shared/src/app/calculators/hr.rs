@@ -11,7 +11,7 @@ use super::*;
 /// structured HRmax figure and one [`HrZoneBandView`] per band row, so a shell
 /// draws the zone table from numbers.
 pub(in crate::app) fn build_hr_zones(
-    q: &HrZoneQuery,
+    q: &HrZoneInputView,
     measured_hr_max: Option<f64>,
 ) -> (Vec<GuidanceView>, Option<HrMaxView>, Vec<HrZoneBandView>) {
     let mut rows = Vec::new();
@@ -42,7 +42,11 @@ pub(in crate::app) fn build_hr_zones(
     push_hr_max_row(&mut rows, q, measured, hr_max);
     let karvonen_rhr = push_hr_method_row(&mut rows, q.resting_hr_bpm);
     let bands = push_band_rows(&mut rows, hr_max, karvonen_rhr);
-    push_maf_row(&mut rows, q.age_years);
+    // 180 − age is only defined over the Tanaka age range; a measured max
+    // reaches here with any age.
+    if running::tanaka_age_in_range(q.age_years) {
+        push_maf_row(&mut rows, q.age_years);
+    }
     push_retest_rows(&mut rows, q);
     (rows, Some(hr_max_view(q, measured, hr_max)), bands)
 }
@@ -51,7 +55,7 @@ pub(in crate::app) fn build_hr_zones(
 /// estimate, each with a basis line saying which and why.
 fn push_hr_max_row(
     rows: &mut Vec<GuidanceView>,
-    q: &HrZoneQuery,
+    q: &HrZoneInputView,
     measured: Option<f64>,
     hr_max: f64,
 ) {
@@ -112,10 +116,7 @@ fn push_hr_method_row(rows: &mut Vec<GuidanceView>, resting_hr_bpm: Option<f64>)
             ),
         };
         push_guidance(rows, "Heart-rate zones", text, &pref);
-        // The boolean view of the same rule drives the band targets below;
-        // the two stay consistent by construction.
-        debug_assert_eq!(use_karvonen, running::prefer_karvonen(rhr).value);
-        running::prefer_karvonen(rhr).value.then_some(rhr)
+        use_karvonen.then_some(rhr)
     })
 }
 
@@ -228,34 +229,31 @@ fn push_maf_row(rows: &mut Vec<GuidanceView>, age_years: f64) {
 
 /// Re-test reminders: zones (running-006) and training paces (running-041)
 /// due on the 4–6-week cadence.
-fn push_retest_rows(rows: &mut Vec<GuidanceView>, q: &HrZoneQuery) {
-    // running-006: recompute zones off a measured max every 4–6 weeks.
-    if let Some(weeks) = q.weeks_since_recalc {
-        let due = running::hr_zone_recalc_due(weeks);
+fn push_retest_rows(rows: &mut Vec<GuidanceView>, q: &HrZoneInputView) {
+    type Reminder<'a> = (Option<u8>, fn(u8) -> Recommended<bool>, &'a str, &'a str);
+    let reminders: [Reminder; 2] = [
+        (
+            q.weeks_since_recalc,
+            running::hr_zone_recalc_due,
+            "Zones last recalculated",
+            "Recompute from a measured HRmax (every 4–6 weeks)",
+        ),
+        (
+            q.weeks_since_pace_test,
+            running::pace_retest_due,
+            "Paces last tested",
+            "Re-test to set paces from your current fitness",
+        ),
+    ];
+    for (weeks, due_fn, last, advice) in reminders {
+        let Some(weeks) = weeks else { continue };
+        let due = due_fn(weeks);
         if due.value {
             let noun = if weeks == 1 { "week" } else { "weeks" };
             push_guidance(
                 rows,
                 "Heart-rate zones",
-                format!(
-                    "Zones last recalculated {weeks} {noun} ago. Recompute from a measured HRmax (every 4–6 weeks)"
-                ),
-                &due,
-            );
-        }
-    }
-
-    // running-041: training paces re-test on the same 4–6-week cadence.
-    if let Some(weeks) = q.weeks_since_pace_test {
-        let due = running::pace_retest_due(weeks);
-        if due.value {
-            let noun = if weeks == 1 { "week" } else { "weeks" };
-            push_guidance(
-                rows,
-                "Heart-rate zones",
-                format!(
-                    "Paces last tested {weeks} {noun} ago. Re-test to set paces from your current fitness"
-                ),
+                format!("{last} {weeks} {noun} ago. {advice}"),
                 &due,
             );
         }
@@ -274,7 +272,7 @@ fn whole_bpm(bpm: f64) -> f64 {
 /// shell reads bpm / measured-vs-estimate / the Tanaka split from data.
 /// The intercept / slope are `running::hr_max_tanaka`'s own constants;
 /// they apply only to the age-based estimate, so they are 0 when measured.
-fn hr_max_view(q: &HrZoneQuery, measured: Option<f64>, hr_max: f64) -> HrMaxView {
+fn hr_max_view(q: &HrZoneInputView, measured: Option<f64>, hr_max: f64) -> HrMaxView {
     if measured.is_some() {
         HrMaxView {
             bpm: whole_bpm(hr_max),

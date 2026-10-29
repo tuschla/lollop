@@ -28,16 +28,26 @@ const TEMPO_BRIDGE: TempoBridge = TempoBridge {
 /// it bypasses `sized_sets` (CAL-VOLCOUNT-SKILL-001).
 const SKILL_SETS: u8 = 4;
 
+/// The region of lift day `i` (`Full` past the end of `regions`).
+fn region_at(regions: &[DayRegion], i: usize) -> DayRegion {
+    regions.get(i).copied().unwrap_or(DayRegion::Full)
+}
+
+/// The lift days of the week before day `i`.
+fn days_before(regions: &[DayRegion], i: usize) -> &[DayRegion] {
+    &regions[..i.min(regions.len())]
+}
+
 /// Whether a lift day of this week trains core (CAL-FREQ-VOL-002: every pattern
 /// ≥2×/wk): every Lower day; on Full days every day when the week has ≤ 2
 /// exposures, otherwise alternate Full days, so a 3-day week keeps 6–7 items.
 fn core_on(regions: &[DayRegion], day_index: usize, n_exposures: usize) -> bool {
-    match regions.get(day_index).copied().unwrap_or(DayRegion::Full) {
+    match region_at(regions, day_index) {
         DayRegion::Lower => true,
         DayRegion::Upper => false,
         DayRegion::Full => {
             n_exposures <= 2
-                || regions[..day_index.min(regions.len())]
+                || days_before(regions, day_index)
                     .iter()
                     .filter(|r| matches!(r, DayRegion::Full))
                     .count()
@@ -62,7 +72,6 @@ struct Ctx<'a> {
     profile: &'a Profile,
     anchors: &'a Anchors,
     kit: Kit,
-    goal: LiftGoal,
     ta: TrainingAge,
     template: calisthenics::CalisTemplate,
 }
@@ -96,15 +105,13 @@ pub(super) fn calisthenics_session(
         profile,
         anchors,
         kit: Kit::from_profile(profile),
-        goal,
         ta: training_age_from_cadence(profile.progression_cadence).value,
         template: calisthenics::session_template(goal).value,
     };
-    let region = regions.get(day_index).copied().unwrap_or(DayRegion::Full);
+    let region = region_at(regions, day_index);
     let upper = matches!(region, DayRegion::Full | DayRegion::Upper);
     let lower = matches!(region, DayRegion::Full | DayRegion::Lower);
-    let before = &regions[..day_index.min(regions.len())];
-    let upper_ordinal = before
+    let upper_ordinal = days_before(regions, day_index)
         .iter()
         .filter(|r| matches!(r, DayRegion::Full | DayRegion::Upper))
         .count();
@@ -214,22 +221,103 @@ fn tempo_for(id: LadderId, rung: u8) -> Option<TempoBridge> {
         .map(|_| TEMPO_BRIDGE)
 }
 
-/// Resolve the working rung and added load from the ladder's anchor:
-/// - no anchor → the easiest rung the equipment allows (`unplaced`);
-/// - a break from the ladder → step down `reentry_steps` (CAL-REENTRY-001); a
-///   loaded rung first sheds its load as one step, unless the rung's lightest
-///   prescription (a "Weighted …" rung's first load step) is no lighter, when
-///   it steps down a rung instead;
-/// - advance on a load-capable rung (`weighted_ok`) → stay and add one load
-///   step, or start at the first load step when unloaded (STR-LOADPROG-001);
-///   the pull-up fork resolves to load, the leverage branch
-///   stays one "Harder" choice away;
-/// - advance elsewhere → step up `advance_steps` available rungs (a skip stops
-///   short of a leave-RIR rung);
-/// - regress → a loaded rung sheds one load step when that is actually
-///   lighter; else step down one rung with a tempo bridge (CAL-PROG-TEMPO-001;
-///   KB §2.2 "step down one rung");
-/// - hold, keeping the bridge while the rung was entered by a regress.
+/// One added-load step for this profile (STR-LOADPROG-001).
+fn load_step(ctx: &Ctx, added: f64) -> f64 {
+    calisthenics::load_step_kg(ctx.profile.bodyweight_kg, added, ctx.profile.weight_lb).value
+}
+
+/// The lightest load rung `r` is ever prescribed at: a "Weighted …" rung starts
+/// at the first load step, every other rung at bodyweight.
+fn min_load(ctx: &Ctx, id: LadderId, r: u8) -> f64 {
+    if calisthenics::tier(id, r).is_some_and(calisthenics::inherently_loaded) {
+        load_step(ctx, 0.0)
+    } else {
+        0.0
+    }
+}
+
+/// Re-entry after a break from the ladder (CAL-REENTRY-001): step down `steps`
+/// available rungs. A loaded rung first sheds its load as one step, unless the
+/// rung's lightest prescription (a "Weighted …" rung's first load step) is no
+/// lighter, when it steps down a rung instead. The load is always dropped.
+fn reentry_rung(ctx: &Ctx, id: LadderId, base: u8, added: f64, steps: u8) -> u8 {
+    let steps = if added > 0.0 && min_load(ctx, id, base) < added {
+        steps - 1
+    } else {
+        steps
+    };
+    let mut rung = base;
+    for _ in 0..steps {
+        if let Some(b) = calisthenics::available_below(id, rung, ctx.kit) {
+            rung = b;
+        }
+    }
+    rung
+}
+
+/// Advance, returning `(rung, added_kg)`. On a load-capable rung
+/// (`weighted_ok`): stay and add one load step, or start at the first load
+/// step when unloaded (STR-LOADPROG-001); the pull-up fork resolves to load,
+/// the leverage branch stays one "Harder" choice away. Elsewhere step up
+/// `steps` available rungs; a skip stops short of a leave-RIR rung.
+fn advance(ctx: &Ctx, id: LadderId, base: u8, added: f64, steps: u8) -> (u8, f64) {
+    if calisthenics::weighted_ok(id, base) {
+        let added = if added > 0.0 && ctx.profile.weight_lb {
+            // A converted-from-kg load lands back on the 2.5 lb grid (always
+            // still above the old load: the step is at least one plate).
+            calisthenics::floor_to_load_grid(added + load_step(ctx, added), true)
+        } else if added > 0.0 {
+            added + load_step(ctx, added)
+        } else {
+            load_step(ctx, 0.0)
+        };
+        return (base, added);
+    }
+    let mut rung = base;
+    for k in 0..steps.max(1) {
+        let Some(up) = calisthenics::available_above(id, rung, ctx.kit) else {
+            break;
+        };
+        if k > 0
+            && calisthenics::tier(id, up).is_none_or(|t| t.failure != FailurePolicy::SelfLimiting)
+        {
+            break;
+        }
+        rung = up;
+    }
+    (rung, added)
+}
+
+/// Regress, returning `(rung, added_kg, tempo_bridge)`: a loaded rung sheds one
+/// load step when that is actually lighter; else step down one rung with a
+/// tempo bridge (CAL-PROG-TEMPO-001; KB §2.2 "step down one rung").
+fn regress(ctx: &Ctx, id: LadderId, base: u8, added: f64) -> (u8, f64, Option<TempoBridge>) {
+    let lighter = if added > 0.0 {
+        calisthenics::floor_to_load_grid(
+            (added - load_step(ctx, added)).max(0.0),
+            ctx.profile.weight_lb,
+        )
+    } else {
+        0.0
+    };
+    let stay_load = if lighter > 0.0 {
+        lighter
+    } else {
+        min_load(ctx, id, base)
+    };
+    if added > 0.0 && stay_load < added {
+        (base, lighter, None)
+    } else if let Some(b) = calisthenics::available_below(id, base, ctx.kit) {
+        (b, added, tempo_for(id, b))
+    } else {
+        (base, added, None)
+    }
+}
+
+/// Resolve the working rung and added load from the ladder's anchor: no anchor
+/// → the easiest rung the equipment allows (`unplaced`); otherwise re-entry,
+/// advance, regress, or hold (keeping the bridge while the rung was entered by
+/// a regress).
 ///
 /// A regress or re-entry never returns more load than last time on the same
 /// rung. A rung the equipment cannot support is substituted by the nearest one
@@ -237,18 +325,6 @@ fn tempo_for(id: LadderId, rung: u8) -> Option<TempoBridge> {
 fn resolve(id: LadderId, anchor: Option<&CalisAnchor>, ctx: &Ctx) -> Option<Resolved> {
     let kit = ctx.kit;
     let n = calisthenics::ladder(id).tiers.len() as u8;
-    let weight_lb = ctx.profile.weight_lb;
-    let step =
-        |added: f64| calisthenics::load_step_kg(ctx.profile.bodyweight_kg, added, weight_lb).value;
-    // The lightest load a rung is ever prescribed at: a "Weighted …" rung
-    // starts at the first load step, every other rung at bodyweight.
-    let min_load = |r: u8| {
-        if calisthenics::tier(id, r).is_some_and(calisthenics::inherently_loaded) {
-            step(0.0)
-        } else {
-            0.0
-        }
-    };
     let mut res = Resolved {
         rung: 0,
         added_kg: 0.0,
@@ -267,76 +343,30 @@ fn resolve(id: LadderId, anchor: Option<&CalisAnchor>, ctx: &Ctx) -> Option<Reso
         return Some(res);
     };
     let base = a.tier.min(n - 1);
-    let mut rung = base;
-    let mut added = if calisthenics::weighted_ok(id, base) {
+    let added = if calisthenics::weighted_ok(id, base) {
         a.last_added_kg.max(0.0)
     } else {
         0.0
     };
-    if a.reentry_steps > 0 {
+    let (mut rung, mut added) = if a.reentry_steps > 0 {
         res.reentry_steps = a.reentry_steps;
         res.retest = a.retest;
-        let mut steps = a.reentry_steps;
-        if added > 0.0 {
-            if min_load(base) < added {
-                steps -= 1;
-            }
-            added = 0.0;
-        }
-        for _ in 0..steps {
-            if let Some(b) = calisthenics::available_below(id, rung, kit) {
-                rung = b;
-            }
-        }
+        (reentry_rung(ctx, id, base, added, a.reentry_steps), 0.0)
     } else if a.advance_ready {
-        if calisthenics::weighted_ok(id, base) {
-            added = if added > 0.0 && weight_lb {
-                // A converted-from-kg load lands back on the 2.5 lb grid (always
-                // still above the old load: the step is at least one plate).
-                calisthenics::floor_to_load_grid(added + step(added), true)
-            } else if added > 0.0 {
-                added + step(added)
-            } else {
-                step(0.0)
-            };
-        } else {
-            for k in 0..a.advance_steps.max(1) {
-                let Some(up) = calisthenics::available_above(id, rung, kit) else {
-                    break;
-                };
-                if k > 0
-                    && calisthenics::tier(id, up)
-                        .is_none_or(|t| t.failure != FailurePolicy::SelfLimiting)
-                {
-                    break;
-                }
-                rung = up;
-            }
-            res.skipped = rung > base.saturating_add(1);
-        }
+        let (rung, added) = advance(ctx, id, base, added, a.advance_steps);
+        res.skipped = rung > base.saturating_add(1);
+        (rung, added)
     } else if a.regress {
-        let lighter = if added > 0.0 {
-            calisthenics::floor_to_load_grid((added - step(added)).max(0.0), weight_lb)
-        } else {
-            0.0
-        };
-        let stay_load = if lighter > 0.0 {
-            lighter
-        } else {
-            min_load(base)
-        };
-        if added > 0.0 && stay_load < added {
-            added = lighter;
-        } else if let Some(b) = calisthenics::available_below(id, rung, kit) {
-            rung = b;
-            res.tempo_bridge = tempo_for(id, rung);
-        }
+        let (rung, added, bridge) = regress(ctx, id, base, added);
+        res.tempo_bridge = bridge;
+        (rung, added)
     } else {
         res.needs_effort_rating = a.needs_effort_rating;
         if a.bridged {
-            res.tempo_bridge = tempo_for(id, rung);
+            res.tempo_bridge = tempo_for(id, base);
         }
-    }
+        (base, added)
+    };
     if !calisthenics::rung_available(id, rung, kit) {
         rung = calisthenics::nearest_available(id, rung, kit)?;
         res.substituted = true;
@@ -350,7 +380,7 @@ fn resolve(id: LadderId, anchor: Option<&CalisAnchor>, ctx: &Ctx) -> Option<Reso
         added = 0.0;
     }
     if added <= 0.0 && inherently_loaded {
-        added = step(0.0);
+        added = load_step(ctx, 0.0);
     }
     res.rung = rung;
     res.added_kg = added;
@@ -431,12 +461,13 @@ fn ladder_prescription(ctx: &Ctx, id: LadderId, dose: Dose) -> Option<Recommende
             (1, 2)
         }
     } else {
-        calisthenics::rir_band(id, res.rung, ctx.goal, novice).map_or((0, 0), |r| r.value)
+        calisthenics::rir_band(id, res.rung, ctx.profile.lift_goal, novice)
+            .map_or((0, 0), |r| r.value)
     };
     let skip_reps = if loaded {
         None
     } else {
-        calisthenics::skip_threshold(tier, ctx.goal)
+        calisthenics::skip_threshold(tier, ctx.profile.lift_goal)
             .value
             .filter(|_| calisthenics::available_above(id, res.rung, ctx.kit).is_some())
     };
@@ -448,7 +479,7 @@ fn ladder_prescription(ctx: &Ctx, id: LadderId, dose: Dose) -> Option<Recommende
         tier: res.rung,
         exercise: tier.name.to_string(),
         sets,
-        target: calisthenics::working_target(tier, ctx.goal, loaded),
+        target: calisthenics::working_target(tier, ctx.profile.lift_goal, loaded),
         rir,
         rest_sec,
         added_kg: load_capable.then_some(res.added_kg),
@@ -471,6 +502,6 @@ fn ladder_prescription(ctx: &Ctx, id: LadderId, dose: Dose) -> Option<Recommende
     });
     Some(evidence::graded(
         pres,
-        evidence_claim(tier, &res, ctx.goal, novice, table_row),
+        evidence_claim(tier, &res, ctx.profile.lift_goal, novice, table_row),
     ))
 }

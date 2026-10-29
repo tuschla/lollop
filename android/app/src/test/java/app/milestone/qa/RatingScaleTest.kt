@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -18,17 +19,22 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import app.milestone.AppClock
 import app.milestone.EffortScale
 import app.milestone.EventDispatcher
+import app.milestone.LiftResultView
 import app.milestone.LocalEditorPinnedActions
 import app.milestone.LogSetEditor
 import app.milestone.MilestoneTheme
+import app.milestone.ObservedAtRow
 import app.milestone.PrescriptionView
 import app.milestone.MorningCheckinSheet
 import app.milestone.R
@@ -38,6 +44,7 @@ import app.milestone.SessionPlanView
 import app.milestone.ViewModel
 import app.milestone.WeightUnit
 import app.milestone.WorkoutType
+import app.milestone.localizedDayFormatter
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -46,11 +53,16 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.time.Instant
+import java.time.ZoneId
+import java.util.Locale
 
 /**
  * UI sweep §0.4 / §8 / §9: every 0–N rating is ONE segmented track in one row
  * (one adjustable TalkBack node, no gap cell), run type is a chip row, and a
  * free set opened from the Log chooser on a run day shows nothing of the run.
+ * The editors' chips keep what they show: a two-decimal kg load through a ±
+ * step, the locale's day/month order on the date chip.
  */
 @RunWith(RobolectricTestRunner::class)
 class RatingScaleTest {
@@ -58,9 +70,12 @@ class RatingScaleTest {
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
 
+    private val savedLocale: Locale = Locale.getDefault()
+
     @After
     fun tearDown() {
         EventDispatcher.model.value = null
+        Locale.setDefault(savedLocale)
     }
 
     private var picked: Int? = null
@@ -84,6 +99,22 @@ class RatingScaleTest {
         rule.onNodeWithText(str(R.string.history_effort_selected, 5, str(R.string.history_effort_anchor_5))).assertExists()
         rule.pickRating("effort-scale", 5)
         assertNull(picked)
+    }
+
+    @Test
+    fun aTapInRtlPicksTheTappedSegment() {
+        rule.setContent {
+            MilestoneTheme {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    var value by remember { mutableStateOf<Int?>(null) }
+                    Column(Modifier.fillMaxSize().padding(16.dp)) {
+                        EffortScale(value, { value = it; picked = it })
+                    }
+                }
+            }
+        }
+        rule.pickRating("effort-scale", 9)
+        assertEquals(9, picked)
     }
 
     @Test
@@ -201,5 +232,42 @@ class RatingScaleTest {
         val words = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
             .resources.getStringArray(R.array.rating_soreness_words)
         rule.onNodeWithText(str(R.string.rating_value_word, 5, words[4])).assertExists()
+    }
+
+    @Test
+    fun aPlateChipKeepsATwoDecimalKgLoad() {
+        rule.setContent {
+            MilestoneTheme {
+                Column(Modifier.fillMaxSize()) {
+                    CompositionLocalProvider(LocalEditorPinnedActions provides true) {
+                        LogSetEditor(
+                            initial = LiftResultView(exercise = "Bench", weight_kg = 101.25, reps = 5),
+                            weightUnit = WeightUnit.Kg,
+                            onSave = {},
+                        )
+                    }
+                }
+            }
+        }
+        rule.onNodeWithContentDescription(str(R.string.ui_cd_adjust_add, "2.5", "kg")).performClick()
+        rule.waitForIdle()
+        val shown = rule.onAllNodes(hasContentDescription("103.75", substring = true)).fetchSemanticsNodes()
+        assertTrue("+2.5 on 101.25 kg reads 103.75, not 103.8", shown.isNotEmpty())
+    }
+
+    @Test
+    fun theDateChipUsesTheLocaleOrder() {
+        Locale.setDefault(Locale.GERMANY)
+        val zone = ZoneId.systemDefault()
+        val day = Instant.ofEpochMilli(AppClock.nowMillis()).atZone(zone).toLocalDate().minusDays(40)
+        val epochSec = day.atTime(12, 0).atZone(zone).toEpochSecond()
+        rule.setContent {
+            MilestoneTheme {
+                ObservedAtRow(epochSec, withTime = false) {}
+            }
+        }
+        val expected = day.format(localizedDayFormatter("MMMd", Locale.GERMANY))
+        val found = rule.onAllNodes(hasText(expected), useUnmergedTree = true).fetchSemanticsNodes()
+        assertTrue("date chip reads \"$expected\"", found.isNotEmpty())
     }
 }

@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -100,11 +99,11 @@ private const val StatValueStepSp = 1f
  * measuring, so the value is laid out at the size it shows.
  */
 @Composable
-internal fun RunStatColumns(stats: List<RunStat>, compact: Boolean, modifier: Modifier = Modifier) {
+internal fun RunStatColumns(stats: List<RunStat>, compact: Boolean) {
     val valueStyle = (if (compact) Type.Title.merge(TabularFigures) else Type.Display).copy(color = OnBgBody)
     val measurer = rememberTextMeasurer()
     BoxWithConstraints(
-        modifier
+        Modifier
             .fillMaxWidth()
             .then(if (compact) Modifier.semantics(mergeDescendants = true) {} else Modifier),
     ) {
@@ -171,15 +170,9 @@ private fun RunStatColumn(stat: RunStat, valueStyle: TextStyle, modifier: Modifi
 @Composable
 internal fun runStartCaption(startedAt: Long): String {
     if (startedAt <= 0L) return ""
-    val ctx = LocalContext.current
-    val locale = Locale.getDefault()
+    val clock = if (android.text.format.DateFormat.is24HourFormat(LocalContext.current)) "Hm" else "hm"
     val at = Instant.ofEpochSecond(startedAt).atZone(ZoneId.systemDefault())
-    val date = DateTimeFormatter.ofPattern(android.text.format.DateFormat.getBestDateTimePattern(locale, "EEEdMMM"), locale)
-    val time = DateTimeFormatter.ofPattern(
-        android.text.format.DateFormat.getBestDateTimePattern(locale, if (android.text.format.DateFormat.is24HourFormat(ctx)) "Hm" else "hm"),
-        locale,
-    )
-    return stringResource(R.string.history_run_overline, at.format(date), at.format(time))
+    return stringResource(R.string.run_start_caption, at.format(localizedDayFormatter("EEEdMMM")), at.format(localizedDayFormatter(clock)))
 }
 
 /** A run's route, shared by its detail and trim sheets: the core's GPX document (for
@@ -242,7 +235,6 @@ internal fun rememberRunRoute(run: RunResultView): RunRoute? {
 internal fun RunDetailContent(
     run: RunResultView,
     route: RunRoute?,
-    nowMillis: Long,
     srpeLoad: SrpeLoadView?,
     onEdit: () -> Unit,
     onTrim: () -> Unit,
@@ -369,8 +361,11 @@ private fun RunLogSection(
                     }
                     Text(stringResource(R.string.history_training_load_explain), color = OnBgMuted, style = Type.Caption)
                     srpeLoad?.let { sl ->
-                        if (sl.grade.isNotBlank()) GradeChip(sl.grade)
-                        if (sl.citation.isNotBlank()) Text(citationLabel(sl.citation), color = OnBgFaint, style = Type.Caption)
+                        ClaimMarkers(
+                            grades = listOfNotNull(sl.grade.takeIf { it.isNotBlank() }),
+                            contested = false,
+                            citations = listOfNotNull(sl.citation.takeIf { it.isNotBlank() }),
+                        )
                     }
                 }
             }
@@ -447,7 +442,6 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
                 ActionRowItem(
                     label = stringResource(R.string.main_export_gpx),
                     icon = painterResource(R.drawable.ic_ui_share),
-                    chevron = true,
                     testTag = "run-export",
                     onClick = {
                         scope.launch {
@@ -471,7 +465,6 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
                 ActionRowItem(
                     label = stringResource(R.string.run_trim_row),
                     icon = painterResource(R.drawable.ic_ui_trim),
-                    chevron = true,
                     testTag = "run-trim",
                     onClick = onTrim,
                 ),

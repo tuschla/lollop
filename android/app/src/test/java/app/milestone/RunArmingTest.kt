@@ -7,10 +7,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * JVM unit tests (no device) for the armed-start pure logic: [isFreshLock] (the
- * stale-lock fix), [ArmTrigger] (the gate state machine, clocks passed in), and
- * [pillState] (the map-pill priority ladder). All three are deliberately pure so the
- * behaviour is pinned here without a Compose/Android harness.
+ * JVM unit tests (no device) for the armed-start pure logic: [isFreshLock],
+ * [ArmTrigger] (the gate state machine, clocks passed in), and [pillState] (the
+ * map-pill priority ladder). All three are pure so the behaviour is pinned here
+ * without a Compose/Android harness.
  */
 class RunArmingTest {
 
@@ -21,35 +21,25 @@ class RunArmingTest {
     // ── isFreshLock ────────────────────────────────────────────────────────────
 
     @Test
-    fun freshAccurateFixIsALock() {
-        // Accurate (10 m ≤ 30 m) and recent (age 4 s ≤ 10 s window).
-        assertTrue(isFreshLock(accuracyM = 10.0, fixElapsedMs = 1_000L, nowElapsedMs = 5_000L))
-    }
-
-    @Test
-    fun staleLockNoLongerCounts() {
-        // The root bug: an accurate fix that is now 19 s old must NOT still read as a
-        // lock (age 19 s > 10 s window), so a Start can't latch onto it.
-        assertFalse(isFreshLock(accuracyM = 10.0, fixElapsedMs = 1_000L, nowElapsedMs = 20_000L))
-    }
-
-    @Test
-    fun tooCoarseFixIsNotALock() {
-        // The lock-accuracy bound tightened 50 m → 30 m to mirror the core's
-        // running::MAX_GPS_ACCURACY_M, so a 40 m fix that once counted as a lock no
-        // longer does (nor an obviously-coarse 60 m one).
-        assertFalse(isFreshLock(accuracyM = 40.0, fixElapsedMs = 1_000L, nowElapsedMs = 2_000L))
-        assertFalse(isFreshLock(accuracyM = 60.0, fixElapsedMs = 1_000L, nowElapsedMs = 2_000L))
-    }
-
-    @Test
-    fun nullAccuracyIsNotALock() {
-        assertFalse(isFreshLock(accuracyM = null, fixElapsedMs = 1_000L, nowElapsedMs = 2_000L))
-    }
-
-    @Test
-    fun neverFixedIsNotALock() {
-        // fixElapsedMs == 0 → no fix yet, regardless of a placeholder accuracy.
+    fun aLockIsAnAccurateRecentFix() {
+        // Within the core's running::MAX_GPS_ACCURACY_M and LOCK_FRESH_MS old at
+        // most, so a Start never latches onto a coarse or stale cached fix.
+        val now = 100_000L
+        val rows = listOf(
+            // accuracy m, fix age ms, lock
+            Triple(10.0, 4_000L, true),
+            Triple(MAX_GPS_ACCURACY_M, 0L, true), // just landed: the pill resamples the clock per fix
+            Triple(10.0, LOCK_FRESH_MS, true),
+            Triple(10.0, LOCK_FRESH_MS + 1, false),
+            Triple(10.0, -1_000L, false), // stamped after now
+            Triple(MAX_GPS_ACCURACY_M + 0.1, 1_000L, false),
+            Triple(60.0, 1_000L, false),
+            Triple(null, 1_000L, false),
+        )
+        for ((accuracy, age, lock) in rows) {
+            assertEquals("accuracy $accuracy m, age $age ms", lock, isFreshLock(accuracy, now - age, now))
+        }
+        // fixElapsedMs == 0: no fix yet, whatever the accuracy.
         assertFalse(isFreshLock(accuracyM = 10.0, fixElapsedMs = 0L, nowElapsedMs = 5_000L))
     }
 
@@ -228,9 +218,9 @@ class RunArmingTest {
     }
 
     // ── markStopped: a dead-service stop resets the WHOLE state machine ──────
-    // RunTrackingService.stop()'s dead-service catch used to clear only `tracking`,
-    // leaving `locating`/`armed` latched → the tracker stuck on "Acquiring GPS" with
-    // no engine. It now calls RunSession.markStopped(), mirroring stopTracking().
+    // RunTrackingService.stop()'s dead-service catch calls RunSession.markStopped(),
+    // mirroring stopTracking(): clearing only `tracking` would leave `locating` /
+    // `armed` latched and the tracker stuck on "Acquiring GPS" with no engine.
 
     @Test
     fun markStoppedClearsLocatingAndArmedNotJustTracking() {

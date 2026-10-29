@@ -46,9 +46,9 @@ import app.milestone.DarkMode
 import app.milestone.OpenDest
 import app.milestone.Palette
 import app.milestone.R
-import app.milestone.accentPassingContrast
 import app.milestone.openIntent
 import app.milestone.todayEpochDay
+import app.milestone.withDynamicAccent
 import androidx.glance.color.ColorProvider as DayNightColorProvider
 
 // The size breakpoints (visual-design-system §10, "Home screen widget").
@@ -126,16 +126,8 @@ internal data class WidgetColors(
  */
 internal fun widgetColors(ctx: Context, theme: AppTheme, darkMode: DarkMode, dynamic: Boolean): WidgetColors {
     val useDynamic = dynamic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-    val light = if (useDynamic) {
-        theme.light.copy(accent = accentPassingContrast(dynamicLightColorScheme(ctx).primary, theme.light.bgTop, theme.light.accent))
-    } else {
-        theme.light
-    }
-    val dark = if (useDynamic) {
-        theme.dark.copy(accent = accentPassingContrast(dynamicDarkColorScheme(ctx).primary, theme.dark.bgTop, theme.dark.accent))
-    } else {
-        theme.dark
-    }
+    val light = if (useDynamic) theme.light.withDynamicAccent(dynamicLightColorScheme(ctx).primary) else theme.light
+    val dark = if (useDynamic) theme.dark.withDynamicAccent(dynamicDarkColorScheme(ctx).primary) else theme.dark
     fun pick(role: (Palette) -> Color): ColorProvider = when (darkMode) {
         DarkMode.System -> DayNightColorProvider(role(light), role(dark))
         DarkMode.Light -> ColorProvider(role(light))
@@ -176,7 +168,7 @@ internal fun TodayWidgetContent(face: WidgetFace, colors: WidgetColors, layout: 
                 color = when (face.tone) {
                     WidgetTone.Paused -> colors.danger
                     WidgetTone.Muted -> colors.muted
-                    WidgetTone.Normal, WidgetTone.Calm -> colors.body
+                    WidgetTone.Normal -> colors.body
                 },
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,

@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,8 +59,6 @@ private val StatusDotSize = 8.dp
 /** How often the status pill re-ages the last fix while its state can still change. */
 private const val PILL_TICK_MS = 1000L
 
-private val PillShape = RoundedCornerShape(100)
-
 /** The stat sheet's control row: a circle, then the pill(s) sharing the rest. */
 @Composable
 internal fun ControlRow(content: @Composable RowScope.() -> Unit) {
@@ -72,18 +71,11 @@ internal fun ControlRow(content: @Composable RowScope.() -> Unit) {
 }
 
 /**
- * The control row under the live figures, one layout per recording state:
- *  - captured-but-unsaved run (the save failed or the stop never confirmed): Discard
- *    (confirmed) + Save (retry), NEVER Start, which would truncate the sidecar;
- *  - armed: Cancel + "Start now" (skips the gates: a treadmill, a slow start, a GPS
- *    hiccup); recording otherwise begins by itself at the first qualifying fix;
- *  - locate preview: Back + Start, ALWAYS tappable (an armed start waits for a live
- *    qualifying fix, so a stale lock can never let a tap record nothing);
- *  - paused: Stop (red outline) + Resume as the wide primary, the likely next tap;
- *  - recording: Pause + Stop. Stop is the primary completion action (Accent, not a
- *    destructive red) and only opens the Finish review; Discard lives there, never
- *    beside Stop mid-run, so one stray tap can't end a run.
- * [stopping] (a save in flight) disables every action that could race it.
+ * The control row under the live figures, one layout per recording state. A captured
+ * but unsaved run offers Discard + Save, NEVER Start, which would truncate the
+ * sidecar. While recording, Stop only opens the Finish review; Discard lives there,
+ * so one stray tap can't end a run. [stopping] (a save in flight) disables every
+ * action that could race it.
  */
 @Composable
 internal fun TrackerControlRow(
@@ -104,14 +96,7 @@ internal fun TrackerControlRow(
     ControlRow {
         when {
             unsavedCapture -> {
-                ControlCircle(
-                    R.drawable.ic_ui_close,
-                    stringResource(R.string.track_cd_discard_run),
-                    danger = true,
-                    enabled = !stopping,
-                    iconSize = 20.dp,
-                    onClick = onDiscardCapture,
-                )
+                DiscardRunCircle(enabled = !stopping, onClick = onDiscardCapture)
                 ControlPill(
                     stringResource(R.string.track_btn_save_run),
                     onClick = onSaveCapture,
@@ -208,6 +193,19 @@ internal fun ControlCircle(
     }
 }
 
+/** The red ✕ that discards a recorded run; callers confirm first. */
+@Composable
+internal fun DiscardRunCircle(enabled: Boolean = true, onClick: () -> Unit) {
+    ControlCircle(
+        R.drawable.ic_ui_close,
+        stringResource(R.string.track_cd_discard_run),
+        danger = true,
+        enabled = enabled,
+        iconSize = 20.dp,
+        onClick = onClick,
+    )
+}
+
 /** The wide pill on the control row: [primary] is the Accent-filled main action
  *  (Start, Stop, Resume while paused, Save run); otherwise the outlined secondary. */
 @Composable
@@ -286,20 +284,11 @@ private fun StatusDot(color: Color) {
 }
 
 /**
- * The map's status pill (one actionable state line behind a state dot), a leaf so
- * the 1 Hz freshness ticker it owns recomposes ONLY the pill, not the whole tracking
- * screen. The ticker ages the last accepted fix so [isFreshLock] decays a stale lock
- * and the signal-loss state can fire. It runs while a lock is still decaying, while
- * armed or locating (so a fresh preview lock lights within its window), or while a
- * recording run ages toward the signal-loss threshold; once none holds, the state is
- * stable until the next fix stamp re-triggers it. The signal-loss BUZZ is the
- * service's (screen-off safe); this pill is the on-screen mirror of the same
- * [signalLossDue]. Exposed to screen readers as ONE polite live region carrying only
- * the state, so GPS drops, pauses and auto-start are announced without leaving the
- * map. Named to avoid the [TrackerPill] enum it renders.
- *
- * [permissionAsked]: before the system prompt was ever shown a missing grant is not a
- * fault yet (the rationale asks for it), so the pill stays neutral.
+ * The map's status pill: a leaf, so the 1 Hz freshness ticker it owns recomposes
+ * only the pill. The ticker runs while the state can still change (a decaying lock,
+ * armed, locating, or a recording run aging toward signal loss). Screen readers get
+ * one polite live region carrying only the state. Before the system prompt was ever
+ * shown ([permissionAsked] false) a missing grant stays neutral.
  */
 @Composable
 internal fun TrackerStatusPill(
@@ -323,19 +312,15 @@ internal fun TrackerStatusPill(
     val freshLock = isFreshLock(lastFix?.accuracyM, lastFixElapsedMs, nowElapsed)
     val signalLost = tracking && signalLossDue(lastFixElapsedMs, nowElapsed)
     val needsTick = freshLock || armed || locating || (tracking && !signalLost)
+    val recheckPermission by rememberUpdatedState(onRecheckPermission)
     LaunchedEffect(needsTick) {
-        while (needsTick) {
-            // Re-check the location grant each tick: a mid-run revocation must read as
-            // PermissionNeeded (which outranks SignalLost in [pillState]), not a lost fix.
-            onRecheckPermission()
+        if (needsTick) while (true) {
+            // A mid-run revocation must read as PermissionNeeded, not a lost fix.
+            recheckPermission()
             nowElapsed = SystemClock.elapsedRealtime()
             delay(PILL_TICK_MS)
         }
     }
-    // The pure [pillState] ladder: a missing grant / disabled location outranks all
-    // (so the pill can't say "Acquiring GPS…" while it can't get a fix and contradict
-    // the sheet); then signal-loss / paused / recording while tracking; gate-aware
-    // waiting text while armed; then fresh lock / acquiring. Never a fake position.
     val pill = pillState(hasPermission, locationOn, tracking, paused, armed, signalLost, freshLock, requirePrecise, requireMoving)
     // Only states that block or break recording wear the warn fill; the benign
     // waiting states (acquiring, armed) read as a neutral pill with a muted dot.
@@ -377,10 +362,7 @@ internal fun TrackerStatusPill(
             )
             TrackerPill.Acquiring -> stringResource(R.string.track_pill_acquiring)
         }
-        // Tabular figures only where the text carries digits (accuracy / states that
-        // could tick), so glyph widths stay stable.
-        val figures = pill == TrackerPill.FreshLock ||
-            pill == TrackerPill.Recording || pill == TrackerPill.Paused
+        val figures = pill == TrackerPill.FreshLock
         Text(
             pillText,
             color = if (pillWarn) Color.White else OnBgBody,
@@ -464,7 +446,7 @@ private fun RunPlanPreview(item: PrescriptionView, unit: DistanceUnit) {
             color = OnBgBody,
             style = Type.Body.copy(fontWeight = FontWeight.Bold),
         )
-        TargetLines(targets)
+        targets.forEach { Text(it, color = OnBgMuted, style = Type.Caption.merge(TabularFigures)) }
     }
 }
 
@@ -480,12 +462,6 @@ private fun PlanCard(content: @Composable ColumnScope.() -> Unit) {
         verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
         content = content,
     )
-}
-
-/** The pre-start plan preview's targets, one per line. */
-@Composable
-private fun TargetLines(targets: List<String>) {
-    targets.forEach { Text(it, color = OnBgMuted, style = Type.Caption.merge(TabularFigures)) }
 }
 
 /**
@@ -557,14 +533,10 @@ private fun RunStepCard(res: Resources, progress: StepProgress, onSkip: () -> Un
 }
 
 /**
- * The stat sheet while precise location is missing: one caption that matches what
- * the user actually allowed ([LocationPrompt]), then ✕ (leave, like before Start)
- * beside the primary action, Continue before the system prompt or Allow location
- * after it. Once refused, "Log run by hand" is the way out without GPS.
- *
- * [onSaveRun] non-null marks a crash-recovered run waiting on the grant to resume
- * ([RunSession.resumeAwaitingLocation]): the caption says the run is on hold, the
- * way out is "Save run" (what was recorded so far), and ✕ discards the run, so
+ * The stat sheet while precise location is missing: a caption matching what the
+ * user allowed ([LocationPrompt]), ✕ beside Continue / Allow location, and "Log run
+ * by hand" once refused. [onSaveRun] non-null marks a crash-recovered run waiting on
+ * the grant ([RunSession.resumeAwaitingLocation]): ✕ then discards the run, so
  * [onClose] must confirm first.
  */
 @Composable
@@ -573,7 +545,7 @@ internal fun LocationPermissionPanel(
     onAllow: () -> Unit,
     onClose: () -> Unit,
     onLogManually: (() -> Unit)?,
-    onSaveRun: (() -> Unit)? = null,
+    onSaveRun: (() -> Unit)?,
 ) {
     val resuming = onSaveRun != null
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
@@ -609,13 +581,7 @@ internal fun LocationPermissionPanel(
         }
         ControlRow {
             if (resuming) {
-                ControlCircle(
-                    R.drawable.ic_ui_close,
-                    stringResource(R.string.track_cd_discard_run),
-                    danger = true,
-                    iconSize = 20.dp,
-                    onClick = onClose,
-                )
+                DiscardRunCircle(onClick = onClose)
             } else {
                 ControlCircle(R.drawable.ic_ui_close, stringResource(R.string.main_close), onClick = onClose)
             }

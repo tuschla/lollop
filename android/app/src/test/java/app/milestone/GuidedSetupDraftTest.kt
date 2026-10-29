@@ -351,11 +351,11 @@ class GuidedSetupDraftTest {
 
     @Test
     fun youthAndHealthFlagsDefer() {
-        assertTrue(healthDefers(16.0, HealthScreen()))
-        assertFalse(healthDefers(30.0, HealthScreen()))
-        assertTrue(healthDefers(30.0, HealthScreen(parq_positive = true)))
-        assertFalse(healthDefers(30.0, HealthScreen(parq_positive = true, medically_cleared = true)))
-        assertTrue(healthDefers(30.0, HealthScreen(acute_illness = true)))
+        assertTrue(isMinor(16.0))
+        assertFalse(healthDefers(HealthScreen()))
+        assertTrue(healthDefers(HealthScreen(parq_positive = true)))
+        assertFalse(healthDefers(HealthScreen(parq_positive = true, medically_cleared = true)))
+        assertTrue(healthDefers(HealthScreen(acute_illness = true)))
     }
 
     /** A first-run answer set; only the arguments a test cares about change. */
@@ -476,13 +476,13 @@ class GuidedSetupDraftTest {
         assertTrue(chest.symptomatic)
         assertFalse(chest.parq_positive)
         assertEquals(1, chest.parqYesCount)
-        assertTrue(healthDefers(30.0, chest))
-        assertTrue(healthDefers(30.0, chest.copy(medically_cleared = true)))
+        assertTrue(healthDefers(chest))
+        assertTrue(healthDefers(chest.copy(medically_cleared = true)))
         assertTrue(firstRun(Modality.Lift, days = 3, health = chest).health.symptomatic)
         // Doctor follow-up items raise parq_positive, which clearance does lift.
         val heart = HealthScreen().withParqAnswer(ParqItem.HeartOrBloodPressure, true).copy(medically_cleared = true)
         assertTrue(heart.parq_positive)
-        assertFalse(healthDefers(30.0, heart))
+        assertFalse(healthDefers(heart))
         // Answering it No again drops the follow-up AND its clearance.
         val cleared = heart.withParqAnswer(ParqItem.HeartOrBloodPressure, false)
         assertFalse(cleared.parq_positive)
@@ -537,13 +537,23 @@ class GuidedSetupDraftTest {
 
     @Test
     fun calisthenicsPlacementMapsToLadderRungs() {
-        val events = placementEvents(listOf(CalisPlacement.PushKnee, CalisPlacement.PullMany, null), 1_759_700_000L)
+        val seed = seedAnswers(null, 20_000L, null, DistanceUnit.Km, null)
+        val events = placementEvents(seed.copy(pushPlace = CalisPlacement.PushKnee, pullPlace = CalisPlacement.PullMany), seed, 1_759_700_000L)
         assertEquals(2, events.size)
         val pull = events.first { it.ladder == CalisLadder.VerticalPull }
         assertTrue(pull.rung >= 4) // at least Full pull-up
         assertEquals(3, events.first { it.ladder == CalisLadder.HorizontalPush }.rung)
         // "Not sure, start easy" sends nothing: the ladder starts at its easiest rung.
-        assertTrue(placementEvents(listOf(null, null, null), 0L).isEmpty())
+        assertTrue(placementEvents(seed, seed, 0L).isEmpty())
+    }
+
+    @Test
+    fun swappingPullUpAnswersOnTheSameRungSendsNoPlacement() {
+        // "1-4 pull-ups" and "5+" both sit on Full pull-up: re-placing the ladder
+        // there would restart its progress.
+        val seeded = seedAnswers(null, 20_000L, null, DistanceUnit.Km, null).copy(pullPlace = CalisPlacement.PullFew)
+        val events = placementEvents(seeded.copy(pullPlace = CalisPlacement.PullMany), seeded, 0L)
+        assertTrue("same rung must send nothing: $events", events.isEmpty())
     }
 
     @Test
@@ -602,6 +612,14 @@ class GuidedSetupDraftTest {
         assertNull(raceTimeSec("2675")) // 75 seconds isn't a time
         assertTrue(plausibleRaceTime(5.0, 1575))
         assertFalse(plausibleRaceTime(5.0, 25)) // "25" typed for 25:00
+    }
+
+    @Test
+    fun aSubFourMinuteMileIsAPlausibleRecentRace() {
+        // The core keeps any time_sec / distance_km >= 120 (app::format).
+        assertTrue(plausibleRaceTime(RaceDistance.Mile.km, 3 * 60 + 58))
+        assertTrue(plausibleRaceTime(1.0, 120))
+        assertFalse(plausibleRaceTime(1.0, 119))
     }
 
     @Test
@@ -674,11 +692,11 @@ class GuidedSetupDraftTest {
         // A runner has no lifting days to seed from.
         assertNull(switchSeedDays(Modality.Lift, firstRun(Modality.Run, days = 4), stashedRunDays = null))
         // Dropping a side keeps the other and its goal coherent.
-        val liftOnly = customised.withoutSide(Focus.Lift)
+        val liftOnly = customised.withoutSide(Modality.Lift)
         assertEquals(0, liftOnly.runningDaysPerWeek)
         assertEquals(0.0, liftOnly.runningKmPerWeek, 0.0)
         assertEquals(ConcurrentGoal.Hypertrophy, liftOnly.concurrentGoal)
-        val runOnly = customised.withoutSide(Focus.Run)
+        val runOnly = customised.withoutSide(Modality.Run)
         assertEquals(0, runOnly.weeklySets)
         assertEquals(ConcurrentGoal.EndurancePriority, runOnly.concurrentGoal)
     }
@@ -690,7 +708,7 @@ class GuidedSetupDraftTest {
         assertEquals(4, switchSeedDays(Modality.Lift, runner, stashedRunDays = null, stashedLiftDays = 4))
         val monWedThuFri = 0b0011101
         val lift = StashedLift(days = 4, goal = LiftGoal.MaxStrength, weeklySets = 12, weekdays = monWedThuFri)
-        val resumed = runner.resumedSide(Focus.Lift, lift, run = null, today = 0L)
+        val resumed = runner.resumedSide(Modality.Lift, lift, run = null, today = 0L)
         assertEquals(12, resumed?.weeklySets)
         assertEquals(4, resumed?.liftDaysPerWeek)
         assertEquals(0, resumed?.runningDaysPerWeek)
@@ -698,14 +716,14 @@ class GuidedSetupDraftTest {
         assertEquals(monWedThuFri, resumed?.trainingWeekdays)
         // An answer missing (lift days never given) or weekdays no longer covering
         // the days: the guided setup asks instead.
-        assertNull(runner.resumedSide(Focus.Lift, lift.copy(days = null), run = null, today = 0L))
-        assertNull(runner.resumedSide(Focus.Lift, lift.copy(weekdays = 0b0000011), run = null, today = 0L))
+        assertNull(runner.resumedSide(Modality.Lift, lift.copy(days = null), run = null, today = 0L))
+        assertNull(runner.resumedSide(Modality.Lift, lift.copy(weekdays = 0b0000011), run = null, today = 0L))
         // Both always asks which side leads.
-        assertNull(runner.resumedSide(Focus.Both, lift, run = null, today = 0L))
+        assertNull(runner.resumedSide(Modality.Both, lift, run = null, today = 0L))
 
         val lifter = firstRun(Modality.Lift, days = 3)
         val run = StashedRun(days = 3, km = 24.0, goal = GoalDistance.TenK, raceEpochDay = 100L, weekdays = null)
-        val back = lifter.resumedSide(Focus.Run, lift = null, run = run, today = 200L)
+        val back = lifter.resumedSide(Modality.Run, lift = null, run = run, today = 200L)
         assertEquals(3, back?.runningDaysPerWeek)
         assertEquals(0, back?.weeklySets)
         assertEquals(GoalDistance.TenK, back?.goalDistance)
@@ -713,7 +731,51 @@ class GuidedSetupDraftTest {
         // A race date already passed is no longer a target.
         assertNull(back?.goalRaceEpochDay)
         assertEquals(ConcurrentGoal.EndurancePriority, back?.concurrentGoal)
-        assertNull(lifter.resumedSide(Focus.Run, lift = null, run = run.copy(goal = null), today = 200L))
+        assertNull(lifter.resumedSide(Modality.Run, lift = null, run = run.copy(goal = null), today = 200L))
+    }
+
+    private val rerunDay = 20_000L
+
+    /** The draft an untouched re-run of [initial] sends on Finish. */
+    private fun untouchedRerun(initial: ProfileDraft): ProfileDraft {
+        val seed = seedAnswers(initial, rerunDay, null, DistanceUnit.Km, null)
+        return SetupValues(seed, seed, initial, seedWeeklyRunKm(initial, null), DistanceUnit.Km, rerunDay).draft()!!
+    }
+
+    @Test
+    fun rerunOfAOneDayRunnerSavesTheDaysTheReviewShows() {
+        // The setup's run range is 2–7: the review's Days row reads the seeded 2.
+        val runner = firstRun(Modality.Run, days = 4).copy(runningDaysPerWeek = 1)
+        val seed = seedAnswers(runner, rerunDay, null, DistanceUnit.Km, null)
+        assertEquals(2, seed.days)
+        assertEquals(seed.days, untouchedRerun(runner).runningDaysPerWeek)
+    }
+
+    @Test
+    fun rerunOfAnOverfullHybridWeekSavesNoMoreDaysThanTheReviewShows() {
+        // Lifting leads, 5 lift + 3 run = 8 sessions: the seed fits it to 7 days.
+        val hybrid = customised.copy(concurrentGoal = ConcurrentGoal.Strength, liftDaysPerWeek = 5, runningDaysPerWeek = 3)
+        val seed = seedAnswers(hybrid, rerunDay, null, DistanceUnit.Km, null)
+        val draft = untouchedRerun(hybrid)
+        assertTrue(
+            "review shows ${seed.days} days, draft holds ${draft.liftDaysPerWeek} lift + ${draft.runningDaysPerWeek} run",
+            draft.liftDaysPerWeek!! + draft.runningDaysPerWeek <= seed.days!!,
+        )
+    }
+
+    @Test
+    fun profileDayScalesOfferOnlyWeeksTheSetupCanHold() {
+        // Beside 5 lift days a lift-led week has room for 2 runs; capped at 3 otherwise.
+        assertEquals(1..2, hybridRunDayOptions(5, BothPriority.LiftLean))
+        assertEquals(1..3, hybridRunDayOptions(2, BothPriority.LiftLean))
+        assertEquals(1..4, hybridRunDayOptions(3, BothPriority.RunLean))
+        assertEquals(2..3, hybridLiftDayRange(BothPriority.RunLean))
+        assertEquals(LIFT_DAYS, hybridLiftDayRange(BothPriority.LiftLean))
+        // A lead switch fits the counts to the new lead's caps.
+        val runLed = customised.copy(concurrentGoal = ConcurrentGoal.EndurancePriority, liftDaysPerWeek = 2, runningDaysPerWeek = 5)
+        assertEquals(3, runLed.withLead(BothPriority.LiftLean).runningDaysPerWeek)
+        val liftLed = customised.copy(concurrentGoal = ConcurrentGoal.Strength, liftDaysPerWeek = 5, runningDaysPerWeek = 2)
+        assertEquals(3, liftLed.withLead(BothPriority.RunLean).liftDaysPerWeek)
     }
 
     @Test
@@ -731,8 +793,8 @@ class GuidedSetupDraftTest {
         assertFalse(isMinor(null))
         // The health answers alone don't defer a 16-year-old: the review shows the
         // hold under About you instead.
-        assertFalse(healthDefers(null, HealthScreen()))
-        assertTrue(healthDefers(16.0, HealthScreen()))
+        assertFalse(healthDefers(HealthScreen()))
+        assertTrue(isMinor(16.0))
     }
 
     @Test

@@ -3,7 +3,6 @@ package app.milestone.qa
 import android.Manifest
 import android.app.Application
 import android.content.Context
-import android.content.Intent
 import android.location.LocationManager
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
@@ -23,16 +22,14 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppClock
 import app.milestone.ConcurrentGoal
 import app.milestone.DarkMode
 import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GoalDistance
-import app.milestone.GpsPoint
 import app.milestone.LiftGoal
-import app.milestone.MainActivity
+import app.milestone.OpenDest
 import app.milestone.PrescriptionView
 import app.milestone.ProgressionCadence
 import app.milestone.R
@@ -41,7 +38,7 @@ import app.milestone.RunSession
 import app.milestone.RunStructureView
 import app.milestone.RunTargetView
 import app.milestone.AppSettings
-import com.github.takahirom.roborazzi.captureScreenRoboImage
+import app.milestone.openIntent
 import java.util.Locale
 import org.junit.After
 import org.junit.Before
@@ -102,14 +99,6 @@ class ScreenshotRunsTest {
         AppSettings.showRouteMaps.value = true
     }
 
-    private fun theme(mode: DarkMode) = AppSettings.setDarkMode(ctx, mode)
-
-    private fun suffix(mode: DarkMode) = if (mode == DarkMode.Dark) "dark" else "light"
-
-    @OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)
-    private fun shot(name: String) =
-        rule.captureWithoutRipples { captureScreenRoboImage("src/test/screenshots/$name.png") }
-
     // ── Waits / drivers (every wait fetches semantics, which idles the looper) ──
 
     private fun waitFor(matcher: SemanticsMatcher, timeoutMs: Long = 10_000) {
@@ -164,22 +153,6 @@ class ScreenshotRunsTest {
         recentRace = RecentRace(distance_km = 5.0, time_sec = 1500, epoch_day = app.milestone.todayEpochDay() - 7),
     )
 
-    /** A 10.1 km GPS run at an even 5:00 /km (one clean fix every 3 s, 10 m apart). */
-    private fun gpsTenK(observedAt: Long, sessionRpe: Int?): Event {
-        val metresPerDegLat = 111_195.0
-        val points = (0 until 1011).map { i ->
-            GpsPoint(lat = 47.0 + i * 10.0 / metresPerDegLat, lon = 8.0, observedAt = observedAt + i * 3L, accuracyM = 5.0)
-        }
-        return Event.LogRunTrack(
-            points = points,
-            hrPctMax = 0.0,
-            longestRecentKm = 0.0,
-            observedAt = observedAt,
-            entryId = observedAt * 1000,
-            sessionRpe = sessionRpe,
-        )
-    }
-
     /**
      * Twelve weeks of three hand-logged runs (easy, short, long) plus a half
      * marathon five weeks back, oldest first, one squat session three days ago (so
@@ -200,11 +173,11 @@ class ScreenshotRunsTest {
                         else -> 11.0 + w % 4
                     }
                     val at = QaHarness.daysAgoAtMidday(7 * (w - 1) + off)
-                    add(at to Event.LogRun(km, km * 5.8, 0.0, 0.0, at, at * 1000))
+                    add(at to Event.LogRun(km, km * 5.8, 0.0, at, at * 1000))
                 }
             }
             val half = QaHarness.daysAgoAtMidday(33) + 600
-            add(half to Event.LogRun(21.2, 115.0, 0.0, 0.0, half, half * 1000))
+            add(half to Event.LogRun(21.2, 115.0, 0.0, half, half * 1000))
             var t = QaHarness.daysAgoAtMidday(3)
             repeat(3) {
                 t += 180
@@ -213,7 +186,7 @@ class ScreenshotRunsTest {
         }.sortedBy { it.first }.map { it.second }
         // Today 07:00, before the pinned 10:00 "now".
         val thisMorning = QaHarness.daysAgoAtMidday(0) - 5 * 3600
-        QaHarness.seedLog(ctx, listOf(runnerProfile()) + manual + gpsTenK(thisMorning, sessionRpe = 7))
+        QaHarness.seedLog(ctx, listOf(runnerProfile()) + manual + QaHarness.gpsTenK(thisMorning, sessionRpe = 7))
         rule.launchApp()
         rule.selectTab(str(R.string.main_dest_history))
         waitForText(str(R.string.main_overline_last_7_days).uppercase(Locale.US))
@@ -243,20 +216,6 @@ class ScreenshotRunsTest {
         rule.scrollToText(sessionHeader(3, 8))
     }
 
-    /** A live recording: 21 fixes, ~30 m every 10 s (600 m, 200 s moving). The fix
-     *  stamps sit far ahead of Robolectric's elapsed clock, so the GPS pill reads a
-     *  steady "Recording" (never a decaying lock or a signal loss). */
-    private fun seedRecordingRun() {
-        val t0 = AppClock.nowSec() - 400
-        for (i in 0..20) {
-            RunSession.add(
-                GpsPoint(52.5200 + i * 0.00027, 13.4050, t0 + i * 10L, 5.0),
-                (1_000L + i * 10L) * 1_000_000_000L,
-            )
-        }
-        RunSession.tracking.value = true
-    }
-
     /** Reopen the tracker onto a followed interval plan mid-run (rep 1 of 6). */
     private fun openRecordingWithPlan() {
         QaHarness.seedLog(ctx, listOf(runnerProfile()))
@@ -277,11 +236,9 @@ class ScreenshotRunsTest {
             ),
             run_structure = RunStructureView(reps = 6, rep_m = 800, recovery_m = 400),
         )
-        seedRecordingRun()
+        QaHarness.seedRecordingRun()
         RunSession.startSteps(android.os.SystemClock.elapsedRealtime())
-        lastScenario = launchMain(
-            Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_TRACKING, true),
-        )
+        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
         rule.waitUntil(30_000) {
             rule.onAllNodesWithText(str(R.string.track_step_skip)).fetchSemanticsNodes().isNotEmpty() && EventDispatcher.bootHandled
         }
@@ -299,32 +256,28 @@ class ScreenshotRunsTest {
     // ── History · Runs: progress section + run card ────────────────────────────
 
     private fun runsProgress(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         seedRunsHistory()
-        val s = suffix(mode)
+        val s = mode.suffix
         // Top of the Runs tab: the 7-day strip and the 12-week heatmap (all
         // activity), then the Lifts | Runs segment (Runs picked) and Progress.
-        shot("runs-progress-top-$s")
+        rule.shot("runs-progress-top-$s")
         // The progress block switched to the 14-day daily chart.
         val daily = str(R.string.history_progress_days, 14)
         rule.scrollToText(daily)
         rule.onNodeWithText(daily).performClick()
         rule.waitForIdle()
-        shot("runs-progress-daily-$s")
+        rule.shot("runs-progress-daily-$s")
         // Records: the carded 2×2 grid, longest run + best efforts down to the half
         // marathon (the best-effort labels are the core's own copy).
         rule.scrollToText(records)
         rule.scrollToText("Half marathon".uppercase(Locale.US))
-        shot("runs-progress-records-$s")
-        // The lower Runs tab, scrolled down to today's card, so the first month header
-        // (with its jump-to-month calendar button) and the newest run card share the
-        // screen.
-        rule.scrollToText("Fastest 10K")
-        shot("runs-progress-bottom-$s")
-        // The run list itself: today's card (weekday title, Effort 7 of 10, the Fastest
-        // 10K chip) and the next ones.
+        rule.shot("runs-progress-records-$s")
+        // The run list: the first month header (with its jump-to-month calendar
+        // button), today's card (weekday title, Effort 7 of 10, the Fastest 10K
+        // chip) and the next ones.
         rule.scrollToText(str(R.string.history_run_weekday, "Saturday"))
-        shot("runs-card-$s")
+        rule.shot("runs-card-$s")
     }
 
     @Test fun runsProgressLight() = runsProgress(DarkMode.Light)
@@ -345,35 +298,35 @@ class ScreenshotRunsTest {
     }
 
     private fun runsDetailRated(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         openRatedRunDetail()
-        val s = suffix(mode)
+        val s = mode.suffix
         // First screen: title + record badge, start date, the 3-up stats and the whole
         // route card (maps off: the route, markers and labels on the plain card).
-        shot("runs-detail-rated-top-$s")
+        rule.shot("runs-detail-rated-top-$s")
         // Splits with the delta column, then YOUR LOG.
         rule.onNodeWithTag("run-log-type").performScrollTo()
-        shot("runs-detail-rated-splits-$s")
+        rule.shot("runs-detail-rated-splits-$s")
         // The training-load "?" opened inside the YOUR LOG card.
         val trainingLoad = hasContentDescription(str(R.string.history_training_load_subject), substring = true) and hasClickAction()
         rule.onNode(trainingLoad).performScrollTo().performClick()
         rule.waitForIdle()
-        shot("runs-detail-rated-why-$s")
+        rule.shot("runs-detail-rated-why-$s")
         rule.onNode(trainingLoad).performClick()
         rule.waitForIdle()
         // Bottom: the action rows (Export GPX, Trim start or end, Delete run).
         rule.onNodeWithTag("run-delete").performScrollTo()
-        shot("runs-detail-rated-$s")
+        rule.shot("runs-detail-rated-$s")
         // Delete run confirms first.
         rule.onNodeWithTag("run-delete").performClick()
         rule.waitForIdle()
-        shot("runs-detail-delete-confirm-$s")
+        rule.shot("runs-detail-delete-confirm-$s")
         rule.onNode(hasText(str(R.string.main_cancel)) and hasClickAction()).performClick()
         rule.waitForIdle()
         // Rate run: the effort scale (7 picked) and the run type chips over the sheet.
         rule.onNodeWithTag("run-log-effort").performScrollTo().performClick()
         rule.waitForIdle()
-        shot("runs-detail-rate-sheet-$s")
+        rule.shot("runs-detail-rate-sheet-$s")
     }
 
     @Test fun runsDetailRatedLight() = runsDetailRated(DarkMode.Light)
@@ -382,45 +335,25 @@ class ScreenshotRunsTest {
 
     @Test fun runsDetailRatedFontScale130() {
         RuntimeEnvironment.setFontScale(1.3f)
-        theme(DarkMode.Light)
+        useDarkMode(DarkMode.Light)
         openRatedRunDetail()
-        shot("runs-detail-rated-top-font130-light")
+        rule.shot("runs-detail-rated-top-font130-light")
         // The splits (delta column, the partial split's distance) readable at 130%.
         rule.onNodeWithTag("run-log-type").performScrollTo()
-        shot("runs-detail-rated-font130-light")
+        rule.shot("runs-detail-rated-font130-light")
     }
-
-    // ── Full-screen route map and the trim sheet ───────────────────────────────
-
-    private fun runsRouteFull(mode: DarkMode) {
-        theme(mode)
-        openRatedRunDetail()
-        val s = suffix(mode)
-        rule.onNode(hasContentDescription(str(R.string.runmap_open_full)) and hasClickAction()).performClick()
-        waitFor(hasContentDescription(str(R.string.runmap_fit_route)))
-        shot("runs-route-full-$s")
-        rule.onNode(hasContentDescription(str(R.string.runmap_close)) and hasClickAction()).performClick()
-        rule.waitForIdle()
-        rule.onNodeWithTag("run-trim").performScrollTo().performClick()
-        waitFor(hasText(str(R.string.trim_hint)))
-        shot("runs-trim-$s")
-    }
-
-    @Test fun runsRouteFullLight() = runsRouteFull(DarkMode.Light)
-
-    @Test fun runsRouteFullDark() = runsRouteFull(DarkMode.Dark)
 
     // ── Run detail: an unrated hand-logged run (no map, Rate this run) ────────
 
     private fun runsDetailRate(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         seedRunsHistory()
         // The newest hand-logged run (Saturday, unrated, untagged).
         val saturdayRun = str(R.string.history_run_weekday, "Saturday")
         rule.scrollToText(saturdayRun)
         rule.onAllNodesWithText(saturdayRun).onFirst().performClick()
         waitFor(hasTestTag("run-log-details"))
-        shot("runs-detail-rate-${suffix(mode)}")
+        rule.shot("runs-detail-rate-${mode.suffix}")
     }
 
     @Test fun runsDetailRateLight() = runsDetailRate(DarkMode.Light)
@@ -430,26 +363,21 @@ class ScreenshotRunsTest {
     // ── History · Lifts: "New best" session card + session sheet ───────────────
 
     private fun runsLifts(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         seedLiftHistory()
-        val s = suffix(mode)
-        shot("runs-lifts-card-$s")
+        val s = mode.suffix
+        rule.shot("runs-lifts-card-$s")
         // The card's own click action: a tap at its center can land on the estimated-max "?".
         rule.onNodeWithText(sessionHeader(3, 8)).performSemanticsAction(SemanticsActions.OnClick)
         waitForText(str(R.string.history_delete_session))
         expandSheetFrom(hasTestTag("lift-set-row"))
         // Per-exercise set rows; "New best" once beside each record exercise's name.
-        shot("runs-lifts-sheet-top-$s")
-        // Scrolled to the sheet's end, so its bottom tail below Delete session shows.
-        rule.onNodeWithText(str(R.string.history_delete_session)).performScrollTo()
-        rule.onNodeWithText(str(R.string.history_delete_session)).performTouchInput { swipeUp() }
-        rule.waitForIdle()
-        shot("runs-lifts-sheet-bottom-$s")
+        rule.shot("runs-lifts-sheet-top-$s")
         // A set opened from the table: the set as the sheet's largest figure, its
         // e1RM / load card, the cross-check and the Edit set / Delete set rows.
         rule.onAllNodes(hasTestTag("lift-set-row")).onFirst().performScrollTo().performClick()
         waitFor(hasTestTag("set-detail-delete"))
-        shot("runs-lifts-set-detail-$s")
+        rule.shot("runs-lifts-set-detail-$s")
     }
 
     @Test fun runsLiftsLight() = runsLifts(DarkMode.Light)
@@ -459,26 +387,26 @@ class ScreenshotRunsTest {
     // ── Manual run editor: h:mm:ss, bpm, effort ────────────────────────────────
 
     private fun runsEditor(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(runnerProfile()))
         rule.launchApp()
         openChooser()
         rule.onNodeWithText(str(R.string.main_log_run_title)).performScrollTo().performClick()
         waitFor(hasContentDescription(str(R.string.log_field_duration)))
-        val s = suffix(mode)
+        val s = mode.suffix
         // Distance 6.2 mi, duration typed timer-style: 1:05:30.
         listOf("6", ".", "2").forEach { key(it) }
         rule.onNode(hasContentDescription(str(R.string.log_field_duration))).performScrollTo().performClick()
         listOf("1", "0", "5", "3", "0").forEach { key(it) }
-        shot("runs-editor-top-$s")
+        rule.shot("runs-editor-top-$s")
         // Average heart rate (bpm offered first, age known): 152 typed.
         rule.onNode(hasContentDescription(str(R.string.track_log_hr_avg))).performScrollTo().performClick()
         listOf("1", "5", "2").forEach { key(it) }
-        shot("runs-editor-mid-$s")
+        rule.shot("runs-editor-mid-$s")
         // Whole-run effort 6 picked, run-type chips below.
         rule.pickRating("effort-scale", 6)
         rule.onNodeWithText("Recovery").performScrollTo()
-        shot("runs-editor-bottom-$s")
+        rule.shot("runs-editor-bottom-$s")
     }
 
     @Test fun runsEditorLight() = runsEditor(DarkMode.Light)
@@ -488,14 +416,14 @@ class ScreenshotRunsTest {
     // ── Tracker before Start: today's plan preview + Follow today's plan ───────
 
     private fun trackPrestart(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(runnerProfile()))
         rule.launchApp()
         openChooser()
         rule.onNodeWithText(str(R.string.main_track_run_title)).performScrollTo().performClick()
         waitForText(str(R.string.track_plan_follow))
         waitForText(strPrefix(R.string.track_plan_title), substring = true)
-        shot("track-prestart-${suffix(mode)}")
+        rule.shot("track-prestart-${mode.suffix}")
     }
 
     @Test fun trackPrestartLight() = trackPrestart(DarkMode.Light)
@@ -505,9 +433,9 @@ class ScreenshotRunsTest {
     // ── Tracker recording a followed plan: step guide + Pace now / Avg ─────────
 
     private fun trackRecording(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         openRecordingWithPlan()
-        shot("track-recording-${suffix(mode)}")
+        rule.shot("track-recording-${mode.suffix}")
     }
 
     @Test fun trackRecordingLight() = trackRecording(DarkMode.Light)
@@ -517,15 +445,15 @@ class ScreenshotRunsTest {
     // ── Finish review: summary, effort cells, run type, Discard/Resume/Save ────
 
     private fun trackFinish(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         openFinishReview()
-        val s = suffix(mode)
-        shot("track-finish-$s")
+        val s = mode.suffix
+        rule.shot("track-finish-$s")
         // The plan-preselected Interval changed to Recovery (local state only), with
         // the action row pinned to the panel's bottom edge.
         rule.onNodeWithText("Recovery").performScrollTo().performClick()
         rule.waitForIdle()
-        shot("track-finish-bottom-$s")
+        rule.shot("track-finish-bottom-$s")
     }
 
     @Test fun trackFinishLight() = trackFinish(DarkMode.Light)
@@ -534,8 +462,8 @@ class ScreenshotRunsTest {
 
     @Test fun trackFinishFontScale130() {
         RuntimeEnvironment.setFontScale(1.3f)
-        theme(DarkMode.Light)
+        useDarkMode(DarkMode.Light)
         openFinishReview()
-        shot("track-finish-font130-light")
+        rule.shot("track-finish-font130-light")
     }
 }

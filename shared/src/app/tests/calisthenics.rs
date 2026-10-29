@@ -13,26 +13,7 @@ const MON: i64 = super::MON + 70;
 
 /// [`super::planned_calisthenics`] on this file's later `MON`.
 fn planned_calisthenics() -> (Engine, Model) {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(calisthenics_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    (app, model)
+    planned_on(calisthenics_profile(), [], MON)
 }
 
 fn place(ladder: Lad, rung: u8, at: i64) -> Event {

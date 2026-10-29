@@ -146,9 +146,8 @@ object ActiveRunStore {
                 }
             }
         }
-        // Thin an unbounded-length recovery back to the save-time cap so a very long
-        // interrupted run doesn't reload tens of thousands of fixes into memory (and
-        // the subsequent save would decimate to this same cap anyway).
+        // Thin to the save cap so RunSession's restored track holds what a save would
+        // send (this list still peaks at every recorded fix while reading).
         return thinForRecovery(out, segmentStarts = starts)
     }
 
@@ -189,38 +188,22 @@ object ActiveRunStore {
     }
 
     /**
-     * Thin a recovered track to at most ~[maxPoints] fixes. The sidecar appends
-     * EVERY raw fix for the whole run, the one place per-run growth is unbounded (a
-     * multi-hour run is tens of thousands of lines), so a naive recovery would load
-     * that entire list back into memory and re-send it. Mirrors the save-time
-     * decimation ([RunSession.decimatedTrackForCore], same [TRACK_DECIMATION_CAP]): a
-     * uniform stride that always keeps the two endpoints and every fix that opened a
-     * segment ([segmentStarts], remapped into the result). At this cap the kept cadence
-     * stays far below [MAX_FIX_GAP_SEC] for any realistic run, so dropping
-     * intermediate fixes can only WIDEN an existing gap and never fabricates a new
-     * segment boundary. No-op below the cap. Pure, so it is unit-tested directly.
+     * Thin a recovered track to ~[maxPoints] fixes with the save's rule
+     * ([decimationKeep]): a uniform stride plus the last fix and every fix that opened
+     * a segment ([segmentStarts], remapped into the result). Dropping fixes only widens
+     * gaps; a widened gap opens a new segment only once stride × fix cadence exceeds
+     * [MAX_FIX_GAP_SEC] (at the 4 s screen-off cadence, past ~37,800 fixes, ≈42 h).
+     * No-op at or below the cap.
      */
     internal fun thinForRecovery(
         pts: List<GpsPoint>,
         maxPoints: Int = TRACK_DECIMATION_CAP,
         segmentStarts: Collection<Int> = emptyList(),
     ): RecoveredTrack {
-        val n = pts.size
-        val starts = segmentStarts.filter { it in 1 until n }.toSortedSet()
-        if (n <= maxPoints || maxPoints < 2) return RecoveredTrack(pts, starts.toList())
-        // Ceil division so the strided count never exceeds the cap.
-        val stride = ((n + maxPoints - 1) / maxPoints).coerceAtLeast(1)
-        val out = ArrayList<GpsPoint>()
-        val outStarts = ArrayList<Int>()
-        for (i in 0 until n) {
-            val opens = i in starts
-            // Always keep the true final fix (the end of the run) even if the stride
-            // skips past it, and every segment's first fix so the boundary survives.
-            if (i % stride != 0 && i != n - 1 && !opens) continue
-            if (opens) outStarts.add(out.size)
-            out.add(pts[i])
-        }
-        return RecoveredTrack(out, outStarts)
+        val starts = segmentStarts.filterTo(HashSet()) { it in 1 until pts.size }
+        val kept = decimationKeep(pts.size, maxPoints, starts)
+        val thinned = if (kept.size == pts.size) pts else kept.map(pts::get)
+        return RecoveredTrack(thinned, remapStarts(kept, starts))
     }
 }
 

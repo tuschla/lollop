@@ -3,6 +3,7 @@ package app.milestone.widget
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.util.Log
@@ -21,14 +22,14 @@ import kotlinx.coroutines.launch
 
 /**
  * The widget's receiver. Besides Glance's own updates it handles the day
- * changing under a stored snapshot: the local-midnight tick ([ACTION_MIDNIGHT]),
- * the system's date change and a clock change mark a snapshot from another day
- * stale; a time zone change marks it stale outright. Either way the widget then
- * reads "Open lollop to update" until the app publishes a fresh model. A clock
- * change within the same day (network time corrects the clock by seconds) leaves
- * the snapshot alone. Each of these, and a locale change, also redraws the Quick
- * Settings tile ([requestTileRefresh]), whose face depends on the day and the
- * language; the midnight tick runs while a widget or the tile is placed.
+ * changing under a stored snapshot: the local-midnight tick ([ACTION_MIDNIGHT])
+ * and a clock change mark a snapshot from another day stale; a time zone change
+ * marks it stale outright. Either way the widget then reads "Open lollop to
+ * update" until the app publishes a fresh model. A clock change within the same
+ * day (network time corrects the clock by seconds) leaves the snapshot alone.
+ * Each of these, and a locale change, also redraws the Quick Settings tile
+ * ([requestTileRefresh]), whose face depends on the day and the language; the
+ * midnight tick runs while a widget or the tile is placed.
  */
 class TodayWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = TodayWidget()
@@ -46,7 +47,7 @@ class TodayWidgetReceiver : GlanceAppWidgetReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val force = when (intent.action) {
             Intent.ACTION_TIMEZONE_CHANGED -> true
-            ACTION_MIDNIGHT, Intent.ACTION_DATE_CHANGED, Intent.ACTION_TIME_CHANGED -> false
+            ACTION_MIDNIGHT, Intent.ACTION_TIME_CHANGED -> false
             Intent.ACTION_LOCALE_CHANGED -> null
             else -> return super.onReceive(context, intent)
         }
@@ -78,7 +79,7 @@ internal object WidgetMidnight {
 
     fun hasWidgets(ctx: Context): Boolean =
         AppWidgetManager.getInstance(ctx)
-            ?.getAppWidgetIds(android.content.ComponentName(ctx, TodayWidgetReceiver::class.java))
+            ?.getAppWidgetIds(ComponentName(ctx, TodayWidgetReceiver::class.java))
             ?.isNotEmpty() == true
 
     private fun pendingIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(

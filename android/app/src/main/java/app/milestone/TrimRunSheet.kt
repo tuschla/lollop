@@ -66,10 +66,8 @@ private const val TrimInactiveAlpha = 0.12f
  * on confirm [onConfirm] gets the absolute unix-second bounds. Distance and time
  * here are PREVIEW figures; the core re-derives the of-record ones from the trim.
  *
- * It takes the [route] already loaded ([rememberRunRoute]), never loading its own:
- * the body is final in the sheet's first frame, so its height can't change while
- * the sheet slides in. (Material3 1.4's sheet drops a height change that lands as
- * its open animation ends and rests at the old height, Trim below the screen.)
+ * Takes a loaded, [RunRoute.trimmable] [route] (see [rememberRunRoute] for why the
+ * sheet never loads its own).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,7 +78,6 @@ internal fun TrimRunSheetContent(
     onConfirm: (keepFromSec: Long, keepUntilSec: Long) -> Unit,
 ) {
     val unit = rememberDistanceUnit()
-    val segments = route.segments
     val points = route.track
     Column(
         modifier = Modifier
@@ -93,127 +90,119 @@ internal fun TrimRunSheetContent(
     ) {
         Text(stringResource(R.string.main_trim_run), color = OnBgBody, style = Type.Title)
 
-        val trimmable = points.size >= 2 && points.last().timeSec > points.first().timeSec
-        if (trimmable) {
-            val firstFixSec = points.first().timeSec
-            val lastFixSec = points.last().timeSec
-            // The slider works in RELATIVE seconds [0, span]: a Float can't represent
-            // an absolute unix second (~1.7e9) exactly, but a run's span (at most a
-            // few hours) sits well inside Float's exact-integer range.
-            val spanF = (lastFixSec - firstFixSec).toFloat()
-            // Saveable (keyed on the track) so a rotation keeps the chosen window under
-            // a still-open confirm, which would otherwise trim the whole track.
-            var range by rememberSaveable(firstFixSec, lastFixSec, stateSaver = FloatRangeSaver) {
-                mutableStateOf(0f..spanF)
-            }
-            val keepFromSec = (firstFixSec + Math.round(range.start).toLong())
-                .coerceIn(firstFixSec, lastFixSec)
-            val keepUntilSec = (firstFixSec + Math.round(range.endInclusive).toLong())
-                .coerceIn(firstFixSec, lastFixSec)
+        val firstFixSec = points.first().timeSec
+        val lastFixSec = points.last().timeSec
+        // The slider works in RELATIVE seconds [0, span]: a Float can't represent
+        // an absolute unix second (~1.7e9) exactly, but a run's span (at most a
+        // few hours) sits well inside Float's exact-integer range.
+        val spanF = (lastFixSec - firstFixSec).toFloat()
+        // Saveable (keyed on the track) so a rotation keeps the chosen window under
+        // a still-open confirm, which would otherwise trim the whole track.
+        var range by rememberSaveable(firstFixSec, lastFixSec, stateSaver = FloatRangeSaver) {
+            mutableStateOf(0f..spanF)
+        }
+        val keepFromSec = (firstFixSec + Math.round(range.start).toLong())
+            .coerceIn(firstFixSec, lastFixSec)
+        val keepUntilSec = (firstFixSec + Math.round(range.endInclusive).toLong())
+            .coerceIn(firstFixSec, lastFixSec)
 
-            // Fixes inside the window are contiguous (points are time-ordered), so a
-            // single walk finds the first/last kept index with no per-frame alloc.
-            var firstKept = -1
-            var lastKept = -1
-            for (i in points.indices) {
-                val t = points[i].timeSec
-                if (t in keepFromSec..keepUntilSec) {
-                    if (firstKept == -1) firstKept = i
-                    lastKept = i
-                }
+        // Fixes inside the window are contiguous (points are time-ordered), so a
+        // single walk finds the first/last kept index with no per-frame alloc.
+        var firstKept = -1
+        var lastKept = -1
+        for (i in points.indices) {
+            val t = points[i].timeSec
+            if (t in keepFromSec..keepUntilSec) {
+                if (firstKept == -1) firstKept = i
+                lastKept = i
             }
-            val keptCount = if (firstKept == -1) 0 else lastKept - firstKept + 1
-            val trackKm = points.last().cumKm
-            val keptKm = if (keptCount >= 2) {
-                trimPreviewShare(points[lastKept].cumKm - points[firstKept].cumKm, trackKm, run.distance_km)
-            } else {
-                0.0
-            }
-            val keptTime = fmtRunTime(trimKeptMovingSec(points, firstKept, lastKept, run.duration_min * 60.0))
-            val headKm = trimPreviewShare(if (firstKept >= 0) points[firstKept].cumKm else trackKm, trackKm, run.distance_km)
-            val tailKm = trimPreviewShare(if (lastKept >= 0) trackKm - points[lastKept].cumKm else 0.0, trackKm, run.distance_km)
-            val headLabel = runDistLabel(headKm, unit)
-            val tailLabel = runDistLabel(tailKm, unit)
-
-            if (segments.isNotEmpty()) TrimRouteMap(segments, run.entry_id, keepFromSec, keepUntilSec)
-
-            val startDesc = stringResource(R.string.trim_start_thumb)
-            val endDesc = stringResource(R.string.trim_end_thumb)
-            val startState = stringResource(R.string.trim_removed_state, headLabel)
-            val endState = stringResource(R.string.trim_removed_state, tailLabel)
-            RangeSlider(
-                value = range,
-                onValueChange = { range = it },
-                valueRange = 0f..spanF,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = ActionMinHeight),
-                startThumb = { TrimThumb(start = true, description = startDesc, state = startState) },
-                endThumb = { TrimThumb(start = false, description = endDesc, state = endState) },
-                track = { TrimTrack(it) },
-            )
-
-            // No-op guard: keeping <2 fixes, or the whole track (both bounds at the
-            // extremes), can't produce a meaningful trim.
-            val wholeTrack = keepFromSec <= firstFixSec && keepUntilSec >= lastFixSec
-            val canApply = keptCount >= 2 && !wholeTrack
-            Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-                Text(
-                    stringResource(R.string.main_trim_keeps, runDistLabel(keptKm, unit), keptTime),
-                    color = OnBgBody,
-                    style = Type.Title.merge(TabularFigures),
-                )
-                Text(
-                    if (wholeTrack) stringResource(R.string.trim_hint) else stringResource(R.string.trim_removes, headLabel, tailLabel),
-                    color = OnBgMuted,
-                    style = Type.Caption.merge(TabularFigures),
-                )
-            }
-
-            var confirm by rememberSaveable { mutableStateOf(false) }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
-            ) {
-                TextAction(stringResource(R.string.main_cancel), onClick = onCancel, modifier = Modifier.offset(x = -TextActionInset))
-                PrimaryButton(
-                    stringResource(R.string.main_trim_confirm),
-                    onClick = { confirm = true },
-                    enabled = canApply,
-                    modifier = Modifier.weight(1f),
-                    minHeight = LargeControlHeight,
-                )
-            }
-
-            if (confirm) {
-                val removedStartMin = Math.round((keepFromSec - firstFixSec) / 60.0).toInt()
-                val removedEndMin = Math.round((lastFixSec - keepUntilSec) / 60.0).toInt()
-                AlertDialog(
-                    onDismissRequest = { confirm = false },
-                    shape = RoundedCornerShape(Space.Card.dp),
-                    title = {
-                        Text(stringResource(R.string.main_trim_confirm_title, runDistLabel(keptKm, unit), keptTime))
-                    },
-                    text = {
-                        Text(stringResource(R.string.main_trim_confirm_message, removedStartMin, removedEndMin))
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            confirm = false
-                            onConfirm(keepFromSec, keepUntilSec)
-                        }) { Text(stringResource(R.string.main_trim_confirm)) }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { confirm = false }) { Text(stringResource(R.string.main_cancel)) }
-                    },
-                )
-            }
+        }
+        val keptCount = if (firstKept == -1) 0 else lastKept - firstKept + 1
+        val trackKm = points.last().cumKm
+        val keptKm = if (keptCount >= 2) {
+            trimPreviewShare(points[lastKept].cumKm - points[firstKept].cumKm, trackKm, run.distance_km)
         } else {
-            // Not trimmable: the route for context and an honest note.
-            RouteMapCard(segments, run.entry_id, distanceMarkers = false, recordKm = run.distance_km)
-            Text(stringResource(R.string.main_trim_unavailable), color = OnBgMuted, style = Type.Body)
+            0.0
+        }
+        val keptTime = fmtRunTime(trimKeptMovingSec(points, firstKept, lastKept, run.duration_min * 60.0))
+        val headKm = trimPreviewShare(if (firstKept >= 0) points[firstKept].cumKm else trackKm, trackKm, run.distance_km)
+        val tailKm = trimPreviewShare(if (lastKept >= 0) trackKm - points[lastKept].cumKm else 0.0, trackKm, run.distance_km)
+        val headLabel = runDistLabel(headKm, unit)
+        val tailLabel = runDistLabel(tailKm, unit)
+
+        TrimRouteMap(route.segments, keepFromSec, keepUntilSec)
+
+        val startDesc = stringResource(R.string.trim_start_thumb)
+        val endDesc = stringResource(R.string.trim_end_thumb)
+        val startState = stringResource(R.string.trim_removed_state, headLabel)
+        val endState = stringResource(R.string.trim_removed_state, tailLabel)
+        RangeSlider(
+            value = range,
+            onValueChange = { range = it },
+            valueRange = 0f..spanF,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = ActionMinHeight),
+            startThumb = { TrimThumb(start = true, description = startDesc, state = startState) },
+            endThumb = { TrimThumb(start = false, description = endDesc, state = endState) },
+            track = { TrimTrack(it) },
+        )
+
+        // No-op guard: keeping <2 fixes, or the whole track (both bounds at the
+        // extremes), can't produce a meaningful trim.
+        val wholeTrack = keepFromSec <= firstFixSec && keepUntilSec >= lastFixSec
+        val canApply = keptCount >= 2 && !wholeTrack
+        Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+            Text(
+                stringResource(R.string.main_trim_keeps, runDistLabel(keptKm, unit), keptTime),
+                color = OnBgBody,
+                style = Type.Title.merge(TabularFigures),
+            )
+            Text(
+                if (wholeTrack) stringResource(R.string.trim_hint) else stringResource(R.string.trim_removes, headLabel, tailLabel),
+                color = OnBgMuted,
+                style = Type.Caption.merge(TabularFigures),
+            )
+        }
+
+        var confirm by rememberSaveable { mutableStateOf(false) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+        ) {
             TextAction(stringResource(R.string.main_cancel), onClick = onCancel, modifier = Modifier.offset(x = -TextActionInset))
+            PrimaryButton(
+                stringResource(R.string.main_trim_confirm),
+                onClick = { confirm = true },
+                enabled = canApply,
+                modifier = Modifier.weight(1f),
+                minHeight = LargeControlHeight,
+            )
+        }
+
+        if (confirm) {
+            val removedStartMin = Math.round((keepFromSec - firstFixSec) / 60.0).toInt()
+            val removedEndMin = Math.round((lastFixSec - keepUntilSec) / 60.0).toInt()
+            AlertDialog(
+                onDismissRequest = { confirm = false },
+                shape = RoundedCornerShape(Space.Card.dp),
+                title = {
+                    Text(stringResource(R.string.main_trim_confirm_title, runDistLabel(keptKm, unit), keptTime))
+                },
+                text = {
+                    Text(stringResource(R.string.main_trim_confirm_message, removedStartMin, removedEndMin))
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirm = false
+                        onConfirm(keepFromSec, keepUntilSec)
+                    }) { Text(stringResource(R.string.main_trim_confirm)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirm = false }) { Text(stringResource(R.string.main_cancel)) }
+                },
+            )
         }
     }
 }
@@ -286,4 +275,40 @@ internal fun trimKeptMovingSec(points: List<TimedTrackPoint>, firstKept: Int, la
     if (firstKept < 0 || lastKept - firstKept < 1) return 0
     val window = points[lastKept].movingSec - points[firstKept].movingSec
     return Math.round(trimPreviewShare(window, points.last().movingSec, recordSec)).toInt()
+}
+
+/**
+ * One parsed GPX fix reduced to what the trim preview needs: its absolute
+ * epoch-second timestamp, the cumulative haversine distance (km) and the cumulative
+ * MOVING seconds from the track start up to this point. PREVIEW figures ONLY — the
+ * of-record distance/duration are always re-derived in the core after a trim event.
+ */
+data class TimedTrackPoint(val timeSec: Long, val cumKm: Double, val movingSec: Double)
+
+/**
+ * Parsed route [segments] reshaped for the trim preview: every fix flattened into one
+ * time-ordered list carrying its epoch-second time, the cumulative distance in km
+ * (the same running haversine sum [RouteTrack] colours by) and the cumulative moving
+ * time. A segment gap (a GPS pause between `<trkseg>`s) adds neither; within a
+ * segment a leg adds its seconds only when it clears [MIN_MOVING_SPEED_MPS], the
+ * core's moving-leg rule (`running::leg`), so standing still counts no time either.
+ */
+fun timedTrackFromSegments(segments: List<List<GpxFix>>): List<TimedTrackPoint> {
+    val out = ArrayList<TimedTrackPoint>()
+    var runningM = 0.0
+    var movingSec = 0.0
+    for (seg in segments) {
+        var prev: GpxFix? = null
+        for (fix in seg) {
+            if (prev != null) {
+                val legM = haversineM(prev.lat, prev.lon, fix.lat, fix.lon)
+                runningM += legM
+                val dt = (fix.timeSec - prev.timeSec).toDouble()
+                if (dt > 0.0 && legM / dt >= MIN_MOVING_SPEED_MPS) movingSec += dt
+            }
+            out += TimedTrackPoint(fix.timeSec, runningM / 1000.0, movingSec)
+            prev = fix
+        }
+    }
+    return out
 }

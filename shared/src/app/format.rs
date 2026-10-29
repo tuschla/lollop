@@ -184,7 +184,7 @@ pub(crate) fn f32_load_ceil(kg: f64) -> f64 {
 /// Format a kg figure: rounded ONCE to 0.1 kg, then printed as an integer when
 /// that is whole, else with one decimal (e.g. `92.5`; 99.97 → `100`).
 pub(super) fn fmt_kg(kg: f64) -> String {
-    fmt_rounded((kg * 10.0).round() / 10.0)
+    fmt_rounded(round_tenths(kg))
 }
 
 /// Format a pound figure: rounded ONCE to the nearest 0.5 lb (US plates and
@@ -194,8 +194,9 @@ pub(super) fn fmt_lb(lb: f64) -> String {
     fmt_rounded((lb * 2.0).round() / 2.0)
 }
 
-/// An already-rounded figure: integer when whole, else one decimal.
-fn fmt_rounded(v: f64) -> String {
+/// An already-rounded figure: integer when whole, else one decimal (`8`,
+/// `8.5`).
+pub(super) fn fmt_rounded(v: f64) -> String {
     if (v - v.round()).abs() < 1e-9 {
         format!("{:.0}", v.round())
     } else {
@@ -246,19 +247,19 @@ pub(super) fn fmt_weight(kg: f64, lb: bool) -> String {
 /// [`MIN_RATIO_BASE_KM`].
 pub(super) const MIN_RATIO_BASE_KG: f64 = 0.05;
 
-/// A km figure rounded ONCE to the tenth a distance line shows, half away from
-/// zero: the one rounding behind both the km line and its miles twin, so the
-/// pair always describe the same distance (`{:.1}` on the raw value would round
-/// an exact .x5 tie half to EVEN: "5.2 km" beside the "3.3 mi" of 5.3 km).
-pub(super) fn shown_km_tenths(km: f64) -> f64 {
-    (km * 10.0).round() / 10.0
+/// A figure rounded ONCE to one decimal, half away from zero. For distances it
+/// is the one rounding behind both the km line and its miles twin, so the pair
+/// always describe the same distance (`{:.1}` on the raw value would round an
+/// exact .x5 tie half to EVEN: "5.2 km" beside the "3.3 mi" of 5.3 km).
+pub(super) fn round_tenths(x: f64) -> f64 {
+    (x * 10.0).round() / 10.0
 }
 
-/// The km distance a line shows at one decimal ([`shown_km_tenths`]), restated
+/// The km distance a line shows at one decimal ([`round_tenths`]), restated
 /// in miles at one decimal with a trailing ".0" dropped ("7.5 mi", "5 mi"): the
 /// `_mi` twin of a km line for a shell that shows miles.
 pub(super) fn fmt_mi_of_km(km: f64) -> String {
-    let mi = shown_km_tenths(km) * 1000.0 / crate::running::MILE_M;
+    let mi = round_tenths(km) * 1000.0 / crate::running::MILE_M;
     // One decimal, a half rounded up (never to even).
     let tenths = mi * 10.0;
     let one = if tenths.fract() == 0.5 {
@@ -285,13 +286,13 @@ pub(super) fn is_ratio_base_km(km: f64) -> bool {
     km >= MIN_RATIO_BASE_KM
 }
 
-/// A km figure as a line shows it ("12.3 km", [`shown_km_tenths`]), or its
+/// A km figure as a line shows it ("12.3 km", [`round_tenths`]), or its
 /// miles twin.
 pub(super) fn fmt_km_or_mi(km: f64, mi: bool) -> String {
     if mi {
         fmt_mi_of_km(km)
     } else {
-        format!("{:.1} km", shown_km_tenths(km))
+        format!("{:.1} km", round_tenths(km))
     }
 }
 
@@ -399,10 +400,24 @@ pub(super) fn race_distance_label(km: f64) -> String {
 /// [`race_distance_label`] for the start of a line or a standalone label
 /// ("Half marathon", "Marathon", "10K").
 pub(super) fn race_distance_title(km: f64) -> String {
-    let label = race_distance_label(km);
-    let mut chars = label.chars();
+    capitalize_first(&race_distance_label(km))
+}
+
+/// `s` with its first character upper-cased ("easy" → "Easy").
+pub(super) fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => label,
+        None => String::new(),
+    }
+}
+
+/// Seconds as whole or half minutes ("2 min", "1.5 min") once they reach
+/// `min_whole` minutes, else as seconds ("45 s", "90 s" below 2 min).
+pub(super) fn fmt_secs_min(s: u32, min_whole: u32) -> String {
+    match (s / 60, s % 60) {
+        (m, 0) if m >= min_whole => format!("{m} min"),
+        (m, 30) if m >= min_whole => format!("{m}.5 min"),
+        _ => format!("{s} s"),
     }
 }

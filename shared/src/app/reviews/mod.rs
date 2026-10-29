@@ -31,6 +31,15 @@ pub(crate) use split::{submit_review_sets_session, submit_review_sets_weekly};
 /// leading. Safety signals never expire here.
 pub(super) const FEEDBACK_FRESH_DAYS: i64 = 7;
 
+/// Whether `day` is at most `days` before `today`; true without a clock or a
+/// date.
+fn fresh_within(today: Option<i64>, day: Option<i64>, days: i64) -> bool {
+    match (today, day) {
+        (Some(t), Some(d)) => t.saturating_sub(d) <= days,
+        _ => true,
+    }
+}
+
 /// The e1RM change that clears day-to-day noise: ±5 % (autoreg-006/007, Helms
 /// 2018). A new best counts only beyond it; the trend row bands on it too.
 const E1RM_NOISE_FRAC: f64 = 0.05;

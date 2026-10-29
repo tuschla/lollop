@@ -53,9 +53,6 @@ import org.robolectric.Shadows.shadowOf
  * is the on-disk bytes a killed process leaves behind plus [ProcessDeath.kill]
  * (every process-scoped singleton dropped, disk kept), and a "boot" is
  * [Core.restore] + the boot `SetToday`, exactly as the boot effect runs them.
- *
- * Long mode: `PERSIST_TORTURE_LONG=1` runs the 5-year log at the tracker's real
- * screen-off cadence (one fix / 4 s) instead of the default one fix / 10 s.
  */
 @RunWith(RobolectricTestRunner::class)
 class PersistenceTortureTest {
@@ -73,10 +70,7 @@ class PersistenceTortureTest {
         Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
         File(ctx.filesDir, "event-log.ndjson.import").delete()
-        // ActiveRunStore caches its file from the FIRST init of the process; each
-        // Robolectric test has its own filesDir, so point it at this test's.
-        ActiveRunStore.javaClass.getDeclaredField("file").apply { isAccessible = true }.set(ActiveRunStore, null)
-        ActiveRunStore.init(ctx)
+        QaHarness.resetActiveRunStore(ctx)
         sidecar.delete()
     }
 
@@ -102,7 +96,7 @@ class PersistenceTortureTest {
         val pts = (0 until 40).map { i ->
             GpsPoint(52.52 + i * 0.00012, 13.405 + (i % 7) * 0.00003, startSec + i * 5L, 5.0)
         }
-        return Event.LogRunTrack(pts, 0.0, 0.0, observedAt = pts.last().observedAt, entryId = entryId)
+        return Event.LogRunTrack(pts, 0.0, observedAt = pts.last().observedAt, entryId = entryId)
     }
 
     /** The committed history every crash test starts from: a profile, a plan, sets
@@ -113,7 +107,7 @@ class PersistenceTortureTest {
         Event.GeneratePlan(todayEpochDay() - 7),
         Event.LogSet("Kniebeuge – Über", 100.0, 5, 8.0, observedAt = at(3), entryId = at(3) * 1000),
         Event.LogSet("Bench Press", 80.0, 5, 8.0, observedAt = at(3, 300), entryId = at(3, 300) * 1000),
-        Event.LogRun(5.0, 27.5, 0.0, 0.0, observedAt = at(2), entryId = at(2) * 1000),
+        Event.LogRun(5.0, 27.5, 0.0, observedAt = at(2), entryId = at(2) * 1000),
         Event.SubmitCheckin(observedAt = at(1), sleepQuality = 4, soreness = 2, mood = 4, fatigue = 2, stress = 2),
         Event.DeleteEntry(Event.EntryKind.Set, at(3, 300) * 1000),
         track(at(1, 3600), at(1, 3600) * 1000),
@@ -218,8 +212,8 @@ class PersistenceTortureTest {
     /** A log big enough in superseded lines that [EventLog.load] rewrites it. */
     private fun compactableLog(): List<String> {
         val base = committed().map(::line)
-        val cooper = (0 until 40).map { """{"ComputeCooper":{"distance_m_12min":${2400 + it}.0}}""" }
-        return base.take(3) + cooper + base.drop(3)
+        val zones = (0 until 40).map { """{"ComputeHrZones":{"age_years":${30 + it}.0}}""" }
+        return base.take(3) + zones + base.drop(3)
     }
 
     /**
@@ -352,7 +346,7 @@ class PersistenceTortureTest {
             """{"LogMeal":{"kcal":540,"observed_at":${at(1, 900)}}}""",
             "\"ClearMeals\"",
             extraSetFuture,
-            line(Event.LogRun(6.0, 33.0, 0.0, 0.0, observedAt = at(1, 1200), entryId = at(1, 1200) * 1000))
+            line(Event.LogRun(6.0, 33.0, 0.0, observedAt = at(1, 1200), entryId = at(1, 1200) * 1000))
                 .replaceFirst("\"observed_at\"", "\"workout_type\":\"Fartlek\",\"observed_at\""),
         )
         // A torn tail forces load() to rewrite the file.
@@ -713,6 +707,20 @@ class PersistenceTortureTest {
         assertEquals(1, entryIdCount(next.entryId))
     }
 
+    /** An Activity recreation between the import's log swap and its restart re-runs
+     *  boot's [Core.restore]: it must not re-attach the detached log, or a queued
+     *  event would append to the imported file. */
+    @Test
+    fun aRestoreAfterTheImportDetachedTheLogDoesNotReattachIt() {
+        writeLog(committed())
+        reboot()
+        val before = logFile.readBytes()
+        Core.detachLog()
+        Core.restore(ctx)
+        assertTrue(Core.send(next).accepted)
+        assertTrue("nothing appended to the detached log", before.contentEquals(logFile.readBytes()))
+    }
+
     /** A log the app cannot read at all boots to a usable (empty) model flagged
      *  stale, so the user is told, never a crash, and its bytes are never touched. */
     @Test
@@ -736,11 +744,8 @@ class PersistenceTortureTest {
     // ── 8. Very large log (5 years) ─────────────────────────────────────────────
 
     /** Five years of a hybrid athlete's history as the app writes it, one GPS fix
-     *  every [fixEverySec] (default: one / 10 s; `PERSIST_TORTURE_LONG=1`: the
-     *  tracker's real screen-off cadence, one / 4 s). */
-    private fun fiveYearLog(
-        fixEverySec: Long = if (System.getenv("PERSIST_TORTURE_LONG") == "1") 4L else 10L,
-    ): Pair<File, Int> {
+     *  every [fixEverySec]. */
+    private fun fiveYearLog(fixEverySec: Long = 10L): Pair<File, Int> {
         val history = LongHistorySeed.build(days = 5 * 365, fixEverySec = fixEverySec)
         val big = File(ctx.cacheDir, "five-year.ndjson")
         big.bufferedWriter().use { w -> history.events.forEach { w.write(line(it)); w.write("\n") } }
@@ -750,11 +755,10 @@ class PersistenceTortureTest {
     /** Boot's [EventLog.load] of a 5-year log finishes in bounded time (host JVM). */
     @Test
     fun aFiveYearLogLoadsInBoundedTime() {
-        val (big, n) = fiveYearLog()
+        val big = fiveYearLog().first
         val t0 = System.nanoTime()
-        val loaded = EventLog.load(big)
+        EventLog.load(big)
         val ms = (System.nanoTime() - t0) / 1_000_000
-        println("PersistenceTortureTest: 5-year log ${big.length() / (1024 * 1024)} MiB, $n lines -> ${loaded.lines.size}, load $ms ms")
         big.delete()
         assertTrue("5-year load took $ms ms", ms < 20_000)
     }
@@ -815,11 +819,13 @@ class PersistenceTortureTest {
         }
     }
 
-    /** Runs [main]'s `main` in a child JVM with an `-Xmx[heapMb]m` cap. */
+    /** Runs [main]'s `main` in a child JVM with an `-Xmx[heapMb]m` cap and this JVM's
+     *  library path, so the child loads the same host core. */
     private fun runProbe(main: Class<*>, heapMb: Int, vararg args: String): Pair<Int, String> {
         val java = File(System.getProperty("java.home"), "bin/java").path
         val cp = System.getProperty("java.class.path")
-        val p = ProcessBuilder(java, "-Xmx${heapMb}m", "-cp", cp, main.name, *args)
+        val libs = "-Djava.library.path=" + System.getProperty("java.library.path")
+        val p = ProcessBuilder(java, "-Xmx${heapMb}m", libs, "-cp", cp, main.name, *args)
             .redirectErrorStream(true).start()
         val out = p.inputStream.bufferedReader().readText()
         assertTrue("probe finished", p.waitFor(120, TimeUnit.SECONDS))
@@ -898,10 +904,15 @@ class PersistenceTortureTest {
 }
 
 /** Child-JVM probe for [PersistenceTortureTest.aFiveYearLogLoadsInTheMinimumPhoneHeap]:
- *  boot's [EventLog.load] of the file in `args[0]`; exit 0 + `ms=` on success, 3 on OOM. */
+ *  boot's [EventLog.load] (the core's compaction included) of the file in `args[0]`;
+ *  exit 0 + `ms=` on success, 3 on OOM, 4 when the core library did not load. */
 object LoadProbe {
     @JvmStatic
     fun main(args: Array<String>) {
+        if (Core.compaction(emptyList()) == null) {
+            println("core library not loaded (java.library.path=${System.getProperty("java.library.path")})")
+            System.exit(4)
+        }
         val f = File(args[0])
         val t0 = System.nanoTime()
         try {

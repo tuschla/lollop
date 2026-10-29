@@ -59,10 +59,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
-import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -94,12 +91,11 @@ internal fun ProfileDestination(
     // keeps it a read-only overlay. `showReferences` is shared between the row
     // that opens it and this pre-LazyColumn sheet, so it stays in the parent; the
     // section gets a callback.
-    var showReferences by remember { mutableStateOf(false) }
+    var showReferences by rememberSaveable { mutableStateOf(false) }
     if (showReferences) {
         ModalBottomSheet(
             onDismissRequest = { showReferences = false },
-            // Fully expanded only: a half-height detent made Back collapse the
-            // sheet to it first, so closing took two presses.
+            // Fully expanded only, so Back closes it in one press.
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = BgSunken,
         ) {
@@ -117,9 +113,8 @@ internal fun ProfileDestination(
     if (tool != null) {
         ModalBottomSheet(
             onDismissRequest = { activeTool = null },
-            // Open fully expanded: every calculator form (keypad + fields +
-            // result cards) exceeds the partial detent, which left the keypad
-            // and results below the fold and forced a second drag.
+            // Fully expanded: every calculator form (keypad, fields, results)
+            // exceeds the partial detent.
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = BgSunken,
         ) {
@@ -140,8 +135,7 @@ internal fun ProfileDestination(
     val revealViewport = remember { RevealViewport() }
     // The pinned hold banner above comes and goes with a health or age answer,
     // moving this list's top edge by its height. Scroll by the same amount so the
-    // row just toggled stays under the finger instead of jumping ~450 px (and a
-    // follow-up tap landing on a different toggle).
+    // row just toggled stays under the finger.
     val scope = rememberCoroutineScope()
     // Last laid-out top edge (NaN before the first layout); read only in the layout
     // callback, so a plain holder, not snapshot state.
@@ -346,15 +340,16 @@ private fun LazyListScope.UnitsSection(ctx: Context, model: ViewModel, onEvent: 
                     // Hidden until a profile exists (nothing to write to yet).
                     val profile = model.profile
                     if (profile != null) {
+                        val draft = ProfileDraft.from(profile)
                         SegmentedEnumRow(
                             label = stringResource(R.string.main_label_weight),
                             values = listOf(WeightUnit.Kg, WeightUnit.Lb),
-                            current = if (profile.weight_lb) WeightUnit.Lb else WeightUnit.Kg,
+                            current = draft.weightUnit,
                             display = { weightSuffix(it) },
                             onSelect = { sel ->
                                 val lb = sel == WeightUnit.Lb
-                                if (lb != profile.weight_lb) {
-                                    onEvent(ProfileDraft.from(profile).toEvent(model.today()).copy(weightLb = lb))
+                                if (lb != draft.weightLb) {
+                                    onEvent(draft.toEvent(model.today()).copy(weightLb = lb))
                                 }
                             },
                         )
@@ -407,9 +402,10 @@ private fun LazyListScope.UnitsSection(ctx: Context, model: ViewModel, onEvent: 
 /** Live pace-bucket sizes offered, in minutes of moving time. */
 private val PACE_BUCKET_MINUTE_OPTIONS = listOf(1, 2, 3, 4, 5, 6, 8, 10)
 
-/** During training: the rest-timer alert (lifting) and keep-screen-on while a
- *  run records (running). Each row hides with its modality. Device prefs, not
- *  coaching state, so they live in [AppSettings], never in the event log. On
+/** During training: the rest-timer alert (lifting), keep-screen-on while a run
+ *  records (running) and the session reminder ([SessionReminderRows]). The first
+ *  two hide with their modality. Device prefs, not coaching state, so they live
+ *  in [AppSettings] and [SessionReminder], never in the event log. On
  *  Android 16+ with Live Updates turned off for the app, a notice says why the run
  *  and rest timer have no status bar chip and links to the system switch. */
 private fun LazyListScope.TrainingAlertsSection(ctx: Context, model: ViewModel) {
@@ -441,6 +437,7 @@ private fun LazyListScope.TrainingAlertsSection(ctx: Context, model: ViewModel) 
                             onCheckedChange = { AppSettings.setKeepScreenOn(ctx, it) },
                         )
                     }
+                    SessionReminderRows(ctx)
                     // Re-checked on every resume, so it clears once the user turns Live
                     // Updates back on in the system screen it opens.
                     var liveUpdatesOff by remember { mutableStateOf(liveUpdatesTurnedOff(ctx)) }
@@ -499,7 +496,7 @@ private fun LazyListScope.DangerZoneSection(onClearAll: () -> Unit) {
         val status = LocalStatusColors.current
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
             SectionOverline(stringResource(R.string.main_overline_danger_zone))
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = ActionMinHeight)
@@ -507,21 +504,18 @@ private fun LazyListScope.DangerZoneSection(onClearAll: () -> Unit) {
                     .border(1.dp, status.danger.copy(alpha = 0.4f), RoundedCornerShape(Space.Card.dp))
                     .clickable(role = Role.Button) { onClearAll() }
                     .padding(Space.Card.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+                verticalArrangement = Arrangement.spacedBy(Space.Xs.dp, Alignment.CenterVertically),
             ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-                    Text(
-                        stringResource(R.string.main_clear_all_data),
-                        color = DangerText,
-                        style = Type.Body.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                    Text(
-                        stringResource(R.string.main_danger_zone_sub),
-                        color = OnBgFaint,
-                        style = Type.Caption,
-                    )
-                }
+                Text(
+                    stringResource(R.string.main_clear_all_data),
+                    color = DangerText,
+                    style = Type.Body.copy(fontWeight = FontWeight.SemiBold),
+                )
+                Text(
+                    stringResource(R.string.main_danger_zone_sub),
+                    color = OnBgFaint,
+                    style = Type.Caption,
+                )
             }
         }
     }
@@ -674,12 +668,11 @@ private fun importSummaryText(s: ImportSummary): String {
     if (first == null || last == null) {
         return pluralStringResource(R.plurals.main_import_file_entries_undated, s.entries, s.entries)
     }
-    val fmt = remember { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM) }
-    val from = LocalDate.ofEpochDay(first).format(fmt)
+    val from = epochDayLabel(first)
     val range = if (first == last) {
         from
     } else {
-        stringResource(R.string.main_import_date_range, from, LocalDate.ofEpochDay(last).format(fmt))
+        stringResource(R.string.main_import_date_range, from, epochDayLabel(last))
     }
     return pluralStringResource(R.plurals.main_import_file_entries, s.entries, s.entries, range)
 }

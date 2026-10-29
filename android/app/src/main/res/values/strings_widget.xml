@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home screen widget (widget/TodayWidget.kt). Reuses the Today screen's hold,
+<!-- Home screen widget (widget/TodayWidget.kt). Reuses the Today screen's
      plan and button strings; these are the widget's own. -->
 <resources>
-    <!-- Widget picker -->
-    <string name="widget_label">Today</string>
+    <!-- widget_overline_today is also the name in the widget picker. -->
     <string name="widget_description">Today\'s session, rest day or pause, with a Log button.</string>
 
     <string name="widget_overline_today">Today</string>
@@ -17,6 +16,9 @@
     <!-- %1$s = next session title, %2$s = its short date ("Thu, Oct 15"). -->
     <string name="widget_next">Next: %1$s, %2$s</string>
     <string name="widget_session_done">Session done</string>
+    <!-- Under the "Training paused" title: the hold's reason is health detail, so
+         the home screen does not show it. -->
+    <string name="widget_paused_body">Open lollop for details.</string>
     <!-- Trails a settled plan item: "Squat · Done". -->
     <string name="widget_item_done">Done</string>
     <!-- %1$s = item name, %2$s = its detail or "Done". -->

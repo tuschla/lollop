@@ -1,35 +1,16 @@
 package app.milestone
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 
 /** Pain character → core [PainKind] (schema.rs, File-08 Table 4.1). The labels
  *  are human; the mapping decides the gate: SharpJoint hard-stops, tendon pain
@@ -81,9 +62,8 @@ private val PainSeverityValues = (0..10).toList()
  * sends a [PainDetail] via [Event.SubmitReadiness] and the core decides hold vs
  * modify-and-monitor. Nothing is pre-answered: character starts at "Not sure"
  * (the conservative stop) and severity unrated (sent as absent), so one quick
- * tap never records a pain the user didn't describe. Under a pinning host
- * ([LocalEditorPinnedActions]) the form scrolls and the commit stays pinned
- * above the navigation bar.
+ * tap never records a pain the user didn't describe. The "Report pain" commit is
+ * [EditorScaffold]'s danger primary and always enabled (safety escape hatch).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -93,7 +73,6 @@ fun PainTriageSheet(
     onDirtyChange: (Boolean) -> Unit = {},
     onSubmit: (Event.SubmitReadiness) -> Unit,
 ) {
-    val status = LocalStatusColors.current
     var location by rememberSaveable { mutableStateOf<PainArea?>(null) }
     var character by rememberSaveable { mutableStateOf(PainCharacter.NotSure) }
     var severity by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -106,9 +85,7 @@ fun PainTriageSheet(
     var observedAt by rememberSaveable { mutableStateOf(AppClock.nowSec()) }
     // The now captured at open, so a real backdate is told apart from the default.
     val initialObservedAt = rememberSaveable { observedAt }
-    // Any filled-in triage marks the sheet dirty: the host's swipe-down and the
-    // sheet's own X then guard it like every other editor. The "Report pain"
-    // submit stays always enabled regardless (safety escape hatch).
+    // Any filled-in triage marks the sheet dirty, so a close or swipe-down asks first.
     val dirty = location != null ||
         character != PainCharacter.NotSure ||
         severity != null ||
@@ -116,24 +93,45 @@ fun PainTriageSheet(
         worseningAfter24h ||
         observedAt != initialObservedAt
     ReportDirty(dirty, onDirtyChange)
-    var confirmDiscard by remember { mutableStateOf(false) }
-    // In-flight latch, same as EditorScaffold's Save pill: onSubmit is
-    // `{ ev -> onEvent(ev); onDismiss() }` and the sheet takes ~300 ms to hide, so
-    // a second tap in that window fires a second SubmitReadiness and double-reports
-    // the pain. This button isn't an EditorScaffold pill (it's the danger commit),
-    // so it needs its own latch. Plain `remember` boolean, it resets when the sheet
-    // is disposed and re-mounted, and we DON'T disable the button (HR3: the pain
-    // escape hatch must never look blocked), we just swallow re-taps below.
-    var submitted by remember { mutableStateOf(false) }
     val characterLabels = PainCharacter.entries.associateWith { stringResource(it.labelRes) }
     val severityText = PainSeverityValues.associateWith { stringResource(R.string.log_pain_severity_value, it) }
     val severitySpoken = PainSeverityValues.associateWith { stringResource(R.string.rating_pain_spoken, it) }
 
-    val form: @Composable () -> Unit = {
+    EditorScaffold(
+        title = stringResource(R.string.log_report_pain),
+        dirty = dirty,
+        saveEnabled = true,
+        onClose = onClose,
+        onSave = {
+            onSubmit(
+                Event.SubmitReadiness(
+                    signal = ReadinessSignal.Pain,
+                    value = 1.0,
+                    observedAt = observedAt,
+                    pain = PainDetail(
+                        kind = character.kind,
+                        // Unrated stays absent on the wire; the core treats an
+                        // unrated tendon report conservatively.
+                        severity = severity,
+                        trend = when {
+                            worseningAfter24h -> PainTrend.WorseningAfter24h
+                            rising -> PainTrend.Rising
+                            else -> PainTrend.Stable
+                        },
+                        persists = false,
+                        location = location?.wire,
+                    ),
+                )
+            )
+        },
+        // A neutral action, not an asserted outcome: the core decides hold vs
+        // modify-and-monitor from the report.
+        actionLabel = stringResource(R.string.log_report_pain),
+        danger = true,
+    ) {
         Text(
             // Honest for BOTH core outcomes: a red-flag report becomes a hold, a
-            // tolerable one a modify-and-monitor adjustment. The core decides the
-            // tier from what's reported, so the copy must not assert a hold up-front.
+            // tolerable one a modify-and-monitor adjustment.
             stringResource(R.string.log_pain_intro),
             color = OnBgMuted,
             style = Type.Caption,
@@ -172,88 +170,9 @@ fun PainTriageSheet(
                 testTag = "pain-severity",
                 hint = stringResource(R.string.log_optional),
             )
-            SwitchRow(stringResource(R.string.log_pain_worse), rising) { rising = it }
-            SwitchRow(stringResource(R.string.pain_trend_worsening), worseningAfter24h) { worseningAfter24h = it }
+            LabeledSwitchRow(stringResource(R.string.log_pain_worse), rising) { rising = it }
+            LabeledSwitchRow(stringResource(R.string.pain_trend_worsening), worseningAfter24h) { worseningAfter24h = it }
             ObservedAtRow(observedAt, withTime = true) { observedAt = it }
-        }
-    }
-
-    Column(
-        // The danger commit is the sheet's last row: keep it above the system
-        // navigation bar.
-        modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
-        verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
-    ) {
-        // Header: close (back to the chooser) + centered title. No Save: the
-        // commit is the danger "Report pain" button below, deliberately distinct.
-        EditorTitleRow(stringResource(R.string.log_report_pain)) {
-            if (dirty) confirmDiscard = true else onClose()
-        }
-        if (LocalEditorPinnedActions.current) {
-            // The host leaves scrolling to the editor: the form scrolls between
-            // the header and the always-visible commit.
-            Box(modifier = Modifier.weight(1f, fill = false).fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
-                ) { form() }
-            }
-        } else {
-            form()
-        }
-        // Danger commit. Always enabled: the bare/uncertain report is the safety
-        // escape hatch and must never be blocked (HR3).
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = ActionMinHeight)
-                .clip(RoundedCornerShape(Space.Card.dp))
-                .background(status.danger)
-                .clickable(role = Role.Button) {
-                    // Swallow re-taps: the first commit is the only commit, so a
-                    // double-tap in the sheet's dismiss window can't send two reports.
-                    if (!submitted) {
-                        submitted = true
-                        onSubmit(
-                            Event.SubmitReadiness(
-                                signal = ReadinessSignal.Pain,
-                                value = 1.0,
-                                observedAt = observedAt,
-                                streak = 0,
-                                pain = PainDetail(
-                                    kind = character.kind,
-                                    // Unrated stays absent on the wire; the core
-                                    // treats an unrated tendon report conservatively.
-                                    severity = severity,
-                                    trend = when {
-                                        worseningAfter24h -> PainTrend.WorseningAfter24h
-                                        rising -> PainTrend.Rising
-                                        else -> PainTrend.Stable
-                                    },
-                                    persists = false,
-                                    location = location?.wire,
-                                ),
-                            )
-                        )
-                    }
-                }
-                .padding(Space.Card.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                // Neutral action, not an asserted outcome: the core decides hold
-                // vs modify-and-monitor from the report, so the button never
-                // promises a hold on a tolerable pain.
-                stringResource(R.string.log_report_pain),
-                color = Color.White,
-                style = Type.Body.copy(fontWeight = FontWeight.ExtraBold),
-            )
-        }
-    }
-    if (confirmDiscard) {
-        DiscardEntryDialog(onKeepEditing = { confirmDiscard = false }) {
-            confirmDiscard = false
-            onClose()
         }
     }
 }

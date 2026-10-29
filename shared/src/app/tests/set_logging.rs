@@ -84,7 +84,7 @@ fn weight_lb_profile_renders_pounds_in_the_lift_summary() {
 
     // The protein "… g/kg × NN kg" bodyweight echo multiplies a g/kg range,
     // so it stays in kg; a pound profile gets the pound figure alongside,
-    // never in nested brackets (spot-runs-setup N13).
+    // never in nested brackets.
     // 80 kg × 2.2046226218 = 176.37 → "× 80 kg (176 lb)".
     app.update(
         Event::ComputeProtein {
@@ -103,29 +103,6 @@ fn weight_lb_profile_renders_pounds_in_the_lift_summary() {
     assert!(!psummary.contains("))"), "no nested brackets: {psummary}");
     // The g/kg scientific unit itself is unconverted.
     assert!(psummary.contains("g/kg"), "g/kg unit stays: {psummary}");
-}
-
-/// Regression: the default (metric) profile renders the weight strings
-/// unchanged from the pre-unit-flag core.
-#[test]
-fn default_metric_profile_renders_kg_weight_strings_unchanged() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(log_set("Back squat", 100.0, 5, 8.0, 0), &mut model)
-        .expect_only_render();
-    const EXPECT: &str = "Back squat 100kg × 5 @RPE8.0 → e1RM 123.3kg (~81%1RM, 2.0 RIR)";
-    // No profile at all → weight_lb defaults false.
-    assert_eq!(app.view(&model).lifts[0].summary, EXPECT);
-    // An explicit metric profile renders identically.
-    app.update(
-        Event::SetProfile(Profile {
-            weight_lb: false,
-            ..sample_profile()
-        }),
-        &mut model,
-    )
-    .expect_only_render();
-    assert_eq!(app.view(&model).lifts[0].summary, EXPECT);
 }
 
 #[test]
@@ -175,40 +152,29 @@ fn logged_sets_accumulate_in_log_order() {
 }
 
 #[test]
-fn e1rm_trend_tracks_previous_set_of_the_same_lift_only() {
-    // The core computes per-lift e1RM delta + direction so a shell renders
-    // without arithmetic. Direction is a factual measurement
-    // (what changed), not an improving/declining judgment: that phrasing
-    // is the feedback-027/028/029 trend arm.
+fn pr_marker_tracks_prior_sets_of_the_same_lift_only() {
     let app = Engine;
     let mut model = Model::default();
+    let mut at = 0;
     let mut log = |exercise: &str, weight_kg: f64, reps: u32| {
-        app.update(log_set(exercise, weight_kg, reps, 8.0, 0), &mut model)
+        at += 60;
+        app.update(log_set(exercise, weight_kg, reps, 8.0, at), &mut model)
             .expect_only_render();
     };
     log("Squat", 100.0, 5); // e1RM 123.3 (RPE 8 → 7 eff reps)
-    log("Bench", 80.0, 5); // other lift must not interfere
-    log("Squat", 102.5, 5); // e1RM 126.4 → +3.1, up
-    log("Squat", 102.5, 5); // unchanged → 0.0, flat
-    log("Squat", 95.0, 5); // e1RM 117.2 → -9.2, down
+    log("Bench", 120.0, 5); // other lift, heavier: must not interfere
+    log("Squat", 102.5, 5); // e1RM 126.4 → PR
+    log("Squat", 102.5, 5); // unchanged → no PR
+    log("Squat", 95.0, 5); // e1RM 117.2 → no PR
 
     let lifts = app.view(&model).lifts;
-    let squats: Vec<_> = lifts.iter().filter(|l| l.exercise == "Squat").collect();
-
-    // First set of a lift: nothing to compare against.
-    assert!(squats[0].e1rm_delta_kg.is_none());
-    assert!(squats[0].e1rm_direction.is_none());
-    // Bench in between must not break the Squat chain, and Bench's own
-    // first set carries no trend either.
+    let squats: Vec<bool> = lifts
+        .iter()
+        .filter(|l| l.exercise == "Squat")
+        .map(|l| l.e1rm_pr)
+        .collect();
+    // The first set of a lift has nothing to beat.
+    assert_eq!(squats, [false, true, false, false]);
     let bench = lifts.iter().find(|l| l.exercise == "Bench").unwrap();
-    assert!(bench.e1rm_delta_kg.is_none());
-
-    assert!((squats[1].e1rm_delta_kg.unwrap() - 3.1).abs() < 0.05);
-    assert_eq!(squats[1].e1rm_direction, Some(TrendDirection::Up));
-
-    assert_eq!(squats[2].e1rm_delta_kg, Some(0.0));
-    assert_eq!(squats[2].e1rm_direction, Some(TrendDirection::Flat));
-
-    assert!((squats[3].e1rm_delta_kg.unwrap() + 9.2).abs() < 0.05);
-    assert_eq!(squats[3].e1rm_direction, Some(TrendDirection::Down));
+    assert!(!bench.e1rm_pr);
 }

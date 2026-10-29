@@ -37,6 +37,7 @@ import app.milestone.todayEpochDay
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -141,6 +142,9 @@ class OwnerJourneysTest {
         rule.checkInIll(R.string.log_illness_below_neck)
         rule.waitForState { EventDispatcher.model.value?.train_blocked == true }
         rule.assertTextCountEventually(doNotTrain, 1)
+        // Flu / fever / body aches is the below-neck-or-fever tier.
+        val illness = journeyLog().last { it.variant == "SubmitReadiness" && it.payload["signal"].toString().contains("Illness") }
+        assertEquals(2.0, illness.payload["value"]!!.jsonPrimitive.double, 0.0)
         val labels = resolveLabels()
         assertEquals("one illness action: $labels", 1, labels.size)
 

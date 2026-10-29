@@ -6,14 +6,11 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import java.util.Locale
@@ -33,18 +30,24 @@ private fun runEditEvent(
     // was given as % of max or not at all.
     avgHrBpm: Double?,
 ): Event = when {
-    initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, 0.0, observedAt, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm, utcOffsetSec = utcOffsetSec())
+    initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, observedAt, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm, utcOffsetSec = utcOffsetSec())
     // observedAtFallback = the row's ORIGINAL stamp → replace, don't duplicate.
     initial.entry_id != 0L ->
-        Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, 0.0, observedAt, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
-    else -> Event.AmendRun(0L, distanceKm, durationMin, hrPctMax, 0.0, initial.observed_at, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
+        Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, observedAt, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
+    else -> Event.AmendRun(0L, distanceKm, durationMin, hrPctMax, initial.observed_at, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
 }
 
 /** Which numeric field the run editor's shared keypad currently edits. */
 private enum class RunField { Distance, Duration, HeartRate }
 
-/** The run editor's distance ceiling, km (mi converts it exactly). */
+/** The run editor's distance ceiling, km. */
 private const val RunDistanceMaxKm = 100.0
+
+/** The distance field's ceiling in [unit]: 100 km, or that limit on the field's
+ *  0.01 mi grid (62.14 mi, which saves as 100.00 km), so a ± chip or a prefill at
+ *  the ceiling stays valid. */
+internal fun runDistanceMax(unit: DistanceUnit): Double =
+    if (unit == DistanceUnit.Mi) Math.round(kmToMi(RunDistanceMaxKm) * 100.0) / 100.0 else RunDistanceMaxKm
 
 /** The run editor's duration ceiling, minutes (10 h). */
 private const val RunDurationMaxMin = 600.0
@@ -63,8 +66,7 @@ internal val PlausibleHrMaxBpm = 100.0..240.0
 internal val TanakaAgeRange = 5.0..100.0
 
 /**
- * Manual run entry for runs recorded without GPS tracking. The spike baseline
- * (`longestRecentKm`) is left at 0: the core derives it from prior logged runs.
+ * Manual run entry for runs recorded without GPS tracking.
  * Distance, duration and the optional average heart rate share one in-form
  * [NumericKeypad]; tapping a field switches the keypad's target. Every buffer
  * is parsed at submit exactly as displayed (display-committed invariant); an
@@ -79,15 +81,11 @@ fun LogRunEditor(
     // Seed the stamp to a plan day's local noon when logging a PAST prescribed run
     // (null falls back to now). The date chip stays user-editable.
     initialObservedAt: Long? = null,
-    // NEW-mode coach prescription. The wire PrescriptionView carries no structured
-    // distance/duration for a run, so there is nothing to prefill and the buffers
-    // stay empty; the editor never fabricates a run (HARD RULE 1).
-    prescription: PrescriptionView? = null,
     // NEW-mode run type of the planned run this entry logs (the Finish review's
     // rule, [workoutTypeForPlan]); preselected, still the user's to change.
     plannedType: WorkoutType? = null,
     // The athlete's profile: whether the core can turn an average bpm into %HRmax.
-    profile: ProfileView? = EventDispatcher.model.collectAsState().value?.profile,
+    profile: ProfileView?,
     onClose: () -> Unit = {},
     // Report unsaved-edits state so a host sheet's swipe-down can guard it.
     onDirtyChange: (Boolean) -> Unit = {},
@@ -126,20 +124,8 @@ fun LogRunEditor(
     // (Back closes the keypad before it asks to discard or closes the editor);
     // tapping a field opens it again.
     var keypadOpen by rememberSaveable { mutableStateOf(true) }
-    // The keypad sits right under the field it types into. A short window (a
-    // landscape phone) shows less than the fields and the keypad, so whenever the
-    // keypad opens or retargets it is scrolled into view, then its field above it:
-    // the user sees the value and the keypad's top rows, never a keypad below the
-    // fold that Back would fold unseen.
-    val keypadRequester = remember { BringIntoViewRequester() }
+    // Each field's slot, revealed after its keypad so the value shows above the keys.
     val fieldRequesters = remember { RunField.entries.associateWith { BringIntoViewRequester() } }
-    LaunchedEffect(keypadOpen, active) {
-        if (keypadOpen) {
-            withFrameNanos { }
-            keypadRequester.bringIntoView()
-            fieldRequesters.getValue(active).bringIntoView()
-        }
-    }
     // Average heart rate: ONE keypad field, empty = not recorded. The core treats
     // hr_pct_max == 0 as "no HR sample" and reports zone "-" rather than
     // fabricating one, so a run logged without a monitor sends 0. bpm, the figure
@@ -186,9 +172,7 @@ fun LogRunEditor(
 
     val distParsed = parseKeypadNumber(distText)
     val durParsed = durationDigitsToMin(durDigits)
-    // Bound in the displayed unit: the mi ceiling is the EXACT converted km limit
-    // (62.14 mi) so a wire-valid near-max km run stays editable in mi mode.
-    val distMax = if (unit == DistanceUnit.Mi) kmToMi(RunDistanceMaxKm) else RunDistanceMaxKm
+    val distMax = runDistanceMax(unit)
     val distValid = distParsed != null && distParsed in 0.0..distMax
     val durValid = durParsed != null && durParsed in 0.0..RunDurationMaxMin
     // A blank buffer is "not entered yet", not an error: no red, Save stays gated.
@@ -201,37 +185,6 @@ fun LogRunEditor(
     // surface a run-specific caption so the dead button has a reason.
     val positive = (distParsed ?: 0.0) > 0.0 && (durParsed ?: 0.0) > 0.0
     val zeroBlocksSave = distValid && durValid && !positive
-
-    fun keyIn(key: Char) {
-        when (active) {
-            RunField.Distance -> {
-                distText = editNumericBuffer(distText, key, fresh)
-                distFresh = false
-            }
-            RunField.Duration -> {
-                durDigits = editDurationDigits(durDigits, key, fresh)
-                durFresh = false
-            }
-            RunField.HeartRate -> hrText = editNumericBuffer(hrText, key, fresh)
-        }
-        fresh = false
-        dirty = true
-    }
-    fun backspace() {
-        when (active) {
-            RunField.Distance -> {
-                distText = distText.dropLast(1)
-                distFresh = false
-            }
-            RunField.Duration -> {
-                durDigits = durDigits.dropLast(1)
-                durFresh = false
-            }
-            RunField.HeartRate -> hrText = hrText.dropLast(1)
-        }
-        fresh = false
-        dirty = true
-    }
 
     val runSavedText = stringResource(R.string.log_run_saved)
     val viewLabel = stringResource(R.string.import_view)
@@ -271,12 +224,22 @@ fun LogRunEditor(
         },
     ) {
         BackHandler(enabled = keypadOpen) { keypadOpen = false }
+        fun edited() {
+            fresh = false
+            dirty = true
+        }
         // The shared keypad, right under the field it types into. Distance takes a
         // decimal; the h:mm:ss digits and the HR number don't.
         val keypadUnder: @Composable (RunField) -> Unit = { field ->
-            if (keypadOpen && active == field) {
-                Box(Modifier.bringIntoViewRequester(keypadRequester)) {
-                    NumericKeypad(onKey = { keyIn(it) }, onBackspace = { backspace() }, allowDecimal = field == RunField.Distance)
+            KeypadPanel(keypadOpen && active == field, alsoReveal = fieldRequesters.getValue(field)) {
+                when (field) {
+                    RunField.Distance -> NumericKeypad(distText, fresh, { distText = it; distFresh = false; edited() })
+                    RunField.Duration -> NumericKeypad(
+                        onKey = { durDigits = editDurationDigits(durDigits, it, fresh); durFresh = false; edited() },
+                        onBackspace = { durDigits = durDigits.dropLast(1); durFresh = false; edited() },
+                        allowDecimal = false,
+                    )
+                    RunField.HeartRate -> NumericKeypad(hrText, fresh, { hrText = it; edited() }, allowDecimal = false)
                 }
             }
         }

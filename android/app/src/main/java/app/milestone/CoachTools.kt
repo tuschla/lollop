@@ -14,20 +14,16 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,20 +38,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /** The four on-demand Coach calculators, launched from the Profile calculator rows. */
 internal enum class CoachTool { Race, Volume, Protein, HrZones }
@@ -244,7 +238,7 @@ internal fun CoachToolSheet(
         CoachTool.HrZones -> stringResource(R.string.main_tool_hr_title)
     }
     // Weight-unit choice for the bodyweight keypad form below.
-    val weightUnit = if (model.profile?.weight_lb == true) WeightUnit.Lb else WeightUnit.Kg
+    val weightUnit = model.weightUnit()
     val scroll = rememberScrollState()
     var keypadOpen by rememberSaveable(tool) { mutableStateOf(false) }
     BackHandler(enabled = keypadOpen) { keypadOpen = false }
@@ -362,13 +356,20 @@ internal fun CoachToolSheet(
 private fun referenceGuidance(model: ViewModel): List<GuidanceView> =
     model.guidance.filterNot { it.section == "Profile" }
 
+/** Cards in the Reference library's Training load group: the weekly report rows plus
+ *  the heart-rate and session-effort (sRPE) load cards, two separate series. */
+private fun trainingLoadCount(model: ViewModel): Int =
+    model.weekly_report.size + (if (model.training_load != null) 1 else 0) + (if (model.srpe_load != null) 1 else 0)
+
 /** How many cards the Reference library holds (guidance groups + reference defaults). */
 internal fun referenceLibraryCount(model: ViewModel): Int =
-    referenceGuidance(model).size + model.reference.size + model.weekly_report.size +
-        (if (model.training_load != null) 1 else 0) + (if (model.srpe_load != null) 1 else 0)
+    referenceGuidance(model).size + model.reference.size + trainingLoadCount(model)
+
+/** One Reference library group: its row's [title] and [count], and the [cards] it opens to. */
+private class ReferenceGroupEntry(val title: String, val count: Int, val cards: @Composable () -> Unit)
 
 /**
- * The Reference library, a Profile-opened sheet (ui-sweep §12): every
+ * The Reference library, a Profile-opened sheet: every
  * evidence-graded programming-guidance group (Strength/Hypertrophy/Running/…),
  * the Training load group (the core-owned running-volume rows + the CTL/ATL/TSB
  * card) and the Reference source list, as one carded list of 56dp group rows
@@ -380,10 +381,7 @@ internal fun referenceLibraryCount(model: ViewModel): Int =
 @Composable
 internal fun ReferenceLibrarySheet(model: ViewModel) {
     val otherGuidance = referenceGuidance(model)
-    // The session-effort (sRPE) weekly load sits beside the heart-rate load as
-    // its own card: a separate series, never summed into it.
-    val loadCount = model.weekly_report.size + (if (model.training_load != null) 1 else 0) +
-        (if (model.srpe_load != null) 1 else 0)
+    val loadCount = trainingLoadCount(model)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -407,53 +405,58 @@ internal fun ReferenceLibrarySheet(model: ViewModel) {
             )
             return@Column
         }
-        PlainCard(contentPadding = PaddingValues(0.dp), spacing = 0.dp) {
-            var first = true
-            @Composable
-            fun group(title: String, count: Int, cards: @Composable () -> Unit) {
-                if (!first) HorizontalDivider(thickness = 1.dp, color = Hairline)
-                first = false
-                ReferenceGroup(title, count, cards)
-            }
+        val groups = buildList<ReferenceGroupEntry> {
             if (loadCount > 0) {
-                group(stringResource(R.string.main_overline_training_load), loadCount) {
-                    model.weekly_report.byGuidancePriority().forEach { g ->
-                        ReferenceItem {
-                            ReferenceEvidenceCard(guidanceSummary(g), g.grade, g.citation, g.confidence, g.safety_critical, g.contested, why = g.why)
+                add(
+                    ReferenceGroupEntry(stringResource(R.string.main_overline_training_load), loadCount) {
+                        model.weekly_report.byGuidancePriority().forEach { g ->
+                            ReferenceItem {
+                                ReferenceEvidenceCard(guidanceSummary(g), g.grade, g.citation, g.confidence, g.safety_critical, g.contested, why = g.why)
+                            }
                         }
-                    }
-                    model.training_load?.let { tl ->
-                        ReferenceItem {
-                            ReferenceEvidenceCard(
-                                tl.summary, tl.grade, tl.citation, tl.confidence, tl.safety_critical, tl.contested,
-                                extraDetail = stringResource(R.string.main_training_load_detail, tl.method, tl.sessions_counted, tl.sessions_skipped),
-                            )
+                        model.training_load?.let { tl ->
+                            ReferenceItem {
+                                ReferenceEvidenceCard(
+                                    tl.summary, tl.grade, tl.citation, tl.confidence, tl.safety_critical, tl.contested,
+                                    extraDetail = stringResource(R.string.main_training_load_detail, tl.method, tl.sessions_counted, tl.sessions_skipped),
+                                )
+                            }
                         }
-                    }
-                    model.srpe_load?.let { sl ->
-                        ReferenceItem {
-                            ReferenceEvidenceCard(sl.summary, sl.grade, sl.citation, sl.confidence, false, false, extraDetail = sl.method.ifBlank { null })
+                        model.srpe_load?.let { sl ->
+                            ReferenceItem {
+                                ReferenceEvidenceCard(sl.summary, sl.grade, sl.citation, sl.confidence, false, false, extraDetail = sl.method.ifBlank { null })
+                            }
                         }
-                    }
-                }
+                    },
+                )
             }
             otherGuidance.groupBy { it.section }.forEach { (section, rows) ->
-                group(section, rows.size) {
-                    rows.byGuidancePriority().forEach {
-                        ReferenceItem {
-                            ReferenceEvidenceCard(guidanceSummary(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, why = it.why)
+                add(
+                    ReferenceGroupEntry(section, rows.size) {
+                        rows.byGuidancePriority().forEach {
+                            ReferenceItem {
+                                ReferenceEvidenceCard(guidanceSummary(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, why = it.why)
+                            }
                         }
-                    }
-                }
+                    },
+                )
             }
             if (model.reference.isNotEmpty()) {
-                group(stringResource(R.string.main_section_reference), model.reference.size) {
-                    model.reference.groupBy { it.section }.values.forEach { rows ->
-                        rows.byGuidancePriority().forEach {
-                            ReferenceItem { Box(Modifier.padding(Space.Card.dp)) { ReferenceRow(it) } }
+                add(
+                    ReferenceGroupEntry(stringResource(R.string.main_section_reference), model.reference.size) {
+                        model.reference.groupBy { it.section }.values.forEach { rows ->
+                            rows.byGuidancePriority().forEach {
+                                ReferenceItem { Box(Modifier.padding(Space.Card.dp)) { ReferenceRow(it) } }
+                            }
                         }
-                    }
-                }
+                    },
+                )
+            }
+        }
+        PlainCard(contentPadding = PaddingValues(0.dp), spacing = 0.dp) {
+            groups.forEachIndexed { i, g ->
+                if (i > 0) HorizontalDivider(thickness = 1.dp, color = Hairline)
+                ReferenceGroup(g.title, g.count, g.cards)
             }
         }
     }
@@ -508,7 +511,7 @@ private fun ReferenceGroup(title: String, count: Int, cards: @Composable () -> U
 /** One item of an open group: a hairline, then the item itself. */
 @Composable
 private fun ReferenceItem(content: @Composable () -> Unit) {
-    HorizontalDivider(thickness = 1.dp, color = OnBgBody.copy(alpha = HairlineAlpha.Row))
+    RowHairline()
     content()
 }
 
@@ -559,14 +562,14 @@ private const val WeeksSinceRaceSeed = 4
 
 /** Race-form bounds: the recent race's whole minutes, the weekly volume (km;
  *  mi converts it exactly) and the weeks-since-race scale. */
-private val RaceMinutesRange = 1.0..359.0
+private val RaceMinutesRange = 1.0..599.0
 private const val WeeklyVolumeMaxKm = 250.0
 private val WeeksSinceRaceScale = (1..52).toList()
 
 /** The HR-zone form's starter age, and its resting-HR scale (bpm) with the
  *  value it opens on when no resting HR is known. */
 private const val HrZonesAgeSeed = "30"
-private val HrZonesRhrScale = (35..90).toList()
+private val HrZonesRhrScale = (RESTING_HR_RANGE.start.toInt()..RESTING_HR_RANGE.endInclusive.toInt()).toList()
 private const val HrZonesRhrSeedBpm = 60
 
 /**
@@ -688,7 +691,7 @@ fun RacePredictorForm(
         )
         // Freshness of the input race (running-041). Off → sent as null (a
         // recent result); on reveals a weeks scale so the core can flag staleness.
-        SwitchRow(stringResource(R.string.log_switch_race_stale), raceStale) { raceStale = it; onKeypad(false) }
+        LabeledSwitchRow(stringResource(R.string.log_switch_race_stale), raceStale) { raceStale = it; onKeypad(false) }
         if (raceStale) {
             FieldLabel(stringResource(R.string.log_field_weeks_since_race), "$weeksSinceRace")
             ScrollableScaleRow(WeeksSinceRaceScale, weeksSinceRace, { "$it" }, label = stringResource(R.string.log_field_weeks_since_race)) {
@@ -696,16 +699,11 @@ fun RacePredictorForm(
                 onKeypad(false)
             }
         }
-        if (keypadOpen) {
-            FormKeypad(
-                onKey = { key ->
-                    setBuffer(editNumericBuffer(buffer(), key, fresh))
-                    fresh = false
-                },
-                onBackspace = {
-                    setBuffer(buffer().dropLast(1))
-                    fresh = false
-                },
+        KeypadPanel(keypadOpen) {
+            NumericKeypad(
+                buffer(),
+                fresh,
+                { setBuffer(it); fresh = false },
                 allowDecimal = active == RaceField.Volume,
                 onDone = { onKeypad(false) },
             )
@@ -817,8 +815,8 @@ fun HypertrophyPlannerForm(initial: HypertrophyInputView? = null, onPlan: (Event
         // week range fits a single ChoiceScaleRow.
         FieldLabel(stringResource(R.string.log_field_accumulation_weeks), "$weeks")
         ChoiceScaleRow(AccumulationWeeks.toList(), weeks, { "$it" }, label = stringResource(R.string.log_field_accumulation_weeks)) { weeks = it }
-        SwitchRow(stringResource(R.string.log_switch_not_growing), notGrowing) { notGrowing = it }
-        SwitchRow(stringResource(R.string.log_switch_recovering_easily), recoveringEasily) { recoveringEasily = it }
+        LabeledSwitchRow(stringResource(R.string.log_switch_not_growing), notGrowing) { notGrowing = it }
+        LabeledSwitchRow(stringResource(R.string.log_switch_recovering_easily), recoveringEasily) { recoveringEasily = it }
         PrimaryButton(
             stringResource(R.string.log_btn_plan_volume),
             {
@@ -916,9 +914,9 @@ fun ProteinForm(
             )
         }
         if (mastersAvailable) {
-            SwitchRow(stringResource(R.string.log_switch_masters), masters) { masters = it; onKeypad(false) }
+            LabeledSwitchRow(stringResource(R.string.log_switch_masters), masters) { masters = it; onKeypad(false) }
         }
-        SwitchRow(stringResource(R.string.log_switch_deficit), deficit) { deficit = it; onKeypad(false) }
+        LabeledSwitchRow(stringResource(R.string.log_switch_deficit), deficit) { deficit = it; onKeypad(false) }
         if (!mastersOn && !deficit) {
             // No general/default protein figure is evidence-graded, so the core
             // returns nothing until a graded context is chosen. Without this the
@@ -930,20 +928,8 @@ fun ProteinForm(
                 style = Type.Caption,
             )
         }
-        if (keypadOpen) {
-            FormKeypad(
-                onKey = { key ->
-                    bwText = editNumericBuffer(bwText, key, fresh)
-                    fresh = false
-                    untouchedSinceOpen = false
-                },
-                onBackspace = {
-                    bwText = bwText.dropLast(1)
-                    fresh = false
-                    untouchedSinceOpen = false
-                },
-                onDone = { onKeypad(false) },
-            )
+        KeypadPanel(keypadOpen) {
+            NumericKeypad(bwText, fresh, { bwText = it; fresh = false; untouchedSinceOpen = false }, onDone = { onKeypad(false) })
         }
         PrimaryButton(
             stringResource(R.string.log_btn_compute_protein),
@@ -986,7 +972,7 @@ fun HrZonesForm(
     // whenever a resting HR is known (from the echo or the profile).
     val seedRhr = initial?.resting_hr_bpm ?: profileRestingHrBpm
     var useRhr by rememberSaveable { mutableStateOf(seedRhr != null) }
-    var rhr by rememberSaveable { mutableStateOf(seedRhr?.toInt() ?: HrZonesRhrSeedBpm) }
+    var rhr by rememberSaveable { mutableStateOf(seedRhr?.roundToInt() ?: HrZonesRhrSeedBpm) }
 
     val ageParsed = parseKeypadNumber(ageText)
     val ageValid = ageParsed != null && ageParsed in TanakaAgeRange
@@ -1010,7 +996,7 @@ fun HrZonesForm(
         }
         // Resting HR unlocks Karvonen (heart-rate-reserve) zones. Off → the
         // core falls back to age-only %HRmax, so this stays optional.
-        SwitchRow(stringResource(R.string.log_switch_use_rhr), useRhr) { useRhr = it; onKeypad(false) }
+        LabeledSwitchRow(stringResource(R.string.log_switch_use_rhr), useRhr) { useRhr = it; onKeypad(false) }
         if (useRhr) {
             FieldLabel(stringResource(R.string.log_field_resting_hr), stringResource(R.string.log_value_bpm, rhr))
             ScrollableScaleRow(HrZonesRhrScale, rhr, { "$it" }, label = stringResource(R.string.log_field_resting_hr)) {
@@ -1018,19 +1004,8 @@ fun HrZonesForm(
                 onKeypad(false)
             }
         }
-        if (keypadOpen) {
-            FormKeypad(
-                onKey = { key ->
-                    ageText = editNumericBuffer(ageText, key, fresh)
-                    fresh = false
-                },
-                onBackspace = {
-                    ageText = ageText.dropLast(1)
-                    fresh = false
-                },
-                allowDecimal = false,
-                onDone = { onKeypad(false) },
-            )
+        KeypadPanel(keypadOpen) {
+            NumericKeypad(ageText, fresh, { ageText = it; fresh = false }, allowDecimal = false, onDone = { onKeypad(false) })
         }
         PrimaryButton(
             stringResource(R.string.log_btn_compute_hr),
@@ -1038,21 +1013,5 @@ fun HrZonesForm(
             Modifier.fillMaxWidth(),
             enabled = ageValid,
         )
-    }
-}
-
-/** A calculator form's shared keypad, scrolled into view as it opens: it sits
- *  under the form's switches and scales, below the fold of a short sheet (a
- *  landscape phone), where the user would see no keypad and Back would fold it
- *  unseen. */
-@Composable
-private fun FormKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit, allowDecimal: Boolean = true, onDone: () -> Unit) {
-    val requester = remember { BringIntoViewRequester() }
-    LaunchedEffect(Unit) {
-        withFrameNanos { }
-        requester.bringIntoView()
-    }
-    Box(Modifier.bringIntoViewRequester(requester)) {
-        NumericKeypad(onKey = onKey, onBackspace = onBackspace, allowDecimal = allowDecimal, onDone = onDone)
     }
 }

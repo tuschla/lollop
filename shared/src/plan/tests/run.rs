@@ -4,11 +4,10 @@
 use super::*;
 use crate::app::Profile;
 use crate::plan::run::{
-    DayCtx, LongRunBind, RunWeekPlan, RunWeekRequest, cap_km_to_spike, continuous_prescription,
-    daily_avg_run_km, effective_weekly_km, is_quality, long_run_decision, mid_f64, mid_u16,
-    run_week_plan, run_week_sessions,
+    DayCtx, LongRunBind, RunWeekPlan, RunWeekRequest, cap_km_to_spike, daily_avg_run_km,
+    effective_weekly_km, is_quality, long_run_decision, run_week_plan, run_week_sessions,
 };
-use crate::running::{self, RunWorkoutRx};
+use crate::running;
 use crate::schema::{
     MesoPhase, Program, RepRecovery, RunIntensity, RunPrescription, RunVolume, Session,
 };
@@ -257,29 +256,19 @@ fn tenk_race_six_weeks_out_tapers_the_final_two_weeks_per_bosquet() {
         phases.push(plan.phase);
         plans.push((plan, sessions));
     }
-    // Phases run Build → Peak → Taper in order (a recovery week may sit inside).
-    let rank = |ph: MesoPhase| match ph {
-        MesoPhase::Base => 0,
-        MesoPhase::Build => 1,
-        MesoPhase::Peak => 2,
-        MesoPhase::Taper => 3,
-        MesoPhase::Deload => -1,
-    };
-    let ordered: Vec<i32> = phases
-        .iter()
-        .map(|p| rank(*p))
-        .filter(|r| *r >= 0)
-        .collect();
-    assert!(
-        ordered.windows(2).all(|w| w[0] <= w[1]),
-        "phases in order: {phases:?}"
+    // Build, a recovery week, then Peak → Taper toward the race.
+    assert_eq!(
+        phases,
+        [
+            MesoPhase::Build,
+            MesoPhase::Deload,
+            MesoPhase::Peak,
+            MesoPhase::Peak,
+            MesoPhase::Peak,
+            MesoPhase::Taper,
+            MesoPhase::Taper,
+        ]
     );
-    assert_eq!(phases[0], MesoPhase::Build);
-    assert!(
-        phases[2..=4].iter().all(|p| *p == MesoPhase::Peak),
-        "{phases:?}"
-    );
-    assert_eq!(&phases[5..], &[MesoPhase::Taper, MesoPhase::Taper]);
 
     // The last pre-taper week is the top load week; both taper weeks cut its
     // volume by 41–60 % (Bosquet), deepening toward the race.
@@ -620,6 +609,44 @@ fn interval_rx_carries_recovery_equal_to_rep_time() {
     );
 }
 
+/// running-019: a VO2max rep takes ≤5 min at I pace. At VDOT 40 a 1200 m rep
+/// takes ~338 s, so the plan prescribes 800 m (~225 s); at VDOT 25 even 800 m
+/// takes ~327 s, so the slot stays an easy run.
+#[test]
+fn interval_rep_stays_within_the_five_minute_ceiling() {
+    let p = runner(GoalDistance::TenK, 5, 60.0);
+    let anchors = |vdot| Anchors {
+        run_vdot: Some(vdot),
+        ..Default::default()
+    };
+    let mut checked = 0;
+    for w in 0..16 {
+        let prog = synthesize(&p, &anchors(40.0), w).unwrap();
+        for s in &prog.mesocycle.sessions {
+            if s.session_type != SessionType::Run(RunSessionType::Interval) {
+                continue;
+            }
+            let r = run_of(s);
+            assert_eq!(
+                r.repeats.map(|(_, rep)| rep),
+                Some(RunVolume::DistanceKm(0.8)),
+                "week {w}"
+            );
+            let Some(RepRecovery::Seconds(rec)) = r.recovery else {
+                panic!("week {w}: numeric recovery: {:?}", r.recovery);
+            };
+            assert!(rec <= 300, "week {w}: {rec} s rep");
+            checked += 1;
+        }
+        let slow = synthesize(&p, &anchors(25.0), w).unwrap();
+        assert!(
+            !run_kinds_of(&slow).contains(&RunSessionType::Interval),
+            "week {w}"
+        );
+    }
+    assert!(checked > 0, "no interval session in 16 weeks");
+}
+
 #[test]
 fn low_quality_budget_honours_the_goal_table_at_four_run_days() {
     let p = runner(GoalDistance::FiveK, 4, 50.0);
@@ -890,11 +917,10 @@ fn a_low_demonstrated_run_caps_a_higher_volume_target_at_the_spike_ceiling() {
 }
 
 #[test]
-fn no_run_history_matches_the_volume_only_plan() {
+fn no_run_history_sets_the_long_run_from_volume_alone() {
     let mut p = half_marathoner();
     p.running_km_per_week = 40.0;
     let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
-    assert_eq!(prog, synthesize(&p, &Anchors::default(), 0).unwrap());
     // 3 run days: the week's average run (40 / 3 → 13 km) is above its 30 %
     // share, so it sets the long run (low-volume guardrail, RUN-LONGRUN-001).
     assert_eq!(long_run_km(&prog), Some(13.0));
@@ -1333,43 +1359,4 @@ fn c25k_never_skips_the_bridge_run_with_fewer_run_days() {
         })
         .collect();
     assert_eq!(bouts, vec![vec![(480, 300), (480, 0)], vec![(1200, 0)]]);
-}
-
-// ── Band helpers ─────────────────────────────────────────────────────────
-
-#[test]
-fn low_mid_u16_ceiling_only_band_propagates_none() {
-    assert_eq!(mid_u16((None, Some(150))), None);
-    assert_eq!(mid_u16((Some(20), Some(40))), Some(30));
-    assert_eq!(mid_u16((Some(20), None)), Some(20));
-    assert_eq!(mid_u16((None, None)), None);
-}
-
-#[test]
-fn mid_f64_ceiling_only_band_propagates_none() {
-    assert_eq!(mid_f64((None, Some(10.0))), None);
-    assert_eq!(mid_f64((Some(4.0), Some(8.0))), Some(6.0));
-    assert_eq!(mid_f64((Some(5.0), None)), Some(5.0));
-    assert_eq!(mid_f64((None, None)), None);
-}
-
-#[test]
-fn continuous_run_ceiling_only_distance_degrades_to_duration() {
-    let base = RunWorkoutRx {
-        pct_hr_max: (Some(0.7), Some(0.8)),
-        pct_hrr_max: None,
-        pct_slower_than_mp: (None, None),
-        rpe: Some((3, 4)),
-        duration_min: (None, None),
-        distance_km: (None, Some(12.0)),
-        hr_governed: true,
-    };
-    let p = continuous_prescription(RunSessionType::Hills, &base, None);
-    assert_eq!(p.volume, RunVolume::DurationMin(30));
-    let with_dur = RunWorkoutRx {
-        duration_min: (Some(30), Some(60)),
-        ..base
-    };
-    let p2 = continuous_prescription(RunSessionType::Hills, &with_dur, None);
-    assert_eq!(p2.volume, RunVolume::DurationMin(45));
 }

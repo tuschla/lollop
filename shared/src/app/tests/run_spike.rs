@@ -72,26 +72,7 @@ fn manual_run_spike_baseline_reads_a_prior_gps_runs_derived_distance() {
 
     // GPS run: ~1.11 km along the equator (0 → 0.01° longitude).
     app.update(
-        log_run_track(
-            vec![
-                GpsPoint {
-                    lat: 0.0,
-                    lon: 0.0,
-                    observed_at: 0,
-                    accuracy_m: 5.0,
-                },
-                GpsPoint {
-                    lat: 0.0,
-                    lon: 0.01,
-                    observed_at: 400,
-                    accuracy_m: 5.0,
-                },
-            ],
-            0.0,
-            0.0,
-            0,
-            0,
-        ),
+        log_run_track(vec![gps(0.0, 0), gps(0.01, 400)], 0.0, 0.0, 0, 0),
         &mut model,
     )
     .expect_only_render();
@@ -105,36 +86,10 @@ fn manual_run_spike_baseline_reads_a_prior_gps_runs_derived_distance() {
 }
 
 #[test]
-fn run_distance_spike_is_flagged() {
-    let app = Engine;
-    let mut model = Model::default();
-
-    app.update(log_run(20.0, 100.0, 75.0, 12.0, 0, 0), &mut model)
-        .expect_only_render();
-
-    assert!(app.view(&model).runs[0].spike_flag);
-}
-
-#[test]
 fn gps_spike_baseline_is_derived_from_prior_runs() {
     let app = Engine;
     let mut model = Model::default();
-    let one_km = || {
-        vec![
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.0,
-                observed_at: 0,
-                accuracy_m: 5.0,
-            },
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.01,
-                observed_at: 400,
-                accuracy_m: 5.0,
-            },
-        ]
-    };
+    let one_km = || vec![gps(0.0, 0), gps(0.01, 400)];
 
     // Run 1: ~1.11 km with no history. The core spike gate errs safe with no
     // baseline, so this first run is flagged, expected and intentional.
@@ -142,7 +97,7 @@ fn gps_spike_baseline_is_derived_from_prior_runs() {
         .expect_only_render();
     assert!(app.view(&model).runs[0].spike_flag);
 
-    // Run 2: same ~1.11 km. Shell again sends baseline 0.0, but the core now
+    // Run 2: same ~1.11 km. Shell again sends baseline 0.0, but the core
     // derives the baseline from run 1 (~1.11 km): 1.11 is not >10 % over
     // itself, so NO spike. This only passes if the baseline came from history.
     app.update(log_run_track(one_km(), 0.0, 0.0, 0, 0), &mut model)
@@ -150,20 +105,7 @@ fn gps_spike_baseline_is_derived_from_prior_runs() {
     assert!(!app.view(&model).runs[1].spike_flag);
 
     // Run 3: ~2.22 km, nearly double the derived baseline → spike.
-    let long = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.0,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.02,
-            observed_at: 800,
-            accuracy_m: 5.0,
-        },
-    ];
+    let long = vec![gps(0.0, 0), gps(0.02, 800)];
     app.update(log_run_track(long, 0.0, 0.0, 0, 0), &mut model)
         .expect_only_render();
     assert!(app.view(&model).runs[2].spike_flag);
@@ -202,12 +144,15 @@ fn run_view_carries_full_spike_gate_evidence() {
         .expect_only_render();
     let run = &app.view(&model).runs[0];
     assert!(run.spike_flag, "20% over baseline must flag");
-    assert!(run.grade.is_some(), "grade populated");
-    assert!(!run.citation.is_empty(), "citation populated");
-    assert!(run.confidence > 0.0, "confidence populated");
+    assert!(run.evidence.grade.is_some(), "grade populated");
+    assert!(!run.evidence.citation.is_empty(), "citation populated");
+    assert!(run.evidence.confidence > 0.0, "confidence populated");
     // RUN-SPIKE-001 is the strongest running injury signal: its
     // safety-critical marker must survive the flattening.
-    assert!(run.safety_critical, "spike gate is safety-critical");
+    assert!(
+        run.evidence.safety_critical,
+        "spike gate is safety-critical"
+    );
 }
 
 #[test]
@@ -216,9 +161,9 @@ fn logged_distance_spike_drives_the_safety_gate_without_a_manual_figure() {
     // running injury signal (RUN-SPIKE-001). A plain review that carries no
     // explicit spike figure must still trip the safety gate off the logged
     // run, so the deferral is reachable from ordinary logging. The gate
-    // now derives its baseline from LOGGED history (`model.runs`), so the
-    // spike must be demonstrable against a real prior run: a 10 km baseline
-    // run, then a 12 km run (+20 %).
+    // derives its baseline from LOGGED history (`model.runs`), so the spike
+    // is shown against a real prior run: a 10 km baseline run, then a 12 km
+    // run (+20 %).
     let app = Engine;
     let mut model = Model::default();
     app.update(log_run(10.0, 50.0, 70.0, 0.0, DAY_SEC, 0), &mut model)
@@ -311,4 +256,11 @@ fn old_long_run_does_not_suppress_a_current_spike() {
         "an all-time baseline leaked in: {}",
         today.longest_recent_km
     );
+    let current = app
+        .view(&model)
+        .runs
+        .into_iter()
+        .find(|r| r.observed_at == 160 * DAY_SEC)
+        .expect("today's run");
+    assert!(current.spike_flag, "no baseline inside the window: a spike");
 }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.core.content.edit
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -102,8 +103,6 @@ internal const val MAX_IMPORT_BYTES = 256L * 1024 * 1024
  *  buffer. */
 internal const val MAX_IMPORT_LINE_BYTES = 16L * 1024 * 1024
 
-private fun eventLogFile(ctx: Context) = File(ctx.filesDir, "event-log.ndjson")
-
 /** [SETUP_PREFS] key: how many entries a data import restored, written
  *  just before the restart so the next boot can confirm it, then removed. */
 internal const val KEY_RESTORED_ENTRIES = "restored_entries"
@@ -128,7 +127,7 @@ suspend fun exportDataTo(ctx: Context, uri: Uri): Boolean {
         var read = emptyList<String>()
         EventDispatcher.exclusive {
             read = withContext(Dispatchers.IO) {
-                val log = EventLog.read(eventLogFile(ctx)).lines
+                val log = EventLog.read(eventLogFile(ctx.filesDir)).lines
                 val planRemoved = ctx.setupPrefs().getBoolean(KEY_PLAN_CLEARED, false)
                 if (planRemoved && lastPlanEvent(log) == null) log + CLEAR_PLAN_LINE else log
             }
@@ -297,7 +296,7 @@ suspend fun replaceEventLog(ctx: Context, lines: List<String>): DataImportResult
                     Core.reattachLog(previous)
                     throw t
                 }
-                ctx.setupPrefs().edit().putBoolean(KEY_PLAN_CLEARED, lastPlanEvent(lines) == "ClearPlan").commit()
+                ctx.setupPrefs().edit(commit = true) { putBoolean(KEY_PLAN_CLEARED, lastPlanEvent(lines) == "ClearPlan") }
             }
             null
         }
@@ -316,7 +315,7 @@ suspend fun replaceEventLog(ctx: Context, lines: List<String>): DataImportResult
 private fun Throwable.isFatalToVm(): Boolean =
     this is VirtualMachineError && this !is OutOfMemoryError && this !is StackOverflowError
 
-/** Atomically replace `event-log.ndjson` in [dir] with [lines] (tmp + fsync +
+/** Atomically replace the event log in [dir] with [lines] (tmp + fsync +
  *  rename), so a crash mid-write can never leave a half-written log. The lines are
  *  STREAMED to the temporary through one small buffer: a 5-year backup (~49 MiB)
  *  joined into one string OOM-killed the app at a 192 MB heap. Throws when the log
@@ -324,8 +323,8 @@ private fun Throwable.isFatalToVm(): Boolean =
  *  deleted and the original is still in place (or set aside as `.bak`, which the
  *  next boot's [EventLog.load] restores). */
 internal fun swapLogFile(dir: File, lines: List<String>) {
-    val dst = File(dir, "event-log.ndjson")
-    val tmp = File(dir, "event-log.ndjson.import")
+    val dst = eventLogFile(dir)
+    val tmp = File(dst.path + ".import")
     try {
         // fsync the bytes to disk BEFORE the rename: a rename-replace without fsync
         // can commit the directory metadata (the new name) before the file's data

@@ -6,36 +6,11 @@ use super::*;
 /// A five-fix track; helper so each trim test states only its bounds.
 fn trim_probe_points() -> Vec<GpsPoint> {
     vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.000,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.005,
-            observed_at: 100,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.010,
-            observed_at: 200,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.015,
-            observed_at: 300,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.020,
-            observed_at: 400,
-            accuracy_m: 5.0,
-        },
+        gps(0.000, 0),
+        gps(0.005, 100),
+        gps(0.010, 200),
+        gps(0.015, 300),
+        gps(0.020, 400),
     ]
 }
 
@@ -89,66 +64,16 @@ fn trim_run_track_remaps_segment_starts_across_a_cut() {
     let app = Engine;
     let mut model = Model::default();
     let pts = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.000,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.001,
-            observed_at: 10,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.002,
-            observed_at: 20,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.003,
-            observed_at: 30,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.004,
-            observed_at: 40,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.000,
-            observed_at: 100,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.001,
-            observed_at: 110,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.002,
-            observed_at: 120,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.003,
-            observed_at: 130,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.004,
-            observed_at: 140,
-            accuracy_m: 5.0,
-        },
+        gps(0.000, 0),
+        gps(0.001, 10),
+        gps(0.002, 20),
+        gps(0.003, 30),
+        gps(0.004, 40),
+        gps(1.000, 100),
+        gps(1.001, 110),
+        gps(1.002, 120),
+        gps(1.003, 130),
+        gps(1.004, 140),
     ];
     app.update(
         log_run_track_seg(pts, 0.0, 0.0, 6_100_002, 6_100_002, vec![5]),
@@ -269,54 +194,14 @@ fn trim_dropping_a_whole_segment_drops_its_boundary() {
     let app = Engine;
     let mut model = Model::default();
     let pts = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.000,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.001,
-            observed_at: 10,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.002,
-            observed_at: 20,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.003,
-            observed_at: 30,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.004,
-            observed_at: 40,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.000,
-            observed_at: 100,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.001,
-            observed_at: 110,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 1.002,
-            observed_at: 120,
-            accuracy_m: 5.0,
-        },
+        gps(0.000, 0),
+        gps(0.001, 10),
+        gps(0.002, 20),
+        gps(0.003, 30),
+        gps(0.004, 40),
+        gps(1.000, 100),
+        gps(1.001, 110),
+        gps(1.002, 120),
     ];
     app.update(
         log_run_track_seg(pts, 0.0, 0.0, 6_100_006, 6_100_006, vec![5]),

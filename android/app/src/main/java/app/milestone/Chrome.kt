@@ -26,7 +26,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -138,7 +138,7 @@ fun MilestoneNavBar(selected: Dest, onSelect: (Dest) -> Unit) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(100))
+                            .clip(PillShape)
                             .background(if (active) AccentTint else Color.Transparent)
                             .padding(horizontal = 18.dp, vertical = 5.dp),
                     ) {
@@ -172,8 +172,8 @@ fun MilestoneNavBar(selected: Dest, onSelect: (Dest) -> Unit) {
  * Side navigation rail: [MilestoneNavBar]'s three destinations (same icons,
  * labels and colours) down the start edge, with Log ([onLog], Today only, as the
  * FAB is) at its top. Used instead of the bottom bar and the Log FAB when they
- * would be laid over the pinned safety banner (a landscape phone under a hold;
- * user decision 2026-10-25): beside the banner, never over it.
+ * would be laid over the pinned safety banner (a landscape phone under a hold):
+ * beside the banner, never over it.
  */
 @Composable
 fun MilestoneNavRail(selected: Dest, onSelect: (Dest) -> Unit, onLog: (() -> Unit)?) {
@@ -268,14 +268,17 @@ fun RunInProgressChip(onClick: () -> Unit) {
  * dialog window, which on gesture-less (3-button) navigation gets the system's
  * contrast scrim, a near-white band under a light palette. Turning it off lets
  * the sheet's own surface (already drawn under the nav inset) be the band, the
- * same theme-derived ground the activity window gets in MainActivity.
+ * same theme-derived ground the activity window gets in MainActivity. API 35+
+ * ignores the nav bar colour (edge-to-edge), so only the scrim switch applies there.
  */
 @Composable
 fun SheetNavBarScrim() {
     val window = (LocalView.current.parent as? DialogWindowProvider)?.window ?: return
-    DisposableEffect(window) {
-        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+    SideEffect {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isNavigationBarContrastEnforced = false
-        onDispose {}
     }
 }

@@ -11,7 +11,7 @@ use crux_core::{
 use serde::{Deserialize, Serialize};
 
 use crate::evidence::{ClaimId, claims, graded};
-use crate::feedback::{FeedbackCategory, TrendDirection};
+use crate::feedback::FeedbackCategory;
 use crate::hybrid::ConcurrentGoal;
 use crate::individualization::{Environment, ProgressionCadence};
 use crate::running::{GoalDistance, GpsPoint};
@@ -25,11 +25,7 @@ use crate::strength::LiftGoal;
 use crate::{DAY_SEC, local_day};
 use crate::{autoreg, feedback, hybrid, hypertrophy, individualization, load, running, strength};
 
-// The reducer (`impl App for Engine`) lives here; state, wire types, and
-// every view/plan/calculator builder live in sibling submodules. They are
-// re-exported into this module's namespace so `update`/`view`, the sibling
-// submodules (`use super::*`), and the `#[cfg(test)]` tests all reach them under
-// their original `crate::app::*` paths.
+// State, wire types and builders live in submodules, glob-imported here.
 mod anchors;
 mod calculators;
 mod evidence_views;
@@ -94,11 +90,10 @@ impl App for Engine {
     type Effect = Effect;
 
     fn update(&self, event: Self::Event, model: &mut Self::Model) -> Command<Effect, Event> {
+        // Every wire float is clamped by `sanitize_f64` before it is stored; see
+        // its doc.
         match event {
             Event::SubmitReadiness(mut input) => {
-                // Sanitize the wire floats BEFORE storing: a huge FINITE value
-                // accumulates to `inf` in the per-day variance math, which
-                // serializes as JSON `null` and breaks a non-null Kotlin decode.
                 input.value = sanitize_f64(input.value);
                 input.effort_min = input.effort_min.map(sanitize_f64);
                 model.inputs.push(input);
@@ -328,11 +323,7 @@ impl App for Engine {
                 entry_id,
                 observed_at_fallback,
             } => {
-                if let Some(pos) = find_set(
-                    &model.sets,
-                    sanitize_entry_id(entry_id),
-                    observed_at_fallback,
-                ) {
+                if let Some(pos) = find_entry(&model.sets, entry_id, observed_at_fallback) {
                     model.sets.remove(pos);
                 }
             }
@@ -341,11 +332,7 @@ impl App for Engine {
                 entry_id,
                 observed_at_fallback,
             } => {
-                if let Some(pos) = find_run(
-                    &model.runs,
-                    sanitize_entry_id(entry_id),
-                    observed_at_fallback,
-                ) {
+                if let Some(pos) = find_entry(&model.runs, entry_id, observed_at_fallback) {
                     let gone = model.runs.remove(pos);
                     refresh_spike_baselines(&mut model.runs, &[gone.observed_at]);
                 }
@@ -355,11 +342,7 @@ impl App for Engine {
                 entry_id,
                 observed_at_fallback,
             } => {
-                if let Some(pos) = find_activity(
-                    &model.activities,
-                    sanitize_entry_id(entry_id),
-                    observed_at_fallback,
-                ) {
+                if let Some(pos) = find_entry(&model.activities, entry_id, observed_at_fallback) {
                     model.activities.remove(pos);
                 }
             }
@@ -391,7 +374,7 @@ impl App for Engine {
                     hold_sec,
                 };
                 if let Some(set) = fields.into_logged()
-                    && let Some(pos) = find_set(&model.sets, set.entry_id, match_at)
+                    && let Some(pos) = find_entry(&model.sets, set.entry_id, match_at)
                 {
                     model.sets.remove(pos);
                     model.sets.push(set);
@@ -413,7 +396,7 @@ impl App for Engine {
                 // The replacement is a fresh manual entry; the spike baselines
                 // around both its old and its new date are re-derived.
                 let match_at = amend_match_at(observed_at_fallback, observed_at);
-                if let Some(pos) = find_run(&model.runs, sanitize_entry_id(entry_id), match_at) {
+                if let Some(pos) = find_entry(&model.runs, entry_id, match_at) {
                     let old = model.runs.remove(pos);
                     let run = logged_run(RunFields {
                         distance_km,
@@ -445,11 +428,7 @@ impl App for Engine {
                 // so an invalid trim is never dispatched; a persisted no-op line
                 // replays as a harmless no-op).
                 if keep_from_sec <= keep_until_sec
-                    && let Some(pos) = find_run(
-                        &model.runs,
-                        sanitize_entry_id(entry_id),
-                        observed_at_fallback,
-                    )
+                    && let Some(pos) = find_entry(&model.runs, entry_id, observed_at_fallback)
                     && let Some((track, starts)) =
                         trim_track(&model.runs[pos], keep_from_sec, keep_until_sec)
                 {
@@ -470,11 +449,7 @@ impl App for Engine {
                 // run's identity, distance, time and track are untouched, so its
                 // position in replay order and every spike baseline stay stable
                 // (mirrors TrimRunTrack's in-place edit).
-                if let Some(pos) = find_run(
-                    &model.runs,
-                    sanitize_entry_id(entry_id),
-                    observed_at_fallback,
-                ) {
+                if let Some(pos) = find_entry(&model.runs, entry_id, observed_at_fallback) {
                     let run = &mut model.runs[pos];
                     run.session_rpe = session_rpe.map(|r| r.min(10));
                     run.workout_type = workout_type;
@@ -502,9 +477,7 @@ impl App for Engine {
                 // so a routine session review never wipes a referral, the
                 // compulsive-training flag or an in-force deload.
                 if submit_review_sets_weekly(&review) {
-                    let weekly = weekly_part(&review);
-                    model.weekly_history.push(weekly.clone());
-                    model.weekly_checkin = Some(weekly);
+                    store_weekly(model, &review);
                 }
                 if submit_review_sets_session(&review) {
                     model.review = Some(session_part(&review));
@@ -513,31 +486,21 @@ impl App for Engine {
             Event::ClearReview => model.review = None,
             Event::SubmitWeeklyCheckin(mut review) => {
                 sanitize_review(&mut review);
-                let weekly = weekly_part(&review);
-                model.weekly_history.push(weekly.clone());
-                model.weekly_checkin = Some(weekly);
+                store_weekly(model, &review);
             }
             Event::ClearWeeklyCheckin => model.weekly_checkin = None,
             Event::PredictRace {
-                mut recent_distance_m,
-                mut recent_time_sec,
-                mut goal_distance_m,
-                mut weekly_km,
+                recent_distance_m,
+                recent_time_sec,
+                goal_distance_m,
+                weekly_km,
                 weeks_since_race,
             } => {
-                // Sanitize every wire float BEFORE storing the query so a huge
-                // FINITE input (e.g. 1e300) can't overflow a downstream product
-                // (VDOT `v²`, Riegel power) to `inf` → JSON `null` → a non-null
-                // Kotlin decode brick. Mirrors `SetProfile`.
-                recent_distance_m = sanitize_f64(recent_distance_m);
-                recent_time_sec = sanitize_f64(recent_time_sec);
-                goal_distance_m = sanitize_f64(goal_distance_m);
-                weekly_km = sanitize_f64(weekly_km);
                 model.race_query = Some(RaceQuery {
-                    recent_distance_m,
-                    recent_time_sec,
-                    goal_distance_m,
-                    weekly_km,
+                    recent_distance_m: sanitize_f64(recent_distance_m),
+                    recent_time_sec: sanitize_f64(recent_time_sec),
+                    goal_distance_m: sanitize_f64(goal_distance_m),
+                    weekly_km: sanitize_f64(weekly_km),
                     weeks_since_race,
                 });
             }
@@ -548,7 +511,7 @@ impl App for Engine {
                 not_growing,
                 recovering_easily,
             } => {
-                model.hypertrophy_plan_query = Some(HypertrophyPlanQuery {
+                model.hypertrophy_plan_query = Some(HypertrophyInputView {
                     muscle,
                     weeks,
                     not_growing,
@@ -561,10 +524,7 @@ impl App for Engine {
                 masters,
                 deficit,
             } => {
-                // Sanitize the wire float before storing (see `SetProfile`): an
-                // `inf`-scale bodyweight would overflow the g/day product to
-                // `null` and brick the non-null Kotlin decode.
-                model.protein_query = Some(ProteinQuery {
+                model.protein_query = Some(ProteinInputView {
                     bodyweight_kg: sanitize_f64(bodyweight_kg),
                     masters,
                     deficit,
@@ -577,8 +537,7 @@ impl App for Engine {
                 weeks_since_recalc,
                 weeks_since_pace_test,
             } => {
-                // Sanitize wire floats before storing (see `SetProfile`).
-                model.hr_zone_query = Some(HrZoneQuery {
+                model.hr_zone_query = Some(HrZoneInputView {
                     age_years: sanitize_f64(age_years),
                     resting_hr_bpm: resting_hr_bpm.map(sanitize_f64),
                     weeks_since_recalc,
@@ -586,43 +545,9 @@ impl App for Engine {
                 });
             }
             Event::ClearHrZones => model.hr_zone_query = None,
-            Event::ComputeCooper { distance_m_12min } => {
-                // Sanitize the wire float before storing (see `SetProfile`).
-                model.cooper_query = Some(sanitize_f64(distance_m_12min));
-            }
-            Event::ClearCooper => model.cooper_query = None,
-            Event::ComputeCriticalSpeed { mut efforts } => {
-                // Sanitize every effort's wire floats before storing (see
-                // `SetProfile`): an `inf` distance/time would overflow the
-                // CS/D' regression to `null` and brick the Kotlin decode.
-                for e in &mut efforts {
-                    e.distance_m = sanitize_f64(e.distance_m);
-                    e.time_sec = sanitize_f64(e.time_sec);
-                }
-                model.cs_query = Some(efforts);
-            }
-            Event::ClearCriticalSpeed => model.cs_query = None,
-            Event::ComputeApre {
-                scheme,
-                reps,
-                current_load_kg,
-            } => {
-                // Sanitize the wire float before storing (see `SetProfile`).
-                model.apre_query = Some(ApreQuery {
-                    scheme,
-                    reps,
-                    current_load_kg: sanitize_f64(current_load_kg),
-                });
-            }
-            Event::ClearApre => model.apre_query = None,
             Event::GeneratePlan { start_epoch_day } => {
-                // Preserve an existing anchor: re-firing GeneratePlan (e.g. the
-                // shell auto-generates on every launch so a set-up user always has
-                // a plan) must NOT re-date the plan to today. Re-anchoring would
-                // pin the week strip at "week 1" forever (weeks_elapsed = today −
-                // start) and flip already-logged done/missed days (epoch_day <
-                // start) back to a neutral "planned" on every relaunch. Keep the
-                // ORIGINAL start; only ClearPlan → GeneratePlan makes a new anchor.
+                // Re-firing GeneratePlan (the shell sends it every launch) keeps
+                // the original start; only ClearPlan re-anchors.
                 let anchor = model
                     .plan_request
                     .as_ref()
@@ -702,7 +627,7 @@ impl App for Engine {
         let rule_ctx = &v.rule_ctx;
         let recommended = &v.review.recommended;
         let review_recs = &v.review.review_recs;
-        let train_blocked = v.safety.train_blocked;
+        let train_blocked = v.safety.hold.is_some();
         let reds_present = v.safety.reds_present;
 
         let (derived_hrv_streak, derived_wellness_streak) = derived_streaks(derived);
@@ -755,7 +680,7 @@ impl App for Engine {
             Some(q) => build_hr_zones(q, model.profile.as_ref().and_then(|p| p.measured_hr_max)),
             None => (Vec::new(), None, Vec::new()),
         };
-        let (hypertrophy_plan, hypertrophy_figures) = model
+        let (hypertrophy_plan, hypertrophy_figures, hypertrophy_ramp) = model
             .hypertrophy_plan_query
             .as_ref()
             .map(|q| build_hypertrophy_plan(q, model.profile.as_ref(), calc_hold.as_ref()))
@@ -796,7 +721,6 @@ impl App for Engine {
             }),
             adjustments,
             review_adjustments,
-            review_present: model.review.is_some(),
             weekly_checkin_present: model.weekly_checkin.is_some(),
             input_count: model.inputs.len(),
             lifts: lift_views(&model.sets, cx.sets_fp, weight_lb),
@@ -833,48 +757,10 @@ impl App for Engine {
                 a.extend(build_calisthenics_guidance(&cx));
                 a
             },
-            cooper: model.cooper_query.map(build_cooper).unwrap_or_default(),
-            critical_speed: model
-                .cs_query
-                .as_deref()
-                .map(build_critical_speed)
-                .unwrap_or_default(),
-            apre: model
-                .apre_query
-                .as_ref()
-                .map(|q| build_apre(q, weight_lb, calc_hold.as_ref()))
-                .unwrap_or_default(),
-            hr_zone_input: model.hr_zone_query.as_ref().map(|q| HrZoneInputView {
-                age_years: q.age_years,
-                resting_hr_bpm: q.resting_hr_bpm,
-                weeks_since_recalc: q.weeks_since_recalc,
-                weeks_since_pace_test: q.weeks_since_pace_test,
-            }),
-            protein_input: model.protein_query.as_ref().map(|q| ProteinInputView {
-                bodyweight_kg: q.bodyweight_kg,
-                masters: q.masters,
-                deficit: q.deficit,
-            }),
-            hypertrophy_input: model.hypertrophy_plan_query.as_ref().map(|q| {
-                HypertrophyInputView {
-                    muscle: q.muscle.clone(),
-                    weeks: q.weeks,
-                    not_growing: q.not_growing,
-                    recovering_easily: q.recovering_easily,
-                }
-            }),
-            hypertrophy_ramp: model
-                .hypertrophy_plan_query
-                .as_ref()
-                .map(|q| hypertrophy_ramp(q, model.profile.as_ref(), calc_hold.as_ref()))
-                .unwrap_or_default(),
-            cooper_input: model.cooper_query,
-            critical_speed_input: model.cs_query.clone().unwrap_or_default(),
-            apre_input: model.apre_query.as_ref().map(|q| ApreInputView {
-                scheme: q.scheme,
-                reps: q.reps,
-                current_load_kg: q.current_load_kg,
-            }),
+            hr_zone_input: model.hr_zone_query.clone(),
+            protein_input: model.protein_query.clone(),
+            hypertrophy_input: model.hypertrophy_plan_query.clone(),
+            hypertrophy_ramp,
             trend: build_trend(
                 model,
                 &cx.set_index,
@@ -1010,15 +896,13 @@ fn review_pipeline(model: &Model, recommended: Vec<Recommended<Adjustment>>) -> 
 struct SafetyState {
     /// Stage-0 onboarding gates (File 08 onboard-050): profile health-screen
     /// deferrals. Rendered as Safety guidance rows (build_guidance) AND
-    /// reflected in `safety_tier`/`train_blocked` so no shell can miss them.
+    /// reflected in `safety_tier` and the hold so no shell can miss them.
     gates: Vec<Recommended<Adjustment>>,
     /// Today's training hold: the first blocking call (Stop / RestDay /
     /// Defer) in the order [`hold_reason`] reads them: profile gate, then
     /// readiness, then weekly check-in. The single source for Today's block
     /// and for the plan calculators and %1RM guidance ([`calculator_hold`]).
     hold: Option<Recommended<Adjustment>>,
-    /// `hold.is_some()`.
-    train_blocked: bool,
     safety_tier: Option<SafetyTier>,
     /// RED-S flagged on any channel as of today; feeds the safety-022 deficit
     /// refusal and the calculator hold.
@@ -1042,14 +926,8 @@ fn safety_state(
         .iter()
         .chain(&review.recommended)
         .chain(&review.review_recs)
-        .find(|r| {
-            matches!(
-                r.value,
-                Adjustment::Stop | Adjustment::RestDay | Adjustment::Defer { .. }
-            )
-        })
+        .find(|r| blocks_training(r))
         .cloned();
-    let train_blocked = hold.is_some();
 
     // Highest safety tier: the readiness ladder, raised to MedicalReferral when
     // an onboarding gate or a review-carried NFOR/OTS deferral fires: the KB
@@ -1090,7 +968,6 @@ fn safety_state(
     SafetyState {
         gates,
         hold,
-        train_blocked,
         safety_tier,
         reds_present,
     }
@@ -1145,7 +1022,7 @@ fn plan_section(
     let model = cx.model;
     let recommended = &v.review.recommended;
     let review_recs = &v.review.review_recs;
-    let train_blocked = v.safety.train_blocked;
+    let train_blocked = v.safety.hold.is_some();
     let (mut next_session, mut week_plan, program) =
         build_plan_views(cx, train_blocked, recommended, review_recs);
     let wordings = [
@@ -1193,7 +1070,7 @@ fn plan_section(
         let (status, adjustment) = (row.status, row.adjustment.take());
         apply_first_set_autoreg(row, recommended, review_recs, hold, weight_lb);
         row.adjustment = adjustment;
-        row.status = rejudged_today_status(&row.items, status);
+        row.status = finished_status(&row.items).unwrap_or(status);
     }
     if !train_blocked && let Some(ns) = today_ns {
         let cues = apply_first_set_autoreg(ns, recommended, review_recs, hold, weight_lb);
@@ -1291,32 +1168,6 @@ fn plan_section(
     }
 }
 
-/// Today's session status after its items were re-judged at the in-session
-/// cue loads: every item done → done; every item finished with some work →
-/// done lighter; otherwise unchanged.
-fn rejudged_today_status(items: &[PrescriptionView], before: SessionStatus) -> SessionStatus {
-    use ItemStatus::*;
-    if items.is_empty() {
-        return before;
-    }
-    if items.iter().all(|it| it.status == Done) {
-        return SessionStatus::Done;
-    }
-    let finished = items.iter().all(|it| {
-        matches!(
-            it.status,
-            Done | DoneLighter | DoneShort | Skipped | SkippedPain | StoppedPain
-        )
-    });
-    let worked = items
-        .iter()
-        .any(|it| matches!(it.status, Done | DoneLighter | DoneShort | StoppedPain));
-    if finished && worked {
-        SessionStatus::DoneLighter
-    } else {
-        before
-    }
-}
 /// The coaching takeaway and the latest run's spike it (and the trend) read.
 struct FeedbackSection {
     feedback: Option<FeedbackView>,
@@ -1363,7 +1214,7 @@ fn feedback_section(
         recovery_week_active: review_recs
             .iter()
             .any(|r| r.claim_id() == RECOVERY_WEEK_CLAIM),
-        protective: suppression_active(&v.review.recommended, v.safety.train_blocked)
+        protective: suppression_active(&v.review.recommended, v.safety.hold.is_some())
             || suppression_active(review_recs, false),
         advanced_user,
         female_user,

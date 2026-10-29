@@ -157,63 +157,14 @@ fn lift_prescriptions(prog: &Program) -> Vec<(LiftSessionType, LiftPrescription)
     out
 }
 
-// ── DUP must respect lift_goal + rest must match the day prescribed ──
+// ── rest must match the day prescribed ──
 
 #[test]
-fn hypertrophy_goal_hybrid_gets_a_hypertrophy_range_day() {
-    // Hybrid = 2 lift days. A hypertrophy-goal DUP lifter must get at least one
-    // 6–12-rep day (a [Heavy, Power] cycle would give zero).
-    let mut p = runner(GoalDistance::HalfMarathon, 3, 30.0);
-    p.weekly_sets = 12;
-    p.lift_goal = LiftGoal::Hypertrophy;
-    let prog = synthesize(&p, &anchored("Back Squat", 120.0), 0).unwrap();
-    let has_hyp_range = lift_prescriptions(&prog)
-        .iter()
-        .any(|(_, l)| l.reps >= 6 && l.reps <= 12);
-    assert!(
-        has_hyp_range,
-        "a hypertrophy-goal lifter must get at least one 6–12-rep day"
-    );
-}
-
-#[test]
-fn dup_rest_comes_from_the_day_prescribed_not_the_goal_band() {
-    // Hypertrophy-goal lifter (now its own week, no DUP heavy/power day): a
-    // heavy compound rests per its EXERCISE CLASS (HYP-REST-002: 120 s), never
-    // the 30 s floor of the hypertrophy loading band, and isolation work rests
-    // at least 90 s. The anchor uses the catalog's own name so the class
-    // resolves from Table 4.
-    let mut p = runner(GoalDistance::HalfMarathon, 3, 30.0);
-    p.weekly_sets = 12;
-    p.lift_goal = LiftGoal::Hypertrophy;
-    let prog = synthesize(&p, &anchored("Back squat", 120.0), 0).unwrap();
-    let lifts = lift_prescriptions(&prog);
-    assert!(
-        lifts
-            .iter()
-            .all(|(lt, _)| *lt == LiftSessionType::Repetition),
-        "a hypertrophy week has no heavy/power DUP day: {lifts:?}"
-    );
-    let squat = lifts
-        .iter()
-        .find(|(_, l)| l.exercise.eq_ignore_ascii_case("Back squat"))
-        .expect("the logged squat is scheduled");
-    assert_eq!(
-        squat.1.rest_sec, 120,
-        "a heavy compound on a hypertrophy day rests 120 s, not 30 s"
-    );
-    for (_, l) in &lifts {
-        assert!(
-            l.rest_sec >= 90,
-            "{} rests {} s (< 90)",
-            l.exercise,
-            l.rest_sec
-        );
-    }
-    // An isolation lift on a strength DUP hypertrophy-emphasis day also takes
-    // the class window (HYP-REST-002: ~90 s, not 60 s).
+fn isolation_lift_rests_per_its_class_on_a_hypertrophy_emphasis_day() {
+    // An isolation lift on a strength DUP hypertrophy-emphasis day takes the
+    // class window (HYP-REST-002: 90 s), not the hypertrophy band's 30 s floor.
     let raise = lift_prescription(
-        LiftGoal::Hypertrophy,
+        LiftGoal::MaxStrength,
         TrainingAge::Intermediate,
         DupDay::Hypertrophy,
         "Lateral raise",
@@ -550,7 +501,7 @@ fn strength_heavy_pct_ramps_across_block() {
 
 #[test]
 fn no_load_week_prescribes_a_percent_set_below_one_rep_in_reserve() {
-    // A1: across every load week of the block, for an intermediate (DUP) and a
+    // Across every load week of the block, for an intermediate (DUP) and a
     // novice (linear) strength lifter, each %1RM prescription leaves ≥1 rep in
     // reserve on the Epley model (STR-INTENT-001 / HYP-FAIL-SAFE-001): 6×5 @
     // 88 % can never be emitted.
@@ -850,6 +801,63 @@ fn depth_jump_absent_below_1_5x_bw() {
     };
     assert_eq!(jump(140.0), "Vertical jump");
     assert_eq!(jump(160.0), "Depth jump (low box)");
+}
+
+#[test]
+fn depth_jump_gate_reads_only_the_barbell_back_squat() {
+    // PLYO-PREREQ-001 names the back squat: a hack, goblet, split or
+    // Smith-machine squat at 1.6× BW never unlocks depth jumps.
+    let mut p = base_profile();
+    p.lift_goal = LiftGoal::Power;
+    p.bodyweight_kg = Some(80.0);
+    let depth_jumps = |squat: &str| {
+        lift_prescriptions(&synthesize(&p, &anchored(squat, 130.0), 0).unwrap())
+            .iter()
+            .any(|(_, l)| l.exercise.starts_with("Depth jump"))
+    };
+    for squat in [
+        "Hack squat",
+        "Goblet squat",
+        "Bulgarian split squat",
+        "Smith machine squat",
+        "Smith machine back squat",
+    ] {
+        assert!(!depth_jumps(squat), "{squat} unlocked depth jumps");
+    }
+    assert!(depth_jumps("Barbell back squat"));
+}
+
+#[test]
+fn isolation_lifts_are_never_loaded_by_percent() {
+    // Skull crushers, face pulls, crunches and sit-ups are isolation in the one
+    // taxonomy `hypertrophy::classify` defers to, so on a strength plan an
+    // anchored one takes the isolation RIR window, never a %1RM × 3.
+    let p = base_profile();
+    for iso in ["Skull crusher", "Face pull", "Crunch", "Sit-up"] {
+        assert!(is_isolation_lift(iso), "{iso}");
+        assert_eq!(
+            crate::hypertrophy::classify(iso),
+            crate::hypertrophy::ExerciseClass::Isolation,
+            "{iso}"
+        );
+        let a = Anchors {
+            lift_e1rm: vec![("Back squat".to_string(), 150.0), (iso.to_string(), 40.0)],
+            ..Anchors::default()
+        };
+        let rx: Vec<_> = lift_prescriptions(&synthesize(&p, &a, 0).unwrap())
+            .into_iter()
+            .filter(|(_, l)| l.exercise == iso)
+            .collect();
+        assert!(!rx.is_empty(), "{iso} scheduled");
+        for (_, l) in rx {
+            assert!(
+                !matches!(l.intensity, LiftIntensity::PercentOneRm(_)),
+                "{iso}: {:?} x {}",
+                l.intensity,
+                l.reps
+            );
+        }
+    }
 }
 
 #[test]
@@ -1248,8 +1256,8 @@ fn a_log_less_hybrid_gets_a_balanced_default_day() {
 
 #[test]
 fn pure_lifting_day_is_no_longer_the_sparse_two_exercise_session() {
-    // The 2-exercise sparsity hit pure lifting too (KB): a pure lifter's day
-    // now carries 3-4 exercises, balanced.
+    // A pure lifter's day carries 3-4 exercises, balanced (the 2-exercise
+    // sparsity hit pure lifting too).
     let prog = synthesize(&base_profile(), &anchored("Back squat", 120.0), 0).unwrap();
     let names = first_lift_day_exercises(&prog);
     assert!(

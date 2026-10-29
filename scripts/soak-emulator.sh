@@ -30,11 +30,12 @@
 #     --gps-minutes N       recorded length of the tracked run, >= 8 (default 30)
 #     --sample-sec N        memory/service sample period (default 20)
 #     --skip-monkey | --skip-gps
-#     --keep-emulator       leave the emulator running at the end
+#     --keep-emulator       leave the emulator this script booted running at the end
 #
 # Exit status: 0 when every check passed, 1 when any check failed (see REPORT.md).
 # Requires: Android SDK (sdk.dir in android/local.properties or $ANDROID_HOME),
-# python3, an x86_64 AVD with Google Play services (fused location) and KVM.
+# python3, KVM and an x86_64 google_apis AVD (Google Play services for fused
+# location; adb root, which lib.sh's event-log push/pull use).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -72,37 +73,27 @@ while [[ $# -gt 0 ]]; do
     --skip-monkey) DO_MONKEY=0; shift ;;
     --skip-gps) DO_GPS=0; shift ;;
     --keep-emulator) KEEP_EMU=1; shift ;;
-    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 [[ "$GPS_MINUTES" -ge 8 ]] || { echo "--gps-minutes must be >= 8" >&2; exit 2; }
 
-log() { printf '[%s] ==> %s\n' "$(date +%T)" "$*" | tee -a "$OUT/soak.log"; }
-die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-
-sdk_dir() {
-  local props="$REPO_ROOT/android/local.properties" dir=""
-  [[ -f "$props" ]] && dir="$(sed -n 's/^sdk\.dir=//p' "$props" | tail -1)"
-  echo "${dir:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}}"
-}
-SDK="$(sdk_dir)"
-[[ -n "$SDK" ]] || die "no Android SDK: set sdk.dir in android/local.properties or \$ANDROID_HOME"
-ADB="$SDK/platform-tools/adb"
-EMULATOR="$SDK/emulator/emulator"
-EMU_PORT="${SERIAL#emulator-}"
-adb_() { "$ADB" -s "$SERIAL" "$@"; }
+rm -rf "$OUT"
+mkdir -p "$OUT"/{shots,monkey,gps,py}
+# shellcheck source=emu-scenarios/lib.sh
+source "$REPO_ROOT/scripts/emu-scenarios/lib.sh"
 command -v python3 >/dev/null || die "python3 is required"
 [[ -f "$APK" ]] || die "APK not found: $APK (build it with scripts/build.sh --no-tests)"
 
-rm -rf "$OUT"
-mkdir -p "$OUT"/{shots,monkey,gps,py}
 PY="$OUT/py"
 CHECKS="$OUT/checks.tsv"   # one line per check: PASS|FAIL|INFO <tab> name <tab> detail
 : >"$CHECKS"
+# Replaces lib.sh's check: this checks.tsv has no scenario column (report.py and
+# the inline chk writers below read three).
 check() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$CHECKS"; log "[$1] $2: $3"; }
 
-# ── Python helpers (route synthesis, fix feeder, UI-tree lookup, analysis) ───
+# ── Python helpers (route synthesis, fix feeder, analysis) ───────────────────
 cat >"$PY/route.py" <<'PY'
 """Deterministic 1 Hz route + action schedule for the tracked-run soak.
 
@@ -221,48 +212,6 @@ with open(path) as f, open(logp, "w", buffering=1) as log:
                            capture_output=True, text=True, timeout=10)
         ok = r.returncode == 0 and "OK" in r.stdout
         log.write(f"{t}\t{time.time():.2f}\t{st}\t{'ok' if ok else 'FAIL ' + (r.stdout + r.stderr).strip()}\n")
-PY
-
-cat >"$PY/node.py" <<'PY'
-"""Read a uiautomator dump on stdin. argv: mode text [anchor].
-mode eq|pre|re: print "cx cy x1 y1 x2 y2 <label>" of the first node whose text or
-content-desc equals / starts with / regex-matches text (only nodes AFTER the first
-node labelled exactly `anchor`, when given); texts: print every label; on: exit 0
-when the node labelled exactly `text` (or its parent/children) is checked/selected."""
-import re, sys, xml.etree.ElementTree as ET
-mode, want = sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else ""
-anchor = sys.argv[3] if len(sys.argv) > 3 else None
-seen = anchor is None
-raw = sys.stdin.read()
-i, j = raw.find("<?xml"), raw.rfind("</hierarchy>")
-if i < 0 or j < 0:
-    sys.exit(2)
-root = ET.fromstring(raw[i:j + 12])
-if mode == "on":
-    parent = {c: p for p in root.iter() for c in p}
-    on = lambda n: n.get("checked") == "true" or n.get("selected") == "true"
-    for n in root.iter("node"):
-        if want in (n.get("text"), n.get("content-desc")):
-            near = [n, parent.get(n)] + list(n)
-            sys.exit(0 if any(m is not None and on(m) for m in near) else 1)
-    sys.exit(2)
-for n in root.iter("node"):
-    for k in ("text", "content-desc"):
-        v = n.get(k, "")
-        if not v:
-            continue
-        if not seen:
-            seen = v == anchor
-            continue
-        if mode == "texts":
-            print(f"{k}={v}")
-            continue
-        if (mode == "eq" and v == want) or (mode == "pre" and v.startswith(want)) \
-                or (mode == "re" and re.search(want, v)):
-            x1, y1, x2, y2 = map(int, re.findall(r"\d+", n.get("bounds")))
-            print((x1 + x2) // 2, (y1 + y2) // 2, x1, y1, x2, y2, v)
-            sys.exit(0)
-sys.exit(0 if mode == "texts" else 1)
 PY
 
 cat >"$PY/analyze_run.py" <<'PY'
@@ -509,40 +458,7 @@ for root, _, files in sorted(os.walk(out)):
 open(f"{out}/REPORT.md", "w").write("\n".join(L) + "\n")
 PY
 
-# ── Device helpers ───────────────────────────────────────────────────────────
-dump_ui() {
-  local x i
-  for i in 1 2 3; do
-    x="$(adb_ exec-out uiautomator dump /dev/tty 2>/dev/null || true)"
-    [[ "$x" == *"</hierarchy>"* ]] && { printf '%s' "$x"; return 0; }
-    sleep 1
-  done
-  return 1
-}
-# find_node MODE TEXT → "cx cy x1 y1 x2 y2 label" (MODE eq|pre|re)
-find_node() { dump_ui | python3 "$PY/node.py" "$1" "$2"; }
-ui_texts() { dump_ui | python3 "$PY/node.py" texts; }
-tap_node() { # tap_node MODE TEXT [retries]
-  local r p i
-  for i in $(seq 1 "${3:-3}"); do
-    if r="$(find_node "$1" "$2")"; then
-      read -r -a p <<<"$r"
-      adb_ shell input tap "${p[0]}" "${p[1]}"
-      return 0
-    fi
-    sleep 1
-  done
-  log "no on-screen node ($1) '$2'"
-  return 1
-}
-# Bottom-nav item: the label's lower edge can sit under the system nav window's
-# touch region on some configurations, so tap the icon above the label.
-tap_nav() {
-  local r p
-  r="$(find_node eq "$1")" || { log "no nav item '$1'"; return 1; }
-  read -r -a p <<<"$r"
-  adb_ shell input tap "${p[0]}" $((p[3] - 60))
-}
+# ── Device helpers (the rest come from emu-scenarios/lib.sh) ─────────────────
 # notif_action ACTION TITLE: open the shade and tap ACTION on the app notification
 # titled TITLE. A silent ongoing notification is shown collapsed (no action row),
 # so expand it first through its own "Expand" chevron.
@@ -550,69 +466,24 @@ notif_action() {
   local r p
   adb_ shell cmd statusbar expand-notifications; sleep 3
   tap_node eq "$1" 1 2>/dev/null && return 0
-  r="$(dump_ui | python3 "$PY/node.py" eq "Expand" "$2")" || { log "no notification '$2'"; return 1; }
+  r="$(find_node eq "Expand" "$2")" || { log "no notification '$2'"; return 1; }
   read -r -a p <<<"$r"
   adb_ shell input tap "${p[0]}" "${p[1]}"; sleep 2
   tap_node eq "$1"
 }
-shot() { adb_ exec-out screencap -p >"$OUT/shots/$1.png" || true; }
-focus() { adb_ shell dumpsys window 2>/dev/null | sed -n 's/.*mCurrentFocus=Window{[^ ]* [^ ]* \([^ }]*\)}.*/\1/p' | head -1; }
-launch() { adb_ shell am start -n "$APP_ID/.MainActivity" >/dev/null 2>&1 || true; }
-app_pid() { adb_ shell pidof "$APP_ID" 2>/dev/null | tr -d '\r' || true; }
-mark() { echo "$1" >"$OUT/.phase"; adb_ shell log -t SOAK "phase $1" >/dev/null 2>&1 || true; log "phase: $1"; }
 
-boot_emulator() {
-  if adb_ get-state >/dev/null 2>&1; then
-    log "$SERIAL already online — using it"
-    return
-  fi
-  [[ -x "$EMULATOR" ]] || die "emulator not found at $EMULATOR"
-  log "booting AVD $AVD on port $EMU_PORT"
-  ANDROID_SDK_ROOT="$SDK" ANDROID_HOME="$SDK" "$EMULATOR" -avd "$AVD" -port "$EMU_PORT" \
-    -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -read-only \
-    -memory 2048 >"$OUT/emulator.log" 2>&1 &
-  local tries=0
-  until [[ "$(adb_ shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; do
-    tries=$((tries + 1)); [[ $tries -lt 150 ]] || die "emulator boot timed out"
-    sleep 2
-  done
-}
-
-stop_emulator() {
-  [[ $KEEP_EMU -eq 1 ]] && return 0
-  log "stopping emulator $SERIAL"
-  adb_ emu kill >/dev/null 2>&1 || true
-}
-
-grant_perms() {
-  local p
-  for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION POST_NOTIFICATIONS; do
-    adb_ shell pm grant "$APP_ID" "android.permission.$p" >/dev/null 2>&1 || true
-  done
-}
-
-# A set-up hybrid athlete (3 run days / 20 km a week) with one manual 5 km run
-# yesterday; the same ndjson wire the app persists and replays on launch.
-seed_log() {
-  local y=$(( $(date +%s) - 86400 ))
-  cat <<EOF
-{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"General","concurrent_goal":"Strength","weekly_sets":12,"running_days_per_week":3,"running_km_per_week":20.0,"advanced":false,"endurance_intensity_pct_vo2max":75.0,"bodyweight_kg":85.0,"age_years":30.0}}
-{"LogRun":{"distance_km":5.0,"duration_min":27.5,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":${y},"entry_id":${y}001}}
-EOF
-}
-
-# reset_app seeded|fresh: wipe app data, re-grant, optionally seed the event log.
+# reset_app seeded|fresh: wipe app data, re-grant, optionally seed the event log
+# (3 run days, a squat and a 5 km run yesterday).
 reset_app() {
   adb_ shell am force-stop "$APP_ID"
   adb_ shell pm clear "$APP_ID" >/dev/null
   grant_perms
   if [[ "$1" == seeded ]]; then
     launch; sleep 4; adb_ shell am force-stop "$APP_ID"
-    seed_log | adb_ shell "run-as $APP_ID sh -c 'mkdir -p files && cat > files/event-log.ndjson'"
+    seed_basic "$(date -d yesterday +%F)" 3 >"$OUT/seed.ndjson"
+    push_log "$OUT/seed.ndjson" || die "could not push the seed event log"
   fi
 }
-
-pull_log() { adb_ shell "run-as $APP_ID cat files/event-log.ndjson" >"$1" 2>/dev/null || true; }
 
 # ── Sampler: meminfo + tracking service state every SAMPLE_SEC ──────────────
 sampler() {
@@ -715,8 +586,6 @@ to_km() { # "3.21 mi" / "5.20 km" → km
 to_sec() { # first h:mm:ss / m:ss → seconds
   python3 -c "import re,sys;m=re.search(r'\b(?:(\d+):)?(\d+):(\d\d)\b',sys.argv[1]);print(int(m.group(1) or 0)*3600+int(m.group(2))*60+int(m.group(3)) if m else '')" "$1"
 }
-wake() { adb_ shell input keyevent 224; sleep 1; adb_ shell wm dismiss-keyguard >/dev/null 2>&1 || true; sleep 1; }
-svc_fg() { adb_ shell dumpsys activity services "$APP_ID/.RunTrackingService" 2>/dev/null | grep -q 'isForeground=true'; }
 
 gps_run() {
   local rec=$(( GPS_MINUTES * 60 )) pid0 pid1 summary
@@ -789,7 +658,7 @@ gps_run() {
   echo "$summary" >"$G/finish-summary.txt"
   # A run that follows today's plan opens with its type preselected, and the chip
   # toggles: tap Easy only when it is not already on.
-  if ! dump_ui | python3 "$PY/node.py" on "Run type, Easy"; then
+  if ! find_node on "Run type, Easy"; then
     tap_node eq "Run type, Easy" || true; sleep 1
   fi
   shot gps-08b-finish-type
@@ -877,7 +746,7 @@ PY
   echo "sampling:    every ${SAMPLE_SEC} s"
 } >"$OUT/config.txt"
 
-boot_emulator
+boot_emulator "$AVD" "$OUT/emulator.log" 2048
 trap 'kill ${SAMPLER_PID:-} ${LOGCAT_PID:-} ${FEEDER_PID:-} 2>/dev/null || true; adb_ shell cmd statusbar send-disable-flag none >/dev/null 2>&1 || true; stop_emulator' EXIT
 adb_ shell input keyevent 82 >/dev/null 2>&1 || true
 adb_ shell settings put global stay_on_while_plugged_in 0 >/dev/null 2>&1 || true

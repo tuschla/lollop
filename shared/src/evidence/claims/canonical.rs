@@ -5,7 +5,7 @@
 //! (SAFE-REDS/OTS/BSI/PREG/CVD-001).
 
 use crate::evidence::cite::{
-    CITE_BOSQUET_2007, CITE_ISRAETEL_2021, CITE_MEEUSEN_2013, CITE_MOUNTJOY_2023,
+    CITE_BAAR_2014, CITE_BOSQUET_2007, CITE_ISRAETEL_2021, CITE_MEEUSEN_2013, CITE_MOUNTJOY_2023,
     CITE_PELLAND_2026, CITE_SCHUMANN_2022,
 };
 use crate::evidence::claim;
@@ -248,7 +248,7 @@ claim_group! {
         "Spacing lifting and endurance sessions at least 3 hours apart (ideally 6–24) reduces how much one blunts the other in the short term.",
         Moderate,
         &[
-            "Baar 2014, Sports Med 44(Suppl 2):S117-S125 (AMPK-mTOR molecular interference)",
+            CITE_BAAR_2014,
             "Robineau et al. 2016, J Strength Cond Res 30(3):672-683 (recovery interval between concurrent sessions)",
         ],
     )

@@ -59,13 +59,16 @@ object UxInvariants {
         val cardKey: String?,
     )
 
-    fun check(
-        provider: SemanticsNodeInteractionsProvider,
-        density: Density,
-        // The root bounds define the visible surface; an action whose bounds
-        // spill past the right edge is treated as clipped.
-        checkClipping: Boolean = false,
-    ): List<Violation> {
+    /** Every violation kind [check] reports. */
+    val ALL = setOf(
+        "forbidden-text", "unlabeled-action", "small-touch-target", "duplicate-action-in-card",
+        "clipped-action", "duplicate-summary-on-screen",
+    )
+
+    /** [ALL] but the duplicate-summary rule: what a screen's text, actions and layout must meet. */
+    val KINDS = ALL - "duplicate-summary-on-screen"
+
+    fun check(provider: SemanticsNodeInteractionsProvider, density: Density): List<Violation> {
         // Every window root: the activity plus any open bottom sheet or dialog,
         // each of which is its own semantics root.
         val roots = provider.onAllNodes(isRoot(), useUnmergedTree = false).fetchSemanticsNodes()
@@ -125,18 +128,18 @@ object UxInvariants {
                 }
             }
 
-        // 4) Required actions are not clipped off the right edge at large fonts.
-        if (checkClipping) {
-            for (n in nodes.filter { it.clickable && it.visible && it.label.isNotBlank() }) {
-                // 1dp tolerance for sub-pixel rounding; a genuinely clipped
-                // action overhangs by far more.
-                if (n.rightDp > rootRightDp + 1f) {
-                    violations += Violation(
-                        "clipped-action",
-                        "action \"${n.label}\" extends past the ${fmt(rootRightDp)}dp surface edge",
-                        n.path,
-                    )
-                }
+        // 4) Required actions are not clipped off the right edge at large fonts:
+        //    the root bounds define the visible surface, so an action whose bounds
+        //    spill past the right edge is clipped.
+        for (n in nodes.filter { it.clickable && it.visible && it.label.isNotBlank() }) {
+            // 1dp tolerance for sub-pixel rounding; a genuinely clipped
+            // action overhangs by far more.
+            if (n.rightDp > rootRightDp + 1f) {
+                violations += Violation(
+                    "clipped-action",
+                    "action \"${n.label}\" extends past the ${fmt(rootRightDp)}dp surface edge",
+                    n.path,
+                )
             }
         }
 
@@ -192,9 +195,8 @@ object UxInvariants {
         val visible = node.boundsInRoot.width > 0f && node.boundsInRoot.height > 0f
         val role = node.config.getOrNull(SemanticsProperties.Role)?.toString()
 
-        // A "card" is the nearest testTagged plan item, else the labelled
-        // traversal group we descended through, so duplicate-action grouping is
-        // scoped to a single visual unit.
+        // A "card" is the nearest testTagged plan item (plan items only), so
+        // duplicate-action grouping is scoped to a single item.
         val tag = node.config.getOrNull(SemanticsProperties.TestTag)
         val thisCard = tag?.takeIf { it.startsWith("plan-item:") } ?: cardKey
 

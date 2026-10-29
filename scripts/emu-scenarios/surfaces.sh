@@ -70,10 +70,6 @@ done
 
 SERIAL="emulator-$PORT"
 OUT="$HOME/.cache/emu-surfaces/$AVD/$(date +%Y%m%d-%H%M%S)"
-SDK="$(sed -n 's/^sdk\.dir=//p' "$REPO_ROOT/android/local.properties" 2>/dev/null | tail -1)"
-SDK="${SDK:-${ANDROID_HOME:-/home/lt/android-home}}"
-ADB="$SDK/platform-tools/adb"
-EMULATOR="$SDK/emulator/emulator"
 [[ -f "$APK" ]] || { echo "APK not found: $APK" >&2; exit 2; }
 
 [[ -e "$OUT" ]] && { echo "output folder exists: $OUT" >&2; exit 2; }
@@ -82,40 +78,17 @@ mkdir -p "$OUT"/{shots,ui,logs}
 # shellcheck source=lib.sh
 source "$HELP/lib.sh"
 EV() { python3 "$HELP/events.py" "$@"; }
-FEEDER_PID=""
-STARTED_EMU=0
 API=0
 
 # ── Emulator ─────────────────────────────────────────────────────────────────
-boot_emulator() {
-  if adb_ get-state >/dev/null 2>&1; then
-    log "$SERIAL already online — using it"
-  else
-    log "booting AVD $AVD on port $PORT"
-    ANDROID_SDK_ROOT="$SDK" ANDROID_HOME="$SDK" "$EMULATOR" -avd "$AVD" -port "$PORT" \
-      -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -read-only \
-      -memory 3072 >"$OUT/logs/emulator.log" 2>&1 &
-    STARTED_EMU=1
-  fi
-  local tries=0
-  until [[ "$(sh_ getprop sys.boot_completed)" == "1" ]]; do
-    tries=$((tries + 1)); [[ $tries -lt 150 ]] || { log "emulator boot timed out"; exit 1; }
-    sleep 2
-  done
-  adb_ root >/dev/null 2>&1; sleep 2; adb_ wait-for-device
-  until [[ "$(sh_ getprop sys.boot_completed)" == "1" ]]; do sleep 2; done
-  # boot_completed is not enough: a surfaceflinger abort loop starts after it.
+# boot_completed is not enough: a surfaceflinger abort loop starts after it.
+check_surfaceflinger() {
   local sf; sf="$(sh_ pidof surfaceflinger)"; sleep 20
   if [[ "$(sh_ pidof surfaceflinger)" != "$sf" ]]; then
     log "surfaceflinger restarted after boot ($(sh_ logcat -d -b crash | grep -m1 'Abort message' || true));" \
       "check target= in ~/.android/avd/$AVD.ini (see the header)"
     exit 1
   fi
-}
-stop_emulator() {
-  [[ $KEEP_EMU -eq 1 ]] && return 0
-  log "stopping emulator $SERIAL"
-  adb_ emu kill >/dev/null 2>&1 || true
 }
 # `adb install` streams over the package service; on some API 37 images that
 # fails with "Broken pipe" while a pushed `pm install` works.
@@ -125,33 +98,12 @@ install_apk() {
 }
 
 # ── Device state ─────────────────────────────────────────────────────────────
-pin_clock() { # pin_clock YYYY-MM-DD [HH:MM]
-  sh_ cmd alarm set-timezone "$TZ0" >/dev/null
-  sh_ cmd alarm set-time "$(TZ="$TZ0" date -d "$1 ${2:-08:00}" +%s)000" >/dev/null
-}
-baseline_device() {
-  adb_ shell settings put global auto_time 0
-  adb_ shell settings put global auto_time_zone 0
-  adb_ shell settings put system time_12_24 12
-  adb_ shell settings put system screen_off_timeout 1800000
-  sh_ cmd location set-location-enabled true >/dev/null
-  adb_ shell cmd statusbar collapse >/dev/null 2>&1 || true
-  wake
-  adb_ shell input keyevent 82 >/dev/null 2>&1 || true
-}
-# The seeded hybrid lifter-runner (2 run days, 12 weekly sets) with a squat and a
-# 5 km run on Sun 2026-09-20: Mon run, Tue rest, Wed lift.
-seed_basic() {
-  local y; y="$(TZ="$TZ0" date -d "2026-09-20 09:00" +%s)"
-  cat <<EOF
-{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"General","concurrent_goal":"Strength","weekly_sets":12,"running_days_per_week":2,"running_km_per_week":20.0,"advanced":false,"endurance_intensity_pct_vo2max":75.0,"bodyweight_kg":85.0,"age_years":30.0}}
-{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":8.0,"observed_at":${y},"entry_id":${y}000}}
-{"LogRun":{"distance_km":5.0,"duration_min":27.5,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":$((y + 3600)),"entry_id":$((y + 3600))001}}
-EOF
-}
+# The seed (seed_basic "$SEED_DAY" 2): 2 run days, a squat and a 5 km run on
+# Sun 2026-09-20, so Mon run, Tue rest, Wed lift.
+SEED_DAY="2026-09-20"
 # seed_basic plus a pain report on DAY 07:30: training paused.
 seed_hold() { # seed_hold DAY
-  seed_basic
+  seed_basic "$SEED_DAY" 2
   echo "{\"SubmitReadiness\":{\"signal\":\"Pain\",\"value\":1.0,\"observed_at\":$(TZ="$TZ0" date -d "$1 07:30" +%s),\"streak\":0,\"pain\":null,\"effort_min\":null}}"
 }
 # A beginner runner on a couch-to-5k plan: run/walk bouts (a guided run).
@@ -279,15 +231,6 @@ home() { adb_ shell input keyevent 3; sleep 2; }
 mmss() { python3 -c "import re,sys;m=re.fullmatch(r'(?:(\d+):)?(\d+):(\d\d)',sys.argv[1].strip());print(int(m.group(1) or 0)*3600+int(m.group(2))*60+int(m.group(3)) if m else -1)" "$1"; }
 
 # ── Run helpers ──────────────────────────────────────────────────────────────
-start_feeder() {
-  stop_feeder; rm -f "$OUT/feed.stop"
-  python3 "$HELP/feeder.py" "$ADB" "$SERIAL" "$OUT/logs/feed-$1.log" "$OUT/feed.stop" &
-  FEEDER_PID=$!; sleep 3
-}
-stop_feeder() {
-  [[ -n "$FEEDER_PID" ]] || return 0
-  touch "$OUT/feed.stop"; wait "$FEEDER_PID" 2>/dev/null || true; FEEDER_PID=""
-}
 open_tracker() {
   tap_node eq Log || return 1; sleep 2
   tap_node eq "Track run (GPS)" || return 1
@@ -366,7 +309,7 @@ tile_case() {
 # ═════════════════════════════════════════════════════════════════════════════
 sc_links() {
   local S=links d want s ex
-  fresh_app "$LIFT_DAY" seed_basic || { check FAIL $S "seeded boot" "Today never rendered"; return; }
+  fresh_app "$LIFT_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
   ex="$(snap_field items.0.name)"
   for d in today log track log_set bogus; do
     case "$d" in log) want=log ;; track) want=track ;; log_set) want=log_set ;; *) want=today ;; esac
@@ -399,19 +342,19 @@ sc_links() {
 
 sc_tile() {
   local S=tile
-  fresh_app "$LIFT_DAY" seed_basic || { check FAIL $S "seeded boot" "Today never rendered"; return; }
+  fresh_app "$LIFT_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
   add_tile || check FAIL $S "tile added to Quick Settings" "not on the QS panel ~40 s after add-tile; ui/tile-added.xml"
   home
   tile_case lift-day "Log set" log_set
-  reseed "$RUN_DAY" seed_basic; home
+  reseed "$RUN_DAY" seed_basic "$SEED_DAY" 2; home
   tile_case run-day "Start run" track
-  reseed "$REST_DAY" seed_basic; home
+  reseed "$REST_DAY" seed_basic "$SEED_DAY" 2; home
   tile_case rest-day "Log" log
   reseed "$RUN_DAY" seed_hold "$RUN_DAY"; home
   expect $S "hold seed pauses training" "snapshot kind '$(snap_field kind)'" test "$(snap_field kind)" = Paused
   tile_case hold "Log" log
   # The stored day is Mon; the clock moves to Wed with the app in the background.
-  reseed "$RUN_DAY" seed_basic; home
+  reseed "$RUN_DAY" seed_basic "$SEED_DAY" 2; home
   pin_clock "$LIFT_DAY"; sleep 4
   tile_case stale-day "Log" log
 }
@@ -425,7 +368,7 @@ sc_tilefresh() {
   check INFO $S "fresh boot" "device uptime $(sh_ cut -d. -f1 /proc/uptime) s at the start; APK installed by this run"
   baseline_device; grant_perms
   pin_clock "$RUN_DAY"
-  seed_basic >"$OUT/logs/seed-tilefresh.ndjson"
+  seed_basic "$SEED_DAY" 2 >"$OUT/logs/seed-tilefresh.ndjson"
   push_log "$OUT/logs/seed-tilefresh.ndjson" >/dev/null 2>&1 || { check FAIL $S "seed pushed" "push_log failed"; return; }
   launch
   wait_text eq Today 40 || { evidence tilefresh-boot; check FAIL $S "seeded boot" "Today never rendered"; return; }
@@ -522,7 +465,7 @@ widget_tap() {
 }
 sc_widget() {
   local S=widget t
-  fresh_app "$RUN_DAY" seed_basic || { check FAIL $S "seeded boot" "Today never rendered"; return; }
+  fresh_app "$RUN_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
   home
   if ! place_widget; then
     evidence widget-place-failed
@@ -537,19 +480,19 @@ sc_widget() {
   widget_tap run-log "Log" log
   widget_tap run-body "Open Today in lollop" today
 
-  reseed "$LIFT_DAY" seed_basic; home
+  reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2; home
   t="$(widget_texts widget-lift-day)"
   expect $S "lift day: lift title and items, Log only" "snapshot title '$(snap_field title)'; $t; shots/widget-lift-day.png" \
     eval 'grep -qx "text=$(snap_field title)" <<<"$t" && grep -qx "text=Log" <<<"$t" && ! grep -qx "text=Track run" <<<"$t"'
 
   reseed "$RUN_DAY" seed_hold "$RUN_DAY"; home
   t="$(widget_texts widget-hold)"
-  expect $S "hold: Training paused + reason, Log" "$t; shots/widget-hold.png" \
-    eval 'grep -qx "text=Training paused" <<<"$t" && grep -qx "text=Log" <<<"$t"'
+  expect $S "hold: Training paused, no reason, Log" "$t; shots/widget-hold.png" \
+    eval 'grep -qx "text=Training paused" <<<"$t" && grep -qx "text=Open lollop for details." <<<"$t" && ! grep -q "pain" <<<"$t" && grep -qx "text=Log" <<<"$t"'
 
   # Date change with the app in the background (not force-stopped: a stopped app
   # gets no TIME_SET broadcast).
-  reseed "$RUN_DAY" seed_basic; home
+  reseed "$RUN_DAY" seed_basic "$SEED_DAY" 2; home
   mark widget-date-change
   pin_clock "$REST_DAY"; sleep 6
   t="$(widget_texts widget-stale)"
@@ -565,7 +508,7 @@ sc_widget() {
 RUN_ID=1
 sc_run() {
   local S=run c1 c2 t1 t2 n
-  fresh_app "$RUN_DAY" seed_basic || { check FAIL $S "seeded boot" "Today never rendered"; return; }
+  fresh_app "$RUN_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
   # No feed yet: the emulator GNSS repeats its default fix, so the locate preview
   # gets a lock and a "Start on move" run stays armed until the feed moves.
   open_tracker || { check FAIL $S "open tracker" "Log → Track run (GPS) failed"; return; }
@@ -701,7 +644,7 @@ sc_guided() {
 REST_ID=4207
 sc_rest() {
   local S=rest c1 c2 r p s n left
-  fresh_app "$LIFT_DAY" seed_basic || { check FAIL $S "seeded boot" "Today never rendered"; return; }
+  fresh_app "$LIFT_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
   # Exact alarms allowed, so the rest-done alert is due at the rest end (sc_restbg
   # covers the inexact case).
   sh_ appops set "$APP_ID" SCHEDULE_EXACT_ALARM allow
@@ -842,7 +785,7 @@ rest_bg() {
   sh_ logcat -d | grep -E "AlarmManager.*$APP_ID|$APP_ID.*(frozen|freez)" | tail -5 >"$OUT/logs/restbg-$c-alarm-logcat.txt"
 }
 sc_restbg() {
-  fresh_app "$LIFT_DAY" seed_basic || { check FAIL restbg "seeded boot" "Today never rendered"; return; }
+  fresh_app "$LIFT_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL restbg "seeded boot" "Today never rendered"; return; }
   rest_bg exact allow
   rest_bg inexact deny
   rest_bg killed allow kill
@@ -884,7 +827,7 @@ profile_notice() { # profile_notice NAME → 0 when the notice row is on Profile
 }
 sc_toggle() {
   local S=toggle r p s
-  fresh_app "$RUN_DAY" seed_basic || { check FAIL $S "seeded boot" "Today never rendered"; return; }
+  fresh_app "$RUN_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
   if [[ $API -lt 36 ]]; then
     profile_notice toggle-profile-old
     expect $S "API $API: no Live Updates notice on Profile" "shots/toggle-profile-old.png" eval '! has_text pre "Live updates are off."'
@@ -938,9 +881,9 @@ sc_toggle() {
   echo "scenarios: $ONLY"
 } >"$OUT/config.txt"
 
-boot_emulator
-[[ $STARTED_EMU -eq 1 ]] || KEEP_EMU=1
+boot_emulator "$AVD" "$OUT/logs/emulator.log" 3072
 trap 'touch "$OUT/feed.stop"; kill ${LOGCAT_PID:-} 2>/dev/null; stop_emulator' EXIT
+check_surfaceflinger
 API="$(sh_ getprop ro.build.version.sdk)"
 echo "device:    $(sh_ getprop ro.product.model), API $API ($(sh_ getprop ro.build.version.release))" >>"$OUT/config.txt"
 install_apk || { log "install failed"; exit 1; }

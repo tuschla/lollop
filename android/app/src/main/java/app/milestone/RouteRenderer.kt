@@ -15,6 +15,7 @@ import kotlin.math.hypot
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -231,6 +232,8 @@ internal class RouteRenderer(private val s: RouteStyle) {
     private val pillA = RectF()
     private val pillB = RectF()
     private val scratch = RectF()
+    /** Marker centres placed in the current [draw] (finish, start, numbers), for label avoidance. */
+    private var placedCount = 0
 
     fun draw(c: Canvas, track: RouteTrack, projector: RouteProjector, bounds: RectF, o: RouteDrawOptions) {
         if (track.isEmpty) return
@@ -437,9 +440,6 @@ internal class RouteRenderer(private val s: RouteStyle) {
         text.textSize = size
     }
 
-    /** Marker centres placed in the current [draw] (finish, start, numbers), for label avoidance. */
-    private var placedCount = 0
-
     /** Whether [rect] covers any numbered distance marker placed in this draw. */
     private fun hitsNumbered(rect: RectF): Boolean {
         val r = (s.distanceDp / 2 + s.haloDp) * d
@@ -511,6 +511,9 @@ internal class RouteRenderer(private val s: RouteStyle) {
     }
 }
 
+/** World size in px at [MaxFrameZoom] (256 px tiles): the tile-less canvas's zoom cap. */
+private val MaxWorldPx = 256.0 * 2.0.pow(MaxFrameZoom)
+
 /**
  * Web-Mercator framing for a route drawn without tiles: fits the route's box into
  * the canvas between [topPx] and [bottomPx] with [insetPx] on every side (zoom capped
@@ -529,7 +532,7 @@ internal class MercatorFit : RouteProjector {
 
     fun fit(
         track: RouteTrack, width: Float, height: Float, insetPx: Float, topPx: Float, bottomPx: Float,
-        maxWorldPx: Double, userScale: Float = 1f, panX: Float = 0f, panY: Float = 0f,
+        userScale: Float = 1f, panX: Float = 0f, panY: Float = 0f,
     ) {
         shift = track.crossesDateLine
         west = track.west
@@ -542,7 +545,7 @@ internal class MercatorFit : RouteProjector {
         val dx = x1 - x0
         val dy = y1 - y0
         val fitK = min(if (dx > 0) freeW / dx else Double.MAX_VALUE, if (dy > 0) freeH / dy else Double.MAX_VALUE)
-        k = min(fitK, maxWorldPx) * userScale
+        k = min(fitK, MaxWorldPx) * userScale
         wcx = (x0 + x1) / 2
         wcy = (y0 + y1) / 2
         cx = width / 2 + panX

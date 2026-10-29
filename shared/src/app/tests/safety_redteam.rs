@@ -117,14 +117,9 @@ fn hybrid_profile() -> Profile {
     }
 }
 
-/// Plan calculators requested (APRE next-load, hypertrophy set ramp, protein
-/// with a deficit), so a hold has something to withhold.
+/// Plan calculators requested (hypertrophy set ramp, protein with a deficit),
+/// so a hold has something to withhold.
 fn request_calculators(s: &mut Sim) {
-    s.ev(Event::ComputeApre {
-        scheme: crate::autoreg::ApreScheme::Apre6,
-        reps: 12,
-        current_load_kg: 100.0,
-    });
     s.ev(Event::PlanHypertrophyMeso {
         muscle: "chest".into(),
         weeks: 4,
@@ -212,14 +207,6 @@ fn assert_no_load_increase(vm: &ViewModel, ctx: &str) {
 /// The plan calculators show the hold row, never numbers.
 #[track_caller]
 fn assert_calculators_held(vm: &ViewModel, ctx: &str) {
-    assert!(
-        vm.apre
-            .iter()
-            .all(|r| r.summary.contains("training is paused"))
-            && !vm.apre.is_empty(),
-        "{ctx}: APRE prescribes a next load through a hold: {:?}",
-        vm.apre.iter().map(|r| &r.summary).collect::<Vec<_>>()
-    );
     assert!(
         vm.hypertrophy_plan
             .iter()
@@ -513,7 +500,7 @@ fn pregnancy_with_a_meet_and_a_doctors_clearance_stays_deferred() {
 
 #[test]
 fn an_under_18_powerlifter_gets_no_plan_however_the_age_is_stated() {
-    // safety-011 / onboard-050 (owner decision 2026-10-17): no programming
+    // safety-011 / onboard-050: no programming
     // under 18. Tried: an explicit youth=false with age 16; a birthday 16
     // years ago with a claimed age of 30 (the birthday is authoritative); a
     // NaN-poisoned age (sanitized conservatively).
@@ -1058,11 +1045,14 @@ fn readiness_deferrals_hold_the_plan_calculators_like_profile_gates() {
         let vm = s.vm();
         assert!(vm.train_blocked, "{signal:?}");
         if !vm
-            .apre
+            .hypertrophy_plan
             .iter()
             .all(|r| r.summary.contains("training is paused"))
         {
-            failures.push(format!("{signal:?}: APRE {:?}", vm.apre[0].summary));
+            failures.push(format!(
+                "{signal:?}: hypertrophy plan {:?}",
+                vm.hypertrophy_plan[0].summary
+            ));
         }
         if !vm.hypertrophy_ramp.is_empty() {
             failures.push(format!("{signal:?}: set ramp {:?}", vm.hypertrophy_ramp));

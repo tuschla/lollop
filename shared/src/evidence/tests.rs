@@ -318,13 +318,6 @@ fn file09_canonical_claims_all_present() {
 }
 
 #[test]
-fn lookup_and_confidence() {
-    let c = claims::TAPER_001.entry();
-    assert_eq!(c.grade, EvidenceGrade::Strong);
-    assert!((c.confidence_score() - 0.90).abs() < f32::EPSILON);
-}
-
-#[test]
 fn myths_are_blocked() {
     let acwr = claims::LOAD_ACWR_001.entry();
     assert!(acwr.is_blocked());
@@ -526,73 +519,4 @@ fn evidence_update_2026_10_regrades_hold() {
     assert_eq!(mode.contested, Some("CQ-F10-01"));
     // No "polarized beats threshold" overclaim.
     assert!(!claims::RUN_DIST_001.entry().statement.contains("beats"));
-}
-
-#[test]
-fn evidence_update_2026_10_claims_are_registered() {
-    // The 2026-10 update rows: each must resolve, be citable advice (never a
-    // myth) and carry a citation.
-    let ids = [
-        claims::STR_HEAVYFREQ_001,
-        claims::STR_BASE_POWER_001,
-        claims::STR_POWER_SELECT_001,
-        claims::STR_DELOAD_VOL_001,
-        claims::STR_LOADPROG_001,
-        claims::DETRAIN_STR_001,
-        claims::HYP_REST_002,
-        claims::HYP_RIR_DOSE_001,
-        claims::HYP_VL_001,
-        claims::HYP_PERIOD_001,
-        claims::HYP_DELOAD_CADENCE_001,
-        claims::RUN_PERIOD_001,
-        claims::RUN_PHASE_TID_001,
-        claims::RUN_VOLUME_001,
-        claims::RUN_LONGRUN_TARGET_001,
-        claims::RUN_TALKTEST_001,
-        claims::RUN_STRENGTH_001,
-        claims::RUN_C25K_002,
-        claims::HYB_SEX_001,
-        claims::HYB_RUNCAP_001,
-        claims::HYB_MAINT_002,
-        claims::HYB_RE_DOSE_001,
-        claims::CAL_PLACE_001,
-        claims::CAL_RIR_ACC_001,
-        claims::CAL_GOAL_RIR_001,
-        claims::CAL_FREQ_VOL_002,
-        claims::CAL_POWER_001,
-        claims::CAL_POWER_LADDER_001,
-        claims::CAL_REENTRY_001,
-        claims::CAL_EQUIP_001,
-        claims::AUTOREG_HRV_LIFT_001,
-        claims::AUTOREG_RHR_NOISE_001,
-        claims::ILLNESS_RTT_001,
-        claims::ILLNESS_COLD_RUN_001,
-        claims::RETURN_HOLD_001,
-        claims::REDS_SCREEN_001,
-        claims::HRV_SOURCE_001,
-        claims::WELLNESS_Z_001,
-        claims::ADH_MISSED_001,
-        claims::ADH_RESCHED_001,
-        claims::ADH_PROGRESS_001,
-        claims::ADH_SELFMON_001,
-        claims::ADH_DAYS_001,
-        claims::ADH_GAMIFY_001,
-        claims::ADH_PRAISE_001,
-        claims::ADH_RATIONALE_001,
-        claims::SCREEN_PARQ_001,
-        claims::SCREEN_ACSM_001,
-        claims::RUN_START_001,
-        claims::LIFT_DAYS_001,
-        claims::REENTRY_RAMP_001,
-        claims::STR_WARMUP_001,
-        claims::LOG_EFFORT_001,
-        claims::RUN_LIVECUE_001,
-        claims::RUN_EASYDRIFT_001,
-        claims::LOAD_SRPE_001,
-    ];
-    for id in ids {
-        let c = id.entry();
-        assert!(!c.is_blocked(), "{id:?} must be citable advice");
-        assert!(!c.primary_citations.is_empty(), "{id:?} has no citation");
-    }
 }

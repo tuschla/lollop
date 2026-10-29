@@ -2,7 +2,6 @@ package app.milestone
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -16,10 +15,8 @@ import org.junit.Test
  *    boundary is NOT inherently a pause. Consecutive Tracks with a small
  *    inter-track gap must merge into one segment (otherwise the core drops each
  *    lap's entering leg from distance AND moving time); a genuine pause gap must
- *    still split. (The full XML→segment path uses `android.util.Xml`, which is a
- *    non-functional stub in JVM unit tests, so the merge policy is verified on
- *    its pure helper; the XML wiring is covered by the instrumented parser test.)
- *  - [parseHrBpm]: the HR-validation fix: accept only finite 20..=250 bpm, drop
+ *    still split.
+ *  - [parseHrBpm]: accept only finite 20..=250 bpm, drop
  *    everything else (NaN, `Infinity`, absurd magnitudes, out-of-range), shared
  *    by the GPX and TCX readers.
  *  - [nonRunSport] and [importedRunEvent]'s sport gate and logged-at stamp: a file
@@ -57,11 +54,17 @@ class ImportParserTest {
 
     @Test
     fun backwardsClockStepBetweenTracksSplits() {
-        // A non-positive (overlapping/backwards) inter-track step is not a
-        // trustworthy continuation → keep the boundary rather than merge.
+        // A backwards inter-track step is not a trustworthy continuation → keep
+        // the boundary rather than merge.
         val a = listOf(fix(2000), fix(2001))
         val b = listOf(fix(1500), fix(1501))
         assertEquals(2, mergeTcxTracks(listOf(a, b)).size)
+    }
+
+    @Test
+    fun aZeroGapBetweenTracksMerges() {
+        val merged = mergeTcxTracks(listOf(listOf(fix(10), fix(11)), listOf(fix(11), fix(12))))
+        assertEquals(1, merged.size)
     }
 
     @Test
@@ -75,57 +78,29 @@ class ImportParserTest {
     // --- HR validation (shared GPX/TCX guard) -----------------------------------
 
     @Test
-    fun plausibleHrIsKept() {
-        assertEquals(120, parseHrBpm("120"))
-        assertEquals(155, parseHrBpm(" 155 "))
-        assertEquals(155, parseHrBpm("155.7")) // truncates toward the bpm
-    }
-
-    @Test
-    fun boundaryHrValuesAreInclusive() {
-        assertEquals(20, parseHrBpm("20"))
-        assertEquals(250, parseHrBpm("250"))
-    }
-
-    @Test
-    fun outOfRangeHrIsDropped() {
-        assertNull("below-floor bpm rejected", parseHrBpm("19"))
-        assertNull("above-ceiling bpm rejected", parseHrBpm("251"))
-        assertNull("absurd magnitude rejected", parseHrBpm("1000000000"))
-        assertNull("zero rejected", parseHrBpm("0"))
-        assertNull("negative rejected", parseHrBpm("-40"))
-    }
-
-    @Test
-    fun nonFiniteAndGarbageHrIsDropped() {
-        // The wire-path bug: `Infinity` used to parse to a Double then flow on as
-        // a bare `Infinity` JSON token → serde-rejected event → silent no-op.
-        assertNull("Infinity rejected", parseHrBpm("Infinity"))
-        assertNull("-Infinity rejected", parseHrBpm("-Infinity"))
-        assertNull("NaN rejected", parseHrBpm("NaN"))
-        assertNull("empty rejected", parseHrBpm(""))
-        assertNull("non-numeric rejected", parseHrBpm("abc"))
+    fun hrIsKeptOnlyAsAFinitePlausibleBpm() {
+        // Finite 20..=250 bpm, truncated toward the bpm. A non-finite value would
+        // reach the wire as a bare `Infinity` token, which serde rejects, so the
+        // whole event would be lost.
+        val cases = mapOf(
+            "120" to 120, " 155 " to 155, "155.7" to 155, "20" to 20, "250" to 250,
+            "19" to null, "251" to null, "1000000000" to null, "0" to null, "-40" to null,
+            "Infinity" to null, "-Infinity" to null, "NaN" to null, "" to null, "abc" to null,
+        )
+        assertEquals(cases, cases.mapValues { (raw, _) -> parseHrBpm(raw) })
     }
 
     // --- Imported-run accuracy ("Imported-run accuracy assumption") -----
 
     @Test
-    fun hdopConvertsToMetresViaNominalUere() {
-        // accuracy ≈ hdop × 5 m (nominal 1-sigma UERE). An HONEST estimate, not
-        // a device measurement, but a real signal, unlike the old fixed 5.0.
-        assertEquals(5.0, hdopToAccuracyM("1.0")!!, 1e-9)
-        assertEquals(12.5, hdopToAccuracyM("2.5")!!, 1e-9)
-        assertEquals(4.0, hdopToAccuracyM(" 0.8 ")!!, 1e-9)
-    }
-
-    @Test
-    fun garbageOrNonPositiveHdopIsUnknownNotZero() {
-        assertNull("missing/blank hdop is unknown", hdopToAccuracyM(""))
-        assertNull("non-numeric hdop is unknown", hdopToAccuracyM("abc"))
-        assertNull("zero hdop is not a real fix quality", hdopToAccuracyM("0"))
-        assertNull("negative hdop rejected", hdopToAccuracyM("-1"))
-        assertNull("NaN rejected", hdopToAccuracyM("NaN"))
-        assertNull("Infinity rejected", hdopToAccuracyM("Infinity"))
+    fun hdopConvertsToMetresAndAnythingElseIsUnknown() {
+        // accuracy ≈ hdop × 5 m (nominal 1-sigma UERE): an honest estimate, not a
+        // device measurement. Missing, garbage or non-positive hdop is unknown, never 0.
+        val cases = mapOf(
+            "1.0" to 5.0, "2.5" to 12.5, " 0.8 " to 4.0,
+            "" to null, "abc" to null, "0" to null, "-1" to null, "NaN" to null, "Infinity" to null,
+        )
+        assertEquals(cases, cases.mapValues { (raw, _) -> hdopToAccuracyM(raw)?.let { Math.round(it * 1e6) / 1e6 } })
     }
 
     // importedRunEvent is a pure function (no android.util.Xml), so its accuracy
@@ -209,14 +184,18 @@ class ImportParserTest {
     }
 
     // --- import <time> parsing (GPX + TCX share parseImportTimeSec) ---------
-    // The XML→segment path uses android.util.Xml (a non-functional JVM stub), so the
-    // timestamp decoder is verified on its pure helper.
 
     @Test
     fun specUtcTimestampsParseToTheirInstant() {
         assertEquals(1_788_084_000L, parseImportTimeSec("2026-08-30T10:00:00Z"))
         // An explicit offset resolves to the same instant (10:00+02:00 == 08:00Z).
         assertEquals(1_788_076_800L, parseImportTimeSec("2026-08-30T10:00:00+02:00"))
+    }
+
+    @Test
+    fun colonlessOffsetParsesToItsInstant() {
+        assertEquals(1_788_076_800L, parseImportTimeSec("2026-08-30T10:00:00+0200"))
+        assertEquals(1_788_084_000L, parseImportTimeSec("2026-08-30T10:00:00.000+0000"))
     }
 
     @Test
@@ -240,7 +219,7 @@ class ImportParserTest {
     // --- distinct entry ids per imported activity --------------------------
 
     @Test
-    fun two_imported_runs_in_one_ms_get_distinct_ids() {
+    fun twoImportedRunsInOneMsGetDistinctIds() {
         // A multi-activity TCX import builds several runs back-to-back; the default
         // System.currentTimeMillis() id would collide within a millisecond, making a
         // later DeleteEntry/AmendRun target the wrong run. EntryIds.next() guarantees
@@ -262,10 +241,17 @@ class ImportParserTest {
         assertEquals("skiing", nonRunSport("alpine_skiing"))
         assertEquals("hiking", nonRunSport("hiking"))
         assertEquals("walking", nonRunSport("Nordic Walking"))
-        // Running in any word wins; unnamed, generic or unknown labels import.
-        for (run in listOf(null, "", "Running", "trail_running", "treadmill_running", "Run", "jogging", "Other", "Laufen", "9", "strides")) {
-            assertNull(run, nonRunSport(run))
-        }
+        // Running in any word wins, in any language or mixed label; unnamed,
+        // generic or unknown labels import.
+        val runs = listOf(
+            null, "", "Running", "trail_running", "treadmill_running", "Run", "jogging", "Other", "9", "1", "strides",
+            "Trail run", "TrailRun", "VirtualRun", "Laufen", "Traillauf", "Course à pied", "Trail",
+            "Carrera", "Correr", "Corsa", "Hardlopen", "Löpning", "Løb", "Juoksu", "Bieganie", "Běh",
+            "Futás", "Koşu", "Бег", "ランニング", "跑步", "Skriešana", "Running/Walking", "Walk/Run",
+            "Run/Walk", "Hike & Run", "Swimrun", "street_running", "Skyrunning", "Fell running",
+            "Orienteering", "Treadmill",
+        )
+        assertEquals(emptyList<String>(), runs.filter { nonRunSport(it) != null }.map { "$it→${nonRunSport(it)}" })
     }
 
     @Test
@@ -274,7 +260,7 @@ class ImportParserTest {
         try {
             importedRunEvent(ride, measuredHrMax = null)
             fail("a ride must not import as a run")
-        } catch (e: GpxImportException) {
+        } catch (e: ImportException) {
             assertEquals(ImportFailure.NotARun, e.reason)
             assertEquals("cycling", e.detail)
         }

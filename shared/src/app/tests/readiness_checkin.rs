@@ -58,14 +58,7 @@ fn a_floor_morning_before_the_baseline_is_very_low_not_below_normal() {
     // baseline, 1 of 7" beside it there is no normal to be below yet.
     let app = Engine;
     let mut model = Model::default();
-    app.update(
-        Event::SetToday {
-            epoch_day: 0,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, 0);
     app.update(checkin_ev(0, 1, 5, 1), &mut model)
         .expect_only_render();
     let vm = app.view(&model);
@@ -608,14 +601,7 @@ fn a_soreness_answer_from_an_earlier_day_never_says_today() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: sunday + 2,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, sunday + 2);
     let vm = app.view(&model);
     let hold = vm
         .adjustments

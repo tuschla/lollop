@@ -94,10 +94,6 @@ class LongHistoryUiTest {
         QaHarness.teardown()
         AppSettings.showRouteMaps.value = true
         AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-        if (timings.isNotEmpty()) {
-            val worst = timings.sortedByDescending { it.second }.take(5)
-            println("LongHistoryUiTest timings (worst): $worst")
-        }
     }
 
     // ── 1. Replay + core view: complete, consistent, sane numbers, linear cost ─
@@ -109,7 +105,6 @@ class LongHistoryUiTest {
         measureCore(quarter) // warm-up: JIT + native first-call costs
         val (fullRestore, fullView, m) = measureCore(full)
         val (qRestore, qView, _) = measureCore(quarter)
-        println("LongHistoryUiTest core: full restore=${fullRestore}ms view=${fullView}ms; quarter restore=${qRestore}ms view=${qView}ms")
 
         assertFalse("a replayed line reset the core (logDegraded)", privateBool(Core, "logDegraded"))
         assertEquals("every seeded set is in the model", full.sets.size, m.lifts.size)
@@ -723,12 +718,12 @@ class LongHistoryUiTest {
             keys.filter { it in seen && it !in prev }.forEach { dups += "reappeared after scrolling past: $it" }
             vis.forEach { seen.putIfAbsent(it.key, it) }
             if (step % checkEvery == 0) {
-                violations += UxInvariants.check(rule, rule.density, checkClipping = true).filter { it.kind in UX_KINDS }
+                violations += UxInvariants.check(rule, rule.density).filter { it.kind in UxInvariants.KINDS }
                 textProblems += textProblems()
             }
             val range = list.fetchSemanticsNode().config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
             if (range != null && range.value() >= range.maxValue()) {
-                violations += UxInvariants.check(rule, rule.density, checkClipping = true).filter { it.kind in UX_KINDS }
+                violations += UxInvariants.check(rule, rule.density).filter { it.kind in UxInvariants.KINDS }
                 textProblems += textProblems()
                 break
             }
@@ -821,7 +816,7 @@ class LongHistoryUiTest {
 
     /** UX invariants + cut-off/overlapping text on whatever is on screen now. */
     private fun sheetChecks(where: String) {
-        val v = UxInvariants.check(rule, rule.density, checkClipping = true).filter { it.kind in UX_KINDS }
+        val v = UxInvariants.check(rule, rule.density).filter { it.kind in UxInvariants.KINDS }
         assertTrue("[$where] UX invariants:\n" + v.joinToString("\n"), v.isEmpty())
         val t = textProblems()
         assertTrue("[$where] text cut off / overlapping:\n" + t.joinToString("\n"), t.isEmpty())
@@ -973,8 +968,6 @@ class LongHistoryUiTest {
 
         /** No seeded kilometre is faster than tempo at the end of the span with its ±4 % wobble. */
         private const val FASTEST_SEEDED_SEC_PER_KM = 275.0 * 0.94 * 0.96 - 5.0
-
-        private val UX_KINDS = setOf("forbidden-text", "unlabeled-action", "small-touch-target", "duplicate-action-in-card", "clipped-action")
 
         private val RUN_FACE = Regex("""^(\d+\.\d\d) (km|mi) · """)
         private val LIFT_COUNT = Regex("""^\d+ exercises? · \d+ sets?$""")

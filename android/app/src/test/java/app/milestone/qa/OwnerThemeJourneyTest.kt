@@ -56,8 +56,8 @@ class OwnerThemeJourneyTest {
     @After
     fun tearDown() = QaHarness.teardown()
 
-    /** A theme swatch card: a radio-button card named by the theme's label. */
-    private fun swatch(t: AppTheme) = hasText(t.label) and isSelectable()
+    /** A theme swatch card: a radio-button card named by the theme's name. */
+    private fun swatch(t: AppTheme) = hasText(t.name) and isSelectable()
 
     /** The "Use system accent color" row (the whole row is the switch). */
     private val accent: SemanticsMatcher get() = hasText(str(R.string.main_use_system_accent)) and isToggleable()

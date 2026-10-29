@@ -9,7 +9,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,7 +46,7 @@ fun SessionReviewSheet(
     // Mirror unsaved-edits up to a host so its swipe-down dismissal can guard it.
     onDirtyChange: (Boolean) -> Unit = {},
     // Whether the run questions apply: a lift-only day never asks them.
-    showRun: Boolean = reviewAsksRun(EventDispatcher.model.collectAsState().value),
+    showRun: Boolean,
     onSubmit: (Event.SubmitReview) -> Unit,
 ) {
     var badDay by rememberSaveable { mutableStateOf(false) }
@@ -100,13 +99,12 @@ fun SessionReviewSheet(
                 color = OnBgMuted,
                 style = Type.Caption,
             )
-            SwitchRow(stringResource(R.string.log_switch_off_day), badDay) { badDay = it }
+            LabeledSwitchRow(stringResource(R.string.log_switch_off_day), badDay) { badDay = it }
         }
         if (showRun) FormCard {
             Text(stringResource(R.string.log_review_run_header), color = OnBgBody, style = Type.Body)
-            SwitchRow(stringResource(R.string.log_switch_decoupling_recorded), hasDecoupling) { hasDecoupling = it }
+            LabeledSwitchRow(stringResource(R.string.log_switch_decoupling_recorded), hasDecoupling) { hasDecoupling = it }
             if (hasDecoupling) {
-                // Tap-scale over 0–30 % in 0.5 steps, not a −/+ stepper.
                 FieldLabel(
                     stringResource(R.string.log_field_decoupling_drift),
                     stringResource(R.string.log_value_pct, String.format(Locale.US, "%.1f", driftPct)),
@@ -119,17 +117,16 @@ fun SessionReviewSheet(
                 ) { driftPct = it }
                 // The core only judges drift on a cool, steady, easy effort; leave
                 // this on for a genuine easy run.
-                SwitchRow(stringResource(R.string.log_switch_cool_steady), coolSteady) { coolSteady = it }
+                LabeledSwitchRow(stringResource(R.string.log_switch_cool_steady), coolSteady) { coolSteady = it }
             }
-            SwitchRow(stringResource(R.string.log_switch_easy_intensity), hasEasyIntensity) { hasEasyIntensity = it }
+            LabeledSwitchRow(stringResource(R.string.log_switch_easy_intensity), hasEasyIntensity) { hasEasyIntensity = it }
             if (hasEasyIntensity) {
-                // Tap-scale over 0–100 % in 5-point steps, not a −/+ stepper.
                 FieldLabel(stringResource(R.string.log_field_time_above_z2), stringResource(R.string.log_value_pct, "$easyPctAboveZ1"))
                 ScrollableScaleRow(FivePercentScale, easyPctAboveZ1, { "$it" }, label = stringResource(R.string.log_field_time_above_z2)) {
                     easyPctAboveZ1 = it
                 }
             }
-            SwitchRow(stringResource(R.string.log_switch_positive_split), hasPositiveSplit) { hasPositiveSplit = it }
+            LabeledSwitchRow(stringResource(R.string.log_switch_positive_split), hasPositiveSplit) { hasPositiveSplit = it }
             if (hasPositiveSplit) {
                 // Second half slower than the first, as a percent; the core flags
                 // pacing strictly beyond +3 %. Tap-scale over 0–30 % in 0.5 steps.
@@ -297,31 +294,20 @@ fun WeeklyCheckinSheet(
         FormCard {
             // Week-level fatigue rollup: ≥2 of any one trigger prompts an easier week.
             // Both counts start unanswered (nothing selected, nothing sent).
-            val sessionsShown = WeekSessionCounts.associateWith { pluralStringResource(R.plurals.rating_sessions, it, it) }
-            RatingScale(
+            WeekSessionCountScale(
                 label = stringResource(R.string.log_weekly_failed_sessions),
-                values = WeekSessionCounts,
                 selected = failedKeySessions,
                 onSelect = { failedKeySessions = it },
-                startCaption = sessionsShown.getValue(WeekSessionCounts.first()),
-                endCaption = sessionsShown.getValue(WeekSessionCounts.last()),
-                selectedText = { sessionsShown.getValue(it) },
-                clearable = false,
                 testTag = "weekly-failed",
                 // A full Space.Lg step before the next question, as in the morning check-in.
                 modifier = Modifier.padding(bottom = (Space.Lg - Space.Md).dp),
             )
             // rpe_load_gap_sessions: the target effort was reached at a load ≥7% below
             // plan (a fatigue sign), said in plain words.
-            RatingScale(
+            WeekSessionCountScale(
                 label = stringResource(R.string.log_weekly_rpe_gap),
-                values = WeekSessionCounts,
                 selected = rpeLoadGapSessions,
                 onSelect = { rpeLoadGapSessions = it },
-                startCaption = sessionsShown.getValue(WeekSessionCounts.first()),
-                endCaption = sessionsShown.getValue(WeekSessionCounts.last()),
-                selectedText = { sessionsShown.getValue(it) },
-                clearable = false,
                 testTag = "weekly-rpe-gap",
             )
             // Bar-speed drop is lab data (a velocity device): folded behind "More
@@ -341,16 +327,11 @@ fun WeeklyCheckinSheet(
                     onActivate = { velocityFresh = true; velocityKeypad = true },
                     onText = { velocityText = it; velocityFresh = false },
                 )
-                if (velocityKeypad) {
+                KeypadPanel(velocityKeypad) {
                     NumericKeypad(
-                        onKey = { key ->
-                            velocityText = editNumericBuffer(velocityText, key, velocityFresh)
-                            velocityFresh = false
-                        },
-                        onBackspace = {
-                            velocityText = velocityText.dropLast(1)
-                            velocityFresh = false
-                        },
+                        velocityText,
+                        velocityFresh,
+                        { velocityText = it; velocityFresh = false },
                         onDone = { velocityKeypad = false },
                     )
                 }
@@ -361,10 +342,10 @@ fun WeeklyCheckinSheet(
         FormCard {
             FieldLabel(stringResource(R.string.log_weekly_signs_q))
             Text(stringResource(R.string.log_weekly_signs_ctx), color = OnBgMuted, style = Type.Caption)
-            SwitchRow(stringResource(R.string.log_weekly_sign_performance), worsePerformance) { worsePerformance = it }
-            SwitchRow(stringResource(R.string.log_weekly_sign_mood), lowMood) { lowMood = it }
-            SwitchRow(stringResource(R.string.log_weekly_sign_rhr), higherRestingHr) { higherRestingHr = it }
-            SwitchRow(stringResource(R.string.log_weekly_sign_sleep), worseSleep) { worseSleep = it }
+            LabeledSwitchRow(stringResource(R.string.log_weekly_sign_performance), worsePerformance) { worsePerformance = it }
+            LabeledSwitchRow(stringResource(R.string.log_weekly_sign_mood), lowMood) { lowMood = it }
+            LabeledSwitchRow(stringResource(R.string.log_weekly_sign_rhr), higherRestingHr) { higherRestingHr = it }
+            LabeledSwitchRow(stringResource(R.string.log_weekly_sign_sleep), worseSleep) { worseSleep = it }
             if (signs.any) {
                 val weekLabels = listOf(
                     stringResource(R.string.log_weekly_signs_lt1),
@@ -433,6 +414,30 @@ fun WeeklyCheckinSheet(
             },
         )
     }
+}
+
+/** A 0–7 sessions-this-week [RatingScale]; a picked count cannot be cleared. */
+@Composable
+private fun WeekSessionCountScale(
+    label: String,
+    selected: Int?,
+    onSelect: (Int?) -> Unit,
+    testTag: String,
+    modifier: Modifier = Modifier,
+) {
+    val shown = WeekSessionCounts.associateWith { pluralStringResource(R.plurals.rating_sessions, it, it) }
+    RatingScale(
+        label = label,
+        values = WeekSessionCounts,
+        selected = selected,
+        onSelect = onSelect,
+        startCaption = shown.getValue(WeekSessionCounts.first()),
+        endCaption = shown.getValue(WeekSessionCounts.last()),
+        selectedText = { shown.getValue(it) },
+        modifier = modifier,
+        clearable = false,
+        testTag = testTag,
+    )
 }
 
 /** The answers to a clinical screen in reading order, plus the not-yet-answered

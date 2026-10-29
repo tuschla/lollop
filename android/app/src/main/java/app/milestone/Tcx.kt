@@ -1,9 +1,7 @@
 package app.milestone
 
-import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserException
-import java.io.StringReader
 
 // Minimal TCX (Garmin Training Center XML) track reader for run import
 // (Garmin/Strava/etc. exports that ship TCX instead of GPX). Reads only
@@ -15,31 +13,16 @@ import java.io.StringReader
 // Creator, Course) is ignored. Produces [GpxFix]es, the same shape as the GPX reader.
 
 /**
- * One [ImportedRun] per `<Activity>` (a TCX export can bundle several, e.g. a multi-sport
- * day: each is a separate run, not a pause inside one), each carrying its `Sport`
- * attribute and a list of recording
- * SEGMENTS. A standard Garmin/Strava TCX opens a new `<Track>` per `<Lap>`
- * - including AUTOLAPS on continuous running, so a `<Track>` boundary is NOT
- * inherently a pause. Consecutive `<Track>`s whose inter-track time gap is
- * small (≤ [MAX_TRACK_MERGE_GAP_SEC], the same convention as the live
- * pipeline's fix-gap threshold) are therefore MERGED into one segment; only a
- * genuine pause (a larger gap, or a clock discontinuity) splits segments. The
- * core drops the entering leg of every segment boundary from BOTH distance and
- * moving time, so one segment per lap would undercount (~−130 m / −40 s on an
- * autolap-per-km marathon). Trackpoints without a `<Position>` (TCX emits these
- * during pauses) are skipped rather than producing a fix with missing
- * coordinates.
+ * One [ImportedRun] per `<Activity>` (a multi-sport day is several runs, not pauses
+ * inside one), with its `Sport` attribute; its `<Track>`s are merged into recording
+ * segments by [mergeTcxTracks]. Trackpoints without a `<Position>` (TCX writes these
+ * during pauses) are skipped.
  */
 internal fun parseTcxActivities(text: String): List<ImportedRun> {
-    val parser = Xml.newPullParser().apply {
-        setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-        setInput(StringReader(text))
-    }
+    val parser = importPullParser(text)
     val activities = mutableListOf<ImportedRun>()
     var sport: String? = null
-    // One raw fix list per `<Track>` in the current `<Activity>`; merged into
-    // recording segments by [mergeTcxTracks] at Activity end (autolap boundaries
-    // collapse, genuine pauses split).
+    // One raw fix list per `<Track>` in the current `<Activity>`, merged at Activity end.
     var tracks = mutableListOf<List<GpxFix>>()
     var segment = mutableListOf<GpxFix>()
     // Track/Trackpoint handling is gated on being INSIDE an <Activity>: a TCX
@@ -57,7 +40,7 @@ internal fun parseTcxActivities(text: String): List<ImportedRun> {
     var hr: Int? = null
     // A cut-off download often ends right after a tag: the pull parser then
     // reaches END_DOCUMENT without throwing, with only the activities closed so
-    // far parsed. As for GPX ([parseGpxRun]), only a closed root proves the file
+    // far parsed. As for GPX ([parseGpxRuns]), only a closed root proves the file
     // is whole; anything else is Damaged (thrown as the parse error the caller
     // maps to it), never a shorter run or "no GPS points".
     var rootClosed = false
@@ -99,10 +82,7 @@ internal fun parseTcxActivities(text: String): List<ImportedRun> {
                 "Trackpoint" -> if (inActivity) {
                     inTrackpoint = false
                     if (lat.isFinite() && lon.isFinite()) {
-                        // TCX carries no per-fix accuracy figure, so GpxFix.accuracyM
-                        // is left null (unknown); importedRunEvent then applies the
-                        // QC-passing IMPORT_UNKNOWN_ACCURACY_M sentinel, never a
-                        // fabricated measurement.
+                        // TCX names no accuracy: null, see [IMPORT_UNKNOWN_ACCURACY_M].
                         segment.add(GpxFix(lat, lon, timeSec, hr))
                     }
                 }
@@ -121,23 +101,18 @@ internal fun parseTcxActivities(text: String): List<ImportedRun> {
     return activities
 }
 
-/** A time gap (seconds) between the end of one `<Track>` and the start of the
- *  next at or below this is treated as CONTINUOUS running (an autolap/lap
- *  boundary) and the two Tracks are merged into one segment; a larger gap is a
- *  genuine recording pause and splits them. Matches the live pipeline's
- *  fix-gap convention (RunSession's `MAX_FIX_GAP_SEC`, 30 s), a normal ~1–2 s
- *  trackpoint cadence never trips it, so only real pauses break a segment. */
+/** Longest gap (seconds) between one `<Track>`'s end and the next one's start that
+ *  still counts as continuous running, the live pipeline's fix-gap threshold
+ *  (RunSession's `MAX_FIX_GAP_SEC`). A 1-2 s trackpoint cadence never trips it. */
 private const val MAX_TRACK_MERGE_GAP_SEC = 30L
 
 /**
- * Fold consecutive per-`<Track>` fix lists into recording segments. Standard
- * Garmin/Strava TCX writes one `<Track>` per `<Lap>` (incl. autolaps on
- * continuous running), so a Track boundary is a LAP boundary, not inherently a
- * pause. Adjacent Tracks separated by a small gap (≤ [MAX_TRACK_MERGE_GAP_SEC])
- * are merged into one segment so the core doesn't drop each lap's entering leg
- * from distance and moving time; a larger gap, or a non-positive/backwards
- * clock step, is a genuine pause and opens a new segment. Empty tracks are
- * skipped. Pure (no XML), so unit-testable directly. Package-visible for tests.
+ * Fold consecutive per-`<Track>` fix lists into recording segments. Garmin/Strava
+ * TCX writes one `<Track>` per `<Lap>`, autolaps on continuous running included,
+ * and the core drops the entering leg of every segment from distance and moving
+ * time (~−130 m / −40 s on an autolap-per-km marathon). So adjacent Tracks with a
+ * gap of 0 to [MAX_TRACK_MERGE_GAP_SEC] merge; a larger gap or a backwards clock
+ * step is a pause and opens a new segment. Empty tracks are skipped.
  */
 internal fun mergeTcxTracks(tracks: List<List<GpxFix>>): List<List<GpxFix>> {
     val segments = mutableListOf<MutableList<GpxFix>>()

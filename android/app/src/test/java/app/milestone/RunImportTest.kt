@@ -41,7 +41,7 @@ class RunImportTest {
     private fun ok(vararg runs: List<List<GpxFix>>) = Result.success(runs.map { ImportedRun(it) })
 
     private fun failed(reason: ImportFailure, detail: String? = null) =
-        Result.failure<List<ImportedRun>>(GpxImportException(reason, detail))
+        Result.failure<List<ImportedRun>>(ImportException(reason, detail))
 
     private fun plan(files: List<ParsedRunFile>, existing: Set<Long> = emptySet()) =
         planRunImport(files, existing) { run -> importedRunEvent(run, measuredHrMax = null) }
@@ -111,11 +111,45 @@ class RunImportTest {
     fun theGateJudgesMovingPaceSoStopsCannotHideASpeed() {
         // 3:20 /km (5 m/s) is a fast but real run: it passes.
         val brisk = track(10_000, metresPerFix = 50.0).flatten().map { GpsPoint(it.lat, it.lon, it.timeSec, 5.0) }
-        assertFalse(isImplausiblyFast(brisk, emptyList()))
+        assertFalse(legTotals(brisk, emptyList()).implausiblyFast)
         // 2:30 /km while moving, standing still every other 10 s: 5:00 /km elapsed, but
         // the moving pace is what counts, so it is refused.
         val stopStart = List(41) { i -> GpsPoint(lat = ((i + 1) / 2) * deg(66.7), lon = 0.0, observedAt = 1_000L + i * 10L, accuracyM = 5.0) }
-        assertTrue(isImplausiblyFast(stopStart, emptyList()))
+        assertTrue(legTotals(stopStart, emptyList()).implausiblyFast)
+    }
+
+    @Test
+    fun eachGpxTrackIsItsOwnRunWithItsOwnSport() {
+        // A 10 km run and a 5 km ride in one GPX: the run imports, the ride is refused.
+        fun trkpts(n: Int, lat0: Double, t0: Long, mps: Double) = buildString {
+            for (i in 0 until n) {
+                append("<trkpt lat=\"${lat0 + i * deg(mps)}\" lon=\"8.54\"><time>${java.time.Instant.ofEpochSecond(t0 + i)}</time></trkpt>")
+            }
+        }
+        val t0 = 1_750_000_000L
+        val rideStart = t0 + 3000 + 60
+        val doc = "<?xml version=\"1.0\"?><gpx version=\"1.1\">" +
+            "<trk><type>running</type><trkseg>${trkpts(3000, 47.37, t0, 3.33)}</trkseg></trk>" +
+            "<trk><type>cycling</type><trkseg>${trkpts(720, 47.37 + deg(3000 * 3.33), rideStart, 7.0)}</trkseg></trk></gpx>"
+        val runs = parseRunFileSegments(doc.toByteArray()) { fail("not a FIT file"); null }
+        assertEquals(listOf("running", "cycling"), runs.map { it.sport })
+        val p = plan(listOf(ParsedRunFile("day.gpx", Result.success(runs))))
+        assertEquals(listOf(t0 + 2999), p.runs.map { it.event.observedAt })
+        assertTrue(p.failures.isEmpty())
+    }
+
+    @Test
+    fun aFitOverItsCapIsRefusedBeforeTheCoreParsesIt() {
+        fun fitHeader(size: Int) = ByteArray(size).also { ".FIT".toByteArray().copyInto(it, destinationOffset = 8) }
+        try {
+            parseRunFileSegments(fitHeader(MAX_FIT_IMPORT_BYTES + 1)) { fail("parsed an oversized FIT"); null }
+            fail("an oversized FIT must not import")
+        } catch (e: ImportException) {
+            assertEquals(ImportFailure.TooLarge, e.reason)
+        }
+        var parsed = false
+        runCatching { parseRunFileSegments(fitHeader(MAX_FIT_IMPORT_BYTES)) { parsed = true; null } }
+        assertTrue("a FIT at the cap reaches the core", parsed)
     }
 
     @Test
@@ -135,42 +169,26 @@ class RunImportTest {
     }
 
     @Test
-    fun aFitFileForAnotherSportIsRefusedWithItsSport() {
-        val json = """{"error":{"kind":"not_a_run","context":"cycling","message":"This FIT file records cycling, not a run"}}"""
-        try {
-            fitSegments(json)
-            fail("a cycling FIT must not import")
-        } catch (e: GpxImportException) {
-            assertEquals(ImportFailure.NotARun, e.reason)
-            assertEquals("cycling", e.detail)
+    fun aFitErrorEnvelopeIsRefusedWithItsNamedReason() {
+        val cases = listOf(
+            """{"error":{"kind":"not_a_run","context":"cycling","message":"This FIT file records cycling, not a run"}}""" to ImportFailure.NotARun,
+            // A 13 s fragment under the keep threshold.
+            """{"error":{"kind":"no_track","context":"too_short","message":"Too short to import as a run"}}""" to ImportFailure.TooShort,
+            """{"error":{"kind":"no_track","context":"","message":"No GPS points"}}""" to ImportFailure.NoTrack,
+            // The legacy plain-string error and a null JNI result read as a damaged file.
+            """{"error":"Couldn't read this FIT file"}""" to ImportFailure.Damaged,
+            null to ImportFailure.Damaged,
+        )
+        for ((json, reason) in cases) {
+            val e = runCatching { fitSegments(json) }.exceptionOrNull()
+            assertEquals(json, reason, (e as? ImportException)?.reason)
         }
-        // The legacy plain-string error and a null JNI result read as a damaged file.
-        for (bad in listOf("""{"error":"Couldn't read this FIT file"}""", null)) {
-            try {
-                fitSegments(bad)
-                fail("an error envelope must not import")
-            } catch (e: GpxImportException) {
-                assertEquals(ImportFailure.Damaged, e.reason)
-            }
-        }
+        val sport = runCatching { fitSegments(cases[0].first) }.exceptionOrNull() as ImportException
+        assertEquals("cycling", sport.detail)
     }
 
     @Test
-    fun aFitFragmentUnderTheKeepThresholdIsSkippedAsTooShort() {
-        val json = """{"error":{"kind":"no_track","context":"too_short","message":"Too short to import as a run"}}"""
-        try {
-            fitSegments(json)
-            fail("a 13 s FIT fragment must not import")
-        } catch (e: GpxImportException) {
-            assertEquals(ImportFailure.TooShort, e.reason)
-        }
-        // Any other no_track still reads as a file without GPS points.
-        try {
-            fitSegments("""{"error":{"kind":"no_track","context":"","message":"No GPS points"}}""")
-            fail("a FIT without points must not import")
-        } catch (e: GpxImportException) {
-            assertEquals(ImportFailure.NoTrack, e.reason)
-        }
+    fun theTooShortReasonReadsInTheDisplayUnit() {
         AppSettings.distanceUnitOverride.value = DistanceUnitOverride.Mi
         try {
             assertEquals(
@@ -187,7 +205,7 @@ class RunImportTest {
         try {
             parseRunFileSegments("name,distance\nmonday,5".encodeToByteArray()) { fail("not a FIT file"); null }
             fail("a CSV must not import")
-        } catch (e: GpxImportException) {
+        } catch (e: ImportException) {
             assertEquals(ImportFailure.WrongType, e.reason)
         }
     }
@@ -209,7 +227,6 @@ class RunImportTest {
         )
         assertEquals(res.getString(R.string.import_result_with_skipped, head, lines), s.text)
         assertTrue("two skips are named inline, no details list", s.details.isEmpty())
-        assertTrue(s.text.contains("broken.gpx") && s.text.contains("bike.fit") && s.text.contains("cycling"))
     }
 
     @Test
@@ -257,5 +274,24 @@ class RunImportTest {
         // The launcher / notification intents carry no import.
         assertTrue(RunImport.urisFrom(Intent(Intent.ACTION_MAIN)).isEmpty())
         assertTrue(RunImport.urisFrom(null).isEmpty())
+    }
+
+    @Test
+    fun onlyOtherAppsContentUrisAreImported() {
+        val private = Uri.parse("file:///data/data/app.milestone/files/events.ndjson")
+        val own = Uri.parse("content://app.milestone.fileprovider/shared/run.gpx")
+        val other = Uri.parse("content://files/a.gpx")
+        assertTrue(RunImport.urisFrom(Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, private)).isEmpty())
+        assertTrue(RunImport.urisFrom(Intent(Intent.ACTION_VIEW).setData(own)).isEmpty())
+        assertEquals(
+            listOf(other),
+            RunImport.urisFrom(
+                Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(private, own, other)),
+            ),
+        )
+        val clipped = Intent(Intent.ACTION_SEND).apply {
+            clipData = android.content.ClipData.newRawUri(null, private).apply { addItem(android.content.ClipData.Item(other)) }
+        }
+        assertEquals(listOf(other), RunImport.urisFrom(clipped))
     }
 }

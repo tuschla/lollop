@@ -7,10 +7,12 @@ import app.milestone.Core
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GoalDistance
+import app.milestone.GpsPoint
 import app.milestone.HistoryFocus
 import app.milestone.LiftGoal
 import app.milestone.ProgressionCadence
 import app.milestone.ResistanceModality
+import app.milestone.RunSession
 import app.milestone.setupPrefs
 import app.milestone.UiMessages
 import java.io.File
@@ -77,7 +79,6 @@ object QaHarness {
         // a consumer that never resumes, so this boot would wait on it forever (the
         // splash cancelling every frame, ActivityScenario.launch spinning).
         EventDispatcher.resetForTest()
-        injectCoreLatency()
         // The run tracker's process singleton (live run, plan guide, save latch): a
         // scenario that left a run recording must not reopen the tracker in the next.
         app.milestone.RunSession.reset()
@@ -97,26 +98,6 @@ object QaHarness {
     }
 
     /**
-     * Race finder, off by default: with `QA_CORE_LATENCY_MS=<n>` in the test JVM's
-     * environment, every queued core send (single and batch) holds its result back
-     * n ms AFTER the core applied it, off the main looper. The event is then in the
-     * durable log while the UI still shows the previous model, which is what a
-     * loaded JVM does on a slow view build. A test that syncs on the log (or on
-     * nothing) and then expects the new model on screen fails under it; sync on
-     * the published [EventDispatcher.model] instead. Run with `--rerun`: Gradle
-     * does not see an environment change.
-     */
-    private fun injectCoreLatency() {
-        val ms = System.getenv("QA_CORE_LATENCY_MS")?.toLongOrNull()?.takeIf { it > 0 } ?: return
-        val send = EventDispatcher.sender
-        val sendAll = EventDispatcher.batchSender
-        EventDispatcher.sender = { e -> send(e).also { lag(ms) } }
-        EventDispatcher.batchSender = { es -> sendAll(es).also { lag(ms) } }
-    }
-
-    private suspend fun lag(ms: Long) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Thread.sleep(ms) }
-
-    /**
      * Close the launched Activity at the END of a test (valid lifecycle point,
      * unlike closing it during the next test's setup). Prevents boot effects and
      * the process-scoped event consumer of finished tests from accumulating and
@@ -132,6 +113,14 @@ object QaHarness {
         val f = logFile(ctx)
         f.parentFile?.mkdirs()
         f.writeText(events.joinToString("") { it.toJson().toString() + "\n" })
+    }
+
+    /** Point [app.milestone.ActiveRunStore] at [ctx]'s files dir. The store caches
+     *  its file from the first init in this JVM, which may be another test's (now
+     *  gone) files dir. */
+    fun resetActiveRunStore(ctx: Context) {
+        setPrivate(app.milestone.ActiveRunStore, "file", null)
+        app.milestone.ActiveRunStore.init(ctx)
     }
 
     // ── Scenario event builders ────────────────────────────────────────────
@@ -231,10 +220,36 @@ object QaHarness {
         distanceKm = 5.0,
         durationMin = 27.5,
         hrPctMax = 0.0,
-        longestRecentKm = 0.0,
         observedAt = observedAt,
         entryId = observedAt * 1000,
     )
+
+    /** A 10.1 km GPS run at an even 5:00 /km, heading north: 1011 clean fixes, 10 m
+     *  apart every 3 s, the first at [observedAt]. */
+    fun gpsTenK(observedAt: Long, sessionRpe: Int? = null): Event.LogRunTrack {
+        val points = (0 until 1011).map { i ->
+            GpsPoint(lat = 47.0 + i * 10.0 / 111_195.0, lon = 8.0, observedAt = observedAt + i * 3L, accuracyM = 5.0)
+        }
+        return Event.LogRunTrack(
+            points = points,
+            hrPctMax = 0.0,
+            observedAt = observedAt,
+            entryId = observedAt * 1000,
+            sessionRpe = sessionRpe,
+        )
+    }
+
+    /** A live recording as the service leaves it: 21 fixes, ~30 m every 10 s (600 m,
+     *  200 s moving, past the short-run gate), tracking on. The fix stamps sit far
+     *  ahead of Robolectric's elapsed clock, so the GPS pill reads a steady
+     *  "Recording". */
+    fun seedRecordingRun() {
+        val t0 = AppClock.nowSec() - 400
+        for (i in 0..20) {
+            RunSession.add(GpsPoint(52.5200 + i * 0.00027, 13.4050, t0 + i * 10L, 5.0), (1_000L + i * 10L) * 1_000_000_000L)
+        }
+        RunSession.tracking.value = true
+    }
 
     private fun setPrivate(target: Any, field: String, value: Any?) {
         val f = target.javaClass.getDeclaredField(field)

@@ -24,6 +24,27 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
+/** The status chip shows its text whole up to this many characters
+ *  (developer.android.com, "Live Updates", "Status chip appearance"). */
+private const val LIVE_CHIP_MAX_CHARS = 7
+
+/** The criteria developer.android.com lists for a Live Update, checked on a built
+ *  notification. (`Notification.hasPromotableCharacteristics()` is not used: the
+ *  Android 16 release build of it, also Robolectric's SDK 36 image, still requires a
+ *  colorized notification; the QPR2 rewrite matches the documented list asserted
+ *  here.) */
+internal fun assertPromotableLiveUpdate(n: Notification) {
+    assertTrue("requests promotion", n.extras.getBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING))
+    assertTrue("ongoing", n.flags and Notification.FLAG_ONGOING_EVENT != 0)
+    assertFalse("title", n.extras.getCharSequence(Notification.EXTRA_TITLE).isNullOrEmpty())
+    assertNull("no custom content view", n.contentView)
+    assertNull("no custom big view", n.bigContentView)
+    assertNull("no custom heads-up view", n.headsUpContentView)
+    assertTrue("not a group summary", n.flags and Notification.FLAG_GROUP_SUMMARY == 0)
+    assertFalse("not colorized", n.extras.getBoolean(Notification.EXTRA_COLORIZED))
+    assertNotNull("dismissal is reported", n.deleteIntent)
+}
+
 /** The run-tracking notification as an Android 16 Live Update: the documented
  *  promotion criteria, the status-bar chip text, the guided-run step bar, the same
  *  notification on older Android, and no re-post after the user dismissed it. */
@@ -48,26 +69,11 @@ class LiveRunNotificationTest {
 
     private val recordingFrame = RunNotifFrame("Moving 23:41 · 4.12 km · 5:45 /km now", "23:41", null)
 
-    /** The criteria developer.android.com lists for a Live Update, checked on the built
-     *  notification. (`Notification.hasPromotableCharacteristics()` is not used: the
-     *  Android 16 release build of it still required a colorized notification; the
-     *  QPR2 rewrite matches the documented list asserted here.) */
-    private fun assertPromotable(n: Notification) {
-        assertTrue("requests promotion", n.extras.getBoolean(Notification.EXTRA_REQUEST_PROMOTED_ONGOING))
-        assertTrue("ongoing", n.flags and Notification.FLAG_ONGOING_EVENT != 0)
-        assertFalse("title", n.extras.getCharSequence(Notification.EXTRA_TITLE).isNullOrEmpty())
-        assertNull("no custom content view", n.contentView)
-        assertNull("no custom big view", n.bigContentView)
-        assertTrue("not a group summary", n.flags and Notification.FLAG_GROUP_SUMMARY == 0)
-        assertFalse("not colorized", n.extras.getBoolean(Notification.EXTRA_COLORIZED))
-        assertNotNull("dismissal is reported", n.deleteIntent)
-    }
-
     @Test
     @Config(sdk = [36])
     fun recordingNotificationIsAPromotableLiveUpdateWithTheMovingTimeChip() {
         val n = build(recordingFrame)
-        assertPromotable(n)
+        assertPromotableLiveUpdate(n)
         assertEquals("23:41", n.shortCriticalText)
         // BigTextStyle (a Live Update style) so the always-expanded card wraps the line.
         assertEquals(Notification.BigTextStyle::class.java.name, n.extras.getString(Notification.EXTRA_TEMPLATE))
@@ -80,7 +86,7 @@ class LiveRunNotificationTest {
     fun guidedRunShowsAProgressStyleBarOfItsSteps() {
         val bar = StepBar(List(5) { STEP_BAR_UNITS }, 2 * STEP_BAR_UNITS + 50)
         val n = build(recordingFrame.copy(content = "Rep 2 of 6 · 2:00 left · Moving 23:41", steps = bar))
-        assertPromotable(n)
+        assertPromotableLiveUpdate(n)
         assertEquals(Notification.ProgressStyle::class.java.name, n.extras.getString(Notification.EXTRA_TEMPLATE))
         val style = Notification.Builder.recoverBuilder(ctx, n).style as Notification.ProgressStyle
         assertEquals(5, style.progressSegments.size)
@@ -167,7 +173,7 @@ class LiveRunNotificationTest {
         fun posted(): Notification = nm.getNotification(1)
 
         val first = shadowOf(controller.get()).lastForegroundNotification
-        assertPromotable(first)
+        assertPromotableLiveUpdate(first)
         assertEquals("recording starts at zero moving time", "0:00", first.shortCriticalText)
 
         // An in-app pause re-posts with the paused chip (the throttled path still works).

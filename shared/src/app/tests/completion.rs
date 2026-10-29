@@ -49,22 +49,12 @@ fn complete_lift_day(app: &Engine, model: &mut Model, epoch_day: i64, at: i64) {
 
 /// The first non-run item on Monday, with its (exercise, sets, reps_low, load).
 fn mon_first_item(app: &Engine, model: &Model) -> (String, u8, u32, Option<f64>) {
-    let vm = app.view(model);
-    let it = vm
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .expect("Monday present")
+    let it = day_row(app, model, MON)
         .items
-        .iter()
+        .into_iter()
         .find(|i| !i.exercise.is_empty())
         .expect("a lift item on Monday");
-    (
-        it.exercise.clone(),
-        it.sets,
-        it.reps_low.max(1) as u32,
-        it.load_kg,
-    )
+    (it.exercise, it.sets, it.reps_low.max(1) as u32, it.load_kg)
 }
 
 #[test]
@@ -76,16 +66,7 @@ fn one_as_prescribed_set_counts_but_does_not_complete_a_multiset_item() {
     app.update(log_set(&ex, w, reps, 8.0, MON * DAY_SEC), &mut model)
         .expect_only_render();
 
-    let vm = app.view(&model);
-    let it = vm
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .unwrap()
-        .items
-        .iter()
-        .find(|i| i.exercise == ex)
-        .expect("the item");
+    let it = mon_item(&app, &model, &ex);
     assert_eq!(it.sets_done, 1, "one qualifying set is counted");
     assert!(!it.done, "one of several prescribed sets is not done");
     assert_eq!(it.logged_sets.len(), 1, "the one set is listed");
@@ -100,24 +81,7 @@ fn warmups_do_not_qualify_or_complete_an_anchored_lift() {
     // planned_strength_model(true) anchors "Back Squat" from a logged e1RM, so
     // its item carries a real load. Five 20 kg empty-bar warm-ups must NOT count.
     let (app, mut model) = planned_strength_model(true);
-    let (ex, sets, reps, load) = {
-        let vm = app.view(&model);
-        let it = vm
-            .week_plan
-            .iter()
-            .find(|s| s.epoch_day == MON)
-            .unwrap()
-            .items
-            .iter()
-            .find(|i| i.load_kg.is_some())
-            .expect("an anchored (load-carrying) item");
-        (
-            it.exercise.clone(),
-            it.sets,
-            it.reps_low.max(1) as u32,
-            it.load_kg.unwrap(),
-        )
-    };
+    let (ex, sets, reps, load) = mon_anchored_item(&app, &model);
     // Log `sets` empty-bar warm-ups (20 kg, high reps).
     for _ in 0..sets {
         app.update(
@@ -126,18 +90,7 @@ fn warmups_do_not_qualify_or_complete_an_anchored_lift() {
         )
         .expect_only_render();
     }
-    let it = {
-        let vm = app.view(&model);
-        vm.week_plan
-            .iter()
-            .find(|s| s.epoch_day == MON)
-            .unwrap()
-            .items
-            .iter()
-            .find(|i| i.exercise == ex)
-            .cloned()
-            .expect("the item")
-    };
+    let it = mon_item(&app, &model, &ex);
     assert_eq!(it.sets_done, 0, "empty-bar warm-ups do not qualify");
     assert!(!it.done, "warm-ups alone never complete an anchored lift");
     assert!(
@@ -148,18 +101,7 @@ fn warmups_do_not_qualify_or_complete_an_anchored_lift() {
     // A working set at the prescribed load DOES qualify.
     app.update(log_set(&ex, load, reps, 8.0, MON * DAY_SEC), &mut model)
         .expect_only_render();
-    let it = {
-        let vm = app.view(&model);
-        vm.week_plan
-            .iter()
-            .find(|s| s.epoch_day == MON)
-            .unwrap()
-            .items
-            .iter()
-            .find(|i| i.exercise == ex)
-            .cloned()
-            .unwrap()
-    };
+    let it = mon_item(&app, &model, &ex);
     assert_eq!(it.sets_done, 1, "a working set at the load qualifies");
 }
 
@@ -191,31 +133,17 @@ fn a_cable_row_completes_the_equipment_qualified_row_fill() {
     );
     // Make the Row day today so its completion is computed (the plan window is
     // start..=today).
-    app.update(
-        Event::SetToday {
-            epoch_day: row_day,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, row_day);
     let at = row_day * DAY_SEC;
     for _ in 0..sets {
         app.update(log_set("Cable row", 60.0, reps, 8.0, at), &mut model)
             .expect_only_render();
     }
-    let it = {
-        let vm = app.view(&model);
-        vm.week_plan
-            .iter()
-            .find(|s| s.epoch_day == row_day)
-            .unwrap()
-            .items
-            .iter()
-            .find(|i| i.exercise == ex)
-            .cloned()
-            .expect("the Row item")
-    };
+    let it = day_row(&app, &model, row_day)
+        .items
+        .into_iter()
+        .find(|i| i.exercise == ex)
+        .expect("the Row item");
     assert_eq!(it.sets_done, sets, "cable rows complete the row fill");
     assert!(it.done, "the Row item reads done");
 }
@@ -224,14 +152,7 @@ fn a_cable_row_completes_the_equipment_qualified_row_fill() {
 fn sets_crossing_midnight_complete_the_day_they_started() {
     let (app, mut model) = planned_strength_model(false);
     // Yesterday morning: today is the day AFTER Monday.
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 1,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON + 1);
     let (ex, sets, reps, _load) = mon_first_item(&app, &model);
     assert!(sets >= 2, "need >=2 sets to split across midnight");
     // All but one set at 23:50 Monday; the last at 00:06 Tuesday (16 min later,
@@ -245,18 +166,7 @@ fn sets_crossing_midnight_complete_the_day_they_started() {
     app.update(log_set(&ex, 100.0, reps, 8.0, early), &mut model)
         .expect_only_render();
 
-    let it = {
-        let vm = app.view(&model);
-        vm.week_plan
-            .iter()
-            .find(|s| s.epoch_day == MON)
-            .unwrap()
-            .items
-            .iter()
-            .find(|i| i.exercise == ex)
-            .cloned()
-            .expect("the item")
-    };
+    let it = mon_item(&app, &model, &ex);
     assert_eq!(
         it.sets_done, sets,
         "the after-midnight set counts toward the day it started"
@@ -266,25 +176,7 @@ fn sets_crossing_midnight_complete_the_day_they_started() {
 
 #[test]
 fn a_short_jog_does_not_complete_a_long_run_but_a_near_full_run_does() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(running_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    let (app, mut model) = planned_on(running_profile(), [], MON);
     let long_day = app
         .view(&model)
         .week_plan
@@ -293,27 +185,13 @@ fn a_short_jog_does_not_complete_a_long_run_but_a_near_full_run_does() {
         .expect("a long run day")
         .epoch_day;
     // Make the long-run day today so its completion is computed.
-    app.update(
-        Event::SetToday {
-            epoch_day: long_day,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, long_day);
     let at = long_day * DAY_SEC + 9 * 3_600;
 
     // A 1 km jog: below 80 % of the prescribed distance.
     app.update(log_run_at(1.0, 6.0, 70.0, at), &mut model)
         .expect_only_render();
-    let done_after_jog = app
-        .view(&model)
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == long_day)
-        .unwrap()
-        .items[0]
-        .done;
+    let done_after_jog = day_row(&app, &model, long_day).items[0].done;
     assert!(!done_after_jog, "a 1 km jog does not complete a long run");
 
     // Replace it with a 4 km run (>= 80 % of the 4.8 km long run: the 30 %
@@ -322,13 +200,7 @@ fn a_short_jog_does_not_complete_a_long_run_but_a_near_full_run_does() {
         .expect_only_render();
     app.update(log_run_at(4.0, 24.0, 70.0, at), &mut model)
         .expect_only_render();
-    let row = app
-        .view(&model)
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == long_day)
-        .unwrap()
-        .clone();
+    let row = day_row(&app, &model, long_day);
     assert!(
         row.items[0].done,
         "a run within 80 % of the target completes it (logged {} km)",
@@ -396,42 +268,11 @@ fn tendon_pain_today_leaves_todays_calisthenics_rung_and_done_unchanged() {
 
 #[test]
 fn a_profile_edit_dated_today_leaves_last_mondays_prescription_and_done_unchanged() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(strength_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    let (app, mut model) = planned_strength_model(false);
     complete_lift_day(&app, &mut model, MON, MON * DAY_SEC);
     // Move to Wednesday: Monday is a completed past day.
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 2,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let mon_before = app
-        .view(&model)
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .unwrap()
-        .clone();
+    set_today(&app, &mut model, MON + 2);
+    let mon_before = day_row(&app, &model, MON);
     assert_eq!(
         mon_before.status,
         SessionStatus::Done,
@@ -450,13 +291,7 @@ fn a_profile_edit_dated_today_leaves_last_mondays_prescription_and_done_unchange
         &mut model,
     )
     .expect_only_render();
-    let mon_after = app
-        .view(&model)
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .unwrap()
-        .clone();
+    let mon_after = day_row(&app, &model, MON);
     assert_eq!(
         mon_after.status,
         SessionStatus::Done,
@@ -477,33 +312,10 @@ fn a_profile_edit_dated_today_leaves_last_mondays_prescription_and_done_unchange
 
 #[test]
 fn a_deload_reduced_set_count_completes_the_day_and_stays_done() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(strength_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    let (app, mut model) = planned_strength_model(false);
 
     // Monday's prescribed exercises + full set counts, BEFORE any deload.
-    let full: Vec<(String, u8, u32)> = app
-        .view(&model)
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .unwrap()
+    let full: Vec<(String, u8, u32)> = day_row(&app, &model, MON)
         .items
         .iter()
         .filter(|i| !i.exercise.is_empty())
@@ -534,13 +346,7 @@ fn a_deload_reduced_set_count_completes_the_day_and_stays_done() {
                 .expect_only_render();
         }
     }
-    let mon = app
-        .view(&model)
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .unwrap()
-        .clone();
+    let mon = day_row(&app, &model, MON);
     assert_eq!(
         mon.status,
         SessionStatus::Done,
@@ -552,21 +358,8 @@ fn a_deload_reduced_set_count_completes_the_day_and_stays_done() {
     );
 
     // The day stays done the next day (the deload is still active).
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 1,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let mon_next = app
-        .view(&model)
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .unwrap()
-        .clone();
+    set_today(&app, &mut model, MON + 1);
+    let mon_next = day_row(&app, &model, MON);
     assert_eq!(
         mon_next.status,
         SessionStatus::Done,
@@ -579,15 +372,10 @@ fn set_exercise_ended_ends_and_reopens_an_item_and_clear_sets_clears_it() {
     let (app, mut model) = planned_strength_model(false);
     let (ex, _sets, _reps, _load) = mon_first_item(&app, &model);
     let item = |app: &Engine, model: &Model| -> PrescriptionView {
-        app.view(model)
-            .week_plan
-            .iter()
-            .find(|s| s.epoch_day == MON)
-            .unwrap()
+        day_row(app, model, MON)
             .items
-            .iter()
+            .into_iter()
             .find(|i| i.exercise == ex)
-            .cloned()
             .expect("the item")
     };
     assert!(!item(&app, &model).done, "unlogged item starts not done");
@@ -647,17 +435,11 @@ fn set_exercise_ended_ends_and_reopens_an_item_and_clear_sets_clears_it() {
 
 /// Monday's first load-carrying (anchored) item: (exercise, sets, reps_low, load).
 fn mon_anchored_item(app: &Engine, model: &Model) -> (String, u8, u32, f64) {
-    let vm = app.view(model);
-    let it = vm
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .unwrap()
+    let it = day_row(app, model, MON)
         .items
-        .iter()
+        .into_iter()
         .find(|i| i.load_kg.is_some())
-        .expect("an anchored (load-carrying) item")
-        .clone();
+        .expect("an anchored (load-carrying) item");
     (
         it.exercise,
         it.sets,
@@ -667,11 +449,7 @@ fn mon_anchored_item(app: &Engine, model: &Model) -> (String, u8, u32, f64) {
 }
 
 fn mon_item(app: &Engine, model: &Model, ex: &str) -> PrescriptionView {
-    app.view(model)
-        .week_plan
-        .into_iter()
-        .find(|s| s.epoch_day == MON)
-        .unwrap()
+    day_row(app, model, MON)
         .items
         .into_iter()
         .find(|i| i.exercise == ex)
@@ -793,26 +571,19 @@ fn the_hero_keeps_a_done_item_flagged_rather_than_dropping_it() {
 /// at its displayed load (a qualifying weight when unanchored) — timestamped at
 /// `at`.
 fn log_shown_session(app: &Engine, model: &mut Model, epoch_day: i64, at: i64) {
-    let items: Vec<(String, u8, u32, f64)> = {
-        let vm = app.view(model);
-        let day = vm
-            .week_plan
-            .iter()
-            .find(|s| s.epoch_day == epoch_day)
-            .expect("day present");
-        day.items
-            .iter()
-            .filter(|i| !i.exercise.is_empty())
-            .map(|i| {
-                (
-                    i.exercise.clone(),
-                    i.sets,
-                    i.reps_low.max(1) as u32,
-                    i.load_kg.unwrap_or(100.0),
-                )
-            })
-            .collect()
-    };
+    let items: Vec<(String, u8, u32, f64)> = day_row(app, model, epoch_day)
+        .items
+        .iter()
+        .filter(|i| !i.exercise.is_empty())
+        .map(|i| {
+            (
+                i.exercise.clone(),
+                i.sets,
+                i.reps_low.max(1) as u32,
+                i.load_kg.unwrap_or(100.0),
+            )
+        })
+        .collect();
     for (ex, sets, reps, w) in items {
         for _ in 0..sets {
             app.update(log_set(&ex, w, reps, 8.0, at), model)
@@ -855,18 +626,7 @@ fn following_the_shown_reduced_load_completes_an_anchored_deload_day() {
         app.update(log_set(&ex, load, reps, 8.0, MON * DAY_SEC), &mut model)
             .expect_only_render();
     }
-    let it = {
-        let vm = app.view(&model);
-        vm.week_plan
-            .iter()
-            .find(|s| s.epoch_day == MON)
-            .unwrap()
-            .items
-            .iter()
-            .find(|i| i.exercise == ex)
-            .cloned()
-            .expect("the anchored item")
-    };
+    let it = mon_item(&app, &model, &ex);
     assert_eq!(
         it.sets_done, sets,
         "the shown-load sets qualify: {:?}",
@@ -876,31 +636,6 @@ fn following_the_shown_reduced_load_completes_an_anchored_deload_day() {
         it.done,
         "following the shown reduced load completes the item"
     );
-}
-
-/// A Monday (`mon0_weekday == 0`) whose unix timestamps are positive, so dated
-/// inputs, reviews and removals take their dated (windowed) paths.
-const POS_MON: i64 = 20_353;
-
-/// Monday's week-strip row.
-fn day_row(app: &Engine, model: &Model, epoch_day: i64) -> SessionPlanView {
-    app.view(model)
-        .week_plan
-        .into_iter()
-        .find(|s| s.epoch_day == epoch_day)
-        .expect("day row present")
-}
-
-/// Move the shell's clock to `epoch_day` (UTC).
-fn set_today(app: &Engine, model: &mut Model, epoch_day: i64) {
-    app.update(
-        Event::SetToday {
-            epoch_day,
-            utc_offset_sec: 0,
-        },
-        model,
-    )
-    .expect_only_render();
 }
 
 #[test]
@@ -1343,33 +1078,10 @@ fn week_plan_marks_a_fully_logged_day_done() {
     // never gates). The hero KEEPS every item — a done exercise stays flagged
     // `done` (the shell collapses it); the day reads done and the hero advances
     // only when all exercises' sets are logged.
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(strength_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    let (app, mut model) = planned_strength_model(false);
 
     // The full prescribed set for today: each exercise with its set + rep count.
-    let items: Vec<(String, u8, u32)> = app
-        .view(&model)
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .expect("Monday present")
+    let items: Vec<(String, u8, u32)> = day_row(&app, &model, MON)
         .items
         .iter()
         .map(|i| (i.exercise.clone(), i.sets, i.reps_low.max(1) as u32))
@@ -1457,8 +1169,7 @@ fn week_plan_marks_a_fully_logged_day_done() {
     let mut guard = 0;
     loop {
         let (done, remaining): (bool, Vec<(String, u32)>) = {
-            let vm = app.view(&model);
-            let mon = vm.week_plan.iter().find(|s| s.epoch_day == MON).unwrap();
+            let mon = day_row(&app, &model, MON);
             let remaining = mon
                 .items
                 .iter()
@@ -1506,21 +1217,8 @@ fn week_plan_marks_a_fully_logged_day_done() {
     );
 
     // A fully-logged PAST day stays "done": advance the clock to Wednesday.
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 2,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let mon_row = app
-        .view(&model)
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .expect("Monday present")
-        .clone();
+    set_today(&app, &mut model, MON + 2);
+    let mon_row = day_row(&app, &model, MON);
     assert_eq!(
         mon_row.status,
         SessionStatus::Done,
@@ -1537,11 +1235,7 @@ fn todays_prescription_is_fixed_while_its_sets_are_logged() {
     // day would never read "done" and the per-item Log action never go away.
     let (app, mut model) = planned_strength_model(false);
     let monday_items = |model: &Model| -> Vec<(String, u8)> {
-        app.view(model)
-            .week_plan
-            .iter()
-            .find(|s| s.epoch_day == MON)
-            .expect("Monday present")
+        day_row(&app, model, MON)
             .items
             .iter()
             .map(|i| (i.exercise.clone(), i.sets))
@@ -1608,38 +1302,13 @@ fn todays_prescription_is_fixed_while_its_sets_are_logged() {
 
 #[test]
 fn a_past_day_completes_from_its_own_prescription_when_logged_later() {
-    // Retroactive logging (the owner's report: yesterday's session entered
-    // today) must complete the day it is dated on. The past day keeps the
-    // prescription it was rendered with, so its own sets can never re-size it
-    // out of "done".
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(strength_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    // Retroactive logging (yesterday's session entered today) must complete
+    // the day it is dated on. The past day keeps the prescription it was
+    // rendered with, so its own sets can never re-size it out of "done".
+    let (app, mut model) = planned_strength_model(false);
     // Today is TUESDAY with nothing logged: Monday is a missed past day.
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 1,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let monday = |model: &Model| {
-        app.view(model)
-            .week_plan
-            .iter()
-            .find(|s| s.epoch_day == MON)
-            .expect("Monday present")
-            .clone()
-    };
+    set_today(&app, &mut model, MON + 1);
+    let monday = |model: &Model| day_row(&app, model, MON);
     let before: Vec<(String, u8)> = monday(&model)
         .items
         .iter()
@@ -1696,35 +1365,11 @@ fn partial_past_lift_day_is_judged_on_its_logged_share_with_per_item_done_flags(
     // "missed" under half its planned work sets and "done_lighter" at half or
     // more, and the finished exercise carries its own done flag while the
     // rest stay not-done.
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(strength_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    let (app, mut model) = planned_strength_model(false);
     // Finish only the first prescribed exercise on Monday (log its prescribed
     // reps until it reads done; it STAYS on the hero, flagged done).
     let (ex0, reps0) = {
-        let vm = app.view(&model);
-        let it = &vm
-            .week_plan
-            .iter()
-            .find(|s| s.epoch_day == MON)
-            .unwrap()
-            .items[0];
+        let it = day_row(&app, &model, MON).items.remove(0);
         (it.exercise.clone(), it.reps_low.max(1) as u32)
     };
     let mut guard = 0;
@@ -1745,20 +1390,8 @@ fn partial_past_lift_day_is_judged_on_its_logged_share_with_per_item_done_flags(
         assert!(guard < 30, "the first exercise should complete");
     }
     // Advance to Wednesday: Monday is now a partially-logged past day.
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 2,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let vm = app.view(&model);
-    let mon = vm
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .expect("Monday present");
+    set_today(&app, &mut model, MON + 2);
+    let mon = day_row(&app, &model, MON);
     let (planned, logged) =
         mon.items
             .iter()
@@ -1767,8 +1400,7 @@ fn partial_past_lift_day_is_judged_on_its_logged_share_with_per_item_done_flags(
                 let required = u32::from(i.sets.max(1));
                 (p + required, l + u32::from(i.sets_done).min(required))
             });
-    // final-setup F7: under the lighter credit, logged work reads partly
-    // done, never missed.
+    // Under the lighter credit, logged work reads partly done, never missed.
     let expected = if 2 * logged >= planned {
         SessionStatus::DoneLighter
     } else {
@@ -1798,25 +1430,7 @@ fn past_run_day_is_done_when_the_run_meets_its_volume() {
     // A run session is complete when the runs attributed to that day clear 80 %
     // of the prescribed volume. A generous run logged mid-morning on the
     // scheduled run day (so its START attributes to that day) marks it done.
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(running_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    let (app, mut model) = planned_on(running_profile(), [], MON);
     let run_day = app
         .view(&model)
         .week_plan
@@ -1830,20 +1444,8 @@ fn past_run_day_is_done_when_the_run_meets_its_volume() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 6,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let vm = app.view(&model);
-    let row = vm
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == run_day)
-        .expect("run day present");
+    set_today(&app, &mut model, MON + 6);
+    let row = day_row(&app, &model, run_day);
     assert_eq!(
         row.status,
         SessionStatus::Done,
@@ -1917,8 +1519,7 @@ fn past_day_completeness_buckets_by_local_day() {
     let mut guard = 0;
     loop {
         let remaining: Vec<(String, u32)> = {
-            let vm = app.view(&model);
-            let mon = vm.week_plan.iter().find(|s| s.epoch_day == MON).unwrap();
+            let mon = day_row(&app, &model, MON);
             if mon.status == SessionStatus::Done {
                 break;
             }
@@ -1938,13 +1539,7 @@ fn past_day_completeness_buckets_by_local_day() {
             "Monday completes once every exercise's sets are logged"
         );
     }
-    let mon = app
-        .view(&model)
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .expect("Monday present")
-        .clone();
+    let mon = day_row(&app, &model, MON);
     assert_eq!(
         mon.status,
         SessionStatus::Done,
@@ -1952,59 +1547,25 @@ fn past_day_completeness_buckets_by_local_day() {
     );
 }
 
-// ── The program week advances with SetToday; a mid-week plan does not
-//        back-date the week's earlier days as missed ──
+// ── The program week advances by completed weeks, also from a mid-week
+//        start (BeforePlan days: `schedule::days_before_a_midweek_plan_start…`) ──
 #[test]
-fn week_advances_and_pre_start_days_are_not_missed() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(strength_profile()), &mut model)
-        .expect_only_render();
-    // Plan starts Wednesday (MON+2), mid-week.
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON + 2,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 2,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let vm = app.view(&model);
-    // Monday (before the plan started) is shown but never reads "missed".
-    let mon = vm
-        .week_plan
-        .iter()
-        .find(|s| s.epoch_day == MON)
-        .expect("the plan week shows Monday");
+fn a_midweek_plan_advances_its_program_week_with_completed_weeks() {
+    let (app, mut model) = planned_on(strength_profile(), [], MON + 2);
     assert_eq!(
-        mon.status,
-        SessionStatus::BeforePlan,
-        "a day before the plan start is not a missed session"
+        app.view(&model).program.as_ref().unwrap().week,
+        1,
+        "week 1 at the start"
     );
-    assert_eq!(vm.program.as_ref().unwrap().week, 1, "week 1 at the start");
 
     // Two weeks later, with the full week in between completed, the summary
     // reports a later program week (the partial first week always advances).
     complete_plan_weeks(&app, &mut model, MON + 7, 1);
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 2 + 14,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    let vm2 = app.view(&model);
+    set_today(&app, &mut model, MON + 2 + 14);
+    let vm = app.view(&model);
     assert!(
-        vm2.program.as_ref().unwrap().week >= 2,
+        vm.program.as_ref().unwrap().week >= 2,
         "the program week must advance with completed weeks: {}",
-        vm2.program.as_ref().unwrap().week
+        vm.program.as_ref().unwrap().week
     );
 }

@@ -3,7 +3,7 @@
 //! has no global counterpart and is CQ-F10-01.
 
 use crate::evidence::cite::{
-    CITE_HUIBERTS_2024, CITE_MEEUSEN_2013, CITE_MOUNTJOY_2023, CITE_SCHUMANN_2022,
+    CITE_BAAR_2014, CITE_HUIBERTS_2024, CITE_MEEUSEN_2013, CITE_MOUNTJOY_2023, CITE_SCHUMANN_2022,
 };
 use crate::evidence::claim;
 use crate::schema::EvidenceGrade::{ExpertOpinion, Moderate, Weak};
@@ -18,7 +18,7 @@ claim_group! {
             "Jones et al. 2013 (endurance-frequency dose-response for interference)",
             "Wilson et al. 2012, J Strength Cond Res 26(8):2293-2307 (concurrent-training meta-analysis)",
             "Doma, Deakin & Bentley 2017, Sports Med 47:2187-2200 (residual fatigue)",
-            "Baar 2014, Sports Med 44(Suppl 2):S117-S125",
+            CITE_BAAR_2014,
             CITE_SCHUMANN_2022,
         ],
     )
@@ -44,7 +44,8 @@ claim_group! {
         &[
             "Wilson et al. 2012, J Strength Cond Res 26(8):2293-2307",
             "Hickson 1980, Eur J Appl Physiol 45:255-263 (original interference study)",
-            "Jones et al. 2013; Baar 2014, Sports Med 44(Suppl 2):S117-S125",
+            "Jones et al. 2013",
+            CITE_BAAR_2014,
         ],
     )
     .contested("CQ-06"),
@@ -106,7 +107,7 @@ claim_group! {
         "Schedule your top-priority training when you're freshest: early in the week or after a rest day.",
         ExpertOpinion,
         &[
-            "Baar 2014, Sports Med 44(Suppl 2):S117-S125 (schedule priority quality when fresh)",
+            CITE_BAAR_2014,
             "Robineau et al. 2016, J Strength Cond Res 30(3):672-683",
         ],
     ),
@@ -116,7 +117,7 @@ claim_group! {
         // File 10 rule entry grades Weak (0.40); the CAP-8 table row says
         // Weak-Moderate, registered at the rule entry's Weak floor.
         Weak,
-        &["Baar 2014, Sports Med 44(Suppl 2):S117-S125"],
+        &[CITE_BAAR_2014],
     ),
     HYB_PHASE_001 => claim(
         "HYB-PHASE-001",
@@ -124,7 +125,7 @@ claim_group! {
         ExpertOpinion,
         &[
             "Issurin 2010, Sports Med 40(3):189-206 (block periodization of qualities)",
-            "Baar 2014, Sports Med 44(Suppl 2):S117-S125",
+            CITE_BAAR_2014,
         ],
     ),
     HYB_EA_001 => claim(
@@ -141,7 +142,7 @@ claim_group! {
         "HYB-TENDON-001",
         "No study has tested how combined training affects tendon stiffness, so go carefully when raising high running volume and heavy lifting at the same time.",
         Weak,
-        &["Baar 2014, Sports Med 44(Suppl 2):S117-S125"],
+        &[CITE_BAAR_2014],
     )
     .safety(),
     HYB_SEX_001 => claim(

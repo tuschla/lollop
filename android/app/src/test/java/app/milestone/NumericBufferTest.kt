@@ -35,6 +35,13 @@ class NumericBufferTest {
     @Test
     fun lengthIsCapped() {
         assertEquals("123456", editNumericBuffer("123456", '7', replaceAll = false))
+        assertEquals("123456", editNumericBuffer("123456", '.', replaceAll = false))
+    }
+
+    @Test
+    fun aDigitReplacesALoneZero() {
+        assertEquals("5", editNumericBuffer("0", '5', replaceAll = false))
+        assertEquals("0.", editNumericBuffer("0", '.', replaceAll = false))
     }
 
     @Test

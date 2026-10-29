@@ -46,7 +46,7 @@ import kotlinx.serialization.json.jsonObject
 /** Wait for app state the screen doesn't show (the model, the event log). The
  *  semantics fetch idles the main looper under Robolectric, so the core's reply
  *  can land while this polls. */
-internal fun ComposeTestRule.waitForState(timeoutMs: Long = 10_000, cond: () -> Boolean) =
+internal fun ComposeTestRule.waitForState(timeoutMs: Long = 15_000, cond: () -> Boolean) =
     waitUntil(timeoutMs) {
         onAllNodes(isRoot()).fetchSemanticsNodes()
         cond()

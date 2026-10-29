@@ -653,20 +653,14 @@ pub struct Model {
     pub(super) race_query: Option<RaceQuery>,
     /// The last hypertrophy-mesocycle volume-plan query, if requested. Stored as
     /// the raw inputs so the graded per-week plan is re-derived in `view`.
-    pub(super) hypertrophy_plan_query: Option<HypertrophyPlanQuery>,
+    pub(super) hypertrophy_plan_query: Option<HypertrophyInputView>,
     /// The last absolute-protein-target query, if requested. Stored as the raw
     /// inputs so the graded g/day range is re-derived in `view` (bodyweight ×
-    /// each graded g/kg bound). Self-contained so old logs never carry it.
-    pub(super) protein_query: Option<ProteinQuery>,
+    /// each graded g/kg bound).
+    pub(super) protein_query: Option<ProteinInputView>,
     /// The last heart-rate-zone query, if requested. Stored as the raw age so the
     /// graded HRmax + %HRmax band table is re-derived in `view`.
-    pub(super) hr_zone_query: Option<HrZoneQuery>,
-    /// The last Cooper 12-min-test query (distance run, metres), if requested.
-    pub(super) cooper_query: Option<f64>,
-    /// The last Critical-Speed protocol query (maximal efforts), if requested.
-    pub(super) cs_query: Option<Vec<CsEffortIn>>,
-    /// The last APRE next-load query, if requested.
-    pub(super) apre_query: Option<ApreQuery>,
+    pub(super) hr_zone_query: Option<HrZoneInputView>,
     /// The accepted "Plan my training" request. Present once the
     /// user accepts a generated plan; the `Program` itself is re-derived in
     /// `view()` from profile + anchors + this request (deterministic, like every
@@ -706,48 +700,6 @@ pub(super) struct SessionMove {
     pub(super) to_epoch_day: i64,
 }
 
-/// One maximal effort submitted to the Critical-Speed calculator (running-009):
-/// distance in metres, time in seconds. Wire shape for `ComputeCriticalSpeed`.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-pub struct CsEffortIn {
-    pub distance_m: f64,
-    pub time_sec: f64,
-}
-
-/// Inputs for an APRE next-load adjustment (File 06 autoreg-015…021): the
-/// scheme, the AMRAP-set rep count, and the current load in kg (arms the
-/// autoreg-019 small-lifter percentage cap).
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct ApreQuery {
-    pub(super) scheme: autoreg::ApreScheme,
-    pub(super) reps: u8,
-    pub(super) current_load_kg: f64,
-}
-
-/// Inputs for a hypertrophy accumulation-block volume plan: a target muscle and
-/// the number of accumulation weeks. Retained so the view recomputes the graded
-/// per-week plan (landmarks, set ramp, RIR schedule, frequency) deterministically.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct HypertrophyPlanQuery {
-    pub(super) muscle: String,
-    pub(super) weeks: u8,
-    /// The muscle is not growing on the current volume (hypertrophy-008).
-    pub(super) not_growing: bool,
-    /// Recovery from the current volume is easy (hypertrophy-008; with
-    /// `not_growing` → +2 sets next mesocycle).
-    pub(super) recovering_easily: bool,
-}
-
-/// Inputs for an absolute daily protein target: the athlete's bodyweight and
-/// which graded goal contexts to surface. Retained so the view recomputes the
-/// g/day range (bodyweight × each graded g/kg bound) deterministically.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct ProteinQuery {
-    pub(super) bodyweight_kg: f64,
-    pub(super) masters: bool,
-    pub(super) deficit: bool,
-}
-
 /// Inputs for a Daniels+Riegel race-time prediction (running-039), retained so
 /// the view can recompute the graded estimate. Distances in metres, time in
 /// seconds, `weekly_km` selects the Riegel fatigue exponent.
@@ -760,23 +712,6 @@ pub(super) struct RaceQuery {
     /// How many weeks old the input race is (running-041 freshness window:
     /// ≤6 wk fresh, 7–8 marginal, >8 stale → re-test). `None` = untracked.
     pub(super) weeks_since_race: Option<u8>,
-}
-
-/// Inputs for a heart-rate-zone table: the athlete's age in years. Retained so
-/// the view recomputes the graded HRmax estimate (Tanaka) and the five Daniels
-/// %HRmax band ranges deterministically.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct HrZoneQuery {
-    pub(super) age_years: f64,
-    /// Resting HR, bpm: arms the running-005 %HRmax-vs-Karvonen method
-    /// preference and the Karvonen band targets. `None` = %HRmax only.
-    pub(super) resting_hr_bpm: Option<f64>,
-    /// Weeks since HR zones were last recalculated off a measured max
-    /// (running-006: recompute every 4–6 weeks). `None` = untracked.
-    pub(super) weeks_since_recalc: Option<u8>,
-    /// Weeks since training paces were last re-tested (running-041: re-test
-    /// every 4–6 weeks). `None` = untracked.
-    pub(super) weeks_since_pace_test: Option<u8>,
 }
 
 /// Which logged history family a [`Event::DeleteEntry`] targets. Selects the
@@ -1173,26 +1108,6 @@ pub enum Event {
     },
     /// Drop the heart-rate-zone table (clears the zone section).
     ClearHrZones,
-    /// Compute a Cooper 12-min-test VO2max estimate from the distance covered
-    /// (metres) in a 12-minute maximal run (File 07 formulas).
-    ComputeCooper { distance_m_12min: f64 },
-    /// Drop the Cooper estimate (clears the section).
-    ClearCooper,
-    /// Fit the Critical-Speed 2-parameter model over 2–5 maximal efforts
-    /// (running-009 protocol-gated: CS + D′, or the specific protocol
-    /// violation explained).
-    ComputeCriticalSpeed { efforts: Vec<CsEffortIn> },
-    /// Drop the Critical-Speed fit (clears the section).
-    ClearCriticalSpeed,
-    /// Compute the APRE next-load adjustment from an AMRAP set (File 06
-    /// autoreg-015…021, with the autoreg-019 small-lifter cap).
-    ComputeApre {
-        scheme: autoreg::ApreScheme,
-        reps: u8,
-        current_load_kg: f64,
-    },
-    /// Drop the APRE adjustment (clears the section).
-    ClearApre,
     /// Accept a synthesized training plan: the user tapped "Plan
     /// my training". `start_epoch_day` anchors the block; the `Program` is
     /// re-derived in `view()` from profile + logged anchors (determinism).
@@ -1244,39 +1159,39 @@ pub enum Event {
     },
 }
 
-/// Index of the NEWEST logged set an `AmendSet`/`DeleteEntry` targets: the last
-/// (`rposition`) whose `entry_id` matches, or, for a legacy target (`id == 0`,
-/// no per-entry id), the last legacy row whose `observed_at` matches. The
-/// compaction Rule 3 matcher (`log.rs`) mirrors this predicate exactly, so a
-/// delete/amend compacts against the same row it removes on replay.
-pub(super) fn find_set(sets: &[LoggedSet], id: u64, observed_at: i64) -> Option<usize> {
-    if id != 0 {
-        sets.iter().rposition(|s| s.entry_id == id)
-    } else {
-        sets.iter()
-            .rposition(|s| s.entry_id == 0 && s.observed_at == observed_at)
-    }
+/// A logged history row an amend or `DeleteEntry` can target.
+pub(super) trait LoggedEntry {
+    fn entry_id(&self) -> u64;
+    fn observed_at(&self) -> i64;
 }
 
-/// Index of the newest logged run an `AmendRun`/`DeleteEntry` targets, the
-/// run analog of [`find_set`].
-pub(super) fn find_run(runs: &[LoggedRun], id: u64, observed_at: i64) -> Option<usize> {
-    if id != 0 {
-        runs.iter().rposition(|r| r.entry_id == id)
-    } else {
-        runs.iter()
-            .rposition(|r| r.entry_id == 0 && r.observed_at == observed_at)
-    }
+macro_rules! impl_entry {
+    ($($t:ty),*) => {$(
+        impl LoggedEntry for $t {
+            fn entry_id(&self) -> u64 {
+                self.entry_id
+            }
+            fn observed_at(&self) -> i64 {
+                self.observed_at
+            }
+        }
+    )*};
 }
+impl_entry!(LoggedSet, LoggedRun, LoggedActivity);
 
-/// Index of the newest logged activity a `DeleteEntry` targets, the activity
-/// analog of [`find_set`].
-pub(super) fn find_activity(acts: &[LoggedActivity], id: u64, observed_at: i64) -> Option<usize> {
+/// Index of the NEWEST row an amend/`DeleteEntry` targets: the last
+/// (`rposition`) whose sanitized `entry_id` matches, or, for a legacy target
+/// (`id == 0`, no per-entry id), the last legacy row whose `observed_at`
+/// matches. The compaction Rule 3 matcher (`log.rs`) mirrors this predicate
+/// exactly, so a delete/amend compacts against the same row it removes on
+/// replay.
+pub(super) fn find_entry<T: LoggedEntry>(rows: &[T], id: u64, observed_at: i64) -> Option<usize> {
+    let id = sanitize_entry_id(id);
     if id != 0 {
-        acts.iter().rposition(|a| a.entry_id == id)
+        rows.iter().rposition(|r| r.entry_id() == id)
     } else {
-        acts.iter()
-            .rposition(|a| a.entry_id == 0 && a.observed_at == observed_at)
+        rows.iter()
+            .rposition(|r| r.entry_id() == 0 && r.observed_at() == observed_at)
     }
 }
 
@@ -1342,25 +1257,13 @@ fn in_force(
     Some(super::ingest::aged_on(p, day))
 }
 
-/// The local day `p`'s `stated_longest_recent_km` was first stated: the
-/// effective day of the earliest unbroken run of profile-history entries
-/// ending at `p` that all carry the same value, so re-saving the profile with
-/// the answer unchanged never makes it look fresh. `None` when unstated or
-/// undated. `p` is located by its [`history_key`] (unique in the history), so
-/// a day-aged copy from `profile_for_day` finds its entry.
-pub(super) fn stated_longest_since(model: &Model, p: &Profile) -> Option<i64> {
-    stated_since(model, p, |q| q.stated_longest_recent_km)
-}
-
-/// The local day `p`'s `running_km_per_week` was first stated, like
-/// [`stated_longest_since`]; `None` when unset (0) or undated.
-pub(super) fn stated_weekly_since(model: &Model, p: &Profile) -> Option<i64> {
-    stated_since(model, p, |q| {
-        Some(q.running_km_per_week).filter(|km| *km > 0.0)
-    })
-}
-
-fn stated_since(
+/// The local day the profile `field` of `p` was first stated: the effective
+/// day of the earliest unbroken run of profile-history entries ending at `p`
+/// that all carry the same value, so re-saving the profile with the answer
+/// unchanged never makes it look fresh. `None` when `field` is unset or the
+/// entry undated. `p` is located by its [`history_key`] (unique in the
+/// history), so a day-aged copy from `profile_for_day` finds its entry.
+pub(super) fn stated_since(
     model: &Model,
     p: &Profile,
     field: impl Fn(&Profile) -> Option<f64>,

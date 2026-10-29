@@ -14,18 +14,13 @@ use crate::strength::{self, DupDay, LiftGoal, LoadingRx};
 
 use super::Anchors;
 
-/// The core movement patterns a lift day should COVER (STR-SESSION-BALANCE-001):
-/// squat / hinge / horizontal push / horizontal pull. Vertical presses and
-/// vertical pulls are folded into `Push` / `Pull` for COVERAGE purposes (an
-/// overhead press still trains the push musculature), while the catalog FILLS in
-/// [`CORE_PATTERN_FILLS`] use the KB's named horizontal defaults.
-///
-/// This pattern TAXONOMY is an EXPERT-OPINION practitioner framework, no RCT
-/// validates a specific movement-pattern list (flagged in the claim's
-/// `contradicting`, GRADE good-practice-statement precedent). The CITABLE part is
-/// the PRINCIPLE that a session must cover distinct patterns because multi-joint
-/// compounds do NOT fully activate every muscle (Schoenfeld et al. 2019, Sports
-/// 7(7):177, PMID 31336594 → STR-SESSION-BALANCE-001, Moderate).
+/// The core movement patterns a lift day covers (STR-SESSION-BALANCE-001):
+/// squat / hinge / push / pull, vertical presses and pulls folded into `Push` /
+/// `Pull`; the catalog fills in [`CORE_PATTERN_FILLS`] are the KB's horizontal
+/// defaults. The cited principle is that multi-joint compounds do not fully
+/// activate every muscle (Schoenfeld 2019, Moderate). The pattern list, its name
+/// keywords ([`movement_pattern`], [`is_isolation_lift`]) and the per-day lift
+/// count are EXPERT-OPINION, flagged in the claim's `contradicting`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MovementPattern {
     Squat,
@@ -34,14 +29,10 @@ pub(crate) enum MovementPattern {
     Pull,
 }
 
-/// Classify an exercise NAME into a core movement pattern, CONSERVATIVELY: only
-/// names that map confidently return `Some`; anything ambiguous (most isolation
-/// work, curls, raises, calf work) returns `None` and is treated as
-/// unclassifiable (a logged unclassifiable lift is still scheduled, never
-/// dropped). Case-insensitive whole-word matching over a small keyword set (a
-/// plural token matches its singular needle); this keyword taxonomy is
-/// EXPERT-OPINION (see [`MovementPattern`]); the principle it serves is cited
-/// (STR-SESSION-BALANCE-001).
+/// Classify an exercise name into a core movement pattern, conservatively:
+/// whole-word, case-insensitive keyword matching (a plural token matches its
+/// singular needle). Anything ambiguous (most isolation work, curls, raises,
+/// calf work) is `None`; a logged unclassifiable lift is still scheduled.
 pub(crate) fn movement_pattern(name: &str) -> Option<MovementPattern> {
     with_name_tokens(name, |tokens| {
         let has = |kw: &str| has_phrase(tokens, kw);
@@ -147,31 +138,20 @@ fn core_fill(pat: MovementPattern, catalog: &'static str, goal: LiftGoal) -> &'s
     }
 }
 
-/// Exercises per lift day (STR-SESSION-BALANCE-001): the DUP-undulated primary
-/// compound + accessories covering the other core patterns. ~3-4 is enough
-/// compounds to span squat/hinge/push/pull in a full-body day; the EXACT count is
-/// EXPERT-OPINION (no RCT prescribes a specific N, flagged in the claim's
-/// `contradicting`).
+/// Exercises per lift day: the DUP primary plus accessories covering the other
+/// core patterns; ~3-4 spans squat/hinge/push/pull (STR-SESSION-BALANCE-001).
 const MAX_LIFTS_PER_DAY: usize = 4;
 
-/// Main lift slots, PATTERN-BALANCED (STR-SESSION-BALANCE-001, Moderate): the day
-/// spans distinct movement patterns rather than stacking one, so a leg-heavy log
-/// (or the squat-led catalog default) still yields a balanced week. Leads with
-/// the user's own logged exercises (each carrying an e1RM anchor → a load),
-/// then FILLS the missing core patterns from the File-03
-/// catalog (→ RIR). The coverage PRINCIPLE is cited (compounds under-activate
-/// some muscles, Schoenfeld 2019); the pattern TAXONOMY + the ~3-4 count are
-/// EXPERT-OPINION, flagged on the claim. The hinge fill is goal-aware: a
-/// strength or power goal trains the competition deadlift (STR-COMP-ANCHOR-001).
+/// A lift day's exercises, pattern-balanced (STR-SESSION-BALANCE-001): the
+/// user's logged lifts first (each anchored → a load), one per core pattern,
+/// then catalog fills for the missing patterns (→ RIR). A strength or power goal
+/// fills the hinge with the competition deadlift (STR-COMP-ANCHOR-001).
 pub(super) fn main_lifts(anchors: &Anchors, goal: LiftGoal) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut covered: Vec<MovementPattern> = Vec::new();
-    // 1. Lead with the user's OWN logged lifts (anchored
-    //    load), but keep PATTERN BALANCE: schedule a logged lift when it opens a
-    //    NEW core pattern (or is unclassifiable, never dropped), and SKIP a
-    //    second logged lift that only repeats an already-covered pattern (that
-    //    repeat is what unbalances a leg-heavy log). `same_movement`
-    //    dedup still applies (never the same lift twice on one day).
+    // 1. Logged lifts, newest first: one per core pattern (a repeat would
+    //    unbalance the day), unclassifiable lifts always kept, never the same
+    //    movement twice.
     for (name, _) in &anchors.lift_e1rm {
         if out.len() >= MAX_LIFTS_PER_DAY {
             break;
@@ -192,12 +172,9 @@ pub(super) fn main_lifts(anchors: &Anchors, goal: LiftGoal) -> Vec<String> {
             None => out.push(name.clone()),
         }
     }
-    // The logged lifts were picked most-recent-first (the newest of each
-    // pattern wins), but the session lists them in the plan's order, squat →
-    // hinge → push → pull, then anything unclassified, so the main compound
-    // leads instead of whichever lift happened to be logged last (tomorrow's
-    // card never runs in reverse of today's). The fills below already follow
-    // that order. Stable: ties keep their recency order.
+    // List in plan order (squat → hinge → push → pull → unclassified) so the
+    // main compound leads, not whichever lift was logged last. Stable: ties keep
+    // recency order; the fills below follow the same order.
     out.sort_by_key(|n| match movement_pattern(n) {
         Some(MovementPattern::Squat) => 0u8,
         Some(MovementPattern::Hinge) => 1,
@@ -205,9 +182,8 @@ pub(super) fn main_lifts(anchors: &Anchors, goal: LiftGoal) -> Vec<String> {
         Some(MovementPattern::Pull) => 3,
         None => 4,
     });
-    // 2. FILL the missing core patterns from the File-03 catalog. Use
-    //    `same_movement` (not exact-case) so a logged "Smith machine back squat"
-    //    isn't scheduled AGAIN as the catalog "Back squat", the same lift twice on one day.
+    // 2. Fill the missing core patterns from the catalog; `same_movement` keeps
+    //    a logged "Smith machine back squat" from repeating as "Back squat".
     for &(pat, catalog) in CORE_PATTERN_FILLS {
         let def = core_fill(pat, catalog, goal);
         if out.len() >= MAX_LIFTS_PER_DAY {
@@ -222,32 +198,17 @@ pub(super) fn main_lifts(anchors: &Anchors, goal: LiftGoal) -> Vec<String> {
         out.push(def.to_string());
         covered.push(pat);
     }
-    // 3. The DUP primary is `out[0]`, undulated at %1RM on EVERY lift day, so it
-    //    MUST be a COMPOUND with a RELIABLE e1RM: isolation lifts are
-    //    e1RM-unreliable (File 02 strength-006; STR-E1RM-CHECK-001, catalog OR
-    //    keyword-named), and an unclassifiable lift carries no core movement
-    //    pattern, so neither is a lift the week should be built around
-    //    (STR-SESSION-BALANCE-001). Promote the first lift that is BOTH
-    //    e1RM-reliable AND pattern-classified to lead; the catalog fills above
-    //    are all compounds, so one normally qualifies. A log of nothing but
-    //    isolation/unclassifiable work (with the core patterns already covered)
-    //    leaves none → keep the most-recent lift as the sensible fallback.
-    let leads = |n: &String| e1rm_reliable_name(n) && movement_pattern(n).is_some();
+    // 3. The DUP primary `out[0]` is undulated at %1RM every lift day, so it must
+    //    be a pattern-classified lift with a reliable e1RM (not isolation,
+    //    strength-006 / STR-E1RM-CHECK-001). Promote the first such lift; with
+    //    none, the most recent lift stays first.
+    let leads = |n: &String| !is_isolation_lift(n) && movement_pattern(n).is_some();
     if out.first().is_some_and(|n| !leads(n))
         && let Some(idx) = out.iter().position(leads)
     {
         out[..=idx].rotate_right(1);
     }
     out
-}
-
-/// Whether a lift's estimated 1RM is reliable enough to anchor the DUP primary's
-/// %1RM loads: isolation lifts are excluded because their e1RM is unreliable
-/// (File 02 strength-006; STR-E1RM-CHECK-001, Moderate). Delegates to
-/// [`is_isolation_lift`], which covers BOTH the File-03 catalog isolation rows
-/// and the many real-world isolation names outside the 16-row catalog.
-pub(crate) fn e1rm_reliable_name(name: &str) -> bool {
-    !is_isolation_lift(name)
 }
 
 #[cfg(test)]
@@ -261,26 +222,19 @@ thread_local! {
 }
 
 /// Counts one `NAME_CLASSIFICATIONS` call (test builds only; a no-op else).
-#[inline(always)]
 pub(crate) fn count_name_classification() {
     #[cfg(test)]
     NAME_CLASSIFICATIONS.with(|c| c.set(c.get() + 1));
 }
 
-/// Whether a lift is an ISOLATION movement whose estimated 1RM is unreliable
-/// (File 02 strength-006; STR-E1RM-CHECK-001). Two sources: the File-03 Table-4
-/// catalog class (authoritative for the 16 known rows), then a keyword taxonomy
-/// for the many isolation names outside the catalog. UNAMBIGUOUS needles
-/// (`ISOLATION_NEEDLES_STRONG`) name a single-joint movement outright and
-/// classify regardless of any compound pattern the name also matches ("Chest
-/// fly" / "Pec deck" read as Push in `movement_pattern`, yet are isolation).
-/// AMBIGUOUS needles (`ISOLATION_NEEDLES_WEAK`) fire only when the name carries
-/// NO compound pattern, so a posterior-chain "back extension" (a hinge) stays a
-/// compound while "leg extension" reads as isolation. Single source shared by
-/// every isolation gate — `e1rm_reliable_name`, the DUP `is_isolation` gate,
-/// `build_plan_anchors`' anchor skip, the e1RM cross-check, and the Prilepin
-/// audit — so no two sites disagree. The taxonomy is EXPERT-OPINION (mirroring
-/// `movement_pattern`), serving the cited reliability principle.
+/// Whether a lift is an isolation movement, whose estimated 1RM is unreliable
+/// (File 02 strength-006; STR-E1RM-CHECK-001). The one isolation taxonomy
+/// (`hypertrophy::classify` defers to it): the Table 4 catalog class, then
+/// [`ISOLATION_NEEDLES_STRONG`] (isolation even inside a compound pattern:
+/// "Chest fly", "Pec deck"), then, for a name with no compound pattern,
+/// [`ISOLATION_NEEDLES_WEAK`] ("leg extension" yes, "back extension" no) or a
+/// single-muscle fragment ([`hypertrophy::isolation_muscle`]: "Skull crusher",
+/// "Face pull", "Crunch").
 pub(crate) fn is_isolation_lift(name: &str) -> bool {
     count_name_classification();
     if hypertrophy::exercise_entry(name)
@@ -288,52 +242,28 @@ pub(crate) fn is_isolation_lift(name: &str) -> bool {
     {
         return true;
     }
-    isolation_keyword(name, ISOLATION_NEEDLES_STRONG)
-        || (movement_pattern(name).is_none() && isolation_keyword(name, ISOLATION_NEEDLES_WEAK))
-}
-
-/// Unambiguous single-joint needles: a name containing one is isolation even
-/// when it also matches a compound movement pattern.
-const ISOLATION_NEEDLES_STRONG: &[&str] = &[
-    "curl",
-    "fly",
-    "flye",
-    "flies",
-    "pushdown",
-    "pressdown",
-    "kickback",
-    "shrug",
-    "pec deck",
-];
-
-/// Needles that also appear in compound movements, so they classify only a name
-/// with no compound movement pattern ("lateral raise" / "leg extension" yes,
-/// "back extension" no).
-const ISOLATION_NEEDLES_WEAK: &[&str] = &["raise", "extension"];
-
-/// Whole-word keyword match over a needle list, with the same token windowing +
-/// plural tolerance `movement_pattern` uses: a multi-word needle ("pec deck")
-/// matches a contiguous token run, and "curls"/"raises" match their singular.
-fn isolation_keyword(name: &str, needles: &[&str]) -> bool {
     with_name_tokens(name, |tokens| {
-        needles.iter().any(|kw| has_phrase(tokens, kw))
+        let has = |kw: &str| has_phrase(tokens, kw);
+        ISOLATION_NEEDLES_STRONG.iter().any(|kw| has(kw))
+            || (movement_pattern_of(&has).is_none()
+                && (ISOLATION_NEEDLES_WEAK.iter().any(|kw| has(kw))
+                    || hypertrophy::isolation_muscle(name).is_some()))
     })
 }
 
-/// Whether two exercise names denote the same movement for dedup and completion
-/// purposes. TOKEN-normalized: lowercase, split on every non-alphanumeric char,
-/// drop equipment tokens (barbell/dumbbell/dumbbells/kettlebell/cable/machine/
-/// smith) and empty tokens, then compare the remaining token sequences. So
-/// "Cable row" ≡ "Row" ≡ "Barbell row" ≡ "Row (barbell/cable/machine)" and
-/// "Push-up" ≡ "Push up", while POSITIONAL / movement modifiers are kept, so
-/// "Front squat" ≠ "Back squat" and "Deadlift" ≠ "Romanian deadlift" stay
-/// distinct lifts. Splitting on punctuation (rather than substring stripping)
-/// drops the separator glyphs in an equipment-qualified name like
-/// "Row (barbell/cable/machine)", so it matches a plain "Row" log.
-/// A bare "Squat" vs "Back squat" still counts as two (they could be different
-/// lifts); closing that safely needs a KB-backed movement-synonym lexicon the
-/// KB does not provide (HARD RULE 1), so it is left as a rare cosmetic dup
-/// rather than risk false-merging distinct lifts.
+/// Single-joint needles that classify a name as isolation even when it also
+/// matches a compound movement pattern.
+const ISOLATION_NEEDLES_STRONG: &[&str] = &["curl", "fly", "flye", "flies", "shrug", "pec deck"];
+
+/// Needles that also appear in compound movements, so they classify only a name
+/// with no compound movement pattern.
+const ISOLATION_NEEDLES_WEAK: &[&str] = &["raise", "extension"];
+
+/// Whether two exercise names denote the same movement (dedup, completion):
+/// their [`movement_key`]s match, so "Cable row" ≡ "Row" ≡ "Row (barbell/cable/
+/// machine)" and "Push-up" ≡ "Push up", while "Front squat" ≠ "Back squat" and
+/// "Deadlift" ≠ "Romanian deadlift". A bare "Squat" and "Back squat" stay two
+/// lifts: merging them would need a movement-synonym lexicon the KB lacks.
 pub(crate) fn same_movement(a: &str, b: &str) -> bool {
     count_name_classification();
     let (mut x, mut y) = (movement_tokens(a), movement_tokens(b));
@@ -404,11 +334,10 @@ pub(super) fn dup_emphasis(goal: LiftGoal, power_base: bool, day_index: usize) -
 }
 
 /// Whether a Power-goal athlete should run the strength-weighted week
-/// (STR-BASE-POWER-001): a novice, or anyone whose squat e1RM is not yet shown
-/// to reach the ~1.5× bodyweight benchmark (the same cut-off as the depth-jump
-/// prerequisite, PLYO-PREREQ-001; ExpertOpinion as a threshold). Unknown
-/// bodyweight or no squat anchor counts as "not yet shown". Always `false` for
-/// other goals.
+/// (STR-BASE-POWER-001): a novice, or anyone whose back-squat e1RM is not yet
+/// shown to reach the ~1.5× bodyweight benchmark (the depth-jump prerequisite,
+/// PLYO-PREREQ-001; ExpertOpinion as a threshold). Unknown bodyweight or no
+/// back-squat anchor counts as "not yet shown". Always `false` for other goals.
 pub(super) fn power_needs_strength_base(
     profile: &Profile,
     anchors: &Anchors,
@@ -418,7 +347,7 @@ pub(super) fn power_needs_strength_base(
         && (ta == TrainingAge::Novice || !squat_benchmark_met(profile, anchors))
 }
 
-/// Squat working e1RM ≥ 1.5× bodyweight (`strength::depth_jump_ready`).
+/// Back-squat working e1RM ≥ 1.5× bodyweight (`strength::depth_jump_ready`).
 fn squat_benchmark_met(profile: &Profile, anchors: &Anchors) -> bool {
     match (profile.bodyweight_kg, squat_e1rm(anchors)) {
         (Some(bw), Some(sq)) => strength::depth_jump_ready(sq, bw).value,
@@ -426,19 +355,25 @@ fn squat_benchmark_met(profile: &Profile, anchors: &Anchors) -> bool {
     }
 }
 
-/// The working e1RM of the athlete's anchored squat (a squat-pattern lift
-/// named "squat", so a leg press or lunge never stands in for it).
+/// The working e1RM of the athlete's anchored barbell back squat.
 fn squat_e1rm(anchors: &Anchors) -> Option<f64> {
     anchors
         .lift_e1rm
         .iter()
-        .find(|(n, _)| {
-            movement_pattern(n) == Some(MovementPattern::Squat)
-                && movement_key(n)
-                    .iter()
-                    .any(|t| t == "squat" || t == "squats")
-        })
+        .find(|(n, _)| is_back_squat(n))
         .and_then(|(n, _)| anchors.working_e1rm_for(n))
+}
+
+/// The barbell back squat, the PLYO-PREREQ-001 benchmark lift (File 02
+/// strength-033). A hack, goblet, split or front squat is another movement, and
+/// a "smith" / "machine" token is rejected before the equipment-blind
+/// [`same_movement`] match. Shared by the plan's depth-jump gate and the lift
+/// audit's.
+pub(crate) fn is_back_squat(name: &str) -> bool {
+    !name
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|t| t.eq_ignore_ascii_case("smith") || t.eq_ignore_ascii_case("machine"))
+        && same_movement("Barbell back squat", name)
 }
 
 /// The loading goal a DUP emphasis targets, so its inter-set REST comes from the
@@ -565,54 +500,16 @@ pub(super) struct SizedSets {
     ramped: bool,
 }
 
-/// Per-session working sets sized from the stated weekly per-muscle target
-/// (`weekly_sets`; knowledge-base/weekly-set-volume-to-prescription-mapping.md).
-/// TWO LAYERS:
-///
-/// 1. Volume dose-response: CITABLE (Moderate, `HYP-VOL-DOSE-001`, Pelland 2026 /
-///    Schoenfeld 2017): more weekly volume → more growth with diminishing returns.
-///    So the weekly target is first BOUNDED to the primary muscle's OWN Table 1
-///    landmark range (`HYP-LANDMARKS-001`), floored at that muscle's MEV (below
-///    MEV growth is negligible, so a sub-MEV answer is raised to the floor rather
-///    than programmed as ineffective volume) and ceilinged at that muscle's MRV
-///    (past the optimal anchor returns diminish and beyond MRV is deload
-///    territory, not a sizing target, so we never scale linearly to absurd
-///    volumes). When the exercise has no Table 1 entry the floor falls back to the
-///    training-age MEV low (`HYP-MEV-AGE-001`) and the ceiling to the RP framework's
-///    generic ~20-set anchor (`HYP-MRV-DELOAD-001`).
-///
-/// 2. Allocation / split: EXPERT-OPINION (no validated weekly-target →
-///    per-session/per-exercise formula exists; the KB's authoritative source counts
-///    1:1 plus "logical rationale and personal expertise"). The primary lift
-///    undulates the SAME movement every lift day, so its muscle is trained
-///    `n_lift_days` times: the honest even split is
-///    `round(bounded_weekly / n_lift_days)`. This arithmetic is the expert-opinion
-///    heuristic flagged in `HYP-VOL-DOSE-001`'s `contradicting` note.
-///
-/// 1b. Accumulation ramp: the bounded weekly target is week 1 of the block, and
-///    the following load weeks climb toward the top of the muscle's productive
-///    (MAV) range, not its MRV (HYP-VOL-CAP-001; `hypertrophy::weekly_set_ramp`,
-///    HYP-SETRAMP-001 shape, ExpertOpinion, capped at
-///    `MAX_WEEKLY_SET_INCREMENT` = +4 sets/week by the hyp-011 no-abrupt-jump
-///    guard). Week 1 is therefore exactly the user's stated target; only later
-///    weeks of the block add volume, and `ramped` reports whether the ramp (not
-///    the stated target) produced the returned count so the caller can cite the
-///    claim that actually set the number.
-///
-/// The result is clamped to `[MIN_SETS_PER_EXERCISE, PER_SESSION_SET_CEILING]`
-/// (`HYP-SESSCAP-001` ~11) AND into the day's own cited intensity `band` [lo,hi],
-/// so a heavy-strength day never inflates past the set ceiling its own claim
-/// sanctions, volume only chooses WHERE within the already-cited band it lands.
-///
-/// ACCESSORIES (documented, not a bypass): with the pattern-balanced full-body
-/// day (STR-SESSION-BALANCE-001) every exercise, primary AND accessory, recurs
-/// on each lift day, so each is trained `n_lift_days`/week and the even split
-/// `weekly/n_lift_days` is the honest per-session count for any ANCHORED lift (it
-/// runs the DUP path below). An UNANCHORED accessory (a catalog pattern-fill) is
-/// prescribed by RIR at its loading band's own set count, NOT a fabricated
-/// per-fill volume attribution the KB does not support (HARD RULE 1), the stated
-/// weekly-set target is the PER-MUSCLE figure the user gave for their primary
-/// emphasis, not a per-fill quantity.
+/// Per-session working sets from the stated weekly per-muscle target
+/// (`weekly_sets`). The target is bounded to the primary muscle's Table 1
+/// MEV..MRV (HYP-VOL-DOSE-001, HYP-LANDMARKS-001; without a Table 1 row the
+/// training-age MEV, HYP-MEV-AGE-001, and the generic ~20-set MRV,
+/// HYP-MRV-DELOAD-001), ramped across the block toward the muscle's MAV high
+/// (HYP-VOL-CAP-001, HYP-SETRAMP-001; week 1 is the stated target), split evenly
+/// over the `n_lift_days` that train it (EXPERT-OPINION, flagged on
+/// HYP-VOL-DOSE-001), then clamped to the per-exercise set limits
+/// (HYP-SESSCAP-001) and the day's own `band`. `ramped` tells the caller which
+/// claim set the number.
 pub(super) fn sized_sets(
     weekly_sets: u8,
     ta: TrainingAge,
@@ -622,32 +519,21 @@ pub(super) fn sized_sets(
     week_in_block: u8,
     block_weeks: u8,
 ) -> SizedSets {
-    // Layer 1: bound the weekly per-muscle target to the cited landmark range.
-    // The floor and ceiling come from the primary muscle's OWN Table 1 landmarks
-    // (HYP-LANDMARKS-001: MEV floor, MRV ceiling — e.g. glutes 0→16, side delts
-    // 8→26), so a low-MEV muscle is not forced to a generic floor and a high-MRV
-    // muscle is not clamped short. Only when the exercise has no Table 1 entry do
-    // we fall back to the training-age MEV band (HYP-MEV-AGE-001) and the RP
-    // framework's generic ~20-set MRV anchor (HYP-MRV-DELOAD-001).
+    // Bound the weekly target to the muscle's MEV..MRV.
     let mev_floor = landmarks
         .map(|l| l.mev)
         .unwrap_or_else(|| hypertrophy::mev_sets_by_training_age(ta).value.0);
     let mrv_ceiling = landmarks.map_or(hypertrophy::GENERIC_MRV_SETS, |l| l.mrv);
     let start = weekly_sets.clamp(mev_floor, mrv_ceiling);
-    // Layer 1b: this week's weekly target along the ramp from the stated volume
-    // to the top of the muscle's productive range (MAV high, HYP-VOL-CAP-001;
-    // the generic ~20-set anchor without Table 1 landmarks, the top of the
-    // ~10–20 productive band). `weekly_set_ramp` always opens at its first
-    // argument, so week 1 is the stated target; a zero-length block leaves it
-    // unchanged, and a stated target above the ramp top is held.
+    // This week's point on the ramp; `weekly_set_ramp` opens at `start`, and a
+    // stated target above the ramp top is held.
     let ramp_top = landmarks.map_or(mrv_ceiling, |l| l.mav.1);
     let ramp = hypertrophy::weekly_set_ramp(start, ramp_top, block_weeks).value;
     let bounded_weekly = ramp
         .get((week_in_block.max(1) - 1) as usize)
         .copied()
         .unwrap_or(start);
-    // Layer 2 (EXPERT-OPINION): even split across the lift days that train the
-    // primary muscle. No validated formula, a practitioner heuristic.
+    // Even split across the lift days that train the primary muscle.
     let n = n_lift_days.max(1) as f64;
     let split = |weekly: u8| -> u8 {
         // Per-session saturation cap + minimum, then into the day's own band.
@@ -844,8 +730,8 @@ struct DoseCtx<'a> {
 impl DoseCtx<'_> {
     /// Rest comes from the band the day ACTUALLY prescribes: a Heavy/Power DUP
     /// day rests per its emphasis (180 s), never per the goal band minimum. A
-    /// hypertrophy-emphasis set rests per the EXERCISE CLASS (HYP-REST-001:
-    /// 120 s heavy compounds, 60 s otherwise, catalog-unknown treated as a
+    /// hypertrophy-emphasis set rests per the EXERCISE CLASS (HYP-REST-002:
+    /// 120 s heavy compounds, 90 s otherwise, catalog-unknown treated as a
     /// moderate compound), not the 30 s floor of the hypertrophy loading band —
     /// a heavy compound cannot hold ≥90% of its first-set reps on 30 s.
     fn rest_sec(&self) -> u16 {
@@ -1104,7 +990,7 @@ const OLYMPIC_POWER_PCT: u8 = 70;
 /// (STR-PCTPROG-001: +1 % upper vs +2.5 % lower). Push/Pull patterns are upper;
 /// Squat/Hinge lower; an unclassifiable lift takes the smaller, upper-body step
 /// (the conservative tie-break).
-pub(crate) fn is_upper_body(name: &str) -> bool {
+fn is_upper_body(name: &str) -> bool {
     !matches!(
         movement_pattern(name),
         Some(MovementPattern::Squat | MovementPattern::Hinge)
@@ -1114,7 +1000,7 @@ pub(crate) fn is_upper_body(name: &str) -> bool {
 /// Whether a lift is an Olympic weightlifting derivative (clean / snatch /
 /// jerk variants, high pulls, jump shrugs). Only ever programmed when the
 /// athlete already logs one — the skill prerequisite.
-pub(crate) fn is_olympic_derivative(name: &str) -> bool {
+fn is_olympic_derivative(name: &str) -> bool {
     let key = movement_key(name);
     let has = |t: &str| key.iter().any(|k| k == t || k.strip_suffix('s') == Some(t));
     has("clean")
@@ -1184,9 +1070,9 @@ fn barbell_tokens(tokens: &[&str]) -> bool {
 /// ≥1.5× bodyweight (PLYO-PREREQ-001, safety gate), a low-box depth jump.
 /// Volume is the KB's low-dose plyometric band floor, 40 foot contacts as 8 × 5
 /// (strength-032 / PLYO-001: low-dose 40–60 also effective; well inside every
-/// level's cap), with 2 min between sets (STR-PLYO-SCHED-001: 2–3 min). Power
-/// days are at most 2 of every 3 lift days and never adjacent in the
-/// `dup_emphasis` order, which keeps jumps ≤3×/wk.
+/// level's cap), with 2 min between sets (STR-PLYO-SCHED-001: 2–3 min). One
+/// power day per 3 lift days in the `dup_emphasis` order (one per 2 in the
+/// running-led `k % 2` layout) keeps jumps ≤3×/wk.
 fn ballistic_item(
     profile: &Profile,
     anchors: &Anchors,
@@ -1249,7 +1135,7 @@ pub(super) fn apply_meet_taper(
         LiftIntensity::PercentOneRm(p) => p >= HEAVY_PCT_1RM,
         LiftIntensity::Rir(r) => r <= 3,
         LiftIntensity::Rpe(r) => r >= 7.0,
-        LiftIntensity::VelocityMs(_) | LiftIntensity::MaxIntent => false,
+        LiftIntensity::MaxIntent => false,
     };
     for s in sessions.iter_mut() {
         if !matches!(s.session_type, SessionType::Lift(_)) {

@@ -17,14 +17,6 @@ use super::rules::{
 };
 use crate::schema::{CheckinInput, ReadinessInput, ReadinessSignal};
 
-// Day-bucketing note. Check-ins bucket by LOCAL calendar day (`crate::local_day`),
-// with the offset threaded from the call site
-// (`derive_readiness(&checkins, offset, today)` in `app::readiness`) exactly like
-// `session_logged` / `build_run_anchors`. This stops a late-evening +
-// next-morning LOCAL pair (e.g. 23:30 then 07:00 Berlin) from collapsing into
-// one UTC bucket and silently breaking a multi-day streak. Offset 0 is UTC
-// bucketing.
-
 /// Minimum number of distinct check-in days before a rolling baseline is
 /// trustworthy enough to emit a z-score / delta for the wellness composite and
 /// resting-HR channels. Below this the core reports an honest "collecting
@@ -82,21 +74,11 @@ pub(super) const SORENESS_RECENCY_DAYS: i64 = 2;
 /// weeks ago; a verdict must not outlive its data.
 pub(super) const HRV_RECENCY_DAYS: i64 = 7;
 
-/// Absolute floor for the wellness composite (1–5 goodness scale, 5 = best): a
-/// morning at/below this, e.g. sleep 1 / soreness 5 / mood 1 → composite 1.0,
-/// is catastrophic on its face and downgrades intensity regardless of the
-/// z-score. It closes the flat-baseline blind spot: 7 identical days give
-/// SD ≈ 0 → z 0 "normal", so a z-only rule can never see the dip. It covers the
-/// all-items-bad morning; the soreness-only morning (maxed soreness but decent
-/// sleep/mood, composite still above the floor) is handled by the soreness
-/// endpoint bridge in [`derive_readiness`], not here.
-///
-/// Heuristic parameter (no KB entry sets an absolute composite floor): the
-/// emitted signal is an ordinary `WellnessZ` input, so the downgrade still
-/// travels with the wellness rule's own `WELLNESS-001` evidence, no invented
-/// citation. The constant itself is expert-opinion, following the
-/// AUTOREG-EASY-CAP precedent for a KB-silent number. Conservative direction
-/// (HARD RULE 3): it can only ADD a downgrade, never remove one or add load.
+/// Absolute floor for the wellness composite (1–5, 5 = best): a morning at or
+/// below it downgrades intensity whatever the z-score, so a flat baseline
+/// (SD ≈ 0 → z 0) cannot hide an all-items-bad morning. Expert-opinion
+/// parameter; the emitted `WellnessZ` input cites WELLNESS-001 and can only add
+/// a downgrade (HARD RULE 3).
 const WELLNESS_ABS_FLOOR: f64 = 2.0;
 
 /// Normalized value forced onto a catastrophic-floor reading: the single-day
@@ -175,11 +157,10 @@ pub struct BaselineStatus {
 
 /// Result of [`derive_readiness`]: synthetic `ReadinessInput`s to feed the
 /// existing rules, the honest still-collecting status of any channel that has
-/// readings but hasn't reached its baseline minimum, and `stale` — gated channels
-/// whose newest reading is older than `CHECKIN_RECENCY_DAYS`. Stale inputs are
-/// NOT fed to the rules (no verdict from an old check-in); the shell passes them
-/// to [`signal_states_in`](super::signal_states_in) to render an honest "No
-/// check-in today" row.
+/// readings but hasn't reached its baseline minimum, and `stale` — gated
+/// channels whose newest reading is older than `CHECKIN_RECENCY_DAYS`. Stale
+/// inputs are NOT fed to the rules; the shell passes them to
+/// [`signal_states_in`](super::signal_states_in) to render an "out of date" row.
 #[derive(Default)]
 pub struct DerivedReadiness {
     pub inputs: Vec<ReadinessInput>,
@@ -212,32 +193,10 @@ fn checkin_soreness_to_seven_point(raw: f64) -> f64 {
 }
 
 /// Wellness "goodness" for one check-in: the mean of the answered items of the
-/// KB's 5-item short-form wellness instrument (`ReadinessSignal::WellnessZ`,
-/// autoreg-030) on a 1–5 → 1–5 scale where 5 = best. Sleep and mood are scored
-/// in the good direction; soreness, fatigue and stress are reverse-scored
-/// (`6 − x`, so higher raw = worse → lower goodness), making the composite
-/// uniformly "higher = better". `None` when no wellness item was answered.
-///
-/// # KB mapping / deliberate 1–5 scale
-/// The KB `WellnessZ` entry (06-autoregulation.md §WellnessZ) accepts EITHER the
-/// Hooper 4-item ×1–7 index OR a 5-item short-form (sleep, fatigue, soreness,
-/// stress, mood/motivation) on 1–5 or 1–10. We implement the 1–5 short-form so
-/// the five check-in rows share one identical scale widget. The absolute
-/// magnitudes differ from a 1–7 Hooper sum, but the emitted signal is a z-score
-/// against the user's OWN rolling baseline, so the compressed range only lowers
-/// resolution — it does not change the z's meaning; direction-normalization is
-/// preserved.
-///
-/// # Variable answered-item count (documented limitation)
-/// The composite is a MEAN over answered items, so it always lands in [1, 5]
-/// regardless of how many items (n = 1..5) the user filled — the baseline MEAN
-/// stays scale-comparable across days. What varies is the per-day estimate
-/// noise: a one-item morning is a noisier draw than a five-item one, which can
-/// inflate the rolling SD. We deliberately do NOT drop low-n days behind a hard
-/// "≥2 items" gate: a genuinely bad single item (sleep 1, fatigue 5, …) must
-/// still be able to trip the absolute floor / z downgrade, and silencing it
-/// would be the LESS-conservative call (HARD RULE 3). The residual baseline
-/// noise is accepted in exchange for never dropping a safety-relevant reading.
+/// KB's 5-item short-form wellness instrument (autoreg-030) on 1–5, 5 = best.
+/// Soreness, fatigue and stress are reverse-scored (`6 − x`). A one-item
+/// morning still counts, so a single bad item can trip the floor or the z
+/// downgrade (HARD RULE 3). `None` when no item was answered.
 pub(super) fn wellness_goodness(c: &CheckinInput) -> Option<f64> {
     let mut sum = 0.0;
     let mut n = 0.0;
@@ -280,11 +239,10 @@ type DaySample = (i64, f64, i64);
 /// Latest raw value per LOCAL epoch-day for one channel, sorted ascending by day
 /// and bounded to the trailing `window_days` of the newest reading (EXCLUSIVE:
 /// `newest − day < window_days`, so `window_days` inclusive days). Each tuple is
-/// `(day, raw_value, observed_at)`. `utc_offset_sec` shifts each stamp to the
-/// device's local day before bucketing (see the day-bucketing note). Readings
-/// with `observed_at <= 0` are skipped (they can't be day-bucketed); the most
-/// recent check-in per local day wins so re-doing a check-in the same day
-/// overwrites, never double-counts.
+/// `(day, raw_value, observed_at)`. Check-ins bucket by the device's LOCAL day
+/// (`utc_offset_sec`; 0 = UTC), so a late-evening + next-morning pair spans two
+/// days. Readings with `observed_at <= 0` are skipped; the newest check-in per
+/// local day wins, so a redone check-in overwrites, never double-counts.
 fn per_day_series(
     checkins: &[CheckinInput],
     utc_offset_sec: i64,
@@ -382,18 +340,16 @@ fn derive_channel(
         }
         return;
     }
-    if let Some(span) = spec.gate.min_span_days {
-        let newest = series.iter().map(|(d, _, _)| *d).max().unwrap_or(0);
-        let oldest = series.iter().map(|(d, _, _)| *d).min().unwrap_or(0);
-        if newest - oldest < span {
-            out.collecting.push(BaselineStatus {
-                signal: spec.signal,
-                have: series.len().min(need),
-                need,
-                kind: BaselineKind::Collecting,
-            });
-            return;
-        }
+    if let Some(span) = spec.gate.min_span_days
+        && newest_day - series[0].0 < span
+    {
+        out.collecting.push(BaselineStatus {
+            signal: spec.signal,
+            have: series.len().min(need),
+            need,
+            kind: BaselineKind::Collecting,
+        });
+        return;
     }
     let scorer = Scorer {
         series,
@@ -483,19 +439,10 @@ impl Scorer<'_> {
 }
 
 /// Forward chronological pass: every day's normalized value and the final
-/// consecutive-suppressed-day streak.
-///
-/// The streak test scores EVERY day against a PAST-ONLY baseline (frozen at
-/// streak entry, [`Scorer::prefix_stats`] for the entry day itself) so a later
-/// reading can never contaminate the entry decision — a sustained shift is
-/// measured against the baseline as it stood before it began. A gap of up to
-/// [`STREAK_MAX_DAY_GAP`] days does not reset the run. A day's value uses that
-/// frozen past-only baseline while in a streak (so the shift can't dilute
-/// itself) and the leave-one-out baseline otherwise (the strip's current-day
-/// z). The trailing-mean emit reuses these per-day values, so a sustained
-/// suppression is measured against the same frozen baseline there too, instead
-/// of a full-window leave-one-out the other suppressed days have already
-/// pulled down.
+/// streak. The streak test scores each day against a past-only baseline frozen
+/// at streak entry, so a sustained shift never absorbs itself; a gap of up to
+/// [`STREAK_MAX_DAY_GAP`] days does not reset the run. Outside a streak a day
+/// uses the leave-one-out baseline.
 fn streak_pass(scorer: &Scorer, streak_predicate: impl Fn(f64) -> bool) -> (Vec<f64>, u8) {
     let mut streak_len: u8 = 0;
     let mut prev_day: i64 = 0;
@@ -506,28 +453,30 @@ fn streak_pass(scorer: &Scorer, streak_predicate: impl Fn(f64) -> bool) -> (Vec<
     let mut carried: Option<((f64, f64), i64)> = None;
     let mut day_values = Vec::with_capacity(scorer.series.len());
     for (idx, &(day, _, _)) in scorer.series.iter().enumerate() {
-        let consecutive = streak_len > 0 && day - prev_day <= STREAK_MAX_DAY_GAP;
+        // `frozen` is `Some` exactly while a streak is active.
+        let active = frozen.filter(|_| day - prev_day <= STREAK_MAX_DAY_GAP);
         // The baseline this day is scored against while a streak is active (the
         // streak's `frozen` baseline after this day's update); `None` outside a
         // streak.
-        let streak_base = if consecutive {
-            let base = frozen.unwrap_or_else(|| scorer.prefix_stats(idx));
+        let streak_base = if let Some(base) = active {
             if streak_predicate(scorer.normalize(idx, base)) {
                 streak_len = streak_len.saturating_add(1);
                 Some(base)
-            } else if streak_predicate(scorer.normalize(idx, scorer.prefix_stats(idx))) {
+            } else {
                 // The frozen baseline does not flag this day, but a fresh
                 // past-only deviation opens a new streak.
-                streak_len = 1;
                 let fresh = scorer.prefix_stats(idx);
-                frozen = Some(fresh);
-                Some(fresh)
-            } else {
-                // Streak ends: retain its pre-dip baseline for a quick re-entry.
-                carried = frozen.map(|b| (b, prev_day));
-                streak_len = 0;
-                frozen = None;
-                None
+                if streak_predicate(scorer.normalize(idx, fresh)) {
+                    streak_len = 1;
+                    frozen = Some(fresh);
+                    Some(fresh)
+                } else {
+                    // Streak ends: retain its pre-dip baseline for a quick re-entry.
+                    carried = Some((base, prev_day));
+                    streak_len = 0;
+                    frozen = None;
+                    None
+                }
             }
         } else {
             // Streak entry (or re-entry): a re-entry within the gap of the last
@@ -640,22 +589,9 @@ impl History<'_> {
 /// - `HrvLnRmssd`: z of `ln(rMSSD)` vs baseline (autoreg-028).
 /// - `RestingHr`: bpm delta vs baseline mean (autoreg-040/041).
 ///
-/// Streaks are core-computed. Below its baseline minimum a channel emits
-/// nothing and reports a `collecting` status instead of a fabricated number.
-///
-/// `utc_offset_sec` is the device's local UTC offset (the shell's
-/// `today_utc_offset_sec`): check-ins bucket by LOCAL calendar day so a
-/// late-evening + next-morning pair spans two days and keeps a streak intact
-/// (see the day-bucketing note). Offset 0 buckets by UTC day.
-///
-/// `today_epoch_day` (the shell's `model.today_epoch_day`, when known) recency-
-/// gates the derived RHR-delta and wellness-z channels: a channel whose newest
-/// reading is older than `CHECKIN_RECENCY_DAYS` is routed to `stale` (surfaced
-/// as "out of date") instead of driving a verdict. HRV is not routed
-/// through this per-reading gate — it reads a trailing rolling window and instead
-/// bounds its own verdict by `HRV_RECENCY_DAYS` against today (and the newest
-/// check-in), so a folded HRV verdict cannot outlive its data either. `None`
-/// disables the gate (a shell without a clock).
+/// `utc_offset_sec` is the device's local UTC offset; check-ins bucket by local
+/// day. `today_epoch_day` (when the shell has a clock) routes stale RHR and
+/// wellness channels to `stale`; HRV bounds itself by `HRV_RECENCY_DAYS`.
 pub fn derive_readiness(
     checkins: &[CheckinInput],
     utc_offset_sec: i64,
@@ -870,6 +806,15 @@ const HRV_QC_MIN_PRIOR: usize = MIN_BASELINE_CHECKINS;
 /// ("≥2 of the last 3 readings flagged").
 const HRV_QC_LOOKBACK: usize = 3;
 
+/// Resolution of a hand-typed rMSSD reading (whole ms).
+const HRV_RESOLUTION_MS: f64 = 1.0;
+
+/// [`HRV_RESOLUTION_MS`] on the ln scale at the ln-valued `mean`: the smallest
+/// spread the outlier test trusts.
+fn hrv_resolution_ln(mean: f64) -> f64 {
+    (HRV_RESOLUTION_MS / mean.exp()).ln_1p()
+}
+
 /// Coefficient of variation of raw rMSSD (ms) for ln-valued readings.
 fn rmssd_cv(ln_values: &[f64]) -> f64 {
     if ln_values.len() < 2 {
@@ -912,7 +857,8 @@ fn hrv_unreliable_flags(series: &[DaySample]) -> Vec<bool> {
         }
         let vals: Vec<f64> = prior.iter().map(|(_, v)| *v).collect();
         let (mean, sq_sum, n) = mean_and_sq_dev(vals.iter().copied());
-        let sd = (sq_sum / n).sqrt().max(SD_EPSILON);
+        // A flat week would otherwise turn a 1 ms change into a > 3 SD outlier.
+        let sd = (sq_sum / n).sqrt().max(hrv_resolution_ln(mean));
         let (day, v, _) = series[idx];
         let z = (v - mean) / sd;
         if z.abs() <= HRV_OUTLIER_Z {

@@ -73,17 +73,14 @@ private val StatusMarkSize = 40.dp
 private val StatusGlyphSize = 22.dp
 
 /**
- * The one card for "this is not normal" (ui-sweep §0.3): the theme's own card
- * surface (`BgElevated`, [Space.Card] radius and padding) with no fill tint and
- * no stripe. Colour lives in exactly two places, a [StatusRingWidth] ring and the
- * solid 40dp mark tile, so a small solid object carries the hue and the card can
- * never read as beige.
+ * The card for "this is not normal" (ui-sweep §0.3): the theme's card surface
+ * with no fill tint; the tone shows only in the [StatusRingWidth] ring and the
+ * solid mark tile.
  *
- * Header: mark tile ([glyph], else the tone's default), the [overline] in the
- * tone's colour, the red SAFETY chip when [safety], then [trailing] (the "?"
- * disclosure) flush to the end. [content] starts [Space.Md] below at the card's
- * content start, full width. [footer] (usually [StatusCardFooter]) closes it.
- * The card is one semantics group: overline first, then the body.
+ * Header: mark tile ([glyph], else the tone's default), the [overline], the red
+ * SAFETY chip when [safety], then [trailing] flush to the end. [content] follows
+ * full width; [footer] (usually [StatusCardFooter]) closes it. The card is one
+ * semantics group.
  */
 @Composable
 internal fun StatusCard(
@@ -204,8 +201,8 @@ private fun FooterLayout(secondary: @Composable () -> Unit, primary: @Composable
             val p = primaryM.fastMap { it.measure(loose) }
             val h = (s + p).maxOfOrNull { it.height } ?: 0
             layout(width, h) {
-                s.forEach { it.place(0, (h - it.height) / 2) }
-                p.forEach { it.place(width - it.width, (h - it.height) / 2) }
+                s.forEach { it.placeRelative(0, (h - it.height) / 2) }
+                p.forEach { it.placeRelative(width - it.width, (h - it.height) / 2) }
             }
         } else {
             val p = primaryM.fastMap { it.measure(Constraints.fixedWidth(width)) }
@@ -215,9 +212,9 @@ private fun FooterLayout(secondary: @Composable () -> Unit, primary: @Composable
             val h = pH + sH + (if (pH > 0 && sH > 0) gap else 0)
             layout(width, h) {
                 var y = 0
-                p.forEach { it.place(0, y); y += it.height }
+                p.forEach { it.placeRelative(0, y); y += it.height }
                 if (pH > 0) y += gap
-                s.forEach { it.place(0, y); y += it.height }
+                s.forEach { it.placeRelative(0, y); y += it.height }
             }
         }
     }
@@ -229,10 +226,10 @@ private fun FooterLayout(secondary: @Composable () -> Unit, primary: @Composable
  * The adjustment prose lives in the [StatusCard] above; this only points at it.
  */
 @Composable
-internal fun AdjustedChip(modifier: Modifier = Modifier) {
+internal fun AdjustedChip() {
     val desc = stringResource(R.string.main_adjusted_chip_cd)
     Box(
-        modifier = modifier
+        modifier = Modifier
             .heightIn(min = AdjustedChipHeight)
             .clip(ChoiceCellShape)
             .background(LocalStatusColors.current.warn)

@@ -2,19 +2,15 @@ package app.milestone.qa
 
 import android.content.Context
 import android.os.Looper
-import android.view.WindowManager
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -22,7 +18,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppClock
@@ -38,8 +33,6 @@ import app.milestone.R
 import app.milestone.ReadinessSignal
 import app.milestone.RecentRace
 import app.milestone.SessionPlanView
-import app.milestone.AppSettings
-import com.github.takahirom.roborazzi.captureScreenRoboImage
 import java.io.File
 import java.time.Duration
 import java.util.Locale
@@ -79,49 +72,11 @@ class ScreenshotTodayTest {
 
     // ── Capture + wait helpers ──────────────────────────────────────────────
 
-    private fun theme(mode: DarkMode) = AppSettings.setDarkMode(ctx, mode)
-
-    private fun suffix(mode: DarkMode) = if (mode == DarkMode.Dark) "dark" else "light"
-
-    @OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)
-    private fun shot(name: String) =
-        rule.captureWithoutRipples { withWindowsInAddOrder { captureScreenRoboImage("src/test/screenshots/$name.png") } }
-
-    /**
-     * Roborazzi composites the window roots sorted by `LayoutParams.type`, and
-     * Espresso lists same-type roots newest-first, so a dialog opened over the Log
-     * sheet (both TYPE_APPLICATION dialogs) is painted UNDER the older sheet and
-     * never shows in the capture. For the capture only, rank every window by the
-     * order it was added (= its on-device z-order), then restore the real types.
-     */
-    @Suppress("UNCHECKED_CAST")
-    private fun <T> withWindowsInAddOrder(block: () -> T): T {
-        val globalClass = Class.forName("android.view.WindowManagerGlobal")
-        val global = globalClass.getMethod("getInstance").invoke(null)
-        val field = globalClass.getDeclaredField("mParams").apply { isAccessible = true }
-        val params = (field.get(global) as List<WindowManager.LayoutParams>).toList()
-        val saved = params.map { it.type }
-        params.forEachIndexed { i, p -> p.type = WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW + i }
-        try {
-            return block()
-        } finally {
-            params.forEachIndexed { i, p -> p.type = saved[i] }
-        }
-    }
-
     /** Wait (fetching semantics, which idles the main looper) for [matcher]. */
     private fun waitFor(matcher: SemanticsMatcher, timeoutMs: Long = 10_000) =
         rule.waitUntil(timeoutMs) { rule.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
 
     private fun waitForText(text: String, substring: Boolean = false) = waitFor(hasText(text, substring = substring))
-
-    /** Wait for model state the screen doesn't show; the semantics fetch lets the
-     *  core's reply land on the main looper while we poll. */
-    private fun waitForState(timeoutMs: Long = 15_000, cond: () -> Boolean) =
-        rule.waitUntil(timeoutMs) {
-            rule.onAllNodes(isRoot()).fetchSemanticsNodes()
-            cond()
-        }
 
     /** Scroll Today's lazy list until a node matching [matcher] is on screen. */
     private fun scrollTodayTo(matcher: SemanticsMatcher) {
@@ -136,16 +91,6 @@ class ScreenshotTodayTest {
             rule.onAllNodes(hasScrollToIndexAction())[0].performTouchInput { swipeUp() }
             rule.waitForIdle()
         }
-    }
-
-    /** Scroll Today's lazy list by [fraction] of its viewport height. The hero is
-     *  ONE lazy item, so scrolling to a node inside it only ever lands the hero's
-     *  top; a pixel scroll gives a genuinely different mid frame. */
-    private fun scrollTodayBy(fraction: Float) {
-        val list = rule.onNode(hasScrollToNodeAction())
-        val height = list.fetchSemanticsNode().size.height
-        list.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, height * fraction) }
-        rule.waitForIdle()
     }
 
     private val todayStartSec get() = QaHarness.daysAgoAtMidday(0) - 43_200L
@@ -164,16 +109,6 @@ class ScreenshotTodayTest {
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_log))).performClick()
         rule.waitForIdle()
         waitForText(str(R.string.main_log_set_title))
-    }
-
-    /** Open the set loop for [exercise]: the current item's filled pill or another
-     *  open item's compact row (both speak "Log set 1 of N, <exercise>"). */
-    private fun openLoopFor(exercise: String) {
-        rule.onNode(
-            hasClickAction() and hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n, 1), substring = true) and
-                hasAnyAncestor(hasTestTag("plan-item:$exercise")),
-        ).performScrollTo().performClick()
-        waitForText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)
     }
 
     // ── Seeds ───────────────────────────────────────────────────────────────
@@ -230,27 +165,23 @@ class ScreenshotTodayTest {
 
     // ── Strength plan item faces: plates per side, effort, Last, Move session ─
     private fun plan(mode: DarkMode, fontScale: Float? = null) {
-        theme(mode)
+        useDarkMode(mode)
         fontScale?.let { RuntimeEnvironment.setFontScale(it) }
         seedStrengthWithHistory()
         rule.launchApp()
         waitForText(strPrefix(R.string.plan_face_per_side), substring = true)
         val tag = if (fontScale != null) "fs130-" else ""
-        shot("today-plan-top-$tag${suffix(mode)}")
+        rule.shot("today-plan-top-$tag${mode.suffix}")
         if (fontScale != null) return
         // The session card's ONE "?": every item's evidence in a single panel.
         val details = hasClickAction() and
             hasContentDescription(str(R.string.main_details_subject, EventDispatcher.model.value!!.next_session!!.title))
         rule.onNode(details).performClick()
-        shot("today-plan-evidence-${suffix(mode)}")
+        rule.shot("today-plan-evidence-${mode.suffix}")
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_hide_details), substring = true)).performClick()
         rule.waitForIdle()
-        // Mid: under half a viewport down, between the hero's head and the week
-        // block (a deeper scroll clamps to the end and duplicates -bottom).
-        scrollTodayBy(0.4f)
-        shot("today-plan-mid-${suffix(mode)}")
         scrollTodayToEnd()
-        shot("today-plan-bottom-${suffix(mode)}")
+        rule.shot("today-plan-bottom-${mode.suffix}")
     }
 
     @Test fun planLight() = plan(DarkMode.Light)
@@ -261,7 +192,7 @@ class ScreenshotTodayTest {
 
     // ── Session done (every planned set logged), with a new best on the squat ─
     private fun sessionDone(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), squat(QaHarness.daysAgoAtMidday(2))))
         rule.launchApp()
         val session = EventDispatcher.model.value!!.next_session!!
@@ -280,11 +211,11 @@ class ScreenshotTodayTest {
             }
         }
         // Every sent set applied (nothing left queued), and the card is up.
-        waitForState { EventDispatcher.model.value!!.lifts.count { it.observed_at >= todayStartSec } == sent }
+        rule.waitForState { EventDispatcher.model.value!!.lifts.count { it.observed_at >= todayStartSec } == sent }
         waitFor(hasTestTag("session-done"))
-        shot("today-sessiondone-top-${suffix(mode)}")
+        rule.shot("today-sessiondone-top-${mode.suffix}")
         scrollTodayToEnd()
-        shot("today-sessiondone-bottom-${suffix(mode)}")
+        rule.shot("today-sessiondone-bottom-${mode.suffix}")
     }
 
     @Test fun sessionDoneLight() = sessionDone(DarkMode.Light)
@@ -293,7 +224,7 @@ class ScreenshotTodayTest {
 
     // ── Weekly consistency: four finished plan weeks + this week ─────────────
     private fun consistency(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         val start = app.milestone.todayEpochDay() - 28
         val doneDays = listOf(28, 26, 24, 21, 19, 14, 12, 10, 7, 5)
         QaHarness.seedLog(
@@ -306,11 +237,11 @@ class ScreenshotTodayTest {
         )
         rule.launchApp()
         scrollTodayTo(hasTestTag("this-week"))
-        shot("today-consistency-${suffix(mode)}")
+        rule.shot("today-consistency-${mode.suffix}")
         // The Progress card: the squat's best set per session, captioned
         // "<exercise> · estimated max" (matched by its fixed tail).
         scrollTodayTo(hasText(str(R.string.main_e1rm_title, "").trim(), substring = true))
-        shot("today-progress-${suffix(mode)}")
+        rule.shot("today-progress-${mode.suffix}")
     }
 
     @Test fun consistencyLight() = consistency(DarkMode.Light)
@@ -319,7 +250,7 @@ class ScreenshotTodayTest {
 
     // ── Pain hold: the banner's "I'm pain-free now" and its confirm ──────────
     private fun painHold(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(
             ctx,
             listOf(QaHarness.strengthProfile(), Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, thisMorning)),
@@ -327,10 +258,10 @@ class ScreenshotTodayTest {
         rule.launchApp()
         // The resolve action's label is the core's own copy.
         waitForText("I'm pain-free now")
-        shot("today-painhold-${suffix(mode)}")
+        rule.shot("today-painhold-${mode.suffix}")
         rule.onNodeWithText("I'm pain-free now").performClick()
         waitForText(str(R.string.main_resolve_hold_confirm))
-        shot("today-painhold-confirm-${suffix(mode)}")
+        rule.shot("today-painhold-confirm-${mode.suffix}")
     }
 
     @Test fun painHoldLight() = painHold(DarkMode.Light)
@@ -339,7 +270,7 @@ class ScreenshotTodayTest {
 
     // ── A non-blocking hold (above-the-neck cold): the "I've recovered" card ─
     private fun holdCard(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(
             ctx,
             listOf(QaHarness.strengthProfile(), Event.SubmitReadiness(ReadinessSignal.Illness, 1.0, thisMorning)),
@@ -348,7 +279,7 @@ class ScreenshotTodayTest {
         // The resolve action's label is the core's own copy.
         waitForText("I've recovered")
         scrollTodayTo(hasText("I've recovered"))
-        shot("today-holdcard-${suffix(mode)}")
+        rule.shot("today-holdcard-${mode.suffix}")
     }
 
     @Test fun holdCardLight() = holdCard(DarkMode.Light)
@@ -358,15 +289,15 @@ class ScreenshotTodayTest {
     // ── Calisthenics day: Easier / Harder chips + the first-time invite, then
     //    the session after the athlete taps Harder on the invited item ─────────
     private fun calisthenics(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.calisthenicsProfile()))
         rule.launchApp()
         val harder = hasContentDescription(strPrefix(R.string.plan_calis_chip_cd, str(R.string.plan_calis_harder)), substring = true)
         waitFor(harder)
-        shot("today-calis-top-${suffix(mode)}")
+        rule.shot("today-calis-top-${mode.suffix}")
         rule.onAllNodes(harder)[0].performClick()
-        waitForState { EventDispatcher.model.value!!.calisthenics_ladders.any { it.current_rung != null } }
-        shot("today-calis-harder-${suffix(mode)}")
+        rule.waitForState { EventDispatcher.model.value!!.calisthenics_ladders.any { it.current_rung != null } }
+        rule.shot("today-calis-harder-${mode.suffix}")
     }
 
     @Test fun calisthenicsLight() = calisthenics(DarkMode.Light)
@@ -381,7 +312,7 @@ class ScreenshotTodayTest {
      * is TODAY'S SESSION on the hero.
      */
     private fun runDay(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(runnerProfile()))
         rule.launchApp()
         val vm = EventDispatcher.model.value!!
@@ -395,16 +326,14 @@ class ScreenshotTodayTest {
             val log = File(ctx.filesDir, "event-log.ndjson").readText()
             QaHarness.teardown()
             QaHarness.reset(ctx)
-            theme(mode)
+            useDarkMode(mode)
             File(ctx.filesDir, "event-log.ndjson").writeText(log)
             AppClock.offsetMillis += (pick.epoch_day - today) * 86_400_000L
             rule.launchApp()
         }
         waitForText(str(R.string.main_todays_session).uppercase(Locale.US))
         waitFor(hasTestTag("plan-item:run"))
-        shot("today-run-top-${suffix(mode)}")
-        scrollTodayToEnd()
-        shot("today-run-bottom-${suffix(mode)}")
+        rule.shot("today-run-top-${mode.suffix}")
     }
 
     @Test fun runDayLight() = runDay(DarkMode.Light)
@@ -413,11 +342,11 @@ class ScreenshotTodayTest {
 
     // ── Hypertrophy plan: rep ranges + "Planned sets per muscle" expanded ────
     private fun hypertrophy(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(hypertrophyProfile()))
         rule.launchApp()
         waitForText(str(R.string.main_todays_session).uppercase(Locale.US))
-        shot("today-hypertrophy-top-${suffix(mode)}")
+        rule.shot("today-hypertrophy-top-${mode.suffix}")
         val section = hasText(str(R.string.main_muscle_volume_title).uppercase(Locale.US), substring = true) and hasClickAction()
         scrollTodayTo(section)
         rule.onNode(section).performClick()
@@ -425,7 +354,7 @@ class ScreenshotTodayTest {
         // Scroll to the end of Today (calculators now live on Profile) so the
         // whole expanded table, its last rows included, sits clear of the Log button.
         scrollTodayToEnd()
-        shot("today-hypertrophy-volume-${suffix(mode)}")
+        rule.shot("today-hypertrophy-volume-${mode.suffix}")
     }
 
     @Test fun hypertrophyLight() = hypertrophy(DarkMode.Light)
@@ -434,14 +363,14 @@ class ScreenshotTodayTest {
 
     // ── Move session dialog ──────────────────────────────────────────────────
     private fun moveDialog(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         seedStrengthWithHistory()
         rule.launchApp()
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_move_session), substring = true)).performClick()
         waitFor(SemanticsMatcher("testTag starts with move-target:") {
             it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("move-target:") == true
         })
-        shot("today-move-dialog-${suffix(mode)}")
+        rule.shot("today-move-dialog-${mode.suffix}")
     }
 
     @Test fun moveDialogLight() = moveDialog(DarkMode.Light)
@@ -450,7 +379,7 @@ class ScreenshotTodayTest {
 
     // ── Rest day today: folded into the overline, then the next session ──────
     private fun restDay(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_move_session), substring = true)).performClick()
@@ -460,7 +389,7 @@ class ScreenshotTodayTest {
         waitFor(target)
         rule.onAllNodes(target)[0].performClick()
         waitForText(str(R.string.main_rest_day_next_overline).uppercase(Locale.US))
-        shot("today-restday-${suffix(mode)}")
+        rule.shot("today-restday-${mode.suffix}")
     }
 
     @Test fun restDayLight() = restDay(DarkMode.Light)
@@ -474,7 +403,7 @@ class ScreenshotTodayTest {
      *  gating. (A shift the next reading reproduces is a real change, not an
      *  artifact, and would not suspend anything.) */
     private fun hrvSuspended(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         val steady = listOf(60.0, 62.0, 58.0, 61.0, 59.0, 60.0, 63.0, 61.0)
         val mornings = steady.mapIndexed { i, ms -> (10 - i) to ms } + listOf(2 to 120.0, 1 to 25.0, 0 to 60.0)
         QaHarness.seedLog(
@@ -485,7 +414,7 @@ class ScreenshotTodayTest {
         )
         rule.launchApp()
         waitForText(str(R.string.main_restart_hrv_baseline))
-        shot("today-hrv-suspended-${suffix(mode)}")
+        rule.shot("today-hrv-suspended-${mode.suffix}")
     }
 
     @Test fun hrvSuspendedLight() = hrvSuspended(DarkMode.Light)
@@ -517,19 +446,19 @@ class ScreenshotTodayTest {
 
     // ── Set loop after a save: rest countdown + the undo row ─────────────────
     private fun setLoopRest(mode: DarkMode, fontScale: Float? = null) {
-        theme(mode)
+        useDarkMode(mode)
         fontScale?.let { RuntimeEnvironment.setFontScale(it) }
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), squat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        openLoopFor(SQUAT)
+        rule.openLoopFor(SQUAT)
         rule.onNodeWithTag("editor-primary").performClick()
         waitForText(strPrefix(R.string.log_set_header_n_of_n, 2), substring = true)
         waitFor(hasContentDescription(strPrefix(R.string.log_rest_left_cd), substring = true))
         waitFor(hasText(str(R.string.log_undo)))
-        waitForState { todaysSets(SQUAT).isNotEmpty() }
+        rule.waitForState { todaysSets(SQUAT).isNotEmpty() }
         pinRestReadout(25)
         val tag = if (fontScale != null) "fs130-" else ""
-        shot("log-setloop-rest-$tag${suffix(mode)}")
+        rule.shot("log-setloop-rest-$tag${mode.suffix}")
     }
 
     @Test fun setLoopRestLight() = setLoopRest(DarkMode.Light)
@@ -542,18 +471,18 @@ class ScreenshotTodayTest {
     /** "Done for now" shows once a set is logged; editing after that save marks
      *  the editor dirty, which is what makes it ask. */
     private fun finishConfirm(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), squat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
-        openLoopFor(SQUAT)
+        rule.openLoopFor(SQUAT)
         rule.onNodeWithTag("editor-primary").performClick()
         waitForText(strPrefix(R.string.log_set_header_n_of_n, 2), substring = true)
-        waitForState { todaysSets(SQUAT).isNotEmpty() }
+        rule.waitForState { todaysSets(SQUAT).isNotEmpty() }
         // The ± chip's "+2.5" is a figure, not a string resource.
         rule.onNodeWithText("+2.5").performClick()
         rule.onNodeWithText(str(R.string.log_set_done)).performClick()
         waitForText(str(R.string.log_finish_unsaved_title))
-        shot("log-finish-unsaved-${suffix(mode)}")
+        rule.shot("log-finish-unsaved-${mode.suffix}")
     }
 
     @Test fun finishConfirmLight() = finishConfirm(DarkMode.Light)
@@ -562,20 +491,20 @@ class ScreenshotTodayTest {
 
     // ── Weekly check-in: signs + how long + the RED-S question ───────────────
     private fun weeklyCheckin(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         openChooser()
         rule.onNodeWithText(str(R.string.main_weekly_checkin_title)).performScrollTo().performClick()
         waitForText(str(R.string.log_weekly_signs_q))
-        shot("log-weekly-top-${suffix(mode)}")
+        rule.shot("log-weekly-top-${mode.suffix}")
         rule.onNodeWithText(str(R.string.log_weekly_sign_sleep)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_sign_mood)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_signs_1to2)).performScrollTo().performClick()
         rule.onNodeWithText(str(R.string.log_weekly_signs_gt2)).performScrollTo()
-        shot("log-weekly-mid-${suffix(mode)}")
+        rule.shot("log-weekly-mid-${mode.suffix}")
         rule.onNode(hasText(str(R.string.log_clinical_reds_ctx), substring = true)).performScrollTo()
-        shot("log-weekly-bottom-${suffix(mode)}")
+        rule.shot("log-weekly-bottom-${mode.suffix}")
     }
 
     @Test fun weeklyCheckinLight() = weeklyCheckin(DarkMode.Light)
@@ -585,7 +514,7 @@ class ScreenshotTodayTest {
     // ── Morning check-in with the illness question asked first ───────────────
     /** An active head cold puts the check-in's Illness item at the top. */
     private fun morningCheckin(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(
             ctx,
             listOf(QaHarness.strengthProfile(), Event.SubmitReadiness(ReadinessSignal.Illness, 1.0, thisMorning)),
@@ -595,7 +524,7 @@ class ScreenshotTodayTest {
         rule.onNodeWithText(str(R.string.main_morning_checkin_title)).performScrollTo().performClick()
         waitFor(hasTestTag("checkin-sleep"))
         waitForText(str(R.string.log_illness_q))
-        shot("log-checkin-illness-${suffix(mode)}")
+        rule.shot("log-checkin-illness-${mode.suffix}")
     }
 
     @Test fun morningCheckinLight() = morningCheckin(DarkMode.Light)
@@ -606,14 +535,14 @@ class ScreenshotTodayTest {
     /** The chooser scrolls only a few dp past the viewport, so it has a top and a
      *  true-end capture, no separate mid. */
     private fun chooserCalis(mode: DarkMode) {
-        theme(mode)
+        useDarkMode(mode)
         QaHarness.seedLog(ctx, listOf(QaHarness.calisthenicsProfile()))
         rule.launchApp()
         openChooser()
-        shot("log-chooser-calis-top-${suffix(mode)}")
+        rule.shot("log-chooser-calis-top-${mode.suffix}")
         rule.onNode(hasText(str(R.string.log_chooser_more)) and hasClickAction()).performScrollTo().performClick()
         rule.onNode(hasText(str(R.string.main_advanced_signal_title)) and hasClickAction()).performScrollTo()
-        shot("log-chooser-calis-bottom-${suffix(mode)}")
+        rule.shot("log-chooser-calis-bottom-${mode.suffix}")
     }
 
     @Test fun chooserCalisLight() = chooserCalis(DarkMode.Light)

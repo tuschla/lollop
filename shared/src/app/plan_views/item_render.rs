@@ -29,14 +29,7 @@ pub(super) fn refresh_lift_summary(it: &mut PrescriptionView, weight_lb: bool) {
         it.suggested_load_kg
             .filter(|_| !matches!(it.intensity, PlanIntensity::Prose))
     });
-    // A lift whose load the day took away says what to load instead: a
-    // weight for its reps-left target ("6×5 · pick a weight for ~3 reps
-    // left"), the line a compact row shows.
-    let pick_rir = it
-        .target_rpe
-        .filter(|_| it.pick_load && load.is_none())
-        .map(|rpe| crate::strength::rpe_to_rir(rpe).round() as i64)
-        .filter(|rir| *rir >= 1);
+    let pick_rir = pick_rir(it);
     let mut parts: Vec<String> = Vec::with_capacity(2);
     let effort = match pick_rir {
         Some(_) if matches!(it.intensity, PlanIntensity::Prose) => it.intensity_label.clone(),
@@ -122,8 +115,8 @@ pub(super) fn set_run_summary(
     }
 }
 
-/// "~2 reps left" for a single reps-in-reserve target: the one effort wording
-/// every face uses (0 = "to your last good rep", never "0 reps left").
+/// "~2 reps left" for a single reps-in-reserve target on a card face (0 = "to
+/// your last good rep", never "0 reps left").
 pub(super) fn reps_left(n: i64) -> String {
     match n {
         n if n <= 0 => "to your last good rep".to_string(),
@@ -142,16 +135,6 @@ pub(super) fn with_reps_left(n: i64) -> String {
     }
 }
 
-/// A basis sentence's effort clause: "with about 2 reps left", or "at your
-/// last good rep" for a zero reserve.
-pub(super) fn about_reps_left(n: i64) -> String {
-    match n {
-        n if n <= 0 => "at your last good rep".to_string(),
-        1 => "with about 1 rep left".to_string(),
-        n => format!("with about {n} reps left"),
-    }
-}
-
 /// The face's rep count: the plan's rep RANGE when it gives one
 /// (calisthenics rungs are "5–8"), else the one figure.
 fn reps_text(it: &PrescriptionView) -> String {
@@ -167,9 +150,9 @@ pub(super) fn sets_reps_lead(it: &PrescriptionView) -> String {
     format!("{}×{}", it.sets, reps_text(it))
 }
 
-/// The single reps-left number the face shows ([`effort_phrase`]), if it
-/// shows one: a structured target, or the reserve a %e1RM or RPE target
-/// implies. `None` for a band, a prose target, or no target.
+/// The single reps-left number [`effort_phrase`] shows, if it shows one: a
+/// structured target, or the reserve a %e1RM or RPE target implies. `None`
+/// for a band, a prose target, or no target.
 pub(super) fn face_rir(it: &PrescriptionView) -> Option<i64> {
     let from_rpe = |rpe: f64| crate::strength::rpe_to_rir(rpe).round() as i64;
     match it.intensity {
@@ -179,6 +162,23 @@ pub(super) fn face_rir(it: &PrescriptionView) -> Option<i64> {
         PlanIntensity::PercentE1rm { .. } => it.target_rpe.map(from_rpe),
         PlanIntensity::Prose => it.target_rpe.filter(|_| it.rpe_target).map(from_rpe),
     }
+}
+
+/// The reserve in "pick a weight for ~N reps left", shown when the day took
+/// the lift's weight away and none is suggested.
+fn pick_rir(it: &PrescriptionView) -> Option<i64> {
+    let load_shown = it.load_kg.is_some()
+        || (it.suggested_load_kg.is_some() && !matches!(it.intensity, PlanIntensity::Prose));
+    it.target_rpe
+        .filter(|_| it.pick_load && !load_shown)
+        .map(|rpe| crate::strength::rpe_to_rir(rpe).round() as i64)
+        .filter(|rir| *rir >= 1)
+}
+
+/// The reps left the face states: the pick-a-weight reserve, else
+/// [`face_rir`].
+pub(super) fn shown_rir(it: &PrescriptionView) -> Option<i64> {
+    pick_rir(it).or_else(|| face_rir(it))
 }
 
 /// A lift item's effort in the face vocabulary: a structured reps-in-reserve
@@ -324,8 +324,8 @@ impl RunAmount {
     /// distance.
     pub(super) fn shown_km(self) -> Option<f64> {
         match self {
-            RunAmount::PlanKm(k) => Some(shown_km_tenths(f64::from(k))),
-            RunAmount::Km(k) => Some(shown_km_tenths(k)),
+            RunAmount::PlanKm(k) => Some(round_tenths(f64::from(k))),
+            RunAmount::Km(k) => Some(round_tenths(k)),
             RunAmount::Minutes(_) | RunAmount::MinutesRange(..) | RunAmount::RunWalk => None,
         }
     }
@@ -333,11 +333,12 @@ impl RunAmount {
     /// `keep` of the amount, as a readiness cut shows it, from the shown
     /// (one-decimal) kilometres; `None` when there is no single number to cut.
     pub(super) fn scaled(self, keep: f64) -> Option<RunAmount> {
-        let tenths = shown_km_tenths;
         match self {
             RunAmount::Minutes(m) => Some(RunAmount::Minutes((m * keep).round().max(1.0))),
-            RunAmount::PlanKm(k) => Some(RunAmount::Km((tenths(f64::from(k)) * keep).max(0.1))),
-            RunAmount::Km(k) => Some(RunAmount::Km((tenths(k) * keep).max(0.1))),
+            RunAmount::PlanKm(k) => {
+                Some(RunAmount::Km((round_tenths(f64::from(k)) * keep).max(0.1)))
+            }
+            RunAmount::Km(k) => Some(RunAmount::Km((round_tenths(k) * keep).max(0.1))),
             RunAmount::MinutesRange(..) | RunAmount::RunWalk => None,
         }
     }
@@ -384,18 +385,14 @@ pub(super) const EASY_RUN_LABEL: &str = "Easy: zone 1–2";
 /// Cap a RUN item to an easy target: keep the bounded volume but replace the
 /// hard intensity with an easy zone. An interval day keeps its numbers as one
 /// continuous easy run of the same total work ("6 × 4 min" → "24 min"; never a
-/// card with no duration). Used by DowngradeSession / CapTopEnd /
-/// ModifyAndMonitor so a run prescription is actually modified, not merely
-/// annotated.
+/// card with no duration).
 pub(super) fn cap_run_item_easy(
     it: &mut PrescriptionView,
     r: &Recommended<Adjustment>,
     note: &str,
 ) {
-    // Downgraded to a continuous easy run: the original rep structure is
-    // deferred, not prescribed, so drop it (and any "N × …" rep or bout
-    // structure that would otherwise read as an interval on an easy card),
-    // carrying its total.
+    // The rep structure is deferred, not prescribed: drop it (and any "N × …"
+    // that would read as an interval on an easy card), carrying its total.
     let vol = if it.rep_count > 0 {
         interval_total(it)
     } else {
@@ -418,11 +415,24 @@ pub(super) fn cap_run_item_easy(
             run_walk: rs.run_walk,
             ..RunStructureView::default()
         });
+    set_easy_run_face(it);
+    it.adjusted_note = note.to_string();
+    repoint_evidence(
+        it,
+        r,
+        Some(format!(
+            "Changed to an easy run ({note}). The planned harder effort waits for another day."
+        )),
+    );
+}
+
+/// Label a run (its volume already set) easy, with the easy pace/bpm target,
+/// and re-render its face.
+pub(super) fn set_easy_run_face(it: &mut PrescriptionView) {
     it.intensity_label = EASY_RUN_LABEL.into();
-    // Re-point the numeric run target to the easy band (may append the easy
-    // pace/bpm to the label).
     crate::app::run_targets::downgrade_run_target_to_easy(it);
     let label = it.intensity_label.clone();
+    let vol = it.run_volume;
     set_run_summary(
         it,
         vol.and_then(RunAmount::label),
@@ -430,29 +440,27 @@ pub(super) fn cap_run_item_easy(
         &label,
         EASY_RUN_LABEL,
     );
-    it.adjusted_note = note.to_string();
-    // The item was downgraded to easy, so EVERY evidence field must surface the
-    // decision that downgraded it, this readiness/safety adjustment `r`, not the
-    // stale ORIGINAL band (e.g. Tempo Strong). Re-point the grade chip + citation
-    // + confidence to `r`, and rebuild the whole why? triad from `r` via
-    // `why_from` (basis overridden with the honest downgrade rationale, grade_note
-    // now consistent with the re-pointed chip, improves keyed to `r`'s claim).
+}
+
+/// Point an item's grade chip and why? at `r`, the call that changed it
+/// (`basis` overrides the claim's own).
+pub(super) fn repoint_evidence(
+    it: &mut PrescriptionView,
+    r: &Recommended<Adjustment>,
+    basis: Option<String>,
+) {
     it.evidence = EvidenceTagView::of(r);
     it.safety_reason.clear();
     it.safety_reason_mi.clear();
-    it.why = why_from(
-        Some(format!(
-            "Changed to an easy run ({note}). The planned harder effort waits for another day."
-        )),
-        r,
-    );
+    it.why = why_from(basis, r);
 }
 
-/// Render an RPE for a set summary: integer when whole (`8`), else one decimal.
-pub(super) fn fmt_rpe(rpe: f64) -> String {
-    if rpe.fract() == 0.0 {
-        format!("{rpe:.0}")
-    } else {
-        format!("{rpe:.1}")
+impl WhyView {
+    /// Add a sentence to the basis.
+    pub(in crate::app) fn append_basis(&mut self, line: &str) {
+        if !self.basis.is_empty() {
+            self.basis.push(' ');
+        }
+        self.basis.push_str(line);
     }
 }

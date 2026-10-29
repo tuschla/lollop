@@ -87,7 +87,7 @@ import java.util.Locale
  *    renders one row per core entry; Today never shows a session while the core
  *    holds training; process death + relaunch replays the same entries.
  *
- * The bugs the walk found (bugs2-UiWalk.md) are pinned by the regression tests
+ * The bugs the walk found are pinned by the regression tests
  * below; the walk tolerates none of them, so it guards them too.
  *
  * Replay: every failure prints the start state, seed, step and the action trace.
@@ -158,10 +158,10 @@ class RandomUiWalkTest {
     @Test fun longHistory() = walk(Start.LongHistory)
     @Test fun milesAndPounds() = walk(Start.MilesLb)
 
-    // ── Bugs the walk found (bugs2-UiWalk.md), pinned as regression tests ──
+    // ── Bugs the walk found, pinned as regression tests ──────────────────
 
     /**
-     * bugs2-UiWalk #1. In landscape the Log run sheet opens with its keypad up
+     * In landscape the Log run sheet opens with its keypad up
      * (RunEditor `keypadOpen = true`) under Duration, below the sheet's fold: the
      * user saw no keypad and the first Back only folded it, so the screen did not
      * change. The editor now scrolls the open keypad (and its field) into view.
@@ -185,12 +185,9 @@ class RandomUiWalkTest {
     }
 
     /**
-     * bugs2-UiWalk #2. The Log set editor's exercise search (SetEditor
-     * `ExerciseSearchField`) is a BasicTextField whose only name was its
-     * placeholder, shown while the field is empty: once it held text the field had
-     * no accessible name, and whitespace left an action with no label at all. It
-     * now names itself with the hint, as the glossary's search well
-     * (`contentDescription = hint`, Evidence.kt `GlossarySearchWell`) does.
+     * The Log set editor's exercise search (a Widgets.kt `SearchWell`) keeps an
+     * accessible name once it holds text: it names itself with the hint, not only
+     * through the placeholder shown while it is empty.
      */
     @Test
     fun exerciseSearch_keepsItsAccessibleName() {
@@ -213,7 +210,7 @@ class RandomUiWalkTest {
     }
 
     /**
-     * bugs2-UiWalk #3. A kg value the app itself derived from pounds (the core's
+     * A kg value the app itself derived from pounds (the core's
      * lb loads are exact divisions, e.g. `230.0 / LB_PER_KG` in completion.rs, and
      * an untouched lb Save re-emitted that exact kg) was shown in the kg weight
      * field unrounded (`fmtLosslessPrefill`, every digit): editing a 225-lb set read
@@ -252,7 +249,7 @@ class RandomUiWalkTest {
     }
 
     /**
-     * bugs2-UiWalk #4. A phone in landscape (411dp tall) at 200 % font with a pain
+     * A phone in landscape (411dp tall) at 200 % font with a pain
      * report on top of an illness hold: the pinned DO-NOT-TRAIN banner (two
      * resolve actions, shown whole by design) leaves the destination no room, and
      * the "lollop" wordmark row was laid out over the bottom navigation, its text
@@ -308,8 +305,8 @@ class RandomUiWalkTest {
     }
 
     /**
-     * bugs2-UiWalk C1 (walk: `UIWALK_STATE=Runner UIWALK_SEED=1594695423
-     * UIWALK_STEPS=49`). The week strip's done ✓ (the non-colour done cue) sat in a
+     * Walk `UIWALK_STATE=Runner UIWALK_SEED=1594695423
+     * UIWALK_STEPS=49`: the week strip's done ✓ (the non-colour done cue) sat in a
      * fixed 16dp slot: at 130 % font its 13sp line is taller than 16dp and was cut
      * off. The slot now grows to the ✓'s measured line.
      */
@@ -345,8 +342,8 @@ class RandomUiWalkTest {
     }
 
     /**
-     * bugs2-UiWalk C2 (walk: `UIWALK_STATE=PainHold UIWALK_SEED=1595153934
-     * UIWALK_STEPS=65`). The set loop's "Last: 100 kg × 3 · 3 reps left" line beside
+     * Walk `UIWALK_STATE=PainHold UIWALK_SEED=1595153934
+     * UIWALK_STEPS=65`: the set loop's "Last: 100 kg × 3 · 3 reps left" line beside
      * "Edit" had `maxLines = 1` and clipped at 200 % font. It now wraps.
      */
     @Test
@@ -377,8 +374,8 @@ class RandomUiWalkTest {
     }
 
     /**
-     * bugs2-UiWalk C3 (walk: `UIWALK_STATE=Lifter UIWALK_SEED=1593027678
-     * UIWALK_STEPS=157`). A keypad field's value figure was one Display-size line
+     * Walk `UIWALK_STATE=Lifter UIWALK_SEED=1593027678
+     * UIWALK_STEPS=157`: a keypad field's value figure was one Display-size line
      * (`maxLines = 1`): in the loop's Edit set dialog at 200 % font a typed
      * 6-character "127.52" did not fit the well and was cut off. The figure now
      * steps down to the Title size, then wraps (Keypad.kt `fittedValueStyle`), in
@@ -473,7 +470,7 @@ class RandomUiWalkTest {
 
     private fun runs(vararg daysAgo: Int): List<Event> = daysAgo.mapIndexed { i, d ->
         val at = QaHarness.daysAgoAtMidday(d) + 3_600L
-        Event.LogRun(5.0 + i, 28.0 + 5 * i, 0.0, 0.0, at, at * 1000)
+        Event.LogRun(5.0 + i, 28.0 + 5 * i, 0.0, at, at * 1000)
     }
 
     private fun seedEvents(start: Start): List<Event>? = when (start) {
@@ -578,8 +575,6 @@ class RandomUiWalkTest {
         }
         step = steps + 1
         endOfWalkChecks()
-        val skipped = trace.count { it.startsWith("   (skipped") }
-        println("UIWALK-SUMMARY [$s] seed=$seed steps=$steps skipped=$skipped screens=${screensSeen.size}")
     }
 
     /** One random action; returns true when it was a Back press. */
@@ -811,7 +806,7 @@ class RandomUiWalkTest {
             .mapNotNull { it.config.getOrNull(SemanticsProperties.TestTag) }
             .filter { it.startsWith("plan-item:") }
             .groupingBy { it }.eachCount().filterValues { it > 1 }.keys
-        val ux = UxInvariants.check(rule, rule.density, checkClipping = true)
+        val ux = UxInvariants.check(rule, rule.density)
             .filter { it.kind in UX_KINDS }
             .filterNot { v -> typed.any { t -> t.isNotBlank() && t.take(20) in v.detail } }
             .filterNot { v -> v.kind == "duplicate-action-in-card" && sharedCards.any { "in card \"$it\"" in v.detail } }
@@ -946,9 +941,7 @@ class RandomUiWalkTest {
     private fun SemanticsNode.isPopup() = !isSheet() && !isDialog()
 
     /** The editors' "Discard this entry?" confirm. */
-    private fun SemanticsNode.isDiscardConfirm(): Boolean = flatten(this).any {
-        labelOf(it) == str(R.string.log_discard_title) || labelOf(it) == str(R.string.main_discard_entry_title)
-    }
+    private fun SemanticsNode.isDiscardConfirm(): Boolean = flatten(this).any { labelOf(it) == str(R.string.log_discard_title) }
 
     /** The M3 date picker, or the editor's "Logged at" time picker dialog. */
     private fun SemanticsNode.isPicker(): Boolean {
@@ -1144,7 +1137,7 @@ class RandomUiWalkTest {
         private const val SHEET_SCRIM = "Close sheet"
 
         /** [UxInvariants] kinds gated here; the touch target is [smallTargets]'. */
-        private val UX_KINDS = setOf("forbidden-text", "unlabeled-action", "duplicate-action-in-card", "clipped-action")
+        private val UX_KINDS = UxInvariants.KINDS - "small-touch-target"
 
         private val FONT_SCALES = listOf(1f, 1f, 1.3f, 2f)
 

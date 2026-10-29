@@ -96,27 +96,17 @@ private class SetupKeypad(
 }
 
 /**
- * Guided setup (modality-first, with a health screen).
- * Plain-language screens: what you train, your goal (a Both profile answers its
- * lifting goal, running goal and which leads on separate screens; calisthenics
- * adds a "Where are you now?" placement, a race goal adds race details), the
- * days you can train, level (lifting and running separately for Both), your
- * running right now, about you, a health screen, and a final "Your plan" review,
- * each with a one-line consequence, ending in a single [Event.SetProfile] (the
- * same wire the full editor uses) plus one rung event per answered calisthenics
- * placement. Seedable: when [initial] is non-null (the Profile "Re-run guided
- * setup" row) every answer is pre-filled from the current profile so the user can
- * review and adjust. [switchTo] (a Profile Focus switch) opens with that modality
- * picked, straight at the first question it adds, and Next walks only the
- * questions the switch needs before returning to the review.
+ * Guided setup: one screen per answer ([setupSteps]), ending in one
+ * [Event.SetProfile] plus one rung event per changed calisthenics placement.
+ * [initial] (a re-run) pre-fills every answer from the profile; [switchTo] (a
+ * Profile Focus switch) opens with that modality at the first question it adds.
+ * [calisLadders] seed a re-run's placements from the rungs held now.
  */
 @Composable
 internal fun GuidedSetup(
-    initial: ProfileDraft? = null,
-    switchTo: Modality? = null,
-    // The model's calisthenics ladders: a re-run seeds the placements from the rungs
-    // they hold now.
-    calisLadders: List<CalisLadderView> = EventDispatcher.model.value?.calisthenics_ladders.orEmpty(),
+    initial: ProfileDraft?,
+    switchTo: Modality?,
+    calisLadders: List<CalisLadderView>,
     onComplete: (ProfileDraft, List<Event.SetCalisthenicsRung>) -> Unit,
     onSkip: () -> Unit,
 ) {
@@ -418,8 +408,8 @@ internal fun GuidedSetup(
                     onAdvance = { if (nextField != null) activate(nextField) else keypadOpen = false },
                     onKey = { pressKey(it) },
                     onBackspace = { setBuffer(activeField, answers.buffer(activeField).dropLast(1)) },
-                    // Whole numbers (age, heart rate, a finish time) get no
-                    // decimal key that would do nothing.
+                    // Whole numbers (heart rate, a finish time) get no decimal key
+                    // that would do nothing.
                     allowDecimal = activeField == KeyField.Bodyweight ||
                         activeField == KeyField.WeeklyRun || activeField == KeyField.LongestRun,
                 )
@@ -630,7 +620,7 @@ private fun RaceStep(a: SetupAnswers, v: SetupValues, today: Long, keypad: Setup
     Spacer(Modifier.size(Space.Sm.dp))
     SubHeading(stringResource(R.string.setup_recent_race_q))
     Text(stringResource(R.string.setup_recent_race_sub), color = OnBgMuted, style = Type.Caption)
-    ChipChoiceRow(listOf<RaceDistance?>(null) + RaceDistance.entries, a.recentDistance, { d -> stringResource(d?.labelRes ?: R.string.setup_dont_know) }) { d ->
+    RaceDistanceChips(a.recentDistance) { d ->
         update { it.copy(recentDistance = d, raceDigits = if (d == null) "" else it.raceDigits) }
         keypad.activate(KeyField.RaceTime)
     }
@@ -711,7 +701,6 @@ private fun SetupKeypad.NumberField(
     invalid: Boolean,
     range: ClosedFloatingPointRange<Double>,
     format: String,
-    hint: String? = null,
 ) {
     KeypadValueField(
         label, unit, text,
@@ -722,7 +711,6 @@ private fun SetupKeypad.NumberField(
         adjustments = emptyList(),
         onActivate = { activate(field) },
         onText = { type(field, it) },
-        hint = hint,
     )
 }
 
@@ -845,11 +833,11 @@ private fun HealthStep(a: SetupAnswers, v: SetupValues, update: UpdateAnswers) {
     // follow with no heading or intro of their own.
     PlainCard {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-            ParqQuestions(a.health, divider = { HealthRowHairline() }, showIntro = false, leadingDivider = false) { h ->
+            ParqQuestions(a.health, divider = { RowHairline() }, showIntro = false, leadingDivider = false) { h ->
                 update { it.copy(health = h) }
             }
-            HealthRowHairline()
-            CurrentHealthRows(a.health, divider = { HealthRowHairline() }) { h -> update { it.copy(health = h) } }
+            RowHairline()
+            CurrentHealthRows(a.health, divider = { RowHairline() }) { h -> update { it.copy(health = h) } }
         }
     }
 
@@ -857,7 +845,7 @@ private fun HealthStep(a: SetupAnswers, v: SetupValues, update: UpdateAnswers) {
     // nothing while the core silently holds their plan (HARD RULE 3: the safety
     // consequence has to be surfaced). When age is the only reason, say so: no
     // toggle here is on.
-    val healthHold = healthDefers(null, a.health)
+    val healthHold = healthDefers(a.health)
     if (healthHold || isMinor(v.ageYears)) {
         Text(
             stringResource(if (healthHold) R.string.setup_health_defer_notice else R.string.setup_health_defer_youth),
@@ -865,12 +853,6 @@ private fun HealthStep(a: SetupAnswers, v: SetupValues, update: UpdateAnswers) {
             style = Type.Caption,
         )
     }
-}
-
-/** The row divider inside the health card. */
-@Composable
-private fun HealthRowHairline() {
-    HorizontalDivider(thickness = 1.dp, color = OnBgBody.copy(alpha = HairlineAlpha.Row))
 }
 
 /** The review rows for [draft] (what Finish sends): each answer once, unanswered
@@ -932,11 +914,7 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: ProfileDraft, dis
             )
         }
         if (m == Modality.Both) {
-            val lead = when (draft.concurrentGoal.lead()) {
-                BothPriority.LiftLean -> R.string.setup_lead_lifting
-                BothPriority.RunLean -> R.string.setup_lead_running
-            }
-            add(ReviewEntry(stringResource(R.string.setup_review_lead), stringResource(lead), SetupStep.Lead))
+            add(ReviewEntry(stringResource(R.string.setup_review_lead), stringResource(draft.concurrentGoal.lead().labelRes), SetupStep.Lead))
         }
         // Days: "5 days · 2 lift · 3 run" (the Profile row's wording), the
         // weekdays under it.
@@ -1012,7 +990,7 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: ProfileDraft, dis
         // safety call stays on the face).
         val healthLines = listOfNotNull(
             healthSummary(draft.health),
-            if (healthDefers(null, draft.health)) stringResource(R.string.setup_review_health_hold) else null,
+            if (healthDefers(draft.health)) stringResource(R.string.setup_review_health_hold) else null,
         )
         add(ReviewEntry(stringResource(R.string.setup_review_health), healthLines.joinToString("\n"), SetupStep.Health))
     }
@@ -1042,7 +1020,6 @@ private fun KeypadBand(
             horizontalArrangement = Arrangement.End,
         ) {
             val nextFieldName = when (nextField) {
-                KeyField.Bodyweight -> stringResource(R.string.setup_row_bodyweight)
                 KeyField.RestingHr -> stringResource(R.string.setup_row_resting_hr)
                 KeyField.LongestRun -> stringResource(R.string.setup_runnow_longest_label)
                 else -> null

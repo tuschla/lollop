@@ -1,10 +1,7 @@
-//! Garmin/ANT `.fit` activity-file parsing, pure data ingestion, no
-//! model/event-log involvement. This module only extracts GPS+HR fixes from
-//! a byte blob (mirrors how [`crate::running::GpsPoint`] treats an already-
-//! decoded track); the Android shell is responsible for turning the result
-//! into its existing `LogRunTrack` event. Nothing here is recommendation-
-//! bearing, so no `Evidence`/`ConfidenceTag` is attached (evidence gating
-//! covers coaching claims, not raw sensor ingest).
+//! Garmin/ANT `.fit` activity-file parsing: pure data ingestion, no
+//! model/event-log involvement. Extracts GPS+HR fixes from a byte blob; the
+//! Android shell turns the result into its `LogRunTrack` event. Nothing here
+//! is recommendation-bearing, so no `Recommended`/`ClaimId` is attached.
 //!
 //! Pure function: no clocks, no IO beyond the given byte slice.
 
@@ -19,13 +16,10 @@ pub struct FitFix {
     pub time_sec: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hr_bpm: Option<u16>,
-    /// Horizontal position accuracy in metres, as recorded by the device in the
-    /// FIT `record.gps_accuracy` field (field 31, `UInt8`, scale 1 / offset 0,
-    /// units "m" per the FIT profile, verified in fitparser 0.11's generated
-    /// `record_message_gps_accuracy_field`). `None` when the file carries no
-    /// such field: NOT a fabricated stand-in. The shell decides what accuracy
-    /// to hand the core's QC gate for a `None` fix (see the sentinel in
-    /// `Gpx.kt`'s `importedRunEvent`); this module never invents one.
+    /// Horizontal position accuracy in metres from the FIT `record.gps_accuracy`
+    /// field (field 31, `UInt8`, scale 1). `None` when the file has no such
+    /// field; the shell picks the accuracy it hands the core's QC gate for a
+    /// `None` fix (`Gpx.kt`'s `importedRunEvent`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accuracy_m: Option<f32>,
 }
@@ -98,43 +92,24 @@ impl FitError {
     }
 }
 
-/// FIT position fields are signed 32-bit "semicircles". Verified against
-/// fitparse-rs' generated decoder (`record_message_position_lat_field` /
-/// `..._position_long_field` in its build-time-generated `profile::decode`):
-/// the FIT profile declares scale=1, offset=0 for these fields, so
-/// `fitparser` hands them back as raw `Value::SInt32` semicircles: it does
-/// NOT convert to degrees. The conversion is done by hand here:
-/// `deg = semicircles * 180 / 2^31`.
-const SEMICIRCLE_TO_DEGREES: f64 = 180.0 / 2_147_483_648.0; // 180.0 / 2^31
+/// deg = semicircles × 180 / 2^31 (FIT profile scale 1, so fitparser returns raw
+/// `Value::SInt32` semicircles).
+const SEMICIRCLE_TO_DEGREES: f64 = 180.0 / 2_147_483_648.0;
 
 fn semicircles_to_degrees(raw: i32) -> f64 {
     f64::from(raw) * SEMICIRCLE_TO_DEGREES
 }
 
 /// Parse a Garmin/ANT `.fit` activity file into GPS+HR fixes, grouped into
-/// segments.
+/// segments: a timer `stop_all` closes the current segment and the next `start`
+/// opens one; plain `stop`/`start` (auto-pause) does not split, so most runs
+/// are one segment.
 ///
-/// Records without a usable position (`position_lat`/`position_long`
-/// missing or the FIT "invalid value" sentinel) or timestamp are skipped
-/// rather than erroring the whole file. Returns [`FitError::NotARun`] when a
-/// `session`/`lap`/`sport` message names a non-running sport (see
-/// `non_run_sport`), checked before the GPS so an indoor ride without GPS is
-/// still reported as "not a run". Returns [`FitError::NotFit`] when the bytes
-/// don't parse as FIT at all, and [`FitError::Damaged`]/[`FitError::NoTrack`]
-/// when fewer than two positioned records survive (nothing worth logging as a
-/// track).
-///
-/// ## Segment splitting
-///
-/// FIT `event` messages with `event == "timer"` mark start/stop boundaries.
-/// A `stop_all` closes the current segment; the next `start` opens a new
-/// one. Plain `stop`/`start` (the recorder's ordinary auto-pause at a red
-/// light, GPS loss, etc.) does NOT split: it is not a genuinely separate
-/// activity leg. LIMITATION: `stop_all`/`start` pairs are how multi-activity
-/// recordings (e.g. brick workouts, a paused-and-resumed-later session) mark
-/// segment boundaries; the overwhelming majority of single-activity runs
-/// never emit them, so those files fall back to exactly one segment: this
-/// is the documented single-segment case, not a bug.
+/// Records without a usable position or timestamp are skipped. Errors:
+/// [`FitError::NotARun`] when a `session`/`lap`/`sport` message names a
+/// non-running sport (checked before GPS), [`FitError::NotFit`] for non-FIT
+/// bytes, [`FitError::Damaged`]/[`FitError::NoTrack`] when fewer than two
+/// positioned records survive.
 pub fn parse_fit(bytes: &[u8]) -> Result<FitTrack, FitError> {
     validate_fit_header(bytes)?;
 
@@ -513,11 +488,8 @@ fn is_timer_event(record: &FitDataRecord, event_type: &str) -> bool {
     is_timer && matches_type
 }
 
-/// A FIT `SInt32` field's value, or `None` if it is the `i32::MAX` "invalid"
-/// sentinel. fitparser normally drops invalid-valued fields before we see
-/// them, but guard it anyway so a stray sentinel never becomes a phantom
-/// value, e.g. a ~180° position fix injecting a multi-thousand-km jump into
-/// distance/pace/splits.
+/// A FIT `SInt32` field's value, or `None` for the `i32::MAX` "invalid"
+/// sentinel, so a stray sentinel never becomes a ~180° phantom fix.
 fn valid_i32(v: &Value) -> Option<i32> {
     match v {
         Value::SInt32(v) if *v != i32::MAX => Some(*v),

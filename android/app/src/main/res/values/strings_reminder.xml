@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  L10N: strings for the daily session reminder (SessionReminder): its Profile
+  rows (During training), the notification channel and the notification. The
+  notification title is the session's own title from the plan.
+-->
+<resources>
+    <string name="reminder_label">Session reminder</string>
+    <string name="reminder_caption">A notification on session days with a button to start the session.</string>
+    <string name="reminder_time_label">Time</string>
+    <string name="reminder_time_title">Reminder time</string>
+    <string name="reminder_notifications_off">Notifications are off for lollop, so the reminder can\'t show.</string>
+    <string name="reminder_open_settings">Open settings</string>
+
+    <string name="reminder_channel">Session reminders</string>
+    <string name="reminder_channel_description">A daily reminder of today\'s planned session.</string>
+
+    <string name="reminder_title_fallback">Today\'s session</string>
+    <!-- One exercise: name · prescription ("Back squat · 3 × 5 @ 100 kg"). -->
+    <string name="reminder_line_single">%1$s · %2$s</string>
+    <!-- Exercise count · first open exercise ("4 exercises · Back squat first"). -->
+    <plurals name="reminder_line_exercises">
+        <item quantity="one">%1$d exercise · %2$s first</item>
+        <item quantity="other">%1$d exercises · %2$s first</item>
+    </plurals>
+    <!-- Session started: done of total · next open exercise ("1 of 4 done · Bench press next"). -->
+    <string name="reminder_line_progress">%1$d of %2$d done · %3$s next</string>
+    <string name="reminder_action_start_run">Start run</string>
+    <string name="reminder_action_log_first_set">Log first set</string>
+    <string name="reminder_action_log_next_set">Log next set</string>
+</resources>

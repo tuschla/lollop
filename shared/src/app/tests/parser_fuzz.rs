@@ -2,7 +2,7 @@
 //!
 //! - the FIT import (`fit::parse_fit` + `fit::import_gate`, the body of
 //!   `ffi::parse_fit_json`, serialized exactly as it does);
-//! - the GPX export (`export_run_gpx` → `running::export_gpx_seg`, what
+//! - the GPX export (`export_run_gpx` → `running::export_gpx`, what
 //!   `Core.exportGpx` returns);
 //! - the track-figures preview (`Event` decode + `preview_track_figures`, the
 //!   body of `ffi::track_figures_json`);
@@ -31,26 +31,7 @@ use super::*;
 use crate::fit::{self, FitError, FitTrack};
 use crux_core::bridge::{Bridge, JsonFfiFormat};
 
-// ── Deterministic randomness ────────────────────────────────────────────────
-
-/// SplitMix64: tiny, seedable, good enough to drive mutations reproducibly.
-struct Rng(u64);
-
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-    fn below(&mut self, n: usize) -> usize {
-        (self.next() % n.max(1) as u64) as usize
-    }
-    fn chance(&mut self, pct: u64) -> bool {
-        self.next() % 100 < pct
-    }
-}
+// ── Environment knobs ───────────────────────────────────────────────────────
 
 fn env_u64(key: &str) -> Option<u64> {
     std::env::var(key).ok().and_then(|v| v.trim().parse().ok())
@@ -491,64 +472,64 @@ const INTERESTING: [u8; 12] = [
     0x00, 0x01, 0x0C, 0x0E, 0x20, 0x40, 0x7F, 0x80, 0x9F, 0xE0, 0xFE, 0xFF,
 ];
 
-fn mutate(rng: &mut Rng, seed: &[u8]) -> Vec<u8> {
+fn mutate(rng: &mut SplitMix, seed: &[u8]) -> Vec<u8> {
     let mut b = seed.to_vec();
-    for _ in 0..1 + rng.below(4) {
+    for _ in 0..1 + rng.index(4) {
         let len = b.len().max(1);
-        match rng.below(10) {
+        match rng.index(10) {
             0 => {
-                let i = rng.below(len);
+                let i = rng.index(len);
                 if let Some(x) = b.get_mut(i) {
-                    *x ^= 1 << rng.below(8);
+                    *x ^= 1 << rng.index(8);
                 }
             }
             1 => {
-                let i = rng.below(len);
+                let i = rng.index(len);
                 if let Some(x) = b.get_mut(i) {
-                    *x = INTERESTING[rng.below(INTERESTING.len())];
+                    *x = INTERESTING[rng.index(INTERESTING.len())];
                 }
             }
             2 => {
-                let i = rng.below(len + 1).min(b.len());
-                let n = 1 + rng.below(8);
+                let i = rng.index(len + 1).min(b.len());
+                let n = 1 + rng.index(8);
                 let ins: Vec<u8> = (0..n).map(|_| rng.next() as u8).collect();
                 b.splice(i..i, ins);
             }
             3 => {
-                let i = rng.below(len).min(b.len());
-                let n = (1 + rng.below(16)).min(b.len() - i);
+                let i = rng.index(len).min(b.len());
+                let n = (1 + rng.index(16)).min(b.len() - i);
                 b.drain(i..i + n);
             }
             4 if !b.is_empty() => {
-                let i = rng.below(b.len());
-                let n = (1 + rng.below(64)).min(b.len() - i);
+                let i = rng.index(b.len());
+                let n = (1 + rng.index(64)).min(b.len() - i);
                 let chunk = b[i..i + n].to_vec();
-                let j = rng.below(b.len() + 1);
+                let j = rng.index(b.len() + 1);
                 b.splice(j..j, chunk);
             }
             5 => {
-                let cut = rng.below(len + 1).min(b.len());
+                let cut = rng.index(len + 1).min(b.len());
                 b.truncate(cut);
             }
             6 if b.len() >= 4 => {
-                let i = rng.below(b.len() - 3);
-                let v: u32 = [0, u32::MAX, 0x7FFF_FFFF, 0x8000_0000, 0xFFFF][rng.below(5)];
+                let i = rng.index(b.len() - 3);
+                let v: u32 = [0, u32::MAX, 0x7FFF_FFFF, 0x8000_0000, 0xFFFF][rng.index(5)];
                 b[i..i + 4].copy_from_slice(&v.to_le_bytes());
             }
             7 if b.len() >= 12 => {
                 // Header data_size: zero, huge, or off by a little.
-                let v: u32 = [0, u32::MAX, (b.len() as u32).wrapping_mul(3), 1][rng.below(4)];
+                let v: u32 = [0, u32::MAX, (b.len() as u32).wrapping_mul(3), 1][rng.index(4)];
                 b[4..8].copy_from_slice(&v.to_le_bytes());
             }
             8 if !b.is_empty() => {
-                let (i, j) = (rng.below(b.len()), rng.below(b.len()));
+                let (i, j) = (rng.index(b.len()), rng.index(b.len()));
                 b.swap(i, j);
             }
             _ => {
                 // Field definition count / size bytes in a definition message:
                 // any byte after a 0x40-ish header becomes huge.
                 if let Some(i) = b.iter().position(|&x| x & 0xF0 == 0x40) {
-                    let k = (i + 5 + rng.below(8)).min(b.len().saturating_sub(1));
+                    let k = (i + 5 + rng.index(8)).min(b.len().saturating_sub(1));
                     if let Some(x) = b.get_mut(k) {
                         *x = 0xFF;
                     }
@@ -558,7 +539,7 @@ fn mutate(rng: &mut Rng, seed: &[u8]) -> Vec<u8> {
     }
     // Half the time re-stamp a valid trailing CRC (and header CRC), so the
     // mutation is judged on its content, not stopped at the checksum.
-    if rng.chance(50) && b.len() >= 16 && matches!(b[0], 12 | 14) {
+    if rng.below(100) < 50 && b.len() >= 16 && matches!(b[0], 12 | 14) {
         if b[0] == 14 {
             let c = fit_crc(&b[..12]);
             b[12..14].copy_from_slice(&c.to_le_bytes());
@@ -645,7 +626,7 @@ fn fit_mutation_fuzz_never_panics_and_yields_sane_outcomes() {
             if only.is_some_and(|s| s != case) {
                 continue;
             }
-            let mut rng = Rng(case);
+            let mut rng = SplitMix(case);
             let bytes = mutate(&mut rng, &seed);
             match check_fit(&bytes) {
                 Ok(FitOutcome::Track(_)) => tracks += 1,
@@ -658,7 +639,6 @@ fn fit_mutation_fuzz_never_panics_and_yields_sane_outcomes() {
             }
         }
     }
-    eprintln!("fit fuzz: {tracks} tracks");
     if only.is_none() {
         assert!(
             tracks > 0,
@@ -1014,7 +994,7 @@ fn export_logged(points: Vec<GpsPoint>, segment_starts: Vec<u32>, observed_at: i
 
 #[test]
 fn gpx_export_of_adversarial_tracks_is_well_formed_with_sane_values() {
-    let mut rng = Rng(0x6E_0000);
+    let mut rng = SplitMix(0x6E_0000);
     let weird_f64 = [
         f64::NAN,
         f64::INFINITY,
@@ -1030,29 +1010,29 @@ fn gpx_export_of_adversarial_tracks_is_well_formed_with_sane_values() {
     ];
     let weird_acc = [f32::NAN, f32::INFINITY, -1.0, 0.0, 1e30, 1e-30, 30.0];
     for case in 0..iters(300) {
-        let mut pts = walk(120 + rng.below(200), 1_750_000_000);
-        for _ in 0..rng.below(6) {
-            let i = rng.below(pts.len());
-            match rng.below(4) {
-                0 => pts[i].lat = weird_f64[rng.below(weird_f64.len())],
-                1 => pts[i].lon = weird_f64[rng.below(weird_f64.len())],
-                2 => pts[i].accuracy_m = weird_acc[rng.below(weird_acc.len())],
+        let mut pts = walk(120 + rng.index(200), 1_750_000_000);
+        for _ in 0..rng.index(6) {
+            let i = rng.index(pts.len());
+            match rng.index(4) {
+                0 => pts[i].lat = weird_f64[rng.index(weird_f64.len())],
+                1 => pts[i].lon = weird_f64[rng.index(weird_f64.len())],
+                2 => pts[i].accuracy_m = weird_acc[rng.index(weird_acc.len())],
                 _ => {
                     // Duplicated / backwards / far-apart times.
-                    let j = rng.below(pts.len());
-                    pts[i].observed_at = pts[j].observed_at - rng.below(3) as i64;
+                    let j = rng.index(pts.len());
+                    pts[i].observed_at = pts[j].observed_at - rng.index(3) as i64;
                 }
             }
         }
-        let starts: Vec<u32> = (0..rng.below(4))
+        let starts: Vec<u32> = (0..rng.index(4))
             .map(|_| {
                 [
                     0,
                     1,
-                    rng.below(pts.len()) as u32,
+                    rng.index(pts.len()) as u32,
                     pts.len() as u32,
                     u32::MAX,
-                ][rng.below(5)]
+                ][rng.index(5)]
             })
             .collect();
         let doc = export_logged(pts.clone(), starts.clone(), 1_750_000_400);
@@ -1076,7 +1056,7 @@ fn gpx_export_of_adversarial_tracks_is_well_formed_with_sane_values() {
 
 #[test]
 fn gpx_export_track_name_with_xml_specials_stays_well_formed() {
-    let doc = crate::running::export_gpx(&walk(5, 1_750_000_000), "<\"a&b'> ]]> <!--");
+    let doc = crate::running::export_gpx(&walk(5, 1_750_000_000), "<\"a&b'> ]]> <!--", &[], None);
     xml_well_formed(&doc).unwrap();
     assert!(
         doc.contains("<name>&lt;&quot;a&amp;b&apos;&gt; ]]&gt; &lt;!--</name>"),
@@ -1194,20 +1174,20 @@ fn track_json(points: &[GpsPoint], starts: &[u32]) -> String {
 
 #[test]
 fn track_figures_of_hostile_points_are_finite_and_bounded() {
-    let mut rng = Rng(0x7F_0000);
+    let mut rng = SplitMix(0x7F_0000);
     let weird = [1e308, -1e308, 1e12, 90.0, -90.0, 180.0, 1e-300, 0.0];
     for case in 0..iters(400) {
-        let mut pts = walk(60 + rng.below(300), 1_750_000_000);
-        for _ in 0..rng.below(8) {
-            let i = rng.below(pts.len());
-            match rng.below(4) {
-                0 => pts[i].lat = weird[rng.below(weird.len())],
-                1 => pts[i].lon = weird[rng.below(weird.len())],
-                2 => pts[i].observed_at = [i64::MIN, i64::MAX, 0, -1, 1 << 40][rng.below(5)],
-                _ => pts[i].accuracy_m = [f32::MAX, -f32::MAX, 0.0, 29.9, 30.1][rng.below(5)],
+        let mut pts = walk(60 + rng.index(300), 1_750_000_000);
+        for _ in 0..rng.index(8) {
+            let i = rng.index(pts.len());
+            match rng.index(4) {
+                0 => pts[i].lat = weird[rng.index(weird.len())],
+                1 => pts[i].lon = weird[rng.index(weird.len())],
+                2 => pts[i].observed_at = [i64::MIN, i64::MAX, 0, -1, 1 << 40][rng.index(5)],
+                _ => pts[i].accuracy_m = [f32::MAX, -f32::MAX, 0.0, 29.9, 30.1][rng.index(5)],
             }
         }
-        let starts: Vec<u32> = (0..rng.below(5))
+        let starts: Vec<u32> = (0..rng.index(5))
             .map(|_| rng.next() as u32 % (pts.len() as u32 + 2))
             .collect();
         let json = track_json(&pts, &starts);
@@ -1238,7 +1218,7 @@ fn track_figures_refuses_malformed_json_without_panicking() {
         vec![0xFF, 0xFE, 0x00],
         good.as_bytes()[..good.len() / 2].to_vec(),
     ];
-    let mut rng = Rng(0x7F_1000);
+    let mut rng = SplitMix(0x7F_1000);
     for _ in 0..iters(400) {
         inputs.push(mutate(&mut rng, good.as_bytes()));
     }
@@ -1284,10 +1264,10 @@ fn bridge_update_and_view_survive_malformed_events_and_keep_state_on_rejection()
             "seed event accepted: {s}"
         );
     }
-    let mut rng = Rng(0xB0_0000);
+    let mut rng = SplitMix(0xB0_0000);
     let mut rejected = 0;
     for case in 0..iters(600) {
-        let seed = &seeds[rng.below(seeds.len())];
+        let seed = &seeds[rng.index(seeds.len())];
         let bytes = mutate(&mut rng, seed.as_bytes());
         let before = view(&mut bridge);
         let mut out = Vec::new();

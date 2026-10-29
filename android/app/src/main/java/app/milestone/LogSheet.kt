@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.dp
 internal fun LogSheetContent(
     mode: LogMode,
     model: ViewModel,
-    initialReadinessSignal: ReadinessSignal,
     onMode: (LogMode) -> Unit,
     onEvent: (Event) -> Unit,
     onTrackRun: () -> Unit,
@@ -139,10 +138,8 @@ internal fun LogSheetContent(
                 // trainable session dated today, with items, reaches here; once
                 // it's logged the core advances next_session off today so the
                 // row disappears.
-                val ns = model.next_session
-                if (ns != null && ns.epoch_day == model.today() && ns.items.isNotEmpty() &&
-                    (ns.status == "next" || ns.status == "adjusted")
-                ) {
+                val ns = model.todaysPlan()
+                if (ns != null) {
                     val nsDiscipline = sessionDiscipline(ns.session_type)
                     val item = firstOpenItem(ns.items) ?: ns.items.first()
                     LogOptionRow(
@@ -160,14 +157,10 @@ internal fun LogSheetContent(
                         }
                     }
                 } else {
-                    // After Finish the core moves next_session off today; today's own
-                    // lift session, once something of it is logged, can be resumed
-                    // (its open item, else its last one for an extra set).
-                    val today = model.week_plan.firstOrNull {
-                        it.epoch_day == model.today() && it.items.isNotEmpty() &&
-                            sessionDiscipline(it.session_type) == "Lift" &&
-                            it.items.any { i -> i.sets_done > 0 || i.logged_sets.isNotEmpty() }
-                    }
+                    // After Finish the core moves next_session off today; today's
+                    // started lift session can be resumed (its open item, else its
+                    // last one for an extra set).
+                    val today = model.resumableLiftDay()
                     if (today != null && liftVisible && !model.train_blocked) {
                         val item = firstOpenItem(today.items) ?: today.items.last()
                         LogOptionRow(
@@ -274,7 +267,7 @@ internal fun LogSheetContent(
                         if (ladderRows.isNotEmpty()) {
                             ChooserGroup {
                                 ladderRows.forEach { (pattern, rung) ->
-                                    CalisRungRow(pattern, rung) {
+                                    ChooserTextRow(rung.name, listOf(pattern, rung.target).filter { it.isNotBlank() }.joinToString(" · ")) {
                                         ladderPick = rung.name
                                         onMode(LogMode.Set)
                                     }
@@ -285,28 +278,28 @@ internal fun LogSheetContent(
                     }
                 }
             }
-            LogMode.Set -> LogSetEditor(
+            LogMode.Set -> {
+              // Today's + this week's prescribed items.
+              val planItems = remember(model.next_session, model.week_plan) {
+                  model.next_session?.items.orEmpty() + model.week_plan.flatMap { it.items }
+              }
+              LogSetEditor(
                 // Quick-picks: the user's own most recent exercises, newest
                 // first (History list is oldest-first on the wire). Memoized on
                 // model.lifts so the full-history scan isn't rerun per recomposition.
                 recentExercises = remember(model.lifts) {
                     model.lifts.asReversed().map { it.exercise }.distinct()
                 },
-                // Modality-aware quick picks: today's + this week's prescribed
-                // exercises; no hard-coded barbell defaults.
-                plannedExercises = remember(model.next_session, model.week_plan) {
-                    (model.next_session?.items.orEmpty() + model.week_plan.flatMap { it.items })
-                        .map { it.exercise }
-                        .filter { it.isNotEmpty() }
-                        .distinct()
+                // Modality-aware quick picks: the prescribed exercises; no
+                // hard-coded barbell defaults.
+                plannedExercises = remember(planItems) {
+                    planItems.map { it.exercise }.filter { it.isNotEmpty() }.distinct()
                 },
                 // Canonical names of today's + this week's prescribed timed-hold
                 // rungs, so the editor logs those as holds (seconds) not reps.
-                holdExercises = remember(model.next_session, model.week_plan, model.calisthenics_ladders) {
+                holdExercises = remember(planItems, model.calisthenics_ladders) {
                     (
-                        (model.next_session?.items.orEmpty() + model.week_plan.flatMap { it.items })
-                            .filter { it.timed_hold }
-                            .map { it.exercise } +
+                        planItems.filter { it.timed_hold }.map { it.exercise } +
                             // A hold rung picked from the chooser.
                             model.calisthenics_ladders.flatMap { it.rungs }
                                 .filter { it.timed_hold }
@@ -317,11 +310,8 @@ internal fun LogSheetContent(
                 // no belt or vest): the editor hides the weight field for these — a
                 // Wall push-up has no load to enter. A load-capable rung keeps its
                 // added-load field even at 0.
-                bodyweightExercises = remember(model.next_session, model.week_plan) {
-                    (model.next_session?.items.orEmpty() + model.week_plan.flatMap { it.items })
-                        .filter { it.added_kg == 0.0 && it.calis?.load_capable != true }
-                        .map { it.exercise }
-                        .toSet()
+                bodyweightExercises = remember(planItems) {
+                    planItems.filter { it.added_kg == 0.0 && it.calis?.load_capable != true }.map { it.exercise }.toSet()
                 },
                 weightUnit = weightUnit,
                 initialObservedAt = planObservedAt,
@@ -345,17 +335,17 @@ internal fun LogSheetContent(
                 // Finish via onFinish.
                 onDone = onDismiss,
                 onFinish = onFinishSession,
-            ) { set -> onEvent(set) }
+              ) { set -> onEvent(set) }
+            }
             LogMode.Run -> LogRunEditor(
                 initialObservedAt = planObservedAt,
-                prescription = planPrefill,
                 // The run type of the planned run this entry logs (today's, or the
                 // past plan day's), by the Finish review's rule.
                 plannedType = remember(model.week_plan, planObservedAt) {
                     val day = planObservedAt?.let { localEpochDay(it, java.time.ZoneId.systemDefault()) } ?: model.today()
                     model.week_plan.firstOrNull {
                         it.epoch_day == day && sessionDiscipline(it.session_type) == "Run" &&
-                            it.status != "done" && it.status != "done_lighter" && it.status != "blocked"
+                            !it.isDone && it.status != "blocked"
                     }?.let { s ->
                         val item = s.items.firstOrNull { it.run_target != null } ?: s.items.firstOrNull()
                         workoutTypeForPlan(s.session_type, item?.run_target?.band)
@@ -381,13 +371,14 @@ internal fun LogSheetContent(
             LogMode.Readiness -> ReadinessEditor(
                 // Red-flag fence position comes from the core's signal_groups.
                 signalGroups = model.signal_groups.associate { it.signal to it.group },
-                initialSignal = initialReadinessSignal,
+                initialSignal = ReadinessSignal.WellnessZ,
                 onClose = { onMode(LogMode.Chooser) },
                 onDirtyChange = onDirtyChange,
             ) { r -> onEvent(r); onDismiss() }
             // The session review (off day + hand-logged run details) and the weekly
             // check-in are separate events with separate lifecycles.
             LogMode.Review -> SessionReviewSheet(
+                showRun = reviewAsksRun(model),
                 onClose = { onMode(LogMode.Chooser) },
                 onDirtyChange = onDirtyChange,
             ) { review -> onEvent(review); onDismiss() }
@@ -513,14 +504,6 @@ internal fun glueFigures(text: String): String =
 
 private val FigureUnit = Regex("""(\d) (kg|lb|km|mi|min|s)\b""")
 private val AtFigure = Regex("""@ (\d)""")
-
-/** One calisthenics movement in the Log chooser's "More" group: the current
- *  rung's name over its movement pattern and target ("Vertical pull · 5–8 reps").
- *  A ≥48dp whole-row tap opens the set editor on that rung. */
-@Composable
-private fun CalisRungRow(pattern: String, rung: CalisRungView, onClick: () -> Unit) {
-    ChooserTextRow(rung.name, listOf(pattern, rung.target).filter { it.isNotBlank() }.joinToString(" · "), onClick)
-}
 
 /** A compact chooser entry inside a [ChooserGroup]: a bold title over a
  *  one-line subtitle and a trailing chevron, no icon tile. Full-width ≥48dp tap. */

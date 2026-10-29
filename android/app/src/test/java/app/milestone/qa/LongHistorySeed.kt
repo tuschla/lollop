@@ -69,11 +69,7 @@ internal class LongHistory(
     val bigSessionDay: Long,
     val bigSessionExercises: Int,
     val bigSessionSets: Int,
-    val lb: Boolean,
-) {
-    /** Distinct lifting days (one History session card each). */
-    val liftDays: Set<Long> get() = sets.map { Math.floorDiv(it.observedAt, 86_400L) }.toSet()
-}
+)
 
 internal object LongHistorySeed {
 
@@ -275,7 +271,7 @@ internal object LongHistorySeed {
                     val entryId = start * 1000 + 7
                     val obs = start + dur
                     events += Event.LogRun(
-                        distanceKm = km, durationMin = dur / 60.0, hrPctMax = 0.0, longestRecentKm = 0.0,
+                        distanceKm = km, durationMin = dur / 60.0, hrPctMax = 0.0,
                         observedAt = obs, entryId = entryId, workoutType = tag, sessionRpe = rpe,
                         avgHrBpm = if (rng.chance(0.5)) rng.int(138, 158).toDouble() else null,
                     )
@@ -286,7 +282,7 @@ internal object LongHistorySeed {
                     val entryId = start * 1000 + 3
                     val obs = points.last().observedAt
                     events += Event.LogRunTrack(
-                        points = points, hrPctMax = 0.0, longestRecentKm = 0.0,
+                        points = points, hrPctMax = 0.0,
                         observedAt = obs, entryId = entryId, workoutType = tag, segmentStarts = starts, sessionRpe = rpe,
                     )
                     sr = SeededRun(obs, entryId, RunSource.Tracked, routeKm, obs - start, tag, rpe)
@@ -304,7 +300,6 @@ internal object LongHistorySeed {
             bigSessionDay = bigSessionDay,
             bigSessionExercises = bigDay.size,
             bigSessionSets = sets.count { Math.floorDiv(it.observedAt, 86_400L) == bigSessionDay },
-            lb = lb,
         )
     }
 

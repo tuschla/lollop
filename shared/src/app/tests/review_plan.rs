@@ -1,8 +1,8 @@
-//! Adversarial review (RevPlan) of the 2026-10-23 run-plan / re-entry fixes:
-//! `plan/run.rs` (3-day long run, run re-entry), `app/anchors.rs`
-//! (`build_run_break`, `lifting_break_return`, `implicit_layoff`) and
-//! `individualization::run_reentry`. Each finding's test failed on the tree it
-//! was written against and now guards the fix (FixPlan2, 2026-10-25).
+//! Run-plan and re-entry guards: the 3-day long run (`plan/run.rs`), the run
+//! and lifting breaks (`app/anchors.rs` `build_run_break`,
+//! `latest_break`, `implicit_layoff`) and the File 08 Table 3.4b
+//! re-entry ramp (`individualization::run_reentry`, RUN-REENTRY-001,
+//! REENTRY-RAMP-001).
 
 use super::*;
 
@@ -24,10 +24,7 @@ fn setup(p: Profile, start: i64) -> (Engine, Model) {
     let app = Engine;
     let mut model = Model::default();
     for e in [
-        Event::SetToday {
-            epoch_day: start,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(start),
         Event::SetProfile(p),
         Event::GeneratePlan {
             start_epoch_day: start,
@@ -38,30 +35,9 @@ fn setup(p: Profile, start: i64) -> (Engine, Model) {
     (app, model)
 }
 
-fn today(app: &Engine, model: &mut Model, day: i64) {
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: day,
-            utc_offset_sec: 0,
-        },
-        model,
-    );
-}
-
 fn run(app: &Engine, model: &mut Model, km: f64, day: i64) {
     let _ = app.update(
-        Event::LogRun {
-            distance_km: km,
-            duration_min: km * 6.0,
-            hr_pct_max: 70.0,
-            longest_recent_km: 0.0,
-            observed_at: day * DAY_SEC + 8 * 3600,
-            entry_id: 0,
-            workout_type: None,
-            session_rpe: None,
-            avg_hr_bpm: None,
-            utc_offset_sec: None,
-        },
+        log_run(km, km * 6.0, 70.0, 0.0, day * DAY_SEC + 8 * 3600, 0),
         model,
     );
 }
@@ -126,7 +102,7 @@ fn squat_frac(a: &crate::plan::Anchors) -> f64 {
     a.load_frac_for("Back Squat").map_or(1.0, |d| d.frac)
 }
 
-// ── F-LIFT-30: a pending lifting break of exactly 30 days gets full load ──
+// ── Lifting re-entry: more days off never restart heavier (Table 3.4b, REENTRY-001) ──
 
 #[test]
 fn lifting_break_derate_is_monotone_in_days_off() {
@@ -140,7 +116,6 @@ fn lifting_break_derate_is_monotone_in_days_off() {
             )
         })
         .collect();
-    eprintln!("{fracs:?}");
     // More time off never restarts heavier (File 08 Table 3.4b brackets).
     for w in fracs.windows(2) {
         assert!(
@@ -154,7 +129,7 @@ fn lifting_break_derate_is_monotone_in_days_off() {
     }
 }
 
-// ── F-CARRY-31: a carried isolation load restarts at 100 % after 31–56 days ──
+// ── Carried isolation load: the re-entry derate past 30 days (Table 3.4b) ──
 
 #[test]
 fn carried_isolation_load_derate_is_monotone_in_days_off() {
@@ -178,7 +153,6 @@ fn carried_isolation_load_derate_is_monotone_in_days_off() {
             )
         })
         .collect();
-    eprintln!("{fracs:?}");
     for w in fracs.windows(2) {
         assert!(
             w[1].1 <= w[0].1 + 1e-9,
@@ -191,7 +165,7 @@ fn carried_isolation_load_derate_is_monotone_in_days_off() {
     }
 }
 
-// ── F-LIFT-LAYOFF: an expired declared layoff shadows every later break ──
+// ── An ended declared layoff never shadows a later lifting break ──
 
 #[test]
 fn an_old_declared_layoff_does_not_disable_later_lifting_reentry() {
@@ -216,7 +190,7 @@ fn an_old_declared_layoff_does_not_disable_later_lifting_reentry() {
     );
 }
 
-// ── F-RUN-LAYOFF: same for runs (the 10-week undeclared break bug) ──
+// ── An ended declared layoff never shadows a later run break (RUN-REENTRY-001) ──
 
 /// Total km of the run items on days after `from` (the rest of the week).
 fn week_run_km(vm: &ViewModel, from: i64) -> f64 {
@@ -230,12 +204,12 @@ fn run_history(p: Profile, weeks: i64, today_off: i64) -> (Engine, Model, i64) {
     let mut last = MON;
     for d in 0..weeks * 7 {
         if matches!(d % 7, 0 | 2 | 5) {
-            today(&app, &mut model, MON + d);
+            set_today(&app, &mut model, MON + d);
             run(&app, &mut model, 10.0, MON + d);
             last = MON + d;
         }
     }
-    today(&app, &mut model, last + today_off);
+    set_today(&app, &mut model, last + today_off);
     (app, model, last + today_off)
 }
 
@@ -250,18 +224,15 @@ fn an_old_declared_layoff_does_not_disable_run_reentry() {
     // 20 weeks of 30 km/wk, then 10 weeks (72 days, today a Monday) off.
     let (app, m, t) = run_history(control, 20, 72);
     let control_km = week_run_km(&app.view(&m), t);
-    eprintln!("control rows: {:?}", runs_after(&app.view(&m), t));
     let (app, m, t) = run_history(declared, 20, 72);
     let declared_km = week_run_km(&app.view(&m), t);
-    let rows = runs_after(&app.view(&m), t);
-    eprintln!("control {control_km} km, declared {declared_km} km: {rows:?}");
     assert!(
         declared_km <= control_km + 0.5,
         "after 10 weeks off the old declared layoff restarts at {declared_km} km vs {control_km} km"
     );
 }
 
-// ── F-RUN-FOREVER: the latest run break never expires ──
+// ── A run break ends with its re-entry ramp (RUN-REENTRY-001) ──
 
 /// 3 runs/wk (Mon/Wed/Sat) for `weeks`, skipping days in `gap`; the last
 /// 5 weeks: one 18 km long run 40 days before today, else 8 km.
@@ -272,12 +243,12 @@ fn long_history(p: Profile, gap: std::ops::Range<i64>) -> (Engine, Model, i64) {
         if !matches!(d % 7, 0 | 2 | 5) || gap.contains(&d) {
             continue;
         }
-        today(&app, &mut model, MON + d);
+        set_today(&app, &mut model, MON + d);
         let km = if d == end - 40 { 18.0 } else { 8.0 };
         run(&app, &mut model, km, MON + d);
     }
     let t = MON + end;
-    today(&app, &mut model, t);
+    set_today(&app, &mut model, t);
     (app, model, t)
 }
 
@@ -296,11 +267,6 @@ fn a_months_old_run_break_does_not_change_todays_long_run() {
     let control = long_run_km(&app.view(&m), t);
     let (app, m2, t2) = long_history(runner(3, 24.0), 14..35);
     let with_old_break = long_run_km(&app.view(&m2), t2);
-    eprintln!(
-        "control {control}: {:?}\nold break {with_old_break}: {:?}",
-        runs_after(&app.view(&m), t),
-        runs_after(&app.view(&m2), t2)
-    );
     assert_eq!(
         with_old_break, control,
         "a break 8 months ago still governs"
@@ -321,7 +287,6 @@ fn a_fresh_stated_longest_run_counts_after_an_old_break() {
         let _ = app.update(Event::SetProfile(stated(runner(3, 24.0))), &mut m);
         out.push(long_run_km(&app.view(&m), t));
     }
-    eprintln!("{out:?}");
     assert_eq!(
         out[1], out[0],
         "same answer, same recent runs, different long run"
@@ -359,7 +324,6 @@ fn a_months_old_short_break_does_not_lower_the_stated_floor() {
     );
     // ... and its ramp ended long ago: it no longer shapes today's plan.
     let brk = crate::app::anchors::build_run_break(&m.runs, &facts, t, 0);
-    eprintln!("break as of today: {brk:?}");
     assert_eq!(brk, None);
     // The same anchors with and without that break.
     let anchors = |run_break| crate::plan::Anchors {
@@ -373,22 +337,6 @@ fn a_months_old_short_break_does_not_lower_the_stated_floor() {
     let p = runner(3, 30.0);
     let without = crate::plan::synthesize(&p, &anchors(None), 0).unwrap();
     let with = crate::plan::synthesize(&p, &anchors(brk), 0).unwrap();
-    let dump = |prog: &crate::schema::Program| {
-        prog.mesocycle
-            .sessions
-            .iter()
-            .flat_map(|s| &s.prescriptions)
-            .filter_map(|r| match &r.value {
-                crate::schema::Prescription::Run(rx) => Some(format!("{:?}", rx.volume)),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    };
-    eprintln!(
-        "without the old break {:?}\nwith it {:?}",
-        dump(&without),
-        dump(&with)
-    );
     assert_eq!(
         program_run_km(&with),
         program_run_km(&without),
@@ -396,7 +344,7 @@ fn a_months_old_short_break_does_not_lower_the_stated_floor() {
     );
 }
 
-// ── F-CLIFF-64: the avg-run floor makes 64 km/wk prescribe less than 63 ──
+// ── More stated volume never prescribes a smaller week (RUN-LONGRUN-001) ──
 
 #[test]
 fn more_stated_volume_never_prescribes_a_smaller_week() {
@@ -407,7 +355,6 @@ fn more_stated_volume_never_prescribes_a_smaller_week() {
         let rows = runs_after(&vm, MON - 1);
         let total: f64 = rows.iter().filter_map(|r| r.2).sum();
         let long = long_run_km(&vm, MON - 1);
-        eprintln!("{km} km/wk: long {long}, week {total}");
         if let Some((pk, pl, pt)) = prev {
             assert!(
                 total >= pt && long >= pl,
@@ -418,12 +365,11 @@ fn more_stated_volume_never_prescribes_a_smaller_week() {
     }
 }
 
-// ── Claim checks (pass = VERIFIED) ─────────────────────────────────────────
+// ── Stated rules of the run plan and the re-entry brackets ─────────────────
 
-/// FixRunPlan: "16 km/wk now gives 5 km instead of 4.8, 40 km/wk gives 13
-/// instead of 12, and 60 km/wk gives 20 instead of 18"; at 4+ days the 30 %
-/// share still governs; no easy day outruns the long run; the long run stays
-/// within 2× the daily average.
+/// The 3-day long run: 16 km/wk gives 5 km, 40 km/wk 13 and 60 km/wk 20; at
+/// 4+ days the 30 % share governs; no easy day outruns the long run; the long
+/// run stays within 2× the daily average.
 #[test]
 fn claim_three_day_long_run_examples() {
     for (days, km, want) in [
@@ -507,14 +453,13 @@ fn claim_plan_rest_days_and_no_history_are_no_break() {
     );
 }
 
-// ── F-CITE-33: the 33 % long run cites the 25–30 % share claim ─────────────
+// ── A long run over the 25–30 % share does not cite the share rule ─────────
 
 #[test]
 fn a_long_run_over_the_share_does_not_cite_the_share_rule() {
     let (app, m) = setup(runner(3, 40.0), MON);
     let it = planned_long_run_item(&app, &m);
     let km = it.run_head_km.unwrap();
-    eprintln!("{km} km: {} | {}", it.evidence.citation, it.why.basis);
     let cites_share = it.why.basis.contains("25–30% of your weekly distance");
     assert!(
         !(km > 0.30 * 40.0 && cites_share),
@@ -553,7 +498,7 @@ fn claim_reentry_plan_is_independent_of_log_order() {
     let mut views = Vec::new();
     for order in [false, true] {
         let (app, mut m) = setup(runner(3, 30.0), MON);
-        today(&app, &mut m, MON + 50);
+        set_today(&app, &mut m, MON + 50);
         let mut ds = days.clone();
         if order {
             ds.reverse();
@@ -567,8 +512,8 @@ fn claim_reentry_plan_is_independent_of_log_order() {
     assert_eq!(views[0], views[1]);
 }
 
-/// FixRunPlan: "No double reduction: `carried_derate_for` stops the reduction
-/// being applied again to a load lifted since the return."
+/// `carried_derate_for` never applies the re-entry reduction again to a load
+/// lifted since the return.
 #[test]
 fn claim_carried_load_is_not_derated_twice() {
     let mut sets: Vec<LoggedSet> = (0..42)
@@ -596,7 +541,7 @@ fn claim_carried_load_is_not_derated_twice() {
     );
 }
 
-// ── F-NOVICE-48: "4–8 wk: near-novice spike caps" ───────────────────────────
+// ── 4–8 wk off: near-novice spike caps (Table 3.4b running) ─────────────────
 
 /// Table 3.4b running: 2–4 wk off → rebuild the long run (only runs since the
 /// return count as long-run capacity, but a run from before the break inside
@@ -644,7 +589,6 @@ fn four_to_eight_weeks_off_judges_single_runs_differently_from_two_to_four() {
             .collect()
     };
     let (three, five) = (run_kms(&prog(3.0)), run_kms(&prog(5.0)));
-    eprintln!("3 wk {three:?}, 5 wk {five:?}");
     // 5 wk: no run more than 10 % past the 6 km run since the return.
     assert!(five.iter().all(|&k| k <= 6.5), "{five:?}");
     // 3 wk: the long run is rebuilt from the week's share, not raised to the
@@ -653,7 +597,7 @@ fn four_to_eight_weeks_off_judges_single_runs_differently_from_two_to_four() {
     assert!(long3 > 6.5 && long3 < 14.0, "{three:?}");
 }
 
-// ── The running re-entry ends (F-RUN-FOREVER) ──────────────────────────────
+// ── The running re-entry ramps back and ends (RUN-REENTRY-001) ─────────────
 
 /// Table 3.4b is a re-entry RAMP (load-036): the bracket's start climbs
 /// linearly back to the prior volume over the row's window (1, 2, 4, 6+
@@ -698,16 +642,16 @@ fn a_longest_run_stated_after_the_break_counts_through_the_rebuild() {
         // weeks off; back on Monday with two 5 km runs.
         for d in 0..42 {
             if matches!(d % 7, 0 | 2 | 5) {
-                today(&app, &mut m, MON + d);
+                set_today(&app, &mut m, MON + d);
                 run(&app, &mut m, if d % 7 == 5 { 12.0 } else { 8.0 }, MON + d);
             }
         }
         for d in [63, 65] {
-            today(&app, &mut m, MON + d);
+            set_today(&app, &mut m, MON + d);
             run(&app, &mut m, 5.0, MON + d);
         }
         let t = MON + 66;
-        today(&app, &mut m, t);
+        set_today(&app, &mut m, t);
         if state_it {
             let p = Profile {
                 stated_longest_recent_km: Some(9.0),
@@ -717,7 +661,6 @@ fn a_longest_run_stated_after_the_break_counts_through_the_rebuild() {
             let _ = app.update(Event::SetProfile(p), &mut m);
         }
         let vm = app.view(&m);
-        eprintln!("stated {state_it}: {:?}", runs_after(&vm, t - 1));
         out.push(long_run_km(&vm, t - 1));
     }
     assert!(

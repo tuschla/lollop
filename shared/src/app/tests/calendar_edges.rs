@@ -9,21 +9,7 @@
 //! here is a combination of those two.
 
 use super::*;
-use crate::running::civil_from_days;
-
-const HOUR: i64 = 3_600;
-
-/// Days since 1970-01-01 of a proleptic Gregorian date (H. Hinnant's
-/// algorithm), independent of the core's calendar code.
-fn ymd(y: i64, m: u32, d: u32) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let (m, d) = (i64::from(m), i64::from(d));
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
+use crate::civil_from_days;
 
 /// The Monday on or before local day `d` (1970-01-05 was a Monday), computed
 /// without the core's `mon0_weekday`.
@@ -34,17 +20,6 @@ fn monday_of(d: i64) -> i64 {
 /// `hour:min` local on local day `d` at `offset`, as a UTC stamp.
 fn local(d: i64, hour: i64, min: i64, offset: i64) -> i64 {
     d * DAY_SEC + hour * HOUR + min * 60 - offset
-}
-
-fn set_today(app: &Engine, model: &mut Model, d: i64, offset: i64) {
-    app.update(
-        Event::SetToday {
-            epoch_day: d,
-            utc_offset_sec: offset,
-        },
-        model,
-    )
-    .expect_only_render();
 }
 
 fn send(app: &Engine, model: &mut Model, e: Event) {
@@ -217,34 +192,46 @@ fn assert_calendar(vm: &ViewModel, today: i64, ctx: &str) {
 
 #[test]
 fn the_reference_calendar_agrees_with_the_core() {
-    assert_eq!(ymd(1970, 1, 1), 0);
-    assert_eq!(ymd(2026, 10, 17), 20_743, "the youth tests' 2026-10-17");
+    assert_eq!(days_from_civil(1970, 1, 1), 0);
+    assert_eq!(
+        days_from_civil(2026, 10, 17),
+        20_743,
+        "the youth tests' 2026-10-17"
+    );
     for d in [
-        ymd(2026, 12, 31),
-        ymd(2028, 2, 29),
-        ymd(2000, 2, 29),
-        ymd(1969, 12, 31),
+        days_from_civil(2026, 12, 31),
+        days_from_civil(2028, 2, 29),
+        days_from_civil(2000, 2, 29),
+        days_from_civil(1969, 12, 31),
     ] {
         let (y, m, dd) = civil_from_days(d);
-        assert_eq!(ymd(y, m, dd), d);
+        assert_eq!(days_from_civil(y, m, dd), d);
     }
     // 2026 is an ISO 53-week year: 1 January 2026 is a Thursday.
-    assert_eq!(monday_of(ymd(2026, 1, 1)), ymd(2025, 12, 29));
-    assert_eq!(monday_of(ymd(2026, 12, 31)), ymd(2026, 12, 28));
-    assert_eq!(monday_of(ymd(2027, 1, 3)), ymd(2026, 12, 28));
+    assert_eq!(
+        monday_of(days_from_civil(2026, 1, 1)),
+        days_from_civil(2025, 12, 29)
+    );
+    assert_eq!(
+        monday_of(days_from_civil(2026, 12, 31)),
+        days_from_civil(2026, 12, 28)
+    );
+    assert_eq!(
+        monday_of(days_from_civil(2027, 1, 3)),
+        days_from_civil(2026, 12, 28)
+    );
 }
 
 /// A hybrid athlete with a plan, a varied log (runs, sets, check-ins; some
-/// logged minutes either side of local midnight), viewed every day around
-/// year ends, ISO week 53, leap days and offsets from −12 h to +14 h.
+/// logged minutes either side of local midnight), viewed every day around a
+/// year end in ISO week 53, a leap day and a common-year 28 February, at
+/// offsets from −12 h to +14 h.
 #[test]
 fn calendar_invariants_hold_across_year_ends_leap_days_and_offsets() {
     let pivots = [
-        ("iso53-end", ymd(2026, 12, 31)),
-        ("new-year-2028", ymd(2028, 1, 1)),
-        ("leap-2028", ymd(2028, 2, 29)),
-        ("common-feb-2027", ymd(2027, 2, 28)),
-        ("dst-eu-2027", ymd(2027, 3, 28)),
+        ("iso53-end", days_from_civil(2026, 12, 31)),
+        ("leap-2028", days_from_civil(2028, 2, 29)),
+        ("common-feb-2027", days_from_civil(2027, 2, 28)),
     ];
     let offsets = [-12 * HOUR, -5 * HOUR, 0, 5 * HOUR + 1_800, 14 * HOUR];
     for (name, pivot) in pivots {
@@ -266,7 +253,7 @@ fn calendar_invariants_hold_across_year_ends_leap_days_and_offsets() {
             let plan_start = pivot - 17 + oi as i64;
             let mut id = 7_000;
             for d in start..=pivot + 8 {
-                set_today(&app, &mut model, d, offset);
+                send(&app, &mut model, set_today_off_ev(d, offset));
                 if d == plan_start {
                     send(&app, &mut model, Event::GeneratePlan { start_epoch_day: d });
                 }
@@ -314,10 +301,10 @@ fn calendar_invariants_hold_across_year_ends_leap_days_and_offsets() {
 /// strip, the weekly running buckets and the consistency card.
 #[test]
 fn iso_week_53_is_one_week_across_the_year_boundary() {
-    let mon = ymd(2026, 12, 28);
-    let thu = ymd(2026, 12, 31);
-    let sat = ymd(2027, 1, 2);
-    let next_mon = ymd(2027, 1, 4);
+    let mon = days_from_civil(2026, 12, 28);
+    let thu = days_from_civil(2026, 12, 31);
+    let sat = days_from_civil(2027, 1, 2);
+    let next_mon = days_from_civil(2027, 1, 4);
     let (app, mut model) = planned_strength_model_on(mon - 14, true);
     let mut id = 1;
     for (d, km) in [(thu, 8.0), (sat, 12.0)] {
@@ -328,7 +315,7 @@ fn iso_week_53_is_one_week_across_the_year_boundary() {
             log_run(km, km * 6.0, 70.0, 50.0, local(d, 7, 0, 0), id),
         );
     }
-    set_today(&app, &mut model, sat, 0);
+    set_today(&app, &mut model, sat);
     let vm = app.view(&model);
     assert_calendar(&vm, sat, "Sat 2 Jan 2027");
     let first = civil_from_days(vm.week_plan[0].epoch_day);
@@ -345,7 +332,7 @@ fn iso_week_53_is_one_week_across_the_year_boundary() {
     assert_eq!((week.week_start_epoch_day, week.runs), (mon, 2), "{week:?}");
     assert!((week.km - 20.0).abs() < 1e-9, "{week:?}");
 
-    set_today(&app, &mut model, next_mon, 0);
+    set_today(&app, &mut model, next_mon);
     let vm = app.view(&model);
     assert_calendar(&vm, next_mon, "Mon 4 Jan 2027");
     let weekly = &vm.run_progress.as_ref().unwrap().weekly;
@@ -360,7 +347,7 @@ fn iso_week_53_is_one_week_across_the_year_boundary() {
 /// the youth card follow the day, both ways, as the clock moves.
 #[test]
 fn a_feb_29_birthday_crosses_18_on_march_1_of_a_common_year() {
-    let born = ymd(2008, 2, 29);
+    let born = days_from_civil(2008, 2, 29);
     let app = Engine;
     let mut model = Model::default();
     send(
@@ -373,7 +360,7 @@ fn a_feb_29_birthday_crosses_18_on_march_1_of_a_common_year() {
     );
     let age = |vm: &ViewModel| vm.profile.as_ref().unwrap().age_years.unwrap();
     let check = |model: &mut Model, d: i64, want_age: f64, youth: bool| {
-        set_today(&app, model, d, 0);
+        set_today(&app, model, d);
         let vm = app.view(model);
         let ctx = format!("{:?}", civil_from_days(d));
         assert_eq!(age(&vm), want_age, "{ctx}");
@@ -387,18 +374,18 @@ fn a_feb_29_birthday_crosses_18_on_march_1_of_a_common_year() {
         assert_eq!(vm.train_blocked, youth, "{ctx}");
         assert_eq!(vm.profile.as_ref().unwrap().health.youth, youth, "{ctx}");
     };
-    check(&mut model, ymd(2026, 2, 28), 17.0, true);
-    check(&mut model, ymd(2026, 3, 1), 18.0, false);
+    check(&mut model, days_from_civil(2026, 2, 28), 17.0, true);
+    check(&mut model, days_from_civil(2026, 3, 1), 18.0, false);
     // The clock moving back re-applies the hold: age comes from today.
-    check(&mut model, ymd(2026, 2, 28), 17.0, true);
-    check(&mut model, ymd(2027, 2, 28), 18.0, false);
-    check(&mut model, ymd(2027, 3, 1), 19.0, false);
-    check(&mut model, ymd(2028, 2, 28), 19.0, false);
-    check(&mut model, ymd(2028, 2, 29), 20.0, false);
+    check(&mut model, days_from_civil(2026, 2, 28), 17.0, true);
+    check(&mut model, days_from_civil(2027, 2, 28), 18.0, false);
+    check(&mut model, days_from_civil(2027, 3, 1), 19.0, false);
+    check(&mut model, days_from_civil(2028, 2, 28), 19.0, false);
+    check(&mut model, days_from_civil(2028, 2, 29), 20.0, false);
 
     // Once adult, a plan starts the same day and its strip is the local week.
-    let d = ymd(2026, 3, 1);
-    set_today(&app, &mut model, d, 0);
+    let d = days_from_civil(2026, 3, 1);
+    set_today(&app, &mut model, d);
     send(&app, &mut model, Event::GeneratePlan { start_epoch_day: d });
     let vm = app.view(&model);
     assert!(vm.plan_withheld.is_none(), "{:?}", vm.plan_withheld);
@@ -410,7 +397,7 @@ fn a_feb_29_birthday_crosses_18_on_march_1_of_a_common_year() {
 /// belongs to Sunday's week (its start), at any offset.
 #[test]
 fn a_run_across_local_midnight_counts_in_the_week_it_started() {
-    let sunday = ymd(2027, 3, 7);
+    let sunday = days_from_civil(2027, 3, 7);
     assert_eq!((sunday - 4).rem_euclid(7), 6);
     for offset in [-10 * HOUR, 0, 2 * HOUR, 13 * HOUR] {
         let app = Engine;
@@ -427,7 +414,7 @@ fn a_run_across_local_midnight_counts_in_the_week_it_started() {
             })
             .collect();
         send(&app, &mut model, log_run_track(pts, 72.0, 50.0, begin, 1));
-        set_today(&app, &mut model, sunday, offset);
+        send(&app, &mut model, set_today_off_ev(sunday, offset));
         let vm = app.view(&model);
         let w = vm
             .run_progress
@@ -442,7 +429,7 @@ fn a_run_across_local_midnight_counts_in_the_week_it_started() {
             (sunday - 6, 1),
             "offset {offset}: {w:?}"
         );
-        set_today(&app, &mut model, sunday + 1, offset);
+        send(&app, &mut model, set_today_off_ev(sunday + 1, offset));
         let vm = app.view(&model);
         let weekly = &vm.run_progress.as_ref().unwrap().weekly;
         assert_eq!(
@@ -459,7 +446,7 @@ fn a_run_across_local_midnight_counts_in_the_week_it_started() {
 /// `started_at` names, at any offset. Fails if the weeks bucket `observed_at`.
 #[test]
 fn a_run_stamped_at_its_end_after_midnight_counts_in_its_start_week() {
-    let sunday = ymd(2027, 3, 7);
+    let sunday = days_from_civil(2027, 3, 7);
     assert_eq!((sunday - 4).rem_euclid(7), 6);
     for offset in [-10 * HOUR, 0, 2 * HOUR, 13 * HOUR] {
         let begin = local(sunday, 23, 40, offset);
@@ -486,7 +473,7 @@ fn a_run_stamped_at_its_end_after_midnight_counts_in_its_start_week() {
             let mut model = Model::default();
             send(&app, &mut model, Event::SetProfile(running_profile()));
             send(&app, &mut model, ev);
-            set_today(&app, &mut model, sunday + 1, offset);
+            send(&app, &mut model, set_today_off_ev(sunday + 1, offset));
             let vm = app.view(&model);
             assert_eq!(vm.runs.len(), 1, "{ctx}");
             assert_eq!(
@@ -518,7 +505,7 @@ fn a_run_stamped_at_its_end_after_midnight_counts_in_its_start_week() {
 /// week's 10 km (+0%, the week it ended).
 #[test]
 fn the_weekly_report_counts_a_midnight_crossing_run_in_its_start_week() {
-    let sunday = ymd(2027, 3, 7);
+    let sunday = days_from_civil(2027, 3, 7);
     assert_eq!((sunday - 4).rem_euclid(7), 6);
     let offset = 0;
     let app = Engine;
@@ -535,7 +522,7 @@ fn the_weekly_report_counts_a_midnight_crossing_run_in_its_start_week() {
     // Sunday 23:30 → Monday 00:30, logged at its end like every shell run.
     let end = local(sunday + 1, 0, 30, offset);
     send(&app, &mut model, log_run(10.0, 60.0, 70.0, 50.0, end, 3));
-    set_today(&app, &mut model, sunday + 1, offset);
+    send(&app, &mut model, set_today_off_ev(sunday + 1, offset));
     let vm = app.view(&model);
     let weekly = &vm.run_progress.as_ref().expect("dated runs").weekly;
     assert_eq!(
@@ -579,7 +566,7 @@ fn runs_ending_after_midnight(km: f64, start_day: i64) -> Vec<LoggedRun> {
 #[test]
 fn run_anchors_date_a_midnight_crossing_run_by_its_start() {
     // Weekly carry before Monday: Sunday's run is last week's km.
-    let sunday = ymd(2027, 3, 7);
+    let sunday = days_from_civil(2027, 3, 7);
     let runs = runs_ending_after_midnight(10.0, sunday);
     assert_eq!(
         build_run_week_km(&runs, &RunFacts::new(&runs), sunday + 1, 0),
@@ -613,13 +600,13 @@ fn run_anchors_date_a_midnight_crossing_run_by_its_start() {
 /// not a one-day chain on Monday, at any offset.
 #[test]
 fn training_load_lands_a_midnight_crossing_run_on_its_start_day() {
-    let sunday = ymd(2027, 3, 7);
+    let sunday = days_from_civil(2027, 3, 7);
     for offset in [-10 * HOUR, 0, 2 * HOUR, 13 * HOUR] {
         let app = Engine;
         let mut model = Model::default();
         let end = local(sunday + 1, 0, 30, offset);
         send(&app, &mut model, log_run(10.0, 60.0, 75.0, 0.0, end, 1));
-        set_today(&app, &mut model, sunday + 1, offset);
+        send(&app, &mut model, set_today_off_ev(sunday + 1, offset));
         let tl = app
             .view(&model)
             .training_load
@@ -636,7 +623,7 @@ fn training_load_lands_a_midnight_crossing_run_on_its_start_day() {
 /// Sunday's session, so a session review dated Sunday gets the cue.
 #[test]
 fn the_pacing_cue_judges_a_midnight_crossing_run_on_its_start_day() {
-    let sunday = ymd(2027, 3, 7);
+    let sunday = days_from_civil(2027, 3, 7);
     let app = Engine;
     let mut model = Model::default();
     // 4 km north: 20 × 100 m at 5:00/km, then 20 × 100 m at 6:00/km.
@@ -662,7 +649,7 @@ fn the_pacing_cue_judges_a_midnight_crossing_run_on_its_start_day() {
             ..Default::default()
         }),
     );
-    set_today(&app, &mut model, sunday + 1, 0);
+    set_today(&app, &mut model, sunday + 1);
     let fb = app.view(&model).feedback.expect("feedback present");
     assert_eq!(fb.category, FeedbackCategory::IntensityDiscipline, "{fb:?}");
 }
@@ -672,7 +659,7 @@ fn the_pacing_cue_judges_a_midnight_crossing_run_on_its_start_day() {
 /// would still show on day 8).
 #[test]
 fn the_spike_warning_ages_from_the_run_start_day() {
-    let sunday = ymd(2027, 3, 7);
+    let sunday = days_from_civil(2027, 3, 7);
     let app = Engine;
     let mut model = Model::default();
     send(
@@ -687,7 +674,7 @@ fn the_spike_warning_ages_from_the_run_start_day() {
         log_run(8.0, 48.0, 70.0, 0.0, local(sunday + 1, 0, 20, 0), 2),
     );
     let category = |model: &mut Model, d: i64| {
-        set_today(&app, model, d, 0);
+        set_today(&app, model, d);
         app.view(model).feedback.map(|f| f.category)
     };
     assert_eq!(
@@ -706,7 +693,7 @@ fn the_spike_warning_ages_from_the_run_start_day() {
 /// show then).
 #[test]
 fn the_longest_run_praise_ages_from_the_run_start_day() {
-    let sunday = ymd(2027, 3, 7);
+    let sunday = days_from_civil(2027, 3, 7);
     let app = Engine;
     let mut model = Model::default();
     send(
@@ -721,7 +708,7 @@ fn the_longest_run_praise_ages_from_the_run_start_day() {
         log_run(8.5, 51.0, 70.0, 0.0, local(sunday + 1, 0, 10, 0), 2),
     );
     let category = |model: &mut Model, d: i64| {
-        set_today(&app, model, d, 0);
+        set_today(&app, model, d);
         app.view(model).feedback.map(|f| f.category)
     };
     assert_eq!(
@@ -740,7 +727,7 @@ fn the_longest_run_praise_ages_from_the_run_start_day() {
 /// day of data, not two.
 #[test]
 fn the_provisional_day_count_counts_a_midnight_crossing_run_on_its_start_day() {
-    let sunday = ymd(2027, 3, 7);
+    let sunday = days_from_civil(2027, 3, 7);
     let app = Engine;
     let mut model = Model::default();
     send(
@@ -753,7 +740,7 @@ fn the_provisional_day_count_counts_a_midnight_crossing_run_on_its_start_day() {
         &mut model,
         log_run(10.0, 60.0, 70.0, 0.0, local(sunday + 1, 0, 30, 0), 1),
     );
-    set_today(&app, &mut model, sunday + 1, 0);
+    set_today(&app, &mut model, sunday + 1);
     let prov = format!(
         "{:?}",
         app.view(&model).provisional.expect("provisional framing")
@@ -767,7 +754,7 @@ fn the_provisional_day_count_counts_a_midnight_crossing_run_on_its_start_day() {
 /// return check (on the end stamp it would count as trained-since and drop it).
 #[test]
 fn a_run_started_before_a_hold_lifted_is_not_a_session_back() {
-    let d = ymd(2027, 3, 8);
+    let d = days_from_civil(2027, 3, 8);
     let app = Engine;
     let mut model = Model::default();
     send(
@@ -813,7 +800,7 @@ fn a_run_started_before_a_hold_lifted_is_not_a_session_back() {
 /// Monday, for the card's title and for the plan alike.
 #[test]
 fn plan_completion_dates_a_run_by_its_first_kept_fix() {
-    let sunday = ymd(2027, 3, 7);
+    let sunday = days_from_civil(2027, 3, 7);
     let app = Engine;
     let mut model = Model::default();
     let first = local(sunday, 23, 59, 0) + 50;
@@ -831,7 +818,7 @@ fn plan_completion_dates_a_run_by_its_first_kept_fix() {
     }));
     let end = pts.last().unwrap().observed_at;
     send(&app, &mut model, log_run_track(pts, 70.0, 0.0, end, 1));
-    set_today(&app, &mut model, sunday + 1, 0);
+    set_today(&app, &mut model, sunday + 1);
     let vm = app.view(&model);
     let card_day = crate::local_day(vm.runs[0].started_at, 0);
     assert_eq!(
@@ -853,7 +840,7 @@ fn plan_completion_dates_a_run_by_its_first_kept_fix() {
 /// day, and the next day is untouched.
 #[test]
 fn work_near_local_midnight_completes_its_local_day_at_extreme_offsets() {
-    let mon = ymd(2027, 6, 7);
+    let mon = days_from_civil(2027, 6, 7);
     assert_eq!(monday_of(mon), mon);
     for (offset, hour) in [
         (-5 * HOUR, 22),
@@ -862,7 +849,7 @@ fn work_near_local_midnight_completes_its_local_day_at_extreme_offsets() {
         (14 * HOUR, 7),
     ] {
         let (app, mut model) = planned_strength_model_on(mon, true);
-        set_today(&app, &mut model, mon, offset);
+        send(&app, &mut model, set_today_off_ev(mon, offset));
         let ns = app.view(&model).next_session.expect("today's session");
         assert_eq!(ns.epoch_day, mon);
         let mut id = 100;
@@ -892,10 +879,10 @@ fn work_near_local_midnight_completes_its_local_day_at_extreme_offsets() {
 /// note is written about sets that were all done.
 #[test]
 fn a_lift_session_running_past_local_midnight_stays_one_session() {
-    let mon = ymd(2027, 6, 7);
+    let mon = days_from_civil(2027, 6, 7);
     for offset in [0, 2 * HOUR, -7 * HOUR] {
         let (app, mut model) = planned_strength_model_on(mon, true);
-        set_today(&app, &mut model, mon, offset);
+        send(&app, &mut model, set_today_off_ev(mon, offset));
         let ns = app.view(&model).next_session.expect("today's session");
         let total_sets: u32 = ns.items.iter().map(|i| u32::from(i.sets)).sum();
         // Every set as prescribed, 4 minutes apart, from 23:20 local: about
@@ -917,7 +904,7 @@ fn a_lift_session_running_past_local_midnight_stays_one_session() {
             crate::local_day(t, offset) == mon + 1 && total_sets >= 4,
             "the session must cross midnight"
         );
-        set_today(&app, &mut model, mon + 1, offset);
+        send(&app, &mut model, set_today_off_ev(mon + 1, offset));
         let vm = app.view(&model);
         let ctx = format!("offset {offset}");
         assert_eq!(
@@ -939,9 +926,9 @@ fn a_lift_session_running_past_local_midnight_stays_one_session() {
 /// allowed to train (as for any other lifted gate, see the PAR-Q twin below).
 #[test]
 fn an_18th_birthday_mid_week_does_not_turn_held_days_into_missed_ones() {
-    let mon = ymd(2027, 6, 7);
+    let mon = days_from_civil(2027, 6, 7);
     let thu = mon + 3;
-    let born = ymd(2009, 6, 10);
+    let born = days_from_civil(2009, 6, 10);
     assert_eq!(civil_from_days(thu), (2027, 6, 10));
     let app = Engine;
     let mut model = Model::default();
@@ -955,14 +942,14 @@ fn an_18th_birthday_mid_week_does_not_turn_held_days_into_missed_ones() {
         }),
     );
     for d in mon - 14..thu {
-        set_today(&app, &mut model, d, 0);
+        set_today(&app, &mut model, d);
         if d == mon - 14 {
             send(&app, &mut model, Event::GeneratePlan { start_epoch_day: d });
         }
         let vm = app.view(&model);
         assert_eq!(vm.hold_reason, Some(HoldReason::Youth), "day {d}");
     }
-    set_today(&app, &mut model, thu, 0);
+    set_today(&app, &mut model, thu);
     let vm = app.view(&model);
     assert!(!vm.train_blocked, "18 today: {:?}", vm.hold_reason);
     assert_calendar(&vm, thu, "18th birthday");
@@ -987,7 +974,7 @@ fn an_18th_birthday_mid_week_does_not_turn_held_days_into_missed_ones() {
 /// day's profile, so they are not missed and no make-up is nudged.
 #[test]
 fn a_health_gate_lifted_mid_week_does_not_turn_held_days_into_missed_ones() {
-    let mon = ymd(2027, 6, 7);
+    let mon = days_from_civil(2027, 6, 7);
     let thu = mon + 3;
     let app = Engine;
     let mut model = Model::default();
@@ -1001,13 +988,13 @@ fn a_health_gate_lifted_mid_week_does_not_turn_held_days_into_missed_ones() {
     };
     send(&app, &mut model, Event::SetProfile(gated));
     for d in mon - 14..thu {
-        set_today(&app, &mut model, d, 0);
+        set_today(&app, &mut model, d);
         if d == mon - 14 {
             send(&app, &mut model, Event::GeneratePlan { start_epoch_day: d });
         }
         assert!(app.view(&model).train_blocked, "day {d}");
     }
-    set_today(&app, &mut model, thu, 0);
+    set_today(&app, &mut model, thu);
     send(
         &app,
         &mut model,
@@ -1031,10 +1018,10 @@ fn a_health_gate_lifted_mid_week_does_not_turn_held_days_into_missed_ones() {
 /// names the weekday, even when the sets sit on the next UTC day.
 #[test]
 fn a_short_lift_says_today_only_on_its_local_day() {
-    let mon = ymd(2027, 6, 7);
+    let mon = days_from_civil(2027, 6, 7);
     for offset in [0, -5 * HOUR, 10 * HOUR] {
         let (app, mut model) = planned_strength_model_on(mon, true);
-        set_today(&app, &mut model, mon, offset);
+        send(&app, &mut model, set_today_off_ev(mon, offset));
         let vm = app.view(&model);
         let ns = vm.next_session.unwrap();
         let it = ns
@@ -1101,7 +1088,7 @@ fn a_short_lift_says_today_only_on_its_local_day() {
             msg.contains(&format!("Came up short on {} today", it.exercise)),
             "{ctx}: {msg}"
         );
-        set_today(&app, &mut model, mon + 1, offset);
+        send(&app, &mut model, set_today_off_ev(mon + 1, offset));
         let msg = app
             .view(&model)
             .feedback
@@ -1121,8 +1108,8 @@ fn a_short_lift_says_today_only_on_its_local_day() {
 /// entries are bucketed with today's offset, `planning/BUGS.md` 2026-08-05.)
 #[test]
 fn an_offset_change_does_not_move_entries_logged_mid_day() {
-    let start = ymd(2027, 3, 15);
-    let dst_day = ymd(2027, 3, 28);
+    let start = days_from_civil(2027, 3, 15);
+    let dst_day = days_from_civil(2027, 3, 28);
     let (app, mut model) = {
         let app = Engine;
         let mut model = Model::default();
@@ -1145,7 +1132,7 @@ fn an_offset_change_does_not_move_entries_logged_mid_day() {
     );
     let mut id = 0;
     for d in start..dst_day {
-        set_today(&app, &mut model, d, HOUR);
+        send(&app, &mut model, set_today_off_ev(d, HOUR));
         let vm = app.view(&model);
         if let Some(ns) = vm.next_session.filter(|s| s.epoch_day == d && d % 4 != 0) {
             log_row(&app, &mut model, &ns, 13, HOUR, &mut id);
@@ -1175,9 +1162,9 @@ fn an_offset_change_does_not_move_entries_logged_mid_day() {
         )
     };
     for d in [dst_day - 1, dst_day] {
-        set_today(&app, &mut model, d, HOUR);
+        send(&app, &mut model, set_today_off_ev(d, HOUR));
         let winter = key(&app.view(&model));
-        set_today(&app, &mut model, d, 2 * HOUR);
+        send(&app, &mut model, set_today_off_ev(d, 2 * HOUR));
         let summer = key(&app.view(&model));
         assert_eq!(winter, summer, "day {d}");
         assert_calendar(&app.view(&model), d, "after DST");
@@ -1189,7 +1176,7 @@ fn an_offset_change_does_not_move_entries_logged_mid_day() {
 /// "today" about it; moving forward again restores everything.
 #[test]
 fn a_clock_moving_backwards_never_judges_future_days() {
-    let mon = ymd(2027, 6, 7);
+    let mon = days_from_civil(2027, 6, 7);
     let (app, mut model) = planned_strength_model_on(mon, true);
     let mut id = 0;
     let wed;
@@ -1205,7 +1192,7 @@ fn a_clock_moving_backwards_never_judges_future_days() {
         wed = lifts[1].epoch_day;
     }
     for d in [mon, wed] {
-        set_today(&app, &mut model, d, 0);
+        set_today(&app, &mut model, d);
         let r = row(&app.view(&model), d);
         log_row(&app, &mut model, &r, 17, 0, &mut id);
     }
@@ -1213,7 +1200,7 @@ fn a_clock_moving_backwards_never_judges_future_days() {
     assert!(row(&forward, wed).status.is_done());
     assert_eq!(forward.consistency.as_ref().unwrap().this_week_done, 2);
 
-    set_today(&app, &mut model, mon, 0);
+    set_today(&app, &mut model, mon);
     let back = app.view(&model);
     assert_calendar(&back, mon, "clock back to Monday");
     assert!(
@@ -1231,7 +1218,7 @@ fn a_clock_moving_backwards_never_judges_future_days() {
         );
     }
 
-    set_today(&app, &mut model, wed, 0);
+    set_today(&app, &mut model, wed);
     let again = app.view(&model);
     assert_eq!(key_statuses(&again), key_statuses(&forward), "no data lost");
 }
@@ -1247,7 +1234,7 @@ fn key_statuses(vm: &ViewModel) -> Vec<(i64, SessionStatus)> {
 /// backdate) is not today's: no "checked in today", today's session not done.
 #[test]
 fn entries_dated_in_the_future_do_not_count_as_today() {
-    let mon = ymd(2027, 6, 7);
+    let mon = days_from_civil(2027, 6, 7);
     let (app, mut model) = planned_strength_model_on(mon, true);
     let today_row = app.view(&model).next_session.unwrap();
     send(
@@ -1286,7 +1273,7 @@ fn entries_dated_in_the_future_do_not_count_as_today() {
 /// count only, and can lift the "repeating this week" note.
 #[test]
 fn backdating_into_a_past_plan_week_updates_that_week_only() {
-    let mon = ymd(2027, 6, 7);
+    let mon = days_from_civil(2027, 6, 7);
     let (app, mut model) = planned_strength_model_on(mon, true);
     let lift_rows: Vec<SessionPlanView> = app
         .view(&model)
@@ -1299,12 +1286,12 @@ fn backdating_into_a_past_plan_week_updates_that_week_only() {
     for r in &lift_rows {
         let mut r2 = r.clone();
         r2.epoch_day += 7;
-        set_today(&app, &mut model, r2.epoch_day, 0);
+        set_today(&app, &mut model, r2.epoch_day);
         let live = row(&app.view(&model), r2.epoch_day);
         log_row(&app, &mut model, &live, 17, 0, &mut id);
     }
     let today = mon + 14 + 2;
-    set_today(&app, &mut model, today, 0);
+    set_today(&app, &mut model, today);
     let before = app.view(&model).consistency.unwrap();
     assert_eq!(before.weeks.len(), 2);
     assert_eq!(before.weeks[0].done, 0);
@@ -1336,7 +1323,7 @@ fn backdating_into_a_past_plan_week_updates_that_week_only() {
 /// record but never into the done share.
 #[test]
 fn a_mid_week_plan_start_in_iso_week_53() {
-    let thu = ymd(2026, 12, 31);
+    let thu = days_from_civil(2026, 12, 31);
     let app = Engine;
     let mut model = Model::default();
     send(&app, &mut model, Event::SetProfile(strength_profile()));
@@ -1347,7 +1334,7 @@ fn a_mid_week_plan_start_in_iso_week_53() {
             start_epoch_day: thu,
         },
     );
-    set_today(&app, &mut model, thu, 0);
+    set_today(&app, &mut model, thu);
     let vm = app.view(&model);
     assert_calendar(&vm, thu, "plan day 1");
     for d in thu - 3..thu {
@@ -1355,14 +1342,14 @@ fn a_mid_week_plan_start_in_iso_week_53() {
     }
     let mut id = 0;
     for d in thu..thu + 4 {
-        set_today(&app, &mut model, d, 0);
+        set_today(&app, &mut model, d);
         let vm = app.view(&model);
         if let Some(ns) = vm.next_session.filter(|s| s.epoch_day == d) {
             log_row(&app, &mut model, &ns, 17, 0, &mut id);
         }
     }
-    let next_mon = ymd(2027, 1, 4);
-    set_today(&app, &mut model, next_mon, 0);
+    let next_mon = days_from_civil(2027, 1, 4);
+    set_today(&app, &mut model, next_mon);
     let vm = app.view(&model);
     assert_calendar(&vm, next_mon, "first full week");
     assert!(
@@ -1372,7 +1359,10 @@ fn a_mid_week_plan_start_in_iso_week_53() {
     );
     let c = vm.consistency.unwrap();
     assert_eq!(c.weeks.len(), 1);
-    assert_eq!(c.weeks[0].week_monday_epoch_day, ymd(2026, 12, 28));
+    assert_eq!(
+        c.weeks[0].week_monday_epoch_day,
+        days_from_civil(2026, 12, 28)
+    );
     assert_eq!(
         c.share_pct, None,
         "a partial first week never counts toward the share"
@@ -1384,7 +1374,7 @@ fn a_mid_week_plan_start_in_iso_week_53() {
 /// outside 1..=total, a negative count in copy, or a missing week strip.
 #[test]
 fn a_race_today_or_in_the_past_keeps_the_plan_sane() {
-    let today = ymd(2027, 5, 12);
+    let today = days_from_civil(2027, 5, 12);
     for (label, race) in [
         ("today", today),
         ("this Monday", monday_of(today)),
@@ -1410,7 +1400,7 @@ fn a_race_today_or_in_the_past_keeps_the_plan_sane() {
                     start_epoch_day: plan_start,
                 },
             );
-            set_today(&app, &mut model, today, 0);
+            set_today(&app, &mut model, today);
             let vm = app.view(&model);
             let ctx = format!("race {label}, plan from {plan_start}");
             assert_calendar(&vm, today, &ctx);

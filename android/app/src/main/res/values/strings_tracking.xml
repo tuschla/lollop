@@ -142,7 +142,7 @@
 
     <!-- Finish sheet (Stop pauses recording and opens this review) -->
     <string name="track_finish_title">Finish this run?</string>
-    <!-- Spoken form of the review figures: %1$s distance ("3.21 km"), %2$s moving time ("23:41"), %3$s average pace ("5:15 /km"). -->
+    <!-- Spoken form of the review figures: %1$s distance ("3.21 km"), %2$s moving time ("23 minutes 41 seconds"), %3$s average pace ("5 minutes 15 seconds per kilometer"). -->
     <string name="track_finish_summary">%1$s · %2$s moving · %3$s average</string>
     <string name="track_finish_avg_pace">Avg pace</string>
     <string name="track_finish_resume">Resume</string>

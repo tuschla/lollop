@@ -3,7 +3,6 @@ package app.milestone.qa
 import android.Manifest
 import android.app.Application
 import android.content.Context
-import android.content.Intent
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -11,9 +10,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppClock
-import app.milestone.GpsPoint
-import app.milestone.MainActivity
+import app.milestone.OpenDest
+import app.milestone.openIntent
 import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.AppSettings
@@ -106,25 +104,10 @@ class RunFinishEffortTest {
         return log.readLines().last { it.contains("LogRunTrack") }
     }
 
-    /** A live recording: 21 fixes, ~30 m every 10 s (600 m, 200 s moving), so the
-     *  save clears the short-run gate. */
-    private fun seedRecordingRun() {
-        val t0 = AppClock.nowSec() - 400
-        for (i in 0..20) {
-            RunSession.add(
-                GpsPoint(52.5200 + i * 0.00027, 13.4050, t0 + i * 10L, 5.0),
-                (1_000L + i * 10L) * 1_000_000_000L,
-            )
-        }
-        RunSession.tracking.value = true
-    }
-
     private fun openTracker() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        seedRecordingRun()
-        lastScenario = launchMain(
-            Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_TRACKING, true),
-        )
+        QaHarness.seedRecordingRun()
+        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
         val stop = str(R.string.track_btn_stop)
         rule.waitUntil(30_000) { rule.onAllNodesWithText(stop).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText(stop).performClick()
@@ -146,12 +129,7 @@ class RunFinishEffortTest {
     fun finishReview_meetsEveryInvariant_atFontScale130() {
         RuntimeEnvironment.setFontScale(1.3f)
         openTracker()
-        val v = UxInvariants.check(rule, rule.density, checkClipping = true)
-        val kinds = setOf(
-            "forbidden-text", "unlabeled-action", "small-touch-target",
-            "duplicate-action-in-card", "clipped-action", "duplicate-summary-on-screen",
-        )
-        val hits = v.filter { it.kind in kinds }
+        val hits = UxInvariants.check(rule, rule.density)
         assertTrue("UX invariant(s) violated:\n" + hits.joinToString("\n"), hits.isEmpty())
         // Save stays reachable without scrolling: the chips scroll above the pinned row.
         val line = saveAndAwaitLoggedRun()
@@ -183,11 +161,9 @@ class RunFinishEffortTest {
             ),
             run_structure = RunStructureView(reps = 6, rep_m = 800, recovery_m = 400),
         )
-        seedRecordingRun()
+        QaHarness.seedRecordingRun()
         RunSession.startSteps(android.os.SystemClock.elapsedRealtime())
-        lastScenario = launchMain(
-            Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_TRACKING, true),
-        )
+        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
         val rep = str(R.string.track_step_rep, 1, 6)
         rule.waitUntil(30_000) { rule.onAllNodesWithText(rep).fetchSemanticsNodes().isNotEmpty() }
         fun metresLeft(m: Int) = str(R.string.track_step_left, str(R.string.track_step_metres, m))

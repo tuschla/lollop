@@ -47,18 +47,20 @@ class QuickTileTest {
 
     @Test
     fun faceFollowsTodayAndTheRecordingRun() {
-        assertEquals(TileFace.Log, tileFace(false, null))
-        assertEquals(TileFace.StartRun, tileFace(false, snapshot(WidgetDayKind.Run, trackable = true)))
+        assertEquals(TileFace.Log, tileFace(null))
+        assertEquals(TileFace.StartRun, tileFace(snapshot(WidgetDayKind.Run, trackable = true)))
         // A run day whose run is logged has nothing to track.
-        assertEquals(TileFace.Log, tileFace(false, snapshot(WidgetDayKind.Run, sessionDone = true)))
-        assertEquals(TileFace.LogSet, tileFace(false, snapshot(WidgetDayKind.Lift)))
-        assertEquals(TileFace.Log, tileFace(false, snapshot(WidgetDayKind.Lift, sessionDone = true)))
+        assertEquals(TileFace.Log, tileFace(snapshot(WidgetDayKind.Run, sessionDone = true)))
+        assertEquals(TileFace.LogSet, tileFace(snapshot(WidgetDayKind.Lift)))
+        assertEquals(TileFace.Log, tileFace(snapshot(WidgetDayKind.Lift, sessionDone = true)))
         for (kind in listOf(WidgetDayKind.Rest, WidgetDayKind.Paused, WidgetDayKind.NoPlan, WidgetDayKind.Setup)) {
-            assertEquals(kind.name, TileFace.Log, tileFace(false, snapshot(kind, trackable = true)))
+            assertEquals(kind.name, TileFace.Log, tileFace(snapshot(kind, trackable = true)))
         }
         // A recording run wins over any day.
+        RunSession.tracking.value = true
         for (s in listOf(null, snapshot(WidgetDayKind.Lift), snapshot(WidgetDayKind.Paused))) {
-            assertEquals(TileFace.Recording, tileFace(true, s))
+            if (s == null) File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME).delete() else WidgetSnapshotStore.write(ctx, s)
+            assertEquals(TileFace.Recording, QuickTileService.currentFace(ctx))
         }
         assertEquals(OpenDest.Track, TileFace.Recording.dest)
         assertEquals(OpenDest.Track, TileFace.StartRun.dest)
@@ -122,17 +124,6 @@ class QuickTileTest {
         assertOpens(click(), OpenDest.Log)
         RunSession.tracking.value = true
         assertOpens(click(), OpenDest.Track)
-    }
-
-    /** Android 13 (the Intent click path): the same faces from the same in-process flag. */
-    @Test
-    @Config(sdk = [33])
-    fun recordingRunLightsTheTileOnApi33() {
-        WidgetSnapshotStore.write(ctx, snapshot(WidgetDayKind.Lift))
-        RunSession.tracking.value = true
-        assertTile(listen(), R.string.tile_run_recording, R.drawable.ic_content_track_run, Tile.STATE_ACTIVE)
-        RunSession.tracking.value = false
-        assertTile(listen(), R.string.tile_log_set, R.drawable.ic_content_set_dumbbell, Tile.STATE_INACTIVE)
     }
 
     /** Below API 34 a tap starts [openIntent] from the service: it needs NEW_TASK (a

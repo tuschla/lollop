@@ -1,5 +1,6 @@
 package app.milestone
 
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.res.Resources
@@ -19,10 +20,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.xmlpull.v1.XmlPullParserException
 
-/** Import cap: real GPX/TCX/FIT exports are well under this; the cap keeps a
- *  pathological or wrong-type file from OOMing the process or blowing up JSON
- *  allocation across the parseFit JNI boundary. */
+/** Read cap for any import file: real GPX/TCX exports are well under it, and it keeps a
+ *  wrong-type or endless source from exhausting memory. FIT has its own smaller cap. */
 private const val MAX_RUN_IMPORT_BYTES = 32 * 1024 * 1024 // 32 MB
+
+/** FIT cap. [Core.parseFit] returns one JSON object per FIT record, up to ~6× the
+ *  file's bytes, and [fitSegments] holds that as a JSON tree, so the 32 MB read cap
+ *  would admit ~190 M chars. 8 MB still fits a day-long 1 Hz recording (86 400
+ *  records under 90 bytes each). */
+internal const val MAX_FIT_IMPORT_BYTES = 8 * 1024 * 1024 // 8 MB
 
 /** How much of a file the XML sniff decodes to find its root element. */
 private const val SNIFF_BYTES = 4 * 1024
@@ -47,22 +53,26 @@ internal fun readCappedBytes(stream: InputStream, cap: Int = MAX_RUN_IMPORT_BYTE
         val n = stream.read(buf)
         if (n < 0) break
         total += n
-        if (total > cap) throw GpxImportException(ImportFailure.TooLarge)
+        if (total > cap) throw ImportException(ImportFailure.TooLarge)
         out.write(buf, 0, n)
     }
     return out.toByteArray()
 }
 
 /**
- * One file → the runs it holds (one per TCX `<Activity>`, else one).
+ * One file → the runs it holds (one per GPX `<trk>` or TCX `<Activity>`, else one).
  * Sniffs the CONTENT, not the extension/MIME (providers lie): the FIT header magic
- * first (binary), then the XML root within the first [SNIFF_BYTES] to tell GPX from
- * TCX, so a wrong-type file is refused without decoding all of it. XML that breaks
- * off or is malformed past the root (a cut-off download) is [ImportFailure.Damaged],
- * and so is a document that declares a DTD ([declaresDtd]).
+ * first (binary, refused over [MAX_FIT_IMPORT_BYTES]), then the XML root within the
+ * first [SNIFF_BYTES] to tell GPX from TCX, so a wrong-type file is refused without
+ * decoding all of it. XML that breaks off or is malformed past the root (a cut-off
+ * download) is [ImportFailure.Damaged], and so is a document that declares a DTD
+ * ([declaresDtd]).
  */
 internal fun parseRunFileSegments(bytes: ByteArray, parseFit: (ByteArray) -> String?): List<ImportedRun> {
-    if (isFitFile(bytes)) return listOf(ImportedRun(fitSegments(parseFit(bytes))))
+    if (isFitFile(bytes)) {
+        if (bytes.size > MAX_FIT_IMPORT_BYTES) throw ImportException(ImportFailure.TooLarge)
+        return listOf(ImportedRun(fitSegments(parseFit(bytes))))
+    }
     // XML 1.0 §4.3.3: a UTF-16 entity starts with its byte order mark; anything
     // else is read as UTF-8 (the BOM, if any, skipped: the pull-parser throws
     // "content not allowed in prolog" on it).
@@ -74,13 +84,13 @@ internal fun parseRunFileSegments(bytes: ByteArray, parseFit: (ByteArray) -> Str
     }
     val head = String(bytes, bom, minOf(bytes.size - bom, SNIFF_BYTES), charset)
     val tcx = head.contains("<TrainingCenterDatabase")
-    if (!tcx && !head.contains("<gpx")) throw GpxImportException(ImportFailure.WrongType)
+    if (!tcx && !head.contains("<gpx")) throw ImportException(ImportFailure.WrongType)
     val text = String(bytes, bom, bytes.size - bom, charset)
-    if (declaresDtd(text)) throw GpxImportException(ImportFailure.Damaged)
+    if (declaresDtd(text)) throw ImportException(ImportFailure.Damaged)
     return try {
-        if (tcx) parseTcxActivities(text) else listOf(parseGpxRun(text))
+        if (tcx) parseTcxActivities(text) else parseGpxRuns(text)
     } catch (e: XmlPullParserException) {
-        throw GpxImportException(ImportFailure.Damaged).apply { initCause(e) }
+        throw ImportException(ImportFailure.Damaged).apply { initCause(e) }
     }
 }
 
@@ -114,7 +124,7 @@ internal fun declaresDtd(text: String): Boolean {
  *  runs it holds, or why it couldn't be read. */
 internal data class ParsedRunFile(val name: String, val runs: Result<List<ImportedRun>>)
 
-/** One file that produced no run, and why ([detail] as in [GpxImportException]). */
+/** One file that produced no run, and why ([detail] as in [ImportException]). */
 internal data class RunImportFailure(val fileName: String, val reason: ImportFailure, val detail: String? = null)
 
 /** A run to send, with the file it came from (named again if the core refuses it). */
@@ -178,7 +188,7 @@ internal fun planRunImport(
 }
 
 private fun failureOf(fileName: String, e: Throwable?): RunImportFailure =
-    if (e is GpxImportException) {
+    if (e is ImportException) {
         RunImportFailure(fileName, e.reason, e.detail)
     } else {
         RunImportFailure(fileName, ImportFailure.Unknown)
@@ -264,8 +274,13 @@ internal fun runImportSummary(
  */
 internal object RunImport {
 
+    /** This app's own FileProvider (its GPX shares), never an import source. */
+    private const val OWN_FILE_PROVIDER = "${BuildConfig.APPLICATION_ID}.fileprovider"
+
     /** The file URIs an incoming VIEW / SEND / SEND_MULTIPLE intent carries, or empty
-     *  for any other intent (launcher, notification deep link). */
+     *  for any other intent (launcher, notification deep link). Only other apps'
+     *  `content://` URIs pass: the import reads with this app's permissions, so a
+     *  `file://` path or its own FileProvider would expose its private files. */
     fun urisFrom(intent: Intent?): List<Uri> {
         if (intent == null) return emptyList()
         val direct = when (intent.action) {
@@ -278,10 +293,12 @@ internal object RunImport {
                     .orEmpty()
             else -> return emptyList()
         }
-        if (direct.isNotEmpty()) return direct
-        // Some senders only populate ClipData (which also carries the read grant).
-        val clip = intent.clipData ?: return emptyList()
-        return (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
+        val uris = direct.ifEmpty {
+            // Some senders only populate ClipData (which also carries the read grant).
+            val clip = intent.clipData ?: return emptyList()
+            (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
+        }
+        return uris.filter { it.scheme == ContentResolver.SCHEME_CONTENT && it.authority != OWN_FILE_PROVIDER }
     }
 
     /**
@@ -306,7 +323,7 @@ internal object RunImport {
                             .onFailure { e ->
                                 // A non-import exception is a shell bug or an IO error, not a
                                 // bad file; leave a diagnostic trail while the batch carries on.
-                                if (e !is GpxImportException) Log.w("lollop", "run import file failed", e)
+                                if (e !is ImportException) Log.w("lollop", "run import file failed", e)
                             },
                     )
                 }
@@ -359,7 +376,7 @@ internal object RunImport {
 
     private fun readUri(ctx: Context, uri: Uri): ByteArray =
         ctx.contentResolver.openInputStream(uri)?.use { readCappedBytes(it) }
-            ?: throw GpxImportException(ImportFailure.ReadFailed)
+            ?: throw ImportException(ImportFailure.ReadFailed)
 
     /** The file's name as the user sees it in their file picker; the URI's last
      *  path segment when the provider won't say. */

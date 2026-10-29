@@ -2,6 +2,7 @@ package app.milestone
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -27,6 +28,8 @@ import androidx.compose.ui.unit.sp
 // It does not vary by theme: the danger ground is identical in every theme.
 // #FFE4E4 clears WCAG AA (≈4.9:1) on the #C1272D danger ground at caption size.
 internal val DangerOn = Color(0xFFFFE4E4) // subtext on the danger surface
+// Labels and glyphs on the danger surface (white, 5.8:1 on #C1272D).
+internal val DangerLabel = Color.White
 
 /**
  * The theme-varying decorative token set: ground/surface, on-ground text tones, and
@@ -75,15 +78,9 @@ private val DangerTextOnDark = Color(0xFFF87171)
 private val DangerTextOnLight = Color(0xFFB3261E)
 
 /**
- * Rose, dark: a deep aubergine-plum ground (wine-tinted, never grey-black)
- * with a bright rose-pink accent and warm off-white text. Cards lift one plum step.
- * The accent leans pink (hue ≈338°), held apart from the salmon-red dangerText.
- * Ratios (ThemeContrastTest, on bgTop / bgElevated / bgSunken): body 15.21 /
- * 12.27 / 14.19, muted 9.11 / 7.35 / 8.50, faint 5.74 / 4.63 / 5.35, accent as
- * text 8.13 / 6.56 / 7.59, warnText 8.06 / 6.50 / 7.52, dangerText 6.46 / 5.21 /
- * 6.03; on-accent (bgTop) on accent 8.13:1; body on 4% cell wash ≥11.00:1, on
- * AccentTint (#5D2D3F) 9.34:1. The ground stays deep so the fixed danger fill
- * still separates from it (3.06:1 on bgTop, red against plum).
+ * Rose, dark: a deep aubergine-plum ground with a bright rose-pink accent (hue
+ * ≈338°, held apart from the salmon-red dangerText) and warm off-white text.
+ * Cards lift one plum step.
  */
 internal val RosePalette = Palette(
     accent = Color(0xFFFF8AB5),
@@ -98,14 +95,8 @@ internal val RosePalette = Palette(
 )
 
 /**
- * Meadow, dark: a deep forest-teal ground (green-tinted, never grey-black) with a
- * warm peach-coral accent and warm off-white text, an evening run by the lake.
- * Cards lift one teal step. Ratios (ThemeContrastTest, on bgTop / bgElevated /
- * bgSunken): body 14.06 / 11.24 / 12.96, muted 9.35 / 7.47 / 8.62, faint 6.38 /
- * 5.10 / 5.88, accent as text 7.53 / 6.01 / 6.94, warnText 7.32 / 5.85 / 6.75,
- * dangerText 5.87 / 4.69 / 5.41; on-accent (bgTop) on accent 7.53:1; body on 4%
- * cell wash ≥10.11:1, on AccentTint (#623528) 8.83:1. The fixed danger fill sits
- * on the complementary hue (red on green), 2.78:1 luminance on bgTop.
+ * Meadow, dark: a deep forest-teal ground with a warm peach-coral accent and warm
+ * off-white text. Cards lift one teal step.
  */
 internal val MeadowPalette = Palette(
     accent = Color(0xFFFF9473),
@@ -120,15 +111,8 @@ internal val MeadowPalette = Palette(
 )
 
 /**
- * Iris, dark: a deep ink-indigo night (blue-violet, never grey-black) with a
- * sunflower-yellow accent, the iris's violet petals and yellow crest. Cards lift
- * one indigo step; text is a warm cream. Ratios (ThemeContrastTest, on
- * bgTop / bgElevated / bgSunken): body 16.17 / 13.53 / 15.08, muted 10.33 /
- * 8.64 / 9.63, faint 7.10 / 5.94 / 6.62, accent as text 12.43 / 10.40 / 11.58,
- * warnText 8.04 / 6.73 / 7.50, dangerText 6.45 / 5.39 / 6.01; on-accent
- * (bgTop) on accent 12.43:1; body on 4% cell wash ≥12.17:1, on AccentTint
- * (#513E0A) 9.32:1. The ground stays deep enough that the fixed danger fill
- * still separates from it (3.05:1 on bgTop).
+ * Iris, dark: a deep ink-indigo ground with a sunflower-yellow accent and warm
+ * cream text. Cards lift one indigo step.
  */
 internal val IrisPalette = Palette(
     accent = Color(0xFFFFD25E),
@@ -148,15 +132,9 @@ internal val IrisPalette = Palette(
 // semantic [StatusColors] stay fixed, only these decorative grounds/accent flip.
 // Chosen at the theme root by the resolved light/dark mode, not per theme.
 
-/** Rose, light: a soft blush ground, near-white rose cards and a
- *  raspberry-berry accent (hue ≈330°, on the magenta side so it never reads as
- *  the fire-engine danger red) with deep plum-ink text. bgSunken is the plain
- *  ground. Ratios (ThemeContrastTest, on bgTop / bgElevated / bgSunken): body
- *  14.57 / 16.24 / 14.57, muted 6.79 / 7.57 / 6.79, faint 4.95 / 5.52 / 4.95,
- *  accent as text 5.75 / 6.41 / 5.75, warnText 5.39 / 6.00 / 5.39, dangerText
- *  5.56 / 6.20 / 5.56; on-accent (bgTop) on accent 5.75:1; body on 4% cell wash
- *  ≥13.54:1, on AccentTint (#FFD1E0) 12.59:1. The blush stays light so the fixed
- *  danger fill still stands out (4.97:1 on bgTop). */
+/** Rose, light: a soft blush ground, near-white rose cards and a raspberry accent
+ *  (hue ≈330°, on the magenta side of the danger red) with deep plum-ink text.
+ *  bgSunken is the plain ground. */
 internal val RoseLightPalette = Palette(
     accent = Color(0xFFAD1A64),
     bgTop = Color(0xFFFBE8ED),
@@ -169,17 +147,9 @@ internal val RoseLightPalette = Palette(
     dangerText = DangerTextOnLight,
 )
 
-/** Meadow, light: fresh mint ground, near-white mint cards, and a juicy tangerine
- *  accent (kept on the orange side of coral so it never reads as rose/berry or the
- *  danger red) with deep green-ink text. The accent is pure orange at the most
- *  chroma sRGB holds at the AA lightness ceiling (an orange with less blue reads
- *  rusty brown at this depth); the mint is lifted a hair so that ceiling sits
- *  higher. Ratios (ThemeContrastTest, on bgTop / bgElevated / bgSunken): body
- *  13.65 / 15.03 / 13.65, muted 6.01 / 6.63 / 6.01, faint 4.71 / 5.19 / 4.71,
- *  accent as text 4.57 / 5.04 / 4.57, warnText 5.47 / 6.03 / 5.47, dangerText
- *  5.65 / 6.23 / 5.65; on-accent (bgTop) on accent 4.57:1; body on 4% cell wash
- *  ≥12.69:1, on AccentTint (#FFD9CB) 12.05:1. The danger fill reads 5.05:1
- *  against the mint ground. */
+/** Meadow, light: a mint ground, near-white mint cards and a tangerine accent (on
+ *  the orange side of coral, apart from rose and the danger red) with deep
+ *  green-ink text. bgSunken is the plain ground. */
 internal val MeadowLightPalette = Palette(
     accent = Color(0xFFBF4100),
     bgTop = Color(0xFFE4F2E8),
@@ -192,14 +162,8 @@ internal val MeadowLightPalette = Palette(
     dangerText = DangerTextOnLight,
 )
 
-/** Iris, light: sunny butter-cream ground, near-white cream cards, a slightly
- *  deeper cream for sheets/keypad, and a vivid violet accent with ink-violet
- *  text. Ratios (ThemeContrastTest, on bgTop / bgElevated / bgSunken): body
- *  14.10 / 15.51 / 13.26, muted 6.15 / 6.76 / 5.78, faint 5.13 / 5.64 / 4.82,
- *  accent as text 6.30 / 6.93 / 5.92, warnText 5.52 / 6.07 / 5.19, dangerText
- *  5.70 / 6.27 / 5.36; on-accent (bgTop) on accent 6.30:1; body on 4% cell
- *  wash ≥12.32:1, on AccentTint (#DCDBFF) 12.03:1. The danger fill reads
- *  4.79–5.60:1 against these grounds. */
+/** Iris, light: a butter-cream ground, near-white cream cards, a deeper cream for
+ *  sheets and the keypad, and a violet accent with ink-violet text. */
 internal val IrisLightPalette = Palette(
     accent = Color(0xFF5A3FC0),
     bgTop = Color(0xFFF8EFD6),
@@ -227,7 +191,6 @@ internal val PaperLightPalette = Palette(
     bgElevated = Color(0xFFF3F3F1),
     bgSunken = Color(0xFFFFFFFF),
     onBgMuted = Color(0xFF5C5C5A),
-    // Faint #8C8C8A → #6E6E6C so it clears AA on bgElevated: 3.03:1 → 4.60:1.
     onBgFaint = Color(0xFF6E6E6C),
     onBgBody = Color(0xFF0A0A0A),
     warnText = WarnTextOnLight,
@@ -241,7 +204,6 @@ internal val PaperDarkPalette = Palette(
     bgElevated = Color(0xFF1B1B1A),
     bgSunken = Color(0xFF141414),
     onBgMuted = Color(0xFFA0A09E),
-    // Faint #6A6A68 → #848481 so it clears AA on bgElevated: 3.18:1 → 4.60:1.
     onBgFaint = Color(0xFF848481),
     onBgBody = Color(0xFFF5F5F3),
     warnText = WarnTextOnDark,
@@ -254,15 +216,15 @@ internal val PaperDarkPalette = Palette(
  * Persisted by [name]; [Paper] is the default (AppSettings pins it, with the system
  * accent, on a fresh install).
  */
-enum class AppTheme(val label: String, val dark: Palette, val light: Palette) {
-    Rose("Rose", RosePalette, RoseLightPalette),
-    Meadow("Meadow", MeadowPalette, MeadowLightPalette),
-    Iris("Iris", IrisPalette, IrisLightPalette),
-    Paper("Paper", PaperDarkPalette, PaperLightPalette);
+enum class AppTheme(val dark: Palette, val light: Palette) {
+    Rose(RosePalette, RoseLightPalette),
+    Meadow(MeadowPalette, MeadowLightPalette),
+    Iris(IrisPalette, IrisLightPalette),
+    Paper(PaperDarkPalette, PaperLightPalette);
 
     companion object {
-        /** Names persisted before the 2026-10-10 theme redesign → the theme that
-         *  took each one's place, so a stored choice never silently falls back. */
+        /** Theme names older builds persisted → the theme that took each one's
+         *  place, so a stored choice never silently falls back. */
         private val retired = mapOf("Beton" to Rose, "Werkstatt" to Meadow, "Signal" to Iris)
 
         fun from(name: String?): AppTheme =
@@ -351,7 +313,6 @@ data class StatusColors(
     val warn: Color = Color(0xFFA16207),
     // Signal red (spec §2A): white text clears 5.8:1 AA on this DANGER surface.
     val danger: Color = Color(0xFFC1272D),
-    val dangerStrong: Color = Color(0xFFCE2A2E),
     // The done mark (a ✓ glyph, a week-strip dot) drawn straight on the ground:
     // a graphical object, so ≥3:1 against every ground of the mode. The deep
     // green clears it on the light grounds; [DarkStatusColors] lightens it for
@@ -497,6 +458,9 @@ val RouteMapHeight = 220.dp
 /** Top-corner radius of the tracker's floating stat sheet. */
 val SheetCornerRadius = 26.dp
 
+/** Fully rounded ends: pills, discs, round touch targets. */
+internal val PillShape = RoundedCornerShape(100)
+
 /** Outline of a [StatusCard]: the ring that carries its tone. */
 val StatusRingWidth = 1.5.dp
 
@@ -538,19 +502,6 @@ fun StatusColors.gradeColor(grade: String): Color = when (grade) {
 }
 
 /**
- * HR-zone accent from the theme-fixed status palette. Zone strings mirror
- * app/mod.rs `RunResultView.zone` ("Z1"/"Z2"/"Z3"); unknown ("-") falls back to the
- * active theme's [accent] so a run with no HR sample isn't miscolored as a real
- * zone. The accent is passed in because this runs outside composition.
- */
-fun StatusColors.hrZoneColor(zone: String, accent: Color): Color = when (zone) {
-    "Z1" -> hrZone1
-    "Z2" -> hrZone2
-    "Z3" -> hrZone3
-    else -> accent
-}
-
-/**
  * App theme. The selected [AppTheme] supplies the whole decorative palette (ground,
  * surface, text tones, accent). On Android 12+ with "system accent" enabled, only
  * the accent role follows the user's Material You wallpaper color; the rest of the
@@ -577,93 +528,42 @@ fun MilestoneTheme(
     val base = if (dark) appTheme.dark else appTheme.light
     // The other ground of the same palette: M3 draws snackbars on the inverse
     // roles, so they take this theme's opposite ground instead of M3's baseline
-    // lavender (ui-sweep §15).
+    // lavender.
     val inverse = if (dark) appTheme.light else appTheme.dark
-    // The selected theme ALWAYS supplies the full scheme, dialogs, menus,
-    // switches and every other M3 surface keep the chosen palette. When dynamic
-    // color (Material You) is on, only the accent role (primary + its on-color)
-    // is taken from the wallpaper-derived scheme (spec §8/§9, design-spec §2:
-    // "only the accent role follows the wallpaper color; the rest of the
-    // selected theme's palette still applies"). Swapping in the whole dynamic
-    // scheme here would wallpaper-tint every dialog/menu/switch surface.
-    val themed: ColorScheme = if (dark) {
-        darkColorScheme(
-            primary = base.accent,
-            // Accent fill uses BgTop text: M3 Buttons read
-            // onPrimary, so pin it to the ground tone (dark OnAccent here -
-            // the mid-tone dark accents fail AA under light text).
-            onPrimary = base.bgTop,
-            background = base.bgTop,
-            surface = base.bgElevated,
-            onBackground = base.onBgBody,
-            onSurface = base.onBgBody,
-            // Pin M3's surface-container / variant / outline roles to the
-            // palette's own grounds so dialogs, bottom sheets and dropdown
-            // menus (which draw on surfaceContainer*/surfaceVariant, not
-            // `surface`) render in the selected palette instead of M3's
-            // baseline tones. Container tiers all map to the app's elevated
-            // surface (dialogs read as raised cards); the lowest tier sits on
-            // the ground.
-            surfaceVariant = base.bgElevated,
-            onSurfaceVariant = base.onBgMuted,
-            surfaceContainerLowest = base.bgTop,
-            surfaceContainerLow = base.bgElevated,
-            surfaceContainer = base.bgElevated,
-            surfaceContainerHigh = base.bgElevated,
-            surfaceContainerHighest = base.bgElevated,
-            outline = base.onBgFaint,
-            // Also pin outlineVariant: M3 HorizontalDividers/menus draw on it, so
-            // leaving it baseline let a stray divider tone leak through the palette.
-            outlineVariant = base.onBgFaint.copy(alpha = HairlineAlpha.Strong),
-            inverseSurface = inverse.bgElevated,
-            inverseOnSurface = inverse.onBgBody,
-            inversePrimary = inverse.accent,
-        )
+    // The palette with the Material You accent when dynamic color is on (AA-guarded,
+    // [withDynamicAccent]); only the accent follows the wallpaper.
+    val palette = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        base.withDynamicAccent((if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)).primary)
     } else {
-        lightColorScheme(
-            primary = base.accent,
-            onPrimary = base.bgTop,
-            background = base.bgTop,
-            surface = base.bgElevated,
-            onBackground = base.onBgBody,
-            onSurface = base.onBgBody,
-            // Same surface-container / variant / outline pinning as the dark
-            // scheme: keep dialogs/sheets/menus in the selected palette rather
-            // than M3's baseline tones (see dark branch for role rationale).
-            surfaceVariant = base.bgElevated,
-            onSurfaceVariant = base.onBgMuted,
-            surfaceContainerLowest = base.bgTop,
-            surfaceContainerLow = base.bgElevated,
-            surfaceContainer = base.bgElevated,
-            surfaceContainerHigh = base.bgElevated,
-            surfaceContainerHighest = base.bgElevated,
-            outline = base.onBgFaint,
-            // Also pin outlineVariant: M3 HorizontalDividers/menus draw on it, so
-            // leaving it baseline let a stray divider tone leak through the palette.
-            outlineVariant = base.onBgFaint.copy(alpha = HairlineAlpha.Strong),
-            inverseSurface = inverse.bgElevated,
-            inverseOnSurface = inverse.onBgBody,
-            inversePrimary = inverse.accent,
-        )
+        base
     }
-    val scheme: ColorScheme = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        val dynamic = if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-        // AA guard: every hand-picked theme accent is WCAG-AA-verified against its
-        // on-accent text (= bgTop, the accent-fill-on-bgTop pairing; the
-        // per-palette ratios are documented at each palette definition). The Material You
-        // `dynamic.primary` is NOT verified, so pin the on-accent to the theme's
-        // bgTop (as the themed scheme already does) and nudge the dynamic accent's
-        // lightness (hue kept) until it clears AA on that same pairing; if it can't,
-        // fall back to the theme's own verified accent rather than ship a failing
-        // contrast. This keeps Material You's hue whenever it is legible.
-        val guardedPrimary = accentPassingContrast(dynamic.primary, base.bgTop, base.accent)
-        themed.copy(primary = guardedPrimary, onPrimary = base.bgTop)
-    } else {
-        themed
-    }
-    // Accent follows the Material You primary when dynamic color is on; the rest of
-    // the palette (grounds, text) is always the selected theme's.
-    val palette = base.copy(accent = scheme.primary)
+    // The selected palette supplies every M3 role, so dialogs, menus and switches
+    // keep it. Accent fills carry bgTop text (onPrimary). Dialogs, sheets and menus
+    // draw on surfaceContainer*/surfaceVariant, not `surface`: every container tier
+    // maps to the elevated ground, the lowest to the base ground. outlineVariant is
+    // pinned too, M3 dividers and menus draw on it. The `*ColorScheme()` factories
+    // default surfaceTint to primary; copy() does not, so it is set here.
+    val scheme: ColorScheme = (if (dark) darkColorScheme() else lightColorScheme()).copy(
+        primary = palette.accent,
+        onPrimary = palette.bgTop,
+        surfaceTint = palette.accent,
+        background = palette.bgTop,
+        surface = palette.bgElevated,
+        onBackground = palette.onBgBody,
+        onSurface = palette.onBgBody,
+        surfaceVariant = palette.bgElevated,
+        onSurfaceVariant = palette.onBgMuted,
+        surfaceContainerLowest = palette.bgTop,
+        surfaceContainerLow = palette.bgElevated,
+        surfaceContainer = palette.bgElevated,
+        surfaceContainerHigh = palette.bgElevated,
+        surfaceContainerHighest = palette.bgElevated,
+        outline = palette.onBgFaint,
+        outlineVariant = palette.onBgFaint.copy(alpha = HairlineAlpha.Strong),
+        inverseSurface = inverse.bgElevated,
+        inverseOnSurface = inverse.onBgBody,
+        inversePrimary = inverse.accent,
+    )
     CompositionLocalProvider(
         LocalStatusColors provides if (dark) DarkStatusColors else StatusColors(),
         LocalPalette provides palette,

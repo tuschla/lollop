@@ -27,31 +27,17 @@ thread_local! {
         std::cell::RefCell::new(Memo::new(RUN_MEMO_CAP));
 }
 
-/// The MOVING legs of a QC'd track as `(metres, seconds)`, segment-aware: the
-/// pause-bridge leg between recording segments is never formed and stopped
-/// legs (<0.5 m/s, File 07 auto-pause) are skipped, matching moving time.
-fn moving_legs(track: &[GpsPoint], segment_starts: &[u32]) -> Vec<(f64, f64)> {
-    let mut legs = Vec::with_capacity(track.len());
-    for seg in running::segments(track, segment_starts) {
-        for w in seg.windows(2) {
-            if let Some((dt, d)) = running::leg(w[0], w[1]) {
-                legs.push((d, dt));
-            }
-        }
-    }
-    legs
-}
-
-/// Fastest time (seconds) to cover `target_m` over contiguous legs. The window
-/// start is interpolated inside its first leg (even pace within one leg), so
-/// the effort covers exactly `target_m`. `None` when the legs are shorter.
+/// Fastest time (seconds) to cover `target_m` over contiguous moving legs
+/// (`(seconds, metres)`, [`running::moving_legs`]). The window start is
+/// interpolated inside its first leg (even pace within one leg), so the effort
+/// covers exactly `target_m`. `None` when the legs are shorter.
 pub(in crate::app) fn fastest_window_sec(legs: &[(f64, f64)], target_m: f64) -> Option<f64> {
     let n = legs.len();
     let mut cd = Vec::with_capacity(n + 1);
     let mut ct = Vec::with_capacity(n + 1);
     cd.push(0.0_f64);
     ct.push(0.0_f64);
-    for (d, t) in legs {
+    for (t, d) in legs {
         cd.push(cd.last().copied().unwrap_or(0.0) + d);
         ct.push(ct.last().copied().unwrap_or(0.0) + t);
     }
@@ -69,7 +55,7 @@ pub(in crate::app) fn fastest_window_sec(legs: &[(f64, f64)], target_m: f64) -> 
             continue;
         }
         // The excess lies inside leg i (i → i+1); trim its share of time.
-        let (leg_d, leg_t) = legs[i];
+        let (leg_t, leg_d) = legs[i];
         let excess = covered - target_m;
         let trim = if leg_d > 0.0 {
             excess / leg_d * leg_t
@@ -102,8 +88,8 @@ fn run_best_efforts(r: &LoggedRun, key: u64, qc: Option<&QcTrack>) -> RunBests {
                 }
             }
             Some(q) => {
-                let legs = moving_legs(&q.track, &q.seg_starts);
-                let total_m: f64 = legs.iter().map(|(d, _)| d).sum();
+                let legs = running::moving_legs(&q.track, &q.seg_starts);
+                let total_m: f64 = legs.iter().map(|(_, d)| d).sum();
                 for (slot, (m, _)) in out.iter_mut().zip(BEST_EFFORT_DISTANCES) {
                     *slot =
                         fastest_window_sec(&legs, m).map(|t| (t, total_m > m * WHOLE_RUN_MATCH.1));
@@ -171,9 +157,7 @@ pub(in crate::app) fn build_run_progress(
         if monday >= first_monday {
             let w = &mut weekly[((monday - first_monday) / 7) as usize];
             w.km += km;
-            w.longest_km = w.longest_km.max(km);
             w.runs += 1;
-            w.moving_min += min;
             if let Some(rpe) = r.session_rpe
                 && min > 0.0
             {
@@ -184,27 +168,17 @@ pub(in crate::app) fn build_run_progress(
         let efforts = run_best_efforts(r, facts.keys[*i], facts.qc[*i].as_deref());
         for (slot, effort) in bests.iter_mut().zip(efforts) {
             if let Some((t, split)) = effort {
-                // Strictly faster wins; a tie keeps the EARLIER run (the record
-                // was set first), independent of storage order.
-                let better = match slot {
-                    None => true,
-                    Some((bt, _, _, at)) => {
-                        t < *bt - BEST_EFFORT_TIE_SEC
-                            || ((t - *bt).abs() <= BEST_EFFORT_TIE_SEC && r.observed_at < *at)
-                    }
-                };
+                // `live` is in chronological order, so a tie keeps the earlier run.
+                let better = slot.is_none_or(|(bt, ..)| t < bt - BEST_EFFORT_TIE_SEC);
                 if better {
                     *slot = Some((t, split, r.entry_id, r.observed_at));
                 }
             }
         }
     }
-    let round1 = |x: f64| (x * 10.0).round() / 10.0;
     for w in &mut weekly {
-        w.km = round1(w.km);
-        w.longest_km = round1(w.longest_km);
-        w.moving_min = round1(w.moving_min);
-        w.srpe_load_au = round1(w.srpe_load_au);
+        w.km = round_tenths(w.km);
+        w.srpe_load_au = round_tenths(w.srpe_load_au);
     }
     let best_efforts = bests
         .iter()
@@ -215,7 +189,6 @@ pub(in crate::app) fn build_run_progress(
                 label: race_distance_title(m / 1000.0),
                 time_sec: whole_seconds(t).min(u64::from(u32::MAX)) as u32,
                 time_label: fmt_clock(t),
-                pace_label: format!("{} /km", fmt_mss(t / (m / 1000.0))),
                 entry_id,
                 observed_at,
                 from_split,
@@ -230,12 +203,10 @@ pub(in crate::app) fn build_run_progress(
             .as_ref()
             .map(|p| p.running_km_per_week.max(0.0))
             .unwrap_or(0.0),
-        longest_run_km: round1(longest.0),
+        longest_run_km: round_tenths(longest.0),
         longest_run_observed_at: longest.1,
         best_efforts,
-        citation: g.reference().to_owned(),
-        grade: Some(g.grade()),
-        confidence: g.confidence(),
+        evidence: EvidenceTagView::of(&g),
     })
 }
 

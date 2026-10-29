@@ -17,6 +17,11 @@ fn stretch(track: &[GpsPoint]) -> Vec<GpsPoint> {
         .collect()
 }
 
+/// The pacing-cue split of the latest tracked run, as the feedback path reads it.
+fn feedback_split(model: &Model) -> Option<f64> {
+    feedback_track_split(model, &RunFacts::new(&model.runs)).map(|t| t.pct)
+}
+
 #[test]
 fn run_only_review_derives_positive_split_feedback_from_last_track() {
     // A GPS run whose back half is far slower than its front half, then a
@@ -25,36 +30,11 @@ fn run_only_review_derives_positive_split_feedback_from_last_track() {
     let app = Engine;
     let mut model = Model::default();
     let points = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.000,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.001,
-            observed_at: 20,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.002,
-            observed_at: 40,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.003,
-            observed_at: 90,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.004,
-            observed_at: 140,
-            accuracy_m: 5.0,
-        },
+        gps(0.000, 0),
+        gps(0.001, 20),
+        gps(0.002, 40),
+        gps(0.003, 90),
+        gps(0.004, 140),
     ];
     app.update(
         log_run_track(stretch(&points), 70.0, 12.0, 0, 0),
@@ -70,25 +50,20 @@ fn run_only_review_derives_positive_split_feedback_from_last_track() {
 
 #[test]
 fn a_fragment_too_short_for_a_verdict_gives_no_pacing_feedback() {
-    // final-runs F3: a ~0.4 km GPS fragment (no full km split) is the latest
+    // A ~0.4 km GPS fragment (no full km split) is the latest
     // tracked run; a manual 4 km run is logged after it. Its halves say
     // nothing about pacing, so no "Even split: textbook pacing" cue.
     let app = Engine;
     let mut model = Model::default();
     let points: Vec<GpsPoint> = (0..5)
-        .map(|k| GpsPoint {
-            lat: 0.0,
-            lon: 0.001 * f64::from(k),
-            observed_at: 30 * i64::from(k),
-            accuracy_m: 5.0,
-        })
+        .map(|k| gps(0.001 * f64::from(k), 30 * i64::from(k)))
         .collect();
     app.update(log_run_track(points.clone(), 70.0, 12.0, 0, 0), &mut model)
         .expect_only_render();
     app.update(log_run_at(4.0, 40.0, 70.0, 600), &mut model)
         .expect_only_render();
     assert!(run_card(&model.runs[0]).split_pct.is_some());
-    assert_eq!(latest_track_split(&model), None);
+    assert_eq!(feedback_split(&model), None);
     let vm = app.view(&model);
     assert!(
         vm.feedback
@@ -104,7 +79,7 @@ fn a_fragment_too_short_for_a_verdict_gives_no_pacing_feedback() {
         &mut model,
     )
     .expect_only_render();
-    assert!(latest_track_split(&model).is_some());
+    assert!(feedback_split(&model).is_some());
 }
 
 #[test]
@@ -114,52 +89,16 @@ fn negative_split_note_reads_as_a_magnitude_not_a_signed_number() {
     // ("N% negative split"), not a signed "-N%" that reads awkwardly next to
     // the word "negative".
     let run = LoggedRun {
-        distance_km: 0.0,
-        duration_min: 0.0,
-        hr_pct_max: 70.0,
-        wire_hr_pct_max: 70.0,
         longest_recent_km: 12.0,
         wire_longest_recent_km: 12.0,
         track: stretch(&[
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.000,
-                observed_at: 0,
-                accuracy_m: 5.0,
-            },
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.001,
-                observed_at: 50,
-                accuracy_m: 5.0,
-            },
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.002,
-                observed_at: 100,
-                accuracy_m: 5.0,
-            },
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.003,
-                observed_at: 120,
-                accuracy_m: 5.0,
-            },
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.004,
-                observed_at: 140,
-                accuracy_m: 5.0,
-            },
+            gps(0.000, 0),
+            gps(0.001, 50),
+            gps(0.002, 100),
+            gps(0.003, 120),
+            gps(0.004, 140),
         ]),
-        track_segment_starts: Vec::new(),
-        observed_at: 0,
-        entry_id: 0,
-        logged_utc_offset_sec: None,
-        hr_pinned: false,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: None,
+        ..logged_run(0.0, 0.0, 70.0, 0)
     };
     let view = run_card(&run);
     assert!(
@@ -180,50 +119,20 @@ fn split_feedback_and_run_row_use_the_same_qc_filtered_track() {
     // A single teleport fix (implausible >12 m/s jump) that CLEARS the
     // accuracy gate but FAILS a qc_track speed gate. The displayed run-row
     // split (to_run_view → qc_track) drops it; the pacing-feedback split
-    // (latest_track_split) must derive from the SAME qc_track output, not the
+    // (feedback_track_split) must derive from the SAME qc_track output, not the
     // accuracy-only usable_track, so the run chip and the coaching cue can't
-    // disagree near ±3% (MEDIUM bug).
+    // disagree near ±3%.
     // Clean track is evenly paced (split ≈ 0 %, "even"); the teleport in the
     // back half, if kept, flips it to a large negative split, opposite
     // verdicts across the ±3 % line.
     let pts = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.000,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.001,
-            observed_at: 25,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.002,
-            observed_at: 50,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.003,
-            observed_at: 75,
-            accuracy_m: 5.0,
-        },
+        gps(0.000, 0),
+        gps(0.001, 25),
+        gps(0.002, 50),
+        gps(0.003, 75),
         // Teleport: ~5.2 km in 1 s (>12 m/s), accuracy fine, qc drops it.
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.050,
-            observed_at: 76,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.004,
-            observed_at: 100,
-            accuracy_m: 5.0,
-        },
+        gps(0.050, 76),
+        gps(0.004, 100),
     ];
     let short = pts;
     let mut pts = stretch(&short);
@@ -236,7 +145,7 @@ fn split_feedback_and_run_row_use_the_same_qc_filtered_track() {
         .expect_only_render();
 
     let row_split = run_card(&model.runs[0]).split_pct.expect("run-row split");
-    let fb_split = latest_track_split(&model).expect("feedback split");
+    let fb_split = feedback_split(&model).expect("feedback split");
     assert_eq!(
         row_split, fb_split,
         "run chip and pacing feedback must derive the split from the same qc_track"
@@ -251,8 +160,7 @@ fn split_feedback_and_run_row_use_the_same_qc_filtered_track() {
         ..model.runs[0].clone()
     };
     let qc_split = run_card(&short_run).split_pct.expect("qc split");
-    let raw_split =
-        running::track_positive_split_pct(&short, running::MAX_GPS_ACCURACY_M).expect("raw split");
+    let raw_split = running::track_positive_split_pct(&short, &[]).expect("raw split");
     assert!(
         (raw_split - qc_split).abs() > 3.0,
         "teleport must shift the accuracy-only split vs the qc split (raw {raw_split}, qc {qc_split})"
@@ -265,54 +173,18 @@ fn positive_split_note_reads_as_a_back_half_slowdown() {
     // split. The run summary must call it out as a "+N% back-half slowdown"
     // so the note and the coaching cue (positive_split_discipline) agree.
     let run = LoggedRun {
-        distance_km: 0.0,
-        duration_min: 0.0,
-        hr_pct_max: 70.0,
-        wire_hr_pct_max: 70.0,
         longest_recent_km: 12.0,
         wire_longest_recent_km: 12.0,
         // Front half (0 → 0.002° over 40 s) is fast; back half
         // (0.002 → 0.004° over 100 s) is slow, a clear back-half slowdown.
         track: vec![
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.000,
-                observed_at: 0,
-                accuracy_m: 5.0,
-            },
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.001,
-                observed_at: 20,
-                accuracy_m: 5.0,
-            },
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.002,
-                observed_at: 40,
-                accuracy_m: 5.0,
-            },
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.003,
-                observed_at: 90,
-                accuracy_m: 5.0,
-            },
-            GpsPoint {
-                lat: 0.0,
-                lon: 0.004,
-                observed_at: 140,
-                accuracy_m: 5.0,
-            },
+            gps(0.000, 0),
+            gps(0.001, 20),
+            gps(0.002, 40),
+            gps(0.003, 90),
+            gps(0.004, 140),
         ],
-        track_segment_starts: Vec::new(),
-        observed_at: 0,
-        entry_id: 0,
-        logged_utc_offset_sec: None,
-        hr_pinned: false,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: None,
+        ..logged_run(0.0, 0.0, 70.0, 0)
     };
     let view = run_card(&run);
     assert!(
@@ -349,10 +221,9 @@ fn positive_split_note_reads_as_a_back_half_slowdown() {
         split.message
     );
     assert_eq!(split.evidence.grade, Some(EvidenceGrade::Moderate));
-    assert!(
-        split.evidence.citation.contains("Hanley"),
-        "got {}",
-        split.evidence.citation
+    assert_eq!(
+        split.evidence.citation,
+        graded((), claims::FB_PACING_001).reference()
     );
     assert!(!split.evidence.safety_critical && !split.evidence.contested);
 }
@@ -397,10 +268,9 @@ fn split_verdict_bands_match_the_single_core_threshold() {
     // Every band carries the same FB-PACING-001 evidence tag.
     for v in [&fade, &even, &neg] {
         assert_eq!(v.evidence.grade, Some(EvidenceGrade::Moderate));
-        assert!(
-            v.evidence.citation.contains("Hanley"),
-            "got {}",
-            v.evidence.citation
+        assert_eq!(
+            v.evidence.citation,
+            graded((), claims::FB_PACING_001).reference()
         );
         assert!(v.evidence.confidence > 0.0);
     }
@@ -411,21 +281,9 @@ fn manual_run_has_no_split_verdict() {
     // No GPS track → no measurable split → no verdict chip (the core never
     // invents a pacing judgment from a hand-entered distance/duration).
     let run = LoggedRun {
-        distance_km: 8.0,
-        duration_min: 45.0,
-        hr_pct_max: 70.0,
-        wire_hr_pct_max: 70.0,
         longest_recent_km: 10.0,
         wire_longest_recent_km: 10.0,
-        track: vec![],
-        track_segment_starts: Vec::new(),
-        observed_at: 0,
-        entry_id: 0,
-        logged_utc_offset_sec: None,
-        hr_pinned: false,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: None,
+        ..logged_run(8.0, 45.0, 70.0, 0)
     };
     let view = run_card(&run);
     assert!(view.split_pct.is_none());
@@ -444,36 +302,11 @@ fn explicit_review_split_wins_over_track_fallback() {
     let app = Engine;
     let mut model = Model::default();
     let points = vec![
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.000,
-            observed_at: 0,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.001,
-            observed_at: 50,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.002,
-            observed_at: 100,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.003,
-            observed_at: 120,
-            accuracy_m: 5.0,
-        },
-        GpsPoint {
-            lat: 0.0,
-            lon: 0.004,
-            observed_at: 140,
-            accuracy_m: 5.0,
-        },
+        gps(0.000, 0),
+        gps(0.001, 50),
+        gps(0.002, 100),
+        gps(0.003, 120),
+        gps(0.004, 140),
     ];
     app.update(log_run_track(points, 70.0, 12.0, 0, 0), &mut model)
         .expect_only_render();

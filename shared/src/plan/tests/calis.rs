@@ -61,10 +61,6 @@ fn item(prog: &Program, ladder: LadderId) -> Option<&Recommended<Prescription>> 
         .find(|p| calis(p).ladder == ladder)
 }
 
-fn claim(rx: &Recommended<Prescription>) -> crate::evidence::ClaimId {
-    rx.claim_id()
-}
-
 #[test]
 fn calisthenics_profile_synthesizes_pattern_balanced_ladder_days() {
     let prog = synthesize(&calis_profile(), &Anchors::default(), 0).expect("a plan is synthesized");
@@ -224,7 +220,7 @@ fn hypertrophy_goal_gets_6_to_15_reps_at_0_to_1_rir() {
     assert_eq!(c.exercise, "Full push-up");
     assert_eq!(c.target, TierTarget::Reps { low: 6, high: 12 });
     assert_eq!(c.rir, (0, 1));
-    assert_eq!(claim(push), claims::CAL_GOAL_RIR_001);
+    assert_eq!(push.claim_id(), claims::CAL_GOAL_RIR_001);
     for s in lift_days(&prog) {
         for p in &s.prescriptions {
             let c = calis(p);
@@ -295,7 +291,7 @@ fn loaded_pullup_trigger_raises_added_kg_not_rung() {
     );
     assert_eq!(c.added_kg, Some(22.5), "+2.5% of the 100 kg system load");
     assert_eq!(c.rir, (1, 2));
-    assert_eq!(claim(rx), claims::CAL_EFAIL_SAFE_001);
+    assert_eq!(rx.claim_id(), claims::CAL_EFAIL_SAFE_001);
     assert!(rx.safety_critical());
     assert_eq!(
         c.harder,
@@ -322,7 +318,7 @@ fn failed_new_rung_prescribes_tempo_bridge_capped_at_8s() {
     assert_eq!(c.exercise, "Full push-up");
     let b = c.tempo_bridge.expect("a tempo bridge on the easier rung");
     assert!(b.eccentric_sec + b.pause_sec < 8, "≤8 s per rep");
-    assert_eq!(claim(rx), claims::CAL_PROG_TEMPO_001);
+    assert_eq!(rx.claim_id(), claims::CAL_PROG_TEMPO_001);
     // The bridge persists while the rung was entered by a regress.
     let mut held = anchor(LadderId::HorizontalPush, 4);
     held.bridged = true;
@@ -351,11 +347,11 @@ fn skip_and_reentry_shape_the_rung_and_its_evidence() {
     let prog = synthesize(&calis_profile(), &with(vec![skip, back]), 0).expect("plan");
     let push = item(&prog, LadderId::HorizontalPush).unwrap();
     assert_eq!(calis(push).tier, 2, "a far-too-easy rung skips two steps");
-    assert_eq!(claim(push), claims::CAL_PLACE_001);
+    assert_eq!(push.claim_id(), claims::CAL_PLACE_001);
     let sq = item(&prog, LadderId::Squat).unwrap();
     assert_eq!(calis(sq).tier, 3, "a 2–8 week break steps down one rung");
     assert_eq!(calis(sq).reentry_steps, 1);
-    assert_eq!(claim(sq), claims::CAL_REENTRY_001);
+    assert_eq!(sq.claim_id(), claims::CAL_REENTRY_001);
 }
 
 #[test]
@@ -395,7 +391,7 @@ fn calisthenics_power_day_leads_with_ballistic_items_capped_contacts() {
             let c = calis(p);
             assert!(c.ballistic);
             assert_eq!(c.rest_sec, crate::calisthenics::BALLISTIC_REST_SEC);
-            assert_eq!(claim(p), claims::CAL_POWER_001);
+            assert_eq!(p.claim_id(), claims::CAL_POWER_001);
             let t = crate::calisthenics::tier(c.ladder, c.tier).unwrap();
             let contacts = c.sets as u32 * c.target.top() as u32 * if t.unilateral { 2 } else { 1 };
             assert!(contacts <= crate::calisthenics::PLYO_CONTACT_CAP);
@@ -488,7 +484,7 @@ fn assisted_nordic_leaves_a_rep_and_is_safety_critical() {
     let c = calis(rx);
     assert_eq!(c.exercise, "Assisted Nordic curl");
     assert_eq!(c.rir, (1, 2));
-    assert_eq!(claim(rx), claims::CAL_EFAIL_SAFE_001);
+    assert_eq!(rx.claim_id(), claims::CAL_EFAIL_SAFE_001);
     assert!(rx.safety_critical());
 }
 

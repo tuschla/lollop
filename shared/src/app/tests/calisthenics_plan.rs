@@ -153,14 +153,7 @@ fn calisthenics_skill_track_schedules_first_and_the_tendon_gate_paces_it() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: later,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, later);
     for back in [30, 23, 16, 9, 1] {
         app.update(
             cal_hold("Tuck front lever", 15, 7.0, (later - back) * DAY_SEC),

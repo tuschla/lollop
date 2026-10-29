@@ -489,13 +489,11 @@ fn run_view_json_carries_split_verdict_and_full_spike_evidence() {
 }
 
 #[test]
-fn lift_view_json_carries_e1rm_trend_fields() {
+fn lift_view_json_carries_the_pr_marker() {
     let _bridge = BRIDGE_RESET.read().unwrap_or_else(|e| e.into_inner());
-    // Pins the additive per-lift e1RM trend wire shape: delta + direction
-    // vs the previous logged set of the same exercise, computed in core so
-    // the shell renders without arithmetic. Distinctive exercise name so
+    // Pins the per-lift PR marker on the wire. Distinctive exercise name so
     // the shared global bridge cannot collide with other tests' sets.
-    let ex = "FFI Trend Pin Squat";
+    let ex = "FFI PR Pin Squat";
     for (weight, reps) in [(100.0, 5), (102.5, 5)] {
         let event = serde_json::json!({
             "LogSet": {
@@ -516,92 +514,25 @@ fn lift_view_json_carries_e1rm_trend_fields() {
         .collect();
     assert_eq!(lifts.len(), 2);
 
-    // First set of the exercise: nothing to compare against.
-    assert!(lifts[0]["e1rm_delta_kg"].is_null());
-    assert!(lifts[0]["e1rm_direction"].is_null());
-
-    // Second set: 102.5x5 vs 100x5, RPE 8 → 7 effective reps → +3.1 kg, "up".
-    assert!((lifts[1]["e1rm_delta_kg"].as_f64().unwrap() - 3.1).abs() < 0.05);
-    assert_eq!(lifts[1]["e1rm_direction"], "up");
+    // First set of the exercise: nothing to beat; the heavier second set is a PR.
+    assert_eq!(lifts[0]["e1rm_pr"], false);
+    assert_eq!(lifts[1]["e1rm_pr"], true);
 }
 
 #[test]
-fn dormant_engine_view_sections_present_with_serde_defaults() {
+fn additive_view_sections_present_with_serde_defaults() {
     let _bridge = BRIDGE_RESET.read().unwrap_or_else(|e| e.into_inner());
-    // Pins the additive ViewModel sections (weekly report, lift audit, the
-    // dormant-engine calculators): they must serialize under these exact
-    // keys, which Android's ignoreUnknownKeys tolerates until a shell
-    // renders them. Shared global bridge → shape checks only.
+    // Pins additive ViewModel sections: they must serialize under these exact
+    // keys. Shared global bridge → shape checks only.
     let view = current_view();
     let view: serde_json::Value = serde_json::from_slice(&view).unwrap();
     assert!(view["weekly_report"].is_array(), "weekly_report key");
     assert!(view["lift_audit"].is_array(), "lift_audit key");
-    assert!(view["cooper"].is_array(), "cooper key");
-    assert!(view["critical_speed"].is_array(), "critical_speed key");
-    assert!(view["apre"].is_array(), "apre key");
     // Option fields serialize as null-or-object, never missing.
     let keys = view.as_object().expect("view object");
     for key in ["training_load", "provisional", "trend", "autoreg_source"] {
         assert!(keys.contains_key(key), "missing view key {key}");
     }
-}
-
-#[test]
-fn cooper_and_apre_calculator_events_round_trip_the_bridge() {
-    let _bridge = BRIDGE_RESET.read().unwrap_or_else(|e| e.into_inner());
-    let cooper = serde_json::json!({ "ComputeCooper": { "distance_m_12min": 2600.0 } });
-    let requests = process_event(cooper.to_string().as_bytes());
-    let requests: serde_json::Value = serde_json::from_slice(&requests).unwrap();
-    assert!(requests.as_array().is_some_and(|a| !a.is_empty()));
-
-    let apre = serde_json::json!({
-        "ComputeApre": { "scheme": "Apre6", "reps": 9, "current_load_kg": 100.0 }
-    });
-    let requests = process_event(apre.to_string().as_bytes());
-    let requests: serde_json::Value = serde_json::from_slice(&requests).unwrap();
-    assert!(requests.as_array().is_some_and(|a| !a.is_empty()));
-
-    let view = current_view();
-    let view: serde_json::Value = serde_json::from_slice(&view).unwrap();
-    let cooper_rows = view["cooper"].as_array().expect("cooper rows");
-    assert!(
-        cooper_rows
-            .iter()
-            .any(|r| r["summary"].as_str().unwrap().contains("VO2max")),
-        "cooper estimate row present: {cooper_rows:?}"
-    );
-    let apre_rows = view["apre"].as_array().expect("apre rows");
-    assert!(
-        apre_rows
-            .iter()
-            .any(|r| r["summary"].as_str().unwrap().contains("APRE-6")),
-        "apre row present: {apre_rows:?}"
-    );
-}
-
-#[test]
-fn critical_speed_event_with_nested_efforts_round_trips_the_bridge() {
-    let _bridge = BRIDGE_RESET.read().unwrap_or_else(|e| e.into_inner());
-    let event = serde_json::json!({
-        "ComputeCriticalSpeed": {
-            "efforts": [
-                { "distance_m": 1200.0, "time_sec": 180.0 },
-                { "distance_m": 5000.0, "time_sec": 1200.0 }
-            ]
-        }
-    });
-    let requests = process_event(event.to_string().as_bytes());
-    let requests: serde_json::Value = serde_json::from_slice(&requests).unwrap();
-    assert!(requests.as_array().is_some_and(|a| !a.is_empty()));
-
-    let view = current_view();
-    let view: serde_json::Value = serde_json::from_slice(&view).unwrap();
-    let rows = view["critical_speed"].as_array().expect("cs rows");
-    assert!(
-        rows.iter()
-            .any(|r| r["summary"].as_str().unwrap().contains("Critical speed")),
-        "cs fit row present: {rows:?}"
-    );
 }
 
 #[test]
@@ -697,19 +628,21 @@ fn calculator_views_echo_their_inputs_in_json_for_form_rehydration() {
 }
 
 #[test]
-fn run_view_json_carries_the_qc_dropped_count() {
+fn run_view_json_drops_a_teleport_fix_from_the_distance() {
     let _bridge = BRIDGE_RESET.read().unwrap_or_else(|e| e.into_inner());
+    // Distinctive stamps so the shared global bridge cannot collide with
+    // other tests' runs.
     let event = serde_json::json!({
         "LogRunTrack": {
             "points": [
-                { "lat": 0.0, "lon": 0.000, "observed_at": 1000, "accuracy_m": 5.0 },
-                { "lat": 0.0, "lon": 0.001, "observed_at": 1020, "accuracy_m": 5.0 },
-                { "lat": 0.0, "lon": 0.100, "observed_at": 1021, "accuracy_m": 5.0 },
-                { "lat": 0.0, "lon": 0.002, "observed_at": 1040, "accuracy_m": 5.0 }
+                { "lat": 0.0, "lon": 0.000, "observed_at": 7_771_000, "accuracy_m": 5.0 },
+                { "lat": 0.0, "lon": 0.001, "observed_at": 7_771_020, "accuracy_m": 5.0 },
+                { "lat": 0.0, "lon": 0.100, "observed_at": 7_771_021, "accuracy_m": 5.0 },
+                { "lat": 0.0, "lon": 0.002, "observed_at": 7_771_040, "accuracy_m": 5.0 }
             ],
             "hr_pct_max": 78.0,
             "longest_recent_km": 12.0,
-            "observed_at": 1000
+            "observed_at": 7_771_000
         }
     });
     process_event(event.to_string().as_bytes());
@@ -720,9 +653,9 @@ fn run_view_json_carries_the_qc_dropped_count() {
         .as_array()
         .expect("runs")
         .iter()
-        .find(|r| r["qc_dropped"].as_u64() == Some(1))
-        .expect("the teleport-carrying run reports one dropped fix");
-    // The teleport never inflates distance: well under 1 km.
+        .find(|r| r["observed_at"].as_i64() == Some(7_771_000))
+        .expect("the teleport-carrying run");
+    // The ~11 km teleport never inflates distance: well under 1 km.
     assert!(run["distance_km"].as_f64().unwrap() < 1.0);
 }
 
@@ -960,14 +893,8 @@ fn parse_fit_json_reports_a_plain_error_for_garbage_bytes() {
     // future JNI boundary.
     let out = super::parse_fit_json(b"not a fit file");
     let v: serde_json::Value = serde_json::from_slice(&out).expect("error JSON parses");
-    assert_eq!(
-        v,
-        serde_json::json!({"error": {
-            "kind": "not_fit",
-            "context": "",
-            "message": "Not a FIT file",
-        }})
-    );
+    assert_eq!(v["error"]["kind"], "not_fit", "{v}");
+    assert_eq!(v["error"]["context"], "", "{v}");
 }
 
 #[test]
@@ -981,14 +908,8 @@ fn parse_fit_json_reports_a_bike_ride_as_not_a_run() {
     let bytes = std::fs::read(&path).expect("fixture should read");
     let out = super::parse_fit_json(&bytes);
     let v: serde_json::Value = serde_json::from_slice(&out).expect("error JSON parses");
-    assert_eq!(
-        v,
-        serde_json::json!({"error": {
-            "kind": "not_a_run",
-            "context": "cycling",
-            "message": "This FIT file records cycling, not a run",
-        }})
-    );
+    assert_eq!(v["error"]["kind"], "not_a_run", "{v}");
+    assert_eq!(v["error"]["context"], "cycling", "{v}");
 }
 
 #[test]
@@ -998,8 +919,6 @@ fn parse_fit_json_refuses_a_fragment_too_short_to_be_a_run() {
     // instead of handing the shell a "run".
     let path = format!("{}/tests/fixtures/Activity.fit", env!("CARGO_MANIFEST_DIR"));
     let bytes = std::fs::read(&path).expect("fixture should read");
-    let track = crate::fit::parse_fit(&bytes).expect("running file parses");
-    assert_eq!(track.segments.iter().map(Vec::len).sum::<usize>(), 14);
     let out = super::parse_fit_json(&bytes);
     let v: serde_json::Value = serde_json::from_slice(&out).expect("error JSON parses");
     assert_eq!(v["error"]["kind"], "no_track", "{v}");

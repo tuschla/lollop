@@ -18,7 +18,7 @@ adb_() { "$ADB" "${SERIAL_ARGS[@]}" "$@"; }
 mkdir -p "$OUT"
 echo "==> running a seeded monkey pass (500 events)"
 adb_ logcat -c
-adb_ shell monkey -p "$APP_ID" -s 42 --throttle 150 --pct-syskeys 0 --ignore-timeouts 500 \
+adb_ shell monkey -p "$APP_ID" -s 42 --throttle 150 --pct-syskeys 0 --ignore-timeouts -v 500 \
   >"$OUT/monkey.txt" 2>&1 || true
 adb_ logcat -d >"$OUT/monkey-logcat.txt"
 
@@ -30,4 +30,8 @@ if grep -E "// (CRASH|NOT RESPONDING): $APP_ID" "$OUT/monkey.txt" \
   echo "ERROR: monkey found a crash/ANR in $APP_ID (see $OUT/monkey.txt, $OUT/monkey-logcat.txt)" >&2
   exit 1
 fi
+# Monkey prints this last line (with -v) only after injecting every event; a run
+# that aborted early (no activity, wrong package, adb error) has none.
+grep -q '// Monkey finished' "$OUT/monkey.txt" \
+  || { echo "ERROR: monkey did not finish (see $OUT/monkey.txt)" >&2; exit 1; }
 echo "==> monkey pass clean"

@@ -14,26 +14,6 @@ use serde_json::json;
 /// A Monday (`(d - 4) % 7 == 0`): the last rendered week starts here.
 pub(super) const END_MON: i64 = 20_500;
 
-/// Deterministic 0..1 sequence (64-bit LCG), so the fixture is identical on
-/// every run and platform.
-struct Lcg(u64);
-
-impl Lcg {
-    fn next(&mut self) -> f64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        (self.0 >> 11) as f64 / (1u64 << 53) as f64
-    }
-
-    fn pick(&mut self, lo: u8, hi: u8) -> u8 {
-        lo + (self.next() * f64::from(hi - lo + 1))
-            .floor()
-            .min(f64::from(hi - lo)) as u8
-    }
-}
-
 pub(super) fn ev(v: serde_json::Value) -> Event {
     serde_json::from_value(v).expect("fixture event decodes")
 }
@@ -373,10 +353,10 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 
 /// (SetToday epoch day, FNV-1a of the view JSON, JSON length).
 const GOLDEN: [(i64, u64, usize); 4] = [
-    (END_MON, 14_966_791_377_927_080_444, 1_181_932),
-    (END_MON + 2, 16_460_677_880_093_023_593, 1_181_270),
-    (END_MON - 1, 5_487_866_796_827_646_665, 1_176_344),
-    (END_MON - 17, 17_026_400_566_693_877_064, 1_170_115),
+    (END_MON, 17_966_945_302_099_585_353, 1_113_496),
+    (END_MON + 2, 6_571_742_933_078_685_545, 1_112_875),
+    (END_MON - 1, 14_382_003_462_995_502_882, 1_107_666),
+    (END_MON - 17, 3_235_686_309_876_353_020, 1_101_545),
 ];
 
 #[test]
@@ -394,6 +374,7 @@ fn view_equivalence_large_history() {
                 view_json(&app, &mut model, day),
                 "memoized view differs from cold view"
             );
+            super::view_wire::assert_only_finite_floats(&app.view(&model));
         }
         if let Some(dir) = &dump {
             std::fs::create_dir_all(dir).expect("dump dir");

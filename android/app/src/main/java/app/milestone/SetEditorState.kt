@@ -99,12 +99,19 @@ internal fun todaySetsFor(
     }.sortedBy { it.observed_at }
 }
 
+/** Reps left in reserve at effort [rpe] on the RIR-based scale (10 − RPE, never
+ *  negative). Pure. */
+internal fun repsLeft(rpe: Double): Double = (10.0 - rpe).coerceAtLeast(0.0)
+
+/** An exercise name as a match key: trimmed, lower case. Pure. */
+internal fun nameKey(name: String): String = name.trim().lowercase()
+
 /** Plain "reps left" for an RPE on the RIR-based scale: 10 → "0 reps left",
  *  9 → "1 rep left", 8 → "2 reps left", 6 or below → "4+ reps left", a half
  *  point → a range ("1–2 reps left"). Always says "reps", so it never reads as
  *  sets. The one wording for effort in the editor, the loop and History. */
 internal fun repsLeftText(res: Resources, rpe: Double): String {
-    val rir = (10.0 - rpe).coerceAtLeast(0.0)
+    val rir = repsLeft(rpe)
     val n = rir.toInt()
     return when {
         rir >= 4.0 -> res.getString(R.string.log_reps_left_4plus)
@@ -214,7 +221,8 @@ private fun halfPoundFigure(kg: Double): String = fmtLosslessPrefill(Math.round(
 internal fun loadFigure(kg: Double, unit: WeightUnit): String =
     if (unit == WeightUnit.Lb) halfPoundFigure(kg) else plateFigure(kg)
 
-/** A ± chip's "%.1f" result without a trailing ".0" ("295.0" → "295"). Pure. */
+/** A ± chip's fixed-decimal result without trailing zeros ("295.0" → "295",
+ *  "103.80" → "103.8"). Pure. */
 internal fun trimWeightText(text: String): String =
     text.toDoubleOrNull()?.let { fmtLosslessPrefill(it) } ?: text
 

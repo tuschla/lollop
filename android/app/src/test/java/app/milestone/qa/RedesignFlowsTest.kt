@@ -53,9 +53,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * Interaction tests that try to break the surfaces of the 2026-10-18 UI sweep
- * (`planning/design/ui-sweep-2026-10-18.md`, rulings in `user-decisions.md`
- * 2026-10-18) over the REAL core: the Today-only "+ Log" FAB from every Today
+ * Interaction tests that try to break the redesigned surfaces over the REAL
+ * core: the Today-only "+ Log" FAB from every Today
  * state, the StatusCard / banner actions, the run detail sheet's rate / trim /
  * delete / export rows, every RatingScale editor, the calculators, the glossary,
  * the Log set editor and the weekly check-in's Save gate. Every assertion is on
@@ -507,7 +506,7 @@ class RedesignFlowsTest {
         val points = (0 until fixes).map { i ->
             app.milestone.GpsPoint(lat = 47.0 + i * 10.0 / 111_195.0, lon = 8.0, observedAt = start + i * 3L, accuracyM = 5.0)
         }
-        return Event.LogRunTrack(points = points, hrPctMax = 0.0, longestRecentKm = 0.0, observedAt = endAt, entryId = endAt * 1000)
+        return Event.LogRunTrack(points = points, hrPctMax = 0.0, observedAt = endAt, entryId = endAt * 1000)
     }
 
     private val yesterdaysRunTitle get() = str(R.string.history_run_weekday, "Sunday")
@@ -581,8 +580,8 @@ class RedesignFlowsTest {
     /** The trim sheet opens on its final body (the detail sheet hands it the track
      *  it already loaded), so its height never changes while it slides in. A body
      *  that grew as the sheet finished opening left Material3's sheet resting at the
-     *  shorter height for good, Trim below the screen (the flaky `runs-trim-light`
-     *  capture of ScreenshotRunsTest.runsRouteFullLight). Stepped frame by frame. */
+     *  shorter height for good, Trim below the screen (the flaky route trim
+     *  captures). Stepped frame by frame. */
     @Test
     fun trimSheet_opensOnItsFinalBody_andRestsWhole() {
         val end = QaHarness.daysAgoAtMidday(1)
@@ -619,7 +618,7 @@ class RedesignFlowsTest {
      *  screen, the sheet opens only once the run's route has loaded, so its body (map,
      *  Trim) is final in its first frame and it rests whole. A body that grew as the
      *  sheet finished opening left Material3's sheet resting at the shorter height,
-     *  Delete run below the screen (frame-stepped probe, 2026-10-29). */
+     *  Delete run below the screen (stepped frame by frame). */
     @Test
     @org.robolectric.annotation.Config(qualifiers = "w411dp-h1300dp-xxhdpi")
     fun runDetail_gpsRun_opensOnceItsRouteLoaded_andRestsWhole() {
@@ -705,7 +704,7 @@ class RedesignFlowsTest {
             ctx,
             listOf(
                 QaHarness.strengthProfile(),
-                Event.LogRun(5.0, 27.5, 0.0, 0.0, observedAt = at, entryId = at * 1000),
+                Event.LogRun(5.0, 27.5, 0.0, observedAt = at, entryId = at * 1000),
                 Event.AmendRunMeta(at * 1000, at, 6, app.milestone.WorkoutType.LongRun),
             ),
         )
@@ -971,7 +970,7 @@ class RedesignFlowsTest {
 
     /** Ticking a sign and unticking it answers nothing: the form is back to its
      *  untouched state, so Save must stay off (an untouched Save would send a
-     *  fabricated week over the stored one, BUGS.md 2026-09-11 #1). */
+     *  fabricated week over the stored one). */
     @Test
     fun weeklyCheckin_tickThenUntick_isStillUnanswered() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
@@ -1184,7 +1183,7 @@ class RedesignFlowsTest {
  * withdraws the explicit all-clear; every answer that can be taken back (a switch,
  * the typed bar speed) leaves the sheet unanswered again: Save off, not an unsaved
  * edit, the all-clear offered. Each answer gets a fresh sheet, so none rides on
- * another (BUGS.md 2026-10-23 fixes 1 and 2).
+ * another.
  */
 @RunWith(RobolectricTestRunner::class)
 class ReviewSheetsSaveGateTest {

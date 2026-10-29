@@ -45,8 +45,6 @@
     <string name="main_resume_run_message">A run was still recording when the app closed.</string>
     <string name="main_resume">Resume</string>
     <string name="main_discard">Discard</string>
-    <string name="main_discard_entry_title">Discard this entry?</string>
-    <string name="main_keep_editing">Keep editing</string>
 
     <!-- Run import (the per-file reasons live in strings_history.xml) -->
     <string name="main_import_failed_generic">Couldn\'t import this file</string>
@@ -281,7 +279,6 @@
     <string name="main_trim_confirm">Trim</string>
     <string name="main_trim_confirm_title">Trim to %1$s (%2$s)?</string>
     <string name="main_trim_confirm_message">Removes %1$d min from the start and %2$d min from the end. This can\'t be undone.</string>
-    <string name="main_trim_unavailable">This run\'s track can\'t be trimmed.</string>
     <string name="main_edit">Edit</string>
 
     <!-- Disclosure button -->
@@ -311,15 +308,10 @@
     <string name="main_evidence_legend_body">A higher grade means more and better studies agree.</string>
     <string name="main_confidence_paren">" (%1$d%% confidence)"</string>
     <string name="main_grade_strong">Strong</string>
-    <string name="main_grade_strong_def">Many good studies agree.</string>
     <string name="main_grade_moderate">Moderate</string>
-    <string name="main_grade_moderate_def">Some good studies support it, but it isn\'t settled yet.</string>
     <string name="main_grade_weak">Weak</string>
-    <string name="main_grade_weak_def">Based on how the body works or on observation, not direct trials.</string>
     <string name="main_grade_expert">Expert opinion</string>
-    <string name="main_grade_expert_def">What experienced coaches do; not yet tested in trials.</string>
     <string name="main_grade_myth">Myth</string>
-    <string name="main_grade_myth_def">Studies contradict it, so the app never uses it.</string>
     <string name="main_legend_safety">A safety rule. It overrides your goals and has no confidence score.</string>
     <string name="main_legend_contested">Sources disagree. The app shows both sides; its choice is provisional.</string>
 
@@ -476,8 +468,8 @@
     <string name="history_run_easy">Easy run</string>
     <!-- An untagged run's title, by the weekday it started: %1$s = "Tuesday". -->
     <string name="history_run_weekday">%1$s run</string>
-    <!-- Run detail overline: %1$s = the run title, %2$s = its date ("Today"). -->
-    <string name="history_run_overline">%1$s · %2$s</string>
+    <!-- Run detail caption under the title: %1$s = the start date ("Wed, Oct 14"), %2$s = the start time ("7:42 AM"). -->
+    <string name="run_start_caption">%1$s · %2$s</string>
 
     <!-- Today: hero accessibility, glossary path, rest day, coach status (UXT-1/9/10/14) -->
     <string name="main_details_subject">Details: %1$s</string>
@@ -667,6 +659,12 @@
     <string name="main_do_not_train_subject">training pause</string>
     <!-- Readiness pill from an earlier check-in, %1$s = the state ("normal · earlier"). -->
     <string name="main_readiness_earlier">%1$s · earlier</string>
+    <!-- Readiness pill names: the short forms of the signals' full labels. -->
+    <string name="main_pill_hrv">HRV</string>
+    <string name="main_pill_wellness">Wellness</string>
+    <string name="main_pill_strength">Strength</string>
+    <string name="main_pill_effort">Effort</string>
+    <string name="main_pill_resting_hr">Resting HR</string>
     <string name="main_checkin_for_today">Check in for today</string>
     <!-- Move: the session can't move; the dialog body is the core's reason. %1$s = session title. -->
     <string name="main_move_blocked_title">%1$s can\'t move</string>

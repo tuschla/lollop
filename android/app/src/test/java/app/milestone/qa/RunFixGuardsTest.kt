@@ -4,13 +4,15 @@ import android.Manifest
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.location.Location
+import android.location.LocationManager
+import android.os.Looper
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
-import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -24,19 +26,18 @@ import app.milestone.DistanceUnit
 import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.EventLog
 import app.milestone.GpsPoint
 import app.milestone.HistoryFocus
-import app.milestone.MainActivity
+import app.milestone.OpenDest
 import app.milestone.R
 import app.milestone.RunSession
-import app.milestone.formatElapsed
+import app.milestone.RunTrackingService
+import app.milestone.openIntent
 import app.milestone.runDistLabel
+import app.milestone.spokenDuration
 import java.io.File
 import java.util.Locale
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -44,16 +45,18 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 /**
- * Guards for three run fixes the mutation review found unpinned (BUGS.md
- * 2026-10-23): the tracker's Finish review shows the CORE's figures for the track
- * Save sends, never the live Kotlin counters; a crash-recovered run resumed from
- * the boot prompt keeps its pause boundaries, and recovery thinning keeps every
- * segment's first fix; a GPS run QC left unmeasurable can still be undone after
- * a delete, because its detail sheet fetches its recorded fixes.
+ * Run tracking and recovery guards: the tracker's Finish review shows the CORE's
+ * figures for the track Save sends, never
+ * the live Kotlin counters; a crash-recovered run resumed from the boot prompt keeps
+ * its pause boundaries, and recovery thinning keeps every segment's first fix; a GPS
+ * run QC left unmeasurable can still be undone after a delete, because its detail
+ * sheet fetches its recorded fixes. Also: a pause breaks the segment even when no
+ * fix passes the live accuracy gate while paused.
  */
 @RunWith(RobolectricTestRunner::class)
 class RunFixGuardsTest {
@@ -88,43 +91,30 @@ class RunFixGuardsTest {
         AppSettings.showRouteMaps.value = true
     }
 
-    /** Point the sidecar store at this test's files dir (it caches the first
-     *  one it saw in this JVM, possibly another test's) and empty it. */
+    /** Point the sidecar store at this test's files dir and empty it. */
     private fun clearSidecar() {
-        ActiveRunStore.javaClass.getDeclaredField("file").apply { isAccessible = true }.set(ActiveRunStore, null)
-        ActiveRunStore.init(ctx)
+        QaHarness.resetActiveRunStore(ctx)
         ActiveRunStore.clearSync()
         File(ctx.filesDir, "active-run.ndjson").delete()
     }
-
-    private fun waitForState(timeoutMs: Long = 15_000, cond: () -> Boolean) =
-        rule.waitUntil(timeoutMs) {
-            rule.onAllNodes(isRoot()).fetchSemanticsNodes()
-            cond()
-        }
 
     private fun waitFor(matcher: androidx.compose.ui.test.SemanticsMatcher, timeoutMs: Long = 15_000) =
         rule.waitUntil(timeoutMs) { rule.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
 
     private val model get() = checkNotNull(EventDispatcher.model.value)
 
-    private fun logLines(): List<String> =
-        File(ctx.filesDir, "event-log.ndjson").takeIf { it.exists() }?.readLines()?.filter { it.isNotBlank() }.orEmpty()
-
     /** A fix [northM] metres north of (52.52, 13.405) at [t], 5 m accuracy. */
     private fun fix(northM: Double, t: Long, accuracyM: Double = 5.0) =
         GpsPoint(52.52 + northM / 111_195.0, 13.405, t, accuracyM)
 
-    // ── Fix 8: the Finish review shows the core's figures ────────────────────
+    // ── The Finish review shows the core's figures ───────────────────────────
 
     @Test
     fun theFinishReviewShowsTheCoresFiguresNotTheLiveCounters() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         // 21 fixes, 30 m every 10 s: the core saves 600 m in 200 s moving.
-        val t0 = AppClock.nowSec() - 400
-        for (i in 0..20) RunSession.add(fix(30.0 * i, t0 + 10L * i), (1_000L + 10L * i) * 1_000_000_000L)
-        RunSession.tracking.value = true
-        lastScenario = launchMain(Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_TRACKING, true))
+        QaHarness.seedRecordingRun()
+        lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
         waitFor(hasText(str(R.string.track_btn_stop)), 30_000)
         // The live counters disagree with the saved figures (a live leg the QC
         // drops, a stop the live floor missed): the review must not show them.
@@ -132,16 +122,16 @@ class RunFixGuardsTest {
         RunSession.elapsedSec.value = 4_321L
         rule.onNodeWithText(str(R.string.track_btn_stop)).performClick()
         waitFor(hasText(str(R.string.track_finish_title)))
-        val core = "${runDistLabel(0.6, DistanceUnit.Km)} · ${formatElapsed(200)} moving"
+        val core = "${runDistLabel(0.6, DistanceUnit.Km)} · ${spokenDuration(ctx.resources, 200)} moving"
         runCatching { waitFor(hasContentDescription(core, substring = true)) }
         val spoken = rule.onAllNodes(androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription))
             .fetchSemanticsNodes().flatMap { it.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription] }
         assertTrue("the review speaks the core's \"$core\": $spoken", spoken.any { core in it })
         assertEquals(0, rule.onAllNodes(hasContentDescription(runDistLabel(9.99, DistanceUnit.Km), substring = true)).fetchSemanticsNodes().size)
-        assertEquals(0, rule.onAllNodes(hasContentDescription(formatElapsed(4_321L), substring = true)).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodes(hasContentDescription(spokenDuration(ctx.resources, 4_321L), substring = true)).fetchSemanticsNodes().size)
     }
 
-    // ── Fix 7: a recovered run keeps its pauses ──────────────────────────────
+    // ── A recovered run keeps its pauses ─────────────────────────────────────
 
     @Test
     fun recoveryThinningKeepsEverySegmentsFirstFix() {
@@ -167,7 +157,10 @@ class RunFixGuardsTest {
         }
         ActiveRunStore.begin(ctx)
         pts.forEachIndexed { i, p ->
-            if (i == 100) RunSession.markResumeBoundary()
+            if (i == 100) {
+                RunSession.setPaused(true)
+                RunSession.setPaused(false)
+            }
             if (RunSession.add(p, (5_000L + (p.observedAt - t0) * 1000L) * 1_000_000L)) ActiveRunStore.append(p)
         }
         RunSession.tracking.value = true
@@ -178,12 +171,50 @@ class RunFixGuardsTest {
         rule.launchApp()
         rule.assertTextCountEventually(str(R.string.main_resume_run_title), 1)
         rule.onNode(hasText(str(R.string.main_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
-        waitForState { RunSession.tracking.value && RunSession.points.value.size == pts.size }
+        rule.waitForState { RunSession.tracking.value && RunSession.points.value.size == pts.size }
         assertEquals("the pause is still a boundary", listOf(100), RunSession.decimatedSegmentStarts(Int.MAX_VALUE))
         assertEquals("the walk during the pause is not distance", liveKm, RunSession.distanceKm.value, 1e-9)
     }
 
-    // ── Fix 9: Undo of an unmeasurable GPS run ───────────────────────────────
+    // ── A pause breaks the segment without an accepted fix ───────────────────
+
+    /** A platform fix [eastM] metres east of (0, 0) at [tSec], [accuracyM] accuracy. */
+    private fun location(eastM: Double, tSec: Long, accuracyM: Float): Location =
+        Location(LocationManager.GPS_PROVIDER).apply {
+            latitude = 0.0
+            longitude = eastM / 111_195.0
+            time = 1_700_000_000_000L + tSec * 1000L
+            elapsedRealtimeNanos = (10_000L + tSec * 1000L) * 1_000_000L
+            accuracy = accuracyM
+        }
+
+    @Test
+    fun aPauseWithoutAnAcceptedFixStillBreaksTheSegment() {
+        val lm = ctx.getSystemService(LocationManager::class.java)
+        shadowOf(lm).setProviderEnabled(LocationManager.GPS_PROVIDER, true)
+        val start = Intent(ctx, RunTrackingService::class.java).setAction("app.milestone.action.START")
+        val controller = Robolectric.buildService(RunTrackingService::class.java, start).create().startCommand(0, 1)
+        fun deliver(l: Location) {
+            shadowOf(lm).simulateLocation(l)
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+        deliver(location(0.0, 0, 5f))
+        deliver(location(15.0, 5, 5f)) // a 3 m/s run leg
+        assertEquals(5L, RunSession.elapsedSec.value)
+
+        RunSession.setPaused(true)
+        // Paused indoors: the only fix is too coarse (50 m > 30 m) for the live gate.
+        deliver(location(25.0, 15, 50f))
+        RunSession.setPaused(false)
+        // First fix after Resume: 20 m from the pre-pause fix, 20 s later (1 m/s).
+        deliver(location(35.0, 25, 5f))
+        assertEquals(3, RunSession.points.value.size)
+        assertEquals("the paused span adds no moving time", 5L, RunSession.elapsedSec.value)
+        assertEquals("the post-resume fix opens a new segment", listOf(2), RunSession.decimatedSegmentStarts())
+        controller.destroy()
+    }
+
+    // ── Undo of an unmeasurable GPS run ──────────────────────────────────────
 
     @Test
     fun anUnmeasurableGpsRunComesBackWithItsFixesAfterDeleteAndUndo() {
@@ -191,7 +222,7 @@ class RunFixGuardsTest {
         // Five fixes, every one past the 30 m accuracy gate: QC leaves nothing to
         // measure, but the run and its recorded fixes are the runner's data.
         val points = (0 until 5).map { fix(3.0 * it, end - 4 + it, accuracyM = 50.0) }
-        val run = Event.LogRunTrack(points = points, hrPctMax = 0.0, longestRecentKm = 0.0, observedAt = end, entryId = end * 1000)
+        val run = Event.LogRunTrack(points = points, hrPctMax = 0.0, observedAt = end, entryId = end * 1000)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), run))
         rule.launchApp()
         assertTrue(model.runs.single().gps_unmeasurable)
@@ -206,17 +237,17 @@ class RunFixGuardsTest {
         val confirm = hasText(str(R.string.main_delete)) and hasClickAction() and hasAnyAncestor(isDialog())
         waitFor(confirm)
         rule.onNode(confirm).performClick()
-        waitForState { model.runs.isEmpty() }
+        rule.waitForState { model.runs.isEmpty() }
         val undo = hasText(str(R.string.log_undo)) and hasClickAction()
         waitFor(undo)
         rule.onNode(undo).performClick()
-        waitForState { model.runs.isNotEmpty() }
+        rule.waitForState { model.runs.isNotEmpty() }
         val back = model.runs.single()
         assertEquals(run.entryId, back.entry_id)
         assertTrue("still the unmeasurable GPS run", back.gps_unmeasurable)
-        val relogged = logLines().filter { EventLog.variantOf(it) == "LogRunTrack" }
+        val relogged = journeyLog().filter { it.variant == "LogRunTrack" }
         assertEquals("seeded + undone", 2, relogged.size)
-        val fixes = Json.parseToJsonElement(relogged.last()).jsonObject["LogRunTrack"]!!.jsonObject["points"]!!.jsonArray
+        val fixes = relogged.last().payload["points"]!!.jsonArray
         assertEquals("every recorded fix comes back", points.size, fixes.size)
     }
 }

@@ -1,12 +1,8 @@
-//! Adversarial review proofs for the 2026-10-23 run fixes (standing-fix
-//! reinsertion in `qc_track`, splits vs moving time, Finish preview vs saved
-//! card, `started_at`, GPX export). `#[ignore = "REVIEW: …"]` tests FAIL on
-//! the current tree and prove a finding; the others verify a fix claim.
+//! Run-track guards: standing-fix QC (`qc_track`), splits against moving
+//! time, the Finish preview against the saved card, and the GPX export
+//! round trip (hdop and coordinates bit-exact).
 
 use super::*;
-
-/// Metres per degree on the equator for the core's haversine (R = 6 371 km).
-const M_PER_DEG: f64 = 6_371_000.0 * std::f64::consts::PI / 180.0;
 
 /// A fix `x_m` east and `y_m` north of (0, 0) at second `t`, 5 m accuracy.
 fn fix_xy(x_m: f64, y_m: f64, t: i64) -> GpsPoint {
@@ -15,20 +11,6 @@ fn fix_xy(x_m: f64, y_m: f64, t: i64) -> GpsPoint {
         lon: x_m / M_PER_DEG,
         observed_at: t,
         accuracy_m: 5.0,
-    }
-}
-
-/// Deterministic xorshift64* in [0, 1).
-struct Rng(u64);
-impl Rng {
-    fn next_f64(&mut self) -> f64 {
-        self.0 ^= self.0 >> 12;
-        self.0 ^= self.0 << 25;
-        self.0 ^= self.0 >> 27;
-        (self.0.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
-    }
-    fn below(&mut self, n: u64) -> u64 {
-        (self.next_f64() * n as f64) as u64
     }
 }
 
@@ -74,10 +56,10 @@ fn run_stand_run(stand_s: i64, mut jitter: impl FnMut(i64) -> (f64, f64)) -> Vec
 /// Uncorrelated (white) horizontal jitter, uniform in a disc of `r` metres:
 /// what a phone reports at 1 Hz standing under poor sky view.
 fn white_disc(seed: u64, r: f64) -> impl FnMut(i64) -> (f64, f64) {
-    let mut rng = Rng(seed);
+    let mut rng = XorShift(seed);
     move |_| {
-        let a = rng.next_f64() * std::f64::consts::TAU;
-        let d = r * rng.next_f64().sqrt();
+        let a = rng.unit() * std::f64::consts::TAU;
+        let d = r * rng.unit().sqrt();
         (d * a.cos(), d * a.sin())
     }
 }
@@ -126,18 +108,16 @@ fn one_outlier_fix_while_standing_adds_no_distance() {
 fn standing_drift_is_not_distance() {
     // A runner stands 300 s while the fix drifts (correlated random walk,
     // 0.8 m steps, pulled back to the stop point, plus 0.5 m white noise).
-    // HEAD (4169b19): mean +3.1 m distance, +18.6 s moving over 20 seeds; now
-    // +18.9 m and +18.6 s. The moving-time leak predates the change; the fix
-    // made distance follow it instead of dropping both.
+    // The stop must hold its distance even though some moving time leaks.
     let mut extra_m = 0.0;
     for seed in 1..=20u64 {
-        let mut rng = Rng(seed * 104_729);
+        let mut rng = XorShift(seed * 104_729);
         let (mut dx, mut dy) = (0.0f64, 0.0f64);
         let card = saved_card(
             run_stand_run(300, |_| {
-                dx = (dx + (rng.next_f64() * 2.0 - 1.0) * 0.8) * 0.98;
-                dy = (dy + (rng.next_f64() * 2.0 - 1.0) * 0.8) * 0.98;
-                (dx + (rng.next_f64() - 0.5), dy + (rng.next_f64() - 0.5))
+                dx = (dx + (rng.unit() * 2.0 - 1.0) * 0.8) * 0.98;
+                dy = (dy + (rng.unit() * 2.0 - 1.0) * 0.8) * 0.98;
+                (dx + (rng.unit() - 0.5), dy + (rng.unit() - 0.5))
             }),
             Vec::new(),
         );
@@ -257,46 +237,46 @@ fn negative_zero_manual_run_never_reads_minus_zero() {
 /// A random track: legs at random speeds incl. stops (identical fixes and
 /// sub-floor drift), white jitter, the occasional bad-accuracy fix, repeated
 /// and backwards stamps, multi-second gaps and pause boundaries.
-fn random_track(rng: &mut Rng) -> (Vec<GpsPoint>, Vec<u32>) {
-    let n = 20 + rng.below(600) as usize;
+fn random_track(rng: &mut XorShift) -> (Vec<GpsPoint>, Vec<u32>) {
+    let n = 20 + rng.scaled(600) as usize;
     let (mut x, mut y, mut t) = (0.0f64, 0.0f64, 1_790_000_000i64);
     let mut pts = Vec::with_capacity(n);
     let mut starts = Vec::new();
     let mut speed = 3.0;
     for i in 0..n {
-        if rng.below(40) == 0 {
-            speed = match rng.below(5) {
+        if rng.scaled(40) == 0 {
+            speed = match rng.scaled(5) {
                 0 => 0.0,
                 1 => 0.3,
                 2 => 1.5,
                 3 => 6.0,
-                _ => 3.0 + rng.next_f64() * 2.0,
+                _ => 3.0 + rng.unit() * 2.0,
             };
         }
-        let dt = match rng.below(30) {
+        let dt = match rng.scaled(30) {
             0 => 0,
             1 => -1,
-            2 => 5 + rng.below(60) as i64,
+            2 => 5 + rng.scaled(60) as i64,
             _ => 1,
         };
         t += dt;
-        let heading = rng.next_f64() * 0.6;
+        let heading = rng.unit() * 0.6;
         x += speed * dt.max(0) as f64 * heading.cos();
         y += speed * dt.max(0) as f64 * heading.sin();
-        let (jx, jy) = if rng.below(3) == 0 {
-            (rng.next_f64() * 4.0 - 2.0, rng.next_f64() * 4.0 - 2.0)
+        let (jx, jy) = if rng.scaled(3) == 0 {
+            (rng.unit() * 4.0 - 2.0, rng.unit() * 4.0 - 2.0)
         } else {
             (0.0, 0.0)
         };
         let mut p = fix_xy(x + jx, y + jy, t);
-        if rng.below(25) == 0 {
+        if rng.scaled(25) == 0 {
             p.accuracy_m = 45.0;
         }
-        if rng.below(15) == 0 {
+        if rng.scaled(15) == 0 {
             // A jitter spike far off the route.
             p.lat += 80.0 / M_PER_DEG;
         }
-        if i > 0 && rng.below(60) == 0 {
+        if i > 0 && rng.scaled(60) == 0 {
             starts.push(i as u32);
         }
         pts.push(p);
@@ -306,26 +286,19 @@ fn random_track(rng: &mut Rng) -> (Vec<GpsPoint>, Vec<u32>) {
 
 #[test]
 fn splits_sum_to_moving_time_and_distance_on_random_tracks() {
-    // Verifies the FixRunMetrics claim "distance, moving time, splits and the
-    // other figures now all use the same legs" as a property over 2 000 random
-    // tracks, on the exact f64 figures (not the whole-second view).
-    let mut rng = Rng(0x5EED_1234_ABCD_0001);
+    // Distance, moving time, splits and the other figures use the same legs:
+    // a property over 2 000 random tracks, on the exact f64 figures (not the
+    // whole-second view).
+    let mut rng = XorShift(0x5EED_1234_ABCD_0001);
     let mut worst_s = 0.0f64;
     let mut worst_m = 0.0f64;
     for _ in 0..2000 {
         let (pts, starts) = random_track(&mut rng);
         let qc = qc_track(&crate::app::ingest::sanitize_track(pts), &starts);
         let moving_s = moving_duration_min(&qc) * 60.0;
-        let dist_m =
-            running::track_distance_km_seg(&qc.track, running::MAX_GPS_ACCURACY_M, &qc.seg_starts)
-                * 1000.0;
+        let dist_m = running::track_distance_km(&qc.track, &qc.seg_starts) * 1000.0;
         for unit in [running::KM_M, running::MILE_M] {
-            let splits = running::track_splits_seg(
-                &qc.track,
-                running::MAX_GPS_ACCURACY_M,
-                unit,
-                &qc.seg_starts,
-            );
+            let splits = running::track_splits(&qc.track, unit, &qc.seg_starts);
             let clock: f64 = splits
                 .iter()
                 .map(|s| {
@@ -354,7 +327,7 @@ fn finish_preview_equals_saved_card_on_random_tracks() {
     // Verifies "the preview equals the saved card" beyond the fixed fixtures:
     // bit-equal on 500 random tracks with pauses, jitter, bad fixes and
     // non-advancing stamps.
-    let mut rng = Rng(0xF1F1_2222_3333_4444);
+    let mut rng = XorShift(0xF1F1_2222_3333_4444);
     for i in 0..500 {
         let (pts, starts) = random_track(&mut rng);
         let preview = preview_track_figures(pts.clone(), &starts);
@@ -375,7 +348,7 @@ fn qc_is_idempotent_so_undo_of_a_route_restores_its_figures() {
     // fixes (RunDetailSheet → Core.exportGpx → restoreEventFor). With the
     // standing-fix reinsertion the QC must still be idempotent or Undo moves
     // distance / moving time.
-    let mut rng = Rng(0x0DD0_1DE0_9999_0001);
+    let mut rng = XorShift(0x0DD0_1DE0_9999_0001);
     for i in 0..2000 {
         let (pts, starts) = random_track(&mut rng);
         let once = qc_track(&crate::app::ingest::sanitize_track(pts), &starts);
@@ -414,14 +387,10 @@ fn hdop_back(a: f32) -> f32 {
 
 #[test]
 fn exported_hdop_never_moves_a_fix_across_the_qc_accuracy_gate() {
-    // What the QC can see of accuracy: only the 30 m gate. No accuracy at or
-    // under it comes back over it, and none just over it (an unmeasurable
-    // run's raw fixes, exported for Undo) comes back under it.
-    let crossing: Vec<(f32, f32)> = hdop_round_trips()
-        .filter(|&(_, back)| back > running::MAX_GPS_ACCURACY_M)
-        .take(3)
-        .collect();
-    assert!(crossing.is_empty(), "{crossing:?}");
+    // What the QC can see of accuracy: only the 30 m gate. No accuracy just
+    // over it (an unmeasurable run's raw fixes, exported for Undo) comes back
+    // under it; one at or under it comes back unchanged
+    // (`exported_hdop_round_trips_accuracy_bit_exact`).
     let mut a = f32::from_bits(running::MAX_GPS_ACCURACY_M.to_bits() + 1);
     while a <= 31.0 {
         let back = hdop_back(a);
@@ -435,7 +404,7 @@ fn exported_hdop_never_moves_a_fix_across_the_qc_accuracy_gate() {
 
 #[test]
 fn exported_hdop_round_trips_accuracy_bit_exact() {
-    // FixRunMetrics: "a route rebuilt from the GPX is bit-identical".
+    // A route rebuilt from its GPX is bit-identical.
     let changed: Vec<(f32, f32)> = hdop_round_trips().filter(|&(a, back)| back != a).collect();
     assert!(
         changed.is_empty(),
@@ -447,12 +416,12 @@ fn exported_hdop_round_trips_accuracy_bit_exact() {
 
 #[test]
 fn exported_coordinates_round_trip_bit_exact() {
-    // Verifies "export_gpx_seg writes lat/lon with `{}`, the shortest decimal
-    // that reads back exactly", and "never exponent notation".
-    let mut rng = Rng(42);
+    // `export_gpx` writes lat/lon with `{}`, the shortest decimal that reads
+    // back exactly, and never in exponent notation.
+    let mut rng = XorShift(42);
     for _ in 0..20_000 {
-        let lat = (rng.next_f64() * 180.0 - 90.0) * if rng.below(10) == 0 { 1e-9 } else { 1.0 };
-        let lon = rng.next_f64() * 360.0 - 180.0;
+        let lat = (rng.unit() * 180.0 - 90.0) * if rng.scaled(10) == 0 { 1e-9 } else { 1.0 };
+        let lon = rng.unit() * 360.0 - 180.0;
         let doc = running::export_gpx(
             &[
                 GpsPoint {
@@ -469,6 +438,8 @@ fn exported_coordinates_round_trip_bit_exact() {
                 },
             ],
             "r",
+            &[],
+            None,
         );
         let lat_s = doc
             .split("lat=\"")
@@ -490,80 +461,5 @@ fn exported_coordinates_round_trip_bit_exact() {
         );
         assert_eq!(lat_s.parse::<f64>().unwrap().to_bits(), lat.to_bits());
         assert_eq!(lon_s.parse::<f64>().unwrap().to_bits(), lon.to_bits());
-    }
-}
-
-/// Writes one GPX per run kind (plain, paused, standing finish, trimmed,
-/// undated legacy stamp, unmeasurable) to `$REVIEW_GPX_DIR` for xmllint
-/// validation against the GPX 1.1 XSD. No-op without the variable.
-#[test]
-fn dump_exported_gpx_samples() {
-    let Ok(dir) = std::env::var("REVIEW_GPX_DIR") else {
-        return;
-    };
-    let line = |n: i64, t0: i64| -> Vec<GpsPoint> {
-        (0..n)
-            .map(|s| fix_xy(3.0 * s as f64, 0.0, t0 + s))
-            .collect()
-    };
-    type Kind<'a> = (&'a str, Vec<GpsPoint>, Vec<u32>, i64, Option<(i64, i64)>);
-    let mut kinds: Vec<Kind> = Vec::new();
-    let t0 = 1_790_000_000;
-    kinds.push(("plain", line(300, t0), vec![], t0 + 299, None));
-    let mut paused = line(150, t0);
-    paused.extend(line(150, t0 + 400).into_iter().map(|mut p| {
-        p.lat += 50.0 / M_PER_DEG;
-        p
-    }));
-    kinds.push(("paused", paused, vec![150], t0 + 549, None));
-    let mut standing_end = line(300, t0);
-    let last = *standing_end.last().unwrap();
-    standing_end.extend((1..120).map(|k| GpsPoint {
-        observed_at: last.observed_at + k,
-        ..last
-    }));
-    kinds.push((
-        "standing_end",
-        standing_end,
-        vec![],
-        last.observed_at + 119,
-        None,
-    ));
-    kinds.push((
-        "trimmed",
-        line(300, t0),
-        vec![],
-        t0 + 299,
-        Some((t0 + 30, t0 + 250)),
-    ));
-    kinds.push(("legacy_zero_stamp", line(300, t0), vec![], 0, None));
-    let bad: Vec<GpsPoint> = line(50, t0)
-        .into_iter()
-        .map(|p| GpsPoint {
-            accuracy_m: 80.0,
-            ..p
-        })
-        .collect();
-    kinds.push(("unmeasurable", bad, vec![], t0 + 49, None));
-    std::fs::create_dir_all(&dir).unwrap();
-    for (name, pts, starts, at, trim_to) in kinds {
-        let app = Engine;
-        let mut model = Model::default();
-        let _ = app.update(log_run_track_seg(pts, 0.0, 0.0, at, 7, starts), &mut model);
-        if let Some((from, until)) = trim_to {
-            let _ = app.update(trim(7, at, from, until), &mut model);
-        }
-        let vm = app.view(&model);
-        let r = &vm.runs[0];
-        let doc = crate::app::export_run_gpx(r.entry_id, r.observed_at);
-        std::fs::write(format!("{dir}/{name}.gpx"), &doc).unwrap();
-        eprintln!(
-            "{name}: has_gpx={} unmeasurable={} observed_at={} started_at={} bytes={}",
-            r.has_gpx,
-            r.gps_unmeasurable,
-            r.observed_at,
-            r.started_at,
-            doc.len()
-        );
     }
 }

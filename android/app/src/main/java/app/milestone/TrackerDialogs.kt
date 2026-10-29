@@ -1,5 +1,6 @@
 package app.milestone
 
+import android.content.res.Resources
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -26,29 +28,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
- * Discarding a captured-but-unsaved run deletes the whole recording with no undo and
- * logs nothing, so it confirms first like every other destructive action.
+ * Confirm before deleting a recorded run (no undo, nothing logged). Each button maps
+ * to exactly one action: [onCancel] keeps the run, [onConfirm] deletes it. [enabled]
+ * is false while a save is in flight.
  */
 @Composable
-internal fun CaptureDiscardDialog(visible: Boolean, onDismiss: () -> Unit, onDiscard: () -> Unit) {
-    ClearConfirmDialog(
-        visible = visible,
-        title = stringResource(R.string.track_discard_title),
-        message = stringResource(R.string.track_discard_body),
-        confirmLabel = stringResource(R.string.log_discard_confirm),
-        onDismiss = onDismiss,
-        onClear = onDiscard,
-    )
-}
-
-/**
- * The Finish review's Discard confirm. Its own dialog (not [ClearConfirmDialog],
- * whose confirm fires onDismiss before onClear) so each button maps to exactly one
- * [FinishAction]: [onCancel] returns to the review, [onConfirm] deletes the run.
- * [enabled] is false while a save is in flight.
- */
-@Composable
-internal fun FinishDiscardDialog(enabled: Boolean, onCancel: () -> Unit, onConfirm: () -> Unit) {
+internal fun DiscardRunDialog(enabled: Boolean, onCancel: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
         onDismissRequest = onCancel,
         shape = RoundedCornerShape(Space.Card.dp),
@@ -98,16 +83,11 @@ internal fun TrackerReadinessSheet(model: ViewModel, onEvent: (Event) -> Unit, o
 }
 
 /**
- * The Finish review shown in place of the control row after Stop: the title, then a
- * scrolling summary (a route thumbnail with start and finish markers, the paused
- * run's distance · moving time · average pace as three large figures, distance and
- * moving time computed by the core for the very track Save sends so History repeats
- * these figures, a short-run notice when the run is under the keep threshold
- * ([isShortRun])), then the optional whole-session effort and run type. The action
- * row stays pinned: Discard · Resume · Save run, with the primary action outermost
- * bottom-right and Resume a text action, so no tonal slab sits beside the primary.
- * [enabled] gates the actions while a save is in flight. Discard only opens the
- * confirm (see [finishTransition]).
+ * The Finish review shown in place of the control row after Stop: route thumbnail,
+ * the core's distance · moving time · average pace for the very track Save sends (so
+ * History repeats these figures), then effort and run type above a pinned Discard ·
+ * Resume · Save run row. Discard only opens the confirm ([finishTransition]).
+ * [enabled] gates the actions while a save is in flight.
  */
 @Composable
 internal fun RunFinishPanel(
@@ -135,13 +115,8 @@ internal fun RunFinishPanel(
         trackSegments(RunSession.decimatedTrackForCore(), RunSession.decimatedSegmentStarts())
     }
     val avgPace = averagePaceMinPerKm(elapsedSec, km)
-    val paceFigure = if (avgPace.isFinite()) formatPaceMinutes(paceInUnit(avgPace, unit)) else NO_VALUE
-    val spoken = stringResource(
-        R.string.track_finish_summary,
-        runDistLabel(km, unit),
-        formatElapsed(elapsedSec),
-        if (avgPace.isFinite()) "$paceFigure ${unit.paceSuffix}" else stringResource(R.string.track_cd_not_available),
-    )
+    val paceFigure = if (avgPace.isFinite()) formatPaceMinutes(paceInUnit(avgPace, unit)) else EmptyValuePlaceholder
+    val spoken = finishSummarySpoken(LocalContext.current.resources, km, elapsedSec, unit)
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
@@ -217,14 +192,7 @@ internal fun RunFinishPanel(
             }
         }
         ControlRow {
-            ControlCircle(
-                R.drawable.ic_ui_close,
-                stringResource(R.string.track_cd_discard_run),
-                danger = true,
-                enabled = enabled,
-                iconSize = 20.dp,
-                onClick = onDiscard,
-            )
+            DiscardRunCircle(enabled = enabled, onClick = onDiscard)
             TextAction(
                 stringResource(R.string.track_finish_resume),
                 onClick = onResume,
@@ -242,3 +210,13 @@ internal fun RunFinishPanel(
 
 /** Height of the Finish review's route thumbnail. */
 private val FinishRouteHeight = 160.dp
+
+/** The Finish review's figures read aloud with units spelled out, e.g. "0.60 km ·
+ *  3 minutes 20 seconds moving · 5 minutes 33 seconds per kilometer average". */
+internal fun finishSummarySpoken(res: Resources, km: Double, elapsedSec: Long, unit: DistanceUnit): String =
+    res.getString(
+        R.string.track_finish_summary,
+        runDistLabel(km, unit),
+        spokenDuration(res, elapsedSec),
+        spokenPace(res, averagePaceMinPerKm(elapsedSec, km), unit),
+    )

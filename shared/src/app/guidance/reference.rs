@@ -11,13 +11,7 @@ pub(in crate::app) const DEFICIT_REFUSAL: &str = "Protein for eating less is not
 pub(in crate::app) fn build_reference(
     reds_present: bool,
 ) -> std::borrow::Cow<'static, [GuidanceView]> {
-    // The reference rows are profile-independent apart from the RED-S deficit
-    // gate, and identical every call in the common no-RED-S case, yet
-    // each rebuild re-runs the evidence-registry lookups behind ~30 `push_guidance`
-    // rows on every `view()`. Borrow the cached common variant; a
-    // RED-S profile is a rare safety state, so recompute its (equally
-    // deterministic) gated variant on demand rather than caching a second copy.
-    // Deterministic (no clock/rand), a lazy constant, not state.
+    // Profile-independent except the RED-S gate: cache the common variant.
     if reds_present {
         return std::borrow::Cow::Owned(build_reference_impl(true));
     }
@@ -86,7 +80,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
     );
 
     // hybrid-011: place the priority quality when freshest.
-    let sched = hybrid::priority_quality_when_freshest(true, true);
+    let sched = graded((), claims::HYB_SCHED_001);
     push_guidance(
         rows,
         "Hybrid",
@@ -95,7 +89,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
     );
 
     // hybrid-019 / CAP-8: double-day fueling.
-    let cho = hybrid::double_day_cho_refuel(true);
+    let cho = graded((), claims::HYB_CHO_001);
     push_guidance(
         rows,
         "Hybrid",
@@ -103,8 +97,9 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
         &cho,
     );
 
-    // hybrid-020: phase interference policy (general vs specific/event).
-    let phase = hybrid::phase_interference_policy(hybrid::HybridPhase::SpecificEvent);
+    // hybrid-020: separate qualities in a general phase, combine them in a
+    // specific/event phase.
+    let phase = graded((), claims::HYB_PHASE_001);
     push_guidance(
         rows,
         "Hybrid",
@@ -131,7 +126,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
     );
 
     // hybrid-025: tendon-stiffness evidence gap → conservative dual progression.
-    let dual = hybrid::conservative_dual_progression(true, true);
+    let dual = graded((), claims::HYB_TENDON_001);
     push_guidance(
         rows,
         "Safety",
@@ -140,7 +135,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
     );
 
     // hybrid-024: energy-availability guard (higher-risk cohorts named).
-    let ea = hybrid::energy_availability_guard(true, true, true);
+    let ea = graded((), claims::HYB_EA_001);
     push_guidance(
         rows,
         "Safety",
@@ -248,7 +243,8 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         &stall,
     );
 
-    let dbl = individualization::double_progression_add_load(true);
+    // load-031: add load once the top of the rep range is hit on every set.
+    let dbl = graded((), claims::DBLPROG_001);
     push_guidance(
         rows,
         "Strength",

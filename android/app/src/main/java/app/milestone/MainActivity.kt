@@ -22,41 +22,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import org.osmdroid.config.Configuration
 
 class MainActivity : ComponentActivity() {
-    // Set true when the run-tracking notification's contentIntent (or any intent
-    // carrying EXTRA_OPEN_TRACKING) delivers, CoachScreen observes it and, if a
-    // run is genuinely live, reopens the tracking screen. A flow rather than a
-    // plain field so an already-running Activity reacts to onNewIntent too.
-    private val openTrackingRequest = MutableStateFlow(false)
-
-    // The latest [ACTION_OPEN] destination (widget, Quick Settings tile, Live
-    // Update tap) not yet applied. CoachScaffold applies and clears it once boot
-    // has run, so a cold start waits for the model before it navigates.
+    // The latest [ACTION_OPEN] destination (widget, Quick Settings tile, a run or
+    // rest notification) not yet applied. CoachScaffold applies and clears it once
+    // boot has run, so a cold start waits for the model before it navigates.
     private val openRequest = MutableStateFlow<OpenDest?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Theme-aware launch/splash frame. The manifest theme (Theme.Milestone)
-        // already follows the SYSTEM light/dark via the values / values-night
-        // split. If the user picked an explicit in-app DarkMode (Light/Dark),
-        // force the matching splash theme here, BEFORE installSplashScreen(),
-        // so the pre-Compose frame honors that choice too. AppSettings is
-        // loaded first for exactly that (it only reads SharedPreferences).
-        //
-        // PLATFORM LIMITATION (accepted): on API 31+ the COLD-START splash is
-        // drawn by SystemUI from the MANIFEST theme before this process even
-        // runs, so an explicit Light/Dark override can NOT tint that very first
-        // frame: it follows the SYSTEM setting for the whole system-drawn
-        // splash, until our own window takes over. setTheme() here still
-        // governs everything the app itself draws: the pre-31 splash, warm
-        // starts, and the post-splash windowBackground (no opposite-color flash
-        // once Compose loads). The only platform lever over the system splash,
-        // UiModeManager.setApplicationNightMode(), is deliberately NOT used: it
-        // recreates the app like a config change on every toggle and has no
-        // documented follow-system reset for our third "System" choice.
+        // AppSettings first: an explicit Light/Dark picks the splash theme before
+        // installSplashScreen(). On API 31+ the system-drawn cold-start splash still
+        // follows the system mode (UiModeManager.setApplicationNightMode would
+        // recreate the app on every toggle and has no "follow system" reset).
         AppSettings.load(this)
         // Home screen widget: every published model refreshes its snapshot; the
         // Quick Settings tile also redraws when a run starts or stops.
         WidgetSync.start(applicationContext)
         TileSync.start(applicationContext)
+        // A force stop clears the session reminder's alarm; any start sets it again.
+        SessionReminder.reschedule(applicationContext)
         when (AppSettings.darkMode.value) {
             DarkMode.Light -> setTheme(R.style.Theme_Milestone_Forced_Light)
             DarkMode.Dark -> setTheme(R.style.Theme_Milestone_Forced_Dark)
@@ -78,13 +60,6 @@ class MainActivity : ComponentActivity() {
         Configuration.getInstance().osmdroidBasePath = File(cacheDir, "osmdroid")
         Configuration.getInstance().osmdroidTileCache = File(cacheDir, "osmdroid/tiles")
         Configuration.getInstance().userAgentValue = packageName
-        if (intent?.getBooleanExtra(EXTRA_OPEN_TRACKING, false) == true) {
-            openTrackingRequest.value = true
-            // Consume it once: without this, every config change (rotation) re-reads
-            // getIntent() and force-reopens the tracker mid-run.
-            intent.removeExtra(EXTRA_OPEN_TRACKING)
-            setIntent(intent)
-        }
         // "Open with" / "Share to" run import (GPX/TCX/FIT). Only on a FRESH create
         // that the share itself started: a rotation or process-restore re-delivers
         // the same getIntent(), and reopening the task from recents replays the
@@ -92,7 +67,7 @@ class MainActivity : ComponentActivity() {
         // the files again.
         val fromRecents = (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
         if (savedInstanceState == null && !fromRecents) RunImport.importRuns(this, RunImport.urisFrom(intent))
-        // An open intent (widget, tile, Live Update) navigates on the same terms: a
+        // An open intent (widget, tile, notification) navigates on the same terms: a
         // rotation or process-restore re-delivers getIntent() with saved state, and a
         // relaunch from recents replays it; neither navigates again.
         if (savedInstanceState == null && !fromRecents) openDestOf(intent)?.let { openRequest.value = it }
@@ -134,7 +109,7 @@ class MainActivity : ComponentActivity() {
                     onDispose {}
                 }
                 Surface(modifier = Modifier.fillMaxSize(), color = BgTop) {
-                    CoachScreen(openTrackingRequest, openRequest)
+                    CoachScreen(openRequest)
                 }
             }
         }
@@ -142,13 +117,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_OPEN_TRACKING, false)) {
-            openTrackingRequest.value = true
-            // Consume it so a later rotation doesn't re-force the tracker open.
-            intent.removeExtra(EXTRA_OPEN_TRACKING)
-            setIntent(intent)
-        }
-        // A widget / tile / Live Update tap while the Activity is alive. It only
+        // A widget / tile / notification tap while the Activity is alive. It only
         // reaches here as a new intent, so a rotation never replays it.
         openDestOf(intent)?.let { openRequest.value = it }
         // A share/open into an already-running Activity imports too.
@@ -156,9 +125,6 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        /** Intent extra asking the shell to reopen the live tracking screen. */
-        const val EXTRA_OPEN_TRACKING = "app.milestone.extra.OPEN_TRACKING"
-
         // Theme-ground alpha for the nav-bar scrim, and the dark scrim androidx's
         // default enableEdgeToEdge() uses where light icons are the only option.
         private const val NAV_SCRIM_ALPHA = 0.9f

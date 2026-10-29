@@ -1,18 +1,8 @@
-//! Training-load & running-analytics math core (knowledge-base File 07:
-//! "Data Harvesting & Analytics - Ingestion Spec").
-//!
-//! Pure, deterministic, IO-free formula functions on `f64` primitives. Every
-//! formula below is transcribed verbatim from File 07's "Formulas" section;
-//! the exact expression + source is reproduced in each function's doc-comment.
-//! Constants are copied verbatim from the spec, do not "tidy" them.
-//!
-//! Most functions here are pure math and return raw scalars, so they are NOT
-//! wrapped in `Recommended<T>`: they compute a number, they do not prescribe.
-//! Only functions that emit a prescriptive *judgement* (e.g. the decoupling
-//! band verdict) are graded with a registry claim (`claims::*`). Canonical
-//! claim_ids used here:
-//! `LOAD-TRIMP-001`, `LOAD-SRPE-001`, `RUN-DECOUPLE-001`, `RUN-GAP-001`, `RUN-SPIKE-001`,
-//! and the hard-blocked myth `LOAD-ACWR-001` (see the ACWR note near the end).
+//! Training-load & running-analytics math core: pure, deterministic formulas
+//! from File 07 ("Data Harvesting & Analytics - Ingestion Spec"), KB 13
+//! session-RPE and the running-007/015 pace bands. Constants are copied
+//! verbatim from the spec. Raw scalars are not graded; the decoupling band
+//! verdict cites `RUN_DECOUPLE_001`.
 
 use crate::evidence::claims;
 use crate::schema::Recommended;
@@ -113,10 +103,7 @@ pub fn riegel_predict(t1_sec: f64, d1: f64, d2: f64, exponent: f64) -> f64 {
 /// `α = 1 − exp(−1/τ)`. `[Moderate]` for CTL/ATL bookkeeping.
 ///
 /// `prev` = yesterday's smoothed value `s_{t−1}`, `today_load` = `x_t`.
-pub fn ewma(prev: f64, today_load: f64, time_constant_days: f64) -> f64 {
-    if time_constant_days.abs() < f64::EPSILON {
-        return today_load;
-    }
+fn ewma(prev: f64, today_load: f64, time_constant_days: f64) -> f64 {
     let alpha = 1.0 - (-1.0 / time_constant_days).exp();
     alpha * today_load + (1.0 - alpha) * prev
 }
@@ -147,143 +134,13 @@ pub fn karvonen_target_hr(hr_rest: f64, hr_max: f64, frac: f64) -> f64 {
     hr_rest + frac * (hr_max - hr_rest)
 }
 
-/// Cooper 12-min test VO2max: `VO2max ≈ (d_meters − 504.9)/44.73` (File 07).
-/// `[Moderate]`
-pub fn cooper_vo2max(distance_m_12min: f64) -> f64 {
-    (distance_m_12min - 504.9) / 44.73
-}
-
-// ---------------------------------------------------------------------------
-// Critical Speed protocol validity (File 04 running-009, RUN-CS-PROTOCOL-001)
-// ---------------------------------------------------------------------------
-
-/// One maximal effort submitted to the Critical Speed protocol (running-009).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CsEffort {
-    pub distance_m: f64,
-    pub time_sec: f64,
-}
-
-/// The fitted 2-parameter linear model `D = CS·t + D′` (running-009):
-/// CS = slope (m/s), D′ = intercept (distance reserve, m).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CsFit {
-    pub cs_m_per_s: f64,
-    pub d_prime_m: f64,
-}
-
-/// Why a set of efforts fails the running-009 protocol validity gates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CsProtocolViolation {
-    /// Fewer than 2 efforts, the linear model needs at least two points.
-    TooFewEfforts,
-    /// More than 5 efforts (KB: "2–5 maximal efforts").
-    TooManyEfforts,
-    /// An effort shorter than 2 min or longer than 30 min. KB marks these
-    /// explicitly invalid ("invalid <2 min or >30 min"). Note the KB also
-    /// states a 2–20 min headline window yet an ideal pair of one 3–8 min +
-    /// one 12–30 min effort, and does not reconcile the 20- vs 30-min upper
-    /// bound; the gate rejects only the explicitly-invalid bounds.
-    DurationOutOfRange,
-    /// All efforts share the same duration, no slope can be fitted.
-    DegenerateDurations,
-    /// A non-positive fitted slope (CS ≤ 0): the efforts imply speed does not
-    /// increase with duration, so D′ and the whole linear model are meaningless.
-    NonPositiveSlope,
-    /// Fitted D′ < 0: the KB reads a negative distance reserve as evidence of
-    /// non-maximal trials, so the estimate is rejected.
-    NegativeDPrime,
-}
-
-/// Explicit KB-invalid duration bounds (running-009): "invalid <2 min or >30 min".
-pub const CS_EFFORT_MIN_SEC: f64 = 120.0;
-pub const CS_EFFORT_MAX_SEC: f64 = 1800.0;
-
-/// Ordinary least-squares fit of `D = CS·t + D′` over ≥2 efforts (running-009:
-/// "CS = slope; D′ = distance reserve"). Pure math, no protocol judgement -
-/// returns `None` when a slope is undefined (<2 points or all-equal durations).
-/// For exactly two efforts this reduces to the two-point model
-/// `CS = (D₂ − D₁)/(T₂ − T₁)`, `D′ = D₁ − CS·T₁` (File 07).
-pub fn cs_linear_fit(efforts: &[CsEffort]) -> Option<CsFit> {
-    if efforts.len() < 2 {
-        return None;
-    }
-    let n = efforts.len() as f64;
-    let mean_t = efforts.iter().map(|e| e.time_sec).sum::<f64>() / n;
-    let mean_d = efforts.iter().map(|e| e.distance_m).sum::<f64>() / n;
-    let mut sxx = 0.0;
-    let mut sxy = 0.0;
-    for e in efforts {
-        let dt = e.time_sec - mean_t;
-        sxx += dt * dt;
-        sxy += dt * (e.distance_m - mean_d);
-    }
-    if sxx.abs() < f64::EPSILON {
-        return None;
-    }
-    let cs = sxy / sxx;
-    Some(CsFit {
-        cs_m_per_s: cs,
-        d_prime_m: mean_d - cs * mean_t,
-    })
-}
-
-/// Advisory pairing check (running-009): the KB's ideal protocol has one
-/// effort of 3–8 min AND one of 12–30 min. Returns true when both windows are
-/// covered. The KB's other pairing cautions, too-similar (1500 m + mile) and
-/// too-spread (800 m + HM), carry NO numeric thresholds in the KB, only those
-/// examples, so this ideal-window predicate is the only implementable pairing
-/// gate; it is advisory (not a hard validity failure).
-pub fn cs_pairing_ideal(efforts: &[CsEffort]) -> bool {
-    let short = efforts
-        .iter()
-        .any(|e| (180.0..=480.0).contains(&e.time_sec));
-    let long = efforts
-        .iter()
-        .any(|e| (720.0..=1800.0).contains(&e.time_sec));
-    short && long
-}
-
-/// Validity-gated Critical Speed estimate (running-009 → `RUN-CS-PROTOCOL-001`,
-/// Moderate; Galbraith/Nicolò 2018). Wraps [`cs_linear_fit`] in the KB's
-/// protocol gates: 2–5 efforts, per-effort duration within the explicit
-/// invalid bounds (≥2 min, ≤30 min), a fittable slope, and a non-negative D′
-/// (negative D′ = non-maximal trials → estimate rejected). Returns the first
-/// violation found, in the order listed on [`CsProtocolViolation`].
-///
-/// The 2–20 min headline window vs 30-min ideal-pair upper bound is a KB
-/// discrepancy (documented on the claim); see [`cs_pairing_ideal`] for the
-/// advisory ideal-pair check.
-pub fn critical_speed_checked(
-    efforts: &[CsEffort],
-) -> Recommended<Result<CsFit, CsProtocolViolation>> {
-    let out = if efforts.len() < 2 {
-        Err(CsProtocolViolation::TooFewEfforts)
-    } else if efforts.len() > 5 {
-        Err(CsProtocolViolation::TooManyEfforts)
-    } else if efforts
-        .iter()
-        .any(|e| e.time_sec < CS_EFFORT_MIN_SEC || e.time_sec > CS_EFFORT_MAX_SEC)
-    {
-        Err(CsProtocolViolation::DurationOutOfRange)
-    } else {
-        match cs_linear_fit(efforts) {
-            None => Err(CsProtocolViolation::DegenerateDurations),
-            Some(fit) if fit.cs_m_per_s <= 0.0 => Err(CsProtocolViolation::NonPositiveSlope),
-            Some(fit) if fit.d_prime_m < 0.0 => Err(CsProtocolViolation::NegativeDPrime),
-            Some(fit) => Ok(fit),
-        }
-    };
-    crate::evidence::graded(out, claims::RUN_CS_PROTOCOL_001)
-}
-
 // ---------------------------------------------------------------------------
 // VDOT / Daniels & Gilbert (File 07)
 // ---------------------------------------------------------------------------
 
 /// Daniels & Gilbert VO2 at running speed `v` (m/min):
 /// `VO2 = −4.60 + 0.182258·v + 0.000104·v²` (File 07 verbatim).
-pub fn daniels_vo2(v_m_per_min: f64) -> f64 {
+fn daniels_vo2(v_m_per_min: f64) -> f64 {
     let v = v_m_per_min;
     -4.60 + 0.182258 * v + 0.000104 * v * v
 }
@@ -291,7 +148,7 @@ pub fn daniels_vo2(v_m_per_min: f64) -> f64 {
 /// Daniels & Gilbert fraction of VO2max sustainable for `t` minutes:
 /// `%max = 0.8 + 0.1894393·e^(−0.012778·t) + 0.2989558·e^(−0.1932605·t)`
 /// (File 07 verbatim).
-pub fn daniels_pct_max(t_min: f64) -> f64 {
+fn daniels_pct_max(t_min: f64) -> f64 {
     0.8 + 0.1894393 * (-0.012778 * t_min).exp() + 0.2989558 * (-0.1932605 * t_min).exp()
 }
 
@@ -303,11 +160,7 @@ pub fn vdot(distance_m: f64, time_sec: f64) -> f64 {
     }
     let t_min = time_sec / 60.0;
     let v = distance_m / t_min;
-    let pct = daniels_pct_max(t_min);
-    if pct.abs() < f64::EPSILON {
-        return 0.0;
-    }
-    daniels_vo2(v) / pct
+    daniels_vo2(v) / daniels_pct_max(t_min)
 }
 
 /// Daniels race-time prediction: the finish time (seconds) over `distance_m`
@@ -317,22 +170,25 @@ pub fn vdot(distance_m: f64, time_sec: f64) -> f64 {
 /// Pair with [`riegel_predict`] and combine via `running::race_equivalency` so a
 /// single method's false precision is never presented alone (File 07). `[Moderate]`
 ///
-/// Guards non-positive inputs and a non-finite distance (returns 0.0) since
-/// VDOT/distance are undefined there. The search brackets 1 s … the time at
-/// 24 m/min, where Daniels' oxygen cost turns negative, so every positive
-/// target VDOT has its root inside the bracket: no distance or VDOT is clamped
-/// to a fabricated bound.
+/// Guards a non-positive or non-finite VDOT or distance (returns 0.0): an
+/// infinite VDOT (a near-zero race time) would otherwise bisect down to the
+/// 1 s bracket floor. The search brackets 1 s … the time at 24 m/min, where
+/// Daniels' oxygen cost turns negative, so every positive target VDOT has its
+/// root inside the bracket: no distance or VDOT is clamped to a fabricated
+/// bound.
 pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
-    if vdot_target <= 0.0 || distance_m <= 0.0 || !distance_m.is_finite() {
+    if !vdot_target.is_finite() || vdot_target <= 0.0 {
+        return 0.0;
+    }
+    if !distance_m.is_finite() || distance_m <= 0.0 {
         return 0.0;
     }
     // vdot(d, t) decreases monotonically in t, so bisect: when the midpoint's
     // VDOT still exceeds the target the time is too short (raise the low bound).
     let mut lo = 1.0; // 1 s - faster than any real finish
     // At 24 m/min `daniels_vo2` is negative (its root is ~24.9 m/min), so the
-    // VDOT there is below any positive target. A fixed cap (it was 12 h) would
-    // return the cap itself for a slow walker's marathon, a time neither
-    // method predicted. 2.5 s per metre = 24 m/min.
+    // VDOT there is below any positive target; a fixed cap would return the
+    // cap itself for a slow walker's marathon. 2.5 s per metre = 24 m/min.
     let mut hi = 2.5 * distance_m;
     for _ in 0..100 {
         let mid = 0.5 * (lo + hi);
@@ -348,7 +204,7 @@ pub fn daniels_predict(vdot_target: f64, distance_m: f64) -> f64 {
 /// Running speed (m/min) whose Daniels & Gilbert oxygen cost equals `vo2`:
 /// the positive root of `0.000104·v² + 0.182258·v − (4.60 + vo2) = 0`, the
 /// inverse of [`daniels_vo2`]. `None` for a non-finite/non-positive target.
-pub fn daniels_speed_for_vo2(vo2: f64) -> Option<f64> {
+fn daniels_speed_for_vo2(vo2: f64) -> Option<f64> {
     if !vo2.is_finite() || vo2 <= 0.0 {
         return None;
     }
@@ -360,7 +216,7 @@ pub fn daniels_speed_for_vo2(vo2: f64) -> Option<f64> {
 
 /// Training pace (seconds per km) for a runner of `vdot` working at
 /// `pct_vo2max` percent of VO2max (running-007: paces come from the CURRENT
-/// VDOT of a recent race). Inverts [`daniels_vo2`] at `pct/100 × VDOT`.
+/// VDOT of a recent race). Inverts `daniels_vo2` at `pct/100 × VDOT`.
 /// `None` for non-positive inputs. `[Moderate]`
 pub fn pace_sec_per_km_at(vdot: f64, pct_vo2max: f64) -> Option<f64> {
     if !vdot.is_finite() || vdot <= 0.0 || !pct_vo2max.is_finite() || pct_vo2max <= 0.0 {
@@ -428,10 +284,9 @@ pub fn lucia_trimp(minutes_per_zone: [f64; 3]) -> f64 {
 // ---------------------------------------------------------------------------
 
 /// A GPS ground speed above this (m/s) is impossible for a runner and is treated
-/// as jitter (File 07 "reject samples implying >12 m/s"). SINGLE SOURCE OF TRUTH
-/// for the ingest QC gate here, the core normalized-speed clamp
-/// (`running::MAX_PLAUSIBLE_SPEED_MPS` re-exports this), and the shell live-jitter
-/// guard, all three gate the same physical thing, so they share the KB value.
+/// as jitter (File 07 "reject samples implying >12 m/s"). One value for the
+/// ingest QC gate, the core moving-leg cap (`running::moving_legs`) and the
+/// shell live-jitter guard.
 pub const MAX_PLAUSIBLE_SPEED_MPS: f64 = 12.0;
 
 /// GPS speed sanity gate: reject samples implying an implausible runner speed
@@ -456,22 +311,6 @@ pub fn is_stopped(speed_m_s: f64) -> bool {
     speed_m_s < 0.5
 }
 
-// ---------------------------------------------------------------------------
-// ACWR: HARD-BLOCKED MYTH (LOAD-ACWR-001). DO NOT USE AS A PREDICTOR.
-// ---------------------------------------------------------------------------
-//
-// The acute:chronic workload ratio (`ACWR = acute 7-day load / chronic
-// 28-day load`, Gabbett 2016 "sweet spot" 0.8–1.3) is graded `MarketingMyth`
-// in the evidence registry under `LOAD-ACWR-001` and is HARD-BLOCKED. It must
-// NEVER be surfaced as advice or used to gate any decision.
-//
-// Reason (File 07 + File 09): the ratio is mathematically coupled, its
-// numerator is a component of its denominator, so the "sweet spot" is a
-// statistical artefact. It performed no better than random data; Enright 2020
-// (RCT) found no injury reduction; Impellizzeri et al. 2019 filed a retraction
-// request and Lolli et al. 2019 documented the coupling. Use week-to-week
-// ramp (< ~10%/wk, and the `RUN-SPIKE-001` single-session distance-spike
-// signal) as the guardrail instead, see `RUN-SPIKE-001`.
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -586,6 +425,16 @@ mod tests {
     }
 
     #[test]
+    fn infinite_vdot_predicts_no_time() {
+        // A near-zero race time overflows VDOT to inf; the prediction is the
+        // 0.0 "no prediction" sentinel, not the 1 s bracket floor.
+        let v = vdot(5000.0, 1e-200);
+        assert!(v.is_infinite(), "{v}");
+        assert_eq!(daniels_predict(v, 42_195.0), 0.0);
+        assert_eq!(daniels_predict(f64::NAN, 42_195.0), 0.0);
+    }
+
+    #[test]
     fn tsb_is_ctl_minus_atl() {
         assert!((tsb(80.0, 55.0) - 25.0).abs() < f64::EPSILON);
         assert!((tsb(40.0, 70.0) - (-30.0)).abs() < f64::EPSILON);
@@ -609,134 +458,9 @@ mod tests {
     }
 
     #[test]
-    fn karvonen_and_cooper() {
+    fn karvonen_target_hr_is_rest_plus_reserve_fraction() {
         // 70% HRR between 50 and 190 → 50 + 0.7*140 = 148.
         assert!((karvonen_target_hr(50.0, 190.0, 0.7) - 148.0).abs() < 1e-9);
-        // Cooper at 2400 m: (2400-504.9)/44.73 ≈ 42.37.
-        assert!((cooper_vo2max(2400.0) - 42.366).abs() < 0.01);
-    }
-
-    // -- Critical Speed protocol validity (running-009 / RUN-CS-PROTOCOL-001) --
-
-    fn eff(distance_m: f64, time_sec: f64) -> CsEffort {
-        CsEffort {
-            distance_m,
-            time_sec,
-        }
-    }
-
-    #[test]
-    fn cs_fit_two_points_matches_two_point_formula() {
-        // 1000 m @ 200 s and 3000 m @ 660 s (both within 2–30 min? 200 s > 120 s ok,
-        // 660 s ok) → identical CS/D′ as the closed-form two-point version.
-        let efforts = [eff(1000.0, 200.0), eff(3000.0, 660.0)];
-        let fit = cs_linear_fit(&efforts).expect("fit");
-        // Closed-form two-point model: CS = 2000/460 ≈ 4.3478 m/s, D′ = 1000 − CS·200.
-        let cs2: f64 = (3000.0 - 1000.0) / (660.0 - 200.0);
-        assert!((cs2 - 4.347826).abs() < 1e-5, "got {cs2}");
-        assert!((fit.cs_m_per_s - cs2).abs() < 1e-9);
-        assert!((fit.d_prime_m - (1000.0 - cs2 * 200.0)).abs() < 1e-9);
-        // Gated path accepts it too.
-        let checked = critical_speed_checked(&efforts).value.expect("valid");
-        assert!((checked.cs_m_per_s - cs2).abs() < 1e-9);
-    }
-
-    #[test]
-    fn cs_gate_effort_count_bounds() {
-        // KB: 2–5 maximal efforts.
-        assert_eq!(
-            critical_speed_checked(&[eff(1000.0, 240.0)]).value,
-            Err(CsProtocolViolation::TooFewEfforts)
-        );
-        let six = [eff(1000.0, 240.0); 6];
-        assert_eq!(
-            critical_speed_checked(&six).value,
-            Err(CsProtocolViolation::TooManyEfforts)
-        );
-    }
-
-    #[test]
-    fn cs_gate_duration_bounds_verbatim() {
-        // KB explicit invalid bounds: <2 min or >30 min.
-        let too_short = [eff(500.0, 119.0), eff(3000.0, 660.0)];
-        assert_eq!(
-            critical_speed_checked(&too_short).value,
-            Err(CsProtocolViolation::DurationOutOfRange)
-        );
-        let too_long = [eff(1000.0, 240.0), eff(9000.0, 1801.0)];
-        assert_eq!(
-            critical_speed_checked(&too_long).value,
-            Err(CsProtocolViolation::DurationOutOfRange)
-        );
-        // Exactly 2 min and exactly 30 min are NOT in the invalid ranges.
-        let edges = [eff(700.0, 120.0), eff(7000.0, 1800.0)];
-        assert!(critical_speed_checked(&edges).value.is_ok());
-    }
-
-    #[test]
-    fn cs_gate_rejects_negative_d_prime_and_degenerate() {
-        // Same duration twice: no slope.
-        let flat = [eff(1000.0, 300.0), eff(1100.0, 300.0)];
-        assert_eq!(
-            critical_speed_checked(&flat).value,
-            Err(CsProtocolViolation::DegenerateDurations)
-        );
-        // First trial non-maximal (way too slow for its duration) → fitted
-        // line has negative intercept (D′ < 0) → rejected per KB.
-        let non_maximal = [eff(600.0, 200.0), eff(3000.0, 660.0)];
-        let fit = cs_linear_fit(&non_maximal).expect("fit exists");
-        assert!(
-            fit.d_prime_m < 0.0,
-            "premise: D′ negative, got {}",
-            fit.d_prime_m
-        );
-        assert_eq!(
-            critical_speed_checked(&non_maximal).value,
-            Err(CsProtocolViolation::NegativeDPrime)
-        );
-    }
-
-    #[test]
-    fn cs_gate_rejects_non_positive_slope() {
-        // Efforts implying speed DECREASES with duration → non-positive slope,
-        // which makes D′ (and the whole model) meaningless. Checked before the
-        // D′ sign gate.
-        let backwards = [eff(3000.0, 200.0), eff(1000.0, 660.0)];
-        assert!(
-            cs_linear_fit(&backwards).expect("fit").cs_m_per_s < 0.0,
-            "premise: CS < 0"
-        );
-        assert_eq!(
-            critical_speed_checked(&backwards).value,
-            Err(CsProtocolViolation::NonPositiveSlope)
-        );
-        // Equal distances over different times → a flat (CS = 0) slope, also rejected.
-        let flat_speed = [eff(2000.0, 200.0), eff(2000.0, 400.0)];
-        assert_eq!(
-            critical_speed_checked(&flat_speed).value,
-            Err(CsProtocolViolation::NonPositiveSlope)
-        );
-    }
-
-    #[test]
-    fn cs_pairing_ideal_windows() {
-        // Ideal: one 3–8 min + one 12–30 min effort.
-        assert!(cs_pairing_ideal(&[eff(1200.0, 300.0), eff(5000.0, 1200.0)]));
-        // Two short efforts: not ideal.
-        assert!(!cs_pairing_ideal(&[eff(1200.0, 300.0), eff(1500.0, 400.0)]));
-        // Two long efforts: not ideal.
-        assert!(!cs_pairing_ideal(&[
-            eff(5000.0, 1200.0),
-            eff(6000.0, 1500.0)
-        ]));
-    }
-
-    #[test]
-    fn cs_checked_carries_moderate_evidence() {
-        let r = critical_speed_checked(&[eff(1000.0, 200.0), eff(3000.0, 660.0)]);
-        assert_eq!(r.claim_id(), claims::RUN_CS_PROTOCOL_001);
-        assert!((r.confidence() - 0.65).abs() < f32::EPSILON);
-        assert!(!r.safety_critical());
     }
 
     #[test]

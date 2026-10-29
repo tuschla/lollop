@@ -89,13 +89,8 @@ class RunTrackingService : Service() {
     // that nothing then cancels, leaving a stuck "Getting a GPS fix".
     @Volatile private var stopped = false
 
-    // The [RunSession.generation] captured when this stream started ([startTracking]).
-    // A Cancel/Back/discard while armed runs `stop()` (async ACTION_STOP) then
-    // `reset()`; a fix already queued on the main looper can fire onFix BEFORE
-    // ACTION_STOP lands, and with `armed` still true would beginRecording() a ghost
-    // session + sidecar AFTER the reset. reset() bumps the generation, so onFix
-    // compares this snapshot against the live value and stands down (self-stops) the
-    // instant they diverge, before touching any recording state.
+    // The [RunSession.generation] this stream started under; onFix stands down once
+    // it differs (see [RunSession.generation]).
     private var sessionGeneration = 0L
 
     // Main-thread scope observing RunSession.paused so an in-app Pause toggle
@@ -119,18 +114,13 @@ class RunTrackingService : Service() {
     // until the next explicit start ([startLocationForeground] clears it).
     private var notifDismissed = false
 
-    // Cached notification-building state. The PendingIntents (tap, pause, resume and
-    // the two Stop variants) and a per-[NotifShape] NotificationCompat.Builder are
-    // built ONCE per state, so the ~1 Hz recording refresh only re-sets the content
-    // line and calls build() instead of reconstructing the PendingIntents + builder +
-    // actions on every fix. The shape (recording/armed/paused) fixes the title and
-    // which actions show; while steady recording it never changes.
-    private var tapPending: PendingIntent? = null
-    private var pausePending: PendingIntent? = null
-    private var resumePending: PendingIntent? = null
-    private var stopPending: PendingIntent? = null
-    private var stopServicePending: PendingIntent? = null
-    private var dismissPending: PendingIntent? = null
+    // Cached notification-building state: the PendingIntents and one builder per
+    // [NotifShape], so the ~1 Hz recording refresh only re-sets the content line.
+    private val openTrackerPending by lazy { openPendingIntent(this, OpenDest.Track) }
+    private val pausePending by lazy { servicePendingIntent(ACTION_PAUSE) }
+    private val resumePending by lazy { servicePendingIntent(ACTION_RESUME) }
+    private val stopServicePending by lazy { servicePendingIntent(ACTION_STOP) }
+    private val dismissPending by lazy { servicePendingIntent(ACTION_NOTIF_DISMISSED) }
     private var cachedBuilder: NotificationCompat.Builder? = null
     private var cachedShape: NotifShape? = null
 
@@ -396,12 +386,8 @@ class RunTrackingService : Service() {
     private fun onFix(loc: Location, batchSize: Int) {
         // Post-stop queued fix: do nothing, and never re-post the notification.
         if (stopped) return
-        // Stale-session guard: a Cancel/Back/discard while armed/locating reset the
-        // session (bumping [RunSession.generation]) but a location result queued on
-        // the main looper can still reach here BEFORE ACTION_STOP tears the stream
-        // down. Recording it would resurrect a ghost session + sidecar AFTER the
-        // reset. Detect the divergence and self-stop instead of touching any state
-        // (not even the preview lastFix, which the reset just cleared).
+        // Stale session (see [RunSession.generation]): self-stop without touching
+        // any state, not even the preview lastFix the reset just cleared.
         if (RunSession.generation != sessionGeneration) {
             unwindLocationFailure(failed = false)
             return
@@ -429,14 +415,9 @@ class RunTrackingService : Service() {
         if (recording) {
             // A fix arrived: any signal-loss episode is over; push the watchdog out.
             onSignalFix()
-            // Paused (stat-sheet control): drop the fix so the paused span records
-            // no route; the service stays foregrounded so the run remains live. Mark a
-            // resume boundary so the NEXT accepted fix opens a new segment; a pause +
-            // relocation must not bridge the displacement into distance.
-            if (RunSession.paused.value) {
-                RunSession.markResumeBoundary()
-                return
-            }
+            // Paused: drop the fix so the paused span records no route; the service
+            // stays foregrounded. [RunSession.setPaused] already marked the boundary.
+            if (RunSession.paused.value) return
             if (RunSession.add(point, loc.elapsedRealtimeNanos)) {
                 // Persist to the crash-durable sidecar the instant the fix is accepted, so
                 // a process/service kill mid-run is recoverable (off the main thread). A fix
@@ -545,23 +526,14 @@ class RunTrackingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        // Safety net: if the service is torn down without an ACTION_STOP (e.g. the
-        // OS stops the component under memory pressure), unregister so the GPS
-        // callback and sensor don't outlive the service. Harmless no-op when
-        // stopTracking() already removed it.
-        stopped = true
+        // Safety net for a teardown without ACTION_STOP (the OS stopping the
+        // component): the GPS callback must not outlive the service, and
+        // stopForeground may not have run, so cancel the notification too.
         serviceScope.cancel()
-        engine.stop()
+        haltStream()
         screenReceiver?.let { runCatching { unregisterReceiver(it) } }
         screenReceiver = null
-        // Cancel the ongoing notification: stopForeground(REMOVE) may not have run
-        // (OS teardown), and a queued onFix could otherwise leave it orphaned.
         getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
-        RunSession.tracking.value = false
-        RunSession.locating.value = false
-        clearArmState()
-        clearSignalWatchdog()
-        clearStepTicker()
         super.onDestroy()
     }
 
@@ -580,71 +552,44 @@ class RunTrackingService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
-    /** Reject a fix that must not reach the LIVE display: a very-low-accuracy fix,
-     *  or — while merely armed/previewing — a STALE cached location the fused provider
-     *  hands back on its first callback (often minutes old / far away). [recording]
-     *  scopes the AGE gate: while recording, batched fixes (Doze wakeups, main-looper
-     *  stalls) may all be many seconds old but MUST still reach [RunSession.add] + the
-     *  sidecar — the FusedEngine forwards every batched fix and RunSession's dt<0
-     *  drop-guard + segment boundaries handle ordering, so dropping one would silently
-     *  amputate the route. While ARMED the same batching applies: a delivered batch
-     *  ([batchSize] > 1) is genuine ongoing screen-off delivery whose fixes are exempt
-     *  from the age gate too, so the [ArmTrigger] moving window can fill; only the lone
-     *  cached first fix (delivered ALONE, [batchSize] == 1) is still rejected. See
-     *  [armedFixPassesAgeGate]. The ACCURACY gate always applies; the core's own QC
-     *  still gates the of-record distance/pace on save. */
+    /** Whether a fix may reach the live display: accuracy within [MAX_GPS_ACCURACY_M]
+     *  (the core's of-record bound) and, unless [recording], fresh enough per
+     *  [armedFixPassesAgeGate]. */
     private fun isPlausibleLiveFix(loc: Location, recording: Boolean, batchSize: Int): Boolean {
-        // Freshness (armed/preview only): elapsedRealtime age is monotonic (immune to
-        // wall-clock skew). Skipped while recording so a batched fix is never dropped.
         if (!recording) {
             val ageMs = (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000
             if (!armedFixPassesAgeGate(ageMs, batchSize)) return false
         }
-        // No reported accuracy → the fix can't be quality-gated: the core's
-        // of-record QC drops it, so recording it live would desync the live
-        // map/distance from the saved run. Reject it here to keep them in step.
-        if (!loc.hasAccuracy()) return false
-        // Accuracy gate: mirror the core's `running::MAX_GPS_ACCURACY_M` (30 m) so
-        // live distance/pace only count fixes the of-record pipeline keeps.
-        if (loc.accuracy > MAX_GPS_ACCURACY_M) return false
-        return true
+        return loc.hasAccuracy() && loc.accuracy <= MAX_GPS_ACCURACY_M
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         lastStartId = startId
-        when (intent?.action) {
+        val action = intent?.action
+        // Only a start or stop may run on an instance that never started a stream: any
+        // other intent that created it (a late Pause tap, Start now, a dismissal) would
+        // leak it, so it stops itself.
+        if (!started && action !in setOf(ACTION_LOCATE, ACTION_START, ACTION_ARM, ACTION_STOP)) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        when (action) {
             ACTION_LOCATE -> startTracking(record = false)
             ACTION_START -> startTracking(record = true)
             ACTION_ARM -> startTracking(record = false, arming = true, intent = intent)
             ACTION_STOP -> stopTracking()
-            // Notification Pause/Resume: write the SAME flag the in-app control sets;
-            // the onFix path drops fixes while paused and the paused-flow collector
-            // re-posts the notification. No startForeground needed (these arrive on an
-            // already-foregrounded service via startService, not startForegroundService).
-            // Guarded on `recording`: a Pause tap racing teardown could deliver here to
-            // a freshly (re)created, non-recording service, whose paused-flow collector
-            // would then post an ongoing notification with NO foreground service behind
-            // it (a stuck ghost notification). Only a live recording may toggle pause.
-            // And a stray Pause/Resume that CREATED this service (onCreate registered
-            // the screen receiver + paused collector with nothing to ever stop them, and
-            // it never ran startTracking, so !started) would otherwise leak the instance:
-            // stopSelf(startId) tears it down. A live locate/armed session (started) is
-            // left untouched.
-            ACTION_PAUSE -> if (recording) RunSession.paused.value = true else if (!started) stopSelf(startId)
-            ACTION_RESUME -> if (recording) RunSession.paused.value = false else if (!started) stopSelf(startId)
-            // "Start now" while armed: begin recording at once, skipping the start gates
-            // (treadmill, a slow start, a GPS hiccup). Only the live armed stream of the
-            // current session may begin; a stray intent that created this instance is
-            // torn down like a stray Pause/Resume.
-            ACTION_START_NOW -> when {
-                armed && !recording && !stopped && RunSession.generation == sessionGeneration -> beginRecording(emptyList())
-                !started -> stopSelf(startId)
-            }
-            // The user dismissed the notification (Android 14+ lets a foreground-service
-            // notification be swiped away; so can a Live Update). Stop re-posting until
-            // the next explicit start. A stray delivery that created this instance is
-            // torn down like a stray Pause/Resume.
-            ACTION_NOTIF_DISMISSED -> if (started) notifDismissed = true else stopSelf(startId)
+            // Notification Pause/Resume. Only a live recording may toggle: on a
+            // locate/armed instance the paused-flow collector would post a
+            // notification with no foreground service behind it.
+            ACTION_PAUSE -> if (recording) RunSession.setPaused(true)
+            ACTION_RESUME -> if (recording) RunSession.setPaused(false)
+            // "Start now" while armed: begin recording at once, skipping the start
+            // gates. Only the live armed stream of the current session may begin.
+            ACTION_START_NOW ->
+                if (armed && !recording && !stopped && RunSession.generation == sessionGeneration) beginRecording(emptyList())
+            // The user dismissed the notification: stop re-posting until the next
+            // explicit start.
+            ACTION_NOTIF_DISMISSED -> notifDismissed = true
         }
         // NOT_STICKY: if the OS kills us mid-run it must not recreate the service
         // with a null intent, that path skips startForeground() and crashes the
@@ -653,18 +598,17 @@ class RunTrackingService : Service() {
         return START_NOT_STICKY
     }
 
+    /**
+     * Start a LOCATE preview, a recording (START), or an ARM preview that begins
+     * recording at the first fix clearing [ArmTrigger]. Every caller used
+     * startForegroundService, so startForeground runs first (its ~5 s deadline kills
+     * the process otherwise), then the fine-location re-check, then the engine. Every
+     * failure goes through [unwindLocationFailure], which also clears the shell's
+     * optimistic armed flag. An ARM reaching a live recording only re-asserts the
+     * notification, so it can't demote the run and merge two runs in one sidecar.
+     */
     @SuppressLint("MissingPermission")
     private fun startTracking(record: Boolean, arming: Boolean = false, intent: Intent? = null) {
-        // Locate-only (record == false) previews fix quality; ACTION_START flips
-        // to recording; ACTION_ARM (arming == true) previews too but auto-begins
-        // recording at the first fix that clears the gates. All arrive via
-        // startForegroundService, so all must call startForeground within the deadline
-        // below. A LOCATE already foregrounded then re-foregrounds harmlessly on ARM.
-        // Defense in depth: an ARM reaching a LIVE recording must not demote it.
-        // recording=false here would let a later trigger-fire re-open the sidecar via
-        // beginRecording() and merge two runs. Satisfy the startForegroundService
-        // deadline by re-asserting the notification, undo the shell's optimistic armed
-        // flag, and leave the run untouched.
         if (arming && recording) {
             RunSession.armed.value = false
             try {
@@ -674,20 +618,13 @@ class RunTrackingService : Service() {
             }
             return
         }
-        // This instance now owns the stream — distinguishes it from an instance a
-        // stray Pause/Resume intent created (see onStartCommand's !started teardown).
         started = true
         recording = record
-        // A fresh LOCATE/START on a reused service instance clears any prior
-        // teardown guard so onFix can post again.
+        // A reused instance clears its teardown guard so onFix can post again.
         stopped = false
-        // Bind this stream to the current session token: onFix records only while the
-        // live [RunSession.generation] still equals this, so a reset() (Cancel/Back/
-        // discard) racing a queued fix can't record into a cleared session.
         sessionGeneration = RunSession.generation
-        // Arm: build the trigger from the requested gates and publish the armed flag
-        // BEFORE foregrounding, so the notification copy and the observing screen are
-        // consistent from the first frame. A non-arming start clears any stale arm.
+        // Publish the arm state before foregrounding, so the notification copy and the
+        // screen agree from the first frame.
         if (arming) {
             armTrigger = ArmTrigger(
                 requirePrecise = intent?.getBooleanExtra(EXTRA_REQUIRE_PRECISE, false) ?: false,
@@ -698,48 +635,25 @@ class RunTrackingService : Service() {
         } else {
             clearArmState()
         }
-        // startForegroundService (the caller) arms a ~5 s deadline: this service
-        // MUST call startForeground before anything, or the framework kills the
-        // process with ForegroundServiceDidNotStartInTimeException. So fulfill the
-        // deadline FIRST, before the permission re-check, and only then decide
-        // whether to keep running. No path may bail out having armed the deadline
-        // without a startForeground call.
         try {
             startLocationForeground()
         } catch (_: SecurityException) {
-            // API 34+: startForeground for a location FGS itself throws without a
-            // location grant. The framework has REJECTED the start here (the deadline
-            // is satisfied by its own rejection). Run the shared clean unwind so the
-            // OPTIMISTIC armed flag the shell set is cleared too — a bare stopSelf()
-            // would leave RunSession.armed latched and strand the tracker armed.
+            // API 34+: a location FGS without a location grant is rejected here.
             unwindLocationFailure()
             return
         }
-        // Foregrounded: now safe to bail if fine location raced away between the
-        // UI's check and here (revoking location also downgrades to coarse-only). Route
-        // through the shared clean unwind so the arm state is cleared too — a bare
-        // stopForeground/stopSelf here would leave RunSession.armed latched and strand
-        // the tracker on "Acquiring GPS" with no engine behind it.
-        // smoke: revoke precise location while armed, tap Start → the tracker returns to
-        // idle (armed flag cleared, no stuck "Acquiring GPS"); not JVM-unit-testable as
-        // this path needs a live foreground Service + startForeground.
+        // Fine location may have been revoked between the UI's check and here.
         if (!hasFineLocation(this)) {
             unwindLocationFailure()
             return
         }
         try {
-            // The onError callback fires for an ASYNC start failure the try/catch
-            // can't see: the fused client's requestLocationUpdates returns a Task
-            // that can fail (a permission race surfacing after the callback was
-            // registered) with no exception thrown here: a dropped failure would
-            // leave the service foregrounded delivering ZERO fixes. It runs the same
-            // clean unwind as the synchronous SecurityException catch below.
+            // onError covers an async start failure (the fused client's Task) that
+            // throws nothing here.
             engine.start(::onFix) { unwindLocationFailure() }
-            // Sync the freshly-started stream to the current screen state.
             engine.setBackground(screenOff)
             RunSession.locating.value = true
-            // Only recording flips `tracking` (Start/Stop UI); locate leaves it
-            // false so the Start button stays shown while GPS is acquired.
+            // Only recording flips `tracking`; a locate keeps Start on screen.
             RunSession.tracking.value = record
             // A direct recording start (crash-resume) watches for signal loss too.
             if (record) armSignalWatchdog()
@@ -747,49 +661,41 @@ class RunTrackingService : Service() {
             // Permission raced away between the check above and engine.start.
             unwindLocationFailure()
         } catch (_: IllegalArgumentException) {
-            // The platform engine found no GPS provider (a Wi-Fi-only tablet without
-            // Play Services): fail the start cleanly instead of crashing.
+            // The platform engine found no GPS provider (no Play Services, no GPS).
             unwindLocationFailure()
         }
     }
 
-    /** Clean unwind for a location-start failure (synchronous SecurityException, a
-     *  missing GPS provider, or the fused client's async Task failure): stop the
-     *  half-started engine, drop the foreground state, and self-stop so the service
-     *  never lingers foregrounded with no fix stream. [failed] publishes
-     *  [RunSession.locationFailed] so the screen stops re-launching the preview into
-     *  the same failure; false for the stale-session stand-down, which is not a
-     *  failure. Marks [stopped] so a late queued onFix returns without re-posting the
-     *  notification, and is idempotent, a second call (e.g. an async Task failure
-     *  arriving after a clean stop) short-circuits. */
-    private fun unwindLocationFailure(failed: Boolean = true) {
-        if (stopped) return
+    /** Stop the stream and clear every engine-state flag. Marks [stopped] first, so a
+     *  fix already queued on the main looper returns without re-posting the
+     *  notification. Shared by every teardown path. */
+    private fun haltStream() {
         stopped = true
         engine.stop()
-        RunSession.tracking.value = false
-        RunSession.locating.value = false
-        if (failed) RunSession.locationFailed.value = true
+        recording = false
         clearArmState()
         clearSignalWatchdog()
         clearStepTicker()
+        RunSession.markStopped()
+    }
+
+    /** Unwind a failed location start (a SecurityException, no GPS provider, the
+     *  fused client's async failure) or a stale session, so the service never lingers
+     *  foregrounded without fixes. [failed] publishes [RunSession.locationFailed] so
+     *  the screen stops re-launching the preview; false for the stale-session
+     *  stand-down. Idempotent once [stopped]. */
+    private fun unwindLocationFailure(failed: Boolean = true) {
+        if (stopped) return
+        haltStream()
+        if (failed) RunSession.locationFailed.value = true
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf(lastStartId)
     }
 
     private fun stopTracking() {
-        // Guard against a location result already queued on the main looper: mark
-        // stopped BEFORE tearing down so any late onFix returns without re-posting
-        // the notification.
-        stopped = true
-        engine.stop()
-        recording = false
-        armTrigger = null
-        clearSignalWatchdog()
-        clearStepTicker()
-        RunSession.markStopped()
+        haltStream()
         stopForeground(STOP_FOREGROUND_REMOVE)
-        // Belt-and-suspenders: explicitly cancel so no "Getting a GPS fix" / "Tracking
-        // run" notification can linger if a re-post slipped in before `stopped`.
+        // Cancel too, in case a re-post slipped in before `stopped`.
         getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
         stopSelf(lastStartId)
     }
@@ -826,8 +732,7 @@ class RunTrackingService : Service() {
         // Per-fix hot path: while steady recording the shape (title + which
         // actions show) never changes, so reuse the builder cached for it and only
         // re-set the per-frame fields + build(). A state change (pause toggle, armed →
-        // recording) rebuilds the builder once. Each PendingIntent is cached once —
-        // they're identical every build.
+        // recording) rebuilds the builder once.
         val builder = cachedBuilder?.takeIf { cachedShape == shape } ?: buildBuilder(shape).also {
             cachedBuilder = it
             cachedShape = shape
@@ -848,8 +753,8 @@ class RunTrackingService : Service() {
             this,
             CHANNEL,
             getString(trackingNotifTitleRes(shape.recording, shape.armed, shape.paused)),
-            tapPendingIntent(),
-            dismissPendingIntent(),
+            openTrackerPending,
+            dismissPending,
         )
         // Pause/Resume only while actually RECORDING. It drives the SAME
         // RunSession.paused flag the in-app Pause button toggles (one source of
@@ -861,80 +766,32 @@ class RunTrackingService : Service() {
             builder.addAction(
                 0,
                 if (shape.paused) getString(R.string.track_action_resume) else getString(R.string.track_action_pause),
-                if (shape.paused) resumePendingIntent() else pausePendingIntent(),
+                if (shape.paused) resumePending else pausePending,
             )
         }
-        // Stop, offered in every state. While recording OR armed it DEEP-LINKS into
-        // the tracking screen (same EXTRA_OPEN_TRACKING as the tap) and does NOT
-        // auto-save: an of-record save must go through the in-app flow (the Finish
-        // review with its short-run note + the Save/Discard choice), so this lands the user on the
-        // tracking screen to Stop and review the run. An auto-save action would bypass those
-        // gates and could silently log a drift/accidental run.
+        // Stop, offered in every state. While recording OR armed it opens the tracker
+        // (like the tap) and does NOT auto-save: an of-record save must go through the
+        // in-app flow (the Finish review with its short-run note + the Save/Discard
+        // choice). An auto-save action would bypass those gates and could silently
+        // log a drift/accidental run.
         if (shape.recording || shape.armed) {
-            builder.addAction(0, getString(R.string.track_action_stop), stopPendingIntent())
+            builder.addAction(0, getString(R.string.track_action_stop), openTrackerPending)
         } else {
             // Locate-only preview: there is no captured run to route through the save
             // gate, so Stop just tears the service down (ACTION_STOP), freeing the GPS
             // radio if the user opened the tracker to check a fix and walked away.
-            builder.addAction(0, getString(R.string.track_action_stop), stopServicePendingIntent())
+            builder.addAction(0, getString(R.string.track_action_stop), stopServicePending)
         }
         return builder
     }
 
-    /** Tapping the ongoing notification reopens MainActivity ONTO the live tracking
-     *  screen (EXTRA_OPEN_TRACKING is consumed by CoachScreen). SINGLE_TOP so an
-     *  already-running Activity gets onNewIntent instead of a duplicate; UPDATE_CURRENT
-     *  so the extra survives re-notify. Cached: identical every build. */
-    private fun tapPendingIntent(): PendingIntent = tapPending ?: PendingIntent.getActivity(
-        this, REQ_TAP, openTrackingIntent(),
+    /** A notification action delivered to this service's [onStartCommand]. The
+     *  actions differ, so each is its own PendingIntent. */
+    private fun servicePendingIntent(action: String): PendingIntent = PendingIntent.getService(
+        this, 0,
+        Intent(this, RunTrackingService::class.java).setAction(action),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-    ).also { tapPending = it }
-
-    /** Stop action target: deep-links into the tracking screen (distinct request code
-     *  from the tap, whose Activity intent is otherwise identical). Cached. */
-    private fun stopPendingIntent(): PendingIntent = stopPending ?: PendingIntent.getActivity(
-        this, REQ_STOP, openTrackingIntent(),
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-    ).also { stopPending = it }
-
-    /** Locate-only Stop: a direct ACTION_STOP to the service (getService), so tapping
-     *  it tears the preview down without routing through the in-app save flow (there
-     *  is nothing captured to save). Cached: identical every build. */
-    private fun stopServicePendingIntent(): PendingIntent = stopServicePending ?: PendingIntent.getService(
-        this, REQ_STOP_SERVICE,
-        Intent(this, RunTrackingService::class.java).setAction(ACTION_STOP),
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-    ).also { stopServicePending = it }
-
-    /** Delete intent: tells the service the user swiped the notification away, so it
-     *  stops re-posting it (ACTION_NOTIF_DISMISSED). Cached. */
-    private fun dismissPendingIntent(): PendingIntent = dismissPending ?: PendingIntent.getService(
-        this, REQ_DISMISS,
-        Intent(this, RunTrackingService::class.java).setAction(ACTION_NOTIF_DISMISSED),
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-    ).also { dismissPending = it }
-
-    /** Pause action: sets RunSession.paused via a service intent. Cached (the pause
-     *  and resume intents differ by action, so they are distinct PendingIntents). */
-    private fun pausePendingIntent(): PendingIntent = pausePending ?: PendingIntent.getService(
-        this, REQ_PAUSE,
-        Intent(this, RunTrackingService::class.java).setAction(ACTION_PAUSE),
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-    ).also { pausePending = it }
-
-    /** Resume action: clears RunSession.paused via a service intent. Cached. */
-    private fun resumePendingIntent(): PendingIntent = resumePending ?: PendingIntent.getService(
-        this, REQ_PAUSE,
-        Intent(this, RunTrackingService::class.java).setAction(ACTION_RESUME),
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-    ).also { resumePending = it }
-
-    /** The Activity intent that reopens the live tracking screen (shared by the tap
-     *  contentIntent and the Stop action). SINGLE_TOP + the OPEN_TRACKING extra. */
-    private fun openTrackingIntent(): Intent =
-        Intent(this, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            .putExtra(MainActivity.EXTRA_OPEN_TRACKING, true)
+    )
 
     /**
      * Elapsed time + live distance from the captured track (06-run-tracking
@@ -984,16 +841,6 @@ class RunTrackingService : Service() {
         private const val EXTRA_REQUIRE_MOVING = "app.milestone.extra.REQUIRE_MOVING"
         private const val CHANNEL = "run_tracking"
         private const val NOTIF_ID = 1
-        // Distinct PendingIntent request codes so the tap contentIntent, the Pause/
-        // Resume action, and the Stop action stay separate PendingIntents (the tap
-        // and Stop share an identical Activity intent, so they must differ by code).
-        private const val REQ_TAP = 0
-        private const val REQ_PAUSE = 1
-        private const val REQ_STOP = 2
-        // Locate-only Stop: a getService ACTION_STOP intent; a distinct request code
-        // so it never collides with the getActivity deep-link Stop (REQ_STOP).
-        private const val REQ_STOP_SERVICE = 3
-        private const val REQ_DISMISS = 4
 
         // Service-side haptic cues (VIBRATE permission). Recording started: one firm
         // pulse. Signal lost: two pulses, so the two can be told apart in a pocket.
@@ -1148,19 +995,11 @@ internal fun trackingNotifContentSpec(
 }
 
 /**
- * The Live Update status-bar chip text (Android 16+) for a tracking state, as a
- * string resource; null while actively recording, where the caller shows the MOVING
- * time ([formatElapsed] of [RunSession.elapsedSec], "23:41", "1:02:33").
- *
- * One rule, moving time, chosen over the two alternatives:
- * - not a chronometer (`setUsesChronometer`): the system ticks it on the wall clock,
- *   but moving time stops while the runner stands still, so the chip would run ahead
- *   of the tracker's own figure and jump back on the next re-post;
- * - not distance: "12.34 km" is 8 characters and the chip shows text whole only up to
- *   [LIVE_CHIP_MAX_CHARS] (7); moving time fits up to 9:59:59.
- * The text is refreshed by the existing ~1 Hz throttled re-post (the moving time is in
- * the content line too, so no extra posts). Every literal here is at most 7 characters
- * (LiveRunNotificationTest).
+ * The Live Update status-bar chip text (Android 16+) per tracking state; null while
+ * recording, where the caller shows the moving time ([formatElapsed]). The chip
+ * shows text whole only up to 7 characters: moving time fits to 9:59:59, every
+ * literal here fits (LiveRunNotificationTest). Not a chronometer: it would tick on
+ * the wall clock while moving time stands still.
  */
 @StringRes
 internal fun trackingChipRes(recording: Boolean, armed: Boolean, paused: Boolean, signalLost: Boolean): Int? = when {
@@ -1432,7 +1271,8 @@ private class PlatformEngine(private val ctx: Context) : LocationEngine {
 
     @SuppressLint("MissingPermission")
     private fun request(l: LocationListener) = lm.requestLocationUpdates(
-        // 1 s (screen on) / 4 s (screen off): the core decimates as needed.
+        // 1 s (screen on) / 4 s (screen off); the shell thins at save time
+        // (`RunSession.decimatedTrackForCore`).
         LocationManager.GPS_PROVIDER,
         if (background) PLATFORM_BG_INTERVAL_MS else PLATFORM_FG_INTERVAL_MS,
         PLATFORM_MIN_DISTANCE_M,

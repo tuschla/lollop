@@ -54,7 +54,7 @@ object Core {
      *  or null. Caught instead of letting the initializer throw, which would make
      *  every later touch of [Core] a NoClassDefFoundError crash: boot reads it via
      *  [probe] and shows the core-unavailable state instead. */
-    private val loadError: Throwable? = try {
+    internal val loadError: Throwable? = try {
         System.loadLibrary("shared")
         null
     } catch (e: UnsatisfiedLinkError) {
@@ -140,15 +140,12 @@ object Core {
      *  like the error envelope. */
     external fun parseFit(bytes: ByteArray): String?
 
-    /** Build the GPX 1.1 document for ONE logged run ON DEMAND. The list
-     *  payload no longer ships a per-run GPX string (it was a ~0.5 MB blob
-     *  re-serialised over JNI + re-parsed on every event); the shell calls this
-     *  only for the one run it inspects, matched by the same (entry_id,
+    /** Build the GPX 1.1 document for ONE logged run, matched by the same (entry_id,
      *  observed_at) identity as delete/amend. Returns "" for a hand-entered run or
      *  an unknown id; for a GPS run QC left unmeasurable (gps_unmeasurable) it is
      *  the recorded fixes, read only by Undo (no route to map or share). null only
-     *  if the JNI string couldn't be allocated (the caller treats null like ""). Reads the
-     *  registry the last [view] populated, so call it after the run list rendered.
+     *  if the JNI string couldn't be allocated (the caller treats null like ""). Reads
+     *  the registry the last [view] populated, so call it after the run list rendered.
      *  Heavy (builds + returns the whole document): call OFF the main thread. */
     external fun exportGpx(entryId: Long, observedAt: Long): String?
 
@@ -165,6 +162,23 @@ object Core {
     fun savedFigures(track: Event.LogRunTrack): TrackFigures? {
         val json = trackFigures(track.toJson().toString().toByteArray(Charsets.UTF_8)) ?: return null
         return runCatching { coreJson.decodeFromString(TrackFigures.serializer(), json) }.getOrNull()
+    }
+
+    /** Pure core query (no model/log): the [LogCompaction] JSON for the event-log
+     *  [lines], or null. See [compaction]. */
+    private external fun compactLog(lines: Array<String>): String?
+
+    /** The core's compaction verdict on the event-log [lines] (log.rs), or null when
+     *  the core can't answer (the library didn't load, it is [unavailable] or under
+     *  [faultForTest], or the call failed): the caller then keeps every line. */
+    internal fun compaction(lines: List<String>): LogCompaction? {
+        if (loadError != null || unavailable || faultForTest != null) return null
+        val json = try {
+            compactLog(lines.toTypedArray())
+        } catch (e: LinkageError) {
+            null
+        } ?: return null
+        return runCatching { coreJson.decodeFromString(LogCompaction.serializer(), json) }.getOrNull()
     }
 
     // Append-only, newline-delimited event log. The crux core holds all state in
@@ -191,8 +205,8 @@ object Core {
      * never existed, so the caller may seed a default profile + onboarding. A
      * log that exists but compacts to zero surviving lines (a returning user who
      * cleared everything) returns false: replaying "nothing left" is their real
-     * state and must not be re-seeded over. Read+compact live in [EventLog.load]
-     * (pure Kotlin, unit tested); this only replays the survivors.
+     * state and must not be re-seeded over. Read, repair and compaction live in
+     * [EventLog.load]; this only replays the survivors.
      *
      * Never throws for a bad log: an unreadable log is logged and leaves the core
      * empty, a line that resets the core is skipped, and either is reported as
@@ -203,14 +217,15 @@ object Core {
         // An unavailable core never gets the log: nothing is replayed into it and no
         // event it might accept can be appended (the boot shows the error state).
         if (unavailable) return false
-        val file = File(ctx.filesDir, "event-log.ndjson")
-        log = file
+        val file = eventLogFile(ctx.filesDir)
         // Already replayed this process (Activity recreation): the only way this
-        // is still a fresh install is if nothing was ever persisted.
+        // is still a fresh install is if nothing was ever persisted. [log] stays as
+        // it is, so a recreation can't re-attach a log a data import detached.
         if (restored) return !file.exists()
         // Marked BEFORE replaying: the native core keeps whatever a partial replay
         // applied, so a second attempt in this process would double those events.
         restored = true
+        log = file
         restoredPlanRemoved = false
         // Compacting before replay matters here: a run's GPS track (thousands of
         // points) is the heaviest line in the log, and every `Clear*` supersedes
@@ -257,10 +272,8 @@ object Core {
     // so two events can never glue into one unparseable line.
     private var appendTornGuard = false
 
-    // The most recent SetToday applied in-memory. SetToday is non-persisted (the
-    // shell's clock, re-sent every foreground), so it is NOT in the replayed log; a
-    // panic_reset that rebuilds the core from the log alone would lose today's date.
-    // Cache it so [replayLogAfterReset] can re-establish it immediately.
+    // The last SetToday applied: it is not in the log, so [replayLogAfterReset]
+    // re-sends it after a panic_reset rebuild.
     private var lastSetToday: Event? = null
 
     // True while the last [currentView] could not produce a fresh view (null bytes,
@@ -315,8 +328,6 @@ object Core {
         }
         // Cache the shell's clock so a later panic_reset can re-establish it.
         if (event is Event.SetToday) lastSetToday = event
-        // A non-persisted event (SetToday, the shell's clock) is applied in-memory
-        // but never written: it is re-sent every launch.
         val file = log
         if (!event.persist || file == null) return Applied.Saved
         return try {
@@ -510,7 +521,7 @@ data class SendResult(
 )
 
 // ── View model (decode) ──────────────────────────────────────────────────────
-// Field names + shapes mirror shared/src/app/mod.rs::ViewModel exactly.
+// Mirrors shared/src/app/view_types.rs (serde names). Unknown keys are ignored.
 
 @Serializable
 data class ViewModel(
@@ -518,17 +529,10 @@ data class ViewModel(
     val train_blocked: Boolean = false,
     val adjustments: List<AdjustmentView> = emptyList(),
     val review_adjustments: List<AdjustmentView> = emptyList(),
-    // A persisted session review exists (app/mod.rs ViewModel.review_present): the
-    // shell shows a "Clear review" affordance.
-    val review_present: Boolean = false,
-    // A weekly check-in is in force (ViewModel.weekly_checkin_present): the shell
-    // offers "Clear weekly check-in" (Event.ClearWeeklyCheckin).
     val weekly_checkin_present: Boolean = false,
-    // An illness report is active, or a high resting-HR morning asks for the
-    // illness check: the morning check-in asks the Illness item first.
+    // True: the morning check-in asks the Illness item first.
     val illness_check_prompt: Boolean = false,
-    // Every calisthenics ladder with its rungs (empty for a Weights profile): the
-    // Log chooser lists them grouped by movement.
+    // Empty for a Weights profile.
     val calisthenics_ladders: List<CalisLadderView> = emptyList(),
     val input_count: Int = 0,
     val lifts: List<LiftResultView> = emptyList(),
@@ -541,137 +545,65 @@ data class ViewModel(
     val hypertrophy_plan: List<GuidanceView> = emptyList(),
     val protein_targets: List<GuidanceView> = emptyList(),
     val hr_zones: List<GuidanceView> = emptyList(),
-    // CTL/ATL/TSB training-load bookkeeping over the logged run history
-    // (app/mod.rs ViewModel.training_load). Null until a dated, HR-carrying run
-    // exists. Bookkeeping only — TSB is NOT a validated performance predictor.
+    // Null until a dated run with heart rate exists.
     val training_load: TrainingLoadView? = null,
-    // Session-RPE load (minutes × whole-session 0–10 rating; LOAD-SRPE-001), the
-    // separate sensor-free weekly series for rated runs (app ViewModel.srpe_load).
-    // Null until a run is rated: the shell then renders nothing.
+    // Null until a run is rated.
     val srpe_load: SrpeLoadView? = null,
-    // Running progress: 16 Monday-start weeks of volume, longest run and
-    // best efforts (app ViewModel.run_progress). Null until a dated run with a
-    // measurable distance exists.
+    // Null until a dated run with a measurable distance exists.
     val run_progress: RunProgressView? = null,
-    // Weekly running-volume system rows for the most recent logged week:
-    // week-over-week increase, two-week ramp flag, Daniels volume caps,
-    // easy-share floor, quality-plan check, hybrid combined-load guard (app/mod.rs
-    // ViewModel.weekly_report). Empty until a dated run exists.
+    // Empty until a dated run exists.
     val weekly_report: List<GuidanceView> = emptyList(),
-    // Lift-session audit rows for the most recent dated lifting day: Prilepin
-    // volume check per exercise + the depth-jump readiness gate when bodyweight
-    // and a squat e1RM are known (app/mod.rs ViewModel.lift_audit). Empty otherwise.
     val lift_audit: List<GuidanceView> = emptyList(),
-    // Raw calculator inputs echoed back so forms rehydrate after a cold start
-    // (see the matching structs above). race_prediction echoes its own inline.
+    // Calculator inputs echoed for form rehydration.
     val hr_zone_input: HrZoneInputView? = null,
     val protein_input: ProteinInputView? = null,
     val hypertrophy_input: HypertrophyInputView? = null,
-    // Weekly direct-set counts of the hypertrophy plan's ramp row (app/mod.rs
-    // ViewModel.hypertrophy_ramp); empty with no plan, a hold or an unknown muscle.
+    // Weekly direct-set counts; empty with no plan, a hold or an unknown muscle.
     val hypertrophy_ramp: List<Int> = emptyList(),
-    // feedback-027/028/029 longitudinal trend message, when the review carries a
-    // trend direction (app/mod.rs ViewModel.trend). Rendered under the lift review.
     val trend: AdjustmentView? = null,
-    // feedback-040 provisional framing: present while fewer than ~14 distinct
-    // logged days exist — recommendations are population defaults still
-    // converging on the user (app/mod.rs ViewModel.provisional). A safety-relevant
-    // honesty disclosure: rendered next to the readiness verdict, not buried.
     val provisional: AdjustmentView? = null,
-    // Which autoregulation signal source is active given the submitted readiness
-    // data (autoreg-047/048 graceful fallback: HRV rolling, subjective +
-    // performance, or performance-only-hold; app/mod.rs ViewModel.autoreg_source).
-    // Null until any readiness input exists. Honesty disclosure — rendered next
-    // to the readiness verdict.
+    // Null until any readiness input exists.
     val autoreg_source: AdjustmentView? = null,
-    // KB-honest per-signal readiness summary (app/mod.rs readiness_summary): the
-    // latest state of each observed signal judged by the core's own KB
-    // thresholds. Deliberately NO composite 0–100 score exists on the wire.
     val readiness_summary: List<ReadinessSignalView> = emptyList(),
-    // Core-owned "today's call": safety hold > adjustment > feedback >
-    // all-clear.
     val today_headline: TodayHeadlineView? = null,
-    // Static signal→group metadata ("metric" | "red_flag") driving the
-    // readiness picker's red-flag fence from the core.
     val signal_groups: List<SignalGroupView> = emptyList(),
-    // The most recent morning check-in echoed for rehydration +
-    // a "checked in today" cue. Null until a check-in exists.
+    // Null until a check-in exists.
     val checkin_today: CheckinEchoView? = null,
-    // Honest "collecting your baseline" rows for each check-in channel that has
-    // data but not yet enough history to emit a z-score/delta. Empty otherwise.
     val baseline_status: List<BaselineStatusView> = emptyList(),
-    // Evidence-grade legend exported from core data (File 09) so
-    // the "How evidence grading works" sheet renders KB definitions, not
-    // hardcoded shell copy.
     val grade_definitions: List<GradeDefView> = emptyList(),
-    // Coach-as-planner. The concrete next session (the Coach hero),
-    // the current week strip, and the program summary. Null/empty until the user
-    // accepts a plan.
+    // Null/empty until the user accepts a plan.
     val next_session: SessionPlanView? = null,
     val week_plan: List<SessionPlanView> = emptyList(),
     val program: ProgramSummaryView? = null,
-    // Structured HRmax figure (bpm + measured/estimate + Tanaka
-    // split) for the last HR-zone query, so the shell reads it instead of
-    // regex-scraping the hr_zones rows. Null until a query is made / when the age
-    // is out of range.
+    // Null until an HR-zone query is made, or when the age is out of range.
     val hr_max: HrMaxView? = null,
-    // Structured protein g/day figures paralleling protein_targets,
-    // so the shell reads them instead of regex-scraping those rows. Empty until a
-    // protein query is made.
+    // Empty until a protein query is made.
     val protein_figures: List<ProteinFigureView> = emptyList(),
-    // Structured Daniels %HRmax bands of the last HR-zone query, one per band
-    // row of hr_zones (app/mod.rs ViewModel.hr_zone_bands), so the zone table
-    // reads numbers, never the prose. Empty with no query / a refused age.
+    // Empty with no HR-zone query or a refused age.
     val hr_zone_bands: List<HrZoneBandView> = emptyList(),
-    // Structured figures of the hypertrophy plan (app/mod.rs
-    // ViewModel.hypertrophy_figures). Null whenever the planner shows no ramp.
+    // Null whenever the planner shows no ramp.
     val hypertrophy_figures: HypertrophyFiguresView? = null,
-    // Echo of the core's `model.today_epoch_day` (app/mod.rs ViewModel.today_epoch_day):
-    // the day SetToday last set. The shell reads this for every plan gate (hero
-    // actionability, week-strip today ring, "Today's plan" tile, planPrefill,
-    // past-day stamps) instead of the wall clock, so a session that crosses
-    // midnight while foregrounded keeps rolling over in lockstep with the core.
-    // Null before the first SetToday → the shell falls back to todayEpochDay().
+    // The day SetToday last set; every plan gate reads this instead of the wall
+    // clock. Null before the first SetToday: fall back to todayEpochDay().
     val today_epoch_day: Long? = null,
-    // Today's completed plan session, one line per item (app/mod.rs
-    // ViewModel.session_done): the Today "session done" card. Null until today's
-    // planned session is complete. The coaching takeaway rides in `feedback`.
+    // Null until today's planned session is complete.
     val session_done: SessionDoneView? = null,
-    // One row per active pain / illness hold: the banner's "I'm pain-free now" /
-    // "I've recovered" action (Event.ResolveHold). Empty when no hold.
     val hold_resolutions: List<HoldResolutionView> = emptyList(),
-    // Planned-vs-done for the active plan: this week + the last 8 plan weeks +
-    // neutral notes. No streaks, no loss framing. Null without a plan.
+    // Null without a plan.
     val consistency: ConsistencyView? = null,
-    // Why training is held (C2, view_types.rs HoldReason, snake_case): parq |
-    // youth | pregnancy | reds | injury_rehab | symptomatic |
-    // acute_illness_profile | illness | pain | medical_signal. Set whenever
-    // `train_blocked`; the most specific reason wins. Drives the banner's
-    // reason line and its one resolve action.
+    // Set whenever train_blocked: parq | youth | pregnancy | reds | injury_rehab |
+    // symptomatic | acute_illness_profile | illness | pain | medical_signal.
     val hold_reason: String? = null,
-    // A morning check-in is dated today (C6). False → the readiness pills come
-    // from an earlier check-in and Today invites today's.
+    // False: the readiness pills come from an earlier check-in.
     val checked_in_today: Boolean = false,
-    // Why no plan can be built right now (view_types.rs PlanWithheld, snake_case):
-    // health_hold | nothing_to_plan; null when GeneratePlan can build one. While
-    // set, Today offers no "Plan my training" and says why instead.
+    // health_hold | nothing_to_plan; null when GeneratePlan can build a plan.
     val plan_withheld: String? = null,
-    // Every logged other-activity row (view_types.rs ViewModel.activities), same
-    // order as `lifts`/`runs`.
     val activities: List<ActivityResultView> = emptyList(),
-    // The WHO 5–17 weekly activity card (youth-pa-001): set only for an
-    // under-18 profile once SetToday has run. Information and tracking only.
+    // Set only for an under-18 profile once SetToday has run.
     val youth_activity: YouthActivityView? = null,
 )
 
-/**
- * The structured HRmax figure the shell used to regex-scrape out of
- * the hr_zones summary rows (incl. the "208 − 0.7 × age" Tanaka split). Field
- * names mirror the Rust HrMaxView (app/mod.rs) serde names exactly. `bpm` is
- * core-rounded.
- * `tanaka_intercept`/`tanaka_slope` are 208/0.7 for the age estimate, 0 when
- * `measured` (a logged maximum, which needs no age).
- */
+/** Mirrors view_types.rs HrMaxView. `tanaka_intercept`/`tanaka_slope` are 0 when [measured]. */
 @Serializable
 data class HrMaxView(
     val bpm: Double = 0.0,
@@ -681,15 +613,8 @@ data class HrMaxView(
     val tanaka_slope: Double = 0.0,
 )
 
-/**
- * One structured protein g/day target paralleling a protein_targets
- * row, so the shell reads it instead of regex-scraping the prose. Field names
- * mirror the Rust ProteinFigureView (app/mod.rs) serde names exactly. `kind` is
- * "masters" or "deficit"; g/day figures are
- * core-rounded and 0 when `refused` (a RED-S deficit refusal carries no number).
- * `low/high_g_per_kg` is the graded g/kg band the grams come from; `row` indexes
- * this figure's evidence row in protein_targets.
- */
+/** Mirrors view_types.rs ProteinFigureView. `kind`: "masters" | "deficit". g/day
+ *  figures are 0 when [refused]; [row] indexes protein_targets. */
 @Serializable
 data class ProteinFigureView(
     val kind: String = "",
@@ -701,15 +626,8 @@ data class ProteinFigureView(
     val row: Int = 0,
 )
 
-/**
- * One Daniels training band of the HR-zone table (app/mod.rs HrZoneBandView).
- * `kind` is the band's wire name ("Easy", "Marathon", "Threshold", "Interval",
- * "Repetition"), the key its swatch colour is chosen by.
- * `pct_*` is %HRmax (whole numbers), `bpm_*` the core-rounded absolute range;
- * a `pace_governed` band is run by pace and carries no bpm target. The
- * `karvonen_*` heart-rate-reserve range is 0 unless the resting HR selected it.
- * `row` indexes this band's evidence row in `hr_zones`.
- */
+/** Mirrors view_types.rs HrZoneBandView. `pct_*` is %HRmax; a `pace_governed` band has
+ *  no bpm target; `karvonen_*` is 0 without a resting HR; [row] indexes hr_zones. */
 @Serializable
 data class HrZoneBandView(
     val kind: String = "",
@@ -724,15 +642,10 @@ data class HrZoneBandView(
     val row: Int = 0,
 )
 
-/**
- * The hypertrophy plan's numbers (app/mod.rs HypertrophyFiguresView): weekly-set
- * landmarks, the reps-left schedule, peak frequency, rest windows (seconds) and
- * the block shape. `face_rows` indexes the `hypertrophy_plan` rows these figures
- * stand for; every other row is a note.
- */
+/** Mirrors view_types.rs HypertrophyFiguresView. Rest windows in seconds;
+ *  [face_rows] index hypertrophy_plan, every other row is a note. */
 @Serializable
 data class HypertrophyFiguresView(
-    val min_sets: Int = 0,
     val productive_low: Int = 0,
     val productive_high: Int = 0,
     val max_sets: Int = 0,
@@ -751,12 +664,7 @@ data class HypertrophyFiguresView(
     val face_rows: List<Int> = emptyList(),
 )
 
-/**
- * The three-part "why?" disclosure carried by every action-bearing card
- * (app/mod.rs WhyView): basis (what it's based on) →
- * grade_note (why this grade) → improves (what data would sharpen it). An empty
- * block makes the card fall back to the plain evidence restatement.
- */
+/** Mirrors view_types.rs WhyView. All empty: the card shows the plain evidence restatement. */
 @Serializable
 data class WhyView(
     val basis: String = "",
@@ -764,10 +672,8 @@ data class WhyView(
     val improves: String = "",
 )
 
-/** One prescribed exercise, core-flattened (app/mod.rs PrescriptionView): the
- *  concrete do-X contract. `load_kg` is set only when anchored to the
- *  user's logged e1RM; otherwise `intensity_label` carries the RIR/pace target
- *  (no invented load, HARD RULE 1). Carries the full evidence block + why?. */
+/** Mirrors view_types.rs PrescriptionView. `load_kg` is null unless anchored on a
+ *  logged e1RM; `intensity_label` then carries the RIR/pace target. */
 @Serializable
 data class PrescriptionView(
     val summary: String = "",
@@ -778,25 +684,17 @@ data class PrescriptionView(
     val load_kg: Double? = null,
     val intensity_label: String = "",
     val rest_sec: Int = 0,
-    // True for a timed-hold calisthenics rung: rep_volume carries "20-45 s hold"
-    // and reps_low/high stay 0 (app/mod.rs PrescriptionView.timed_hold). Default false.
+    // Timed-hold rung: rep_volume carries the hold band, reps_low/high stay 0.
     val timed_hold: Boolean = false,
-    // Numeric prefill targets mirroring app/mod.rs PrescriptionView: target_rpe maps a
-    // prescribed RIR/RPE for the log editor, hold_low/high_sec carry a timed band,
-    // added_kg is the calisthenics added load (Some(0.0) = bodyweight).
     val target_rpe: Double? = null,
     val hold_low_sec: Int = 0,
     val hold_high_sec: Int = 0,
+    // 0.0 = bodyweight.
     val added_kg: Double? = null,
     val rep_volume: String = "",
     val anchored_on: String = "",
-    // `anchored_on` is a last-time line ("Last: 60 kg × 8"): the face shows it
-    // as what was lifted last time (view_types.rs PrescriptionView.anchored_on_last).
     val anchored_on_last: Boolean = false,
     val adjusted_note: String = "",
-    // The post-illness return check standing in for the whole session
-    // (view_types.rs PrescriptionView.return_check): its dose and stop list are
-    // the advice, shown once on this item.
     val return_check: Boolean = false,
     val grade: String = "",
     val citation: String = "",
@@ -804,24 +702,13 @@ data class PrescriptionView(
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
     val why: WhyView = WhyView(),
-    // True when this session's day already has the prescribed work logged
-    // (app/mod.rs PrescriptionView.done): the week strip marks the item complete and
-    // omits its past-day Log action.
     val done: Boolean = false,
-    // Per-set completion wire (app/mod.rs PrescriptionView).
-    // `sets_done`: qualifying same-movement sets attributed to this item's
-    // session day (0 for runs). `logged_sets`: every same-movement set that day,
-    // chronological, each flagged `qualifies` (warm-ups / below-target stay
-    // listed with qualifies=false). `ended_early`: the user ended this exercise
-    // via SetExerciseEnded. `run_logged_km`/`run_logged_min`: for a run item,
-    // totals attributed to the session day (0 otherwise).
+    // sets_done is 0 for runs; run_logged_km/run_logged_min are 0 for other items.
     val sets_done: Int = 0,
     val logged_sets: List<ItemSetView> = emptyList(),
     val ended_early: Boolean = false,
     val run_logged_km: Double = 0.0,
     val run_logged_min: Double = 0.0,
-    // The newest set of this movement from a PRIOR session day (same shape as
-    // logged_sets): prefills the weight when load_kg is null and reads "Last time".
     val last_set: ItemSetView? = null,
     // Starting weight (kg) for an effort-prescribed item with no load_kg.
     val suggested_load_kg: Double? = null,
@@ -829,29 +716,19 @@ data class PrescriptionView(
     val plates_per_side: List<Double> = emptyList(),
     // Short execution cue ("move fast"); already part of `summary`.
     val effort_cue: String = "",
-    // Calisthenics-only data (ladder, rung, easier/harder, load_capable,
-    // ballistic); null for lifts and runs.
+    // Null for lifts and runs.
     val calis: CalisItemView? = null,
-    // Run items only (view_types.rs PrescriptionView.run_target / run_structure):
-    // numeric pace / heart-rate / effort targets and the step structure the GPS
-    // tracker walks (warm-up → reps + recovery → cool-down → strides, or run/walk
-    // bouts). Both null for lifts/calisthenics; run_structure is also null for a
-    // plain continuous run.
+    // Run items only; run_structure is also null for a plain continuous run.
     val run_target: RunTargetView? = null,
     val run_structure: RunStructureView? = null,
-    // Item completion (C4, view_types.rs ItemStatus, snake_case): open |
-    // in_progress | done | done_lighter | skipped | skipped_pain.
+    // open | in_progress | done | done_lighter | skipped | skipped_pain.
     val status: String = "open",
-    // Why a safety cap shaped this item, plain language with distances in km like
-    // `summary` (view_types.rs PrescriptionView.safety_reason, e.g. "Capped at
-    // 12.5 km: at most 10% over your longest recent run"); empty otherwise.
+    // Why a safety cap shaped this item, distances in km; empty otherwise.
     val safety_reason: String = "",
     // `safety_reason` with its distance in miles; empty when it states none.
     val safety_reason_mi: String = "",
-    // Face parts of `summary` (view_types.rs PrescriptionView): the bold name line
-    // and the prescription line under it for a lift / calisthenics item (both empty
-    // for runs and the return check), the compact row's one line, and a run's
-    // volume head before its target ("6 × 800 m", distances in km).
+    // Face parts of `summary` (km); face_name/face_detail are empty for runs and the
+    // return check.
     val face_name: String = "",
     val face_detail: String = "",
     val face_lead: String = "",
@@ -860,9 +737,8 @@ data class PrescriptionView(
     val run_head_km: Double? = null,
 )
 
-/** Numeric execution targets for one run prescription (view_types.rs
- *  RunTargetView). Pace in seconds per km (0 = none), heart rate in bpm (0 =
- *  none), CR-10 effort band (0/0 = none); the labels are display-ready. */
+/** Mirrors view_types.rs RunTargetView. Pace in seconds per km (0 = none); the
+ *  labels are display-ready. */
 @Serializable
 data class RunTargetView(
     val band: String = "",
@@ -870,25 +746,16 @@ data class RunTargetView(
     val pace_slow_sec_per_km: Int = 0,
     val pace_label_km: String = "",
     val pace_label_mi: String = "",
-    val hr_low_bpm: Int = 0,
-    val hr_high_bpm: Int = 0,
     val hr_label: String = "",
-    val rpe_low: Int = 0,
-    val rpe_high: Int = 0,
     val effort_cue: String = "",
     // `effort_cue` without its leading "effort" word ("3–4 of 10").
     val effort_detail: String = "",
-    val vdot: Double = 0.0,
-    val hr_max_bpm: Double = 0.0,
-    val hr_max_measured: Boolean = false,
-    val hr_rest_bpm: Double = 0.0,
     val citation: String = "",
     val grade: String = "",
     val confidence: Float = 0f,
 )
 
-/** Numeric structure of a prescribed run (view_types.rs RunStructureView); every
- *  field 0/empty when it does not apply. Drives the tracker's step machine. */
+/** Mirrors view_types.rs RunStructureView; 0/empty when a field does not apply. */
 @Serializable
 data class RunStructureView(
     val reps: Int = 0,
@@ -912,10 +779,8 @@ data class RunWalkStepView(
     val walk_sec: Int = 0,
 )
 
-/** One logged set attributed to a prescription item's session day
- *  (app/mod.rs ItemSetView). `summary` is display-ready and unit-aware (the " @ RPE x"
- *  segment is already omitted when rpe == 0). `qualifies` is false for a warm-up
- *  or below-target set, which the shell still lists but marks. */
+/** Mirrors view_types.rs ItemSetView. `summary` is display-ready; a warm-up or
+ *  below-target set has `qualifies` false. */
 @Serializable
 data class ItemSetView(
     val entry_id: Long = 0,
@@ -925,8 +790,6 @@ data class ItemSetView(
     val rpe: Double = 0.0,
     val hold_sec: Int? = null,
     val qualifies: Boolean = false,
-    // A counted set below the full prescribed load ("lighter than planned").
-    val lighter: Boolean = false,
     // A counted set short of the prescribed reps / hold time ("missed reps").
     val short: Boolean = false,
     val summary: String = "",
@@ -943,18 +806,15 @@ data class CalisRungView(
     val timed_hold: Boolean = false,
 )
 
-/** Calisthenics-only data on a plan item (view_types.rs CalisItemView).
- *  `load_capable`: show the added-load field even when added_kg is 0.
- *  `ballistic`: max-intent power item, no RPE hint. */
+/** Mirrors view_types.rs CalisItemView. `load_capable`: show the added-load field
+ *  even at 0 kg. `ballistic`: no RPE hint. */
 @Serializable
 data class CalisItemView(
     val ladder: CalisLadder = CalisLadder.HorizontalPush,
     val rung: Int = 0,
-    val rung_count: Int = 0,
     val easier: CalisRungView? = null,
     val harder: CalisRungView? = null,
     val load_capable: Boolean = false,
-    val test_hold_sec: Int = 0,
     val ballistic: Boolean = false,
     val needs_effort_rating: Boolean = false,
 )
@@ -972,16 +832,13 @@ data class CalisLadderView(
     // The rung the athlete placed themselves on, before the equipment check
     // (current_rung is the rung the kit allows; null when none fits).
     val placed_rung: Int? = null,
-    // Plain-language note when the kit limits this ladder ("Full pull-up needs a
-    // pull-up bar or rings…"); empty otherwise.
+    // Empty unless the kit limits this ladder.
     val equipment_note: String = "",
 )
 
-/** One planned day in the week (app/mod.rs SessionPlanView). Rendered
- *  strictly downstream of the safety gates: a hold sets status "blocked" and
- *  empties items. status ∈ next|planned|done|done_lighter|missed|partial|
- *  adjusted|blocked|rest|before_plan ("partial": a past day with some work
- *  logged, under the done-lighter share; neither done nor missed). */
+/** Mirrors view_types.rs SessionPlanView. A hold sets status "blocked" and empties
+ *  items. status: next | planned | done | done_lighter | missed | partial | adjusted |
+ *  blocked | rest | before_plan. */
 @Serializable
 data class SessionPlanView(
     val epoch_day: Long = 0,
@@ -990,21 +847,19 @@ data class SessionPlanView(
     val status: String = "",
     val items: List<PrescriptionView> = emptyList(),
     val adjustment: AdjustmentView? = null,
-    // Days this session can be moved to (Event.MoveSession{from = epoch_day}).
-    // Empty for rest/done days.
+    // Event.MoveSession targets; empty for rest/done days.
     val move_targets: List<Long> = emptyList(),
     // The day the athlete moved this session from, when moved.
     val moved_from_epoch_day: Long? = null,
     // Why a requested move was refused, plain language.
     val move_note: String? = null,
-    // The day whose logged same-discipline session credited this planned one
-    // (C4, a swap within the week): the strip reads "Done Tue" on this day.
+    // The day whose logged session credited this one (the strip reads "Done Tue").
     val credited_from_epoch_day: Long? = null,
-    // Why this session cannot move (C5, plain language) when move_targets is empty.
+    // Why this session cannot move, plain language, when move_targets is empty.
     val move_blocked_reason: String? = null,
 )
 
-/** The active program summary card (app/mod.rs ProgramSummaryView). */
+/** Mirrors view_types.rs ProgramSummaryView. */
 @Serializable
 data class ProgramSummaryView(
     val name: String = "",
@@ -1018,14 +873,13 @@ data class ProgramSummaryView(
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
     val why: WhyView = WhyView(),
-    // Hypertrophy goal only: weekly working sets per muscle vs the target, plus
-    // one plain note about them. Empty otherwise.
+    // Hypertrophy goal only; empty otherwise.
     val muscle_volume: List<MuscleVolumeView> = emptyList(),
     val muscle_volume_note: String = "",
 )
 
-/** One muscle's weekly volume on the program card (app/mod.rs MuscleVolumeView).
- *  `target_sets` 0 = no direct target; `label` is display-ready. */
+/** Mirrors view_types.rs MuscleVolumeView. `target_sets` 0 = no direct target;
+ *  `label` is display-ready. */
 @Serializable
 data class MuscleVolumeView(
     val muscle: String = "",
@@ -1034,8 +888,7 @@ data class MuscleVolumeView(
     val label: String = "",
 )
 
-/** Today's completed plan session (app/mod.rs SessionDoneView). Descriptive
- *  only (a summary of logs), so it carries no evidence tag. */
+/** Mirrors view_types.rs SessionDoneView. */
 @Serializable
 data class SessionDoneView(
     val epoch_day: Long = 0,
@@ -1043,11 +896,8 @@ data class SessionDoneView(
     val items: List<SessionDoneItemView> = emptyList(),
 )
 
-/** One exercise (or "Run") of a completed session: a display-ready line, its
- *  item status (the hero's verdict: done | done_short | done_lighter | skipped |
- *  skipped_pain | stopped_pain) with `met` == (status == "done"), and for a run
- *  the logged and planned distance (km) / time (min) to render in the user's
- *  unit (`summary` is in km, a fallback only). */
+/** Mirrors view_types.rs SessionDoneItemView. status: done | done_short | done_lighter |
+ *  skipped | skipped_pain | stopped_pain. Run figures in km / min; `summary` is km only. */
 @Serializable
 data class SessionDoneItemView(
     val exercise: String = "",
@@ -1060,20 +910,18 @@ data class SessionDoneItemView(
     val run_planned_min: Double? = null,
 )
 
-/** The resolve action for one active pain / illness hold (app/mod.rs
- *  HoldResolutionView). `signal` is the ResolveHold wire name. */
+/** Mirrors view_types.rs HoldResolutionView. `signal` is the ResolveHold wire name. */
 @Serializable
 data class HoldResolutionView(
     val signal: String = "",
     val paused_text: String = "",
     val action_label: String = "",
     val confirm_text: String = "",
-    // Confirming also switches off the profile's "I'm ill right now" answer
-    // (a SetProfile effective today alongside the ResolveHold).
+    // Confirming also sends a SetProfile clearing the profile's illness answer.
     val ends_profile_illness: Boolean = false,
 )
 
-/** Planned vs done for the active plan (app/mod.rs ConsistencyView). */
+/** Mirrors view_types.rs ConsistencyView. */
 @Serializable
 data class ConsistencyView(
     val this_week_done: Int = 0,
@@ -1090,10 +938,9 @@ data class ConsistencyView(
 data class ConsistencyWeekView(
     val week_monday_epoch_day: Long = 0,
     val done: Int = 0,
-    val planned: Int = 0,
 )
 
-/** One row of the evidence-grade legend, core-provided (app/mod.rs GradeDefView). */
+/** Mirrors view_types.rs GradeDefView. */
 @Serializable
 data class GradeDefView(
     val grade: String = "",
@@ -1102,8 +949,7 @@ data class GradeDefView(
     val confidence: Float = 0f,
 )
 
-/** The most recent morning check-in echoed by the core (app/mod.rs CheckinEchoView),
- *  so the shell can rehydrate the sheet and show today's check-in is recorded. */
+/** Mirrors view_types.rs CheckinEchoView. */
 @Serializable
 data class CheckinEchoView(
     val observed_at: Long = 0,
@@ -1116,50 +962,40 @@ data class CheckinEchoView(
     val hrv_rmssd_ms: Double? = null,
 )
 
-/** One check-in channel still collecting its baseline (app/mod.rs BaselineStatusView):
- *  an honest progress row shown IN PLACE of a derived signal until enough history
- *  exists, never a fabricated number (HARD RULE 1). Carries no evidence tag. */
+/** Mirrors view_types.rs BaselineStatusView. */
 @Serializable
 data class BaselineStatusView(
     val signal: String = "",
     val label: String = "",
     val have: Int = 0,
     val need: Int = 0,
-    // "Collecting" (still gathering history) | "SparseWeek" (this week under-sampled
-    // vs the 4/week cadence). Old core omits it → decodes to "Collecting".
+    // "Collecting" | "SparseWeek".
     val kind: String = "Collecting",
 )
 
-/** One readiness signal's latest state (app/mod.rs ReadinessSignalView). The
- *  evidence fields cite the rule whose threshold judged `state`; grade is
- *  empty for plain factual rows ("recorded"/"clear") that judge nothing. */
+/** Mirrors view_types.rs ReadinessSignalView. `grade` is empty on factual rows that
+ *  judge nothing. */
 @Serializable
 data class ReadinessSignalView(
     val signal: String = "",
     val group: String = "", // "metric" | "red_flag"
     val value: Double = 0.0,
-    val streak: Int = 0,
     val state: String = "",
     val grade: String = "",
     val citation: String = "",
     val confidence: Float = 0f,
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
-    // Human sub-line for the banner ("right knee, sharp, 6/10"), serde-default
-    // empty. Populated by the core for a characterized Pain report; when empty the
-    // shell falls back to its own echo.
+    // Empty: the shell falls back to its own echo.
     val detail: String = "",
-    // The value comes from today's check-in (C6). Defaults true so a core that
-    // omits the field never makes a reading look stale.
+    // Defaults true so a missing field never reads as stale.
     val from_today: Boolean = true,
-    // The reading is recency-expired (app ReadinessSignalView.stale): `state` is the
-    // core's "out of date" text, so the shell adds no "earlier" qualifier.
+    // True: `state` is the core's "out of date" text; add no "earlier" qualifier.
     val stale: Boolean = false,
 )
 
-/** The core's single highest-priority call for today (app/mod.rs TodayHeadlineView).
- *  `kind`: "safety_hold" | "adjustment" | "feedback" | "prescription" | "all_clear". The
- *  all-clear default carries an empty evidence tag (it asserts no claim). */
+/** Mirrors view_types.rs TodayHeadlineView. `kind`: safety_hold | adjustment |
+ *  feedback | prescription | all_clear. */
 @Serializable
 data class TodayHeadlineView(
     val kind: String = "",
@@ -1172,50 +1008,41 @@ data class TodayHeadlineView(
     val why: WhyView = WhyView(),
 )
 
-/** Signal→group row for the static readiness-picker fence metadata. */
+/** Mirrors view_types.rs SignalGroupView. */
 @Serializable
 data class SignalGroupView(
     val signal: String = "",
     val group: String = "",
 )
 
-/** Goal-race finish prediction (app/mod.rs RacePredictionView). Daniels+Riegel. */
+/** Mirrors view_types.rs RacePredictionView. */
 @Serializable
 data class RacePredictionView(
     val goal_label: String = "",
     val predicted: String = "",
-    val agreed: Boolean = false,
-    val low_sec: Double = 0.0,
-    val high_sec: Double = 0.0,
     val summary: String = "",
     val grade: String = "",
     val citation: String = "",
     val confidence: Float = 0f,
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
-    // Raw inputs echoed by the core so the predictor form rehydrates after a
-    // log replay / cold start instead of resetting to hardcoded defaults.
+    // Inputs echoed for form rehydration.
     val recent_distance_m: Double = 0.0,
     val recent_time_sec: Double = 0.0,
     val goal_distance_m: Double = 0.0,
     val weekly_km: Double = 0.0,
     val weeks_since_race: Int? = null,
-    // Core-emitted evidence-graded caveats (staleness re-test / marathon
-    // under-mileage optimism, app/mod.rs RacePredictionView.notes), rendered as
-    // GuidanceView cards under the prediction.
     val notes: List<GuidanceView> = emptyList(),
 )
 
-/** Raw HR-zone query echoed back for form rehydration (app/mod.rs HrZoneInputView). */
+/** Mirrors view_types.rs HrZoneInputView. */
 @Serializable
 data class HrZoneInputView(
     val age_years: Double = 0.0,
     val resting_hr_bpm: Double? = null,
-    val weeks_since_recalc: Int? = null,
-    val weeks_since_pace_test: Int? = null,
 )
 
-/** Raw protein query echoed back for form rehydration (app/mod.rs ProteinInputView). */
+/** Mirrors view_types.rs ProteinInputView. */
 @Serializable
 data class ProteinInputView(
     val bodyweight_kg: Double = 0.0,
@@ -1223,7 +1050,7 @@ data class ProteinInputView(
     val deficit: Boolean = false,
 )
 
-/** Raw hypertrophy-plan query echoed back for rehydration (app/mod.rs HypertrophyInputView). */
+/** Mirrors view_types.rs HypertrophyInputView. */
 @Serializable
 data class HypertrophyInputView(
     val muscle: String = "",
@@ -1232,7 +1059,7 @@ data class HypertrophyInputView(
     val recovering_easily: Boolean = false,
 )
 
-/** Profile echoed by the core (app/mod.rs ViewModel.profile) for editor hydration. */
+/** Mirrors model.rs Profile (ViewModel.profile). */
 @Serializable
 data class ProfileView(
     val progression_cadence: String = "",
@@ -1242,44 +1069,29 @@ data class ProfileView(
     val weekly_sets: Int = 0,
     val running_days_per_week: Int = 0,
     val running_km_per_week: Double = 0.0,
-    // False while the weekly distance was never given (Profile shows "Not set");
-    // the core serde-defaults it true for older logs.
+    // False while the weekly distance was never given ("Not set").
     val running_km_per_week_set: Boolean = true,
     val advanced: Boolean = false,
-    // Consolidated person data. Entered once on the profile; the
-    // Coach protein/HR-zone calculators prefill from these. All optional so a
-    // profile persisted before these fields existed decodes with them absent
-    // (null).
+    // Person data; null = not given.
     val female: Boolean? = null,
     val bodyweight_kg: Double? = null,
     val age_years: Double? = null,
     val resting_hr_bpm: Double? = null,
     val measured_hr_max: Double? = null,
-    // Display weights in pounds instead of kg. DISPLAY-ONLY: every numeric field
-    // (bodyweight_kg, and the load/e1RM figures on other views) stays kg; the
-    // core already renders its verbatim weight STRINGS in the chosen unit. Wire
-    // default false → a pre-unit-flag profile decodes metric. Mirrors
-    // app::Profile::weight_lb.
+    // Display weights in pounds. Numeric fields stay kg; core strings already use
+    // the chosen unit.
     val weight_lb: Boolean = false,
-    // Stage-0 onboarding health screen (schema.rs HealthScreen, File 08
-    // onboard-050). Echoed so the Profile health rows rehydrate after a cold
-    // start.
     val health: HealthScreen = HealthScreen(),
-    // Resistance-training modality (app::Profile::resistance_modality):
-    // "Weights" (default) or "Calisthenics". Echoed so the editor rehydrates the
-    // choice.
+    // "Weights" | "Calisthenics".
     val resistance_modality: String = "Weights",
-    // Advanced training-context fields (app::Profile). Echoed so the editor
-    // rehydrates them after a cold start; absent → unset.
-    // `environment` is the bare Rust variant name ("Heat"/"Altitude"/"Cold"/
-    // "Neutral"); the editor maps it back through Environment.valueOf.
+    // `environment` is the bare Rust variant name, mapped back through
+    // Environment.valueOf. Null = unset.
     val high_load_block: Boolean = false,
     val environment: String? = null,
     val env_temp_c: Double? = null,
     val env_altitude_m: Double? = null,
     val weeks_off: Double? = null,
-    // Coaching inputs (app::Profile; absent → unset). Mirrors the SetProfile wire
-    // names exactly.
+    // Coaching inputs; null = unset.
     val lift_days_per_week: Int? = null,
     val training_weekdays: Int? = null,
     val goal_race_epoch_day: Long? = null,
@@ -1290,8 +1102,7 @@ data class ProfileView(
     val calis_equipment: CalisEquipment? = null,
     val specialization_muscle: String? = null,
     val runner_strength: Boolean = false,
-    // Birthday, local epoch day (app::Profile::birth_epoch_day). When set, the
-    // core derives age_years from it each day; absent → a legacy stated age only.
+    // Local epoch day; when set the core derives age_years from it.
     val birth_epoch_day: Long? = null,
 )
 
@@ -1339,16 +1150,9 @@ private val PARQ_FOLLOW_UP_BITS: Int = ParqItem.entries
     .fold(0) { acc, it -> acc or (1 shl it.bit) }
 
 /**
- * Stage-0 onboarding health screen (schema.rs HealthScreen, File 08 onboard-050).
- * Every flag defaults false → a profile with no gates matches the
- * pre-health-screen wire (the core serde-defaults the whole object). `youth` is
- * derived core-side from `age_years` (no shell-invented age cutoff, HARD RULE 1);
- * the shell only collects the answerable screens (the seven PAR-Q+ questions,
- * clearance, current illness, pregnancy + warning sign, RED-S). Kotlin-
- * `Serializable` too so it can ride in the `ProfileDraft` rememberSaveable bundle.
- *
- * The PAR-Q+ answers live in [parq_yes] (bit per [ParqItem]); the gate flags are
- * derived from it by [withParqAnswer] so they can never disagree: Q1/Q4/Q5/Q7 →
+ * Mirrors schema.rs HealthScreen. `youth` is derived core-side from age. Kotlin
+ * `Serializable` so it can ride in the `ProfileDraft` rememberSaveable bundle.
+ * The gate flags are derived from [parq_yes] by [withParqAnswer]: Q1/Q4/Q5/Q7 →
  * `parq_positive`, Q2/Q3 → `symptomatic`, Q6 → `injury_or_rehab`.
  */
 @Serializable
@@ -1444,14 +1248,14 @@ data class AdjustmentView(
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
     val why: WhyView = WhyView(),
-    // An item-scoped in-session cue: the plan item's exact exercise name (null on
-    // a session-wide row), the plate-grid load (kg) it suggests for the remaining
-    // sets when it changes load, and whether it suggests ending the exercise.
+    // Item-scoped cue: `exercise` is null on a session-wide row; `suggested_load_kg`
+    // is the plate-grid load for the remaining sets.
     val exercise: String? = null,
     val suggested_load_kg: Double? = null,
     val suggests_end_exercise: Boolean = false,
 )
 
+/** Mirrors view_types.rs LiftResultView. */
 @Serializable
 data class LiftResultView(
     val exercise: String = "",
@@ -1460,48 +1264,23 @@ data class LiftResultView(
     val rpe: Double = 0.0,
     val e1rm_kg: Double = 0.0,
     val pct_1rm: Double = 0.0,
-    val rir: Double = 0.0,
-    // Whether an RPE was actually recorded for this set (app/mod.rs LiftResultView
-    // .rpe_recorded; s.rpe > 0). When false the shell omits the "· RIR x" caption
-    // rather than implying a measured effort.
+    // False: omit the "· RIR x" caption.
     val rpe_recorded: Boolean = false,
-    // Cross-checked e1RM range across Epley/Brzycki/Lombardi (strength-005/006,
-    // app/mod.rs LiftResultView.cross_check). Null when the estimate is unreliable
-    // per strength-006 (0 reps, >10 reps, or an isolation lift): the shell then
-    // suggests a 3–6 rep test set instead of showing a false range.
+    // Null when the estimate is unreliable: suggest a 3–6 rep test set instead.
     val cross_check: E1rmRangeView? = null,
-    // e1RM change vs the previous set of the same exercise, kg (core-computed,
-    // app/mod.rs LiftResultView.e1rm_delta_kg). Null for an exercise's first set.
-    // Factual measurement: the shell must NOT phrase it as improving/declining
-    // (that judgment belongs to the core's trend feedback, FB-TREND-001).
-    val e1rm_delta_kg: Double? = null,
-    // "up" / "down" / "flat" direction of the delta; null iff the delta is null.
-    val e1rm_direction: String? = null,
     val summary: String = "",
-    // When the set was logged, unix seconds; 0 when undated. The shell dates the
-    // history card from this (app/mod.rs LiftResultView.observed_at).
+    // Unix seconds; 0 when undated.
     val observed_at: Long = 0,
-    // Stable per-entry id the shell sends back in AmendSet/
-    // DeleteEntry to edit or delete THIS set. 0 for a legacy row written before
-    // entry ids existed: the shell then targets it by observed_at.
+    // Sent back in AmendSet/DeleteEntry. 0 for a legacy row: target it by observed_at.
     val entry_id: Long = 0,
-    // Timed-hold seconds for a static/hold set; null for a reps×load set
-    // (app/mod.rs LiftResultView.hold_sec). When set, `summary` reads "<name> - <s> s hold".
+    // Null for a reps×load set.
     val hold_sec: Int? = null,
-    // True when this set's e1RM beats every PRIOR e1RM of the same exercise
-    // (app LiftResultView.e1rm_pr): the history card's "New best" chip.
     val e1rm_pr: Boolean = false,
-    // Load × reps of this set in kg, 0 for a timed hold (app LiftResultView.tonnage_kg):
-    // the one tonnage definition History sums per session and per week.
+    // kg; 0 for a timed hold.
     val tonnage_kg: Double = 0.0,
 )
 
-/**
- * The strength-006 multi-formula e1RM cross-check, flattened for shells
- * (app/mod.rs E1rmRangeView). `low_kg`/`high_kg` span the Epley/Brzycki/Lombardi
- * estimates (0.1-rounded); `formulas` is how many were cross-checked. Carries
- * the full evidence tag. Null on LiftResultView when the estimate is unreliable.
- */
+/** Mirrors view_types.rs E1rmRangeView. */
 @Serializable
 data class E1rmRangeView(
     val low_kg: Double = 0.0,
@@ -1514,11 +1293,7 @@ data class E1rmRangeView(
     val contested: Boolean = false,
 )
 
-/**
- * Core-owned pacing verdict for a run's measured split (app/mod.rs SplitVerdictView,
- * feedback-016/017). Carries the chip label, coaching copy, and the full evidence
- * tag, so the ~3% fade threshold never leaks into shell code.
- */
+/** Mirrors view_types.rs SplitVerdictView. */
 @Serializable
 data class SplitVerdictView(
     val verdict: String = "", // "fade" | "even" | "negative"
@@ -1531,15 +1306,12 @@ data class SplitVerdictView(
     val contested: Boolean = false,
 )
 
-// Interval-vs-steady verdict from the GPS track's variability index
-// (RUN-INTERVAL-VI-001). Lets the shell show why two runs of the same average
-// pace rate differently. Null for a hand-entered run or a track too short.
+/** Mirrors view_types.rs IntervalVerdictView. */
 @Serializable
 data class IntervalVerdictView(
     val kind: String = "", // "interval" | "steady"
     val label: String = "",
     val message: String = "",
-    val variability_index: Double = 0.0,
     val grade: String = "",
     val citation: String = "",
     val confidence: Float = 0f,
@@ -1547,12 +1319,8 @@ data class IntervalVerdictView(
     val contested: Boolean = false,
 )
 
-/**
- * User-declared run-intent label. Mirrors app/mod.rs `schema::WorkoutType`.
- * USER DATA, like an exercise name: carries NO evidence and drives NO coaching
- * output (storage + display only). Entry NAMES are the exact serde wire strings
- * (`WorkoutType.name` ⇒ "Steady"/"Interval"/…); [label] is the display text.
- */
+/** Run-intent label (schema::WorkoutType). Entry names are the serde wire strings;
+ *  [label] is the display text. */
 enum class WorkoutType(val label: String) {
     Steady("Steady"),
     Interval("Interval"),
@@ -1563,20 +1331,17 @@ enum class WorkoutType(val label: String) {
     ;
 
     companion object {
-        /** Decode-safe: an unknown wire string (future variant) ⇒ null, never a crash. */
+        /** An unknown wire string decodes to null. */
         fun fromWire(s: String?): WorkoutType? =
             s?.let { w -> entries.firstOrNull { it.name == w } }
     }
 }
 
-/**
- * Kind of a logged other activity. Mirrors the core's `ActivityKind`; entry
- * NAMES are the exact serde wire strings. USER DATA: display only.
- */
+/** Mirrors the core's ActivityKind; entry names are the serde wire strings. */
 @Serializable
 enum class ActivityKind { Sport, Cycling, Swimming, Walking, Dance, Strength, Other }
 
-/** One logged other activity (view_types.rs ActivityResultView). */
+/** Mirrors view_types.rs ActivityResultView. */
 @Serializable
 data class ActivityResultView(
     val entry_id: Long = 0,
@@ -1587,12 +1352,7 @@ data class ActivityResultView(
     val strengthening: Boolean = false,
 )
 
-/**
- * The under-18 weekly activity card (view_types.rs YouthActivityView): this
- * local Mon–Sun week's moderate-to-vigorous minutes and vigorous /
- * strengthening days against the WHO 5–17 targets (youth-pa-001). The targets
- * ride the wire with the evidence tag, never shell literals.
- */
+/** Mirrors view_types.rs YouthActivityView (local Mon–Sun week). */
 @Serializable
 data class YouthActivityView(
     val week_monday_epoch_day: Long = 0,
@@ -1614,109 +1374,80 @@ data class YouthActivityView(
     val why: WhyView = WhyView(),
 )
 
+/** Mirrors view_types.rs RunResultView. */
 @Serializable
 data class RunResultView(
     val zone: String = "",
     val pace: String = "",
     val distance_km: Double = 0.0,
-    // Raw duration + HR echoed for the manual-run edit prefill.
+    // Echoed for the manual-run edit prefill.
     val duration_min: Double = 0.0,
     val hr_pct_max: Double = 0.0,
-    // The average heart rate the athlete entered, bpm; null when none was (a
-    // tracked run's HR is %HRmax only). Echoed so Undo re-logs the bpm itself.
+    // bpm; null when none was entered (a tracked run has %HRmax only).
     val avg_hr_bpm: Double? = null,
-    // The UTC offset the run was logged under (null for a legacy row); Undo
-    // re-sends it so the restored %HRmax is identical.
+    // Null for a legacy row; Undo re-sends it.
     val utc_offset_sec: Int? = null,
-    // Ready-to-show heart-rate line from the core: "148 bpm · Z2" when a bpm
-    // was entered, "HR 80% · Z2" without one, "" with no heart rate. A hard-
-    // rated run never carries a contradicting Z1 label.
+    // Display-ready; "" with no heart rate.
     val hr_label: String = "",
     val spike_flag: Boolean = false,
     val spike_note: String = "",
-    val split_pct: Double? = null,
-    // Pacing verdict + chip data for split_pct; null exactly when split_pct is
-    // null (hand-entered run or a track too short/degenerate to split).
+    // Null for a hand-entered run or a track too short to split.
     val split: SplitVerdictView? = null,
-    // Interval-vs-steady verdict from the track's variability index; null for a
-    // hand-entered run or a track too short to derive it.
+    // Null for a hand-entered run or a track too short.
     val interval: IntervalVerdictView? = null,
-    // User-declared run-intent label echoed for history display. Held as
-    // the raw wire string (decode-safe: an unknown future variant simply decodes
-    // as a string and is ignored by WorkoutType.fromWire). null = untagged.
+    // Raw wire string, read through WorkoutType.fromWire; null = untagged.
     val workout_type: String? = null,
     val summary: String = "",
     val citation: String = "",
-    // Whether this run has an exportable GPS route (>=2 QC-passing fixes). The
-    // full GPX document is no longer shipped per-run in the list payload; the shell
-    // reads this cheap flag to decide whether to offer the map / share affordances
-    // and fetches the document on demand via [Core.exportGpx]. False for a
-    // hand-entered run.
+    // Fetch the route on demand via [Core.exportGpx]; false for a hand-entered run.
     val has_gpx: Boolean = false,
     val observed_at: Long = 0,
-    // Stable per-entry id; see LiftResultView.entry_id. 0 = legacy.
+    // 0 = legacy; see LiftResultView.entry_id.
     val entry_id: Long = 0,
-    // Per-km / per-mi splits derived from the GPS track. Both
-    // lists carry the SAME cumulative distance_km at each split end; the shell
-    // picks km vs mi by the user's distance-unit override. Empty for a
-    // hand-entered run (no track) → no split section rendered.
+    // Both lists carry the same cumulative distance_km; pick by distance unit.
+    // Empty without a track.
     val splits_km: List<RunSplitView> = emptyList(),
     val splits_mi: List<RunSplitView> = emptyList(),
-    // Structured spike-baseline provenance the shell used to scrape
-    // from spike_note (contains("no prior run")). true when a prior 30-day
-    // baseline distance exists to gauge this run against; false for a first run
-    // with no baseline. Only meaningful when spike_flag.
+    // A prior 30-day baseline exists; only meaningful when spike_flag.
     val spike_has_baseline: Boolean = false,
-    // Whole-session effort, CR-10 (0–10), as rated by the athlete; null =
-    // unrated (the detail sheet's Effort field rates it via AmendRunMeta).
+    // CR-10; null = unrated.
     val session_rpe: Int? = null,
-    // Session-RPE load = moving minutes × session_rpe (arbitrary units); null
-    // when unrated or unmeasurable. Never added to the heart-rate load.
+    // Moving minutes × session_rpe; null when unrated. Never added to the HR load.
     val srpe_load_au: Double? = null,
     // Best-effort records this run holds, e.g. ["Fastest 5K"].
     val best_effort_labels: List<String> = emptyList(),
-    // When the run STARTED, unix seconds; 0 when undated. observed_at is when it was
-    // logged (a tracked/imported run's LAST fix); this is a GPS run's first fix, a
-    // hand-entered run's stamp minus its duration (view_types.rs started_at). Names,
-    // titles and captions a run.
+    // Unix seconds; 0 when undated. observed_at is the log time (a GPS run's last fix).
     val started_at: Long = 0,
-    // A GPS run whose fixes all fail QC ("GPS signal too poor"): no route (has_gpx
-    // false), but a tracked run. [Core.exportGpx] returns its recorded fixes so
-    // Undo re-logs it as recorded (view_types.rs gps_unmeasurable). Omitted = false.
+    // All fixes failed QC: no route, but [Core.exportGpx] returns the recorded fixes.
     val gps_unmeasurable: Boolean = false,
 )
 
-// A track's of-record figures before it is saved ([Core.savedFigures], ffi.rs
-// track_figures_json): distance km and moving minutes, exactly the saved card's
-// distance_km / duration_min. No defaults, so an error envelope fails to decode.
+// [Core.savedFigures] result (ffi.rs track_figures_json). No defaults, so an error
+// envelope fails to decode.
 @Serializable
 data class TrackFigures(
     val distance_km: Double,
     val duration_min: Double,
 )
 
-// One km-or-mi split of a GPS run. `pace` is pre-formatted "m:ss" (render
-// verbatim, the core already applied the unit); `distance_km` is the CUMULATIVE
-// km at the split's end (identical value in splits_km and splits_mi); `partial`
-// marks the trailing sub-unit remainder.
+/** Mirrors view_types.rs RunSplitView. `pace` is display-ready; `distance_km` is
+ *  cumulative. */
 @Serializable
 data class RunSplitView(
     val index: Int = 0,
     val pace: String = "",
-    // Numeric per-unit pace in whole seconds — the same figure `pace` is
-    // formatted from. Drives splits bar-chart bar lengths without re-parsing the
-    // "m:ss" string.
+    // Whole seconds; the figure `pace` is formatted from.
     val seconds_per_unit: Int = 0,
     val distance_km: Double = 0.0,
     val partial: Boolean = false,
 )
 
+/** Mirrors view_types.rs GuidanceView. */
 @Serializable
 data class GuidanceView(
     val section: String = "",
     val summary: String = "",
-    // The summary restated in miles for a row that states a distance; empty on
-    // every other row (view_types.rs GuidanceView.summary_mi).
+    // Empty on rows that state no distance.
     val summary_mi: String = "",
     val grade: String = "",
     val citation: String = "",
@@ -1724,23 +1455,13 @@ data class GuidanceView(
     val safety_critical: Boolean = false,
     val contested: Boolean = false,
     val why: WhyView = WhyView(),
-    // On the profile's training-age row, the training age ("Intermediate"); empty
-    // on every other row (view_types.rs GuidanceView.training_age).
+    // Set on the profile's training-age row only.
     val training_age: String = "",
 )
 
-/**
- * CTL/ATL/TSB fitness–fatigue bookkeeping over the logged run history
- * (app/mod.rs TrainingLoadView, File 07 impulse-response; LOAD-PMC-001). Daily load
- * is a Lucia 3-zone TRIMP from each dated HR-carrying run; `method` states what
- * was counted. Bookkeeping only — TSB is NOT a validated performance predictor
- * (the claim statement carries that caveat).
- */
+/** Mirrors view_types.rs TrainingLoadView. */
 @Serializable
 data class TrainingLoadView(
-    val ctl: Double = 0.0,
-    val atl: Double = 0.0,
-    val tsb: Double = 0.0,
     val days: Int = 0,
     val sessions_counted: Int = 0,
     val sessions_skipped: Int = 0,
@@ -1753,17 +1474,9 @@ data class TrainingLoadView(
     val contested: Boolean = false,
 )
 
-/**
- * Session-RPE weekly load (app SrpeLoadView, LOAD-SRPE-001): this week vs last
- * in arbitrary units, rated/unrated run counts, a plain method line and summary.
- * Its own series, never mixed into [TrainingLoadView].
- */
+/** Mirrors view_types.rs SrpeLoadView. */
 @Serializable
 data class SrpeLoadView(
-    val week_au: Double = 0.0,
-    val prev_week_au: Double = 0.0,
-    val rated_runs: Int = 0,
-    val unrated_runs: Int = 0,
     val method: String = "",
     val summary: String = "",
     val grade: String = "",
@@ -1771,12 +1484,8 @@ data class SrpeLoadView(
     val confidence: Float = 0f,
 )
 
-/**
- * Running progress over time (app RunProgressView): the last 16
- * Monday-start local weeks oldest first (empty weeks as zeros), the profile's
- * planned weekly km (0 = none), the longest run and the best efforts. Factual
- * aggregates; every distance is canonical km, the shell converts.
- */
+/** Mirrors view_types.rs RunProgressView. 16 weeks, oldest first; distances in km;
+ *  `planned_weekly_km` 0 = none. */
 @Serializable
 data class RunProgressView(
     val weekly: List<RunWeekView> = emptyList(),
@@ -1789,36 +1498,28 @@ data class RunProgressView(
     val confidence: Float = 0f,
 )
 
-/** One Monday-start local week of running (app RunWeekView). */
+/** Mirrors view_types.rs RunWeekView. */
 @Serializable
 data class RunWeekView(
     val week_start_epoch_day: Long = 0,
     val km: Double = 0.0,
-    val longest_km: Double = 0.0,
     val runs: Int = 0,
-    val moving_min: Double = 0.0,
     val srpe_load_au: Double = 0.0,
-    val rated_runs: Int = 0,
 )
 
-/**
- * The fastest known effort over one standard distance (app BestEffortView):
- * 1000/5000/10000/21097 m. `pace_label` is per km only, so the shell derives the
- * displayed pace from [time_sec] and [distance_m] in the user's unit.
- * `from_split` = measured from a stretch of a longer GPS run.
- */
+/** Mirrors view_types.rs BestEffortView. Derive the displayed pace from [time_sec]
+ *  and [distance_m]. */
 @Serializable
 data class BestEffortView(
     val distance_m: Int = 0,
     val label: String = "",
     val time_sec: Int = 0,
     val time_label: String = "",
-    val pace_label: String = "",
     val entry_id: Long = 0,
     val observed_at: Long = 0,
-    val from_split: Boolean = false,
 )
 
+/** Mirrors view_types.rs FeedbackView. */
 @Serializable
 data class FeedbackView(
     val category: String = "",
@@ -1826,7 +1527,6 @@ data class FeedbackView(
     val message: String = "",
     // `message` with its distances in miles; empty when it states none.
     val message_mi: String = "",
-    val suppresses_praise: Boolean = false,
     val grade: String = "",
     val citation: String = "",
     val confidence: Float = 0f,
@@ -1924,20 +1624,14 @@ object EntryIds {
 sealed interface Event {
     fun toJson(): JsonElement
 
-    /** Whether this event is written to the durable log when the core accepts it.
-     *  Everything is persisted except the shell's clock ([SetToday]), which is
-     *  re-sent every launch and kept as a single last-write-wins line — writing it
-     *  on every foreground would only grow the log with a line compaction drops. */
+    /** Whether this event is written to the durable log when the core accepts it
+     *  (all but [SetToday]). */
     val persist: Boolean get() = true
 
     data class SubmitReadiness(
         val signal: ReadinessSignal,
         val value: Double,
         val observedAt: Long,
-        // Consecutive days/sessions the signal's condition has held (ReadinessInput
-        // .streak). 0 = not tracked. The multi-day autoreg rules (e1RM ≥2 sessions,
-        // RHR ≥2 days, SubjectiveMultiDay tier) are dead until the shell sends this.
-        val streak: Int = 0,
         // Pain characterization for a Pain report (ReadinessInput.pain). null keeps
         // the conservative bare-report hard stop; a full detail reaches the graded
         // File-08 pain gate.
@@ -1953,7 +1647,8 @@ sealed interface Event {
                 put("value", value)
                 put("observed_at", observedAt)
                 if (effortMin != null) put("effort_min", effortMin)
-                put("streak", streak)
+                // Always 0: the core derives streaks from check-ins.
+                put("streak", 0)
                 if (pain != null) put("pain", buildJsonObject {
                     put("kind", pain.kind.name)
                     pain.severity?.let { put("severity", it) }
@@ -2035,37 +1730,23 @@ sealed interface Event {
         val advanced: Boolean,
         // False = the athlete never gave a weekly distance (C9): the core forces
         // runningKmPerWeek to 0.0 and plans from logged runs or its KB floors. A
-        // real "I don't run yet" answer is 0.0 with this true. Emitted only when
-        // false so every answered profile keeps the legacy wire.
+        // real "I don't run yet" answer is 0.0 with this true.
         val runningKmPerWeekSet: Boolean = true,
-        // Consolidated person data: sent on EVERY SetProfile so
-        // the last-write-wins profile keeps them (an omitted field defaults to
-        // None on the core, so the draft must always re-emit them). Unanswered
-        // person data is omitted from the wire (serde default), keeping the line
-        // identical to the base eight-field form when nothing is set.
+        // Every field below mirrors app::Profile and is sent on EVERY SetProfile
+        // (last-write-wins, so an omitted field would reset to the core default).
+        // Optional fields are emitted only when set (serde defaults on the core),
+        // so an unanswered profile keeps the base eight-field wire.
         val female: Boolean? = null,
         val bodyweightKg: Double? = null,
         val ageYears: Double? = null,
         val restingHrBpm: Double? = null,
         val measuredHrMax: Double? = null,
-        // Display weights in pounds instead of kg (mirrors app::Profile::weight_lb).
-        // Display-only; the core converts its verbatim weight strings. Emitted only
-        // when true so an all-metric profile keeps the same wire form.
+        // Display weights in pounds; display-only.
         val weightLb: Boolean = false,
-        // Stage-0 onboarding health screen (schema.rs HealthScreen). Sent so the
-        // pediatric/PAR-Q+/pregnancy/injury/RED-S deferral gates are reachable.
-        // Emitted only when a flag is raised, so an all-clear profile keeps
-        // the same pre-health wire; the core serde-defaults the rest.
+        // Stage-0 health screen (schema.rs HealthScreen): the pediatric/PAR-Q+/
+        // pregnancy/injury/RED-S deferral gates.
         val health: HealthScreen = HealthScreen(),
-        // Resistance-training modality (mirrors app::Profile::resistance_modality).
-        // Emitted only when Calisthenics so a weights profile keeps the
-        // same pre-calisthenics wire (core serde-defaults Weights).
         val resistanceModality: ResistanceModality = ResistanceModality.Weights,
-        // Advanced training-context fields (mirror app::Profile). All
-        // #[serde(default)] on the core, so each is emitted only when set and an
-        // unset advanced profile keeps the same legacy wire. Carried on
-        // every SetProfile (last-write-wins) so a later training-field edit can't
-        // drop them.
         //   high_load_block  — arms autoreg-029's parasympathetic-saturation guard
         //   environment       — File-08 environment modifiers (heat/altitude/cold)
         //   env_temp_c/_m     — running-041 pace-correction triggers
@@ -2075,9 +1756,6 @@ sealed interface Event {
         val envTempC: Double? = null,
         val envAltitudeM: Double? = null,
         val weeksOff: Double? = null,
-        // Coaching inputs (mirror app::Profile; all serde-default on the core, so
-        // each is emitted only when answered and an unanswered profile keeps the
-        // legacy wire):
         //   lift_days_per_week        — 2..=5 lifting sessions the athlete can do
         //   training_weekdays         — bitmask bit0=Mon..bit6=Sun; null = any day
         //   goal_race_epoch_day       — race date (taper/periodisation target)
@@ -2098,24 +1776,16 @@ sealed interface Event {
         val calisEquipment: CalisEquipment? = null,
         val specializationMuscle: String? = null,
         val runnerStrength: Boolean = false,
-        // Profile-history effective day (mirrors app::Profile
-        // effective_from_epoch_day). The core keys its profile history by this: a
-        // SetProfile with eff E supersedes every entry with eff >= E, and a past
-        // day is prescribed from the profile effective THAT day, so an edit no
-        // longer re-prescribes settled days. EVERY production construction site
-        // passes the core's today (model.today_epoch_day ?: todayEpochDay());
-        // null replaces the whole history (a legacy undated edit). Emitted as
-        // `effective_from_epoch_day` only when non-null so an all-metric legacy
-        // wire is unchanged.
+        // The day this profile takes effect (app::Profile effective_from_epoch_day):
+        // it supersedes every history entry from that day on, and a past day is
+        // prescribed from the profile in force then. Production sites pass the
+        // core's today; null replaces the whole history.
         val effectiveFromEpochDay: Long? = null,
-        // Birthday, local epoch day (mirrors app::Profile::birth_epoch_day). The
-        // core derives age_years and the under-18 gate from it and its today;
-        // emitted only when set, so a legacy age-only profile keeps its wire.
+        // Birthday, local epoch day: the core derives the age and the under-18 gate.
         val birthEpochDay: Long? = null,
-        // When the edit was made, unix seconds (mirrors app::Profile::edited_at):
-        // on its effective day the edit is in force only from this instant, so an
-        // evening edit never re-converts a run logged that morning. Stamped by
-        // ProfileDraft.toEvent for a dated edit; emitted only when set.
+        // When the edit was made (unix seconds): on its effective day the edit is in
+        // force only from this instant, so an evening edit never re-converts a run
+        // logged that morning. Stamped by ProfileDraft.toEvent for a dated edit.
         val editedAtSec: Long? = null,
     ) : Event {
         override fun toJson() = buildJsonObject {
@@ -2129,24 +1799,16 @@ sealed interface Event {
                 put("running_km_per_week", runningKmPerWeek)
                 put("advanced", advanced)
                 if (!runningKmPerWeekSet) put("running_km_per_week_set", false)
-                // Only emit person data that is set: an all-absent profile stays
-                // identical to the base eight-field wire (test-pinned), and the
-                // core's serde defaults fill None for anything omitted.
                 if (female != null) put("female", female)
                 if (bodyweightKg != null) put("bodyweight_kg", bodyweightKg)
                 if (ageYears != null) put("age_years", ageYears)
                 if (restingHrBpm != null) put("resting_hr_bpm", restingHrBpm)
                 if (measuredHrMax != null) put("measured_hr_max", measuredHrMax)
-                // Emit only when set to lb so an all-metric profile stays
-                // identical to the pre-unit-flag wire (core serde-defaults false).
                 if (weightLb) put("weight_lb", true)
                 if (resistanceModality != ResistanceModality.Weights) {
                     put("resistance_modality", resistanceModality.name)
                 }
-                // Advanced training-context fields: emit only when set so an unset
-                // advanced profile stays the same as the legacy wire (the
-                // core serde-defaults each to None/false). `environment` rides as
-                // the bare variant name the Rust enum deserializes.
+                // `environment` is the bare Rust variant name.
                 if (highLoadBlock) put("high_load_block", true)
                 if (environment != null) put("environment", environment.name)
                 if (envTempC != null) put("env_temp_c", envTempC)
@@ -2175,8 +1837,7 @@ sealed interface Event {
                 }
                 if (birthEpochDay != null) put("birth_epoch_day", birthEpochDay)
                 if (editedAtSec != null) put("edited_at", editedAtSec)
-                // Health screen: emit only when a gate flag is raised so the
-                // all-clear line stays identical to the pre-health-screen form.
+                // Health screen: only when a gate flag is raised.
                 if (health.anyRaised()) put("health", buildJsonObject {
                     // youth is core-derived from age; the shell never asserts it,
                     // so re-emitting a profile can never pin the pediatric gate.
@@ -2283,7 +1944,6 @@ sealed interface Event {
         val distanceKm: Double,
         val durationMin: Double,
         val hrPctMax: Double,
-        val longestRecentKm: Double,
         val observedAt: Long = AppClock.nowSec(),
         val entryId: Long = EntryIds.next(),
         // User-declared run-intent label; null = untagged. Omitted from the
@@ -2305,7 +1965,8 @@ sealed interface Event {
                 put("distance_km", distanceKm)
                 put("duration_min", durationMin)
                 put("hr_pct_max", hrPctMax)
-                put("longest_recent_km", longestRecentKm)
+                // Always 0: the core derives the baseline from logged runs.
+                put("longest_recent_km", 0.0)
                 put("observed_at", observedAt)
                 put("entry_id", entryId)
                 workoutType?.let { put("workout_type", it.name) }
@@ -2319,7 +1980,6 @@ sealed interface Event {
     data class LogRunTrack(
         val points: List<GpsPoint>,
         val hrPctMax: Double,
-        val longestRecentKm: Double,
         // The session's logged-at stamp for history display; distinct from each
         // GPS fix's own per-point `observed_at`.
         val observedAt: Long = AppClock.nowSec(),
@@ -2352,7 +2012,7 @@ sealed interface Event {
                     }
                 }
                 put("hr_pct_max", hrPctMax)
-                put("longest_recent_km", longestRecentKm)
+                put("longest_recent_km", 0.0)
                 put("observed_at", observedAt)
                 put("entry_id", entryId)
                 workoutType?.let { put("workout_type", it.name) }
@@ -2459,7 +2119,6 @@ sealed interface Event {
         val distanceKm: Double,
         val durationMin: Double,
         val hrPctMax: Double,
-        val longestRecentKm: Double = 0.0,
         val observedAt: Long,
         // The row's ORIGINAL observed_at (before any date change), so a legacy
         // (entry_id == 0) row is matched and REPLACED rather than duplicated.
@@ -2477,7 +2136,7 @@ sealed interface Event {
                 put("distance_km", distanceKm)
                 put("duration_min", durationMin)
                 put("hr_pct_max", hrPctMax)
-                put("longest_recent_km", longestRecentKm)
+                put("longest_recent_km", 0.0)
                 put("observed_at", observedAt)
                 put("observed_at_fallback", observedAtFallback)
                 workoutType?.let { put("workout_type", it.name) }

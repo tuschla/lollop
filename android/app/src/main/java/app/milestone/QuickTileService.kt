@@ -8,6 +8,7 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
+import androidx.core.content.edit
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetMidnight
 import app.milestone.widget.WidgetSnapshot
@@ -31,14 +32,12 @@ internal enum class TileFace(val label: Int, val icon: Int, val dest: OpenDest, 
 }
 
 /**
- * The tile for [recording] (a run recording in this process) and today's widget
- * [snapshot] (null when there is none for today, or it is stale). Start run needs
- * an open run item today ([WidgetSnapshot.trackable]); Log set needs today's lift
- * session still open. A finished session, a hold ([WidgetDayKind.Paused]), a rest
- * day and no plan all fall back to Log.
+ * The tile for today's widget [snapshot] (null when there is none for today, or
+ * it is stale). Start run needs an open run item today ([WidgetSnapshot.trackable]);
+ * Log set needs today's lift session still open. A finished session, a hold
+ * ([WidgetDayKind.Paused]), a rest day and no plan all fall back to Log.
  */
-internal fun tileFace(recording: Boolean, snapshot: WidgetSnapshot?): TileFace = when {
-    recording -> TileFace.Recording
+internal fun tileFace(snapshot: WidgetSnapshot?): TileFace = when {
     snapshot == null -> TileFace.Log
     snapshot.kind == WidgetDayKind.Run && snapshot.trackable -> TileFace.StartRun
     snapshot.kind == WidgetDayKind.Lift && !snapshot.sessionDone -> TileFace.LogSet
@@ -50,22 +49,18 @@ internal fun tileFace(recording: Boolean, snapshot: WidgetSnapshot?): TileFace =
  * day snapshot file and the in-process [RunSession] flags, so showing it never
  * boots the core.
  *
- * An active tile (manifest meta-data `ACTIVE_TILE`): System UI shows the face it
- * last drew and binds the service only when the app asks ([requestTileRefresh])
- * or on a tap. Opening the panel alone did not redraw it on the Android 14
- * emulator (the label stayed "Start run" on a later day and during a run). The
- * app asks whenever the face can change: a run starts or stops ([TileSync]), the
- * day snapshot is written or marked stale ([WidgetSnapshotStore.write]), and the
- * day changes (local midnight, date, clock or time zone change in
+ * An active tile (manifest meta-data `ACTIVE_TILE`): System UI redraws it only
+ * when the app asks ([requestTileRefresh]) or on a tap, so the app asks whenever
+ * the face can change: a run starts or stops ([TileSync]), the day snapshot is
+ * written or marked stale ([WidgetSnapshotStore.write]), and the day changes
+ * (local midnight, clock or time zone change in
  * [app.milestone.widget.TodayWidgetReceiver]).
  *
  * A tap opens the app ([openIntent]); it never starts [RunTrackingService] itself,
  * since a location foreground service may not start from the background. "Start
- * run" opens the tracker, where the user starts the run.
- *
- * The tap goes through [onClick] on purpose, not [Tile.setActivityLaunchForClick]:
- * on the Android 14 emulator a launch handed to System UI kept the tile's label
- * stale, since a click then no longer made System UI bind the service.
+ * run" opens the tracker, where the user starts the run. The tap goes through
+ * [onClick], not [Tile.setActivityLaunchForClick]: the click must bind the service
+ * so the face is redrawn.
  */
 class QuickTileService : TileService() {
 
@@ -74,9 +69,8 @@ class QuickTileService : TileService() {
         setAdded(this, true)
         // The face rolls over at local midnight like the widget's.
         WidgetMidnight.schedule(this)
-        // Draw now: otherwise System UI shows the manifest label ("Log") until the
-        // next trigger. A listening request from here is ignored on the Android 37
-        // emulator (it works a moment later), so the face is set while bound.
+        // Draw now (a listening request from here can be ignored), or System UI
+        // shows the manifest label until the next trigger.
         draw()
     }
 
@@ -90,10 +84,9 @@ class QuickTileService : TileService() {
         super.onStartListening()
         draw()
         // Cleared app data forgets onTileAdded; a tile System UI draws is on the panel.
-        if (!isAdded(this)) {
-            setAdded(this, true)
-            WidgetMidnight.schedule(this)
-        }
+        if (!isAdded(this)) setAdded(this, true)
+        // A reboot clears alarms; re-arm the midnight tick (replaces any earlier one).
+        WidgetMidnight.schedule(this)
     }
 
     private fun draw() {
@@ -131,14 +124,14 @@ class QuickTileService : TileService() {
 
         /** The face for the current state: a recording run first (no file read), then the snapshot. */
         internal fun currentFace(context: Context): TileFace =
-            if (RunSession.tracking.value) TileFace.Recording else tileFace(false, WidgetSnapshotStore.today(context))
+            if (RunSession.tracking.value) TileFace.Recording else tileFace(WidgetSnapshotStore.today(context))
 
         /** Whether the tile is on the user's Quick Settings panel (it then needs the midnight tick). */
         internal fun isAdded(context: Context): Boolean =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ADDED, false)
 
         private fun setAdded(context: Context, added: Boolean) {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ADDED, added).apply()
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean(KEY_ADDED, added) }
         }
     }
 }
@@ -161,7 +154,8 @@ internal fun requestTileRefresh(ctx: Context) {
 /**
  * Redraws the tile when a run starts or stops recording ([RunSession.tracking], the
  * flag behind [TileFace.Recording]), whoever changes it. Process-scoped, started from
- * MainActivity and [RunTrackingService]; a later call only replaces the context.
+ * MainActivity and [RunTrackingService]; a later call only replaces the context
+ * (Robolectric gives each test a new Application under the same collector).
  */
 internal object TileSync {
     @Volatile private var started = false

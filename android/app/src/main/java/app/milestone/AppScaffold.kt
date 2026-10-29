@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -19,7 +18,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -52,9 +50,6 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun CoachScaffold(session: CoachSession) {
     val ctx = LocalContext.current
-    // The setup prefs the boot effect + dispatch use; read here to make the
-    // clear-all ↔ KEY_PLAN_CLEARED coupling explicit (see the onClear below).
-    val setupPrefs = remember { ctx.setupPrefs() }
     // Live tracking state drives the "run in progress" reentry chip below.
     val liveTracking by RunSession.tracking.collectAsState()
 
@@ -105,6 +100,22 @@ internal fun CoachScaffold(session: CoachSession) {
     // A set loop in progress (reported by the Set editor): the sheet refuses to be
     // swiped or scrim-tapped away; X or "Done for now" close it.
     var sheetLocked by rememberSaveable { mutableStateOf(false) }
+    // A set loop in progress, or an editor holding unsaved edits: what a sheet
+    // close or an open intent must not drop.
+    fun loopLocked() = sheetLocked && sheetMode == LogMode.Set
+    fun editorDirty() = sheetDirty && sheetMode != LogMode.Chooser
+    fun resetSheet() {
+        sheetDirty = false
+        sheetLocked = false
+        sheetPlanExercise = null
+        sheetPlanDay = null
+    }
+    fun openSheet(mode: LogMode, exercise: String? = null, day: Long? = null) {
+        sheetPlanExercise = exercise
+        sheetPlanDay = day
+        sheetMode = mode
+        sheetOpen = true
+    }
 
     // Crash-recovery consent, ahead of the full-screen returns below so neither
     // the setup nor a tracker restored after process death can hide it.
@@ -123,7 +134,7 @@ internal fun CoachScaffold(session: CoachSession) {
             dest,
             nav,
             session.model,
-            sheetBusy = (sheetLocked && sheetMode == LogMode.Set) || (sheetDirty && sheetMode != LogMode.Chooser),
+            sheetBusy = loopLocked() || editorDirty(),
             trackerPinned = !RunSession.tracking.value && (RunSession.armed.value || RunSession.locating.value),
         )
         if (next.sheetOpen && (!nav.sheetOpen || next.sheetMode != nav.sheetMode)) {
@@ -154,6 +165,7 @@ internal fun CoachScaffold(session: CoachSession) {
             GuidedSetup(
                 initial = session.setupInitial,
                 switchTo = setupSwitchTo,
+                calisLadders = session.model.calisthenics_ladders,
                 onComplete = { draft, rungs ->
                     session.dispatch(draft.toEvent(session.model.today()))
                     // Calisthenics self-placement: each answered ladder starts at
@@ -196,10 +208,7 @@ internal fun CoachScaffold(session: CoachSession) {
             },
             onLogRunManually = {
                 session.showTracker = false
-                sheetPlanExercise = null
-                sheetPlanDay = null
-                sheetMode = LogMode.Run
-                sheetOpen = true
+                openSheet(LogMode.Run)
             },
         )
         return
@@ -225,11 +234,11 @@ internal fun CoachScaffold(session: CoachSession) {
     }
     // "How evidence grading works" legend sheet, opened from the "?" on grade
     // badges. Static copy; no coaching logic.
-    var showLegend by remember { mutableStateOf(false) }
+    var showLegend by rememberSaveable { mutableStateOf(false) }
     // Glossary bottom-sheet: the term key to open it scrolled to, or null
     // when closed. Opened from tappable term chips app-wide. Static UI copy;
     // definitions of jargon, NOT KB training claims.
-    var glossaryTerm by remember { mutableStateOf<String?>(null) }
+    var glossaryTerm by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Today's scroll position, hoisted so the Log FAB can collapse to its icon
     // once the list leaves the top.
@@ -248,8 +257,8 @@ internal fun CoachScaffold(session: CoachSession) {
         confirmValueChange = { target ->
             when {
                 target != SheetValue.Hidden -> true
-                sheetLocked && sheetMode == LogMode.Set -> false
-                sheetDirty && sheetMode != LogMode.Chooser -> {
+                loopLocked() -> false
+                editorDirty() -> {
                     confirmDiscardSheet = true
                     false
                 }
@@ -260,10 +269,7 @@ internal fun CoachScaffold(session: CoachSession) {
     val scope = rememberCoroutineScope()
     // Animate the sheet closed, then drop it from composition once hidden.
     val dismissSheet: () -> Unit = {
-        sheetDirty = false
-        sheetLocked = false
-        sheetPlanExercise = null
-        sheetPlanDay = null
+        resetSheet()
         scope.launch { sheetState.hide() }.invokeOnCompletion {
             if (!sheetState.isVisible) sheetOpen = false
         }
@@ -271,22 +277,17 @@ internal fun CoachScaffold(session: CoachSession) {
 
     // The Today Log FAB. Reopening always resets to the chooser so the sheet
     // never reappears mid-editor.
-    val openLog: () -> Unit = {
-        sheetMode = LogMode.Chooser
-        sheetPlanExercise = null
-        sheetPlanDay = null
-        sheetOpen = true
-    }
+    val openLog: () -> Unit = { openSheet(LogMode.Chooser) }
 
     // The bottom bar's measured height: the top chrome keeps the app bar off it.
     var bottomBarPx by remember { mutableIntStateOf(0) }
     // The nav bar's own measured height, kept while the rail replaces it, so the
     // rail decision below is judged against the bar it would bring back.
     var navBarPx by remember { mutableIntStateOf(0) }
-    // The chrome gives way to the pinned safety banner, never the reverse (user
-    // decision 2026-10-25): when the bottom nav and the Log button no longer fit
-    // under the banner (a landscape phone under a hold), a side rail carries the
-    // destinations and Log, beside the banner instead of over it.
+    // The chrome gives way to the pinned safety banner, never the reverse: when the
+    // bottom nav and the Log button no longer fit under the banner (a landscape
+    // phone under a hold), a side rail carries the destinations and Log, beside the
+    // banner instead of over it.
     var navRail by remember { mutableStateOf(false) }
     val logRoomPx = with(LocalDensity.current) { LogButtonRoom.roundToPx() }
     Row(Modifier.fillMaxSize().background(BgTop)) {
@@ -318,7 +319,7 @@ internal fun CoachScaffold(session: CoachSession) {
                                 .padding(horizontal = Space.Screen.dp)
                                 .padding(top = Space.Md.dp),
                             lastPain = session.lastPain,
-                            onAddDetails = { sheetMode = LogMode.Readiness; sheetOpen = true },
+                            onAddDetails = { openSheet(LogMode.Readiness) },
                             onOpenProfile = { row -> profileFocus = row; selected = Dest.Profile },
                         )
                     },
@@ -381,8 +382,8 @@ internal fun CoachScaffold(session: CoachSession) {
                     // Every logged family + derived coaching output; the profile
                     // (training configuration) stays. ONE batch: a single core turn with
                     // one view decode and one published model, never a run of partial
-                    // models. (There are no Cooper/CriticalSpeed/APRE encoders in the
-                    // shell: those calculators have no UI, so nothing to clear for them.)
+                    // models. The ClearPlan echo also marks the plan cleared, so it is
+                    // not regenerated on the next boot.
                     session.dispatchAll(
                         listOf(
                             Event.ClearSets, Event.ClearRuns, Event.ClearReadiness,
@@ -391,90 +392,53 @@ internal fun CoachScaffold(session: CoachSession) {
                             Event.ClearPlan, Event.ClearActivities,
                         ),
                     )
-                    // Explicit decision: after "Clear all data" the plan is NOT
-                    // auto-regenerated on the next boot; the user re-creates it from the
-                    // PlanPromptCard. The dispatch echo already sets this marker for the
-                    // ClearPlan above, but writing it here makes the durable-disable an
-                    // explicit part of clear-all rather than an invisible side effect.
-                    setupPrefs.edit().putBoolean(KEY_PLAN_CLEARED, true).apply()
                 },
             )
             CompositionLocalProvider(
                 LocalEvidenceLegend provides { showLegend = true },
                 LocalGlossary provides { term -> glossaryTerm = term },
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(pad),
-                ) {
-                    // Destinations are pure projections of the one hoisted `model`.
-                    Box(Modifier.weight(1f)) {
-                        when (selected) {
-                            Dest.Today -> {
-                                TodayDestination(
-                                    model = session.model,
-                                    listState = todayListState,
-                                    onEvent = { session.dispatch(it) },
-                                    lastPain = session.lastPain,
-                                    onOpenProfile = { row -> profileFocus = row; selected = Dest.Profile },
-                                    onStartSetup = {
-                                        // First-run entry point (no seed): keep the onboarding
-                                        // pref semantics at the call site above.
-                                        session.setupInitial = null
-                                        session.showSetup = true
-                                    },
-                                    onRerunSetup = { rerunSetup(null) },
-                                    onLogPlanItem = {
-                                        sheetPlanExercise = it.exercise
-                                        sheetPlanDay = null
-                                        sheetMode = LogMode.Set
-                                        sheetOpen = true
-                                    },
-                                    onLogPastItem = { item, day ->
-                                        sheetPlanExercise = item.exercise
-                                        sheetPlanDay = day
-                                        sheetMode = LogMode.Set
-                                        sheetOpen = true
-                                    },
-                                    onLogPastRun = { day ->
-                                        sheetPlanExercise = null
-                                        sheetPlanDay = day
-                                        sheetMode = LogMode.Run
-                                        sheetOpen = true
-                                    },
-                                    onTrackRun = { session.showTracker = true },
-                                    onOpenSheet = { mode ->
-                                        sheetPlanExercise = null
-                                        sheetPlanDay = null
-                                        sheetMode = mode
-                                        sheetOpen = true
-                                    },
-                                )
-                            }
-                            Dest.History -> HistoryDestination(
+                // Destinations are pure projections of the one hoisted `model`.
+                Box(Modifier.fillMaxSize().padding(pad)) {
+                    when (selected) {
+                        Dest.Today -> {
+                            TodayDestination(
                                 model = session.model,
+                                listState = todayListState,
                                 onEvent = { session.dispatch(it) },
-                                onTrackRun = { session.showTracker = true },
-                                onLogSet = {
-                                    sheetPlanExercise = null
-                                    sheetPlanDay = null
-                                    sheetMode = LogMode.Set
-                                    sheetOpen = true
+                                lastPain = session.lastPain,
+                                onOpenProfile = { row -> profileFocus = row; selected = Dest.Profile },
+                                onStartSetup = {
+                                    // First-run entry point (no seed): keep the onboarding
+                                    // pref semantics at the call site above.
+                                    session.setupInitial = null
+                                    session.showSetup = true
                                 },
-                            )
-                            Dest.Profile -> ProfileDestination(
-                                ctx = ctx,
-                                model = session.model,
-                                onEvent = { session.dispatch(it) },
-                                onClearAll = { confirmClearAll = true },
-                                onRerunSetup = rerunSetup,
-                                focusRow = profileFocus,
-                                onFocusHandled = { profileFocus = null },
-                                planAnswersOpen = planAnswersOpen,
-                                onPlanAnswersOpenChange = { planAnswersOpen = it },
+                                onRerunSetup = { rerunSetup(null) },
+                                onLogPlanItem = { openSheet(LogMode.Set, exercise = it.exercise) },
+                                onLogPastItem = { item, day -> openSheet(LogMode.Set, exercise = item.exercise, day = day) },
+                                onLogPastRun = { day -> openSheet(LogMode.Run, day = day) },
+                                onTrackRun = { session.showTracker = true },
+                                onOpenSheet = { mode -> openSheet(mode) },
                             )
                         }
+                        Dest.History -> HistoryDestination(
+                            model = session.model,
+                            onEvent = { session.dispatch(it) },
+                            onTrackRun = { session.showTracker = true },
+                            onLogSet = { openSheet(LogMode.Set) },
+                        )
+                        Dest.Profile -> ProfileDestination(
+                            ctx = ctx,
+                            model = session.model,
+                            onEvent = { session.dispatch(it) },
+                            onClearAll = { confirmClearAll = true },
+                            onRerunSetup = rerunSetup,
+                            focusRow = profileFocus,
+                            onFocusHandled = { profileFocus = null },
+                            planAnswersOpen = planAnswersOpen,
+                            onPlanAnswersOpenChange = { planAnswersOpen = it },
+                        )
                     }
                 }
 
@@ -497,15 +461,17 @@ internal fun CoachScaffold(session: CoachSession) {
                 if (sheetOpen) {
                     // A set loop in progress can't be swiped or scrim-tapped away (a scroll
                     // back up to the timer closed the whole loop); it closes via X or Finish.
-                    val loopLocked = sheetLocked && sheetMode == LogMode.Set
                     ModalBottomSheet(
                         // The dirty-editor and loop guards live in sheetState.confirmValueChange
                         // (which keeps the sheet visible while confirming). By the time
                         // onDismissRequest fires the hide is already committed on a clean,
                         // unlocked sheet, so this just finishes the close.
-                        onDismissRequest = { sheetDirty = false; sheetLocked = false; sheetPlanExercise = null; sheetPlanDay = null; sheetOpen = false },
+                        onDismissRequest = {
+                            resetSheet()
+                            sheetOpen = false
+                        },
                         sheetState = sheetState,
-                        sheetGesturesEnabled = !loopLocked,
+                        sheetGesturesEnabled = !loopLocked(),
                         // Sheet ground a hair off BgElevated for separation (05-log §1);
                         // on paper the elevated surface already separates.
                         containerColor = BgSunken,
@@ -514,13 +480,10 @@ internal fun CoachScaffold(session: CoachSession) {
                         LogSheetContent(
                             mode = sheetMode,
                             model = session.model,
-                            initialReadinessSignal = ReadinessSignal.WellnessZ,
                             // Returning to the chooser clears the dirty flag (the entry was
                             // handled or discarded via the editor's own guard).
                             onMode = {
-                                if (it == LogMode.Chooser) {
-                                    sheetDirty = false; sheetLocked = false; sheetPlanExercise = null; sheetPlanDay = null
-                                }
+                                if (it == LogMode.Chooser) resetSheet()
                                 sheetMode = it
                             },
                             onEvent = { session.dispatch(it) },
@@ -541,22 +504,11 @@ internal fun CoachScaffold(session: CoachSession) {
                 }
                 // The swipe-down discard confirmation for a dirty Log editor.
                 if (confirmDiscardSheet) {
-                    AlertDialog(
-                        onDismissRequest = { confirmDiscardSheet = false },
-                        shape = RoundedCornerShape(Space.Card.dp),
-                        title = { Text(stringResource(R.string.main_discard_entry_title)) },
-                        confirmButton = {
-                            TextButton(onClick = {
-                                confirmDiscardSheet = false
-                                sheetDirty = false
-                                sheetLocked = false
-                                sheetOpen = false
-                            }) { Text(stringResource(R.string.main_discard), color = DangerText) }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { confirmDiscardSheet = false }) { Text(stringResource(R.string.main_keep_editing)) }
-                        },
-                    )
+                    DiscardEntryDialog(onKeepEditing = { confirmDiscardSheet = false }) {
+                        confirmDiscardSheet = false
+                        resetSheet()
+                        sheetOpen = false
+                    }
                 }
                 // "How evidence grading works" legend, reached from the "?" on any
                 // grade badge. Static reference copy; no coaching logic.
@@ -603,7 +555,7 @@ private val LogButtonRoom = 72.dp
  * [onNeedsRail] reports whether a banner leaves less than [logRoomPx] between
  * it and the nav bar ([navBarPx]): the nav bar and the Log button would then be
  * laid over it, so the host swaps them for a side rail (a landscape phone under
- * a hold, user decision 2026-10-25).
+ * a hold).
  */
 @Composable
 private fun TopChrome(

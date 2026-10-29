@@ -1,32 +1,9 @@
-//! MutationAudit (2026-10-25): guards for 2026-10-23..25 fixes whose mutant
-//! (`planning/review/mutation/mutate.py`) SURVIVED the whole standing
-//! `cargo test -p shared` (`mutate.py --suite`), plus equivalence witnesses
-//! for the mutants that cannot change behaviour. Each test names its mutant;
-//! the verdict table is `planning/review/mutation/AUDIT.md`.
-//!
-//! `cargo test -p shared --lib mutation_guards`.
+//! Guards for mutants of `planning/review/mutation/mutate.py` that survived
+//! the whole standing `cargo test -p shared`, plus equivalence witnesses for
+//! the mutants that cannot change behaviour. Each test names its mutant; the
+//! verdict table is `planning/review/mutation/AUDIT.md`.
 
 use super::*;
-
-const DAY0: i64 = 20_458; // a Monday (long_horizon's START)
-
-fn today(m: &mut Model, d: i64) {
-    let _ = Engine.update(
-        Event::SetToday {
-            epoch_day: d,
-            utc_offset_sec: 0,
-        },
-        m,
-    );
-}
-
-fn set_id(exercise: &str, kg: f64, reps: u32, id: u64, at: i64) -> Event {
-    let mut ev = log_set(exercise, kg, reps, 8.0, at);
-    if let Event::LogSet { entry_id, .. } = &mut ev {
-        *entry_id = id;
-    }
-    ev
-}
 
 fn is_bench(name: &str) -> bool {
     crate::plan::same_movement(name, "Bench press")
@@ -43,56 +20,22 @@ fn bench_loads(vm: &ViewModel, from: i64) -> Vec<f64> {
         .collect()
 }
 
-/// A hypertrophy lifter benching 60 kg × 8 @ RPE 8 (an e1RM-ANCHORED lift)
-/// twice a week for six weeks; returns the model and the last lifting day.
+/// Bench press 60 kg × 8 @ RPE 8 (an e1RM-ANCHORED lift) twice a week.
 fn anchored_hypertrophy_lifter() -> (Model, i64) {
-    let app = Engine;
-    let mut m = Model::default();
-    today(&mut m, DAY0);
-    let _ = app.update(
-        Event::SetProfile(Profile {
-            weekly_sets: 16,
-            lift_days_per_week: Some(4),
-            lift_goal: LiftGoal::Hypertrophy,
-            concurrent_goal: ConcurrentGoal::Hypertrophy,
-            effective_from_epoch_day: Some(DAY0),
-            ..base_profile()
-        }),
-        &mut m,
-    );
-    let _ = app.update(
-        Event::GeneratePlan {
-            start_epoch_day: DAY0,
-        },
-        &mut m,
-    );
-    let mut id = 0;
-    for w in 0..6 {
-        for wd in [0, 3] {
-            let d = DAY0 + 7 * w + wd;
-            today(&mut m, d);
-            for k in 0..3 {
-                id += 1;
-                let t = d * DAY_SEC + 64_800 + k * 120;
-                let _ = app.update(set_id("Bench press", 60.0, 8, id, t), &mut m);
-            }
-        }
-    }
-    (m, DAY0 + 7 * 5 + 3)
+    hypertrophy_lifter(&[("Bench press", 60.0, 8, 0)])
 }
 
 /// M03c (REENTRY-RAMP-001, File 08 Table 3.4b: the re-entry ramp scales only
 /// numbers set BEFORE the break). An e1RM-anchored lift keeps a ramping
 /// `Reentry` derate on its anchor after the return, so a load lifted since
 /// the return must not take it again when carried (`carried_derate_for`).
-/// The standing `a_load_lifted_since_the_return_is_not_derated_again` uses an
-/// UNANCHORED isolation lift, whose derate the M03b `pre_break` filter
-/// already drops, so it no longer reaches `carried_derate_for`'s match.
+/// An unanchored isolation lift never reaches that match: the M03b
+/// `pre_break` filter already drops its derate.
 #[test]
 fn an_anchored_load_lifted_since_the_return_is_not_derated_again() {
     let (mut m, last) = anchored_hypertrophy_lifter();
     let back = last + 25;
-    today(&mut m, back);
+    set_today(&Engine, &mut m, back);
     let restart = bench_loads(&Engine.view(&m), back);
     assert!(
         !restart.is_empty() && restart.iter().all(|&kg| kg < 60.0),
@@ -102,11 +45,14 @@ fn an_anchored_load_lifted_since_the_return_is_not_derated_again() {
     let restart = restart[0];
     for k in 0..3 {
         let t = back * DAY_SEC + 64_800 + k * 120;
-        let _ = Engine.update(set_id("Bench press", restart, 8, 900 + k as u64, t), &mut m);
+        let _ = Engine.update(
+            with_entry_id(log_set("Bench press", restart, 8, 8.0, t), 900 + k as u64),
+            &mut m,
+        );
     }
     // Bench is a Monday lift: the next one is a week after the return, still
     // inside the 3-weeks-off ramp.
-    today(&mut m, back + 7);
+    set_today(&Engine, &mut m, back + 7);
     let vm = Engine.view(&m);
     let next = bench_loads(&vm, back + 7);
     assert!(
@@ -148,13 +94,13 @@ fn a_dead_even_gps_run_never_shows_a_negative_zero_split() {
     legs.extend(std::iter::repeat_n(1.0e-4 * (1.0 + 1.0e-5), 50));
     let start = 1_700_000_000;
     let points = north_track((50.0, start), &legs);
-    let raw = crate::running::track_positive_split_pct(&points, crate::running::MAX_GPS_ACCURACY_M)
-        .expect("a 100-leg track splits");
+    let raw =
+        crate::running::track_positive_split_pct(&points, &[]).expect("a 100-leg track splits");
     assert_eq!(raw, 0.0, "the split rounds to zero: {raw}");
     assert!(!raw.is_sign_negative(), "positive split is -0.0");
 
     let mut m = Model::default();
-    today(&mut m, start / DAY_SEC);
+    set_today(&Engine, &mut m, start / DAY_SEC);
     let _ = Engine.update(
         log_run_track(points, 70.0, 0.0, start + 400, 7_310_001),
         &mut m,
@@ -181,7 +127,7 @@ fn a_dead_even_gps_run_never_shows_a_negative_zero_split() {
 fn weekly_report_with_empty_and_negative_zero_weeks_shows_no_negative_zero() {
     for prior_week in [0, 2] {
         let mut m = Model::default();
-        today(&mut m, DAY0 + 20);
+        set_today(&Engine, &mut m, DAY0 + 20);
         let _ = Engine.update(
             Event::SetProfile(Profile {
                 running_days_per_week: 3,
@@ -218,7 +164,7 @@ fn weekly_report_with_empty_and_negative_zero_weeks_shows_no_negative_zero() {
             ),
             &mut m,
         );
-        today(&mut m, DAY0 + 21);
+        set_today(&Engine, &mut m, DAY0 + 21);
         let json = serde_json::to_string(&Engine.view(&m)).unwrap();
         if prior_week == 2 {
             assert!(
@@ -230,44 +176,57 @@ fn weekly_report_with_empty_and_negative_zero_weeks_shows_no_negative_zero() {
             assert!(
                 !json.contains(bad),
                 "{bad}: {}",
-                &json[json.find(bad).map_or(0, |i| i.saturating_sub(120))..][..240.min(json.len())]
+                excerpt(&json, json.find(bad).unwrap_or(0), 120, 240)
             );
         }
     }
 }
 
 /// M09f: a corrupt log's subnormal prior weight is no prior best
-/// (`MIN_RATIO_BASE_KG`). The standing `a_subnormal_prior_set_never_praises_
-/// an_infinite_gain` runs a novice profile, whose plain-language mastery copy
-/// prints no percentage, so "+inf%" never shows there; an ADVANCED lifter
-/// (MonthToMonth cadence, feedback-023/024 verbosity) gets the
-/// "+N% on your 90-day best" copy.
+/// (`MIN_RATIO_BASE_KG`). An ADVANCED lifter (MonthToMonth cadence,
+/// feedback-023/024 verbosity) gets the "+N% on your 90-day best" copy, which
+/// a novice's plain-language mastery copy never prints. An 80 kg prior best
+/// is the control: that copy does show for it.
 #[test]
 fn a_subnormal_prior_set_never_praises_an_advanced_lifter_with_infinite_gain() {
-    let app = Engine;
-    let mut m = Model::default();
-    today(&mut m, DAY0 + 1);
-    let _ = app.update(
-        Event::SetProfile(Profile {
-            progression_cadence: ProgressionCadence::MonthToMonth,
-            ..base_profile()
-        }),
-        &mut m,
-    );
-    let _ = app.update(
-        set_id("Back squat", 5e-324, 5, 1, DAY0 * DAY_SEC + 7 * 3600),
-        &mut m,
-    );
-    let _ = app.update(
-        set_id("Back squat", 100.0, 5, 2, (DAY0 + 1) * DAY_SEC + 7 * 3600),
-        &mut m,
-    );
-    let json = serde_json::to_string(&app.view(&m)).expect("view serializes");
-    assert!(
-        !json.contains("inf%") && !json.contains("on your 90-day best"),
-        "{}",
-        &json[json.find("90-day").map_or(0, |i| i.saturating_sub(160))..][..320.min(json.len())]
-    );
+    for prior_kg in [80.0, 5e-324] {
+        let app = Engine;
+        let mut m = Model::default();
+        set_today(&app, &mut m, DAY0 + 1);
+        let _ = app.update(
+            Event::SetProfile(Profile {
+                progression_cadence: ProgressionCadence::MonthToMonth,
+                ..base_profile()
+            }),
+            &mut m,
+        );
+        let _ = app.update(
+            with_entry_id(
+                log_set("Back squat", prior_kg, 5, 8.0, DAY0 * DAY_SEC + 7 * 3600),
+                1,
+            ),
+            &mut m,
+        );
+        let _ = app.update(
+            with_entry_id(
+                log_set("Back squat", 100.0, 5, 8.0, (DAY0 + 1) * DAY_SEC + 7 * 3600),
+                2,
+            ),
+            &mut m,
+        );
+        let json = vm_json(&app.view(&m));
+        let praised = json.contains("on your 90-day best");
+        let at = json.find("90-day").unwrap_or(0);
+        if prior_kg == 80.0 {
+            assert!(praised, "control: an 80 kg prior best is praised");
+        } else {
+            assert!(
+                !json.contains("inf%") && !praised,
+                "{}",
+                excerpt(&json, at, 160, 320)
+            );
+        }
+    }
 }
 
 /// M09i3 (equivalence witness). `cur_monday = today - weekday` is only
@@ -309,7 +268,7 @@ fn run_progress_at_extreme_days_never_overflows() {
 /// (`<lollop:logged_at>`), so re-importing the file is recognised as the run
 /// it came from (BUGS.md 2026-10-23 B2/B3: "re-imported own GPX was
 /// duplicated (standing or trimmed end)"). The standing Rust guards test
-/// `export_gpx_seg` itself, not that `export_run_gpx` passes the stamp.
+/// `export_gpx` itself, not that `export_run_gpx` passes the stamp.
 #[test]
 fn a_runs_gpx_export_names_its_logged_at_stamp() {
     let start = 1_700_100_000;
@@ -317,7 +276,7 @@ fn a_runs_gpx_export_names_its_logged_at_stamp() {
     // Logged 10 minutes after the last fix (a standing-still finish).
     let logged_at = start + 80 + 600;
     let mut m = Model::default();
-    today(&mut m, start / DAY_SEC);
+    set_today(&Engine, &mut m, start / DAY_SEC);
     let _ = Engine.update(
         log_run_track(points, 70.0, 0.0, logged_at, 7_340_001),
         &mut m,
@@ -339,7 +298,7 @@ fn a_runs_gpx_export_names_its_logged_at_stamp() {
 /// The view JSON before vs after an Undo of entry `id`; `None` when equal,
 /// else the first differing context.
 fn undo_diff(m: &mut Model, kind: EntryKind, id: u64, at: i64, ev: Event) -> Option<String> {
-    let json = |m: &Model| serde_json::to_string(&Engine.view(m)).expect("view serializes");
+    let json = |m: &Model| vm_json(&Engine.view(m));
     let before = json(m);
     let _ = Engine.update(
         Event::DeleteEntry {
@@ -357,11 +316,10 @@ fn undo_diff(m: &mut Model, kind: EntryKind, id: u64, at: i64, ev: Event) -> Opt
             .zip(after.bytes())
             .position(|(a, b)| a != b)
             .unwrap_or(0);
-        let lo = i.saturating_sub(160);
         format!(
             "Undo of {kind:?} {id}: …{}… vs …{}…",
-            &before[lo..(i + 80).min(before.len())],
-            &after[lo..(i + 80).min(after.len())]
+            excerpt(&before, i, 160, 240),
+            excerpt(&after, i, 160, 240)
         )
     })
 }
@@ -373,14 +331,20 @@ fn undo_diff(m: &mut Model, kind: EntryKind, id: u64, at: i64, ev: Event) -> Opt
 #[test]
 fn undo_of_one_of_two_tied_bests_keeps_the_mastery_praise() {
     let mut m = Model::default();
-    today(&mut m, DAY0 + 10);
+    set_today(&Engine, &mut m, DAY0 + 10);
     let _ = Engine.update(Event::SetProfile(strength_profile()), &mut m);
     let prior = DAY0 * DAY_SEC + 7 * 3600;
-    let _ = Engine.update(set_id("Back squat", 80.0, 5, 1, prior), &mut m);
+    let _ = Engine.update(
+        with_entry_id(log_set("Back squat", 80.0, 5, 8.0, prior), 1),
+        &mut m,
+    );
     let a_at = (DAY0 + 10) * DAY_SEC + 7 * 3600;
-    let a = set_id("Back squat", 100.0, 5, 10, a_at);
+    let a = with_entry_id(log_set("Back squat", 100.0, 5, 8.0, a_at), 10);
     let _ = Engine.update(a.clone(), &mut m);
-    let _ = Engine.update(set_id("back squat", 100.0, 5, 11, a_at + 300), &mut m);
+    let _ = Engine.update(
+        with_entry_id(log_set("back squat", 100.0, 5, 8.0, a_at + 300), 11),
+        &mut m,
+    );
     let fb = serde_json::to_string(&Engine.view(&m).feedback).unwrap();
     assert!(
         fb.contains("Back squat"),
@@ -398,7 +362,7 @@ fn undo_of_one_of_two_tied_bests_keeps_the_mastery_praise() {
 fn undo_of_a_same_stamp_run_keeps_the_spike_gate() {
     let mut m = Model::default();
     let day = DAY0 + 10;
-    today(&mut m, day);
+    set_today(&Engine, &mut m, day);
     let _ = Engine.update(
         Event::SetProfile(Profile {
             running_days_per_week: 3,
@@ -442,7 +406,7 @@ fn undo_of_a_same_stamp_gps_run_keeps_the_pacing_cue() {
     let fade = north_track((50.1, t0), &fade_legs);
     let at = t0 + 4 * 304 + 60;
     let mut m = Model::default();
-    today(&mut m, DAY0 + 10);
+    set_today(&Engine, &mut m, DAY0 + 10);
     let _ = Engine.update(Event::SetProfile(base_profile()), &mut m);
     let even_ev = log_run_track(even, 0.0, 0.0, at, 7_360_041);
     let _ = Engine.update(even_ev.clone(), &mut m);
@@ -504,9 +468,9 @@ fn undo_of_a_tied_top_set_keeps_the_session_summary() {
             // One extra set: the first item's last two sets tie on weight and
             // reps (different effort).
             let rpe = if k == it.sets { 9.0 } else { 8.0 };
-            let ev = with_rpe(
-                set_id(&it.exercise, kg, u32::from(it.reps_high), id, t),
-                rpe,
+            let ev = with_entry_id(
+                log_set(&it.exercise, kg, u32::from(it.reps_high), rpe, t),
+                id,
             );
             if n == 0 && k + 1 >= it.sets {
                 ties.push((id, t, ev.clone()));
@@ -525,13 +489,6 @@ fn undo_of_a_tied_top_set_keeps_the_session_summary() {
     }
 }
 
-fn with_rpe(mut ev: Event, v: f64) -> Event {
-    if let Event::LogSet { rpe, .. } = &mut ev {
-        *rpe = v;
-    }
-    ev
-}
-
 /// M09t: two weighted pull-up sets on the same second (+12.5 kg, then
 /// +10 kg by `entry_id`). The "≈ N estimated 1-rep max … from your last
 /// weighted set" line reads the LAST set in log order (`chrono_cmp`); by
@@ -548,9 +505,12 @@ fn undo_of_a_same_second_weighted_set_keeps_the_system_load_line() {
         &mut m,
     );
     let at = (MON - 1) * DAY_SEC + 18 * 3600;
-    let first = set_id("Full pull-up", 12.5, 5, 21, at);
+    let first = with_entry_id(log_set("Full pull-up", 12.5, 5, 8.0, at), 21);
     let _ = app.update(first.clone(), &mut m);
-    let _ = app.update(set_id("Full pull-up", 10.0, 5, 22, at), &mut m);
+    let _ = app.update(
+        with_entry_id(log_set("Full pull-up", 10.0, 5, 8.0, at), 22),
+        &mut m,
+    );
     let item = cal_item(&app.view(&m), Lad::VerticalPull).expect("a pull-up item");
     let line = serde_json::to_string(&item).unwrap();
     assert!(

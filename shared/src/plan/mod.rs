@@ -1,8 +1,7 @@
-//! Program synthesis: compose the dormant graded
-//! band functions (`strength::dup_day_rx`, `strength::loading_rx`,
-//! `hypertrophy::intermediate_default_program`, `running::workout_rx`,
-//! `running::goal_week_plan`, `hypertrophy::meso_structure`) into a concrete,
-//! dated [`Program`] of `Recommended<Prescription>` for the user's profile.
+//! Program synthesis: compose the graded band functions
+//! (`strength::dup_day_rx`, `strength::loading_rx`, `running::run_workout_rx`,
+//! `running::goal_week_plan`) into a concrete, dated [`Program`] of
+//! `Recommended<Prescription>` for the user's profile.
 //!
 //! Pure and deterministic: no clock, no IO, no randomness. Time enters `view()`
 //! as `observed_at`/`epoch_day` event data; this module lays out ONE week as a
@@ -60,7 +59,7 @@ pub(crate) use hypertrophy::{
 pub(crate) use lift::NAME_CLASSIFICATIONS;
 pub(crate) use lift::count_name_classification;
 pub(crate) use lift::{
-    MovementPattern, e1rm_reliable_name, is_barbell_lift, is_isolation_lift, movement_key,
+    MovementPattern, is_back_squat, is_barbell_lift, is_isolation_lift, movement_key,
     movement_pattern, same_movement,
 };
 pub(crate) use run::is_quality as is_quality_run;
@@ -81,35 +80,19 @@ pub struct Anchors {
     /// e1RM drop) lives in `lift_derates`. A lift untrained for >8 weeks has no
     /// entry (falls back to RIR).
     pub lift_e1rm: Vec<(String, f64)>,
-    /// Longest COMPLETED run (km) in the trailing 30-day window, derived in
-    /// `app/mod.rs::build_run_anchors` from `model.runs`. `None` when no run has been
-    /// logged in the window. This is the running analogue of `lift_e1rm`: just as
-    /// a logged e1RM anchors a lift's %1RM load to demonstrated capacity, this
-    /// anchors the long run to the athlete's demonstrated recent distance.
-    ///
-    /// Window + safety rationale: it uses the SAME 30-day window and predicate as
-    /// the `RUN-SPIKE-001` spike baseline (`spike_baseline_km`). Prescribing a
-    /// long run AT this value is 0 % over the 30-day longest run = no
-    /// single-session spike (RUN-SPIKE-001 flags only >10 % over that baseline),
-    /// so anchoring the long run here is safe by the same rule that governs
-    /// progression BEYOND it. KB: RUN-SPIKE-001 (Frandsen et al. 2025, BJSM).
+    /// Longest completed run (km) in the trailing 30-day window, from
+    /// `app/anchors.rs::build_run_anchors`; `None` with no run in the window.
+    /// Same window and predicate as the RUN-SPIKE-001 baseline
+    /// (`spike_baseline_km`), so a long run at this value is no spike.
     pub longest_recent_run_km: Option<f64>,
-    /// Measured average weekly running volume (km) = total km run in the trailing
-    /// 28 days ÷ 4, derived in `app/mod.rs::build_run_anchors`. `None` when no run has
-    /// been logged in the window. A measured FACT about the athlete (not a
-    /// recommendation), used only as the *input volume* to the existing KB-cited
-    /// long-run share rule, never as a claim itself. KB: RUN-LONGRUN-001
-    /// (running-016 single-run ≤25 % of weekly volume).
+    /// Measured weekly running volume (km): trailing-28-day total ÷ 4, from
+    /// `app/anchors.rs::build_run_anchors`; `None` with no run in the window.
+    /// Input volume to the long-run share rule (RUN-LONGRUN-001).
     pub recent_weekly_km: Option<f64>,
-    /// `true` when `longest_recent_run_km` is a DETRAINING-ADJUSTED value:
-    /// the run that set it is older than the 30-day full-credit window and its
-    /// distance has been tapered by `app/mod.rs::build_run_anchors` per the KB
-    /// detraining timeline (`DETRAIN-001`) instead of dropping out of the
-    /// anchor at day 31. When this holds and the demonstrated anchor is
-    /// what elevates the long run above the plain 25 % volume share, the long-run
-    /// prescription cites `DETRAIN-001` (the principle keeping the anchor alive)
-    /// instead of `RUN-SPIKE-001`. Default `false` for in-window / log-less
-    /// anchors.
+    /// `true` when `longest_recent_run_km` comes from a run older than the
+    /// 30-day window, tapered per DETRAIN-001 in
+    /// `app/anchors.rs::build_run_anchors`. A long run raised by it cites
+    /// DETRAIN-001 instead of RUN-SPIKE-001.
     pub longest_run_detrained: bool,
     /// `true` while the profile's `stated_longest_recent_km` is inside its own
     /// 30-day window (dated by the profile edit that first stated it), set in
@@ -136,7 +119,8 @@ pub struct Anchors {
     /// lifts where ≥2 RATED sessions failed to beat the anchor; feeds
     /// `strength::stall_triggers_deload` (STR-STALL-001: flat ≥2 weeks).
     pub lift_stall_weeks: Vec<(String, u8)>,
-    /// Per-ladder calisthenics tier state, derived in `app/mod.rs::build_calisthenics_anchors`
+    /// Per-ladder calisthenics tier state, derived in
+    /// `app/plan_views/calis_anchors.rs::build_calisthenics_anchors`
     /// from logged sets (empty for a `Weights` profile). A dynamic ladder with no
     /// logged rung is simply absent (the plan starts it at rung 0); a skill track is
     /// absent until a rung is logged (opt-in, never force-fed).
@@ -670,10 +654,7 @@ pub fn lift_block_position(profile: &Profile, week_index: u32) -> BlockPosition 
 ///   (HYB-MAINT-002 maintenance at held intensity; HYB-TENDON-001 progress one
 ///   side at a time) and, with no race goal, keep a single quality session.
 fn run_request(profile: &Profile, shape: &WeekShape, week_index: u32) -> RunWeekRequest {
-    let gwp = running::goal_week_plan(profile.goal_distance, profile.advanced).value;
-    let table_days = (profile.running_days_per_week as usize)
-        .min(gwp.sessions_per_week.1 as usize)
-        .max(1);
+    let table_days = run::goal_table_run_days(profile);
     let volume_scale = (shape.run_days as f64 / table_days as f64).min(1.0);
     let lift_leads = hybrid_lead(profile) == Some(HybridLead::Lifting);
     RunWeekRequest {
@@ -721,9 +702,9 @@ pub fn synthesize(profile: &Profile, anchors: &Anchors, week_index: u32) -> Opti
     // CAP-1 (HYB-CAP-001): with ≥4 run days or ≥40 km a week, at most 2 lift
     // days carry leg work and weekly leg volume is trimmed.
     let lower_cap = if lifting && running {
-        run_plan.as_ref().and_then(|p| {
-            hybrid::lower_lift_cap(shape.run_days.min(u8::MAX as usize) as u8, p.weekly_km)
-        })
+        run_plan
+            .as_ref()
+            .and_then(|p| hybrid::lower_lift_cap(shape.run_days, p.weekly_km))
     } else {
         None
     };
@@ -1049,7 +1030,7 @@ fn program_phase_weeks(
 /// explicit years-per-band mapping, so a novice reads below the 1-year cutoff
 /// (larger +10% steps) and everyone else above it (+5%): an expert-opinion split
 /// flagged as RUN-PROGRESS-001's novice/other basis, mirroring the taper.
-fn training_age_years(ta: TrainingAge) -> f64 {
+pub(crate) fn training_age_years(ta: TrainingAge) -> f64 {
     match ta {
         TrainingAge::Novice => 0.5,
         _ => 2.0,
@@ -1063,11 +1044,17 @@ pub fn cycle_shape(profile: &Profile) -> (u32, u32) {
     if profile.weekly_sets > 0 {
         return lift_cycle(profile);
     }
-    let ta = training_age_from_cadence(profile.progression_cadence).value;
-    let load_weeks = running::deload_cadence(conservative_deload(profile.age_years, ta))
-        .value
-        .load_weeks as u32;
+    let load_weeks = run_load_weeks(profile);
     (load_weeks, load_weeks + 1)
+}
+
+/// Load weeks of the running deload cadence (3:1, or 2:1 when
+/// [`conservative_deload`] holds, RUN-DELOAD-001).
+fn run_load_weeks(profile: &Profile) -> u32 {
+    let ta = training_age_from_cadence(profile.progression_cadence).value;
+    running::deload_cadence(conservative_deload(profile.age_years, ta))
+        .value
+        .load_weeks as u32
 }
 
 /// Whether plan week `week_index` (Monday = `week_monday_epoch_day`) is a
@@ -1099,7 +1086,6 @@ pub fn planned_recovery_week(
 /// so the guidance refresh stays cheap. `None` when the profile is gated or
 /// schedules no run.
 pub fn plan_run_intensity(profile: &Profile, anchors: &Anchors) -> Option<(u8, f64)> {
-    use crate::schema::VdotBand;
     if profile.health.any_gate() || profile.running_days_per_week == 0 {
         return None;
     }
@@ -1111,13 +1097,7 @@ pub fn plan_run_intensity(profile: &Profile, anchors: &Anchors) -> Option<(u8, f
     for w in 0..8u32 {
         let plan = run_week_plan(profile, anchors, &run_request(profile, &shape, w));
         for &k in &plan.kinds {
-            let band = match k {
-                RunSessionType::Tempo => VdotBand::Threshold,
-                RunSessionType::Interval => VdotBand::Interval,
-                RunSessionType::Repetition | RunSessionType::Hills => VdotBand::Repetition,
-                RunSessionType::RacePace => VdotBand::Marathon,
-                _ => VdotBand::Easy,
-            };
+            let band = run::vdot_band_for(k);
             peak = peak.max(running::vdot_band_vo2max_pct(band).0);
         }
     }
@@ -1136,14 +1116,11 @@ fn is_masters(age_years: Option<f64>) -> bool {
     age_years.is_some_and(|a| a >= MASTERS_AGE_YEARS)
 }
 
-/// Whether the conservative 2:1 running deload cadence applies to this athlete
-/// (`RUN-DELOAD-001`: "2:1 for older / injury-prone / low training-age"). The KB
-/// names BOTH triggers, so this ORs the masters age threshold (`is_masters`,
-/// ≥ 65) with a novice training age. The SINGLE shared predicate used by the
-/// program synthesizer (the `weeks` computation in `synthesize`) and the guidance
-/// card (`app::build_running_guidance`), so the programmed and displayed cadence
-/// can never disagree. (Injury-prone is not modeled, so that RUN-DELOAD-001 arm
-/// is not represented here — HARD RULE 1.)
+/// Whether the conservative 2:1 running deload cadence applies
+/// (`RUN-DELOAD-001`: "2:1 for older / injury-prone / low training-age"):
+/// masters age ([`is_masters`]) or a novice training age. Injury-prone is not
+/// modeled. Shared by `run_load_weeks` (the plan) and
+/// `app/guidance/running.rs` (the card), so the two cadences agree.
 pub fn conservative_deload(age_years: Option<f64>, training_age: TrainingAge) -> bool {
     is_masters(age_years) || matches!(training_age, TrainingAge::Novice)
 }

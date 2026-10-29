@@ -39,10 +39,10 @@ import org.robolectric.RobolectricTestRunner
 
 /**
  * Today coaching surfaces over the REAL core: the do-this numbers on a
- * plan item's face (plates per side, the effort target), the pain hold's
- * "I'm pain-free now" resolution, the session-done moment, moving a session to
- * another day, the calisthenics Easier/Harder rung choice, the minimal THIS WEEK
- * card and the hold card's call + one line + action. Each scenario is seeded
+ * plan item's face (plates per side, the effort target), the session-done
+ * moment, moving a session to another day, the calisthenics Easier/Harder rung
+ * choice, the minimal THIS WEEK card and the hold card's call + one line +
+ * action. Each scenario is seeded
  * through the event log (or dispatched events) and asserted through the
  * semantics tree, then checked against [UxInvariants].
  */
@@ -54,11 +54,6 @@ class TodayCoachingTest {
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
 
-    private val invariantKinds = listOf(
-        "forbidden-text", "unlabeled-action", "small-touch-target", "duplicate-action-in-card",
-        "duplicate-summary-on-screen",
-    )
-
     @Before
     fun setUp() {
         Locale.setDefault(Locale.US)
@@ -69,7 +64,7 @@ class TodayCoachingTest {
     fun tearDown() = QaHarness.teardown()
 
     private fun assertNoViolations() {
-        val hits = UxInvariants.check(rule, rule.density).filter { it.kind in invariantKinds }
+        val hits = UxInvariants.check(rule, rule.density)
         assertTrue("UX invariant(s) violated:\n" + hits.joinToString("\n"), hits.isEmpty())
     }
 
@@ -109,60 +104,6 @@ class TodayCoachingTest {
         assertNoViolations()
     }
 
-    // ── a pain hold resolves from the banner ─────────────────────────────────
-    @Test
-    fun painHold_painFreeNowLiftsTheHold() {
-        val morning = app.milestone.todayEpochDay() * 86_400L + 8 * 3_600L
-        QaHarness.seedLog(
-            ctx,
-            listOf(QaHarness.strengthProfile(), Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, morning)),
-        )
-        rule.launchApp()
-        // The resolve action's label is the core's own copy.
-        rule.assertTextCountEventually("I'm pain-free now", 1)
-        assertTrue(EventDispatcher.model.value?.train_blocked == true)
-        rule.onNodeWithText("I'm pain-free now").performClick()
-        rule.waitForIdle()
-        // The confirm dialog carries the core's own copy; confirming resolves it.
-        rule.onNodeWithText(str(R.string.main_resolve_hold_confirm)).performClick()
-        rule.assertTextCountEventually("I'm pain-free now", 0)
-        assertTrue(
-            "ResolveHold lifted the training hold",
-            EventDispatcher.model.value?.train_blocked == false,
-        )
-    }
-
-    // ── one "I'm better" ends a reported illness AND the profile's answer ────
-    @Test
-    fun illnessInProfileAndReport_oneImBetterEndsBoth_thenPlanMyTrainingBuildsThePlan() {
-        val today = app.milestone.todayEpochDay()
-        val ill = (QaHarness.strengthProfile() as Event.SetProfile)
-            .copy(health = app.milestone.HealthScreen(acute_illness = true), effectiveFromEpochDay = today)
-        QaHarness.seedLog(
-            ctx,
-            listOf(ill, Event.SubmitReadiness(ReadinessSignal.Illness, 2.0, today * 86_400L + 8 * 3_600L)),
-        )
-        rule.launchApp()
-        // One illness action covers both, not "I've recovered" plus "I'm better".
-        rule.assertTextCountEventually("I'm better", 1)
-        rule.assertTextCountEventually("I've recovered", 0)
-        rule.onNodeWithText("I'm better").performClick()
-        rule.waitForIdle()
-        rule.onNodeWithText(str(R.string.main_resolve_hold_confirm)).performClick()
-        rule.assertTextCountEventually("I'm better", 0)
-        val m = EventDispatcher.model.value!!
-        assertTrue("no hold left to switch off in Profile", !m.train_blocked)
-        assertTrue("the profile answer is off", m.profile?.health?.acute_illness == false)
-        assertTrue("the plan resumes", m.next_session != null)
-
-        // Remove plan, then "Plan my training" builds it again.
-        EventDispatcher.send(Event.ClearPlan)
-        rule.assertTextCountEventually(str(R.string.main_plan_prompt_cta), 1)
-        rule.onNodeWithText(str(R.string.main_plan_prompt_cta)).performClick()
-        rule.assertTextCountEventually(str(R.string.main_plan_prompt_cta), 0)
-        assertTrue("a tap builds the plan", EventDispatcher.model.value?.next_session != null)
-    }
-
     // ── every planned set logged → the session-done card ─────────────────────
     @Test
     fun allSetsLogged_showsSessionDoneCard() {
@@ -185,17 +126,19 @@ class TodayCoachingTest {
         assertTrue("the session-done card appears", waitForAny(hasTestTag("session-done")) == 1)
         // The next session below is a preview: no log targets, no empty set slots.
         val next = EventDispatcher.model.value?.next_session
-        if (next != null && next.epoch_day != EventDispatcher.model.value?.today_epoch_day) {
-            assertTrue(
-                "a future session offers nothing to log",
-                rule.onAllNodes(hasClickAction() and hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n), substring = true))
-                    .fetchSemanticsNodes().isEmpty(),
-            )
-            assertTrue(
-                "a future session shows no empty set slots",
-                rule.onAllNodes(tagStartsWith("set-slots:")).fetchSemanticsNodes().isEmpty(),
-            )
-        }
+        assertTrue(
+            "the next session is a later day's",
+            next != null && next.epoch_day != EventDispatcher.model.value?.today_epoch_day,
+        )
+        assertTrue(
+            "a future session offers nothing to log",
+            rule.onAllNodes(hasClickAction() and hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n), substring = true))
+                .fetchSemanticsNodes().isEmpty(),
+        )
+        assertTrue(
+            "a future session shows no empty set slots",
+            rule.onAllNodes(tagStartsWith("set-slots:")).fetchSemanticsNodes().isEmpty(),
+        )
         assertNoViolations()
     }
 

@@ -45,7 +45,7 @@ internal fun InlineNotice(
             Text(text, color = OnBgBody, style = Type.Caption, modifier = Modifier.weight(1f))
             if (!stacked && actionLabel != null && onAction != null) TextAction(actionLabel, onAction)
         }
-        if (dismissLabel != null && onDismiss != null) {
+        if (stacked) {
             Row(modifier = Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
                 TextAction(dismissLabel, onDismiss)
                 if (actionLabel != null && onAction != null) TextAction(actionLabel, onAction)

@@ -4,14 +4,6 @@
 
 use super::*;
 
-fn row(app: &Engine, model: &Model, day: i64) -> SessionPlanView {
-    app.view(model)
-        .week_plan
-        .into_iter()
-        .find(|s| s.epoch_day == day)
-        .expect("a week-strip row for the day")
-}
-
 fn move_session(app: &Engine, model: &mut Model, from: i64, to: i64) {
     app.update(
         Event::MoveSession {
@@ -27,21 +19,21 @@ fn move_session(app: &Engine, model: &mut Model, from: i64, to: i64) {
 fn move_session_moves_todays_session_and_blocks_a_spacing_violation() {
     // Pure lifter, full-body Mon/Wed/Fri; today is Monday.
     let (app, mut model) = planned_strength_model(true);
-    let monday = row(&app, &model, MON);
+    let monday = day_row(&app, &model, MON);
     assert!(!monday.items.is_empty(), "Monday is a lift day");
     // Only Sunday keeps ~48 h from the Wednesday/Friday full-body days.
     assert_eq!(monday.move_targets, vec![MON + 6]);
 
     // Saturday sits the day after Friday's full-body day: refused, with a reason.
     move_session(&app, &mut model, MON, MON + 5);
-    let monday = row(&app, &model, MON);
+    let monday = day_row(&app, &model, MON);
     assert!(
         !monday.items.is_empty(),
         "a refused move leaves the session in place"
     );
     let note = monday.move_note.expect("the refusal is explained");
     assert!(note.contains("back-to-back"), "{note}");
-    assert!(row(&app, &model, MON + 5).items.is_empty());
+    assert!(day_row(&app, &model, MON + 5).items.is_empty());
 
     // Sunday is fine: the session moves, Monday becomes a rest day.
     move_session(&app, &mut model, MON, MON + 6);
@@ -69,14 +61,7 @@ fn move_session_moves_todays_session_and_blocks_a_spacing_violation() {
 fn a_week_with_too_few_sessions_repeats_without_penalty() {
     let (app, mut model) = planned_strength_model(true);
     // A whole week passes with nothing logged: the plan holds week 1.
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 7,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON + 7);
     let vm = app.view(&model);
     assert_eq!(vm.program.as_ref().unwrap().week, 1, "the week repeats");
     let c = vm.consistency.expect("consistency view");
@@ -136,16 +121,9 @@ fn consistency_counts_done_vs_planned_with_no_streak_or_loss_copy() {
 #[test]
 fn missed_key_session_emits_reschedule_guidance_without_guilt() {
     let (app, mut model) = planned_strength_model(true);
-    app.update(
-        Event::SetToday {
-            epoch_day: MON + 1,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON + 1);
     let vm = app.view(&model);
-    let monday = vm.week_plan.iter().find(|s| s.epoch_day == MON).unwrap();
+    let monday = day_row(&app, &model, MON);
     assert_eq!(monday.status, SessionStatus::Missed);
     assert_eq!(monday.move_targets, vec![MON + 6], "make it up on Sunday");
     let c = vm.consistency.expect("consistency view");
@@ -213,14 +191,7 @@ fn set_profile_cleans_implausible_planning_fields_and_the_view_renders() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
     let vm = app.view(&model);
     assert_eq!(vm.week_plan.len(), 7, "the plan still renders");
     assert!(serde_json::to_string(&vm).is_ok());
@@ -266,17 +237,6 @@ fn set_profile_cleans_implausible_planning_fields_and_the_view_renders() {
     assert_eq!(model.profile.as_ref().unwrap().recent_race, None);
 }
 
-fn set_today(app: &Engine, model: &mut Model, epoch_day: i64) {
-    app.update(
-        Event::SetToday {
-            epoch_day,
-            utc_offset_sec: 0,
-        },
-        model,
-    )
-    .expect_only_render();
-}
-
 #[test]
 fn a_session_with_no_free_day_left_explains_why_it_cannot_move() {
     // Full-body Mon/Wed/Fri, today Wednesday: Thursday and Saturday sit next to
@@ -292,24 +252,13 @@ fn a_session_with_no_free_day_left_explains_why_it_cannot_move() {
     assert!(reason.contains("back-to-back"), "{reason}");
     assert!(reason.contains("Thursday"), "{reason}");
     // A done or rest day offers no move and no reason.
-    let tue = row(&app, &model, MON + 1);
+    let tue = day_row(&app, &model, MON + 1);
     assert!(tue.move_targets.is_empty() && tue.move_blocked_reason.is_none());
 }
 
 #[test]
 fn days_before_a_midweek_plan_start_are_neither_planned_nor_counted() {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(strength_profile()), &mut model)
-        .expect_only_render();
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON + 2,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    set_today(&app, &mut model, MON + 2);
+    let (app, model) = planned_on(strength_profile(), [], MON + 2);
     let vm = app.view(&model);
     for day in [MON, MON + 1] {
         let r = vm.week_plan.iter().find(|s| s.epoch_day == day).unwrap();
@@ -502,7 +451,7 @@ fn a_new_plan_never_opens_on_a_rest_day() {
             )
             .expect_only_render();
             set_today(&app, &mut model, start);
-            let first = row(&app, &model, start);
+            let first = day_row(&app, &model, start);
             assert!(
                 !first.items.is_empty(),
                 "start {start}: {:?}",
@@ -603,7 +552,7 @@ fn a_session_credited_from_a_lighter_day_reads_done_lighter() {
     )
     .expect_only_render();
     set_today(&app, &mut model, first);
-    let run_item = row(&app, &model, run_day)
+    let run_item = day_row(&app, &model, run_day)
         .items
         .into_iter()
         .find(|i| i.is_run())
@@ -619,7 +568,7 @@ fn a_session_credited_from_a_lighter_day_reads_done_lighter() {
     )
     .expect_only_render();
     set_today(&app, &mut model, lift_day.max(run_day) + 1);
-    let run = row(&app, &model, run_day);
+    let run = day_row(&app, &model, run_day);
     assert_eq!(run.credited_from_epoch_day, Some(lift_day));
     assert_eq!(run.status, SessionStatus::DoneLighter);
 }

@@ -65,10 +65,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SDK="$(sed -n 's/^sdk\.dir=//p' "$REPO_ROOT/android/local.properties" 2>/dev/null | tail -1)"
-SDK="${SDK:-${ANDROID_HOME:-/home/lt/android-home}}"
-ADB="$SDK/platform-tools/adb"
-EMULATOR="$SDK/emulator/emulator"
 [[ -f "$APK" ]] || { echo "APK not found: $APK (scripts/build.sh --no-tests)" >&2; exit 2; }
 
 # Keep the generated seed + compiled probe across runs; everything else is per run.
@@ -81,84 +77,23 @@ mkdir -p "$OUT"/{shots,ui,logs,seed,probe}
 source "$HELP/lib.sh"
 measure() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$OUT/measurements.tsv"; log "measure $1 · $2 = $3"; }
 EV() { python3 "$HELP/events.py" "$@"; }
-FEEDER_PID=""
-STARTED_EMU=0
-
-# ── Emulator / device baseline ───────────────────────────────────────────────
-boot_emulator() {
-  if adb_ get-state >/dev/null 2>&1; then
-    log "$SERIAL already online — using it"
-  else
-    log "booting AVD $AVD on port ${SERIAL#emulator-}"
-    ANDROID_SDK_ROOT="$SDK" ANDROID_HOME="$SDK" "$EMULATOR" -avd "$AVD" -port "${SERIAL#emulator-}" \
-      -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -read-only \
-      -memory 2048 >"$OUT/logs/emulator.log" 2>&1 &
-    STARTED_EMU=1
-  fi
-  local tries=0
-  until [[ "$(sh_ getprop sys.boot_completed)" == "1" ]]; do
-    tries=$((tries + 1)); [[ $tries -lt 150 ]] || { log "emulator boot timed out"; exit 1; }
-    sleep 2
-  done
-  adb_ root >/dev/null 2>&1; sleep 2; adb_ wait-for-device
-  until [[ "$(sh_ getprop sys.boot_completed)" == "1" ]]; do sleep 2; done
-}
-stop_emulator() {
-  [[ $KEEP_EMU -eq 1 ]] && return 0
-  log "stopping emulator $SERIAL"
-  adb_ emu kill >/dev/null 2>&1 || true
-}
-
-# Mon 2026-09-21 HH:MM in zone TZ, as the device clock.
-pin_clock() {
-  local hm="${1:-08:00}" tz="${2:-$TZ0}"
-  sh_ cmd alarm set-timezone "$tz" >/dev/null
-  sh_ cmd alarm set-time "$(TZ="$tz" date -d "$PIN_DATE $hm" +%s)000" >/dev/null
-}
 dev_now() { sh_ date +%s; }
 
-# Every scenario starts from the same device state.
-baseline_device() {
-  adb_ shell settings put global auto_time 0
-  adb_ shell settings put global auto_time_zone 0
-  adb_ shell settings put system time_12_24 12
-  adb_ shell settings put system font_scale 1.0
-  adb_ shell settings put system screen_off_timeout 1800000
-  adb_ shell wm density reset >/dev/null
-  adb_ shell cmd uimode night no >/dev/null
-  adb_ shell settings put global low_power 0
-  adb_ shell dumpsys battery reset >/dev/null
-  adb_ shell cmd statusbar collapse >/dev/null 2>&1 || true
-  sh_ cmd locale set-app-locales "$APP_ID" >/dev/null
-  wake
-  adb_ shell input keyevent 82 >/dev/null 2>&1 || true
-}
-
 # ── App state ────────────────────────────────────────────────────────────────
-# A set-up hybrid lifter-runner (2 run days, 12 weekly sets) with a squat and a
-# 5 km run yesterday, dated against the pinned clock: Today is an Easy run day.
-basic_seed() {
-  local y
-  y="$(TZ="$TZ0" date -d "2026-09-20 09:00" +%s)"
-  cat <<EOF
-{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"General","concurrent_goal":"Strength","weekly_sets":12,"running_days_per_week":2,"running_km_per_week":20.0,"advanced":false,"endurance_intensity_pct_vo2max":75.0,"bodyweight_kg":85.0,"age_years":30.0}}
-{"LogSet":{"exercise":"Back Squat","weight_kg":120.0,"reps":3,"rpe":8.0,"observed_at":${y},"entry_id":${y}000}}
-{"LogRun":{"distance_km":5.0,"duration_min":27.5,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":$((y + 3600)),"entry_id":$((y + 3600))001}}
-EOF
-}
-
 # reset_app seeded|fresh [log-file]: wipe data, baseline, (seed) and land on Today.
+# The default seed: 2 run days, a squat and a 5 km run on Sun 2026-09-20, so
+# Today (Mon) is an Easy run day.
 reset_app() {
   stop_feeder
   adb_ shell am force-stop "$APP_ID"
   adb_ shell pm clear "$APP_ID" >/dev/null
   baseline_device
   grant_perms
-  pin_clock 08:00
+  pin_clock "$PIN_DATE"
   if [[ "$1" == seeded ]]; then
     launch; sleep 4; adb_ shell am force-stop "$APP_ID"
     local f="${2:-$OUT/seed/basic.ndjson}"
-    [[ -n "${2:-}" ]] || basic_seed >"$f"
+    [[ -n "${2:-}" ]] || seed_basic 2026-09-20 2 >"$f"
     push_log "$f" || return 1
     launch
     wait_text pre "TODAY'S SESSION" 40
@@ -222,19 +157,6 @@ editor_chip() {
 }
 
 # ── Tracked runs ─────────────────────────────────────────────────────────────
-start_feeder() {
-  stop_feeder
-  rm -f "$OUT/feed.stop"
-  python3 "$HELP/feeder.py" "$ADB" "$SERIAL" "$OUT/logs/feed-$1.log" "$OUT/feed.stop" &
-  FEEDER_PID=$!
-  sleep 3
-}
-stop_feeder() {
-  [[ -n "$FEEDER_PID" ]] || return 0
-  touch "$OUT/feed.stop"
-  wait "$FEEDER_PID" 2>/dev/null || true
-  FEEDER_PID=""
-}
 start_run() {
   tap_node eq Log || return 1; sleep 2
   tap_node eq "Track run (GPS)" || return 1
@@ -373,14 +295,14 @@ sc_time() {
   close_editor
 
   mark time-clock-jump
-  pin_clock 13:30
+  pin_clock "$PIN_DATE" 13:30
   sleep 2
   open_set_editor; chip="$(editor_chip)"; evidence time-03-clock-1330
   expect $S "clock set to 13:30 while open: new editor stamps 1:3x PM" "'$chip'" eval '[[ "$chip" =~ 1:3[0-9][^0-9]*PM$ ]]'
   close_editor
 
   mark time-tz-background
-  pin_clock 23:30
+  pin_clock "$PIN_DATE" 23:30
   adb_ shell input keyevent 3; sleep 2
   sh_ cmd alarm set-timezone Asia/Tokyo >/dev/null   # Tue 06:30 local
   sleep 2; launch; sleep 5
@@ -399,7 +321,7 @@ sc_time() {
   expect $S "after a resume the strip follows the device day again" "week strip '$x'" eval '[[ "$x" == "Today, Monday"* ]]'
 
   mark time-mid-run
-  pin_clock 08:00
+  pin_clock "$PIN_DATE"
   tap_nav Today; sleep 2
   start_feeder time
   if start_run; then
@@ -431,7 +353,7 @@ sc_time() {
     check FAIL $S "start tracked run" "tracker Start not reachable"
   fi
   stop_feeder
-  pin_clock 08:00
+  pin_clock "$PIN_DATE"
 }
 
 screen_lum() { adb_ exec-out screencap | python3 "$HELP/lum.py" | cut -d' ' -f1; }
@@ -779,7 +701,7 @@ sc_backup() {
     cmp -s "$OUT/logs/backup-device.canon" "$OUT/logs/backup-exported.canon"
   mark backup-clear
   adb_ shell am force-stop "$APP_ID"; adb_ shell pm clear "$APP_ID" >/dev/null
-  grant_perms; pin_clock 08:00; launch; sleep 5
+  grant_perms; pin_clock "$PIN_DATE"; launch; sleep 5
   has_text eq Skip && { tap_node eq Skip; sleep 3; }
   expect $S "cleared app starts empty" "log lines $(log_lines)" test "$(log_lines)" -le 1
   import_backup "$f" clear
@@ -947,8 +869,7 @@ sc_longlog() {
   echo "clock:     pinned to $PIN_DATE 08:00 $TZ0 per scenario"
 } >"$OUT/config.txt"
 
-boot_emulator
-[[ $STARTED_EMU -eq 1 ]] || KEEP_EMU=1
+boot_emulator "$AVD" "$OUT/logs/emulator.log" 2048
 trap 'touch "$OUT/feed.stop"; kill ${LOGCAT_PID:-} 2>/dev/null; stop_emulator' EXIT
 echo "device:    $(sh_ getprop ro.product.model), API $(sh_ getprop ro.build.version.sdk), heapgrowthlimit $(sh_ getprop dalvik.vm.heapgrowthlimit)" >>"$OUT/config.txt"
 adb_ install -r "$APK" >/dev/null || { log "install failed"; exit 1; }

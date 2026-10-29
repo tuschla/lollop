@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredSize
-import androidx.compose.foundation.layout.requiredSizeIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.wrapContentSize
@@ -29,10 +28,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -48,12 +43,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -102,7 +93,7 @@ internal fun DisclosureButton(
     Box(
         modifier = Modifier
             .size(ActionMinHeight)
-            .clip(RoundedCornerShape(100))
+            .clip(PillShape)
             .clickable(role = Role.Button) { onClick() }
             // Name the affordance for screen readers (the bare "?" glyph is
             // meaningless spoken); state-aware so the toggle reads its effect.
@@ -130,12 +121,11 @@ private val DisclosureDiscSize = 24.dp
  */
 @Composable
 private fun DisclosureDisc(filled: Boolean = false, tint: Color = Accent, onTint: Color = OnAccent) {
-    val shape = RoundedCornerShape(100)
     Box(
         modifier = Modifier
             .sizeIn(minWidth = DisclosureDiscSize, minHeight = DisclosureDiscSize)
-            .clip(shape)
-            .then(if (filled) Modifier.background(tint) else Modifier.border(1.dp, tint, shape)),
+            .clip(PillShape)
+            .then(if (filled) Modifier.background(tint) else Modifier.border(1.dp, tint, PillShape)),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -160,7 +150,7 @@ private fun InlineDisclosureLink(description: String, onClick: () -> Unit) {
             Modifier
                 .matchParentSize()
                 .requiredSize(ActionMinHeight)
-                .clip(RoundedCornerShape(100))
+                .clip(PillShape)
                 .clickable(role = Role.Button, onClick = onClick)
                 .semantics { contentDescription = description },
         )
@@ -452,7 +442,7 @@ internal fun WhyDetail(
     confidence: Float,
     contested: Boolean,
     showConfidence: Boolean,
-    extraDetail: String?,
+    extraDetail: String? = null,
     glossaryKeys: List<String> = emptyList(),
     confidenceHigh: Float? = null,
 ) {
@@ -553,14 +543,14 @@ val LocalEvidenceLegend = staticCompositionLocalOf<() -> Unit> { {} }
 internal fun GradeChip(grade: String) {
     // Unmapped/future grades have no human label; hide the whole badge rather
     // than leak a raw Debug string.
-    val label = gradeChipLabel(grade) ?: return
+    val label = gradeLabel(grade)?.uppercase(Locale.US) ?: return
     val status = LocalStatusColors.current
     val openLegend = LocalEvidenceLegend.current
     val legendDesc = stringResource(R.string.main_evidence_legend_title)
     Box(contentAlignment = Alignment.Center) {
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(Space.Md.dp - Space.Xs.dp))
+                .clip(SegmentShape)
                 .background(status.gradeColor(grade))
                 .padding(start = Space.Md.dp, end = Space.Sm.dp, top = Space.Sm.dp - 1.dp, bottom = Space.Sm.dp - 1.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -591,17 +581,32 @@ private fun OutlinedChip(text: String, border: Color) {
         color = border,
         style = Type.Chip,
         modifier = Modifier
-            .border(1.dp, border, RoundedCornerShape(Space.Md.dp - Space.Xs.dp))
-            .padding(horizontal = Space.Md.dp, vertical = Space.Sm.dp - 1.dp),
+            .border(1.dp, border, SegmentShape)
+            .chipPadding(),
     )
 }
 
+/** The grade badges, CONTESTED marker and citations of the findings one "?" speaks
+ *  for, marked the same way as [WhyDetail]. */
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+internal fun ClaimMarkers(grades: List<String>, contested: Boolean, citations: List<String>) {
+    if (grades.isNotEmpty() || contested) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+            grades.forEach { GradeChip(it) }
+            if (contested) OutlinedChip(stringResource(R.string.main_chip_contested), WarnText)
+        }
+    }
+    citations.forEach { Text(citationLabel(it), color = OnBgFaint, style = Type.Caption) }
+}
+
 /**
- * Static "How evidence grading works" reference sheet. Explains the five
- * grades and the SAFETY / CONTESTED markers. No coaching logic, no wire data.
+ * Static "How evidence grading works" reference sheet: the core's five grade
+ * definitions ([definitions]), then the SAFETY / CONTESTED markers. No coaching
+ * logic.
  */
 @Composable
-internal fun EvidenceLegendSheet(definitions: List<GradeDefView> = emptyList()) {
+internal fun EvidenceLegendSheet(definitions: List<GradeDefView>) {
     val status = LocalStatusColors.current
     Column(
         modifier = Modifier
@@ -619,25 +624,15 @@ internal fun EvidenceLegendSheet(definitions: List<GradeDefView> = emptyList()) 
             color = OnBgMuted,
             style = Type.Body,
         )
-        // Definitions come from the core so the legend and the cards agree by
-        // construction; shell copy covers a view that carries none.
-        if (definitions.isNotEmpty()) {
-            definitions.forEach { d ->
-                val label = d.label.ifBlank { gradeLabel(d.grade) }
-                if (label != null) {
-                    LegendRow(
-                        label,
-                        status.gradeColor(d.grade),
-                        d.definition + stringResource(R.string.main_confidence_paren, Math.round(d.confidence * 100)),
-                    )
-                }
+        definitions.forEach { d ->
+            val label = d.label.ifBlank { gradeLabel(d.grade) }
+            if (label != null) {
+                LegendRow(
+                    label,
+                    status.gradeColor(d.grade),
+                    d.definition + stringResource(R.string.main_confidence_paren, Math.round(d.confidence * 100)),
+                )
             }
-        } else {
-            LegendRow(stringResource(R.string.main_grade_strong), status.gradeColor("Strong"), stringResource(R.string.main_grade_strong_def))
-            LegendRow(stringResource(R.string.main_grade_moderate), status.gradeColor("Moderate"), stringResource(R.string.main_grade_moderate_def))
-            LegendRow(stringResource(R.string.main_grade_weak), status.gradeColor("Weak"), stringResource(R.string.main_grade_weak_def))
-            LegendRow(stringResource(R.string.main_grade_expert), status.gradeColor("ExpertOpinion"), stringResource(R.string.main_grade_expert_def))
-            LegendRow(stringResource(R.string.main_grade_myth), status.gradeColor("MarketingMyth"), stringResource(R.string.main_grade_myth_def))
         }
         HorizontalDivider(color = Hairline)
         // The two markers share the grade rows' chip column so every body line
@@ -759,7 +754,7 @@ private fun glossaryLetter(term: String): String =
     term.firstOrNull()?.takeIf { it.isLetter() }?.uppercaseChar()?.toString() ?: "#"
 
 /**
- * The glossary bottom sheet (ui-sweep §12): the title and a search well pinned
+ * The glossary bottom sheet: the title and a search well pinned
  * above an alphabetical list, one [SectionOverline] per first letter, each term in
  * Bold over its definition. Typing filters on the term and the definition; a query
  * that matches nothing says so. Opens scrolled to `initialKey`, which keeps a ring.
@@ -797,7 +792,14 @@ internal fun GlossarySheet(initialKey: String) {
         verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
     ) {
         Text(stringResource(R.string.main_glossary_title), color = OnBgBody, style = Type.Title)
-        GlossarySearchWell(query) { query = it }
+        SearchWell(
+            query,
+            { query = it },
+            hint = stringResource(R.string.main_glossary_search_hint),
+            testTag = "glossary-search",
+            imeAction = ImeAction.Search,
+            verticalPadding = Space.Md.dp,
+        )
         if (shown.isEmpty()) {
             Text(
                 stringResource(R.string.main_glossary_no_match, needle),
@@ -840,55 +842,6 @@ private fun GlossaryTerm(row: GlossaryRow, highlighted: Boolean) {
     }
 }
 
-/** The glossary's search well (the ui-sweep §8 well: `bgSunken`, a 1dp
- *  [ChoiceCellBorder], Accent while typing) with a leading search glyph and a
- *  faint "Search terms" placeholder. The keyboard's Search key folds it. */
-@Composable
-private fun GlossarySearchWell(value: String, onChange: (String) -> Unit) {
-    val focusManager = LocalFocusManager.current
-    var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(Space.Card.dp)
-    val hint = stringResource(R.string.main_glossary_search_hint)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = ActionMinHeight)
-            .clip(shape)
-            .background(BgSunken)
-            .border(if (focused) 1.5.dp else 1.dp, if (focused) Accent else ChoiceCellBorder, shape)
-            .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
-    ) {
-        Icon(
-            painterResource(R.drawable.ic_ui_search),
-            contentDescription = null,
-            tint = OnBgFaint,
-            modifier = Modifier.size(18.dp),
-        )
-        BasicTextField(
-            value = value,
-            onValueChange = onChange,
-            singleLine = true,
-            textStyle = Type.Body.copy(color = OnBgBody),
-            cursorBrush = SolidColor(Accent),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-            modifier = Modifier
-                .weight(1f)
-                .testTag("glossary-search")
-                .semantics { contentDescription = hint }
-                .onFocusChanged { focused = it.isFocused },
-            decorationBox = { inner ->
-                Box {
-                    if (value.isEmpty()) Text(hint, color = OnBgFaint, style = Type.Body)
-                    inner()
-                }
-            },
-        )
-    }
-}
-
 /** One legend row: the chip in a fixed-width column, then its plain definition. */
 @Composable
 private fun LegendRow(label: String, chipColor: Color, body: String) {
@@ -902,11 +855,6 @@ private fun LegendRow(label: String, chipColor: Color, body: String) {
         Text(body, color = OnBgMuted, style = Type.Caption, modifier = Modifier.weight(1f))
     }
 }
-
-/** Grade-badge text: the human label, uppercased to match the other chips
- *  (SAFETY / CONTESTED / SPIKE). Display-only. */
-@Composable
-internal fun gradeChipLabel(grade: String): String? = gradeLabel(grade)?.uppercase(Locale.US)
 
 /**
  * Human label for an evidence grade's wire name, or null for an unmapped grade
@@ -926,14 +874,7 @@ private fun gradeLabelRes(grade: String): Int? = when (grade) {
     else -> null
 }
 
-/**
- * Human-readable citation line. Verbatim-render contract (design/user-decisions
- * "Evidence display"): the shell renders the CORE's citation string exactly as
- * emitted; it never paraphrases, renumbers, or collapses a distinction the core
- * drew. The registry emits real published references (evidence.rs
- * `primary_citations`); a blank citation is the only thing we touch, rendering
- * it as a dash.
- */
+/** The core's citation verbatim; "-" when blank. */
 internal fun citationLabel(citation: String): String =
     citation.ifBlank { "-" }
 

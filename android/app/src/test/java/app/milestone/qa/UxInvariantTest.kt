@@ -81,23 +81,16 @@ class UxInvariantTest {
         )
     }
 
-    // ── Today ───────────────────────────────────────────────────────────────
+    // ── Today and History ───────────────────────────────────────────────────
 
+    private val allKinds = UxInvariants.KINDS.toTypedArray()
+
+    // The same screen at 130 % font is SmallScreenLargeFontTest's, on the 320dp phone.
     @Test
-    fun todayPlan_noGarbageTextOrDuplicateActions() {
+    fun todayPlan_meetsEveryInvariant() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
-        val v = UxInvariants.check(rule, rule.density)
-        assertNoViolations(v, "forbidden-text", "duplicate-action-in-card")
-    }
-
-    @Test
-    fun todayPlan_fontScale130_requiredActionsNotClipped() {
-        RuntimeEnvironment.setFontScale(1.3f)
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        rule.launchApp()
-        val v = UxInvariants.check(rule, rule.density, checkClipping = true)
-        assertNoViolations(v, "clipped-action")
+        assertNoViolations(UxInvariants.check(rule, rule.density), *allKinds)
     }
 
     @Test
@@ -108,46 +101,31 @@ class UxInvariantTest {
         )
         rule.launchApp()
         rule.selectTab(str(R.string.main_dest_history))
-        rule.scrollToText(QaHarness.expectedRunDistanceLabel(5.0))
+        // The run card shows its distance in the locale's unit (mi under en-US).
+        val label = QaHarness.expectedRunDistanceLabel(5.0)
+        rule.scrollToText(label)
+        rule.onNodeWithText(label, substring = true).assertIsDisplayed()
         val v = UxInvariants.check(rule, rule.density)
         assertNoViolations(v, "forbidden-text", "duplicate-action-in-card")
     }
 
     @Test
-    fun historyHoldSet_hasNoForbiddenText() {
-        // A timed hold renders its seconds; no fabricated RPE or e1RM figure.
+    fun historyHoldSet_showsSecondsAndNoForbiddenText() {
+        // A timed hold renders "1 × 30 s hold"; no fabricated RPE or e1RM figure.
         QaHarness.seedLog(
             ctx,
             listOf(QaHarness.calisthenicsProfile(), QaHarness.loggedHold(QaHarness.daysAgoAtMidday(1))),
         )
         rule.launchApp()
         rule.selectTab(str(R.string.main_dest_history))
-        rule.scrollToText(str(R.string.history_sets_hold, 1, 30))
+        val hold = str(R.string.history_sets_hold, 1, 30)
+        rule.scrollToText(hold)
+        rule.onAllNodesWithText(hold, substring = true).assertCountEquals(1)
         val v = UxInvariants.check(rule, rule.density)
         assertNoViolations(v, "forbidden-text")
     }
 
-    @Test
-    fun todayPlan_allActionsAreLabeled() {
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        rule.launchApp()
-        val v = UxInvariants.check(rule, rule.density)
-        assertNoViolations(v, "unlabeled-action")
-    }
-
-    @Test
-    fun planItemActions_meet48dpTouchTarget() {
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        rule.launchApp()
-        val v = UxInvariants.check(rule, rule.density)
-        assertNoViolations(v, "small-touch-target")
-    }
-
     // ── Every other key screen: all rules at once ───────────────────────────
-
-    private val allKinds = arrayOf(
-        "forbidden-text", "unlabeled-action", "small-touch-target", "duplicate-action-in-card",
-    )
 
     private fun seedAnchoredLifter() = QaHarness.seedLog(
         ctx,
@@ -364,7 +342,7 @@ class UxInvariantTest {
         val visited = mutableListOf<String>()
         GuidedSetupWalk.walk(rule) { screen ->
             visited += screen.name
-            assertNoViolations(UxInvariants.check(rule, rule.density, checkClipping = true), *allKinds, "clipped-action")
+            assertNoViolations(UxInvariants.check(rule, rule.density), *allKinds)
             assertNoClippedOptionText(screen.name)
             screen.gateCaption?.let { caption ->
                 rule.onAllNodesWithText(str(caption)).assertCountEquals(1)

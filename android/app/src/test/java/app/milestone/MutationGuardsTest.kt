@@ -28,9 +28,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 /**
- * Guards for fixes whose mutants SURVIVED every standing test in the
- * MutationAudit run (planning/review/mutation/AUDIT.md). Each test names the
- * mutant of `planning/review/mutation/kotlin/mutate_kt.py` it kills.
+ * Guards for behaviours no other test pins (see
+ * planning/review/mutation/AUDIT.md). Each test names the mutant of
+ * `planning/review/mutation/kotlin/mutate_kt.py` it kills.
  */
 @RunWith(RobolectricTestRunner::class)
 class MutationGuardsTest {

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.compose.ui.test.ComposeTimeoutException
@@ -20,10 +21,13 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppSettings
+import app.milestone.DarkMode
 import app.milestone.EventDispatcher
 import app.milestone.MainActivity
 import app.milestone.R
 import app.milestone.ViewModel
+import com.github.takahirom.roborazzi.captureScreenRoboImage
 import java.util.Timer
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.schedule
@@ -89,7 +93,7 @@ internal fun <T> launchWithSplashWatchdog(launch: () -> T): T {
     return launched
 }
 
-/** Start [MainActivity] (with [intent], e.g. a tracker extra) under [launchWithSplashWatchdog]. */
+/** Start [MainActivity] (with [intent], e.g. an open intent) under [launchWithSplashWatchdog]. */
 internal fun launchMain(intent: Intent? = null): ActivityScenario<MainActivity> = launchWithSplashWatchdog {
     if (intent == null) ActivityScenario.launch(MainActivity::class.java) else ActivityScenario.launch(intent)
 }
@@ -179,6 +183,22 @@ fun ComposeTestRule.typeWeight(figures: String) {
     waitForIdle()
 }
 
+/** Open the set loop for [exercise] from Today: the current item's filled pill or
+ *  another open item's compact row (both speak "Log set 1 of N, <exercise>"). */
+fun ComposeTestRule.openLoopFor(exercise: String) {
+    onNode(
+        androidx.compose.ui.test.hasClickAction() and
+            androidx.compose.ui.test.hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n, 1), substring = true) and
+            androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasTestTag("plan-item:$exercise")),
+    ).performScrollTo().performClick()
+    waitUntil(15_000) {
+        onAllNodes(hasText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)).fetchSemanticsNodes().isNotEmpty()
+    }
+}
+
+/** The set loop's "Set k of N" header. */
+fun setHeader(k: Int, n: Int) = str(R.string.log_set_header_n_of_n, k, n)
+
 /** Select a History sub-filter ("Lifts" / "Runs"). */
 fun ComposeTestRule.selectHistoryFilter(label: String) {
     onNodeWithText(label).performClick()
@@ -212,6 +232,17 @@ fun ComposeTestRule.scrollToText(text: String) {
     waitForIdle()
 }
 
+/** A capture name's light/dark suffix. */
+val DarkMode.suffix: String get() = if (this == DarkMode.Dark) "dark" else "light"
+
+/** Force light or dark for the next launch. */
+fun useDarkMode(mode: DarkMode) = AppSettings.setDarkMode(ApplicationProvider.getApplicationContext(), mode)
+
+/** Capture the screen to the golden `src/test/screenshots/[name].png`. */
+@OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)
+fun ComposeTestRule.shot(name: String) =
+    captureWithoutRipples { withWindowsInAddOrder { captureScreenRoboImage("src/test/screenshots/$name.png") } }
+
 /**
  * Run [capture] with every Compose ripple host hidden, so no tap ripple lands in a
  * screenshot.
@@ -225,7 +256,7 @@ fun ComposeTestRule.scrollToText(text: String) {
  * taps, where the settled screen shows no ripple; hiding the hosts captures exactly
  * that and never starts the animation.
  */
-fun ComposeTestRule.captureWithoutRipples(capture: () -> Unit) {
+private fun ComposeTestRule.captureWithoutRipples(capture: () -> Unit) {
     waitForIdle()
     val hosts = windowViews().flatMap { it.descendants() }
         .filter { rippleHostClass.isInstance(it) && it.visibility == View.VISIBLE }
@@ -238,6 +269,28 @@ fun ComposeTestRule.captureWithoutRipples(capture: () -> Unit) {
 }
 
 private val rippleHostClass by lazy { Class.forName("androidx.compose.material.ripple.RippleHostView") }
+
+/**
+ * Roborazzi composites the window roots sorted by `LayoutParams.type`, and
+ * Espresso lists same-type roots newest-first, so a dialog opened over a sheet
+ * (both TYPE_APPLICATION dialogs) is painted UNDER the older sheet and never
+ * shows in the capture. For the capture only, rank every window by the order it
+ * was added (= its on-device z-order), then restore the real types.
+ */
+@Suppress("UNCHECKED_CAST")
+private fun <T> withWindowsInAddOrder(block: () -> T): T {
+    val globalClass = Class.forName("android.view.WindowManagerGlobal")
+    val global = globalClass.getMethod("getInstance").invoke(null)
+    val field = globalClass.getDeclaredField("mParams").apply { isAccessible = true }
+    val params = (field.get(global) as List<WindowManager.LayoutParams>).toList()
+    val saved = params.map { it.type }
+    params.forEachIndexed { i, p -> p.type = WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW + i }
+    try {
+        return block()
+    } finally {
+        params.forEachIndexed { i, p -> p.type = saved[i] }
+    }
+}
 
 @Suppress("UNCHECKED_CAST")
 private fun windowViews(): List<View> {

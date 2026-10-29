@@ -9,7 +9,8 @@ import org.junit.Test
 
 /** Pure Today decisions: the banner's way back per hold reason, one coaching
  *  card per exercise, the win that carries its next-time advice, the newcomer
- *  guide's reps-in-reserve and face line, and when the session review asks runs. */
+ *  guide's reps-in-reserve and face line, when the session review asks runs,
+ *  and the plan face's plate figure, run head and display-unit distances. */
 class TodayLogicTest {
 
     @Test
@@ -201,5 +202,92 @@ class TodayLogicTest {
             week_plan = listOf(SessionPlanView(epoch_day = day, session_type = "Run(Easy)", items = listOf(PrescriptionView()))),
         )
         assertTrue("a planned run asks them", reviewAsksRun(runDay, zone))
+    }
+
+    private fun squat(day: java.time.LocalDate?, e1rm: Double) = LiftResultView(
+        exercise = "Back squat",
+        e1rm_kg = e1rm,
+        observed_at = day?.atTime(18, 0)?.atZone(java.time.ZoneId.systemDefault())?.toEpochSecond() ?: 0L,
+    )
+
+    @Test
+    fun e1rmTrend_countsOnlyDatedSessions() {
+        val d = java.time.LocalDate.of(2026, 10, 1)
+        assertNull(
+            "an undated set is no session: two dated ones are not a trend",
+            e1rmTrend(ViewModel(lifts = listOf(squat(null, 90.0), squat(d, 100.0), squat(d.plusDays(3), 102.0)))),
+        )
+        val trend = e1rmTrend(
+            ViewModel(lifts = listOf(squat(null, 90.0), squat(d, 95.0), squat(d.plusDays(2), 100.0), squat(d.plusDays(4), 102.0))),
+        )!!
+        assertEquals(listOf(95.0, 100.0, 102.0), trend.series)
+        assertEquals(d, trend.firstDay)
+    }
+
+    @Test
+    fun todayCards_aDoneSessionSpendsItsCoachingButKeepsTheSafetyCall() {
+        val cue = AdjustmentView(summary = "Stop a rep earlier", grade = "B", citation = "c1", exercise = "Back squat")
+        val safety = AdjustmentView(summary = "Head cold: fewer sets", grade = "B", citation = "c2", safety_critical = true)
+        val underWay = ViewModel(today_epoch_day = 100, adjustments = listOf(cue, safety))
+        val open = todayCards(underWay, hasSignal = true, DistanceUnit.Km)
+        assertSame(safety, open.hostAdjustment)
+        assertEquals(listOf(cue), open.coachingCards)
+        assertTrue("both are cards above the session", ("Stop a rep earlier" to "c1") in open.renderedKeys)
+        val done = underWay.copy(
+            session_done = SessionDoneView(epoch_day = 100, items = listOf(SessionDoneItemView(exercise = "Back squat"))),
+        )
+        val after = todayCards(done, hasSignal = true, DistanceUnit.Km)
+        assertSame("a safety call is never spent", safety, after.hostAdjustment)
+        assertTrue("the session's coaching is spent once it is done", after.coachingCards.isEmpty())
+    }
+
+    @Test
+    fun plateFigureHelper() {
+        assertEquals("20", plateFigure(20.0))
+        assertEquals("2.5", plateFigure(2.5))
+        assertEquals("1.25", plateFigure(1.25))
+    }
+
+    /** A run face leads with the core's volume head only when the item carries a
+     *  run target, whose pace / heart-rate / effort lines then render under it. */
+    @Test
+    fun runFaceHeadIsTheCoreVolumeHeadUnderATarget() {
+        val item = coreJson.decodeFromString(
+            PrescriptionView.serializer(),
+            """
+            {"summary":"6 × 800 m · 3:40–3:50 /km (interval) · effort 8 of 10","run_head":"6 × 800 m","face_lead":"6 × 800 m",
+             "run_target":{"band":"interval","pace_label_km":"3:40–3:50 /km","effort_cue":"effort 8 of 10","effort_detail":"8 of 10"}}
+            """.trimIndent(),
+        )
+        assertEquals("6 × 800 m", runFaceHead(item, DistanceUnit.Km))
+        // A rep head has no plain distance: it reads the same in miles.
+        assertEquals("6 × 800 m", runFaceHead(item, DistanceUnit.Mi))
+        assertEquals("8 of 10", item.run_target?.effort_detail)
+        // No target, or no volume head (a pain stop): the full summary stays.
+        assertEquals(null, runFaceHead(item.copy(run_target = null), DistanceUnit.Km))
+        assertEquals(null, runFaceHead(item.copy(run_head = ""), DistanceUnit.Km))
+    }
+
+    /** A distance head and distance prose read in the display unit from the core's
+     *  structured km figure and its miles twins, never by rewriting the km text. */
+    @Test
+    fun distancesFollowTheDisplayUnit() {
+        val item = PrescriptionView(
+            run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(band = "easy"),
+            safety_reason = "Capped at 8 km: at most 10% over your longest recent run",
+            safety_reason_mi = "Capped at 5 mi: at most 10% over your longest recent run",
+        )
+        assertEquals("8 km", runFaceHead(item, DistanceUnit.Km))
+        assertEquals("5 mi", runFaceHead(item, DistanceUnit.Mi))
+        assertEquals(item.safety_reason, safetyReasonText(item, DistanceUnit.Km))
+        assertEquals(item.safety_reason_mi, safetyReasonText(item, DistanceUnit.Mi))
+        // A reason stating no distance has no twin: the km text stands.
+        val kept = item.copy(safety_reason = "Kept short and easy", safety_reason_mi = "")
+        assertEquals("Kept short and easy", safetyReasonText(kept, DistanceUnit.Mi))
+        assertEquals(null, safetyReasonText(PrescriptionView(), DistanceUnit.Mi))
+        val fb = FeedbackView(message = "Run done: 10.2 km in 47 min, as planned.", message_mi = "Run done: 6.3 mi in 47 min, as planned.")
+        assertEquals(fb.message, feedbackMessage(fb, DistanceUnit.Km))
+        assertEquals(fb.message_mi, feedbackMessage(fb, DistanceUnit.Mi))
+        assertEquals("Even split.", feedbackMessage(FeedbackView(message = "Even split."), DistanceUnit.Mi))
     }
 }

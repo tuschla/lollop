@@ -33,6 +33,7 @@ claim_group! {
             CITE_ISRAETEL_2021,
         ],
     ),
+    #[kb_only]
     AUTOREG_APRE_001 => claim(
         "AUTOREG-APRE-001",
         "Your next weight comes from how many reps you managed on an as-many-reps-as-possible set, using standard adjustment tables (APRE).",

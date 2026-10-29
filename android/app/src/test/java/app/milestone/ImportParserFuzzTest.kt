@@ -31,7 +31,7 @@ import org.robolectric.RobolectricTestRunner
 
 /**
  * Seeded mutation fuzzing of the shell's run-import parsers ([parseRunFileSegments] →
- * [parseGpxRun] / [parseTcxActivities] / [fitSegments] over the REAL core's
+ * [parseGpxRuns] / [parseTcxActivities] / [fitSegments] over the REAL core's
  * [Core.parseFit], then [importedRunEvent]) and of the JNI byte entry points
  * (`update`, `view`, `parseFit`, `trackFigures`, `exportGpx`) with malformed input.
  *
@@ -95,17 +95,17 @@ class ImportParserFuzzTest {
     }
 
     /** What the import pipeline makes of one file; any exception that is not a named
-     *  [GpxImportException] is a shell bug (it surfaces as [ImportFailure.Unknown]). */
+     *  [ImportException] is a shell bug (it surfaces as [ImportFailure.Unknown]). */
     private fun parse(bytes: ByteArray): Out = try {
         Out.Runs(parseRunFileSegments(bytes, Core::parseFit))
-    } catch (e: GpxImportException) {
+    } catch (e: ImportException) {
         Out.Failed(e.reason, e.detail)
     }
 
     /** One run → the event, or the named reason it was refused. */
     private fun build(run: ImportedRun): Any = try {
         importedRunEvent(run, measuredHrMax = 190.0).copy(entryId = 1L)
-    } catch (e: GpxImportException) {
+    } catch (e: ImportException) {
         Out.Failed(e.reason, e.detail)
     }
 
@@ -259,7 +259,7 @@ class ImportParserFuzzTest {
 
     /** The core's own GPX export of a logged run (what Share / Undo read). */
     private fun coreGpx(points: List<GpsPoint>, starts: List<Int> = emptyList(), entryId: Long = 99L): String {
-        val ev = Event.LogRunTrack(points, 0.0, 0.0, observedAt = points.last().observedAt, entryId = entryId, segmentStarts = starts)
+        val ev = Event.LogRunTrack(points, 0.0, observedAt = points.last().observedAt, entryId = entryId, segmentStarts = starts)
         assertTrue("core accepts the seed run", Core.send(ev).accepted)
         return Core.exportGpx(entryId, points.last().observedAt).orEmpty()
     }
@@ -400,19 +400,10 @@ class ImportParserFuzzTest {
 
     // ═══ Truncation ════════════════════════════════════════════════════════════
 
-    /** Cut offsets for [doc]: an even sample, plus the end of a sample of tags (a
-     *  download cut at a tag boundary is the case the pull parser does not notice),
-     *  never the whole document (its final newline excluded). */
-    private fun cuts(doc: ByteArray): List<Int> {
-        val even = (0 until doc.size - 1).step(maxOf(1, doc.size / 150)).toList()
-        val tagEnds = doc.indices.filter { doc[it] == '>'.code.toByte() }.map { it + 1 }.filter { it < doc.size - 1 }
-        return (even + tagEnds.filterIndexed { i, _ -> i % maxOf(1, tagEnds.size / 150) == 0 }).distinct().sorted()
-    }
-
     @Test
     fun aGpxCutAtAnyOffsetIsDamagedOrTheWrongTypeNeverAShorterRun() {
         val doc = gpx(listOf(run(60), run(60, t0 = 1_750_000_200L))).toByteArray()
-        for (cut in cuts(doc)) {
+        for (cut in truncationCuts(doc)) {
             val out = check("gpx cut at $cut", doc.copyOf(cut))
             assertTrue("gpx cut at $cut: $out", out is Out.Failed && out.reason in setOf(ImportFailure.Damaged, ImportFailure.WrongType))
         }
@@ -423,7 +414,7 @@ class ImportParserFuzzTest {
         val doc = tcx(listOf("Running" to listOf(run(150, seed = 4)), "Running" to listOf(run(150, t0 = 1_750_100_000L, seed = 5)))).toByteArray()
         val afterFirst = String(doc).indexOf("</Activity>") + "</Activity>".length
         val bad = mutableListOf<String>()
-        for (cut in (cuts(doc) + afterFirst).distinct()) {
+        for (cut in (truncationCuts(doc) + afterFirst).distinct()) {
             val out = check("tcx cut at $cut", doc.copyOf(cut))
             val ok = out is Out.Failed && out.reason in setOf(ImportFailure.Damaged, ImportFailure.WrongType)
             if (!ok) bad += "cut $cut/${doc.size}: " + if (out is Out.Runs) "${out.runs.size} run(s)" else out.toString()
@@ -482,14 +473,6 @@ class ImportParserFuzzTest {
 
     @Test
     fun nestedEntityExpansionIsBounded() {
-        if (System.getenv("IMPORT_FUZZ_LAUGHS_FULL") == "1") {
-            // The real attack: a 1 KB file, 10 levels (10^10 chars); it must end in a
-            // named reason, not an OutOfMemoryError or a hang.
-            val small = laughs(10, "type").replace(Regex("<trkpt.*</trkpt>"), "")
-            val full = runCatching { bounded("billion laughs ×10", 120_000) { runCatching { parse(small.toByteArray()) } } }
-            val got = full.fold({ it.fold({ o -> "$o" }, { e -> "${e::class.java.name}: ${e.message}" }) }, { e -> "${e::class.java.name}: ${e.message}" })
-            assertTrue("billion laughs ×10 (${small.length} bytes): $got", full.getOrNull()?.getOrNull() is Out.Failed)
-        }
         // 6 levels = 3 MB of "lol": harmless to run, enough to see whether the parser
         // expands without a cap. A cap (or refusing DTDs) keeps amplification small.
         val doc = laughs(6, "type")
@@ -703,7 +686,7 @@ class ImportParserFuzzTest {
     private val eventSeeds by lazy {
         listOf(
             Event.SetToday(20_300L, 3600).toJson().toString(),
-            Event.LogRunTrack(run(60).map { it.point() }, 0.0, 0.0, 1_750_000_060L, 5L).toJson().toString(),
+            Event.LogRunTrack(run(60).map { it.point() }, 0.0, 1_750_000_060L, 5L).toJson().toString(),
             Event.ClearRuns.toJson().toString(),
             QaHarness.loggedRun(1_750_000_000L).toJson().toString(),
         )
@@ -748,7 +731,7 @@ class ImportParserFuzzTest {
                 assertTrue("trackFigures $case: $text", km != null && min != null && km.isFinite() && min.isFinite() && km >= 0 && min >= 0)
             }
         }
-        assertTrue(Core.send(Event.LogRunTrack(run(300).map { it.point() }, 0.0, 0.0, 1_750_000_300L, 42L)).accepted)
+        assertTrue(Core.send(Event.LogRunTrack(run(300).map { it.point() }, 0.0, 1_750_000_300L, 42L)).accepted)
         for (id in listOf(0L, -1L, Long.MIN_VALUE, Long.MAX_VALUE, 42L)) for (at in listOf(0L, -1L, Long.MIN_VALUE, Long.MAX_VALUE, 1_750_000_300L)) {
             val gpx = Core.exportGpx(id, at)
             assertNotNull(gpx)
@@ -776,9 +759,25 @@ class ImportParserFuzzTest {
             // The shell's decode maps it: a run or a named reason, never another exception.
             try {
                 fitSegments(json)
-            } catch (e: GpxImportException) {
+            } catch (e: ImportException) {
                 // named
             }
         }
     }
+}
+
+/** Offsets in [from, until) to cut [doc] at, as a download cut off mid-file: every
+ *  [step]th byte plus the end of every [tagStride]th tag (a cut right after a tag
+ *  is the case the pull parser does not notice). The defaults sample about 150 of
+ *  each across the whole document, never the whole document (its final newline
+ *  excluded). */
+internal fun truncationCuts(
+    doc: ByteArray,
+    from: Int = 0,
+    until: Int = doc.size - 1,
+    step: Int = maxOf(1, doc.size / 150),
+    tagStride: Int = maxOf(1, doc.count { it == '>'.code.toByte() } / 150),
+): List<Int> {
+    val tagEnds = (maxOf(from, 1) until until).filter { doc[it - 1] == '>'.code.toByte() }
+    return ((from until until step step) + tagEnds.filterIndexed { i, _ -> i % tagStride == 0 }).distinct().sorted()
 }

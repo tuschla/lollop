@@ -26,32 +26,11 @@ fn set_at(exercise: &str, weight_kg: f64, reps: u32, rpe: f64, day: i64, i: i64)
 /// Plan a hypertrophy week starting Monday `MON` after logging `sets` the day
 /// before, and return the view.
 fn planned_with(sets: &[(f64, u32, f64)]) -> ViewModel {
-    let app = Engine;
-    let mut model = Model::default();
-    app.update(Event::SetProfile(hyp_profile()), &mut model)
-        .expect_only_render();
-    for (i, &(kg, reps, rpe)) in sets.iter().enumerate() {
-        app.update(
-            set_at("Lat pulldown", kg, reps, rpe, MON - 1, i as i64),
-            &mut model,
-        )
-        .expect_only_render();
-    }
-    app.update(
-        Event::GeneratePlan {
-            start_epoch_day: MON,
-        },
-        &mut model,
-    )
-    .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    let history = sets
+        .iter()
+        .enumerate()
+        .map(|(i, &(kg, reps, rpe))| set_at("Lat pulldown", kg, reps, rpe, MON - 1, i as i64));
+    let (app, model) = planned_on(hyp_profile(), history, MON);
     app.view(&model)
 }
 
@@ -102,7 +81,8 @@ fn last_working_takes_the_top_load_sets_of_the_newest_session() {
         mk(12.0, 13, 100, 1),
         mk(8.0, 20, 100, 2), // lighter back-off set, not a working set
     ];
-    let refs: Vec<&LoggedSet> = sets.iter().collect();
+    let index = SetIndex::new(&sets);
+    let refs: Vec<(&LoggedSet, NameFacts)> = index.with_facts(&sets).collect();
     let lw = build_last_working(&refs, false, 101, 0);
     assert_eq!(lw.len(), 1);
     assert_eq!(lw[0].weight_kg, 12.0);
@@ -159,8 +139,8 @@ fn planner_ramp_equals_plan_ramp() {
     let p = hyp_profile();
     let ta = individualization::training_age_from_cadence(p.progression_cadence).value;
     let bw = crate::plan::lift_block_position(&p, 0).block_weeks;
-    let (rows, _) = build_hypertrophy_plan(
-        &HypertrophyPlanQuery {
+    let (rows, _, _) = build_hypertrophy_plan(
+        &HypertrophyInputView {
             muscle: "chest".into(),
             weeks: bw,
             not_growing: false,
@@ -235,7 +215,7 @@ fn last_raise(kg: f64, reps: u32) -> crate::plan::Anchors {
 
 #[test]
 fn a_held_dumbbell_load_is_carried_exactly_as_logged() {
-    // A4: 6 kg × 13 → hold 6 kg for 14; never floored onto the 2.5 kg grid
+    // 6 kg × 13 → hold 6 kg for 14; never floored onto the 2.5 kg grid
     // (5 kg) while the card says "same weight as last time".
     let it = flatten_prescription(&range_rx(14, 6.0), &last_raise(6.0, 13), None, false);
     assert_eq!(it.load_kg, Some(6.0));
@@ -248,7 +228,7 @@ fn a_held_dumbbell_load_is_carried_exactly_as_logged() {
 
 #[test]
 fn a_light_load_steps_up_by_at_most_ten_percent() {
-    // B1: the double-progression step is the smallest step capped at
+    // The double-progression step is the smallest step capped at
     // STR-LOADPROG-001's +10 %, so a 6 kg raise goes to 6.6 kg, not 8.5 kg.
     assert!((crate::hypertrophy::load_step_kg(6.0) - 0.6).abs() < 1e-9);
     assert_eq!(crate::hypertrophy::load_step_kg(40.0), 2.5);

@@ -104,20 +104,39 @@ pub(in crate::app) struct TrackSplit {
 
 /// The split of the latest tracked run, unless it was tagged as intervals: the
 /// pacing cue is for an even-effort run (feedback-016/017), and a rep workout's
-/// halves differ by design.
+/// halves differ by design. The figure is read off the run's memoized card, so
+/// the cue and the run chip use the same QC'd track; a run too short for the
+/// card's own pacing verdict (two full km splits) has none.
 pub(in crate::app) fn feedback_track_split(model: &Model, facts: &RunFacts) -> Option<TrackSplit> {
     let i = latest_tracked_run(model)?;
     let r = &model.runs[i];
     if r.workout_type == Some(WorkoutType::Interval) {
         return None;
     }
+    let card = to_run_view(r, facts.keys[i], facts.qc[i].as_deref());
     Some(TrackSplit {
-        pct: track_split_pct(model, facts, i)?,
+        pct: card.split.and(card.split_pct)?,
         // The day the run STARTED, the plan day completion credits it to: the
         // pacing cue attaches only to a split measured on the judged day.
         day: (!is_undated(r.observed_at))
             .then(|| local_day(facts.started[i], model.today_utc_offset_sec)),
     })
+}
+
+/// Index of the chronologically latest tracked run up to the end of today
+/// (`end_of_local_today_sec`; no clock, no cutoff), so neither a backdated nor
+/// a future-dated GPS import poses as the latest session. A same-stamp tie goes
+/// to the later-logged run by `entry_id`, not its storage slot.
+fn latest_tracked_run(model: &Model) -> Option<usize> {
+    let cutoff = end_of_local_today_sec(model);
+    model
+        .runs
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| !r.track.is_empty())
+        .filter(|(_, r)| cutoff.is_none_or(|c| r.observed_at <= c))
+        .max_by_key(|(i, r)| (r.observed_at, r.entry_id, *i))
+        .map(|(i, _)| i)
 }
 
 /// Resolve the single feedback message (safety gate first), flattened.
@@ -132,10 +151,7 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
     let model = c.cx.model;
     let offset = model.today_utc_offset_sec;
     let today = model.today_epoch_day;
-    let fresh = |day: Option<i64>| match (today, day) {
-        (Some(t), Some(d)) => t.saturating_sub(d) <= FEEDBACK_FRESH_DAYS,
-        _ => true,
-    };
+    let fresh = |day: Option<i64>| fresh_within(today, day, FEEDBACK_FRESH_DAYS);
 
     let session = c
         .session
@@ -160,10 +176,7 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
 
     let (inp, exec_day) = execution_input(&c, session, session_day, derived);
     let mut exec = session_execution(&inp);
-    let win_fresh = |day: Option<i64>| match (today, day) {
-        (Some(t), Some(d)) => t.saturating_sub(d) <= WIN_FRESH_DAYS,
-        _ => true,
-    };
+    let win_fresh = |day: Option<i64>| fresh_within(today, day, WIN_FRESH_DAYS);
     if exec.as_ref().is_some_and(|e| {
         matches!(
             e.rec.value,
@@ -271,7 +284,7 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
     }
 
     Some(feedback_view(
-        category, message, message_mi, verbosity, &resolved, ungraded,
+        category, message, message_mi, &resolved, ungraded,
     ))
 }
 
@@ -289,8 +302,7 @@ fn execution_input(
     let split_on = |day: Option<i64>| c.track_split.filter(|t| t.day == day).map(|t| t.pct);
     let manual_leads = session.is_some()
         && match (derived, session_day) {
-            (None, _) => true,
-            (Some(_), None) => true,
+            (None, _) | (Some(_), None) => true,
             (Some(d), Some(sd)) => sd >= d.epoch_day,
         };
     let same_day = matches!((derived, session_day), (Some(d), Some(sd)) if sd == d.epoch_day);
@@ -382,24 +394,17 @@ fn feedback_view(
     category: FeedbackCategory,
     message: String,
     message_mi: String,
-    verbosity: feedback::FeedbackVerbosity,
     resolved: &Recommended<FeedbackCategory>,
     ungraded: bool,
 ) -> FeedbackView {
-    // feedback-023/024 verbosity + feedback-005 mastery anchoring.
-    let anchor = feedback::mastery_anchor_required(category).value;
-
     let view = FeedbackView {
         category,
         category_label: feedback_category_label(category).to_string(),
         message,
         message_mi,
         suppresses_praise: category.suppresses_competing_praise(),
-        max_takeaways: verbosity.max_takeaways,
-        max_metrics: verbosity.max_metrics,
-        rationale_mandatory: verbosity.rationale_mandatory,
-        minimize_jargon: verbosity.minimize_jargon,
-        anchor_mastery: anchor,
+        // feedback-005 mastery anchoring.
+        anchor_mastery: feedback::mastery_anchor_required(category).value,
         evidence: EvidenceTagView::default(),
         why: WhyView::default(),
     };
@@ -451,7 +456,7 @@ pub(in crate::app) struct MessageCtx<'a> {
     pub(in crate::app) signs: Option<OvertrainingSigns>,
     pub(in crate::app) signal_count: u8,
     pub(in crate::app) recovery_week_active: bool,
-    /// The plan set this lift's next session ~5 % lighter (AUTOREG-E1RM-GATE-001).
+    /// The plan derated this lift's next session (AUTOREG-E1RM-GATE-001).
     pub(in crate::app) lighter_next: bool,
     pub(in crate::app) double_progression: bool,
     /// Beginner copy: plain words, no RIR/e1RM terms (feedback-023).
@@ -486,13 +491,13 @@ fn short_detail(o: &LiftOutcome, w: &dyn Fn(f64) -> String) -> String {
     }
 }
 
-/// "2 reps left": the one effort wording every face uses, for beginners and
-/// advanced lifters alike (plain words carry no RIR jargon, feedback-023).
+/// "2 reps left" / "no reps left": a logged or target reserve in feedback
+/// copy, plain for beginners and advanced lifters alike (feedback-023).
 pub(super) fn reserve(n: u8) -> String {
-    match n {
-        0 => "no reps left".to_string(),
-        1 => "1 rep left".to_string(),
-        n => format!("{n} reps left"),
+    if n == 0 {
+        "no reps left".to_string()
+    } else {
+        format!("{} left", reps_word(n))
     }
 }
 
@@ -669,7 +674,11 @@ fn corrective_message(m: &MessageCtx) -> String {
         _ => match detail {
             Some(o) => {
                 let next = if m.lighter_next {
-                    format!(" Your next {} session is set about 5% lighter.", o.exercise)
+                    format!(
+                        " Your next {} session is set about {:.0}% lighter.",
+                        o.exercise,
+                        (1.0 - crate::app::anchors::E1RM_DROP_GATE) * 100.0
+                    )
                 } else {
                     " Keep the same weight next time and aim to finish every set.".to_string()
                 };

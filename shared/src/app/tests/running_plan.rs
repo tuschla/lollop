@@ -1,7 +1,6 @@
-//! Run planning: C25K progression monotonicity, Karvonen %HRR bands, the
-//! co-primary endurance-frequency cap, the heavy-leg / long-run spacing
-//! definition, and run anchors from logged history (trailing windows, local
-//! days, the detraining taper) feeding the long run and interval structure.
+//! Run planning: Karvonen %HRR bands, the co-primary endurance-frequency cap,
+//! and run anchors from logged history (trailing windows, local days, the
+//! detraining taper) feeding the long run and interval structure.
 
 use super::*;
 
@@ -34,60 +33,6 @@ fn logrun_noon(distance_km: f64, day: i64) -> Event {
     )
 }
 
-// ── C25K per-session running minutes are monotone ─────────────────────────
-
-/// Total running minutes in the week's last (hardest) C25K session.
-fn c25k_run_min(week: u8) -> f64 {
-    crate::running::c25k_session_rx(week, 3).value.run_sec() as f64 / 60.0
-}
-
-/// The longest continuous running bout (seconds) of the week's last session.
-fn c25k_rep_sec(week: u8) -> f64 {
-    crate::running::c25k_session_rx(week, 3)
-        .value
-        .longest_bout_sec() as f64
-}
-
-#[test]
-fn c25k_running_minutes_never_regress_week_to_week() {
-    // Per-session running minutes follow the NHS table (running-049): week 1
-    // runs 8 min, week 9 runs 30 min, and no week runs less than the one
-    // before it (weeks advance only once completed).
-    let mins: Vec<f64> = (1..=9).map(c25k_run_min).collect();
-    assert!(
-        (mins[0] - 8.0).abs() < 1e-9,
-        "week-1 anchor is 8 running min: {mins:?}"
-    );
-    assert!(
-        (mins[8] - 30.0).abs() < 1e-9,
-        "week-9 anchor is 30 running min: {mins:?}"
-    );
-    for w in 1..mins.len() {
-        assert!(
-            mins[w] >= mins[w - 1] - 1e-9,
-            "week {} running minutes {} regressed below week {} ({})",
-            w + 1,
-            mins[w],
-            w,
-            mins[w - 1]
-        );
-    }
-    // The longest continuous bout is monotone non-decreasing too, ending at
-    // the 30-min continuous run.
-    let reps: Vec<f64> = (1..=9).map(c25k_rep_sec).collect();
-    for w in 1..reps.len() {
-        assert!(
-            reps[w] >= reps[w - 1] - 1e-9,
-            "week {} bout {}s is shorter than week {} ({}s)",
-            w + 1,
-            reps[w],
-            w,
-            reps[w - 1]
-        );
-    }
-    assert_eq!(reps[8], 1800.0);
-}
-
 // ── Karvonen bands use the %HRR (VO2max) reserve, not %HRmax ───────────────
 
 #[test]
@@ -96,7 +41,7 @@ fn karvonen_band_uses_hr_reserve_not_hrmax_fractions() {
     // HRmax 190 / RHR 50 the Easy band's %HRR fractions (59–74% VO2max) give
     // 133–154 bpm; reusing the %HRmax band fractions (65–79%) as %HRR would
     // render ~141–161 bpm — ~8 bpm too hot for the low-RHR cohort this targets.
-    let q = HrZoneQuery {
+    let q = HrZoneInputView {
         age_years: 30.0,
         resting_hr_bpm: Some(50.0),
         weeks_since_recalc: None,
@@ -121,23 +66,14 @@ fn karvonen_band_uses_hr_reserve_not_hrmax_fractions() {
 
 // ── The ≤3 d/wk endurance cap is co-primary-conditional ────────────────────
 
-fn hybrid_run_profile(concurrent_goal: &str, days: u8, km: f64) -> Profile {
-    serde_json::from_str(&format!(
-        r#"{{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength",
-            "goal_distance":"Marathon","concurrent_goal":"{concurrent_goal}","weekly_sets":4,
-            "running_days_per_week":{days},"running_km_per_week":{km},"advanced":true}}"#
-    ))
-    .expect("profile fixture parses")
-}
-
-/// A strength profile with running not configured (0 run days, 0 km).
-fn pure_lifter_profile() -> Profile {
-    serde_json::from_str(
-        r#"{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength",
-            "goal_distance":"General","concurrent_goal":"Strength","weekly_sets":12,
-            "running_days_per_week":0,"running_km_per_week":0.0,"advanced":false}"#,
-    )
-    .expect("profile fixture parses")
+fn hybrid_run_profile(concurrent_goal: ConcurrentGoal, days: u8, km: f64) -> Profile {
+    Profile {
+        concurrent_goal,
+        weekly_sets: 4,
+        running_days_per_week: days,
+        running_km_per_week: km,
+        ..sample_profile()
+    }
 }
 
 #[test]
@@ -146,126 +82,32 @@ fn endurance_priority_hybrid_keeps_full_run_frequency() {
     // power is co-primary (the cap protects LIFTING from endurance interference).
     // An endurance-priority marathoner who also lifts keeps every prescribed run
     // day (File 10 hybrid-010/CONC-RE-001), so 6 running days stay 6, not 3.
-    let endurance = hybrid_run_profile("EndurancePriority", 6, 50.0);
+    let endurance = hybrid_run_profile(ConcurrentGoal::EndurancePriority, 6, 50.0);
     assert_eq!(
         crate::plan::run_slot_count(&endurance),
         6,
         "endurance-priority hybrid must not be capped to the ≤3 d/wk concurrency limit"
     );
     // The cap still applies when a strength quality is co-primary.
-    for goal in ["Strength", "Power", "Hypertrophy"] {
+    for goal in [
+        ConcurrentGoal::Strength,
+        ConcurrentGoal::Power,
+        ConcurrentGoal::Hypertrophy,
+    ] {
         let strength = hybrid_run_profile(goal, 6, 50.0);
         assert_eq!(
             crate::plan::run_slot_count(&strength),
             3,
-            "{goal} co-primary must cap endurance at 3 d/wk"
+            "{goal:?} co-primary must cap endurance at 3 d/wk"
         );
     }
 }
 
-// ── A long run is the week's LONGEST run over an external full-week basis ───
+// ── Run-plan anchors: completed-week km and race-date taper wiring ─────────
 
 fn manual_run(km: f64, at: i64) -> LoggedRun {
-    LoggedRun {
-        distance_km: km,
-        duration_min: km * 6.0,
-        hr_pct_max: 70.0,
-        wire_hr_pct_max: 70.0,
-        longest_recent_km: 0.0,
-        wire_longest_recent_km: 0.0,
-        track: Vec::new(),
-        track_segment_starts: Vec::new(),
-        observed_at: at,
-        entry_id: 0,
-        logged_utc_offset_sec: None,
-        hr_pinned: false,
-        workout_type: None,
-        session_rpe: None,
-        avg_hr_bpm: None,
-    }
+    logged_run(km, km * 6.0, 70.0, at)
 }
-
-fn heavy_squat(at: i64) -> LoggedSet {
-    LoggedSet {
-        exercise: "Back Squat".to_string(),
-        weight_kg: 150.0,
-        reps: 3,
-        rpe: 9.0,
-        observed_at: at,
-        entry_id: 0,
-        hold_sec: None,
-    }
-}
-
-/// A 3-run week (easy 5 / tempo 4 / long 8 km): only the 8 km run is the long
-/// run. Mondays start local weeks (day ≡ 4 mod 7), so days 4–10 are one week.
-fn three_run_week() -> Vec<LoggedRun> {
-    vec![
-        manual_run(5.0, 5 * DAY_SEC + 8 * 3600), // Tue easy
-        manual_run(4.0, 6 * DAY_SEC + 8 * 3600), // Wed tempo
-        manual_run(8.0, 9 * DAY_SEC + 8 * 3600), // Sat long
-    ]
-}
-
-const GAP_FLAG: &str = "keep ≥24 h between";
-
-#[test]
-fn easy_run_near_leg_day_is_not_treated_as_a_long_run() {
-    // A heavy squat Mon 20:00 and the easy 5 km Tue 08:00 are ~12 h apart, but
-    // the 5 km run is 29% of a partial-week total only — it is NOT the week's
-    // longest run, so it must not trip the heavy-leg/long-run CAP-3 spacing flag.
-    // The actual long run (8 km, Sat) is 5 days from the squat, well clear.
-    let model = Model {
-        profile: Some(hybrid_run_profile("EndurancePriority", 3, 17.0)),
-        runs: three_run_week(),
-        sets: vec![heavy_squat(4 * DAY_SEC + 20 * 3600)], // Mon evening
-        ..Default::default()
-    };
-    let report = build_weekly_report(&ViewCtx::new(&model), &[]);
-    assert!(
-        !report.iter().any(|r| r.summary.contains(GAP_FLAG)),
-        "an easy 5 km run near leg day must not flag as a long run: {report:#?}"
-    );
-}
-
-#[test]
-fn heavy_squat_close_to_the_actual_long_run_still_flags() {
-    // Positive control: move the heavy squat to Fri 20:00, ~12 h before the 8 km
-    // long run on Sat 08:00. The 8 km run IS the week's longest and clears 25% of
-    // the 17 km full-week basis, so CAP-3 must fire.
-    let model = Model {
-        profile: Some(hybrid_run_profile("EndurancePriority", 3, 17.0)),
-        runs: three_run_week(),
-        sets: vec![heavy_squat(8 * DAY_SEC + 20 * 3600)], // Fri evening
-        ..Default::default()
-    };
-    let report = build_weekly_report(&ViewCtx::new(&model), &[]);
-    assert!(
-        report.iter().any(|r| r.summary.contains(GAP_FLAG)),
-        "a heavy squat ~12 h from the actual long run must flag CAP-3: {report:#?}"
-    );
-}
-
-#[test]
-fn a_pure_lifters_lone_jog_after_squats_is_not_a_long_run() {
-    // A lifter with no planned mileage logs a single 3 km recovery jog the morning
-    // after heavy squats. With no external basis (no plan, no other runs in the
-    // trailing 7 days) the jog cannot certify itself as a long run, so CAP-3 stays
-    // silent instead of flagging the recovery jog.
-    let model = Model {
-        profile: Some(pure_lifter_profile()),
-        runs: vec![manual_run(3.0, 5 * DAY_SEC + 8 * 3600)], // Tue morning
-        sets: vec![heavy_squat(4 * DAY_SEC + 20 * 3600)],    // Mon evening, ~12 h prior
-        ..Default::default()
-    };
-    let report = build_weekly_report(&ViewCtx::new(&model), &[]);
-    assert!(
-        !report.iter().any(|r| r.summary.contains(GAP_FLAG)),
-        "a lone recovery jog with no external basis must not flag CAP-3: {report:#?}"
-    );
-}
-
-// ── Run-plan anchors: completed-week km and race-date taper wiring ─────────
 
 /// A Monday epoch day (epoch day 0 was a Thursday).
 const PLAN_MONDAY: i64 = 20_000 - (20_000_i64.rem_euclid(7) + 3).rem_euclid(7);
@@ -314,28 +156,30 @@ const SEEDED_10K_DAY: i64 = 20_742;
 fn seeded_10k_model(stated_on: i64, today: i64) -> (Engine, Model) {
     let app = Engine;
     let mut model = Model::default();
-    let profile: Profile = serde_json::from_value(serde_json::json!({
-        "progression_cadence": "WeekToWeek", "lift_goal": "MaxStrength",
-        "goal_distance": "TenK", "concurrent_goal": "EndurancePriority",
-        "weekly_sets": 12, "running_days_per_week": 3, "running_km_per_week": 32.19,
-        "advanced": false, "female": false, "age_years": 34.0, "weight_lb": true,
-        "lift_days_per_week": 2, "recent_race": {"distance_km": 5.0, "time_sec": 1350},
-        "stated_longest_recent_km": 12.87, "effective_from_epoch_day": stated_on
-    }))
-    .expect("seed profile");
+    let profile = Profile {
+        goal_distance: GoalDistance::TenK,
+        concurrent_goal: ConcurrentGoal::EndurancePriority,
+        running_days_per_week: 3,
+        running_km_per_week: 32.19,
+        age_years: Some(34.0),
+        weight_lb: true,
+        lift_days_per_week: Some(2),
+        recent_race: Some(RecentRace {
+            distance_km: 5.0,
+            time_sec: 1350,
+            epoch_day: None,
+        }),
+        stated_longest_recent_km: Some(12.87),
+        effective_from_epoch_day: Some(stated_on),
+        ..base_profile()
+    };
     for e in [
-        Event::SetToday {
-            epoch_day: stated_on,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(stated_on),
         Event::SetProfile(profile),
         Event::GeneratePlan {
             start_epoch_day: stated_on,
         },
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(today),
     ] {
         let _ = app.update(e, &mut model);
     }
@@ -421,10 +265,7 @@ fn a_dated_race_plan_counts_weeks_to_the_race() {
         ..running_profile()
     };
     for e in [
-        Event::SetToday {
-            epoch_day: today,
-            utc_offset_sec: 0,
-        },
+        set_today_ev(today),
         Event::SetProfile(profile),
         Event::GeneratePlan {
             start_epoch_day: today,
@@ -436,13 +277,7 @@ fn a_dated_race_plan_counts_weeks_to_the_race() {
     let p = program(&model);
     assert_eq!((p.week, p.weeks_total), (1, 7), "{p:?}");
     assert_eq!(p.phase, MesoPhase::Build);
-    let _ = app.update(
-        Event::SetToday {
-            epoch_day: race - 1,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    );
+    let _ = app.update(set_today_ev(race - 1), &mut model);
     let p = program(&model);
     assert_eq!((p.week, p.weeks_total), (7, 7), "race week: {p:?}");
     assert_eq!(p.phase, MesoPhase::Taper);
@@ -470,14 +305,7 @@ fn the_long_run_anchors_to_logged_recent_distance_not_a_stale_profile() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
 
     let item = planned_long_run_item(&app, &model);
     assert!(
@@ -511,14 +339,7 @@ fn a_volume_dominated_long_run_card_still_cites_the_share_cap() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
 
     let item = planned_long_run_item(&app, &model);
     assert!(item.summary.starts_with("18 km"), "{:?}", item.summary);
@@ -549,14 +370,7 @@ fn a_stale_run_outside_the_window_does_not_raise_the_long_run() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
 
     let summary = planned_long_run_summary(&app, &model);
     // Fully-detrained run ignored → the 3-day average run, 16 / 3 → 5 km
@@ -581,14 +395,7 @@ fn a_log_less_running_plan_is_unchanged_by_the_run_anchors() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
     assert!(planned_long_run_summary(&app, &model).starts_with("5 km"));
 }
 
@@ -609,14 +416,7 @@ fn the_run_reactive_plan_is_deterministic_across_repeated_views() {
         &mut model,
     )
     .expect_only_render();
-    app.update(
-        Event::SetToday {
-            epoch_day: MON,
-            utc_offset_sec: 0,
-        },
-        &mut model,
-    )
-    .expect_only_render();
+    set_today(&app, &mut model, MON);
     let a = app.view(&model);
     let b = app.view(&model);
     assert_eq!(

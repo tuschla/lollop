@@ -30,6 +30,18 @@ fn log(app: &Engine, model: &mut Model, exercise: &str, ev: Event) {
     .expect_only_render();
 }
 
+/// A low-HRV morning on `MON`: holds lift progression (AUTOREG-HRV-LIFT-001).
+fn report_low_hrv(app: &Engine, model: &mut Model) {
+    app.update(
+        Event::SubmitReadiness(ReadinessInput {
+            observed_at: MON * DAY_SEC + 60,
+            ..input(ReadinessSignal::HrvLnRmssd, -0.8)
+        }),
+        model,
+    )
+    .expect_only_render();
+}
+
 /// Today's first anchored (loaded) lift item.
 fn loaded_item(app: &Engine, model: &Model) -> PrescriptionView {
     app.view(model)
@@ -269,14 +281,7 @@ fn a_hold_caps_today_from_the_recent_sets_of_matching_reps() {
     );
     let before = loaded_item(&app, &model).load_kg.unwrap();
     assert!(before > lifted, "the plan adds load: {before} vs {lifted}");
-    app.update(
-        Event::SubmitReadiness(ReadinessInput {
-            observed_at: MON * DAY_SEC + 60,
-            ..input(ReadinessSignal::HrvLnRmssd, -0.8)
-        }),
-        &mut model,
-    )
-    .expect_only_render();
+    report_low_hrv(&app, &mut model);
     let held = app
         .view(&model)
         .next_session
@@ -431,8 +436,8 @@ fn a_row_with_no_bar_or_rings_says_to_use_a_table() {
     let view = flatten_prescription(row, &crate::plan::Anchors::default(), None, false);
     assert_eq!(view.effort_cue, "use a sturdy table edge");
     assert!(view.summary.contains("sturdy table"), "{}", view.summary);
-    // final-setup N10: the compact row shows only the lead, so the setup
-    // rides it, also after an adjustment re-renders the face.
+    // The compact row shows only the lead, so the setup rides it, also after
+    // an adjustment re-renders the face.
     assert!(
         view.face_lead.ends_with("· use a sturdy table edge"),
         "{}",
@@ -467,14 +472,7 @@ fn a_row_with_no_bar_or_rings_says_to_use_a_table() {
 fn the_first_set_clause_goes_once_a_set_is_logged() {
     // "Log your first work set…" is spent once one is logged today.
     let (app, mut model) = planned_strength_model(true);
-    app.update(
-        Event::SubmitReadiness(ReadinessInput {
-            observed_at: MON * DAY_SEC + 60,
-            ..input(ReadinessSignal::HrvLnRmssd, -0.8)
-        }),
-        &mut model,
-    )
-    .expect_only_render();
+    report_low_hrv(&app, &mut model);
     let clause = "Log your first work set";
     let has_clause = |vm: &ViewModel| vm.adjustments.iter().any(|a| a.summary.contains(clause));
     assert!(
@@ -556,14 +554,7 @@ fn a_short_lift_note_names_the_day_and_expires_on_its_next_session() {
         .find(|d| !lift_days.iter().any(|s| s.epoch_day == *d))
         .expect("a day between the two lift days");
     let feedback_on = |model: &mut Model, day: i64| {
-        app.update(
-            Event::SetToday {
-                epoch_day: day,
-                utc_offset_sec: 0,
-            },
-            model,
-        )
-        .expect_only_render();
+        set_today(&app, model, day);
         app.view(model)
             .feedback
             .map(|f| f.message)
@@ -587,17 +578,9 @@ fn a_short_lift_note_names_the_day_and_expires_on_its_next_session() {
 
 #[test]
 fn the_hero_hold_line_drops_the_first_set_clause_once_a_set_is_logged() {
-    // final-today N8 residual: the session's own hold line follows the
-    // readiness row.
+    // The session's own hold line follows the readiness row.
     let (app, mut model) = planned_strength_model(true);
-    app.update(
-        Event::SubmitReadiness(ReadinessInput {
-            observed_at: MON * DAY_SEC + 60,
-            ..input(ReadinessSignal::HrvLnRmssd, -0.8)
-        }),
-        &mut model,
-    )
-    .expect_only_render();
+    report_low_hrv(&app, &mut model);
     let clause = "Log your first work set";
     let hero_line = |vm: &ViewModel| {
         vm.next_session
@@ -634,7 +617,7 @@ fn the_hero_hold_line_drops_the_first_set_clause_once_a_set_is_logged() {
 
 #[test]
 fn a_later_failed_set_gets_a_stop_or_drop_cue() {
-    // final-today #1: a set after the first that went to failure (missed
+    // A set after the first that went to failure (missed
     // reps) while sets remain cues "end here or drop the weight"; a good set
     // after it clears the cue.
     let (app, mut model) = planned_strength_model(true);
@@ -672,7 +655,7 @@ fn a_later_failed_set_gets_a_stop_or_drop_cue() {
         .expect("the stop cue");
     assert!(
         cue.suggests_end_exercise,
-        "spot-today #1: the set loop offers End exercise: {cue:?}"
+        "the set loop offers End exercise: {cue:?}"
     );
     let item = vm
         .next_session
@@ -698,7 +681,7 @@ fn a_later_failed_set_gets_a_stop_or_drop_cue() {
 
 #[test]
 fn a_lift_finished_at_the_cue_load_reads_done() {
-    // final-today F3: a hard first set cuts the remaining sets; the rest done
+    // A hard first set cuts the remaining sets; the rest done
     // at the cue load completes the lift, also once the session is finished
     // and no longer the hero.
     let (app, mut model) = planned_strength_model(true);
@@ -763,7 +746,7 @@ fn a_lift_finished_at_the_cue_load_reads_done() {
 
 #[test]
 fn a_held_lift_restates_its_load_in_the_why_basis() {
-    // final-today F4: the session `?` panel reads the held load, not the
+    // The session `?` panel reads the held load, not the
     // planned one.
     let mut it = lift_item("Back squat", 100.0);
     it.hold_load_cap_kg = Some(95.0);
@@ -791,11 +774,10 @@ fn a_held_lift_restates_its_load_in_the_why_basis() {
 
 #[test]
 fn a_lighter_week_restates_sets_and_reps_left_in_the_why_basis() {
-    // copy-review M7: the `?` basis restated only the weight, so one card
-    // read "3×5 … about 2 reps left" under a face of fewer sets and more
-    // reps left.
+    // The `?` basis restates the sets and the reps left with the weight, so
+    // it reads the prescription the face shows.
     let mut it = lift_item("Bench press", 100.0);
-    it.why.basis = "3×5 at 83% of your estimated max (120 kg): 100 kg. Stop each set with about 2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.".into();
+    it.why.basis = "3×5 at 83% of your estimated max (120 kg): 100 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.".into();
     it.basis_rx = Some(BasisRx {
         load_kg: Some(100.0),
         lead: "3×5".into(),
@@ -829,7 +811,7 @@ fn a_lighter_week_restates_sets_and_reps_left_in_the_why_basis() {
     assert_eq!(
         it.why.basis,
         format!(
-            "{}×5 at 83% of your estimated max (120 kg): 100 kg planned, {} today. Stop each set with about {rir} reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "{}×5 at 83% of your estimated max (120 kg): 100 kg planned, {} today. Stop each set with ~{rir} reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             it.sets,
             fmt_weight(it.load_kg.unwrap(), false)
         )
@@ -898,7 +880,7 @@ fn assert_panel_states_hero_loads(vm: &ViewModel) {
 
 #[test]
 fn the_session_panel_states_the_hero_loads_through_holds_and_cues() {
-    // spot-today F4: the `?` panel's per-lift load and "last time" are the
+    // The `?` panel's per-lift load and "last time" are the
     // hero's, as planned, under a hold, and after an in-session cut.
     let (app, mut model) = planned_strength_model(true);
     let it = loaded_item(&app, &model);
@@ -917,14 +899,7 @@ fn the_session_panel_states_the_hero_loads_through_holds_and_cues() {
     assert_panel_states_hero_loads(&planned);
     let planned_kg = loaded_item(&app, &model).load_kg.unwrap();
 
-    app.update(
-        Event::SubmitReadiness(ReadinessInput {
-            observed_at: MON * DAY_SEC + 60,
-            ..input(ReadinessSignal::HrvLnRmssd, -0.8)
-        }),
-        &mut model,
-    )
-    .expect_only_render();
+    report_low_hrv(&app, &mut model);
     let held = app.view(&model);
     let held_kg = held
         .next_session
@@ -958,7 +933,7 @@ fn the_session_panel_states_the_hero_loads_through_holds_and_cues() {
 
 #[test]
 fn a_later_set_spends_the_first_set_add() {
-    // spot-today #3: "your first set felt easier" is the call for the next
+    // "Your first set felt easier" is the call for the next
     // set; once later sets are logged without the add, it is withdrawn.
     let (app, mut model) = planned_strength_model(true);
     let it = loaded_item(&app, &model);
@@ -997,4 +972,33 @@ fn a_later_set_spends_the_first_set_add() {
         "{}",
         item.adjusted_note
     );
+}
+
+/// On an eased day the face says "pick a weight for ~N reps left"; the `?`
+/// basis states the same reserve, not the planned harder one.
+#[test]
+fn eased_items_basis_states_the_face_reps_left() {
+    let model = snapshot_fixture_model(include_str!(
+        "../../../tests/fixtures/view_snapshot/pain_hold.events.ndjson"
+    ));
+    let ns = Engine.view(&model).next_session.expect("a session today");
+    let mut checked = 0;
+    for it in &ns.items {
+        let Some(n) = it
+            .face_lead
+            .split("pick a weight for ~")
+            .nth(1)
+            .and_then(|s| s.split(' ').next())
+        else {
+            continue;
+        };
+        checked += 1;
+        assert!(
+            it.why.basis.contains(&format!("~{n} rep")),
+            "{}: face ~{n} reps left, basis: {}",
+            it.exercise,
+            it.why.basis
+        );
+    }
+    assert!(checked >= 1, "an eased pick-a-weight item today");
 }

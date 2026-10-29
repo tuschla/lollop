@@ -86,63 +86,6 @@ pub fn rpe_stop_reached(rpe_actual: f64, rpe_target: f64) -> bool {
     rpe_actual >= rpe_target
 }
 
-/// Which APRE scheme's adjustment table applies (File 06 autoreg-015…021).
-/// Serde derives: the scheme crosses the JSON FFI as a bare variant name in
-/// the `ComputeApre` calculator event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum ApreScheme {
-    /// 3RM strength emphasis.
-    Apre3,
-    /// 6RM strength/hypertrophy.
-    Apre6,
-    /// 10RM hypertrophy.
-    Apre10,
-}
-
-/// APRE next-load adjustment (kg) from the AMRAP-set rep count (File 06
-/// autoreg-015…021; Mann 2010). Returns the `(low, high)` kg delta to apply to
-/// the next set/session; negatives reduce load. `[Moderate]` (AUTOREG-APRE-001).
-///
-/// UNITS: the whole engine domain is kg; Mann 2010's source tables are stated in
-/// lb increments (±5 / ±10 / ±15 lb). Those are converted to plate-rounded kg
-/// (5 lb ≈ 2.5 kg, 10 lb ≈ 5 kg, 15 lb ≈ 7.5 kg) so the adjustment lands on
-/// standard kg plate steps. The original lb values are noted here for traceability.
-///
-/// The Mann 2010 tables are stated for a rep window centred on
-/// each scheme's target RM. The `0..=N` low arms and the open-ended `_` high arm
-/// EXTEND the table's own lowest/highest published rows to cover reps below/above
-/// that window (e.g. an APRE-6 AMRAP of 0–2 reps or 13+ reps). This is a
-/// conservative saturation of the KB band's endpoints, not an invented new
-/// band, so far-out rep counts clamp to the nearest published adjustment rather
-/// than extrapolating a fabricated larger jump/cut.
-pub fn apre_load_adjustment_kg(scheme: ApreScheme, reps: u8) -> Recommended<(f64, f64)> {
-    // kg values are the Mann 2010 lb increments plate-rounded:
-    // −10/−5/0/+5/+10/+15 lb → −5.0/−2.5/0/+2.5/+5.0/+7.5 kg.
-    let range = match scheme {
-        ApreScheme::Apre6 => match reps {
-            0..=2 => (-5.0, -2.5),
-            3..=4 => (-2.5, 0.0),
-            5..=7 => (0.0, 0.0),
-            8..=12 => (2.5, 5.0),
-            _ => (5.0, 7.5),
-        },
-        ApreScheme::Apre10 => match reps {
-            0..=6 => (-5.0, -2.5),
-            7..=8 => (-2.5, 0.0),
-            9..=11 => (0.0, 0.0),
-            12..=16 => (2.5, 5.0),
-            _ => (5.0, 7.5),
-        },
-        ApreScheme::Apre3 => match reps {
-            0..=2 => (-5.0, -2.5),
-            3..=4 => (0.0, 0.0),
-            5..=6 => (2.5, 5.0),
-            _ => (5.0, 7.5),
-        },
-    };
-    evidence::graded(range, claims::AUTOREG_APRE_001)
-}
-
 /// The standard RP-framework 1-week deload used by the multi-session triggers
 /// (File 06 autoreg-023/024/025/026): volume −50%, load −10%.
 fn standard_deload() -> Adjustment {
@@ -198,8 +141,6 @@ pub fn deload_from_failed_sessions(failed_key_sessions: u8) -> Option<Recommende
 /// RPE ≥ target+1 or above the HR cap, cut the remaining-rep pace target ~2–4%
 /// (returns the fractional pace reduction to apply, else `None`).
 pub fn interval_pace_autoreg(reps_over_target: u8) -> Option<Recommended<f64>> {
-    // Cite the autoreg-031 interval-pace rule itself, not RUN-VDOT-001 (the
-    // VDOT *estimator* claim, unrelated to this within-session pace autoreg).
     (reps_over_target >= 2).then(|| evidence::graded(0.03, claims::AUTOREG_INTERVAL_PACE_001))
 }
 
@@ -207,7 +148,6 @@ pub fn interval_pace_autoreg(reps_over_target: u8) -> Option<Recommended<f64>> {
 /// if the runner cannot hold the prescribed easy pace under the HR cap, slow
 /// the pace. `true` = slow the easy pace.
 pub fn slow_easy_pace_if_over_cap(can_hold_pace_under_cap: bool) -> Recommended<bool> {
-    // Cite the autoreg-033 easy-day HR-cap rule, not RUN-VDOT-001.
     evidence::graded(!can_hold_pace_under_cap, claims::AUTOREG_EASY_CAP_001)
 }
 
@@ -308,43 +248,6 @@ pub fn hrv_single_day_downgrade(
 /// 1 week. AUTOREG-MRV-001 (ExpertOpinion, Israetel et al. 2021).
 pub fn mrv_signs_deload(sign_cluster_present: bool) -> Option<Recommended<Adjustment>> {
     sign_cluster_present.then(|| evidence::graded(standard_deload(), claims::AUTOREG_MRV_001))
-}
-
-/// APRE next-load adjustment (kg) with the autoreg-019 small-lifter cap applied.
-///
-/// autoreg-019 (verbatim, in the source's lb): reps 13+ on APRE-6 → "+10 to 15
-/// lb (cap as % of load for smaller/weaker lifters, 15 lb on 100 lb = +15%)".
-/// The KB states no separate %-cap constant; its worked example fixes the top
-/// band at +15% (15 lb on 100 lb). Converted to kg the top band is +7.5 kg, so
-/// the same +15% is reproduced at a 50 kg reference load (7.5/50 = 15%): each
-/// positive bound is capped at `min(band_kg, current_load_kg × band_kg / 50)`.
-/// Because both the band and the reference load are the kg analogues of the lb
-/// figures, every bound's PERCENT cap is identical to the source's (5 kg/50 =
-/// 10%, matching 10 lb/100). At the reference load this equals the flat
-/// band; below it the jump shrinks proportionally; above it the flat band already
-/// IS the smaller value and governs unchanged. Reductions (negative bounds) are
-/// never capped, capping a load *cut* would weaken a fatigue response.
-/// AUTOREG-APRE-001 (Moderate - Mann 2010).
-pub fn apre_load_adjustment_capped_kg(
-    scheme: ApreScheme,
-    reps: u8,
-    current_load_kg: f64,
-) -> Recommended<(f64, f64)> {
-    let (lo, hi) = apre_load_adjustment_kg(scheme, reps).value;
-    // A non-positive current load has no meaningful proportional cap:
-    // `current_load_kg × band/50` would flip a positive jump negative (a
-    // fabricated load *cut*). Reject it: fall back to the uncapped KB flat band.
-    if current_load_kg <= 0.0 || current_load_kg.is_nan() {
-        return evidence::graded((lo, hi), claims::AUTOREG_APRE_001);
-    }
-    let cap = |bound_kg: f64| -> f64 {
-        if bound_kg > 0.0 {
-            bound_kg.min(current_load_kg * bound_kg / 50.0)
-        } else {
-            bound_kg
-        }
-    };
-    evidence::graded((cap(lo), cap(hi)), claims::AUTOREG_APRE_001)
 }
 
 /// autoreg-032: pace at target HR improved by at least a smallest-worthwhile

@@ -4,10 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -18,38 +15,25 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 
 // ── Run cards (History "Runs" stream) ───────────────────────────────────────
-
-/** Whether the run carries a heart-rate reading: the core's [RunResultView.hr_label]
- *  ("148 bpm · Z2", "HR 80% · Z2") is empty for a run without HR, and the HR row
- *  is hidden then rather than printing a dead line. */
-internal fun RunResultView.hasHrReading(): Boolean = hr_label.isNotBlank()
 
 /**
  * The run's title: the user's own run-type tag when set ("Tempo run"), so the title
@@ -73,13 +57,6 @@ internal fun runTitle(r: RunResultView): String {
     val weekday = Instant.ofEpochSecond(r.started_at).atZone(ZoneId.systemDefault()).dayOfWeek
         .getDisplayName(java.time.format.TextStyle.FULL, Locale.getDefault())
     return stringResource(R.string.history_run_weekday, weekday)
-}
-
-/** Local calendar days from [epochSec] to [nowMillis] (0 = today), or null when undated. */
-internal fun localDaysAgo(epochSec: Long, nowMillis: Long): Long? {
-    if (epochSec <= 0L) return null
-    val zone = ZoneId.systemDefault()
-    return localEpochDay(nowMillis / 1000, zone) - localEpochDay(epochSec, zone)
 }
 
 /**
@@ -129,20 +106,6 @@ internal fun runKmByDay(runs: List<RunResultView>, zone: ZoneId): Map<Long, Doub
 internal fun recordRun(runs: List<RunResultView>, entryId: Long?, observedAt: Long): RunResultView? =
     runs.firstOrNull { (entryId == null || it.entry_id == entryId) && it.observed_at == observedAt }
 
-/** The run detail overline: title and date with the day named once ("Tempo run ·
- *  Today", "Today", "Saturday run", "Saturday run · September 12"). */
-@Composable
-internal fun runOverline(r: RunResultView, nowMillis: Long): String {
-    val chip = runDateChip(r, nowMillis)
-    val untaggedRecent = WorkoutType.fromWire(r.workout_type) == null &&
-        localDaysAgo(runDaySec(r), nowMillis)?.let { it in 0L..1L } == true
-    return when {
-        untaggedRecent -> chip
-        chip.isBlank() -> runTitle(r)
-        else -> stringResource(R.string.history_run_overline, runTitle(r), chip)
-    }
-}
-
 /** The run's face line in the display unit: "8.05 km · 5:34 /km · 44:12". The time is
  *  the same clock Today and the Finish review show for a run. */
 @Composable
@@ -162,8 +125,8 @@ internal fun RecordChip(text: String, description: String? = null, modifier: Mod
         color = OnAccent,
         style = Type.Chip,
         modifier = modifier
-            .background(Accent, RoundedCornerShape(Space.Md.dp - Space.Xs.dp))
-            .padding(horizontal = Space.Md.dp, vertical = Space.Sm.dp - 1.dp)
+            .background(Accent, SegmentShape)
+            .chipPadding()
             .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
     )
 }
@@ -175,25 +138,6 @@ internal fun NewBestChip(exercise: String) {
         stringResource(R.string.history_new_best),
         stringResource(R.string.history_new_best_cd, exercise.ifBlank { stringResource(R.string.main_set) }),
     )
-}
-
-/** The core's best-effort records this run holds ("Fastest 5K"), as chips. The card
- *  [face] carries only the longest-distance record (the list is ordered by distance);
- *  the detail sheet lists them all. Renders nothing otherwise. */
-@Composable
-@OptIn(ExperimentalLayoutApi::class)
-internal fun RunRecordChips(r: RunResultView, face: Boolean) {
-    if (r.best_effort_labels.isEmpty()) return
-    if (face) {
-        RecordChip(r.best_effort_labels.last())
-        return
-    }
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
-        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
-    ) {
-        r.best_effort_labels.forEach { RecordChip(it) }
-    }
 }
 
 /** "Effort 7/10" on the run card face once the run is rated; nothing when unrated. */
@@ -211,7 +155,7 @@ internal fun RunEffortLine(r: RunResultView) {
  * A History segment (Lifts or Runs) with nothing logged yet: one line saying it
  * is empty, then the action that fills it ([primaryLabel]) and an optional
  * second way in ([secondaryLabel], e.g. importing past runs) as a start-aligned
- * [TextAction], never a second slab beside the button (ui-sweep §14). No empty
+ * [TextAction], never a second slab beside the button. No empty
  * chart or zero tiles.
  */
 @Composable
@@ -249,12 +193,11 @@ private const val PROGRESS_DAYS = 14
  * range, never as heavy as the Lifts | Runs page filter) between the core's 16-week
  * weekly distance (with the planned weekly distance as a reference line) and the last
  * [PROGRESS_DAYS] days of daily distance ([kmByDay], km per local day, aggregated by
- * the caller). All figures in the user's distance [unit]. Without a weekly series (an
- * older core) only the daily chart renders, with no segment.
+ * the caller). All figures in the user's distance [unit].
  */
 @Composable
 internal fun RunProgressSection(
-    progress: RunProgressView?,
+    progress: RunProgressView,
     kmByDay: Map<Long, Double>,
     todayLocalDay: Long,
     unit: DistanceUnit,
@@ -262,25 +205,22 @@ internal fun RunProgressSection(
     // reports): the weekly chart's plan line starts there.
     planStartEpochDay: Long? = null,
 ) {
-    val weekly = progress?.weekly.orEmpty()
+    val weekly = progress.weekly
     var window by rememberSaveable { mutableStateOf(RunProgressWindow.Weeks) }
-    val shown = if (weekly.isEmpty()) RunProgressWindow.Days else window
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
         SectionOverline(stringResource(R.string.history_progress_overline))
         PlainCard {
-            if (weekly.isNotEmpty()) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                    TwoSegmentRow(
-                        stringResource(R.string.history_progress_weeks, weekly.size),
-                        stringResource(R.string.history_progress_days, PROGRESS_DAYS),
-                        selectedIndex = window.ordinal,
-                        compact = true,
-                    ) { window = RunProgressWindow.entries[it] }
-                }
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                TwoSegmentRow(
+                    stringResource(R.string.history_progress_weeks, weekly.size),
+                    stringResource(R.string.history_progress_days, PROGRESS_DAYS),
+                    selectedIndex = window.ordinal,
+                    compact = true,
+                ) { window = RunProgressWindow.entries[it] }
             }
-            when (shown) {
+            when (window) {
                 RunProgressWindow.Weeks -> WeeklyDistanceChart(
-                    weekly, progress?.planned_weekly_km ?: 0.0, unit, chartHeight = PROGRESS_CHART_HEIGHT,
+                    weekly, progress.planned_weekly_km, unit, chartHeight = PROGRESS_CHART_HEIGHT,
                     planStartEpochDay = planStartEpochDay,
                 )
                 RunProgressWindow.Days -> RunDistanceBars(

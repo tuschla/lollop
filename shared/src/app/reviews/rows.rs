@@ -314,21 +314,14 @@ fn push_execution_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &R
     // day after (an undated or clockless review keeps them).
     let same_day = ctx.review_age.is_none_or(|a| a < 1);
 
-    // autoreg-011/012: first-work-set outcome → add/drop/hold the set count.
-    // Wellness-normal must satisfy BOTH the review's own low-recovery tally AND
-    // the core's derived suppression (a downgrade from wellness z / RHR / HRV /
-    // pain in this same view): otherwise "add a set today, wellness normal" can
-    // render directly beneath the engine's own "easier session", contradicting it
-    // and misapplying autoreg-011 (whose third condition is objectively false).
+    // autoreg-011/012: first-work-set outcome → add/drop/hold the set count;
+    // wellness is normal only with no low-recovery tally and no derived downgrade.
     if same_day && let (Some(met), Some(rpe_delta)) = (r.first_set_reps_met, r.first_set_rpe_delta)
     {
         let wellness_normal =
             !r.low_recovery && !suppression_active(ctx.readiness_recs, ctx.train_blocked);
         let a = autoreg::set_volume_action(met, rpe_delta, wellness_normal);
-        // HoldPlanned = keep the planned set count: a graded "no change" verdict.
-        // AddSet is only produced when `wellness_normal` holds (which implies no
-        // active suppression), so it never coincides with a downgrade — never
-        // neutral. A stale review still can't headline it over the prescription.
+        // HoldPlanned keeps the set count; AddSet needs `wellness_normal`, so never neutral.
         let (text, neutral) = match a.value {
             autoreg::SetVolumeAction::AddSet => (
                 "First set on target and check-in normal: add a set today",

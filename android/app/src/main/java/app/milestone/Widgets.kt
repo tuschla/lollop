@@ -29,6 +29,9 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
@@ -48,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -56,6 +60,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.AlignmentLine
@@ -65,6 +70,8 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -76,9 +83,12 @@ import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Constraints
 import java.util.Locale
@@ -150,15 +160,6 @@ fun Modifier.choiceCard(selected: Boolean): Modifier {
         clipped.background(BgElevated).border(1.dp, ChoiceCellBorder, ChoiceCardShape)
     }
 }
-
-/** Fill of a disabled primary action: the neutral cell tint plus
- *  [DisabledActionBorder], so the button keeps its pill on every ground (never the
- *  plain ground colour, which vanishes on a light sheet). Label: OnBgMuted. An
- *  inactive control is exempt from WCAG 1.4.3, so the label stays deliberately quiet. */
-val DisabledActionFill: Color @Composable get() = ChoiceCellFill
-
-/** Outline of a disabled primary action (see [DisabledActionFill]). */
-val DisabledActionBorder: Color @Composable get() = ChoiceCellBorder
 
 /** Shown in place of an empty numeric value: a faint dash, never a "0" that reads
  *  as an entry. */
@@ -486,18 +487,25 @@ fun FieldLabel(
     }
 }
 
+/** The 1dp hairline between grouped rows inside a card (04-profile §1). */
+@Composable
+internal fun RowHairline(modifier: Modifier = Modifier) {
+    HorizontalDivider(modifier = modifier, thickness = 1.dp, color = OnBgBody.copy(alpha = HairlineAlpha.Row))
+}
+
 /**
- * A settings toggle whose WHOLE row is the switch: one ≥48dp touch target, and
- * TalkBack reads the label with the state ("Show route maps, switch, on"). The
- * inner [Switch] only draws the state, so it never surfaces as an unnamed control.
+ * A toggle whose WHOLE row is the switch: one ≥48dp touch target, and TalkBack
+ * reads the label with the state ("Show route maps, switch, on"). The inner
+ * [Switch] only draws the state, so it never surfaces as an unnamed control.
+ * [subtitle] is an optional caption under the label.
  */
 @Composable
 fun LabeledSwitchRow(
     label: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
     subtitle: String? = null,
     subtitleColor: Color = OnBgMuted,
+    onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -736,9 +744,9 @@ private val RunTypeOrder = listOf(
 )
 
 /**
- * The run's type as a single-select [ChoiceChip] FlowRow under its [FieldLabel]
- * (UI sweep §9): Easy, Recovery, Steady, Long run, Tempo, Interval. USER DATA only;
- * [onSelect] gets the tapped type, and the caller toggles a re-tapped type off.
+ * The run's type as a single-select [ChoiceChip] FlowRow under its [FieldLabel]:
+ * Easy, Recovery, Steady, Long run, Tempo, Interval. USER DATA only; [onSelect]
+ * gets the tapped type, and the caller toggles a re-tapped type off.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -805,18 +813,21 @@ fun RowScope.StatTile(value: String, unit: String?, label: String, glossaryKey: 
     }
 }
 
-/** Row-disclosure chevron (`ui-chevron-right`, 16dp, `OnBgFaint`); rotates 90°
- *  when the row is expanded. One shared affordance for every tappable row; a
- *  [TextAction] that opens something tints it with its label tone. */
+/** Row-disclosure chevron (`ui-chevron-right`, 16dp, `OnBgFaint`), pointing to the
+ *  end edge; turned to point down when the row is expanded. One shared affordance
+ *  for every tappable row; a [TextAction] that opens something tints it with its
+ *  label tone. */
 @Composable
 fun RowChevron(expanded: Boolean = false, tint: Color = OnBgFaint) {
+    // The drawable mirrors under RTL ("‹"), so it turns the other way to point down.
+    val turn = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -90f else 90f
     Icon(
         painterResource(R.drawable.ic_ui_chevron_right),
         contentDescription = null,
         tint = tint,
         modifier = Modifier
             .size(16.dp)
-            .rotate(if (expanded) 90f else 0f),
+            .rotate(if (expanded) turn else 0f),
     )
 }
 
@@ -830,7 +841,9 @@ fun RowChevron(expanded: Boolean = false, tint: Color = OnBgFaint) {
 //   Finish, Move session ›, Delete). Bold Accent label (DangerText when it destroys
 //   something), a trailing chevron only when it opens something, no fill.
 // Both buttons share [ActionShape] and a ≥48dp height; a disabled button keeps its
-// pill ([DisabledActionFill] + [DisabledActionBorder]) with an OnBgMuted label.
+// pill ([ChoiceCellFill] inside a [ChoiceCellBorder] hairline, never the plain
+// ground, which vanishes on a light sheet) with an OnBgMuted label: an inactive
+// control is exempt from WCAG 1.4.3.
 // Every tier keeps a ≥48dp touch target. Outlined buttons are NOT part of the
 // system: an outline reads as an input field or a selected chip, and a danger
 // outline weighs as much as the primary beside it.
@@ -843,7 +856,8 @@ val ActionShape = RoundedCornerShape(Space.Card.dp)
  * ≥[minHeight] (a pinned editor action passes 56dp). Width is the caller's
  * (`Modifier.fillMaxWidth()` or a `weight` in a row). The label wraps rather than
  * clipping at a large font scale. [description] replaces the spoken label when the
- * same label repeats on one screen ("Log set 1 of 4: Back Squat").
+ * same label repeats on one screen ("Log set 1 of 4: Back Squat"). [danger] fills
+ * it with the danger red for a safety commit ("Report pain").
  */
 @Composable
 fun PrimaryButton(
@@ -853,8 +867,10 @@ fun PrimaryButton(
     enabled: Boolean = true,
     description: String? = null,
     minHeight: Dp = ActionMinHeight,
+    danger: Boolean = false,
 ) {
-    ActionButton(label, onClick, modifier, enabled, description, minHeight, Accent, OnAccent, FontWeight.ExtraBold)
+    val (fill, labelColor) = if (danger) LocalStatusColors.current.danger to DangerLabel else Accent to OnAccent
+    ActionButton(label, onClick, modifier, enabled, description, minHeight, fill, labelColor, FontWeight.ExtraBold)
 }
 
 /** The secondary action: tonal [AccentTint] fill, no border, Bold `OnBgBody`
@@ -894,7 +910,7 @@ private fun ActionButton(
                 if (enabled) {
                     Modifier.background(fill)
                 } else {
-                    Modifier.background(DisabledActionFill).border(1.dp, DisabledActionBorder, ActionShape)
+                    Modifier.background(ChoiceCellFill).border(1.dp, ChoiceCellBorder, ActionShape)
                 },
             )
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
@@ -974,10 +990,10 @@ fun SectionOverline(text: String) {
     )
 }
 
-/** A rounded icon ground (36/38/44dp) holding a tinted 24-grid symbol, the
- *  leading tile on chooser rows, activity rows and history cards. */
+/** A rounded icon ground ([size], 36dp by default) holding a tinted 20dp symbol:
+ *  the leading tile of a chooser or activity row. */
 @Composable
-fun IconTile(painter: Painter, tint: Color, ground: Color, size: Dp = 36.dp, iconSize: Dp = 20.dp) {
+fun IconTile(painter: Painter, tint: Color, ground: Color, size: Dp = 36.dp) {
     Box(
         modifier = Modifier
             .size(size)
@@ -985,7 +1001,7 @@ fun IconTile(painter: Painter, tint: Color, ground: Color, size: Dp = 36.dp, ico
             .background(ground),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painter, contentDescription = null, tint = tint, modifier = Modifier.size(iconSize))
+        Icon(painter, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -1080,7 +1096,7 @@ internal val SegmentTouchInset = 4.dp
 /** Track inner padding and the gap between segments. */
 internal val SegmentTrackPadding = Space.Xs.dp
 
-/** A selected segment's fill shape inside the track. */
+/** Corner shape of a selected segment inside its track, and of a [Chip]. */
 internal val SegmentShape = RoundedCornerShape(Space.Md.dp - Space.Xs.dp)
 
 /** The segmented track's ground: a [fill] round rect inset [inset] top and bottom
@@ -1143,7 +1159,7 @@ fun ThemeSwatchPicker(current: AppTheme, onSelect: (AppTheme) -> Unit) {
             ((maxWidth - ThemeSwatchGap * (themes.size - 1)) / themes.size - ThemeSwatchInset * 2).toPx()
         }
         val fits = themes.all {
-            measurer.measure(it.label, style = Type.Chip, maxLines = 1, softWrap = false).size.width <= labelRoomPx
+            measurer.measure(it.name, style = Type.Chip, maxLines = 1, softWrap = false).size.width <= labelRoomPx
         }
         Column(
             modifier = Modifier.fillMaxWidth().selectableGroup(),
@@ -1207,10 +1223,74 @@ private fun RowScope.ThemeSwatchCard(theme: AppTheme, selected: Boolean, onClick
         }
         // Wraps rather than clipping if a name still outgrows its card.
         Text(
-            theme.label,
+            theme.name,
             color = choiceCellContent(selected),
             style = Type.Chip,
             textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * A one-line search field: a `BgSunken` well in a 1dp [ChoiceCellBorder] hairline
+ * (1.5dp `Accent` while focused), a leading 18dp search glyph and a faint [hint]
+ * placeholder. The field names itself with [hint], so it keeps an accessible name
+ * once it holds text. The keyboard's [imeAction] key folds it.
+ */
+@Composable
+internal fun SearchWell(
+    value: String,
+    onChange: (String) -> Unit,
+    hint: String,
+    testTag: String,
+    imeAction: ImeAction,
+    verticalPadding: Dp,
+    bold: Boolean = false,
+    capitalization: KeyboardCapitalization = KeyboardCapitalization.None,
+    onFocusChange: (Boolean) -> Unit = {},
+) {
+    val focusManager = LocalFocusManager.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(Space.Card.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = ActionMinHeight)
+            .clip(shape)
+            .background(BgSunken)
+            .border(if (focused) 1.5.dp else 1.dp, if (focused) Accent else ChoiceCellBorder, shape)
+            .padding(horizontal = Space.Card.dp, vertical = verticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+    ) {
+        Icon(
+            painterResource(R.drawable.ic_ui_search),
+            contentDescription = null,
+            tint = OnBgFaint,
+            modifier = Modifier.size(18.dp),
+        )
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            singleLine = true,
+            textStyle = Type.Body.copy(fontWeight = if (bold) FontWeight.Bold else null, color = OnBgBody),
+            cursorBrush = SolidColor(Accent),
+            keyboardOptions = KeyboardOptions(capitalization = capitalization, imeAction = imeAction),
+            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }, onSearch = { focusManager.clearFocus() }),
+            modifier = Modifier
+                .weight(1f)
+                .testTag(testTag)
+                .semantics { contentDescription = hint }
+                .onFocusChanged {
+                    focused = it.isFocused
+                    onFocusChange(it.isFocused)
+                },
+            decorationBox = { inner ->
+                Box {
+                    if (value.isEmpty()) Text(hint, color = OnBgFaint, style = Type.Body)
+                    inner()
+                }
+            },
         )
     }
 }

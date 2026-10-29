@@ -9,8 +9,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Direct "ignore battery optimizations" request so a long background run isn't
-         Dozed/frozen. Sideloaded app (Play policy irrelevant); falls back to the
-         battery-optimization settings list if the OEM rejects the direct dialog. -->
+         Dozed/frozen; falls back to the battery-optimization settings list if the OEM
+         rejects the direct dialog. A Play listing must declare this permission's use
+         case (fitness tracking is an accepted one). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Run-tracking haptic cues from the foreground service (recording started,
          GPS signal lost) so they reach a runner whose screen is off. Normal
@@ -24,6 +25,9 @@
          Android 14+ start without it; the set loop asks once. Without it the alarm
          is inexact and may arrive late. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- The session reminder's alarm is cleared by a reboot; set it again after boot
+         (SessionReminderReceiver). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="true"
@@ -97,6 +101,20 @@
             android:name=".RestEndReceiver"
             android:exported="false" />
 
+        <!-- The daily session reminder (SessionReminder): its alarm, and boot, app
+             update, time zone and clock changes, after which the alarm is set again.
+             The system sends these to a non-exported receiver. -->
+        <receiver
+            android:name=".SessionReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+            </intent-filter>
+        </receiver>
+
         <!-- Quick Settings tile: opens today's next action (QuickTileService).
              An active tile: the app asks System UI to redraw it whenever its face
              can change (requestTileRefresh). -->
@@ -104,7 +122,7 @@
             android:name=".QuickTileService"
             android:exported="true"
             android:icon="@drawable/ic_stat_mark"
-            android:label="@string/tile_name"
+            android:label="@string/tile_log"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
@@ -120,14 +138,13 @@
         <receiver
             android:name=".widget.TodayWidgetReceiver"
             android:exported="true"
-            android:label="@string/widget_label">
+            android:label="@string/widget_overline_today">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
-                <action android:name="android.intent.action.DATE_CHANGED" />
                 <action android:name="android.intent.action.LOCALE_CHANGED" />
             </intent-filter>
             <meta-data

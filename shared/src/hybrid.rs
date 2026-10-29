@@ -11,8 +11,9 @@
 //! wrapped in [`Recommended`] via [`Recommended::new`] with evidence from
 //! `crate::evidence`. Claim ids: CONC-ORDER-001, CONC-SEP-001, HYB-CAP-001,
 //! HYB-RUNCAP-001, CONC-RE-001, HYB-SEX-001, HYB-THRESH-001, HYB-MAINT-001,
-//! HYB-BSI-001, HYB-PROG-001, HYB-DELOAD-001, HYB-DURATION-001, HYB-SCHED-001,
-//! HYB-CHO-001, HYB-PHASE-001, HYB-EA-001, HYB-TENDON-001.
+//! HYB-BSI-001, HYB-PROG-001. The claim-only reference rules (HYB-DURATION-001,
+//! HYB-SCHED-001, HYB-CHO-001, HYB-PHASE-001, HYB-EA-001, HYB-TENDON-001) are
+//! graded where `app::guidance` shows them.
 
 use crate::evidence;
 use crate::evidence::claims;
@@ -127,7 +128,7 @@ pub struct LowerLiftCap {
 /// (File 10 CAP-1 / hybrid-015): cap lower lifting ≤2/wk and cut lower
 /// hypertrophy volume ~20–33 %. `None` when neither trigger fires.
 pub fn lower_lift_cap(
-    running_days_per_week: u8,
+    running_days_per_week: usize,
     running_km_per_week: f64,
 ) -> Option<Recommended<LowerLiftCap>> {
     if running_days_per_week >= 4 || running_km_per_week >= 40.0 {
@@ -208,14 +209,12 @@ pub fn interference_expected(
 }
 
 /// Peak strength/power mesocycle running override (File 10 hybrid-016 / CAP-2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PeakPhaseRunCap {
     /// Max easy running sessions per week during the peak block (range).
     pub max_easy_runs_per_week: (u8, u8),
-    /// Hard intervals are removed for the block.
-    pub allow_intervals: bool,
     /// Minimum hours a long run must clear a heavy-lower day.
-    pub long_run_min_gap_hours: u8,
+    pub long_run_min_gap_hours: f64,
 }
 
 /// During a peak strength/power mesocycle, cap running to ≤2–3 easy sessions/wk,
@@ -225,8 +224,7 @@ pub fn peak_phase_run_cap() -> Recommended<PeakPhaseRunCap> {
     evidence::graded(
         PeakPhaseRunCap {
             max_easy_runs_per_week: (2, 3),
-            allow_intervals: false,
-            long_run_min_gap_hours: 24,
+            long_run_min_gap_hours: HEAVY_LEG_RUN_GAP_H,
         },
         claims::HYB_CAP_001,
     )
@@ -283,16 +281,16 @@ pub fn bsi_surveillance_flag(running_km_per_week: f64) -> Recommended<bool> {
 
 /// Week-over-week running-volume growth cap under a combined lifting + running
 /// load (File 10 hybrid-021: "≤ ~10 %/wk"; HYB-PROG-001).
-pub const COMBINED_RAMP_CAP_FRAC: f64 = 0.10;
+const COMBINED_RAMP_CAP_FRAC: f64 = 0.10;
 
 /// Combined-load running progression guard (File 10 hybrid-021, safety layer):
-/// keep weekly running-volume growth ≤ [`COMBINED_RAMP_CAP_FRAC`] to bound
+/// keep weekly running-volume growth ≤ `COMBINED_RAMP_CAP_FRAC` (10 %) to bound
 /// stacked mechanical + systemic load. Returns whether next week's volume is
 /// within the cap.
 ///
 /// NOTE: the ACWR "sweet spot" (0.8–1.3) from this rule is deliberately NOT
 /// encoded, it is the hard-blocked `LOAD-ACWR-001` myth (mathematically
-/// coupled; see `load.rs`). The ≤10 %/wk ramp is the guardrail we act on.
+/// coupled; see `load.rs`). Only the ≤10 %/wk ramp is enforced.
 /// HYB-PROG-001 (Moderate, safety-critical, contested CQ-05).
 pub fn combined_load_progression_ok(current_km: f64, next_km: f64) -> Recommended<Option<bool>> {
     // No baseline volume → the growth ratio is undefined, so the guard is
@@ -300,131 +298,6 @@ pub fn combined_load_progression_ok(current_km: f64, next_km: f64) -> Recommende
     // as a spike.
     let ok = crate::running::ratio_increase_within(current_km, next_km, COMBINED_RAMP_CAP_FRAC);
     evidence::graded(ok, claims::HYB_PROG_001)
-}
-
-// ---------------------------------------------------------------------------
-// 5. Interference moderators, scheduling & phase policy (File 10 hybrid-004/
-//    011/019/020)
-// ---------------------------------------------------------------------------
-
-/// Wilson 2012 interference moderator correlations (File 10 hybrid-004;
-/// HYB-DURATION-001, Moderate, contested CQ-06, the exact frequency/duration
-/// onset threshold is undefined, so these are *relative weights*, never
-/// cutoffs).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct InterferenceModerators {
-    /// Endurance-frequency correlation band with lifting outcomes (r).
-    pub frequency_r: (f64, f64),
-    /// Per-session continuous-duration correlation band (r); the −0.75 end is
-    /// the hypertrophy outcome.
-    pub duration_r: (f64, f64),
-    /// Continuous session duration is the single strongest moderator.
-    pub duration_is_strongest: bool,
-}
-
-/// Interference scales with endurance frequency and (most strongly) continuous
-/// per-session duration (File 10 hybrid-004). Prefer shortening endurance
-/// sessions over cutting frequency when protecting lifting adaptations.
-pub fn interference_moderators() -> Recommended<InterferenceModerators> {
-    evidence::graded(
-        InterferenceModerators {
-            frequency_r: (-0.35, -0.26),
-            duration_r: (-0.75, -0.29),
-            duration_is_strongest: true,
-        },
-        claims::HYB_DURATION_001,
-    )
-}
-
-/// Schedule the highest-priority quality when freshest, at the start of the
-/// week or immediately after a rest day (File 10 hybrid-011; HYB-SCHED-001,
-/// ExpertOpinion). `true` = the given slot is a "freshest" slot for the
-/// priority quality.
-pub fn priority_quality_when_freshest(week_start: bool, after_rest_day: bool) -> Recommended<bool> {
-    evidence::graded(week_start || after_rest_day, claims::HYB_SCHED_001)
-}
-
-/// Double (AM/PM) day carbohydrate rule (File 10 hybrid-019 / CAP-8;
-/// HYB-CHO-001, Weak, Baar 2014): fully refuel CHO between the endurance and
-/// lifting sessions, because low glycogen amplifies AMPK activation and
-/// interference. `true` = the refuel note applies to this day.
-pub fn double_day_cho_refuel(am_pm_double_day: bool) -> Recommended<bool> {
-    evidence::graded(am_pm_double_day, claims::HYB_CHO_001)
-}
-
-/// Training phase for interference policy (File 10 hybrid-020).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HybridPhase {
-    /// General preparation: separate qualities to minimize interference.
-    General,
-    /// Specific/event phase: deliberately combine qualities, accepting some
-    /// interference for sport-specific transfer.
-    SpecificEvent,
-}
-
-/// Phase interference policy (File 10 hybrid-020; HYB-PHASE-001, ExpertOpinion).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PhaseInterferencePolicy {
-    /// Combine strength + endurance qualities within sessions/days.
-    pub combine_qualities: bool,
-    /// Accept some interference as the price of sport-specific transfer.
-    pub accept_interference: bool,
-    /// Hybrid-race weekly split, `(strength sessions, endurance sessions)`
-    /// low–high (2–3 strength + 3–4 endurance), stated for the specific phase
-    /// template; `None` in the general phase (no split stated).
-    pub weekly_split: Option<((u8, u8), (u8, u8))>,
-}
-
-/// Periodize interference by phase (File 10 hybrid-020): a general phase
-/// separates qualities; a specific/event phase deliberately combines them
-/// (strength-endurance hybrids at moderate load / high rep / minimal rest).
-pub fn phase_interference_policy(phase: HybridPhase) -> Recommended<PhaseInterferencePolicy> {
-    let p = match phase {
-        HybridPhase::General => PhaseInterferencePolicy {
-            combine_qualities: false,
-            accept_interference: false,
-            weekly_split: None,
-        },
-        HybridPhase::SpecificEvent => PhaseInterferencePolicy {
-            combine_qualities: true,
-            accept_interference: true,
-            weekly_split: Some(((2, 3), (3, 4))),
-        },
-    };
-    evidence::graded(p, claims::HYB_PHASE_001)
-}
-
-// ---------------------------------------------------------------------------
-// 6. Safety-layer guards (File 10 hybrid-024/025)
-// ---------------------------------------------------------------------------
-
-/// Energy-availability guard (File 10 hybrid-024; HYB-EA-001, ExpertOpinion,
-/// safety-critical): guard against RED-S/LEA, with heightened vigilance for
-/// the higher-risk cohorts, high-volume endurance, leaner, and female
-/// athletes. `true` = heightened LEA vigilance for this athlete; the guard
-/// itself (adequate fueling) applies to everyone. Actual RED-S signals route
-/// to the absolute deferral (SAFE-REDS-001), not this monitor.
-pub fn energy_availability_guard(
-    high_volume_endurance: bool,
-    lean: bool,
-    female: bool,
-) -> Recommended<bool> {
-    evidence::graded(high_volume_endurance || lean || female, claims::HYB_EA_001)
-}
-
-/// Conservative dual-progression guard (File 10 hybrid-025; HYB-TENDON-001,
-/// Weak, safety-critical): the concurrent-training effect on tendon stiffness
-/// has NO direct study, when high running volume and heavy lifting would
-/// progress in the same week, err conservative (progress one, hold the other).
-/// `true` = the combination is aggressive; hold one modality's progression.
-pub fn conservative_dual_progression(
-    progressing_running_volume: bool,
-    progressing_heavy_lifting: bool,
-) -> Recommended<bool> {
-    evidence::graded(
-        progressing_running_volume && progressing_heavy_lifting,
-        claims::HYB_TENDON_001,
-    )
 }
 
 #[cfg(test)]
@@ -499,8 +372,9 @@ mod tests {
     }
 
     #[test]
-    fn reciprocal_dose_and_interference_expectations() {
+    fn maintenance_lift_sessions_are_two_to_three() {
         assert_eq!(maintenance_lift_sessions().value, (2, 3));
+        assert!((maintenance_dose_fraction().value - 1.0 / 3.0).abs() < 1e-9);
     }
 
     #[test]
@@ -534,16 +408,10 @@ mod tests {
     }
 
     #[test]
-    fn peak_phase_cap_removes_intervals() {
+    fn peak_phase_cap_keeps_long_runs_a_day_from_heavy_legs() {
         let c = peak_phase_run_cap().value;
         assert_eq!(c.max_easy_runs_per_week, (2, 3));
-        assert!(!c.allow_intervals);
-        assert_eq!(c.long_run_min_gap_hours, 24);
-    }
-
-    #[test]
-    fn maintenance_dose_is_one_third() {
-        assert!((maintenance_dose_fraction().value - 1.0 / 3.0).abs() < 1e-9);
+        assert_eq!(c.long_run_min_gap_hours, 24.0);
     }
 
     #[test]
@@ -567,73 +435,22 @@ mod tests {
         assert!(!bsi_surveillance_flag(50.0).value);
     }
 
-    // --- hybrid-004/011/019/020/024/025 ---
-
+    /// The hybrid reference rules surface only their claim, so the registry
+    /// grading is what the shown row carries (hybrid-004/019/024/025).
     #[test]
-    fn duration_is_the_strongest_interference_moderator() {
-        let m = interference_moderators();
-        assert!(m.value.duration_is_strongest);
-        // Verbatim Wilson 2012 bands: frequency r −0.26..−0.35, duration
-        // r −0.29..−0.75 (hypertrophy end).
-        assert_eq!(m.value.frequency_r, (-0.35, -0.26));
-        assert_eq!(m.value.duration_r, (-0.75, -0.29));
-        assert_eq!(m.claim_id(), claims::HYB_DURATION_001);
-        // Contested: onset threshold undefined (File 10 CQ-02 → global CQ-06).
-        assert!(m.contested().is_some());
-        assert_eq!(m.contested(), Some("CQ-06"));
-    }
-
-    #[test]
-    fn priority_quality_scheduled_when_freshest() {
-        assert!(priority_quality_when_freshest(true, false).value);
-        assert!(priority_quality_when_freshest(false, true).value);
-        assert!(!priority_quality_when_freshest(false, false).value);
-    }
-
-    #[test]
-    fn double_day_gets_cho_refuel_note_at_weak_grade() {
-        let r = double_day_cho_refuel(true);
-        assert!(r.value);
-        assert!(!double_day_cho_refuel(false).value);
-        // Registered at the rule entry's Weak floor (CAP-8 table says
-        // Weak-Moderate; never rounded up).
-        assert!((r.confidence() - 0.40).abs() < f32::EPSILON);
-        assert_eq!(r.claim_id(), claims::HYB_CHO_001);
-    }
-
-    #[test]
-    fn phase_policy_separates_general_combines_specific() {
-        let g = phase_interference_policy(HybridPhase::General).value;
-        assert!(!g.combine_qualities && !g.accept_interference);
-        assert_eq!(g.weekly_split, None);
-        let s = phase_interference_policy(HybridPhase::SpecificEvent).value;
-        assert!(s.combine_qualities && s.accept_interference);
-        // Hybrid-race split: 2-3 strength + 3-4 endurance sessions/wk.
-        assert_eq!(s.weekly_split, Some(((2, 3), (3, 4))));
-    }
-
-    #[test]
-    fn energy_availability_guard_flags_risk_cohorts() {
-        assert!(energy_availability_guard(true, false, false).value);
-        assert!(energy_availability_guard(false, true, false).value);
-        assert!(energy_availability_guard(false, false, true).value);
-        assert!(!energy_availability_guard(false, false, false).value);
-        let g = energy_availability_guard(false, false, true);
-        assert!(g.safety_critical());
-        assert_eq!(g.claim_id(), claims::HYB_EA_001);
-        // ExpertOpinion (File 10 Section E, uncited): never overstated.
-        assert!((g.confidence() - 0.30).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn dual_progression_guard_fires_only_on_simultaneous_progression() {
-        assert!(conservative_dual_progression(true, true).value);
-        assert!(!conservative_dual_progression(true, false).value);
-        assert!(!conservative_dual_progression(false, true).value);
-        let g = conservative_dual_progression(true, true);
-        assert!(g.safety_critical());
-        // Weak: an evidence *gap* drives the conservatism (Baar 2014).
-        assert!((g.confidence() - 0.40).abs() < f32::EPSILON);
-        assert_eq!(g.claim_id(), claims::HYB_TENDON_001);
+    fn reference_rule_claims_keep_their_grading() {
+        // Interference onset threshold undefined (File 10 CQ-02 → global CQ-06).
+        assert_eq!(claims::HYB_DURATION_001.entry().contested, Some("CQ-06"));
+        // CAP-8 says Weak-Moderate; registered at the Weak floor.
+        let cho = claims::HYB_CHO_001.entry();
+        assert!((cho.confidence_score() - 0.40).abs() < f32::EPSILON);
+        // Energy availability: ExpertOpinion (File 10 Section E, uncited).
+        let ea = claims::HYB_EA_001.entry();
+        assert!(ea.safety_critical);
+        assert!((ea.confidence_score() - 0.30).abs() < f32::EPSILON);
+        // Tendon: Weak, an evidence gap drives the conservatism (Baar 2014).
+        let tendon = claims::HYB_TENDON_001.entry();
+        assert!(tendon.safety_critical);
+        assert!((tendon.confidence_score() - 0.40).abs() < f32::EPSILON);
     }
 }

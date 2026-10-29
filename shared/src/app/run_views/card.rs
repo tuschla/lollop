@@ -8,7 +8,7 @@ pub(in crate::app) fn run_split_views(
     unit_m: f64,
     segment_starts: &[u32],
 ) -> Vec<RunSplitView> {
-    running::track_splits_seg(track, running::MAX_GPS_ACCURACY_M, unit_m, segment_starts)
+    running::track_splits(track, unit_m, segment_starts)
         .into_iter()
         .map(|s| {
             // Round to whole seconds ONCE (`whole_seconds`, the display rule) so
@@ -97,16 +97,8 @@ pub(in crate::app) fn to_run_view(r: &LoggedRun, key: u64, qc: Option<&QcTrack>)
     memoized(&RUN_VIEW_CACHE, key, || to_run_view_uncached(r, qc))
 }
 
-/// Physiological ceiling for a run's average %HRmax echo/classification. A stale
-/// or low `measured_hr_max` paired with a hard effort can push the imported
-/// average above 100 % (e.g. 104.7 %), which is physiologically impossible.
-/// `Gpx.kt` already clamps at import, but the core is the single trust boundary
-/// and cannot assume it: a pre-clamp persisted run replays through here, a
-/// non-Android or future shell may skip the import clamp, and a hand-edited log
-/// line can carry any value. Clamp here so no >100 % figure is ever echoed to a
-/// shell or fed to `classify_three_zone`. (The Lucia zone bucket is >=88 % = Z3
-/// either way, so this cannot alter a classification; it only stops an absurd
-/// percentage from surfacing.)
+/// Physiological ceiling for an echoed/classified average %HRmax; the core
+/// clamps regardless of the shell's import clamp.
 const MAX_HR_PCT_MAX: f64 = 100.0;
 
 /// The uncached run-view derivation over the run's QC'd track (`None` for a
@@ -127,16 +119,13 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     } else {
         0.0
     };
-    // Clamp the stored %HRmax to 0..=100 before it is echoed or classified
-    // (see MAX_HR_PCT_MAX): the core never trusts the import-side clamp alone.
-    // A negative figure (corrupt/hand-edited log, a non-Android shell) is no
-    // heart-rate reading, the same as the 0 sentinel. `+ 0.0`: `clamp` keeps a
-    // wire -0.0, which would ride the view as "hr_pct_max":-0.0.
+    // A negative figure is no reading, like the 0 sentinel. `+ 0.0`: `clamp`
+    // keeps a wire -0.0, which would ride the view as "hr_pct_max":-0.0.
     let hr_pct_max = r.hr_pct_max.clamp(0.0, MAX_HR_PCT_MAX) + 0.0;
     // A GPS track derives its own distance/duration; a manual run uses scalars.
     let gps = qc.is_some();
     // File 07 QC gates ran BEFORE any derivation (accuracy, implausible speed,
-    // jitter, non-advancing time); the dropped count is surfaced to the shell.
+    // jitter, non-advancing time).
     let (track, qc_dropped, seg_starts): (&[GpsPoint], u32, &[u32]) = match qc {
         Some(q) => (&q.track, q.dropped, &q.seg_starts),
         None => (&[], 0, &[]),
@@ -163,7 +152,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     let pace = run_pace_label(distance_km, duration_min);
 
     let split_pct = if gps {
-        running::track_positive_split_pct_seg(track, running::MAX_GPS_ACCURACY_M, seg_starts)
+        running::track_positive_split_pct(track, seg_starts)
     } else {
         None
     };
@@ -193,7 +182,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     // above a steady run of the *same average pace*. GPS-only, a hand-entered
     // run has no per-point speed series to compute it from.
     let variability_index = if gps {
-        running::track_variability_index_seg(track, running::MAX_GPS_ACCURACY_M, seg_starts)
+        running::track_variability_index(track, seg_starts)
     } else {
         None
     };
@@ -230,11 +219,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
             spike_seg,
             split_note,
         ),
-        citation: spike.reference().to_owned(),
-        grade: Some(spike.grade()),
-        confidence: spike.confidence(),
-        safety_critical: spike.safety_critical(),
-        contested: spike.contested().is_some(),
+        evidence: EvidenceTagView::of(&spike),
         splits_km,
         splits_mi,
         qc_dropped,
@@ -254,7 +239,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         srpe_load_au: r
             .session_rpe
             .filter(|_| duration_min > 0.0)
-            .map(|rpe| (load::srpe_load_au(duration_min, rpe) * 10.0).round() / 10.0),
+            .map(|rpe| round_tenths(load::srpe_load_au(duration_min, rpe))),
         // Best-effort records depend on OTHER data (the rest of the history),
         // so they are filled after the per-run memo by `annotate_run_views`.
         best_effort_labels: Vec::new(),
@@ -280,11 +265,7 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64, qc_dropped: u32) -> Run
         summary: "GPS signal too poor to measure this run".to_string(),
         // No measurable distance → the spike gate never ran; carry an
         // empty evidence tag rather than citing a claim that was not used.
-        citation: String::new(),
-        grade: None,
-        confidence: 0.0,
-        safety_critical: false,
-        contested: false,
+        evidence: EvidenceTagView::default(),
         qc_dropped,
         has_gpx: false,
         gps_unmeasurable: true,
@@ -381,10 +362,7 @@ fn split_note_suffix(split_pct: Option<f64>) -> String {
 /// Why the card carries a SPIKE chip; empty when the spike gate did not trip.
 fn spike_note_text(spike: bool, has_baseline: bool) -> &'static str {
     // The spike gate errs safe with no history (see single_session_spike), so a
-    // user's first run trips it. Say *why* rather than claiming a ">10%" jump over
-    // a baseline that does not exist yet, the SPIKE flag itself is unchanged, only
-    // the wording is honest about the cause. Held as a field so a shell can render
-    // it beside the SPIKE chip without re-parsing `summary`.
+    // first run trips it; the note says why.
     if spike {
         if has_baseline {
             "Longer than your recent longest run"
@@ -461,10 +439,7 @@ pub(in crate::app) fn split_verdict_view(split_pct: f64) -> SplitVerdictView {
 /// simplification, deliberately Weak-graded.
 pub(in crate::app) fn interval_verdict_view(vi: f64) -> IntervalVerdictView {
     let r = running::interval_verdict(vi);
-    // Copy MEASURES, it does not "rate": the variability index is a descriptive
-    // label only, no downstream load/adjustment consumes it yet, so claiming the
-    // run is "rated above its average" would overstate. The interval/steady cutoff
-    // is an engine heuristic (there is no cited threshold), stated as such.
+    // The interval/steady cutoff is an engine heuristic with no cited threshold.
     let (kind, label, message) = if r.value {
         (
             PaceVariability::Interval,

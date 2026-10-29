@@ -1,32 +1,32 @@
 package app.milestone
 
+import android.content.Context
 import androidx.annotation.StringRes
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.core.app.ApplicationProvider
 import java.util.Locale
 import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 /**
- * Instrumented Compose UI tests for [EvidenceCard], the honesty-invariant card
- * that every recommendation renders through. The card contract: the collapsed
+ * [EvidenceCard], the card every recommendation renders through. The collapsed
  * face shows ONLY the summary, the SAFETY marker (never hidden) and a single "?"
  * disclosure; the grade badge, CONTESTED marker, confidence figure and citation
  * ALL live behind the "?".
- *
- * Runs on device/emulator (needs the real theme + composition locals), so it
- * complements the JVM-only wire-shape tests rather than duplicating them.
  */
+@RunWith(RobolectricTestRunner::class)
 class EvidenceCardUiTest {
 
     @get:Rule
     val rule = createComposeRule()
 
-    private val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+    private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
 
     private fun str(@StringRes id: Int, vararg args: Any): String = ctx.getString(id, *args)
 

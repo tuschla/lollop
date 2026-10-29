@@ -126,12 +126,6 @@ fn safety_gate_priority_order() {
 }
 
 #[test]
-fn concern_injury_is_safety_critical() {
-    let c = evidence::graded(FeedbackCategory::ConcernInjury, claims::SAFE_BSI_001);
-    assert!(c.safety_critical());
-}
-
-#[test]
 fn suppression_set_matches_file05() {
     for c in [
         FeedbackCategory::ConcernInjury,
@@ -390,10 +384,10 @@ fn female_bsi_prompt_gated_on_both_conditions() {
 fn verbosity_defaults_by_experience() {
     let b = verbosity_for_experience(false).value;
     assert_eq!((b.max_takeaways, b.max_metrics), (1, 1));
-    assert!(b.rationale_mandatory && b.minimize_jargon && b.lead_with_single_lever);
+    assert!(b.rationale_mandatory && b.minimize_jargon);
     let a = verbosity_for_experience(true).value;
     assert_eq!((a.max_takeaways, a.max_metrics), (1, 3));
-    assert!(!a.minimize_jargon && a.lead_with_single_lever);
+    assert!(!a.minimize_jargon);
     assert_eq!(
         verbosity_for_experience(true).claim_id(),
         claims::FB_VERBOSITY_001

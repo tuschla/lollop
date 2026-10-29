@@ -112,10 +112,8 @@ pub(in crate::app) fn build_trend(
     if suppressed {
         return None;
     }
-    let fresh_spike = spike.filter(|s| match (model.today_epoch_day, s.day) {
-        (Some(t), Some(d)) => t.saturating_sub(d) <= FEEDBACK_FRESH_DAYS,
-        _ => true,
-    });
+    let fresh_spike =
+        spike.filter(|s| fresh_within(model.today_epoch_day, s.day, FEEDBACK_FRESH_DAYS));
     let low_recovery =
         weekly.is_some_and(|w| w.low_recovery) || derived_wellness_streak.is_some_and(|s| s >= 2);
     let load_spike = fresh_spike.is_some_and(|s| s.frac > running::SPIKE_FRAC)
@@ -163,12 +161,7 @@ pub(in crate::app) fn build_trend(
                 names.push((&model.sets[i].exercise, movement));
             }
         }
-        let mut picked: Option<(
-            u8,
-            LiftTrend,
-            feedback::TrendSummary,
-            Recommended<feedback::TrendSummary>,
-        )> = None;
+        let mut picked: Option<(u8, LiftTrend, Recommended<feedback::TrendSummary>)> = None;
         for name in names {
             let Some(t) = lift_trend(model, set_index, name, today, calis) else {
                 continue;
@@ -187,12 +180,12 @@ pub(in crate::app) fn build_trend(
                 feedback::TrendSummary::Stable => 0,
             };
             if rank > 0 && picked.as_ref().is_none_or(|(r, ..)| rank > *r) {
-                picked = Some((rank, t, rec.value, rec));
+                picked = Some((rank, t, rec));
             }
         }
-        if let Some((_, t, summary, rec)) = picked {
+        if let Some((_, t, rec)) = picked {
             let max = fmt_weight(t.current, weight_lb);
-            let text = match summary {
+            let text = match rec.value {
                 feedback::TrendSummary::Improving => format!(
                     "{}: best estimated max over the last 4 weeks is {max}, up {:.0}% on the 4 weeks before.",
                     t.exercise,
@@ -203,7 +196,7 @@ pub(in crate::app) fn build_trend(
                         "{} has held steady for {} weeks (estimated max {max}). Suggested change: {lever}.",
                         t.exercise, t.weeks_flat
                     );
-                    return Some(to_view_with(text, &graded(summary, lever_claim)));
+                    return Some(to_view_with(text, &graded(rec.value, lever_claim)));
                 }
                 feedback::TrendSummary::LoadExplainedDecline => format!(
                     "{} is down {:.0}% over the last 4 weeks, likely from low recovery, not lost fitness. Take a lighter week first.",

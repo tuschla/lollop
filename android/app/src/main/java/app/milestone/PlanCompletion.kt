@@ -73,9 +73,14 @@ internal fun endExerciseWithUndo(res: Resources, item: PrescriptionView, epochDa
         UiMessage(
             text,
             actionLabel = res.getString(R.string.log_undo),
-            onAction = { EventDispatcher.send(Event.SetExerciseEnded(item.exercise, epochDay, ended = false)) },
+            onAction = { reopenExercise(item, epochDay, EventDispatcher::send) },
         ),
     )
+}
+
+/** Reopens [item]'s exercise on [epochDay]; a run or a check (no exercise) has nothing to reopen. */
+internal fun reopenExercise(item: PrescriptionView, epochDay: Long, send: (Event) -> Unit) {
+    if (item.exercise.isNotBlank()) send(Event.SetExerciseEnded(item.exercise, epochDay, ended = false))
 }
 
 /** The prescribed target band for a plan item's set-editor header: a hold band
@@ -147,8 +152,8 @@ internal const val RestReadoutWindowSec = 30 * 60
 
 /** What the loop's rest readout shows. */
 internal sealed interface RestFace {
-    /** A prescribed rest still running: [leftSec] of [restSec] remain. */
-    data class Counting(val leftSec: Int, val restSec: Int) : RestFace
+    /** A prescribed rest still running: [leftSec] remain. */
+    data class Counting(val leftSec: Int) : RestFace
     /** The prescribed rest ended [overSec] ago. */
     data class Over(val overSec: Int) : RestFace
     /** No prescribed rest: time since the newest set of this exercise. */
@@ -176,7 +181,7 @@ internal fun restFace(
             val leftMs = restEndMillis - nowMillis
             return if (leftMs > 0) {
                 // Rounded up: "0:01" shows until the rest is really over.
-                RestFace.Counting(((leftMs + 999) / 1000).toInt(), ((restEndMillis - restStartMillis) / 1000).toInt())
+                RestFace.Counting(((leftMs + 999) / 1000).toInt())
             } else {
                 RestFace.Over((-leftMs / 1000).toInt())
             }
@@ -258,11 +263,7 @@ internal fun RestReadout(lastSetSec: Long?, itemRestSec: Int) {
                 if (done && !wasDone && alert) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 wasDone = done
             }
-            val clock = when (face) {
-                is RestFace.Counting -> fmtClock(face.leftSec)
-                is RestFace.Over -> "+" + fmtClock(face.overSec)
-                else -> ""
-            }
+            val clock = if (face is RestFace.Counting) fmtClock(face.leftSec) else "+" + fmtClock((face as RestFace.Over).overSec)
             // The countdown's description carries the time left (read on focus, not
             // announced). Once over it is static and a live region, so the change
             // to "done" is announced once and the overtime ticks stay silent.
@@ -392,7 +393,6 @@ private val SlotCheckSize = 14.dp
 internal fun PlanItemCompletion(
     item: PrescriptionView,
     isRun: Boolean,
-    actionable: Boolean,
     onEndExercise: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
@@ -415,22 +415,20 @@ internal fun PlanItemCompletion(
                 horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
             ) {
                 SetSlotsRow(item)
-                if (actionable) {
-                    Spacer(Modifier.weight(1f))
-                    // Nothing logged yet: ending it means skipping it, so say so.
-                    val label = if (item.logged_sets.isEmpty()) {
-                        stringResource(R.string.plan_skip_exercise)
-                    } else {
-                        stringResource(R.string.plan_end_exercise)
-                    }
-                    // The label (not its touch padding) ends at the content edge.
-                    TextAction(
-                        label,
-                        onEndExercise,
-                        modifier = Modifier.offset(x = TextActionInset),
-                        description = stringResource(R.string.plan_secondary_action_cd, label, item.exercise),
-                    )
+                Spacer(Modifier.weight(1f))
+                // Nothing logged yet: ending it means skipping it, so say so.
+                val label = if (item.logged_sets.isEmpty()) {
+                    stringResource(R.string.plan_skip_exercise)
+                } else {
+                    stringResource(R.string.plan_end_exercise)
                 }
+                // The label (not its touch padding) ends at the content edge.
+                TextAction(
+                    label,
+                    onEndExercise,
+                    modifier = Modifier.offset(x = TextActionInset),
+                    description = stringResource(R.string.plan_secondary_action_cd, label, item.exercise),
+                )
             }
             // Warm-ups / light sets stay listed but are marked, so a floor of
             // empty-bar singles can never masquerade as the prescribed work.
@@ -707,18 +705,11 @@ private fun PlanActionPill(label: String, subject: String, onClick: () -> Unit) 
     )
 }
 
-/** The CURRENT plan item (the first open one of an actionable session): its
- *  summary as a bold name over the prescription, the do-this numbers
- *  ([PlanItemFace]), the set slots with "Skip/End exercise", then the one filled
- *  "Log set k of N" (or "Track run") action. It carries no "?" of its own: its
- *  evidence sits in the session's single "?" panel ([PlanItemEvidence]); a
- *  safety-critical item keeps its SAFETY chip on the face. Every other item is a
- *  [PlanItemRow]. Tagged `plan-item:<exercise>` (`plan-item:run`,
- *  `plan-item:check`).
- *
- *  [isCheck] marks the post-illness "Return check" (an item with no exercise in a
- *  lifting session): its stop list sits on the face and any session logged today
- *  completes it, so it has no Log action of its own (the + Log button logs it). */
+/** The CURRENT plan item (the first open one of an actionable session): the
+ *  name over the prescription, the do-this numbers ([PlanItemFace]), the set
+ *  slots with "Skip/End exercise" and the one filled "Log set k of N" (or "Track
+ *  run") action. Its evidence sits in the session's "?" panel. The return check
+ *  ([isCheck]) has no Log action: any session logged today completes it. */
 @Composable
 internal fun OpenPlanItemCard(
     item: PrescriptionView,
@@ -796,7 +787,7 @@ internal fun OpenPlanItemCard(
             }
             when {
                 isCheck -> FaceLine(stringResource(R.string.plan_check_any_session))
-                !runUnlogged -> PlanItemCompletion(item, isRun, actionable = true, onEndExercise = onEndExercise)
+                !runUnlogged -> PlanItemCompletion(item, isRun, onEndExercise)
             }
             if (actionLabel != null) {
                 PlanActionPill(actionLabel, subject, onClick = if (isRun) onTrack else onLog)
@@ -806,24 +797,18 @@ internal fun OpenPlanItemCard(
 }
 
 /**
- * One plan item as a single compact row: the name over its sets × reps @ load
- * (a run's distance or time), no "?", no buttons. With [actionLabel] the whole row
- * is a filled tile and the tap target that logs it (an open item of today's
- * session other than the current one: out-of-order logging stays one tap) and
- * ends in a chevron. Without it the row is a read-only preview (a future session):
- * plain text on the card, no tile, so it never looks tappable. Set slots appear
- * only once a set is logged, so a preview never shows dead empty boxes. A
- * safety-critical item keeps its SAFETY chip, and the return check / a
- * target-less run keep their safety note on the face. Tagged like
- * [OpenPlanItemCard].
+ * One plan item as a compact row: the name over its sets × reps @ load (a run's
+ * distance or time). With [actionLabel] the row is a filled tile that logs it on
+ * tap; without it a read-only preview that never looks tappable. Set slots show
+ * only once a set is logged.
  */
 @Composable
 internal fun PlanItemRow(
     item: PrescriptionView,
     isRun: Boolean,
-    isCheck: Boolean = false,
-    actionLabel: String? = null,
-    onClick: () -> Unit = {},
+    isCheck: Boolean,
+    actionLabel: String?,
+    onClick: () -> Unit,
 ) {
     val status = LocalStatusColors.current
     val distanceUnit = rememberDistanceUnit()
@@ -888,28 +873,22 @@ private fun itemEvidenceDetail(item: PrescriptionView, isRun: Boolean, isCheck: 
 
 /**
  * A session's evidence panel (its one "?"): items resting on the same evidence
- * source (grade, citation, grade note, what would improve it) share ONE block.
- * Each exercise gets one line with what is its own (the reasoning sentences the
- * others in the block don't share, and its load anchor), then the block states
- * once what they share as "Based on", why this grade with the confidence stated
- * once (a range when the items differ), what would improve it, the citation and
- * the glossary links. A Based-on / grade / to-improve block is never repeated
- * per exercise; an item on another source (a run beside lifts, a safety-critical
- * item) gets a block of its own.
+ * source share ONE block. Each item gets one line with what is its own (basis
+ * sentences the others don't share, its load anchor); the block then states
+ * once what they share, with the confidence as a range when the items differ.
  */
 @Composable
 internal fun SessionItemsEvidence(
     items: List<PrescriptionView>,
     isRun: (PrescriptionView) -> Boolean,
     isCheck: (PrescriptionView) -> Boolean,
-    modifier: Modifier = Modifier,
 ) {
     val groups = remember(items) {
         items.groupBy {
             listOf(it.grade, it.citation, it.why.grade_note, it.why.improves, it.contested, it.safety_critical)
         }.values.toList()
     }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
         groups.forEach { group ->
             val first = group.first()
             val shared = remember(group) { sharedBasisSentences(group.map { it.why.basis }) }
@@ -935,7 +914,6 @@ internal fun SessionItemsEvidence(
                     confidenceHigh = group.maxOf { it.confidence },
                     contested = first.contested,
                     showConfidence = !first.safety_critical,
-                    extraDetail = null,
                     glossaryKeys = remember(group) { group.flatMap { glossaryKeysIn(it.summary) }.distinct() },
                 )
             }
@@ -958,44 +936,32 @@ internal fun sharedBasisSentences(bases: List<String>): List<String> {
     return head.filter { s -> split.all { s in it } }
 }
 
-/** A settled plan item collapsed to one row (ordered after the open items). A
- *  lift/calisthenics item reads "k/N" with a ✓, "Ended early k/N", "k/N · short
- *  reps" (every set at the load, some reps missed) or "k/N · lighter" (below the
- *  load); a skipped one reads "Skipped" (or "Skipped · pain in <[painArea]>") and one a pain
- *  report stopped after some sets "Stopped · <[painArea]>", both with a neutral
- *  dash and never the done ✓. An exercise the user ended (skipped or early)
- *  offers "Reopen". An item done by its logged sets has nothing to reopen (the
- *  sets still count), and neither does a run (it completes from logged
- *  distance/time) or the return check, so those show no Reopen. */
+/** A settled plan item collapsed to one row: "k/N" with a ✓, "Ended early k/N",
+ *  or its [settledLabel]; a skip or pain stop wears a neutral dash. An exercise
+ *  the user ended (skipped or early) offers "Reopen"; a run, the return check
+ *  and an item done by its sets have nothing to reopen. */
 @Composable
 internal fun DonePlanItemRow(
     item: PrescriptionView,
     isRun: Boolean,
     reopenable: Boolean,
     onReopen: () -> Unit,
-    isCheck: Boolean = false,
+    isCheck: Boolean,
     // The reported body area ("Left knee"), when known.
     painArea: String? = null,
 ) {
-    val status = LocalStatusColors.current
     val tag = planItemTag(item, isRun, isCheck)
     val stopped = !isCheck && item.status == "stopped_pain"
-    val skipped = stopped || (!isCheck && (item.status == "skipped" || item.status == "skipped_pain"))
+    val skipped = !isCheck && item.status in SkippedItemStatuses
     val progress = when {
         isCheck -> ""
         isRun -> runProgressText(LocalContext.current.resources, item, rememberDistanceUnit())
         else -> "${item.sets_done}/${plannedSetCount(item)}"
     }
     val label = when {
-        stopped -> stoppedLabel(painArea)
-        item.status == "skipped_pain" && !isCheck -> painArea
-            ?.let { stringResource(R.string.plan_skipped_pain_area, it.lowercase(Locale.getDefault())) }
-            ?: stringResource(R.string.plan_skipped_pain)
-        skipped -> stringResource(R.string.plan_skipped)
-        item.ended_early && !isCheck -> stringResource(R.string.plan_ended_early, item.sets_done, plannedSetCount(item))
-        item.status == "done_short" && progress.isNotBlank() -> stringResource(R.string.plan_done_short, progress)
-        item.status == "done_lighter" && progress.isNotBlank() -> stringResource(R.string.plan_done_lighter, progress)
-        else -> progress
+        isCheck -> ""
+        !skipped && item.ended_early -> stringResource(R.string.plan_ended_early, item.sets_done, plannedSetCount(item))
+        else -> settledLabel(item.status, progress, painArea)
     }
     val title = planItemName(item, isRun, isCheck)
     Row(
@@ -1008,12 +974,7 @@ internal fun DonePlanItemRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
-        // A skip is neither done nor failed: a neutral dash, never the green ✓.
-        Text(
-            if (skipped) "\u2013" else "\u2713",
-            color = if (skipped) OnBgMuted else status.done,
-            style = Type.Body.copy(fontWeight = FontWeight.Bold),
-        )
+        SettledMark(skipped)
         Text(title, color = OnBgMuted, style = Type.Body, modifier = Modifier.weight(1f))
         if (label.isNotBlank()) Text(label, color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
         if (reopenable && (item.ended_early || (skipped && !stopped)) && !isRun && !isCheck) {
@@ -1028,30 +989,54 @@ internal fun DonePlanItemRow(
     }
 }
 
+/** Item statuses that read as a skip (a neutral dash, never the done ✓). */
+internal val SkippedItemStatuses = setOf("stopped_pain", "skipped_pain", "skipped")
+
+/** What a settled item's [status] reads after its [progress] (sets "k/N", a
+ *  run's totals or a done row's summary): a skip or pain stop names the reported
+ *  [painArea]; a short or lighter result says so; anything else is [progress]. */
+@Composable
+internal fun settledLabel(status: String, progress: String, painArea: String?): String = when {
+    status == "stopped_pain" -> stoppedLabel(painArea)
+    status == "skipped_pain" -> painArea
+        ?.let { stringResource(R.string.plan_skipped_pain_area, it.lowercase(Locale.getDefault())) }
+        ?: stringResource(R.string.plan_skipped_pain)
+    status == "skipped" -> stringResource(R.string.plan_skipped)
+    progress.isBlank() -> progress
+    status == "done_short" -> stringResource(R.string.plan_done_short, progress)
+    status == "done_lighter" -> stringResource(R.string.plan_done_lighter, progress)
+    else -> progress
+}
+
+/** A settled item's mark: the green ✓ for work done, a neutral dash for a skip
+ *  (never a red failure mark). */
+@Composable
+internal fun SettledMark(skipped: Boolean) {
+    Text(
+        if (skipped) "\u2013" else "\u2713",
+        color = if (skipped) OnBgMuted else LocalStatusColors.current.done,
+        style = Type.Body.copy(fontWeight = FontWeight.Bold),
+    )
+}
+
 /** "Stopped · Left knee" for an exercise a pain report ended after some sets
  *  ("Stopped · pain" when no area is known). */
 @Composable
 internal fun stoppedLabel(painArea: String?): String =
     painArea?.let { stringResource(R.string.plan_stopped_area, it) } ?: stringResource(R.string.plan_stopped_pain)
 
-/** The gym-floor loop header inside the set editor, painted as a card (BgElevated
- *  + hairline) so it keeps its bounds on the sheet's sunken ground in both themes.
- *  One compact first row reads in a glance: "Set 2 of 6 · 5 reps · ~1 rep left"
- *  on the left (an off-plan exercise: "Set k"; a finished item: "Exercise
- *  complete") and the rest readout on the right. Under it the coach's in-session
- *  cue for this exercise with its one-tap actions ("Use 140 kg", "End
- *  exercise"), then the set slots with the quiet exits ("Log extra set" once the
- *  item is complete, "Done for now" when [showDone]: it closes the loop and
- *  leaves the session in progress), then the last set with Edit. The way forward
- *  after a completed item is the editor's primary action; [nextItem] is offered
- *  here only when that action is busy logging an extra set. The caller guards an
- *  unsaved set on "Done for now". */
+/** The gym-floor loop header inside the set editor: "Set 2 of 6 · 5 reps · ~1
+ *  rep left" (an off-plan exercise "Set k", a finished item "Exercise complete")
+ *  with the rest readout, the coach's in-session cue and its actions, the set
+ *  slots with "Log extra set" / "Done for now" ([showDone]: leaves the session in
+ *  progress), then the last set with Edit. [nextItem] is offered only while the
+ *  editor's primary action logs an extra set. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SetLoopHeader(
     item: PrescriptionView?,
-    // "Set k" for an off-plan exercise; null while no exercise is named yet.
-    offPlanSetNumber: Int?,
+    // "Set k" for an off-plan exercise.
+    offPlanSetNumber: Int,
     // Newest set logged today for this exercise (unix seconds) and its line.
     lastSetSec: Long?,
     lastSetLine: String?,
@@ -1066,7 +1051,7 @@ internal fun SetLoopHeader(
     onNext: (PrescriptionView) -> Unit,
     onEditLast: (() -> Unit)?,
     onLogExtra: (() -> Unit)?,
-    showDone: Boolean = true,
+    showDone: Boolean,
 ) {
     val done = item?.done == true
     val shape = RoundedCornerShape(Space.Card.dp)
@@ -1081,9 +1066,8 @@ internal fun SetLoopHeader(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val title = when {
-                // Never repeats the sheet title ("Log set"): an unnamed
-                // off-plan exercise is simply on its first set.
-                item == null -> stringResource(R.string.log_set_header_n, offPlanSetNumber ?: 1)
+                // Never repeats the sheet title ("Log set").
+                item == null -> stringResource(R.string.log_set_header_n, offPlanSetNumber)
                 done -> stringResource(R.string.plan_item_complete)
                 else -> stringResource(R.string.log_set_header_n_of_n, nextSetNumber(item), plannedSetCount(item))
             }
@@ -1110,13 +1094,13 @@ internal fun SetLoopHeader(
                     .testTag("loop-cue")
                     .semantics { liveRegion = LiveRegionMode.Polite },
             )
-            val useLoad = if (cueLoadLabel != null) onUseCueLoad else null
-            if (useLoad != null || onEndExercise != null) {
+            val cueLoad = cueLoadLabel?.let { label -> onUseCueLoad?.let { label to it } }
+            if (cueLoad != null || onEndExercise != null) {
                 FlowRow(
                     modifier = Modifier.offset(x = -TextActionInset),
                     horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
                 ) {
-                    if (cueLoadLabel != null && useLoad != null) TextAction(cueLoadLabel, useLoad)
+                    cueLoad?.let { (label, use) -> TextAction(label, use) }
                     if (onEndExercise != null) TextAction(stringResource(R.string.log_cue_end_exercise), onEndExercise)
                 }
             }

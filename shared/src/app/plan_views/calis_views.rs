@@ -128,11 +128,9 @@ pub(super) fn flatten_calisthenics_prescription(
         calis: Some(CalisItemView {
             ladder: c.ladder,
             rung: c.tier,
-            rung_count: cal::ladder(c.ladder).tiers.len() as u8,
             easier: c.easier.map(|r| calis_rung_view(c.ladder, r, true)),
             harder: c.harder.map(|r| calis_rung_view(c.ladder, r, true)),
             load_capable: c.load_capable,
-            test_hold_sec: c.test_hold_sec.unwrap_or(0),
             ballistic: c.ballistic,
             needs_effort_rating: c.needs_effort_rating,
         }),

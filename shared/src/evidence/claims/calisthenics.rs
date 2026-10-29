@@ -4,8 +4,9 @@
 //! INFERRED load fractions per §1 "Load quantification".
 
 use crate::evidence::cite::{
-    CITE_BELL_2024, CITE_BOSQUET_2013, CITE_COLEMAN_2024, CITE_HALPERIN_2022, CITE_ISRAETEL_2021,
-    CITE_LOW_2016, CITE_MARKOVIC_2007, CITE_PELLAND_2026, CITE_ROBINSON_2024, CITE_SORIANO_2015,
+    CITE_BELL_2024, CITE_BOSQUET_2013, CITE_COLEMAN_2024, CITE_GRGIC_2018, CITE_HALPERIN_2022,
+    CITE_ISRAETEL_2021, CITE_LOW_2016, CITE_MARKOVIC_2007, CITE_PELLAND_2026, CITE_ROBINSON_2024,
+    CITE_SORIANO_2015,
 };
 use crate::evidence::claim;
 use crate::schema::EvidenceGrade::{ExpertOpinion, Moderate, Strong, Weak};
@@ -229,7 +230,7 @@ claim_group! {
         "CAL-PROG-GTG-001",
         "Grease-the-Groove (frequent submaximal practice) is an expert-opinion protocol; its frequency \"edge\" comes from extra volume (no benefit beyond equated volume).",
         ExpertOpinion,
-        &["Grgic 2018 (PMID 29470825)", "Tsatsouline 2000"],
+        &[CITE_GRGIC_2018, "Tsatsouline 2000"],
     ),
     #[kb_only]
     CAL_VOL_001 => claim(
@@ -247,10 +248,7 @@ claim_group! {
         "CAL-FREQ-001",
         "At equated weekly volume, frequency does not independently affect hypertrophy/strength; >=2x/wk is a volume-distribution vehicle.",
         Strong,
-        &[
-            "Schoenfeld 2019 (PMID 30558493)",
-            "Grgic 2018 (PMID 29470825)",
-        ],
+        &["Schoenfeld 2019 (PMID 30558493)", CITE_GRGIC_2018],
     ),
     #[kb_only]
     CAL_VOL_LANDMARK_001 => claim(
@@ -271,10 +269,7 @@ claim_group! {
         "CAL-VOLCOUNT-SKILL-001",
         "Submaximal skill/static practice should be discounted from the failure-driven hypertrophy volume count (low-fatigue, non-failure, neural/tendon-biased).",
         ExpertOpinion,
-        &[
-            "Grgic 2018 (PMID 29470825)",
-            "Schoenfeld 2019 (PMID 30558493)",
-        ],
+        &[CITE_GRGIC_2018, "Schoenfeld 2019 (PMID 30558493)"],
     ),
     CAL_TENDON_001 => claim(
         "CAL-TENDON-001",

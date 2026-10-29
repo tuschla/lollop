@@ -193,10 +193,12 @@ pub(super) fn sanitize_track(points: Vec<GpsPoint>) -> Vec<GpsPoint> {
             lat: sanitize_f64(p.lat),
             lon: sanitize_f64(p.lon),
             observed_at: p.observed_at,
-            accuracy_m: if p.accuracy_m.is_finite() {
-                p.accuracy_m.clamp(-1.0e12, 1.0e12)
-            } else {
+            // NaN reads as "no accuracy reported"; ±inf clamps like any huge
+            // value, so an infinitely bad fix fails the accuracy gate.
+            accuracy_m: if p.accuracy_m.is_nan() {
                 0.0
+            } else {
+                p.accuracy_m.clamp(-1.0e12, 1.0e12)
             },
         })
         .collect()
@@ -212,6 +214,14 @@ pub(super) fn amend_match_at(observed_at_fallback: i64, observed_at: i64) -> i64
     } else {
         observed_at
     }
+}
+
+/// Store `review`'s weekly part as the weekly check-in in force and append it
+/// to the weekly history.
+pub(super) fn store_weekly(model: &mut Model, review: &SessionReview) {
+    let weekly = weekly_part(review);
+    model.weekly_history.push(weekly.clone());
+    model.weekly_checkin = Some(weekly);
 }
 
 /// `run`'s track cut to the fixes whose per-point `observed_at` lies in
@@ -279,17 +289,10 @@ pub(super) fn apply_profile(model: &mut Model, mut profile: Profile) {
         }
     }
     let key = history_key(&profile);
-    // running-041: a race only anchors paces while it is recent, so a race the
-    // shell sent undated is dated when it is first stated (before sanitizing,
-    // so a dropped out-of-range date stays undated): with the date of the same
-    // race on the history entry this edit follows (a re-sent unchanged race
-    // keeps its date, so re-saving the profile never makes an old race look
-    // fresh), else (no such race, or one that entry left undated) with this
-    // edit's effective day, so a race the user re-states today is dated today.
-    // Both are read from data this edit's own history survives with, never
-    // from the clock or a superseded profile, so a compacted replay dates it
-    // the same. An undated legacy edit (no effective day) leaves the race
-    // undated: its day is unknown, so it anchors no paces.
+    // running-041: an undated race takes the date of the same race on the
+    // previous history entry, else this edit's effective day. Read before
+    // sanitizing (a dropped out-of-range date stays undated); an undated edit
+    // leaves the race undated.
     if let Some(race) = profile.recent_race.as_mut()
         && race.epoch_day.is_none()
     {
@@ -311,15 +314,9 @@ pub(super) fn apply_profile(model: &mut Model, mut profile: Profile) {
     if let Some(today) = model.today_epoch_day {
         derive_birthday_age(&mut profile, today);
     }
-    // HARD RULE 3: auto-derive the pediatric gate from age alone so it fires
-    // even when the health screen is skipped. The KB gives no numeric cutoff
-    // for "child/adolescent" (safety-011); 18 y is used. Never CLEARS a flag
-    // the shell set explicitly. Age is optional: a profile with NO age is
-    // treated as an adult and is not gated (owner decision 2026-10-17, recorded
-    // in planning/design/user-decisions.md; KB onboard-050 note); it simply has
-    // no age-derived values (Tanaka HRmax, masters 65+). Runs AFTER the
-    // sanitize above, so a `NaN` age becomes 0 → gate fires (conservative),
-    // not a silently-skipped `NaN < 18.0` (false).
+    // HARD RULE 3: derive the pediatric gate from age (18 y; safety-011 gives no
+    // cutoff). No age = adult, not gated (KB onboard-050). Runs after
+    // sanitizing, so a NaN age (0) gates.
     if profile.age_years.is_some_and(|a| a < YOUTH_AGE_YEARS) {
         profile.health.youth = true;
     }
@@ -395,7 +392,7 @@ pub(super) fn whole_years_between(birth: i64, today: i64) -> i64 {
     if today <= birth {
         return 0;
     }
-    let (by, bm, bd) = crate::running::civil_from_days(birth);
-    let (ty, tm, td) = crate::running::civil_from_days(today);
+    let (by, bm, bd) = crate::civil_from_days(birth);
+    let (ty, tm, td) = crate::civil_from_days(today);
     ty - by - i64::from((tm, td) < (bm, bd))
 }

@@ -583,10 +583,6 @@ fn runner_strength_block_avoids_hard_run_neighbours() {
 
 // ── age_years → conservative running deload cadence (masters) ──
 
-fn program_weeks(prog: &Program) -> u8 {
-    prog.mesocycle.weeks
-}
-
 #[test]
 fn masters_runner_takes_the_conservative_two_week_load_cadence() {
     // is_masters threshold (MASTERS-001, 65+).
@@ -600,30 +596,41 @@ fn masters_runner_takes_the_conservative_two_week_load_cadence() {
     let mut masters = half_marathoner();
     masters.age_years = Some(70.0);
     assert_eq!(
-        program_weeks(&synthesize(&masters, &Anchors::default(), 0).unwrap()),
+        synthesize(&masters, &Anchors::default(), 0)
+            .unwrap()
+            .mesocycle
+            .weeks,
         3
     );
 
     // Elsewhere the default cadence holds: an age-less runner and a younger
-    // runner keep 3 load weeks + 1 recovery = a 4-week cycle, and a masters
-    // LIFTER (no running) keeps the 4-week accumulation + 1 recovery = 5.
+    // runner keep 3 load weeks + 1 recovery = a 4-week cycle.
     let ageless = half_marathoner();
     assert_eq!(
-        program_weeks(&synthesize(&ageless, &Anchors::default(), 0).unwrap()),
+        synthesize(&ageless, &Anchors::default(), 0)
+            .unwrap()
+            .mesocycle
+            .weeks,
         4
     );
 
     let mut young = half_marathoner();
     young.age_years = Some(40.0);
     assert_eq!(
-        program_weeks(&synthesize(&young, &Anchors::default(), 0).unwrap()),
+        synthesize(&young, &Anchors::default(), 0)
+            .unwrap()
+            .mesocycle
+            .weeks,
         4
     );
 
     let mut masters_lifter = base_profile(); // weekly_sets=12, no running
     masters_lifter.age_years = Some(70.0);
     assert_eq!(
-        program_weeks(&synthesize(&masters_lifter, &anchored("Back Squat", 100.0), 0).unwrap()),
+        synthesize(&masters_lifter, &anchored("Back Squat", 100.0), 0)
+            .unwrap()
+            .mesocycle
+            .weeks,
         6,
         "a lifter runs the 5+1 lifting block (HYP-DELOAD-CADENCE-001) at any age"
     );
@@ -636,7 +643,10 @@ fn masters_runner_takes_the_conservative_two_week_load_cadence() {
     novice_runner.age_years = Some(30.0);
     novice_runner.progression_cadence = ProgressionCadence::EverySession; // → Novice
     assert_eq!(
-        program_weeks(&synthesize(&novice_runner, &Anchors::default(), 0).unwrap()),
+        synthesize(&novice_runner, &Anchors::default(), 0)
+            .unwrap()
+            .mesocycle
+            .weeks,
         3
     );
     assert!(conservative_deload(Some(30.0), TrainingAge::Novice));

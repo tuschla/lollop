@@ -112,6 +112,32 @@ fn contested_render_shows_one_opposing_side_when_kb_supplies_it() {
 }
 
 #[test]
+fn grade_notes_restate_the_legend_definitions() {
+    let cases = [
+        (
+            EvidenceGrade::Strong,
+            "Strong evidence: many good studies agree.",
+        ),
+        (
+            EvidenceGrade::Moderate,
+            "Moderate evidence: some good studies support it, but it isn't settled yet.",
+        ),
+        (
+            EvidenceGrade::Weak,
+            "Weak evidence: based on how the body works or on observation, not direct trials.",
+        ),
+        (
+            EvidenceGrade::ExpertOpinion,
+            "Expert opinion: what experienced coaches do; not yet tested in trials.",
+        ),
+        (EvidenceGrade::MarketingMyth, ""),
+    ];
+    for (grade, note) in cases {
+        assert_eq!(grade_note_str(grade, None), note, "{grade:?}");
+    }
+}
+
+#[test]
 fn grade_definitions_export_all_five_grades_with_confidence() {
     // The legend sheet renders from core data, not hardcoded Kotlin.
     let app = Engine;

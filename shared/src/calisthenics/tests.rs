@@ -2,16 +2,8 @@ use super::*;
 use std::collections::HashSet;
 
 #[test]
-fn fifteen_ladders_all_nonempty() {
-    assert_eq!(LADDERS.len(), 15);
-    for l in LADDERS {
-        assert!(!l.tiers.is_empty(), "{:?} has no tiers", l.id);
-    }
-}
-
-#[test]
-fn every_ladder_id_resolves() {
-    for id in [
+fn every_ladder_id_resolves_to_a_nonempty_ladder() {
+    let ids = [
         HorizontalPush,
         Dip,
         VerticalPush,
@@ -27,8 +19,12 @@ fn every_ladder_id_resolves() {
         MuscleUp,
         Jump,
         PlyoPush,
-    ] {
-        assert_eq!(ladder(id).id, id);
+    ];
+    assert_eq!(LADDERS.len(), ids.len());
+    for id in ids {
+        let l = ladder(id);
+        assert_eq!(l.id, id);
+        assert!(!l.tiers.is_empty(), "{id:?} has no tiers");
     }
 }
 
@@ -77,23 +73,33 @@ fn legacy_labels_name_their_rung_and_display_as_it() {
 }
 
 #[test]
-fn tier_by_name_matches_common_aliases() {
-    assert_eq!(tier_by_name("Pull ups"), Some((VerticalPull, 4)));
-    assert_eq!(tier_by_name("Pull-up"), Some((VerticalPull, 4)));
-    assert_eq!(tier_by_name("pullups"), Some((VerticalPull, 4)));
-    assert_eq!(tier_by_name("Chin-ups"), Some((VerticalPull, 4)));
-    assert_eq!(tier_by_name("Push-ups"), Some((HorizontalPush, 4)));
-    assert_eq!(tier_by_name("pushup"), Some((HorizontalPush, 4)));
-    assert_eq!(tier_by_name("Dips"), Some((Dip, 3)));
-    assert_eq!(tier_by_name("Pistol"), Some((Squat, 5)));
-    assert_eq!(tier_by_name("Front lever tuck"), Some((FrontLever, 0)));
-    // Plurals of canonical names resolve too.
-    assert_eq!(tier_by_name("Archer push-ups"), Some((HorizontalPush, 7)));
-    assert_eq!(tier_by_name("scapular pull"), Some((VerticalPull, 1)));
-    // A barbell lift is not a rung.
-    assert_eq!(tier_by_name("Bench press"), None);
-    assert_eq!(tier_by_name("Back squat"), None);
-    assert_eq!(tier_by_name("  "), None);
+fn tier_by_name_matches_names_and_aliases() {
+    for (name, want) in [
+        // Case, spacing and punctuation are normalized.
+        ("full push-up", Some((HorizontalPush, 4))),
+        ("  Full pull-up ", Some((VerticalPull, 4))),
+        ("Negative muscle-up", Some((MuscleUp, 2))),
+        // Common aliases.
+        ("Pull ups", Some((VerticalPull, 4))),
+        ("Pull-up", Some((VerticalPull, 4))),
+        ("pullups", Some((VerticalPull, 4))),
+        ("Chin-ups", Some((VerticalPull, 4))),
+        ("Push-ups", Some((HorizontalPush, 4))),
+        ("pushup", Some((HorizontalPush, 4))),
+        ("Dips", Some((Dip, 3))),
+        ("Pistol", Some((Squat, 5))),
+        ("Front lever tuck", Some((FrontLever, 0))),
+        // Plurals of canonical names.
+        ("Archer push-ups", Some((HorizontalPush, 7))),
+        ("scapular pull", Some((VerticalPull, 1))),
+        // A barbell lift or an unknown name is not a rung.
+        ("Bench press", None),
+        ("Back squat", None),
+        ("nope", None),
+        ("  ", None),
+    ] {
+        assert_eq!(tier_by_name(name), want, "{name:?}");
+    }
 }
 
 #[test]
@@ -214,14 +220,6 @@ fn eccentric_rungs_leave_rir() {
             }
         }
     }
-}
-
-#[test]
-fn tier_by_name_is_case_insensitive_and_exact() {
-    assert_eq!(tier_by_name("full push-up"), Some((HorizontalPush, 4)));
-    assert_eq!(tier_by_name("  Full pull-up "), Some((VerticalPull, 4)));
-    assert_eq!(tier_by_name("Negative muscle-up"), Some((MuscleUp, 2)));
-    assert_eq!(tier_by_name("nope"), None);
 }
 
 #[test]
@@ -464,6 +462,14 @@ fn equipment_filters_rungs() {
     };
     assert!(ladder_available(VerticalPull, rings) && rung_available(Dip, 3, rings));
     assert!((0..8).all(|i| rung_available(VerticalPull, i, Kit::ALL)));
+}
+
+#[test]
+fn equipment_lookups_never_return_a_missing_rung() {
+    let len = ladder(Squat).tiers.len() as u8;
+    assert!(!rung_available(Squat, len, Kit::ALL));
+    assert_eq!(nearest_available(Squat, 200, Kit::ALL), Some(len - 1));
+    assert_eq!(available_below(Squat, 200, Kit::ALL), Some(len - 1));
 }
 
 #[test]

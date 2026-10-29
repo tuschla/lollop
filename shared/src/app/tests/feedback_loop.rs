@@ -4,20 +4,6 @@
 
 use super::*;
 
-/// A dated Monday (`mon0_weekday == 0`) so reviews take their dated paths.
-const FB_MON: i64 = 20_353;
-
-fn today(app: &Engine, model: &mut Model, epoch_day: i64) {
-    app.update(
-        Event::SetToday {
-            epoch_day,
-            utc_offset_sec: 0,
-        },
-        model,
-    )
-    .expect_only_render();
-}
-
 /// Every lift item of today's hero: (exercise, sets, reps, load).
 fn hero_items(app: &Engine, model: &Model) -> Vec<(String, u8, u32, f64)> {
     app.view(model)
@@ -54,11 +40,11 @@ fn hero_squat_load(app: &Engine, model: &Model) -> f64 {
 fn weekly_bone_pain_referral_survives_a_later_session_review() {
     let app = Engine;
     let mut model = Model::default();
-    today(&app, &mut model, FB_MON + 2);
+    set_today(&app, &mut model, POS_MON + 2);
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
             bone_pain_red_flag: true,
-            observed_at: FB_MON * DAY_SEC,
+            observed_at: POS_MON * DAY_SEC,
             ..SessionReview::default()
         }),
         &mut model,
@@ -72,7 +58,7 @@ fn weekly_bone_pain_referral_survives_a_later_session_review() {
                 rir_actual: 2,
                 rir_target: 2,
             }),
-            observed_at: (FB_MON + 1) * DAY_SEC,
+            observed_at: (POS_MON + 1) * DAY_SEC,
             ..SessionReview::default()
         }),
         &mut model,
@@ -111,13 +97,13 @@ fn weekly_bone_pain_referral_survives_a_later_session_review() {
 
 #[test]
 fn weekly_deload_stays_in_todays_plan_after_a_session_review() {
-    let (app, mut model) = planned_strength_model_on(FB_MON, true);
+    let (app, mut model) = planned_strength_model_on(POS_MON, true);
     let full = hero_squat_load(&app, &model);
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
             failed_key_sessions: Some(2),
             rpe_load_gap_sessions: Some(2),
-            observed_at: (FB_MON - 1) * DAY_SEC + 20 * 3_600,
+            observed_at: (POS_MON - 1) * DAY_SEC + 20 * 3_600,
             ..SessionReview::default()
         }),
         &mut model,
@@ -128,7 +114,7 @@ fn weekly_deload_stays_in_todays_plan_after_a_session_review() {
     app.update(
         Event::SubmitReview(SessionReview {
             bad_day: true,
-            observed_at: FB_MON * DAY_SEC + 600,
+            observed_at: POS_MON * DAY_SEC + 600,
             ..SessionReview::default()
         }),
         &mut model,
@@ -256,7 +242,7 @@ fn feedback_copy_carries_no_label_guilt_or_jargon() {
 
 #[test]
 fn overtraining_concern_folds_a_deload_into_the_next_session() {
-    let (app, mut model) = planned_strength_model_on(FB_MON, true);
+    let (app, mut model) = planned_strength_model_on(POS_MON, true);
     let full = hero_squat_load(&app, &model);
     app.update(
         Event::SubmitWeeklyCheckin(SessionReview {
@@ -266,7 +252,7 @@ fn overtraining_concern_folds_a_deload_into_the_next_session() {
                 ..OvertrainingSigns::default()
             }),
             overtraining_signal_weeks: Some(1.5),
-            observed_at: FB_MON * DAY_SEC,
+            observed_at: POS_MON * DAY_SEC,
             ..SessionReview::default()
         }),
         &mut model,
@@ -388,21 +374,21 @@ fn running_down_week_row_absent_for_a_pure_lifter() {
 
 #[test]
 fn completed_lift_day_emits_feedback_without_a_review() {
-    let (app, mut model) = planned_strength_model_on(FB_MON, true);
+    let (app, mut model) = planned_strength_model_on(POS_MON, true);
     assert!(app.view(&model).feedback.is_none());
     for (ex, sets, reps, kg) in hero_items(&app, &model) {
         for _ in 0..sets {
             app.update(
-                log_set(&ex, kg, reps, 8.0, FB_MON * DAY_SEC + 3_600),
+                log_set(&ex, kg, reps, 8.0, POS_MON * DAY_SEC + 3_600),
                 &mut model,
             )
             .expect_only_render();
         }
     }
     let vm = app.view(&model);
-    assert!(!vm.review_present, "no SubmitReview was sent");
+    assert!(model.review.is_none(), "no SubmitReview was sent");
     let done = vm.session_done.expect("today's session summarized");
-    assert_eq!(done.epoch_day, FB_MON);
+    assert_eq!(done.epoch_day, POS_MON);
     assert!(done.items.iter().all(|i| i.met), "{:#?}", done.items);
     let fb = vm.feedback.expect("feedback derived from the logged sets");
     assert!(!fb.evidence.safety_critical);
@@ -415,18 +401,18 @@ fn completed_lift_day_emits_feedback_without_a_review() {
 
 #[test]
 fn missed_reps_on_logged_sets_yield_corrective_feedback() {
-    let (app, mut model) = planned_strength_model_on(FB_MON, true);
+    let (app, mut model) = planned_strength_model_on(POS_MON, true);
     let items = hero_items(&app, &model);
     let (first, first_sets, first_reps, first_kg) = items[0].clone();
     assert!(first_sets > 1, "need a multi-set first item");
-    let at = FB_MON * DAY_SEC + 3_600;
+    let at = POS_MON * DAY_SEC + 3_600;
     // One qualifying set, then the user ends the exercise early.
     app.update(log_set(&first, first_kg, first_reps, 9.0, at), &mut model)
         .expect_only_render();
     app.update(
         Event::SetExerciseEnded {
             exercise: first.clone(),
-            epoch_day: FB_MON,
+            epoch_day: POS_MON,
             ended: true,
             observed_at: at,
         },
@@ -462,7 +448,7 @@ fn missed_reps_on_logged_sets_yield_corrective_feedback() {
     app.update(
         Event::SubmitReview(SessionReview {
             bad_day: true,
-            observed_at: FB_MON * DAY_SEC + 7_200,
+            observed_at: POS_MON * DAY_SEC + 7_200,
             ..SessionReview::default()
         }),
         &mut model,
@@ -509,7 +495,7 @@ fn derived_rir_target_comes_from_the_prescription() {
         )),
         None
     );
-    // spot-today #2: a cut %e1RM item keeps the effort its face shows (~1 rep
+    // A cut %e1RM item keeps the effort its face shows (~1 rep
     // left), never the Epley reserve of its reduced percentage (~3).
     let cut = PrescriptionView {
         target_rpe: Some(9.0),
@@ -528,7 +514,7 @@ fn derived_rir_target_comes_from_the_prescription() {
 fn run_spike_feedback_fires_without_a_review() {
     let app = Engine;
     let mut model = Model::default();
-    today(&app, &mut model, 100);
+    set_today(&app, &mut model, 100);
     app.update(log_run(10.0, 60.0, 70.0, 0.0, 40 * DAY_SEC, 1), &mut model)
         .expect_only_render();
     app.update(log_run(10.0, 60.0, 70.0, 0.0, 95 * DAY_SEC, 2), &mut model)
@@ -550,7 +536,7 @@ fn run_spike_feedback_fires_without_a_review() {
 fn e1rm_pr_beyond_5pct_emits_anchored_mastery() {
     let app = Engine;
     let mut model = Model::default();
-    today(&app, &mut model, 100);
+    set_today(&app, &mut model, 100);
     app.update(
         log_set("Back Squat", 100.0, 5, 8.0, 90 * DAY_SEC),
         &mut model,
@@ -576,7 +562,7 @@ fn e1rm_pr_beyond_5pct_emits_anchored_mastery() {
 fn pr_within_noise_band_is_not_a_pr() {
     let app = Engine;
     let mut model = Model::default();
-    today(&app, &mut model, 100);
+    set_today(&app, &mut model, 100);
     app.update(
         log_set("Back Squat", 100.0, 5, 8.0, 90 * DAY_SEC),
         &mut model,
@@ -599,7 +585,7 @@ fn pr_within_noise_band_is_not_a_pr() {
 fn spike_run_is_never_praised_as_longest() {
     let app = Engine;
     let mut model = Model::default();
-    today(&app, &mut model, 100);
+    set_today(&app, &mut model, 100);
     app.update(log_run(8.0, 48.0, 70.0, 0.0, 30 * DAY_SEC, 1), &mut model)
         .expect_only_render();
     app.update(log_run(10.0, 60.0, 70.0, 0.0, 95 * DAY_SEC, 2), &mut model)
@@ -612,7 +598,7 @@ fn spike_run_is_never_praised_as_longest() {
 
     // Within the 10 % rule, the longest run in 90 days is praised.
     let mut ok = Model::default();
-    today(&app, &mut ok, 100);
+    set_today(&app, &mut ok, 100);
     app.update(log_run(11.5, 69.0, 70.0, 0.0, 60 * DAY_SEC, 1), &mut ok)
         .expect_only_render();
     app.update(log_run(11.0, 66.0, 70.0, 0.0, 95 * DAY_SEC, 2), &mut ok)
@@ -634,7 +620,7 @@ fn beginner_mastery_copy_has_no_rir_or_e1rm_terms() {
     let mut model = Model::default();
     app.update(Event::SetProfile(strength_profile()), &mut model)
         .expect_only_render();
-    today(&app, &mut model, 100);
+    set_today(&app, &mut model, 100);
     app.update(
         log_set("Back Squat", 100.0, 5, 8.0, 90 * DAY_SEC),
         &mut model,
@@ -646,7 +632,6 @@ fn beginner_mastery_copy_has_no_rir_or_e1rm_terms() {
     )
     .expect_only_render();
     let fb = app.view(&model).feedback.expect("mastery");
-    assert!(fb.minimize_jargon);
     assert!(
         !fb.message.contains("RIR") && !fb.message.contains("e1RM"),
         "{}",
@@ -776,7 +761,7 @@ fn four_flat_weeks_of_e1rm_emit_plateau_with_named_lever() {
     // goal → the strength-stall lever (STR-STALL-001), never "add sets".
     let app = Engine;
     let mut model = Model::default();
-    today(&app, &mut model, 200);
+    set_today(&app, &mut model, 200);
     for day in [130, 150, 190] {
         app.update(
             log_set("Back Squat", 100.0, 5, 8.0, day * DAY_SEC),
@@ -816,7 +801,7 @@ fn four_flat_weeks_of_e1rm_emit_plateau_with_named_lever() {
 fn rising_e1rm_emits_improving_trend() {
     let app = Engine;
     let mut model = Model::default();
-    today(&app, &mut model, 200);
+    set_today(&app, &mut model, 200);
     app.update(
         log_set("Back Squat", 100.0, 5, 8.0, 150 * DAY_SEC),
         &mut model,
@@ -835,7 +820,7 @@ fn rising_e1rm_emits_improving_trend() {
 fn decline_with_low_wellness_emits_recovery_first() {
     let app = Engine;
     let mut model = Model::default();
-    today(&app, &mut model, 200);
+    set_today(&app, &mut model, 200);
     app.update(
         log_set("Back Squat", 110.0, 5, 8.0, 150 * DAY_SEC),
         &mut model,
@@ -867,7 +852,7 @@ fn decline_with_low_wellness_emits_recovery_first() {
 
 #[test]
 fn anchored_lift_basis_names_last_set_and_delta() {
-    let (app, model) = planned_strength_model_on(FB_MON, true);
+    let (app, model) = planned_strength_model_on(POS_MON, true);
     let squat = app
         .view(&model)
         .next_session
@@ -988,4 +973,40 @@ fn a_skipped_exercise_is_not_judged_as_coming_up_short() {
     let names: Vec<_> = exec.lifts.iter().map(|l| l.exercise.as_str()).collect();
     assert_eq!(names, ["Back Squat"]);
     assert!(exec.lifts.iter().all(|l| l.reps_met));
+}
+
+/// A day where every set came up short of its reps (items `done_short`) is
+/// never praised as having hit the target reps.
+#[test]
+fn a_day_of_short_sets_is_not_praised_as_hitting_the_target_reps() {
+    let app = Engine;
+    let mut model = snapshot_fixture_model(include_str!(
+        "../../../tests/fixtures/view_snapshot/calisthenics.events.ndjson"
+    ));
+    let ns = app.view(&model).next_session.expect("hero");
+    assert_eq!(ns.epoch_day, 20003);
+    let mut id = 10_000u64;
+    let mut at = 1_728_291_600i64; // local day 20003, 09:00
+    for it in &ns.items {
+        for _ in 0..it.sets {
+            id += 1;
+            at += 120;
+            let ev = if it.timed_hold {
+                cal_hold(&it.exercise, it.hold_low_sec - 5, 0.0, at)
+            } else {
+                log_set(&it.exercise, 0.0, u32::from(it.reps_low) - 1, 0.0, at)
+            };
+            let _ = app.update(with_entry_id(ev, id), &mut model);
+        }
+    }
+    let vm = app.view(&model);
+    let today = vm.week_plan.iter().find(|s| s.epoch_day == 20003).unwrap();
+    for it in &today.items {
+        assert_eq!(it.status, ItemStatus::DoneShort, "{}", it.summary);
+    }
+    let msg = vm.feedback.map(|f| f.message).unwrap_or_default();
+    assert!(
+        !msg.contains("hit the target reps"),
+        "every set was short: {msg}"
+    );
 }

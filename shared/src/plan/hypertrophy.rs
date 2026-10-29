@@ -34,12 +34,6 @@ pub(crate) fn uses_double_progression(profile: &Profile) -> bool {
         && profile.resistance_modality == ResistanceModality::Weights
 }
 
-/// Days a last working load stays current enough to carry forward: the same
-/// 30-day full-credit window the e1RM anchor uses before detraining decay
-/// starts (DETRAIN-001). Older sessions fall back to the e1RM anchor (which
-/// decays) or to effort-only prescription.
-pub(crate) const HYP_CARRY_DAYS: i64 = 30;
-
 /// Table 1 muscles in sizing order: the big compound-trained muscles first, so
 /// their secondary (½-set) credit is known before the small muscles that
 /// receive it are sized (bench → triceps, squat/RDL → glutes).
@@ -133,8 +127,8 @@ pub(crate) fn hypertrophy_block_targets(
     ta: TrainingAge,
     block_weeks: u8,
     lift_days: usize,
-) -> Vec<Vec<MuscleWeekTarget>> {
-    fitted_block_memo(profile, ta, block_weeks.max(1), lift_days).to_vec()
+) -> std::rc::Rc<[Vec<MuscleWeekTarget>]> {
+    fitted_block_memo(profile, ta, block_weeks.max(1), lift_days)
 }
 
 /// Everything [`fitted_block`] reads: the profile's stated weekly sets and
@@ -466,7 +460,6 @@ fn allocate_week(
     // 1. Logged lifts with no Table 1 primary muscle: kept, never dropped, at
     //    the hypertrophy loading band's set count, up to twice a week.
     let unmapped_sets = strength::loading_rx(LiftGoal::Hypertrophy).value.sets.0;
-    let session_cap = day_cap;
     for (name, _) in logged
         .iter()
         .filter(|(_, p)| p.is_none())
@@ -476,7 +469,7 @@ fn allocate_week(
         if eligible.is_empty() {
             eligible = (0..n).collect();
         }
-        eligible.retain(|&s| load[s].saturating_add(u32::from(unmapped_sets)) <= session_cap);
+        eligible.retain(|&s| load[s].saturating_add(u32::from(unmapped_sets)) <= day_cap);
         let f = eligible.len().min(2);
         for slot in pick_slots(&eligible, &load, f) {
             load[slot] += u32::from(unmapped_sets);
@@ -515,7 +508,7 @@ fn allocate_week(
             eligible = (0..n).collect();
         }
         // A day with no room for even the per-exercise minimum is full.
-        eligible.retain(|&s| load[s].saturating_add(min_sets) <= session_cap);
+        eligible.retain(|&s| load[s].saturating_add(min_sets) <= day_cap);
         if eligible.is_empty() {
             continue;
         }
@@ -543,7 +536,7 @@ fn allocate_week(
         let (base, rem) = (total / f, total % f);
         for (j, &slot) in chosen.iter().enumerate() {
             let sets = (base + u32::from((j as u32) < rem))
-                .min(session_cap.saturating_sub(load[slot]))
+                .min(day_cap.saturating_sub(load[slot]))
                 .min(u32::from(u8::MAX)) as u8;
             let name = &options[j % options.len()];
             load[slot] += u32::from(sets);
@@ -633,11 +626,13 @@ fn prescribe(
     let by_effort = |rx: Prescription| rir_rx.with_value(rx);
 
     // A >8 wk layoff re-enters like a novice by effort (REENTRY-001): no load
-    // is carried from before the break.
+    // is carried from before the break. A last working load stays current for
+    // the e1RM anchor's full-credit window; an older one falls back to the
+    // (decayed) e1RM anchor or to effort.
     if !anchors.reentry_novice {
         if let Some(lw) = anchors
             .last_working_for(name)
-            .filter(|w| w.age_days <= HYP_CARRY_DAYS)
+            .filter(|w| w.age_days <= strength::FULL_CREDIT_DAYS)
         {
             let w = lw.weight_kg;
             let step = hypertrophy::double_progression((bottom, top), rir, &lw.sets);
@@ -671,7 +666,7 @@ fn prescribe(
                         .min_by_key(|(r, _)| *r)
                         .map(|&(r, rpe)| {
                             strength::e1rm_epley_rpe(w, r.max(1), rpe)
-                                * f64::from(hypertrophy::pct_1rm_for_reps_in_reserve(bottom, rir))
+                                * strength::pct_1rm_leaving_rir(bottom, rir)
                                 / 100.0
                         })
                         .unwrap_or(0.0);
@@ -682,7 +677,7 @@ fn prescribe(
         if class != ExerciseClass::Isolation && anchors.e1rm_for(name).is_some() {
             // First exposure with only an e1RM anchor: the %1RM that leaves the
             // target reps in reserve at the range bottom (8 @ 2 RIR → 75 %).
-            let pct = hypertrophy::pct_1rm_for_reps_in_reserve(bottom, rir);
+            let pct = strength::pct_1rm_leaving_rir(bottom, rir) as f32;
             return by_effort(lift(bottom, LiftIntensity::PercentOneRm(pct), None));
         }
     }

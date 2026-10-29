@@ -14,7 +14,7 @@ import org.junit.Test
 class ThemeContrastTest {
 
     private fun variants(): List<Pair<String, Palette>> = AppTheme.entries.flatMap { t ->
-        listOf("${t.label} dark" to t.dark, "${t.label} light" to t.light)
+        listOf("${t.name} dark" to t.dark, "${t.name} light" to t.light)
     }
 
     private fun assertAa(variant: String, pair: String, fg: Color, bg: Color) {
@@ -44,6 +44,22 @@ class ThemeContrastTest {
             assertAa(variant, "accent on bgTop", p.accent, p.bgTop)
             assertAa(variant, "accent on bgElevated", p.accent, p.bgElevated)
             assertAa(variant, "accent on bgSunken", p.accent, p.bgSunken)
+        }
+    }
+
+    @Test
+    fun dynamicAccent_clearsAaOnEveryGround() {
+        // Material You primaries that fail AA on some ground as they come; the guard
+        // nudges or replaces each one so it holds the same contract as a theme accent.
+        val primaries = listOf(0xFF6750A4, 0xFF8B5000, 0xFF7A4E8C, 0xFF5B6300, 0xFF4F6354, 0xFFB3261E).map { Color(it) }
+        for ((variant, base) in variants()) {
+            for (primary in primaries) {
+                val p = base.withDynamicAccent(primary)
+                val v = "$variant + system $primary"
+                assertAa(v, "accent on bgTop", p.accent, p.bgTop)
+                assertAa(v, "accent on bgElevated", p.accent, p.bgElevated)
+                assertAa(v, "accent on bgSunken", p.accent, p.bgSunken)
+            }
         }
     }
 
@@ -101,7 +117,7 @@ class ThemeContrastTest {
                 for ((name, ground) in listOf("bgTop" to p.bgTop, "bgElevated" to p.bgElevated, "bgSunken" to p.bgSunken)) {
                     val ratio = contrastRatio(done, ground)
                     assertTrue(
-                        "${t.label} $mode: done mark on $name is %.2f:1, needs ≥ 3.0:1".format(ratio),
+                        "${t.name} $mode: done mark on $name is %.2f:1, needs ≥ 3.0:1".format(ratio),
                         ratio >= 3.0,
                     )
                 }
@@ -122,7 +138,7 @@ class ThemeContrastTest {
                 for ((name, ground) in listOf("bgTop" to p.bgTop, "bgElevated" to p.bgElevated, "bgSunken" to p.bgSunken)) {
                     val ratio = contrastRatio(mark, ground)
                     assertTrue(
-                        "${t.label} $mode: warn mark on $name is %.2f:1, needs ≥ 3.0:1".format(ratio),
+                        "${t.name} $mode: warn mark on $name is %.2f:1, needs ≥ 3.0:1".format(ratio),
                         ratio >= 3.0,
                     )
                 }
@@ -143,9 +159,9 @@ class ThemeContrastTest {
             )) {
                 val glyph = if (tile == StatusColors().warn) Color.White else p.bgTop
                 val onCard = contrastRatio(tile, p.bgElevated)
-                assertTrue("${t.label} $mode: warn tile on bgElevated is %.2f:1, needs ≥ 3.0:1".format(onCard), onCard >= 3.0)
+                assertTrue("${t.name} $mode: warn tile on bgElevated is %.2f:1, needs ≥ 3.0:1".format(onCard), onCard >= 3.0)
                 val glyphRatio = contrastRatio(glyph, tile)
-                assertTrue("${t.label} $mode: glyph on the warn tile is %.2f:1, needs ≥ 3.0:1".format(glyphRatio), glyphRatio >= 3.0)
+                assertTrue("${t.name} $mode: glyph on the warn tile is %.2f:1, needs ≥ 3.0:1".format(glyphRatio), glyphRatio >= 3.0)
             }
         }
     }

@@ -46,9 +46,9 @@ class AppThemeTest {
 }
 
 /**
- * Owner ruling 2026-10-17: a fresh install starts on Paper with the system accent
- * ON; switching to Rose/Meadow/Iris turns it OFF, back to Paper turns it ON, and
- * an install that predates the ruling keeps what it rendered.
+ * A fresh install starts on Paper with the system accent ON; switching to
+ * Rose/Meadow/Iris turns it OFF, back to Paper turns it ON, and an install from
+ * before this default keeps what it rendered.
  */
 @RunWith(RobolectricTestRunner::class)
 class AppSettingsThemeTest {

@@ -103,9 +103,9 @@ private fun SemanticsNode.text(): String =
 private fun SemanticsNode.allDescendants(): List<SemanticsNode> = children.flatMap { listOf(it) + it.allDescendants() }
 
 /**
- * Adversarial review (RevShell) of the 2026-10-23 shell fixes, over the REAL core.
- * Each test proved one finding (it failed on the reviewed tree) and now guards its
- * fix; the rest are claim checks.
+ * Shell layout guards over the REAL core: RTL placement of the hero and undo
+ * actions, the pain-hold banner shown whole at small and landscape windows and
+ * large fonts, and words kept whole at in-between font scales.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w320dp-h640dp-xhdpi")

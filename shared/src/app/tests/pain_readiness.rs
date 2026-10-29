@@ -86,10 +86,13 @@ fn pain_blocks_training_with_a_single_stop() {
     assert_eq!(vm.safety_tier, Some(SafetyTier::Pain));
     assert!(vm.train_blocked);
     assert_eq!(vm.adjustments.len(), 1);
-    assert_eq!(
-        vm.adjustments[0].summary,
-        "Pain reported: training is paused. Rest the painful area and check it before you train again."
+    assert!(vm.adjustments[0].evidence.safety_critical);
+    assert!(
+        vm.adjustments[0].summary.contains("paused"),
+        "{}",
+        vm.adjustments[0].summary
     );
+    assert_eq!(vm.today_headline.kind, HeadlineKind::SafetyHold);
 }
 
 #[test]

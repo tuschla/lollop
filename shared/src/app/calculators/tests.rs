@@ -1,53 +1,38 @@
 use super::*;
+use crate::DAY_SEC as DAY;
+use crate::app::tests::{base_profile, logged_run};
+use crate::hybrid::ConcurrentGoal;
+use crate::individualization::ProgressionCadence;
 use crate::schema::WorkoutType;
 
-const DAY: i64 = 86_400;
 /// Noon of epoch-day 704, a Monday, so a week anchored here is one clean
 /// Mon–Sun block for the local-week bucketing. Noon, not 00:00: a run stamped
 /// at its end counts in the week it STARTED, so a run "logged" at Monday 00:00
 /// would be the previous Sunday's.
 const MON: i64 = 704 * DAY + 12 * 3600;
 
+/// Weekly-report row text the tests match on.
+const OVER_TWICE_DAILY: &str = "more than twice your average daily distance";
+const SHARE_CAP_FROM_64KM: &str = "The 25% limit applies from 64 km a week";
+const OVER_SHARE_CAP: &str = "over the 25% limit";
+
 fn run(km: f64, minutes: f64, hr_pct: f64, wt: Option<WorkoutType>, at: i64) -> LoggedRun {
     LoggedRun {
-        distance_km: km,
-        duration_min: minutes,
-        hr_pct_max: hr_pct,
-        wire_hr_pct_max: hr_pct,
-        longest_recent_km: 0.0,
-        wire_longest_recent_km: 0.0,
-        track: Vec::new(),
-        track_segment_starts: Vec::new(),
-        observed_at: at,
-        entry_id: 0,
-        logged_utc_offset_sec: None,
-        hr_pinned: false,
         workout_type: wt,
-        session_rpe: None,
-        avg_hr_bpm: None,
-    }
-}
-
-fn lift(exercise: &str, reps: u32, rpe: f64, at: i64) -> LoggedSet {
-    LoggedSet {
-        exercise: exercise.to_string(),
-        weight_kg: 100.0,
-        reps,
-        rpe,
-        observed_at: at,
-        entry_id: 0,
-        hold_sec: None,
+        ..logged_run(km, minutes, hr_pct, at)
     }
 }
 
 fn profile_with_run_days(days: u8, km: f64) -> Profile {
-    serde_json::from_str(&format!(
-        r#"{{"progression_cadence":"EverySession","lift_goal":"Hypertrophy",
-            "goal_distance":"General","concurrent_goal":"Hypertrophy","weekly_sets":10,
-            "running_days_per_week":{days},"running_km_per_week":{km},"advanced":false,
-            "endurance_intensity_pct_vo2max":75.0}}"#
-    ))
-    .expect("profile fixture parses")
+    Profile {
+        progression_cadence: ProgressionCadence::EverySession,
+        lift_goal: LiftGoal::Hypertrophy,
+        concurrent_goal: ConcurrentGoal::Hypertrophy,
+        weekly_sets: 10,
+        running_days_per_week: days,
+        running_km_per_week: km,
+        ..base_profile()
+    }
 }
 
 // The ≤2×-daily bound averages over RUN days, not calendar days, so the
@@ -67,9 +52,7 @@ fn weekly_report_uses_run_day_average() {
     };
     let report = build_weekly_report(&ViewCtx::new(&model), &[]);
     assert!(
-        !report.iter().any(|r| r
-            .summary
-            .contains("more than twice your average daily distance")),
+        !report.iter().any(|r| r.summary.contains(OVER_TWICE_DAILY)),
         "run-day average must not flag a 15 km long run for a 3-day/30 km runner: {report:#?}"
     );
 }
@@ -107,26 +90,31 @@ fn tempo_counts_as_threshold_not_interval() {
     );
 }
 
-// The heavy-leg ↔ long-run guard fires only on squat/hinge work at ≥80%
-// 1RM. Light calf work (not a squat/hinge pattern) next to a short run is not
-// a heavy-leg/long-run collision and must raise no spacing flag.
+// A long run over 25 % of the week does not hide the threshold overrun: 8 km
+// at 90 %HRmax is 24 % of a 33 km week against the 10 % cap.
 #[test]
-fn light_leg_work_and_a_short_run_raise_no_gap_flag() {
+fn weekly_report_flags_a_threshold_overrun_next_to_a_long_run_overrun() {
     let model = Model {
-        sets: vec![
-            lift("Calf raise", 15, 8.0, MON),
-            lift("Calf raise", 15, 8.0, MON),
-            lift("Calf raise", 15, 8.0, MON),
+        runs: vec![
+            run(15.0, 90.0, 75.0, None, MON),
+            run(8.0, 40.0, 90.0, None, MON + DAY),
+            run(5.0, 30.0, 75.0, None, MON + 2 * DAY),
+            run(5.0, 30.0, 75.0, None, MON + 3 * DAY),
         ],
-        runs: vec![run(3.0, 18.0, 70.0, None, MON + 10 * 3600)],
         ..Default::default()
     };
     let report = build_weekly_report(&ViewCtx::new(&model), &[]);
     assert!(
-        !report
+        report
             .iter()
-            .any(|r| r.summary.contains("keep ≥24 h between")),
-        "light calf work + a short run must not raise a heavy-leg/run spacing flag: {report:#?}"
+            .any(|r| r.summary.starts_with("Long run 15.0 km is 45% of the week")),
+        "long-run row: {report:#?}"
+    );
+    assert!(
+        report.iter().any(|r| r
+            .summary
+            .starts_with("Threshold running 8.0 km is over 10%")),
+        "threshold row: {report:#?}"
     );
 }
 
@@ -135,13 +123,13 @@ fn light_leg_work_and_a_short_run_raise_no_gap_flag() {
 // ramp starts at MAV low, never 0.
 #[test]
 fn mev_zero_muscle_starts_above_zero() {
-    let q = HypertrophyPlanQuery {
+    let q = HypertrophyInputView {
         muscle: "glutes".into(),
         weeks: 4,
         not_growing: false,
         recovering_easily: false,
     };
-    let (rows, _) = build_hypertrophy_plan(&q, None, None);
+    let (rows, _, _) = build_hypertrophy_plan(&q, None, None);
     let ramp = rows
         .iter()
         .find(|r| r.summary.starts_with("No direct sets:"))
@@ -167,7 +155,7 @@ fn mev_zero_muscle_starts_above_zero() {
 // HR cannot validly anchor on short reps.
 #[test]
 fn repetition_hr_row_reads_cleanly() {
-    let q = HrZoneQuery {
+    let q = HrZoneInputView {
         age_years: 30.0,
         resting_hr_bpm: None,
         weeks_since_recalc: None,
@@ -218,9 +206,9 @@ fn low_mileage_long_run_within_2x_daily_average_is_informational() {
     };
     let report = build_weekly_report(&ViewCtx::new(&model), &[]);
     assert!(
-        report.iter().any(|r| r
-            .summary
-            .contains("The 25% limit applies from 64 km a week")),
+        report
+            .iter()
+            .any(|r| r.summary.contains(SHARE_CAP_FROM_64KM)),
         "a sub-64 km long run within 2× daily average is informational: {report:#?}"
     );
     assert!(
@@ -232,9 +220,7 @@ fn low_mileage_long_run_within_2x_daily_average_is_informational() {
         "the informational row carries a miles twin: {report:#?}"
     );
     assert!(
-        !report
-            .iter()
-            .any(|r| r.summary.contains("over the 25% limit")),
+        !report.iter().any(|r| r.summary.contains(OVER_SHARE_CAP)),
         "it must not be flagged as a cap violation: {report:#?}"
     );
 }
@@ -257,15 +243,13 @@ fn hybrid_report_uses_the_capped_run_day_count() {
     // run; capped to the 3-day hybrid concurrency count (10 km/day, 2× = 20
     // km) it does not, reading as the sub-64 km informational note instead.
     assert!(
-        report.iter().any(|r| r
-            .summary
-            .contains("The 25% limit applies from 64 km a week")),
+        report
+            .iter()
+            .any(|r| r.summary.contains(SHARE_CAP_FROM_64KM)),
         "the report must average over the capped run-day count: {report:#?}"
     );
     assert!(
-        !report.iter().any(|r| r
-            .summary
-            .contains("more than twice your average daily distance")),
+        !report.iter().any(|r| r.summary.contains(OVER_TWICE_DAILY)),
         "the capped denominator must not flag the long run: {report:#?}"
     );
 }
@@ -289,9 +273,7 @@ fn run_dated_tomorrow_does_not_count_in_this_week() {
         "only the four runs through today count (20 km), not the future run: {report:#?}"
     );
     assert!(
-        !report
-            .iter()
-            .any(|r| r.summary.contains("over the 25% limit")),
+        !report.iter().any(|r| r.summary.contains(OVER_SHARE_CAP)),
         "the future 15 km long run must not create a cap violation: {report:#?}"
     );
 }
@@ -306,7 +288,7 @@ fn long_run_rows(report: &[GuidanceView]) -> Vec<&str> {
         .collect()
 }
 
-// copy-review M8: under 64 km a week a long run past twice the daily average
+// Under 64 km a week a long run past twice the daily average
 // is one row, without the 25% share cap (which applies from 64 km a week)
 // and without a second and third row restating the share.
 #[test]

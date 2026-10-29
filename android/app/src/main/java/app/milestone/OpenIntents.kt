@@ -42,8 +42,7 @@ internal fun openIntent(ctx: Context, dest: OpenDest): Intent =
 
 /**
  * Immutable activity PendingIntent for [openIntent]. PendingIntents match on the
- * intent without its extras, so each destination gets its own request code;
- * FLAG_UPDATE_CURRENT keeps the extra current if an older one exists.
+ * intent without its extras, so each destination gets its own request code.
  */
 internal fun openPendingIntent(ctx: Context, dest: OpenDest): PendingIntent =
     PendingIntent.getActivity(
@@ -91,10 +90,9 @@ internal fun routeOpen(
     val today = nav.copy(showTracker = false, selected = Dest.Today)
     if (nav.sheetOpen && sheetBusy) return today
     return when (dest) {
-        OpenDest.Today -> today.copy(sheetOpen = false, sheetMode = LogMode.Chooser, sheetPlanExercise = null, sheetPlanDay = null)
         OpenDest.Log -> today.copy(sheetOpen = true, sheetMode = LogMode.Chooser, sheetPlanExercise = null, sheetPlanDay = null)
         OpenDest.LogSet -> today.copy(sheetOpen = true, sheetMode = LogMode.Set, sheetPlanExercise = logSetTarget(model), sheetPlanDay = null)
-        OpenDest.Track -> today // returned above
+        else -> today.copy(sheetOpen = false, sheetMode = LogMode.Chooser, sheetPlanExercise = null, sheetPlanDay = null)
     }
 }
 
@@ -105,16 +103,12 @@ internal fun routeOpen(
  */
 internal fun logSetTarget(model: ViewModel): String? {
     if (model.train_blocked) return null
-    val today = model.today()
-    val ns = model.next_session
-    if (ns != null && ns.epoch_day == today && ns.items.isNotEmpty() &&
-        (ns.status == "next" || ns.status == "adjusted") && sessionDiscipline(ns.session_type) == "Lift"
-    ) {
-        return (firstOpenItem(ns.items) ?: ns.items.first()).exercise.takeIf { it.isNotBlank() }
+    val plan = model.todaysPlan()
+    val item = if (plan != null && sessionDiscipline(plan.session_type) == "Lift") {
+        firstOpenItem(plan.items) ?: plan.items.first()
+    } else {
+        val started = model.resumableLiftDay() ?: return null
+        firstOpenItem(started.items) ?: started.items.last()
     }
-    val started = model.week_plan.firstOrNull {
-        it.epoch_day == today && it.items.isNotEmpty() && sessionDiscipline(it.session_type) == "Lift" &&
-            it.items.any { i -> i.sets_done > 0 || i.logged_sets.isNotEmpty() }
-    } ?: return null
-    return (firstOpenItem(started.items) ?: started.items.last()).exercise.takeIf { it.isNotBlank() }
+    return item.exercise.takeIf { it.isNotBlank() }
 }

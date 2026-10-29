@@ -9,16 +9,14 @@ import java.time.format.TextStyle
 import java.util.Locale
 
 // Pure guided-setup logic: the answer vocabulary, the screen path, the answers →
-// profile mapping and the seed a re-run or Focus switch opens with. No Compose.
+// profile mapping and the seed a re-run or Profile Focus switch opens with. No Compose.
 
-/** The three training modalities the guided setup maps onto the profile's volume
- *  fields. Mirrors the [Focus] row in the full editor: Run-only zeroes lifting,
- *  Lift-only zeroes running, Both splits the week. Title/consequence carry string
- *  resource ids, resolved at the (composable) render site. */
-internal enum class Modality(val titleRes: Int, val consequenceRes: Int) {
-    Lift(R.string.setup_modality_lift_title, R.string.setup_modality_lift_consequence),
-    Run(R.string.setup_modality_run_title, R.string.setup_modality_run_consequence),
-    Both(R.string.setup_modality_both_title, R.string.setup_modality_both_consequence),
+/** The three training modalities: Run-only zeroes lifting, Lift-only zeroes
+ *  running, Both splits the week. [focusLabelRes] is the Profile Focus segment. */
+internal enum class Modality(val titleRes: Int, val consequenceRes: Int, val focusLabelRes: Int) {
+    Lift(R.string.setup_modality_lift_title, R.string.setup_modality_lift_consequence, R.string.setup_focus_lift),
+    Run(R.string.setup_modality_run_title, R.string.setup_modality_run_consequence, R.string.setup_focus_run),
+    Both(R.string.setup_modality_both_title, R.string.setup_modality_both_consequence, R.string.setup_focus_both),
 }
 
 /** The modality a stored profile trains: whichever sides carry volume (null when
@@ -57,10 +55,11 @@ internal fun LiftGoal.toConcurrent(): ConcurrentGoal = when (this) {
 }
 
 /** For a Both profile: which side leads. The core only reads the concurrent goal as
- *  lift-first vs run-first, so this two-way answer is the whole choice. */
-internal enum class BothPriority(val titleRes: Int, val consequenceRes: Int) {
-    LiftLean(R.string.setup_bothpriority_liftlean_title, R.string.setup_bothpriority_liftlean_consequence),
-    RunLean(R.string.setup_bothpriority_runlean_title, R.string.setup_bothpriority_runlean_consequence),
+ *  lift-first vs run-first, so this two-way answer is the whole choice. [labelRes]
+ *  is the short label of the Profile row and the review. */
+internal enum class BothPriority(val titleRes: Int, val consequenceRes: Int, val labelRes: Int) {
+    LiftLean(R.string.setup_bothpriority_liftlean_title, R.string.setup_bothpriority_liftlean_consequence, R.string.setup_lead_lifting),
+    RunLean(R.string.setup_bothpriority_runlean_title, R.string.setup_bothpriority_runlean_consequence, R.string.setup_lead_running),
 }
 
 /** Which-leads → concurrent goal, shared by the wizard and the Profile editor:
@@ -147,7 +146,7 @@ internal val ResistanceModality.setupConsequenceRes: Int
 /** The kg|lb the bodyweight field opens in: a re-run keeps the profile's choice; a
  *  first run follows the phone's region (lb in the US/LR/MM). */
 internal fun seedWeightUnit(initial: ProfileDraft?, locale: Locale = Locale.getDefault()): WeightUnit =
-    initial?.let { if (it.weightLb) WeightUnit.Lb else WeightUnit.Kg } ?: localeWeightUnit(locale)
+    initial?.weightUnit ?: localeWeightUnit(locale)
 
 /** Age at which the core's pediatric hold (SAFE-PEDS-001) stops applying. */
 private const val ADULT_AGE_YEARS = 18.0
@@ -183,13 +182,11 @@ internal fun birthdayPickerStart(birthDay: Long?, today: Long): Long {
 /** Years back from today the birthday calendar opens on when no birthday is set. */
 private const val PICKER_START_YEARS_BACK = 30L
 
-/** Whether these answers raise a core deferral gate, so the wizard can say so
- *  before Finish. Age under 18 fires the core's pediatric Defer gate (SAFE-PEDS-001,
- *  derived from age alone in app/mod.rs); the rest mirror the health flags. A
- *  symptom (Q2/Q3) defers even with a clearance answer (onboard-052). */
-internal fun healthDefers(ageYears: Double?, health: HealthScreen): Boolean =
-    isMinor(ageYears) ||
-        (health.parq_positive && !health.medically_cleared) ||
+/** Whether the health answers raise a core deferral gate, so the wizard can say
+ *  so before Finish. Age (the core's pediatric gate) is checked apart with
+ *  [isMinor]. A symptom (Q2/Q3) defers even with a clearance answer (onboard-052). */
+internal fun healthDefers(health: HealthScreen): Boolean =
+    (health.parq_positive && !health.medically_cleared) ||
         health.symptomatic || health.acute_illness ||
         health.pregnant || health.pregnancy_warning_sign ||
         health.injury_or_rehab || health.reds_signal
@@ -327,9 +324,19 @@ internal const val HYBRID_CAPPED_DAYS = 3
 
 /** Lift-day choices for a Both week of [totalDays]: at least one run day stays,
  *  and a run-led week lifts at most [HYBRID_CAPPED_DAYS] days. */
-internal fun hybridLiftDayOptions(totalDays: Int, lead: BothPriority?): IntRange {
-    val cap = if (lead == BothPriority.RunLean) HYBRID_CAPPED_DAYS else LIFT_DAYS.last
-    return HYBRID_DEFAULT_LIFT_DAYS..maxOf(HYBRID_DEFAULT_LIFT_DAYS, minOf(cap, totalDays - 1))
+internal fun hybridLiftDayOptions(totalDays: Int, lead: BothPriority?): IntRange =
+    HYBRID_DEFAULT_LIFT_DAYS..maxOf(HYBRID_DEFAULT_LIFT_DAYS, minOf(hybridLiftDayRange(lead).last, totalDays - 1))
+
+/** Lift days a Both week can hold whatever its total: [LIFT_DAYS], at most
+ *  [HYBRID_CAPPED_DAYS] while running leads. */
+internal fun hybridLiftDayRange(lead: BothPriority?): IntRange =
+    LIFT_DAYS.first..(if (lead == BothPriority.RunLean) HYBRID_CAPPED_DAYS else LIFT_DAYS.last)
+
+/** Run days a Both week can hold beside [liftDays]: the rest of the week, at most
+ *  [HYBRID_CAPPED_DAYS] while lifting leads. */
+internal fun hybridRunDayOptions(liftDays: Int, lead: BothPriority?): IntRange {
+    val rest = WEEK_DAYS - liftDays
+    return 1..(if (lead == BothPriority.RunLean) rest else minOf(rest, HYBRID_CAPPED_DAYS))
 }
 
 /** Run days the engine schedules in a Both week: the rest of the athlete's days,
@@ -348,14 +355,19 @@ internal fun dayOptions(modality: Modality?): IntRange = when (modality) {
 }
 
 /** Days-step seed for a re-run: the lifting days (Lift), the run days (Run), or
- *  run + lift days (Both, which stores the two sides separately). Lift falls back
- *  to the engine's default for a profile from before the lift-days answer. */
-internal fun seedTotalDays(modality: Modality?, initial: ProfileDraft?): Int? = when (modality) {
+ *  run + lift days (Both, which stores the two sides separately), inside
+ *  [dayOptions]. Lift falls back to the engine's default for a profile from before
+ *  the lift-days answer. */
+internal fun seedTotalDays(modality: Modality?, initial: ProfileDraft?): Int? =
+    storedTotalDays(modality, initial)?.coerceIn(dayOptions(modality))
+
+/** [seedTotalDays] before it is fitted to [dayOptions]. */
+private fun storedTotalDays(modality: Modality?, initial: ProfileDraft?): Int? = when (modality) {
     Modality.Run -> initial?.runningDaysPerWeek
     Modality.Both -> initial?.runningDaysPerWeek?.let { it + (initial.liftDaysPerWeek ?: HYBRID_DEFAULT_LIFT_DAYS) }
     Modality.Lift -> initial?.liftDaysPerWeek ?: LIFT_ONLY_DEFAULT_DAYS
     null -> null
-}?.coerceIn(dayOptions(modality))
+}
 
 /** Days-step seed for a Profile Focus switch to [target]: only days the user
  *  already gave for the sides [target] trains (either side's days may come from
@@ -373,23 +385,8 @@ internal fun switchSeedDays(target: Modality, initial: ProfileDraft, stashedRunD
 
 // ── Running now / race details ──────────────────────────────────────────────
 
-/** Accepted keypad ranges, canonical km. */
-internal const val WEEKLY_RUN_MAX_KM = WEEKLY_VOLUME_MAX_KM
+/** Accepted longest-run keypad range, canonical km. */
 internal val LONGEST_RUN_KM = 0.5..60.0
-
-/** A km range shown in the user's distance unit. */
-internal fun distanceBounds(km: ClosedFloatingPointRange<Double>, unit: DistanceUnit): ClosedFloatingPointRange<Double> =
-    if (unit == DistanceUnit.Mi) roundTenth(kmToMi(km.start))..roundTenth(kmToMi(km.endInclusive)) else km
-
-private fun roundTenth(v: Double): Double = Math.round(v * 10.0) / 10.0
-
-/** A canonical km value as the keypad buffer in the display unit. */
-internal fun distanceBufferText(km: Double, unit: DistanceUnit): String =
-    trimDecimal(if (unit == DistanceUnit.Mi) roundTenth(kmToMi(km)) else km)
-
-/** A typed display-unit distance back to canonical km. */
-internal fun displayToKm(value: Double, unit: DistanceUnit): Double =
-    if (unit == DistanceUnit.Mi) miToKmWire(value) else value
 
 /** How close a stored race distance must be to a chip's to count as that chip. */
 private const val RACE_DISTANCE_MATCH_KM = 0.01
@@ -451,12 +448,18 @@ internal fun raceTimeDigits(sec: Int): String {
 }
 
 /** Running paces (min per km) a recent finish time must imply to be believed, so
- *  a typo like "25" (25 seconds) for a 5K is caught before it anchors every pace. */
-private val PLAUSIBLE_RACE_PACE_MIN_PER_KM = 2.5..20.0
+ *  a typo like "25" (25 seconds) for a 5K is caught before it anchors every pace.
+ *  The floor is the core's (app::format keeps time_sec / distance_km >= 120). */
+private val PLAUSIBLE_RACE_PACE_MIN_PER_KM = 2.0..20.0
 
 /** A finish time that is a real running pace ([PLAUSIBLE_RACE_PACE_MIN_PER_KM]). */
 internal fun plausibleRaceTime(distanceKm: Double, sec: Int): Boolean =
     (sec / 60.0 / distanceKm) in PLAUSIBLE_RACE_PACE_MIN_PER_KM
+
+/** The recent race a distance answer and a finish-time buffer give, once the time
+ *  is complete and plausible. */
+internal fun recentRaceOf(distance: RaceDistance?, digits: String): RecentRace? =
+    distance?.let { d -> raceTimeSec(digits)?.takeIf { plausibleRaceTime(d.km, it) }?.let { RecentRace(d.km, it) } }
 
 // ── Calisthenics placement ──────────────────────────────────────────────────
 
@@ -486,18 +489,13 @@ internal val PLACEMENT_LADDERS = listOf(
     CalisLadder.Squat to R.string.setup_place_squat_q,
 )
 
-/** One rung event per answered placement (unanswered ladders start easy). */
-internal fun placementEvents(answers: Collection<CalisPlacement?>, observedAt: Long): List<Event.SetCalisthenicsRung> =
-    answers.filterNotNull().map { Event.SetCalisthenicsRung(it.ladder, it.rung, observedAt) }
-
-/** The rung events a finished setup sends: only placements that differ from the
- *  [seed]. A re-run seeds the ladders' current rungs, and re-placing a ladder on
- *  the rung it already holds would restart its progress there. */
+/** The rung events a finished setup sends: one per answered placement whose rung
+ *  differs from the [seed]'s. A re-run seeds the ladders' current rungs, and
+ *  re-placing a ladder on the rung it already holds would restart its progress. */
 internal fun placementEvents(answers: SetupAnswers, seed: SetupAnswers, observedAt: Long): List<Event.SetCalisthenicsRung> =
-    placementEvents(
-        PLACEMENT_LADDERS.map { (ladder, _) -> answers.placement(ladder)?.takeIf { it != seed.placement(ladder) } },
-        observedAt,
-    )
+    PLACEMENT_LADDERS.mapNotNull { (ladder, _) ->
+        answers.placement(ladder)?.takeIf { it.rung != seed.placement(ladder)?.rung }
+    }.map { Event.SetCalisthenicsRung(it.ladder, it.rung, observedAt) }
 
 /** The placement answer naming [rung] on [ladder] exactly, or null when no answer
  *  sits on that rung (Few and Many pull-ups share Full pull-up: the first wins). */
@@ -550,23 +548,17 @@ internal fun epochDayLabel(day: Long, locale: Locale = Locale.getDefault()): Str
 internal fun epochDayShortLabel(day: Long, today: Long, locale: Locale = Locale.getDefault()): String {
     val date = LocalDate.ofEpochDay(day)
     if (date.year != LocalDate.ofEpochDay(today).year) return epochDayLabel(day, locale)
-    val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "MMMd")
-    return date.format(DateTimeFormatter.ofPattern(pattern, locale))
+    return date.format(localizedDayFormatter("MMMd", locale))
 }
 
 // ── Answers → profile ───────────────────────────────────────────────────────
 
 /**
- * Turn the guided answers into ONE [ProfileDraft]. Plain shell mapping (not a KB
- * training claim, it only picks which registry-backed profile values the user
- * asserted). Modality drives the volumes: Run-only zeroes weekly sets, Lift-only
- * zeroes running, Both splits the chosen days into the lift days the user picked
- * and the run days the engine will actually schedule (capped at 3 while lifting
- * leads, HYB-RUNCAP-001). Weekly running volume is the athlete's stated figure
- * ([weeklyRunKm], 0 = "I don't run yet"); skipped, it is sent as NOT SET and the
- * engine picks its own conservative start, never a shell-invented number.
- * Nothing about the person is required: age (from the birthday, or "Prefer not
- * to say"), bodyweight, sex and resting HR may be null (not given).
+ * The guided answers as ONE [ProfileDraft] (shell mapping, no KB claim). Both
+ * splits [daysPerWeek] into the picked lift days and the run days the engine
+ * schedules (HYB-RUNCAP-001). A skipped weekly distance ([weeklyRunKm] null) is
+ * sent as not set, so the engine picks its own start. The `keep*` flags carry the
+ * [initial] profile's value through ([keepFlags]).
  */
 internal fun deriveDraft(
     modality: Modality,
@@ -730,8 +722,10 @@ internal fun keepFlags(
         liftVolume = sameModality && level == seedLevel,
         runVolume = sameModality && runLevel == seedRun && days == seedDays,
         // Run days follow modality, the days answer, the lifting split and which
-        // side leads, so the exact seed count holds only while all of them do.
-        runDays = sameModality && days == seedDays && liftSplit == seedLiftSplit && bothPriority == seedBothPriority,
+        // side leads, so the exact seed count holds only while all of them do, and
+        // only when the seeded days are the stored ones (not fitted to dayOptions).
+        runDays = sameModality && days == seedDays && seedDays == storedTotalDays(seedModality, initial) &&
+            liftSplit == seedLiftSplit && bothPriority == seedBothPriority,
         // Advanced is driven by the running level alone.
         advanced = runLevel == seedRun,
     )
@@ -740,19 +734,13 @@ internal fun keepFlags(
 // ── The answers as one value ────────────────────────────────────────────────
 
 /**
- * Every guided-setup answer, held as ONE saveable value (Serializable, so the
- * rememberSaveable autoSaver bundles it). No-fabrication: an answer with no seed
- * starts unset (null) and Next stays blocked until the user picks it.
- *
- * Keypad buffers ([bwText] … [longestText]) are in the DISPLAY unit, exactly what
- * is shown and parsed. Losslessness: a seeded buffer shows the profile value at
- * display precision, and each `*Touched` flag flips true only when the user edits
- * that field, so an untouched Finish re-emits the seed double verbatim. Races and
- * meets: a null date = "No date yet"; a null [recentDistance] = "I don't know", and
- * its finish time is the digit buffer [raceDigits]. Calisthenics: null [equipment]
- * = unanswered (the core assumes everything); a null placement = "Not sure, start
- * easy". [weekdays] null = "Any days". [distanceChoice] is the distance unit picked
- * in the setup (null = the app setting), saved as the app setting only on Finish.
+ * Every guided-setup answer as ONE saveable value. An answer with no seed starts
+ * unset (null) and Next stays blocked until the user picks it. Keypad buffers
+ * ([bwText] … [longestText]) are in the display unit; a `*Touched` flag flips only
+ * when the user edits that field, so an untouched Finish re-sends the seed value
+ * exactly. Null means: a date "No date yet", [recentDistance] "I don't know",
+ * [equipment] unanswered, a placement "Not sure, start easy", [weekdays] "Any
+ * days", [distanceChoice] the app setting.
  */
 internal data class SetupAnswers(
     val modality: Modality?,
@@ -842,16 +830,11 @@ internal fun seedWeeklyRunKm(initial: ProfileDraft?, runStash: StashedRun?): Dou
     initial?.takeIf { it.runningDaysPerWeek > 0 && it.runningKmPerWeekSet }?.runningKmPerWeek ?: runStash?.km
 
 /**
- * An existing profile reverse-mapped into the wizard's answers (best-effort: the
- * profile stores per-side days, not the total the user first entered); every
- * answer unset on a first run ([initial] null). The setup opens on these (unless a
- * Focus switch adjusts them, [switchedAnswers]) and compares against them for
- * unsaved changes. [recordedRunLevel] is the shell's record of a Both profile's
- * running level; [runStash] the running answers kept while running was off (only
- * for a switch that turns running back on). Dates already passed are no longer a
- * target, so a re-run asks again. Buffers are in [distanceUnit]. A calisthenics
- * profile's placements are the answers naming its [currentRungs] (a pull-up rung
- * only while the kit has something to hang from).
+ * An existing profile mapped back into the wizard's answers; every answer unset on
+ * a first run ([initial] null). [recordedRunLevel] is a Both profile's running
+ * level; [runStash] the running answers kept while running was off. Past dates
+ * are dropped. Buffers are in [distanceUnit]. A calisthenics profile's placements
+ * name its [currentRungs] (a pull-up rung only while the kit can hang).
  */
 internal fun seedAnswers(
     initial: ProfileDraft?,
@@ -874,9 +857,9 @@ internal fun seedAnswers(
         // is a placeholder), so its question opens unanswered.
         liftFocus = initial?.takeIf { it.weeklySets > 0 }?.let { LiftFocus.of(it.liftGoal) },
         goalDistance = initial?.takeIf { it.runningDaysPerWeek > 0 }?.goalDistance,
-        bothPriority = if (both) initial?.concurrentGoal?.lead() else null,
+        bothPriority = if (both) initial.concurrentGoal.lead() else null,
         days = seedTotalDays(modality, initial),
-        liftSplit = if (both) initial?.liftDaysPerWeek ?: HYBRID_DEFAULT_LIFT_DAYS else null,
+        liftSplit = if (both) initial.liftDaysPerWeek ?: HYBRID_DEFAULT_LIFT_DAYS else null,
         weekdays = initial?.trainingWeekdays,
         level = level,
         // Without a recorded running level a Both profile seeds it from the shared one.
@@ -959,7 +942,7 @@ internal class SetupValues(
     distanceUnit: DistanceUnit,
     private val today: Long,
 ) {
-    val weeklyBounds = distanceBounds(0.0..WEEKLY_RUN_MAX_KM, distanceUnit)
+    val weeklyBounds = distanceBounds(0.0..WEEKLY_VOLUME_MAX_KM, distanceUnit)
     val longestBounds = distanceBounds(LONGEST_RUN_KM, distanceUnit)
     val bodyweightRange = bodyweightBounds(answers.weightUnit)
 
@@ -993,9 +976,7 @@ internal class SetupValues(
     val longestInvalid = answers.longestTouched && answers.longestText.isNotEmpty() && longestRunKm == null
 
     /** The recent race, once a distance has a real finish time. */
-    val recentRace: RecentRace? = answers.recentDistance?.let { d ->
-        raceTimeSec(answers.raceDigits)?.takeIf { plausibleRaceTime(d.km, it) }?.let { RecentRace(d.km, it) }
-    }
+    val recentRace: RecentRace? = recentRaceOf(answers.recentDistance, answers.raceDigits)
     val raceTimeInvalid = answers.recentDistance != null && answers.raceDigits.isNotEmpty() && recentRace == null
 
     val dayRange = dayOptions(answers.modality)

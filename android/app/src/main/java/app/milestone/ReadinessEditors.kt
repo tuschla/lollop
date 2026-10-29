@@ -1,26 +1,22 @@
 package app.milestone
 
+import androidx.annotation.ArrayRes
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringArrayResource
@@ -49,8 +45,8 @@ private val HrvMsRange = 1.0..300.0
  * Manual readiness entry. Surfaces every [ReadinessSignal], including the
  * medical-referral flags (Illness/RedS/CardiacRedFlag/BoneStress) that gate the
  * top of the safety ladder, so the core's safety layer is reachable from the
- * device. Signal semantics differ (z-scores, bpm deltas, %, 0/1 flags), so the
- * value stepper spans a deliberately wide range; the core interprets it.
+ * device. Signal semantics differ (z-scores, bpm deltas, %, 0/1 flags); the core
+ * interprets the value.
  */
 @Composable
 fun ReadinessEditor(
@@ -99,18 +95,98 @@ fun ReadinessEditor(
             )
         },
     ) {
-        ReadinessEditorBody(
-            signal = signal,
-            value = value,
-            observedAt = observedAt,
-            effortMin = effortMin,
-            firstRedFlag = firstRedFlag,
-            signalGroups = signalGroups,
-            onSignal = { signal = it; value = defaultReadinessValue(it); dirty = true },
-            onValue = { value = it; dirty = true },
-            onEffortMin = { effortMin = it; dirty = true },
-            onObservedAt = { observedAt = it; dirty = true },
-        )
+        FormCard {
+            // What a readiness signal is and what submitting one does; the
+            // coaching interpretation stays in the core.
+            Text(
+                stringResource(R.string.log_readiness_intro),
+                color = OnBgMuted,
+                style = Type.Caption,
+            )
+            // Picker order comes from the core's signal_groups metadata (ALL_SIGNALS
+            // order on the wire), so routine metrics, Soreness included, render
+            // together above the medical red-flag fence. Empty map (old core) falls
+            // back to the enum's declaration order.
+            val ordered = remember(signalGroups) {
+                signalGroups.keys
+                    .mapNotNull { name -> ReadinessSignal.entries.firstOrNull { it.name == name } }
+                    .ifEmpty { ReadinessSignal.entries.toList() }
+            }
+            val signalLabels = ordered.associateWith { stringResource(it.labelRes) }
+            EnumRow(
+                stringResource(R.string.log_field_signal),
+                ordered,
+                signal,
+                display = { signalLabels.getValue(it) },
+                // Fence the medical red-flag block off from the routine metrics
+                // above it, where the core's signal_groups says it starts.
+                divideBefore = { it == firstRedFlag },
+            ) {
+                signal = it
+                value = defaultReadinessValue(it)
+                dirty = true
+            }
+            // One-line neutral explainer for the selected signal: what it is, not
+            // what number triggers what (the value hints below cite thresholds,
+            // see [ValueSpec]).
+            Text(stringResource(signal.explainerRes), color = OnBgMuted, style = Type.Caption)
+            when {
+                signal.isBinaryFlag ->
+                    // A yes/no answer to a red-flag symptom question (the signal and
+                    // its explainer sit right above), so the switch is the affirmative.
+                    LabeledSwitchRow(stringResource(R.string.log_switch_yes_have), value > 0.0) {
+                        value = if (it) 1.0 else 0.0
+                        dirty = true
+                    }
+                signal == ReadinessSignal.Illness -> {
+                    val level = IllnessLevel.entries.lastOrNull { value >= it.value } ?: IllnessLevel.None
+                    val levelLabels = IllnessLevel.entries.associateWith { stringResource(it.labelRes) }
+                    // Whole-row option list, not segmented: the triage labels are too
+                    // long to segment and must not be abbreviated (safety-relevant).
+                    EnumRow(stringResource(R.string.log_field_severity), IllnessLevel.entries.toList(), level, display = { levelLabels.getValue(it) }) {
+                        value = it.value
+                        dirty = true
+                    }
+                }
+                else -> {
+                    // The whole value grid is visible and one tap picks any point,
+                    // negatives (z-scores, deltas) included, which the keypad can't type.
+                    val spec = continuousSpec(signal)
+                    FieldLabel(stringResource(R.string.log_field_value), String.format(Locale.US, spec.format, value))
+                    ScrollableScaleRow(
+                        spec.gridOptions(),
+                        value,
+                        { String.format(Locale.US, spec.format, it) },
+                        label = stringResource(signal.labelRes),
+                    ) {
+                        value = it
+                        dirty = true
+                    }
+                    // The unit and the point where the value starts to matter.
+                    Text(stringResource(spec.hint), color = OnBgMuted, style = Type.Caption)
+                }
+            }
+            // AerobicDecoupling is duration-gated (valid only >20 min, File 06): the
+            // core discards a reading with no duration, so the run length is sent too.
+            if (signal == ReadinessSignal.AerobicDecoupling) {
+                FieldLabel(stringResource(R.string.log_field_run_duration), stringResource(R.string.log_value_min, effortMin.toInt()))
+                ScrollableScaleRow(
+                    (0..DecouplingRunMaxMin step DecouplingRunStepMin).map { it.toDouble() },
+                    effortMin,
+                    { "${it.toInt()}" },
+                    label = stringResource(R.string.log_field_run_duration),
+                ) {
+                    effortMin = it
+                    dirty = true
+                }
+                Text(
+                    stringResource(R.string.log_decoupling_hint),
+                    color = OnBgMuted,
+                    style = Type.Caption,
+                )
+            }
+            ObservedAtRow(observedAt, withTime = false) { observedAt = it; dirty = true }
+        }
     }
 }
 
@@ -202,38 +278,33 @@ fun MorningCheckinSheet(
     val rhrValid = !hasRhr || rhrText.isEmpty() || (rhrParsed != null && rhrParsed in RestingHrBpmRange)
     val hrvValid = !hasHrv || hrvText.isEmpty() || (hrvParsed != null && hrvParsed in HrvMsRange)
     val savedMessage = stringResource(R.string.log_checkin_saved)
-    val bpm = stringResource(R.string.log_unit_bpm)
-    val ms = stringResource(R.string.log_unit_ms)
 
-    fun buffer() = if (active == CheckinField.RestingHr) rhrText else hrvText
-    fun setBuffer(v: String) = if (active == CheckinField.RestingHr) rhrText = v else hrvText = v
-    // Like the set keypad: the open keypad scrolls fully into view (its rows sat
-    // under the fade and Save), and its Done key folds it away.
-    val keypadRequester = remember { BringIntoViewRequester() }
-    LaunchedEffect(keypadOpen, active) {
-        if (keypadOpen) {
-            withFrameNanos { }
-            keypadRequester.bringIntoView()
+    fun activate(field: CheckinField) {
+        active = field
+        fresh = true
+        keypadOpen = true
+    }
+    // A watch number's toggle. Switching the keypad's field off re-routes the
+    // keypad to the other field (if shown), so it never types into a hidden one.
+    fun toggle(field: CheckinField, on: Boolean) {
+        if (field == CheckinField.RestingHr) hasRhr = on else hasHrv = on
+        dirty = true
+        val other = if (field == CheckinField.RestingHr) CheckinField.Hrv else CheckinField.RestingHr
+        val otherShown = if (field == CheckinField.RestingHr) hasHrv else hasRhr
+        if (on) {
+            activate(field)
+        } else if (active == field) {
+            keypadOpen = false
+            if (otherShown) {
+                active = other
+                fresh = true
+            }
         }
     }
-    val keypad: @Composable () -> Unit = {
-        Box(Modifier.bringIntoViewRequester(keypadRequester)) {
-            NumericKeypad(
-                onKey = { key ->
-                    setBuffer(editNumericBuffer(buffer(), key, fresh))
-                    fresh = false
-                    dirty = true
-                },
-                onBackspace = {
-                    setBuffer(buffer().dropLast(1))
-                    fresh = false
-                    dirty = true
-                },
-                // Resting HR and rMSSD are whole numbers.
-                allowDecimal = false,
-                onDone = { keypadOpen = false },
-            )
-        }
+    fun setText(field: CheckinField, text: String) {
+        if (field == CheckinField.RestingHr) rhrText = text else hrvText = text
+        fresh = false
+        dirty = true
     }
     // A scale or illness answer hands focus away from the watch numbers.
     fun answer(pick: () -> Unit) {
@@ -282,116 +353,53 @@ fun MorningCheckinSheet(
             // The core's order is kept (soreness, fatigue and stress run 5→1), so
             // one note says which way every row reads.
             Text(stringResource(R.string.log_checkin_scale_note), color = OnBgMuted, style = Type.Caption)
-            CheckinScaleRow(
-                "sleep",
-                stringResource(R.string.log_checkin_sleep),
-                ScaleHighGood,
-                stringResource(R.string.log_anchor_terrible),
-                stringResource(R.string.log_anchor_great),
-                stringArrayResource(R.array.rating_sleep_words),
-                sleep,
-                lastTimeHint(pastEcho?.sleep_quality),
-            ) { v -> answer { sleep = v } }
-            CheckinScaleRow(
-                "soreness",
-                stringResource(R.string.log_checkin_soreness),
-                ScaleHighBad,
-                stringResource(R.string.log_anchor_very_sore),
-                stringResource(R.string.log_anchor_none),
-                stringArrayResource(R.array.rating_soreness_words),
-                soreness,
-                lastTimeHint(pastEcho?.soreness),
-            ) { v -> answer { soreness = v } }
-            CheckinScaleRow(
-                "mood",
-                stringResource(R.string.log_checkin_mood),
-                ScaleHighGood,
-                stringResource(R.string.log_anchor_awful),
-                stringResource(R.string.log_anchor_great),
-                stringArrayResource(R.array.rating_mood_words),
-                mood,
-                lastTimeHint(pastEcho?.mood),
-            ) { v -> answer { mood = v } }
-            CheckinScaleRow(
-                "fatigue",
-                stringResource(R.string.log_checkin_fatigue),
-                ScaleHighBad,
-                stringResource(R.string.log_anchor_exhausted),
-                stringResource(R.string.log_anchor_fresh),
-                stringArrayResource(R.array.rating_fatigue_words),
-                fatigue,
-                lastTimeHint(pastEcho?.fatigue),
-            ) { v -> answer { fatigue = v } }
-            CheckinScaleRow(
-                "stress",
-                stringResource(R.string.log_checkin_stress),
-                ScaleHighBad,
-                stringResource(R.string.log_anchor_stressed),
-                stringResource(R.string.log_anchor_calm),
-                stringArrayResource(R.array.rating_stress_words),
-                stress,
-                lastTimeHint(pastEcho?.stress),
-            ) { v -> answer { stress = v } }
-
-            SwitchRow(stringResource(R.string.log_switch_add_rhr), hasRhr, stringResource(R.string.log_switch_rhr_hint)) {
-                hasRhr = it; dirty = true
-                // Toggle-off must also re-route the shared keypad: leaving
-                // `active` on the now-hidden field would silently type into it
-                // while the visible one never updates.
-                if (it) {
-                    active = CheckinField.RestingHr; fresh = true; keypadOpen = true
-                } else if (active == CheckinField.RestingHr) {
-                    keypadOpen = false
-                    if (hasHrv) {
-                        active = CheckinField.Hrv; fresh = true
+            CheckinItem.entries.forEach { item ->
+                val (value, past) = when (item) {
+                    CheckinItem.Sleep -> sleep to pastEcho?.sleep_quality
+                    CheckinItem.Soreness -> soreness to pastEcho?.soreness
+                    CheckinItem.Mood -> mood to pastEcho?.mood
+                    CheckinItem.Fatigue -> fatigue to pastEcho?.fatigue
+                    CheckinItem.Stress -> stress to pastEcho?.stress
+                }
+                CheckinScaleRow(item, value, lastTimeHint(past)) { v ->
+                    answer {
+                        when (item) {
+                            CheckinItem.Sleep -> sleep = v
+                            CheckinItem.Soreness -> soreness = v
+                            CheckinItem.Mood -> mood = v
+                            CheckinItem.Fatigue -> fatigue = v
+                            CheckinItem.Stress -> stress = v
+                        }
                     }
                 }
             }
-            if (hasRhr) {
-                KeypadValueField(
-                    stringResource(R.string.log_field_resting_hr), bpm, rhrText,
-                    active = keypadOpen && active == CheckinField.RestingHr,
+
+            for (field in CheckinField.entries) {
+                val rhr = field == CheckinField.RestingHr
+                WatchNumberRow(
+                    switchLabel = stringResource(if (rhr) R.string.log_switch_add_rhr else R.string.log_switch_add_hrv),
+                    switchHint = stringResource(if (rhr) R.string.log_switch_rhr_hint else R.string.log_switch_hrv_hint),
+                    shown = if (rhr) hasRhr else hasHrv,
+                    onToggle = { toggle(field, it) },
+                    label = stringResource(if (rhr) R.string.log_field_resting_hr else R.string.log_field_hrv),
+                    unit = stringResource(if (rhr) R.string.log_unit_bpm else R.string.log_unit_ms),
+                    text = if (rhr) rhrText else hrvText,
                     // Red only once something out-of-range is typed: an empty
                     // field isn't an error, it sends nothing.
-                    invalid = rhrText.isNotEmpty() && !rhrValid,
-                    min = RestingHrBpmRange.start, max = RestingHrBpmRange.endInclusive, format = "%.0f",
-                    adjustments = listOf(-1.0, 1.0),
-                    onActivate = { active = CheckinField.RestingHr; fresh = true; keypadOpen = true },
+                    invalid = if (rhr) !rhrValid else !hrvValid,
+                    range = if (rhr) RestingHrBpmRange else HrvMsRange,
+                    adjustments = if (rhr) listOf(-1.0, 1.0) else listOf(-1.0, 1.0, 5.0),
+                    lastValue = if (rhr) pastEcho?.resting_hr_bpm else pastEcho?.hrv_rmssd_ms,
+                    keypadOpen = keypadOpen && active == field,
+                    fresh = fresh,
+                    onActivate = { activate(field) },
                     // A ± chip sets a whole value; it needs no keypad, so it folds.
-                    onText = { rhrText = it; fresh = false; keypadOpen = false; dirty = true },
-                    hint = pastEcho?.resting_hr_bpm?.let {
-                        stringResource(R.string.log_checkin_last_unit, String.format(Locale.US, "%.0f", it), bpm)
-                    },
+                    onChip = { setText(field, it); keypadOpen = false },
+                    onBuffer = { setText(field, it) },
+                    onDone = { keypadOpen = false },
                 )
-                if (keypadOpen && active == CheckinField.RestingHr) keypad()
-            }
-            SwitchRow(stringResource(R.string.log_switch_add_hrv), hasHrv, stringResource(R.string.log_switch_hrv_hint)) {
-                hasHrv = it; dirty = true
-                if (it) {
-                    active = CheckinField.Hrv; fresh = true; keypadOpen = true
-                } else if (active == CheckinField.Hrv) {
-                    keypadOpen = false
-                    if (hasRhr) {
-                        active = CheckinField.RestingHr; fresh = true
-                    }
-                }
-            }
-            if (hasHrv) {
-                KeypadValueField(
-                    stringResource(R.string.log_field_hrv), ms, hrvText,
-                    active = keypadOpen && active == CheckinField.Hrv,
-                    invalid = hrvText.isNotEmpty() && !hrvValid,
-                    min = HrvMsRange.start, max = HrvMsRange.endInclusive, format = "%.0f",
-                    adjustments = listOf(-1.0, 1.0, 5.0),
-                    onActivate = { active = CheckinField.Hrv; fresh = true; keypadOpen = true },
-                    onText = { hrvText = it; fresh = false; keypadOpen = false; dirty = true },
-                    hint = pastEcho?.hrv_rmssd_ms?.let {
-                        stringResource(R.string.log_checkin_last_unit, String.format(Locale.US, "%.0f", it), ms)
-                    },
-                )
-                if (keypadOpen && active == CheckinField.Hrv) keypad()
                 // AUTOREG-6: the HRV baseline only means something from one source.
-                Text(stringResource(R.string.log_hrv_help), color = OnBgMuted, style = Type.Caption)
+                if (!rhr && hasHrv) Text(stringResource(R.string.log_hrv_help), color = OnBgMuted, style = Type.Caption)
             }
             if (!illnessPrompt) {
                 IllnessQuestion(illness, prompted = false) { v -> answer { illness = v } }
@@ -407,44 +415,89 @@ fun MorningCheckinSheet(
 private fun lastTimeHint(value: Int?): String? =
     value?.let { stringResource(R.string.log_checkin_last, "$it") }
 
+/** The five 1–5 wellness items of the morning check-in, in the core's order:
+ *  [options] is the drawn order (soreness, fatigue and stress run 5→1, worse end
+ *  first), [left]/[right] name the two ends and [words] holds the value words
+ *  (indexed value − 1). */
+private enum class CheckinItem(
+    @StringRes val label: Int,
+    val options: List<Int>,
+    @StringRes val left: Int,
+    @StringRes val right: Int,
+    @ArrayRes val words: Int,
+) {
+    Sleep(R.string.log_checkin_sleep, ScaleHighGood, R.string.log_anchor_terrible, R.string.log_anchor_great, R.array.rating_sleep_words),
+    Soreness(R.string.log_checkin_soreness, ScaleHighBad, R.string.log_anchor_very_sore, R.string.log_anchor_none, R.array.rating_soreness_words),
+    Mood(R.string.log_checkin_mood, ScaleHighGood, R.string.log_anchor_awful, R.string.log_anchor_great, R.array.rating_mood_words),
+    Fatigue(R.string.log_checkin_fatigue, ScaleHighBad, R.string.log_anchor_exhausted, R.string.log_anchor_fresh, R.array.rating_fatigue_words),
+    Stress(R.string.log_checkin_stress, ScaleHighBad, R.string.log_anchor_stressed, R.string.log_anchor_calm, R.array.rating_stress_words),
+}
+
 /**
- * One 1–5 wellness row for the morning check-in: a [RatingScale] in [options]
- * order (the core's own direction, so soreness/fatigue/stress run 5→1 with the
- * worse end on the left) with both ends named under it ([leftWord], [rightWord])
- * and the picked value's word from [words] (indexed value − 1) at the label's end.
- * [hint] is an earlier answer shown in the word slot while unanswered, never a
+ * One check-in [item] as a [RatingScale] with the picked value's word at the
+ * label's end. [hint] is an earlier answer shown while unanswered, never a
  * selection. The stored value is the number the core reads
- * (schema.rs::CheckinInput), whatever side it is drawn on. [key] is the stable,
- * untranslated item name its test tag "checkin-<key>" is built from.
+ * (schema.rs::CheckinInput), whatever side it is drawn on. Test tag
+ * "checkin-<item, lowercase>".
  */
 @Composable
-private fun CheckinScaleRow(
-    key: String,
-    label: String,
-    options: List<Int>,
-    leftWord: String,
-    rightWord: String,
-    words: Array<String>,
-    value: Int?,
-    hint: String?,
-    onValue: (Int) -> Unit,
-) {
-    val shown = options.associateWith { stringResource(R.string.rating_value_word, it, words.getOrElse(it - 1) { "" }) }
+private fun CheckinScaleRow(item: CheckinItem, value: Int?, hint: String?, onValue: (Int) -> Unit) {
+    val words = stringArrayResource(item.words)
+    val shown = item.options.associateWith { stringResource(R.string.rating_value_word, it, words.getOrElse(it - 1) { "" }) }
     RatingScale(
-        label = label,
-        values = options,
+        label = stringResource(item.label),
+        values = item.options,
         selected = value,
         onSelect = { picked -> picked?.let(onValue) },
-        startCaption = leftWord,
-        endCaption = rightWord,
+        startCaption = stringResource(item.left),
+        endCaption = stringResource(item.right),
         selectedText = { shown.getValue(it) },
         // FormCard spaces fields by Space.Md; the extra bottom padding makes the
         // gap to the next field Space.Lg.
         modifier = Modifier.padding(bottom = (Space.Lg - Space.Md).dp),
         clearable = false,
-        testTag = "checkin-$key",
+        testTag = "checkin-${item.name.lowercase()}",
         hint = hint,
     )
+}
+
+/** An optional watch number behind its toggle: the switch, and while [shown] a
+ *  whole-number keypad field with the earlier reading ([lastValue]) as its hint
+ *  and, while [keypadOpen], the keypad under it. */
+@Composable
+private fun WatchNumberRow(
+    switchLabel: String,
+    switchHint: String,
+    shown: Boolean,
+    onToggle: (Boolean) -> Unit,
+    label: String,
+    unit: String,
+    text: String,
+    invalid: Boolean,
+    range: ClosedFloatingPointRange<Double>,
+    adjustments: List<Double>,
+    lastValue: Double?,
+    keypadOpen: Boolean,
+    fresh: Boolean,
+    onActivate: () -> Unit,
+    onChip: (String) -> Unit,
+    onBuffer: (String) -> Unit,
+    onDone: () -> Unit,
+) {
+    LabeledSwitchRow(switchLabel, shown, switchHint, onCheckedChange = onToggle)
+    if (!shown) return
+    KeypadValueField(
+        label, unit, text,
+        active = keypadOpen,
+        invalid = text.isNotEmpty() && invalid,
+        min = range.start, max = range.endInclusive, format = "%.0f",
+        adjustments = adjustments,
+        onActivate = onActivate,
+        onText = onChip,
+        hint = lastValue?.let { stringResource(R.string.log_checkin_last_unit, String.format(Locale.US, "%.0f", it), unit) },
+    )
+    // Resting HR and rMSSD are whole numbers.
+    KeypadPanel(keypadOpen) { NumericKeypad(text, fresh, onBuffer, allowDecimal = false, onDone = onDone) }
 }
 
 /**
@@ -494,121 +547,10 @@ private fun IllnessQuestion(value: Int?, prompted: Boolean, onValue: (Int) -> Un
     }
 }
 
-@Composable
-private fun ReadinessEditorBody(
-    signal: ReadinessSignal,
-    value: Double,
-    observedAt: Long,
-    effortMin: Double,
-    firstRedFlag: ReadinessSignal,
-    signalGroups: Map<String, String>,
-    onSignal: (ReadinessSignal) -> Unit,
-    onValue: (Double) -> Unit,
-    onEffortMin: (Double) -> Unit,
-    onObservedAt: (Long) -> Unit,
-) {
-    FormCard {
-        // Plain-language framing so the picker isn't a wall of jargon: what a
-        // readiness signal IS and what submitting one does. Generic UI copy -
-        // the coaching interpretation stays entirely in the core.
-        Text(
-            stringResource(R.string.log_readiness_intro),
-            color = OnBgMuted,
-            style = Type.Caption,
-        )
-        // Picker order comes from the core's signal_groups metadata (ALL_SIGNALS
-        // order on the wire), so routine metrics — Soreness included — render
-        // together above the medical red-flag fence. Empty map (old core) falls
-        // back to the enum's declaration order.
-        val ordered = remember(signalGroups) {
-            signalGroups.keys
-                .mapNotNull { name -> ReadinessSignal.entries.firstOrNull { it.name == name } }
-                .ifEmpty { ReadinessSignal.entries.toList() }
-        }
-        // Reset the value to the newly-selected signal's sensible default: the core
-        // reads a flag signal as "present" only when value > 0 (Pain/RED-S/cardiac/
-        // bone-stress) and an Illness by severity band, so carrying over a 0.0 or a
-        // z-score would silently submit a *non-triggering* red flag, the opposite
-        // of what a user picking "Pain" intends.
-        val signalLabels = ordered.associateWith { stringResource(it.labelRes) }
-        EnumRow(
-            stringResource(R.string.log_field_signal),
-            ordered,
-            signal,
-            display = { signalLabels.getValue(it) },
-            // Fence the medical red-flag block off from the routine metrics
-            // above it: where the block starts comes from the core's
-            // signal_groups metadata (fallback: Pain, the first red flag).
-            divideBefore = { it == firstRedFlag },
-        ) {
-            onSignal(it)
-        }
-        // One-line neutral explainer for the selected signal: what it is, not
-        // what number triggers what (thresholds live in the core; the stepper
-        // hints below cite them separately, see the ValueSpec note).
-        Text(stringResource(signal.explainerRes), color = OnBgMuted, style = Type.Caption)
-        when {
-            signal.isBinaryFlag ->
-                // A bare "Present" reads as a neutral status; this is a yes/no answer to
-                // a red-flag symptom question (the signal + its explainer sit right
-                // above), so label the switch as the affirmative it is.
-                SwitchRow(stringResource(R.string.log_switch_yes_have), value > 0.0) { onValue(if (it) 1.0 else 0.0) }
-            signal == ReadinessSignal.Illness -> {
-                val level = IllnessLevel.entries.lastOrNull { value >= it.value } ?: IllnessLevel.None
-                val levelLabels = IllnessLevel.entries.associateWith { stringResource(it.labelRes) }
-                // Whole-row option list, not segmented: the triage labels ("Above-neck
-                // (no fever)", "Below-neck / fever") are too long to segment, and must
-                // not be abbreviated: the distinction is safety-relevant.
-                EnumRow(stringResource(R.string.log_field_severity), IllnessLevel.entries.toList(), level, display = { levelLabels.getValue(it) }) {
-                    onValue(it.value)
-                }
-            }
-            else -> {
-                // Tap-scale primitive, not a −/+ stepper: one tap picks a value,
-                // the whole value scale is visible and one tap picks any point
-                // on the signal's own grid, negatives (z-scores, deltas)
-                // included, which the numeric keypad can't express.
-                val spec = continuousSpec(signal)
-                FieldLabel(stringResource(R.string.log_field_value), String.format(Locale.US, spec.format, value))
-                ScrollableScaleRow(
-                    spec.gridOptions(),
-                    value,
-                    { String.format(Locale.US, spec.format, it) },
-                    label = stringResource(signal.labelRes),
-                ) { onValue(it) }
-                // The bare "Value" scale gives no clue what unit a z-score / bpm
-                // delta / ratio wants; the core interprets each signal differently,
-                // so spell out the unit and the point where it starts to matter.
-                spec.hint?.let { Text(stringResource(it), color = OnBgMuted, style = Type.Caption) }
-            }
-        }
-        // AerobicDecoupling is duration-gated (valid only >20 min, File 06): the
-        // core discards a reading with no duration, so capture the run length here
-        // and send it, rather than submitting a reading the engine silently drops.
-        if (signal == ReadinessSignal.AerobicDecoupling) {
-            // Tap-scale over 0–180 min (5-min steps), not a −/+ stepper: one tap
-            // picks the run length the decoupling reading needs.
-            FieldLabel(stringResource(R.string.log_field_run_duration), stringResource(R.string.log_value_min, effortMin.toInt()))
-            ScrollableScaleRow(
-                (0..DecouplingRunMaxMin step DecouplingRunStepMin).map { it.toDouble() },
-                effortMin,
-                { "${it.toInt()}" },
-                label = stringResource(R.string.log_field_run_duration),
-            ) { onEffortMin(it) }
-            Text(
-                stringResource(R.string.log_decoupling_hint),
-                color = OnBgMuted,
-                style = Type.Caption,
-            )
-        }
-        ObservedAtRow(observedAt, withTime = false) { onObservedAt(it) }
-    }
-}
-
 /**
- * Signals the core treats as a present/absent red flag (`value > 0` fires). For
- * these a numeric stepper is meaningless, and worse, its 0.0 default silently
- * records the *absence* of the flag, so the editor shows a plain on/off switch.
+ * Signals the core treats as a present/absent red flag (`value > 0` fires). A
+ * value scale's 0.0 default would record the *absence* of the flag, so the
+ * editor shows a plain on/off switch.
  */
 private val ReadinessSignal.isBinaryFlag: Boolean
     get() = this == ReadinessSignal.Pain ||
@@ -630,27 +572,20 @@ private fun defaultReadinessValue(signal: ReadinessSignal): Double = when {
 }
 
 /**
- * Stepper bounds/step/default for one continuous readiness signal. A single wide
- * range fits none of them: the core reads [ReadinessSignal.EstimatedOneRm] as a
- * ~0.9–1.05 ratio, [ReadinessSignal.Rpe] as a signed delta, RestingHr as a bpm
- * delta, others as z-scores or percents. Each maps to the thresholds in
- * autoreg.rs, so the stepper lands near where the signal actually triggers.
- *
- * On the threshold numbers in the hints: they are not a second copy of any
- * core verdict. They cite autoreg.rs *input* thresholds that the core does not
- * export on the bridge, shown BEFORE submission as a stepper affordance so the
- * user knows where a value becomes meaningful. Nothing keys off them; the
- * core's evidence-cited adjustment after submit stays authoritative. They stay
- * until the core exports its readiness thresholds, at which point they should
- * be rendered from the wire instead.
+ * Scale bounds/step/default for one continuous readiness signal, mapped to the
+ * autoreg.rs input thresholds so the scale lands near where the signal triggers:
+ * the core reads [ReadinessSignal.EstimatedOneRm] as a ~0.9–1.05 ratio,
+ * [ReadinessSignal.Rpe] as a signed delta, RestingHr as a bpm delta, others as
+ * z-scores or percents. Hint thresholds cite autoreg.rs inputs the bridge does
+ * not export.
  */
 private data class ValueSpec(
     val min: Double,
     val max: Double,
     val step: Double,
     val default: Double,
-    // Unit + threshold caption; null shows none.
-    @StringRes val hint: Int?,
+    // Unit + threshold caption.
+    @StringRes val hint: Int,
     val format: String = "%.1f",
 )
 
@@ -697,9 +632,9 @@ private fun continuousSpec(signal: ReadinessSignal): ValueSpec = when (signal) {
     // Soreness on the 1–7 Hooper scale; ≥6 downgrades intensity one level.
     ReadinessSignal.Soreness ->
         ValueSpec(1.0, 7.0, 1.0, 3.0, R.string.log_spec_soreness, "%.0f")
-    // Flags/Illness never reach continuousSpec; keep the branch total with a
-    // neutral fallback rather than crashing if a new signal is added upstream.
-    else -> ValueSpec(-5.0, 40.0, 0.5, 0.0, null)
+    ReadinessSignal.Pain, ReadinessSignal.Illness, ReadinessSignal.RedS,
+    ReadinessSignal.CardiacRedFlag, ReadinessSignal.BoneStress ->
+        error("$signal is not a continuous signal")
 }
 
 /**

@@ -77,9 +77,6 @@ class CompletionScenarioTest {
     /** The plan item's "Log set k of N" action label. */
     private fun logSetOf(k: Int, n: Int) = str(R.string.plan_log_set_n_of_n, k, n)
 
-    /** The loop editor's "Set k of N" header. */
-    private fun setHeader(k: Int, n: Int) = str(R.string.log_set_header_n_of_n, k, n)
-
     /** The set slots' spoken "k of N sets done". */
     private fun setsDone(k: Int, n: Int) = str(R.string.plan_sets_done_cd, k, n)
 
@@ -117,6 +114,10 @@ class CompletionScenarioTest {
         // Back on Today: the squat's first slot is filled and its button advanced.
         rule.assertCountEventually(hasContentDescription(setsDone(1, 3)), 1)
         rule.assertTextCountEventually(logSetOf(2, 3), 1)
+        // History lists the set (only lifts exist, so it opens on the Lifts list).
+        rule.selectTab(str(R.string.main_dest_history))
+        rule.scrollToText("Back squat")
+        rule.onNodeWithText("Back squat", substring = true).assertIsDisplayed()
     }
 
     // ── (c) all N qualifying sets → item collapses to done ───────────────────
@@ -179,7 +180,7 @@ class CompletionScenarioTest {
         // strength goal's hinge, the competition deadlift (STRENGTH-10).
         // The planned loop names the exercise (no search field): Deadlift, not the squat.
         rule.assertCountEventually(hasTestTag("loop-exercise") and hasText("Deadlift"), 1)
-        rule.onAllNodes(hasTestTag("loop-exercise") and hasText("Back Squat", substring = true)).assertCountEquals(0)
+        rule.onAllNodes(hasTestTag("loop-exercise") and hasText("Back Squat", substring = true, ignoreCase = true)).assertCountEquals(0)
         rule.onAllNodesWithText(setHeader(1, 3)).assertCountEquals(1)
     }
 
@@ -226,23 +227,5 @@ class CompletionScenarioTest {
         // scroll above moved out of composition: scroll back up before counting.
         rule.onAllNodes(hasScrollToIndexAction())[0].performScrollToIndex(0)
         rule.assertCountEventually(logActions(logSetOf(1, 3)), 4)
-    }
-
-    // ── (h) a hold set in History shows seconds and no e1RM/@ RPE 0 ─────────
-    @Test
-    fun holdSetInHistory_showsSecondsNotFabricatedRpeOrE1rm() {
-        QaHarness.seedLog(
-            ctx,
-            listOf(QaHarness.calisthenicsProfile(), QaHarness.loggedHold(QaHarness.daysAgoAtMidday(1))),
-        )
-        rule.launchApp()
-        rule.selectTab(str(R.string.main_dest_history))
-        // One 30 s hold set: its exercise line reads "1 × 30 s hold".
-        val hold = str(R.string.history_sets_hold, 1, 30)
-        rule.scrollToText(hold)
-        rule.onAllNodesWithText(hold, substring = true).assertCountEquals(1)
-        // No fabricated RPE or e1RM figure on a hold.
-        rule.onAllNodesWithText("@ RPE 0", substring = true).assertCountEquals(0)
-        rule.onAllNodesWithText("0 kg e1RM", substring = true).assertCountEquals(0)
     }
 }

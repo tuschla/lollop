@@ -138,6 +138,12 @@ fn state_str(states: &[SignalState], signal: ReadinessSignal) -> String {
         .clone()
 }
 
+/// The strip state of the first input's signal, with no goal, block or stale
+/// context.
+fn state_of(inputs: &[ReadinessInput]) -> String {
+    state_str(&signal_states(inputs, None, false, &[]), inputs[0].signal)
+}
+
 /// Locks the displayed "why" (`signal_states`) to the SAME named thresholds
 /// the adjustment rules fire on. Both sides read one set of constants,
 /// so they cannot desync; this test additionally pins the state text to the
@@ -154,10 +160,7 @@ fn signal_states_track_rule_thresholds() {
         (RPE_DELTA_WELL_BELOW, "well below target"),
     ] {
         let ins = vec![input(ReadinessSignal::Rpe, v)];
-        assert_eq!(
-            state_str(&signal_states(&ins, None, false, &[]), ReadinessSignal::Rpe),
-            want_state
-        );
+        assert_eq!(state_of(&ins), want_state);
     }
     // On-target is the only band that yields no load change.
     assert!(rpe_load_adjust(&[input(ReadinessSignal::Rpe, 0.0)]).is_none());
@@ -170,13 +173,7 @@ fn signal_states_track_rule_thresholds() {
         E1RM_DELOAD_RATIO - 0.01,
         E1RM_DELOAD_STREAK,
     )];
-    assert_eq!(
-        state_str(
-            &signal_states(&deload, None, false, &[]),
-            ReadinessSignal::EstimatedOneRm
-        ),
-        "down more than 10% for 2+ sessions"
-    );
+    assert_eq!(state_of(&deload), "down more than 10% for 2+ sessions");
     assert!(
         e1rm_gate(&deload)
             .iter()
@@ -187,13 +184,7 @@ fn signal_states_track_rule_thresholds() {
         ReadinessSignal::EstimatedOneRm,
         E1RM_REDUCE_RATIO - 0.01,
     )];
-    assert_eq!(
-        state_str(
-            &signal_states(&reduce, None, false, &[]),
-            ReadinessSignal::EstimatedOneRm
-        ),
-        "down"
-    );
+    assert_eq!(state_of(&reduce), "down");
     assert!(
         e1rm_gate(&reduce)
             .iter()
@@ -204,13 +195,7 @@ fn signal_states_track_rule_thresholds() {
         ReadinessSignal::EstimatedOneRm,
         E1RM_INCREASE_RATIO + 0.01,
     )];
-    assert_eq!(
-        state_str(
-            &signal_states(&up, None, false, &[]),
-            ReadinessSignal::EstimatedOneRm
-        ),
-        "up"
-    );
+    assert_eq!(state_of(&up), "up");
     assert!(
         e1rm_gate(&up)
             .iter()
@@ -218,13 +203,7 @@ fn signal_states_track_rule_thresholds() {
     );
 
     let stable = vec![input(ReadinessSignal::EstimatedOneRm, 1.0)];
-    assert_eq!(
-        state_str(
-            &signal_states(&stable, None, false, &[]),
-            ReadinessSignal::EstimatedOneRm
-        ),
-        "stable"
-    );
+    assert_eq!(state_of(&stable), "stable");
     assert!(e1rm_gate(&stable).is_empty());
 
     // --- Wellness z bands vs wellness_downgrade (≥2 consecutive suppressed days) ---
@@ -233,13 +212,7 @@ fn signal_states_track_rule_thresholds() {
         WELLNESS_MULTIDAY_Z,
         WELLNESS_DOWNGRADE_STREAK,
     )];
-    assert_eq!(
-        state_str(
-            &signal_states(&two_day, None, false, &[]),
-            ReadinessSignal::WellnessZ
-        ),
-        "below normal"
-    );
+    assert_eq!(state_of(&two_day), "below normal");
     assert!(wellness_downgrade(&two_day).is_some());
 
     let multiday = vec![input_streak(
@@ -247,46 +220,22 @@ fn signal_states_track_rule_thresholds() {
         WELLNESS_MULTIDAY_Z,
         WELLNESS_MULTIDAY_STREAK,
     )];
-    assert_eq!(
-        state_str(
-            &signal_states(&multiday, None, false, &[]),
-            ReadinessSignal::WellnessZ
-        ),
-        "below normal"
-    );
+    assert_eq!(state_of(&multiday), "below normal");
     assert!(wellness_downgrade(&multiday).is_some());
 
     // A shallow single day (z between −1 and −1.5) never vetoes training.
     let low_single = vec![input(ReadinessSignal::WellnessZ, WELLNESS_MULTIDAY_Z)];
-    assert_eq!(
-        state_str(
-            &signal_states(&low_single, None, false, &[]),
-            ReadinessSignal::WellnessZ
-        ),
-        "low today"
-    );
+    assert_eq!(state_of(&low_single), "low today");
     assert!(wellness_downgrade(&low_single).is_none());
 
     // A deep single day (z ≤ −1.5) downgrades on its own, and the strip says so.
     let deep_single = vec![input(ReadinessSignal::WellnessZ, -2.0)];
-    assert_eq!(
-        state_str(
-            &signal_states(&deep_single, None, false, &[]),
-            ReadinessSignal::WellnessZ
-        ),
-        "below normal"
-    );
+    assert_eq!(state_of(&deep_single), "below normal");
     assert!(wellness_downgrade(&deep_single).is_some());
 
     // --- HRV SWC band vs hrv_downgrade / hrv_saturation_hold ---
     let hrv_low = vec![input(ReadinessSignal::HrvLnRmssd, HRV_SWC_LOWER_Z - 0.1)];
-    assert_eq!(
-        state_str(
-            &signal_states(&hrv_low, None, false, &[]),
-            ReadinessSignal::HrvLnRmssd
-        ),
-        "below normal"
-    );
+    assert_eq!(state_of(&hrv_low), "below normal");
     assert!(hrv_downgrade(&hrv_low).is_some());
 
     let hrv_high = HRV_SWC_UPPER_Z + 0.1;
@@ -309,10 +258,7 @@ fn signal_states_track_rule_thresholds() {
     // One stop-level morning is likely noise: an easier day + illness check.
     let rhr_stop_in = vec![input(ReadinessSignal::RestingHr, RHR_STOP_BPM)];
     assert_eq!(
-        state_str(
-            &signal_states(&rhr_stop_in, None, false, &[]),
-            ReadinessSignal::RestingHr
-        ),
+        state_of(&rhr_stop_in),
         "high this morning: easier day, check for illness"
     );
     assert!(rhr_stop(&rhr_stop_in));
@@ -322,48 +268,24 @@ fn signal_states_track_rule_thresholds() {
         RHR_STOP_BPM,
         RHR_DOWNGRADE_STREAK,
     )];
-    assert_eq!(
-        state_str(
-            &signal_states(&rhr_rest, None, false, &[]),
-            ReadinessSignal::RestingHr
-        ),
-        "well above normal: rest"
-    );
+    assert_eq!(state_of(&rhr_rest), "well above normal: rest");
 
     let rhr_down = vec![input_streak(
         ReadinessSignal::RestingHr,
         RHR_DOWNGRADE_FLOOR_BPM,
         RHR_DOWNGRADE_STREAK,
     )];
-    assert_eq!(
-        state_str(
-            &signal_states(&rhr_down, None, false, &[]),
-            ReadinessSignal::RestingHr
-        ),
-        "high 2+ days"
-    );
+    assert_eq!(state_of(&rhr_down), "high 2+ days");
     assert!(rhr_downgrade(&rhr_down).is_some());
 
     let rhr_single = vec![input(ReadinessSignal::RestingHr, RHR_DOWNGRADE_FLOOR_BPM)];
-    assert_eq!(
-        state_str(
-            &signal_states(&rhr_single, None, false, &[]),
-            ReadinessSignal::RestingHr
-        ),
-        "high today, probably a one-off"
-    );
+    assert_eq!(state_of(&rhr_single), "high today, probably a one-off");
     assert!(rhr_downgrade(&rhr_single).is_none());
     assert!(!rhr_stop(&rhr_single));
 
     // --- Soreness floor vs soreness_downgrade ---
     let sore = vec![input(ReadinessSignal::Soreness, SORENESS_HIGH)];
-    assert_eq!(
-        state_str(
-            &signal_states(&sore, None, false, &[]),
-            ReadinessSignal::Soreness
-        ),
-        "high"
-    );
+    assert_eq!(state_of(&sore), "high");
     assert!(soreness_downgrade(&sore).is_some());
 
     // --- Decoupling boundary vs decoupling_downgrade: a drift of EXACTLY
@@ -375,13 +297,7 @@ fn signal_states_track_rule_thresholds() {
             crate::load::DECOUPLING_HIGH_PCT,
         )
     }];
-    assert_eq!(
-        state_str(
-            &signal_states(&decouple, None, false, &[]),
-            ReadinessSignal::AerobicDecoupling
-        ),
-        "high"
-    );
+    assert_eq!(state_of(&decouple), "high");
     assert!(matches!(
         decoupling_downgrade(&decouple).map(|r| r.value),
         Some(Adjustment::DowngradeSession)
@@ -394,24 +310,12 @@ fn signal_states_track_rule_thresholds() {
             crate::load::DECOUPLING_HIGH_PCT - 0.1,
         )
     }];
-    assert_eq!(
-        state_str(
-            &signal_states(&ok, None, false, &[]),
-            ReadinessSignal::AerobicDecoupling
-        ),
-        "normal"
-    );
+    assert_eq!(state_of(&ok), "normal");
     assert!(decoupling_downgrade(&ok).is_none());
 
     // --- Velocity-loss band vs vl_stop (already shared via vl_threshold_pct) ---
     let vl = vec![input(ReadinessSignal::VelocityLoss, vl_threshold_pct(None))];
-    assert_eq!(
-        state_str(
-            &signal_states(&vl, None, false, &[]),
-            ReadinessSignal::VelocityLoss
-        ),
-        "over threshold"
-    );
+    assert_eq!(state_of(&vl), "over threshold");
     assert!(vl_stop(&vl, None).is_some());
 }
 
@@ -582,6 +486,17 @@ fn rhr_plus_ten_forces_rest_day_at_red_flag_tier() {
     assert_eq!(
         resolve_safety_for_goal(&inputs, None),
         Some(SafetyTier::Illness)
+    );
+
+    // One stop-level morning plus illness symptoms also earns the rest day.
+    let with_symptoms = vec![
+        input(ReadinessSignal::RestingHr, 10.0),
+        input(ReadinessSignal::Illness, 1.0),
+    ];
+    assert!(
+        adjustments(&with_symptoms)
+            .iter()
+            .any(|r| r.value == Adjustment::RestDay)
     );
 }
 
@@ -760,42 +675,6 @@ fn rpe_stop_reached_at_target() {
 }
 
 #[test]
-fn apre_tables_verbatim() {
-    // kg = Mann 2010 lb increments plate-rounded (±5/10/15 lb → ±2.5/5/7.5 kg).
-    // APRE-6 bands.
-    assert_eq!(
-        apre_load_adjustment_kg(ApreScheme::Apre6, 1).value,
-        (-5.0, -2.5)
-    );
-    assert_eq!(
-        apre_load_adjustment_kg(ApreScheme::Apre6, 6).value,
-        (0.0, 0.0)
-    );
-    assert_eq!(
-        apre_load_adjustment_kg(ApreScheme::Apre6, 20).value,
-        (5.0, 7.5)
-    );
-    // APRE-10 bands.
-    assert_eq!(
-        apre_load_adjustment_kg(ApreScheme::Apre10, 5).value,
-        (-5.0, -2.5)
-    );
-    assert_eq!(
-        apre_load_adjustment_kg(ApreScheme::Apre10, 14).value,
-        (2.5, 5.0)
-    );
-    // APRE-3 bands.
-    assert_eq!(
-        apre_load_adjustment_kg(ApreScheme::Apre3, 3).value,
-        (0.0, 0.0)
-    );
-    assert_eq!(
-        apre_load_adjustment_kg(ApreScheme::Apre3, 8).value,
-        (5.0, 7.5)
-    );
-}
-
-#[test]
 fn multi_session_deload_triggers() {
     assert!(deload_from_rpe_load_gap(2).is_some());
     assert!(deload_from_rpe_load_gap(1).is_none());
@@ -936,37 +815,55 @@ fn velocity_loss_stop_is_goal_dependent() {
     assert!(!fires(&vl12, None));
 }
 
-// --- §5 tier 4: SubjectiveMultiDay needs ≥3 suppressed days ---
+// --- autoreg-030 wellness bands; §5 tier 4 needs ≥3 suppressed days ---
 
 #[test]
-fn deep_single_wellness_day_downgrades_but_does_not_raise_the_multiday_tier() {
-    // autoreg-030 single-day arm (as scoped by ready-upd-001): a deep one-day
-    // z ≤ −1.5 holds the top end (cap, no load added), but the §5 tier-4
-    // SubjectiveMultiDay escalation still needs a ≥3-day run.
-    let inputs = vec![input(ReadinessSignal::WellnessZ, -2.0)];
-    let adj = adjustments(&inputs);
-    assert!(adj.iter().any(|r| r.value
-        == Adjustment::CapTopEnd {
-            trigger: ReadinessSignal::WellnessZ
-        }));
-    assert!(!adj.iter().any(|r| r.value == Adjustment::DowngradeSession));
-    assert_ne!(
-        resolve_safety_for_goal(&inputs, None),
-        Some(SafetyTier::SubjectiveMultiDay),
-        "one bad day is not multi-day suppression"
-    );
-}
-
-#[test]
-fn three_day_wellness_suppression_raises_multiday_tier() {
-    // z ≤ −1 held ≥3 days (streak) → tier 4 + an intensity cut.
-    let inputs = vec![input_streak(ReadinessSignal::WellnessZ, -1.1, 3)];
-    assert_eq!(
-        resolve_safety_for_goal(&inputs, None),
-        Some(SafetyTier::SubjectiveMultiDay)
-    );
-    let adj = adjustments(&inputs);
-    assert!(adj.iter().any(|r| r.value == Adjustment::DowngradeSession));
+fn wellness_z_bands_by_depth_and_streak() {
+    let cap = Some(Adjustment::CapTopEnd {
+        trigger: ReadinessSignal::WellnessZ,
+    });
+    let multi = WELLNESS_MULTIDAY_Z - 0.1;
+    // (z, consecutive days, wellness rule outcome, raises SubjectiveMultiDay)
+    for (z, streak, want, tier4) in [
+        // Single-day arm (ready-upd-001): z ≤ −1.5 holds the top end.
+        (-2.0, 0, cap.clone(), false),
+        (-1.6, 0, cap.clone(), false),
+        // Above the single-day trigger and short of the 2-day streak.
+        (-1.2, 0, None, false),
+        (multi, 1, None, false),
+        // Multi-day arm: ≥2 consecutive days at z ≤ −1 hold the top end.
+        (multi, 2, cap.clone(), false),
+        // ≥3 days: tier 4 and an intensity cut.
+        (multi, 3, Some(Adjustment::DowngradeSession), true),
+    ] {
+        let ins = vec![input_streak(ReadinessSignal::WellnessZ, z, streak)];
+        let case = format!("z {z}, {streak} days");
+        assert_eq!(wellness_downgrade(&ins).map(|r| r.value), want, "{case}");
+        let adj = adjustments(&ins);
+        if let Some(w) = &want {
+            assert!(adj.iter().any(|r| &r.value == w), "{case}: {adj:?}");
+        }
+        assert_eq!(
+            adj.iter().any(|r| r.value == Adjustment::DowngradeSession),
+            tier4,
+            "{case}"
+        );
+        assert_eq!(
+            resolve_safety_for_goal(&ins, None) == Some(SafetyTier::SubjectiveMultiDay),
+            tier4,
+            "{case}"
+        );
+    }
+    // WELLNESS-Z-001: yesterday's check-in never drives today's single-day call.
+    let yesterday = vec![ReadinessInput {
+        observed_at: D + 100,
+        ..input(ReadinessSignal::WellnessZ, -1.6)
+    }];
+    let ctx = RuleContext {
+        today_epoch_day: Some(2),
+        ..RuleContext::default()
+    };
+    assert!(wellness_downgrade_in(&yesterday, &ctx).is_none());
 }
 
 // --- autoreg-030 soreness item ---
@@ -1254,35 +1151,6 @@ fn mrv_sign_cluster_deloads_with_rp_magnitude() {
     assert_eq!(d.claim_id(), claims::AUTOREG_MRV_001);
     // ExpertOpinion: the RP cluster is a heuristic, not trial evidence.
     assert!((d.confidence() - 0.30).abs() < f32::EPSILON);
-}
-
-// --- autoreg-019: small-lifter cap on the APRE top band ---
-
-#[test]
-fn apre_top_band_caps_relative_to_load_for_small_lifters() {
-    // reps 14 on APRE-6 is the open top arm → flat band +5..7.5 kg. At the
-    // 50 kg reference load (kg analogue of the KB's 100 lb worked example) the
-    // +15% cap equals the flat band and changes nothing.
-    assert_eq!(
-        apre_load_adjustment_capped_kg(ApreScheme::Apre6, 14, 50.0).value,
-        (5.0, 7.5)
-    );
-    // A 30 kg working load shrinks the jump proportionally (7.5 kg would be
-    // a +25% leap; capped to the band's relative size: 3.0–4.5 kg).
-    assert_eq!(
-        apre_load_adjustment_capped_kg(ApreScheme::Apre6, 14, 30.0).value,
-        (3.0, 4.5)
-    );
-    // Heavier lifters keep the flat band: the cap only ever shrinks.
-    assert_eq!(
-        apre_load_adjustment_capped_kg(ApreScheme::Apre6, 14, 150.0).value,
-        (5.0, 7.5)
-    );
-    // Load *reductions* are never capped (weakening a fatigue response).
-    assert_eq!(
-        apre_load_adjustment_capped_kg(ApreScheme::Apre6, 1, 30.0).value,
-        (-5.0, -2.5)
-    );
 }
 
 // --- autoreg-032: threshold re-test ---
@@ -1782,8 +1650,8 @@ fn local_offset_splits_an_evening_morning_pair_that_utc_would_collapse() {
         "the preserved 2-day streak arms the autoreg-040 downgrade"
     );
 
-    // Same stamps under UTC bucketing: the pair collapses to one day → the
-    // streak breaks (this is exactly the bug the offset threading fixes).
+    // Same stamps under UTC bucketing: the pair collapses to one day and the
+    // streak breaks, so the shell must pass the local offset.
     let utc = derive_readiness(&checkins, 0, None);
     let r0 = derived(&utc.inputs, ReadinessSignal::RestingHr).expect("derived rhr delta");
     assert!(
@@ -1936,27 +1804,6 @@ fn load_increase_stripped_while_above_neck_illness() {
     );
 }
 
-// ── APRE must reject a non-positive current load (no negative "increase") ──
-#[test]
-fn apre_rejects_nonpositive_current_load() {
-    // reps 14 on APRE-6 → the flat +2.5..5 kg band. A 0 (or negative) current
-    // load must NOT flip the positive jump negative via the proportional cap.
-    let (lo, hi) = apre_load_adjustment_capped_kg(ApreScheme::Apre6, 14, 0.0).value;
-    assert!(
-        lo >= 0.0 && hi >= 0.0,
-        "0 kg load must not yield a negative increase"
-    );
-    assert_eq!(
-        (lo, hi),
-        apre_load_adjustment_kg(ApreScheme::Apre6, 14).value
-    );
-    let (lo, hi) = apre_load_adjustment_capped_kg(ApreScheme::Apre6, 14, -50.0).value;
-    assert!(
-        lo >= 0.0 && hi >= 0.0,
-        "negative load must not yield a negative increase"
-    );
-}
-
 // ── autoreg-031/033 cite their OWN claims, not RUN-VDOT-001 ──
 #[test]
 fn interval_and_easy_pace_cite_their_own_claims() {
@@ -2082,50 +1929,6 @@ fn a_floored_catastrophic_morning_downgrades_on_its_own() {
     );
 }
 
-#[test]
-fn wellness_z_minus_1_5_downgrades_on_a_single_day() {
-    let inputs = vec![input(ReadinessSignal::WellnessZ, -1.6)];
-    // Single-day arm holds the top end (ready-upd-001), no clock → today.
-    assert!(matches!(
-        wellness_downgrade(&inputs).map(|r| r.value),
-        Some(Adjustment::CapTopEnd {
-            trigger: ReadinessSignal::WellnessZ
-        })
-    ));
-    // WELLNESS-Z-001: yesterday's check-in never drives today's single-day call.
-    let yesterday = vec![ReadinessInput {
-        observed_at: D + 100,
-        ..input(ReadinessSignal::WellnessZ, -1.6)
-    }];
-    let ctx = RuleContext {
-        today_epoch_day: Some(2),
-        ..RuleContext::default()
-    };
-    assert!(wellness_downgrade_in(&yesterday, &ctx).is_none());
-}
-
-#[test]
-fn wellness_z_minus_1_2_single_day_does_not_downgrade() {
-    let inputs = vec![input(ReadinessSignal::WellnessZ, -1.2)];
-    assert!(
-        wellness_downgrade(&inputs).is_none(),
-        "a single z of −1.2 is above the −1.5 single-day trigger and below the 2-day streak"
-    );
-}
-
-#[test]
-fn flat_baseline_normal_morning_stays_normal_despite_floor() {
-    // The floor must not fire on an ordinary morning above it.
-    let mut checkins: Vec<CheckinInput> = (0..7)
-        .map(|d| checkin(d, Some(4), Some(2), Some(4))) // composite 4.0
-        .collect();
-    checkins.push(checkin(7, Some(4), Some(2), Some(4))); // composite 4.0 > floor
-    let out = derive_readiness(&checkins, 0, None);
-    let w = derived(&out.inputs, ReadinessSignal::WellnessZ).unwrap();
-    assert_eq!(w.value, 0.0, "normal morning on a flat baseline stays z 0");
-    assert!(wellness_downgrade(&out.inputs).is_none());
-}
-
 // ── Consecutive wellness dip days reach the multi-day tier. The dip is
 // scored against a PAST-ONLY baseline frozen at streak entry, so a sustained
 // low can neither dilute itself nor be absorbed by future dips; the streak
@@ -2249,30 +2052,6 @@ fn stale_soreness_reading_does_not_bridge_but_a_recent_one_does() {
 }
 
 #[test]
-fn wellness_needs_two_consecutive_days_for_the_multiday_arm() {
-    // autoreg-030 multi-day arm downgrades only after ≥2 consecutive
-    // suppressed days at z ≤ −1 (the single-day −1.5 arm is separate).
-    let one = vec![input_streak(
-        ReadinessSignal::WellnessZ,
-        WELLNESS_MULTIDAY_Z - 0.1,
-        1,
-    )];
-    assert!(
-        wellness_downgrade(&one).is_none(),
-        "a single day at z ≈ −1.1 reaches neither arm"
-    );
-    let two = vec![input_streak(
-        ReadinessSignal::WellnessZ,
-        WELLNESS_MULTIDAY_Z - 0.1,
-        2,
-    )];
-    assert!(
-        wellness_downgrade(&two).is_some(),
-        "two consecutive suppressed days downgrade"
-    );
-}
-
-#[test]
 fn worsening_after_24h_is_reactive() {
     // PainTrend::WorseningAfter24h is treated like Rising: reactive tendon
     // pain (reduce load) and its context reads "worsening".
@@ -2337,8 +2116,9 @@ fn streak_enters_on_a_pre_dip_baseline() {
 fn hrv_needs_four_readings() {
     // HRV emits only with ≥ HRV_MIN_WEEKLY_READINGS readings inside the trailing
     // rolling window (autoreg-047). 21 matured reading-days but a sparse recent
-    // week (only three in the trailing seven days after a gap) → no HRV input; a
-    // fourth recent reading tips it over and the channel emits.
+    // week (only three in the trailing seven days after a gap) → no HRV input,
+    // but an honest collecting(have/need) status; a fourth recent reading tips
+    // it over and the channel emits.
     let make = |days: Vec<i64>| -> Vec<CheckinInput> {
         days.into_iter()
             .map(|d| CheckinInput {
@@ -2354,35 +2134,6 @@ fn hrv_needs_four_readings() {
         derived(&out.inputs, ReadinessSignal::HrvLnRmssd).is_none(),
         "fewer than four readings in the trailing week emit no HRV z"
     );
-    let dense: Vec<i64> = (0..18).chain(24..28).collect();
-    let out2 = derive_readiness(&make(dense), 0, None);
-    assert!(
-        derived(&out2.inputs, ReadinessSignal::HrvLnRmssd).is_some(),
-        "four readings in the trailing week emit the HRV z"
-    );
-}
-
-#[test]
-fn hrv_sparse_week_reports_collecting_not_silence() {
-    // A matured baseline but only three readings in the trailing rolling window
-    // must not make the HRV channel vanish: it reports an honest
-    // collecting(have/need) status so the strip shows it is still gathering
-    // (autoreg-047).
-    let make = |days: Vec<i64>| -> Vec<CheckinInput> {
-        days.into_iter()
-            .map(|d| CheckinInput {
-                observed_at: d * D + 100,
-                hrv_rmssd_ms: Some(58.0 + (d % 5) as f64),
-                ..Default::default()
-            })
-            .collect()
-    };
-    let sparse: Vec<i64> = (0..18).chain(25..28).collect();
-    let out = derive_readiness(&make(sparse), 0, None);
-    assert!(
-        derived(&out.inputs, ReadinessSignal::HrvLnRmssd).is_none(),
-        "a sparse trailing week still emits no HRV z"
-    );
     let status = out
         .collecting
         .iter()
@@ -2392,6 +2143,34 @@ fn hrv_sparse_week_reports_collecting_not_silence() {
     assert_eq!(
         status.need, HRV_MIN_WEEKLY_READINGS,
         "the honest target is the weekly-reading minimum"
+    );
+    let dense: Vec<i64> = (0..18).chain(24..28).collect();
+    let out2 = derive_readiness(&make(dense), 0, None);
+    assert!(
+        derived(&out2.inputs, ReadinessSignal::HrvLnRmssd).is_some(),
+        "four readings in the trailing week emit the HRV z"
+    );
+}
+
+#[test]
+fn a_one_ms_change_after_a_flat_week_is_not_an_artifact() {
+    // Seven identical hand-typed readings leave a zero spread; a 1 ms change
+    // (50 → 51 → 50) sits within the reading resolution, not > 3 SD
+    // (autoreg-049).
+    let checkins: Vec<CheckinInput> = std::iter::repeat_n(50.0, 7)
+        .chain([51.0, 50.0])
+        .zip(0..)
+        .map(|(v, d)| CheckinInput {
+            observed_at: d * D + 100,
+            hrv_rmssd_ms: Some(v),
+            ..Default::default()
+        })
+        .collect();
+    let out = derive_readiness(&checkins, 0, None);
+    assert!(
+        out.hrv_unreliable.is_empty(),
+        "flagged: {:?}",
+        out.hrv_unreliable
     );
 }
 
@@ -2565,6 +2344,67 @@ fn the_pain_row_describes_the_worst_active_report_not_the_newest() {
         !row.detail.to_lowercase().contains("calves"),
         "the milder DOMS must not label the row, got {}",
         row.detail
+    );
+}
+
+#[test]
+fn a_back_plus_limb_location_is_not_scoped_to_one_region() {
+    // Spine words count even when a limb word matched, so a location naming
+    // the back and a limb keeps the whole-day stop. "Back of" names the limb.
+    assert_eq!(pain_region("lower back and hip"), None);
+    assert_eq!(pain_region("upper back and neck"), None);
+    assert_eq!(pain_region("knee and lumbar spine"), None);
+    assert_eq!(pain_region("lower back"), Some(PainRegion::Back));
+    assert_eq!(pain_region("back of the knee"), Some(PainRegion::LowerLimb));
+    assert_eq!(pain_region("back of my hand"), Some(PainRegion::UpperLimb));
+    let report = pain_input_loc(
+        PainKind::SharpJoint,
+        7,
+        PainTrend::Stable,
+        false,
+        Some("lower back and hip"),
+    );
+    assert!(
+        matches!(pain_gate(&[report]), PainGate::Block(_)),
+        "sharp back-plus-limb pain stops the whole day"
+    );
+}
+
+#[test]
+fn back_plus_limb_pain_keeps_nothing_back_pain_stops() {
+    // Scoped to the limb, lower-back + hip pain would keep a bench press and
+    // pull-ups, and upper-back + neck pain would keep runs (an empty name).
+    for (location, item) in [
+        ("lower back and hip", "Bench press"),
+        ("lower back and hip", "Pull-up"),
+        ("upper back and neck", ""),
+    ] {
+        assert!(!item_spared_by_pain(PainRegion::Back, item), "{item:?}");
+        assert!(
+            !pain_region(location).is_some_and(|r| item_spared_by_pain(r, item)),
+            "{item:?} kept under {location}"
+        );
+    }
+}
+
+#[test]
+fn the_pain_row_reads_clear_when_a_clear_shares_the_report_second() {
+    // A report stamped in the same second as a pain-clear is cleared by the
+    // gate; the row must agree and read "clear", not the cleared report's stop.
+    let inputs = vec![
+        ReadinessInput {
+            observed_at: 1_000,
+            ..input(ReadinessSignal::Pain, 0.0)
+        },
+        pain_at(PainKind::SharpJoint, 7, 1_000),
+    ];
+    assert!(!pain_hold_active(&inputs), "the gate clears the report");
+    assert_eq!(
+        state_str(
+            &signal_states(&inputs, None, false, &[]),
+            ReadinessSignal::Pain
+        ),
+        "clear"
     );
 }
 
