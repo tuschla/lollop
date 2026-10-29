@@ -1,5 +1,6 @@
 package app.milestone
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -560,7 +562,22 @@ fun LogSetEditor(
         LoopPrimary.LogBlank -> stringResource(R.string.log_set_title_new)
     }
     val movesOn = primary == LoopPrimary.Next || primary == LoopPrimary.FinishSession
-    val requestFinish: () -> Unit = { if (dirty) confirmDone = true else onFinish() }
+    // Leaving the loop ("Done for now", "Finish session") ends a running rest and
+    // its countdown notification; the X keeps it (Today shows it as a pill).
+    val finishLoop: () -> Unit = {
+        if (loop) RestAlarm.cancel(ctx)
+        onFinish()
+    }
+    val requestFinish: () -> Unit = { if (dirty) confirmDone = true else finishLoop() }
+    // The rest countdown notification names the set this loop logs next.
+    if (loop) {
+        val res = ctx.resources
+        val kg = resolveSaveWeightKg(bodyweightMode, fields.weightFresh, fields.weightVerbatim, fields.weightText, weightUnit)
+        val load = restNextLoad(res, if (holdMode) fields.holdSec else null, kg, fields.reps, bodyweightMode, weightUnit)
+        val next = restNextSet(res, primary, fields.exercise.trim(), liveItem, nextItem, todaySets.size + 1, load)
+        val run = RestAlarm.running.collectAsState().value
+        LaunchedEffect(run, next) { RestAlarm.setNextSet(ctx, next) }
+    }
 
     // The coach's in-session cue for the exercise being lifted (from its first
     // logged set on), with its load change and "End exercise" as one-tap actions.
@@ -599,7 +616,7 @@ fun LogSetEditor(
         onSave = {
             when (primary) {
                 LoopPrimary.Next -> nextItem?.let { reseedTo(it.exercise, markDirty = false) }
-                LoopPrimary.FinishSession -> onFinish()
+                LoopPrimary.FinishSession -> finishLoop()
                 else -> commitSet()
             }
         },
@@ -694,6 +711,23 @@ fun LogSetEditor(
                     showDone = loggedToday && primary != LoopPrimary.FinishSession,
                 )
             }
+            // Shown once, after the first rest started without exact alarms
+            // (Android 12+): the rest-done alert may then come late while the app
+            // is in the background. Either action ends it for good.
+            val askExactAlarms by RestAlarm.exactAlarmPrompt.collectAsState()
+            if (askExactAlarms && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                InlineNotice(
+                    stringResource(R.string.log_exact_alarm_caption),
+                    modifier = Modifier.testTag("exact-alarm-notice"),
+                    actionLabel = stringResource(R.string.log_exact_alarm_allow),
+                    onAction = {
+                        RestAlarm.dismissExactAlarmPrompt(ctx)
+                        openExactAlarmSettings(ctx)
+                    },
+                    dismissLabel = stringResource(R.string.log_exact_alarm_dismiss),
+                    onDismiss = { RestAlarm.dismissExactAlarmPrompt(ctx) },
+                )
+            }
             if (confirmDone) {
                 AlertDialog(
                     onDismissRequest = { confirmDone = false },
@@ -704,7 +738,7 @@ fun LogSetEditor(
                         if (saveEnabled) {
                             TextButton(onClick = {
                                 confirmDone = false
-                                if (commitSet()) onFinish()
+                                if (commitSet()) finishLoop()
                             }) { Text(stringResource(R.string.log_finish_log_it)) }
                         }
                     },
@@ -713,7 +747,7 @@ fun LogSetEditor(
                             TextButton(onClick = { confirmDone = false }) {
                                 Text(stringResource(R.string.log_keep_editing))
                             }
-                            TextButton(onClick = { confirmDone = false; onFinish() }) {
+                            TextButton(onClick = { confirmDone = false; finishLoop() }) {
                                 Text(
                                     stringResource(R.string.log_discard_confirm),
                                     color = DangerText,

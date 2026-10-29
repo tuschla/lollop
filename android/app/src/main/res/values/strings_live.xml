@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 16+ Live Updates (status-bar chip) for the run-tracking notification, and
+     the Profile notice when Live Updates are off. Owned by RunTrackingService.kt /
+     LiveUpdates.kt / ProfileScreen.kt. All names are `live_`-prefixed. -->
+<resources>
+
+    <!-- Status-bar chip text. The chip shows text whole only up to 7 characters
+         (LiveRunNotificationTest pins the limit). While recording the chip shows the
+         moving time ("23:41"), so it needs no string. -->
+    <string name="live_chip_locating">GPS…</string>
+    <string name="live_chip_waiting">Waiting</string>
+    <string name="live_chip_paused">Paused</string>
+    <string name="live_chip_no_gps">No GPS</string>
+
+    <!-- Profile › During training, shown only on Android 16+ while Live Updates are
+         turned off for the app. -->
+    <string name="live_updates_off_caption">Live updates are off. The run and rest timer stay in the notification list, without a status bar chip.</string>
+    <string name="live_updates_open_settings">Open settings</string>
+
+</resources>

@@ -16,6 +16,14 @@
          GPS signal lost) so they reach a runner whose screen is off. Normal
          permission, granted at install. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Android 16+ Live Updates: lets the run and rest-timer notifications request
+         promotion (status-bar chip, top of the shade). Normal permission, granted at
+         install; the user can still turn Live Updates off per app. -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!-- The rest-done alert at the exact rest end (RestAlarm). New installs on
+         Android 14+ start without it; the set loop asks once. Without it the alarm
+         is inexact and may arrive late. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
         android:allowBackup="true"
@@ -77,6 +85,55 @@
             android:name=".RunTrackingService"
             android:exported="false"
             android:foregroundServiceType="location" />
+
+        <!-- The rest countdown's delete intent: a swiped-away countdown is not reposted. -->
+        <receiver
+            android:name=".RestDismissReceiver"
+            android:exported="false" />
+
+        <!-- The rest-end alarm: posts the rest-done alert, also in a process started
+             for it (RestAlarm). -->
+        <receiver
+            android:name=".RestEndReceiver"
+            android:exported="false" />
+
+        <!-- Quick Settings tile: opens today's next action (QuickTileService).
+             An active tile: the app asks System UI to redraw it whenever its face
+             can change (requestTileRefresh). -->
+        <service
+            android:name=".QuickTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_mark"
+            android:label="@string/tile_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+        </service>
+
+        <!-- Home screen widget (widget/TodayWidget.kt). Exported for the widget host's
+             broadcasts; the time and time zone changes (exempt from the implicit
+             broadcast limits) mark a stored day stale, the locale change re-renders. -->
+        <receiver
+            android:name=".widget.TodayWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/today_widget_info" />
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

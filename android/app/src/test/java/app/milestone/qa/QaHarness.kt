@@ -82,8 +82,9 @@ object QaHarness {
         // scenario that left a run recording must not reopen the tracker in the next.
         app.milestone.RunSession.reset()
         // The set loop's running rest drives its readout; a prior scenario's rest
-        // must not show in the next loop.
+        // (or its exact-alarm notice) must not show in the next loop.
         app.milestone.RestAlarm.cancel(ctx)
+        app.milestone.RestAlarm.resetProcessState()
 
         // Onboarding / plan-cleared markers live here; a stale onboarding_done
         // would suppress the fresh-install guided setup.

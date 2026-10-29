@@ -1,6 +1,7 @@
 # shellcheck shell=bash
-# Device helpers for scripts/emulator-scenarios.sh (sourced; also usable from an
-# interactive shell: `source scripts/emu-scenarios/lib.sh`).
+# Device helpers for scripts/emulator-scenarios.sh and scripts/emu-scenarios/
+# surfaces.sh (sourced; also usable from an interactive shell:
+# `source scripts/emu-scenarios/lib.sh`).
 #   Needs: ADB, SERIAL, APP_ID, OUT, HELP (dir of this file).
 
 : "${APP_ID:=app.milestone}"

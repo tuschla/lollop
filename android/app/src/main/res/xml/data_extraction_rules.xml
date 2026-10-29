@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Backup & device-transfer rules (API 31+). Exclude the event log (the source of
      truth, moved explicitly via Export/Import instead), its swap/import temporaries
-     (.tmp/.import/.bak), and the transient active-run sidecar from both cloud backup
+     (.tmp/.import/.bak), and the transient active-run sidecar and the widget snapshot (derived from the log)
+     from both cloud backup
      and device-to-device transfer. All live in filesDir. A pre-existing install may
      have left osmdroid tiles on external storage; exclude that legacy directory too
      (new tiles live in cache/). The GPX export temp dir lives in cache/, which is
@@ -15,6 +16,8 @@
         <exclude domain="file" path="event-log.ndjson.import" />
         <exclude domain="file" path="event-log.ndjson.bak" />
         <exclude domain="file" path="active-run.ndjson" />
+        <exclude domain="file" path="widget-today.json" />
+        <exclude domain="file" path="widget-today.json.tmp" />
         <exclude domain="sharedpref" path="milestone_setup.xml" />
         <exclude domain="external" path="osmdroid/" />
     </cloud-backup>
@@ -24,6 +27,8 @@
         <exclude domain="file" path="event-log.ndjson.import" />
         <exclude domain="file" path="event-log.ndjson.bak" />
         <exclude domain="file" path="active-run.ndjson" />
+        <exclude domain="file" path="widget-today.json" />
+        <exclude domain="file" path="widget-today.json.tmp" />
         <exclude domain="sharedpref" path="milestone_setup.xml" />
         <exclude domain="external" path="osmdroid/" />
     </device-transfer>

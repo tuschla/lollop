@@ -277,7 +277,6 @@
     <string name="main_export_gpx_failed">Couldn\'t export this run\'s GPX</string>
     <!-- Trim run (head/tail GPS trim) -->
     <string name="main_trim_run">Trim run</string>
-    <string name="history_trim_loading">Loading route…</string>
     <string name="main_trim_keeps">Keeps %1$s · %2$s</string>
     <string name="main_trim_confirm">Trim</string>
     <string name="main_trim_confirm_title">Trim to %1$s (%2$s)?</string>

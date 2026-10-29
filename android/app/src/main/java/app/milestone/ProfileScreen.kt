@@ -58,6 +58,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -408,7 +409,9 @@ private val PACE_BUCKET_MINUTE_OPTIONS = listOf(1, 2, 3, 4, 5, 6, 8, 10)
 
 /** During training: the rest-timer alert (lifting) and keep-screen-on while a
  *  run records (running). Each row hides with its modality. Device prefs, not
- *  coaching state, so they live in [AppSettings], never in the event log. */
+ *  coaching state, so they live in [AppSettings], never in the event log. On
+ *  Android 16+ with Live Updates turned off for the app, a notice says why the run
+ *  and rest timer have no status bar chip and links to the system switch. */
 private fun LazyListScope.TrainingAlertsSection(ctx: Context, model: ViewModel) {
     val showLifting = model.profile == null || model.showLifting()
     val showRunning = model.profile == null || model.showRunning()
@@ -436,6 +439,20 @@ private fun LazyListScope.TrainingAlertsSection(ctx: Context, model: ViewModel) 
                             subtitleColor = OnBgFaint,
                             checked = keepOn,
                             onCheckedChange = { AppSettings.setKeepScreenOn(ctx, it) },
+                        )
+                    }
+                    // Re-checked on every resume, so it clears once the user turns Live
+                    // Updates back on in the system screen it opens.
+                    var liveUpdatesOff by remember { mutableStateOf(liveUpdatesTurnedOff(ctx)) }
+                    LifecycleResumeEffect(Unit) {
+                        liveUpdatesOff = liveUpdatesTurnedOff(ctx)
+                        onPauseOrDispose {}
+                    }
+                    if (liveUpdatesOff) {
+                        InlineNotice(
+                            stringResource(R.string.live_updates_off_caption),
+                            actionLabel = stringResource(R.string.live_updates_open_settings),
+                            onAction = { openPromotedNotificationSettings(ctx) },
                         )
                     }
                 }

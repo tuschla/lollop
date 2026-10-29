@@ -283,6 +283,8 @@ internal class CoachSession(
     val dispatch: (Event) -> Unit,
     val dispatchAll: (List<Event>) -> Unit,
     val markOnboardingDone: () -> Unit,
+    /** A pending [OpenDest] from an open intent; [CoachScaffold] applies and clears it. */
+    val openRequest: MutableStateFlow<OpenDest?>,
 ) {
     var loaded by loadedState                     // remember (composition-local)
     var model by modelState                       // remember (composition-local)
@@ -294,7 +296,10 @@ internal class CoachSession(
 }
 
 @Composable
-private fun rememberCoachSession(openTrackingRequest: MutableStateFlow<Boolean>): CoachSession {
+private fun rememberCoachSession(
+    openTrackingRequest: MutableStateFlow<Boolean>,
+    openRequest: MutableStateFlow<OpenDest?>,
+): CoachSession {
     val ctx = LocalContext.current
     // Replay the persisted event log; on a fresh install (the log file never
     // existed) seed a representative profile so the engine still renders content
@@ -417,6 +422,7 @@ private fun rememberCoachSession(openTrackingRequest: MutableStateFlow<Boolean>)
             dispatch = dispatch,
             dispatchAll = dispatchAll,
             markOnboardingDone = markOnboardingDone,
+            openRequest = openRequest,
         )
     }
 
@@ -690,8 +696,8 @@ internal fun ResumeRunDialog(session: CoachSession) {
 }
 
 @Composable
-internal fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>) {
-    val session = rememberCoachSession(openTrackingRequest)
+internal fun CoachScreen(openTrackingRequest: MutableStateFlow<Boolean>, openRequest: MutableStateFlow<OpenDest?>) {
+    val session = rememberCoachSession(openTrackingRequest, openRequest)
 
     val coreUnavailable by EventDispatcher.coreUnavailable.collectAsState()
     if (coreUnavailable) {

@@ -182,22 +182,66 @@ internal fun runStartCaption(startedAt: Long): String {
     return stringResource(R.string.history_run_overline, at.format(date), at.format(time))
 }
 
-/** The detail sheet's route: the core's GPX document (for Export), its parsed segments
- *  (map, Undo) and whether the track can be trimmed (≥2 fixes over a nonzero span). */
-private data class RunRoute(val gpx: String?, val segments: List<List<GpxFix>>, val trimmable: Boolean)
+/** A run's route, shared by its detail and trim sheets: the core's GPX document (for
+ *  Export), its parsed segments (map, Undo, the trim map), whether the track can be
+ *  trimmed (≥2 fixes over a nonzero span) and, when it can, the timed track the trim
+ *  slider and readout work on. */
+internal data class RunRoute(
+    val gpx: String?,
+    val segments: List<List<GpxFix>>,
+    val trimmable: Boolean,
+    val track: List<TimedTrackPoint>,
+)
+
+/** Fetches a run's GPX document for [rememberRunRoute] (off the main thread). A var
+ *  only so a JVM test can hold the fetch and see what the sheets do while it loads. */
+internal var runGpxFetch: (entryId: Long, observedAt: Long) -> String? = Core::exportGpx
+
+/**
+ * The run's GPX, fetched ON DEMAND (off the main thread) for the one run being
+ * inspected and parsed ONCE in the same block, keyed on the fields that change the
+ * route, so rating or tagging never re-runs the export. Null while loading. A GPS run
+ * QC left unmeasurable has no route, but its recorded fixes are fetched too, for Undo
+ * only (never mapped, shared or trimmed). Hoisted above the detail and trim sheets:
+ * neither opens before it has loaded, so their height never changes while they slide
+ * in. (Material3 1.4's sheet drops a height change that lands as its open animation
+ * ends and rests at the old height, its bottom rows below the screen.)
+ */
+@Composable
+internal fun rememberRunRoute(run: RunResultView): RunRoute? {
+    val route: RunRoute? by produceState<RunRoute?>(
+        null,
+        run.entry_id, run.observed_at, run.has_gpx, run.gps_unmeasurable, run.distance_km, run.duration_min,
+    ) {
+        value = if (run.has_gpx || run.gps_unmeasurable) {
+            withContext(Dispatchers.IO) {
+                val gpx = runGpxFetch(run.entry_id, run.observed_at)
+                val segs = if (gpx.isNullOrBlank()) emptyList() else parseGpx(gpx)
+                val flat = segs.flatten()
+                val trimmable = run.has_gpx && flat.size >= 2 && flat.last().timeSec > flat.first().timeSec
+                RunRoute(gpx.takeIf { run.has_gpx }, segs, trimmable, if (trimmable) timedTrackFromSegments(segs) else emptyList())
+            }
+        } else {
+            RunRoute(null, emptyList(), false, emptyList())
+        }
+    }
+    return route
+}
 
 /**
  * Past-run detail sheet body (spec §2): the run's name with its record badge and
  * start date, the 3-up headline stats and HR-zone bar, any findings, the route map
  * card, the splits, then YOUR LOG (effort, run type, details: each opens its
  * editor) and the action rows (Export GPX, Trim start or end, Delete run, which
- * confirms first). [onDelete] gets the event that re-logs the run for Undo
- * ([restoreEventFor]), null when the route hasn't loaded yet.
+ * confirms first). [route] is [rememberRunRoute]'s, null while it loads. [onDelete]
+ * gets the event that re-logs the run for Undo ([restoreEventFor]), null when the
+ * route hasn't loaded yet.
  */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 internal fun RunDetailContent(
     run: RunResultView,
+    route: RunRoute?,
     nowMillis: Long,
     srpeLoad: SrpeLoadView?,
     onEdit: () -> Unit,
@@ -206,27 +250,6 @@ internal fun RunDetailContent(
     onEvent: (Event) -> Unit,
 ) {
     val unit = rememberDistanceUnit()
-    // The run's GPX is fetched ON DEMAND (off the main thread) for the one run being
-    // inspected and parsed ONCE in the same block, keyed on the fields that change the
-    // route, so rating or tagging never re-runs the export. Null while loading. A GPS
-    // run QC left unmeasurable has no route, but its recorded fixes are fetched too,
-    // for Undo only (never mapped, shared or trimmed).
-    val route: RunRoute? by produceState<RunRoute?>(
-        null,
-        run.entry_id, run.observed_at, run.has_gpx, run.gps_unmeasurable, run.distance_km, run.duration_min,
-    ) {
-        value = if (run.has_gpx || run.gps_unmeasurable) {
-            withContext(Dispatchers.IO) {
-                val gpx = Core.exportGpx(run.entry_id, run.observed_at)
-                val segs = if (gpx.isNullOrBlank()) emptyList() else parseGpx(gpx)
-                val flat = segs.flatten()
-                val trimmable = run.has_gpx && flat.size >= 2 && flat.last().timeSec > flat.first().timeSec
-                RunRoute(gpx.takeIf { run.has_gpx }, segs, trimmable)
-            }
-        } else {
-            RunRoute(null, emptyList(), false)
-        }
-    }
     val title = runTitle(run)
     val caption = runStartCaption(run.started_at)
     val stats = runStats(run, unit)
@@ -269,18 +292,15 @@ internal fun RunDetailContent(
         }
         // Spike / baseline / interval findings (the split verdict sits under SPLITS).
         RunFindings(run, face = false, showSplit = splits.isEmpty())
-        // 2.3 Route map card: a placeholder while the GPX loads; nothing for a manual run.
-        if (run.has_gpx) {
-            val r = route
-            if (r == null) {
-                RouteMapPlaceholder()
-            } else if (r.segments.isNotEmpty()) {
-                RouteMapCard(
-                    r.segments, run.entry_id,
-                    fullScreen = RouteFullScreen(title, caption, stats),
-                    recordKm = run.distance_km,
-                )
-            }
+        // 2.3 Route map card (the sheet opens once a GPS run's route has loaded);
+        // nothing for a manual run.
+        val segments = route?.segments.orEmpty()
+        if (run.has_gpx && segments.isNotEmpty()) {
+            RouteMapCard(
+                segments, run.entry_id,
+                fullScreen = RouteFullScreen(title, caption, stats),
+                recordKm = run.distance_km,
+            )
         }
         // 2.5 Splits.
         if (splits.isNotEmpty()) RunSplitsSection(run, splits, unit)

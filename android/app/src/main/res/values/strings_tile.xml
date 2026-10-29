@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  L10N: strings for the Quick Settings tile (QuickTileService). The label names
+  what a tap opens; tile_name is the name in the tile picker.
+-->
+<resources>
+    <string name="tile_name">Log</string>
+    <string name="tile_log">Log</string>
+    <string name="tile_log_set">Log set</string>
+    <string name="tile_start_run">Start run</string>
+    <string name="tile_run_recording">Run · recording</string>
+</resources>

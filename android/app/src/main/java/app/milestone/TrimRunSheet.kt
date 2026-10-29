@@ -27,7 +27,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -41,8 +40,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /** Saves a [RangeSlider] window as its two ends. */
 private val FloatRangeSaver = listSaver<ClosedFloatingPointRange<Float>, Float>(
@@ -68,33 +65,23 @@ private const val TrimInactiveAlpha = 0.12f
  * (text) and Trim. Trim stays disabled until a handle has moved and confirms first;
  * on confirm [onConfirm] gets the absolute unix-second bounds. Distance and time
  * here are PREVIEW figures; the core re-derives the of-record ones from the trim.
+ *
+ * It takes the [route] already loaded ([rememberRunRoute]), never loading its own:
+ * the body is final in the sheet's first frame, so its height can't change while
+ * the sheet slides in. (Material3 1.4's sheet drops a height change that lands as
+ * its open animation ends and rests at the old height, Trim below the screen.)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun TrimRunSheetContent(
     run: RunResultView,
+    route: RunRoute,
     onCancel: () -> Unit,
     onConfirm: (keepFromSec: Long, keepUntilSec: Long) -> Unit,
 ) {
     val unit = rememberDistanceUnit()
-    // Same on-demand, off-main-thread GPX fetch as the detail sheet, keyed on the
-    // run's stable identity so it loads once per opened run; null while loading.
-    val segsAndPoints: Pair<List<List<GpxFix>>, List<TimedTrackPoint>>? by produceState<Pair<List<List<GpxFix>>, List<TimedTrackPoint>>?>(
-        initialValue = null,
-        run.entry_id,
-        run.observed_at,
-    ) {
-        value = withContext(Dispatchers.IO) {
-            // Fetch AND parse the GPX ONCE off the main thread: the parsed segments feed
-            // the trim map, and the timed track (for the slider + readout) is derived
-            // from the SAME parse, so nothing re-parses on the main thread.
-            val g = Core.exportGpx(run.entry_id, run.observed_at)
-            val segs = if (g.isNullOrBlank()) emptyList() else parseGpx(g)
-            segs to timedTrackFromSegments(segs)
-        }
-    }
-    val segments = segsAndPoints?.first.orEmpty()
-    val points = segsAndPoints?.second.orEmpty()
+    val segments = route.segments
+    val points = route.track
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -223,15 +210,9 @@ internal fun TrimRunSheetContent(
                 )
             }
         } else {
-            if (segsAndPoints == null) {
-                // Track still loading: the card at full height, Cancel reachable.
-                RouteMapPlaceholder()
-                Text(stringResource(R.string.history_trim_loading), color = OnBgMuted, style = Type.Body)
-            } else {
-                // Loaded but not trimmable: the route for context and an honest note.
-                RouteMapCard(segments, run.entry_id, distanceMarkers = false, recordKm = run.distance_km)
-                Text(stringResource(R.string.main_trim_unavailable), color = OnBgMuted, style = Type.Body)
-            }
+            // Not trimmable: the route for context and an honest note.
+            RouteMapCard(segments, run.entry_id, distanceMarkers = false, recordKm = run.distance_km)
+            Text(stringResource(R.string.main_trim_unavailable), color = OnBgMuted, style = Type.Body)
             TextAction(stringResource(R.string.main_cancel), onClick = onCancel, modifier = Modifier.offset(x = -TextActionInset))
         }
     }

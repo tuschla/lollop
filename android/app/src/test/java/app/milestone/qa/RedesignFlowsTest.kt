@@ -578,6 +578,76 @@ class RedesignFlowsTest {
         assertTrue("the clear is sent as null: $last", last["session_rpe"].toString() == "null")
     }
 
+    /** The trim sheet opens on its final body (the detail sheet hands it the track
+     *  it already loaded), so its height never changes while it slides in. A body
+     *  that grew as the sheet finished opening left Material3's sheet resting at the
+     *  shorter height for good, Trim below the screen (the flaky `runs-trim-light`
+     *  capture of ScreenshotRunsTest.runsRouteFullLight). Stepped frame by frame. */
+    @Test
+    fun trimSheet_opensOnItsFinalBody_andRestsWhole() {
+        val end = QaHarness.daysAgoAtMidday(1)
+        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), trackedRun(end)))
+        rule.launchApp()
+        openYesterdaysRun(gps = true)
+        val trimRow = rule.onNodeWithTagScrolled("run-trim").fetchSemanticsNode()
+        val title = hasText(str(R.string.main_trim_run))
+        val body = hasText(str(R.string.trim_hint))
+        var framesShown = 0
+        rule.mainClock.autoAdvance = false
+        try {
+            // The row's own click, without the idling a performClick would add.
+            rule.runOnUiThread { trimRow.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!.invoke() }
+            repeat(60) { frame ->
+                rule.mainClock.advanceTimeByFrame()
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                if (countOf(title) > 0) {
+                    framesShown++
+                    assertEquals("frame $frame: the trim sheet shows its whole body from its first frame", 1, countOf(body))
+                }
+            }
+        } finally {
+            rule.mainClock.autoAdvance = true
+        }
+        assertTrue("the trim sheet opened", framesShown > 0)
+        rule.waitForIdle()
+        val screen = rule.onAllNodes(androidx.compose.ui.test.isRoot()).fetchSemanticsNodes().first().boundsInRoot
+        val trim = rule.onAllNodes(hasText(str(R.string.main_trim_confirm)) and hasClickAction()).fetchSemanticsNodes().single().boundsInRoot
+        assertTrue("Trim rests on screen: its bottom ${trim.bottom}px, the screen's ${screen.bottom}px", trim.bottom <= screen.bottom)
+    }
+
+    /** On a tall screen, where a short GPS run's detail sheet is shorter than the
+     *  screen, the sheet opens only once the run's route has loaded, so its body (map,
+     *  Trim) is final in its first frame and it rests whole. A body that grew as the
+     *  sheet finished opening left Material3's sheet resting at the shorter height,
+     *  Delete run below the screen (frame-stepped probe, 2026-10-29). */
+    @Test
+    @org.robolectric.annotation.Config(qualifiers = "w411dp-h1300dp-xxhdpi")
+    fun runDetail_gpsRun_opensOnceItsRouteLoaded_andRestsWhole() {
+        val end = QaHarness.daysAgoAtMidday(1)
+        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), trackedRun(end, fixes = 40)))
+        rule.launchApp()
+        rule.selectTab(str(R.string.main_dest_history))
+        rule.scrollToText(yesterdaysRunTitle)
+        val held = java.util.concurrent.CountDownLatch(1)
+        val fetch = app.milestone.runGpxFetch
+        app.milestone.runGpxFetch = { id, at -> held.await(); fetch(id, at) }
+        try {
+            rule.onAllNodes(hasText(yesterdaysRunTitle) and hasClickAction())[0].performClick()
+            rule.waitForIdle()
+            assertEquals("no sheet while the route loads", 0, countOf(hasTestTag("run-delete")))
+        } finally {
+            held.countDown()
+            app.milestone.runGpxFetch = fetch
+        }
+        waitForAny(hasTestTag("run-delete"))
+        assertEquals("the sheet opens with its route: Trim is there", 1, countOf(hasTestTag("run-trim")))
+        rule.waitForIdle()
+        val screen = rule.onAllNodes(androidx.compose.ui.test.isRoot()).fetchSemanticsNodes().first().boundsInRoot
+        val delete = rule.onNode(hasTestTag("run-delete")).fetchSemanticsNode()
+        val bottom = delete.positionInRoot.y + delete.size.height
+        assertTrue("Delete run rests on screen: its bottom ${bottom}px, the screen's ${screen.bottom}px", bottom <= screen.bottom)
+    }
+
     @Test
     fun trimSheet_disabledUntilMoved_cancelAndDialogCancelTrimNothing_confirmTrims() {
         val end = QaHarness.daysAgoAtMidday(1)

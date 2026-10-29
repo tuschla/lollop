@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home screen widget (widget/TodayWidget.kt). Reuses the Today screen's hold,
+     plan and button strings; these are the widget's own. -->
+<resources>
+    <!-- Widget picker -->
+    <string name="widget_label">Today</string>
+    <string name="widget_description">Today\'s session, rest day or pause, with a Log button.</string>
+
+    <string name="widget_overline_today">Today</string>
+    <!-- %1$s = "Today", %2$s = the short date the content is for ("Wed, Oct 28"). -->
+    <string name="widget_overline_day">%1$s · %2$s</string>
+    <!-- Shown instead of the day's content when the stored day is not today (after
+         midnight, a time zone or clock change) or nothing is stored yet. -->
+    <string name="widget_open_to_update">Open lollop to update</string>
+    <string name="widget_rest_day">Rest day</string>
+    <string name="widget_no_session">No session today</string>
+    <!-- %1$s = next session title, %2$s = its short date ("Thu, Oct 15"). -->
+    <string name="widget_next">Next: %1$s, %2$s</string>
+    <string name="widget_session_done">Session done</string>
+    <!-- Trails a settled plan item: "Squat · Done". -->
+    <string name="widget_item_done">Done</string>
+    <!-- %1$s = item name, %2$s = its detail or "Done". -->
+    <string name="widget_item_line">%1$s · %2$s</string>
+    <plurals name="widget_more_items">
+        <item quantity="one">%1$d more item</item>
+        <item quantity="other">%1$d more items</item>
+    </plurals>
+    <string name="widget_no_plan">No plan yet</string>
+    <string name="widget_no_plan_body">Open lollop to make a plan.</string>
+    <string name="widget_setup_title">Not set up yet</string>
+    <string name="widget_setup_body">Open lollop to answer the setup questions.</string>
+    <string name="widget_open_today_cd">Open Today in lollop</string>
+</resources>

@@ -1,4 +1,4 @@
-"""Query a uiautomator dump read on stdin.
+"""Query a uiautomator dump read on stdin (`dump` or `dump --windows`).
 
 argv: mode [text] [anchor]
   eq|pre|re TEXT   print "cx cy x1 y1 x2 y2 <label>" of the first node whose text or
@@ -6,6 +6,7 @@ argv: mode [text] [anchor]
                    nodes AFTER the first node labelled exactly ANCHOR, when given);
                    exit 1 when absent.
   rid ID           same, matching the node's resource-id suffix (after ':id/' or exact).
+  ridtext ID       print the text of that node.
   texts            print every label as "<key>=<value>" in document order.
   on TEXT          exit 0 when the node labelled exactly TEXT (or its parent/children)
                    is checked/selected, 1 when not, 2 when absent.
@@ -14,6 +15,10 @@ argv: mode [text] [anchor]
   rtl              print "<n_left> <n_right>" counts of labelled nodes whose centre
                    lies in the left / right third of the root (layout mirroring probe).
   scroll           print "x1 y1 x2 y2" of the largest vertically scrollable node.
+  expand TEXT      print "cx cy ..." of the collapsed-notification Expand button
+                   (`expand_button`, content-desc "Expand") in the notification row
+                   holding the first node whose label starts with TEXT; exit 1 when
+                   the row is absent or already expanded.
 """
 import re
 import sys
@@ -23,10 +28,12 @@ mode = sys.argv[1]
 want = sys.argv[2] if len(sys.argv) > 2 else ""
 anchor = sys.argv[3] if len(sys.argv) > 3 else None
 raw = sys.stdin.read()
-i, j = raw.find("<?xml"), raw.rfind("</hierarchy>")
-if i < 0 or j < 0:
+# `uiautomator dump --windows` wraps every window's <hierarchy> in <displays>.
+i, j = raw.find("<?xml"), raw.rfind("</displays>")
+j = j + 11 if j >= 0 else raw.rfind("</hierarchy>") + 12
+if i < 0 or j < 12:
     sys.exit(2)
-root = ET.fromstring(raw[i:j + 12])
+root = ET.fromstring(raw[i:j])
 
 
 def bounds(n):
@@ -88,13 +95,30 @@ if mode == "rtl":
     print(left, right)
     sys.exit(0)
 
+if mode == "expand":
+    parent = {c: p for p in root.iter() for c in p}
+    hit = next((n for n in nodes for _, v in labels(n) if v.startswith(want)), None)
+    p = parent.get(hit)
+    while p is not None:
+        btn = next((b for b in p.iter("node") if b.get("resource-id", "").endswith(":id/expand_button")), None)
+        if btn is not None:
+            if btn.get("content-desc") != "Expand":
+                sys.exit(1)
+            x1, y1, x2, y2 = bounds(btn)
+            print((x1 + x2) // 2, (y1 + y2) // 2, x1, y1, x2, y2, "Expand")
+            sys.exit(0)
+        if p.get("resource-id", "").endswith(":id/expandableNotificationRow"):
+            break
+        p = parent.get(p)
+    sys.exit(1)
+
 seen = anchor is None
 for n in nodes:
-    if mode == "rid":
+    if mode in ("rid", "ridtext"):
         rid = n.get("resource-id", "")
         if rid == want or rid.endswith(":id/" + want):
             x1, y1, x2, y2 = bounds(n)
-            print((x1 + x2) // 2, (y1 + y2) // 2, x1, y1, x2, y2, rid)
+            print(n.get("text", "") if mode == "ridtext" else f"{(x1 + x2) // 2} {(y1 + y2) // 2} {x1} {y1} {x2} {y2} {rid}")
             sys.exit(0)
         continue
     for k, v in labels(n):

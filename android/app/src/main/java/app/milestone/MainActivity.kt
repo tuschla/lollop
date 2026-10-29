@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import app.milestone.widget.WidgetSync
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.osmdroid.config.Configuration
@@ -26,6 +27,11 @@ class MainActivity : ComponentActivity() {
     // run is genuinely live, reopens the tracking screen. A flow rather than a
     // plain field so an already-running Activity reacts to onNewIntent too.
     private val openTrackingRequest = MutableStateFlow(false)
+
+    // The latest [ACTION_OPEN] destination (widget, Quick Settings tile, Live
+    // Update tap) not yet applied. CoachScaffold applies and clears it once boot
+    // has run, so a cold start waits for the model before it navigates.
+    private val openRequest = MutableStateFlow<OpenDest?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Theme-aware launch/splash frame. The manifest theme (Theme.Milestone)
@@ -47,6 +53,10 @@ class MainActivity : ComponentActivity() {
         // recreates the app like a config change on every toggle and has no
         // documented follow-system reset for our third "System" choice.
         AppSettings.load(this)
+        // Home screen widget: every published model refreshes its snapshot; the
+        // Quick Settings tile also redraws when a run starts or stops.
+        WidgetSync.start(applicationContext)
+        TileSync.start(applicationContext)
         when (AppSettings.darkMode.value) {
             DarkMode.Light -> setTheme(R.style.Theme_Milestone_Forced_Light)
             DarkMode.Dark -> setTheme(R.style.Theme_Milestone_Forced_Dark)
@@ -82,6 +92,10 @@ class MainActivity : ComponentActivity() {
         // the files again.
         val fromRecents = (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
         if (savedInstanceState == null && !fromRecents) RunImport.importRuns(this, RunImport.urisFrom(intent))
+        // An open intent (widget, tile, Live Update) navigates on the same terms: a
+        // rotation or process-restore re-delivers getIntent() with saved state, and a
+        // relaunch from recents replays it; neither navigates again.
+        if (savedInstanceState == null && !fromRecents) openDestOf(intent)?.let { openRequest.value = it }
         // The window ground under the first Compose frame (and the import restart's
         // "Restoring your data…" screen) is the resolved palette's, not the theme's
         // plain white/black windowBackground.
@@ -120,7 +134,7 @@ class MainActivity : ComponentActivity() {
                     onDispose {}
                 }
                 Surface(modifier = Modifier.fillMaxSize(), color = BgTop) {
-                    CoachScreen(openTrackingRequest)
+                    CoachScreen(openTrackingRequest, openRequest)
                 }
             }
         }
@@ -134,6 +148,9 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(EXTRA_OPEN_TRACKING)
             setIntent(intent)
         }
+        // A widget / tile / Live Update tap while the Activity is alive. It only
+        // reaches here as a new intent, so a rotation never replays it.
+        openDestOf(intent)?.let { openRequest.value = it }
         // A share/open into an already-running Activity imports too.
         RunImport.importRuns(this, RunImport.urisFrom(intent))
     }

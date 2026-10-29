@@ -87,6 +87,15 @@
     <string name="log_rest_notif_title">Resting · %1$s</string>
     <string name="log_rest_notif_done_title">Rest done</string>
     <string name="log_rest_notif_done_body">Time for your next set of %1$s.</string>
+    <!-- The countdown's next-set line: "Next: Set 3 of 4 · 100 kg × 5". -->
+    <string name="log_rest_notif_next">Next: %1$s</string>
+    <string name="log_rest_notif_join">%1$s · %2$s</string>
+    <string name="log_rest_notif_extra_set">Extra set</string>
+    <!-- Set loop notice, once, after the first rest started without exact alarms
+         (Android 12+). The action opens the system "Alarms & reminders" switch. -->
+    <string name="log_exact_alarm_caption">Exact alarms are off, so the \"Rest done\" alert can arrive late while lollop is in the background.</string>
+    <string name="log_exact_alarm_allow">Allow exact alarms</string>
+    <string name="log_exact_alarm_dismiss">Dismiss</string>
 
     <!-- Log-run editor -->
     <string name="log_run_title_edit">Edit run</string>

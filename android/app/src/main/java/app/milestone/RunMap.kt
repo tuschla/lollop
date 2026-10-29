@@ -308,18 +308,6 @@ internal fun RouteMapCard(
     }
 }
 
-/** The route card's loading state (spec §2 States): the card at full height, no spinner. */
-@Composable
-internal fun RouteMapPlaceholder(modifier: Modifier = Modifier, height: Dp = RouteMapHeight) {
-    Box(
-        modifier
-            .fillMaxWidth()
-            .height(height)
-            .clip(RoundedCornerShape(Space.Card.dp))
-            .background(BgElevated),
-    )
-}
-
 /** The sheet map's "open in full" corner control: a 40dp square in a 48dp target, 8dp in. */
 @Composable
 private fun ExpandButton(modifier: Modifier, onClick: () -> Unit) {

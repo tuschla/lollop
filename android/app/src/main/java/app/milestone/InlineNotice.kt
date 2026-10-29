@@ -1,6 +1,7 @@
 package app.milestone
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
@@ -15,8 +16,9 @@ import androidx.compose.ui.unit.dp
 /**
  * A small in-form caution (ui-sweep §0.6): a 20dp warning glyph in
  * [StatusColors.warnMark] and a `Type.Caption` `OnBgBody` line on the bare
- * ground, with a trailing [TextAction] when there is an action. No card, no fill,
- * no stripe.
+ * ground, with a trailing [TextAction] when there is an action. With a dismiss
+ * action as well, both actions sit on their own row under the line, end-aligned.
+ * No card, no fill, no stripe.
  */
 @Composable
 internal fun InlineNotice(
@@ -24,19 +26,30 @@ internal fun InlineNotice(
     modifier: Modifier = Modifier,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    dismissLabel: String? = null,
+    onDismiss: (() -> Unit)? = null,
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
-    ) {
-        Icon(
-            painterResource(R.drawable.ic_safety_warning_triangle),
-            contentDescription = null,
-            tint = LocalStatusColors.current.warnMark,
-            modifier = Modifier.size(20.dp),
-        )
-        Text(text, color = OnBgBody, style = Type.Caption, modifier = Modifier.weight(1f))
-        if (actionLabel != null && onAction != null) TextAction(actionLabel, onAction)
+    val stacked = dismissLabel != null && onDismiss != null
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+        ) {
+            Icon(
+                painterResource(R.drawable.ic_safety_warning_triangle),
+                contentDescription = null,
+                tint = LocalStatusColors.current.warnMark,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(text, color = OnBgBody, style = Type.Caption, modifier = Modifier.weight(1f))
+            if (!stacked && actionLabel != null && onAction != null) TextAction(actionLabel, onAction)
+        }
+        if (dismissLabel != null && onDismiss != null) {
+            Row(modifier = Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+                TextAction(dismissLabel, onDismiss)
+                if (actionLabel != null && onAction != null) TextAction(actionLabel, onAction)
+            }
+        }
     }
 }

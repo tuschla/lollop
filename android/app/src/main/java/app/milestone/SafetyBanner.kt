@@ -118,7 +118,7 @@ internal fun bannerStatesHold(holdReason: String?, tier: String?, pregnancyWarni
  *  vocabulary like "red flag" or "tier"; an unknown reason gets the generic line.
  *  A pregnancy reads like its own Profile row; [pregnancyWarning] (a warning
  *  sign is on) says to stop and seek care. */
-private fun holdReasonLineRes(holdReason: String?, tier: String?, pregnancyWarning: Boolean): Int = when (holdReason) {
+internal fun holdReasonLineRes(holdReason: String?, tier: String?, pregnancyWarning: Boolean): Int = when (holdReason) {
     "pain" -> R.string.main_hold_reason_pain
     "illness" -> R.string.main_hold_reason_illness
     "acute_illness_profile" -> R.string.main_hold_reason_ill_profile

@@ -96,10 +96,47 @@ internal fun CoachScaffold(session: CoachSession) {
     // The plan DAY a past-session Log/Track targets: drives the editor's seed
     // stamp + the missed-day prescription lookup. null = today's flow.
     var sheetPlanDay by rememberSaveable { mutableStateOf<Long?>(null) }
+    // Whether the currently-shown editor has unsaved edits, hoisted here so the
+    // sheet's SWIPE-DOWN dismissal can honor the same "Discard this entry?" guard
+    // the editor's X already enforces. The Set/Run editors report their dirty state
+    // up; other quick forms leave it false (swipe-down just closes them).
+    var sheetDirty by rememberSaveable { mutableStateOf(false) }
+    var confirmDiscardSheet by rememberSaveable { mutableStateOf(false) }
+    // A set loop in progress (reported by the Set editor): the sheet refuses to be
+    // swiped or scrim-tapped away; X or "Done for now" close it.
+    var sheetLocked by rememberSaveable { mutableStateOf(false) }
 
     // Crash-recovery consent, ahead of the full-screen returns below so neither
     // the setup nor a tracker restored after process death can hide it.
     ResumeRunDialog(session)
+
+    // An open intent (widget, Quick Settings tile, Live Update tap) asks for a
+    // destination: apply it once and clear it. The guided setup, while it shows,
+    // stays; [routeOpen] keeps unsaved input and a tracker that holds a service.
+    val openDest by session.openRequest.collectAsState()
+    LaunchedEffect(openDest) {
+        val dest = openDest ?: return@LaunchedEffect
+        session.openRequest.value = null
+        if (session.showSetup) return@LaunchedEffect
+        val nav = OpenNav(session.showTracker, selected, sheetOpen, sheetMode, sheetPlanExercise, sheetPlanDay)
+        val next = routeOpen(
+            dest,
+            nav,
+            session.model,
+            sheetBusy = (sheetLocked && sheetMode == LogMode.Set) || (sheetDirty && sheetMode != LogMode.Chooser),
+            trackerPinned = !RunSession.tracking.value && (RunSession.armed.value || RunSession.locating.value),
+        )
+        if (next.sheetOpen && (!nav.sheetOpen || next.sheetMode != nav.sheetMode)) {
+            sheetDirty = false
+            sheetLocked = false
+        }
+        session.showTracker = next.showTracker
+        selected = next.selected
+        sheetMode = next.sheetMode
+        sheetPlanExercise = next.sheetPlanExercise
+        sheetPlanDay = next.sheetPlanDay
+        sheetOpen = next.sheetOpen
+    }
 
     if (session.showSetup) {
         // Guided setup replaces the whole scaffold on first run. Completing it
@@ -198,15 +235,6 @@ internal fun CoachScaffold(session: CoachSession) {
     // once the list leaves the top.
     val todayListState = rememberLazyListState()
     val fabExpanded by remember { derivedStateOf { todayListState.firstVisibleItemIndex == 0 } }
-    // Whether the currently-shown editor has unsaved edits, hoisted here so the
-    // sheet's SWIPE-DOWN dismissal can honor the same "Discard this entry?" guard
-    // the editor's X already enforces. The Set/Run editors report their dirty state
-    // up; other quick forms leave it false (swipe-down just closes them).
-    var sheetDirty by rememberSaveable { mutableStateOf(false) }
-    var confirmDiscardSheet by rememberSaveable { mutableStateOf(false) }
-    // A set loop in progress (reported by the Set editor): the sheet refuses to be
-    // swiped or scrim-tapped away; X or "Done for now" close it.
-    var sheetLocked by rememberSaveable { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(
         // Open fully expanded: the chooser list and the editors (with their
         // in-sheet keypad) must be visible without a second drag; the partial

@@ -166,6 +166,8 @@ internal fun EntryActionSheets(
     // selected entry, so picking a different entry resets these).
     var editing by rememberSaveable(selected) { mutableStateOf(false) }
     var trimming by rememberSaveable(selected) { mutableStateOf(false) }
+    // The run's route, loaded once for both its detail and its trim sheet.
+    val route = (selected as? HistoryEntry.Run)?.let { rememberRunRoute(it.v) }
     val deletedText = ctx.getString(
         if (selected is HistoryEntry.Run) R.string.history_run_deleted else R.string.history_set_deleted,
     )
@@ -246,7 +248,10 @@ internal fun EntryActionSheets(
         }
     } else if (trimming && selected is HistoryEntry.Run) {
         val runView = selected.v
-        ModalBottomSheet(
+        // Opens only on a loaded route (the detail sheet's, else once a recreated
+        // screen has reloaded it), so its body is final in its first frame.
+        val loaded = route
+        if (loaded != null) ModalBottomSheet(
             onDismissRequest = { trimming = false },
             containerColor = BgSunken,
             // Open fully expanded: the route map + slider + Trim shouldn't strand below a
@@ -256,6 +261,7 @@ internal fun EntryActionSheets(
             SheetNavBarScrim()
             TrimRunSheetContent(
                 run = runView,
+                route = loaded,
                 onCancel = { trimming = false },
                 onConfirm = { keepFromSec, keepUntilSec ->
                     onEvent(
@@ -273,9 +279,10 @@ internal fun EntryActionSheets(
                 },
             )
         }
-    } else {
+    } else if (selected !is HistoryEntry.Run || !selected.v.has_gpx || route != null) {
         // Fully expanded only: Back (and a swipe) close the sheet in one step instead
-        // of first collapsing it to a half-height detent.
+        // of first collapsing it to a half-height detent. A GPS run's sheet opens once
+        // its route has loaded (map, Trim), so its body is final in its first frame.
         ModalBottomSheet(
             onDismissRequest = onDismiss,
             containerColor = if (selected is HistoryEntry.Run) BgSunken else BgElevated,
@@ -290,6 +297,7 @@ internal fun EntryActionSheets(
             when (selected) {
                 is HistoryEntry.Run -> RunDetailContent(
                     run = selected.v,
+                    route = route,
                     nowMillis = nowMillis,
                     srpeLoad = srpeLoad,
                     onEdit = { editing = true },

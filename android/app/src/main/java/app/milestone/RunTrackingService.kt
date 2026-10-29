@@ -38,6 +38,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.location.LocationCallback
@@ -102,15 +103,21 @@ class RunTrackingService : Service() {
     // action label). The notification's own Pause/Resume action writes the SAME
     // flag, so both directions stay in sync off one source of truth. Cancelled in
     // onDestroy. Dispatchers.Main.immediate keeps every notification write on the
-    // main thread, serialized with onFix's, so lastNotifiedContent needs no lock.
+    // main thread, serialized with onFix's, so lastNotifiedFrame needs no lock.
     private val serviceScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
 
-    // The last notification content string actually posted, so [notifyIfChanged]
-    // re-posts ONLY when the displayed line changes rather than rebuilding + notify()
-    // on every ~1 Hz fix. While recording it changes ~once/sec anyway (elapsed
-    // ticks), but a paused/standing-still stretch, and every locate-preview fix,
-    // whose notification is static, then costs nothing.
-    private var lastNotifiedContent: String? = null
+    // The last notification frame actually posted (content line, chip text, step
+    // bar), so [notifyIfChanged] re-posts ONLY when what is shown changes rather than
+    // rebuilding + notify() on every ~1 Hz fix. While recording it changes ~once/sec
+    // anyway (moving time ticks), but a paused/standing-still stretch, and every
+    // locate-preview fix, whose notification is static, then costs nothing.
+    private var lastNotifiedFrame: RunNotifFrame? = null
+
+    // The user swiped the notification away (its delete intent, possible for a
+    // foreground-service notification on Android 14+ and for a Live Update). Live
+    // Update guidance: never re-post a dismissed one, so [notifyIfChanged] stands down
+    // until the next explicit start ([startLocationForeground] clears it).
+    private var notifDismissed = false
 
     // Cached notification-building state. The PendingIntents (tap, pause, resume and
     // the two Stop variants) and a per-[NotifShape] NotificationCompat.Builder are
@@ -123,6 +130,7 @@ class RunTrackingService : Service() {
     private var resumePending: PendingIntent? = null
     private var stopPending: PendingIntent? = null
     private var stopServicePending: PendingIntent? = null
+    private var dismissPending: PendingIntent? = null
     private var cachedBuilder: NotificationCompat.Builder? = null
     private var cachedShape: NotifShape? = null
 
@@ -196,8 +204,8 @@ class RunTrackingService : Service() {
      *  "starts when ready" copy, or the static locate-preview text. The state→resource
      *  SELECTION lives in the pure [trackingNotifContentSpec] (unit-tested against the
      *  real R.string ids, so a swapped id can't hide behind caller-supplied literals);
-     *  this just resolves. The throttle key for [notifyIfChanged]: because the paused
-     *  and signal-lost states fold into the line, toggling either re-posts. */
+     *  this just resolves. Part of the [notifyIfChanged] throttle key: because the
+     *  paused and signal-lost states fold into the line, toggling either re-posts. */
     private fun currentNotifContent(): String {
         val spec = trackingNotifContentSpec(
             recording = recording,
@@ -221,6 +229,18 @@ class RunTrackingService : Service() {
             }
             is NotifContentSpec.PausedProgress -> getString(spec.res, spec.progress)
         }
+    }
+
+    /** Everything one refresh shows: the content line, the Live Update chip text
+     *  ([trackingChipRes], or the moving time while recording) and, for a guided run,
+     *  the step bar. Its equality is the [notifyIfChanged] throttle key. */
+    private fun currentNotifFrame(): RunNotifFrame {
+        val chipRes = trackingChipRes(recording, armed, RunSession.paused.value, signalLost)
+        return RunNotifFrame(
+            content = currentNotifContent(),
+            chip = if (chipRes != null) getString(chipRes) else formatElapsed(RunSession.elapsedSec.value),
+            steps = if (recording) RunSession.stepProgress.value?.let(::stepBar) else null,
+        )
     }
 
     /** (Re)schedule the signal-loss check for [SIGNAL_LOSS_MS] after the latest
@@ -266,7 +286,7 @@ class RunTrackingService : Service() {
     private fun onSignalFix() {
         if (signalLost) {
             signalLost = false
-            lastNotifiedContent = null
+            lastNotifiedFrame = null
         }
         armSignalWatchdog()
     }
@@ -360,14 +380,15 @@ class RunTrackingService : Service() {
         RunSession.armed.value = false
     }
 
-    /** Re-post the ongoing notification only when its content actually changed.
-     *  No-op once [stopped] so a late queued fix can't resurrect it. */
+    /** Re-post the ongoing notification only when what it shows actually changed.
+     *  No-op once [stopped] so a late queued fix can't resurrect it, and after the
+     *  user dismissed it ([notifDismissed]). */
     private fun notifyIfChanged() {
-        if (stopped) return
-        val content = currentNotifContent()
-        if (content == lastNotifiedContent) return
-        lastNotifiedContent = content
-        getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification())
+        if (stopped || notifDismissed) return
+        val frame = currentNotifFrame()
+        if (frame == lastNotifiedFrame) return
+        lastNotifiedFrame = frame
+        getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(frame))
     }
 
     /** One fix → preview state always; a route point + sidecar line only while
@@ -466,7 +487,7 @@ class RunTrackingService : Service() {
         RunSession.startSteps(SystemClock.elapsedRealtime())
         tickSteps()
         // Force a re-post: the title/copy switch from armed to "Tracking run".
-        lastNotifiedContent = null
+        lastNotifiedFrame = null
         notifyIfChanged()
         // Armed → recording happens hands-free (often phone already pocketed), so
         // confirm it with a buzz from the service, which works screen-off.
@@ -477,6 +498,8 @@ class RunTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         ActiveRunStore.init(this)
+        // The Quick Settings tile reads "Run · recording" while this records.
+        TileSync.start(this)
         engine = if (hasPlayServices(this)) FusedEngine(this) else PlatformEngine(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -617,6 +640,11 @@ class RunTrackingService : Service() {
                 armed && !recording && !stopped && RunSession.generation == sessionGeneration -> beginRecording(emptyList())
                 !started -> stopSelf(startId)
             }
+            // The user dismissed the notification (Android 14+ lets a foreground-service
+            // notification be swiped away; so can a Live Update). Stop re-posting until
+            // the next explicit start. A stray delivery that created this instance is
+            // torn down like a stray Pause/Resume.
+            ACTION_NOTIF_DISMISSED -> if (started) notifDismissed = true else stopSelf(startId)
         }
         // NOT_STICKY: if the OS kills us mid-run it must not recreate the service
         // with a null intent, that path skips startForeground() and crashes the
@@ -687,9 +715,6 @@ class RunTrackingService : Service() {
             unwindLocationFailure()
             return
         }
-        // The startForeground call just posted the notification; seed the throttle
-        // key so the first fix doesn't needlessly re-post identical content.
-        lastNotifiedContent = currentNotifContent()
         // Foregrounded: now safe to bail if fine location raced away between the
         // UI's check and here (revoking location also downgrades to coarse-only). Route
         // through the shared clean unwind so the arm state is cleared too — a bare
@@ -772,60 +797,60 @@ class RunTrackingService : Service() {
     /** Foreground as a `location`-typed service. API 34+ requires the typed
      *  startForeground for a location FGS (the 2-arg overload throws); ServiceCompat
      *  picks the right form per API level. On API 34+ this throws [SecurityException]
-     *  without a location grant. */
+     *  without a location grant. Every caller is an explicit start (Locate/Arm/Start),
+     *  so a previous dismissal no longer holds; the posted frame seeds the throttle
+     *  key so the first fix doesn't re-post identical content. */
     private fun startLocationForeground() {
+        notifDismissed = false
+        val frame = currentNotifFrame()
         ServiceCompat.startForeground(
             this,
             NOTIF_ID,
-            buildNotification(),
+            buildNotification(frame),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             } else {
                 0
             },
         )
+        lastNotifiedFrame = frame
     }
 
     /** The notification "shape": the state fields that decide the title and which
      *  actions show, so [buildNotification] can cache one builder per shape and reuse
-     *  it across every fix that keeps the same shape (only the content line changes). */
+     *  it across every fix that keeps the same shape (only the per-frame fields change). */
     private data class NotifShape(val recording: Boolean, val armed: Boolean, val paused: Boolean)
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(frame: RunNotifFrame): Notification {
         val shape = NotifShape(recording, armed, RunSession.paused.value)
         // Per-fix hot path: while steady recording the shape (title + which
         // actions show) never changes, so reuse the builder cached for it and only
-        // re-set the content line + build(). A state change (pause toggle, armed →
+        // re-set the per-frame fields + build(). A state change (pause toggle, armed →
         // recording) rebuilds the builder once. Each PendingIntent is cached once —
         // they're identical every build.
         val builder = cachedBuilder?.takeIf { cachedShape == shape } ?: buildBuilder(shape).also {
             cachedBuilder = it
             cachedShape = shape
         }
-        return builder.setContentText(currentNotifContent()).build()
+        return buildRunNotification(builder, frame)
     }
 
     /** Build the ongoing-notification [NotificationCompat.Builder] for one notification
      *  [shape] (the title + which actions show). Cached by [buildNotification] and
-     *  reused across every fix that keeps the same shape; the content text is set by
-     *  the caller per fix, not here. */
+     *  reused across every fix that keeps the same shape; the content text, chip and
+     *  style are set per frame by [buildRunNotification], not here. */
     private fun buildBuilder(shape: NotifShape): NotificationCompat.Builder {
         // One "acquiring" wording everywhere (the map pill + Start button both say
         // "Acquiring GPS"). The title/content id selection is the pure
         // [trackingNotifTitleRes]/[trackingNotifContentSpec] (unit-tested against the
         // real R.string ids); the call site only resolves.
-        val builder = NotificationCompat.Builder(this, CHANNEL)
-            .setContentTitle(getString(trackingNotifTitleRes(shape.recording, shape.armed, shape.paused)))
-            // 1-color white route mark, silhouette only (icons README table).
-            .setSmallIcon(R.drawable.ic_stat_mark)
-            .setOngoing(true)
-            .setContentIntent(tapPendingIntent())
-            // Shown in full on a secure lock screen: the line carries only moving
-            // time, distance and pace (never a location), so a runner can glance at
-            // it without unlocking.
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            // The ~1 Hz progress refresh must never re-alert.
-            .setOnlyAlertOnce(true)
+        val builder = runNotificationBuilder(
+            this,
+            CHANNEL,
+            getString(trackingNotifTitleRes(shape.recording, shape.armed, shape.paused)),
+            tapPendingIntent(),
+            dismissPendingIntent(),
+        )
         // Pause/Resume only while actually RECORDING. It drives the SAME
         // RunSession.paused flag the in-app Pause button toggles (one source of
         // truth), delivered as a service action (getService) handled in
@@ -880,6 +905,14 @@ class RunTrackingService : Service() {
         Intent(this, RunTrackingService::class.java).setAction(ACTION_STOP),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     ).also { stopServicePending = it }
+
+    /** Delete intent: tells the service the user swiped the notification away, so it
+     *  stops re-posting it (ACTION_NOTIF_DISMISSED). Cached. */
+    private fun dismissPendingIntent(): PendingIntent = dismissPending ?: PendingIntent.getService(
+        this, REQ_DISMISS,
+        Intent(this, RunTrackingService::class.java).setAction(ACTION_NOTIF_DISMISSED),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    ).also { dismissPending = it }
 
     /** Pause action: sets RunSession.paused via a service intent. Cached (the pause
      *  and resume intents differ by action, so they are distinct PendingIntents). */
@@ -946,6 +979,7 @@ class RunTrackingService : Service() {
         private const val ACTION_PAUSE = "app.milestone.action.PAUSE"
         private const val ACTION_RESUME = "app.milestone.action.RESUME"
         private const val ACTION_START_NOW = "app.milestone.action.START_NOW"
+        private const val ACTION_NOTIF_DISMISSED = "app.milestone.action.NOTIF_DISMISSED"
         private const val EXTRA_REQUIRE_PRECISE = "app.milestone.extra.REQUIRE_PRECISE"
         private const val EXTRA_REQUIRE_MOVING = "app.milestone.extra.REQUIRE_MOVING"
         private const val CHANNEL = "run_tracking"
@@ -959,6 +993,7 @@ class RunTrackingService : Service() {
         // Locate-only Stop: a getService ACTION_STOP intent; a distinct request code
         // so it never collides with the getActivity deep-link Stop (REQ_STOP).
         private const val REQ_STOP_SERVICE = 3
+        private const val REQ_DISMISS = 4
 
         // Service-side haptic cues (VIBRATE permission). Recording started: one firm
         // pulse. Signal lost: two pulses, so the two can be told apart in a pocket.
@@ -1110,6 +1145,120 @@ internal fun trackingNotifContentSpec(
     recording -> if (progress != null) NotifContentSpec.Progress(progress, paceNow) else NotifContentSpec.Literal(R.string.track_notif_recording_hint)
     armed -> NotifContentSpec.Literal(R.string.track_notif_armed_text)
     else -> NotifContentSpec.Literal(R.string.track_notif_locate_text)
+}
+
+/**
+ * The Live Update status-bar chip text (Android 16+) for a tracking state, as a
+ * string resource; null while actively recording, where the caller shows the MOVING
+ * time ([formatElapsed] of [RunSession.elapsedSec], "23:41", "1:02:33").
+ *
+ * One rule, moving time, chosen over the two alternatives:
+ * - not a chronometer (`setUsesChronometer`): the system ticks it on the wall clock,
+ *   but moving time stops while the runner stands still, so the chip would run ahead
+ *   of the tracker's own figure and jump back on the next re-post;
+ * - not distance: "12.34 km" is 8 characters and the chip shows text whole only up to
+ *   [LIVE_CHIP_MAX_CHARS] (7); moving time fits up to 9:59:59.
+ * The text is refreshed by the existing ~1 Hz throttled re-post (the moving time is in
+ * the content line too, so no extra posts). Every literal here is at most 7 characters
+ * (LiveRunNotificationTest).
+ */
+@StringRes
+internal fun trackingChipRes(recording: Boolean, armed: Boolean, paused: Boolean, signalLost: Boolean): Int? = when {
+    recording && paused -> R.string.live_chip_paused
+    recording && signalLost -> R.string.live_chip_no_gps
+    recording -> null
+    armed -> R.string.live_chip_waiting
+    else -> R.string.live_chip_locating
+}
+
+/** A guided run's step bar: one equal [STEP_BAR_UNITS] segment per step (one segment
+ *  for the whole run past [STEP_BAR_MAX_SEGMENTS]) and the progress through them. */
+internal data class StepBar(val segments: List<Int>, val progress: Int)
+
+/** Length of one step on the bar. Steps are timed or measured, so the bar counts
+ *  steps, not seconds or metres. */
+internal const val STEP_BAR_UNITS = 100
+
+/** `Notification.ProgressStyle` draws only its first 15 segments
+ *  (`MAX_PROGRESS_SEGMENT_LIMIT` in AOSP `Notification.java`). */
+internal const val STEP_BAR_MAX_SEGMENTS = 15
+
+/** The bar for [p]: completed steps plus the done share of the current timed or
+ *  measured step (an open or "as long as the last rep" step has no known length and
+ *  adds nothing until it ends). Full once every step is done. */
+internal fun stepBar(p: StepProgress): StepBar? {
+    if (p.total <= 0) return null
+    val max = p.total * STEP_BAR_UNITS
+    val segments = if (p.total <= STEP_BAR_MAX_SEGMENTS) List(p.total) { STEP_BAR_UNITS } else listOf(max)
+    val step = p.step ?: return StepBar(segments, max)
+    val remainingSec = p.remainingSec
+    val remainingM = p.remainingM
+    val done = when {
+        step.durationSec > 0 && remainingSec != null -> 1.0 - remainingSec.toDouble() / step.durationSec
+        step.distanceM > 0 && remainingM != null -> 1.0 - remainingM.toDouble() / step.distanceM
+        else -> 0.0
+    }
+    // Stop short of the next boundary: the step ends when the machine says so.
+    val within = (done.coerceIn(0.0, 1.0) * STEP_BAR_UNITS).roundToInt().coerceAtMost(STEP_BAR_UNITS - 1)
+    return StepBar(segments, (p.index * STEP_BAR_UNITS + within).coerceIn(0, max))
+}
+
+/** One refresh of the run notification: the content line, the chip text and, for a
+ *  guided run, the step bar. Equality is the service's re-post throttle key. */
+internal data class RunNotifFrame(val content: String, val chip: String, val steps: StepBar?)
+
+/**
+ * The run notification's per-state builder: everything but the per-frame fields and
+ * the actions. It requests promotion to a Live Update (Android 16+; an ignored extra
+ * below, where it posts as the same ongoing notification as before) and meets the
+ * documented criteria: ongoing, a title, no custom views, not a group summary, not
+ * colorized, on an IMPORTANCE_LOW channel. [dismiss] reports a user swipe so the
+ * service stops re-posting.
+ */
+internal fun runNotificationBuilder(
+    ctx: Context,
+    channel: String,
+    title: String,
+    tap: PendingIntent,
+    dismiss: PendingIntent,
+): NotificationCompat.Builder = NotificationCompat.Builder(ctx, channel)
+    .setContentTitle(title)
+    // 1-color white route mark, silhouette only (icons README table). Also the
+    // chip's icon.
+    .setSmallIcon(R.drawable.ic_stat_mark)
+    .setOngoing(true)
+    .setRequestPromotedOngoing(true)
+    .setContentIntent(tap)
+    .setDeleteIntent(dismiss)
+    // Shown in full on a secure lock screen: the line carries only moving time,
+    // distance and pace (never a location), so a runner can glance at it without
+    // unlocking.
+    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+    // The ~1 Hz progress refresh must never re-alert.
+    .setOnlyAlertOnce(true)
+
+/**
+ * Apply one [frame] to a cached [builder] and build. A guided run gets a
+ * `ProgressStyle` of its steps (the current step name leads the content line);
+ * androidx falls back to a plain progress bar below Android 16. Otherwise
+ * `BigTextStyle`, so the always-expanded Live Update card wraps the line (moving
+ * time, distance, current pace) instead of cutting it. The chip text is applied by
+ * androidx on Android 16+ only.
+ */
+internal fun buildRunNotification(builder: NotificationCompat.Builder, frame: RunNotifFrame): Notification {
+    val bar = frame.steps
+    val style = if (bar != null) {
+        NotificationCompat.ProgressStyle()
+            .setProgressSegments(bar.segments.map { NotificationCompat.ProgressStyle.Segment(it) })
+            .setProgress(bar.progress)
+    } else {
+        NotificationCompat.BigTextStyle().bigText(frame.content)
+    }
+    return builder
+        .setContentText(frame.content)
+        .setShortCriticalText(frame.chip)
+        .setStyle(style)
+        .build()
 }
 
 /** True when Google Play Services is installed and usable, i.e. the fused

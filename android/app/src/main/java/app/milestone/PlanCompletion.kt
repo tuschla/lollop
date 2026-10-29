@@ -205,7 +205,9 @@ internal fun rememberTicker(periodMs: Long): Long {
 /** Tells [RestAlarm] the set loop is on a resumed screen, so its own rest cue
  *  covers the rest end and no notification is posted. Lives for the whole loop
  *  sheet, not one exercise's readout: switching exercise mid-rest never hands
- *  the countdown to a notification while the app is open. */
+ *  the countdown to a notification while the app is open. Each resume also
+ *  re-checks the exact-alarm grant (the user may be back from the system screen
+ *  the loop's notice opens). */
 @Composable
 internal fun RestAlarmInAppScope() {
     val ctx = LocalContext.current
@@ -213,7 +215,10 @@ internal fun RestAlarmInAppScope() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> RestAlarm.setInAppVisible(ctx, true)
+                Lifecycle.Event.ON_RESUME -> {
+                    RestAlarm.setInAppVisible(ctx, true)
+                    RestAlarm.recheckExactAlarms(ctx)
+                }
                 Lifecycle.Event.ON_PAUSE -> RestAlarm.setInAppVisible(ctx, false)
                 else -> Unit
             }

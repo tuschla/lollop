@@ -115,6 +115,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("com.google.android.gms:play-services-location:21.4.0")
+    // Home screen widget (widget/TodayWidget.kt). 1.2.0 is the latest stable on
+    // Google Maven (1.3.0 is alpha).
+    implementation("androidx.glance:glance-appwidget:1.2.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Backports java.time (+ other Java 8 APIs) to minSdk 24 so the app doesn't
@@ -142,6 +145,8 @@ dependencies {
     testImplementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
     testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.76.0")
     testImplementation("io.github.takahirom.roborazzi:roborazzi-junit-rule:1.76.0")
+    // Glance widget content tests (runGlanceAppWidgetUnitTest), same version as the widget.
+    testImplementation("androidx.glance:glance-appwidget-testing:1.2.0")
 
     // Instrumented Compose UI tests (on device/emulator).
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
@@ -210,6 +215,10 @@ tasks.withType<Test>().configureEach {
     environment("ANDROID_LOG_TAGS", "OpenGLRenderer:E *:W")
     // Give the forked test JVM headroom: the real core + Compose + Robolectric.
     maxHeapSize = "2g"
+    // Robolectric's Android 16 (SDK 36) sandbox reaches into jdk.internal.access to
+    // set up shared memory; without this export every @Config(sdk = [36]) test fails
+    // at setup with "Failed to interact with raw FileDescriptor internals".
+    jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
     // A hang fails the task instead of holding CI until its job timeout: the full
     // suite runs in well under this.
     timeout.set(Duration.ofMinutes(30))
