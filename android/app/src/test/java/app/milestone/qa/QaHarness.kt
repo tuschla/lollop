@@ -86,6 +86,10 @@ object QaHarness {
         // (or its exact-alarm notice) must not show in the next loop.
         app.milestone.RestAlarm.cancel(ctx)
         app.milestone.RestAlarm.resetProcessState()
+        // The widget snapshot sync started by an earlier test's Activity is bound
+        // to that test's Application (and files dir); the next launch starts it
+        // again for this one.
+        app.milestone.widget.WidgetSync.resetForTest()
 
         // Onboarding / plan-cleared markers live here; a stale onboarding_done
         // would suppress the fresh-install guided setup.

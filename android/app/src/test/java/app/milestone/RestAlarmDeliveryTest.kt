@@ -51,7 +51,13 @@ class RestAlarmDeliveryTest {
         RestAlarm.resetProcessState()
     }
 
-    private fun posted(): Notification? = shadowOf(nm).getNotification(RestAlarm.NOTIF_ID)
+    /** What the rest shows: the rest-done alert, else the countdown; never both. */
+    private fun posted(): Notification? {
+        val done = shadowOf(nm).getNotification(RestAlarm.DONE_NOTIF_ID)
+        val countdown = shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID)
+        assertTrue("countdown and rest-done alert both posted", done == null || countdown == null)
+        return done ?: countdown
+    }
     private fun title(n: Notification?) = n?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
     private val resting get() = app.getString(R.string.log_rest_notif_title, "Back squat")
     private val restDone get() = app.getString(R.string.log_rest_notif_done_title)
@@ -140,6 +146,27 @@ class RestAlarmDeliveryTest {
         nm.cancelAll()
         deliver(fired)
         assertNull(posted())
+    }
+
+    /** The countdown's timeout is the rest end, as is the exact alarm, so the
+     *  system can remove the countdown's id just after the alert is posted: the
+     *  alert has its own id and stays. */
+    @Test
+    fun theCountdownsTimeoutAtTheRestEndLeavesTheDoneAlert() {
+        ShadowAlarmManager.setCanScheduleExactAlarms(true)
+        RestAlarm.schedule(app, 90, "Back squat")
+        assertEquals(resting, title(shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID)))
+        deliver(broadcastOf(alarm()))
+        assertNull("the countdown is taken down explicitly", shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID))
+
+        // The countdown's setTimeoutAfter fires: the system cancels its id.
+        nm.cancel(RestAlarm.COUNTDOWN_NOTIF_ID)
+
+        assertEquals(restDone, title(shadowOf(nm).getNotification(RestAlarm.DONE_NOTIF_ID)))
+        assertEquals(1, shadowOf(nm).allNotifications.size)
+        // A new rest or cancel still clears the alert.
+        RestAlarm.cancel(app)
+        assertEquals(0, shadowOf(nm).allNotifications.size)
     }
 
     @Test

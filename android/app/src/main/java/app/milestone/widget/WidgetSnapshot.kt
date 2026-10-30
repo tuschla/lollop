@@ -230,6 +230,12 @@ internal object WidgetSnapshotStore {
     private val lock = Any()
     private val _revision = MutableStateFlow(0L)
     val revision: StateFlow<Long> = _revision.asStateFlow()
+    private val _staleMarks = MutableStateFlow(0L)
+
+    /** Ticks on every stale mark ([markStale]), so [WidgetSync] rewrites the
+     *  snapshot from the model the app process holds: a time zone change that
+     *  keeps the local day publishes no new model. */
+    val staleMarks: StateFlow<Long> = _staleMarks.asStateFlow()
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE_NAME)
 
@@ -275,11 +281,16 @@ internal object WidgetSnapshotStore {
     /**
      * Mark the stored snapshot stale: always when [force] (a time zone change),
      * else only when it describes a day other than [today] (the midnight tick, a
-     * clock change). The next published model writes a fresh one.
+     * clock change). The next published model, or [WidgetSync] at once when the
+     * app process holds a model, writes a fresh one.
      */
-    fun markStale(ctx: Context, force: Boolean, today: Long = todayEpochDay()): Boolean = synchronized(lock) {
-        val current = read(ctx) ?: return false
-        if (current.stale || (!force && current.epochDay == today)) return false
-        write(ctx, current.copy(stale = true))
+    fun markStale(ctx: Context, force: Boolean, today: Long = todayEpochDay()): Boolean {
+        val marked = synchronized(lock) {
+            val current = read(ctx) ?: return false
+            if (current.stale || (!force && current.epochDay == today)) return false
+            write(ctx, current.copy(stale = true))
+        }
+        if (marked) _staleMarks.value += 1
+        return marked
     }
 }

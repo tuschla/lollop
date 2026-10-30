@@ -37,7 +37,11 @@ import kotlinx.coroutines.flow.asStateFlow
 internal object RestAlarm {
     private const val CHANNEL_COUNTDOWN = "rest_countdown"
     private const val CHANNEL_DONE = "rest_done"
-    internal const val NOTIF_ID = 4207
+    // The countdown and the rest-done alert have their own ids: the countdown's
+    // timeout (the rest end) can fire just after the alert is posted, and the
+    // system then cancels whatever holds the countdown's id.
+    internal const val COUNTDOWN_NOTIF_ID = 4207
+    internal const val DONE_NOTIF_ID = 4209
     // The rest-end alarm's identity: this request code, [ACTION_REST_END] and
     // [RestEndReceiver]. A new rest replaces the alarm, cancel finds it.
     private const val ALARM_REQUEST = 4208
@@ -133,7 +137,7 @@ internal object RestAlarm {
         alarmInexact = false
         _running.value = null
         clearSavedRest(app)
-        app.getSystemService(NotificationManager::class.java)?.cancel(NOTIF_ID)
+        cancelNotifications(app)
     }
 
     /** The open loop's next set; the countdown posted after the loop closes names
@@ -150,7 +154,7 @@ internal object RestAlarm {
         inAppVisible = visible
         val app = ctx.applicationContext
         if (visible) {
-            app.getSystemService(NotificationManager::class.java)?.cancel(NOTIF_ID)
+            cancelNotifications(app)
         } else if (endAtMillis != null) {
             postCountdown(app)
         }
@@ -198,8 +202,9 @@ internal object RestAlarm {
         endAtMillis = null
         alarmInexact = false
         val nm = app.getSystemService(NotificationManager::class.java) ?: return
+        nm.cancel(COUNTDOWN_NOTIF_ID)
         if (inAppVisible || !canNotify(app)) {
-            nm.cancel(NOTIF_ID)
+            nm.cancel(DONE_NOTIF_ID)
             return
         }
         ensureChannels(app)
@@ -217,7 +222,7 @@ internal object RestAlarm {
             // without the channel's sound or vibration.
             .setSilent(!AppSettings.restAlert.value)
             .build()
-        nm.notify(NOTIF_ID, n)
+        nm.notify(DONE_NOTIF_ID, n)
     }
 
     private fun postCountdown(app: Context) {
@@ -248,17 +253,24 @@ internal object RestAlarm {
             b.setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
         }
         val n: Notification = b.build()
-        app.getSystemService(NotificationManager::class.java)?.notify(NOTIF_ID, n)
+        app.getSystemService(NotificationManager::class.java)?.notify(COUNTDOWN_NOTIF_ID, n)
     }
 
     private fun dismissIntent(app: Context, startMillis: Long): PendingIntent =
         PendingIntent.getBroadcast(
-            app, NOTIF_ID,
+            app, COUNTDOWN_NOTIF_ID,
             Intent(app, RestDismissReceiver::class.java).putExtra(EXTRA_REST_START, startMillis),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
     private fun prefs(app: Context): SharedPreferences = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** Take down the countdown and the rest-done alert. */
+    private fun cancelNotifications(app: Context) {
+        val nm = app.getSystemService(NotificationManager::class.java) ?: return
+        nm.cancel(COUNTDOWN_NOTIF_ID)
+        nm.cancel(DONE_NOTIF_ID)
+    }
 
     private fun clearSavedRest(app: Context) {
         prefs(app).edit { remove(KEY_START).remove(KEY_EXERCISE).remove(KEY_NEXT_EXERCISE) }

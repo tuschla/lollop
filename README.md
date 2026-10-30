@@ -25,7 +25,7 @@ cargo test                                    # core
 cd android && ./gradlew testDebugUnitTest     # JVM + Robolectric UI tests on the real core
 cd android && ./gradlew verifyRoborazziDebug  # screenshots (baselines are local, not in git)
 scripts/emulator-scenarios.sh                 # on-device scenarios (AVD e34)
-scripts/emu-scenarios/surfaces.sh             # widget, QS tile, open intents, Live Updates (AVD e37 / e34)
+scripts/emu-scenarios/surfaces.sh             # widget, QS tile, open intents, Live Updates, session reminder (AVD e37 / e34)
 ```
 
 ## Privacy

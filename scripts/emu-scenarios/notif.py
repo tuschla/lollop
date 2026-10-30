@@ -3,7 +3,8 @@ notification of a package.
 
 argv: package [id]
 Prints a JSON list (or the one record with that notification id, `null` when it
-is not posted) of {"id", "channel", "flags": [...], "when", "extras": {name: value}}.
+is not posted) of {"id", "channel", "category", "vis", "flags": [...], "when",
+"actions": [title, ...], "extras": {name: value}}.
 `extras` keeps the dump's value text ("String (Tracking run)" → "Tracking run",
 "Boolean (true)" → "true"); `flags` are names (an API 34 dump's hex is decoded).
 Only the first record per id is kept: the same key can also appear in the
@@ -41,7 +42,9 @@ for line in text.splitlines():
         cur = None
         in_extras = False
         if m.group(1) == pkg:
-            cur = {"id": int(m.group(2)), "channel": m.group(3), "flags": [], "when": None, "extras": {}}
+            head = lambda k: (re.search(rf" {k}=(\S+?)[ )]", line) or [None, None])[1]
+            cur = {"id": int(m.group(2)), "channel": m.group(3), "category": head("category"), "vis": head("vis"),
+                   "flags": [], "when": None, "actions": [], "extras": {}}
             if all(r["id"] != cur["id"] for r in records):
                 records.append(cur)
             else:
@@ -53,7 +56,10 @@ for line in text.splitlines():
     if re.match(r"^(AppSettings|mEnabledListeners|Snoozed|Notification history)", s):
         cur = None
         continue
-    if s.startswith("flags=") and not cur["flags"]:
+    m = re.match(r'^\[\d+\] "(.*)" -> PendingIntent', s)
+    if m and not in_extras:
+        cur["actions"].append(m.group(1))
+    elif s.startswith("flags=") and not cur["flags"]:
         cur["flags"] = flag_names(s[6:])
     elif s.startswith("when=") and cur["when"] is None:
         cur["when"] = int(s[5:].split("/")[0])

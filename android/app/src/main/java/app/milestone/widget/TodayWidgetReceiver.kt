@@ -25,8 +25,9 @@ import kotlinx.coroutines.launch
  * changing under a stored snapshot: the local-midnight tick ([ACTION_MIDNIGHT])
  * and a clock change mark a snapshot from another day stale; a time zone change
  * marks it stale outright. Either way the widget then reads "Open lollop to
- * update" until the app publishes a fresh model. A clock change within the same
- * day (network time corrects the clock by seconds) leaves the snapshot alone.
+ * update" until the app publishes a fresh model (at once while the app process
+ * holds one: [WidgetSync]). A clock change within the same day (network time
+ * corrects the clock by seconds) leaves the snapshot alone.
  * Each of these, and a locale change, also redraws the Quick Settings tile
  * ([requestTileRefresh]), whose face depends on the day and the language; the
  * midnight tick runs while a widget or the tile is placed.

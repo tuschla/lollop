@@ -49,7 +49,13 @@ class LiveRestNotificationTest {
         RestAlarm.setInAppVisible(app, false)
     }
 
-    private fun posted(): Notification? = shadowOf(nm).getNotification(RestAlarm.NOTIF_ID)
+    /** What the rest shows: the rest-done alert, else the countdown; never both. */
+    private fun posted(): Notification? {
+        val done = shadowOf(nm).getNotification(RestAlarm.DONE_NOTIF_ID)
+        val countdown = shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID)
+        assertTrue("countdown and rest-done alert both posted", done == null || countdown == null)
+        return done ?: countdown
+    }
 
     /** The system delivers the rest-end alarm: its broadcast reaches the receiver. */
     private fun fireRestEnd() {
@@ -123,7 +129,7 @@ class LiveRestNotificationTest {
         assertTrue(delete.isBroadcastIntent)
         assertEquals(RestDismissReceiver::class.java.name, delete.savedIntent.component?.className)
         // The user swipes it away: the system cancels it and sends the delete intent.
-        nm.cancel(RestAlarm.NOTIF_ID)
+        nm.cancel(RestAlarm.COUNTDOWN_NOTIF_ID)
         RestDismissReceiver().onReceive(app, delete.savedIntent)
 
         RestAlarm.setInAppVisible(app, true)
