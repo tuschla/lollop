@@ -38,6 +38,14 @@ android {
             }
         }
         release {
+            // QA only: `-PqaX86Release` adds the x86_64 core so the minified
+            // release APK runs on the x86_64 emulator (scripts/emulator-scenarios.sh
+            // --apk). The shipped default stays arm64-v8a alone.
+            if (providers.gradleProperty("qaX86Release").isPresent) {
+                ndk {
+                    abiFilters += listOf("x86_64")
+                }
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

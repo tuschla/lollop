@@ -2,6 +2,7 @@ package app.milestone
 
 import android.Manifest
 import android.app.AlarmManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -45,6 +46,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import androidx.core.os.bundleOf
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
@@ -56,6 +58,8 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.Calendar
+import kotlin.math.abs
+import kotlinx.coroutines.launch
 
 /**
  * The daily session reminder (Profile › During training, off by default). At the
@@ -66,7 +70,10 @@ import java.util.Calendar
  * (`track` on a run day, the tracker's pre-start screen; `log_set` on a lift day,
  * the set editor at the first open exercise). Nothing on a rest day, without a
  * plan, while training is paused (a hold or the under-18 pause), once the session
- * is done, while a run is recording, or when the day is not known.
+ * is done, while a run is recording, or when the day is not known. At most one
+ * per local day: the days reminded are stored (those within [REMINDED_DAYS_KEPT]
+ * days of the latest), so an alarm set again for a date already reminded (a time
+ * zone change west, the clock set back, a later reminder time) posts nothing.
  *
  * It reads only the widget snapshot ([WidgetSnapshotStore]), never the core. The
  * snapshot describes the day the app last published, usually an earlier day at
@@ -75,6 +82,9 @@ import java.util.Calendar
  * most [AHEAD_MAX_DAYS] old, was written in the current time zone and was not
  * paused or planless. A newer snapshot for today ([onSnapshot]) takes a posted
  * reminder down once the session is done or today is no longer a session day.
+ * A run reminder goes once a run records ([watchRecording]), any reminder once
+ * its action is tapped ([onOpenIntent]) and once the local day it was posted for
+ * has passed ([onDayChanged]: the midnight tick, a time zone or clock change).
  *
  * The alarm is set again after it fires, after boot or an app update, on a time
  * zone or clock change ([SessionReminderReceiver]), when the app starts and when
@@ -95,6 +105,19 @@ internal object SessionReminder {
     private const val PREFS = "session_reminder"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_MINUTE = "minute_of_day"
+    private const val KEY_REMINDED_DAYS = "reminded_epoch_days"
+    private const val ACTION_REQUEST = 4303
+
+    /** How far from the latest post a reminded day is kept. A time zone change moves
+     *  the local date by two days at most; a clock set back further reminds again. */
+    internal const val REMINDED_DAYS_KEPT = 7L
+
+    // The shown reminder's local day and kind, read back from the posted notification.
+    private const val EXTRA_DAY = "app.milestone.reminder.epoch_day"
+    private const val EXTRA_KIND = "app.milestone.reminder.kind"
+
+    /** On the action's open intent: the tap takes the reminder down ([onOpenIntent]). */
+    private const val EXTRA_FROM_REMINDER = "app.milestone.reminder.action"
 
     data class Setting(val enabled: Boolean, val minuteOfDay: Int)
 
@@ -105,6 +128,10 @@ internal object SessionReminder {
             minuteOfDay = p.getInt(KEY_MINUTE, DEFAULT_MINUTE_OF_DAY).coerceIn(0, MINUTES_PER_DAY - 1),
         )
     }
+
+    /** The local days a reminder was posted for, near the day of the last post. */
+    private fun remindedDays(app: Context): List<Long> =
+        prefs(app).getString(KEY_REMINDED_DAYS, null).orEmpty().split(',').mapNotNull { it.toLongOrNull() }
 
     /** Switch the reminder on or off; off also takes down a posted reminder. */
     fun setEnabled(ctx: Context, enabled: Boolean) {
@@ -161,9 +188,9 @@ internal object SessionReminder {
     }
 
     /**
-     * Post today's reminder when the reminder is on, notifications are allowed and
-     * the stored snapshot shows an open session today ([reminderOf]). True when
-     * one was posted.
+     * Post today's reminder when the reminder is on, notifications are allowed,
+     * no reminder was posted for local day [today] yet and the stored snapshot
+     * shows an open session today ([reminderOf]). True when one was posted.
      */
     internal fun post(
         ctx: Context,
@@ -173,47 +200,103 @@ internal object SessionReminder {
     ): Boolean {
         val app = ctx.applicationContext
         if (!setting(app).enabled || !canNotify(app)) return false
+        if (today in remindedDays(app)) return false
         val reminder = reminderOf(WidgetSnapshotStore.read(app), today, zone) ?: return false
         // A run already recording is today's run under way.
         if (recording && reminder.kind == WidgetDayKind.Run) return false
-        notify(app, reminder, silent = false)
+        notify(app, reminder, today, silent = false)
+        val kept = (remindedDays(app) + today).filter { abs(it - today) <= REMINDED_DAYS_KEPT }
+        prefs(app).edit { putString(KEY_REMINDED_DAYS, kept.joinToString(",")) }
+        watchRecording(app)
         return true
     }
 
     /**
-     * A fresh snapshot was stored. While a reminder is showing, a snapshot for
-     * today takes it down once today's session is done or today is no longer a
-     * session day, and otherwise redraws it quietly (a changed session).
+     * A fresh snapshot was stored. A shown reminder for another local day goes.
+     * A shown reminder for today goes once a snapshot for today has the session
+     * done, today no longer a session day, or a run day while a run records;
+     * otherwise it is redrawn quietly (a changed session).
      */
     internal fun onSnapshot(
         ctx: Context,
         snapshot: WidgetSnapshot,
         today: Long = todayEpochDay(),
         zone: String = ZoneId.systemDefault().id,
+        recording: Boolean = RunSession.tracking.value,
     ) {
-        if (snapshot.stale || snapshot.epochDay != today) return
         val app = ctx.applicationContext
         val nm = app.getSystemService(NotificationManager::class.java) ?: return
-        if (nm.activeNotifications.none { it.id == NOTIF_ID }) return
+        val shown = shown(nm) ?: return
+        if (shown.extras.getLong(EXTRA_DAY, Long.MIN_VALUE) != today) {
+            nm.cancel(NOTIF_ID)
+            return
+        }
+        if (snapshot.stale || snapshot.epochDay != today) return
         val reminder = reminderOf(snapshot, today, zone)
-        if (reminder == null || !canNotify(app)) {
+        if (reminder == null || !canNotify(app) || (recording && reminder.kind == WidgetDayKind.Run)) {
             nm.cancel(NOTIF_ID)
         } else {
-            notify(app, reminder, silent = true)
+            notify(app, reminder, today, silent = true)
         }
     }
+
+    /**
+     * The local day may have changed (the midnight tick, a time zone or clock
+     * change): a shown reminder posted for a day other than [today] goes. Its
+     * timeout alone runs to the midnight of the zone and clock it was posted in.
+     */
+    internal fun onDayChanged(ctx: Context, today: Long = todayEpochDay()) {
+        val nm = ctx.applicationContext.getSystemService(NotificationManager::class.java) ?: return
+        val shown = shown(nm) ?: return
+        if (shown.extras.getLong(EXTRA_DAY, Long.MIN_VALUE) != today) nm.cancel(NOTIF_ID)
+    }
+
+    /** A shown run reminder goes once a run records: its "Start run" is done. */
+    internal fun onRecording(ctx: Context) {
+        val nm = ctx.applicationContext.getSystemService(NotificationManager::class.java) ?: return
+        val shown = shown(nm) ?: return
+        if (shown.extras.getString(EXTRA_KIND) == WidgetDayKind.Run.name) nm.cancel(NOTIF_ID)
+    }
+
+    @Volatile private var watching = false
+    @Volatile private var watchApp: Context? = null
+
+    /**
+     * Runs [onRecording] whenever [RunSession.tracking] turns on, whoever turns it
+     * on, at once on the main thread. Process-scoped, started by [post], MainActivity
+     * and [RunTrackingService]; a later call only replaces the context (Robolectric
+     * gives each test a new Application under the same collector).
+     */
+    fun watchRecording(ctx: Context) {
+        watchApp = ctx.applicationContext
+        if (watching) return
+        watching = true
+        EventDispatcher.scope.launch {
+            RunSession.tracking.collect { recording -> if (recording) watchApp?.let(::onRecording) }
+        }
+    }
+
+    /** MainActivity got [intent]: the reminder's action was tapped, so the reminder goes
+     *  (a tap on an action does not auto-cancel the notification). */
+    internal fun onOpenIntent(ctx: Context, intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_FROM_REMINDER, false) == true) cancelNotification(ctx)
+    }
+
+    private fun shown(nm: NotificationManager): Notification? =
+        nm.activeNotifications.firstOrNull { it.id == NOTIF_ID }?.notification
 
     fun cancelNotification(ctx: Context) {
         ctx.applicationContext.getSystemService(NotificationManager::class.java)?.cancel(NOTIF_ID)
     }
 
-    private fun notify(app: Context, reminder: Reminder, silent: Boolean) {
+    /** [reminder] for local day [day]. */
+    private fun notify(app: Context, reminder: Reminder, day: Long, silent: Boolean) {
         ensureChannel(app)
         val res = app.resources
         val start = NotificationCompat.Action.Builder(
             if (reminder.kind == WidgetDayKind.Run) R.drawable.ic_content_track_run else R.drawable.ic_content_set_dumbbell,
             reminderActionLabel(res, reminder),
-            openPendingIntent(app, reminder.dest),
+            actionPendingIntent(app, reminder.dest),
         )
             // From the lock screen the session opens after unlock.
             .setAuthenticationRequired(true)
@@ -231,11 +314,22 @@ internal object SessionReminder {
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setSilent(silent)
+            .addExtras(bundleOf(EXTRA_DAY to day, EXTRA_KIND to reminder.kind.name))
             // Today's reminder never stands into tomorrow.
             .setTimeoutAfter((nextFireMillis(now, 0, ZoneId.systemDefault()) - now).coerceAtLeast(1L))
         if (line != null) b.setContentText(line)
         app.getSystemService(NotificationManager::class.java)?.notify(NOTIF_ID, b.build())
     }
+
+    /** The action's open intent to [dest], marked so that MainActivity takes the
+     *  reminder down ([onOpenIntent]). Its own request code: PendingIntents match
+     *  without extras, so the shared [openPendingIntent] would lose the mark. */
+    private fun actionPendingIntent(app: Context, dest: OpenDest): PendingIntent = PendingIntent.getActivity(
+        app,
+        ACTION_REQUEST,
+        openIntent(app, dest).putExtra(EXTRA_FROM_REMINDER, true),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
 
     /** POST_NOTIFICATIONS granted (API 33+) and the app's notifications not blocked. */
     internal fun canNotify(ctx: Context): Boolean =
@@ -335,6 +429,8 @@ internal fun reminderActionLabel(res: Resources, reminder: Reminder): String = r
  * The reminder alarm ([SessionReminder.ACTION_FIRE]) and the system events after
  * which the alarm must be set again: boot, an app update (alarms do not survive
  * either), a time zone change (07:30 is another instant) and a clock change.
+ * Each of these may also have changed the local day, which takes down a reminder
+ * posted for another day ([SessionReminder.onDayChanged]).
  */
 class SessionReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -344,7 +440,10 @@ class SessionReminderReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIMEZONE_CHANGED,
             Intent.ACTION_TIME_CHANGED,
-            -> SessionReminder.reschedule(context)
+            -> {
+                SessionReminder.reschedule(context)
+                SessionReminder.onDayChanged(context)
+            }
         }
     }
 }

@@ -112,9 +112,9 @@ internal data class WidgetSnapshot(
     val holdReason: String? = null,
     /** [WidgetDayKind.NoPlan]: the core's plan_withheld (health_hold | nothing_to_plan), or null. */
     val planWithheld: String? = null,
-    /** The plan's session days after [epochDay] that the model knows (this week's
-     *  plan and the next session), for the session reminder when the app has not
-     *  run since; empty while paused, without a plan or a profile. */
+    /** The plan's session days after [epochDay] that the model knows (this and
+     *  next week's plan and the next session), for the session reminder when the
+     *  app has not run since; empty while paused, without a plan or a profile. */
     val ahead: List<WidgetAheadDay> = emptyList(),
     /** The time zone the snapshot was written in ([ZoneId] id); empty in a file
      *  written before it was recorded. */
@@ -177,10 +177,10 @@ internal fun widgetSnapshotOf(
     )
 }
 
-/** The planned (not yet trained) lift and run days after [today] in this week's
- *  plan and [ns], by day. */
+/** The planned (not yet trained) lift and run days after [today] in this and
+ *  next week's plan and [ns], by day. */
 private fun aheadDays(model: ViewModel, ns: SessionPlanView, today: Long, unit: DistanceUnit): List<WidgetAheadDay> =
-    (model.week_plan + ns)
+    (model.week_plan + model.next_week_plan + ns)
         .filter { it.epoch_day > today && it.items.isNotEmpty() && (it.actionable || it.status == "planned") }
         .distinctBy { it.epoch_day }
         .sortedBy { it.epoch_day }
@@ -282,9 +282,11 @@ internal object WidgetSnapshotStore {
      * Mark the stored snapshot stale: always when [force] (a time zone change),
      * else only when it describes a day other than [today] (the midnight tick, a
      * clock change). The next published model, or [WidgetSync] at once when the
-     * app process holds a model, writes a fresh one.
+     * app process holds a model, writes a fresh one. A shown session reminder
+     * for a day other than [today] goes ([SessionReminder.onDayChanged]).
      */
     fun markStale(ctx: Context, force: Boolean, today: Long = todayEpochDay()): Boolean {
+        SessionReminder.onDayChanged(ctx, today)
         val marked = synchronized(lock) {
             val current = read(ctx) ?: return false
             if (current.stale || (!force && current.epochDay == today)) return false

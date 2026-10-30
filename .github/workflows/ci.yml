@@ -87,6 +87,13 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest
 
+      - name: Release R8 keep check
+        # Classes created by name at run time (JNI Core, manifest components,
+        # startup initializers, Room/WorkManager reflection) must survive
+        # minification; a miss only crashes the release APK. Builds
+        # :app:minifyReleaseWithR8 and checks its dex.
+        run: scripts/check-release-r8.sh
+
   emulator-smoke:
     name: Android on-device smoke (emulator)
     # Expensive: only weekly + on manual dispatch, never on push/PR.

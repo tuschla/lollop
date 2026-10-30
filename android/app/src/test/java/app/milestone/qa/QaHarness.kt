@@ -79,6 +79,7 @@ object QaHarness {
         // a consumer that never resumes, so this boot would wait on it forever (the
         // splash cancelling every frame, ActivityScenario.launch spinning).
         EventDispatcher.resetForTest()
+        injectCoreLatency()
         // The run tracker's process singleton (live run, plan guide, save latch): a
         // scenario that left a run recording must not reopen the tracker in the next.
         app.milestone.RunSession.reset()
@@ -100,6 +101,26 @@ object QaHarness {
         File(ctx.filesDir, "event-log.ndjson.bak").delete()
         File(ctx.filesDir, "event-log.ndjson.tmp").delete()
     }
+
+    /**
+     * Race finder, off by default: with `QA_CORE_LATENCY_MS=<n>` in the test JVM's
+     * environment, every queued core send (single and batch) holds its result back
+     * n ms AFTER the core applied it, off the main looper. The event is then in the
+     * durable log while the UI still shows the previous model, which is what a
+     * loaded JVM does on a slow view build. A test that syncs on the log (or on
+     * nothing) and then expects the new model on screen fails under it; sync on
+     * the published [EventDispatcher.model] instead. Run with `--rerun`: Gradle
+     * does not see an environment change.
+     */
+    private fun injectCoreLatency() {
+        val ms = System.getenv("QA_CORE_LATENCY_MS")?.toLongOrNull()?.takeIf { it > 0 } ?: return
+        val send = EventDispatcher.sender
+        val sendAll = EventDispatcher.batchSender
+        EventDispatcher.sender = { e -> send(e).also { lag(ms) } }
+        EventDispatcher.batchSender = { es -> sendAll(es).also { lag(ms) } }
+    }
+
+    private suspend fun lag(ms: Long) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Thread.sleep(ms) }
 
     /**
      * Close the launched Activity at the END of a test (valid lifecycle point,

@@ -401,6 +401,13 @@ pub struct ViewModel {
     /// The seven days of the current week around today, for the week strip.
     #[serde(default)]
     pub week_plan: Vec<SessionPlanView>,
+    /// The seven days of next week, laid out as next week's own view will
+    /// show them when nothing more is logged; held days are blanked like
+    /// `week_plan`'s. A hero wrapped into next week is one of these rows. The
+    /// shell's session reminder reads the days ahead from here when the app
+    /// is not opened again before them.
+    #[serde(default)]
+    pub next_week_plan: Vec<SessionPlanView>,
     /// The active program summary card (name/goal/phase/week), when a plan is set.
     #[serde(default)]
     pub program: Option<ProgramSummaryView>,

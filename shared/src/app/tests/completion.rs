@@ -105,6 +105,37 @@ fn warmups_do_not_qualify_or_complete_an_anchored_lift() {
     assert_eq!(it.sets_done, 1, "a working set at the load qualifies");
 }
 
+/// The set loop's one-tap warm-up row logs the STR-WARMUP-001 ramp (40 % × 5,
+/// 60 % × 3, 80 % × 2 of the working load, `SetEditorState.kt` `warmUpSteps`)
+/// unrated BEFORE the first work set: "warm-up sets do not count as work
+/// sets", so the 80 % × 2 step is a warm-up while it is still the day's heaviest.
+#[test]
+fn the_warm_up_ramp_top_step_does_not_count_before_the_first_work_set() {
+    let (app, mut model) = planned_strength_model(true);
+    let (ex, _, reps, load) = mon_anchored_item(&app, &model);
+    for (i, (share, r)) in [(0.4, 5), (0.6, 3), (0.8, 2)].into_iter().enumerate() {
+        app.update(
+            log_set(&ex, load * share, r, 0.0, MON * DAY_SEC + i as i64 * 120),
+            &mut model,
+        )
+        .expect_only_render();
+    }
+    let it = mon_item(&app, &model, &ex);
+    let flags: Vec<(f64, u32, bool)> = it
+        .logged_sets
+        .iter()
+        .map(|s| (s.weight_kg, s.reps, s.qualifies))
+        .collect();
+    assert_eq!(
+        it.sets_done, 0,
+        "the warm-up ramp before {load} kg × {reps} counts no work set: {flags:?}"
+    );
+    assert!(
+        flags.iter().all(|f| !f.2),
+        "every ramp step is a warm-up: {flags:?}"
+    );
+}
+
 #[test]
 fn a_cable_row_completes_the_equipment_qualified_row_fill() {
     let (app, mut model) = planned_strength_model(false);

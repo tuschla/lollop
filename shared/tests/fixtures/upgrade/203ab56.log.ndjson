@@ -1,0 +1,211 @@
+{"ComputeProtein":{"bodyweight_kg":78.0,"masters":false,"deficit":false}}
+{"ComputeCriticalSpeed":{"efforts":[{"distance_m":1200.0,"time_sec":270.0},{"distance_m":3600.0,"time_sec":900.0}]}}
+{"ComputeCooper":{"distance_m_12min":2710.0}}
+{"LogSet":{"exercise":"Squat","weight_kg":90.0,"reps":5,"rpe":7.0,"observed_at":1785600000}}
+{"LogSet":{"exercise":"Squat","weight_kg":100.0,"reps":5,"rpe":7.5,"observed_at":1785772800,"entry_id":1790000000001}}
+{"LogSet":{"exercise":"Squat","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":1785773040,"entry_id":1790000000002}}
+{"LogSet":{"exercise":"Squat","weight_kg":100.0,"reps":5,"rpe":8.5,"observed_at":1785773280,"entry_id":1790000000003}}
+{"LogSet":{"exercise":"Bench press","weight_kg":70.0,"reps":5,"rpe":7.5,"observed_at":1785773520,"entry_id":1790000000004}}
+{"LogSet":{"exercise":"Bench press","weight_kg":70.0,"reps":5,"rpe":8.0,"observed_at":1785773760,"entry_id":1790000000005}}
+{"LogSet":{"exercise":"Bench press","weight_kg":70.0,"reps":5,"rpe":8.5,"observed_at":1785774000,"entry_id":1790000000006}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":130.0,"reps":5,"rpe":7.5,"observed_at":1785945600,"entry_id":1790000000007}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":130.0,"reps":5,"rpe":8.0,"observed_at":1785945840,"entry_id":1790000000008}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":130.0,"reps":5,"rpe":8.5,"observed_at":1785946080,"entry_id":1790000000009}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":45.0,"reps":5,"rpe":7.5,"observed_at":1785946320,"entry_id":1790000000010}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":45.0,"reps":5,"rpe":8.0,"observed_at":1785946560,"entry_id":1790000000011}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":45.0,"reps":5,"rpe":8.5,"observed_at":1785946800,"entry_id":1790000000012}}
+{"LogSet":{"exercise":"Squat","weight_kg":95.0,"reps":5,"rpe":7.5,"observed_at":1786118400,"entry_id":1790000000013}}
+{"LogSet":{"exercise":"Squat","weight_kg":95.0,"reps":5,"rpe":8.0,"observed_at":1786118640,"entry_id":1790000000014}}
+{"LogSet":{"exercise":"Squat","weight_kg":95.0,"reps":5,"rpe":8.5,"observed_at":1786118880,"entry_id":1790000000015}}
+{"LogSet":{"exercise":"Bench press","weight_kg":67.5,"reps":5,"rpe":7.5,"observed_at":1786119120,"entry_id":1790000000016}}
+{"LogSet":{"exercise":"Bench press","weight_kg":67.5,"reps":5,"rpe":8.0,"observed_at":1786119360,"entry_id":1790000000017}}
+{"LogSet":{"exercise":"Bench press","weight_kg":67.5,"reps":5,"rpe":8.5,"observed_at":1786119600,"entry_id":1790000000018}}
+{"LogRun":{"distance_km":6.0,"duration_min":33.599999999999994,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":1785821400,"entry_id":1790000000019,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":7.0,"duration_min":39.199999999999996,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":1785994200,"entry_id":1790000000020,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":10.0,"duration_min":56.0,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":1786167000,"entry_id":1790000000021,"workout_type":"LongRun"}}
+{"LogSet":{"exercise":"Squat","weight_kg":102.5,"reps":5,"rpe":7.5,"observed_at":1786377600,"entry_id":1790000000022}}
+{"LogSet":{"exercise":"Squat","weight_kg":102.5,"reps":5,"rpe":8.0,"observed_at":1786377840,"entry_id":1790000000023}}
+{"LogSet":{"exercise":"Bench press","weight_kg":72.5,"reps":5,"rpe":7.5,"observed_at":1786378320,"entry_id":1790000000025}}
+{"LogSet":{"exercise":"Bench press","weight_kg":72.5,"reps":5,"rpe":8.0,"observed_at":1786378560,"entry_id":1790000000026}}
+{"LogSet":{"exercise":"Bench press","weight_kg":72.5,"reps":5,"rpe":8.5,"observed_at":1786378800,"entry_id":1790000000027}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":132.5,"reps":5,"rpe":7.5,"observed_at":1786550400,"entry_id":1790000000028}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":132.5,"reps":5,"rpe":8.0,"observed_at":1786550640,"entry_id":1790000000029}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":132.5,"reps":5,"rpe":8.5,"observed_at":1786550880,"entry_id":1790000000030}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":47.5,"reps":5,"rpe":7.5,"observed_at":1786551120,"entry_id":1790000000031}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":47.5,"reps":5,"rpe":8.0,"observed_at":1786551360,"entry_id":1790000000032}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":47.5,"reps":5,"rpe":8.5,"observed_at":1786551600,"entry_id":1790000000033}}
+{"LogSet":{"exercise":"Squat","weight_kg":97.5,"reps":5,"rpe":7.5,"observed_at":1786723200,"entry_id":1790000000034}}
+{"LogSet":{"exercise":"Squat","weight_kg":97.5,"reps":5,"rpe":8.0,"observed_at":1786723440,"entry_id":1790000000035}}
+{"LogSet":{"exercise":"Squat","weight_kg":97.5,"reps":5,"rpe":8.5,"observed_at":1786723680,"entry_id":1790000000036}}
+{"LogSet":{"exercise":"Bench press","weight_kg":70.0,"reps":5,"rpe":7.5,"observed_at":1786723920,"entry_id":1790000000037}}
+{"LogSet":{"exercise":"Bench press","weight_kg":70.0,"reps":5,"rpe":8.0,"observed_at":1786724160,"entry_id":1790000000038}}
+{"LogSet":{"exercise":"Bench press","weight_kg":70.0,"reps":5,"rpe":8.5,"observed_at":1786724400,"entry_id":1790000000039}}
+{"LogRun":{"distance_km":6.0,"duration_min":33.599999999999994,"hr_pct_max":0.0,"longest_recent_km":10.0,"observed_at":1786426200,"entry_id":1790000000040,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":7.0,"duration_min":39.199999999999996,"hr_pct_max":0.0,"longest_recent_km":10.0,"observed_at":1786599000,"entry_id":1790000000041,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":10.5,"duration_min":58.8,"hr_pct_max":0.0,"longest_recent_km":10.0,"observed_at":1786771800,"entry_id":1790000000042,"workout_type":"LongRun"}}
+{"SubmitCheckin":{"observed_at":1786683600,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":55.0,"hrv_rmssd_ms":61.0}}
+{"SubmitCheckin":{"observed_at":1786856400,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"LogSet":{"exercise":"Squat","weight_kg":105.0,"reps":5,"rpe":7.5,"observed_at":1786982400,"entry_id":1790000000043}}
+{"LogSet":{"exercise":"Squat","weight_kg":105.0,"reps":5,"rpe":8.0,"observed_at":1786982640,"entry_id":1790000000044}}
+{"LogSet":{"exercise":"Squat","weight_kg":105.0,"reps":5,"rpe":8.5,"observed_at":1786982880,"entry_id":1790000000045}}
+{"LogSet":{"exercise":"Bench press","weight_kg":75.0,"reps":5,"rpe":7.5,"observed_at":1786983120,"entry_id":1790000000046}}
+{"LogSet":{"exercise":"Bench press","weight_kg":75.0,"reps":5,"rpe":8.0,"observed_at":1786983360,"entry_id":1790000000047}}
+{"LogSet":{"exercise":"Bench press","weight_kg":75.0,"reps":5,"rpe":8.5,"observed_at":1786983600,"entry_id":1790000000048}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":135.0,"reps":5,"rpe":7.5,"observed_at":1787155200,"entry_id":1790000000049}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":135.0,"reps":5,"rpe":8.0,"observed_at":1787155440,"entry_id":1790000000050}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":135.0,"reps":5,"rpe":8.5,"observed_at":1787155680,"entry_id":1790000000051}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":50.0,"reps":5,"rpe":7.5,"observed_at":1787155920,"entry_id":1790000000052}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":50.0,"reps":5,"rpe":8.0,"observed_at":1787156160,"entry_id":1790000000053}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":50.0,"reps":5,"rpe":8.5,"observed_at":1787156400,"entry_id":1790000000054}}
+{"LogSet":{"exercise":"Squat","weight_kg":100.0,"reps":5,"rpe":7.5,"observed_at":1787328000,"entry_id":1790000000055}}
+{"LogSet":{"exercise":"Squat","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":1787328240,"entry_id":1790000000056}}
+{"LogSet":{"exercise":"Squat","weight_kg":100.0,"reps":5,"rpe":8.5,"observed_at":1787328480,"entry_id":1790000000057}}
+{"LogSet":{"exercise":"Bench press","weight_kg":72.5,"reps":5,"rpe":7.5,"observed_at":1787328720,"entry_id":1790000000058}}
+{"LogSet":{"exercise":"Bench press","weight_kg":72.5,"reps":5,"rpe":8.0,"observed_at":1787328960,"entry_id":1790000000059}}
+{"LogSet":{"exercise":"Bench press","weight_kg":72.5,"reps":5,"rpe":8.5,"observed_at":1787329200,"entry_id":1790000000060}}
+{"LogRun":{"distance_km":6.0,"duration_min":33.599999999999994,"hr_pct_max":0.0,"longest_recent_km":10.5,"observed_at":1787031000,"entry_id":1790000000061,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":7.0,"duration_min":39.199999999999996,"hr_pct_max":0.0,"longest_recent_km":10.5,"observed_at":1787203800,"entry_id":1790000000062,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":11.0,"duration_min":61.599999999999994,"hr_pct_max":0.0,"longest_recent_km":10.5,"observed_at":1787376600,"entry_id":1790000000063,"workout_type":"LongRun"}}
+{"SubmitCheckin":{"observed_at":1786942800,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"SubmitCheckin":{"observed_at":1787115600,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":56.0,"hrv_rmssd_ms":60.0}}
+{"SubmitCheckin":{"observed_at":1787288400,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":55.0,"hrv_rmssd_ms":61.0}}
+{"SubmitCheckin":{"observed_at":1787461200,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"LogSet":{"exercise":"Squat","weight_kg":107.5,"reps":5,"rpe":7.5,"observed_at":1787587200,"entry_id":1790000000064}}
+{"LogSet":{"exercise":"Squat","weight_kg":107.5,"reps":5,"rpe":8.0,"observed_at":1787587440,"entry_id":1790000000065}}
+{"LogSet":{"exercise":"Squat","weight_kg":107.5,"reps":5,"rpe":8.5,"observed_at":1787587680,"entry_id":1790000000066}}
+{"LogSet":{"exercise":"Bench press","weight_kg":77.5,"reps":5,"rpe":7.5,"observed_at":1787587920,"entry_id":1790000000067}}
+{"LogSet":{"exercise":"Bench press","weight_kg":77.5,"reps":5,"rpe":8.0,"observed_at":1787588160,"entry_id":1790000000068}}
+{"LogSet":{"exercise":"Bench press","weight_kg":77.5,"reps":5,"rpe":8.5,"observed_at":1787588400,"entry_id":1790000000069}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":137.5,"reps":5,"rpe":7.5,"observed_at":1787760000,"entry_id":1790000000070}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":137.5,"reps":5,"rpe":8.0,"observed_at":1787760240,"entry_id":1790000000071}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":137.5,"reps":5,"rpe":8.5,"observed_at":1787760480,"entry_id":1790000000072}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":52.5,"reps":5,"rpe":7.5,"observed_at":1787760720,"entry_id":1790000000073}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":52.5,"reps":5,"rpe":8.0,"observed_at":1787760960,"entry_id":1790000000074}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":52.5,"reps":5,"rpe":8.5,"observed_at":1787761200,"entry_id":1790000000075}}
+{"LogSet":{"exercise":"Squat","weight_kg":102.5,"reps":5,"rpe":7.5,"observed_at":1787932800,"entry_id":1790000000076}}
+{"LogSet":{"exercise":"Squat","weight_kg":102.5,"reps":5,"rpe":8.0,"observed_at":1787933040,"entry_id":1790000000077}}
+{"LogSet":{"exercise":"Squat","weight_kg":102.5,"reps":5,"rpe":8.5,"observed_at":1787933280,"entry_id":1790000000078}}
+{"LogSet":{"exercise":"Bench press","weight_kg":75.0,"reps":5,"rpe":7.5,"observed_at":1787933520,"entry_id":1790000000079}}
+{"LogSet":{"exercise":"Bench press","weight_kg":75.0,"reps":5,"rpe":8.0,"observed_at":1787933760,"entry_id":1790000000080}}
+{"LogSet":{"exercise":"Bench press","weight_kg":75.0,"reps":5,"rpe":8.5,"observed_at":1787934000,"entry_id":1790000000081}}
+{"LogRun":{"distance_km":6.0,"duration_min":33.599999999999994,"hr_pct_max":0.0,"longest_recent_km":11.0,"observed_at":1787635800,"entry_id":1790000000082,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":7.0,"duration_min":39.199999999999996,"hr_pct_max":0.0,"longest_recent_km":11.0,"observed_at":1787808600,"entry_id":1790000000083,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":11.5,"duration_min":64.39999999999999,"hr_pct_max":0.0,"longest_recent_km":11.0,"observed_at":1787981400,"entry_id":1790000000084,"workout_type":"LongRun"}}
+{"SubmitCheckin":{"observed_at":1787547600,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"SubmitCheckin":{"observed_at":1787720400,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":56.0,"hrv_rmssd_ms":60.0}}
+{"SubmitCheckin":{"observed_at":1787893200,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":55.0,"hrv_rmssd_ms":61.0}}
+{"SubmitCheckin":{"observed_at":1788066000,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"LogSet":{"exercise":"Squat","weight_kg":110.0,"reps":5,"rpe":7.5,"observed_at":1788192000,"entry_id":1790000000085}}
+{"LogSet":{"exercise":"Squat","weight_kg":110.0,"reps":5,"rpe":8.0,"observed_at":1788192240,"entry_id":1790000000086}}
+{"LogSet":{"exercise":"Squat","weight_kg":110.0,"reps":5,"rpe":8.5,"observed_at":1788192480,"entry_id":1790000000087}}
+{"LogSet":{"exercise":"Bench press","weight_kg":80.0,"reps":5,"rpe":7.5,"observed_at":1788192720,"entry_id":1790000000088}}
+{"LogSet":{"exercise":"Bench press","weight_kg":80.0,"reps":5,"rpe":8.0,"observed_at":1788192960,"entry_id":1790000000089}}
+{"LogSet":{"exercise":"Bench press","weight_kg":80.0,"reps":5,"rpe":8.5,"observed_at":1788193200,"entry_id":1790000000090}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":140.0,"reps":5,"rpe":7.5,"observed_at":1788364800,"entry_id":1790000000091}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":140.0,"reps":5,"rpe":8.0,"observed_at":1788365040,"entry_id":1790000000092}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":140.0,"reps":5,"rpe":8.5,"observed_at":1788365280,"entry_id":1790000000093}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":55.0,"reps":5,"rpe":7.5,"observed_at":1788365520,"entry_id":1790000000094}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":55.0,"reps":5,"rpe":8.0,"observed_at":1788365760,"entry_id":1790000000095}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":55.0,"reps":5,"rpe":8.5,"observed_at":1788366000,"entry_id":1790000000096}}
+{"LogSet":{"exercise":"Squat","weight_kg":105.0,"reps":5,"rpe":7.5,"observed_at":1788537600,"entry_id":1790000000097}}
+{"LogSet":{"exercise":"Squat","weight_kg":105.0,"reps":5,"rpe":8.0,"observed_at":1788537840,"entry_id":1790000000098}}
+{"LogSet":{"exercise":"Squat","weight_kg":105.0,"reps":5,"rpe":8.5,"observed_at":1788538080,"entry_id":1790000000099}}
+{"LogSet":{"exercise":"Bench press","weight_kg":77.5,"reps":5,"rpe":7.5,"observed_at":1788538320,"entry_id":1790000000100}}
+{"LogSet":{"exercise":"Bench press","weight_kg":77.5,"reps":5,"rpe":8.0,"observed_at":1788538560,"entry_id":1790000000101}}
+{"LogSet":{"exercise":"Bench press","weight_kg":77.5,"reps":5,"rpe":8.5,"observed_at":1788538800,"entry_id":1790000000102}}
+{"LogRun":{"distance_km":6.0,"duration_min":33.599999999999994,"hr_pct_max":0.0,"longest_recent_km":11.5,"observed_at":1788240600,"entry_id":1790000000103,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":7.0,"duration_min":39.199999999999996,"hr_pct_max":0.0,"longest_recent_km":11.5,"observed_at":1788413400,"entry_id":1790000000104,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":12.0,"duration_min":67.19999999999999,"hr_pct_max":0.0,"longest_recent_km":11.5,"observed_at":1788586200,"entry_id":1790000000105,"workout_type":"LongRun"}}
+{"SubmitCheckin":{"observed_at":1788152400,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"SubmitCheckin":{"observed_at":1788325200,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":56.0,"hrv_rmssd_ms":60.0}}
+{"SubmitCheckin":{"observed_at":1788498000,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":55.0,"hrv_rmssd_ms":61.0}}
+{"SubmitCheckin":{"observed_at":1788670800,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"LogSet":{"exercise":"Squat","weight_kg":112.5,"reps":5,"rpe":7.5,"observed_at":1788796800,"entry_id":1790000000106}}
+{"LogSet":{"exercise":"Squat","weight_kg":112.5,"reps":5,"rpe":8.0,"observed_at":1788797040,"entry_id":1790000000107}}
+{"LogSet":{"exercise":"Squat","weight_kg":112.5,"reps":5,"rpe":8.5,"observed_at":1788797280,"entry_id":1790000000108}}
+{"LogSet":{"exercise":"Bench press","weight_kg":82.5,"reps":5,"rpe":7.5,"observed_at":1788797520,"entry_id":1790000000109}}
+{"LogSet":{"exercise":"Bench press","weight_kg":82.5,"reps":5,"rpe":8.0,"observed_at":1788797760,"entry_id":1790000000110}}
+{"LogSet":{"exercise":"Bench press","weight_kg":82.5,"reps":5,"rpe":8.5,"observed_at":1788798000,"entry_id":1790000000111}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":142.5,"reps":5,"rpe":7.5,"observed_at":1788969600,"entry_id":1790000000112}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":142.5,"reps":5,"rpe":8.0,"observed_at":1788969840,"entry_id":1790000000113}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":142.5,"reps":5,"rpe":8.5,"observed_at":1788970080,"entry_id":1790000000114}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":57.5,"reps":5,"rpe":7.5,"observed_at":1788970320,"entry_id":1790000000115}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":57.5,"reps":5,"rpe":8.0,"observed_at":1788970560,"entry_id":1790000000116}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":57.5,"reps":5,"rpe":8.5,"observed_at":1788970800,"entry_id":1790000000117}}
+{"LogSet":{"exercise":"Squat","weight_kg":107.5,"reps":5,"rpe":7.5,"observed_at":1789142400,"entry_id":1790000000118}}
+{"LogSet":{"exercise":"Squat","weight_kg":107.5,"reps":5,"rpe":8.0,"observed_at":1789142640,"entry_id":1790000000119}}
+{"LogSet":{"exercise":"Squat","weight_kg":107.5,"reps":5,"rpe":8.5,"observed_at":1789142880,"entry_id":1790000000120}}
+{"LogSet":{"exercise":"Bench press","weight_kg":80.0,"reps":5,"rpe":7.5,"observed_at":1789143120,"entry_id":1790000000121}}
+{"LogSet":{"exercise":"Bench press","weight_kg":80.0,"reps":5,"rpe":8.0,"observed_at":1789143360,"entry_id":1790000000122}}
+{"LogSet":{"exercise":"Bench press","weight_kg":80.0,"reps":5,"rpe":8.5,"observed_at":1789143600,"entry_id":1790000000123}}
+{"LogRun":{"distance_km":6.0,"duration_min":33.599999999999994,"hr_pct_max":0.0,"longest_recent_km":12.0,"observed_at":1788845400,"entry_id":1790000000124,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":7.0,"duration_min":39.199999999999996,"hr_pct_max":0.0,"longest_recent_km":12.0,"observed_at":1789018200,"entry_id":1790000000125,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":12.5,"duration_min":70.0,"hr_pct_max":0.0,"longest_recent_km":12.0,"observed_at":1789191000,"entry_id":1790000000126,"workout_type":"LongRun"}}
+{"SubmitCheckin":{"observed_at":1788757200,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"SubmitCheckin":{"observed_at":1788930000,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":56.0,"hrv_rmssd_ms":60.0}}
+{"SubmitCheckin":{"observed_at":1789102800,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":55.0,"hrv_rmssd_ms":61.0}}
+{"SubmitCheckin":{"observed_at":1789275600,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"LogSet":{"exercise":"Squat","weight_kg":115.0,"reps":5,"rpe":7.5,"observed_at":1789401600,"entry_id":1790000000127}}
+{"LogSet":{"exercise":"Squat","weight_kg":115.0,"reps":5,"rpe":8.0,"observed_at":1789401840,"entry_id":1790000000128}}
+{"LogSet":{"exercise":"Squat","weight_kg":115.0,"reps":5,"rpe":8.5,"observed_at":1789402080,"entry_id":1790000000129}}
+{"LogSet":{"exercise":"Bench press","weight_kg":85.0,"reps":5,"rpe":7.5,"observed_at":1789402320,"entry_id":1790000000130}}
+{"LogSet":{"exercise":"Bench press","weight_kg":85.0,"reps":5,"rpe":8.0,"observed_at":1789402560,"entry_id":1790000000131}}
+{"LogSet":{"exercise":"Bench press","weight_kg":85.0,"reps":5,"rpe":8.5,"observed_at":1789402800,"entry_id":1790000000132}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":145.0,"reps":5,"rpe":7.5,"observed_at":1789574400,"entry_id":1790000000133}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":145.0,"reps":5,"rpe":8.0,"observed_at":1789574640,"entry_id":1790000000134}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":145.0,"reps":5,"rpe":8.5,"observed_at":1789574880,"entry_id":1790000000135}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":60.0,"reps":5,"rpe":7.5,"observed_at":1789575120,"entry_id":1790000000136}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":60.0,"reps":5,"rpe":8.0,"observed_at":1789575360,"entry_id":1790000000137}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":60.0,"reps":5,"rpe":8.5,"observed_at":1789575600,"entry_id":1790000000138}}
+{"LogSet":{"exercise":"Squat","weight_kg":110.0,"reps":5,"rpe":7.5,"observed_at":1789747200,"entry_id":1790000000139}}
+{"LogSet":{"exercise":"Squat","weight_kg":110.0,"reps":5,"rpe":8.0,"observed_at":1789747440,"entry_id":1790000000140}}
+{"LogSet":{"exercise":"Squat","weight_kg":110.0,"reps":5,"rpe":8.5,"observed_at":1789747680,"entry_id":1790000000141}}
+{"LogSet":{"exercise":"Bench press","weight_kg":82.5,"reps":5,"rpe":7.5,"observed_at":1789747920,"entry_id":1790000000142}}
+{"LogSet":{"exercise":"Bench press","weight_kg":82.5,"reps":5,"rpe":8.0,"observed_at":1789748160,"entry_id":1790000000143}}
+{"LogSet":{"exercise":"Bench press","weight_kg":82.5,"reps":5,"rpe":8.5,"observed_at":1789748400,"entry_id":1790000000144}}
+{"LogRun":{"distance_km":6.0,"duration_min":33.599999999999994,"hr_pct_max":0.0,"longest_recent_km":12.5,"observed_at":1789450200,"entry_id":1790000000145,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":7.0,"duration_min":39.199999999999996,"hr_pct_max":0.0,"longest_recent_km":12.5,"observed_at":1789623000,"entry_id":1790000000146,"workout_type":"Recovery"}}
+{"SubmitCheckin":{"observed_at":1789362000,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"SubmitCheckin":{"observed_at":1789534800,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":56.0,"hrv_rmssd_ms":60.0}}
+{"SubmitCheckin":{"observed_at":1789707600,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":55.0,"hrv_rmssd_ms":61.0}}
+{"SubmitCheckin":{"observed_at":1789880400,"sleep_quality":3,"soreness":2,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"LogSet":{"exercise":"Squat","weight_kg":117.5,"reps":5,"rpe":7.5,"observed_at":1790006400,"entry_id":1790000000147}}
+{"LogSet":{"exercise":"Squat","weight_kg":117.5,"reps":5,"rpe":8.0,"observed_at":1790006640,"entry_id":1790000000148}}
+{"LogSet":{"exercise":"Squat","weight_kg":117.5,"reps":5,"rpe":8.5,"observed_at":1790006880,"entry_id":1790000000149}}
+{"LogSet":{"exercise":"Bench press","weight_kg":87.5,"reps":5,"rpe":7.5,"observed_at":1790007120,"entry_id":1790000000150}}
+{"LogSet":{"exercise":"Bench press","weight_kg":87.5,"reps":5,"rpe":8.0,"observed_at":1790007360,"entry_id":1790000000151}}
+{"LogSet":{"exercise":"Bench press","weight_kg":87.5,"reps":5,"rpe":8.5,"observed_at":1790007600,"entry_id":1790000000152}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":147.5,"reps":5,"rpe":7.5,"observed_at":1790179200,"entry_id":1790000000153}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":147.5,"reps":5,"rpe":8.0,"observed_at":1790179440,"entry_id":1790000000154}}
+{"LogSet":{"exercise":"Deadlift","weight_kg":147.5,"reps":5,"rpe":8.5,"observed_at":1790179680,"entry_id":1790000000155}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":62.5,"reps":5,"rpe":7.5,"observed_at":1790179920,"entry_id":1790000000156}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":62.5,"reps":5,"rpe":8.0,"observed_at":1790180160,"entry_id":1790000000157}}
+{"LogSet":{"exercise":"Overhead press","weight_kg":62.5,"reps":5,"rpe":8.5,"observed_at":1790180400,"entry_id":1790000000158}}
+{"LogSet":{"exercise":"Squat","weight_kg":112.5,"reps":5,"rpe":7.5,"observed_at":1790352000,"entry_id":1790000000159}}
+{"LogSet":{"exercise":"Squat","weight_kg":112.5,"reps":5,"rpe":8.0,"observed_at":1790352240,"entry_id":1790000000160}}
+{"LogSet":{"exercise":"Squat","weight_kg":112.5,"reps":5,"rpe":8.5,"observed_at":1790352480,"entry_id":1790000000161}}
+{"LogSet":{"exercise":"Bench press","weight_kg":85.0,"reps":5,"rpe":7.5,"observed_at":1790352720,"entry_id":1790000000162}}
+{"LogSet":{"exercise":"Bench press","weight_kg":85.0,"reps":5,"rpe":8.0,"observed_at":1790352960,"entry_id":1790000000163}}
+{"LogSet":{"exercise":"Bench press","weight_kg":85.0,"reps":5,"rpe":8.5,"observed_at":1790353200,"entry_id":1790000000164}}
+{"LogRun":{"distance_km":6.0,"duration_min":33.599999999999994,"hr_pct_max":0.0,"longest_recent_km":13.0,"observed_at":1790055000,"entry_id":1790000000165,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":7.0,"duration_min":39.199999999999996,"hr_pct_max":0.0,"longest_recent_km":13.0,"observed_at":1790227800,"entry_id":1790000000166,"workout_type":"Recovery"}}
+{"LogRun":{"distance_km":13.5,"duration_min":75.6,"hr_pct_max":0.0,"longest_recent_km":13.0,"observed_at":1790400600,"entry_id":1790000000167,"workout_type":"LongRun"}}
+{"SubmitCheckin":{"observed_at":1789966800,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"SubmitCheckin":{"observed_at":1790139600,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":56.0,"hrv_rmssd_ms":60.0}}
+{"SubmitCheckin":{"observed_at":1790312400,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":55.0,"hrv_rmssd_ms":61.0}}
+{"SubmitCheckin":{"observed_at":1790485200,"sleep_quality":3,"soreness":3,"mood":4,"resting_hr_bpm":54.0,"hrv_rmssd_ms":62.0}}
+{"SubmitReview":{"bone_pain_red_flag":false,"compulsive_flag":false,"overtraining_signal_count":0,"bad_day":false,"observed_at":1790532000}}
+{"LogRunTrack":{"points":[{"lat":52.52,"lon":13.405,"observed_at":1789797600,"accuracy_m":4.0},{"lat":52.520121,"lon":13.405076999999999,"observed_at":1789797605,"accuracy_m":5.0},{"lat":52.520253000000004,"lon":13.405160999999998,"observed_at":1789797610,"accuracy_m":6.0},{"lat":52.520396000000005,"lon":13.405251999999997,"observed_at":1789797615,"accuracy_m":7.0},{"lat":52.52055000000001,"lon":13.405349999999997,"observed_at":1789797620,"accuracy_m":4.0},{"lat":52.52071500000001,"lon":13.405419999999996,"observed_at":1789797625,"accuracy_m":5.0},{"lat":52.52089100000001,"lon":13.405496999999995,"observed_at":1789797630,"accuracy_m":6.0},{"lat":52.52100100000001,"lon":13.405580999999994,"observed_at":1789797635,"accuracy_m":7.0},{"lat":52.52112200000001,"lon":13.405671999999994,"observed_at":1789797640,"accuracy_m":4.0},{"lat":52.52125400000001,"lon":13.405769999999993,"observed_at":1789797645,"accuracy_m":5.0},{"lat":52.521397000000015,"lon":13.405839999999992,"observed_at":1789797650,"accuracy_m":6.0},{"lat":52.52155100000002,"lon":13.405916999999992,"observed_at":1789797655,"accuracy_m":7.0},{"lat":52.52171600000002,"lon":13.406000999999991,"observed_at":1789797660,"accuracy_m":4.0},{"lat":52.52189200000002,"lon":13.40609199999999,"observed_at":1789797665,"accuracy_m":5.0},{"lat":52.52200200000002,"lon":13.40618999999999,"observed_at":1789797670,"accuracy_m":6.0},{"lat":52.52212300000002,"lon":13.406259999999989,"observed_at":1789797675,"accuracy_m":7.0},{"lat":52.52225500000002,"lon":13.406336999999988,"observed_at":1789797680,"accuracy_m":4.0},{"lat":52.522398000000024,"lon":13.406420999999987,"observed_at":1789797685,"accuracy_m":5.0},{"lat":52.522552000000026,"lon":13.406511999999987,"observed_at":1789797690,"accuracy_m":6.0},{"lat":52.52271700000003,"lon":13.406609999999986,"observed_at":1789797695,"accuracy_m":7.0},{"lat":52.52289300000003,"lon":13.406679999999985,"observed_at":1789797700,"accuracy_m":4.0},{"lat":52.52300300000003,"lon":13.406756999999985,"observed_at":1789797705,"accuracy_m":5.0},{"lat":52.52312400000003,"lon":13.406840999999984,"observed_at":1789797710,"accuracy_m":6.0},{"lat":52.52325600000003,"lon":13.406931999999983,"observed_at":1789797715,"accuracy_m":7.0},{"lat":52.52339900000003,"lon":13.407029999999983,"observed_at":1789797720,"accuracy_m":4.0},{"lat":52.523553000000035,"lon":13.407099999999982,"observed_at":1789797725,"accuracy_m":5.0},{"lat":52.52371800000004,"lon":13.407176999999981,"observed_at":1789797730,"accuracy_m":6.0},{"lat":52.52389400000004,"lon":13.40726099999998,"observed_at":1789797735,"accuracy_m":7.0},{"lat":52.52400400000004,"lon":13.40735199999998,"observed_at":1789797740,"accuracy_m":4.0},{"lat":52.52412500000004,"lon":13.40744999999998,"observed_at":1789797745,"accuracy_m":5.0},{"lat":52.52425700000004,"lon":13.407519999999979,"observed_at":1789797750,"accuracy_m":6.0},{"lat":52.52440000000004,"lon":13.407596999999978,"observed_at":1789797755,"accuracy_m":7.0},{"lat":52.524554000000045,"lon":13.407680999999977,"observed_at":1789797760,"accuracy_m":4.0},{"lat":52.52471900000005,"lon":13.407771999999976,"observed_at":1789797765,"accuracy_m":5.0},{"lat":52.52489500000005,"lon":13.407869999999976,"observed_at":1789797770,"accuracy_m":6.0},{"lat":52.52500500000005,"lon":13.407939999999975,"observed_at":1789797775,"accuracy_m":7.0},{"lat":52.52512600000005,"lon":13.408016999999974,"observed_at":1789797780,"accuracy_m":4.0},{"lat":52.52525800000005,"lon":13.408100999999974,"observed_at":1789797785,"accuracy_m":5.0},{"lat":52.52540100000005,"lon":13.408191999999973,"observed_at":1789797790,"accuracy_m":6.0},{"lat":52.525555000000054,"lon":13.408289999999973,"observed_at":1789797795,"accuracy_m":7.0},{"lat":52.52572000000006,"lon":13.408359999999972,"observed_at":1789797800,"accuracy_m":4.0},{"lat":52.52589600000006,"lon":13.40843699999997,"observed_at":1789797805,"accuracy_m":5.0},{"lat":52.52600600000006,"lon":13.40852099999997,"observed_at":1789797810,"accuracy_m":6.0},{"lat":52.52612700000006,"lon":13.40861199999997,"observed_at":1789797815,"accuracy_m":7.0},{"lat":52.52625900000006,"lon":13.408709999999969,"observed_at":1789797820,"accuracy_m":4.0},{"lat":52.52640200000006,"lon":13.408779999999968,"observed_at":1789797825,"accuracy_m":5.0},{"lat":52.52655600000006,"lon":13.408856999999967,"observed_at":1789797830,"accuracy_m":6.0},{"lat":52.526721000000066,"lon":13.408940999999967,"observed_at":1789797835,"accuracy_m":7.0},{"lat":52.52689700000007,"lon":13.409031999999966,"observed_at":1789797840,"accuracy_m":4.0},{"lat":52.52700700000007,"lon":13.409129999999966,"observed_at":1789797845,"accuracy_m":5.0},{"lat":52.52712800000007,"lon":13.409199999999965,"observed_at":1789797850,"accuracy_m":6.0},{"lat":52.52726000000007,"lon":13.409276999999964,"observed_at":1789797855,"accuracy_m":7.0},{"lat":52.52740300000007,"lon":13.409360999999963,"observed_at":1789797860,"accuracy_m":4.0},{"lat":52.52755700000007,"lon":13.409451999999963,"observed_at":1789797865,"accuracy_m":5.0},{"lat":52.527722000000075,"lon":13.409549999999962,"observed_at":1789797870,"accuracy_m":6.0},{"lat":52.52789800000008,"lon":13.409619999999961,"observed_at":1789797875,"accuracy_m":7.0},{"lat":52.52800800000008,"lon":13.40969699999996,"observed_at":1789797880,"accuracy_m":4.0},{"lat":52.52812900000008,"lon":13.40978099999996,"observed_at":1789797885,"accuracy_m":5.0},{"lat":52.52826100000008,"lon":13.40987199999996,"observed_at":1789797890,"accuracy_m":6.0},{"lat":52.52840400000008,"lon":13.409969999999959,"observed_at":1789797895,"accuracy_m":7.0},{"lat":52.52855800000008,"lon":13.410039999999958,"observed_at":1789797900,"accuracy_m":4.0},{"lat":52.528723000000085,"lon":13.410116999999957,"observed_at":1789797905,"accuracy_m":5.0},{"lat":52.52889900000009,"lon":13.410200999999956,"observed_at":1789797910,"accuracy_m":6.0},{"lat":52.52900900000009,"lon":13.410291999999956,"observed_at":1789797915,"accuracy_m":7.0},{"lat":52.52913000000009,"lon":13.410389999999955,"observed_at":1789797920,"accuracy_m":4.0},{"lat":52.52926200000009,"lon":13.410459999999954,"observed_at":1789797925,"accuracy_m":5.0},{"lat":52.52940500000009,"lon":13.410536999999954,"observed_at":1789797930,"accuracy_m":6.0},{"lat":52.52955900000009,"lon":13.410620999999953,"observed_at":1789797935,"accuracy_m":7.0},{"lat":52.529724000000094,"lon":13.410711999999952,"observed_at":1789797940,"accuracy_m":4.0},{"lat":52.5299000000001,"lon":13.410809999999952,"observed_at":1789797945,"accuracy_m":5.0},{"lat":52.5300100000001,"lon":13.41087999999995,"observed_at":1789797950,"accuracy_m":6.0},{"lat":52.5301310000001,"lon":13.41095699999995,"observed_at":1789797955,"accuracy_m":7.0},{"lat":52.5302630000001,"lon":13.41104099999995,"observed_at":1789797960,"accuracy_m":4.0},{"lat":52.5304060000001,"lon":13.411131999999949,"observed_at":1789797965,"accuracy_m":5.0},{"lat":52.5305600000001,"lon":13.411229999999948,"observed_at":1789797970,"accuracy_m":6.0},{"lat":52.5307250000001,"lon":13.411299999999947,"observed_at":1789797975,"accuracy_m":7.0},{"lat":52.53090100000011,"lon":13.411376999999947,"observed_at":1789797980,"accuracy_m":4.0},{"lat":52.531011000000106,"lon":13.411460999999946,"observed_at":1789797985,"accuracy_m":5.0},{"lat":52.531132000000106,"lon":13.411551999999945,"observed_at":1789797990,"accuracy_m":6.0},{"lat":52.53126400000011,"lon":13.411649999999945,"observed_at":1789797995,"accuracy_m":7.0},{"lat":52.53140700000011,"lon":13.411719999999944,"observed_at":1789798000,"accuracy_m":4.0},{"lat":52.53156100000011,"lon":13.411796999999943,"observed_at":1789798005,"accuracy_m":5.0},{"lat":52.53172600000011,"lon":13.411880999999942,"observed_at":1789798010,"accuracy_m":6.0},{"lat":52.531902000000116,"lon":13.411971999999942,"observed_at":1789798015,"accuracy_m":7.0},{"lat":52.532012000000115,"lon":13.412069999999941,"observed_at":1789798020,"accuracy_m":4.0},{"lat":52.532133000000115,"lon":13.41213999999994,"observed_at":1789798025,"accuracy_m":5.0},{"lat":52.532265000000116,"lon":13.41221699999994,"observed_at":1789798030,"accuracy_m":6.0},{"lat":52.53240800000012,"lon":13.412300999999939,"observed_at":1789798035,"accuracy_m":7.0},{"lat":52.53256200000012,"lon":13.412391999999938,"observed_at":1789798040,"accuracy_m":4.0},{"lat":52.53272700000012,"lon":13.412489999999938,"observed_at":1789798045,"accuracy_m":5.0},{"lat":52.533027000000125,"lon":13.412559999999937,"observed_at":1789798165,"accuracy_m":6.0},{"lat":52.533137000000124,"lon":13.412636999999936,"observed_at":1789798170,"accuracy_m":7.0},{"lat":52.533258000000124,"lon":13.412720999999936,"observed_at":1789798175,"accuracy_m":4.0},{"lat":52.533390000000125,"lon":13.412811999999935,"observed_at":1789798180,"accuracy_m":5.0},{"lat":52.533533000000126,"lon":13.412909999999934,"observed_at":1789798185,"accuracy_m":6.0},{"lat":52.53368700000013,"lon":13.412979999999934,"observed_at":1789798190,"accuracy_m":7.0},{"lat":52.53385200000013,"lon":13.413056999999933,"observed_at":1789798195,"accuracy_m":4.0},{"lat":52.534028000000134,"lon":13.413140999999932,"observed_at":1789798200,"accuracy_m":5.0},{"lat":52.534138000000134,"lon":13.413231999999931,"observed_at":1789798205,"accuracy_m":6.0},{"lat":52.534259000000134,"lon":13.413329999999931,"observed_at":1789798210,"accuracy_m":7.0},{"lat":52.534391000000134,"lon":13.41339999999993,"observed_at":1789798215,"accuracy_m":4.0},{"lat":52.534534000000136,"lon":13.41347699999993,"observed_at":1789798220,"accuracy_m":5.0},{"lat":52.53468800000014,"lon":13.413560999999929,"observed_at":1789798225,"accuracy_m":6.0},{"lat":52.53485300000014,"lon":13.413651999999928,"observed_at":1789798230,"accuracy_m":7.0},{"lat":52.535029000000144,"lon":13.413749999999927,"observed_at":1789798235,"accuracy_m":4.0},{"lat":52.53513900000014,"lon":13.413819999999927,"observed_at":1789798240,"accuracy_m":5.0},{"lat":52.53526000000014,"lon":13.413896999999926,"observed_at":1789798245,"accuracy_m":6.0},{"lat":52.535392000000144,"lon":13.413980999999925,"observed_at":1789798250,"accuracy_m":7.0},{"lat":52.535535000000145,"lon":13.414071999999925,"observed_at":1789798255,"accuracy_m":4.0},{"lat":52.53568900000015,"lon":13.414169999999924,"observed_at":1789798260,"accuracy_m":5.0},{"lat":52.53585400000015,"lon":13.414239999999923,"observed_at":1789798265,"accuracy_m":6.0},{"lat":52.53603000000015,"lon":13.414316999999922,"observed_at":1789798270,"accuracy_m":7.0},{"lat":52.53614000000015,"lon":13.414400999999922,"observed_at":1789798275,"accuracy_m":4.0},{"lat":52.53626100000015,"lon":13.414491999999921,"observed_at":1789798280,"accuracy_m":5.0},{"lat":52.53639300000015,"lon":13.41458999999992,"observed_at":1789798285,"accuracy_m":6.0},{"lat":52.536536000000154,"lon":13.41465999999992,"observed_at":1789798290,"accuracy_m":7.0},{"lat":52.536690000000156,"lon":13.414736999999919,"observed_at":1789798295,"accuracy_m":4.0},{"lat":52.53685500000016,"lon":13.414820999999918,"observed_at":1789798300,"accuracy_m":5.0},{"lat":52.53703100000016,"lon":13.414911999999918,"observed_at":1789798305,"accuracy_m":6.0},{"lat":52.53714100000016,"lon":13.415009999999917,"observed_at":1789798310,"accuracy_m":7.0},{"lat":52.53726200000016,"lon":13.415079999999916,"observed_at":1789798315,"accuracy_m":4.0},{"lat":52.53739400000016,"lon":13.415156999999915,"observed_at":1789798320,"accuracy_m":5.0},{"lat":52.537537000000164,"lon":13.415240999999915,"observed_at":1789798325,"accuracy_m":6.0},{"lat":52.537691000000166,"lon":13.415331999999914,"observed_at":1789798330,"accuracy_m":7.0},{"lat":52.53785600000017,"lon":13.415429999999914,"observed_at":1789798335,"accuracy_m":4.0},{"lat":52.53803200000017,"lon":13.415499999999913,"observed_at":1789798340,"accuracy_m":5.0},{"lat":52.53814200000017,"lon":13.415576999999912,"observed_at":1789798345,"accuracy_m":6.0},{"lat":52.53826300000017,"lon":13.415660999999911,"observed_at":1789798350,"accuracy_m":7.0},{"lat":52.53839500000017,"lon":13.41575199999991,"observed_at":1789798355,"accuracy_m":4.0},{"lat":52.53853800000017,"lon":13.41584999999991,"observed_at":1789798360,"accuracy_m":5.0},{"lat":52.538692000000175,"lon":13.41591999999991,"observed_at":1789798365,"accuracy_m":6.0},{"lat":52.53885700000018,"lon":13.415996999999908,"observed_at":1789798370,"accuracy_m":7.0},{"lat":52.53903300000018,"lon":13.416080999999908,"observed_at":1789798375,"accuracy_m":4.0},{"lat":52.53914300000018,"lon":13.416171999999907,"observed_at":1789798380,"accuracy_m":5.0},{"lat":52.53926400000018,"lon":13.416269999999907,"observed_at":1789798385,"accuracy_m":6.0},{"lat":52.53939600000018,"lon":13.416339999999906,"observed_at":1789798390,"accuracy_m":7.0},{"lat":52.53953900000018,"lon":13.416416999999905,"observed_at":1789798395,"accuracy_m":4.0},{"lat":52.539693000000184,"lon":13.416500999999904,"observed_at":1789798400,"accuracy_m":5.0},{"lat":52.53985800000019,"lon":13.416591999999904,"observed_at":1789798405,"accuracy_m":6.0},{"lat":52.54003400000019,"lon":13.416689999999903,"observed_at":1789798410,"accuracy_m":7.0},{"lat":52.54014400000019,"lon":13.416759999999902,"observed_at":1789798415,"accuracy_m":4.0},{"lat":52.54026500000019,"lon":13.416836999999902,"observed_at":1789798420,"accuracy_m":5.0},{"lat":52.54039700000019,"lon":13.4169209999999,"observed_at":1789798425,"accuracy_m":6.0},{"lat":52.54054000000019,"lon":13.4170119999999,"observed_at":1789798430,"accuracy_m":7.0},{"lat":52.540694000000194,"lon":13.4171099999999,"observed_at":1789798435,"accuracy_m":4.0},{"lat":52.5408590000002,"lon":13.417179999999899,"observed_at":1789798440,"accuracy_m":5.0},{"lat":52.5410350000002,"lon":13.417256999999898,"observed_at":1789798445,"accuracy_m":6.0},{"lat":52.5411450000002,"lon":13.417340999999897,"observed_at":1789798450,"accuracy_m":7.0},{"lat":52.5412660000002,"lon":13.417431999999897,"observed_at":1789798455,"accuracy_m":4.0},{"lat":52.5413980000002,"lon":13.417529999999896,"observed_at":1789798460,"accuracy_m":5.0},{"lat":52.5415410000002,"lon":13.417599999999895,"observed_at":1789798465,"accuracy_m":6.0},{"lat":52.5416950000002,"lon":13.417676999999895,"observed_at":1789798470,"accuracy_m":7.0},{"lat":52.541860000000206,"lon":13.417760999999894,"observed_at":1789798475,"accuracy_m":4.0},{"lat":52.54203600000021,"lon":13.417851999999893,"observed_at":1789798480,"accuracy_m":5.0},{"lat":52.54214600000021,"lon":13.417949999999893,"observed_at":1789798485,"accuracy_m":6.0},{"lat":52.54226700000021,"lon":13.418019999999892,"observed_at":1789798490,"accuracy_m":7.0},{"lat":52.54239900000021,"lon":13.418096999999891,"observed_at":1789798495,"accuracy_m":4.0},{"lat":52.54254200000021,"lon":13.41818099999989,"observed_at":1789798500,"accuracy_m":5.0},{"lat":52.54269600000021,"lon":13.41827199999989,"observed_at":1789798505,"accuracy_m":6.0},{"lat":52.542861000000215,"lon":13.41836999999989,"observed_at":1789798510,"accuracy_m":7.0}],"hr_pct_max":0.0,"longest_recent_km":12.5,"observed_at":1789798510,"entry_id":1790000000168,"workout_type":"Steady","segment_starts":[90]}}
+{"ComputeHrZones":{"age_years":36.0,"resting_hr_bpm":56.0}}
+{"AmendSet":{"entry_id":1790000000011,"exercise":"Squat","weight_kg":102.5,"reps":5,"rpe":8.5,"observed_at":1785946560,"observed_at_fallback":0}}
+{"AmendSet":{"entry_id":0,"exercise":"Squat","weight_kg":92.5,"reps":5,"rpe":7.0,"observed_at":1785603600,"observed_at_fallback":1785600000}}
+{"AmendRun":{"entry_id":1790000000041,"distance_km":7.2,"duration_min":41.0,"hr_pct_max":0.0,"longest_recent_km":0.0,"observed_at":1786599000,"observed_at_fallback":0,"workout_type":"Tempo"}}
+{"DeleteEntry":{"kind":"Run","entry_id":1790000000062,"observed_at_fallback":1787203800}}
+{"PredictRace":{"recent_distance_m":5000.0,"recent_time_sec":1500.0,"goal_distance_m":10000.0,"weekly_km":24.0,"weeks_since_race":2}}
+{"PlanHypertrophyMeso":{"muscle":"Quads","weeks":5}}
+{"ComputeApre":{"scheme":"Apre6","reps":8,"current_load_lb":175.0}}
+{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"TenK","concurrent_goal":"Strength","weekly_sets":14,"running_days_per_week":3,"running_km_per_week":28.0,"advanced":false,"endurance_intensity_pct_vo2max":70.0,"bodyweight_kg":77.0,"age_years":36.0,"resting_hr_bpm":54.0}}
+{"GeneratePlan":{"start_epoch_day":20711}}
+{"SubmitReadiness":{"signal":"Pain","value":1.0,"observed_at":1790611260,"streak":0,"pain":{"kind":"TendonLoadRelated","severity":3,"trend":"Stable","persists":false,"location":"Left knee"}}}
+{"SubmitReadiness":{"signal":"Rpe","value":8.5,"observed_at":1790614800,"streak":2}}
+{"SetToday":{"epoch_day":20724,"utc_offset_sec":7200}}

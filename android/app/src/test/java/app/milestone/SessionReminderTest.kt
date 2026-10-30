@@ -7,7 +7,9 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.qa.QaHarness
 import app.milestone.widget.WidgetAheadDay
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
@@ -28,6 +30,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowAlarmManager
@@ -93,6 +96,12 @@ class SessionReminderTest {
     private fun alarms(): List<ShadowAlarmManager.ScheduledAlarm> = shadowOf(am).scheduledAlarms
     private fun fire() = SessionReminderReceiver().onReceive(app, Intent(SessionReminder.ACTION_FIRE))
     private fun millis(at: String, z: String) = LocalDateTime.parse(at).atZone(ZoneId.of(z)).toInstant().toEpochMilli()
+
+    /** Forget the days already reminded (one reminder per local day), so a test
+     *  can fire again on the same date. */
+    private fun forgetRemindedDays() {
+        app.getSharedPreferences("session_reminder", 0).edit().remove("reminded_epoch_days").commit()
+    }
 
     // ── Next time ────────────────────────────────────────────────────────────
 
@@ -309,6 +318,7 @@ class SessionReminderTest {
         assertEquals("Lower body", title(posted()))
         assertEquals("Log first set", posted()!!.actions.single().title.toString())
         nm.cancelAll()
+        forgetRemindedDays()
         // A run day ahead, from a lift day's snapshot a week old.
         store(yesterday(kind = WidgetDayKind.Lift, age = 7, ahead = listOf(WidgetAheadDay(today, WidgetDayKind.Run, "Easy run 8 km", runItems))))
         fire()
@@ -369,12 +379,14 @@ class SessionReminderTest {
         assertNull("session done", posted())
 
         store(runDay())
+        forgetRemindedDays()
         fire()
         assertTrue(posted() != null)
         store(WidgetSnapshot(epochDay = today, kind = WidgetDayKind.Rest, restDay = true, zone = zone))
         assertNull("today is a rest day now", posted())
 
         store(runDay())
+        forgetRemindedDays()
         fire()
         store(WidgetSnapshot(epochDay = today, kind = WidgetDayKind.Paused, holdReason = "pain", zone = zone))
         assertNull("training paused", posted())
@@ -402,5 +414,251 @@ class SessionReminderTest {
         SessionReminder.setEnabled(app, false)
         assertNull(posted())
         assertTrue(alarms().isEmpty())
+    }
+
+    // ── Stale reminders ──────────────────────────────────────────────────────
+
+    /** "Start run" opens the tracker; an action tap does not auto-cancel the
+     *  notification, so the reminder must go once the run records (the reminder
+     *  posts nothing "while a run is recording"). */
+    @Test
+    fun aShownRunReminderGoesOnceTheRunRecords() {
+        SessionReminder.setEnabled(app, true)
+        store(runDay())
+        fire()
+        assertEquals(OpenDest.Track.wire, destOf(posted()!!.actions.single().actionIntent))
+        shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        val start = Intent(app, RunTrackingService::class.java).setAction("app.milestone.action.START")
+        val controller = Robolectric.buildService(RunTrackingService::class.java, start).create().startCommand(0, 1)
+        try {
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue("the run records", RunSession.tracking.value)
+            assertNull("the 'Start run' reminder stays up beside the recording run", posted())
+        } finally {
+            controller.destroy()
+            RunSession.reset()
+        }
+    }
+
+    /** A tap on the action opens the app with a mark that takes the reminder
+     *  down; the widget's and tile's open intents carry no mark. */
+    @Test
+    fun aTapOnTheActionTakesTheReminderDown() {
+        SessionReminder.setEnabled(app, true)
+        store(liftDay())
+        fire()
+        val n = posted()!!
+        SessionReminder.onOpenIntent(app, shadowOf(n.contentIntent).savedIntent)
+        SessionReminder.onOpenIntent(app, openIntent(app, OpenDest.LogSet))
+        assertTrue("the content intent and other surfaces leave it up", posted() != null)
+        val action = shadowOf(n.actions.single().actionIntent).savedIntent
+        assertEquals(OpenDest.LogSet, openDestOf(action))
+        SessionReminder.onOpenIntent(app, action)
+        assertNull("the action tap takes it down", posted())
+    }
+
+    /** The reminder fired at 07:30 in Berlin and was opened; a move to London
+     *  (06:31 there, the same date) sets the alarm for 07:30 London, which must
+     *  not remind about the same day a second time. */
+    @Test
+    fun atMostOneReminderPerLocalDayAcrossATimeZoneChange() {
+        AppClock.offsetMillis = millis("2026-10-29T07:30:30", "Europe/Berlin") - System.currentTimeMillis()
+        try {
+            val day = today
+            SessionReminder.setEnabled(app, true)
+            store(liftDay())
+            fire()
+            assertEquals("Upper body", title(posted()))
+            // Opened from the shade: auto-cancel takes it down.
+            nm.cancel(SessionReminder.NOTIF_ID)
+
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/London"))
+            SessionReminderReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
+            // The app is open: the snapshot is rewritten in the new zone, same day.
+            store(liftDay())
+            assertEquals(day, today)
+            val next = alarms().single().triggerAtTime
+            AppClock.offsetMillis = next + 30_000 - System.currentTimeMillis()
+            assertEquals("07:30 London is still ${java.time.LocalDate.ofEpochDay(day)}", day, today)
+            fire()
+            assertNull("a second reminder for the same day", posted())
+        } finally {
+            AppClock.offsetMillis = 0L
+        }
+    }
+
+    /** Reminded on Thursday and on Friday; the clock is then set back to Thursday
+     *  morning, so Thursday's 07:30 comes again: no second reminder for Thursday. */
+    @Test
+    fun aClockSetBackADayDoesNotRemindThatDayAgain() {
+        try {
+            SessionReminder.setEnabled(app, true)
+            for (at in listOf("2026-10-29T07:30:30", "2026-10-30T07:30:30")) {
+                AppClock.offsetMillis = millis(at, "Europe/Berlin") - System.currentTimeMillis()
+                store(liftDay())
+                fire()
+                assertEquals(at, "Upper body", title(posted()))
+                nm.cancel(SessionReminder.NOTIF_ID)
+            }
+            AppClock.offsetMillis = millis("2026-10-29T06:00:00", "Europe/Berlin") - System.currentTimeMillis()
+            SessionReminderReceiver().onReceive(app, Intent(Intent.ACTION_TIME_CHANGED))
+            store(liftDay())
+            val next = alarms().single().triggerAtTime
+            assertEquals(millis("2026-10-29T07:30", "Europe/Berlin"), next)
+            AppClock.offsetMillis = next + 30_000 - System.currentTimeMillis()
+            fire()
+            assertNull("a second reminder for Thursday", posted())
+        } finally {
+            AppClock.offsetMillis = 0L
+        }
+    }
+
+    /** An evening reminder in Chicago; at 23:30 the phone crosses into Eastern
+     *  time, where it is already 00:30 the next day. The reminder's timeout runs
+     *  to Chicago midnight (01:00 there), so without a check on the day change
+     *  Thursday's session shows as today's reminder on Friday. */
+    @Test
+    fun aTimeZoneChangePastMidnightTakesYesterdaysReminderDown() {
+        TimeZone.setDefault(TimeZone.getTimeZone("America/Chicago"))
+        val postedAt = millis("2026-10-29T20:00:30", "America/Chicago")
+        AppClock.offsetMillis = postedAt - System.currentTimeMillis()
+        try {
+            SessionReminder.setMinuteOfDay(app, 20 * 60)
+            SessionReminder.setEnabled(app, true)
+            store(liftDay())
+            fire()
+            val n = posted()!!
+            assertEquals("Upper body", title(n))
+
+            val crossing = millis("2026-10-29T23:30:00", "America/Chicago")
+            AppClock.offsetMillis = crossing - System.currentTimeMillis()
+            TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
+            // Both receivers get the broadcast.
+            SessionReminderReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
+            WidgetSnapshotStore.markStale(app, force = true, today = todayEpochDay())
+            assertEquals("it is Friday in New York", java.time.LocalDate.parse("2026-10-30").toEpochDay(), today)
+            assertTrue("the system timeout has not run out yet", n.timeoutAfter > crossing - postedAt)
+            assertNull("yesterday's reminder still shows", posted())
+        } finally {
+            AppClock.offsetMillis = 0L
+        }
+    }
+
+    /** The midnight tick (with the widget or tile placed) takes a reminder for the
+     *  day that ended down, so it does not rest on the timeout alone (a clock set
+     *  forward after the post moves the timeout past midnight). */
+    @Test
+    fun theMidnightTickTakesYesterdaysReminderDown() {
+        val postedAt = millis("2026-10-29T07:30:30", "Europe/Berlin")
+        AppClock.offsetMillis = postedAt - System.currentTimeMillis()
+        try {
+            SessionReminder.setEnabled(app, true)
+            store(liftDay())
+            fire()
+            assertTrue(posted() != null)
+            AppClock.offsetMillis = millis("2026-10-29T23:59:00", "Europe/Berlin") - System.currentTimeMillis()
+            WidgetSnapshotStore.markStale(app, force = false, today = todayEpochDay())
+            assertTrue("still the same day", posted() != null)
+            AppClock.offsetMillis = millis("2026-10-30T00:00:05", "Europe/Berlin") - System.currentTimeMillis()
+            WidgetSnapshotStore.markStale(app, force = false, today = todayEpochDay())
+            assertNull("Thursday's reminder on Friday", posted())
+        } finally {
+            AppClock.offsetMillis = 0L
+        }
+    }
+
+    // ── Days ahead from the real core ────────────────────────────────────────
+
+    /** Log every item of [s] (dated [day]) to the real core; the model after it. */
+    private fun trainAll(day: Long, s: SessionPlanView): ViewModel {
+        var v: ViewModel? = null
+        var id = day * 1_000
+        val at = day * 86_400L + 43_200L
+        for (item in s.items) {
+            if (isRunItem(item, s.session_type)) {
+                v = Core.send(Event.LogRun(distanceKm = item.run_head_km ?: 6.0, durationMin = 40.0, hrPctMax = 0.7, observedAt = at, entryId = ++id)).view
+            } else if (!isReturnCheckItem(item, s.session_type)) {
+                repeat(item.sets.coerceAtLeast(1)) {
+                    v = Core.send(
+                        Event.LogSet(
+                            exercise = item.exercise, weightKg = item.load_kg ?: 0.0, reps = item.reps_high.coerceAtLeast(1), rpe = 7.0,
+                            observedAt = at, entryId = ++id, holdSec = item.hold_high_sec.takeIf { item.timed_hold && it > 0 },
+                        ),
+                    ).view
+                }
+            }
+        }
+        return checkNotNull(v)
+    }
+
+    /** Fire the reminder at 07:30:30 UTC on [day] from [snapshot], the one the app last wrote. */
+    private fun fireOn(day: Long, snapshot: WidgetSnapshot) {
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+        AppClock.offsetMillis = day * 86_400_000L + (7 * 60 + 30) * 60_000L + 30_000L - System.currentTimeMillis()
+        assertEquals(day, today)
+        SessionReminder.setEnabled(app, true)
+        store(snapshot)
+        fire()
+    }
+
+    /** Set up on Sunday 2025-11-09 (calisthenics) and train that day's session; the
+     *  app is not opened on Monday. In its own week Tuesday is a rest day, so the
+     *  reminder must not post on Tuesday; Sunday's model used to name Tuesday as
+     *  the next session (the start week's placement a week later). */
+    @Test
+    fun aSundaySnapshotNeverRemindsOnTheNextWeeksRestDay() {
+        val sun = java.time.LocalDate.parse("2025-11-09").toEpochDay()
+        Core.resetForTest()
+        try {
+            Core.send(Event.SetToday(sun))
+            Core.send(QaHarness.calisthenicsProfile())
+            val first = checkNotNull(Core.send(Event.GeneratePlan(sun)).view.next_session)
+            assertEquals("a session on the setup Sunday", sun, first.epoch_day)
+            val sunday = trainAll(sun, first)
+            val next = checkNotNull(sunday.next_session) { "Sunday's model names a next session" }
+            val snapshot = widgetSnapshotOf(sunday, DistanceUnit.Km, "UTC")
+
+            val tue = sun + 2
+            val tuesday = Core.send(Event.SetToday(tue)).view
+            assertTrue(
+                "Sunday's next session is a session day in its own week",
+                tuesday.week_plan.first { it.epoch_day == next.epoch_day }.items.isNotEmpty(),
+            )
+            assertEquals("in its own week Tuesday is a rest day", "rest", tuesday.week_plan.first { it.epoch_day == tue }.status)
+            assertNull(reminderOf(widgetSnapshotOf(tuesday, DistanceUnit.Km, "UTC"), tue, "UTC"))
+            fireOn(tue, snapshot)
+            assertNull("a reminder on a rest day: '${title(posted())}'", posted())
+        } finally {
+            AppClock.offsetMillis = 0L
+            Core.resetForTest()
+        }
+    }
+
+    /** A hybrid 10K plan set up on Friday 2025-11-14; the app is last opened on
+     *  Sunday, whose long run is still open, and not on Monday. Monday has an easy
+     *  run: Sunday's snapshot carries it from the core's next week, so Monday's
+     *  reminder posts. */
+    @Test
+    fun mondaysSessionIsRemindedWhenTheAppWasLastOpenedOnSunday() {
+        val fri = java.time.LocalDate.parse("2025-11-14").toEpochDay()
+        Core.resetForTest()
+        try {
+            Core.send(Event.SetToday(fri))
+            val base = QaHarness.strengthProfile() as Event.SetProfile
+            Core.send(base.copy(goalDistance = GoalDistance.TenK, runningDaysPerWeek = 3, runningKmPerWeek = 25.0))
+            Core.send(Event.GeneratePlan(fri))
+            val sun = fri + 2
+            val sunday = Core.send(Event.SetToday(sun)).view
+            assertEquals("Sunday's session is open", sun, sunday.next_session?.epoch_day)
+            val snapshot = widgetSnapshotOf(sunday, DistanceUnit.Km, "UTC")
+
+            val mon = sun + 1
+            val monday = checkNotNull(Core.send(Event.SetToday(mon)).view.todaysPlan()) { "Monday has a session" }
+            fireOn(mon, snapshot)
+            assertEquals("Monday's reminder", monday.title, title(posted()))
+        } finally {
+            AppClock.offsetMillis = 0L
+            Core.resetForTest()
+        }
     }
 }

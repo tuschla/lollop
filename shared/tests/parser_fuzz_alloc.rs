@@ -17,8 +17,14 @@ struct Counting;
 
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
-/// Serializes the measurements: libtest runs tests on parallel threads.
+/// Serializes the tests: libtest runs them on parallel threads and the counter
+/// is process-wide, so a test must hold this while it builds its input too (the
+/// 32 MB array file built on another thread once peaked the plain run at 124 B/B).
 static MEASURE: Mutex<()> = Mutex::new(());
+
+fn exclusive() -> std::sync::MutexGuard<'static, ()> {
+    MEASURE.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
@@ -50,9 +56,9 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static A: Counting = Counting;
 
-/// Peak heap growth (bytes above the live count at entry) while `f` runs.
+/// Peak heap growth (bytes above the live count at entry) while `f` runs. The
+/// caller holds [`exclusive`].
 fn peak_during<T>(f: impl FnOnce() -> T) -> (T, usize) {
-    let _g = MEASURE.lock().unwrap_or_else(|e| e.into_inner());
     let base = LIVE.load(Ordering::Relaxed);
     PEAK.store(base, Ordering::Relaxed);
     let out = f();
@@ -138,6 +144,7 @@ const MAX_BYTES_PER_INPUT_BYTE: usize = 16;
 
 #[test]
 fn a_plain_run_fit_parses_within_a_bounded_heap_per_input_byte() {
+    let _g = exclusive();
     let bytes = run_fit(40_000); // ~0.6 MB, 11 h at 1 Hz
     let (ok, peak) = peak_during(|| import(&bytes));
     assert!(ok);
@@ -153,6 +160,7 @@ fn a_plain_run_fit_parses_within_a_bounded_heap_per_input_byte() {
 
 #[test]
 fn an_array_heavy_fit_parses_within_a_bounded_heap_per_input_byte() {
+    let _g = exclusive();
     let mb: usize = std::env::var("PARSER_FUZZ_ALLOC_MB")
         .ok()
         .and_then(|v| v.parse().ok())

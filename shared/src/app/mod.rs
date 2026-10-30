@@ -656,6 +656,7 @@ impl App for Engine {
         let PlanSection {
             next_session,
             week_plan,
+            next_week_plan,
             program,
         } = plan_section(&cx, &v, &mut adjustments, &merged_away, weight_lb);
 
@@ -799,6 +800,7 @@ impl App for Engine {
             consistency: build_consistency(model, &cx.days, &week_plan, train_blocked),
             next_session,
             week_plan,
+            next_week_plan,
             program,
             hr_max,
             protein_figures,
@@ -1000,10 +1002,12 @@ fn derived_streaks(derived: &autoreg::DerivedReadiness) -> (Option<u8>, Option<u
     (hrv, wellness)
 }
 
-/// The dated week with today's session as the coach prescribes it.
+/// The dated week with today's session as the coach prescribes it, and next
+/// week's days.
 struct PlanSection {
     next_session: Option<SessionPlanView>,
     week_plan: Vec<SessionPlanView>,
+    next_week_plan: Vec<SessionPlanView>,
     program: Option<ProgramSummaryView>,
 }
 
@@ -1023,7 +1027,7 @@ fn plan_section(
     let recommended = &v.review.recommended;
     let review_recs = &v.review.review_recs;
     let train_blocked = v.safety.hold.is_some();
-    let (mut next_session, mut week_plan, program) =
+    let (mut next_session, mut week_plan, mut next_week_plan, program) =
         build_plan_views(cx, train_blocked, recommended, review_recs);
     let wordings = [
         (
@@ -1107,6 +1111,7 @@ fn plan_section(
     for it in next_session
         .iter_mut()
         .chain(week_plan.iter_mut())
+        .chain(next_week_plan.iter_mut())
         .flat_map(|s| s.items.iter_mut())
     {
         restate_basis(it, weight_lb);
@@ -1115,7 +1120,11 @@ fn plan_section(
     if let Some(ns) = next_session.as_mut() {
         let now_anchors = cx.lift_anchors_now();
         annotate_last_time(ns, model, &cx.set_index, now_anchors, weight_lb);
-        if let Some(row) = week_plan.iter_mut().find(|s| s.epoch_day == ns.epoch_day) {
+        if let Some(row) = week_plan
+            .iter_mut()
+            .chain(next_week_plan.iter_mut())
+            .find(|s| s.epoch_day == ns.epoch_day)
+        {
             annotate_last_time(row, model, &cx.set_index, now_anchors, weight_lb);
         }
     }
@@ -1164,6 +1173,7 @@ fn plan_section(
     PlanSection {
         next_session,
         week_plan,
+        next_week_plan,
         program,
     }
 }

@@ -990,7 +990,9 @@ private fun weightNoteLines(
 /** The warm-up row on set 1 of a barbell lift: one cell per step ("Bar", then
  *  the figures) with its reps under it, each a single tap that logs that
  *  warm-up. A step whose load is already logged as a warm-up today ([doneKg])
- *  is filled with a ✓; it stays tappable for a repeat. */
+ *  is filled and its reps line reads "✓ ×5"; it stays tappable for a repeat.
+ *  The ✓ sits on the shorter reps line, not beside the load: at 200 % font a
+ *  quarter-width cell holds "62.5" but not "✓ 62.5". */
 @Composable
 private fun WarmUpRow(steps: List<WarmUpStep>, doneKg: List<Double>, weightUnit: WeightUnit, onLog: (WarmUpStep) -> Unit) {
     val barLabel = stringResource(R.string.log_warmup_bar)
@@ -1020,13 +1022,13 @@ private fun WarmUpRow(steps: List<WarmUpStep>, doneKg: List<Double>, weightUnit:
                 verticalArrangement = Arrangement.Center,
             ) {
                 Text(
-                    if (done) "\u2713\u00A0$figure" else figure,
+                    figure,
                     color = choiceCellContent(done),
                     style = Type.Body.merge(TabularFigures),
                     maxLines = 1,
                 )
                 Text(
-                    "\u00D7${step.reps}",
+                    if (done) "\u2713\u00A0\u00D7${step.reps}" else "\u00D7${step.reps}",
                     color = choiceCellContent(done),
                     style = Type.Caption.merge(TabularFigures),
                     maxLines = 1,

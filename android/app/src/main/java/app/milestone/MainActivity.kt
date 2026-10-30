@@ -39,6 +39,8 @@ class MainActivity : ComponentActivity() {
         TileSync.start(applicationContext)
         // A force stop clears the session reminder's alarm; any start sets it again.
         SessionReminder.reschedule(applicationContext)
+        // A shown "Start run" reminder goes once a run records.
+        SessionReminder.watchRecording(applicationContext)
         when (AppSettings.darkMode.value) {
             DarkMode.Light -> setTheme(R.style.Theme_Milestone_Forced_Light)
             DarkMode.Dark -> setTheme(R.style.Theme_Milestone_Forced_Dark)
@@ -70,7 +72,10 @@ class MainActivity : ComponentActivity() {
         // An open intent (widget, tile, notification) navigates on the same terms: a
         // rotation or process-restore re-delivers getIntent() with saved state, and a
         // relaunch from recents replays it; neither navigates again.
-        if (savedInstanceState == null && !fromRecents) openDestOf(intent)?.let { openRequest.value = it }
+        if (savedInstanceState == null && !fromRecents) {
+            openDestOf(intent)?.let { openRequest.value = it }
+            SessionReminder.onOpenIntent(this, intent)
+        }
         // The window ground under the first Compose frame (and the import restart's
         // "Restoring your data…" screen) is the resolved palette's, not the theme's
         // plain white/black windowBackground.
@@ -120,6 +125,7 @@ class MainActivity : ComponentActivity() {
         // A widget / tile / notification tap while the Activity is alive. It only
         // reaches here as a new intent, so a rotation never replays it.
         openDestOf(intent)?.let { openRequest.value = it }
+        SessionReminder.onOpenIntent(this, intent)
         // A share/open into an already-running Activity imports too.
         RunImport.importRuns(this, RunImport.urisFrom(intent))
     }

@@ -1,0 +1,2 @@
+{"SetProfile":{"progression_cadence":"WeekToWeek","lift_goal":"MaxStrength","goal_distance":"TenK","concurrent_goal":"Strength","weekly_sets":12,"running_days_per_week":3,"running_km_per_week":24.0,"advanced":false,"endurance_intensity_pct_vo2max":70.0,"bodyweight_kg":78.0,"age_years":36.0,"resting_hr_bpm":54.0}}
+{"LogSet":{"exercise":"Squat","weight_kg":100.0,"reps":5,"rpe":8.0,"observed_at":1790524800,"entry_id":1790000000001}}

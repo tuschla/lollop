@@ -22,16 +22,20 @@
 #               dalvik.vm.heapgrowthlimit (zygote restarted, proven by HeapProbe)
 #
 #   scripts/emulator-scenarios.sh [--only "locale time ..."] [--keep-emulator]
-#                                 [--regen-seed]
+#                                 [--regen-seed] [--avd e34] [--port 5580]
+#                                 [--apk PATH] [--out DIR]
 #
-# Debug APK only: the release APK ships arm64-v8a alone (build.gradle.kts
-# abiFilters), so on this x86_64 AVD its core runs under libndk_translation, where
-# every JNI call returns null ("Core: event rejected" + "core view() returned
-# null" in logcat): it can't be measured here.
+# Default APK: the debug build. The shipped release APK carries arm64-v8a alone
+# (build.gradle.kts abiFilters), so on this x86_64 AVD its core runs under
+# libndk_translation, where every JNI call returns null ("Core: event rejected" +
+# "core view() returned null" in logcat): it can't be measured here. For the
+# minified release build, assemble it with the x86_64 core
+# (`./gradlew assembleRelease -PqaX86Release`), sign it with the debug key,
+# uninstall the debug app (no debuggable state carries over) and pass --apk.
 #
 # GPS is fed with `adb emu geo fix` (scripts/emu-scenarios/feeder.py, 1 Hz,
 # constant 3 m/s ellipse). The device clock is pinned to Mon 2026-09-21 08:00
-# Europe/Berlin before every scenario. Outputs: ~/.cache/emu-scenarios/
+# Europe/Berlin before every scenario. Outputs: ~/.cache/emu-scenarios/ or --out
 # (REPORT.md, checks.tsv, measurements.tsv, logcat.txt, shots/, ui/, logs/).
 # Exit status 0 when no check FAILed. The emulator is stopped at the end unless
 # --keep-emulator (or it was already running when the script started).
@@ -45,8 +49,9 @@ cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 HELP="$REPO_ROOT/scripts/emu-scenarios"
 APP_ID="app.milestone"
-SERIAL="emulator-5580"
+SERIAL=""
 AVD="e34"
+PORT=5580
 OUT="$HOME/.cache/emu-scenarios"
 APK="$REPO_ROOT/android/app/build/outputs/apk/debug/app-debug.apk"
 ONLY="locale time appearance perms power death lowmem update backup longlog"
@@ -60,10 +65,15 @@ while [[ $# -gt 0 ]]; do
     --only) ONLY="$2"; shift 2 ;;
     --keep-emulator) KEEP_EMU=1; shift ;;
     --regen-seed) REGEN=1; shift ;;
-    -h|--help) sed -n '2,41p' "$0"; exit 0 ;;
+    --avd) AVD="$2"; shift 2 ;;
+    --port) PORT="$2"; shift 2 ;;
+    --apk) APK="$2"; shift 2 ;;
+    --out) OUT="$2"; shift 2 ;;
+    -h|--help) sed -n '2,45p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+SERIAL="emulator-$PORT"
 
 [[ -f "$APK" ]] || { echo "APK not found: $APK (scripts/build.sh --no-tests)" >&2; exit 2; }
 
@@ -174,10 +184,21 @@ finish_run() {
   FINISH="$(node_label re '^[0-9.]+ (mi|km) · ')"
   tap_node eq "Save run" || return 1
   sleep 5
-  ! has_text eq "Save run"
+  has_text eq "Save run" && return 1
+  # A run tracked from the Log sheet returns to it: dismiss it.
+  has_text eq "Exercise, weight, reps" && { adb_ shell input keyevent 4; sleep 2; }
+  return 0
 }
-# "0:59 moving" → 59
-moving_sec() { python3 -c "import re,sys;m=re.search(r'(?:(\d+):)?(\d+):(\d\d) moving',sys.argv[1]);print(int(m.group(1) or 0)*3600+int(m.group(2))*60+int(m.group(3)) if m else '')" "$1"; }
+# Moving seconds of a finish summary: "0:59 moving" or its spoken form
+# ("1 minute 5 seconds moving", the label the UI tree carries) → 59 / 65.
+moving_sec() { python3 -c "
+import re,sys
+s=sys.argv[1]
+m=re.search(r'(?:(\d+):)?(\d+):(\d\d) moving',s)
+if m: print(int(m.group(1) or 0)*3600+int(m.group(2))*60+int(m.group(3))); sys.exit()
+m=re.search(r'((?:\d+ (?:hours?|minutes?|seconds?) ?)+) moving',s)
+if m: print(sum(int(n)*{'h':3600,'m':60,'s':1}[u[0]] for n,u in re.findall(r'(\d+) (\w+)',m.group(1)))); sys.exit()
+print('')" "$1"; }
 dismiss_crash_dialog() {
   local i
   for i in 1 2 3; do
@@ -346,9 +367,9 @@ sc_time() {
     check INFO $S "saved run first→last fix span (includes the +1 h wall-clock jump)" "${wall}s; process $pid0 → $(app_pid)"
     tap_nav History; sleep 3; scroll_to re '^[0-9.]+ (mi|km) · ' 6; evidence time-08-history
     x="$(node_label re '^[0-9.]+ (mi|km) · ')"
-    local fm; fm="$(python3 -c "import re,sys;m=re.search(r'(\d+:\d\d) moving',sys.argv[1]);print(m.group(1) if m else '')" "$FINISH")"
-    expect $S "History row moving time equals the finish sheet" "row '$x' vs finish '$FINISH'" \
-      eval '[[ -n "$fm" && "${x##* · }" == "$fm" ]]'
+    local rs; rs="$(moving_sec "${x##* · } moving")"
+    expect $S "History row moving time equals the finish sheet" "row '$x' (${rs}s) vs finish '$FINISH' (${ms}s)" \
+      eval '[[ -n "$ms" && "$rs" == "$ms" ]]'
   else
     check FAIL $S "start tracked run" "tracker Start not reachable"
   fi

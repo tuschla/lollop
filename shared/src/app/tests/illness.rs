@@ -186,7 +186,13 @@ fn flu_rests_every_upcoming_day_then_the_return_check_then_the_plan() {
         "the next session is rest"
     );
     assert!(ns.items.is_empty(), "no run distance is shown");
-    for row in vm.week_plan.iter().filter(|s| s.epoch_day > today) {
+    assert_eq!(vm.next_week_plan.len(), 7, "next week renders, held");
+    for row in vm
+        .week_plan
+        .iter()
+        .chain(&vm.next_week_plan)
+        .filter(|s| s.epoch_day > today)
+    {
         assert!(
             row.items.is_empty(),
             "day {} still shows {:?}",

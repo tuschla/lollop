@@ -479,8 +479,10 @@ class RunTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         ActiveRunStore.init(this)
-        // The Quick Settings tile reads "Run · recording" while this records.
+        // The Quick Settings tile reads "Run · recording" while this records, and a
+        // shown "Start run" reminder goes.
         TileSync.start(this)
+        SessionReminder.watchRecording(this)
         engine = if (hasPlayServices(this)) FusedEngine(this) else PlatformEngine(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(

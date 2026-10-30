@@ -28,3 +28,13 @@
 -keep class org.osmdroid.tileprovider.** { *; }
 -keep class org.osmdroid.config.** { *; }
 -dontwarn org.osmdroid.**
+
+# --- WorkManager (pulled in by Glance) -----------------------------------------
+# work-runtime 2.7.1 / room-runtime 2.2.5 keep these classes without members. R8
+# full mode then drops the no-arg constructors their libraries call through
+# reflection: Room's WorkDatabase_Impl (process start crashes in
+# WorkManagerInitializer) and the InputMerger of every work request (Glance's
+# SessionWorker fails, the widget never renders). scripts/check-release-r8.sh
+# checks both on the R8 output.
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-keep class * extends androidx.work.InputMerger { <init>(); }

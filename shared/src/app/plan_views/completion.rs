@@ -135,9 +135,11 @@ const NO_LOAD_WORK_SHARE: f64 = 0.9;
 /// the adjustment picture shown for that day: a load cut lowers the bar to what
 /// the user actually saw, and a downgrade/modify day (`load_dropped`) removes
 /// the load bar entirely. With a prescribed load, a set within one plate step
-/// of it is full work, one at ≥80 % of it is lighter work unless it is the
-/// warm-up ramp's top step (1–3 reps clearly under the session's heaviest
-/// same-movement set). Without a prescribed load the bar is
+/// of it is full work, one at ≥80 % of it is lighter work unless it is a
+/// warm-up ramp top step of 1–3 reps (STR-WARMUP-001): at most the set
+/// screen's 80 % step of the working load (`warmUpSteps`, on the nearest
+/// plate) however the day's sets were ordered, or any set clearly under the
+/// session's heaviest same-movement set. Without a prescribed load the bar is
 /// [`NO_LOAD_WORK_SHARE`] of the day's heaviest same-movement weight, so a
 /// 0 kg bodyweight set passes (0 >= 0.9·0).
 fn set_credit(
@@ -172,8 +174,12 @@ fn set_credit(
         (None, Some(added)) => added,
         (None, None) => return near_heaviest,
     };
-    let ramp_top =
-        s.hold_sec.is_none() && s.reps <= RAMP_TOP_MAX_REPS && s.weight_kg < heaviest - step;
+    // The set loop logs the ramp BEFORE the first work set, while its top step
+    // is still the day's heaviest set: it is a warm-up by its load alone.
+    let ramp_step = it.load_kg.is_some() && s.weight_kg <= WORK_SET_FLOOR * bar + step / 2.0 + 1e-9;
+    let ramp_top = s.hold_sec.is_none()
+        && s.reps <= RAMP_TOP_MAX_REPS
+        && (ramp_step || s.weight_kg < heaviest - step);
     if s.weight_kg >= bar - step {
         SetCredit::Full
     } else if s.weight_kg >= WORK_SET_FLOOR * bar && !ramp_top {
@@ -997,6 +1003,20 @@ mod tests {
         assert_eq!(
             set_credit(&it, &ramp, top, step, AdjustFold::default()),
             SetCredit::NotCounted
+        );
+        // Logged first (the set loop's order) it is the day's heaviest set; the
+        // set screen's step for 285 lb rounds 228 up to 230 lb, above 80 %.
+        let first = set_at(230.0 * LB, 2, 0);
+        assert_eq!(
+            set_credit(
+                &squat(285.0, 5, 6),
+                &first,
+                first.weight_kg,
+                step,
+                AdjustFold::default()
+            ),
+            SetCredit::NotCounted,
+            "the ramp top logged before any work set is still a warm-up"
         );
         let light = set_at(200.0 * LB, 5, 0);
         assert_eq!(

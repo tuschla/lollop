@@ -17,6 +17,8 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -418,6 +420,142 @@ class RandomUiWalkTest {
         assertTrue("precondition: the weight field shows the typed 127.52:\n${screenDump()}", shown)
         val cut = textProblems().filter { it.startsWith("cut off: \"127.52\"") }
         assertTrue("the weight field shows 127.52 whole:\n" + cut.joinToString("\n"), cut.isEmpty())
+    }
+
+    /**
+     * Walk `UIWALK_STATE=MilesLb UIWALK_SEED=1592776843 UIWALK_STEPS=214`: on set 1
+     * of a barbell lift at 200 % font, a warm-up step already logged showed
+     * "✓ <load>" in its quarter-width cell with `maxLines = 1`; "✓ Bar" fit, a
+     * figure such as "✓ 42.5" did not and was cut off. The ✓ now leads the
+     * reps line ("✓ ×3"); no done mark may be cut off.
+     */
+    @Test
+    fun warmUpDoneMark_font200_isNotCutOff() {
+        start = Start.Lifter
+        RuntimeEnvironment.setFontScale(2f)
+        // Logged lifts give today's items a load, so they show plates and warm-ups.
+        QaHarness.seedLog(ctx, seedEvents(Start.Lifter)!!)
+        rule.launchApp()
+        settle()
+        // Today's first plate-loaded lift with its warm-ups under 80 % of the work
+        // load logged as the loop's one-tap warm-up logs them (unrated). The ramp's
+        // top step is left out: logged first, the core counts it as a work set
+        // (completion.rs `the_warm_up_ramp_top_step_does_not_count_before_the_first_work_set`)
+        // and the loop drops its warm-up row.
+        val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() && it.plates_per_side.isNotEmpty() }
+        assertTrue("precondition: ${first.exercise} has no set logged today", first.sets_done == 0)
+        val workKg = first.load_kg ?: first.suggested_load_kg!!
+        val steps = app.milestone.warmUpSteps(workKg, app.milestone.WeightUnit.Kg, first.exercise).filter { it.kg < 0.8 * workKg }
+        assertTrue("precondition: ${first.exercise} at $workKg kg has a load step besides the bar: $steps", steps.any { !it.bar })
+        val at = QaHarness.daysAgoAtMidday(0)
+        val seeded = Core.currentView().lifts.size
+        EventDispatcher.sendAll(steps.mapIndexed { i, s -> Event.LogSet(first.exercise, s.kg, s.reps, 0.0, at + i, (at + i) * 1000) })
+        awaitCoreLifts(seeded + steps.size)
+        rule.onNode(
+            hasClickAction() and hasContentDescription(str(R.string.plan_log_set_n_of_n, 1, first.sets), substring = true) and
+                hasAnyAncestor(hasTestTag("plan-item:${first.exercise}")),
+        ).performScrollTo().performClick()
+        settle()
+        val marks = allUnmergedRoots().flatMap { flatten(it) }.flatMap { n ->
+            n.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
+        }.filter { it.startsWith("\u2713\u00A0") }
+        assertTrue("precondition: the warm-up row shows a done step per warm-up:\n${screenDump()}", marks.size == steps.size)
+        val cut = textProblems().filter { it.startsWith("cut off: \"\u2713") }
+        assertTrue("the done warm-up steps $marks are not cut off:\n" + cut.joinToString("\n"), cut.isEmpty())
+    }
+
+    /**
+     * Walk `UIWALK_STATE=LongHistory UIWALK_SEED=1593292569 UIWALK_STEPS=149`: in
+     * landscape at 200 % font, "Move" on a session the core cannot move opens a
+     * dialog whose body is the core's reason ("No other day this week works. On
+     * Thursday, …"). The body did not scroll, so the reason was cut off.
+     */
+    @Test
+    fun moveBlockedDialog_landscapeFont200_showsTheWholeReason() {
+        start = Start.LongHistory
+        RuntimeEnvironment.setQualifiers("w891dp-h411dp-land-xxhdpi")
+        RuntimeEnvironment.setFontScale(2f)
+        QaHarness.seedLog(ctx, seedEvents(Start.LongHistory)!!)
+        rule.launchApp()
+        settle()
+        val vm = EventDispatcher.model.value!!
+        val blocked = (listOfNotNull(vm.next_session) + vm.week_plan).firstOrNull { s ->
+            s.move_targets.isEmpty() && !s.move_blocked_reason.isNullOrBlank()
+        }
+        assertTrue("precondition: a session the core cannot move, with its reason", blocked != null)
+        val reason = blocked!!.move_blocked_reason!!
+        // The semantics action, not a touch: after performScrollTo's minimal scroll
+        // the floating Log button can sit over "Move" in landscape.
+        rule.onAllNodes(
+            hasClickAction() and hasContentDescription(str(R.string.plan_secondary_action_cd, str(R.string.main_move_session), blocked.title)),
+        )[0].performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        settle()
+        val shown = allUnmergedRoots().flatMap { flatten(it) }.any { n -> n.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == reason } }
+        assertTrue("precondition: the dialog shows the core's reason \"$reason\":\n${screenDump()}", shown)
+        val cut = textProblems().filter { it.startsWith("cut off: \"${reason.take(20)}") }
+        assertTrue("the move-blocked reason is shown whole:\n" + cut.joinToString("\n"), cut.isEmpty())
+    }
+
+    /**
+     * The move day picker in landscape at 200 % font with the most target days a
+     * generated week offers (one run day: the long run may go to all four free
+     * days). The body did not scroll, so the fourth row was clipped to a 2dp
+     * sliver above Cancel. Every target row must scroll whole (≥ 48dp) into the
+     * body between the title and Cancel, and a tap on the last one moves the
+     * session there.
+     */
+    @Test
+    fun moveDayPicker_landscapeFont200_reachesEveryTargetDay() {
+        start = Start.Hybrid
+        RuntimeEnvironment.setQualifiers("w891dp-h411dp-land-xxhdpi")
+        RuntimeEnvironment.setFontScale(2f)
+        QaHarness.seedLog(ctx, listOf(profile(runDays = 1, runKm = 6.0)))
+        rule.launchApp()
+        settle()
+        val vm = EventDispatcher.model.value!!
+        val session = (listOfNotNull(vm.next_session) + vm.week_plan).maxBy { it.move_targets.size }
+        val targets = session.move_targets
+        assertTrue("precondition: a session with four target days, got ${session.title} $targets", targets.size >= 4)
+        // A day other than the hero's shows its "Move" once picked in the week strip.
+        if (session.epoch_day != vm.next_session?.epoch_day) {
+            val weekday = java.time.LocalDate.ofEpochDay(session.epoch_day).dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.ENGLISH)
+            rule.onAllNodes(hasScrollToNodeAction())[0].performScrollToNode(hasTestTag("this-week"))
+            settle()
+            rule.onNode(hasClickAction() and hasContentDescription("$weekday, ", substring = true)).performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            settle()
+        }
+        rule.onAllNodes(
+            hasClickAction() and hasContentDescription(str(R.string.plan_secondary_action_cd, str(R.string.main_move_session), session.title)),
+        )[0].performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        settle()
+        val inDialog = hasAnyAncestor(isDialog())
+        val title = rule.onNode(hasText(str(R.string.main_move_session_title, session.title)) and inDialog, useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val cancel = rule.onNode(hasText(str(R.string.main_cancel)) and inDialog, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val d = rule.density.density
+        val slack = 2f * d
+        val unreachable = targets.mapNotNull { day ->
+            val tag = hasTestTag("move-target:$day") and hasClickAction()
+            // Scroll it into view when the body scrolls; a fixed body leaves it where it is.
+            if (rule.onAllNodes(tag and hasAnyAncestor(hasScrollAction())).fetchSemanticsNodes().isNotEmpty()) {
+                rule.onNode(tag).performScrollTo()
+                settle()
+            }
+            val b = rule.onNode(tag).fetchSemanticsNode().boundsInRoot
+            // boundsInRoot is clipped by the dialog: a clipped row shows only a sliver.
+            if (b.top >= title.bottom - slack && b.bottom <= cancel.top + slack && b.height >= app.milestone.ActionMinHeight.value * d - slack) {
+                null
+            } else {
+                "move-target:$day at ${(b.top / d).toInt()}-${(b.bottom / d).toInt()}dp (title ends ${(title.bottom / d).toInt()}dp, Cancel starts ${(cancel.top / d).toInt()}dp)"
+            }
+        }
+        assertTrue("every target day is in view between the title and Cancel once scrolled to:\n" + unreachable.joinToString("\n"), unreachable.isEmpty())
+        val last = targets.last()
+        rule.onNode(hasTestTag("move-target:$last") and hasClickAction()).performClick()
+        settle()
+        val moved = Core.currentView().let { listOfNotNull(it.next_session) + it.week_plan }
+            .any { it.epoch_day == last && it.moved_from_epoch_day == session.epoch_day }
+        assertTrue("a tap on the last target day moves ${session.title} there", moved)
     }
 
     /** Wait until the core holds [n] logged sets (an [EventDispatcher] send reaches

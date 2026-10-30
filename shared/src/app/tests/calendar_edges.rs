@@ -1370,6 +1370,134 @@ fn a_mid_week_plan_start_in_iso_week_53() {
     assert!(!c.repeating_week, "a partial first week always advances");
 }
 
+/// Where each day of a week sits and what it is, without its status or loads.
+fn layout(rows: &[SessionPlanView]) -> Vec<(i64, SessionType, String, bool)> {
+    rows.iter()
+        .map(|s| {
+            (
+                s.epoch_day,
+                s.session_type,
+                s.title.clone(),
+                s.items.is_empty(),
+            )
+        })
+        .collect()
+}
+
+fn hybrid_10k() -> Profile {
+    Profile {
+        goal_distance: GoalDistance::TenK,
+        running_days_per_week: 3,
+        running_km_per_week: 25.0,
+        ..strength_profile()
+    }
+}
+
+/// A plan set up late in a week, its start week trained in full: once nothing
+/// is left this week, the hero is next week's first session on the day next
+/// week's own views put it, never the start week's placement shifted by seven
+/// days (a calisthenics plan set up on Sunday 9 November 2025 named Tuesday,
+/// a rest day in that week). Every start weekday, three plan shapes.
+#[test]
+fn a_wrapped_hero_sits_on_next_weeks_own_first_session() {
+    let sunday = days_from_civil(2025, 11, 9);
+    let mut wrapped = 0;
+    for (name, profile) in [
+        ("lifter", strength_profile()),
+        ("calisthenics", calisthenics_profile()),
+        ("hybrid 10K", hybrid_10k()),
+    ] {
+        for start in sunday - 6..=sunday {
+            let (app, mut model) = planned_on(profile.clone(), [], start);
+            let next_monday = monday_of(start) + 7;
+            let mut id = 0;
+            for d in start..next_monday {
+                set_today(&app, &mut model, d);
+                if let Some(ns) = app.view(&model).next_session.filter(|s| s.epoch_day == d) {
+                    log_row(&app, &mut model, &ns, 9, 0, &mut id);
+                }
+                let vm = app.view(&model);
+                let Some(ns) = vm.next_session.filter(|s| s.epoch_day >= next_monday) else {
+                    continue;
+                };
+                let ctx = format!("{name} from {start}, on {d}");
+                // Nothing is left this week, so nothing more is logged: next
+                // week's own view.
+                set_today(&app, &mut model, next_monday);
+                let own = app.view(&model);
+                let first = own
+                    .week_plan
+                    .iter()
+                    .find(|s| !s.items.is_empty())
+                    .unwrap_or_else(|| panic!("{ctx}: next week has a session"));
+                assert_eq!(
+                    (ns.epoch_day, ns.session_type, &ns.title),
+                    (first.epoch_day, first.session_type, &first.title),
+                    "{ctx}: the wrapped hero is next week's first session"
+                );
+                assert_eq!(
+                    layout(&vm.next_week_plan),
+                    layout(&own.week_plan),
+                    "{ctx}: next week's days are next week's own strip"
+                );
+                wrapped += 1;
+                break;
+            }
+        }
+    }
+    assert!(wrapped >= 7, "only {wrapped} wrapped heroes checked");
+}
+
+/// Every day of a start week, trained or not, already carries next week's
+/// days as next Monday's own strip lays them out: a hybrid 10K plan set up on
+/// Friday 14 November 2025, seen on Sunday with the long run still open,
+/// carries Monday's easy run, so the session reminder can post on Monday
+/// without the app being opened again.
+#[test]
+fn each_day_carries_next_weeks_own_days() {
+    let friday = days_from_civil(2025, 11, 14);
+    for (name, profile) in [
+        ("lifter", strength_profile()),
+        ("calisthenics", calisthenics_profile()),
+        ("hybrid 10K", hybrid_10k()),
+    ] {
+        for start in friday - 4..=friday + 2 {
+            let (app, mut model) = planned_on(profile.clone(), [], start);
+            let next_monday = monday_of(start) + 7;
+            let seen: Vec<(i64, Vec<SessionPlanView>)> = (start..next_monday)
+                .map(|d| {
+                    set_today(&app, &mut model, d);
+                    (d, app.view(&model).next_week_plan)
+                })
+                .collect();
+            set_today(&app, &mut model, next_monday);
+            let own = app.view(&model).week_plan;
+            assert_eq!(own.len(), 7, "{name} from {start}");
+            for (d, next_week) in &seen {
+                assert_eq!(
+                    layout(next_week),
+                    layout(&own),
+                    "{name} from {start}, on {d}: next week's own strip"
+                );
+            }
+        }
+    }
+    // The reported case: Sunday's view names Monday's easy run.
+    let (app, mut model) = planned_on(hybrid_10k(), [], friday);
+    set_today(&app, &mut model, friday + 2);
+    let vm = app.view(&model);
+    assert_eq!(vm.next_session.map(|s| s.epoch_day), Some(friday + 2));
+    let monday = vm
+        .next_week_plan
+        .iter()
+        .find(|s| s.epoch_day == friday + 3)
+        .expect("Monday's row");
+    assert!(
+        matches!(monday.session_type, SessionType::Run(_)) && !monday.items.is_empty(),
+        "Monday is a run day: {monday:?}"
+    );
+}
+
 /// A race today, earlier this week, or weeks ago never yields a program week
 /// outside 1..=total, a negative count in copy, or a missing week strip.
 #[test]

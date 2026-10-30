@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -156,7 +158,8 @@ internal fun SessionMoveAction(s: SessionPlanView, today: Long, onMove: (Long, L
             onDismissRequest = { picking = false },
             shape = RoundedCornerShape(Space.Card.dp),
             title = { Text(stringResource(R.string.main_move_blocked_title, s.title)) },
-            text = { Text(blockedReason.orEmpty(), style = Type.Body) },
+            // Scrolls: in landscape at 200 % font the reason is taller than the slot.
+            text = { Text(blockedReason.orEmpty(), style = Type.Body, modifier = Modifier.verticalScroll(rememberScrollState())) },
             confirmButton = {
                 TextButton(onClick = { picking = false }) { Text(stringResource(R.string.log_ok)) }
             },
@@ -173,7 +176,8 @@ internal fun SessionMoveAction(s: SessionPlanView, today: Long, onMove: (Long, L
         shape = RoundedCornerShape(Space.Card.dp),
         title = { Text(stringResource(R.string.main_move_session_title, s.title)) },
         text = {
-            Column {
+            // Scrolls: in landscape at 200 % font the target rows overflow the slot.
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(stringResource(R.string.main_move_session_body), style = Type.Body)
                 Spacer(Modifier.height(Space.Sm.dp))
                 // Each target day is a whole-row option with a chevron (the

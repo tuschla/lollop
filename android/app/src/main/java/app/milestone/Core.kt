@@ -574,6 +574,8 @@ data class ViewModel(
     // Null/empty until the user accepts a plan.
     val next_session: SessionPlanView? = null,
     val week_plan: List<SessionPlanView> = emptyList(),
+    // Next week's seven days as next week's own week_plan lays them out.
+    val next_week_plan: List<SessionPlanView> = emptyList(),
     val program: ProgramSummaryView? = null,
     // Null until an HR-zone query is made, or when the age is out of range.
     val hr_max: HrMaxView? = null,
