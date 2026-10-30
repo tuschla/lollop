@@ -20,7 +20,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -48,7 +47,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 
-/** A plan day's short date in the device locale ("Thu, Oct 15" / "Do., 15. Okt."). */
+/** A plan day's short date in the app's language ([appLocale]: "Thu, Oct 15"). */
 internal fun planDateLabel(epochDay: Long): String =
     java.time.LocalDate.ofEpochDay(epochDay).format(localizedDayFormatter("EEEMMMd"))
 
@@ -66,21 +65,18 @@ private fun weekdayShort(epochDay: Long): String = when (
     java.time.DayOfWeek.SUNDAY -> "Su"
 }
 
-/** English weekday name (e.g. "Monday") for the week-strip accessibility
- *  description. Pinned to Locale.ENGLISH, NOT the device locale: the rest of the
- *  spoken phrase (sessionDiscipline, weekDayStatusPhrase) and the visible strip
- *  ([weekdayShort]) are hardcoded English (l10n-TODO), so a localized weekday here
- *  made TalkBack disagree with the screen. Localize all four together if l10n lands. */
+/** Weekday name (e.g. "Monday") for the week-strip accessibility description, in
+ *  the app's language ([appLocale]) like the rest of the spoken phrase. */
 private fun weekdayFull(epochDay: Long): String =
     java.time.LocalDate.ofEpochDay(epochDay).dayOfWeek
-        .getDisplayName(java.time.format.TextStyle.FULL, Locale.ENGLISH)
+        .getDisplayName(java.time.format.TextStyle.FULL, appLocale())
 
 /** Plain-language week-strip day status for the accessibility description. */
 // l10n: needs context plumbing (pure display helper, no Context; multi-branch copy)
 private fun weekDayStatusPhrase(status: String): String = when (status) {
     "next" -> "next session"
     "adjusted" -> "adjusted"
-    "blocked" -> "on hold"
+    "blocked" -> "paused"
     "done" -> "done"
     "done_lighter" -> "done, lighter than planned"
     "before_plan" -> "before your plan started"
@@ -149,15 +145,13 @@ internal fun SessionMoveAction(s: SessionPlanView, today: Long, onMove: (Long, L
     TextAction(
         stringResource(R.string.main_move_short),
         onClick = { picking = true },
-        description = stringResource(R.string.plan_secondary_action_cd, stringResource(R.string.main_move_session), s.title),
+        description = stringResource(R.string.ui_label_value, stringResource(R.string.main_move_session), s.title),
         tint = OnBgMuted,
     )
     if (!picking) return
     if (s.move_targets.isEmpty()) {
-        AlertDialog(
-            onDismissRequest = { picking = false },
-            modifier = Modifier.windowTraversalGroup(),
-            shape = RoundedCornerShape(Space.Card.dp),
+        AppDialog(
+            onDismiss = { picking = false },
             title = { Text(stringResource(R.string.main_move_blocked_title, s.title)) },
             // Scrolls: in landscape at 200 % font the reason is taller than the slot.
             text = { Text(blockedReason.orEmpty(), style = Type.Body, modifier = Modifier.verticalScroll(rememberScrollState())) },
@@ -172,10 +166,8 @@ internal fun SessionMoveAction(s: SessionPlanView, today: Long, onMove: (Long, L
         onMove(s.epoch_day, day)
     }
     val todayLabel = stringResource(R.string.main_move_today)
-    AlertDialog(
-        onDismissRequest = { picking = false },
-        modifier = Modifier.windowTraversalGroup(),
-        shape = RoundedCornerShape(Space.Card.dp),
+    AppDialog(
+        onDismiss = { picking = false },
         title = { Text(stringResource(R.string.main_move_session_title, s.title)) },
         text = {
             // Scrolls: in landscape at 200 % font the target rows overflow the slot.
@@ -458,20 +450,13 @@ private fun planPlainLabel(prog: ProgramSummaryView): String {
  *  grows to the ✓'s line at a large font ([WeekStrip] measures it). */
 private val DayGlyphSlot = 16.dp
 
-/** The done ✓'s style in a week-strip day. */
-private val DayDoneGlyphStyle = Type.Chip.copy(fontWeight = FontWeight.Bold)
-
 /** A week-strip day's status dot. */
 private val DayDotSize = 8.dp
 
-/** The week strip: 7 equal tappable day columns across the full card width,
- *  each showing its weekday, the day-type token (Lift/Run/Rest, from the core's
- *  session_type) and ONE status glyph: ✓ done, a filled dot for today's (or the
- *  next) session, a hollow ring for a planned or missed day, a half-filled one for
- *  a partly done day. TODAY is ringed + accent-bold. Tapping a day reveals its
- *  sessions inline below, where a swapped or lighter day says so in words. Every
- *  field is core-emitted; the "today" mark is the shell's own clock (already sent
- *  to the core via SetToday), not a fabricated value. */
+/** The week strip: one column per day with its weekday, day type and ONE status
+ *  glyph (✓ done, a filled dot for today's or the next session, a hollow ring for
+ *  a planned or missed day, a half-filled one for a partly done day). At a large
+ *  font it wraps into balanced rows. Tapping a day opens its sessions below. */
 @Composable
 private fun WeekStrip(
     week: List<SessionPlanView>,
@@ -500,7 +485,7 @@ private fun WeekStrip(
                 (dayLabels.maxOfOrNull { measurer.measure(it, Type.Chip, maxLines = 1, softWrap = false).size.width } ?: 0)
             // One glyph-slot height for every column: the 16dp floor, or the ✓'s
             // line once the font scales past it (13sp at 130 % no longer fits 16dp).
-            val glyphSlot = maxOf(DayGlyphSlot, with(density) { measurer.measure("\u2713", DayDoneGlyphStyle, maxLines = 1).size.height.toDp() })
+            val glyphSlot = maxOf(DayGlyphSlot, with(density) { measurer.measure("\u2713", Type.Chip, maxLines = 1).size.height.toDp() })
             // Seven equal columns while every label fits whole; at a large font on a
             // narrow phone the week wraps into balanced rows (4 + 3, …) of equal
             // columns instead of cutting "Rest" to "Res".
@@ -587,43 +572,20 @@ private fun WeekStrip(
                     // rows, no empty slots. Settled items collapse to a ✓ row; an
                     // exercise ended early stays reopenable on today's and past days,
                     // including once the whole day reads done and leaves the hero.
-                    val pastActionable = actions != null && s.epoch_day < today && s.status == "missed"
-                    val reopenable = actions != null && s.epoch_day <= today
-                    val (openItems, doneItems) = s.items.partition { !it.done }
-                    val current = if (pastActionable) openItems.firstOrNull() else null
-                    val logRunLabel = stringResource(R.string.main_log_run_title)
-                    openItems.forEach { item ->
-                        if (item === current) {
-                            OpenPlanItemCard(
-                                item = item,
-                                isRun = isRun(item),
-                                onLog = { actions?.onLogItem(item, s.epoch_day) },
-                                onTrack = { actions?.onLogRun(s.epoch_day) },
-                                onEndExercise = { actions?.onEndExercise(item, s.epoch_day) },
-                                runActionLabel = logRunLabel,
-                                weightUnit = weightUnit,
-                                isCheck = isCheck(item),
-                            )
-                        } else {
-                            PlanItemRow(
-                                item = item,
-                                isRun = isRun(item),
-                                isCheck = isCheck(item),
-                                actionLabel = if (pastActionable) planItemActionLabel(item, isRun(item), isCheck(item), logRunLabel) else null,
-                                onClick = { if (isRun(item)) actions?.onLogRun(s.epoch_day) else actions?.onLogItem(item, s.epoch_day) },
-                            )
-                        }
-                    }
-                    doneItems.forEach { item ->
-                        DonePlanItemRow(
-                            item = item,
-                            isRun = isRun(item),
-                            reopenable = reopenable,
-                            onReopen = { actions?.onReopen(item, s.epoch_day) },
-                            isCheck = isCheck(item),
-                            painArea = painArea,
-                        )
-                    }
+                    SessionItemList(
+                        items = s.items,
+                        isRun = isRun,
+                        isCheck = isCheck,
+                        actionable = actions != null && s.epoch_day < today && s.status == "missed",
+                        reopenable = actions != null && s.epoch_day <= today,
+                        runActionLabel = stringResource(R.string.main_log_run_title),
+                        weightUnit = weightUnit,
+                        painArea = painArea,
+                        onLog = { actions?.onLogItem(it, s.epoch_day) },
+                        onRun = { actions?.onLogRun(s.epoch_day) },
+                        onEndExercise = { actions?.onEndExercise(it, s.epoch_day) },
+                        onReopen = { actions?.onReopen(it, s.epoch_day) },
+                    )
                 }
             }
         }
@@ -720,7 +682,7 @@ private fun WeekStripDay(
                 s.isDone -> Text(
                     "\u2713",
                     color = status.done,
-                    style = DayDoneGlyphStyle,
+                    style = Type.Chip,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                 )

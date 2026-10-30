@@ -57,7 +57,6 @@ class CompletionScenarioTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 
@@ -78,7 +77,7 @@ class CompletionScenarioTest {
     private fun logSetOf(k: Int, n: Int) = str(R.string.plan_log_set_n_of_n, k, n)
 
     /** The set slots' spoken "k of N sets done". */
-    private fun setsDone(k: Int, n: Int) = str(R.string.plan_sets_done_cd, k, n)
+    private fun setsDone(k: Int, n: Int) = plural(R.plurals.plan_sets_done_cd, n, k, n)
 
     // ── (a) the current item carries the controls, every other item one tap ──
     @Test

@@ -19,19 +19,13 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -53,9 +47,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.util.Calendar
@@ -255,13 +246,7 @@ internal fun EditorTitleRow(title: String, onClose: () -> Unit) {
                 modifier = Modifier.size(24.dp),
             )
         }
-        Text(
-            title,
-            color = OnBgBody,
-            style = Type.Title,
-            modifier = Modifier.weight(1f).semantics { heading() },
-            textAlign = TextAlign.Center,
-        )
+        SheetTitle(title, Modifier.weight(1f), textAlign = TextAlign.Center)
         Spacer(Modifier.size(ActionMinHeight))
     }
 }
@@ -392,54 +377,31 @@ fun ObservedAtRow(
                     year <= Calendar.getInstance().apply { timeInMillis = AppClock.nowMillis() }.get(Calendar.YEAR)
             },
         )
-        DatePickerDialog(
-            onDismissRequest = { showDate = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    val sel = state.selectedDateMillis
-                    showDate = false
-                    if (sel != null) {
-                        if (withTime) {
-                            pendingDayUtcMillis = sel
-                            showTime = true
-                        } else {
-                            // Keep the entry's current local time-of-day.
-                            val cur = Calendar.getInstance().apply { timeInMillis = epochSec * 1000L }
-                            commit(sel, cur.get(Calendar.HOUR_OF_DAY), cur.get(Calendar.MINUTE))
-                        }
-                    }
-                }) { Text(stringResource(R.string.log_ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDate = false }) { Text(stringResource(R.string.main_cancel)) }
-            },
-        ) { DatePicker(state) }
+        AppDatePickerDialog(state, onDismiss = { showDate = false }, onConfirm = {
+            val sel = state.selectedDateMillis
+            showDate = false
+            if (sel != null) {
+                if (withTime) {
+                    pendingDayUtcMillis = sel
+                    showTime = true
+                } else {
+                    // Keep the entry's current local time-of-day.
+                    val cur = Calendar.getInstance().apply { timeInMillis = epochSec * 1000L }
+                    commit(sel, cur.get(Calendar.HOUR_OF_DAY), cur.get(Calendar.MINUTE))
+                }
+            }
+        })
     }
 
     if (showTime) {
         val cur = Calendar.getInstance().apply { timeInMillis = epochSec * 1000L }
-        val tState = rememberTimePickerState(
+        AppTimePickerDialog(
+            title = stringResource(R.string.log_logged_at),
             initialHour = cur.get(Calendar.HOUR_OF_DAY),
             initialMinute = cur.get(Calendar.MINUTE),
             is24Hour = use24h,
-        )
-        AlertDialog(
-            onDismissRequest = { showTime = false },
-            modifier = Modifier.windowTraversalGroup(),
-            title = { Text(stringResource(R.string.log_logged_at)) },
-            text = { TimePicker(tState) },
-            confirmButton = {
-                TextButton(onClick = {
-                    showTime = false
-                    pendingDayUtcMillis?.let { day ->
-                        commit(day, tState.hour, tState.minute)
-                    }
-                }) { Text(stringResource(R.string.log_ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTime = false }) { Text(stringResource(R.string.main_cancel)) }
-            },
-        )
+            onDismiss = { showTime = false },
+        ) { hour, minute -> pendingDayUtcMillis?.let { day -> commit(day, hour, minute) } }
     }
 }
 

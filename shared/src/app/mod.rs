@@ -525,7 +525,11 @@ impl App for Engine {
                 });
             }
             Event::ClearPlan => {
-                model.plan_request = None;
+                if let Some(req) = model.plan_request.take() {
+                    let start = req.start_epoch_day;
+                    let end = model.today_epoch_day.unwrap_or(start);
+                    model.past_plans.push((start, end));
+                }
                 model.session_moves.clear();
             }
             // Stored as asked; `view()` validates each move against the week's
@@ -621,6 +625,7 @@ impl App for Engine {
             week_plan,
             next_week_plan,
             program,
+            planned_run_km,
         } = plan_section(&cx, &v, &mut adjustments, &merged_away, weight_lb);
 
         let FeedbackSection { feedback, spike } = feedback_section(&cx, &v, &week_plan, weight_lb);
@@ -654,7 +659,7 @@ impl App for Engine {
             prescription: next_session.as_ref(),
         });
 
-        let (runs, run_progress) = history_section(&cx);
+        let (runs, run_progress) = history_section(&cx, planned_run_km);
 
         // The readiness strip surfaces recency-expired RHR/wellness readings as an
         // "out of date" row, so it is fed the stale inputs too; the rules
@@ -951,6 +956,8 @@ struct PlanSection {
     week_plan: Vec<SessionPlanView>,
     next_week_plan: Vec<SessionPlanView>,
     program: Option<ProgramSummaryView>,
+    /// The run km this plan week prescribes (0 without a plan).
+    planned_run_km: f64,
 }
 
 /// Coach-as-planner: synthesize + date the week, then apply readiness/safety
@@ -970,7 +977,7 @@ fn plan_section(
     let recommended = &v.review.recommended;
     let review_recs = &v.review.review_recs;
     let train_blocked = v.safety.hold.is_some();
-    let (mut next_session, mut week_plan, mut next_week_plan, program) =
+    let (mut next_session, mut week_plan, mut next_week_plan, program, planned_run_km) =
         build_plan_views(cx, train_blocked, recommended, review_recs);
     let wordings = [
         (
@@ -1048,11 +1055,7 @@ fn plan_section(
     adjustments.extend(fresh_rows);
     // The "log your first work set" clause is spent once one is logged, on
     // the readiness rows and on the session's own hold line.
-    if today_session.is_some_and(|ts| {
-        ts.items
-            .iter()
-            .any(|it| !it.is_run() && (it.sets_done > 0 || !it.logged_sets.is_empty()))
-    }) {
+    if today_session.is_some_and(|ts| ts.items.iter().any(|it| !it.is_run() && it.has_work())) {
         let session_rows = next_session
             .iter_mut()
             .chain(week_plan.iter_mut())
@@ -1069,6 +1072,7 @@ fn plan_section(
         week_plan,
         next_week_plan,
         program,
+        planned_run_km,
     }
 }
 
@@ -1236,14 +1240,18 @@ fn feedback_section(
 /// The run history views in chronological (observed_at) order, stable for
 /// ties and undated (0) legacy entries, so a backdated log slots into its true
 /// position and the shells' oldest→newest rendering follows log TIME, not
-/// submission order; plus the run progress layered on them. Every run consumer
-/// reads `cx.runs`, so each track is QC'd at most once per view.
-fn history_section(cx: &ViewCtx) -> (Vec<RunResultView>, Option<RunProgressView>) {
+/// submission order; plus the run progress layered on them, its target marker
+/// at `planned_run_km`. Every run consumer reads `cx.runs`, so each track is
+/// QC'd at most once per view.
+fn history_section(
+    cx: &ViewCtx,
+    planned_run_km: f64,
+) -> (Vec<RunResultView>, Option<RunProgressView>) {
     let model = cx.model;
     let mut runs = run_views(&model.runs, &cx.runs);
     // Run progress and the cross-run best-effort records are layered on the
     // memoized per-run views.
-    let run_progress = build_run_progress(model, &cx.runs);
+    let run_progress = build_run_progress(model, &cx.runs, planned_run_km);
     annotate_run_views(&mut runs, run_progress.as_ref());
     // Keep the on-demand GPX registry in step with the current run history
     // so `exportGpx(entry_id, observed_at)` can build any inspected run's GPX

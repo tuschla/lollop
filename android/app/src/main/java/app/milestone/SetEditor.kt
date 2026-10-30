@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -137,7 +136,7 @@ fun LogSetEditor(
     // picks (fed by LogSheet.kt), after today's open items and the user's recents.
     plannedExercises: List<String> = emptyList(),
     // Canonical names of today's prescribed TIMED-HOLD rungs. When the picked
-    // exercise matches one (case-insensitive), the editor logs a hold (seconds)
+    // exercise matches one (by [sameExercise]), the editor logs a hold (seconds)
     // instead of reps and relabels the weight field "added load".
     holdExercises: Set<String> = emptySet(),
     // Canonical names of prescribed PURE-BODYWEIGHT rungs (added load 0): the
@@ -206,11 +205,12 @@ fun LogSetEditor(
     // Canonical names of today's prescribed hold rungs.
     val holdSet = remember(holdExercises) { holdExercises.mapTo(HashSet(), ::nameKey) }
     // Hold mode follows the CURRENT exercise: a prescribed hold rung, OR editing an
-    // existing hold set while its exercise is unchanged. Renaming an edited hold set
-    // to a barbell lift drops hold mode (so it can't emit a "Bench — 30 s hold" row
-    // or pollute the Bench e1RM with a phantom 1-rep set).
+    // existing hold set while its exercise is unchanged ([sameExercise], the match
+    // Save resolves the name with). Renaming an edited hold set to a barbell lift
+    // drops hold mode (so it can't emit a "Bench — 30 s hold" row or pollute the
+    // Bench e1RM with a phantom 1-rep set).
     val holdMode = nameKey(fields.exercise) in holdSet ||
-        (initial?.hold_sec != null && fields.exercise.trim() == initial.exercise.trim())
+        (initial?.hold_sec != null && sameExercise(fields.exercise, initial.exercise))
     // A pure-bodyweight rung (prescribed added load 0) has no weight to enter, so
     // the field + keypad below are hidden. Follows the CURRENT exercise like
     // holdMode; in EDIT mode only when the logged weight is already 0, so editing a
@@ -639,10 +639,8 @@ fun LogSetEditor(
                 )
             }
             if (confirmDone) {
-                AlertDialog(
-                    onDismissRequest = { confirmDone = false },
-                    modifier = Modifier.windowTraversalGroup(),
-                    shape = RoundedCornerShape(Space.Card.dp),
+                AppDialog(
+                    onDismiss = { confirmDone = false },
                     title = { Text(stringResource(R.string.log_finish_unsaved_title)) },
                     text = { Text(stringResource(R.string.log_finish_unsaved_body)) },
                     confirmButton = {
@@ -857,7 +855,7 @@ fun LogSetEditor(
             Surface(
                 color = BgSunken,
                 shape = RoundedCornerShape(Space.Card.dp),
-                modifier = Modifier.fillMaxWidth().padding(Space.Md.dp).windowTraversalGroup(),
+                modifier = Modifier.fillMaxWidth().padding(Space.Md.dp).traversalGroup(),
             ) {
                 Column(Modifier.sheetPadding()) {
                     CompositionLocalProvider(LocalEditorPinnedActions provides true) {

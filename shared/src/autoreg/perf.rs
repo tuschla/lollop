@@ -20,10 +20,6 @@ pub struct PerfSet<'a> {
     /// Logged RPE; `0` = not recorded (the set is not scored).
     pub rpe: f64,
     pub observed_at: i64,
-    /// One step of the plate grid the plan floors this load onto, kg: a set
-    /// done as asked may sit up to this much under the load its target
-    /// called for.
-    pub grid_step_kg: f64,
 }
 
 /// One lift's newest session, scored against its own recent best.
@@ -31,10 +27,7 @@ pub struct PerfSet<'a> {
 pub struct MovementPerf {
     /// Exercise name of that session's top set, as logged.
     pub exercise: String,
-    /// Top-set e1RM ÷ the best e1RM of the previous 14 local days. A top set
-    /// under that best is credited up to one plate-grid step of load at its
-    /// reps and RPE, never past 1: the plan's floor onto the plate grid is
-    /// not a drop, and never an increase.
+    /// Top-set e1RM ÷ the best e1RM of the previous 14 local days.
     pub ratio: f64,
     /// Consecutive sessions, ending with this one, whose ratio was < 0.90.
     pub decline_streak: u8,
@@ -69,8 +62,6 @@ struct DaySlot<'a> {
     top_kg: f64,
     /// e1RM of the first set at that load.
     top_e1: f64,
-    /// The same set's e1RM one plate-grid step heavier.
-    top_grid_e1: f64,
     /// That set's exercise name, as logged.
     exercise: &'a str,
     /// Best e1RM of the day.
@@ -113,7 +104,6 @@ pub fn derive_performance(
         let top = || DaySlot {
             top_kg: s.weight_kg,
             top_e1: e,
-            top_grid_e1: strength::e1rm_epley_rpe(s.weight_kg + s.grid_step_kg, s.reps, s.rpe),
             exercise: s.exercise,
             best: e,
         };
@@ -141,8 +131,7 @@ pub fn derive_performance(
                 .filter(|(pd, _)| d - pd <= E1RM_BASELINE_DAYS)
                 .map(|(_, s)| s.best)
                 .fold(f64::NAN, f64::max);
-            (base.is_finite() && base > 0.0)
-                .then(|| (top.top_e1 / base).max((top.top_grid_e1 / base).min(1.0)))
+            (base.is_finite() && base > 0.0).then(|| top.top_e1 / base)
         };
         let Some(last) = sessions.len().checked_sub(1) else {
             continue;

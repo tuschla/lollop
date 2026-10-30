@@ -1732,7 +1732,8 @@ pub struct RunProgressView {
     /// The last 16 Monday-start local weeks, oldest first, ending with the
     /// current week (empty weeks included as zeros).
     pub weekly: Vec<RunWeekView>,
-    /// Planned weekly km from the profile, for a target marker (0 = none).
+    /// The run km this plan week prescribes, for a target marker (0 = none:
+    /// no plan, no runs or a run/walk week).
     #[serde(default)]
     pub planned_weekly_km: f64,
     /// Longest logged run ever, km (0 when none) and when it was logged.

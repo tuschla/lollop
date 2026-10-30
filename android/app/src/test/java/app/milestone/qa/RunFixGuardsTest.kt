@@ -33,10 +33,8 @@ import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.RunTrackingService
 import app.milestone.openIntent
-import app.milestone.runDistLabel
 import app.milestone.spokenDuration
-import java.io.File
-import java.util.Locale
+import app.milestone.spokenRunDistance
 import kotlinx.serialization.json.jsonArray
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -68,10 +66,8 @@ class RunFixGuardsTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
-        clearSidecar()
-        RunSession.reset()
+        QaHarness.clearSidecar(ctx)
         shadowOf(ctx as Application).grantPermissions(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -86,20 +82,10 @@ class RunFixGuardsTest {
         QaHarness.teardown()
         ProcessDeath.teardown()
         RunSession.reset()
-        clearSidecar()
+        QaHarness.clearSidecar(ctx)
         AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
         AppSettings.showRouteMaps.value = true
     }
-
-    /** Point the sidecar store at this test's files dir and empty it. */
-    private fun clearSidecar() {
-        QaHarness.resetActiveRunStore(ctx)
-        ActiveRunStore.clearSync()
-        File(ctx.filesDir, "active-run.ndjson").delete()
-    }
-
-    private fun waitFor(matcher: androidx.compose.ui.test.SemanticsMatcher, timeoutMs: Long = 15_000) =
-        rule.waitUntil(timeoutMs) { rule.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
 
     private val model get() = checkNotNull(EventDispatcher.model.value)
 
@@ -115,19 +101,19 @@ class RunFixGuardsTest {
         // 21 fixes, 30 m every 10 s: the core saves 600 m in 200 s moving.
         QaHarness.seedRecordingRun()
         lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
-        waitFor(hasText(str(R.string.track_btn_stop)), 30_000)
+        rule.waitForNode(hasText(str(R.string.track_btn_stop)), 30_000)
         // The live counters disagree with the saved figures (a live leg the QC
         // drops, a stop the live floor missed): the review must not show them.
         RunSession.distanceKm.value = 9.99
         RunSession.elapsedSec.value = 4_321L
         rule.onNodeWithText(str(R.string.track_btn_stop)).performClick()
-        waitFor(hasText(str(R.string.track_finish_title)))
-        val core = "${runDistLabel(0.6, DistanceUnit.Km)} · ${spokenDuration(ctx.resources, 200)} moving"
-        runCatching { waitFor(hasContentDescription(core, substring = true)) }
+        rule.waitForNode(hasText(str(R.string.track_finish_title)))
+        val core = "${spokenRunDistance(ctx.resources, 0.6, DistanceUnit.Km)} · ${spokenDuration(ctx.resources, 200)} moving"
+        runCatching { rule.waitForNode(hasContentDescription(core, substring = true)) }
         val spoken = rule.onAllNodes(androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription))
             .fetchSemanticsNodes().flatMap { it.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription] }
         assertTrue("the review speaks the core's \"$core\": $spoken", spoken.any { core in it })
-        assertEquals(0, rule.onAllNodes(hasContentDescription(runDistLabel(9.99, DistanceUnit.Km), substring = true)).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodes(hasContentDescription(spokenRunDistance(ctx.resources, 9.99, DistanceUnit.Km), substring = true)).fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodes(hasContentDescription(spokenDuration(ctx.resources, 4_321L), substring = true)).fetchSemanticsNodes().size)
     }
 
@@ -170,7 +156,7 @@ class RunFixGuardsTest {
         ProcessDeath.kill(ctx)
         rule.launchApp()
         rule.assertTextCountEventually(str(R.string.main_resume_run_title), 1)
-        rule.onNode(hasText(str(R.string.main_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
+        rule.onNode(hasText(str(R.string.track_action_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
         rule.waitForState { RunSession.tracking.value && RunSession.points.value.size == pts.size }
         assertEquals("the pause is still a boundary", listOf(100), RunSession.decimatedSegmentStarts(Int.MAX_VALUE))
         assertEquals("the walk during the pause is not distance", liveKm, RunSession.distanceKm.value, 1e-9)
@@ -227,7 +213,7 @@ class RunFixGuardsTest {
         rule.launchApp()
         assertTrue(model.runs.single().gps_unmeasurable)
         HistoryFocus.request(run.entryId, run.observedAt)
-        waitFor(hasTestTag("run-delete"))
+        rule.waitForNode(hasTestTag("run-delete"))
         // The fixes load off the main thread; give that fetch time to land.
         repeat(20) {
             Thread.sleep(50)
@@ -235,11 +221,11 @@ class RunFixGuardsTest {
         }
         rule.onNodeWithTag("run-delete").performScrollTo().performClick()
         val confirm = hasText(str(R.string.main_delete)) and hasClickAction() and hasAnyAncestor(isDialog())
-        waitFor(confirm)
+        rule.waitForNode(confirm)
         rule.onNode(confirm).performClick()
         rule.waitForState { model.runs.isEmpty() }
         val undo = hasText(str(R.string.log_undo)) and hasClickAction()
-        waitFor(undo)
+        rule.waitForNode(undo)
         rule.onNode(undo).performClick()
         rule.waitForState { model.runs.isNotEmpty() }
         val back = model.runs.single()

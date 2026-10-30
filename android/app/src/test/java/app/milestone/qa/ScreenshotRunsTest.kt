@@ -22,18 +22,13 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.ConcurrentGoal
 import app.milestone.DarkMode
 import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.GoalDistance
-import app.milestone.LiftGoal
 import app.milestone.OpenDest
 import app.milestone.PrescriptionView
-import app.milestone.ProgressionCadence
 import app.milestone.R
-import app.milestone.RecentRace
 import app.milestone.RunSession
 import app.milestone.RunStructureView
 import app.milestone.RunTargetView
@@ -76,7 +71,6 @@ class ScreenshotRunsTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
         shadowOf(ctx as Application).grantPermissions(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -102,7 +96,7 @@ class ScreenshotRunsTest {
     // ── Waits / drivers (every wait fetches semantics, which idles the looper) ──
 
     private fun waitFor(matcher: SemanticsMatcher, timeoutMs: Long = 10_000) {
-        rule.waitUntil(timeoutMs) { rule.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForNode(matcher, timeoutMs)
         rule.waitForIdle()
     }
 
@@ -135,23 +129,6 @@ class ScreenshotRunsTest {
         rule.onNode(hasText(k) and hasAnyAncestor(hasTestTag("numeric-keypad"))).performScrollTo().performClick()
 
     // ── Scenario seeds ─────────────────────────────────────────────────────────
-
-    /** A 5K runner (4 days, 30 km a week planned) with a fresh 5K race as pace
-     *  anchor and an age for heart-rate targets. Monday (the pinned today) is an
-     *  easy run in the generated plan. */
-    private fun runnerProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
-        goalDistance = GoalDistance.FiveK,
-        concurrentGoal = ConcurrentGoal.EndurancePriority,
-        weeklySets = 0,
-        runningDaysPerWeek = 4,
-        runningKmPerWeek = 30.0,
-        advanced = false,
-        bodyweightKg = 70.0,
-        ageYears = 30.0,
-        recentRace = RecentRace(distance_km = 5.0, time_sec = 1500, epoch_day = app.milestone.todayEpochDay() - 7),
-    )
 
     /**
      * Twelve weeks of three hand-logged runs (easy, short, long) plus a half
@@ -186,7 +163,7 @@ class ScreenshotRunsTest {
         }.sortedBy { it.first }.map { it.second }
         // Today 07:00, before the pinned 10:00 "now".
         val thisMorning = QaHarness.daysAgoAtMidday(0) - 5 * 3600
-        QaHarness.seedLog(ctx, listOf(runnerProfile()) + manual + QaHarness.gpsTenK(thisMorning, sessionRpe = 7))
+        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()) + manual + QaHarness.gpsTenK(thisMorning, sessionRpe = 7))
         rule.launchApp()
         rule.selectTab(str(R.string.main_dest_history))
         waitForText(str(R.string.main_overline_last_7_days).uppercase(Locale.US))
@@ -218,7 +195,7 @@ class ScreenshotRunsTest {
 
     /** Reopen the tracker onto a followed interval plan mid-run (rep 1 of 6). */
     private fun openRecordingWithPlan() {
-        QaHarness.seedLog(ctx, listOf(runnerProfile()))
+        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
         RunSession.plannedRun.value = PrescriptionView(
             exercise = "Intervals",
             summary = "6 × 800 m · 400 m jog between",
@@ -388,7 +365,7 @@ class ScreenshotRunsTest {
 
     private fun runsEditor(mode: DarkMode) {
         useDarkMode(mode)
-        QaHarness.seedLog(ctx, listOf(runnerProfile()))
+        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
         rule.launchApp()
         openChooser()
         rule.onNodeWithText(str(R.string.main_log_run_title)).performScrollTo().performClick()
@@ -417,7 +394,7 @@ class ScreenshotRunsTest {
 
     private fun trackPrestart(mode: DarkMode) {
         useDarkMode(mode)
-        QaHarness.seedLog(ctx, listOf(runnerProfile()))
+        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
         rule.launchApp()
         openChooser()
         rule.onNodeWithText(str(R.string.main_track_run_title)).performScrollTo().performClick()

@@ -78,9 +78,8 @@ pub(crate) fn round_load_grid(kg: f64, weight_lb: bool) -> f64 {
 }
 
 /// One step of the plate grid [`round_load_grid`] floors a load of `kg` onto,
-/// in kg. A plan load lands up to this much under the anchor × % it came
-/// from, so a set at `kg` may have been asked from a target as heavy as
-/// `kg` + this step.
+/// in kg: the one plate step for completion tolerance, warm-up matching and
+/// load steps.
 pub(crate) fn load_grid_step_kg(kg: f64, weight_lb: bool) -> f64 {
     let step = grid_step(kg, weight_lb);
     if weight_lb { step / LB_PER_KG } else { step }

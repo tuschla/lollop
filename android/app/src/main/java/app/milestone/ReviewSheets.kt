@@ -156,7 +156,6 @@ internal fun weeklyAllClear(observedAt: Long): Event.SubmitReview = Event.Submit
     bonePainRedFlag = false,
     compulsiveFlag = false,
     redsSignalReported = false,
-    overtrainingSignalCount = 0,
     overtrainingSigns = OvertrainingSigns(),
     failedKeySessions = 0,
     rpeLoadGapSessions = 0,
@@ -246,9 +245,6 @@ fun WeeklyCheckinSheet(
                     bonePainRedFlag = bonePain == true,
                     compulsiveFlag = compulsive == true,
                     redsSignalReported = reds == true,
-                    // The core counts the ticked signs; the count rides along
-                    // for an older reader.
-                    overtrainingSignalCount = listOf(worsePerformance, lowMood, higherRestingHr, worseSleep).count { it },
                     overtrainingSigns = signs,
                     overtrainingSignalWeeks = if (signs.any) signWeeks else null,
                     // Whole-week deload triggers (autoreg-023/026/036); an

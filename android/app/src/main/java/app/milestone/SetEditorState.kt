@@ -3,7 +3,6 @@ package app.milestone
 import android.content.res.Resources
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
-import java.util.Locale
 
 /** How many quick-pick chips show with nothing (or an exact pick) typed. */
 private const val QuickPickBase = 6
@@ -11,14 +10,9 @@ private const val QuickPickBase = 6
 private const val QuickPickFiltered = 8
 
 /**
- * Exercise quick-pick chips. The candidate order is today's open plan items, then
- * the user's own recent exercises (newest first), then the rest of the week's
- * plan, deduplicated by [nameKey], so a busy plan week can't crowd out the
- * lifts the user actually logs. With nothing typed, or a name that already
- * matches a candidate, the first [QuickPickBase] show; otherwise every candidate
- * containing the typed text (by [nameKey]) is offered, up to
- * [QuickPickFiltered]. Modality-aware by construction: no hard-coded barbell
- * defaults. Pure.
+ * Exercise quick-pick chips: today's open plan items, then the user's recent
+ * exercises, then the rest of the week's plan, so a busy plan week can't crowd
+ * out the lifts the user actually logs. Pure.
  */
 internal fun quickPickCandidates(
     query: String,
@@ -59,7 +53,7 @@ internal fun newExerciseToAdd(typed: String, known: List<String>): String? {
 }
 
 /** The plan item a set of [exercise] belongs to: a lift or calisthenics item of
- *  that name (case-insensitive). Never a run item, whose exercise is blank, so a
+ *  that name (by [sameExercise]). Never a run item, whose exercise is blank, so a
  *  free set opened from the Log chooser on a run day carries no run prescription.
  *  Null while no exercise is named. Pure. */
 internal fun planItemFor(items: List<PrescriptionView>, exercise: String): PrescriptionView? {
@@ -80,7 +74,7 @@ internal fun exerciseChosen(exercise: String, known: List<String>, added: String
 /** The sets logged today (since [dayStartSec]) for the loop's exercise, oldest
  *  first: the plan item's own logged sets (matched by entry id, so a free-typed
  *  name variant the core attributed to the item still counts) plus any set with
- *  the same name (case-insensitive). Pure. */
+ *  the same name (by [sameExercise]). Pure. */
 internal fun todaySetsFor(
     exercise: String,
     item: PrescriptionView?,
@@ -100,27 +94,36 @@ internal fun todaySetsFor(
  *  negative). Pure. */
 internal fun repsLeft(rpe: Double): Double = (10.0 - rpe).coerceAtLeast(0.0)
 
-/** An exercise name as a match key, the core's `names::exercise_key`: trimmed,
- *  then each character folded on its own. A Latin letter with a diacritic, a
- *  ligature or the Turkish İ/ı becomes its ASCII letters ([asciiFold]: "İncline"
- *  → "incline", "Straße" → "strasse"); any other character is upper-cased, then
- *  lower-cased, as `equals(ignoreCase = true)` compares. The quick-pick and
- *  [sameExercise] both match on it; `shared/tests/fixtures/names/fold.tsv` pins
- *  it to the core's. Pure. */
+/** An exercise name as a match key, the core's `names::exercise_key`: trimmed of
+ *  Unicode White_Space as Rust's `str::trim` ([isCoreSpace]), then each code point
+ *  folded on its own: upper-cased, then lower-cased, as `equals(ignoreCase = true)`
+ *  compares; a Latin letter with a diacritic, a ligature or the Turkish İ/ı,
+ *  before or after that step, becomes its ASCII letters ([asciiFold]: "İncline" →
+ *  "incline", "Straße" → "strasse", the Ångström sign → "a"). The quick-pick and
+ *  [sameExercise] both match on it; `shared/tests/fixtures/names/fold.tsv` pins it
+ *  to the core's. Pure. */
 internal fun nameKey(name: String): String {
-    val t = name.trim()
+    val t = name.trim(::isCoreSpace)
     return buildString(t.length) {
-        for (c in t) {
-            val letters = asciiFold(c)
-            if (letters != null) append(letters) else append(c.uppercaseChar().lowercaseChar())
+        var i = 0
+        while (i < t.length) {
+            val c = t.codePointAt(i)
+            i += Character.charCount(c)
+            val low = Character.toLowerCase(Character.toUpperCase(c))
+            val folded = asciiFold(c) ?: asciiFold(low)
+            if (folded != null) append(folded) else appendCodePoint(low)
         }
     }
 }
 
+/** Unicode White_Space, what Rust's `char::is_whitespace` (and so `str::trim`)
+ *  strips: Kotlin's [Char.isWhitespace] plus U+0085, minus U+001C–U+001F. */
+private fun isCoreSpace(c: Char): Boolean = c == '\u0085' || (c.isWhitespace() && c !in '\u001C'..'\u001F')
+
 /** The lowercase ASCII spelling of a Latin-1 / Latin Extended-A letter with a
  *  diacritic, a ligature, the capital sharp s or the Turkish dotted/dotless i;
  *  null for any other character, ASCII included. The core's `names::ascii_fold`. */
-private fun asciiFold(c: Char): String? = when (c) {
+private fun asciiFold(c: Int): String? = if (c > 0xFFFF) null else when (c.toChar()) {
     in 'À'..'Å', in 'à'..'å', in 'Ā'..'ą' -> "a"
     'Æ', 'æ' -> "ae"
     'Ç', 'ç', in 'Ć'..'č' -> "c"
@@ -230,7 +233,7 @@ internal data class WarmUpStep(val kg: Double, val reps: Int, val bar: Boolean =
  *  snatch from the floor, a Pendlay row). A Romanian or stiff-leg deadlift and a
  *  hang variant start from the top. Pure. */
 internal fun isFloorLift(exercise: String): Boolean {
-    val e = exercise.lowercase(Locale.ROOT)
+    val e = nameKey(exercise)
     if ("romanian" in e || "rdl" in e || "stiff" in e || "hang" in e) return false
     return "deadlift" in e || "clean" in e || "snatch" in e || "pendlay" in e
 }
@@ -327,15 +330,12 @@ internal object AppliedCueLoads {
     fun forItem(item: PrescriptionView): AppliedCue? = byItem[key(item)]
 }
 
-/** Build a NEW-entry seed from a coach prescription. The weight is the first of
- *  a cue load applied ([appliedCue]) after the item's newest work set today, the
- *  load of that newest work set today (what the lifter is actually using: a
- *  reopened loop never falls back to the plan), `added_kg` (calisthenics "added
- *  load" semantics), `load_kg` (the prescribed load), `suggested_load_kg` (the
- *  core's start weight for an effort target) and the athlete's own `last_set`
- *  weight; with none, the editor's fresh default stays rather than inventing a
- *  load (HARD RULE 1). Reps and hold seconds take the band midpoint; the RPE
- *  target rides along as a hint, never for a ballistic power item. */
+/** Build a NEW-entry seed from a coach prescription. The weight prefers a cue
+ *  load applied after today's newest work set, then that set (a reopened loop
+ *  never falls back to the plan), then the plan and the last set; with none, the
+ *  editor's fresh default stays rather than inventing a load (HARD RULE 1). Reps
+ *  and hold seconds take the band midpoint; the RPE target rides along as a
+ *  hint, never for a ballistic power item. */
 internal fun prescriptionPrefill(p: PrescriptionView, weightUnit: WeightUnit, appliedCue: AppliedCue? = null): SetPrefill {
     val lastWork = p.logged_sets.lastOrNull { it.qualifies }
     val cueKg = appliedCue?.takeIf { lastWork == null || it.atSec >= lastWork.observed_at }?.kg

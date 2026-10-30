@@ -52,7 +52,6 @@ class OwnerProfileJourneysTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

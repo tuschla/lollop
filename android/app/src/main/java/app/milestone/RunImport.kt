@@ -173,8 +173,8 @@ internal fun planRunImport(
             continue
         }
         var firstFailure: Throwable? = null
-        val built = activities.mapNotNull { segments ->
-            runCatching { build(segments) }.onFailure { if (firstFailure == null) firstFailure = it }.getOrNull()
+        val built = activities.mapNotNull { run ->
+            runCatching { build(run) }.onFailure { if (firstFailure == null) firstFailure = it }.getOrNull()
         }
         if (built.isEmpty()) {
             failures += failureOf(file.name, firstFailure)
@@ -219,8 +219,8 @@ internal fun importFailureReason(res: Resources, failure: RunImportFailure): Str
 internal fun importFailureLine(res: Resources, failure: RunImportFailure): String =
     res.getString(R.string.import_skip_item, failure.fileName, importFailureReason(res, failure))
 
-/** A run's local date for the import result ("Jun 12, 2017"), device locale. */
-internal fun importDateLabel(epochSec: Long, locale: Locale = Locale.getDefault(), zone: ZoneId = ZoneId.systemDefault()): String =
+/** A run's local date for the import result ("Jun 12, 2017"), in the app's language. */
+internal fun importDateLabel(epochSec: Long, locale: Locale = appLocale(), zone: ZoneId = ZoneId.systemDefault()): String =
     Instant.ofEpochSecond(epochSec).atZone(zone).format(localizedDayFormatter("yMMMd", locale))
 
 /** The import result: one line, plus every skipped file when there are too many to
@@ -352,7 +352,7 @@ internal object RunImport {
                 .map { RunImportFailure(it.fileName, ImportFailure.Rejected) }
             val newest = appliedRuns.maxByOrNull { it.event.observedAt }?.event
             val skipped = plan.failures + rejected
-            val res = app.withLatinDigits().resources
+            val res = app.latinDigitResources()
             val summary = runImportSummary(
                 res, appliedRuns.size, newest?.observedAt, plan.duplicates, skipped,
             )

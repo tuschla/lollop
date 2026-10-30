@@ -75,9 +75,8 @@ class RunArmingTest {
 
     @Test
     fun movingGateToleratesAnIsolatedStationaryFix() {
-        // The bug: the old consecutive-leg gate RESET the whole run-up on a single
-        // duplicate/near-stationary fix, so an armed run "wouldn't start" while the
-        // user was moving. Net-over-window tolerates the blip and still fires.
+        // A single duplicate / near-stationary fix does not reset the run-up: the
+        // gate measures net ground over the window, so it still fires while moving.
         val t = ArmTrigger(requirePrecise = false, requireMoving = true)
         val p0 = GpsPoint(0.0, 0.0, 0, 5.0)
         val m1 = GpsPoint(0.0, 3.0 * degPerM, 1, 5.0) // clean 3 m/s leg

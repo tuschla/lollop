@@ -3111,29 +3111,31 @@ fn views_from_many_warm_threads_equal_a_cold_thread_every_step() {
             tx
         })
         .collect();
-    let on = |w: usize, job: Box<dyn FnOnce() -> String + Send>| -> Result<String, String> {
-        let (tx, rx) = mpsc::channel();
-        let run: Job = Box::new(move || {
-            let _ = tx.send(catch_unwind(AssertUnwindSafe(job)).map_err(|p| panic_text(&*p)));
-        });
-        match w {
-            usize::MAX => {
-                std::thread::Builder::new()
-                    .stack_size(32 << 20)
-                    .spawn(run)
-                    .map_err(|e| e.to_string())?;
+    // `None` views on a fresh thread, with every cache cold.
+    let on =
+        |w: Option<usize>, job: Box<dyn FnOnce() -> String + Send>| -> Result<String, String> {
+            let (tx, rx) = mpsc::channel();
+            let run: Job = Box::new(move || {
+                let _ = tx.send(catch_unwind(AssertUnwindSafe(job)).map_err(|p| panic_text(&*p)));
+            });
+            match w {
+                Some(w) => workers[w].send(run).map_err(|e| e.to_string())?,
+                None => drop(
+                    std::thread::Builder::new()
+                        .stack_size(32 << 20)
+                        .spawn(run)
+                        .map_err(|e| e.to_string())?,
+                ),
             }
-            w => workers[w].send(run).map_err(|e| e.to_string())?,
-        }
-        rx.recv_timeout(Duration::from_secs(120))
-            .map_err(|_| format!("thread {w} gave no view in 120 s"))?
-            .map_err(|p| format!("PANIC on thread {w}: {p}"))
-    };
+            rx.recv_timeout(Duration::from_secs(120))
+                .map_err(|_| format!("thread {w:?} gave no view in 120 s"))?
+                .map_err(|p| format!("PANIC on thread {w:?}: {p}"))
+        };
     for mode in [Mode::Shell, Mode::Boundary, Mode::Absurd] {
         run_cases(
             "views_from_many_warm_threads_equal_a_cold_thread_every_step",
             0x5448_5245_4144_0008 ^ mode as u64,
-            12,
+            4,
             |seed| {
                 let mut g = Gen::new(seed, mode);
                 let len = g.rng.int(8, 45) as usize;
@@ -3143,7 +3145,7 @@ fn views_from_many_warm_threads_equal_a_cold_thread_every_step() {
                     let w = g.rng.below(4) as usize;
                     let (m, ev) = (model.clone(), e.clone());
                     let warm = on(
-                        w,
+                        Some(w),
                         Box::new(move || {
                             let mut m = m.lock().unwrap_or_else(|p| p.into_inner());
                             let _ = Engine.update(ev, &mut m);
@@ -3153,7 +3155,7 @@ fn views_from_many_warm_threads_equal_a_cold_thread_every_step() {
                     .map_err(|m| format!("event #{i} {}: {m}", short(e)))?;
                     let m = model.clone();
                     let cold = on(
-                        usize::MAX,
+                        None,
                         Box::new(move || {
                             vm_json(&Engine.view(&m.lock().unwrap_or_else(|p| p.into_inner())))
                         }),

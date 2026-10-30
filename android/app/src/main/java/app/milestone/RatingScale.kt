@@ -32,7 +32,6 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
@@ -181,7 +180,7 @@ private fun RatingTrack(
                 Text(
                     "$v",
                     color = if (on) OnAccent else OnBgBody,
-                    style = (if (on) Type.Chip else Type.Chip.copy(fontWeight = FontWeight.Medium)).merge(TabularFigures),
+                    style = (if (on) Type.Chip else Type.ChipMedium).merge(TabularFigures),
                     maxLines = 1,
                     softWrap = false,
                     modifier = Modifier.clearAndSetSemantics {},
@@ -218,7 +217,7 @@ internal fun effortWord(n: Int): String = stringResource(
  * clears it. Test tags: "effort-scale", segments "effort-scale-<n>".
  */
 @Composable
-fun EffortScale(selected: Int?, onSelect: (Int?) -> Unit, modifier: Modifier = Modifier) {
+fun EffortScale(selected: Int?, onSelect: (Int?) -> Unit) {
     val shown = EffortValues.map { stringResource(R.string.history_effort_selected, it, effortWord(it)) }
     val spoken = EffortValues.map { stringResource(R.string.rating_effort_spoken, it, effortWord(it)) }
     RatingScale(
@@ -229,7 +228,6 @@ fun EffortScale(selected: Int?, onSelect: (Int?) -> Unit, modifier: Modifier = M
         startCaption = stringResource(R.string.rating_effort_start),
         endCaption = stringResource(R.string.rating_effort_end),
         selectedText = { shown[it] },
-        modifier = modifier,
         testTag = "effort-scale",
         spokenText = { spoken[it] },
     )

@@ -76,7 +76,7 @@ class LayoutRegressionTest : UiProbeTest() {
      *  landscape. */
     private fun tapMove(title: String) {
         rule.onAllNodes(
-            hasClickAction() and hasContentDescription(str(R.string.plan_secondary_action_cd, str(R.string.main_move_session), title)),
+            hasClickAction() and hasContentDescription(str(R.string.ui_label_value, str(R.string.main_move_session), title)),
         )[0].performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         settle()
     }

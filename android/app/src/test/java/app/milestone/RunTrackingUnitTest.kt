@@ -31,8 +31,8 @@ class RunTrackingUnitTest {
             GpsPoint(52.52054, 13.4050, 20, 5.0),
             GpsPoint(52.52081, 13.4050, 30, 5.0),
         )
-        // add() now takes the fix's monotonic timestamp (elapsedRealtimeNanos);
-        // drive it from observedAt so the per-leg dt is a plausible 10 s.
+        // add() takes the fix's monotonic timestamp (elapsedRealtimeNanos); drive it
+        // from observedAt so the per-leg dt is a plausible 10 s.
         pts.forEach { RunSession.add(it, it.observedAt * 1_000_000_000L) }
         // Incrementally-accumulated distance is identical to a one-shot haversine
         // over the whole track: the O(1)-per-fix path can't drift from the truth.
@@ -186,10 +186,9 @@ class RunTrackingUnitTest {
     @Test
     fun notifTitleResPinsStateToResourceId() {
         // The state→resource mapping lives in the pure function, so a swapped id
-        // fails here against the ACTUAL R.string constants (plain ints on the JVM
-        // test classpath) — not against caller-supplied local literals, which is
-        // what let a call-site swap slip past the old tests. A paused recording
-        // selects the paused title; armed/locate ignore the paused flag.
+        // fails here against the actual R.string constants (plain ints on the JVM
+        // test classpath). A paused recording selects the paused title; armed/locate
+        // ignore the paused flag.
         assertEquals(
             R.string.track_notif_recording_title,
             trackingNotifTitleRes(recording = true, armed = false, paused = false),
@@ -255,7 +254,7 @@ class RunTrackingUnitTest {
         // Null progress (no two-fix track yet) falls back to a state-appropriate
         // literal instead of an empty/absent progress line.
         assertEquals(
-            NotifContentSpec.Literal(R.string.track_notif_paused_text),
+            NotifContentSpec.Literal(R.string.track_state_paused),
             spec(recording = true, armed = false, paused = true, progress = null),
         )
         assertEquals(
@@ -392,8 +391,7 @@ class RunTrackingUnitTest {
         }
         assertEquals(3L, RunSession.elapsedSec.value)
         // A 37 s fix gap (> MAX_FIX_GAP_SEC): a pause bridge, its span adds ZERO
-        // moving time (the runner may have stood/relocated). Elapsed stays at 3 s, it
-        // does NOT jump the 37 s the way the old wall-clock span did.
+        // moving time (the runner may have stood/relocated). Elapsed stays at 3 s.
         lon += 3.0 * degPerM
         RunSession.add(GpsPoint(0.0, lon, 40, 5.0), 40_000_000_000L)
         assertEquals(3L, RunSession.elapsedSec.value)
@@ -777,11 +775,10 @@ class RunTrackingUnitTest {
 
     @Test
     fun savedTrackIsByteIdenticalToTheAppendedFixes() {
-        // The append-only backing store must expose EXACTLY the surviving fixes (a
+        // The append-only backing store exposes EXACTLY the surviving fixes (a
         // dropped non-monotonic fix never appears; a pause boundary is reported),
-        // and the of-record saved forms (decimatedTrackForCore /
-        // segmentStartIndices) are pure functions of that list, so a run built
-        // through add() is identical to the old prev+p semantics.
+        // and the saved forms (decimatedTrackForCore / segmentStartIndices) are pure
+        // functions of that list.
         RunSession.reset()
         val expected = ArrayList<GpsPoint>()
         val degPerM = 1.0 / 111_320.0
@@ -957,7 +954,7 @@ class RunTrackingUnitTest {
         assertEquals(120.0, points[last].movingSec, 0.0)
 
         // The untouched window reads the run detail's moving time, not "4:20".
-        assertEquals("2:00", fmtRunTime(trimKeptMovingSec(points, 0, last, recordSec = 120.0)))
+        assertEquals("2:00", formatElapsed(trimKeptMovingSec(points, 0, last, recordSec = 120.0).toLong()))
         // The core's QC'd figure wins over the raw track's, as for distance.
         assertEquals(118, trimKeptMovingSec(points, 0, last, recordSec = 118.0))
         // Trimming the first segment away keeps only the second one's minute.

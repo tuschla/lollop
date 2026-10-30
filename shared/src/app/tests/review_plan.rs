@@ -367,15 +367,17 @@ fn more_stated_volume_never_prescribes_a_smaller_week() {
 
 // ── Stated rules of the run plan and the re-entry brackets ─────────────────
 
-/// The 3-day long run: 16 km/wk gives 5 km, 40 km/wk 13 and 60 km/wk 20; at
-/// 4+ days the 30 % share governs; no easy day outruns the long run; the long
-/// run stays within 2× the daily average.
+/// The 3-day long run: 16 km/wk gives 5 km and 40 km/wk 13; 60 km/wk is more
+/// than three runs hold under the 90-min easy-run ceiling (running-015), so
+/// the long run is sized on the week they hold: 13.5. At 4+ days the 30 %
+/// share governs; no easy day outruns the long run; the long run stays within
+/// 2× the daily average.
 #[test]
 fn claim_three_day_long_run_examples() {
     for (days, km, want) in [
         (3u8, 16.0, 5.0),
         (3, 40.0, 13.0),
-        (3, 60.0, 20.0),
+        (3, 60.0, 13.5),
         (4, 40.0, 12.0),
     ] {
         let (app, m) = setup(runner(days, km), MON);

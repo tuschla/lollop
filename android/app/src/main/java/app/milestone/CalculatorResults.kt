@@ -449,7 +449,7 @@ internal fun VolumeResult(model: ViewModel, onClear: () -> Unit) {
     }
 }
 
-/** Height of the volume ramp chart (the History weekly chart's height). */
+/** Height of the volume ramp chart. */
 private val RampChartHeight = 112.dp
 
 /**

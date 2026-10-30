@@ -25,8 +25,7 @@ use crate::hybrid::{self, ConcurrentGoal};
 use crate::individualization::{TrainingAge, training_age_from_cadence};
 use crate::running::{self, GoalDistance};
 use crate::schema::{
-    Goal, LadderId, MesoPhase, Mesocycle, Program, Recommended, RunSessionType, Session,
-    SessionType,
+    Goal, LadderId, MesoPhase, Mesocycle, Program, Recommended, Session, SessionType,
 };
 use crate::strength::{DupDay, LiftGoal};
 
@@ -239,7 +238,7 @@ impl Anchors {
     pub fn e1rm_for(&self, exercise: &str) -> Option<f64> {
         self.lift_e1rm
             .iter()
-            .find(|(n, _)| n.eq_ignore_ascii_case(exercise))
+            .find(|(n, _)| crate::names::fold_eq(n, exercise))
             .or_else(|| {
                 let key = movement_key(exercise);
                 self.lift_e1rm.iter().find(|(n, _)| movement_key(n) == key)
@@ -251,9 +250,9 @@ impl Anchors {
     /// The working-load derate for an exercise's movement, if one applies.
     pub fn load_frac_for(&self, exercise: &str) -> Option<&LiftDerate> {
         let key = movement_key(exercise);
-        self.lift_derates
-            .iter()
-            .find(|d| d.exercise.eq_ignore_ascii_case(exercise) || movement_key(&d.exercise) == key)
+        self.lift_derates.iter().find(|d| {
+            crate::names::fold_eq(&d.exercise, exercise) || movement_key(&d.exercise) == key
+        })
     }
 
     /// The derate on a load carried from the movement's last working session
@@ -624,12 +623,9 @@ pub struct BlockPosition {
 /// Where `week_index` sits in the lifting block. The single source for the
 /// lift builders and the program summary. A running-led hybrid holds week 1
 /// (maintenance dose, no set ramp: HYB-MAINT-001, and HYB-TENDON-001's
-/// "progress one side, hold the other"). A novice on linear %1RM progression
-/// has no calendar deload, so nothing restarts the ramp: the week keeps
-/// counting and `strength::pct_for_week` holds its band/RIR cap (STR-PCTPROG-001
-/// adds load per successful week; indiv-007 linear progression runs 3–6
-/// months). Restarting at the band floor every block would be an unplanned
-/// deload on completed sessions.
+/// "progress one side, hold the other"). A linear novice (no calendar deload)
+/// keeps counting weeks; `strength::pct_for_week` holds the band cap
+/// (STR-PCTPROG-001).
 pub fn lift_block_position(profile: &Profile, week_index: u32) -> BlockPosition {
     let (block_weeks, cycle_len) = lift_cycle(profile);
     // `pos < cycle_len`, a `u8`.
@@ -653,32 +649,56 @@ pub fn lift_block_position(profile: &Profile, week_index: u32) -> BlockPosition 
 }
 
 /// Days from the week's Monday `week_start` to the meet when a barbell
-/// MaxStrength/Power meet taper (applied per session 0–20 days out) shapes the
-/// week; it replaces the calendar deload there. Other goals and calisthenics
-/// keep the deload: the taper rules are barbell-meet rules.
-fn meet_taper_offset(profile: &Profile, week_start: Option<i64>) -> Option<i64> {
+/// MaxStrength/Power meet taper reaches one of the week's lift sessions
+/// (`lift_days`, 0 = Monday): [`lift::apply_meet_taper`] shapes sessions 0–14
+/// days out. Such a week takes the taper in place of the calendar deload; a
+/// week the taper misses keeps its deload. Other goals and calisthenics keep
+/// the deload: the taper rules are barbell-meet rules.
+fn meet_taper_offset(
+    profile: &Profile,
+    week_start: Option<i64>,
+    lift_days: impl FnOnce() -> Vec<u16>,
+) -> Option<i64> {
     let tapers = profile.weekly_sets > 0
         && matches!(profile.lift_goal, LiftGoal::MaxStrength | LiftGoal::Power)
         && !calisthenics_mode(profile);
-    match (profile.meet_epoch_day, week_start) {
-        (Some(meet), Some(ws)) if tapers => {
-            Some(meet.saturating_sub(ws)).filter(|d| (0..=20).contains(d))
-        }
-        _ => None,
-    }
+    let offset = profile
+        .meet_epoch_day
+        .zip(week_start)
+        .filter(|_| tapers)
+        .map(|(meet, ws)| meet.saturating_sub(ws))?;
+    lift::meet_taper_reaches(offset, &lift_days()).then_some(offset)
+}
+
+/// Whether a week at lifting block position `recovery` is the planned lifting
+/// deload: a lifting profile's recovery week that no meet taper replaces
+/// (`taper_offset`, [`meet_taper_offset`]).
+fn is_lift_deload(profile: &Profile, recovery: bool, taper_offset: Option<i64>) -> bool {
+    profile.weekly_sets > 0 && recovery && taper_offset.is_none()
 }
 
 /// Whether plan week `week_index` (Monday `week_monday`) is the planned lifting
-/// deload week `synthesize` lays out: the block's recovery week, unless a meet
-/// taper replaces it. Its light sets are prescribed, not a performance
-/// decrement, so the e1RM anchors, the last working sets and the e1RM-decline
-/// gate leave them out (autoreg-022 reads e1RM at fixed RPE; HYP-DELOAD-RX-001
-/// deloads from the working weight).
+/// deload week `synthesize` lays out ([`is_lift_deload`]; the lift days a meet
+/// taper is judged on are the week placed from the profile). Its light sets
+/// are prescribed, not a performance decrement, so the e1RM anchors, the last
+/// working sets and the e1RM-decline gate leave them out (autoreg-022 reads
+/// e1RM at fixed RPE; HYP-DELOAD-RX-001 deloads from the working weight,
+/// 03-hypertrophy.md:395; HYP-DOUBLEPROG-001, :361-362).
 pub fn lift_deload_week(profile: &Profile, week_index: u32, week_monday: i64) -> bool {
-    plan_withheld(profile).is_none()
-        && profile.weekly_sets > 0
-        && lift_block_position(profile, week_index).recovery
-        && meet_taper_offset(profile, Some(week_monday)).is_none()
+    if plan_withheld(profile).is_some() || !lift_block_position(profile, week_index).recovery {
+        return false;
+    }
+    let taper_offset = meet_taper_offset(profile, Some(week_monday), || {
+        let anchors = Anchors {
+            week_start_epoch_day: Some(week_monday),
+            ..Default::default()
+        };
+        let shape = week_shape(profile);
+        let run = (shape.run_days > 0).then(|| run_plan(profile, &anchors, &shape, week_index));
+        let (_, placement) = place(profile, &anchors, &shape, run.as_ref());
+        placement.lifts.iter().map(|(d, _)| *d).collect()
+    });
+    is_lift_deload(profile, true, taper_offset)
 }
 
 /// The run-week request for this profile's week. Hybrid dosing:
@@ -699,6 +719,82 @@ fn run_request(profile: &Profile, shape: &WeekShape, week_index: u32) -> RunWeek
         hold_volume: lift_leads,
         max_quality: (lift_leads && profile.goal_distance == GoalDistance::General).then_some(1),
     }
+}
+
+/// The run side of plan week `week_index` ([`run_week_plan`]). A taper week
+/// cuts from the last full load week as it was prescribed: that week, `k`
+/// weeks back, is replayed through the same plan, lift days and placement
+/// ([`load_week_km`]).
+fn run_plan(
+    profile: &Profile,
+    anchors: &Anchors,
+    shape: &WeekShape,
+    week_index: u32,
+) -> RunWeekPlan {
+    run_week_plan(
+        profile,
+        anchors,
+        &run_request(profile, shape, week_index),
+        &|k| load_week_km(profile, anchors, shape, week_index, k),
+    )
+}
+
+/// The run km prescribed in plan week `week_index − back` (Monday `back`
+/// weeks earlier, the weekly-km history seen from there). Only taper weeks
+/// ask, for their last load week, which is no taper, so this recurses once.
+fn load_week_km(
+    profile: &Profile,
+    anchors: &Anchors,
+    shape: &WeekShape,
+    week_index: u32,
+    back: u32,
+) -> f64 {
+    let anchors = Anchors {
+        week_start_epoch_day: anchors
+            .week_start_epoch_day
+            .map(|d| d - 7 * i64::from(back)),
+        run_week_km: anchors
+            .run_week_km
+            .get(back as usize..)
+            .unwrap_or_default()
+            .to_vec(),
+        ..anchors.clone()
+    };
+    let plan = run_plan(profile, &anchors, shape, week_index.saturating_sub(back));
+    let (_, placement) = place(profile, &anchors, shape, Some(&plan));
+    run::prescribed_km(
+        &run_week_sessions(&plan, &placement.runs, profile, &anchors),
+        &anchors,
+    )
+}
+
+/// The week's lift days and run kinds on the athlete's weekdays (CAP-3 / 48 h
+/// spacing), with the CAP-1 leg cap (HYB-CAP-001: ≥4 run days or ≥40 km a
+/// week leave at most 2 lift days with leg work and trim weekly leg volume)
+/// the run week triggers.
+fn place(
+    profile: &Profile,
+    anchors: &Anchors,
+    shape: &WeekShape,
+    run_plan: Option<&RunWeekPlan>,
+) -> (
+    Option<Recommended<hybrid::LowerLiftCap>>,
+    schedule::Placement,
+) {
+    let ta = training_age_from_cadence(profile.progression_cadence).value;
+    let lower_cap = run_plan
+        .filter(|_| profile.weekly_sets > 0)
+        .and_then(|p| hybrid::lower_lift_cap(shape.run_days, p.weekly_km));
+    let specs = build_lift_specs(profile, anchors, ta, shape.lift_days, lower_cap.as_ref());
+    let run_kinds = run_plan.map(|p| p.kinds.as_slice()).unwrap_or_default();
+    let placement = place_week(
+        available_weekdays(profile),
+        &specs,
+        run_kinds,
+        run_plan.and_then(|p| p.race_day),
+        plan_start_day(anchors),
+    );
+    (lower_cap, placement)
 }
 
 /// Why no plan can be built for this profile, `None` when one can: any
@@ -728,35 +824,11 @@ pub fn synthesize(profile: &Profile, anchors: &Anchors, week_index: u32) -> Opti
     let running = profile.running_days_per_week > 0;
     let shape = week_shape(profile);
 
-    // ── Run content: kinds + volume for this week (phase-aware, run.rs). ──
-    let run_plan = (shape.run_days > 0)
-        .then(|| run_week_plan(profile, anchors, &run_request(profile, &shape, week_index)));
+    // ── Run content: kinds + volume for this week (phase-aware, run.rs),
+    // then the lift days and both sides placed (CAP-1 / CAP-3). ──
+    let run_plan = (shape.run_days > 0).then(|| run_plan(profile, anchors, &shape, week_index));
     let run_recovery = run_plan.as_ref().is_some_and(|p| p.recovery);
-
-    // ── Lift content: template and per-day emphasis. ──
-    // CAP-1 (HYB-CAP-001): with ≥4 run days or ≥40 km a week, at most 2 lift
-    // days carry leg work and weekly leg volume is trimmed.
-    let lower_cap = if lifting && running {
-        run_plan
-            .as_ref()
-            .and_then(|p| hybrid::lower_lift_cap(shape.run_days, p.weekly_km))
-    } else {
-        None
-    };
-    let specs = build_lift_specs(profile, anchors, ta, shape.lift_days, lower_cap.as_ref());
-
-    // ── Placement onto the athlete's weekdays (CAP-3 / 48 h spacing). ──
-    let run_kinds: Vec<RunSessionType> = run_plan
-        .as_ref()
-        .map(|p| p.kinds.clone())
-        .unwrap_or_default();
-    let placement = place_week(
-        available_weekdays(profile),
-        &specs,
-        &run_kinds,
-        run_plan.as_ref().and_then(|p| p.race_day),
-        plan_start_day(anchors),
-    );
+    let (lower_cap, placement) = place(profile, anchors, &shape, run_plan.as_ref());
 
     // ── Lift sessions, then the week-level rules. ──
     let week = LiftWeek {
@@ -794,6 +866,14 @@ pub fn synthesize(profile: &Profile, anchors: &Anchors, week_index: u32) -> Opti
             sessions,
         },
     })
+}
+
+/// The run km a synthesized week prescribes, as the plan sizes a week: each
+/// run's main set, its jog-distance recoveries and its warm-up and cool-down,
+/// minutes counted at the athlete's accounting easy pace (`anchors`, the
+/// anchors the week was synthesized with).
+pub fn prescribed_run_km(program: &Program, anchors: &Anchors) -> f64 {
+    run::prescribed_km(&program.mesocycle.sessions, anchors)
 }
 
 /// A lifting profile that trains bodyweight ladders instead of weights.
@@ -1019,13 +1099,18 @@ fn apply_lift_week_modifiers(
         modifiers::apply_lower_cap(sessions, cap);
     }
 
-    // A meet taper (barbell MaxStrength/Power, applied per session 0–14 days
-    // out) replaces the calendar deload in the weeks it touches.
-    let taper_offset = meet_taper_offset(profile, week.anchors.week_start_epoch_day);
+    // A meet taper replaces the calendar deload in the weeks it reaches.
+    let taper_offset = meet_taper_offset(profile, week.anchors.week_start_epoch_day, || {
+        sessions
+            .iter()
+            .filter(|s| matches!(s.session_type, SessionType::Lift(_)))
+            .map(|s| s.day)
+            .collect()
+    });
     if let Some(days) = taper_offset {
         lift::apply_meet_taper(sessions, days);
     }
-    let lift_deload = lifting && week.block.recovery && taper_offset.is_none();
+    let lift_deload = is_lift_deload(profile, week.block.recovery, taper_offset);
     if lift_deload {
         modifiers::apply_deload_week(sessions, profile.lift_goal);
     } else if run_recovery && n_lift > 0 {
@@ -1105,7 +1190,7 @@ fn run_load_weeks(profile: &Profile) -> u32 {
 
 /// Whether plan week `week_index` (Monday = `week_monday_epoch_day`) is a
 /// planned cut for the weekly running report: the running side's recovery week
-/// when the profile runs, else the lifting deload week.
+/// when the profile runs, else the lifting deload week ([`lift_deload_week`]).
 pub fn planned_recovery_week(
     profile: &Profile,
     week_index: u32,
@@ -1116,10 +1201,9 @@ pub fn planned_recovery_week(
             week_start_epoch_day: Some(week_monday_epoch_day),
             ..Default::default()
         };
-        let shape = week_shape(profile);
-        run_week_plan(profile, &anchors, &run_request(profile, &shape, week_index)).recovery
+        run_plan(profile, &anchors, &week_shape(profile), week_index).recovery
     } else {
-        lift_block_position(profile, week_index).recovery
+        lift_deload_week(profile, week_index, week_monday_epoch_day)
     }
 }
 
@@ -1127,9 +1211,8 @@ pub fn planned_recovery_week(
 /// (%VO2max, the floor of its Daniels band) over the coming 8 weeks (a base
 /// and a build running cycle): the inputs to the interference check
 /// (HYB-THRESH-001), taken from the athlete's OWN plan instead of a
-/// self-reported %VO2max. Reads only the run side's week content (the same
-/// `run_week_plan` `synthesize` lays out), never the lift days or placement,
-/// so the guidance refresh stays cheap. `None` when the profile is gated or
+/// self-reported %VO2max. Reads the run side's week content (the same
+/// [`run_plan`] `synthesize` lays out). `None` when the profile is gated or
 /// schedules no run.
 pub fn plan_run_intensity(profile: &Profile, anchors: &Anchors) -> Option<(u8, f64)> {
     if profile.health.any_gate() || profile.running_days_per_week == 0 {
@@ -1141,7 +1224,7 @@ pub fn plan_run_intensity(profile: &Profile, anchors: &Anchors) -> Option<(u8, f
     }
     let mut peak = 0.0_f64;
     for w in 0..8u32 {
-        let plan = run_week_plan(profile, anchors, &run_request(profile, &shape, w));
+        let plan = run_plan(profile, anchors, &shape, w);
         for &k in &plan.kinds {
             let band = run::vdot_band_for(k);
             peak = peak.max(running::vdot_band_vo2max_pct(band).0);

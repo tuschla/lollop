@@ -464,7 +464,7 @@ fun RunTrackingScreen(
                             // keeps the track + crash sidecar and surfaces the
                             // save-failed toast, instead of resetting the session.
                             if (!result.accepted || !result.persisted) error("run save not persisted")
-                            result.view
+                            result.view // the saved model, which exclusive publishes
                         }
                     }
                 },
@@ -898,21 +898,20 @@ internal fun claimSaving(saving: MutableStateFlow<Boolean>, ownsSaving: Boolean 
  * A [CancellationException] is re-thrown, never sent to [onFailure]; any other
  * exception means [send] failed before clear/reset, with the run intact for a retry.
  */
-internal suspend fun <T> runSaveCriticalSection(
-    send: suspend () -> T,
+internal suspend fun runSaveCriticalSection(
+    send: suspend () -> Unit,
     clearSidecar: () -> Unit,
     resetSession: () -> Unit,
-    finish: (T) -> Unit,
+    finish: () -> Unit,
     onFailure: () -> Unit,
 ) {
     try {
-        val result = withContext(Dispatchers.IO + NonCancellable) {
-            val r = send()
+        withContext(Dispatchers.IO + NonCancellable) {
+            send()
             clearSidecar()
             resetSession()
-            r
         }
-        withContext(NonCancellable) { finish(result) }
+        withContext(NonCancellable) { finish() }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {

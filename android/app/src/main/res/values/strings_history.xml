@@ -80,18 +80,6 @@
     <string name="run_split_faster">%1$s faster than average</string>
     <string name="run_split_slower">%1$s slower than average</string>
     <string name="run_split_even">same as average</string>
-    <plurals name="run_minutes_spoken">
-        <item quantity="one">%d minute</item>
-        <item quantity="other">%d minutes</item>
-    </plurals>
-    <plurals name="run_seconds_spoken">
-        <item quantity="one">%d second</item>
-        <item quantity="other">%d seconds</item>
-    </plurals>
-    <!-- Spoken pace: %1$s minutes ("8 minutes"), %2$d seconds, %3$s "mile" or "kilometer". -->
-    <string name="run_pace_spoken">%1$s %2$d per %3$s</string>
-    <string name="run_unit_mile_word">mile</string>
-    <string name="run_unit_km_word">kilometer</string>
 
     <!-- Trim run sheet. -->
     <string name="trim_removes">Removes %1$s from the start and %2$s from the end</string>
@@ -119,13 +107,12 @@
     <string name="history_heatmap_run">Run</string>
     <string name="history_heatmap_both">Both</string>
     <string name="history_heatmap_open_day">Open this day</string>
-    <string name="history_heatmap_cell">%1$s: %2$s</string>
     <plurals name="history_heatmap_runs">
         <item quantity="one">%d run</item>
         <item quantity="other">%d runs</item>
     </plurals>
-    <!-- Weekly distance chart, a tapped bar: %1$s week's Monday ("Sep 21"), %2$s distance, %3$s unit. -->
-    <string name="history_weekly_bar_value">Week of %1$s · %2$s %3$s</string>
+    <!-- Weekly distance chart, a week's bar: the tap readout ("16 km") and its TalkBack node ("16 kilometers"). %1$s week's Monday ("Sep 21"), %2$s distance with its unit. -->
+    <string name="history_weekly_bar_value">Week of %1$s · %2$s</string>
 
     <!-- History changes, confirmed with Undo. -->
     <string name="history_run_deleted">Run deleted</string>

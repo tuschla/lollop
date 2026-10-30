@@ -87,7 +87,13 @@ fn review_deloads_with_reasons(
     {
         out.push((
             d,
-            Some("because sessions felt harder at the same weights while your check-ins stayed low for 3+ days".into()),
+            Some(
+                format!(
+                    "because sessions felt harder at the same weights while your check-ins stayed low for {}+ days",
+                    autoreg::WELLNESS_MULTIDAY_STREAK
+                )
+                .into(),
+            ),
         ));
     }
     // autoreg-028 second trigger: a single-day lnRMSSD z < −1 with a ≥2-day

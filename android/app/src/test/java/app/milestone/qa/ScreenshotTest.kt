@@ -11,7 +11,6 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.DarkMode
 import app.milestone.R
-import java.util.Locale
 import org.junit.Before
 import org.junit.After
 import org.junit.Rule
@@ -40,7 +39,6 @@ class ScreenshotTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

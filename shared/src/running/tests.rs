@@ -1271,35 +1271,49 @@ fn gpx_names_the_runs_logged_at_stamp_before_its_track() {
     );
 }
 
+/// The NHS Couch to 5K bouts, (run s, walk s) for each run of weeks 1–9
+/// (extracted/13-running-update.md:101); a single bout is a continuous run.
+pub(crate) const NHS_C25K: [[&[(u32, u32)]; 3]; 9] = {
+    const WK1: &[(u32, u32)] = &[(60, 90); 8];
+    const WK2: &[(u32, u32)] = &[(90, 120); 6];
+    const WK3: &[(u32, u32)] = &[(90, 90), (180, 180), (90, 90), (180, 180)];
+    const WK4: &[(u32, u32)] = &[(180, 90), (300, 150), (180, 90), (300, 0)];
+    [
+        [WK1, WK1, WK1],
+        [WK2, WK2, WK2],
+        [WK3, WK3, WK3],
+        [WK4, WK4, WK4],
+        [
+            &[(300, 180), (300, 180), (300, 0)],
+            &[(480, 300), (480, 0)],
+            &[(1200, 0)],
+        ],
+        [
+            &[(300, 180), (480, 180), (300, 0)],
+            &[(600, 180), (600, 0)],
+            &[(1500, 0)],
+        ],
+        [&[(1500, 0)], &[(1500, 0)], &[(1500, 0)]],
+        [&[(1680, 0)], &[(1680, 0)], &[(1680, 0)]],
+        [&[(1800, 0)], &[(1800, 0)], &[(1800, 0)]],
+    ]
+};
+
 #[test]
 fn c25k_matches_the_nhs_bout_table() {
-    let bouts = |w: u8, r: u8| -> Vec<(u16, u16)> {
+    let bouts = |w: u8, r: u8| -> Vec<(u32, u32)> {
         c25k_session_rx(w, r)
             .value
             .bouts
             .iter()
-            .map(|b| (b.run_sec, b.walk_sec))
+            .map(|b| (u32::from(b.run_sec), u32::from(b.walk_sec)))
             .collect()
     };
-    assert_eq!(bouts(1, 1), vec![(60, 90); 8]);
-    assert_eq!(bouts(2, 2), vec![(90, 120); 6]);
-    assert_eq!(
-        bouts(3, 1),
-        vec![(90, 90), (180, 180), (90, 90), (180, 180)]
-    );
-    assert_eq!(
-        bouts(4, 3),
-        vec![(180, 90), (300, 150), (180, 90), (300, 0)]
-    );
-    assert_eq!(bouts(5, 1), vec![(300, 180), (300, 180), (300, 0)]);
-    assert_eq!(bouts(5, 2), vec![(480, 300), (480, 0)]);
-    assert_eq!(bouts(5, 3), vec![(1200, 0)], "first 20-min run ends week 5");
-    assert_eq!(bouts(6, 1), vec![(300, 180), (480, 180), (300, 0)]);
-    assert_eq!(bouts(6, 2), vec![(600, 180), (600, 0)]);
-    assert_eq!(bouts(6, 3), vec![(1500, 0)], "25 min straight ends week 6");
-    assert_eq!(bouts(7, 2), vec![(1500, 0)]);
-    assert_eq!(bouts(8, 1), vec![(1680, 0)]);
-    assert_eq!(bouts(9, 3), vec![(1800, 0)]);
+    for (w, week) in (1..).zip(NHS_C25K) {
+        for (r, want) in (1..).zip(week) {
+            assert_eq!(bouts(w, r), want, "week {w} run {r}");
+        }
+    }
     assert_eq!(
         bouts(12, 1),
         vec![(1800, 0)],

@@ -11,7 +11,6 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.updateAll
 import app.milestone.AppClock
-import app.milestone.todayEpochDay
 import app.milestone.QuickTileService
 import app.milestone.requestTileRefresh
 import java.time.Instant
@@ -56,7 +55,7 @@ class TodayWidgetReceiver : GlanceAppWidgetReceiver() {
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                if (force != null) WidgetSnapshotStore.markStale(context, force = force, today = todayEpochDay())
+                if (force != null) WidgetSnapshotStore.markStale(context, force = force)
                 requestTileRefresh(context)
                 val widgets = WidgetMidnight.hasWidgets(context)
                 if (widgets || QuickTileService.isAdded(context)) WidgetMidnight.schedule(context)

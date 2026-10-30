@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -595,7 +596,14 @@ internal fun ProfileEditor(
                 }
             }
             RowHairline()
-            ActionRow(stringResource(R.string.setup_rerun_setup)) { onRerunSetup(null) }
+            ChevronRow(
+                { onRerunSetup(null) },
+                Modifier.clip(RoundedCornerShape(Space.Md.dp)),
+                contentPadding = PaddingValues(vertical = Space.Sm.dp),
+                spacing = Space.Md.dp,
+            ) {
+                Text(stringResource(R.string.setup_rerun_setup), color = OnBgBody, style = Type.Body)
+            }
         }
 
         if (lift) {
@@ -627,12 +635,12 @@ internal fun ProfileEditor(
                 if (draft.liftGoal == LiftGoal.Hypertrophy) {
                     // Optional specialization; the core applies it only for
                     // experienced lifters (HYP-SPEC-BLOCK-001).
-                    val muscle = HypertrophyMuscle.entries.firstOrNull { it.wire == draft.specializationMuscle }
+                    val muscle = HypertrophyMuscle.of(draft.specializationMuscle)
                     ProfileRow(
                         open == ProfileRowId.PriorityMuscle,
                         { toggle(ProfileRowId.PriorityMuscle) },
                         stringResource(R.string.setup_row_priority_muscle),
-                        draft.specializationMuscle?.let { hypertrophyMuscleLabel(it) },
+                        muscle?.let { stringResource(it.labelRes) } ?: draft.specializationMuscle,
                         placeholder = stringResource(R.string.setup_priority_none),
                     ) {
                         OptionList(
@@ -954,7 +962,7 @@ internal fun ProfileEditor(
                     draft.environment?.let { stringResource(it.labelRes) },
                 ) {
                     OptionList(
-                        listOf<Environment?>(null, Environment.Heat, Environment.Altitude, Environment.Cold, Environment.Neutral),
+                        listOf<Environment?>(null) + Environment.entries,
                         draft.environment,
                         { it?.let { e -> res.getString(e.labelRes) } ?: res.getString(R.string.setup_not_set) },
                     ) {
@@ -1071,7 +1079,7 @@ internal fun Event.SetProfile.trainingDayTotal(): Int {
 @Composable
 private fun RecentRaceEditor(race: RecentRace?, onChange: (RecentRace?) -> Unit) {
     var distance by rememberSaveable { mutableStateOf(race?.let { RaceDistance.of(it.distance_km) }) }
-    var digits by rememberSaveable { mutableStateOf(race?.let { raceTimeDigits(it.time_sec) } ?: "") }
+    var digits by rememberSaveable { mutableStateOf(race?.let { secondsToHmsDigits(it.time_sec) } ?: "") }
     var fresh by rememberSaveable { mutableStateOf(true) }
     val invalid = distance != null && digits.isNotEmpty() && recentRaceOf(distance, digits) == null
     fun edit(next: String) {
@@ -1124,11 +1132,7 @@ private val ENV_ALTITUDE_OPTIONS_M = 0..4500 step 100
 private val WEEKS_OFF_OPTIONS = 1..52
 
 /** Sex answer → its label; null (not given) → "Prefer not to say". */
-internal fun sexLabelRes(female: Boolean?): Int = when (female) {
-    true -> R.string.setup_sex_female
-    false -> R.string.setup_sex_male
-    null -> R.string.setup_sex_not_saying
-}
+internal fun sexLabelRes(female: Boolean?): Int = SexAnswer.of(female).labelRes
 
 /**
  * Keypad entry for one Profile person number. The buffer starts from the stored
@@ -1202,24 +1206,6 @@ private fun ProfileGroup(title: String, content: @Composable () -> Unit) {
         PlainCard {
             Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) { content() }
         }
-    }
-}
-
-/** A quiet whole-row action inside a Profile card (label + chevron, ≥48dp),
- *  styled like the field rows around it. */
-@Composable
-private fun ActionRow(label: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = ActionMinHeight)
-            .clip(RoundedCornerShape(Space.Md.dp))
-            .clickable(role = Role.Button) { onClick() }
-            .padding(vertical = Space.Sm.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = OnBgBody, style = Type.Body, modifier = Modifier.weight(1f).padding(end = Space.Md.dp))
-        RowChevron()
     }
 }
 

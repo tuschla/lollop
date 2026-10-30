@@ -35,7 +35,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -66,7 +65,7 @@ internal fun runStats(run: RunResultView, unit: DistanceUnit): List<RunStat> {
         stats += RunStat(label, dist, unit.distanceLabel, stringResource(R.string.run_stat_cd, label, spoken))
     }
     if (run.duration_min > 0.0) {
-        val time = fmtRunTime(Math.round(run.duration_min * 60.0).toInt())
+        val time = formatElapsed(Math.round(run.duration_min * 60.0))
         val label = stringResource(R.string.run_stat_time)
         stats += RunStat(label, time, "", stringResource(R.string.run_stat_cd, label, time))
     }
@@ -254,7 +253,7 @@ internal fun RunDetailContent(
         // 2.1 Header: name + top record badge on one baseline, then the start date.
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-                Text(title, color = OnBgBody, style = Type.Title, modifier = Modifier.weight(1f).alignByBaseline().semantics { heading() })
+                SheetTitle(title, Modifier.weight(1f).alignByBaseline())
                 run.best_effort_labels.lastOrNull()?.let { RecordChip(it, modifier = Modifier.alignByBaseline()) }
             }
             if (caption.isNotBlank()) Text(caption, color = OnBgMuted, style = Type.Caption.merge(TabularFigures))
@@ -494,7 +493,7 @@ private fun RateRunSheet(run: RunResultView, onDismiss: () -> Unit, onSave: (Int
             modifier = Modifier.sheetBody(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
         ) {
-            Text(stringResource(R.string.run_rate_title), color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
+            SheetTitle(stringResource(R.string.run_rate_title))
             EffortScale(rpe, onSelect = { rpe = it })
             RunTypeChips(type, onSelect = { wt -> type = if (type == wt) null else wt })
             PrimaryButton(

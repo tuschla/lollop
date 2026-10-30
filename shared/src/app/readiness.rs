@@ -497,19 +497,13 @@ pub(super) fn build_signal_groups() -> std::borrow::Cow<'static, [SignalGroupVie
 
 /// Logged sets dated on or before local day `through` as performance-derivation
 /// inputs. Holds and undated legacy rows are left out (a hold has
-/// no e1RM, an undated set has no session day), and so are the sets of a
-/// planned lifting deload week: their light loads at more reps in reserve are
-/// prescribed, not a performance decrement, so they never score against the
-/// pre-deload best nor become the baseline after it (autoreg-022 reads e1RM at
-/// fixed RPE, extracted/06-autoregulation.md:278-280). Each set carries the
-/// step of the plate grid (`weight_lb`: the pound grid) its load was floored
-/// onto.
+/// no e1RM, an undated set has no session day), and planned deload weeks are
+/// skipped ([`crate::plan::lift_deload_week`]).
 pub(super) fn perf_sets<'s>(
     sets: &'s [LoggedSet],
     through: i64,
     offset: i64,
-    deloads: DeloadWeeks,
-    weight_lb: bool,
+    deloads: DeloadDays,
 ) -> Vec<autoreg::PerfSet<'s>> {
     sets.iter()
         .filter(|s| s.hold_sec.is_none() && !is_undated(s.observed_at))
@@ -523,7 +517,6 @@ pub(super) fn perf_sets<'s>(
             reps: s.reps,
             rpe: s.rpe,
             observed_at: s.observed_at,
-            grid_step_kg: load_grid_step_kg(s.weight_kg, weight_lb),
         })
         .collect()
 }
@@ -679,9 +672,8 @@ pub(super) fn readiness_picture(
     // (top-set e1RM vs the 14-day best), not a hand-typed ratio.
     let perf = as_of
         .map(|day| {
-            let deloads = lift_deload_weeks(model, days);
-            let weight_lb = profile.is_some_and(|p| p.weight_lb);
-            let sets = perf_sets(&model.sets, day, offset, deloads, weight_lb);
+            let deloads = lift_deload_days(model, days);
+            let sets = perf_sets(&model.sets, day, offset, deloads);
             autoreg::derive_performance(&sets, day, offset)
         })
         .unwrap_or_default();

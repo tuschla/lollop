@@ -107,7 +107,8 @@ const BEST_EFFORT_TIE_SEC: f64 = 1e-9;
 
 /// The running-progress view (self-monitoring, ADH-SELFMON-001): the last
 /// [`PROGRESS_WEEKS`] Monday-start local weeks of volume (with the separate
-/// session-RPE load series, LOAD-SRPE-001), the longest run and best efforts.
+/// session-RPE load series, LOAD-SRPE-001), the longest run and best efforts,
+/// with `planned_run_km` (this plan week's prescribed run km) as the target.
 /// A run counts in the local day/week it STARTED ([`run_started_at`], the day
 /// its card's title and date name), so a Sunday 23:40 run ending after
 /// midnight is Sunday's week. Future-dated rows are excluded. `None` until a
@@ -115,6 +116,7 @@ const BEST_EFFORT_TIE_SEC: f64 = 1e-9;
 pub(in crate::app) fn build_run_progress(
     model: &Model,
     facts: &RunFacts,
+    planned_run_km: f64,
 ) -> Option<RunProgressView> {
     let offset = model.today_utc_offset_sec;
     // Chronological ([`RunFacts::chrono`]): the weekly float sums are rounded
@@ -194,10 +196,7 @@ pub(in crate::app) fn build_run_progress(
     let g = graded((), claims::ADH_SELFMON_001);
     Some(RunProgressView {
         weekly,
-        planned_weekly_km: model
-            .profile()
-            .map(|p| p.running_km_per_week.max(0.0))
-            .unwrap_or(0.0),
+        planned_weekly_km: planned_run_km,
         longest_run_km: round_tenths(longest.0),
         longest_run_observed_at: longest.1,
         best_efforts,

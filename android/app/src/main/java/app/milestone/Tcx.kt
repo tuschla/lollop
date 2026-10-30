@@ -87,25 +87,21 @@ internal fun parseTcxActivities(text: String): List<ImportedRun> {
     return activities
 }
 
-/** Longest gap (seconds) between one `<Track>`'s end and the next one's start that
- *  still counts as continuous running, the live pipeline's fix-gap threshold
- *  (RunSession's `MAX_FIX_GAP_SEC`). A 1-2 s trackpoint cadence never trips it. */
-private const val MAX_TRACK_MERGE_GAP_SEC = 30L
-
 /**
  * Fold consecutive per-`<Track>` fix lists into recording segments. Garmin/Strava
  * TCX writes one `<Track>` per `<Lap>`, autolaps on continuous running included,
  * and the core drops the entering leg of every segment from distance and moving
  * time (~−130 m / −40 s on an autolap-per-km marathon). So adjacent Tracks with a
- * gap of 0 to [MAX_TRACK_MERGE_GAP_SEC] merge; a larger gap or a backwards clock
- * step is a pause and opens a new segment. Empty tracks are skipped.
+ * gap of 0 to [MAX_FIX_GAP_SEC] (the live pipeline's segment-break gap) merge; a
+ * larger gap or a backwards clock step is a pause and opens a new segment. Empty
+ * tracks are skipped.
  */
 internal fun mergeTcxTracks(tracks: List<List<GpxFix>>): List<List<GpxFix>> {
     val segments = mutableListOf<MutableList<GpxFix>>()
     for (track in tracks) {
         if (track.isEmpty()) continue
         val prev = segments.lastOrNull()
-        if (prev != null && track.first().timeSec - prev.last().timeSec in 0..MAX_TRACK_MERGE_GAP_SEC) {
+        if (prev != null && track.first().timeSec - prev.last().timeSec in 0..MAX_FIX_GAP_SEC) {
             prev.addAll(track)
         } else {
             segments.add(track.toMutableList())

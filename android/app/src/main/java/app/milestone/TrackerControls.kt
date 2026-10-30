@@ -350,9 +350,9 @@ internal fun TrackerStatusPill(
         val pillText = when (pill) {
             TrackerPill.PermissionNeeded -> stringResource(R.string.track_pill_permission_needed)
             TrackerPill.LocationOff -> stringResource(R.string.track_pill_location_off)
-            TrackerPill.SignalLost -> stringResource(R.string.track_pill_signal_lost)
-            TrackerPill.Paused -> stringResource(R.string.track_pill_paused)
-            TrackerPill.Recording -> stringResource(R.string.track_pill_recording)
+            TrackerPill.SignalLost -> stringResource(R.string.track_notif_signal_lost)
+            TrackerPill.Paused -> stringResource(R.string.track_state_paused)
+            TrackerPill.Recording -> stringResource(R.string.track_state_recording)
             TrackerPill.ArmedMoving -> stringResource(R.string.track_pill_armed_moving)
             TrackerPill.ArmedPrecise -> stringResource(R.string.track_pill_armed_precise)
             TrackerPill.ArmedWaiting -> stringResource(R.string.track_pill_armed_waiting)
@@ -360,7 +360,7 @@ internal fun TrackerStatusPill(
                 R.string.track_pill_fresh_lock,
                 lastFix?.accuracyM?.let { Math.round(it) } ?: 0L,
             )
-            TrackerPill.Acquiring -> stringResource(R.string.track_pill_acquiring)
+            TrackerPill.Acquiring -> stringResource(R.string.track_notif_locate_title)
         }
         val figures = pill == TrackerPill.FreshLock
         Text(

@@ -16,7 +16,6 @@ import app.milestone.AppTheme
 import app.milestone.DarkMode
 import app.milestone.Event
 import app.milestone.R
-import java.util.Locale
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -41,7 +40,6 @@ class ScreenshotThemesTest(private val theme: AppTheme, private val mode: DarkMo
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

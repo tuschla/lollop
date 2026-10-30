@@ -489,7 +489,7 @@ class GuidedSetupDraftTest {
         assertFalse(cleared.medically_cleared)
         // The bone/joint question is the injury/rehab hold.
         assertTrue(HealthScreen().withParqAnswer(ParqItem.BoneOrJoint, true).injury_or_rehab)
-        // A legacy single-toggle answer stays raised until a question is answered.
+        // A legacy single-toggle answer stays raised until a follow-up question is answered.
         val legacy = HealthScreen(parq_positive = true)
         assertTrue(legacy.legacyParq)
         assertTrue(legacy.withParqAnswer(ParqItem.ChestPain, false).parq_positive)
@@ -607,8 +607,8 @@ class GuidedSetupDraftTest {
         assertEquals("0:02", raceTimeDisplay("2"))
         assertEquals("1:52:00", raceTimeDisplay("15200"))
         assertEquals(6720, raceTimeSec("15200"))
-        assertEquals("2615", raceTimeDigits(1575))
-        assertEquals("15200", raceTimeDigits(6720))
+        assertEquals("2615", secondsToHmsDigits(1575))
+        assertEquals("15200", secondsToHmsDigits(6720))
         assertNull(raceTimeSec("2675")) // 75 seconds isn't a time
         assertTrue(plausibleRaceTime(5.0, 1575))
         assertFalse(plausibleRaceTime(5.0, 25)) // "25" typed for 25:00

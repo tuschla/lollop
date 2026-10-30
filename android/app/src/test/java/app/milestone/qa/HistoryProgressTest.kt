@@ -50,7 +50,6 @@ class HistoryProgressTest {
 
     @Before
     fun setUp() {
-        java.util.Locale.setDefault(java.util.Locale.US)
         QaHarness.reset(ctx)
     }
 
@@ -184,11 +183,11 @@ class HistoryProgressTest {
         rule.onAllNodesWithText(str(R.string.history_progress_weeks, 16)).assertCountEquals(1)
         val spoken = rule.onNode(chart).fetchSemanticsNode()
             .config[SemanticsProperties.ContentDescription].joinToString(" ")
-        // 2 × 5 km = 6.2 mi, every figure in miles. (Fragments of the spoken
-        // summary, whose peak-week date argument the test can't rebuild.)
-        assertTrue(spoken, spoken.contains("6.2 mi in total"))
-        assertTrue(spoken, spoken.contains("this week 0 mi"))
-        assertFalse(spoken, spoken.contains("km"))
+        // 2 × 5 km = 6.2 miles, every figure in miles, units spelled out. (Fragments
+        // of the spoken summary, whose peak-week date argument the test can't rebuild.)
+        assertTrue(spoken, spoken.contains("6.2 miles in total"))
+        assertTrue(spoken, spoken.contains("this week 0 miles"))
+        assertFalse(spoken, spoken.contains("km") || spoken.contains("kilometer"))
     }
 
     @Test

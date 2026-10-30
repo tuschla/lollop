@@ -31,7 +31,6 @@ import app.milestone.LiftResultView
 import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.ReadinessSignal
-import app.milestone.RecentRace
 import app.milestone.SessionPlanView
 import java.io.File
 import java.time.Duration
@@ -63,7 +62,6 @@ class ScreenshotTodayTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 
@@ -72,11 +70,7 @@ class ScreenshotTodayTest {
 
     // ── Capture + wait helpers ──────────────────────────────────────────────
 
-    /** Wait (fetching semantics, which idles the main looper) for [matcher]. */
-    private fun waitFor(matcher: SemanticsMatcher, timeoutMs: Long = 10_000) =
-        rule.waitUntil(timeoutMs) { rule.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
-
-    private fun waitForText(text: String, substring: Boolean = false) = waitFor(hasText(text, substring = substring))
+    private fun waitForText(text: String, substring: Boolean = false) = rule.waitForNode(hasText(text, substring = substring))
 
     /** Scroll Today's lazy list until a node matching [matcher] is on screen. */
     private fun scrollTodayTo(matcher: SemanticsMatcher) {
@@ -142,23 +136,6 @@ class ScreenshotTodayTest {
         ageYears = 30.0,
     )
 
-    /** A 10K runner with an age, resting HR and a recent 5K, so run items carry
-     *  pace, heart-rate and effort targets. */
-    private fun runnerProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
-        goalDistance = GoalDistance.TenK,
-        concurrentGoal = ConcurrentGoal.EndurancePriority,
-        weeklySets = 0,
-        runningDaysPerWeek = 4,
-        runningKmPerWeek = 35.0,
-        advanced = true,
-        bodyweightKg = 70.0,
-        ageYears = 30.0,
-        restingHrBpm = 55.0,
-        recentRace = RecentRace(distance_km = 5.0, time_sec = 25 * 60, epoch_day = app.milestone.todayEpochDay() - 14),
-    )
-
     private val thisMorning get() = todayStartSec + 8 * 3_600L
 
     // ═════════════════════════════ TODAY ════════════════════════════════════
@@ -212,7 +189,7 @@ class ScreenshotTodayTest {
         }
         // Every sent set applied (nothing left queued), and the card is up.
         rule.waitForState { EventDispatcher.model.value!!.lifts.count { it.observed_at >= todayStartSec } == sent }
-        waitFor(hasTestTag("session-done"))
+        rule.waitForNode(hasTestTag("session-done"))
         rule.shot("today-sessiondone-top-${mode.suffix}")
         scrollTodayToEnd()
         rule.shot("today-sessiondone-bottom-${mode.suffix}")
@@ -293,7 +270,7 @@ class ScreenshotTodayTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.calisthenicsProfile()))
         rule.launchApp()
         val harder = hasContentDescription(strPrefix(R.string.plan_calis_chip_cd, str(R.string.plan_calis_harder)), substring = true)
-        waitFor(harder)
+        rule.waitForNode(harder)
         rule.shot("today-calis-top-${mode.suffix}")
         rule.onAllNodes(harder)[0].performClick()
         rule.waitForState { EventDispatcher.model.value!!.calisthenics_ladders.any { it.current_rung != null } }
@@ -313,7 +290,7 @@ class ScreenshotTodayTest {
      */
     private fun runDay(mode: DarkMode) {
         useDarkMode(mode)
-        QaHarness.seedLog(ctx, listOf(runnerProfile()))
+        QaHarness.seedLog(ctx, listOf(QaHarness.tenKRunnerProfile()))
         rule.launchApp()
         val vm = EventDispatcher.model.value!!
         val today = vm.today_epoch_day ?: app.milestone.todayEpochDay()
@@ -332,7 +309,7 @@ class ScreenshotTodayTest {
             rule.launchApp()
         }
         waitForText(str(R.string.main_todays_session).uppercase(Locale.US))
-        waitFor(hasTestTag("plan-item:run"))
+        rule.waitForNode(hasTestTag("plan-item:run"))
         rule.shot("today-run-top-${mode.suffix}")
     }
 
@@ -367,7 +344,7 @@ class ScreenshotTodayTest {
         seedStrengthWithHistory()
         rule.launchApp()
         rule.onNode(hasClickAction() and hasContentDescription(str(R.string.main_move_session), substring = true)).performClick()
-        waitFor(SemanticsMatcher("testTag starts with move-target:") {
+        rule.waitForNode(SemanticsMatcher("testTag starts with move-target:") {
             it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("move-target:") == true
         })
         rule.shot("today-move-dialog-${mode.suffix}")
@@ -386,7 +363,7 @@ class ScreenshotTodayTest {
         val target = SemanticsMatcher("testTag starts with move-target:") {
             it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("move-target:") == true
         }
-        waitFor(target)
+        rule.waitForNode(target)
         rule.onAllNodes(target)[0].performClick()
         waitForText(str(R.string.main_rest_day_next_overline).uppercase(Locale.US))
         rule.shot("today-restday-${mode.suffix}")
@@ -453,8 +430,8 @@ class ScreenshotTodayTest {
         rule.openLoopFor(SQUAT)
         rule.onNodeWithTag("editor-primary").performClick()
         waitForText(strPrefix(R.string.log_set_header_n_of_n, 2), substring = true)
-        waitFor(hasContentDescription(strPrefix(R.string.log_rest_left_cd), substring = true))
-        waitFor(hasText(str(R.string.log_undo)))
+        rule.waitForNode(hasContentDescription(strPrefix(R.string.log_rest_left_cd), substring = true))
+        rule.waitForNode(hasText(str(R.string.log_undo)))
         rule.waitForState { todaysSets(SQUAT).isNotEmpty() }
         pinRestReadout(25)
         val tag = if (fontScale != null) "fs130-" else ""
@@ -485,7 +462,7 @@ class ScreenshotTodayTest {
         // The loop's rest readout shows under the dialog: pin it to the rest's first
         // second ("Rest left 3:00"), whatever time the steps above took.
         pinRestReadout(0)
-        waitFor(hasContentDescription(str(R.string.log_rest_left_cd, "3:00")))
+        rule.waitForNode(hasContentDescription(str(R.string.log_rest_left_cd, "3:00")))
         rule.shot("log-finish-unsaved-${mode.suffix}")
     }
 
@@ -526,7 +503,7 @@ class ScreenshotTodayTest {
         rule.launchApp()
         openChooser()
         rule.onNodeWithText(str(R.string.main_morning_checkin_title)).performScrollTo().performClick()
-        waitFor(hasTestTag("checkin-sleep"))
+        rule.waitForNode(hasTestTag("checkin-sleep"))
         waitForText(str(R.string.log_illness_q))
         rule.shot("log-checkin-illness-${mode.suffix}")
     }

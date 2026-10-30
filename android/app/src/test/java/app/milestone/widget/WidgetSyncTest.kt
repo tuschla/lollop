@@ -8,6 +8,7 @@ import app.milestone.EventDispatcher
 import app.milestone.qa.QaHarness
 import app.milestone.qa.lastScenario
 import app.milestone.qa.launchMain
+import app.milestone.qa.waitForBoot
 import java.io.File
 import java.util.Locale
 import java.util.TimeZone
@@ -35,7 +36,6 @@ class WidgetSyncTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
         File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
     }
@@ -58,15 +58,14 @@ class WidgetSyncTest {
     fun aSameDayTimeZoneChangeRewritesTheStaleSnapshotFromTheModel() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         lastScenario = launchMain()
-        rule.waitUntil(30_000) { EventDispatcher.bootHandled && EventDispatcher.model.value != null }
-        rule.waitForIdle()
+        rule.waitForBoot()
         rule.waitUntil(10_000) { WidgetSnapshotStore.read(ctx)?.zone == "UTC" }
         val before = checkNotNull(WidgetSnapshotStore.read(ctx))
         val model = EventDispatcher.model.value
 
         TimeZone.setDefault(TimeZone.getTimeZone("Europe/London"))
         assertTrue(WidgetSnapshotStore.markStale(ctx, force = true, today = before.epochDay))
-        waitMain("a fresh snapshot") { WidgetSnapshotStore.read(ctx)?.stale == false }
+        QaHarness.pumpMainUntil("a fresh snapshot", 10_000) { WidgetSnapshotStore.read(ctx)?.stale == false }
 
         assertSame("no new model was published", model, EventDispatcher.model.value)
         assertEquals(before.copy(zone = "Europe/London"), WidgetSnapshotStore.read(ctx))
@@ -80,8 +79,7 @@ class WidgetSyncTest {
     fun theMidnightMarkLeavesYesterdaysSnapshotStale() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         lastScenario = launchMain()
-        rule.waitUntil(30_000) { EventDispatcher.bootHandled && EventDispatcher.model.value != null }
-        rule.waitForIdle()
+        rule.waitForBoot()
         rule.waitUntil(10_000) { WidgetSnapshotStore.read(ctx) != null }
         val before = checkNotNull(WidgetSnapshotStore.read(ctx))
         val revision = WidgetSnapshotStore.revision.value
@@ -95,15 +93,5 @@ class WidgetSyncTest {
 
         assertEquals(before.copy(stale = true), WidgetSnapshotStore.read(ctx))
         assertEquals("one write: the stale mark", revision + 1, WidgetSnapshotStore.revision.value)
-    }
-
-    /** Run the main looper (where [WidgetSync] collects) until [done]. */
-    private fun waitMain(what: String, timeoutMs: Long = 10_000, done: () -> Boolean) {
-        val until = System.currentTimeMillis() + timeoutMs
-        while (!done()) {
-            check(System.currentTimeMillis() < until) { "timed out waiting for $what: ${WidgetSnapshotStore.read(ctx)}" }
-            shadowOf(Looper.getMainLooper()).idle()
-            Thread.sleep(20)
-        }
     }
 }

@@ -281,8 +281,10 @@ class RatingScaleTest {
         assertTrue(rule.onAllNodes(hasContentDescription(", 100 kg", substring = true)).fetchSemanticsNodes().isNotEmpty())
     }
 
+    /** On a German phone the chip reads English (the app's language) in the
+     *  region's day-first order, never a German month name. */
     @Test
-    fun theDateChipUsesTheLocaleOrder() {
+    fun theDateChipUsesTheAppLanguageInTheRegionsOrder() {
         Locale.setDefault(Locale.GERMANY)
         val zone = ZoneId.systemDefault()
         val day = Instant.ofEpochMilli(AppClock.nowMillis()).atZone(zone).toLocalDate().minusDays(40)
@@ -292,7 +294,9 @@ class RatingScaleTest {
                 ObservedAtRow(epochSec, withTime = false) {}
             }
         }
-        val expected = day.format(localizedDayFormatter("MMMd", Locale.GERMANY))
+        val expected = day.format(localizedDayFormatter("MMMd", Locale.Builder().setLanguage("en").setRegion("DE").build()))
+        val german = day.format(localizedDayFormatter("MMMd", Locale.GERMANY))
+        assertTrue("\"$expected\" is not the German \"$german\"", expected != german)
         val found = rule.onAllNodes(hasText(expected), useUnmergedTree = true).fetchSemanticsNodes()
         assertTrue("date chip reads \"$expected\"", found.isNotEmpty())
     }

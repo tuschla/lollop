@@ -21,7 +21,6 @@ import app.milestone.AppTheme
 import app.milestone.EventDispatcher
 import app.milestone.R
 import java.io.File
-import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Before
@@ -49,7 +48,6 @@ class OwnerThemeJourneyTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

@@ -29,9 +29,6 @@ class ScenarioBaselineTest {
 
     @Before
     fun setUp() {
-        // Pin the locale so locale-derived UI (distance unit, number formats) is
-        // deterministic across host/CI environments.
-        java.util.Locale.setDefault(java.util.Locale.US)
         QaHarness.reset(ctx)
     }
 

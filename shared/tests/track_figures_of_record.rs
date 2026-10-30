@@ -10,8 +10,9 @@
 //!   cargo test -p shared --test track_figures_of_record
 //! ```
 //!
-//! writes `{"entry_id", "distance_m", "moving_s", "split_clock_s"}` of the
-//! newest run with a track. Without the variables it checks the figures of
+//! writes `{"entry_id", "distance_m", "moving_s", "split_clock_s",
+//! "split_clock_mi_s"}` of the newest run with a track. Without the variables
+//! it checks the figures of
 //! `fixtures/device_tracks/soak-e37-20min.events.ndjson`, a run the soak
 //! recorded on the API 37 emulator (fed route 2858.4 m, 946 s moving; screen
 //! off, backgrounded, a light, an in-app and a notification pause, Doze).
@@ -20,7 +21,7 @@ use std::path::Path;
 
 use crux_core::App;
 use serde_json::{Value, json};
-use shared::{Engine, Event};
+use shared::Engine;
 
 mod common;
 
@@ -39,11 +40,7 @@ fn split_clock_s(splits: &[Value], unit_km: f64) -> f64 {
 
 /// The newest tracked run's figures after replaying the log at `path`.
 fn figures(path: &Path) -> Value {
-    let log = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let model = common::replay(log.lines().filter(|l| !l.trim().is_empty()).map(|l| {
-        serde_json::from_str::<Event>(l)
-            .unwrap_or_else(|e| panic!("unparseable event {l:.120}: {e}"))
-    }));
+    let model = common::replay(common::events(path));
     let vm = serde_json::to_value(Engine.view(&model)).unwrap();
     let run = vm["runs"]
         .as_array()

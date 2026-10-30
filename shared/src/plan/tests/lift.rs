@@ -991,6 +991,48 @@ fn meet_date_without_taper_keeps_the_deload_week() {
     }
 }
 
+/// The meet taper shapes sessions 0–14 days out, so a Mon/Wed/Fri deload week
+/// whose Monday is 20 days before the meet has no session it reaches: it keeps
+/// its deload, and `lift_deload_week` says so.
+#[test]
+fn a_week_the_meet_taper_misses_keeps_its_deload() {
+    const MON0: i64 = 20_000 - (20_000_i64.rem_euclid(7) + 3).rem_euclid(7);
+    let mut p = base_profile();
+    p.lift_days_per_week = Some(3);
+    let mut a = anchored("Back Squat", 140.0);
+    a.lift_e1rm.push(("Bench Press".into(), 100.0));
+    a.lift_e1rm.push(("Deadlift".into(), 180.0));
+    a.week_start_epoch_day = Some(MON0);
+    let sets = |prog: &Program| -> u32 {
+        prog.mesocycle
+            .sessions
+            .iter()
+            .flat_map(|s| &s.prescriptions)
+            .map(|rx| match &rx.value {
+                Prescription::Lift(l) => u32::from(l.sets),
+                _ => 0,
+            })
+            .sum()
+    };
+    let deload_week = 5;
+    assert!(lift_block_position(&p, deload_week).recovery);
+    let plain = sets(&synthesize(&p, &a, deload_week).unwrap());
+    assert!(plain < sets(&synthesize(&p, &a, deload_week - 1).unwrap()));
+    for (meet_after_monday, deload) in [(20, true), (14, false)] {
+        p.meet_epoch_day = Some(MON0 + meet_after_monday);
+        let prog = synthesize(&p, &a, deload_week).unwrap();
+        assert_eq!(
+            prog.mesocycle.phase == MesoPhase::Deload,
+            deload,
+            "meet {meet_after_monday} days after the deload week's Monday"
+        );
+        assert_eq!(lift_deload_week(&p, deload_week, MON0), deload);
+        if deload {
+            assert_eq!(sets(&prog), plain);
+        }
+    }
+}
+
 #[test]
 fn load_weeks_ramp_unanchored_hypertrophy_rir() {
     // Unanchored lifts are RIR-prescribed. A hypertrophy block walks RIR from

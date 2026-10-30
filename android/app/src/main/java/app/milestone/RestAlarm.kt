@@ -228,13 +228,16 @@ internal object RestAlarm {
         val leftMs = end - AppClock.nowMillis()
         if (leftMs <= 0 || dismissed || !canPostNotifications(app)) return
         ensureChannels(app)
-        val res = app.withLatinDigits().resources
+        // Every argument is a name or a detail the set loop already formatted, so the
+        // app's own resources do (no digits are formatted here).
+        val res = app.resources
         val text = countdownText(res, run.exercise, nextSet)
         val b = NotificationCompat.Builder(app, CHANNEL_COUNTDOWN)
             .setSmallIcon(R.drawable.ic_stat_mark)
             .setContentTitle(res.getString(R.string.log_rest_notif_title, run.exercise))
             // A live countdown chronometer to the rest end (system wall time);
-            // a promoted Live Update shows it in the status-bar chip.
+            // a promoted Live Update shows it in the status-bar chip. System UI
+            // draws it in the system's digits; the app cannot pick them.
             .setUsesChronometer(true)
             .setChronometerCountDown(true)
             .setWhen(System.currentTimeMillis() + leftMs)

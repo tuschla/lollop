@@ -11,7 +11,7 @@ use std::fs;
 use std::path::Path;
 
 use crux_core::App;
-use shared::{Engine, Event};
+use shared::Engine;
 
 mod common;
 
@@ -31,11 +31,7 @@ fn view_json_matches_snapshot() {
     let mut wanted = BTreeSet::new();
     for case in &cases {
         let events_name = format!("{case}.events.ndjson");
-        let events = fs::read_to_string(dir.join(&events_name)).unwrap();
-        let model = common::replay(events.lines().filter(|l| !l.trim().is_empty()).map(|line| {
-            serde_json::from_str::<Event>(line)
-                .unwrap_or_else(|e| panic!("unparseable fixture line {line:?}: {e}"))
-        }));
+        let model = common::replay(common::events(&dir.join(&events_name)));
         let mut json = serde_json::to_string_pretty(&Engine.view(&model)).unwrap();
         json.push('\n');
         let name = format!("{case}.view.json");

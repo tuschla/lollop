@@ -130,17 +130,18 @@ fn percent_arm(
         crate::plan::DerateCause::E1rmDrop => claims::AUTOREG_E1RM_GATE_001,
     });
     let reps_txt = range_text(l.reps, l.reps_max.unwrap_or(l.reps));
-    // The effort the percentage implies on the Epley model (85 %×3 → ~2 in
-    // reserve), 1–4 RIR: the "how hard" target on the face and the editor's
-    // RPE hint. A set that feels much harder than this means today sits below
-    // the estimate (true 1RM varies day to day). An e1RM-drop cut also caps
-    // the session at the planned RPE − 1 (autoreg-006, "cap session at planned
-    // RPE − 1 and reduce top-set load ~5%", extracted/06-autoregulation.md:134),
-    // still within 1–4: the lighter load at the planned effort would itself
-    // read as another drop.
+    // The effort target: the Epley reps in reserve at the load given, as a
+    // share of the (derated) estimate, so a load the plate grid floored is
+    // asked at the effort it really takes and a set done as asked reads the
+    // estimate back. An e1RM-drop cut adds one rep in reserve (autoreg-006,
+    // extracted/06-autoregulation.md:134), capped at 4.
+    let given_pct = match (load, e1) {
+        (Some(kg), Some(e)) if kg > 0.0 && e > 0.0 => 100.0 * kg / (e * frac),
+        _ => p as f64,
+    };
     let drop_cut = derate.is_some_and(|d| d.cause == crate::plan::DerateCause::E1rmDrop);
     let effort_rir =
-        (crate::strength::effort_target_rir(p as f64, l.reps as u32) + u8::from(drop_cut)).min(4);
+        (crate::strength::effort_target_rir(given_pct, l.reps as u32) + u8::from(drop_cut)).min(4);
     if matches!(load, Some(kg) if kg <= 0.0) {
         // The anchor exists but shrinks below the plate grid (a tiny dumbbell
         // best, or a real anchor cut hard by a derate), so the rounded working
@@ -257,7 +258,10 @@ fn rir_arm(
         },
     };
     LiftArm {
-        repoint: anchors.reentry_novice.then_some(claims::REENTRY_001),
+        repoint: anchors
+            .reentry_novice
+            .then_some(claims::REENTRY_001)
+            .or(arm.repoint),
         ..arm
     }
 }
@@ -276,9 +280,8 @@ fn rep_range_arm(
     let (bottom, _) =
         crate::hypertrophy::rep_range_for(crate::hypertrophy::classify(&l.exercise)).value;
     let bottom = bottom.min(l.reps);
-    let frac = anchors
-        .carried_derate_for(&l.exercise)
-        .map_or(1.0, |d| d.frac);
+    let derate = anchors.carried_derate_for(&l.exercise);
+    let frac = derate.map_or(1.0, |d| d.frac);
     let last = anchors.last_working_for(&l.exercise);
     let last_kg = last.map(|w| w.weight_kg).filter(|w| *w > 0.0);
     // A load the athlete actually lifted is carried exactly as logged (a 6 kg
@@ -305,6 +308,11 @@ fn rep_range_arm(
         }
     });
     let last_shown = last.filter(|w| w.weight_kg > 0.0 && load.is_some());
+    // An e1RM-drop cut also leaves one more rep in reserve, as on the %1RM
+    // arm (autoreg-006).
+    let drop_cut =
+        load.is_some() && derate.is_some_and(|d| d.cause == crate::plan::DerateCause::E1rmDrop);
+    let effort_rir = if drop_cut { (n + 1).min(4).max(n) } else { n };
     let anchored_on = last_shown
         .map(|w| {
             let reps: Vec<String> = w.sets.iter().map(|(r, _)| r.to_string()).collect();
@@ -322,7 +330,7 @@ fn rep_range_arm(
     let reps_txt = range_text(l.reps, top);
     let step = crate::hypertrophy::SMALLEST_LOAD_STEP_KG;
     let deload = rx.claim_id() == claims::HYP_DELOAD_RX_001;
-    let effort = with_reps_left(i64::from(n));
+    let effort = with_reps_left(i64::from(effort_rir));
     let basis = match (load, last) {
         _ if deload => format!(
             "Lighter week: {}×{reps_txt}{} with at least {} left, about half your usual sets at a lighter weight.",
@@ -343,6 +351,13 @@ fn rep_range_arm(
             l.sets,
             fmt_weight(kg, weight_lb),
             l.reps
+        ),
+        (Some(kg), _) if drop_cut => format!(
+            "{}×{reps_txt} at {} {effort}, scaled to {:.0}% {}. {rule}",
+            l.sets,
+            fmt_weight(kg, weight_lb),
+            frac * 100.0,
+            derate_reason(crate::plan::DerateCause::E1rmDrop)
         ),
         (Some(kg), _) => format!(
             "{}×{reps_txt} at {} {effort}: worked out for this rep range from your last session of this lift. {rule}",
@@ -365,7 +380,8 @@ fn rep_range_arm(
             "Log every working set with how hard it felt so the next weight step comes at the right time."
                 .to_string(),
         ),
-        target_rpe: Some(crate::strength::rir_to_rpe(n as f64)),
+        target_rpe: Some(crate::strength::rir_to_rpe(effort_rir as f64)),
+        repoint: drop_cut.then_some(claims::AUTOREG_E1RM_GATE_001),
         ..LiftArm::default()
     }
 }

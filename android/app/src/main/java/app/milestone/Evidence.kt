@@ -27,7 +27,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -48,10 +47,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 
@@ -130,7 +127,7 @@ private fun DisclosureDisc(filled: Boolean = false, tint: Color = Accent, onTint
         Text(
             "?",
             color = if (filled) onTint else tint,
-            style = Type.Chip.copy(fontWeight = FontWeight.Bold),
+            style = Type.Chip,
         )
     }
 }
@@ -587,16 +584,10 @@ internal fun ClaimMarkers(grades: List<String>, contested: Boolean, citations: L
 internal fun EvidenceLegendSheet(definitions: List<GradeDefView>) {
     val status = LocalStatusColors.current
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            // Edge-to-edge sheet: the last row must clear the system nav bar.
-            .navigationBarsPadding()
-            .padding(horizontal = Space.ReadingSheet.dp)
-            .padding(bottom = Space.Lg.dp),
+        modifier = Modifier.sheetBody(rememberScrollState(), Space.ReadingSheet.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
     ) {
-        Text(stringResource(R.string.main_evidence_legend_title), color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
+        SheetTitle(stringResource(R.string.main_evidence_legend_title))
         Text(
             stringResource(R.string.main_evidence_legend_body),
             color = OnBgMuted,
@@ -769,7 +760,7 @@ internal fun GlossarySheet(initialKey: String) {
             .padding(horizontal = Space.ReadingSheet.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
     ) {
-        Text(stringResource(R.string.main_glossary_title), color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
+        SheetTitle(stringResource(R.string.main_glossary_title))
         SearchWell(
             query,
             { query = it },

@@ -277,12 +277,8 @@ private val rippleHostClass by lazy { Class.forName("androidx.compose.material.r
  * shows in the capture. For the capture only, rank every window by the order it
  * was added (= its on-device z-order), then restore the real types.
  */
-@Suppress("UNCHECKED_CAST")
 private fun <T> withWindowsInAddOrder(block: () -> T): T {
-    val globalClass = Class.forName("android.view.WindowManagerGlobal")
-    val global = globalClass.getMethod("getInstance").invoke(null)
-    val field = globalClass.getDeclaredField("mParams").apply { isAccessible = true }
-    val params = (field.get(global) as List<WindowManager.LayoutParams>).toList()
+    val params = windowParams()
     val saved = params.map { it.type }
     params.forEachIndexed { i, p -> p.type = WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW + i }
     try {
@@ -292,14 +288,21 @@ private fun <T> withWindowsInAddOrder(block: () -> T): T {
     }
 }
 
+private fun windowManagerGlobal(): Any = Class.forName("android.view.WindowManagerGlobal").getMethod("getInstance").invoke(null)!!
+
+/** Every window's root view, in the order the windows were added. */
 @Suppress("UNCHECKED_CAST")
-private fun windowViews(): List<View> {
-    val globalClass = Class.forName("android.view.WindowManagerGlobal")
-    val global = globalClass.getMethod("getInstance").invoke(null)
-    return (globalClass.getMethod("getWindowViews").invoke(global) as List<View>).toList()
+internal fun windowViews(): List<View> = windowManagerGlobal().let { g ->
+    (g.javaClass.getMethod("getWindowViews").invoke(g) as List<View>).toList()
 }
 
-private fun View.descendants(): Sequence<View> = sequence {
+/** The layout params of [windowViews], index for index (the params themselves are live). */
+@Suppress("UNCHECKED_CAST")
+internal fun windowParams(): List<WindowManager.LayoutParams> = windowManagerGlobal().let { g ->
+    (g.javaClass.getDeclaredField("mParams").apply { isAccessible = true }.get(g) as List<WindowManager.LayoutParams>).toList()
+}
+
+internal fun View.descendants(): Sequence<View> = sequence {
     yield(this@descendants)
     if (this@descendants is ViewGroup) {
         for (i in 0 until childCount) yieldAll(getChildAt(i).descendants())

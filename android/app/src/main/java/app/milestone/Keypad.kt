@@ -150,7 +150,7 @@ fun KeypadValueField(
                 // Spoken as the action with its unit ("Add 2.5 kg"), not a bare "+2.5".
                 val adjDesc = stringResource(
                     if (adj < 0) R.string.ui_cd_adjust_sub else R.string.ui_cd_adjust_add,
-                    stepText(adj),
+                    fmtLosslessPrefill(Math.abs(adj)),
                     unit,
                 )
                 // The clickable node itself spans ≥48×48dp (not a smaller chip with
@@ -280,13 +280,7 @@ fun NumericKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit, allowDecimal: 
         }
         if (onDone != null) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = ActionMinHeight)
-                    .clip(KeypadKeyShape)
-                    .background(BgElevated)
-                    .clickable(role = Role.Button, onClick = onDone)
-                    .padding(vertical = Space.Md.dp),
+                modifier = Modifier.fillMaxWidth().keypadKey(onDone),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -338,12 +332,7 @@ fun KeypadPanel(
 @Composable
 private fun KeypadKey(key: Char, onKey: (Char) -> Unit, onBackspace: () -> Unit, modifier: Modifier) {
     Box(
-        modifier = modifier
-            .heightIn(min = ActionMinHeight)
-            .clip(KeypadKeyShape)
-            .background(BgElevated)
-            .clickable(role = Role.Button) { if (key == '⌫') onBackspace() else onKey(key) }
-            .padding(vertical = Space.Md.dp),
+        modifier = modifier.keypadKey { if (key == '⌫') onBackspace() else onKey(key) },
         contentAlignment = Alignment.Center,
     ) {
         if (key == '⌫') {
@@ -369,6 +358,16 @@ private fun KeypadKey(key: Char, onKey: (Char) -> Unit, onBackspace: () -> Unit,
     }
 }
 
+/** A raised keypad key's chrome: ≥48dp tall, rounded, on the elevated ground
+ *  (a theme colour, so it reads the composition). */
+@Composable
+private fun Modifier.keypadKey(onClick: () -> Unit): Modifier = this
+    .heightIn(min = ActionMinHeight)
+    .clip(KeypadKeyShape)
+    .background(BgElevated)
+    .clickable(role = Role.Button, onClick = onClick)
+    .padding(vertical = Space.Md.dp)
+
 /**
  * Apply one keypad key to a numeric text buffer. `replaceAll` implements
  * calculator-style entry: the first key after (re)activating a field starts a
@@ -387,10 +386,6 @@ fun editNumericBuffer(text: String, key: Char, replaceAll: Boolean): String {
     return base + key
 }
 
-/** `+2.5` / `−5` / `+0.01` label for a relative-adjust chip. */
-private fun adjLabel(a: Double): String = (if (a < 0) "−" else "+") + stepText(a)
-
-/** A step's magnitude at its own precision ("0.01", "2.5", "5"): [trimDecimal]'s
- *  one-decimal rounding would print a 0.01 m/s step as "0". */
-private fun stepText(a: Double): String =
-    java.math.BigDecimal.valueOf(Math.abs(a)).stripTrailingZeros().toPlainString()
+/** `+2.5` / `−5` / `+0.01` label for a relative-adjust chip, at the step's own
+ *  precision ([trimDecimal] would print a 0.01 m/s step as "0"). */
+private fun adjLabel(a: Double): String = (if (a < 0) "−" else "+") + fmtLosslessPrefill(Math.abs(a))

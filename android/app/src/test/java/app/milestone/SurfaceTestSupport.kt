@@ -34,9 +34,11 @@ internal fun seededWalk(label: String, repro: String, keep: Int = 25, body: (not
 }
 
 /** Tap the Quick Settings tile on API 34+ with a stand-in for System UI's QS
- *  binder; returns the PendingIntent the tile handed to startActivityAndCollapse. */
-internal fun clickTile(): PendingIntent {
+ *  binder, after [prepare] sets up the service; returns the PendingIntent the tile
+ *  handed to startActivityAndCollapse. */
+internal fun clickTile(prepare: (QuickTileService) -> Unit = {}): PendingIntent {
     val service = Robolectric.buildService(QuickTileService::class.java).create().get()
+    prepare(service)
     val iface = Class.forName("android.service.quicksettings.IQSService")
     var started: PendingIntent? = null
     val qs = Proxy.newProxyInstance(iface.classLoader, arrayOf(iface)) { _, method, args ->
@@ -68,3 +70,10 @@ internal fun restEndBroadcast(ctx: Context): Intent =
 
 /** The system delivers the rest-end alarm to [RestEndReceiver]. */
 internal fun fireRestEnd(ctx: Context) = RestEndReceiver().onReceive(ctx, restEndBroadcast(ctx))
+
+/** No rest running, posted or scheduled, and the rest-done alert on. */
+internal fun resetRest(ctx: Context) {
+    RestAlarm.cancel(ctx)
+    RestAlarm.resetProcessState()
+    AppSettings.restAlert.value = true
+}

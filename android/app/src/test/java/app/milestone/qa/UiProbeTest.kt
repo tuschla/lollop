@@ -6,9 +6,12 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppSettings
 import app.milestone.AppTheme
@@ -23,18 +26,19 @@ import app.milestone.HealthScreen
 import app.milestone.LiftGoal
 import app.milestone.ProgressionCadence
 import app.milestone.R
+import app.milestone.ReadinessSignal
 import app.milestone.ViewModel
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.robolectric.RuntimeEnvironment
-import java.util.Locale
 
 /**
- * The app over the REAL core with screen probes shared by [RandomUiWalkTest] and
- * [LayoutRegressionTest]: settling the UI onto the core's model, cut-off and
- * overlapping text, the hold banner's chrome overlaps, and screen dumps. Each test
- * restores the qualifiers, the font scale and the app settings it changed.
+ * The app over the REAL core with the screen probes its UI test classes share:
+ * seeded start states, settling the UI onto the core's model, node lookup, the
+ * crash guard, a relaunch after Back left the app, cut-off and overlapping text,
+ * small touch targets, the hold banner's chrome overlaps, and screen dumps. Each
+ * test restores the qualifiers, the font scale and the app settings it changed.
  */
 abstract class UiProbeTest {
 
@@ -46,7 +50,6 @@ abstract class UiProbeTest {
 
     @Before
     fun setUpProbe() {
-        Locale.setDefault(Locale.US)
         originalQualifiers = RuntimeEnvironment.getQualifiers()
         QaHarness.reset(ctx)
         resetSettings()
@@ -57,6 +60,16 @@ abstract class UiProbeTest {
         QaHarness.teardown()
         RuntimeEnvironment.setQualifiers(originalQualifiers)
         RuntimeEnvironment.setFontScale(1f)
+        resetSettings()
+    }
+
+    /** A fresh process within one test: the activity closed, the log reset, the
+     *  qualifiers, font scale and settings restored. */
+    protected fun freshProcess() {
+        QaHarness.teardown()
+        RuntimeEnvironment.setQualifiers(originalQualifiers)
+        RuntimeEnvironment.setFontScale(1f)
+        QaHarness.reset(ctx)
         resetSettings()
     }
 
@@ -77,9 +90,42 @@ abstract class UiProbeTest {
             .get(app.milestone.AppliedCueLoads) as MutableMap<*, *>).clear()
     }
 
+    /** Thrown by [fail]; [guard] passes it on. */
+    protected class ProbeFailure(msg: String) : AssertionError(msg)
+
     /** Fail with [msg] and what is on screen. */
     protected open fun fail(msg: String): Nothing =
-        throw AssertionError("$msg\nscreen:\n" + runCatching { screenDump() }.getOrElse { "<unavailable: $it>" })
+        throw ProbeFailure("$msg\nscreen:\n" + runCatching { screenDump() }.getOrElse { "<unavailable: $it>" })
+
+    /** Run [block]; false when the test framework threw (node gone, touch outside the
+     *  window), which only skips the action. An exception from app code anywhere in
+     *  the cause chain is a crash and fails the test. */
+    protected fun guard(what: String, block: () -> Unit): Boolean = try {
+        block()
+        true
+    } catch (e: Throwable) {
+        if (e is ProbeFailure) throw e
+        val crash = generateSequence(e) { it.cause }.any { t ->
+            t.stackTrace.any { f -> f.className.startsWith("app.milestone.") && !f.className.startsWith("app.milestone.qa.") }
+        }
+        if (crash) fail("crash during $what: $e\n${e.stackTraceToString().lines().take(30).joinToString("\n")}")
+        onSkipped(what, e)
+        false
+    }
+
+    /** A [guard]ed action the test framework refused. */
+    protected open fun onSkipped(what: String, e: Throwable) {}
+
+    /** Back on the root screen left the app: open it again (warm start). True when it did. */
+    protected fun relaunchIfLeft(): Boolean {
+        val sc = lastScenario ?: return false
+        var finishing = false
+        runCatching { sc.onActivity { finishing = it.isFinishing } }
+        if (sc.state != Lifecycle.State.DESTROYED && !finishing) return false
+        runCatching { sc.close() }
+        guard("relaunch") { lastScenario = launchMain() }
+        return true
+    }
 
     // ── Seeds ───────────────────────────────────────────────────────────────
 
@@ -122,6 +168,25 @@ abstract class UiProbeTest {
     protected fun runs(vararg daysAgo: Int): List<Event> = daysAgo.mapIndexed { i, d ->
         val at = QaHarness.daysAgoAtMidday(d) + 3_600L
         Event.LogRun(5.0 + i, 28.0 + 5 * i, 0.0, at, at * 1000)
+    }
+
+    // ── Starting states ─────────────────────────────────────────────────────
+
+    enum class Start { FreshInstall, Runner, Lifter, Hybrid, Calisthenics, Under18, PainHold, Illness, Pregnancy, LongHistory, MilesLb }
+
+    /** The log [start] boots from; null for a fresh install. */
+    protected fun seedEvents(start: Start): List<Event>? = when (start) {
+        Start.FreshInstall -> null
+        Start.Runner -> listOf(QaHarness.tenKRunnerProfile()) + runs(1, 3, 6, 9, 40)
+        Start.Lifter -> listOf(QaHarness.strengthProfile()) + liftDays(1, 3, 5, 8, 35)
+        Start.Hybrid -> listOf(profile(runDays = 3, runKm = 20.0, goal = GoalDistance.FiveK)) + liftDays(2, 4) + runs(1, 3, 5)
+        Start.Calisthenics -> listOf(QaHarness.calisthenicsProfile(), QaHarness.loggedHold(QaHarness.daysAgoAtMidday(1)), QaHarness.loggedHold(QaHarness.daysAgoAtMidday(3)))
+        Start.Under18 -> listOf(profile(age = 15.0))
+        Start.PainHold -> listOf(QaHarness.strengthProfile()) + liftDays(2) + Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, morning)
+        Start.Illness -> listOf(profile(runDays = 3, runKm = 20.0, goal = GoalDistance.FiveK)) + runs(2) + Event.SubmitReadiness(ReadinessSignal.Illness, 2.0, morning)
+        Start.Pregnancy -> listOf(profile(age = 33.0, health = HealthScreen(pregnant = true)))
+        Start.LongHistory -> LongHistorySeed.build(days = 150, fixEverySec = 60L).events
+        Start.MilesLb -> listOf(QaHarness.strengthProfileLb()) + liftDays(1, 4) + runs(2, 6)
     }
 
     // ── Settling ────────────────────────────────────────────────────────────
@@ -204,6 +269,18 @@ abstract class UiProbeTest {
     private fun keypadNodes(): List<SemanticsNode> = roots().lastOrNull()?.let { top ->
         allUnmerged(top).filter { it.config.getOrNull(SemanticsProperties.TestTag) == "numeric-keypad" }
     }.orEmpty()
+
+    /** [n] itself: ids are per window, so match the id, the bounds and the window root too. */
+    protected fun node(n: SemanticsNode): SemanticsNodeInteraction {
+        fun SemanticsNode.top(): SemanticsNode = generateSequence(this) { it.parent }.last()
+        val root = n.top()
+        val all = rule.onAllNodes(
+            SemanticsMatcher("node #${n.id}") {
+                it.id == n.id && it.boundsInRoot == n.boundsInRoot && it.top().let { t -> t.id == root.id && t.size == root.size }
+            },
+        )
+        return all[(all.fetchSemanticsNodes().size - 1).coerceAtLeast(0)]
+    }
 
     /** What a user perceives: the windows, the selected tab, and the top window's texts. */
     protected fun fingerprint(): String {
@@ -310,6 +387,20 @@ abstract class UiProbeTest {
             }
         }
         return out.distinct()
+    }
+
+    /** Fully visible actions whose touch target (own size or touch expansion) is
+     *  under 48dp; a partly scrolled-out action is judged once fully in view. */
+    protected fun smallTargets(): List<String> {
+        val d = rule.density.density
+        return roots().flatMap { flatten(it) }.filter { n ->
+            n.config.getOrNull(SemanticsActions.OnClick) != null && n.isVisible() &&
+                n.boundsInRoot.width + 1f >= n.size.width && n.boundsInRoot.height + 1f >= n.size.height
+        }.mapNotNull { n ->
+            val w = maxOf(n.size.width.toFloat(), n.touchBoundsInRoot.width) / d
+            val h = maxOf(n.size.height.toFloat(), n.touchBoundsInRoot.height) / d
+            if (w + 0.5f < 48f || h + 0.5f < 48f) "\"${labelOf(n)}\" is ${w.toInt()}x${h.toInt()}dp (<48dp)" else null
+        }
     }
 
     private val TextLayoutResult.cutsOffText: Boolean

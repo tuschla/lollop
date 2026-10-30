@@ -15,14 +15,12 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,7 +42,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -274,20 +271,15 @@ internal fun CoachToolSheet(
     }
     Column(
         modifier = Modifier
-            .fillMaxWidth()
             // A tap on the bare sheet (not on a control) folds the keypad.
             .pointerInput(keypadOpen) {
                 if (keypadOpen) detectTapGestures { keypadOpen = false }
             }
             // The form + result can exceed the sheet's max height.
-            .verticalScroll(scroll)
-            // The last action clears the system navigation bar.
-            .navigationBarsPadding()
-            .padding(horizontal = Space.ReadingSheet.dp)
-            .padding(bottom = Space.Lg.dp),
+            .sheetBody(scroll, Space.ReadingSheet.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
     ) {
-        Text(title, color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
+        SheetTitle(title)
         // The tool's FORM, seeded from the core's echoed query so it rehydrates
         // after a cold start. Profile owns bodyweight and age; the forms prefill
         // from it and keep an override local (never written back to the profile).
@@ -377,15 +369,10 @@ internal fun ReferenceLibrarySheet(model: ViewModel) {
     val otherGuidance = referenceGuidance(model)
     val loadCount = trainingLoadCount(model)
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
-            .padding(horizontal = Space.ReadingSheet.dp)
-            .padding(bottom = Space.Lg.dp),
+        modifier = Modifier.sheetBody(rememberScrollState(), Space.ReadingSheet.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
     ) {
-        Text(stringResource(R.string.main_evidence_references_title), color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
+        SheetTitle(stringResource(R.string.main_evidence_references_title))
         Text(
             stringResource(R.string.main_evidence_references_body),
             color = OnBgMuted,
@@ -751,15 +738,19 @@ internal enum class HypertrophyMuscle(val wire: String, @StringRes val labelRes:
     Biceps("biceps", R.string.log_muscle_biceps),
     Triceps("triceps", R.string.log_muscle_triceps),
     Calves("calves", R.string.log_muscle_calves),
-    Abs("abs", R.string.log_muscle_abs),
+    Abs("abs", R.string.log_muscle_abs);
+
+    companion object {
+        /** The muscle for a wire name, matched case-insensitively as the core does; null if none. */
+        fun of(wire: String?): HypertrophyMuscle? = entries.firstOrNull { it.wire.equals(wire, ignoreCase = true) }
+    }
 }
 
 /** Display label for a planner wire muscle ("side delts" → "Side delts"); an
  *  unknown name (the core then explains it isn't one) shows as sent. */
 @Composable
 internal fun hypertrophyMuscleLabel(wire: String): String =
-    HypertrophyMuscle.entries.firstOrNull { it.wire.equals(wire, ignoreCase = true) }
-        ?.let { stringResource(it.labelRes) } ?: wire
+    HypertrophyMuscle.of(wire)?.let { stringResource(it.labelRes) } ?: wire
 
 /** The accumulation-block lengths the planner offers, weeks, and its opening pick. */
 private val AccumulationWeeks = 2..8
@@ -778,8 +769,7 @@ fun HypertrophyPlannerForm(initial: HypertrophyInputView?, onPlan: (Event.PlanHy
     // Rehydrate from the core's echoed query on a cold start; else defaults.
     var muscle by rememberSaveable {
         mutableStateOf(
-            initial?.let { i -> HypertrophyMuscle.entries.firstOrNull { it.wire == i.muscle } }
-                ?: HypertrophyMuscle.Chest,
+            initial?.let { HypertrophyMuscle.of(it.muscle) } ?: HypertrophyMuscle.Chest,
         )
     }
     var weeks by rememberSaveable {
@@ -939,8 +929,8 @@ fun ProteinForm(
  * [Event.ComputeHrZones]; the core answers with an evidence-graded HRmax estimate
  * (Tanaka) plus the five Daniels %HRmax training bands as absolute bpm ranges,
  * rendered from `model.hr_zones`. All numbers come from the core (load.rs /
- * running.rs, RUN-VDOT-001), this form only picks the age. The keypad shows only
- * while [keypadOpen] (the age well was tapped).
+ * running.rs, RUN-VDOT-001), this form only picks the inputs (age, optional
+ * resting HR). The keypad shows only while [keypadOpen] (the age well was tapped).
  */
 @Composable
 fun HrZonesForm(

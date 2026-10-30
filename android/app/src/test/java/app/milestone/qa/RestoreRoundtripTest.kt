@@ -62,7 +62,6 @@ import app.milestone.segmentKm
 import app.milestone.todayEpochDay
 import app.milestone.utcOffsetSec
 import java.io.File
-import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -74,7 +73,6 @@ import kotlinx.serialization.json.long
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -107,13 +105,7 @@ internal object ProcessDeath {
         restored = null
         // The sidecar's queued appends belong to the dying process's last instants.
         ActiveRunStore.flush()
-        Core.resetForTest()
-        for ((field, value) in listOf(
-            "restored" to false, "log" to null, "lastGoodView" to null, "appendTornGuard" to false,
-            "lastSetToday" to null, "viewStale" to false, "logDegraded" to false,
-        )) {
-            Core.javaClass.getDeclaredField(field).apply { isAccessible = true }.set(Core, value)
-        }
+        QaHarness.resetCore()
         EventDispatcher.resetForTest()
         RunSession.reset()
         UiMessages.clear()
@@ -186,10 +178,8 @@ class RestoreRoundtripTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
-        clearSidecar()
-        RunSession.reset()
+        QaHarness.clearSidecar(ctx)
         shadowOf(ctx as Application).grantPermissions(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -204,17 +194,11 @@ class RestoreRoundtripTest {
         QaHarness.teardown()
         ProcessDeath.teardown()
         RunSession.reset()
-        clearSidecar()
+        QaHarness.clearSidecar(ctx)
         AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
         AppSettings.showRouteMaps.value = true
         AppSettings.theme.value = AppTheme.Paper
         AppSettings.darkMode.value = DarkMode.System
-    }
-
-    private fun clearSidecar() {
-        ActiveRunStore.init(ctx)
-        ActiveRunStore.clearSync()
-        File(ctx.filesDir, "active-run.ndjson").delete()
     }
 
     // ── Shared drivers ──────────────────────────────────────────────────────────
@@ -224,14 +208,6 @@ class RestoreRoundtripTest {
         rule.waitUntil(15_000) { rule.onAllNodes(isRoot()).fetchSemanticsNodes().isNotEmpty() }
         rule.waitForIdle()
     }
-
-    private fun waitForText(text: String, substring: Boolean = false, timeoutMs: Long = 15_000) =
-        rule.waitUntil(timeoutMs) { rule.onAllNodes(hasText(text, substring = substring)).fetchSemanticsNodes().isNotEmpty() }
-
-    private fun waitForTag(tag: String, timeoutMs: Long = 15_000) =
-        rule.waitUntil(timeoutMs) { rule.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
-
-    private fun count(m: SemanticsMatcher) = rule.onAllNodes(m).fetchSemanticsNodes().size
 
     private fun logCount(variant: String) = journeyLog().count { it.variant == variant }
 
@@ -286,14 +262,14 @@ class RestoreRoundtripTest {
         ProcessDeath.kill(ctx)
         ProcessDeath.relaunchWithState(rule, state)
         rule.waitForState { todaysSets("Back Squat").size == 1 }
-        assertEquals(0, count(hasText(str(R.string.log_set_header_n_of_n, 1, 4))))
+        assertEquals(0, rule.countOf(hasText(str(R.string.log_set_header_n_of_n, 1, 4))))
         assertEquals(listOf(122.5), todaysSets("Back Squat").map { it.weight_kg })
 
         // A cold start (no saved state): Today, the set replayed once, no editor.
         ProcessDeath.kill(ctx)
         rule.launchApp()
         assertEquals(listOf(122.5), todaysSets("Back Squat").map { it.weight_kg })
-        assertEquals(0, count(hasText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)))
+        assertEquals(0, rule.countOf(hasText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)))
         assertEquals(2, logCount("LogSet"))
     }
 
@@ -302,7 +278,7 @@ class RestoreRoundtripTest {
     private fun openMorningCheckin() {
         rule.onNodeWithContentDescription(str(R.string.main_log)).performClick()
         rule.onNodeWithText(str(R.string.main_morning_checkin_title)).performScrollTo().performClick()
-        waitForTag("checkin-sleep")
+        rule.waitForNode(hasTestTag("checkin-sleep"))
     }
 
     @Test
@@ -314,10 +290,9 @@ class RestoreRoundtripTest {
         rule.pickRating("checkin-soreness", 4)
         val sleep = ratingState("checkin-sleep")
         val soreness = ratingState("checkin-soreness")
-        assertNotNull(sleep)
 
         recreate()
-        waitForTag("checkin-sleep")
+        rule.waitForNode(hasTestTag("checkin-sleep"))
         assertEquals("sleep answer kept", sleep, ratingState("checkin-sleep"))
         assertEquals("soreness answer kept", soreness, ratingState("checkin-soreness"))
         assertEquals("nothing submitted by a rotation", 0, logCount("SubmitCheckin"))
@@ -343,12 +318,12 @@ class RestoreRoundtripTest {
 
     private fun launchOnTracker() {
         lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
-        waitForText(str(R.string.track_btn_stop), timeoutMs = 30_000)
+        rule.waitForNode(hasText(str(R.string.track_btn_stop)), 30_000)
     }
 
     private fun stopToFinishReview() {
         rule.onNodeWithText(str(R.string.track_btn_stop)).performClick()
-        waitForText(str(R.string.track_finish_title))
+        rule.waitForNode(hasText(str(R.string.track_finish_title)))
     }
 
     /** Save the run as the tracker's Save does, standing in for the service's stop
@@ -375,7 +350,7 @@ class RestoreRoundtripTest {
         val effort = ratingState("effort-scale")
 
         recreate()
-        waitForText(str(R.string.track_finish_title))
+        rule.waitForNode(hasText(str(R.string.track_finish_title)))
         assertEquals("the effort answer is kept", effort, ratingState("effort-scale"))
         rule.onNodeWithText("Interval").performScrollTo().assertIsSelected()
         assertEquals("the captured track is untouched", 21, RunSession.points.value.size)
@@ -388,13 +363,13 @@ class RestoreRoundtripTest {
         val saved = journeyLog().single { it.variant == "LogRunTrack" }.payload
         assertEquals(7, saved["session_rpe"]!!.jsonPrimitive.int)
         assertEquals("Interval", saved["workout_type"]!!.jsonPrimitive.content)
-        assertEquals(0, count(hasText(str(R.string.track_finish_title))))
+        assertEquals(0, rule.countOf(hasText(str(R.string.track_finish_title))))
 
         ProcessDeath.kill(ctx)
         rule.launchApp()
         assertEquals(1, model.runs.size)
         assertEquals(7, model.runs.single().session_rpe)
-        assertEquals("no recovery offered for a saved run", 0, count(hasText(str(R.string.main_resume_run_title))))
+        assertEquals("no recovery offered for a saved run", 0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
     }
 
     // ═══ 4 + 6. An open run detail sheet, its rate sheet and the trim sheet ═════
@@ -402,28 +377,14 @@ class RestoreRoundtripTest {
     /** This morning's 10K, finished at 07:00. */
     private fun gpsTenK() = QaHarness.gpsTenK(QaHarness.daysAgoAtMidday(0) - 5 * 3600 - 1010 * 3L)
 
-    private fun runnerProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
-        goalDistance = GoalDistance.FiveK,
-        concurrentGoal = ConcurrentGoal.EndurancePriority,
-        weeklySets = 0,
-        runningDaysPerWeek = 4,
-        runningKmPerWeek = 30.0,
-        advanced = false,
-        bodyweightKg = 70.0,
-        ageYears = 30.0,
-        recentRace = RecentRace(distance_km = 5.0, time_sec = 1500, epoch_day = todayEpochDay() - 7),
-    )
-
     /** Seed a runner with [run] (plus an older hand-logged run) and open its sheet
      *  the way the app's own "View" action does. */
     private fun openRunDetail(run: Event.LogRunTrack) {
         val older = QaHarness.daysAgoAtMidday(3)
-        QaHarness.seedLog(ctx, listOf(runnerProfile(), Event.LogRun(6.0, 33.0, 0.0, older, older * 1000), run))
+        QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile(), Event.LogRun(6.0, 33.0, 0.0, older, older * 1000), run))
         rule.launchApp()
         HistoryFocus.request(run.entryId, run.observedAt)
-        waitForTag("run-trim")
+        rule.waitForNode(hasTestTag("run-trim"))
     }
 
     @Test
@@ -431,16 +392,16 @@ class RestoreRoundtripTest {
         val run = gpsTenK()
         openRunDetail(run)
         recreate()
-        waitForTag("run-trim")
+        rule.waitForNode(hasTestTag("run-trim"))
         assertEquals("no run doubled", 2, model.runs.size)
 
         // Rate it: pick 6, rotate with the rate sheet open, then save.
         rule.onNodeWithTag("run-log-effort").performScrollTo().performClick()
-        waitForTag("run-rate-save")
+        rule.waitForNode(hasTestTag("run-rate-save"))
         rule.pickRating("effort-scale", 6)
         val picked = ratingState("effort-scale")
         recreate()
-        waitForTag("run-rate-save")
+        rule.waitForNode(hasTestTag("run-rate-save"))
         assertEquals("the unsaved rating is kept", picked, ratingState("effort-scale"))
         assertEquals(0, logCount("AmendRunMeta"))
         rule.onNodeWithTag("run-rate-save").performClick()
@@ -452,7 +413,7 @@ class RestoreRoundtripTest {
         assertSavedStateFitsABinderTransaction(size)
         ProcessDeath.kill(ctx)
         ProcessDeath.relaunchWithState(rule, state)
-        waitForTag("run-trim")
+        rule.waitForNode(hasTestTag("run-trim"))
         assertEquals(2, model.runs.size)
         assertEquals(6, model.runs.single { it.entry_id == run.entryId }.session_rpe)
         assertEquals(1, logCount("LogRunTrack"))
@@ -487,21 +448,22 @@ class RestoreRoundtripTest {
         setThumb(0, 300f)
         setThumb(1, (last - first - 600).toFloat())
         val keeps = keepsLine()
-        assertEquals(0, count(hasText(str(R.string.trim_hint))))
+        assertEquals(0, rule.countOf(hasText(str(R.string.trim_hint))))
 
         recreate()
         rule.waitUntil(15_000) { trimThumbs().fetchSemanticsNodes().size == 2 }
         assertEquals("the chosen window survives rotation", keeps, keepsLine())
 
         // Trim → confirm dialog; rotate with the dialog up, then confirm. The dialog
-        // is told apart from the sheet (itself a dialog window) by its message.
-        val message = hasText(str(R.string.main_trim_confirm_message, 5, 10))
+        // is told apart from the sheet (itself a dialog window) by its message's
+        // closing sentence, which the sheet's removes line doesn't have.
+        val message = hasText(str(R.string.main_trim_confirm_message, "", "\u0000").substringAfter('\u0000'), substring = true)
         val confirmInDialog = hasText(str(R.string.main_trim_confirm)) and hasClickAction() and
             hasAnyAncestor(isDialog() and androidx.compose.ui.test.hasAnyDescendant(message))
         rule.onNode(hasText(str(R.string.main_trim_confirm)) and hasClickAction()).performScrollTo().performClick()
-        rule.waitUntil(5_000) { count(message) == 1 }
+        rule.waitUntil(5_000) { rule.countOf(message) == 1 }
         recreate()
-        rule.waitUntil(15_000) { count(message) == 1 && count(confirmInDialog) == 1 }
+        rule.waitUntil(15_000) { rule.countOf(message) == 1 && rule.countOf(confirmInDialog) == 1 }
         assertEquals(0, logCount("TrimRunTrack"))
         rule.onNode(confirmInDialog).performClick()
         rule.waitForState { logCount("TrimRunTrack") == 1 && model.runs.single { it.entry_id == run.entryId }.distance_km < beforeKm - 1.0 }
@@ -530,7 +492,7 @@ class RestoreRoundtripTest {
             "train" -> str(R.string.setup_step_train_q)
             else -> null
         }
-        return marker != null && count(hasText(marker)) > 0
+        return marker != null && rule.countOf(hasText(marker)) > 0
     }
 
     private fun next() {
@@ -578,7 +540,7 @@ class RestoreRoundtripTest {
 
         ProcessDeath.kill(ctx)
         rule.launchApp()
-        assertEquals("no second setup after a cold start", 0, count(hasText(str(R.string.setup_step_train_q))))
+        assertEquals("no second setup after a cold start", 0, rule.countOf(hasText(str(R.string.setup_step_train_q))))
         assertEquals(p, model.profile)
     }
 
@@ -620,7 +582,7 @@ class RestoreRoundtripTest {
         val row = hasText(str(R.string.main_tool_protein_title)) and hasClickAction()
         rule.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(row)
         rule.onAllNodes(row).onFirst().performClick()
-        waitForTag("calc-result")
+        rule.waitForNode(hasTestTag("calc-result"))
         val first = model.protein_figures.single()
 
         // A new bodyweight, typed on the keypad, then Compute.
@@ -636,14 +598,14 @@ class RestoreRoundtripTest {
         val headline = "${Math.round(second.low_g_per_day)}–${Math.round(second.high_g_per_day)}"
 
         recreate()
-        waitForTag("calc-result")
+        rule.waitForNode(hasTestTag("calc-result"))
         assertHeadline(headline)
 
         val (state, size) = ProcessDeath.saveState()
         assertSavedStateFitsABinderTransaction(size)
         ProcessDeath.kill(ctx)
         ProcessDeath.relaunchWithState(rule, state)
-        waitForTag("calc-result")
+        rule.waitForNode(hasTestTag("calc-result"))
         assertHeadline(headline)
         assertEquals(95.0, model.protein_input?.bodyweight_kg)
     }
@@ -923,16 +885,16 @@ class RestoreRoundtripTest {
         ProcessDeath.kill(ctx)
         rule.launchApp()
         rule.assertTextCountEventually(str(R.string.main_resume_run_title), 1)
-        rule.onNode(hasText(str(R.string.main_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
+        rule.onNode(hasText(str(R.string.track_action_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
         rule.waitForState { RunSession.tracking.value && RunSession.points.value.size == pts.size }
         assertEquals(live.km, RunSession.distanceKm.value, 1e-9)
         assertEquals(live.sec.toDouble(), RunSession.elapsedSec.value.toDouble(), 1.0)
-        waitForText(str(R.string.track_btn_stop))
+        rule.waitForNode(hasText(str(R.string.track_btn_stop)))
 
         // A rotation on the resumed tracker: no second offer, no doubled fixes.
         recreate()
-        waitForText(str(R.string.track_btn_stop))
-        assertEquals(0, count(hasText(str(R.string.main_resume_run_title))))
+        rule.waitForNode(hasText(str(R.string.track_btn_stop)))
+        assertEquals(0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
         assertEquals(pts.size, RunSession.points.value.size)
 
         stopToFinishReview()
@@ -947,7 +909,7 @@ class RestoreRoundtripTest {
 
         ProcessDeath.kill(ctx)
         rule.launchApp()
-        assertEquals(0, count(hasText(str(R.string.main_resume_run_title))))
+        assertEquals(0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
         assertEquals(1, model.runs.size)
     }
 
@@ -963,9 +925,9 @@ class RestoreRoundtripTest {
         launchOnTracker()
         repeat(2) {
             recreate()
-            waitForText(str(R.string.track_btn_stop))
+            rule.waitForNode(hasText(str(R.string.track_btn_stop)))
         }
-        assertEquals(0, count(hasText(str(R.string.main_resume_run_title))))
+        assertEquals(0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
         assertEquals(live.points, RunSession.points.value.toList())
         assertEquals(live.km, RunSession.distanceKm.value, 1e-12)
         assertEquals(0, logCount("LogRunTrack"))
@@ -983,7 +945,7 @@ class RestoreRoundtripTest {
         ActiveRunStore.flush()
         rule.launchApp()
         ActiveRunStore.flush()
-        assertEquals(0, count(hasText(str(R.string.main_resume_run_title))))
+        assertEquals(0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
         assertFalse(File(ctx.filesDir, "active-run.ndjson").exists())
         assertEquals(0, model.runs.size)
 
@@ -994,7 +956,7 @@ class RestoreRoundtripTest {
         ActiveRunStore.flush()
         rule.launchApp()
         ActiveRunStore.flush()
-        assertEquals(0, count(hasText(str(R.string.main_resume_run_title))))
+        assertEquals(0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
         assertFalse(File(ctx.filesDir, "active-run.ndjson").exists())
     }
 

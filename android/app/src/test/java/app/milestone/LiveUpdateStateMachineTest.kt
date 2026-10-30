@@ -387,7 +387,7 @@ class LiveUpdateStateMachineTest {
             val labels = n.actions.orEmpty().map { it.title.toString() }
             val expected = listOfNotNull(
                 if (recording) app.getString(if (paused) R.string.track_action_resume else R.string.track_action_pause) else null,
-                app.getString(R.string.track_action_stop),
+                app.getString(R.string.track_btn_stop),
             )
             assertEquals("actions", expected, labels)
             assertEquals(OpenDest.Track, openDestOf(shadowOf(n.contentIntent).savedIntent))

@@ -68,9 +68,9 @@ class SetLoggingLogicTest {
     @Test
     fun runDurationIsTypedLikeATimer() {
         assertEquals(105.5, durationDigitsToMin("14530")!!, 1e-9)
-        assertEquals("1:45:30", fmtDurationDigits("14530"))
-        assertEquals("45:30", fmtDurationDigits("4530"))
-        assertEquals("0:30", fmtDurationDigits("30"))
+        assertEquals("1:45:30", hmsDisplay("14530"))
+        assertEquals("45:30", hmsDisplay("4530"))
+        assertEquals("0:30", hmsDisplay("30"))
         assertEquals("14530", minutesToDurationDigits(105.5))
         assertEquals("4530", minutesToDurationDigits(45.5))
         // Seconds (and minutes under an hours field) must stay under 60.
@@ -95,6 +95,9 @@ class SetLoggingLogicTest {
         // The 1 s ticker read the clock just before the set was logged: the full
         // rest shows at once, not nothing until the next tick.
         assertEquals(RestFace.Counting(180), restFace(1_000_000, 1_180_000, null, 120, 999_400))
+        // A clock set back an hour mid-rest shows no frozen full countdown.
+        assertNull(restFace(1_000_000, 1_180_000, null, 120, 1_000_000 - 3_600_000L))
+        assertNull(restFace(1_000_000, 1_180_000, null, 120, 998_999))
         // Past the window the rest belongs to an earlier bout.
         assertNull(restFace(1_000_000, 1_180_000, null, 120, 1_000_000 + (RestReadoutWindowSec + 1) * 1000L))
         // No running rest: an exercise without a prescribed rest counts up from its last set.
@@ -157,6 +160,8 @@ class SetLoggingLogicTest {
         assertTrue(isFloorLift("Power clean"))
         assertFalse(isFloorLift("Romanian deadlift"))
         assertFalse(isFloorLift("Hang clean"))
+        // The Turkish-keyboard caps spelling is folded like nameKey's.
+        assertTrue(isFloorLift("DEADL\u0130FT"))
     }
 
     @Test

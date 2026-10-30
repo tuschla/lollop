@@ -44,7 +44,6 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
@@ -106,8 +105,9 @@ internal data class DayActivity(val lifted: Boolean, val runs: Int) {
     val sessions: Int get() = (if (lifted) 1 else 0) + runs
 }
 
-/** A locale-ordered date formatter for [skeleton] ("MMMd" → "Sep 21" / "21. Sep."). */
-internal fun localizedDayFormatter(skeleton: String, locale: Locale = Locale.getDefault()): DateTimeFormatter =
+/** A date formatter for [skeleton] in the app's language and the device region's
+ *  order ([appLocale]: "MMMd" → "Sep 21" / "21 Sept"). */
+internal fun localizedDayFormatter(skeleton: String, locale: Locale = appLocale()): DateTimeFormatter =
     DateTimeFormatter.ofPattern(android.text.format.DateFormat.getBestDateTimePattern(locale, skeleton), locale)
 
 /** [localizedDayFormatter] for a local-day index (days since the epoch). */
@@ -130,9 +130,7 @@ internal fun ContributionHeatmap(
     val runTint = palette.accent
     val liftTint = palette.onBgMuted
     val diagonalBoth = runTint.isAchromatic()
-    // Epoch day 0 (1970-01-01) is a Thursday; shift so Monday = 0.
-    fun dow(day: Long): Int = Math.floorMod(day + 3, 7L).toInt()
-    val thisWeekStart = todayLocalDay - dow(todayLocalDay)
+    val thisWeekStart = mondayOf(todayLocalDay)
     val firstWeekStart = thisWeekStart - (weeks - 1) * 7L
 
     // TalkBack summary of the window (active-day count + busiest week); each logged
@@ -159,7 +157,7 @@ internal fun ContributionHeatmap(
 
     // Axis labels: localized narrow weekday initials down the left gutter (Mon top),
     // month ticks along the bottom at each column where the month first changes.
-    val locale = LocalConfiguration.current.locales[0]
+    val locale = appLocale(LocalConfiguration.current.locales)
     val weekdayInitials = remember(locale) { (0..6).map { DayOfWeek.of(it + 1).getDisplayName(TextStyle.NARROW, locale) } }
     val monthFmt = remember(locale) { localizedDayFormatter("MMM", locale) }
     val cellDateFmt = remember(locale) { localizedDayFormatter("EEEEMMMMd", locale) }
@@ -270,7 +268,7 @@ internal fun ContributionHeatmap(
                                         activity.runs.takeIf { it > 0 }
                                             ?.let { res.getQuantityString(R.plurals.history_heatmap_runs, it, it) },
                                     ).joinToString(", ")
-                                    val cellDesc = stringResource(R.string.history_heatmap_cell, cellDateFmt.formatEpochDay(day), what)
+                                    val cellDesc = stringResource(R.string.ui_label_value, cellDateFmt.formatEpochDay(day), what)
                                     Box(
                                         cellMod
                                             .drawBehind { drawDayTint(activity, liftTint, runTint, diagonalBoth) }
@@ -423,13 +421,14 @@ fun RunDistanceBars(
     fun dayLabel(day: Long): String = dayFmt.formatEpochDay(day)
 
     // TalkBack summary of the canvas: window length, total distance, the longest day.
+    val res = LocalResources.current
     val longestIdx = vals.indices.maxBy { vals[it] }
     val daysText = pluralStringResource(R.plurals.history_days, days, days)
     val barsDesc = if (totalKm > 0.0) {
         stringResource(
             R.string.history_bars_desc,
-            daysText, trimDecimal(totalKm), unit.distanceLabel,
-            trimDecimal(vals[longestIdx]), dayLabel(firstDay + longestIdx),
+            daysText, spokenDistance(res, trimDecimal(totalKm), unit),
+            spokenDistance(res, trimDecimal(vals[longestIdx]), unit), dayLabel(firstDay + longestIdx),
         )
     } else {
         stringResource(R.string.history_bars_desc_empty, daysText)
@@ -577,10 +576,9 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawAxisCeiling(col
 /**
  * Weekly running distance: one accent bar per Monday-start local week of the
  * core's series ([weeks], oldest left, this week right), every figure in the
- * user's distance [unit]. When the profile plans a weekly distance ([plannedKm],
- * canonical km, 0 = none) a dashed reference line marks it, starting at the week
- * the plan began ([planStartEpochDay]; null = the whole window). Tapping a bar
- * reads out its week and distance ("Week of Sep 21 · 16 mi"); tapping it again
+ * user's distance [unit]. When the plan prescribes running this week ([plannedKm],
+ * canonical km, 0 = none) a dashed mark over this week's bar shows it. Tapping a
+ * bar reads out its week and distance ("Week of Sep 21 · 16 mi"); tapping it again
  * clears it. TalkBack reads a summary (total, busiest week, this week, plan), then
  * each week's figure from a node over its bar, so no week needs the tap readout.
  */
@@ -590,18 +588,11 @@ fun WeeklyDistanceChart(
     plannedKm: Double,
     unit: DistanceUnit,
     chartHeight: Dp,
-    planStartEpochDay: Long?,
 ) {
     if (weeks.isEmpty()) return
     val vals = weeks.map { metersToDisplay(it.km * 1000.0, unit) }
     val n = weeks.size
-    // First bar the plan line covers: the week holding the plan's first day.
-    val planFrom = if (planStartEpochDay == null) {
-        0
-    } else {
-        weeks.indexOfFirst { it.week_start_epoch_day + 6 >= planStartEpochDay }.let { if (it < 0) n else it }
-    }
-    val planned = if (plannedKm > 0.0 && planFrom < n) metersToDisplay(plannedKm * 1000.0, unit) else 0.0
+    val planned = if (plannedKm > 0.0) metersToDisplay(plannedKm * 1000.0, unit) else 0.0
     val yMax = niceAxisCeiling(maxOf(vals.max(), planned))
     val total = vals.sum()
     var selected by remember(weeks) { mutableStateOf<Int?>(null) }
@@ -613,17 +604,13 @@ fun WeeklyDistanceChart(
     val weekFmt = remember { localizedDayFormatter("MMMd") }
     fun weekLabel(day: Long): String = weekFmt.formatEpochDay(day)
     val busiest = vals.indices.maxBy { vals[it] }
-    val planDesc = if (planned > 0.0) {
-        stringResource(R.string.history_weekly_desc_plan, trimDecimal(planned), unit.distanceLabel)
-    } else {
-        ""
-    }
+    val res = LocalResources.current
+    fun spoken(v: Double) = spokenDistance(res, trimDecimal(v), unit)
+    val planDesc = if (planned > 0.0) stringResource(R.string.history_weekly_desc_plan, spoken(planned)) else ""
     val chartDesc = if (total > 0.0) {
         stringResource(
             R.string.history_weekly_desc,
-            n, trimDecimal(total), unit.distanceLabel,
-            trimDecimal(vals[busiest]), weekLabel(weeks[busiest].week_start_epoch_day),
-            trimDecimal(vals.last()),
+            n, spoken(total), spoken(vals[busiest]), weekLabel(weeks[busiest].week_start_epoch_day), spoken(vals.last()),
         ) + planDesc
     } else {
         stringResource(R.string.history_weekly_desc_empty, n) + planDesc
@@ -634,8 +621,10 @@ fun WeeklyDistanceChart(
         verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
         // Header: y-max at the start, the plan legend (dashed swatch) at the end.
+        // It speaks the chart's summary, so TalkBack reads it before the per-week
+        // nodes below (a node under those full-size nodes would count as covered).
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = chartDesc },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
         ) {
@@ -661,18 +650,14 @@ fun WeeklyDistanceChart(
         }
         val bars = rememberBarColors()
         val weekDescs = weeks.mapIndexed { i, w ->
-            stringResource(R.string.history_weekly_bar_value, weekLabel(w.week_start_epoch_day), trimDecimal(vals[i]), unit.distanceLabel)
+            stringResource(R.string.history_weekly_bar_value, weekLabel(w.week_start_epoch_day), spoken(vals[i]))
         }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(chartHeight)
-                // A group, so the summary is read before the weeks inside it.
-                .semantics {
-                    contentDescription = chartDesc
-                    isTraversalGroup = true
-                }
-                .pointerInput(n) {
+                .traversalGroup()
+                .pointerInput(weeks) {
                     detectTapGestures { tap ->
                         val i = (tap.x / (size.width.toFloat() / n)).toInt().coerceIn(0, n - 1)
                         selected = if (selected == i) null else i
@@ -684,13 +669,13 @@ fun WeeklyDistanceChart(
                 val usableH = drawDistanceBars(vals, yMax, barFrac = 0.62f, bars, currentIndex = n - 1) { i ->
                     if (picked == null || picked == i) accent else accentDimmed
                 }
-                // The planned weekly distance as a dashed reference line across the bars of
-                // the weeks the plan existed.
+                // This week's planned distance as a dashed mark over its bar only:
+                // earlier plan weeks had their own targets.
                 if (planned > 0.0 && yMax > 0.0) {
                     val y = usableH - (planned / yMax).toFloat().coerceIn(0f, 1f) * usableH
                     drawLine(
                         color = planColor,
-                        start = Offset(size.width / n * planFrom, y),
+                        start = Offset(size.width / n * (n - 1), y),
                         end = Offset(size.width, y),
                         strokeWidth = stroke(1.5f),
                         pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
@@ -714,7 +699,7 @@ fun WeeklyDistanceChart(
             Text(
                 stringResource(
                     R.string.history_weekly_bar_value,
-                    weekLabel(weeks[i].week_start_epoch_day), trimDecimal(vals[i]), unit.distanceLabel,
+                    weekLabel(weeks[i].week_start_epoch_day), "${trimDecimal(vals[i])} ${unit.distanceLabel}",
                 ),
                 color = OnBgBody,
                 style = Type.Caption.merge(TabularFigures),

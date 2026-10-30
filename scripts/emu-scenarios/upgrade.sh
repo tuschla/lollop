@@ -235,14 +235,16 @@ expect $S "widget snapshot keeps today's day kind" "kind $k0 → $k1" test -n "$
 W1="$(widget_texts new-04-widget)"; echo "$W1" >"$OUT/logs/new-widget.txt"
 expect $S "widget shows the same face after the update" "old $(tr '\n' '|' <<<"$OLD_WIDGET") / new $(tr '\n' '|' <<<"$W1")" test "$OLD_WIDGET" = "$W1"
 NEW_TILE="$(tile_label new-05-tile)"; adb_ shell cmd statusbar collapse
-# Today's face from the new snapshot (tileFace in QuickTileService.kt). The old
+# Today's face from the new snapshot (tileFace in QuickTileService.kt reads
+# WidgetSnapshotStore.today(): not stale and dated the device's today). The old
 # build's label is only reported: 4728546 and 901d239 can show the manifest label
 # ("Log") until their next redraw.
 WANT_TILE="$(python3 -c "
-import json,sys
+import datetime,json,sys,zoneinfo
 d=json.load(open(sys.argv[1]))
-k='' if d.get('stale') else d.get('kind')
-print('Start run' if k=='Run' and d.get('trackable') else 'Log set' if k=='Lift' and not d.get('sessionDone') else 'Log')" "$OUT/logs/new-snapshot.json" 2>/dev/null)"
+today=datetime.datetime.fromtimestamp(int(sys.argv[2]),zoneinfo.ZoneInfo(sys.argv[3])).date()-datetime.date(1970,1,1)
+k='' if d.get('stale') or d.get('epochDay')!=today.days else d.get('kind')
+print('Start run' if k=='Run' and d.get('trackable') else 'Log set' if k=='Lift' and not d.get('sessionDone') else 'Log')" "$OUT/logs/new-snapshot.json" "$(adb_ shell date +%s | tr -d '\r')" "$TZ0" 2>/dev/null)"
 expect $S "tile still on Quick Settings, with today's face" "old '$OLD_TILE' → new '$NEW_TILE' (today's face '$WANT_TILE')" test -n "$NEW_TILE" -a "$NEW_TILE" = "$WANT_TILE"
 if [[ -n "$MID" ]]; then
   launch; wait_text eq Today 20

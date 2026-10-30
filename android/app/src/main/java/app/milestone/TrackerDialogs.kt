@@ -99,7 +99,6 @@ internal fun RunFinishPanel(
         trackSegments(RunSession.decimatedTrackForCore(), RunSession.decimatedSegmentStarts())
     }
     val avgPace = averagePaceMinPerKm(elapsedSec, km)
-    val paceFigure = if (avgPace.isFinite()) formatPaceMinutes(paceInUnit(avgPace, unit)) else EmptyValuePlaceholder
     val spoken = finishSummarySpoken(LocalResources.current, km, elapsedSec, unit)
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -122,7 +121,7 @@ internal fun RunFinishPanel(
                 verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
             ) {
                 if (route.sumOf { it.size } >= 2) {
-                    RouteMapCard(route, entryId = 0L, height = FinishRouteHeight, distanceMarkers = false)
+                    RouteMapCard(route, entryId = 0L, height = FinishRouteHeight, distanceMarkers = false, recordKm = km)
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                     Row(
@@ -132,7 +131,7 @@ internal fun RunFinishPanel(
                         horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
                     ) {
                         LiveFigure(
-                            label = stringResource(R.string.track_stat_distance),
+                            label = stringResource(R.string.run_stat_distance),
                             value = distanceFigure(km, unit),
                             suffix = unit.distanceLabel,
                             known = km > 0.0,
@@ -148,8 +147,8 @@ internal fun RunFinishPanel(
                             modifier = Modifier.weight(1f),
                         )
                         LiveFigure(
-                            label = stringResource(R.string.track_finish_avg_pace),
-                            value = paceFigure,
+                            label = stringResource(R.string.run_stat_avg_pace),
+                            value = paceFigure(avgPace, unit),
                             suffix = unit.paceSuffix,
                             known = avgPace.isFinite(),
                             maxSp = LIVE_FIGURE_MAX_SP,
@@ -179,7 +178,7 @@ internal fun RunFinishPanel(
         ControlRow {
             DiscardRunCircle(enabled = enabled, onClick = onDiscard)
             TextAction(
-                stringResource(R.string.track_finish_resume),
+                stringResource(R.string.track_action_resume),
                 onClick = onResume,
                 enabled = enabled,
             )
@@ -196,12 +195,13 @@ internal fun RunFinishPanel(
 /** Height of the Finish review's route thumbnail. */
 private val FinishRouteHeight = 160.dp
 
-/** The Finish review's figures read aloud with units spelled out, e.g. "0.60 km ·
- *  3 minutes 20 seconds moving · 5 minutes 33 seconds per kilometer average". */
+/** The Finish review's figures read aloud with units spelled out, e.g. "0.60
+ *  kilometers · 3 minutes 20 seconds moving · 5 minutes 33 seconds per kilometer
+ *  average". */
 internal fun finishSummarySpoken(res: Resources, km: Double, elapsedSec: Long, unit: DistanceUnit): String =
     res.getString(
         R.string.track_finish_summary,
-        runDistLabel(km, unit),
+        spokenRunDistance(res, km, unit),
         spokenDuration(res, elapsedSec),
         spokenPace(res, averagePaceMinPerKm(elapsedSec, km), unit),
     )

@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,8 +33,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.core.content.edit
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
@@ -518,10 +514,8 @@ internal fun ResumeRunDialog(session: CoachSession) {
     // interrupted one): resuming would replace its live track and discarding would
     // delete its crash-recovery file, so both just drop the stale offer.
     val liveRun = { RunSession.tracking.value || RunSession.armed.value }
-    AlertDialog(
-        onDismissRequest = { /* deliberate choice required */ },
-        modifier = Modifier.windowTraversalGroup(),
-        shape = RoundedCornerShape(Space.Card.dp),
+    AppDialog(
+        onDismiss = { /* deliberate choice required */ },
         title = { Text(stringResource(R.string.main_resume_run_title)) },
         text = { Text(stringResource(R.string.main_resume_run_message)) },
         confirmButton = {
@@ -554,7 +548,7 @@ internal fun ResumeRunDialog(session: CoachSession) {
                         ActiveRunStore.clear()
                     }
                 }
-            }) { Text(stringResource(R.string.main_resume)) }
+            }) { Text(stringResource(R.string.track_action_resume)) }
         },
         dismissButton = {
             TextButton(onClick = {
@@ -612,12 +606,7 @@ internal fun CoreUnavailableScreen() {
         contentAlignment = Alignment.Center,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Card.dp)) {
-            Text(
-                stringResource(R.string.main_core_unavailable_title),
-                color = OnBgBody,
-                style = Type.Title,
-                modifier = Modifier.semantics { heading() },
-            )
+            SheetTitle(stringResource(R.string.main_core_unavailable_title))
             Text(stringResource(R.string.main_core_unavailable_message), color = OnBgBody, style = Type.Body)
             PrimaryButton(stringResource(R.string.profile_export_data), onClick = exportData, modifier = Modifier.fillMaxWidth())
         }

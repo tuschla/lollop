@@ -7,18 +7,10 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 /**
- * Pure (no-XML) unit tests for the run-import parser logic that the JVM unit
- * suite can exercise directly:
- *
- *  - [mergeTcxTracks]: a standard Garmin/Strava TCX opens one
- *    `<Track>` per `<Lap>` (autolaps on continuous running included), so a Track
- *    boundary is NOT inherently a pause. Consecutive Tracks with a small
- *    inter-track gap must merge into one segment (otherwise the core drops each
- *    lap's entering leg from distance AND moving time); a genuine pause gap must
- *    still split.
- *  - [parseHrBpm]: accept only finite 20..=250 bpm, drop
- *    everything else (NaN, `Infinity`, absurd magnitudes, out-of-range), shared
- *    by the GPX and TCX readers.
+ * Run-import parser logic without XML:
+ *  - [mergeTcxTracks]: consecutive TCX `<Track>`s (one per `<Lap>`, autolaps
+ *    included) with a small gap merge into one segment; a pause-sized gap splits.
+ *  - [parseHrBpm]: only finite 20..=250 bpm, shared by the GPX and TCX readers.
  *  - [nonRunSport] and [importedRunEvent]'s sport gate and logged-at stamp: a file
  *    that names another sport is refused by name, and lollop's own GPX names the
  *    run's stamp so a re-import is the same run.
@@ -42,7 +34,7 @@ class ImportParserTest {
 
     @Test
     fun aRealPauseStillSplitsTheSegment() {
-        // A 5-minute stop between Tracks (gap ≫ MAX_TRACK_MERGE_GAP_SEC) is a
+        // A 5-minute stop between Tracks (gap ≫ MAX_FIX_GAP_SEC) is a
         // genuine recording pause → two segments, so the bridging leg is dropped.
         val before = listOf(fix(1000), fix(1001), fix(1002))
         val after = listOf(fix(1302), fix(1303)) // 300 s later

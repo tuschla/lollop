@@ -3,9 +3,7 @@ package app.milestone
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -162,10 +160,8 @@ internal fun UiMessageHost(modifier: Modifier = Modifier) {
     }
     SnackbarHost(host, modifier)
     shownDetails?.let { lines ->
-        AlertDialog(
-            onDismissRequest = { shownDetails = null },
-            modifier = Modifier.windowTraversalGroup(),
-            shape = RoundedCornerShape(Space.Card.dp),
+        AppDialog(
+            onDismiss = { shownDetails = null },
             title = shownDetailsTitle?.let { t -> @Composable { Text(t) } },
             text = {
                 Column(

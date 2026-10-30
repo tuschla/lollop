@@ -11,6 +11,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DatePickerState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
@@ -72,7 +78,7 @@ internal fun PlainCard(
     }
 }
 
-/** A small status chip: white [Type.Chip] text on the [bg] fill (SAFETY, SPIKE, ON HOLD…). */
+/** A small status chip: white [Type.Chip] text on the [bg] fill (SAFETY, SPIKE, PAUSED…). */
 @Composable
 internal fun Chip(text: String, bg: Color) {
     Text(
@@ -117,7 +123,77 @@ internal fun guidanceTitle(row: GuidanceView): String =
 internal fun guidanceSummary(row: GuidanceView): String =
     if (rememberDistanceUnit() == DistanceUnit.Mi) row.summary_mi.ifBlank { row.summary } else row.summary
 
-/** A confirmation [AlertDialog] (chrome §6): [title], an optional [body], a
+/** The app's [AlertDialog]: the card shape, and a [traversalGroup] so an RTL
+ *  locale hears the buttons start to end. Every dialog window goes through it,
+ *  [AppDatePickerDialog] or [AppTimePickerDialog]. */
+@Composable
+internal fun AppDialog(
+    onDismiss: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null,
+    text: (@Composable () -> Unit)? = null,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = confirmButton,
+        modifier = Modifier.traversalGroup(),
+        dismissButton = dismissButton,
+        title = title,
+        text = text,
+        shape = RoundedCornerShape(Space.Card.dp),
+    )
+}
+
+/** A [DatePicker] on [state] in an [AppDialog]-styled window: OK (enabled while
+ *  [confirmEnabled]) runs [onConfirm], Cancel runs [onDismiss]. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun AppDatePickerDialog(
+    state: DatePickerState,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    confirmEnabled: Boolean = true,
+) {
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(stringResource(R.string.log_ok)) }
+        },
+        modifier = Modifier.traversalGroup(),
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) } },
+        shape = RoundedCornerShape(Space.Card.dp),
+    ) { DatePicker(state) }
+}
+
+/** A [TimePicker] titled [title] in an [AppDialog]: OK closes through
+ *  [onDismiss] and sends the picked hour and minute to [onConfirm]. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun AppTimePickerDialog(
+    title: String,
+    initialHour: Int,
+    initialMinute: Int,
+    is24Hour: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (hour: Int, minute: Int) -> Unit,
+) {
+    val state = rememberTimePickerState(initialHour = initialHour, initialMinute = initialMinute, is24Hour = is24Hour)
+    AppDialog(
+        onDismiss = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                onDismiss()
+                onConfirm(state.hour, state.minute)
+            }) { Text(stringResource(R.string.log_ok)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) } },
+        title = { Text(title) },
+        text = { TimePicker(state) },
+    )
+}
+
+/** A confirmation [AppDialog] (chrome §6): [title], an optional [body], a
  *  dismiss button ([dismissLabel]) and one confirm button in [confirmColor]
  *  (`DangerText` when destructive, else the button's own colour), disabled while
  *  not [confirmEnabled]. Each button runs exactly its own callback. */
@@ -132,16 +208,14 @@ internal fun ConfirmDialog(
     confirmEnabled: Boolean = true,
     dismissLabel: String = stringResource(R.string.main_cancel),
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.windowTraversalGroup(),
-        shape = RoundedCornerShape(Space.Card.dp),
-        title = { Text(title) },
-        text = body?.let { { Text(it) } },
+    AppDialog(
+        onDismiss = onDismiss,
         confirmButton = {
             TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(confirmLabel, color = confirmColor) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(dismissLabel) } },
+        title = { Text(title) },
+        text = body?.let { { Text(it) } },
     )
 }
 

@@ -19,7 +19,6 @@ import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.GpsPoint
 import app.milestone.R
-import java.util.Locale
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -43,7 +42,6 @@ class ScreenshotRouteThemesTest(private val theme: AppTheme, private val mode: D
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
         AppSettings.setShowRouteMaps(ctx, false)
         AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Mi)
@@ -57,7 +55,7 @@ class ScreenshotRouteThemesTest(private val theme: AppTheme, private val mode: D
     }
 
     private fun waitFor(matcher: SemanticsMatcher) {
-        rule.waitUntil(10_000) { rule.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForNode(matcher, 10_000)
         rule.waitForIdle()
     }
 

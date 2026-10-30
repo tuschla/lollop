@@ -42,7 +42,7 @@ pub(crate) use prescriptions::{
     HRV_UNRELIABLE_SUSPEND, RPE_LOAD_GAP_DELOAD_PCT, VBT_RELIABILITY_M_S,
     VBT_WEEKLY_DROP_DELOAD_M_S,
 };
-pub(crate) use rules::{HRV_ESCALATE_STREAK, WELLNESS_DOWNGRADE_STREAK};
+pub(crate) use rules::{HRV_ESCALATE_STREAK, WELLNESS_DOWNGRADE_STREAK, WELLNESS_MULTIDAY_STREAK};
 pub use rules::{
     RhrNoise, RuleContext, adjustments_in, bone_stress_referral, failed_set_stop,
     first_set_rpe_adjust, hrv_below_swc, illness_active, illness_plan_recs, illness_stop,

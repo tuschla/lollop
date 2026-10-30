@@ -36,6 +36,7 @@ import app.milestone.R
 import app.milestone.RunResultView
 import app.milestone.ViewModel
 import app.milestone.formatLogDate
+import app.milestone.groupedFigure
 import app.milestone.kgToLb
 import app.milestone.trimDecimal
 import java.time.LocalDate
@@ -82,7 +83,6 @@ class LongHistoryUiTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
         // Robolectric has no tiles: the plain-card route (as the route screenshots do).
         AppSettings.setShowRouteMaps(ctx, false)
@@ -185,7 +185,7 @@ class LongHistoryUiTest {
         val weekly = hasContentDescription(strPrefix(R.string.history_weekly_desc, 16), substring = true)
         historyList().performScrollToNode(weekly)
         val spoken = contentDescription(weekly)
-        val wm = Regex("""over 16 weeks: ([\d.]+) km in total, most ([\d.]+) km in the week of (.+?), this week ([\d.]+) km""").find(spoken)
+        val wm = Regex("""over 16 weeks: ([\d.]+) kilometers in total, most ([\d.]+) kilometers in the week of (.+?), this week ([\d.]+) kilometers""").find(spoken)
         assertNotNull("weekly chart speaks its figures: $spoken", wm)
         val thisMonday = h.today - Math.floorMod(h.today + 3, 7L)
         val sixteenKm = h.runs.filter { Math.floorDiv(it.observedAt, 86_400L) >= thisMonday - 15 * 7 }.sumOf { it.km }
@@ -329,10 +329,11 @@ class LongHistoryUiTest {
         rule.onAllNodes(hasText(str(R.string.trim_hint))).fetchSemanticsNodes().let { assertTrue("the start thumb moved: ${dump()}", it.isEmpty()) }
         rule.onNode(hasText(str(R.string.main_trim_confirm)) and hasClickAction()).performScrollTo().performClick()
         rule.waitForIdle()
-        // The confirm dialog's own Trim (its message counts minutes; the sheet's readout counts distance).
+        // The confirm dialog's own Trim: its message ends with a sentence the sheet's readout lacks.
+        val confirmTail = str(R.string.main_trim_confirm_message, "", "\u0000").substringAfter('\u0000')
         rule.onNode(
             hasText(str(R.string.main_trim_confirm)) and hasClickAction() and
-                hasAnyAncestor(hasAnyDescendant(hasText("min from the start", substring = true))),
+                hasAnyAncestor(hasAnyDescendant(hasText(confirmTail, substring = true))),
         ).performClick()
         timed("trim round trip") {
             rule.waitForState(30_000) { model().runs.first { it.entry_id == h.longestRun.entryId }.distance_km < run.distance_km * 0.9 }
@@ -396,7 +397,7 @@ class LongHistoryUiTest {
             rule.onNode(hasText(countLine) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
             rule.waitForIdle()
         }
-        val volume = java.text.NumberFormat.getIntegerInstance(Locale.US).format(Math.round(bigSets.filter { it.holdSec == null }.sumOf { it.weightKg * it.reps }))
+        val volume = groupedFigure(Math.round(bigSets.filter { it.holdSec == null }.sumOf { it.weightKg * it.reps }))
         rule.assertTextCountEventually("$countLine · ${str(R.string.history_session_volume, volume, "kg")}", 1)
         assertEquals("every set of the day has its row", h.bigSessionSets, rule.onAllNodesWithTag("lift-set-row").fetchSemanticsNodes().size)
         val sheet = topWindowTexts()
@@ -493,8 +494,8 @@ class LongHistoryUiTest {
         val weekly = hasContentDescription(strPrefix(R.string.history_weekly_desc, 16), substring = true)
         historyList().performScrollToNode(weekly)
         val spoken = contentDescription(weekly)
-        assertFalse("the chart speaks miles: $spoken", spoken.contains("km"))
-        val total = Regex("""([\d.]+) mi in total""").find(spoken)!!.groupValues[1].toDouble()
+        assertFalse("the chart speaks miles: $spoken", spoken.contains("km") || spoken.contains("kilometer"))
+        val total = Regex("""([\d.]+) miles in total""").find(spoken)!!.groupValues[1].toDouble()
         assertEquals(m.run_progress!!.weekly.sumOf { it.km } / 1.609344, total, 0.051)
 
         historyList().performScrollToNode(hasTestTag("history-record"))
@@ -539,7 +540,7 @@ class LongHistoryUiTest {
         assertNoUnitLeak("Lifts list", "kg")
         rule.onNode(hasText(countLine) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
-        val lb = java.text.NumberFormat.getIntegerInstance(Locale.US).format(Math.round(kgToLb(bigSets.sumOf { it.weightKg * it.reps })))
+        val lb = groupedFigure(Math.round(kgToLb(bigSets.sumOf { it.weightKg * it.reps })))
         rule.waitForIdle()
         val header = topWindowTexts().firstOrNull { it.startsWith("$countLine · ") }
         assertEquals("session volume in lb", "$countLine · ${str(R.string.history_session_volume, lb, "lb")}", header)
@@ -951,8 +952,8 @@ class LongHistoryUiTest {
             (!layoutInput.softWrap && multiParagraph.intrinsics.maxIntrinsicWidth > size.width + 0.5f)
 
     companion object {
-        /** `LOLLOP_LONG_UI=1` (or -Dlollop.longUi=true): three years at the tracker's 3-s cadence. */
-        private val LONG = System.getenv("LOLLOP_LONG_UI") == "1" || System.getProperty("lollop.longUi") == "true"
+        /** `LOLLOP_LONG_UI=1`: three years at the tracker's 3-s cadence. */
+        private val LONG = System.getenv("LOLLOP_LONG_UI") == "1"
         private val DAYS = if (LONG) 1_095 else 730
         private val FIX_SEC = if (LONG) 3L else 15L
 

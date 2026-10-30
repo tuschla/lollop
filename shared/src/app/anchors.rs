@@ -34,15 +34,10 @@ pub(super) struct AnchorCtx<'a> {
     /// A session day the athlete marked as an off day (session review
     /// `bad_day`): a low e1RM that day does not cut the next load.
     pub(super) off_day: Option<i64>,
-    /// The planned lifting deload weeks: their prescribed light sets neither
-    /// anchor an e1RM nor become a lift's last working sets (the deload is
-    /// taken from the working weight and the next block resumes from it,
-    /// HYP-DELOAD-RX-001, 03-hypertrophy.md:395; HYP-DOUBLEPROG-001 carries the
-    /// working load, :361-362). They still count as training days.
-    pub(super) deloads: DeloadWeeks<'a>,
-    /// The profile weighs in pounds: the plan floors loads onto the lb plate
-    /// grid, which sets how far under its target a plan load can land.
-    pub(super) weight_lb: bool,
+    /// Planned deload weeks are skipped ([`crate::plan::lift_deload_week`]):
+    /// their sets neither anchor an e1RM nor become a lift's last working
+    /// sets. They still count as training days.
+    pub(super) deloads: DeloadDays<'a>,
 }
 
 impl<'a> AnchorCtx<'a> {
@@ -52,7 +47,7 @@ impl<'a> AnchorCtx<'a> {
         profile: Option<&Profile>,
         model: &Model,
         offset: i64,
-        deloads: DeloadWeeks<'a>,
+        deloads: DeloadDays<'a>,
     ) -> Self {
         AnchorCtx {
             layoff: profile.and_then(Layoff::of),
@@ -60,7 +55,6 @@ impl<'a> AnchorCtx<'a> {
                 .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics),
             off_day: off_day(model, offset),
             deloads,
-            weight_lb: profile.is_some_and(|p| p.weight_lb),
         }
     }
 }
@@ -96,7 +90,7 @@ pub(super) fn lift_anchors_now(
         model.profile(),
         model,
         offset,
-        lift_deload_weeks(model, days),
+        lift_deload_days(model, days),
     );
     build_plan_anchors(set_index.with_facts(&model.sets), ctx, today, offset)
 }
@@ -115,8 +109,7 @@ const WINDOW_HORIZON_DAYS: i64 = 56;
 /// neither creates nor raises an anchor (STRENGTH-3).
 const SPEED_SET_FRAC: f64 = 0.70;
 /// AUTOREG-E1RM-GATE-001: a session e1RM more than 5 % under baseline cuts the
-/// next working load by about 5 %. A rated set is judged on its plate-grid
-/// credit (`Obs::e1_grid`).
+/// next working load by about 5 %.
 pub(super) const E1RM_DROP_GATE: f64 = 0.95;
 /// [`E1RM_DROP_GATE`] as the percentage drop the copy states.
 pub(super) const E1RM_DROP_PCT: f64 = (1.0 - E1RM_DROP_GATE) * 100.0;
@@ -130,14 +123,6 @@ struct Obs {
     /// RPE-extended e1RM for a rated set; the reps-as-performed Epley LOWER
     /// BOUND for an unrated one.
     e1: f64,
-    /// A rated set's e1RM one plate-grid step heavier (`load_grid_step_kg`)
-    /// at the same reps and RPE. The plan floors the load it asks for onto the
-    /// grid, so a set done as asked shows its baseline only within that step:
-    /// 85 % of a 55.5 kg overhead-press anchor is 47.2 kg, floored to 45 kg,
-    /// and 45 kg × 3 at ~2 reps left reads 52.5 kg (94.6 %). The e1RM-drop
-    /// gate compares at the RPE the set was done at (autoreg-022, e1RM "at
-    /// fixed RPE") and credits it this step.
-    e1_grid: f64,
     rated: bool,
 }
 
@@ -146,9 +131,9 @@ struct Obs {
 #[derive(Clone, Copy)]
 struct WindowResult {
     anchor: f64,
-    /// The latest session's best rated e1RM, credited one plate-grid step
-    /// (`Obs::e1_grid`), fell ≥5 % under the baseline before it (and that day
-    /// was not marked an off day).
+    /// The latest session's best rated e1RM fell ≥5 % under the baseline
+    /// before it, at the RPE the sets were done at (autoreg-022, e1RM "at
+    /// fixed RPE"), and that day was not marked an off day.
     dropped: bool,
 }
 
@@ -263,7 +248,7 @@ fn score_sessions(
     work_frac: &dyn Fn(i64) -> f64,
 ) -> Option<WindowResult> {
     let mut list: Vec<(i64, f64)> = Vec::new();
-    // (real day, best grid-credited rated e1RM, working baseline before it)
+    // (real day, best rated e1RM, working baseline before it)
     let mut last: Option<(i64, f64, Option<f64>)> = None;
     let mut i = 0;
     while i < obs.len() {
@@ -274,11 +259,11 @@ fn score_sessions(
         let running = window_best(&list, aged);
         let mut j = i;
         let mut value: Option<f64> = None;
-        let mut rated_credit: Option<f64> = None;
+        let mut rated_best: Option<f64> = None;
         while j < obs.len() && day_key(obs[j].day) == day {
             let o = obs[j];
             let v = if o.rated {
-                rated_credit = Some(rated_credit.map_or(o.e1_grid, |r: f64| r.max(o.e1_grid)));
+                rated_best = Some(rated_best.map_or(o.e1, |r: f64| r.max(o.e1)));
                 Some(o.e1)
             } else {
                 match running {
@@ -297,7 +282,7 @@ fn score_sessions(
         }
         last = Some((
             day,
-            rated_credit.unwrap_or(f64::NAN),
+            rated_best.unwrap_or(f64::NAN),
             running.map(|a| a * frac),
         ));
         i = j;
@@ -485,18 +470,11 @@ fn collect_movements<'a>(
         if deload {
             continue;
         }
-        let e1_grid = if rated {
-            let step = load_grid_step_kg(s.weight_kg, ctx.weight_lb);
-            strength::e1rm_epley_rpe(s.weight_kg + step, s.reps, s.rpe)
-        } else {
-            e1
-        };
         g.0.push(Obs {
             day,
             observed_at: s.observed_at,
             weight: s.weight_kg,
             e1,
-            e1_grid,
             rated,
         });
     }
@@ -680,11 +658,8 @@ fn last_working_derates(
 /// every set logged at that load (lighter warm-ups / back-offs are not
 /// judged). A bodyweight movement keeps load 0 (rep progression only). Holds
 /// and, on a Calisthenics profile, ladder rungs are skipped (they have their
-/// own progression), and so are a planned deload week's sets: the deload is
-/// cut from the working load and the next block resumes from it
-/// (HYP-DELOAD-RX-001, 03-hypertrophy.md:395; HYP-DOUBLEPROG-001, :361-362),
-/// so a deload session never becomes the load the next one is cut from or
-/// progresses from. A movement untrained for more than
+/// own progression), and planned deload days are skipped
+/// ([`crate::plan::lift_deload_week`]). A movement untrained for more than
 /// [`WINDOW_HORIZON_DAYS`] drops out, the horizon at which an untrained e1RM
 /// anchor is dropped (DETRAIN-STR-001).
 pub(super) fn build_last_working(

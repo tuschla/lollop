@@ -237,3 +237,236 @@ fn a_light_load_steps_up_by_at_most_ten_percent() {
     assert!(kg > 6.0 && kg <= 6.6 + 1e-6, "{kg}");
     assert!(it.why.basis.contains("goes up"), "{}", it.why.basis);
 }
+
+#[test]
+fn an_e1rm_drop_cut_on_a_rep_range_also_leaves_one_more_rep() {
+    // autoreg-006 ("cap session at planned RPE − 1 and reduce top-set load
+    // ~5%", extracted/06-autoregulation.md:134) on a double-progression item:
+    // 60 kg × 0.95 floored to 55 kg, one more rep in reserve (RPE 8 → 7), and
+    // the card says why and cites AUTOREG-E1RM-GATE-001.
+    let anchors = crate::plan::Anchors {
+        lift_e1rm: vec![("Bench Press".into(), 80.0)],
+        last_working: vec![crate::plan::LastWorking {
+            exercise: "Bench Press".into(),
+            weight_kg: 60.0,
+            sets: vec![(8, 9.0); 3],
+            age_days: 2,
+        }],
+        lift_derates: vec![crate::plan::LiftDerate {
+            exercise: "Bench Press".into(),
+            frac: crate::app::anchors::E1RM_DROP_GATE,
+            cause: crate::plan::DerateCause::E1rmDrop,
+        }],
+        ..Default::default()
+    };
+    let rx = graded(
+        Prescription::Lift(crate::schema::LiftPrescription {
+            exercise: "Bench Press".into(),
+            sets: 3,
+            reps: 8,
+            intensity: LiftIntensity::Rir(2),
+            rest_sec: 120,
+            velocity_loss_pct: None,
+            reps_max: Some(12),
+            load_kg: Some(60.0),
+        }),
+        claims::HYP_DOUBLEPROG_001,
+    );
+    let it = flatten_prescription(&rx, &anchors, None, false);
+    assert_eq!((it.load_kg, it.target_rpe), (Some(55.0), Some(7.0)));
+    assert!(
+        it.evidence.citation.contains("Helms"),
+        "{:?}",
+        it.evidence.citation
+    );
+    assert!(
+        it.why.basis.contains("under your estimate"),
+        "{}",
+        it.why.basis
+    );
+}
+
+// ── Planned deload days survive a re-made plan and mid-week profile edits ──
+
+/// 2026-01-05, a Monday.
+const DELOAD_START: i64 = 20_458;
+
+fn four_day_hyp_profile() -> Profile {
+    Profile {
+        lift_goal: LiftGoal::Hypertrophy,
+        concurrent_goal: ConcurrentGoal::Hypertrophy,
+        weekly_sets: 16,
+        lift_days_per_week: Some(4),
+        age_years: Some(29.0),
+        ..base_profile()
+    }
+}
+
+/// An athlete who follows the plan exactly: each day's loads, reps and effort.
+struct Follower {
+    m: Model,
+    id: u64,
+    last_kg: std::collections::BTreeMap<String, f64>,
+}
+
+impl Follower {
+    /// Profile in force from two weeks before [`DELOAD_START`], one set of each
+    /// lift logged three days before it, and a plan from [`DELOAD_START`].
+    fn new(profile: Profile, lifts: &[(&str, f64)]) -> Self {
+        let mut f = Follower {
+            m: Model::default(),
+            id: 0,
+            last_kg: Default::default(),
+        };
+        f.send(set_today_ev(DELOAD_START - 14));
+        f.send(Event::SetProfile(Profile {
+            effective_from_epoch_day: Some(DELOAD_START - 14),
+            ..profile
+        }));
+        for (i, (ex, kg)) in lifts.iter().enumerate() {
+            let at = (DELOAD_START - 3) * DAY_SEC + 64_800 + 200 * i as i64;
+            f.send(log_set(ex, *kg, 5, 8.0, at));
+        }
+        f.send(set_today_ev(DELOAD_START));
+        f.send(Event::GeneratePlan {
+            start_epoch_day: DELOAD_START,
+        });
+        f
+    }
+
+    fn send(&mut self, mut ev: Event) {
+        self.id += 1;
+        if let Event::LogSet { entry_id, .. } = &mut ev {
+            *entry_id = self.id;
+        }
+        let _ = Engine.update(ev, &mut self.m);
+    }
+
+    /// Follow the plan exactly on day `d` (loads, reps, target effort).
+    fn train(&mut self, d: i64) {
+        self.send(set_today_ev(d));
+        let Some(ns) = Engine
+            .view(&self.m)
+            .next_session
+            .filter(|s| s.epoch_day == d)
+        else {
+            return;
+        };
+        let mut t = d * DAY_SEC + 17 * 3_600;
+        for it in ns.items.iter().filter(|i| !i.is_run()) {
+            let rpe = it.target_rpe.unwrap_or(8.0);
+            let reps = u32::from(it.reps_high.max(it.reps_low).max(1));
+            let kg = it
+                .load_kg
+                .or(it.suggested_load_kg)
+                .or_else(|| self.last_kg.get(&it.exercise).copied())
+                .unwrap_or(20.0);
+            self.last_kg.insert(it.exercise.clone(), kg);
+            for _ in 0..it.sets.max(1) {
+                self.send(log_set(&it.exercise, kg, reps, rpe, t));
+                t += i64::from(it.rest_sec.max(60));
+            }
+        }
+    }
+
+    /// The first prescribed load of `ex` in this week's plan.
+    fn first_load(&self, ex: &str) -> Option<f64> {
+        Engine
+            .view(&self.m)
+            .week_plan
+            .iter()
+            .flat_map(|r| r.items.iter())
+            .filter(|it| it.exercise == ex)
+            .find_map(|it| it.load_kg)
+    }
+}
+
+/// HYP-DELOAD-RX-001 / autoreg-022: "Remove plan" and a new plan the week
+/// after the deload keep the deload's light sets out of the anchors
+/// (`Model::past_plans`), so the new block starts from the working loads.
+#[test]
+fn a_remade_plan_still_skips_the_last_deload() {
+    let mut f = Follower::new(
+        four_day_hyp_profile(),
+        &[
+            ("Back Squat", 100.0),
+            ("Bench Press", 75.0),
+            ("Deadlift", 130.0),
+            ("Overhead Press", 45.0),
+            ("Barbell Row", 65.0),
+        ],
+    );
+    // Weeks 1–6: five load weeks and the planned deload (plan week index 5).
+    let mut week5 = std::collections::BTreeMap::new();
+    for d in DELOAD_START..DELOAD_START + 42 {
+        f.train(d);
+        if (DELOAD_START + 28..DELOAD_START + 35).contains(&d) {
+            week5.extend(f.last_kg.clone());
+        }
+    }
+    let monday = DELOAD_START + 42;
+    f.send(set_today_ev(monday));
+    let kept = f.first_load("Bench Press").expect("bench on the kept plan");
+    f.send(Event::ClearPlan);
+    f.send(Event::GeneratePlan {
+        start_epoch_day: monday,
+    });
+    let fresh = f.first_load("Bench Press").expect("bench on the new plan");
+    let before = week5["Bench Press"];
+    assert!(
+        fresh >= 0.9 * before,
+        "bench: {before} kg in the last load week, {kept} kg on the kept plan, \
+         {fresh} kg on a plan re-created after the deload"
+    );
+}
+
+/// A novice (no calendar deload) who becomes an intermediate on the
+/// Wednesday of plan week index 5 is prescribed a deload Wednesday–Sunday:
+/// those days are deload days under their own profile, so the next block
+/// starts from the working loads.
+#[test]
+fn a_mid_week_profile_change_into_a_deload_still_skips_it() {
+    let novice = Profile {
+        progression_cadence: crate::individualization::ProgressionCadence::EverySession,
+        ..four_day_hyp_profile()
+    };
+    let mut f = Follower::new(
+        novice,
+        &[
+            ("Bench Press", 75.0),
+            ("Back Squat", 100.0),
+            ("Barbell Row", 65.0),
+        ],
+    );
+    let wed = DELOAD_START + 35 + 2;
+    let mut week5 = std::collections::BTreeMap::new();
+    for d in DELOAD_START..DELOAD_START + 42 {
+        if d == wed {
+            f.send(set_today_ev(d));
+            f.send(Event::SetProfile(Profile {
+                effective_from_epoch_day: Some(wed),
+                ..four_day_hyp_profile()
+            }));
+        }
+        f.train(d);
+        if (DELOAD_START + 28..DELOAD_START + 35).contains(&d) {
+            week5.extend(f.last_kg.clone());
+        }
+    }
+    let monday = DELOAD_START + 42;
+    f.send(set_today_ev(monday));
+    let deload_days = {
+        let cx = ViewCtx::new(&f.m);
+        lift_deload_days(&f.m, &cx.days).0.to_vec()
+    };
+    assert!(
+        deload_days.contains(&wed) && !deload_days.contains(&(wed - 2)),
+        "deload days {deload_days:?}"
+    );
+    let next = f.first_load("Bench Press").expect("bench next week");
+    let before = week5["Bench Press"];
+    assert!(
+        next >= 0.9 * before,
+        "bench {before} kg before the deload → {next} kg after it"
+    );
+}

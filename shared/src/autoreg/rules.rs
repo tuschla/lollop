@@ -228,7 +228,7 @@ pub(super) const WELLNESS_MULTIDAY_Z: f64 = -1.0;
 /// Consecutive suppressed days that arm the wellness multi-day intensity downgrade.
 pub(crate) const WELLNESS_DOWNGRADE_STREAK: u8 = 2;
 /// Consecutive suppressed days that raise the §5 tier-4 SubjectiveMultiDay tier.
-pub(super) const WELLNESS_MULTIDAY_STREAK: u8 = 3;
+pub(crate) const WELLNESS_MULTIDAY_STREAK: u8 = 3;
 
 /// HRV lnRMSSD z-score SWC band, ± around rolling baseline (autoreg-028/029).
 pub(super) const HRV_SWC_LOWER_Z: f64 = -0.5;

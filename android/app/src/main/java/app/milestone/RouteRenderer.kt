@@ -165,7 +165,7 @@ internal class RouteStyle(
     val pillBorder: Int,
     val density: Float,
     val textPx: Float,
-    /** The finish flag, already tinted OnAccent. */
+    /** The finish flag, already tinted (the route's casing colour). */
     val flag: Drawable,
     val startLabel: String,
     val finishLabel: String,

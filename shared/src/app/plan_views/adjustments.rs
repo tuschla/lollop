@@ -523,7 +523,6 @@ impl EffortPass {
             .max()
             .unwrap_or(0);
         let hold_load = recommended.iter().any(holds_load);
-        let step = movement_step_kg(weight_lb);
         let mut eased = vec![0u8; items.len()];
         let mut clamped = vec![false; items.len()];
         for (i, it) in items.iter_mut().enumerate() {
@@ -538,7 +537,7 @@ impl EffortPass {
             if d > 0 && cap_item_effort(it, d, weight_lb) {
                 eased[i] = d;
             }
-            if hold_load && clamp_to_hold_cap(it, step) {
+            if hold_load && clamp_to_hold_cap(it, weight_lb) {
                 clamped[i] = true;
                 it.load_held = true;
                 resync_intensity(it, weight_lb);
@@ -970,7 +969,7 @@ fn hold_note(eased: u8) -> String {
 /// for its reps (`hold_load_cap_kg`): the prescribed load (its %e1RM label
 /// following) or, for an effort-prescribed lift, the suggested start. The
 /// logged sets are re-judged at the held load. Returns whether it moved.
-fn clamp_to_hold_cap(it: &mut PrescriptionView, step: f64) -> bool {
+fn clamp_to_hold_cap(it: &mut PrescriptionView, weight_lb: bool) -> bool {
     let Some(cap) = it.hold_load_cap_kg.filter(|c| *c > 0.0) else {
         return false;
     };
@@ -978,7 +977,7 @@ fn clamp_to_hold_cap(it: &mut PrescriptionView, step: f64) -> bool {
         (Some(load), _) if cap + 1e-9 < load => {
             it.load_kg = Some(cap);
             reduce_percent_intensity(&mut it.intensity, 1.0 - cap / load);
-            rejudge_at_load(it, cap, step);
+            rejudge_at_load(it, cap, weight_lb);
             true
         }
         (None, Some(start)) if cap + 1e-9 < start => {
@@ -990,9 +989,11 @@ fn clamp_to_hold_cap(it: &mut PrescriptionView, step: f64) -> bool {
 }
 
 /// Re-judge an item's logged sets against a lowered load `bar`: a set at it
-/// (within one plate step) for the prescribed reps is a full set.
-pub(super) fn rejudge_at_load(it: &mut PrescriptionView, bar: f64, step: f64) {
+/// (within one plate step, [`load_grid_step_kg`]) for the prescribed reps is
+/// a full set.
+pub(super) fn rejudge_at_load(it: &mut PrescriptionView, bar: f64, weight_lb: bool) {
     let reps_low = u32::from(it.reps_low);
+    let step = load_grid_step_kg(bar, weight_lb);
     for s in it.logged_sets.iter_mut() {
         if s.hold_sec.is_none() && s.reps >= reps_low && s.weight_kg + 1e-9 >= bar - step {
             s.qualifies = true;

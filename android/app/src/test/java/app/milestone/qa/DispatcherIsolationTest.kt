@@ -5,7 +5,6 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import java.util.Locale
 import kotlinx.coroutines.awaitCancellation
 import org.junit.After
 import org.junit.Assert.assertTrue
@@ -37,7 +36,6 @@ class DispatcherIsolationTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

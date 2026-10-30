@@ -62,6 +62,9 @@ internal fun monthLabel(epochSec: Long, zone: java.time.ZoneId, fmt: java.time.f
     return java.time.Instant.ofEpochSecond(epochSec).atZone(zone).toLocalDate().format(fmt)
 }
 
+/** Epoch day of the Monday that starts [epochDay]'s week (epoch day 0 was a Thursday). */
+internal fun mondayOf(epochDay: Long): Long = epochDay - Math.floorMod(epochDay + 3, 7L)
+
 /** The month headers and jump targets for a newest-first stream with one day stamp
  *  per card ([stamps]), after [base] non-month items. MIRRORS the stream's emission
  *  order (a header slot before each month's first card, then the card): a wrong
@@ -93,10 +96,6 @@ internal fun buildMonthNav(
     }
     return MonthNav(jumpTargets = jumpTargets, headerBefore = headerBefore)
 }
-
-/** ConsistencyView.weeks holds at most this many finished plan weeks (the core's
- *  `build_consistency`); fewer means the oldest one is the plan's first week. */
-private const val CONSISTENCY_WEEKS_MAX = 8
 
 /** History (03-history): 7-day strip → LAST 12 WEEKS heatmap → Lifts|Runs segment → (Runs: progress, records) → entry cards, or the segment's empty state. */
 @Composable
@@ -192,16 +191,6 @@ internal fun HistoryDestination(
     ) { uris -> if (uris.isNotEmpty()) RunImport.importRuns(ctx, uris) }
     val launchImport = { importRuns.launch("*/*") }
     val todayLocalDay = localEpochDay(nowMillis / 1000, zone)
-    // The plan's first week, so the weekly chart's plan line never covers the weeks
-    // before the plan existed. When the core reports a full window of finished plan
-    // weeks the start is older than it says, so the line spans the whole chart.
-    val planStartEpochDay = model.consistency?.let { c ->
-        if (c.weeks.size >= CONSISTENCY_WEEKS_MAX) {
-            null
-        } else {
-            c.weeks.firstOrNull()?.week_monday_epoch_day ?: (todayLocalDay - Math.floorMod(todayLocalDay + 3, 7L))
-        }
-    }
     EntryActionSheets(
         selected = selected,
         // Memoized on model.lifts so the full-history scan isn't recomputed on
@@ -240,10 +229,7 @@ internal fun HistoryDestination(
             onEvent = onEvent,
         )
     }
-    // Jump-to-month scaffolding: the list state is hoisted so the control below can
-    // animate-scroll it, and `monthNav` maps each month label -> its LazyColumn item
-    // index by MIRRORING the emission order (prefix of non-month items + a running
-    // header/entry tally). A wrong offset would scroll to the wrong row.
+    // The list state is hoisted so the jump control can scroll it.
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     // The core sends run progress only once a dated run has a distance; without it
@@ -386,7 +372,6 @@ internal fun HistoryDestination(
                     kmByDay = kmByDay,
                     todayLocalDay = todayLocalDay,
                     unit = distanceUnit,
-                    planStartEpochDay = planStartEpochDay,
                 )
             }
         }
@@ -406,7 +391,7 @@ internal fun HistoryDestination(
         // opens a whole-row option list, never an anchored dropdown) when the active
         // stream spans >=2 months; a pick animate-scrolls to that month's header (item
         // index precomputed in `monthNav`).
-        val jumpMonths = monthNav.jumpTargets.map { it.first }.takeIf { it.size >= 2 }
+        val jumpMonths = monthNav.jumpTargets.map { it.first }.takeIf { it.isNotEmpty() }
         val onJump: (String) -> Unit = { label ->
             monthNav.jumpTargets.firstOrNull { it.first == label }?.let { target ->
                 scope.launch { listState.animateScrollToItem(target.second) }

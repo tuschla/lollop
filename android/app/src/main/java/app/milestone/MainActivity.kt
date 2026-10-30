@@ -107,7 +107,7 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 }
-                Surface(modifier = Modifier.fillMaxSize().windowTraversalGroup(), color = BgTop) {
+                Surface(modifier = Modifier.fillMaxSize().traversalGroup(), color = BgTop) {
                     CoachScreen(openRequest)
                 }
             }

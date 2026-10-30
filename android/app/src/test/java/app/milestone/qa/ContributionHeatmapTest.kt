@@ -71,7 +71,7 @@ class ContributionHeatmapTest {
         val grid = rule.onNode(hasContentDescription(strPrefix(R.string.history_heatmap_desc, 12), substring = true)).getBoundsInRoot()
         val slack = (host.right - host.left) - (grid.right - grid.left)
         // Only the whole-pixel flooring of 12 equal columns (< 1px each) may be
-        // left over; the old 18dp cell cap left several columns' worth.
+        // left over.
         val maxSlack = with(rule.density) { 12.toDp() }
         assertTrue("heatmap leaves $slack unused at the right (max $maxSlack)", slack <= maxSlack)
     }

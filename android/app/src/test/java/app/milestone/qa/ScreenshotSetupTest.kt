@@ -58,7 +58,6 @@ class ScreenshotSetupTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

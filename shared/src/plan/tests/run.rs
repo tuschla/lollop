@@ -57,10 +57,27 @@ fn place(plan: &RunWeekPlan) -> Vec<(u16, RunSessionType)> {
     out
 }
 
+/// `run_week_plan` for direct run-week tests: a taper week cuts from its last
+/// load week laid out by [`place`].
+fn plan_week(p: &Profile, a: &Anchors, r: &RunWeekRequest) -> RunWeekPlan {
+    run_week_plan(p, a, r, &|k| {
+        let a = Anchors {
+            week_start_epoch_day: a.week_start_epoch_day.map(|d| d - 7 * i64::from(k)),
+            ..a.clone()
+        };
+        let r = RunWeekRequest {
+            week_index: r.week_index.saturating_sub(k),
+            ..*r
+        };
+        let plan = plan_week(p, &a, &r);
+        sessions_km(&run_week_sessions(&plan, &place(&plan), p, &a))
+    })
+}
+
 /// Plan + prescribe one week directly (no lift days).
 fn week(p: &Profile, a: &Anchors, week_index: u32) -> (RunWeekPlan, Vec<Session>) {
     let days = run_slot_count(p);
-    let plan = run_week_plan(p, a, &req(week_index, days));
+    let plan = plan_week(p, a, &req(week_index, days));
     let sessions = run_week_sessions(&plan, &place(&plan), p, a);
     (plan, sessions)
 }
@@ -86,7 +103,7 @@ fn claim_of(s: &Session) -> crate::evidence::ClaimId {
 /// The first plan block index whose rolling phase is Build (cycle 1).
 fn build_week(p: &Profile) -> u32 {
     (0..16)
-        .find(|&w| run_week_plan(p, &Anchors::default(), &req(w, 5)).phase == MesoPhase::Build)
+        .find(|&w| plan_week(p, &Anchors::default(), &req(w, 5)).phase == MesoPhase::Build)
         // General fitness stays in Base: its "build" week is the first week.
         .unwrap_or(0)
 }
@@ -139,6 +156,7 @@ fn ctx(weekly_km: f64, baseline: Option<f64>, n: usize) -> DayCtx {
         n_run_days: n,
         recovery: false,
         taper: false,
+        quality_floor: false,
         goal: GoalDistance::TenK,
         vdot: None,
         easy_pace: 390.0,
@@ -153,28 +171,10 @@ fn km_of(v: RunVolume) -> f64 {
     }
 }
 
-/// A week's prescribed km as the plan counts it: main sets (reps × rep for a
-/// repeat set), minutes at the accounting easy pace, and every warm-up and
-/// cool-down.
+/// A week's prescribed km as the plan counts it, at the accounting easy pace
+/// of an athlete with no pace anchor.
 fn sessions_km(sessions: &[Session]) -> f64 {
-    let pace = running::warmup_rx().value.accounting_easy_pace_sec_per_km;
-    let km_or_min = |v: RunVolume| match v {
-        RunVolume::DurationMin(m) => f64::from(m) * 60.0 / pace,
-        v => km_of(v),
-    };
-    sessions
-        .iter()
-        .map(|s| {
-            let r = run_of(s);
-            let main = match r.repeats {
-                Some((n, rep)) => f64::from(n) * km_of(rep),
-                None => km_or_min(r.volume),
-            };
-            let wucd =
-                f64::from(r.warmup_min.unwrap_or(0) + r.cooldown_min.unwrap_or(0)) * 60.0 / pace;
-            main + wucd
-        })
-        .sum()
+    crate::plan::run::prescribed_km(sessions, &Anchors::default())
 }
 
 // ── Basic week shape ─────────────────────────────────────────────────────
@@ -269,6 +269,7 @@ fn tenk_race_six_weeks_out_tapers_the_final_two_weeks_per_bosquet() {
     let mut p = runner(GoalDistance::TenK, 5, 60.0);
     // Race on the Saturday six weeks after the first plan week's Monday.
     p.goal_race_epoch_day = Some(MON0 + 42 + 5);
+    let shape = week_shape(&p);
     let mut phases = Vec::new();
     let mut plans = Vec::new();
     for i in 0..=6u32 {
@@ -276,7 +277,14 @@ fn tenk_race_six_weeks_out_tapers_the_final_two_weeks_per_bosquet() {
             week_start_epoch_day: Some(MON0 + 7 * i as i64),
             ..Default::default()
         };
-        let (plan, sessions) = week(&p, &a, i);
+        let plan = run_plan(&p, &a, &shape, i);
+        let prog = synthesize(&p, &a, i).unwrap();
+        let sessions: Vec<Session> = prog
+            .mesocycle
+            .sessions
+            .into_iter()
+            .filter(|s| matches!(s.session_type, SessionType::Run(_)))
+            .collect();
         phases.push(plan.phase);
         plans.push((plan, sessions));
     }
@@ -294,26 +302,24 @@ fn tenk_race_six_weeks_out_tapers_the_final_two_weeks_per_bosquet() {
         ]
     );
 
-    // The last pre-taper week is the top load week; both taper weeks cut its
-    // volume by 41–60 % (Bosquet), deepening toward the race. The cut is
-    // judged on the km each week prescribes: with 12 km a day the easy days
-    // hit running-015's 90-min ceiling, so the top week holds less than its
-    // ramp figure. Half a kilometre of rounding per run day.
+    // The last pre-taper week is the top load week; both taper weeks cut the
+    // km it prescribes by 41–60 % (Bosquet), deepening toward the race. With
+    // 12 km a day the easy days hit running-015's 90-min ceiling, so the top
+    // week holds less than its ramp figure; the taper weeks hold their cut.
     let top = sessions_km(&plans[4].1);
     let t1 = plans[5].0.weekly_km;
     let t2 = plans[6].0.weekly_km;
     assert!(top < plans[4].0.weekly_km, "the ceiling binds: {top} km");
     for (t, sessions) in [(t1, &plans[5].1), (t2, &plans[6].1)] {
-        let tol = 0.5 * sessions.len() as f64;
-        let held = sessions_km(sessions);
-        assert!(
-            (top * 0.40 - tol..=top * 0.59 + tol).contains(&held),
-            "taper week {held} km of a {top} km top week"
-        );
         let cut = 1.0 - t / top;
         assert!(
-            (0.41 - 0.01..=0.60 + 0.01).contains(&cut),
+            (0.41 - 1e-9..=0.60 + 1e-9).contains(&cut),
             "taper cut {cut} of {top} km"
+        );
+        let held = sessions_km(sessions);
+        assert!(
+            held <= t + 1e-9,
+            "taper week {held} km of a {t} km cut week"
         );
     }
     assert!(t2 < t1);
@@ -338,11 +344,115 @@ fn tenk_race_six_weeks_out_tapers_the_final_two_weeks_per_bosquet() {
     );
 }
 
+/// (run km the synthesized week prescribes, its run plan, the program) for
+/// plan week `i` counted from [`MON0`].
+fn synthesized_week(p: &Profile, i: u32) -> (f64, RunWeekPlan, Program) {
+    let a = Anchors {
+        week_start_epoch_day: Some(MON0 + 7 * i64::from(i)),
+        ..Default::default()
+    };
+    let prog = synthesize(p, &a, i).expect("a plan");
+    (
+        sessions_km(&prog.mesocycle.sessions),
+        run_plan(p, &a, &week_shape(p), i),
+        prog,
+    )
+}
+
+/// A hybrid's taper cuts from the load week laid out around its lift days, as
+/// synthesized (running-037/038), not from a run-only re-placement of it.
+#[test]
+fn hybrid_taper_cuts_from_the_load_week_it_ran() {
+    let mut p = base_profile();
+    p.goal_distance = GoalDistance::TenK;
+    p.concurrent_goal = ConcurrentGoal::EndurancePriority;
+    p.running_days_per_week = 5;
+    p.running_km_per_week = 60.0;
+    p.lift_days_per_week = Some(3);
+    p.weekly_sets = 10;
+    p.goal_race_epoch_day = Some(MON0 + 42 + 5);
+    let (ran, _, _) = synthesized_week(&p, 4);
+    let (_, taper, _) = synthesized_week(&p, 5);
+    let (k, n) = taper.taper_week.expect("week 5 is the first taper week");
+    assert_eq!(k, 1);
+    let cut = running::taper_volume_cut(p.goal_distance, k, n)
+        .unwrap()
+        .value;
+    let basis = taper.weekly_km / (1.0 - cut);
+    assert!(
+        (ran - basis).abs() < 1e-9,
+        "last load week ran {ran:.1} km; the taper cut from {basis:.1} km"
+    );
+}
+
+/// RUN-LONGRUN-001's 25–30 % share (04-running.md:482) is a share of the week
+/// run: once the 90-min easy ceiling (running-015) holds the week below its
+/// ramp, the long run is sized on what the week holds, and a later load week
+/// never runs a shorter long run or a smaller week.
+#[test]
+fn long_run_keeps_its_share_of_the_week_it_runs() {
+    let mut p = runner(GoalDistance::TenK, 5, 60.0);
+    p.goal_race_epoch_day = Some(MON0 + 42 + 5);
+    let mut prev: Option<(f64, f64)> = None;
+    for i in 0..=4u32 {
+        let (held, plan, prog) = synthesized_week(&p, i);
+        if plan.recovery {
+            continue;
+        }
+        let long = prog
+            .mesocycle
+            .sessions
+            .iter()
+            .filter(|s| s.session_type == SessionType::Run(RunSessionType::LongRun))
+            .map(|s| km_of(run_of(s).volume))
+            .next()
+            .expect("a long run");
+        let share = running::long_run_share(held).value;
+        assert!(
+            long <= share * held + 0.5,
+            "week {i}: long {long} km of the {held:.1} km it holds"
+        );
+        if let Some((pl, ph)) = prev {
+            assert!(
+                long >= pl && held >= ph - 1e-9,
+                "week {i}: long {pl} → {long} km, week {ph:.1} → {held:.1} km"
+            );
+        }
+        prev = Some((long, held));
+    }
+}
+
+/// A 40 km/wk half-marathon taper week sheds the race-pace session the half's
+/// taper does not keep (running-038: MP touches are the marathon's,
+/// 04-running.md:499-500) and holds its 50 % cut within half a kilometre of
+/// rounding per run day.
+#[test]
+fn half_marathon_taper_week_cuts_half_of_the_last_load_week() {
+    let mut p = runner(GoalDistance::HalfMarathon, 5, 40.0);
+    let race_week = 14u32;
+    p.goal_race_epoch_day = Some(MON0 + 7 * i64::from(race_week) + 5);
+    let n = running::taper_weeks(GoalDistance::HalfMarathon);
+    let (top, _, _) = synthesized_week(&p, race_week - n);
+    let (taper, plan, prog) = synthesized_week(&p, race_week - n + 1);
+    let rule = running::taper_volume_cut(GoalDistance::HalfMarathon, 1, n)
+        .unwrap()
+        .value;
+    assert!(
+        taper <= top * (1.0 - rule) + 2.5,
+        "taper week {taper:.1} km after a {top:.1} km load week: a {:.0} % cut, rule {:.0} %",
+        100.0 * (1.0 - taper / top),
+        100.0 * rule
+    );
+    let kinds = run_kinds_of(&prog);
+    assert!(!kinds.contains(&RunSessionType::RacePace), "{kinds:?}");
+    assert_eq!(kinds.len(), plan.kinds.len(), "frequency held");
+}
+
 #[test]
 fn no_race_date_rolls_base_and_build_cycles_without_peak_or_taper() {
     let p = runner(GoalDistance::HalfMarathon, 5, 40.0);
     let phases: Vec<MesoPhase> = (0..16)
-        .map(|w| run_week_plan(&p, &Anchors::default(), &req(w, 5)).phase)
+        .map(|w| plan_week(&p, &Anchors::default(), &req(w, 5)).phase)
         .collect();
     assert_eq!(phases[0], MesoPhase::Base);
     assert!(phases.contains(&MesoPhase::Build));
@@ -358,7 +468,7 @@ fn a_past_race_date_falls_back_to_the_rolling_cycle() {
         week_start_epoch_day: Some(MON0),
         ..Default::default()
     };
-    let plan = run_week_plan(&p, &a, &req(0, 5));
+    let plan = plan_week(&p, &a, &req(0, 5));
     assert_eq!(plan.phase, MesoPhase::Base);
     assert_eq!(plan.race_day, None);
 }
@@ -406,7 +516,7 @@ fn volume_holds_in_the_week_the_phase_steps_intensity_up() {
                 week_start_epoch_day: Some(MON0 + 7 * i as i64),
                 ..Default::default()
             };
-            run_week_plan(&p, &a, &req(i, 5))
+            plan_week(&p, &a, &req(i, 5))
         })
         .collect();
     let rank = |ph: MesoPhase| match ph {
@@ -445,7 +555,7 @@ fn recovery_week_cuts_by_the_kb_midpoint_and_shrinks_the_long_run() {
         ..Default::default()
     };
     let rec = (0..8u32)
-        .find(|&w| run_week_plan(&p, &a, &req(w, 3)).recovery)
+        .find(|&w| plan_week(&p, &a, &req(w, 3)).recovery)
         .expect("a recovery week");
     let (load, load_sessions) = week(&p, &a, 0);
     let (plan, sessions) = week(&p, &a, rec);
@@ -475,7 +585,7 @@ fn compliant_twelve_week_history_grows_cycle_start_volume() {
             run_week_km: hist,
             ..Default::default()
         };
-        run_week_plan(&p, &a, &req(i, 5)).weekly_km
+        plan_week(&p, &a, &req(i, 5)).weekly_km
     };
     let c1 = w(0, vec![]);
     assert!((c1 - 40.0).abs() < 1e-9);
@@ -502,7 +612,7 @@ fn noncompliant_cycle_repeats_base() {
         run_week_km: vec![15.0, 20.0, 20.0, 18.0],
         ..Default::default()
     };
-    assert_eq!(run_week_plan(&p, &a, &req(4, 5)).weekly_km, 40.0);
+    assert_eq!(plan_week(&p, &a, &req(4, 5)).weekly_km, 40.0);
 }
 
 #[test]
@@ -927,12 +1037,13 @@ fn a_demonstrated_anchored_long_run_within_bounds_cites_the_spike_rule() {
 #[test]
 fn a_volume_dominated_long_run_still_cites_the_share_cap() {
     // Four run days: 30 % of the week is above the average run, so the share
-    // itself sets the long run.
+    // itself sets the long run. 48 km is a week four runs hold under the
+    // 90-min easy-run ceiling (running-015).
     let mut p = half_marathoner();
     p.running_days_per_week = 4;
-    p.running_km_per_week = 60.0;
+    p.running_km_per_week = 48.0;
     let prog = synthesize(&p, &Anchors::default(), 0).unwrap();
-    assert_eq!(long_run_km(&prog), Some(18.0), "30 % of 60 km");
+    assert_eq!(long_run_km(&prog), Some(14.0), "30 % of 48 km, floored");
     assert_eq!(long_run_claim(&prog), Some(claims::RUN_LONGRUN_001));
 }
 
@@ -965,12 +1076,12 @@ fn measured_volume_raises_the_long_run_even_without_a_longest_anchor() {
     let mut p = half_marathoner();
     p.running_km_per_week = 16.0;
     let anchors = Anchors {
-        recent_weekly_km: Some(60.0),
+        recent_weekly_km: Some(27.0),
         ..Default::default()
     };
     let prog = synthesize(&p, &anchors, 0).unwrap();
-    // 60 km over 3 run days: the average run, 20 km.
-    assert_eq!(long_run_km(&prog), Some(20.0));
+    // 27 km over 3 run days: the average run, 9 km.
+    assert_eq!(long_run_km(&prog), Some(9.0));
 }
 
 #[test]
@@ -1221,7 +1332,7 @@ fn no_stated_or_measured_volume_plans_the_kb_duration_floors() {
 
 #[test]
 fn quality_week_with_wu_cd_sums_to_weekly_km() {
-    let p = runner(GoalDistance::TenK, 5, 50.0);
+    let p = runner(GoalDistance::TenK, 5, 45.0);
     let (plan, sessions) = week(&p, &Anchors::default(), build_week(&p));
     let pace = running::warmup_rx().value.accounting_easy_pace_sec_per_km;
     let mut total = 0.0;
@@ -1380,7 +1491,7 @@ fn c25k_never_skips_the_bridge_run_with_fewer_run_days() {
     assert_eq!(run_slot_count(&p), 3);
     // Only two days fit: the week keeps its last two runs, so week 5 still
     // ends on the first 20-min continuous run.
-    let plan = run_week_plan(&p, &Anchors::default(), &req(4, 2));
+    let plan = plan_week(&p, &Anchors::default(), &req(4, 2));
     let sessions = run_week_sessions(&plan, &place(&plan), &p, &Anchors::default());
     let bouts: Vec<Vec<(u16, u16)>> = sessions
         .iter()

@@ -262,7 +262,7 @@ fun LogRunEditor(
             Box(Modifier.bringIntoViewRequester(fieldRequesters.getValue(RunField.Duration))) {
                 KeypadValueField(
                     stringResource(R.string.log_field_duration), stringResource(R.string.log_unit_hms),
-                    fmtDurationDigits(durDigits),
+                    hmsDisplay(durDigits),
                     active = keypadOpen && active == RunField.Duration,
                     invalid = false,
                     min = 0.0, max = RunDurationMaxMin, format = "%.0f",
@@ -344,30 +344,10 @@ internal fun durationDigitsToMin(digits: String): Double? {
     return h * 60.0 + m + s / 60.0
 }
 
-/** Display form of a duration digit buffer: "1:45:30", "45:30", "0:30"; "" when empty. Pure. */
-internal fun fmtDurationDigits(digits: String): String {
-    if (digits.isEmpty()) return ""
-    val p = digits.padStart(HMS_DIGITS_MAX, '0').takeLast(HMS_DIGITS_MAX)
-    val h = p.substring(0, 2).toInt()
-    val m = p.substring(2, 4)
-    val s = p.substring(4, 6)
-    return if (h > 0) "$h:$m:$s" else "${m.toInt()}:$s"
-}
-
 /** A stored duration (minutes) as a timer digit buffer, rounded to the second
  *  ("105.5" → "14530"); "" for zero. Pure. */
-internal fun minutesToDurationDigits(min: Double): String {
-    val total = Math.round(min * 60.0).coerceIn(0L, 359_999L)
-    val h = total / 3600
-    val m = (total % 3600) / 60
-    val s = total % 60
-    val raw = if (h > 0) {
-        String.format(Locale.US, "%d%02d%02d", h, m, s)
-    } else {
-        String.format(Locale.US, "%d%02d", m, s)
-    }
-    return raw.trimStart('0')
-}
+internal fun minutesToDurationDigits(min: Double): String =
+    secondsToHmsDigits(Math.round(min * 60.0).coerceIn(0L, 359_999L).toInt())
 
 /** Apply one keypad key to a duration digit buffer: digits append (no leading
  *  zero, at most hhmmss), the decimal point is ignored. [replaceAll] starts a

@@ -18,7 +18,6 @@ import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.epochDayLabel
 import java.time.LocalDate
-import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -44,7 +43,6 @@ class NoBirthdayJourneysTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

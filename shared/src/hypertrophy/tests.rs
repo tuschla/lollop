@@ -409,3 +409,37 @@ fn rep_ranges_sit_inside_table_2() {
     assert_eq!(pct(8, 2).round(), 75.0);
     assert_eq!(pct(6, 2).round(), 79.0);
 }
+
+/// One `names::exercise_key`, one exercise: caps-lock typing on a Turkish
+/// keyboard ("CABLE KİCKBACK") folds like its ASCII spelling in the isolation
+/// taxonomy and the Table 1 muscle credits too.
+#[test]
+fn one_exercise_key_one_isolation_class() {
+    for (ascii, turkish) in [
+        ("Cable kickback", "CABLE KİCKBACK"),
+        ("Skull crusher", "SKULL CRUSHER"),
+        ("Hip thrust", "HİP THRUST"),
+        ("Face pull", "FACE PULL"),
+        ("Sissy squat", "SİSSY SQUAT"),
+    ] {
+        assert_eq!(
+            crate::names::exercise_key(ascii),
+            crate::names::exercise_key(turkish)
+        );
+        assert_eq!(
+            crate::plan::is_isolation_lift(ascii),
+            crate::plan::is_isolation_lift(turkish),
+            "{ascii:?} vs {turkish:?}"
+        );
+        assert_eq!(
+            muscle_credits(ascii),
+            muscle_credits(turkish),
+            "{ascii:?} vs {turkish:?}"
+        );
+        assert_eq!(
+            classify(ascii),
+            classify(turkish),
+            "{ascii:?} vs {turkish:?}"
+        );
+    }
+}

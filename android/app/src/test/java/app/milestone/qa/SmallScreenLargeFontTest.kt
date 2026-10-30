@@ -28,15 +28,10 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.ConcurrentGoal
 import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.GoalDistance
-import app.milestone.LiftGoal
-import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.ReadinessSignal
-import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -70,7 +65,6 @@ class SmallScreenLargeFontTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 
@@ -285,34 +279,11 @@ class SmallScreenLargeFontTest {
 
     private fun fabWidthDp() = dp(rule.onNode(logFab).fetchSemanticsNode().boundsInRoot.width)
 
-    private fun strengthWithHistory() = QaHarness.seedLog(
-        ctx,
-        listOf(
-            QaHarness.strengthProfile(),
-            QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(6)),
-            QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(4)),
-            QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(2)),
-        ),
-    )
-
-    private fun hybridProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
-        goalDistance = GoalDistance.FiveK,
-        concurrentGoal = ConcurrentGoal.Strength,
-        weeklySets = 12,
-        runningDaysPerWeek = 3,
-        runningKmPerWeek = 20.0,
-        advanced = false,
-        bodyweightKg = 80.0,
-        ageYears = 30.0,
-    )
-
     // ═══════════════ Today + the Log FAB + the chooser ═════════════════════
 
     private fun todayAndChooser(scale: Float) {
         useFont(scale)
-        strengthWithHistory()
+        QaHarness.seedStrengthHistory(ctx)
         rule.launchApp()
         assertClean("today top")
         assertTabsWholeAndWorking("today")
@@ -354,7 +325,7 @@ class SmallScreenLargeFontTest {
 
     private fun setLoop(scale: Float) {
         useFont(scale)
-        strengthWithHistory()
+        QaHarness.seedStrengthHistory(ctx)
         rule.launchApp()
         val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() }
         rule.onNode(
@@ -388,7 +359,7 @@ class SmallScreenLargeFontTest {
     @Test
     fun setLoopUndoRow_font200_showsTheWholeSet() {
         useFont(2.0f)
-        strengthWithHistory()
+        QaHarness.seedStrengthHistory(ctx)
         rule.launchApp()
         val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() }
         rule.onNode(
@@ -425,7 +396,7 @@ class SmallScreenLargeFontTest {
         QaHarness.seedLog(
             ctx,
             listOf(
-                hybridProfile(),
+                QaHarness.hybridFiveKProfile(),
                 Event.LogRunTrack(points = points, hrPctMax = 0.0, observedAt = end, entryId = end * 1000),
             ),
         )
@@ -545,7 +516,7 @@ class SmallScreenLargeFontTest {
 
     private fun profileCalculator(scale: Float) {
         useFont(scale)
-        QaHarness.seedLog(ctx, listOf(hybridProfile(), Event.ComputeHrZones(30.0, null)))
+        QaHarness.seedLog(ctx, listOf(QaHarness.hybridFiveKProfile(), Event.ComputeHrZones(30.0, null)))
         rule.launchApp()
         val calcRow = hasText(str(R.string.main_tool_hr_title)) and hasClickAction()
         goTo(R.string.main_dest_profile)

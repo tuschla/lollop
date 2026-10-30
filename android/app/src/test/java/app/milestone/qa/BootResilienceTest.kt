@@ -24,7 +24,6 @@ import app.milestone.RunSession
 import app.milestone.RunTrackingService
 import app.milestone.exportDataTo
 import java.io.File
-import java.util.Locale
 import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -59,14 +58,12 @@ class BootResilienceTest {
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
     private val app get() = ctx as Application
-    private val logFile get() = File(ctx.filesDir, "event-log.ndjson")
+    private val logFile get() = QaHarness.logFile(ctx)
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
-        clearSidecar()
-        RunSession.reset()
+        QaHarness.clearSidecar(ctx)
         shadowOf(app).grantPermissions(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -82,20 +79,10 @@ class BootResilienceTest {
         QaHarness.teardown()
         ProcessDeath.teardown()
         RunSession.reset()
-        clearSidecar()
+        QaHarness.clearSidecar(ctx)
         AppSettings.showRouteMaps.value = true
         shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
     }
-
-    private fun clearSidecar() {
-        QaHarness.resetActiveRunStore(ctx)
-        ActiveRunStore.clearSync()
-        File(ctx.filesDir, "active-run.ndjson").delete()
-    }
-
-    private fun count(text: String) = rule.onAllNodes(hasText(text, substring = true)).fetchSemanticsNodes().size
-
-    private fun waitForText(text: String, timeoutMs: Long = 15_000) = rule.waitForState(timeoutMs) { count(text) > 0 }
 
     /** Every service start the app issued since the last drain, by action. */
     private fun drainStartedServiceActions(): List<String?> {
@@ -129,7 +116,7 @@ class BootResilienceTest {
         rule.launchApp()
         rule.assertTextCountEventually(str(R.string.main_resume_run_title), 1)
         drainStartedServiceActions()
-        rule.onNode(hasText(str(R.string.main_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
+        rule.onNode(hasText(str(R.string.track_action_resume)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
     }
 
     @Test
@@ -137,11 +124,11 @@ class BootResilienceTest {
         val n = interruptedRunWithLocationRevoked()
         resumeFromPrompt()
         rule.waitForState { RunSession.resumeAwaitingLocation.value && RunSession.points.value.size == n }
-        waitForText(str(R.string.track_resume_perm_caption))
+        rule.waitForNode(hasText(str(R.string.track_resume_perm_caption), substring = true))
         assertFalse("nothing records before the grant", RunSession.tracking.value)
         assertEquals("no recording start without a grant", emptyList<String?>(), drainStartedServiceActions())
         // The run so far stays savable while it waits.
-        assertTrue(count(str(R.string.track_btn_save_run)) > 0)
+        assertTrue(rule.countOf(hasText(str(R.string.track_btn_save_run), substring = true)) > 0)
 
         // The user allows location from the tracker's rationale (Continue).
         shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -154,7 +141,7 @@ class BootResilienceTest {
             .create()
             .startCommand(0, 1)
         rule.waitForState { RunSession.tracking.value && !RunSession.resumeAwaitingLocation.value }
-        waitForText(str(R.string.track_btn_stop))
+        rule.waitForNode(hasText(str(R.string.track_btn_stop), substring = true))
         assertEquals(n, RunSession.points.value.size)
         assertFalse(RunSession.locationFailed.value)
     }
@@ -163,7 +150,7 @@ class BootResilienceTest {
     fun aDenialKeepsTheResumedRunSavableNeverSilentlyDiscarded() {
         val n = interruptedRunWithLocationRevoked()
         resumeFromPrompt()
-        waitForText(str(R.string.track_resume_perm_caption))
+        rule.waitForNode(hasText(str(R.string.track_resume_perm_caption), substring = true))
         // ✕ on the waiting run asks before deleting anything.
         rule.onNode(androidx.compose.ui.test.hasContentDescription(str(R.string.track_cd_discard_run)) and hasClickAction()).performClick()
         rule.waitForState { rule.onAllNodes(isDialog()).fetchSemanticsNodes().isNotEmpty() }
@@ -196,12 +183,12 @@ class BootResilienceTest {
         val before = logFile.readBytes()
         Core.faultForTest = fault
         lastScenario = launchMain()
-        waitForText(str(R.string.main_core_unavailable_title), 30_000)
+        rule.waitForNode(hasText(str(R.string.main_core_unavailable_title), substring = true), 30_000)
         rule.waitForIdle()
         assertTrue(Core.unavailable)
-        assertEquals(0, count(str(R.string.setup_step_train_q)))
-        assertEquals(0, count(str(R.string.main_dest_history)))
-        assertTrue(count(str(R.string.profile_export_data)) > 0)
+        assertEquals(0, rule.countOf(hasText(str(R.string.setup_step_train_q), substring = true)))
+        assertEquals(0, rule.countOf(hasText(str(R.string.main_dest_history), substring = true)))
+        assertTrue(rule.countOf(hasText(str(R.string.profile_export_data), substring = true)) > 0)
         assertNull("no model hydrated from a dead core", EventDispatcher.model.value)
         assertArrayEquals("the event log is untouched", before, logFile.readBytes())
 
@@ -260,7 +247,7 @@ class BootResilienceTest {
         assertFalse(Core.unavailable)
         assertFalse(EventDispatcher.coreUnavailable.value)
         assertEquals(1, EventDispatcher.model.value?.runs?.size)
-        assertEquals(0, count(str(R.string.main_core_unavailable_title)))
+        assertEquals(0, rule.countOf(hasText(str(R.string.main_core_unavailable_title), substring = true)))
     }
 
     /** Rev3 D4: the boot effect re-runs on every rotation; on the same day it reuses

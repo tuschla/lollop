@@ -10,7 +10,6 @@ import app.milestone.qa.QaHarness.onAppScope
 import app.milestone.qa.launchApp
 import app.milestone.qa.launchAppExpectingSetup
 import java.io.File
-import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -38,7 +37,6 @@ class MutationGuardsTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

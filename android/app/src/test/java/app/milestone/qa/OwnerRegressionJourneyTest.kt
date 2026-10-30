@@ -20,7 +20,6 @@ import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.PrescriptionView
 import app.milestone.R
-import java.util.Locale
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonPrimitive
@@ -51,7 +50,6 @@ class OwnerRegressionJourneyTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

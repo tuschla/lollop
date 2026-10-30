@@ -3,7 +3,6 @@ package app.milestone
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -13,7 +12,9 @@ import app.milestone.qa.lastScenario
 import app.milestone.qa.launchMain
 import app.milestone.qa.str
 import app.milestone.qa.strPrefix
-import java.util.Locale
+import app.milestone.qa.waitForBoot
+import app.milestone.qa.waitForNode
+import app.milestone.qa.countOf
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -45,7 +46,6 @@ class DeepLinkTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 
@@ -122,21 +122,10 @@ class DeepLinkTest {
 
     // ── The real app ──────────────────────────────────────────────────────
 
-    private fun waitFor(matcher: SemanticsMatcher, timeoutMs: Long = 30_000) =
-        rule.waitUntil(timeoutMs) { rule.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
-
-    private fun count(matcher: SemanticsMatcher) = rule.onAllNodes(matcher).fetchSemanticsNodes().size
-
     private fun launchAt(dest: String?) {
         val intent = Intent(ACTION_OPEN).setClass(ctx, MainActivity::class.java)
         if (dest != null) intent.putExtra(EXTRA_DEST, dest)
         lastScenario = launchMain(intent)
-    }
-
-    /** Wait for boot to finish and the open request to be applied. */
-    private fun waitBooted() {
-        rule.waitUntil(30_000) { EventDispatcher.bootHandled && EventDispatcher.model.value != null }
-        rule.waitForIdle()
     }
 
     private val setHeader get() = hasText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)
@@ -146,10 +135,10 @@ class DeepLinkTest {
     fun coldStartLogSetOpensTodaysPlanItem() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         launchAt("log_set")
-        waitFor(setHeader)
+        rule.waitForNode(setHeader, 30_000)
         val target = logSetTarget(checkNotNull(EventDispatcher.model.value))
         assertNotNull("the pinned Monday is a lift day", target)
-        assertTrue(count(hasText(target!!, substring = true)) > 0)
+        assertTrue(rule.countOf(hasText(target!!, substring = true)) > 0)
     }
 
     @Test
@@ -157,7 +146,7 @@ class DeepLinkTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         grantLocation()
         launchAt("track")
-        waitFor(trackerStart)
+        rule.waitForNode(trackerStart, 30_000)
         assertFalse(RunSession.tracking.value)
     }
 
@@ -169,38 +158,38 @@ class DeepLinkTest {
     fun unknownDestOpensToday() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         launchAt("bogus")
-        waitFor(hasText(str(R.string.main_dest_history)))
-        waitBooted()
-        assertEquals(0, count(setHeader))
-        assertEquals(0, count(trackerStart))
-        assertEquals(0, count(chooserPlanRow))
-        assertEquals(1, count(hasTestTag("log-fab")))
+        rule.waitForNode(hasText(str(R.string.main_dest_history)), 30_000)
+        rule.waitForBoot()
+        assertEquals(0, rule.countOf(setHeader))
+        assertEquals(0, rule.countOf(trackerStart))
+        assertEquals(0, rule.countOf(chooserPlanRow))
+        assertEquals(1, rule.countOf(hasTestTag("log-fab")))
     }
 
     @Test
     fun beforeSetupTheGuidedSetupStays() {
         launchAt("log_set")
-        waitFor(hasText(str(R.string.setup_step_train_q)))
-        waitBooted()
-        assertEquals(0, count(setHeader))
-        assertEquals(0, count(hasTestTag("exercise-search")))
-        assertTrue(count(hasText(str(R.string.setup_step_train_q))) > 0)
+        rule.waitForNode(hasText(str(R.string.setup_step_train_q)), 30_000)
+        rule.waitForBoot()
+        assertEquals(0, rule.countOf(setHeader))
+        assertEquals(0, rule.countOf(hasTestTag("exercise-search")))
+        assertTrue(rule.countOf(hasText(str(R.string.setup_step_train_q))) > 0)
     }
 
     @Test
     fun newIntentWhileRunningOpensTheLogChooser() {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         lastScenario = launchMain()
-        waitFor(hasText(str(R.string.main_dest_history)))
-        waitBooted()
-        assertEquals(0, count(chooserPlanRow))
+        rule.waitForNode(hasText(str(R.string.main_dest_history)), 30_000)
+        rule.waitForBoot()
+        assertEquals(0, rule.countOf(chooserPlanRow))
         checkNotNull(lastScenario).onActivity { activity ->
             MainActivity::class.java.getDeclaredMethod("onNewIntent", Intent::class.java)
                 .apply { isAccessible = true }
                 .invoke(activity, openIntent(activity, OpenDest.Log))
         }
         // The chooser, led by today's plan row.
-        waitFor(chooserPlanRow)
+        rule.waitForNode(chooserPlanRow, 30_000)
         // Applied once: the request is cleared.
         assertEquals(null, readOpenRequest())
     }
@@ -223,16 +212,16 @@ class DeepLinkTest {
         val now = QaHarness.PINNED_NOW_MILLIS / 1000
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, now - 600)))
         launchAt("log_set")
-        waitFor(hasTestTag("exercise-search"))
+        rule.waitForNode(hasTestTag("exercise-search"), 30_000)
         assertTrue("the hold is active", checkNotNull(EventDispatcher.model.value).train_blocked)
         // Held days carry no items: a blank editor, no plan prefill.
-        assertEquals(0, count(setHeader))
-        assertTrue(count(hasTestTag("safety-banner")) > 0)
+        assertEquals(0, rule.countOf(setHeader))
+        assertTrue(rule.countOf(hasTestTag("safety-banner")) > 0)
         QaHarness.teardown()
 
         grantLocation()
         launchAt("track")
-        waitFor(trackerStart)
-        assertTrue(count(hasTestTag("safety-banner")) > 0)
+        rule.waitForNode(trackerStart, 30_000)
+        assertTrue(rule.countOf(hasTestTag("safety-banner")) > 0)
     }
 }

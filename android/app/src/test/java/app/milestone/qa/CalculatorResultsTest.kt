@@ -26,7 +26,6 @@ import app.milestone.GoalDistance
 import app.milestone.LiftGoal
 import app.milestone.ProgressionCadence
 import app.milestone.R
-import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -51,7 +50,6 @@ class CalculatorResultsTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

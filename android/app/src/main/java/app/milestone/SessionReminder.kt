@@ -22,12 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,7 +49,6 @@ import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.util.Calendar
 import kotlin.math.abs
 
 /**
@@ -130,7 +124,7 @@ internal object SessionReminder {
 
     /** Set the next reminder alarm when the reminder is on, else remove it.
      *  Replaces any earlier one (same PendingIntent). */
-    fun reschedule(ctx: Context, nowMillis: Long = AppClock.nowMillis(), zone: ZoneId = ZoneId.systemDefault()) {
+    fun reschedule(ctx: Context) {
         val app = ctx.applicationContext
         val am = app.getSystemService(AlarmManager::class.java) ?: return
         val s = setting(app)
@@ -139,7 +133,8 @@ internal object SessionReminder {
             return
         }
         // Inexact: a reminder minutes late is fine, and it needs no exact-alarm grant.
-        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextFireMillis(nowMillis, s.minuteOfDay, zone), alarmIntent(app))
+        val next = nextFireMillis(AppClock.nowMillis(), s.minuteOfDay, ZoneId.systemDefault())
+        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, alarmIntent(app))
     }
 
     /** The first local [minuteOfDay] strictly after [nowMillis] in [zone]. A time
@@ -168,15 +163,12 @@ internal object SessionReminder {
 
     /**
      * Post today's reminder when the reminder is on, notifications are allowed,
-     * no reminder was posted for local day [today] yet and the stored snapshot
-     * shows an open session today ([reminderOf]). True when one was posted.
+     * no reminder was posted for today yet and the stored snapshot shows an open
+     * session today ([reminderOf]). True when one was posted.
      */
-    internal fun post(
-        ctx: Context,
-        today: Long = todayEpochDay(),
-        zone: String = ZoneId.systemDefault().id,
-        recording: Boolean = RunSession.tracking.value,
-    ): Boolean {
+    internal fun post(ctx: Context, recording: Boolean = RunSession.tracking.value): Boolean {
+        val today = todayEpochDay()
+        val zone = ZoneId.systemDefault().id
         val app = ctx.applicationContext
         if (!setting(app).enabled || !canNotify(app)) return false
         val days = remindedDays(app)
@@ -196,13 +188,9 @@ internal object SessionReminder {
      * done, today no longer a session day, or a run day while a run records;
      * otherwise it is redrawn quietly (a changed session).
      */
-    internal fun onSnapshot(
-        ctx: Context,
-        snapshot: WidgetSnapshot,
-        today: Long = todayEpochDay(),
-        zone: String = ZoneId.systemDefault().id,
-        recording: Boolean = RunSession.tracking.value,
-    ) {
+    internal fun onSnapshot(ctx: Context, snapshot: WidgetSnapshot) {
+        val today = todayEpochDay()
+        val recording = RunSession.tracking.value
         val app = ctx.applicationContext
         val nm = nm(app) ?: return
         val day = shownDay(nm) ?: return
@@ -211,7 +199,7 @@ internal object SessionReminder {
             return
         }
         if (snapshot.stale || snapshot.epochDay != today) return
-        val reminder = reminderOf(snapshot, today, zone)
+        val reminder = reminderOf(snapshot, today, ZoneId.systemDefault().id)
         if (reminder == null || !canNotify(app) || (recording && reminder.kind == WidgetDayKind.Run)) {
             nm.cancel(NOTIF_ID)
         } else {
@@ -258,7 +246,7 @@ internal object SessionReminder {
     /** [reminder] for local day [day]. */
     private fun notify(app: Context, reminder: Reminder, day: Long, silent: Boolean) {
         ensureChannel(app)
-        val res = app.withLatinDigits().resources
+        val res = app.latinDigitResources()
         val start = NotificationCompat.Action.Builder(
             if (reminder.kind == WidgetDayKind.Run) R.drawable.ic_content_track_run else R.drawable.ic_content_set_dumbbell,
             reminderActionLabel(res, reminder),
@@ -417,7 +405,6 @@ class SessionReminderReceiver : BroadcastReceiver() {
  * notification settings. Switching on asks for the notification permission on
  * Android 13+ when it is not granted.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SessionReminderRows(ctx: Context) {
     var setting by remember { mutableStateOf(SessionReminder.setting(ctx)) }
@@ -472,37 +459,21 @@ internal fun SessionReminderRows(ctx: Context) {
         )
     }
     if (picking) {
-        val state = rememberTimePickerState(
+        AppTimePickerDialog(
+            title = stringResource(R.string.reminder_time_title),
             initialHour = setting.minuteOfDay / 60,
             initialMinute = setting.minuteOfDay % 60,
             is24Hour = use24h,
-        )
-        AlertDialog(
-            onDismissRequest = { picking = false },
-            modifier = Modifier.windowTraversalGroup(),
-            title = { Text(stringResource(R.string.reminder_time_title)) },
-            text = { TimePicker(state) },
-            confirmButton = {
-                TextButton(onClick = {
-                    picking = false
-                    SessionReminder.setMinuteOfDay(ctx, state.hour * 60 + state.minute)
-                    setting = SessionReminder.setting(ctx)
-                }) { Text(stringResource(R.string.log_ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.main_cancel)) }
-            },
-        )
+            onDismiss = { picking = false },
+        ) { hour, minute ->
+            SessionReminder.setMinuteOfDay(ctx, hour * 60 + minute)
+            setting = SessionReminder.setting(ctx)
+        }
     }
 }
 
-/** [minuteOfDay] in the phone's 12- or 24-hour format ("07:30", "7:30 AM"). */
-internal fun reminderTimeText(ctx: Context, minuteOfDay: Int): String {
-    val cal = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, minuteOfDay / 60)
-        set(Calendar.MINUTE, minuteOfDay % 60)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }
-    return DateFormat.getTimeFormat(ctx).format(cal.time)
-}
+/** [minuteOfDay] in the phone's 12- or 24-hour format ("07:30", "7:30 AM"), in the
+ *  app's language. */
+internal fun reminderTimeText(ctx: Context, minuteOfDay: Int): String =
+    LocalTime.of(minuteOfDay / 60, minuteOfDay % 60)
+        .format(localizedDayFormatter(if (DateFormat.is24HourFormat(ctx)) "HHmm" else "hmm"))

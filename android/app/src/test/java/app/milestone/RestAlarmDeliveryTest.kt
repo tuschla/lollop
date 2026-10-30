@@ -40,17 +40,11 @@ class RestAlarmDeliveryTest {
     @Before
     fun setUp() {
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
-        RestAlarm.cancel(app)
-        RestAlarm.resetProcessState()
-        AppSettings.restAlert.value = true
+        resetRest(app)
     }
 
     @After
-    fun tearDown() {
-        RestAlarm.cancel(app)
-        RestAlarm.resetProcessState()
-        AppSettings.restAlert.value = true
-    }
+    fun tearDown() = resetRest(app)
 
     private fun posted() = postedRest(app)
     private fun title(n: Notification?) = n?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()

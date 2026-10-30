@@ -65,7 +65,6 @@ class UxInvariantTest {
 
     @Before
     fun setUp() {
-        java.util.Locale.setDefault(java.util.Locale.US)
         QaHarness.reset(ctx)
     }
 
@@ -188,26 +187,12 @@ class UxInvariantTest {
         assertNoViolations(UxInvariants.check(rule, rule.density), *allKinds)
     }
 
-    /** Lifts AND runs, so every chooser row (both modalities) is offered. */
-    private fun hybridProfile(): Event = Event.SetProfile(
-        progressionCadence = app.milestone.ProgressionCadence.WeekToWeek,
-        liftGoal = app.milestone.LiftGoal.MaxStrength,
-        goalDistance = app.milestone.GoalDistance.FiveK,
-        concurrentGoal = app.milestone.ConcurrentGoal.Strength,
-        weeklySets = 12,
-        runningDaysPerWeek = 3,
-        runningKmPerWeek = 20.0,
-        advanced = false,
-        bodyweightKg = 80.0,
-        ageYears = 30.0,
-    )
-
     @Test
     fun logChooser_trackRunIsOnTopAndOnScreenAtOpen() {
         // Track run (GPS) is one of the most-used actions, so it is the first row
         // (second only to today's plan fast-path) and visible the moment the sheet
         // opens, with no scroll; Report pain stays offered.
-        QaHarness.seedLog(ctx, listOf(hybridProfile()))
+        QaHarness.seedLog(ctx, listOf(QaHarness.hybridFiveKProfile()))
         rule.launchApp()
         rule.onNode(hasContentDescription(str(R.string.main_log))).performClick()
         val trackRunRow = hasText(str(R.string.main_track_run_title)) and hasClickAction()
@@ -382,20 +367,6 @@ class UxInvariantTest {
         rule.onAllNodes(hasText("parasympathetic", substring = true)).assertCountEquals(0)
     }
 
-    /** An under-18 lifter: the core holds the plan; Today shows the calm youth card. */
-    private fun youthProfile(): Event = Event.SetProfile(
-        progressionCadence = app.milestone.ProgressionCadence.WeekToWeek,
-        liftGoal = app.milestone.LiftGoal.MaxStrength,
-        goalDistance = app.milestone.GoalDistance.General,
-        concurrentGoal = app.milestone.ConcurrentGoal.Strength,
-        weeklySets = 12,
-        runningDaysPerWeek = 0,
-        runningKmPerWeek = 0.0,
-        advanced = false,
-        bodyweightKg = 60.0,
-        ageYears = 15.0,
-    )
-
     @Test
     // The spot-check phone (w411dp-h660dp). The youth card's "Check age" opens
     // Profile, unfolds the plan answers and opens the Age row: its birthday
@@ -403,7 +374,7 @@ class UxInvariantTest {
     // asks for the birthday.
     @Config(qualifiers = "w411dp-h660dp-xxhdpi")
     fun checkAge_opensTheFoldedPlanAnswersAtTheBirthdayPicker() {
-        QaHarness.seedLog(ctx, listOf(youthProfile()))
+        QaHarness.seedLog(ctx, listOf(QaHarness.youthProfile()))
         rule.launchApp()
         rule.onAllNodes(hasText(str(R.string.main_hold_check_age)) and hasClickAction())[0].performClick()
         rule.waitForIdle()
@@ -422,7 +393,7 @@ class UxInvariantTest {
     @Config(qualifiers = "w411dp-h660dp-xxhdpi")
     fun youthCard_scrollsWithToday_atLargeFont() {
         RuntimeEnvironment.setFontScale(1.3f)
-        QaHarness.seedLog(ctx, listOf(youthProfile()))
+        QaHarness.seedLog(ctx, listOf(QaHarness.youthProfile()))
         rule.launchApp()
         val title = hasText(str(R.string.main_hold_youth_title).uppercase(java.util.Locale.US))
         rule.waitUntilDisplayed(title)

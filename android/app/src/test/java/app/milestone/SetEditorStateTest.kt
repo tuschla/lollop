@@ -79,4 +79,14 @@ class SetEditorStateTest {
             assertEquals(name, key, nameKey(name))
         }
     }
+
+    /** Spelled with escapes, as the fixture's rows are invisible: a supplementary
+     *  letter folds per code point, and the trim strips U+0085 but keeps
+     *  U+001C–U+001F, as the core's `str::trim`. */
+    @Test
+    fun nameKeyFoldsCodePointsAndTrimsLikeTheCore() {
+        assertEquals("\uD801\uDC28 curl", nameKey("\uD801\uDC00 curl"))
+        assertEquals("squat", nameKey("\u0085squat"))
+        assertEquals("\u001Fsquat", nameKey("\u001Fsquat"))
+    }
 }

@@ -204,12 +204,14 @@ tasks.withType<Test>().configureEach {
     // Roborazzi records real pixels; NATIVE graphics also makes Compose layout
     // deterministic on the JVM.
     systemProperty("robolectric.graphicsMode", "NATIVE")
-    // The native renderer writes its own logs straight to the terminal; ripple
-    // animations started without a render thread emit harmless per-tap
-    // "OpenGLRenderer W ... without an animation handle" lines. Show only its
-    // errors; everything else keeps warning level.
-    environment("ANDROID_LOG_TAGS", "OpenGLRenderer:E *:W")
-    // Give the forked test JVM headroom: the real core + Compose + Robolectric.
+    // Native code in the Robolectric runtime logs straight to the terminal.
+    // android-base's logger reads ANDROID_LOG_TAGS and accepts only
+    // `*:<lowercase level>` (any other spec logs "unsupported ... in
+    // ANDROID_LOG_TAGS"), so this sets one floor for every native tag.
+    environment("ANDROID_LOG_TAGS", "*:w")
+    // Two test JVMs, each with headroom for the real core + Compose +
+    // Robolectric: 2 × 2 GB fits the 16 GB CI runner.
+    maxParallelForks = 2
     maxHeapSize = "2g"
     // Robolectric's Android 16 (SDK 36) sandbox reaches into jdk.internal.access to
     // set up shared memory; without this export every @Config(sdk = [36]) test fails

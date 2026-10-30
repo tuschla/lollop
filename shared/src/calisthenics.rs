@@ -446,25 +446,17 @@ pub fn tier(id: LadderId, idx: u8) -> Option<&'static Tier> {
     ladder(id).tiers.get(idx as usize)
 }
 
-/// Normalized lookup key for an exercise name: lowercase ASCII alphanumeric
-/// tokens with a plural trailing "s" dropped, joined without separators, so
-/// "Pull ups", "pull-up" and "PULLUPS" share one key. A Latin letter with a
-/// diacritic and the Turkish İ/ı fold to their ASCII letters first
-/// ([`crate::names::ascii_fold`]), so "PİSTOL SQUAT" and "Inclıne push-up" key
-/// like their ASCII spelling; any other character is a separator.
+/// Normalized lookup key for an exercise name: the [`crate::names::fold`]ed
+/// name's ASCII alphanumeric tokens with a plural trailing "s" dropped, joined
+/// without separators, so "Pull ups", "pull-up", "PULLUPS" and "PİSTOL SQUAT"
+/// key like their ASCII spelling; any other character is a separator.
 fn name_key(name: &str) -> String {
-    let mut folded = String::with_capacity(name.len());
-    for c in name.chars() {
-        if c.is_ascii_alphanumeric() {
-            folded.push(c.to_ascii_lowercase());
-        } else if let Some(ascii) = crate::names::ascii_fold(c) {
-            folded.push_str(ascii);
-        } else {
-            folded.push(' ');
-        }
-    }
+    let folded = crate::names::fold(name);
     let mut key = String::with_capacity(folded.len());
-    for tok in folded.split(' ').filter(|t| !t.is_empty()) {
+    for tok in folded
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+    {
         let singular = match tok.strip_suffix('s') {
             Some(s) if s.len() >= 2 && !s.ends_with('s') => s,
             _ => tok,

@@ -55,9 +55,7 @@ class RunFinishEffortTest {
 
     @Before
     fun setUp() {
-        java.util.Locale.setDefault(java.util.Locale.US)
         QaHarness.reset(ctx)
-        RunSession.reset()
         shadowOf(ctx as Application).grantPermissions(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -232,9 +230,9 @@ class RunFinishEffortTest {
         val notice = rule.onNodeWithText(battery).fetchSemanticsNode().boundsInRoot
         assertTrue("battery notice $notice floats over the map $frame", notice.top >= frame.bottom)
         val allowed = listOf(
-            R.string.track_pill_permission_needed, R.string.track_pill_location_off, R.string.track_pill_signal_lost,
+            R.string.track_pill_permission_needed, R.string.track_pill_location_off, R.string.track_notif_signal_lost,
             R.string.track_pill_armed_moving, R.string.track_pill_armed_precise, R.string.track_pill_armed_waiting,
-            R.string.track_pill_acquiring, R.string.track_cd_pill_fresh_lock, R.string.track_map_attribution,
+            R.string.track_notif_locate_title, R.string.track_cd_pill_fresh_lock, R.string.track_map_attribution,
             R.string.track_cd_recenter,
         ).map { str(it) }.toSet()
         val labelled = SemanticsMatcher("has text or description") {

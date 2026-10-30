@@ -26,7 +26,6 @@ pub(in crate::app) fn apply_first_set_autoreg(
     let mut all: Vec<Recommended<Adjustment>> = recommended.to_vec();
     all.extend(review_recs.iter().cloned());
     let session_cut = fold_completion_adjustments(&all).load_frac;
-    let step = movement_step_kg(weight_lb);
     // A safety easy day (tendon pain, head cold, first session back) is already
     // load-less and easy: no first-set rule on top of it. A tendon modify day
     // scoped to a body region eases only the lifts that load it; the rest are
@@ -43,7 +42,6 @@ pub(in crate::app) fn apply_first_set_autoreg(
         recommended,
         hold,
         weight_lb,
-        step,
         session_cut,
         safety_day,
         cap_applied: f64::from(session_effort_cap(&all)),
@@ -79,7 +77,6 @@ struct FirstSetCtx<'a> {
     recommended: &'a [Recommended<Adjustment>],
     hold: bool,
     weight_lb: bool,
-    step: f64,
     /// The session-wide load cut already folded into every item.
     session_cut: f64,
     /// A safety easy day: no first-set rule on top of it.
@@ -98,19 +95,21 @@ fn item_cues(it: &mut PrescriptionView, cx: &FirstSetCtx) -> Vec<ItemCue> {
         recommended,
         hold,
         weight_lb,
-        step,
         session_cut,
         safety_day,
         cap_applied,
     } = *cx;
-    // First-set RPE vs this item's PLANNED target: a %e1RM item's effort
-    // from its planned percent (Epley inverse, File 02 strength-005), else
-    // the prescribed RPE with today's readiness caps added back.
+    // First-set RPE vs this item's PLANNED target: a %e1RM item's effort as
+    // its card first stated it (`basis_rx`, before any fold; else from its
+    // planned percent on the Epley inverse, File 02 strength-005), else the
+    // prescribed RPE with today's readiness caps added back.
     let target = match it.intensity {
-        PlanIntensity::PercentE1rm { pct, reduced_from } if pct > 0 => Some(percent_effort_rpe(
-            reduced_from.unwrap_or(pct).max(1) as f64,
-            it.reps_low,
-        )),
+        PlanIntensity::PercentE1rm { pct, reduced_from } if pct > 0 => {
+            Some(it.basis_rx.as_ref().and_then(|b| b.rir).map_or_else(
+                || percent_effort_rpe(reduced_from.unwrap_or(pct).max(1) as f64, it.reps_low),
+                |rir| crate::strength::rir_to_rpe(rir as f64),
+            ))
+        }
         _ => it.target_rpe.map(|t| (t + cap_applied).min(10.0)),
     };
     let first = (!safety_day)
@@ -197,7 +196,7 @@ fn item_cues(it: &mut PrescriptionView, cx: &FirstSetCtx) -> Vec<ItemCue> {
             }
             // Re-judge the logged sets at the cut load: the user followed
             // the coach, so a set at the cut load is a full set.
-            rejudge_at_load(it, bar, step);
+            rejudge_at_load(it, bar, weight_lb);
         } else {
             reduce_percent_intensity(&mut it.intensity, cut);
         }

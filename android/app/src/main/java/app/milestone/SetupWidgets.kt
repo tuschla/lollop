@@ -23,15 +23,12 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DatePickerState
 import androidx.compose.material3.DisplayMode
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,9 +52,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -253,7 +248,7 @@ internal fun hybridSplitText(totalDays: Int, liftDays: Int, lead: BothPriority?)
 @Composable
 internal fun recentRaceText(race: RecentRace, unit: DistanceUnit): String {
     val dist = RaceDistance.of(race.distance_km)?.let { stringResource(it.labelRes) } ?: distanceText(race.distance_km, unit)
-    return stringResource(R.string.setup_recent_race_value, dist, raceTimeDisplay(raceTimeDigits(race.time_sec)))
+    return stringResource(R.string.setup_recent_race_value, dist, raceTimeDisplay(secondsToHmsDigits(race.time_sec)))
 }
 
 /** "Pull-up bar, rings" / "None" for an answered equipment set. */
@@ -270,7 +265,7 @@ internal fun equipmentText(e: CalisEquipment): String =
 @Composable
 internal fun StepHeader(question: String, subtitle: String? = null) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-        Text(question, color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
+        SheetTitle(question)
         if (subtitle != null) Text(subtitle, color = OnBgMuted, style = Type.Body)
     }
 }
@@ -499,21 +494,10 @@ private fun DatePickerState.pickedDay(): Long? = selectedDateMillis?.let { Math.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EpochDayPickerDialog(state: DatePickerState, pick: Long?, onPick: (Long) -> Unit, onDismiss: () -> Unit) {
-    DatePickerDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    pick?.let(onPick)
-                    onDismiss()
-                },
-                enabled = pick != null,
-            ) { Text(stringResource(R.string.log_ok)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }
-        },
-    ) { DatePicker(state) }
+    AppDatePickerDialog(state, onDismiss = onDismiss, confirmEnabled = pick != null, onConfirm = {
+        pick?.let(onPick)
+        onDismiss()
+    })
 }
 
 /**

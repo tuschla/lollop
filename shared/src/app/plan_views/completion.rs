@@ -4,16 +4,6 @@
 use super::*;
 use std::fmt::Write as _;
 
-/// One plate step of completion tolerance: 2.5 kg, or 5 lb for a pounds
-/// profile. A set is full work once it reaches the prescribed load minus this
-/// much (lighter sets may still count, see [`set_credit`]).
-const KG_STEP_KG: f64 = 2.5;
-/// One 5 lb plate step, in kg.
-const LB_STEP_KG: f64 = 5.0 / LB_PER_KG;
-pub(super) fn movement_step_kg(weight_lb: bool) -> f64 {
-    if weight_lb { LB_STEP_KG } else { KG_STEP_KG }
-}
-
 /// A set logged before this local time of day (04:00) may still belong to the
 /// previous evening's session.
 const SESSION_CHAIN_CUTOFF_SEC: i64 = 4 * 3_600;
@@ -140,15 +130,15 @@ const WARM_UP_RAMP: [(f64, u32); 3] = [(0.4, 5), (0.6, 3), (0.8, 2)];
 /// slot. `fold` is the adjustment picture shown for that day: a load cut
 /// lowers the bar to what the user actually saw, and a downgrade/modify day
 /// (`load_dropped`) removes the load bar entirely. With a prescribed load, a
-/// set within one plate step of it is full work and one at ≥80 % of it is
-/// lighter work. Without a prescribed load the bar is [`NO_LOAD_WORK_SHARE`]
-/// of the day's heaviest same-movement weight, so a 0 kg bodyweight set
-/// passes (0 >= 0.9·0).
+/// set within one plate step ([`load_grid_step_kg`]) of it is full work and
+/// one at ≥80 % of it is lighter work. Without a prescribed load the bar is
+/// [`NO_LOAD_WORK_SHARE`] of the day's heaviest same-movement weight, so a
+/// 0 kg bodyweight set passes (0 >= 0.9·0).
 fn set_credit(
     it: &PrescriptionView,
     s: &LoggedSet,
     heaviest: f64,
-    step: f64,
+    weight_lb: bool,
     fold: AdjustFold,
 ) -> SetCredit {
     let worked = if it.timed_hold {
@@ -176,7 +166,7 @@ fn set_credit(
         (None, Some(added)) => added,
         (None, None) => return near_heaviest,
     };
-    if s.weight_kg >= bar - step {
+    if s.weight_kg >= bar - load_grid_step_kg(bar, weight_lb) {
         SetCredit::Full
     } else if s.weight_kg >= WORK_SET_FLOOR * bar {
         SetCredit::Lighter
@@ -220,7 +210,7 @@ fn warm_up_steps(work_kg: f64, weight_lb: bool, exercise: &str) -> Vec<(f64, u32
 /// snatch from the floor, a Pendlay row; not a Romanian, stiff-leg or hang
 /// variant), as `isFloorLift` in `SetEditorState.kt` reads it.
 fn starts_from_floor(exercise: &str) -> bool {
-    let e = exercise.to_lowercase();
+    let e = crate::names::fold(exercise);
     let has = |k: &str| e.contains(k);
     !(has("romanian") || has("rdl") || has("stiff") || has("hang"))
         && (has("deadlift") || has("clean") || has("snatch") || has("pendlay"))
@@ -296,7 +286,6 @@ pub(in crate::app) fn apply_last_sets(
     epoch_day: i64,
     weight_lb: bool,
 ) {
-    let step = movement_step_kg(weight_lb);
     for it in items.iter_mut() {
         if it.is_run() || it.added_kg.is_some() || it.timed_hold {
             continue;
@@ -335,6 +324,7 @@ pub(in crate::app) fn apply_last_sets(
             } else {
                 1.0
             };
+            let step = load_grid_step_kg(s.weight_kg, weight_lb);
             let step_up = frac >= 1.0
                 && capacity - target >= STEP_UP_SURPLUS_REPS
                 && step <= crate::strength::MAX_LOAD_STEP_FRAC * s.weight_kg;
@@ -588,7 +578,7 @@ impl PrescriptionView {
 
     /// Whether any work is logged against the item: a run, or a set of its
     /// movement.
-    pub(super) fn has_work(&self) -> bool {
+    pub(in crate::app) fn has_work(&self) -> bool {
         if self.is_run() {
             self.ran()
         } else {
@@ -905,7 +895,6 @@ fn judge_lift_item(it: &mut PrescriptionView, judge: &DayJudge, ctx: &FlattenCtx
         ..
     } = *ctx;
     let fold = judge.fold;
-    let step = movement_step_kg(weight_lb);
     let mut day_sets: Vec<&LoggedSet> = set_index
         .same_movement_sets(&it.exercise)
         .iter()
@@ -917,7 +906,7 @@ fn judge_lift_item(it: &mut PrescriptionView, judge: &DayJudge, ctx: &FlattenCtx
         .iter()
         .map(|srec| srec.weight_kg)
         .fold(0.0, f64::max);
-    let credits = day_credits(it, &day_sets, heaviest, step, fold, weight_lb);
+    let credits = day_credits(it, &day_sets, heaviest, fold, weight_lb);
     let mut sets_done = 0u8;
     let mut logged = Vec::with_capacity(day_sets.len());
     for (srec, credit) in day_sets.iter().zip(credits) {
@@ -939,17 +928,15 @@ fn judge_lift_item(it: &mut PrescriptionView, judge: &DayJudge, ctx: &FlattenCtx
 }
 
 /// Each of a day's chronological same-movement sets credited ([`set_credit`]),
-/// except a warm-up: a set logged before the first work set that matches a
 /// not-yet-taken step of the set screen's ramp ([`warm_up_steps`]) for the
 /// load shown that day, else the suggested start (`SetEditor.kt`:
-/// `load_kg ?: suggested_load_kg`): within half a plate of the step's load,
-/// at most its reps. Each step is taken once, so a day holds at most as many
-/// warm-ups as the ramp has steps.
+/// `load_kg ?: suggested_load_kg`): within half a plate step of the step's
+/// load, at most its reps. Each step is taken once, so a day holds at most as
+/// many warm-ups as the ramp has steps.
 fn day_credits(
     it: &PrescriptionView,
     day_sets: &[&LoggedSet],
     heaviest: f64,
-    step: f64,
     fold: AdjustFold,
     weight_lb: bool,
 ) -> Vec<SetCredit> {
@@ -972,7 +959,8 @@ fn day_credits(
         .iter()
         .map(|s| {
             let matches = |&(kg, reps): &(f64, u32)| {
-                (s.weight_kg - kg).abs() <= step / 2.0 + 1e-9 && (1..=reps).contains(&s.reps)
+                (s.weight_kg - kg).abs() <= load_grid_step_kg(kg, weight_lb) / 2.0 + 1e-9
+                    && (1..=reps).contains(&s.reps)
             };
             if !working
                 && s.hold_sec.is_none()
@@ -981,7 +969,7 @@ fn day_credits(
                 ramp.remove(i);
                 return SetCredit::NotCounted;
             }
-            let credit = set_credit(it, s, heaviest, step, fold);
+            let credit = set_credit(it, s, heaviest, weight_lb, fold);
             working |= credit != SetCredit::NotCounted;
             credit
         })
@@ -1019,13 +1007,12 @@ mod tests {
             ..Default::default()
         };
         let heaviest = 80.0;
-        let step = movement_step_kg(false);
         assert_eq!(
             set_credit(
                 &it,
                 &set_at(80.0, 5, 0),
                 heaviest,
-                step,
+                false,
                 AdjustFold::default()
             ),
             SetCredit::Full
@@ -1035,7 +1022,7 @@ mod tests {
                 &it,
                 &set_at(20.0, 5, 0),
                 heaviest,
-                step,
+                false,
                 AdjustFold::default()
             ),
             SetCredit::NotCounted
@@ -1060,13 +1047,7 @@ mod tests {
         // 290 lb × 4 against 290 lb × 5: a missed rep still did the set.
         let it = squat(290.0, 5, 6);
         let s = set_at(290.0 * LB, 4, 0);
-        let credit = set_credit(
-            &it,
-            &s,
-            s.weight_kg,
-            movement_step_kg(true),
-            AdjustFold::default(),
-        );
+        let credit = set_credit(&it, &s, s.weight_kg, true, AdjustFold::default());
         assert_eq!(credit, SetCredit::Full);
         assert!(
             short_of_target(&it, 4, None),
@@ -1080,13 +1061,7 @@ mod tests {
         let it = squat(290.0, 3, 5);
         let s = set_at(264.6 * LB, 5, 0);
         assert_eq!(
-            set_credit(
-                &it,
-                &s,
-                s.weight_kg,
-                movement_step_kg(true),
-                AdjustFold::default()
-            ),
+            set_credit(&it, &s, s.weight_kg, true, AdjustFold::default()),
             SetCredit::Lighter
         );
     }
@@ -1096,8 +1071,7 @@ mod tests {
         let logged: Vec<LoggedSet> = sets.iter().map(|&(kg, r)| set_at(kg, r, 0)).collect();
         let day: Vec<&LoggedSet> = logged.iter().collect();
         let heaviest = sets.iter().map(|s| s.0).fold(0.0, f64::max);
-        let step = movement_step_kg(weight_lb);
-        day_credits(it, &day, heaviest, step, AdjustFold::default(), weight_lb)
+        day_credits(it, &day, heaviest, AdjustFold::default(), weight_lb)
     }
 
     #[test]
@@ -1145,8 +1119,10 @@ mod tests {
             credits(&it, &[(20.0, 5), (25.0, 5), (62.5, 5), (62.5, 5)], false),
             [NotCounted, NotCounted, Full, Full]
         );
-        // A floor pull starts at 60 kg, so 25 kg × 5 is no step of its ramp.
+        // A floor pull starts at 60 kg, so 25 kg × 5 is no step of its ramp;
+        // a Turkish keyboard's "DEADLİFT" is one too (the folded name).
         assert_eq!(warm_up_steps(62.5, false, "Deadlift"), [(60.0, 5)]);
+        assert_eq!(warm_up_steps(62.5, false, "DEADLİFT"), [(60.0, 5)]);
         assert_eq!(warm_up_steps(20.0, false, "Back Squat"), []);
     }
 
@@ -1165,7 +1141,7 @@ mod tests {
         let mut s = set_at(0.0, 8, 0);
         s.exercise = "Full push-up".to_string();
         assert_eq!(
-            set_credit(&it, &s, 0.0, movement_step_kg(false), AdjustFold::default()),
+            set_credit(&it, &s, 0.0, false, AdjustFold::default()),
             SetCredit::Full
         );
     }

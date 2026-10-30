@@ -29,7 +29,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
@@ -56,7 +55,7 @@ internal fun runTitle(r: RunResultView): String {
     if (tagged != null) return stringResource(tagged)
     if (r.started_at <= 0L) return stringResource(R.string.main_run)
     val weekday = Instant.ofEpochSecond(r.started_at).atZone(ZoneId.systemDefault()).dayOfWeek
-        .getDisplayName(java.time.format.TextStyle.FULL, LocalConfiguration.current.locales[0])
+        .getDisplayName(java.time.format.TextStyle.FULL, appLocale(LocalConfiguration.current.locales))
     return stringResource(R.string.history_run_weekday, weekday)
 }
 
@@ -112,7 +111,7 @@ internal fun recordRun(runs: List<RunResultView>, entryId: Long?, observedAt: Lo
 @Composable
 internal fun runFaceLine(r: RunResultView, unit: DistanceUnit): String {
     val base = "${runDistLabel(r.distance_km, unit)} · ${runPaceLabel(r.distance_km, r.duration_min, unit)}"
-    return if (r.duration_min > 0.0) "$base · ${fmtRunTime(Math.round(r.duration_min * 60.0).toInt())}" else base
+    return if (r.duration_min > 0.0) "$base · ${formatElapsed(Math.round(r.duration_min * 60.0))}" else base
 }
 
 // ── Records, run rating and run progress ────────────────────────────────────
@@ -204,9 +203,6 @@ internal fun RunProgressSection(
     kmByDay: Map<Long, Double>,
     todayLocalDay: Long,
     unit: DistanceUnit,
-    // The local day the active plan began (null = no plan, or older than the core
-    // reports): the weekly chart's plan line starts there.
-    planStartEpochDay: Long?,
 ) {
     val weekly = progress.weekly
     var window by rememberSaveable { mutableStateOf(RunProgressWindow.Weeks) }
@@ -222,10 +218,7 @@ internal fun RunProgressSection(
                 ) { window = RunProgressWindow.entries[it] }
             }
             when (window) {
-                RunProgressWindow.Weeks -> WeeklyDistanceChart(
-                    weekly, progress.planned_weekly_km, unit, chartHeight = PROGRESS_CHART_HEIGHT,
-                    planStartEpochDay = planStartEpochDay,
-                )
+                RunProgressWindow.Weeks -> WeeklyDistanceChart(weekly, progress.planned_weekly_km, unit, chartHeight = PROGRESS_CHART_HEIGHT)
                 RunProgressWindow.Days -> RunDistanceBars(
                     kmByDay, todayLocalDay, unit = unit, days = PROGRESS_DAYS, chartHeight = PROGRESS_CHART_HEIGHT,
                 )

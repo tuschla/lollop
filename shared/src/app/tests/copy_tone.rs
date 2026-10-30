@@ -194,8 +194,16 @@ fn tone_violations(s: &str) -> Vec<String> {
     if s.contains('—') && s.trim() != "—" {
         v.push("tone: em dash in a sentence".into());
     }
+    for (term, say) in TERMS {
+        if has_phrase(&n, term) {
+            v.push(format!("tone: term `{term}` (say {say})"));
+        }
+    }
     v
 }
+
+/// writing.md Terms: (the word not to use, the app's word).
+const TERMS: &[(&str, &str)] = &[("on hold", "paused")];
 
 /// `s` with digit runs as `#`, so one template rendered with different
 /// numbers reports once.
@@ -275,6 +283,7 @@ fn the_tone_lint_flags_each_rule_and_passes_clean_copy() {
         ("Ready to train", "`Ready to`"),
         ("It's important to note the cap", "`It's important to note`"),
         ("Easy run — keep it short", "em dash"),
+        ("Training is on hold", "`on hold`"),
     ] {
         let v = tone_violations(s);
         assert!(

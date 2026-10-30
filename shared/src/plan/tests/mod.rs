@@ -6,7 +6,8 @@ use crate::app::tests::base_profile;
 use crate::hybrid::ConcurrentGoal;
 use crate::individualization::ProgressionCadence;
 use crate::schema::{
-    Goal, LiftIntensity, LiftPrescription, LiftSessionType, Prescription, RunVolume, SessionType,
+    Goal, LiftIntensity, LiftPrescription, LiftSessionType, Prescription, RunSessionType,
+    RunVolume, SessionType,
 };
 use std::collections::BTreeSet;
 

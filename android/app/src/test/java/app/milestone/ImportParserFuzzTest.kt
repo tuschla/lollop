@@ -6,7 +6,6 @@ import app.milestone.qa.QaHarness
 import app.milestone.qa.QaHarness.fixture
 import java.io.File
 import java.time.Instant
-import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -58,7 +57,6 @@ class ImportParserFuzzTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

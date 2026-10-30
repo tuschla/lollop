@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -124,17 +125,9 @@ internal fun runProgressText(res: Resources, item: PrescriptionView, unit: Dista
             val figure = if (shown < 1.0) String.format(Locale.US, "%.2f", shown) else trimDecimal(shown)
             add(res.getString(R.string.plan_run_logged_distance, figure, unit.distanceLabel))
         }
-        if (item.run_logged_min > 0.0) add(fmtRunTime(Math.round(item.run_logged_min * 60.0).toInt()))
+        if (item.run_logged_min > 0.0) add(formatElapsed(Math.round(item.run_logged_min * 60.0)))
     }
     return parts.joinToString(" \u00b7 ")
-}
-
-/** A run duration as a clock: "3:42", "27:00", "1:19:05". Pure. */
-internal fun fmtRunTime(totalSec: Int): String {
-    val s = totalSec.coerceAtLeast(0)
-    if (s < 3600) return fmtClock(s)
-    val m = (s % 3600) / 60
-    return "${s / 3600}:${m.toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}"
 }
 
 /** "m:ss" clock for a rest / elapsed readout. */
@@ -163,10 +156,10 @@ internal sealed interface RestFace {
  * exercise is on screen, so the countdown carries into the next exercise. With
  * none running, an exercise without a prescribed rest ([itemRestSec] 0) counts up
  * from its newest set today ([lastSetSec], unix seconds). Null when nothing is in
- * its [RestReadoutWindowSec] window. A [nowMillis] before the rest's start (the
- * 1 s ticker last read the clock just before the set was logged) reads as the
- * start, so the full rest shows at once instead of nothing until the next tick.
- * Pure.
+ * its [RestReadoutWindowSec] window. A [nowMillis] up to one 1 s tick before the
+ * rest's start (the ticker last read the clock just before the set was logged)
+ * reads as the start, so the full rest shows at once instead of nothing until
+ * the next tick; an earlier clock (set back mid-rest) shows nothing. Pure.
  */
 internal fun restFace(
     restStartMillis: Long?,
@@ -176,8 +169,8 @@ internal fun restFace(
     nowMillis: Long,
 ): RestFace? {
     if (restStartMillis != null && restEndMillis != null) {
-        val at = maxOf(nowMillis, restStartMillis)
-        if (at - restStartMillis <= RestReadoutWindowSec * 1000L) {
+        val at = if (restStartMillis - nowMillis in 1L..1_000L) restStartMillis else nowMillis
+        if (at - restStartMillis in 0L..RestReadoutWindowSec * 1000L) {
             val leftMs = restEndMillis - at
             return if (leftMs > 0) {
                 // Rounded up: "0:01" shows until the rest is really over.
@@ -336,12 +329,12 @@ internal fun setSlotMarks(item: PrescriptionView): List<String?> {
  *  scale, and a box with reps grows with the text. TalkBack reads the row as ONE
  *  node ("1 of 4 sets done") instead of a run of identical per-slot nodes. */
 @Composable
-internal fun SetSlotsRow(item: PrescriptionView, modifier: Modifier = Modifier) {
+internal fun SetSlotsRow(item: PrescriptionView) {
     val status = LocalStatusColors.current
     val marks = setSlotMarks(item)
-    val cd = stringResource(R.string.plan_sets_done_cd, item.sets_done, marks.size)
+    val cd = pluralStringResource(R.plurals.plan_sets_done_cd, marks.size, item.sets_done, marks.size)
     Row(
-        modifier = modifier
+        modifier = Modifier
             .testTag("set-slots:${item.exercise}")
             .clearAndSetSemantics { contentDescription = cd },
         horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp + Space.Xs.dp),
@@ -427,7 +420,7 @@ internal fun PlanItemCompletion(
                     label,
                     onEndExercise,
                     modifier = Modifier.offset(x = TextActionInset),
-                    description = stringResource(R.string.plan_secondary_action_cd, label, item.exercise),
+                    description = stringResource(R.string.ui_label_value, label, item.exercise),
                 )
             }
             // Warm-ups / light sets stay listed but are marked, so a floor of
@@ -638,7 +631,7 @@ private fun CalisControls(
         chips.forEach { (labelRes, rung) ->
             val label = stringResource(labelRes)
             val cd = if (rung.target.isBlank()) {
-                stringResource(R.string.plan_calis_chip_cd_short, label, rung.name)
+                stringResource(R.string.ui_label_value, label, rung.name)
             } else {
                 stringResource(R.string.plan_calis_chip_cd, label, rung.name, rung.target)
             }
@@ -700,6 +693,67 @@ private fun PlanActionPill(label: String, subject: String, onClick: () -> Unit) 
         modifier = Modifier.fillMaxWidth().testTag("plan-action-filled"),
         description = stringResource(R.string.main_action_subject, label, subject),
     )
+}
+
+/** A session's plan items: open ones first, then settled ones as ✓ rows. When
+ *  [actionable], the first open item is the full [OpenPlanItemCard] and the
+ *  others are rows a tap logs; otherwise every open item is a read-only row. */
+@Composable
+internal fun SessionItemList(
+    items: List<PrescriptionView>,
+    isRun: (PrescriptionView) -> Boolean,
+    isCheck: (PrescriptionView) -> Boolean,
+    actionable: Boolean,
+    reopenable: Boolean,
+    runActionLabel: String,
+    weightUnit: WeightUnit,
+    painArea: String?,
+    onLog: (PrescriptionView) -> Unit,
+    onRun: () -> Unit,
+    onEndExercise: (PrescriptionView) -> Unit,
+    onReopen: (PrescriptionView) -> Unit,
+    // The hero's extras for its current card (see [OpenPlanItemCard]).
+    unplaced: (PrescriptionView) -> Boolean = { false },
+    onSetRung: ((CalisLadder, Int) -> Unit)? = null,
+    guide: @Composable (PrescriptionView) -> List<String> = { emptyList() },
+) {
+    val (openItems, doneItems) = items.partition { !it.done }
+    val current = if (actionable) openItems.firstOrNull() else null
+    openItems.forEach { item ->
+        if (item === current) {
+            OpenPlanItemCard(
+                item = item,
+                isRun = isRun(item),
+                onLog = { onLog(item) },
+                onTrack = onRun,
+                onEndExercise = { onEndExercise(item) },
+                runActionLabel = runActionLabel,
+                weightUnit = weightUnit,
+                isCheck = isCheck(item),
+                unplaced = unplaced(item),
+                onSetRung = onSetRung,
+                guide = guide(item),
+            )
+        } else {
+            PlanItemRow(
+                item = item,
+                isRun = isRun(item),
+                isCheck = isCheck(item),
+                actionLabel = if (actionable) planItemActionLabel(item, isRun(item), isCheck(item), runActionLabel) else null,
+                onClick = { if (isRun(item)) onRun() else onLog(item) },
+            )
+        }
+    }
+    doneItems.forEach { item ->
+        DonePlanItemRow(
+            item = item,
+            isRun = isRun(item),
+            reopenable = reopenable,
+            onReopen = { onReopen(item) },
+            isCheck = isCheck(item),
+            painArea = painArea,
+        )
+    }
 }
 
 /** The CURRENT plan item (the first open one of an actionable session): the
@@ -898,7 +952,7 @@ internal fun SessionItemsEvidence(
                         itemEvidenceDetail(item, isRun(item), isCheck(item))?.let(::stripClaimIds),
                     ).joinToString(" \u00b7 ")
                     Text(
-                        if (line.isBlank()) name else stringResource(R.string.main_evidence_item_detail, name, line),
+                        if (line.isBlank()) name else stringResource(R.string.ui_label_value, name, line),
                         color = OnBgBody,
                         style = Type.Caption,
                     )
@@ -980,7 +1034,7 @@ internal fun DonePlanItemRow(
             TextAction(
                 reopen,
                 onReopen,
-                description = stringResource(R.string.plan_secondary_action_cd, reopen, item.exercise),
+                description = stringResource(R.string.ui_label_value, reopen, item.exercise),
             )
         }
     }
@@ -996,7 +1050,7 @@ internal val SkippedItemStatuses = setOf("stopped_pain", "skipped_pain", "skippe
 internal fun settledLabel(status: String, progress: String, painArea: String?): String = when {
     status == "stopped_pain" -> stoppedLabel(painArea)
     status == "skipped_pain" -> painArea
-        ?.let { stringResource(R.string.plan_skipped_pain_area, it.lowercase(Locale.getDefault())) }
+        ?.let { stringResource(R.string.plan_skipped_pain_area, it.lowercase(appLocale())) }
         ?: stringResource(R.string.plan_skipped_pain)
     status == "skipped" -> stringResource(R.string.plan_skipped)
     progress.isBlank() -> progress

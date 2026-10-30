@@ -469,7 +469,7 @@ internal fun GuidedSetup(
                                 val done = answers
                                 valuesOf(done).draft()?.let { draft ->
                                     val rungs = if (draft.resistanceModality == ResistanceModality.Calisthenics) {
-                                        placementEvents(done, seed, AppClock.nowMillis() / 1000L)
+                                        placementEvents(done, seed, AppClock.nowSec())
                                     } else {
                                         emptyList()
                                     }
@@ -757,7 +757,7 @@ private fun AboutStep(
         FieldLabel(stringResource(R.string.setup_sex_label))
         // Unset until tapped (nothing highlighted); "Prefer not to say" is a real
         // answer that stores no sex.
-        ChipChoiceRow(SexAnswer.entries.toList(), a.sex, { stringResource(sexLabelRes(it.female)) }, onSex)
+        ChipChoiceRow(SexAnswer.entries.toList(), a.sex, { stringResource(it.labelRes) }, onSex)
         Text(stringResource(R.string.setup_sex_caption), color = OnBgMuted, style = Type.Caption)
     }
     unitsRow()
@@ -950,7 +950,7 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile,
                 ?: draft.ageYears?.let { stringResource(R.string.setup_review_age, trimDecimal(it)) }
                 ?: stringResource(R.string.setup_review_age_not_given),
             draft.bodyweightKg?.let { stringResource(R.string.setup_bodyweight_value, bodyweightBufferText(it, a.weightUnit), weightSuffix(a.weightUnit)) },
-            a.sex?.let { stringResource(sexLabelRes(it.female)) },
+            a.sex?.let { stringResource(it.labelRes) },
             draft.restingHrBpm?.let { stringResource(R.string.setup_bpm_value, trimDecimal(it)) },
         )
         // The youth hold comes from age, so it shows here, not under Health (whose

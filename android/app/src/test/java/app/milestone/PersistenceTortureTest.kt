@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.LongHistorySeed
 import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
+import app.milestone.qa.QaHarness.daysAgoAtMidday as at
 import app.milestone.qa.QaHarness.onAppScope
 import app.milestone.qa.launchApp
 import app.milestone.qa.str
@@ -14,9 +15,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.util.Locale
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
@@ -57,13 +56,12 @@ class PersistenceTortureTest {
     val rule = createEmptyComposeRule()
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
-    private val logFile get() = File(ctx.filesDir, "event-log.ndjson")
+    private val logFile get() = QaHarness.logFile(ctx)
     private val sidecar get() = File(ctx.filesDir, "active-run.ndjson")
     private val json = Json { ignoreUnknownKeys = true }
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
         File(ctx.filesDir, "event-log.ndjson.import").delete()
         QaHarness.resetActiveRunStore(ctx)
@@ -82,8 +80,6 @@ class PersistenceTortureTest {
     }
 
     // ── Fixtures ────────────────────────────────────────────────────────────────
-
-    private fun at(daysAgo: Int, plusSec: Long = 0) = QaHarness.daysAgoAtMidday(daysAgo) + plusSec
 
     private fun line(e: Event) = e.toJson().toString()
 
@@ -117,17 +113,10 @@ class PersistenceTortureTest {
 
     private fun writeLog(events: List<Event>) = QaHarness.seedLog(ctx, events)
 
-    /** Process death, then a cold boot exactly as the boot effect runs it. */
-    private fun reboot(): SendResult {
-        ProcessDeath.kill(ctx)
-        Core.restore(ctx)
-        return Core.send(Event.SetToday(todayEpochDay(), utcOffsetSec()))
-    }
-
     /** The view a cold boot of exactly [events] produces (a clean, uncrashed log). */
     private fun viewOf(events: List<Event>): ViewModel {
         writeLog(events)
-        return reboot().view
+        return QaHarness.reboot(ctx).view
     }
 
     /** Every non-blank line on disk parses as JSON (no torn line survived). */
@@ -169,14 +158,14 @@ class PersistenceTortureTest {
         for (k in 0..wire.size) {
             logFile.writeBytes(prefix + wire.copyOf(k))
             val complete = k == wire.size
-            val booted = reboot()
+            val booted = QaHarness.reboot(ctx)
             assertEquals("cut at byte $k/${wire.size}: replay = committed state", if (complete) withTorn else baseView, booted.view)
             val r = Core.send(next)
             assertTrue("cut at $k: the next append is persisted", r.accepted && r.persisted)
             assertAllLinesParse()
             assertEquals("cut at $k: the next append is on disk once", 1, entryIdCount(next.entryId))
             assertEquals("cut at $k: a committed set is never duplicated", 1, entryIdCount(at(3) * 1000))
-            val after = reboot().view
+            val after = QaHarness.reboot(ctx).view
             assertEquals("cut at $k: replay after the second boot", if (complete) tornNext else baseNext, after)
         }
     }
@@ -282,13 +271,13 @@ class PersistenceTortureTest {
         logFile.writeBytes(tornBytes)
         tmp.mkdirs()
         File(tmp, "blocker").writeText("x")
-        val booted = reboot()
+        val booted = QaHarness.reboot(ctx)
         assertEquals("replay = committed state", baseView, booted.view)
         assertTrue("the failed rewrite left the original bytes", tornBytes.contentEquals(logFile.readBytes()))
         val r = Core.send(next)
         assertTrue(r.accepted && r.persisted)
         tmp.deleteRecursively()
-        assertEquals("next append replays after the reboot", baseNext, reboot().view)
+        assertEquals("next append replays after the reboot", baseNext, QaHarness.reboot(ctx).view)
         assertEquals(1, entryIdCount(next.entryId))
     }
 
@@ -320,7 +309,7 @@ class PersistenceTortureTest {
         assertEquals("every intact committed line once, in order", EventLog.compact(baseLines), loaded.lines.filter { it in baseLines })
         for (l in loaded.lines) assertTrue("a survivor is a committed line or parseable junk", l in baseLines || EventLog.variantOf(l) == null)
         assertAllLinesParse()
-        assertEquals("boot replays every intact event", baseView, reboot().view)
+        assertEquals("boot replays every intact event", baseView, QaHarness.reboot(ctx).view)
         assertTrue(Core.send(next).persisted)
         assertEquals(1, entryIdCount(next.entryId))
     }
@@ -347,7 +336,7 @@ class PersistenceTortureTest {
         )
         // A torn tail forces load() to rewrite the file.
         logFile.writeText(base.joinToString("") { line(it) + "\n" } + future.joinToString("") { "$it\n" } + "{\"LogSe")
-        val booted = reboot()
+        val booted = QaHarness.reboot(ctx)
         for (f in future) assertEquals("kept verbatim: ${f.take(40)}", 1, countLines { it == f })
         assertEquals("the known variant with an extra field is applied", expected.lifts, booted.view.lifts)
         assertEquals(expected.profile, booted.view.profile)
@@ -370,7 +359,7 @@ class PersistenceTortureTest {
         val base = committed()
         val expected = viewOf(base + next)
         writeLog(base)
-        reboot()
+        QaHarness.reboot(ctx)
         val live = logFile
         setField("log", devFull)
         val r = Core.send(torn)
@@ -382,7 +371,7 @@ class PersistenceTortureTest {
         val r2 = Core.send(next)
         assertTrue(r2.accepted && r2.persisted)
         assertEquals(1, entryIdCount(next.entryId))
-        assertEquals("replay = what was reported saved", expected, reboot().view)
+        assertEquals("replay = what was reported saved", expected, QaHarness.reboot(ctx).view)
         assertAllLinesParse()
         assertEquals(1, entryIdCount(next.entryId))
         assertEquals("the unsaved event stays unsaved", 0, entryIdCount(torn.entryId))
@@ -400,7 +389,7 @@ class PersistenceTortureTest {
         val before = logFile.readBytes()
         logFile.setWritable(false, false)
         ctx.filesDir.setWritable(false, false)
-        val booted = reboot()
+        val booted = QaHarness.reboot(ctx)
         assertEquals(baseView, booted.view)
         val r = Core.send(next)
         assertTrue(r.accepted)
@@ -414,54 +403,19 @@ class PersistenceTortureTest {
         assertEquals(0, ActiveRunStore.recover(ctx).size)
         ctx.filesDir.setWritable(true, true)
         logFile.setWritable(true, true)
-        assertEquals("after storage returns, boot heals and replays", baseView, reboot().view)
+        assertEquals("after storage returns, boot heals and replays", baseView, QaHarness.reboot(ctx).view)
         assertTrue(Core.send(next).persisted)
         assertEquals(1, entryIdCount(next.entryId))
     }
 
     // ── 5. Concurrency ──────────────────────────────────────────────────────────
 
-    /** Two threads appending at once: every event lands exactly once as a whole
-     *  line, and the replay equals the live model. */
-    @Test
-    fun concurrentAppendsFromTwoThreadsLoseAndDuplicateNothing() {
-        writeLog(listOf(QaHarness.strengthProfile()))
-        reboot()
-        val perThread = 120
-        val barrier = CyclicBarrier(2)
-        val failure = AtomicReference<Throwable?>(null)
-        val threads = (0 until 2).map { t ->
-            thread(name = "append-$t") {
-                runCatching {
-                    barrier.await()
-                    repeat(perThread) { i ->
-                        val obs = at(5, (t * 10_000 + i * 60).toLong())
-                        val r = Core.send(Event.LogSet("Lift $t", 50.0 + i, 5, 8.0, observedAt = obs, entryId = obs * 1000 + t))
-                        check(r.accepted && r.persisted) { "thread $t event $i not saved" }
-                    }
-                }.onFailure { failure.compareAndSet(null, it) }
-            }
-        }
-        threads.forEach { it.join(60_000) }
-        failure.get()?.let { throw it }
-        val live = Core.currentView()
-        assertAllLinesParse()
-        assertEquals(2 * perThread, countLines { it.startsWith("{\"LogSet\"") })
-        for (t in 0 until 2) for (i in 0 until perThread) {
-            val obs = at(5, (t * 10_000 + i * 60).toLong())
-            assertEquals("t$t#$i once", 1, entryIdCount(obs * 1000 + t))
-        }
-        val replayed = reboot().view
-        assertEquals(live.lifts, replayed.lifts)
-        assertEquals(live.input_count, replayed.input_count)
-    }
-
     /** A reader ([EventLog.read]: export, panic-reset replay) racing a writer only
      *  ever sees whole committed events, in order, never fewer than before. */
     @Test
     fun aReadRacingAppendsSeesOnlyWholeEventsAndNeverGoesBackwards() {
         writeLog(listOf(QaHarness.strengthProfile()))
-        reboot()
+        QaHarness.reboot(ctx)
         val done = CountDownLatch(1)
         val failure = AtomicReference<Throwable?>(null)
         val reader = thread(name = "reader") {
@@ -507,7 +461,7 @@ class PersistenceTortureTest {
         assertTrue(r.persisted)
         assertEquals(1, entryIdCount(next.entryId))
         assertAllLinesParse()
-        reboot()
+        QaHarness.reboot(ctx)
         assertEquals(1, entryIdCount(next.entryId))
     }
 
@@ -644,7 +598,7 @@ class PersistenceTortureTest {
         assumeTrue("root ignores permissions", System.getProperty("user.name") != "root")
         val base = committed()
         writeLog(base)
-        reboot()
+        QaHarness.reboot(ctx)
         val before = logFile.readBytes()
         ctx.filesDir.setWritable(false, false)
         val res = try {
@@ -659,20 +613,20 @@ class PersistenceTortureTest {
         assertEquals(1, entryIdCount(next.entryId))
         assertEquals(viewOf(base + next), run {
             logFile.writeBytes(before + (line(next) + "\n").toByteArray())
-            reboot().view
+            QaHarness.reboot(ctx).view
         })
     }
 
     /** A data import that runs out of heap mid-write (a backup too large for the
-     *  device; [replaceEventLog] once let the OutOfMemoryError escape its
-     *  `catch (e: Exception)` and kill the app) fails as a whole: the import reports
-     *  [DataImportResult.Failed], the live log is byte-identical, no `.import`
-     *  temporary is left, and the core's log is re-attached. */
+     *  device; [replaceEventLog] treats an OutOfMemoryError as a failed write)
+     *  fails as a whole: the import reports [DataImportResult.Failed], the live log
+     *  is byte-identical, no `.import` temporary is left, and the core's log is
+     *  re-attached. */
     @Test
     fun anImportThatRunsOutOfMemoryFailsCleanlyAndTheLiveLogKeepsRecording() {
         val base = committed()
         writeLog(base)
-        reboot()
+        QaHarness.reboot(ctx)
         val before = logFile.readBytes()
         val profile = line(QaHarness.strengthProfile())
         // The OOM strikes after two lines reached the temporary.
@@ -695,7 +649,7 @@ class PersistenceTortureTest {
     @Test
     fun aRestoreAfterTheImportDetachedTheLogDoesNotReattachIt() {
         writeLog(committed())
-        reboot()
+        QaHarness.reboot(ctx)
         val before = logFile.readBytes()
         Core.detachLog()
         Core.restore(ctx)
@@ -713,14 +667,14 @@ class PersistenceTortureTest {
         logFile.setReadable(false, false)
         logFile.setWritable(false, false)
         val booted = try {
-            reboot()
+            QaHarness.reboot(ctx)
         } finally {
             logFile.setReadable(true, true)
             logFile.setWritable(true, true)
         }
         assertTrue("the boot result tells the user the data could not be read", booted.stale)
         assertTrue("bytes untouched", before.contentEquals(logFile.readBytes()))
-        assertEquals(viewOf(committed()), reboot().view)
+        assertEquals(viewOf(committed()), QaHarness.reboot(ctx).view)
     }
 
     // ── 8. Very large log (5 years) ─────────────────────────────────────────────

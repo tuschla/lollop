@@ -328,9 +328,11 @@ class EventLogTest {
     @Test
     fun loadReportsARemovedPlan() {
         val file = tempLog()
-        file.writeText(listOf(line(Event.GeneratePlan(1)), line(Event.ClearPlan)).joinToString("\n", postfix = "\n"))
+        val lines = listOf(line(Event.GeneratePlan(1)), line(Event.ClearPlan))
+        file.writeText(lines.joinToString("\n", postfix = "\n"))
         val restored = EventLog.load(file)
-        assertEquals(listOf(line(Event.ClearPlan)), restored.lines)
+        // The removed plan keeps its span (`Model::past_plans`): both lines stay.
+        assertEquals(lines, restored.lines)
         assertTrue(restored.planRemoved)
     }
 

@@ -13,19 +13,6 @@ use shared::{Engine, Event, compact_event_log};
 
 mod common;
 
-/// The events of one fixture file; a failure names the file.
-fn parse(path: &Path) -> Vec<Event> {
-    fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("unreadable fixture {}: {e}", path.display()))
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| {
-            serde_json::from_str(l)
-                .unwrap_or_else(|e| panic!("unparseable line in {}: {l:?}: {e}", path.display()))
-        })
-        .collect()
-}
-
 /// The view JSON a shell renders after replaying `events` from an empty model.
 fn replayed_view(events: &[Event]) -> String {
     serde_json::to_string(&Engine.view(&common::replay(events.iter().cloned())))
@@ -68,8 +55,8 @@ fn compaction_golden_fixtures() {
     for case in &cases {
         let in_path = dir.join(format!("{case}.in.ndjson"));
         let expected_path = dir.join(format!("{case}.expected.ndjson"));
-        let input = parse(&in_path);
-        let expected = parse(&expected_path);
+        let input = common::events(&in_path);
+        let expected = common::events(&expected_path);
         assert_eq!(
             compact_event_log(input.clone()),
             expected,

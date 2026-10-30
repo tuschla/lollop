@@ -44,16 +44,13 @@ fun ReadinessEditor(
     // Core-exported signal→group map (ViewModel.signal_groups): picker order and
     // the red-flag fence come from it, not from a shell-side predicate.
     signalGroups: Map<String, String>,
-    // Deep-link entry point (Today "+ Add" chips): the signal the editor opens
-    // pre-selected. Defaults to WellnessZ (the manual/advanced default).
-    initialSignal: ReadinessSignal = ReadinessSignal.WellnessZ,
-    onClose: () -> Unit = {},
+    onClose: () -> Unit,
     // Mirror unsaved-edits up to a host so its swipe-down dismissal can guard it.
     onDirtyChange: (Boolean) -> Unit = {},
     onSubmit: (Event.SubmitReadiness) -> Unit,
 ) {
-    var signal by rememberSaveable { mutableStateOf(initialSignal) }
-    var value by rememberSaveable { mutableStateOf(defaultReadinessValue(initialSignal)) }
+    var signal by rememberSaveable { mutableStateOf(ReadinessSignal.WellnessZ) }
+    var value by rememberSaveable { mutableStateOf(defaultReadinessValue(ReadinessSignal.WellnessZ)) }
     var observedAt by rememberSaveable { mutableStateOf(AppClock.nowSec()) }
     // Effort minutes for the duration-gated AerobicDecoupling signal (valid only
     // >20 min, File 06). Defaults to a validating 30 min; sent only for that

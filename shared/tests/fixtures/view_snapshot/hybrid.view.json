@@ -3570,7 +3570,7 @@
         "srpe_load_au": 0.0
       }
     ],
-    "planned_weekly_km": 40.0,
+    "planned_weekly_km": 43.5,
     "longest_run_km": 17.0,
     "longest_run_observed_at": 1728198000,
     "best_efforts": [
@@ -3900,7 +3900,7 @@
         "run_head_km": null
       },
       {
-        "summary": "Deadlift: 1×3 @ 130 kg · ~3 reps left",
+        "summary": "Deadlift: 1×3 @ 130 kg · ~4 reps left",
         "exercise": "Deadlift",
         "sets": 1,
         "reps_low": 3,
@@ -3910,7 +3910,7 @@
         "rest_sec": 180,
         "rep_volume": "",
         "timed_hold": false,
-        "target_rpe": 7.0,
+        "target_rpe": 6.0,
         "last_set": {
           "entry_id": 52,
           "observed_at": 1728064800,
@@ -3944,7 +3944,7 @@
         "safety_critical": false,
         "contested": true,
         "why": {
-          "basis": "1×3 at 85% of your estimated max (172.1 kg): 145 kg planned, 130 kg today. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 147.5 kg × 3 with 2 reps left. Today is 17.5 kg lighter because of today's adjustment.",
+          "basis": "1×3 at 85% of your estimated max (172.1 kg): 145 kg planned, 130 kg today. Stop each set with ~4 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 147.5 kg × 3 with 2 reps left. Today is 17.5 kg lighter because of today's adjustment.",
           "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
           "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
         },
@@ -3959,13 +3959,13 @@
         "calis": null,
         "run_structure": null,
         "face_name": "Deadlift",
-        "face_detail": "1×3 @ 130 kg · ~3 reps left",
+        "face_detail": "1×3 @ 130 kg · ~4 reps left",
         "face_lead": "1×3 @ 130 kg",
         "run_head": "",
         "run_head_km": null
       },
       {
-        "summary": "Bench Press: 1×3 @ 80 kg · ~3 reps left",
+        "summary": "Bench Press: 1×3 @ 80 kg · ~4 reps left",
         "exercise": "Bench Press",
         "sets": 1,
         "reps_low": 3,
@@ -3975,7 +3975,7 @@
         "rest_sec": 180,
         "rep_volume": "",
         "timed_hold": false,
-        "target_rpe": 7.0,
+        "target_rpe": 6.0,
         "last_set": {
           "entry_id": 49,
           "observed_at": 1727892000,
@@ -4008,7 +4008,7 @@
         "safety_critical": false,
         "contested": false,
         "why": {
-          "basis": "1×3 at 85% of your estimated max (107.9 kg): 90 kg planned, 80 kg today. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 87.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter because of today's adjustment.",
+          "basis": "1×3 at 85% of your estimated max (107.9 kg): 90 kg planned, 80 kg today. Stop each set with ~4 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 87.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter because of today's adjustment.",
           "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
           "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
         },
@@ -4023,7 +4023,7 @@
         "calis": null,
         "run_structure": null,
         "face_name": "Bench Press",
-        "face_detail": "1×3 @ 80 kg · ~3 reps left",
+        "face_detail": "1×3 @ 80 kg · ~4 reps left",
         "face_lead": "1×3 @ 80 kg",
         "run_head": "",
         "run_head_km": null
@@ -4174,7 +4174,7 @@
           "run_head_km": null
         },
         {
-          "summary": "Deadlift: 1×3 @ 130 kg · ~3 reps left",
+          "summary": "Deadlift: 1×3 @ 130 kg · ~4 reps left",
           "exercise": "Deadlift",
           "sets": 1,
           "reps_low": 3,
@@ -4184,7 +4184,7 @@
           "rest_sec": 180,
           "rep_volume": "",
           "timed_hold": false,
-          "target_rpe": 7.0,
+          "target_rpe": 6.0,
           "last_set": {
             "entry_id": 52,
             "observed_at": 1728064800,
@@ -4218,7 +4218,7 @@
           "safety_critical": false,
           "contested": true,
           "why": {
-            "basis": "1×3 at 85% of your estimated max (172.1 kg): 145 kg planned, 130 kg today. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 147.5 kg × 3 with 2 reps left. Today is 17.5 kg lighter because of today's adjustment.",
+            "basis": "1×3 at 85% of your estimated max (172.1 kg): 145 kg planned, 130 kg today. Stop each set with ~4 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 147.5 kg × 3 with 2 reps left. Today is 17.5 kg lighter because of today's adjustment.",
             "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -4233,13 +4233,13 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Deadlift",
-          "face_detail": "1×3 @ 130 kg · ~3 reps left",
+          "face_detail": "1×3 @ 130 kg · ~4 reps left",
           "face_lead": "1×3 @ 130 kg",
           "run_head": "",
           "run_head_km": null
         },
         {
-          "summary": "Bench Press: 1×3 @ 80 kg · ~3 reps left",
+          "summary": "Bench Press: 1×3 @ 80 kg · ~4 reps left",
           "exercise": "Bench Press",
           "sets": 1,
           "reps_low": 3,
@@ -4249,7 +4249,7 @@
           "rest_sec": 180,
           "rep_volume": "",
           "timed_hold": false,
-          "target_rpe": 7.0,
+          "target_rpe": 6.0,
           "last_set": {
             "entry_id": 49,
             "observed_at": 1727892000,
@@ -4282,7 +4282,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "1×3 at 85% of your estimated max (107.9 kg): 90 kg planned, 80 kg today. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 87.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter because of today's adjustment.",
+            "basis": "1×3 at 85% of your estimated max (107.9 kg): 90 kg planned, 80 kg today. Stop each set with ~4 reps left. If a set feels much harder, you're below your estimate today: end the exercise there. Last time: 87.5 kg × 5 with 2 reps left. Today is 7.5 kg lighter because of today's adjustment.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -4297,7 +4297,7 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Bench Press",
-          "face_detail": "1×3 @ 80 kg · ~3 reps left",
+          "face_detail": "1×3 @ 80 kg · ~4 reps left",
           "face_lead": "1×3 @ 80 kg",
           "run_head": "",
           "run_head_km": null
@@ -5014,7 +5014,7 @@
       "status": "planned",
       "items": [
         {
-          "summary": "Back Squat: 1×3 @ 110 kg · ~2 reps left",
+          "summary": "Back Squat: 1×3 @ 110 kg · ~3 reps left",
           "exercise": "Back Squat",
           "sets": 1,
           "reps_low": 3,
@@ -5024,7 +5024,7 @@
           "rest_sec": 180,
           "rep_volume": "",
           "timed_hold": false,
-          "target_rpe": 8.0,
+          "target_rpe": 7.0,
           "last_set": {
             "entry_id": 46,
             "observed_at": 1727719200,
@@ -5058,7 +5058,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "1×3 at 85% of your estimated max (144.9 kg), scaled to 90% in week 1 of 1 back from your break: 110 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "basis": "1×3 at 85% of your estimated max (144.9 kg), scaled to 90% in week 1 of 1 back from your break: 110 kg. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -5073,13 +5073,13 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Back Squat",
-          "face_detail": "1×3 @ 110 kg · ~2 reps left",
+          "face_detail": "1×3 @ 110 kg · ~3 reps left",
           "face_lead": "1×3 @ 110 kg",
           "run_head": "",
           "run_head_km": null
         },
         {
-          "summary": "Deadlift: 1×3 @ 130 kg · ~2 reps left",
+          "summary": "Deadlift: 1×3 @ 130 kg · ~3 reps left",
           "exercise": "Deadlift",
           "sets": 1,
           "reps_low": 3,
@@ -5089,7 +5089,7 @@
           "rest_sec": 180,
           "rep_volume": "",
           "timed_hold": false,
-          "target_rpe": 8.0,
+          "target_rpe": 7.0,
           "last_set": {
             "entry_id": 52,
             "observed_at": 1728064800,
@@ -5123,7 +5123,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "1×3 at 85% of your estimated max (172.1 kg), scaled to 90% in week 1 of 1 back from your break: 130 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "basis": "1×3 at 85% of your estimated max (172.1 kg), scaled to 90% in week 1 of 1 back from your break: 130 kg. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -5138,7 +5138,7 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Deadlift",
-          "face_detail": "1×3 @ 130 kg · ~2 reps left",
+          "face_detail": "1×3 @ 130 kg · ~3 reps left",
           "face_lead": "1×3 @ 130 kg",
           "run_head": "",
           "run_head_km": null

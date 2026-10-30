@@ -122,7 +122,7 @@ pub fn pain_region(location: &str) -> Option<PainRegion> {
 /// Runs load the legs and, through impact, the spine: they stay only for arm,
 /// shoulder or neck pain.
 pub fn item_spared_by_pain(region: PainRegion, exercise: &str) -> bool {
-    let n = exercise.trim().to_ascii_lowercase();
+    let n = crate::names::exercise_key(exercise);
     if n.is_empty() {
         return region == PainRegion::UpperLimb;
     }

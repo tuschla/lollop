@@ -620,6 +620,10 @@ pub struct Model {
     /// `view()` from profile + anchors + this request (deterministic, like every
     /// calculator). `None` → no plan surfaced.
     pub(super) plan_request: Option<PlanRequest>,
+    /// Earlier plans as (start day, local day `ClearPlan` removed them), in
+    /// removal order, so their planned deload weeks stay known after the plan
+    /// is removed and set up again (`consistency::lift_deload_days`).
+    pub(super) past_plans: Vec<(i64, i64)>,
     /// The shell's clock, entering as event data: the current
     /// epoch-day, sent on foreground so `view()` can date the week and pick the
     /// next session without reading a clock. `None`

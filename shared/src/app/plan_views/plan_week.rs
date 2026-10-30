@@ -32,7 +32,8 @@ struct PlanSnapshots {
 /// prescribed with the profile effective THAT day), the active and retracted
 /// readiness inputs (they gate calisthenics progression, date-filtered per
 /// day), the shell's today/offset, the block position, the plan's start day,
-/// the off day and the calisthenics placements. The key covers everything the
+/// the earlier plans' spans (their deload days), the off day and the
+/// calisthenics placements. The key covers everything the
 /// snapshots read, so an unrelated event reuses them. A view builds it
 /// borrowing the model; only a miss stores an owned copy.
 #[derive(PartialEq)]
@@ -46,6 +47,7 @@ struct PlanSnapshotKey<'m> {
     offset: i64,
     week_index: u32,
     start: i64,
+    past_plans: std::borrow::Cow<'m, [(i64, i64)]>,
     off_day: Option<i64>,
     calis_placements: std::borrow::Cow<'m, [CalisPlacement]>,
 }
@@ -63,6 +65,7 @@ impl PlanSnapshotKey<'_> {
             offset: self.offset,
             week_index: self.week_index,
             start: self.start,
+            past_plans: Owned(self.past_plans.into_owned()),
             off_day: self.off_day,
             calis_placements: Owned(self.calis_placements.into_owned()),
         }
@@ -158,7 +161,7 @@ impl<'a> PlanFrame<'a> {
                 Some(day_profile),
                 model,
                 offset,
-                lift_deload_weeks(model, &cx.days),
+                lift_deload_days(model, &cx.days),
             ),
             through,
             offset,
@@ -298,7 +301,8 @@ impl WeekRecs {
 /// Otherwise the active readiness + non-blocking review adjustments are folded
 /// into today's items, and the first session after a resolved hold is the easy
 /// return session even when it falls after today. `None`/empty when no plan is
-/// set or the profile raises an onboarding gate.
+/// set or the profile raises an onboarding gate. Last: the run km this week
+/// prescribes (0 for none, or a run/walk week, whose runs are timed).
 /// Each calendar day is prescribed from the history logged strictly BEFORE it,
 /// so logging a day's sets can never move that day's target; a future day sees
 /// everything through today.
@@ -312,10 +316,11 @@ pub(in crate::app) fn build_plan_views(
     Vec<SessionPlanView>,
     Vec<SessionPlanView>,
     Option<ProgramSummaryView>,
+    f64,
 ) {
     let model = cx.model;
     let (Some(profile), Some(req)) = (model.profile(), model.plan_request) else {
-        return (None, Vec::new(), Vec::new(), None);
+        return (None, Vec::new(), Vec::new(), None, 0.0);
     };
     let start = req.start_epoch_day;
     let today = model.today_epoch_day.unwrap_or(start);
@@ -335,7 +340,7 @@ pub(in crate::app) fn build_plan_views(
         week_index: plan_week_index(model, &cx.days, week_monday).unwrap_or(0),
     };
     let Some((snapshots, past)) = plan_snapshots(&f) else {
-        return (None, Vec::new(), Vec::new(), None);
+        return (None, Vec::new(), Vec::new(), None, 0.0);
     };
     let mut today_recs: Vec<Recommended<Adjustment>> = recommended.to_vec();
     today_recs.extend(review_recs.iter().cloned());
@@ -397,14 +402,25 @@ pub(in crate::app) fn build_plan_views(
         blank_row(row);
     }
 
-    let cur_program = &snapshots.this.current.1;
+    let (cur_anchors, cur_program) = &snapshots.this.current;
     let program_view = Some(build_program_summary(
         f.today_profile,
         cur_program,
         program_week(&f, &cur_program.mesocycle),
         f.week_index,
     ));
-    (next_session, week, next_week, program_view)
+    let run_walk = cur_program
+        .mesocycle
+        .sessions
+        .iter()
+        .flat_map(|s| &s.prescriptions)
+        .any(|rx| matches!(&rx.value, Prescription::Run(r) if matches!(r.volume, crate::schema::RunVolume::RunWalk { .. })));
+    let planned_run_km = if run_walk {
+        0.0
+    } else {
+        round_tenths(crate::plan::prescribed_run_km(cur_program, cur_anchors))
+    };
+    (next_session, week, next_week, program_view, planned_run_km)
 }
 
 /// The week's plan snapshots and past-day readiness, from the cache when the
@@ -438,6 +454,7 @@ fn plan_snapshots(f: &PlanFrame) -> Option<(Rc<PlanSnapshots>, Rc<PastReadiness>
         offset,
         week_index,
         start,
+        past_plans: Borrowed(&model.past_plans),
         off_day: crate::app::anchors::off_day(model, offset),
         calis_placements: Borrowed(&model.calis_placements),
     };

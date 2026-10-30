@@ -46,6 +46,11 @@ internal fun displayFigure(displayValue: Double): String = String.format(Locale.
 /** A distance figure without its unit ("3.21"), in the user's unit. */
 internal fun distanceFigure(km: Double, unit: DistanceUnit): String = displayFigure(metersToDisplay(km * 1000.0, unit))
 
+/** A pace figure without its unit ("5:30"), in the user's unit; the placeholder
+ *  while there is no pace yet. */
+internal fun paceFigure(minPerKm: Double, unit: DistanceUnit): String =
+    if (minPerKm.isFinite()) formatPaceMinutes(paceInUnit(minPerKm, unit)) else EmptyValuePlaceholder
+
 /** Distance in the display unit, e.g. "8.05 km" / "5.00 mi". */
 internal fun runDistLabel(distanceKm: Double, unit: DistanceUnit): String = "${distanceFigure(distanceKm, unit)} ${unit.distanceLabel}"
 
@@ -376,7 +381,7 @@ internal fun RunSplitsSection(run: RunResultView, splits: List<RunSplitView>, un
             for (i in 0 until shown) {
                 val s = splits[i]
                 val bar = bars[i]
-                val spoken = splitSpoken(res, s, bar, deltaLabels[i], unit)
+                val spoken = splitSpoken(res, s, bar, if (s.partial) spokenDistance(res, displayFigure(partialLength(splits, i, unit)), unit) else "", unit)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -450,15 +455,13 @@ private val SplitBarHeight = 10.dp
 /** Opacity of the partial split's `OnBgFaint` bar. */
 private const val PartialBarAlpha = 0.3f
 
-/** "Split 1, 8 minutes 22 per mile, 1 second faster than average, fastest". */
+/** "Split 1, 8 minutes 22 seconds per mile, 1 second faster than average,
+ *  fastest"; the partial split speaks its [distance]. */
 private fun splitSpoken(res: Resources, s: RunSplitView, bar: SplitBar, distance: String, unit: DistanceUnit): String {
     val pace = if (s.seconds_per_unit > 0) {
-        val m = s.seconds_per_unit / 60
         res.getString(
-            R.string.run_pace_spoken,
-            res.getQuantityString(R.plurals.run_minutes_spoken, m, m),
-            s.seconds_per_unit % 60,
-            res.getString(if (unit == DistanceUnit.Mi) R.string.run_unit_mile_word else R.string.run_unit_km_word),
+            if (unit == DistanceUnit.Mi) R.string.track_cd_pace_mi else R.string.track_cd_pace_km,
+            spokenDuration(res, s.seconds_per_unit.toLong()),
         )
     } else {
         "${s.pace} ${unit.paceSuffix}"
@@ -468,16 +471,7 @@ private fun splitSpoken(res: Resources, s: RunSplitView, bar: SplitBar, distance
     val delta = when {
         d == null -> ""
         d == 0 -> res.getString(R.string.run_split_even)
-        else -> {
-            val a = Math.abs(d)
-            val amount = if (a >= 60) {
-                res.getQuantityString(R.plurals.run_minutes_spoken, a / 60, a / 60) +
-                    (if (a % 60 > 0) " " + res.getQuantityString(R.plurals.run_seconds_spoken, a % 60, a % 60) else "")
-            } else {
-                res.getQuantityString(R.plurals.run_seconds_spoken, a, a)
-            }
-            res.getString(if (d < 0) R.string.run_split_faster else R.string.run_split_slower, amount)
-        }
+        else -> res.getString(if (d < 0) R.string.run_split_faster else R.string.run_split_slower, spokenDuration(res, Math.abs(d).toLong()))
     }
     val row = res.getString(R.string.run_split_cd, "${s.index}", pace, delta).trimEnd(',', ' ')
     return when (bar.tag) {

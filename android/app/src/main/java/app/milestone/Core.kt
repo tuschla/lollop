@@ -1133,12 +1133,13 @@ enum class ParqItem(val bit: Int) {
 
     val symptom: Boolean get() = this == ChestPain || this == DizzyOrFainting
     val injury: Boolean get() = this == BoneOrJoint
+    val followUp: Boolean get() = !symptom && !injury
 }
 
 /** The clearable doctor-follow-up questions (Q1/Q4/Q5/Q7) as a [HealthScreen.parq_yes]
  *  mask; mirrors schema.rs `PARQ_FOLLOWUP_BITS`. */
 private val PARQ_FOLLOW_UP_BITS: Int = ParqItem.entries
-    .filter { !it.symptom && !it.injury }
+    .filter { it.followUp }
     .fold(0) { acc, it -> acc or (1 shl it.bit) }
 
 /** The symptom questions (Q2/Q3) as a [HealthScreen.parq_yes] mask. */
@@ -1179,8 +1180,8 @@ data class HealthScreen(
             symptomatic || acute_illness || parq_yes != 0
 
     /** A "Doctor-flagged" answer from the old single toggle, before the seven
-     *  questions existed: raised, but no per-question answer recorded. */
-    val legacyParq: Boolean get() = parq_yes == 0 && parq_positive
+     *  questions existed: raised, but no follow-up answer recorded. */
+    val legacyParq: Boolean get() = parq_positive && parq_yes and PARQ_FOLLOW_UP_BITS == 0
 
     /** This PAR-Q+ question answered Yes. Q6 also reads the injury flag, which
      *  predates the questions and means the same thing. */
@@ -1191,13 +1192,13 @@ data class HealthScreen(
     val parqYesCount: Int get() = ParqItem.entries.count { parqYes(it) }
 
     /** Answer one PAR-Q+ question and re-derive the gate flags from all seven.
-     *  Once any per-question answer exists the answers are authoritative; a
-     *  legacy raised toggle is kept only while none is. A legacy `symptomatic`
-     *  flag (no symptom bit) stays until a symptom question itself is answered:
-     *  symptoms are never clearable (onboard-052), so an unrelated answer must
-     *  not drop it. A clearance survives only while every follow-up Yes was
-     *  already covered by it: a NEW follow-up Yes drops `medically_cleared`
-     *  (safety-044). */
+     *  A legacy flag stays until a question of its own kind is answered, so an
+     *  unrelated answer never drops a hold: a legacy doctor flag ([legacyParq])
+     *  until a follow-up question (Q1/Q4/Q5/Q7) is answered, a legacy
+     *  `symptomatic` flag (no symptom bit) until a symptom question is
+     *  (symptoms are never clearable, onboard-052). A clearance survives only
+     *  while every follow-up Yes was already covered by it: a NEW follow-up Yes
+     *  drops `medically_cleared` (safety-044). */
     fun withParqAnswer(item: ParqItem, yes: Boolean): HealthScreen {
         val bit = 1 shl item.bit
         // Fold a legacy injury flag into its question first, so answering another
@@ -1208,7 +1209,7 @@ data class HealthScreen(
         val followUpBits = PARQ_FOLLOW_UP_BITS
         val oldFollowUps = parq_yes and followUpBits
         val newFollowUps = mask and followUpBits
-        val followUp = newFollowUps != 0 || (mask == 0 && legacyParq)
+        val followUp = newFollowUps != 0 || (legacyParq && !item.followUp)
         // What the existing clearance covers: the recorded mask, or (a clearance
         // saved before the mask existed / a legacy toggle) the answers at the time.
         val covered = when {

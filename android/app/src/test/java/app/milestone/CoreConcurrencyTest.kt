@@ -6,8 +6,7 @@ import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
 import app.milestone.widget.WidgetSnapshotStore
 import app.milestone.widget.widgetSnapshotOf
-import java.io.File
-import java.util.Locale
+import app.milestone.qa.QaHarness.daysAgoAtMidday as at
 import java.util.Random
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CyclicBarrier
@@ -53,14 +52,11 @@ import org.robolectric.RobolectricTestRunner
 class CoreConcurrencyTest {
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
-    private val logFile get() = File(ctx.filesDir, "event-log.ndjson")
+    private val logFile get() = QaHarness.logFile(ctx)
     private val json = Json { ignoreUnknownKeys = true }
 
     @Before
-    fun setUp() {
-        Locale.setDefault(Locale.US)
-        QaHarness.reset(ctx)
-    }
+    fun setUp() = QaHarness.reset(ctx)
 
     @After
     fun tearDown() {
@@ -70,18 +66,9 @@ class CoreConcurrencyTest {
 
     // ── Harness ────────────────────────────────────────────────────────────────
 
-    private fun at(daysAgo: Int, plusSec: Long = 0) = QaHarness.daysAgoAtMidday(daysAgo) + plusSec
-
-    /** Process death, then the boot sequence: restore (compaction + replay), SetToday. */
-    private fun reboot(): SendResult {
-        ProcessDeath.kill(ctx)
-        Core.restore(ctx)
-        return Core.send(Event.SetToday(todayEpochDay(), utcOffsetSec()))
-    }
-
     private fun boot(events: List<Event>): SendResult {
         QaHarness.seedLog(ctx, events)
-        return reboot()
+        return QaHarness.reboot(ctx)
     }
 
     private fun sendOk(e: Event, who: String): SendResult {
@@ -125,8 +112,6 @@ class CoreConcurrencyTest {
         failure.get()?.let { throw AssertionError("worker failed: ${it.message}", it) }
         threads.firstOrNull { it.isAlive }?.let { fail("${it.name} still running after $STALL_SEC s (deadlock?)") }
     }
-
-    private fun lines() = logFile.readLines().filter { it.isNotBlank() }
 
     /** Whether wire [line] names entry [id] (the field may close the object). */
     private fun carriesId(line: String, id: Long) =
@@ -260,7 +245,8 @@ class CoreConcurrencyTest {
                             // A data export / boot compaction reading the log while it grows.
                             val read = EventLog.read(logFile).lines
                             assertWholeLines(read, "t$t export read")
-                            assertNotNull("t$t: compaction verdict", Core.compaction(lines()))
+                            val dropped = checkNotNull(Core.compaction(read)) { "t$t: no compaction verdict" }.dropped
+                            assertTrue("t$t: compaction drops lines it was not given: $dropped", dropped.all { it in read.indices })
                         }
                         else -> {
                             // Widget / tile / reminder reads of the current view.
@@ -296,7 +282,7 @@ class CoreConcurrencyTest {
         val runIds = live.runs.groupingBy { it.entry_id }.eachCount()
         assertEquals("every run once", (gpsRuns.keys + manualRuns).associateWith { 1 }, runIds)
         // An import batch's lines are contiguous in the log (one monitor turn).
-        val logLines = lines()
+        val logLines = QaHarness.logLines(ctx)
         assertWholeLines(logLines, "final log")
         for (batch in batches) {
             val idx = batch.map { id -> logLines.indexOfFirst { it.startsWith("{\"LogRunTrack\"") && carriesId(it, id) } }
@@ -307,7 +293,7 @@ class CoreConcurrencyTest {
         exports.forEach { (rid, g) -> assertTrue("run $rid: empty export", !g.isNullOrBlank()) }
 
         // A cold boot of the durable log renders the live view and the same routes.
-        val replayed = reboot()
+        val replayed = QaHarness.reboot(ctx)
         assertTrue("replayed view is stale", !replayed.stale)
         assertTrue("reboot view differs from the live view", replayed.view == live)
         for ((rid, g) in exports) {
@@ -341,7 +327,7 @@ class CoreConcurrencyTest {
         }
         val live = Core.currentView()
         val expected = ArrayList<Pair<Double, Int>>()
-        for (l in lines().filter { carriesId(it, base.id) }) {
+        for (l in QaHarness.logLines(ctx).filter { carriesId(it, base.id) }) {
             val o = json.parseToJsonElement(l).jsonObject
             val variant = o.keys.single()
             val f = o.getValue(variant).jsonObject
@@ -355,7 +341,7 @@ class CoreConcurrencyTest {
         }
         val shown = live.lifts.filter { it.entry_id == base.id }.map { it.weight_kg to it.reps }
         assertEquals("rows for set ${base.id} vs the log order", expected.sortedBy { it.toString() }, shown.sortedBy { it.toString() })
-        assertTrue("reboot view differs from the live view", reboot().view == live)
+        assertTrue("reboot view differs from the live view", QaHarness.reboot(ctx).view == live)
     }
 
     // ── 3. A panic reset in the middle of the stress ─────────────────────────────
@@ -408,8 +394,8 @@ class CoreConcurrencyTest {
         val live = Core.currentView()
         val ids = live.lifts.groupingBy { it.entry_id }.eachCount()
         assertEquals("every accepted set once, nothing else", accepted.associateWith { 1 }, ids)
-        assertTrue("the poisoned event reached the log", lines().none { POISON in it })
-        assertTrue("reboot view differs from the live view", reboot().view == live)
+        assertTrue("the poisoned event reached the log", QaHarness.logLines(ctx).none { POISON in it })
+        assertTrue("reboot view differs from the live view", QaHarness.reboot(ctx).view == live)
     }
 
     // ── 4. Boot compaction racing the first sends ───────────────────────────────
@@ -442,11 +428,11 @@ class CoreConcurrencyTest {
         booter.join(STALL_SEC * 1000)
         assertFalse("boot still running (deadlock?)", booter.isAlive)
         val live = Core.send(Event.SetToday(todayEpochDay(), utcOffsetSec())).view
-        val onDisk = lines()
+        val onDisk = QaHarness.logLines(ctx)
         assertTrue("the log was not compacted", onDisk.none { it.startsWith("{\"ComputeHrZones\"") && "\"age_years\":30.0" in it })
         for (id in sent) assertEquals("set $id on disk once", 1, onDisk.count { carriesId(it, id) })
         assertEquals("every set once", (sent + old.map { it.entryId }).associateWith { 1 }, live.lifts.groupingBy { it.entry_id }.eachCount())
-        assertTrue("reboot view differs from the live view", reboot().view == live)
+        assertTrue("reboot view differs from the live view", QaHarness.reboot(ctx).view == live)
     }
 
     // ── 5. Widget, tile and reminder reads racing the snapshot writes ────────────

@@ -46,7 +46,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 
@@ -137,7 +136,7 @@ internal fun holdReasonLineRes(holdReason: String?, tier: String?, pregnancyWarn
  * The DO-NOT-TRAIN banner with the confirm dialogs its actions need, the one
  * host for every screen that pins it (Today and the run tracker). The under-18
  * pause renders nothing here (it is Today's [YouthHoldCard]). Without
- * [onAddDetails] / [onOpenProfile] the banner states the way back as text.
+ * [onOpenProfile] the banner states the way back as text.
  */
 @Composable
 internal fun SafetyBannerHost(
@@ -145,7 +144,7 @@ internal fun SafetyBannerHost(
     onEvent: (Event) -> Unit,
     modifier: Modifier = Modifier,
     lastPain: PainDetail?,
-    onAddDetails: (() -> Unit)? = null,
+    onAddDetails: () -> Unit,
     onOpenProfile: ((ProfileRowId) -> Unit)? = null,
 ) {
     var confirmReadiness by rememberSaveable { mutableStateOf(false) }
@@ -248,7 +247,7 @@ private fun SafetyBanner(
     holdDetail: String?,
     action: HoldAction,
     onAction: (() -> Unit)?,
-    onAddDetails: (() -> Unit)?,
+    onAddDetails: () -> Unit,
     onResolveHold: (HoldResolutionView) -> Unit,
 ) {
     // Proportional safety: the pinned red banner is reserved for a genuine
@@ -351,7 +350,6 @@ private fun SafetyBanner(
         }
         val reportHold = action == HoldAction.RemovePain || action == HoldAction.RemoveIllness ||
             action == HoldAction.ClearReadiness
-        val showAddDetails = onAddDetails != null && reportHold
         val undoLabel = when (action) {
             HoldAction.RemovePain, HoldAction.RemoveIllness -> stringResource(R.string.main_remove_report)
             HoldAction.ClearReadiness -> stringResource(R.string.main_logged_by_mistake)
@@ -359,7 +357,7 @@ private fun SafetyBanner(
             HoldAction.EndIllness, HoldAction.CheckAge -> null
         }
         val opensProfile = action == HoldAction.ReviewHealth
-        val hasTextActions = showAddDetails || opensProfile || (undoLabel != null && onAction != null)
+        val hasTextActions = reportHold || opensProfile || (undoLabel != null && onAction != null)
         // The way back to training: the core's resolve actions (history kept;
         // one illness action ends every illness hold). Solid white, the
         // banner's primary actions.
@@ -393,7 +391,7 @@ private fun SafetyBanner(
                     ) {
                         // Each text action on its own line (never joined by a stray "·").
                         Column(Modifier.weight(1f).offset(x = -TextActionInset)) {
-                            if (showAddDetails) {
+                            if (reportHold) {
                                 TextAction(stringResource(R.string.main_add_details), onClick = onAddDetails, tint = Color.White)
                             }
                             if (undoLabel != null && onAction != null) {

@@ -206,12 +206,11 @@ fn post_return_anchor_is_unscaled_and_long_layoff_window_ends() {
 fn missed_target_cuts_next_load_5pct_unless_off_day() {
     // AUTOREG-E1RM-GATE-001: a session whose rated e1RM lands
     // >5 % under the baseline cuts that lift's next working load ~5 %. 100 kg
-    // × 4 at RPE 10 reads 113.3 kg, 8 % under 123.3 kg, and still 5.8 % under
-    // when credited the 2.5 kg plate-grid step.
+    // × 5 at RPE 10 reads 116.7 kg, 5.4 % under 123.3 kg, at an unchanged load.
     let sets = [
         set("Back Squat", 100.0, 5, 8.0, 0),
         set("Back Squat", 100.0, 5, 8.0, 7),
-        set("Back Squat", 100.0, 4, 10.0, 14),
+        set("Back Squat", 100.0, 5, 10.0, 14),
     ];
     let a = anchors_at(&sets, AnchorCtx::default(), 15);
     let d = a.load_frac_for("Back Squat").expect("an e1RM-drop cut");
@@ -230,26 +229,43 @@ fn missed_target_cuts_next_load_5pct_unless_off_day() {
 }
 
 #[test]
-fn a_plate_floored_load_done_as_asked_is_no_e1rm_drop() {
-    // 85 % of a 55.5 kg overhead-press anchor is 47.2 kg, floored onto the
-    // 2.5 kg grid to 45 kg. 45 kg × 3 at the card's ~2 reps left (RPE 8) reads
-    // 52.5 kg, 94.6 % of the anchor; one plate step heavier, the most the
-    // floor took off, it reads 55.4 kg. The floor is not a drop
-    // (AUTOREG-E1RM-GATE-001 at fixed RPE, autoreg-022).
-    let asked = [
+fn a_light_lift_drop_at_the_same_load_is_cut() {
+    // 45 kg × 3 at RPE 9.5 after 45 kg × 5 at RPE 8: the same bar weight, the
+    // e1RM falls 55.5 → 50.25 kg (−9.5 %), past AUTOREG-E1RM-GATE-001's 5 %
+    // however light the lift.
+    let sets = [
         set("Overhead Press", 45.0, 5, 8.0, 0),
-        set("Overhead Press", 45.0, 3, 8.0, 3),
+        set("Overhead Press", 45.0, 3, 9.5, 3),
     ];
-    let a = anchors_at(&asked, AnchorCtx::default(), 4);
-    assert_eq!(a.load_frac_for("Overhead Press"), None);
-    // A set more than one plate step under it still is: 42.5 kg × 3 at RPE 8
-    // reads 52.5 kg even credited 45 kg, under 95 % of 55.5 kg (52.7 kg).
-    let missed = [
-        set("Overhead Press", 45.0, 5, 8.0, 0),
-        set("Overhead Press", 42.5, 3, 8.0, 3),
-    ];
-    let d = anchors_at(&missed, AnchorCtx::default(), 4)
+    let d = anchors_at(&sets, AnchorCtx::default(), 4)
         .load_frac_for("Overhead Press")
+        .cloned()
+        .expect("an e1RM-drop cut");
+    assert_eq!(d.cause, DerateCause::E1rmDrop);
+}
+
+#[test]
+fn a_plate_floored_load_is_asked_at_the_effort_it_takes() {
+    // 85 % × 3 of a 55.5 kg anchor is 47.2 kg, floored onto the 2.5 kg grid to
+    // 45 kg: 81 % of the anchor, ~4 reps left on the Epley model where 85 %
+    // would ask ~2. Done as asked, 45 kg × 3 reads the anchor back; at the
+    // unfloored effort (RPE 8) it reads 52.5 kg, a 5.4 % drop
+    // (AUTOREG-E1RM-GATE-001 at fixed RPE, autoreg-022).
+    let anchors = crate::plan::Anchors {
+        lift_e1rm: vec![("Back Squat".into(), 55.5)],
+        ..Default::default()
+    };
+    let it = flatten_prescription(&pct_rx(85.0, 3, None), &anchors, None, false);
+    assert_eq!((it.load_kg, it.target_rpe), (Some(45.0), Some(6.0)));
+    let base = set("Back Squat", 45.0, 5, 8.0, 0);
+    let asked = [base.clone(), set("Back Squat", 45.0, 3, 6.0, 3)];
+    assert_eq!(
+        anchors_at(&asked, AnchorCtx::default(), 4).load_frac_for("Back Squat"),
+        None
+    );
+    let harder = [base, set("Back Squat", 45.0, 3, 8.0, 3)];
+    let d = anchors_at(&harder, AnchorCtx::default(), 4)
+        .load_frac_for("Back Squat")
         .cloned()
         .expect("an e1RM-drop cut");
     assert_eq!(d.cause, DerateCause::E1rmDrop);
@@ -270,11 +286,23 @@ fn e1rm_drop_cut_also_leaves_one_more_rep_in_reserve() {
         ..Default::default()
     };
     let it = flatten_prescription(&pct_rx(85.0, 3, None), &anchors, None, false);
-    // 100 kg × 85 % × 95 % = 80.75 kg, floored to 80 kg; 85 % × 3 alone
-    // targets ~2 reps left (RPE 8).
+    // 100 kg × 85 % × 95 % = 80.75 kg, floored to 80 kg: 84 % of the cut
+    // 95 kg estimate is ~3 reps left on its own, ~4 with the cut's extra rep.
     assert_eq!(it.load_kg, Some(80.0));
-    assert_eq!(it.target_rpe, Some(7.0));
-    assert!(it.summary.contains("~3 reps left"), "{}", it.summary);
+    assert_eq!(it.target_rpe, Some(6.0));
+    assert!(it.summary.contains("4 reps left"), "{}", it.summary);
+}
+
+/// Three 100 kg × 5 @ RPE 8 sessions (epoch days 4–8, a Monday-start week),
+/// then a planned deload week of 70 % × 5 @ RPE 7 on days 11 and 13.
+fn deload_week_sets() -> [LoggedSet; 5] {
+    [
+        set("Back Squat", 100.0, 5, 8.0, 4),
+        set("Back Squat", 100.0, 5, 8.0, 6),
+        set("Back Squat", 100.0, 5, 8.0, 8),
+        set("Back Squat", 70.0, 5, 7.0, 11),
+        set("Back Squat", 70.0, 5, 7.0, 13),
+    ]
 }
 
 #[test]
@@ -283,16 +311,10 @@ fn planned_deload_sets_neither_cut_nor_anchor_the_next_load() {
     // deload's RIR) are prescribed, not a performance drop (autoreg-022 reads
     // e1RM at fixed RPE): the e1RM-drop cut (AUTOREG-E1RM-GATE-001) and the
     // last working sets the next block resumes from (HYP-DELOAD-RX-001) skip
-    // them. Epoch day 4 is a Monday.
-    let sets = [
-        set("Back Squat", 100.0, 5, 8.0, 4),
-        set("Back Squat", 100.0, 5, 8.0, 6),
-        set("Back Squat", 100.0, 5, 8.0, 8),
-        set("Back Squat", 70.0, 5, 7.0, 11),
-        set("Back Squat", 70.0, 5, 7.0, 13),
-    ];
+    // them.
+    let sets = deload_week_sets();
     let deload = AnchorCtx {
-        deloads: DeloadWeeks(&[11]),
+        deloads: DeloadDays(&[11, 13]),
         ..Default::default()
     };
     let a = anchors_at(&sets, deload, 14);
@@ -314,20 +336,14 @@ fn planned_deload_sets_never_score_as_a_readiness_e1rm_drop() {
     // The same deload through the readiness gate (autoreg-006 today's cut,
     // autoreg-022 the decline deload; e1RM at fixed RPE,
     // extracted/06-autoregulation.md:278-280): a deload week's sets rated
-    // exactly (70 % × 5 at RPE 7: 72 % of the 123.3 kg best, 74 % credited a
-    // plate step) are left out, so the last scored session is day 8's.
-    let sets = [
-        set("Back Squat", 100.0, 5, 8.0, 4),
-        set("Back Squat", 100.0, 5, 8.0, 6),
-        set("Back Squat", 100.0, 5, 8.0, 8),
-        set("Back Squat", 70.0, 5, 7.0, 11),
-        set("Back Squat", 70.0, 5, 7.0, 13),
-    ];
+    // exactly (70 % × 5 at RPE 7: 72 % of the 123.3 kg best) are left out, so
+    // the last scored session is day 8's.
+    let sets = deload_week_sets();
     let perf = |deloads| {
-        let scored = crate::app::readiness::perf_sets(&sets, 13, 0, deloads, false);
+        let scored = crate::app::readiness::perf_sets(&sets, 13, 0, deloads);
         crate::autoreg::derive_performance(&scored, 13, 0)
     };
-    let deload = perf(DeloadWeeks(&[11]));
+    let deload = perf(DeloadDays(&[11, 13]));
     assert!(
         deload
             .iter()
@@ -336,7 +352,7 @@ fn planned_deload_sets_never_score_as_a_readiness_e1rm_drop() {
     );
     // Outside a planned deload they are a drop: today's cut and a two-session
     // decline.
-    let plain = perf(DeloadWeeks(&[]));
+    let plain = perf(DeloadDays(&[]));
     assert!(
         plain.iter().any(|p| p.today && p.decline_streak == 2),
         "{plain:?}"

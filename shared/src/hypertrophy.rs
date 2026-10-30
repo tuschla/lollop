@@ -814,11 +814,11 @@ pub const LEGACY_NAMES: &[(&str, &str)] = &[
 /// `None` for any other name. Ingest stores a set logged under an old label
 /// under this name, so every view shows the current one.
 pub fn renamed(name: &str) -> Option<&'static str> {
-    let trimmed = name.trim();
+    let key = crate::names::FoldKey::new(name.trim());
     LEGACY_NAMES
         .iter()
         .chain(crate::calisthenics::LEGACY_NAMES)
-        .find(|&&(old, _)| crate::names::fold_eq(old, trimmed))
+        .find(|&&(old, _)| key.is(old))
         .map(|&(_, new)| new)
 }
 
@@ -832,7 +832,9 @@ pub fn canonical_name(name: &str) -> &str {
 /// resolves to its row).
 pub fn exercise_entry(name: &str) -> Option<&'static ExerciseEntry> {
     let name = canonical_name(name);
-    EXERCISES.iter().find(|e| e.name.eq_ignore_ascii_case(name))
+    EXERCISES
+        .iter()
+        .find(|e| crate::names::fold_eq(e.name, name))
 }
 
 /// A Table 4 row for any spelling of a catalog movement: exact (case-
@@ -896,7 +898,7 @@ pub fn classify(name: &str) -> ExerciseClass {
     if crate::plan::is_isolation_lift(name) {
         return ExerciseClass::Isolation;
     }
-    let lower = name.to_ascii_lowercase();
+    let lower = crate::names::fold(name);
     if crate::plan::movement_pattern(name).is_some()
         && !MACHINE_NEEDLES.iter().any(|n| lower.contains(n))
     {
@@ -957,7 +959,7 @@ const ISOLATION_MUSCLE_NEEDLES: &[(&str, &str)] = &[
 /// The Table 1 muscle an isolation-named exercise trains directly: the first
 /// [`ISOLATION_MUSCLE_NEEDLES`] fragment the name contains.
 pub(crate) fn isolation_muscle(name: &str) -> Option<&'static str> {
-    let lower = name.to_ascii_lowercase();
+    let lower = crate::names::fold(name);
     ISOLATION_MUSCLE_NEEDLES
         .iter()
         .find(|(needle, _)| lower.contains(needle))
@@ -1004,7 +1006,7 @@ pub fn muscle_credits(name: &str) -> Vec<(&'static str, f32)> {
             add_credit(&mut out, "glutes", 0.5);
         }
         Some(MovementPattern::Push) => {
-            let lower = name.to_ascii_lowercase();
+            let lower = crate::names::fold(name);
             if !VERTICAL_PRESS_NEEDLES.iter().any(|n| lower.contains(n)) {
                 add_credit(&mut out, "chest", 1.0);
             }

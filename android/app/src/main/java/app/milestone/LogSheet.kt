@@ -13,11 +13,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -33,7 +31,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 /**
@@ -371,7 +368,6 @@ internal fun LogSheetContent(
             LogMode.Readiness -> ReadinessEditor(
                 // Red-flag fence position comes from the core's signal_groups.
                 signalGroups = model.signal_groups.associate { it.signal to it.group },
-                initialSignal = ReadinessSignal.WellnessZ,
                 onClose = { onMode(LogMode.Chooser) },
                 onDirtyChange = onDirtyChange,
             ) { r -> onEvent(r); onDismiss() }
@@ -478,16 +474,7 @@ private fun LogOptionRow(
             Text(title, color = titleColor, style = Type.BodyBold)
             Text(subtitle, color = subColor, style = Type.Caption)
         }
-        if (tone == LogRowTone.Plain) {
-            RowChevron()
-        } else {
-            Icon(
-                painterResource(R.drawable.ic_ui_chevron_right),
-                contentDescription = null,
-                tint = titleColor,
-                modifier = Modifier.size(16.dp),
-            )
-        }
+        RowChevron(tint = if (tone == LogRowTone.Plain) OnBgFaint else titleColor)
     }
 }
 

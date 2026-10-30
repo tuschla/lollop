@@ -83,7 +83,6 @@ import androidx.compose.ui.semantics.collapse
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -205,21 +204,11 @@ fun Modifier.horizontalEdgeFade(state: ScrollState): Modifier =
         }
 
 /**
- * Full-width list of exclusive options: one comfortable (≥48dp) whole-row tap
- * target per option, announced as one radio group. The selected row is the one
- * list-selection look ([AccentTint] fill, Bold `OnBgBody` label,
- * `Accent` check), shared with the [SegmentedEnumRow] list fallback. Used instead
- * of an anchored dropdown menu, whose rows are tiny, easy to fumble, and clip
- * long option lists.
- *
- * [display] only affects the on-screen text; callers that serialize the choice
- * still key off the value itself (e.g. an enum's `.name`), so a friendly label
- * here never touches the wire contract.
- *
- * [divideBefore] draws a divider above the first option for which it returns
- * true, so a caller can visually fence a subgroup, e.g. the readiness picker
- * separates the medical red-flag signals from the routine metrics, since
- * mis-tapping a red flag has outsized (safety) consequences.
+ * Full-width list of exclusive options, one ≥48dp row each, announced as one
+ * radio group, in the list-selection look shared with [SegmentedEnumRow]'s list
+ * fallback. [display] is the on-screen text only. [divideBefore] draws a divider
+ * above the first option it returns true for (the readiness picker fences its
+ * red-flag signals).
  */
 @Composable
 fun <T> OptionList(
@@ -329,22 +318,11 @@ fun <T : Enum<T>> EnumRow(
 }
 
 /**
- * Label + segmented buttons for a short exclusive enum (design/usability-ia-spec §2:
- * 2–5 options). Every option is visible at once and one tap selects any of them -
- * the "recognition over recall" win a dropdown can't give for a handful of choices,
- * with the current selection always obvious. Use [EnumRow] for longer sets (6+) or
- * where a subgroup divider is needed (e.g. the readiness red-flag fence).
- *
- * Segments are equal-width, so at a large font scale (Android allows 200 %) a label
- * like "Hypertrophy" can outgrow its segment. Every label is measured against the
- * width a segment actually gets; if any would be cut off, the same options render
- * as a full-width radio list instead (one ≥48dp row per option), so no text is
- * ever silently clipped (WCAG 1.4.4).
- *
- * [display] only affects the on-screen text; the wire contract still keys off the
- * value itself (an enum's `.name`, a plain number), so a friendly label never
- * touches serialization. [label] may be null when the caller already renders the
- * field's label.
+ * Label + equal-width segments for a short exclusive enum (2–5 options; use
+ * [OptionList] for more or for a subgroup divider). When a label measured at the
+ * current font scale would not fit its segment, the options render as a
+ * full-width radio list instead, so no text is clipped (WCAG 1.4.4). [display] is
+ * the on-screen text only; [label] may be null when the caller renders it.
  */
 @Composable
 fun <T> SegmentedEnumRow(
@@ -391,22 +369,12 @@ fun <T> SegmentedEnumRow(
 // core derives e1RM / RIR / zone from.
 
 /**
- * The ONE field / sub-question label (log editors, keypad fields, setup steps,
- * check-ins): sentence case, `Type.Body` Bold, `OnBgMuted`, so a label reads as a
- * quiet heading over its control and a long question ("Hard sessions you couldn't
- * finish") reads as a sentence rather than a shouted overline. An optional
- * right-aligned live value / unit hint (e.g. `Reps … 5`, `Weight … kg`) sits on the
- * label's first baseline, a Space.Md gap away, while the label's longest word
- * still fits beside it (a long label wraps within its own column); otherwise (a
- * long hint, a large font) the hint wraps onto its own line under the label, so
- * the label never breaks inside a word. [heading] marks a sub-question as a heading for
- * TalkBack's heading navigation (setup steps); plain field labels leave it off.
- * [onTrailing] turns the trailing hint into a quiet in-place action (a unit swap
- * such as "bpm ⇄"): Bold `Accent`, spoken as [trailingDescription], with a 48dp
- * touch target that overflows the label row rather than growing it.
- *
- * Forms only: a read-only section header (a detail sheet's EFFORT / RUN TYPE /
- * SPLITS) uses [TileOverline], so one sheet never mixes the two heading styles.
+ * The one field / sub-question label: sentence case, `Type.Body` Bold, `OnBgMuted`.
+ * A [trailing] hint sits on the label's first baseline while the label's longest
+ * word still fits beside it, else on its own line below. [heading] marks a setup
+ * sub-question for TalkBack's heading navigation; [onTrailing] makes the hint an
+ * in-place action spoken as [trailingDescription], with a 48dp target. Forms
+ * only: a read-only section header uses [TileOverline].
  */
 @Composable
 fun FieldLabel(
@@ -753,8 +721,8 @@ private val RunTypeOrder = listOf(
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun RunTypeChips(selected: WorkoutType?, onSelect: (WorkoutType) -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+fun RunTypeChips(selected: WorkoutType?, onSelect: (WorkoutType) -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
         FieldLabel(stringResource(R.string.history_workout_type))
         FlowRow(
             modifier = Modifier.fillMaxWidth().selectableGroup(),
@@ -793,7 +761,7 @@ fun RowScope.StatTile(value: String, unit: String?, label: String, glossaryKey: 
         modifier = Modifier
             .weight(1f)
             .fillMaxHeight()
-            .semantics { isTraversalGroup = true }
+            .traversalGroup()
             .clip(RoundedCornerShape(12.dp))
             .background(BgElevated)
             .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp + Space.Xs.dp),
@@ -1074,6 +1042,12 @@ fun SectionOverline(text: String) {
     )
 }
 
+/** A sheet, dialog or card title: [Type.Title] in `OnBgBody`, a TalkBack heading. */
+@Composable
+fun SheetTitle(text: String, modifier: Modifier = Modifier, textAlign: TextAlign? = null) {
+    Text(text, color = OnBgBody, style = Type.Title, modifier = modifier.semantics { heading() }, textAlign = textAlign)
+}
+
 /** A rounded icon ground ([size], 36dp by default) holding a tinted 20dp symbol:
  *  the leading tile of a chooser or activity row. */
 @Composable
@@ -1162,7 +1136,7 @@ private fun SegmentTrack(
                     Text(
                         label,
                         color = if (selected) OnAccent else OnBgBody,
-                        style = if (selected) Type.Chip else Type.Chip.copy(fontWeight = FontWeight.Medium),
+                        style = if (selected) Type.Chip else Type.ChipMedium,
                         textAlign = TextAlign.Center,
                     )
                 }

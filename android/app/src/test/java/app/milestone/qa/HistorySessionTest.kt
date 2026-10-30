@@ -49,7 +49,6 @@ class HistorySessionTest {
 
     @Before
     fun setUp() {
-        java.util.Locale.setDefault(java.util.Locale.US)
         QaHarness.reset(ctx)
     }
 
@@ -93,7 +92,7 @@ class HistorySessionTest {
         // at its center, which can land on the estimated-max "?".
         rule.onNodeWithText(header).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
-        val volume = str(R.string.history_session_volume, "3,180", "kg")
+        val volume = str(R.string.history_session_volume, "3\u202F180", "kg")
         rule.onAllNodesWithText("$header · $volume").assertCountEquals(1)
         rule.onAllNodesWithText("BACK SQUAT").assertCountEquals(0)
         rule.onAllNodesWithText("BENCH PRESS").assertCountEquals(0)
@@ -189,13 +188,13 @@ class HistorySessionTest {
         rule.onAllNodesWithText(" km").assertCountEquals(0)
 
         // The progress block opens on the 16-week chart (Runs is the default
-        // segment: the run is the newest entry); it speaks miles, never km.
+        // segment: the run is the newest entry); it speaks miles, never kilometers.
         val weekly = hasContentDescription(strPrefix(R.string.history_weekly_desc, 16), substring = true)
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(weekly)
         val spoken = rule.onNode(weekly).fetchSemanticsNode()
             .config[SemanticsProperties.ContentDescription].joinToString(" ")
-        assertTrue(spoken, spoken.contains("3.1 mi"))
-        assertFalse(spoken, spoken.contains("km"))
+        assertTrue(spoken, spoken.contains("3.1 miles"))
+        assertFalse(spoken, spoken.contains("km") || spoken.contains("kilometer"))
 
         // Switched to "14 days", the daily chart totals in miles too.
         rule.onNode(hasText(str(R.string.history_progress_days, 14)) and hasClickAction()).performClick()

@@ -61,9 +61,6 @@ import com.google.android.gms.location.Priority
  */
 class RunTrackingService : Service() {
 
-    // The notification's counts and times in Latin digits (AppLocale.kt).
-    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(newBase.withLatinDigits())
-
     private lateinit var engine: LocationEngine
 
     // Locate-only vs recording. Opening the tracker starts the
@@ -89,7 +86,7 @@ class RunTrackingService : Service() {
     // Set once the service is tearing down (stopTracking / onDestroy). A location
     // result already queued on the main looper can still fire onFix AFTER
     // stopForeground; without this guard it would re-post the ongoing notification
-    // that nothing then cancels, leaving a stuck "Getting a GPS fix".
+    // that nothing then cancels, leaving a stuck "Finding GPS…".
     @Volatile private var stopped = false
 
     // The [RunSession.generation] this stream started under; onFix stands down once
@@ -215,8 +212,10 @@ class RunTrackingService : Service() {
                     getString(R.string.track_notif_progress, spec.text)
                 }
                 // A guided run leads with the current step ("Rep 2 of 6 · 320 m
-                // left"), so a glance at the lock screen says what to do now.
-                RunSession.stepProgress.value?.let { getString(R.string.track_notif_step, runStepLine(resources, it), base) } ?: base
+                // left"), so a glance at the lock screen says what to do now. Its
+                // counts in Latin digits (AppLocale.kt).
+                RunSession.stepProgress.value
+                    ?.let { getString(R.string.track_notif_step, runStepLine(latinDigitResources(), it), base) } ?: base
             }
             is NotifContentSpec.PausedProgress -> getString(spec.res, spec.progress)
         }
@@ -744,8 +743,6 @@ class RunTrackingService : Service() {
      *  reused across every fix that keeps the same shape; the content text, chip and
      *  style are set per frame by [buildRunNotification], not here. */
     private fun buildBuilder(shape: NotifShape): NotificationCompat.Builder {
-        // One "acquiring" wording everywhere (the map pill + Start button both say
-        // "Acquiring GPS").
         val builder = runNotificationBuilder(
             this,
             CHANNEL,
@@ -772,12 +769,12 @@ class RunTrackingService : Service() {
         // choice). An auto-save action would bypass those gates and could silently
         // log a drift/accidental run.
         if (shape.recording || shape.armed) {
-            builder.addAction(0, getString(R.string.track_action_stop), openTrackerPending)
+            builder.addAction(0, getString(R.string.track_btn_stop), openTrackerPending)
         } else {
             // Locate-only preview: there is no captured run to route through the save
             // gate, so Stop just tears the service down (ACTION_STOP), freeing the GPS
             // radio if the user opened the tracker to check a fix and walked away.
-            builder.addAction(0, getString(R.string.track_action_stop), stopServicePending)
+            builder.addAction(0, getString(R.string.track_btn_stop), stopServicePending)
         }
         return builder
     }
@@ -932,7 +929,7 @@ class RunTrackingService : Service() {
                 // ACTION_STOP couldn't be delivered, so stopTracking() won't reset the
                 // observable state machine. Do it here directly, mirroring
                 // stopTracking()'s resets — clearing ONLY `tracking` would leave
-                // `locating`/`armed` latched, sticking the tracker on "Acquiring GPS"
+                // `locating`/`armed` latched, sticking the tracker on "Finding GPS…"
                 // with no engine behind it.
                 RunSession.markStopped()
             }
@@ -975,7 +972,7 @@ internal fun trackingNotifContentSpec(
     progress: String?,
     paceNow: String?,
 ): NotifContentSpec = when {
-    recording && paused -> if (progress != null) NotifContentSpec.PausedProgress(R.string.track_notif_paused_content, progress) else NotifContentSpec.Literal(R.string.track_notif_paused_text)
+    recording && paused -> if (progress != null) NotifContentSpec.PausedProgress(R.string.track_notif_paused_content, progress) else NotifContentSpec.Literal(R.string.track_state_paused)
     recording && signalLost -> NotifContentSpec.Literal(R.string.track_notif_signal_lost)
     recording -> if (progress != null) NotifContentSpec.Progress(progress, paceNow) else NotifContentSpec.Literal(R.string.track_notif_recording_hint)
     armed -> NotifContentSpec.Literal(R.string.track_notif_armed_text)

@@ -18,7 +18,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -33,7 +32,7 @@ internal data class ActionRowItem(
 )
 
 /** The destructive last row of an [ActionRows] block: it always confirms first
- *  through an M3 AlertDialog with a `DangerText` [confirmLabel]. */
+ *  ([ClearConfirmDialog]). */
 internal data class DestructiveAction(
     val label: String,
     val icon: Painter,

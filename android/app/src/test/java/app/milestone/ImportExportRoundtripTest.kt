@@ -2,7 +2,6 @@ package app.milestone
 
 import android.content.Context
 import android.net.Uri
-import android.os.Looper
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
@@ -28,13 +27,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows.shadowOf
 
 /**
  * Export → import round trips, hunting for data loss and duplicates.
@@ -63,7 +60,6 @@ class ImportExportRoundtripTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
         AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Km)
     }
@@ -73,18 +69,6 @@ class ImportExportRoundtripTest {
         QaHarness.teardown()
         RunSession.reset()
         AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-    }
-
-    // ── Driving the process-scoped coroutines from the (main-looper) test thread ──
-
-    /** Pump the main looper until [cond] holds (the core's reply lands there). */
-    private fun waitFor(timeoutMs: Long = 15_000, what: String = "condition", cond: () -> Boolean) {
-        val end = System.currentTimeMillis() + timeoutMs
-        while (!cond()) {
-            shadowOf(Looper.getMainLooper()).idle()
-            if (System.currentTimeMillis() > end) fail("timed out waiting for $what")
-            Thread.sleep(2)
-        }
     }
 
     private fun logLines(): List<String> =
@@ -572,7 +556,7 @@ class ImportExportRoundtripTest {
         val before = EventDispatcher.model.value!!.lifts.size
         val liveAt = AppClock.nowSec() - 600
         EventDispatcher.send(Event.LogSet("Bench Press", 60.0, 8, 8.0, liveAt, liveAt * 1000))
-        waitFor(what = "the live set") { EventDispatcher.model.value!!.lifts.size == before + 1 }
+        QaHarness.pumpMainUntil("the live set") { EventDispatcher.model.value!!.lifts.size == before + 1 }
         val original = EventDispatcher.model.value!!
         assertNotNull(original.program)
         assertTrue(original.runs.any { it.has_gpx })
@@ -638,7 +622,7 @@ class ImportExportRoundtripTest {
         // And the core still persists: a later entry lands in the same log.
         val at = AppClock.nowSec() - 60
         EventDispatcher.send(Event.LogSet("Deadlift", 140.0, 3, 8.0, at, at * 1000))
-        waitFor(what = "the set to persist") { logLines().size == logBefore.size + 1 }
+        QaHarness.pumpMainUntil("the set to persist") { logLines().size == logBefore.size + 1 }
     }
 
     @Test

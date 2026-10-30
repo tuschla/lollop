@@ -323,6 +323,10 @@ fn pain_scoping_keeps_only_movements_that_cannot_load_the_painful_part() {
         assert!(!item_spared_by_pain(PainRegion::Back, lift), "{lift:?}");
     }
     assert!(item_spared_by_pain(PainRegion::Back, "Lat pulldown"));
+    // Matched on the folded name, like the e1RM key: a Turkish keyboard's
+    // caps-lock "LAT PULLDOWN" or "LEG EXTENSİON" is the same movement.
+    assert!(item_spared_by_pain(PainRegion::Back, "LAT PULLDOWN"));
+    assert!(item_spared_by_pain(PainRegion::UpperLimb, "LEG EXTENSİON"));
     assert!(item_spared_by_pain(PainRegion::LowerLimb, "Bench press"));
     assert!(!item_spared_by_pain(PainRegion::LowerLimb, ""));
 }

@@ -547,13 +547,12 @@ fn removals(lines: &[LineFacts]) -> Vec<bool> {
     rule0_readiness_removes(lines, &mut remove);
     rule3_entry_edits(lines, &mut remove);
     rule1_clears(lines, &mut remove);
-    rule1_keep_final_plan_clear(lines, &mut remove);
     rule2_singletons(lines, &mut remove);
     rule2_today(lines, &mut remove);
     rule2_review_clears(lines, &mut remove);
     rule2_profile_history(lines, &mut remove);
     rule2_exercise_ended(lines, &mut remove);
-    rule2b_plan_keep_first(lines, &mut remove);
+    rule2b_plan_spans(lines, &mut remove);
     remove
 }
 
@@ -707,20 +706,6 @@ fn rule1_clears(lines: &[LineFacts], remove: &mut [bool]) {
     }
 }
 
-/// Rule 1's one kept clear: the last `ClearPlan` survives when no
-/// `GeneratePlan` follows it. It replays as a no-op, but it is the durable
-/// record that the user removed their plan, which the shell's boot reads.
-fn rule1_keep_final_plan_clear(lines: &[LineFacts], remove: &mut [bool]) {
-    let last_plan_line = lines
-        .iter()
-        .rposition(|l| matches!(l.rule(), Rule::GeneratePlan | Rule::ClearPlan));
-    if let Some(j) = last_plan_line
-        && matches!(lines[j].rule(), Rule::ClearPlan)
-    {
-        remove[j] = false;
-    }
-}
-
 /// Rule 2: for each [`SINGLETONS`] family, keep only the last surviving member.
 fn rule2_singletons(lines: &[LineFacts], remove: &mut [bool]) {
     let mut seen: Vec<Family> = Vec::new();
@@ -739,8 +724,9 @@ fn rule2_singletons(lines: &[LineFacts], remove: &mut [bool]) {
     }
 }
 
-/// Rule 2 (`SetToday`): the shell's clock. The day bakes nothing (`update`
-/// re-derives birthday ages on every SetToday), but the UTC offset does: a
+/// Rule 2 (`SetToday`): the shell's clock. The day bakes nothing but the day
+/// a ClearPlan removes a plan on (Rule 2b keeps that SetToday; `update`
+/// re-derives birthday ages on every SetToday), and the UTC offset does: a
 /// legacy run row without its own offset converts its typed bpm under the
 /// offset in force, and a later undated SetProfile pins that figure. So a
 /// SetToday survives when it changes the offset (from the model's default 0),
@@ -854,17 +840,38 @@ fn rule2_exercise_ended(lines: &[LineFacts], remove: &mut [bool]) {
     }
 }
 
-/// Rule 2b: `update`'s GeneratePlan arm keeps the ORIGINAL plan anchor and
-/// ignores every later request, and the shell fires one every launch, so only
-/// the first surviving GeneratePlan (after Rule 1 swept everything up to the
-/// last ClearPlan) is kept.
-fn rule2b_plan_keep_first(lines: &[LineFacts], remove: &mut [bool]) {
-    let mut first = true;
+/// Rule 2b (plan): `update`'s GeneratePlan arm keeps the ORIGINAL start and
+/// ignores every later request while a plan exists (the shell fires one every
+/// launch), and a ClearPlan without a plan is a no-op. So each plan's first
+/// GeneratePlan survives, and so does the ClearPlan that removed it with the
+/// SetToday before it: together they replay the plan's span
+/// (`Model::past_plans`). The last ClearPlan survives too when no
+/// GeneratePlan follows it: replayed as a no-op, it is the durable record
+/// that the user removed their plan, which the shell's boot reads. Rule 1
+/// has already swept the MoveSession lines a ClearPlan empties.
+fn rule2b_plan_spans(lines: &[LineFacts], remove: &mut [bool]) {
+    let (mut open, mut today_line, mut last_plan_line) = (false, None, None);
     for (j, line) in lines.iter().enumerate() {
-        if !remove[j] && matches!(line.rule(), Rule::GeneratePlan) {
-            remove[j] = !first;
-            first = false;
+        match line.rule() {
+            Rule::Today { .. } => today_line = Some(j),
+            Rule::GeneratePlan => {
+                remove[j] = open;
+                open = true;
+                last_plan_line = Some(j);
+            }
+            Rule::ClearPlan => {
+                remove[j] = !open;
+                if let Some(t) = today_line.filter(|_| open) {
+                    remove[t] = false;
+                }
+                open = false;
+                last_plan_line = Some(j);
+            }
+            _ => {}
         }
+    }
+    if let Some(j) = last_plan_line.filter(|&j| matches!(lines[j].rule(), Rule::ClearPlan)) {
+        remove[j] = false;
     }
 }
 

@@ -110,14 +110,14 @@ private fun weekTotals(
  *  them ([exerciseSetsSummary]): "Bench: 3 × 5 @ 100 kg". */
 private fun liftLines(res: Resources, sets: List<LiftResultView>, unit: WeightUnit): List<String> =
     sets.sortedBy { it.observed_at }.groupBy { it.exercise }.map { (exercise, rows) ->
-        res.getString(R.string.coach_export_lift, exercise, exerciseSetsSummary(res, rows, unit))
+        res.getString(R.string.ui_label_value, exercise, exerciseSetsSummary(res, rows, unit))
     }
 
 private fun runLine(res: Resources, r: RunResultView, unit: DistanceUnit): String {
     val line = res.getString(
         R.string.coach_export_run,
         runDistLabel(r.distance_km, unit),
-        fmtDurationDigits(minutesToDurationDigits(r.duration_min)),
+        hmsDisplay(minutesToDurationDigits(r.duration_min)),
         runPaceLabel(r.distance_km, r.duration_min, unit),
     )
     return r.session_rpe?.let { "$line · ${res.getString(R.string.coach_export_run_effort, it)}" } ?: line
@@ -145,7 +145,7 @@ internal val ActivityKind.labelRes: Int
  *  profile's weight unit and the chosen distance unit. */
 internal fun shareCoachSummary(ctx: Context, model: ViewModel) {
     val text = buildCoachSummary(
-        ctx.withLatinDigits().resources,
+        ctx.latinDigitResources(),
         model,
         today = model.today(),
         zone = ZoneId.systemDefault(),

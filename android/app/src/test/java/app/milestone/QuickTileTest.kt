@@ -10,6 +10,7 @@ import app.milestone.widget.WidgetSnapshotStore
 import java.io.File
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -121,15 +122,18 @@ class QuickTileTest {
     }
 
     /** Below API 34 a tap starts [openIntent] from the service: it needs NEW_TASK (a
-     *  service is no activity context) and opens the face's destination, locked or not. */
+     *  service is no activity context) and opens the face's destination. Unlocked it
+     *  opens at once; on the lock screen it goes through unlockAndRun first, which
+     *  Robolectric runs by clearing the locked flag. */
     @Test
-    @Config(sdk = [33])
-    fun clickOnApi33StartsTheOpenIntent() {
+    @Config(sdk = [28, 33])
+    fun clickBelowApi34StartsTheOpenIntent() {
         val app = ctx as android.app.Application
         fun clickAndTake(locked: Boolean = false): Intent {
             val service = Robolectric.buildService(QuickTileService::class.java).create().get()
             shadowOf(service).setLocked(locked)
             service.onClick()
+            assertFalse("the tap left the keyguard up", service.isLocked)
             return checkNotNull(shadowOf(app).nextStartedActivity) { "the tile started nothing" }
         }
         fun assertOpensIntent(intent: Intent, dest: OpenDest) {
@@ -143,7 +147,6 @@ class QuickTileTest {
         assertOpensIntent(clickAndTake(), OpenDest.LogSet)
         RunSession.tracking.value = true
         assertOpensIntent(clickAndTake(), OpenDest.Track)
-        // On the lock screen the tap unlocks first, then opens the same destination.
         assertOpensIntent(clickAndTake(locked = true), OpenDest.Track)
         assertEquals(null, shadowOf(app).nextStartedService)
     }
@@ -171,27 +174,15 @@ class QuickTileTest {
         assertEquals(null, shadowOf(ctx as android.app.Application).nextStartedService)
     }
 
-    /** API 34+: on the lock screen the tap hands System UI the launch at once; System
-     *  UI asks for the PIN itself (startPendingIntentDismissingKeyguard). Wrapped in
-     *  unlockAndRun the PIN was asked first, the launch then asked again while the
-     *  keyguard went away and System UI dropped it: the app never opened (device:
-     *  `surfaces.sh --only tilelock`). Robolectric's unlockAndRun clears the locked
-     *  flag, so a flag still set shows the tile did not take that path. */
+    /** API 34+ hands System UI the launch with no unlockAndRun: on the lock screen
+     *  System UI asks for the PIN itself. Robolectric's unlockAndRun clears the
+     *  locked flag, so a flag still set shows the tile did not take that path. */
     @Test
     fun lockedClickOnApi34LeavesTheUnlockToSystemUi() {
         WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Run, trackable = true))
-        val service = Robolectric.buildService(QuickTileService::class.java).create().get()
-        val iface = Class.forName("android.service.quicksettings.IQSService")
-        var started: PendingIntent? = null
-        val qs = java.lang.reflect.Proxy.newProxyInstance(iface.classLoader, arrayOf(iface)) { _, method, args ->
-            if (method.name == "startActivity") started = args[1] as PendingIntent
-            if (method.returnType == java.lang.Boolean.TYPE) false else null
-        }
-        android.service.quicksettings.TileService::class.java.getDeclaredField("mService")
-            .apply { isAccessible = true }.set(service, qs)
-        shadowOf(service).setLocked(true)
-        service.onClick()
-        assertOpens(checkNotNull(started) { "the tile started nothing" }, OpenDest.Track)
+        lateinit var service: QuickTileService
+        val started = clickTile { service = it; shadowOf(it).setLocked(true) }
+        assertOpens(started, OpenDest.Track)
         assertTrue("the tile unlocked through unlockAndRun before its launch", service.isLocked)
     }
 }

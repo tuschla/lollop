@@ -6,8 +6,6 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performSemanticsAction
@@ -21,20 +19,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.espresso.Espresso
 import app.milestone.AppSettings
 import app.milestone.AppTheme
-import app.milestone.ConcurrentGoal
 import app.milestone.Core
 import app.milestone.DarkMode
 import app.milestone.DistanceUnitOverride
-import app.milestone.Event
 import app.milestone.EventDispatcher
-import app.milestone.GoalDistance
-import app.milestone.HealthScreen
 import app.milestone.HistoryFocus
-import app.milestone.LiftGoal
-import app.milestone.ProgressionCadence
 import app.milestone.R
-import app.milestone.ReadinessSignal
-import app.milestone.RecentRace
 import app.milestone.UiMessages
 import app.milestone.ViewModel
 import app.milestone.groupLiftSessions
@@ -67,22 +57,11 @@ import java.time.ZoneId
  * The bugs the walk found are pinned in [LayoutRegressionTest]; the walk
  * tolerates none of them, so it guards them too.
  *
- * Replay: every failure prints the start state, seed, step and the action trace.
- * Environment (read by the test JVM):
- *  - `UIWALK_STATE=<Start>` runs only that start's walk;
- *  - `UIWALK_SEED=<n>` walks exactly that seed (as printed);
- *  - `UIWALK_STEPS=<n>` steps per walk (default [DEFAULT_STEPS]);
- *  - long mode: `UIWALK_SEEDS=<n>` walks n seeds per start from the
- *    `UIWALK_FIRST`-th, `UIWALK_KEEPGOING=1` reports every failing seed;
- *  - `UIWALK_DEBUG=1` prints each screen after its step.
- * Gradle caches a passed test task: add `--rerun` when only the environment changed.
+ * Replay: every failure prints the start state, seed, step, the action trace and
+ * the environment that replays it.
  */
 @RunWith(RobolectricTestRunner::class)
 class RandomUiWalkTest : UiProbeTest() {
-
-    // ── Starting states ─────────────────────────────────────────────────────
-
-    enum class Start { FreshInstall, Runner, Lifter, Hybrid, Calisthenics, Under18, PainHold, Illness, Pregnancy, LongHistory, MilesLb }
 
     @Test fun freshInstall() = walk(Start.FreshInstall)
     @Test fun runner() = walk(Start.Runner)
@@ -95,35 +74,6 @@ class RandomUiWalkTest : UiProbeTest() {
     @Test fun pregnancy() = walk(Start.Pregnancy)
     @Test fun longHistory() = walk(Start.LongHistory)
     @Test fun milesAndPounds() = walk(Start.MilesLb)
-
-    internal fun seedEvents(start: Start): List<Event>? = when (start) {
-        Start.FreshInstall -> null
-        Start.Runner -> listOf(
-            Event.SetProfile(
-                progressionCadence = ProgressionCadence.WeekToWeek,
-                liftGoal = LiftGoal.MaxStrength,
-                goalDistance = GoalDistance.TenK,
-                concurrentGoal = ConcurrentGoal.EndurancePriority,
-                weeklySets = 0,
-                runningDaysPerWeek = 4,
-                runningKmPerWeek = 35.0,
-                advanced = true,
-                bodyweightKg = 70.0,
-                ageYears = 30.0,
-                restingHrBpm = 55.0,
-                recentRace = RecentRace(distance_km = 5.0, time_sec = 25 * 60, epoch_day = app.milestone.todayEpochDay() - 14),
-            ),
-        ) + runs(1, 3, 6, 9, 40)
-        Start.Lifter -> listOf(QaHarness.strengthProfile()) + liftDays(1, 3, 5, 8, 35)
-        Start.Hybrid -> listOf(profile(runDays = 3, runKm = 20.0, goal = GoalDistance.FiveK)) + liftDays(2, 4) + runs(1, 3, 5)
-        Start.Calisthenics -> listOf(QaHarness.calisthenicsProfile(), QaHarness.loggedHold(QaHarness.daysAgoAtMidday(1)), QaHarness.loggedHold(QaHarness.daysAgoAtMidday(3)))
-        Start.Under18 -> listOf(profile(age = 15.0))
-        Start.PainHold -> listOf(QaHarness.strengthProfile()) + liftDays(2) + Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, morning)
-        Start.Illness -> listOf(profile(runDays = 3, runKm = 20.0, goal = GoalDistance.FiveK)) + runs(2) + Event.SubmitReadiness(ReadinessSignal.Illness, 2.0, morning)
-        Start.Pregnancy -> listOf(profile(age = 33.0, health = HealthScreen(pregnant = true)))
-        Start.LongHistory -> LongHistorySeed.build(days = 150, fixEverySec = 60L).events
-        Start.MilesLb -> listOf(QaHarness.strengthProfileLb()) + liftDays(1, 4) + runs(2, 6)
-    }
 
     // ── The walk ────────────────────────────────────────────────────────────
 
@@ -149,18 +99,12 @@ class RandomUiWalkTest : UiProbeTest() {
         val keepGoing = System.getenv("UIWALK_KEEPGOING") == "1"
         val failures = ArrayList<String>()
         for (k in 0 until count) {
-            if (k > 0) {
-                QaHarness.teardown()
-                RuntimeEnvironment.setQualifiers(originalQualifiers)
-                RuntimeEnvironment.setFontScale(1f)
-                QaHarness.reset(ctx)
-                resetSettings()
-            }
+            if (k > 0) freshProcess()
             try {
                 walkOnce(s, fixed ?: (BASE_SEED + s.ordinal * 7_919L + (first + k) * 104_729L), steps)
             } catch (e: AssertionError) {
                 // A framework assertion (not [fail]) carries no seed: give it the replay line.
-                val err = if (e.message?.startsWith("UIWALK") == true) e else walkError("${e.javaClass.simpleName}: ${e.message}").apply { initCause(e) }
+                val err = if (e is ProbeFailure) e else walkError("${e.javaClass.simpleName}: ${e.message}").apply { initCause(e) }
                 if (!keepGoing) throw err
                 println("UIWALK-FAIL " + err.message)
                 failures += err.message.orEmpty().lineSequence().first()
@@ -255,9 +199,9 @@ class RandomUiWalkTest : UiProbeTest() {
         val tb = top.boundsInRoot
         val px = tb.left + rng.nextFloat() * tb.width
         val py = tb.top + rng.nextFloat() * tb.height
-        add(4, "tap at (${px.toInt()},${py.toInt()})px") { rootNode(top).performTouchInput { click(Offset(px - tb.left, py - tb.top)) } }
-        add(1, "swipe sideways") { rootNode(top).performTouchInput { if (rng.nextBoolean()) swipeLeft() else swipeRight() } }
-        if (overlay) add(6, "swipe sheet down") { rootNode(top).performTouchInput { swipeDown() } }
+        add(4, "tap at (${px.toInt()},${py.toInt()})px") { node(top).performTouchInput { click(Offset(px - tb.left, py - tb.top)) } }
+        add(1, "swipe sideways") { node(top).performTouchInput { if (rng.nextBoolean()) swipeLeft() else swipeRight() } }
+        if (overlay) add(6, "swipe sheet down") { node(top).performTouchInput { swipeDown() } }
         add(8, "BACK") { Espresso.pressBackUnconditionally() }
         add(2, "recreate activity") { recreate() }
         add(2, "rotate") {
@@ -288,29 +232,11 @@ class RandomUiWalkTest : UiProbeTest() {
         trace += "#$step $desc"
         guard(desc) { cands[idx].second() }
         // Leaving the app is Back's progress; the reopened app is checked as a new screen.
-        return desc == "BACK" && !relaunchIfLeft()
+        return desc == "BACK" && !relaunchIfLeft().also { if (it) trace += "   (app left; relaunched)" }
     }
 
-    /** Run [block]; an exception thrown from app code is a crash (fail with the
-     *  trace), one from the test framework (node gone, touch outside the window)
-     *  only skips this action. */
-    private fun guard(what: String, block: () -> Unit) {
-        try {
-            block()
-        } catch (e: Throwable) {
-            if (isAppCrash(e)) fail("crash during $what: $e\n${e.stackTraceToString().lines().take(30).joinToString("\n")}")
-            trace += "   (skipped: ${e.javaClass.simpleName}: ${e.message?.lineSequence()?.firstOrNull()?.take(160)})"
-        }
-    }
-
-    private fun isAppCrash(e: Throwable): Boolean {
-        if (e is AssertionError && e.message?.startsWith("UIWALK") == true) throw e
-        var t: Throwable? = e
-        while (t != null) {
-            if (t.stackTrace.any { f -> f.className.startsWith("app.milestone.") && !f.className.startsWith("app.milestone.qa.") }) return true
-            t = t.cause
-        }
-        return false
+    override fun onSkipped(what: String, e: Throwable) {
+        trace += "   (skipped: ${e.javaClass.simpleName}: ${e.message?.lineSequence()?.firstOrNull()?.take(160)})"
     }
 
     // ── Lifecycle actions ───────────────────────────────────────────────────
@@ -320,33 +246,12 @@ class RandomUiWalkTest : UiProbeTest() {
         rule.waitUntil(15_000) { roots().isNotEmpty() }
     }
 
-    /** Back on the root screen leaves the app; the user opens it again (warm start). */
-    private fun relaunchIfLeft(): Boolean {
-        val sc = lastScenario ?: return false
-        if (sc.state == Lifecycle.State.DESTROYED || activityFinishing()) {
-            trace += "   (app left; relaunch)"
-            runCatching { sc.close() }
-            guard("relaunch") { lastScenario = launchMain() }
-            return true
-        }
-        return false
-    }
-
-    private fun activityFinishing(): Boolean {
-        var finishing = false
-        runCatching { lastScenario?.onActivity { finishing = it.isFinishing } }
-        return finishing
-    }
-
     /** Kill the process (every singleton back to a fresh process, the durable log
      *  and prefs kept), relaunch, and require the same entries back. */
     private fun processDeath() {
         val beforeModel = EventDispatcher.model.value
         QaHarness.teardown()
-        Core.resetForTest()
-        for ((f, v) in listOf("restored" to false, "log" to null, "lastGoodView" to null, "appendTornGuard" to false, "lastSetToday" to null, "viewStale" to false, "logDegraded" to false)) {
-            Core.javaClass.getDeclaredField(f).apply { isAccessible = true }.set(Core, v)
-        }
+        QaHarness.resetCore()
         EventDispatcher.resetForTest()
         app.milestone.RunSession.reset()
         UiMessages.clear()
@@ -418,7 +323,7 @@ class RandomUiWalkTest : UiProbeTest() {
             .filter { it.kind in UX_KINDS }
             .filterNot { v -> typed.any { t -> t.isNotBlank() && t.take(20) in v.detail } }
             .filterNot { v -> v.kind == "duplicate-action-in-card" && sharedCards.any { "in card \"$it\"" in v.detail } }
-            .map { it.toString() } + smallTargets()
+            .map { it.toString() } + smallTargets().map { "[small-touch-target] $it" }
         if (ux.isNotEmpty()) fail("UX invariants:\n" + ux.take(12).joinToString("\n"))
         val text = textProblems(typed)
         if (text.isNotEmpty()) fail("text cut off / overlapping (${text.size}):\n" + text.take(12).joinToString("\n"))
@@ -557,37 +462,13 @@ class RandomUiWalkTest : UiProbeTest() {
         flatten(top).any { it.config.getOrNull(SemanticsActions.SetText) != null && it.config.getOrNull(SemanticsProperties.Focused) == true }
     } == true
 
-    /** Fully visible actions whose touch target (own size or touch expansion) is
-     *  under 48dp; a partly scrolled-out action is judged once fully in view. */
-    private fun smallTargets(): List<String> {
-        val d = rule.density.density
-        return roots().flatMap { flatten(it) }.filter { n ->
-            n.config.getOrNull(SemanticsActions.OnClick) != null && n.isVisible() &&
-                n.boundsInRoot.width + 1f >= n.size.width && n.boundsInRoot.height + 1f >= n.size.height
-        }.mapNotNull { n ->
-            val w = maxOf(n.size.width.toFloat(), n.touchBoundsInRoot.width) / d
-            val h = maxOf(n.size.height.toFloat(), n.touchBoundsInRoot.height) / d
-            if (w + 0.5f < 48f || h + 0.5f < 48f) "[small-touch-target] \"${labelOf(n)}\" is ${w.toInt()}x${h.toInt()}dp (<48dp)" else null
-        }
-    }
-
-    private fun node(n: SemanticsNode): SemanticsNodeInteraction {
-        val id = n.id
-        val b = n.boundsInRoot
-        val all = rule.onAllNodes(SemanticsMatcher("node #$id") { it.id == id && it.boundsInRoot == b })
-        val count = all.fetchSemanticsNodes().size
-        return all[(count - 1).coerceAtLeast(0)]
-    }
-
-    private fun rootNode(r: SemanticsNode): SemanticsNodeInteraction = node(r)
-
     private fun quote(s: String) = "\"" + (if (s.length > 24) s.take(24) + "…(${s.length})" else s).replace("\n", "\\n") + "\""
 
     override fun fail(msg: String): Nothing = throw walkError(msg)
 
-    private fun walkError(msg: String): AssertionError {
+    private fun walkError(msg: String): ProbeFailure {
         val replay = "UIWALK_STATE=${start.name} UIWALK_SEED=$seed UIWALK_STEPS=$step"
-        return AssertionError(
+        return ProbeFailure(
             "UIWALK [$start] seed=$seed step=$step font=$fontScale land=$landscape: $msg\n" +
                 "replay: $replay ./gradlew :app:testDebugUnitTest --tests 'app.milestone.qa.RandomUiWalkTest'\n" +
                 "trace:\n" + trace.takeLast(200).joinToString("\n") + "\n" +

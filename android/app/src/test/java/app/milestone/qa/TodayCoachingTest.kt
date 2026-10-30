@@ -56,7 +56,6 @@ class TodayCoachingTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 
@@ -70,8 +69,8 @@ class TodayCoachingTest {
 
     /** Wait until at least one node matches, then return how many do. */
     private fun waitForAny(matcher: SemanticsMatcher, timeoutMs: Long = 10_000): Int {
-        runCatching { rule.waitUntil(timeoutMs) { rule.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() } }
-        return rule.onAllNodes(matcher).fetchSemanticsNodes().size
+        runCatching { rule.waitForNode(matcher, timeoutMs) }
+        return rule.countOf(matcher)
     }
 
     private fun tagStartsWith(prefix: String) = SemanticsMatcher("testTag starts with $prefix") {
@@ -399,7 +398,9 @@ class TodayCoachingTest {
         )
         // The hold's follow-up safety rows sit behind the "?", never stacked on the face.
         val call = m.today_headline?.summary
-        m.adjustments.filter { it.safety_critical && it.summary != call }.forEach { a ->
+        val followUps = m.adjustments.filter { it.safety_critical && it.summary != call }
+        assertTrue("scenario: the hold has follow-up safety rows", followUps.isNotEmpty())
+        followUps.forEach { a ->
             assertTrue(
                 "follow-up row is behind the ?: ${a.summary}",
                 rule.onAllNodes(hasText(a.summary)).fetchSemanticsNodes().isEmpty(),

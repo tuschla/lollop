@@ -25,15 +25,18 @@ pub(in crate::app) fn plan_week_index(
     days: &LoggedDays,
     week_monday: i64,
 ) -> Option<u32> {
+    let start = model.plan_request?.start_epoch_day;
     let weeks = plan_weeks(model, days)?;
-    let advanced = |records: &[PlanWeekRecord]| {
-        let n = records.iter().filter(|r| r.advanced).count();
-        n.min(u32::MAX as usize) as u32
-    };
     Some(if week_monday <= weeks.through_monday {
-        advanced(weeks.before(week_monday))
+        next_index(weeks.before(week_monday))
     } else {
-        advanced(&plan_week_records(model, days, week_monday)?)
+        next_index(&plan_week_records(
+            model,
+            days,
+            model.profile()?,
+            start,
+            week_monday,
+        ))
     })
 }
 
@@ -44,6 +47,8 @@ const MAX_TRACKED_WEEKS: i64 = 1_040;
 /// One finished plan week: planned vs done, and whether it moved the plan on.
 pub(super) struct PlanWeekRecord {
     monday: i64,
+    /// The plan's block position that week: the earlier weeks that advanced it.
+    index: u32,
     done: usize,
     planned: usize,
     /// The plan started mid-way through this week.
@@ -51,13 +56,21 @@ pub(super) struct PlanWeekRecord {
     advanced: bool,
 }
 
-/// A view's plan-week records: every plan week before `through_monday` (next
-/// week's Monday, so this week's own record is the last).
+/// The block position after `records` (0 for none).
+fn next_index(records: &[PlanWeekRecord]) -> u32 {
+    records
+        .last()
+        .map_or(0, |r| r.index.saturating_add(u32::from(r.advanced)))
+}
+
+/// A view's plan-week records: every week of the active plan before
+/// `through_monday` (next week's Monday, so this week's own record is the
+/// last; none without a plan), and the planned lifting deload days.
 pub(super) struct PlanWeeks {
     through_monday: i64,
     records: Vec<PlanWeekRecord>,
-    /// Mondays (ascending) of those weeks that were planned lifting deload
-    /// weeks at their block position ([`crate::plan::lift_deload_week`]).
+    /// Local days (ascending) that were planned lifting deload days
+    /// ([`lift_deload_days`]).
     lift_deloads: Vec<i64>,
 }
 
@@ -69,53 +82,53 @@ impl PlanWeeks {
     }
 }
 
-/// The plan weeks through this one that were planned lifting deloads.
+/// The local days, through this week, that were planned lifting deload days.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(in crate::app) struct DeloadWeeks<'a>(pub(in crate::app) &'a [i64]);
+pub(in crate::app) struct DeloadDays<'a>(pub(in crate::app) &'a [i64]);
 
-impl DeloadWeeks<'_> {
-    /// Whether local `day` falls in a planned lifting deload week.
+impl DeloadDays<'_> {
+    /// Whether local `day` was a planned lifting deload day.
     pub(in crate::app) fn contains(&self, day: i64) -> bool {
-        self.0.binary_search(&monday_of(day)).is_ok()
+        self.0.binary_search(&day).is_ok()
     }
 }
 
-/// The planned lifting deload weeks of the active plan through this week (none
-/// without a plan). Their sets are prescribed light work, not performance: the
-/// e1RM anchors, the last working sets and the e1RM-decline gate leave them out
-/// (autoreg-022 compares e1RM at fixed RPE; HYP-DELOAD-RX-001 deloads from the
-/// working weight, which the next block resumes from, 03-hypertrophy.md:395).
-pub(in crate::app) fn lift_deload_weeks<'d>(
-    model: &Model,
-    days: &'d LoggedDays,
-) -> DeloadWeeks<'d> {
-    DeloadWeeks(plan_weeks(model, days).map_or(&[], |w| w.lift_deloads.as_slice()))
+/// The planned lifting deload days through this week, of the active plan and
+/// of every earlier one up to the day it was removed (`Model::past_plans`): a
+/// day is one when its plan week is a deload ([`crate::plan::lift_deload_week`])
+/// under the profile in force that day. The e1RM anchors, the last working
+/// sets and the e1RM-decline gate skip their sets.
+pub(in crate::app) fn lift_deload_days<'d>(model: &Model, days: &'d LoggedDays) -> DeloadDays<'d> {
+    DeloadDays(plan_weeks(model, days).map_or(&[], |w| w.lift_deloads.as_slice()))
 }
 
 /// The view's [`PlanWeeks`], built once per view on `days`: the plan-week
 /// index of this and next week, the consistency card, the readiness
-/// high-load check and the weekly report all read it.
+/// high-load check, the weekly report and the deload days all read it.
 fn plan_weeks<'d>(model: &Model, days: &'d LoggedDays) -> Option<&'d PlanWeeks> {
     days.plan_weeks
         .get_or_init(|| {
-            let req = model.plan_request?;
-            let today = model.today_epoch_day.unwrap_or(req.start_epoch_day);
-            let through_monday = monday_of(today).saturating_add(7);
-            let records = plan_week_records(model, days, through_monday)?;
             let profile = model.profile()?;
-            let mut advanced = 0u32;
+            let active = model.plan_request.map(|r| r.start_epoch_day);
+            let today = model
+                .today_epoch_day
+                .or(active)
+                .or_else(|| model.past_plans.last().map(|&(_, end)| end))?;
+            let through_monday = monday_of(today).saturating_add(7);
+            let records = active.map_or_else(Vec::new, |start| {
+                plan_week_records(model, days, profile, start, through_monday)
+            });
             let mut lift_deloads = Vec::new();
-            for r in &records {
-                let p = profile_for_day(model, r.monday);
-                if crate::plan::lift_deload_week(
-                    p.as_deref().unwrap_or(profile),
-                    advanced,
-                    r.monday,
-                ) {
-                    lift_deloads.push(r.monday);
-                }
-                advanced = advanced.saturating_add(u32::from(r.advanced));
+            for &(start, end) in &model.past_plans {
+                let last_monday = monday_of(end).saturating_add(7).min(through_monday);
+                let weeks = plan_week_records(model, days, profile, start, last_monday);
+                push_deload_days(model, profile, &weeks, start..=end, &mut lift_deloads);
             }
+            if let Some(start) = active {
+                push_deload_days(model, profile, &records, start..=today, &mut lift_deloads);
+            }
+            lift_deloads.sort_unstable();
+            lift_deloads.dedup();
             Some(PlanWeeks {
                 through_monday,
                 records,
@@ -125,46 +138,68 @@ fn plan_weeks<'d>(model: &Model, days: &'d LoggedDays) -> Option<&'d PlanWeeks> 
         .as_ref()
 }
 
-/// Every finished plan week from the plan's start week up to, not including,
+/// The days in `span` of `weeks` (one plan's) that are a lifting deload under
+/// the profile in force that day, so a mid-week profile edit counts from the
+/// day it applies, as the plan prescribes each day.
+fn push_deload_days(
+    model: &Model,
+    profile: &Profile,
+    weeks: &[PlanWeekRecord],
+    span: std::ops::RangeInclusive<i64>,
+    out: &mut Vec<i64>,
+) {
+    for r in weeks {
+        for day in (r.monday..r.monday.saturating_add(7)).filter(|d| span.contains(d)) {
+            let p = profile_for_day(model, day);
+            if crate::plan::lift_deload_week(p.as_deref().unwrap_or(profile), r.index, r.monday) {
+                out.push(day);
+            }
+        }
+    }
+}
+
+/// Every finished week of the plan starting `start`, up to, not including,
 /// the week of `week_monday`. "Planned" is the week's training-day count for
-/// the profile in force that Monday; "done" counts distinct days with logged
-/// training, capped at planned.
+/// the profile in force that Monday (else `profile`); "done" counts distinct
+/// days with logged training, capped at planned.
 fn plan_week_records(
     model: &Model,
     days: &LoggedDays,
+    profile: &Profile,
+    start: i64,
     week_monday: i64,
-) -> Option<Vec<PlanWeekRecord>> {
-    let profile = model.profile()?;
-    let req = model.plan_request?;
-    let start = req.start_epoch_day;
+) -> Vec<PlanWeekRecord> {
     let start_monday = monday_of(start);
     let weeks = week_monday
         .saturating_sub(start_monday)
         .div_euclid(7)
         .clamp(0, MAX_TRACKED_WEEKS);
     let active = &days.active;
-    Some(
-        (0..weeks)
-            .map(|w| {
-                let monday = start_monday.saturating_add(w * 7);
-                let p = profile_for_day(model, monday);
-                let planned = crate::plan::planned_training_days(p.as_deref().unwrap_or(profile));
-                let done = (0..7)
-                    .filter(|d| active.contains(&monday.saturating_add(*d)))
-                    .count()
-                    .min(planned);
-                let partial = monday < start;
-                let (num, den) = WEEK_ADVANCE_SHARE;
-                PlanWeekRecord {
-                    monday,
-                    done,
-                    planned,
-                    partial,
-                    advanced: partial || planned == 0 || done * den >= planned * num,
-                }
-            })
-            .collect(),
-    )
+    let mut index = 0u32;
+    (0..weeks)
+        .map(|w| {
+            let monday = start_monday.saturating_add(w * 7);
+            let p = profile_for_day(model, monday);
+            let planned = crate::plan::planned_training_days(p.as_deref().unwrap_or(profile));
+            let done = (0..7)
+                .filter(|d| active.contains(&monday.saturating_add(*d)))
+                .count()
+                .min(planned);
+            let partial = monday < start;
+            let (num, den) = WEEK_ADVANCE_SHARE;
+            let advanced = partial || planned == 0 || done * den >= planned * num;
+            let r = PlanWeekRecord {
+                monday,
+                index,
+                done,
+                planned,
+                partial,
+                advanced,
+            };
+            index = index.saturating_add(u32::from(advanced));
+            r
+        })
+        .collect()
 }
 
 /// English weekday name for a local epoch day.

@@ -557,7 +557,7 @@ class SessionReminderTest {
     /** Two zone changes in one evening, the app not opened: the first (Chicago →
      *  Denver, still Thursday) marks the snapshot stale, so the second (into New
      *  York, already Friday) writes no snapshot and only the receiver's day check
-     *  can take Thursday's reminder down (mutant KH03, `mutate_kt.py`). */
+     *  can take Thursday's reminder down. */
     @Test
     fun aSecondZoneChangePastMidnightTakesYesterdaysReminderDown() {
         TimeZone.setDefault(TimeZone.getTimeZone("America/Chicago"))

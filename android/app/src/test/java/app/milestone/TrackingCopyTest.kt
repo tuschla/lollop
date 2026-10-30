@@ -44,7 +44,17 @@ class TrackingCopyTest {
     @Test
     fun finishSummarySpellsOutTimeAndPaceUnits() {
         val spoken = finishSummarySpoken(ctx.resources, km = 0.6, elapsedSec = 200L, unit = DistanceUnit.Km)
-        assertEquals("0.60 km · 3 minutes 20 seconds moving · 5 minutes 33 seconds per kilometer average", spoken)
-        assertTrue(spoken, !spoken.contains("/km") && !spoken.contains("3:20"))
+        assertEquals("0.60 kilometers · 3 minutes 20 seconds moving · 5 minutes 33 seconds per kilometer average", spoken)
+        assertTrue(spoken, !spoken.contains("km") && !spoken.contains("3:20"))
+    }
+
+    /** writing.md Terms: never "on hold"; and not "paused" either, which is the
+     *  user's own Pause: the location-loss captions say what recording waits for. */
+    @Test
+    fun resumeCaptionsNeverSayOnHoldOrPaused() {
+        for (id in listOf(R.string.track_resume_perm_caption, R.string.track_resume_perm_blocked_caption)) {
+            val s = ctx.getString(id)
+            assertTrue(s, !s.contains("on hold", ignoreCase = true) && !s.contains("paused", ignoreCase = true))
+        }
     }
 }

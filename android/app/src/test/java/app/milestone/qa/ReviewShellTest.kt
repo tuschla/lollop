@@ -36,14 +36,10 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.ConcurrentGoal
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.FieldLabel
-import app.milestone.GoalDistance
-import app.milestone.LiftGoal
 import app.milestone.MilestoneTheme
-import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.ReadinessSignal
 import app.milestone.SendResult
@@ -118,7 +114,6 @@ class ReviewShellTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 
@@ -130,38 +125,14 @@ class ReviewShellTest {
 
     private fun dp(px: Float) = with(rule.density) { px.toDp().value }
 
-    private fun strengthWithHistory() = QaHarness.seedLog(
-        ctx,
-        listOf(
-            QaHarness.strengthProfile(),
-            QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(6)),
-            QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(4)),
-            QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(2)),
-        ),
-    )
-
-    private fun hybridProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
-        goalDistance = GoalDistance.FiveK,
-        concurrentGoal = ConcurrentGoal.Strength,
-        weeklySets = 12,
-        runningDaysPerWeek = 3,
-        runningKmPerWeek = 20.0,
-        advanced = false,
-        bodyweightKg = 80.0,
-        ageYears = 30.0,
-    )
-
     // ═══════════ RTL: the restacked Layouts mirror ═══════════════════════════
 
-    /** In RTL the hero's title must sit at the start (right) and its trailing
-     *  "Move" / "?" at the end (left), as the Row they replaced mirrored (the
-     *  restacked Layout once placed with absolute x, `place`, never mirroring). */
+    /** In RTL the hero's title sits at the start (right) and its trailing "Move" /
+     *  "?" at the end (left): the hero's Layout places by layout direction. */
     @Test
     @Config(qualifiers = "ar-rEG-ldrtl-w360dp-h640dp-xhdpi")
     fun heroTitle_rtl_actionsSitAtTheEnd() {
-        strengthWithHistory()
+        QaHarness.seedStrengthHistory(ctx)
         rule.launchApp()
         // Control: the app really is RTL: the configuration says so and the Scaffold's
         // end-positioned "+ Log" FAB sits on the left half.
@@ -193,7 +164,7 @@ class ReviewShellTest {
     @Test
     @Config(qualifiers = "ar-rEG-ldrtl-w360dp-h640dp-xhdpi")
     fun undoRow_rtl_undoSitsAtTheEnd() {
-        strengthWithHistory()
+        QaHarness.seedStrengthHistory(ctx)
         rule.launchApp()
         val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() }
         // Locale-agnostic: the ar config formats the set numbers in Arabic-Indic digits.
@@ -297,7 +268,7 @@ class ReviewShellTest {
 
     private fun hrZones(scale: Float) {
         RuntimeEnvironment.setFontScale(scale)
-        QaHarness.seedLog(ctx, listOf(hybridProfile(), Event.ComputeHrZones(30.0, null)))
+        QaHarness.seedLog(ctx, listOf(QaHarness.hybridFiveKProfile(), Event.ComputeHrZones(30.0, null)))
         rule.launchApp()
         val calcRow = hasText(str(R.string.main_tool_hr_title)) and hasClickAction()
         rule.onNode(hasText(str(R.string.main_dest_profile)) and hasClickAction()).performClick()
@@ -331,7 +302,7 @@ class ReviewShellTest {
      *  each, no cut) and the hero title never split inside a word. */
     private fun todayWhole(scale: Float) {
         RuntimeEnvironment.setFontScale(scale)
-        strengthWithHistory()
+        QaHarness.seedStrengthHistory(ctx)
         rule.launchApp()
         rule.waitForIdle()
         val problems = mutableListOf<String>()

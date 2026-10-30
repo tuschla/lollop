@@ -160,7 +160,7 @@ class PlanCompletionTest {
     fun runProgressTextShowsTheTimeAsAClockNotDecimalMinutes() {
         // 3.7 min is 3:42, never "3.7 min".
         assertEquals("3:42", runProgressText(res, PrescriptionView(run_logged_min = 3.7), DistanceUnit.Km))
-        assertEquals("1:19:05", fmtRunTime(79 * 60 + 5))
+        assertEquals("1:19:05", runProgressText(res, PrescriptionView(run_logged_min = 79 + 5 / 60.0), DistanceUnit.Km))
     }
 
     @Test

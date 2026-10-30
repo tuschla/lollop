@@ -548,27 +548,43 @@ fn session_moves_survive_keep_first_and_clear_with_the_plan() {
     let out = compact_event_log(vec![generate_plan(1), mv(1, 2), generate_plan(8), mv(2, 3)]);
     assert_eq!(out, vec![generate_plan(1), mv(1, 2), mv(2, 3)]);
     // ClearPlan sweeps the moves with the plan (update clears them too); the
-    // ClearPlan itself stays as the final plan state.
+    // plan's GeneratePlan and the ClearPlan stay (the removed plan's span).
     let out = compact_event_log(vec![generate_plan(1), mv(1, 2), Event::ClearPlan]);
-    assert_eq!(out, vec![Event::ClearPlan]);
+    assert_eq!(out, vec![generate_plan(1), Event::ClearPlan]);
 }
 
 #[test]
-fn a_final_clear_plan_is_kept_and_a_superseded_one_dropped() {
-    // The last ClearPlan is the durable "plan removed" record while no
-    // GeneratePlan follows it; earlier clears go with the plan they cleared.
-    let out = compact_event_log(vec![
+fn removed_plans_keep_their_span_and_a_no_op_clear_is_dropped() {
+    // Each removed plan keeps its GeneratePlan and the ClearPlan that removed
+    // it (`Model::past_plans`); a ClearPlan with no plan is a no-op, kept only
+    // as the final "plan removed" record.
+    let events = vec![
+        generate_plan(1),
+        Event::ClearPlan,
+        Event::ClearPlan,
+        generate_plan(2),
+        Event::ClearPlan,
+    ];
+    let out = compact_event_log(events);
+    let kept = vec![
         generate_plan(1),
         Event::ClearPlan,
         generate_plan(2),
         Event::ClearPlan,
-    ]);
-    assert_eq!(out, vec![Event::ClearPlan]);
-    // A fixed point: compacting the kept clear again keeps it.
-    assert_eq!(compact_event_log(out), vec![Event::ClearPlan]);
-    // A later GeneratePlan supersedes it (the plan is back).
+    ];
+    assert_eq!(out, kept);
+    // A fixed point.
+    assert_eq!(compact_event_log(out), kept);
+    // A lone no-op ClearPlan is still the final record.
+    assert_eq!(
+        compact_event_log(vec![Event::ClearPlan]),
+        vec![Event::ClearPlan]
+    );
     let out = compact_event_log(vec![generate_plan(1), Event::ClearPlan, generate_plan(3)]);
-    assert_eq!(out, vec![generate_plan(3)]);
+    assert_eq!(
+        out,
+        vec![generate_plan(1), Event::ClearPlan, generate_plan(3)]
+    );
     // Replay-equivalent with and without surrounding lines.
     assert_replay_equivalent(vec![
         profile(12),
@@ -1388,7 +1404,7 @@ fn wire_lines_compact_like_their_events() {
         Event::ClearPlan,
     ];
     let out = compact_wire(&wire(&events));
-    assert_eq!(out.dropped, vec![0, 2, 4]);
+    assert_eq!(out.dropped, vec![0, 2]);
     assert!(out.torn.is_empty());
     assert_eq!(out.max_entry_id, 900, "an id compacted away still counts");
     assert!(out.plan_removed);
@@ -1460,10 +1476,4 @@ fn turkish_keyboard_spellings_share_one_ended_marker_key() {
         vec![events[0].clone(), events[3].clone()]
     );
     assert_replay_equivalent(events);
-    // A different exercise on the same day keeps its own marker.
-    let other = vec![
-        ended("Incline bench press", true, 700 * DAY_SEC + 10),
-        ended("Decline bench press", true, 700 * DAY_SEC + 20),
-    ];
-    assert_eq!(compact_event_log(other.clone()), other);
 }

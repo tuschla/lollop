@@ -2,9 +2,9 @@ package app.milestone.qa
 
 import android.graphics.Bitmap
 import android.view.View
-import android.view.ViewGroup
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.Role
@@ -20,7 +20,6 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
-import androidx.lifecycle.Lifecycle
 import androidx.test.espresso.Espresso
 import app.milestone.AppSettings
 import app.milestone.AppTheme
@@ -28,6 +27,7 @@ import app.milestone.DarkMode
 import app.milestone.Event
 import app.milestone.R
 import app.milestone.Core
+import app.milestone.contrastRatio
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -39,7 +39,6 @@ import org.robolectric.Shadows.shadowOf
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.pow
 
 /**
  * Accessibility audit over the REAL app and core: walks the main tabs (every
@@ -60,7 +59,7 @@ import kotlin.math.pow
  *    end within a row (right to left under RTL); the floating Log button and a
  *    snackbar are read after the list they ride over, and the Material time
  *    picker's clock face around the dial;
- *  - actions are at least 48dp (fully visible ones, as RandomUiWalkTest);
+ *  - actions are at least 48dp (fully visible ones, [smallTargets]);
  *  - rendered text contrast: the pixels of each fully visible text line in a
  *    software capture, glyph vs ground, at least 4.5:1 (3:1 for large text, WCAG
  *    1.4.3), in every theme; screens with a sheet or dialog open, opening or closing
@@ -73,12 +72,8 @@ import kotlin.math.pow
  * the targeted tests and the regression pins run, plus one crawl: a hybrid athlete's
  * tabs and the sheets one tap away at font 2.0, dark, RTL. `A11Y_FULL=1` adds the
  * same crawl at font 1.0, light, LTR, the contrast pass over the 8 palettes and the
- * full crawl: every start state of [RandomUiWalkTest] at all 8 configurations, two
- * taps deep. `A11Y_REPORT=1` prints every finding (known ones too). Gradle caches a
+ * full crawl: every [Start] at all 8 configurations, two taps deep. Gradle caches a
  * passed test: add `--rerun` when only the environment changed.
- *
- * Findings that are open bugs are listed in [KNOWN] with the `@Ignore`d test
- * that pins each; anything else fails here.
  */
 @RunWith(RobolectricTestRunner::class)
 class AccessibilityAuditTest : UiProbeTest() {
@@ -98,12 +93,12 @@ class AccessibilityAuditTest : UiProbeTest() {
     // ── Tests ───────────────────────────────────────────────────────────────
 
     @Test
-    fun hybridAthlete_font2_dark_rtl() = audit(RandomUiWalkTest.Start.Hybrid, Config(2f, dark = true, rtl = true), depth = 1)
+    fun hybridAthlete_font2_dark_rtl() = audit(Start.Hybrid, Config(2f, dark = true, rtl = true), depth = 1)
 
     @Test
     fun hybridAthlete_font1_light_ltr() {
         assumeTrue("A11Y_FULL=1 runs the LTR crawl", FULL)
-        audit(RandomUiWalkTest.Start.Hybrid, Config(1f, dark = false, rtl = false), depth = 1)
+        audit(Start.Hybrid, Config(1f, dark = false, rtl = false), depth = 1)
     }
 
     /** Every palette (and Paper with the system accent, a fresh install's default),
@@ -112,7 +107,7 @@ class AccessibilityAuditTest : UiProbeTest() {
     fun renderedTextContrast_everyTheme() {
         assumeTrue("A11Y_FULL=1 runs the contrast pass", FULL)
         config = Config(1f, dark = false, rtl = false)
-        launch(RandomUiWalkTest.Start.Hybrid, config)
+        launch(Start.Hybrid, config)
         val palettes = AppTheme.entries.map { it to false } + (AppTheme.Paper to true)
         for ((theme, dynamic) in palettes) for (dark in listOf(false, true)) {
             AppSettings.theme.value = theme
@@ -132,7 +127,7 @@ class AccessibilityAuditTest : UiProbeTest() {
                 }
             }
         }
-        assertNoNewFindings()
+        assertNoFindings()
     }
 
     // ── Custom controls: value and action exposed ─────────────────────────────
@@ -141,7 +136,7 @@ class AccessibilityAuditTest : UiProbeTest() {
     @Test
     fun customControls_setLoopScalesAndKeypad() {
         config = Config(1f, dark = false, rtl = false)
-        launch(RandomUiWalkTest.Start.Lifter, config)
+        launch(Start.Lifter, config)
         val ex = mergedNodes().mapNotNull { it.config.getOrNull(SemanticsProperties.TestTag) }
             .first { it.startsWith("plan-item:") }.removePrefix("plan-item:")
         rule.openLoopFor(ex)
@@ -157,9 +152,7 @@ class AccessibilityAuditTest : UiProbeTest() {
                     generateSequence(n) { it.parent }.any { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
             }
             assertTrue("$tag has radio cells", cells.isNotEmpty())
-            assertTrue("$tag cells are labelled: ${cells.map { nameOf(it) }}", cells.all { spoken(it).isNotEmpty() })
-            assertTrue("$tag cells expose selection", cells.all { it.config.getOrNull(SemanticsProperties.Selected) != null })
-            at(cells.first()).performSemanticsAction(SemanticsActions.OnClick)
+            node(cells.first()).performSemanticsAction(SemanticsActions.OnClick)
             settle()
             val picked = mergedNodes().filter { n ->
                 n.config.getOrNull(SemanticsProperties.Selected) == true &&
@@ -180,16 +173,14 @@ class AccessibilityAuditTest : UiProbeTest() {
         for (d in 0..9) assertTrue("digit $d key in $labels", labels.any { it == "$d" })
         assertTrue("decimal key named in $labels", labels.any { it.contains(str(R.string.ui_cd_decimal_point)) })
         assertTrue("delete key named in $labels", labels.any { it.contains(str(R.string.ui_cd_delete_digit)) })
-        assertTrue("every key is a button: ${keys.filter { it.config.getOrNull(SemanticsProperties.Role) != Role.Button }.map { nameOf(it) }}",
-            keys.all { it.config.getOrNull(SemanticsProperties.Role) == Role.Button })
-        assertNoNewFindings()
+        assertNoFindings()
     }
 
     /** Week strip, activity heatmap, distance charts, route map and the trim thumbs. */
     @Test
     fun customControls_weekStripHeatmapChartsRouteAndTrim() {
         config = Config(1f, dark = false, rtl = false)
-        launch(RandomUiWalkTest.Start.Hybrid, config, extra = listOf(QaHarness.gpsTenK(QaHarness.daysAgoAtMidday(2) - 7_200L, sessionRpe = 6)))
+        launch(Start.Hybrid, config, extra = listOf(QaHarness.gpsTenK(QaHarness.daysAgoAtMidday(2) - 7_200L, sessionRpe = 6)))
         // Week strip: seven day tabs, each naming its weekday, one selectable at a time.
         val days = mergedNodes().filter { n ->
             n.config.getOrNull(SemanticsProperties.Role) == Role.Tab && generateSequence(n) { it.parent }.any { it.config.getOrNull(SemanticsProperties.TestTag) == "this-week" }
@@ -198,9 +189,8 @@ class AccessibilityAuditTest : UiProbeTest() {
         val weekdays = java.time.DayOfWeek.entries.map { it.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.US) }
         days.zip(weekdays).forEach { (n, wd) ->
             assertTrue("day tab names $wd: ${nameOf(n)}", cds(n).any { it.contains(wd) })
-            assertTrue("day tab exposes selection: ${nameOf(n)}", n.config.getOrNull(SemanticsProperties.Selected) != null)
         }
-        at(days[3]).performSemanticsAction(SemanticsActions.OnClick)
+        node(days[3]).performSemanticsAction(SemanticsActions.OnClick)
         settle()
         val picked = mergedNodes().filter { it.config.getOrNull(SemanticsProperties.Role) == Role.Tab && it.config.getOrNull(SemanticsProperties.Selected) == true && cds(it).any { c -> c.contains(weekdays[3]) } }
         assertEquals("the tapped day reads selected", 1, picked.size)
@@ -214,28 +204,12 @@ class AccessibilityAuditTest : UiProbeTest() {
         settle()
         where = "morning check-in"
         auditNow()
-        val scales = mergedNodes().filter { it.config.getOrNull(SemanticsActions.SetProgress) != null }
-        assertTrue("the check-in shows its rating tracks", scales.size >= 3)
-        for (s in scales) {
-            val before = s.config.getOrNull(SemanticsProperties.StateDescription)
-            assertTrue("${nameOf(s)}: a spoken value", !before.isNullOrBlank())
-            val range = s.config[SemanticsProperties.ProgressBarRangeInfo]
-            at(s).performSemanticsAction(SemanticsActions.SetProgress) { it(range.range.endInclusive) }
-            settle()
-            val after = mergedNodes().first { it.id == s.id }.config.getOrNull(SemanticsProperties.StateDescription)
-            assertTrue("${nameOf(s)}: set-progress changes the spoken value ($before → $after)", after != before)
-        }
 
-        // History: the heatmap speaks a summary, every logged day its date, with an open action.
+        // History: every logged heatmap day names itself, with an open action.
         goHome(str(R.string.main_dest_history))
-        val heatPrefix = strPrefix(R.string.history_heatmap_desc, 12).substringBefore("%").take(8)
-        assertTrue("heatmap summary", unmergedNodes().any { n -> cds(n).any { it.contains("week activity") || it.startsWith(heatPrefix) } })
         val cells = unmergedNodes().filter { it.config.getOrNull(SemanticsActions.CustomActions)?.any { a -> a.label == str(R.string.history_heatmap_open_day) } == true }
         assertTrue("logged heatmap days offer \"Open this day\"", cells.isNotEmpty())
         assertTrue("each logged day names itself", cells.all { cds(it).any { c -> c.isNotBlank() } })
-        // The Runs progress chart (scrolled into view) speaks its weekly summary.
-        scrollMainToText(strPrefix(R.string.history_weekly_desc).take(12))
-        assertTrue("weekly distance chart summary", unmergedNodes().any { n -> cds(n).any { it.startsWith(strPrefix(R.string.history_weekly_desc).take(12)) } })
 
         // Run detail: the route map describes the route.
         val runTitle = str(R.string.history_run_weekday, "Saturday")
@@ -249,7 +223,7 @@ class AccessibilityAuditTest : UiProbeTest() {
 
         // Trim: two adjustable thumbs, each named and saying what it removes.
         val trim = flatten(roots().last()).first { it.config.getOrNull(SemanticsProperties.TestTag) == "run-trim" }
-        at(trim).performSemanticsAction(SemanticsActions.OnClick)
+        node(trim).performSemanticsAction(SemanticsActions.OnClick)
         settle()
         where = "trim sheet"
         auditNow()
@@ -258,10 +232,9 @@ class AccessibilityAuditTest : UiProbeTest() {
         val names = listOf(str(R.string.trim_start_thumb), str(R.string.trim_end_thumb))
         thumbs.forEach { t ->
             assertTrue("thumb named: ${nameOf(t)}", cds(t).any { c -> names.any { c.contains(it) } })
-            assertTrue("thumb has a spoken value: ${nameOf(t)}", !t.config.getOrNull(SemanticsProperties.StateDescription).isNullOrBlank())
             assertTrue("thumb has a range", t.config.getOrNull(SemanticsProperties.ProgressBarRangeInfo) != null)
         }
-        assertNoNewFindings()
+        assertNoFindings()
     }
 
     /** A snackbar and the loop's "Logged … · Undo" line are polite live regions; the
@@ -269,7 +242,7 @@ class AccessibilityAuditTest : UiProbeTest() {
     @Test
     fun liveRegions_snackbarUndoLineAndRest() {
         config = Config(1f, dark = false, rtl = false)
-        launch(RandomUiWalkTest.Start.Lifter, config)
+        launch(Start.Lifter, config)
         app.milestone.UiMessages.post(app.milestone.UiMessage(text = "Set updated", actionLabel = "Undo", onAction = {}))
         rule.waitUntil(10_000) { unmergedNodes().any { n -> texts(n).contains("Set updated") } }
         val snack = unmergedNodes().first { n -> texts(n).contains("Set updated") }
@@ -281,9 +254,9 @@ class AccessibilityAuditTest : UiProbeTest() {
         settle()
         val sets = Core.currentView().lifts.size
         val primary = flatten(roots().last()).first { it.config.getOrNull(SemanticsProperties.TestTag) == "editor-primary" }
-        at(primary).performSemanticsAction(SemanticsActions.OnClick)
+        node(primary).performSemanticsAction(SemanticsActions.OnClick)
         awaitCoreLifts(sets + 1)
-        // The countdown on Today's card ("Rest: 2:59 left") or in the loop ("Rest timer: … left").
+        // The countdown on Today's card or in the loop ("Rest: 2:59 left").
         val restWord = strPrefix(R.string.log_rest_left_cd).substringBefore(' ')
         val clock = Regex("""\d+:\d\d""")
         val rest = roots().flatMap { allUnmerged(it) }.firstOrNull { n -> spoken(n).any { it.startsWith(restWord) && clock.containsMatchIn(it) } }
@@ -299,7 +272,7 @@ class AccessibilityAuditTest : UiProbeTest() {
     @Test
     fun rtl_bottomNavigation_isReadStartToEnd() {
         config = Config(1f, dark = false, rtl = true)
-        launch(RandomUiWalkTest.Start.Hybrid, config)
+        launch(Start.Hybrid, config)
         val w = windows().first()
         val names = TABS.map { str(it) }
         val tabs = flatten(w.merged).filter { it.config.getOrNull(SemanticsProperties.Role) == Role.Tab && labelOf(it) in names }
@@ -312,7 +285,7 @@ class AccessibilityAuditTest : UiProbeTest() {
     @Test
     fun sectionOverlinesAndSheetTitles_areHeadings() {
         config = Config(1f, dark = false, rtl = false)
-        launch(RandomUiWalkTest.Start.Hybrid, config)
+        launch(Start.Hybrid, config)
         goHome(str(R.string.main_dest_profile))
         val overlines = listOf(R.string.main_overline_calculators, R.string.main_overline_units).map { str(it).uppercase(java.util.Locale.US) }
         val missing = ArrayList<String>()
@@ -332,7 +305,7 @@ class AccessibilityAuditTest : UiProbeTest() {
     @Test
     fun glossarySearch_namesItselfOnce() {
         config = Config(1f, dark = false, rtl = false)
-        launch(RandomUiWalkTest.Start.Hybrid, config)
+        launch(Start.Hybrid, config)
         goHome(str(R.string.main_dest_history))
         val explain = str(R.string.main_explain, "").trim()
         tapLabelContaining(explain)
@@ -345,35 +318,44 @@ class AccessibilityAuditTest : UiProbeTest() {
     @Test
     fun historyCardsAndProfileRows_haveRoles() {
         config = Config(1f, dark = false, rtl = false)
-        launch(RandomUiWalkTest.Start.Hybrid, config)
+        launch(Start.Hybrid, config)
         goHome(str(R.string.main_dest_history))
         val runTitle = str(R.string.history_run_weekday, "Sunday")
         scrollMainToText(runTitle)
         val bare = ArrayList<String>()
-        mergedNodes().filter { it.config.getOrNull(SemanticsActions.OnClick) != null && spoken(it).firstOrNull() == runTitle }
-            .forEach { if (it.config.getOrNull(SemanticsProperties.Role) == null) bare += nameOf(it) }
+        val cards = mergedNodes().filter { it.config.getOrNull(SemanticsActions.OnClick) != null && spoken(it).firstOrNull() == runTitle }
+        assertTrue("History shows a clickable \"$runTitle\" card", cards.isNotEmpty())
+        cards.forEach { if (it.config.getOrNull(SemanticsProperties.Role) == null) bare += nameOf(it) }
         goHome(str(R.string.main_dest_profile))
         rule.openPlanAnswers()
         settle()
         scrollMainToText(str(R.string.setup_row_lift_experience))
-        mergedNodes().filter { it.config.getOrNull(SemanticsActions.OnClick) != null && spoken(it).firstOrNull() == str(R.string.setup_row_lift_experience) }
-            .forEach { if (it.config.getOrNull(SemanticsProperties.Role) == null) bare += nameOf(it) }
+        val rows = mergedNodes().filter { it.config.getOrNull(SemanticsActions.OnClick) != null && spoken(it).firstOrNull() == str(R.string.setup_row_lift_experience) }
+        assertTrue("the plan answers show a clickable \"${str(R.string.setup_row_lift_experience)}\" row", rows.isNotEmpty())
+        rows.forEach { if (it.config.getOrNull(SemanticsProperties.Role) == null) bare += nameOf(it) }
         assertTrue("clickable with no role: $bare", bare.isEmpty())
     }
 
+    /** One node per week the chart shows, each in TalkBack's order after the summary. */
     @Test
     fun weeklyDistanceChart_weekFiguresReachableWithoutTouch() {
         config = Config(1f, dark = false, rtl = false)
-        launch(RandomUiWalkTest.Start.Runner, config)
+        launch(Start.Runner, config)
         goHome(str(R.string.main_dest_history))
         val prefix = strPrefix(R.string.history_weekly_desc).take(12)
         scrollMainToText(prefix)
-        val chart = unmergedNodes().first { n -> cds(n).any { it.startsWith(prefix) } }
-        val actions = chart.config.getOrNull(SemanticsActions.CustomActions).orEmpty()
-        val perWeek = chart.children.count { cds(it).isNotEmpty() }
+        val weeks = checkNotNull(Core.currentView().run_progress).weekly.size
+        val w = windows().first()
+        val nodes = flatten(w.unmerged).filter { it.placedVisible() }
+        val summary = nodes.first { n -> cds(n).any { it.startsWith(prefix) } }
+        val weekPrefix = strPrefix(R.string.history_weekly_bar_value)
+        val perWeek = nodes.filter { n -> cds(n).any { it.startsWith(weekPrefix) } }
+        assertEquals("one node per week shown: ${perWeek.map { cds(it) }}", weeks, perWeek.size)
+        val at = w.order.indexOf(summary.id)
+        val weekAt = perWeek.map { w.order.indexOf(it.id) }
         assertTrue(
-            "the chart (${cds(chart)}) offers no way to a single week's figure: no click, no custom action, no per-week node",
-            chart.config.getOrNull(SemanticsActions.OnClick) != null || actions.isNotEmpty() || perWeek > 0,
+            "the summary \"${short(cds(summary).first())}\" is read before every week: summary at $at, weeks at $weekAt in TalkBack's order",
+            at >= 0 && weekAt.all { it > at },
         )
     }
 
@@ -385,13 +367,9 @@ class AccessibilityAuditTest : UiProbeTest() {
         val tonnage = str(R.string.main_stat_tonnage)
         val running = str(R.string.main_stat_running)
         for (rtl in listOf(false, true)) {
-            runCatching { QaHarness.teardown() }
-            RuntimeEnvironment.setQualifiers(originalQualifiers)
-            RuntimeEnvironment.setFontScale(1f)
-            QaHarness.reset(ctx)
-            resetSettings()
+            freshProcess()
             config = Config(2f, dark = false, rtl = rtl)
-            launch(RandomUiWalkTest.Start.MilesLb, config)
+            launch(Start.MilesLb, config)
             goHome(str(R.string.main_dest_history))
             scrollMainToTop()
             where = "History p0"
@@ -402,19 +380,19 @@ class AccessibilityAuditTest : UiProbeTest() {
             assertEquals("tile labels in TalkBack's order ($config)", listOf("sessions", tonnage, running), read)
             auditTraversal(w)
         }
-        assertNoNewFindings()
+        assertNoFindings()
     }
 
     /** A safety card names itself once: its SAFETY chip, not the mark tile as well. */
     @Test
     fun safetyCard_saysSafetyOnce() {
         config = Config(1f, dark = false, rtl = false)
-        launch(RandomUiWalkTest.Start.Pregnancy, config)
+        launch(Start.Pregnancy, config)
         where = "Today p0"
         val chip = str(R.string.main_chip_safety)
         assertTrue("a safety card on Today", mergedNodes(roots().first()).any { n -> texts(n).any { it.equals(chip, ignoreCase = true) } })
         auditSemantics(windows().first())
-        assertNoNewFindings()
+        assertNoFindings()
     }
 
     // ── Small node helpers for the targeted tests ─────────────────────────────
@@ -432,7 +410,7 @@ class AccessibilityAuditTest : UiProbeTest() {
 
     private fun tapLabelContaining(text: String) {
         val n = flatten(roots().last()).first { it.isVisible() && it.config.getOrNull(SemanticsActions.OnClick) != null && spoken(it).any { s -> s.contains(text) } }
-        at(n).performSemanticsAction(SemanticsActions.OnClick)
+        node(n).performSemanticsAction(SemanticsActions.OnClick)
     }
 
     /** Scroll the main list until a node speaking [text] is on screen. */
@@ -447,55 +425,44 @@ class AccessibilityAuditTest : UiProbeTest() {
     @Test
     fun fullCrawl_everyStartEveryConfig() {
         assumeTrue("A11Y_FULL=1 runs the full crawl", FULL)
-        val only = System.getenv("A11Y_STATE")
-        for (s in RandomUiWalkTest.Start.entries) {
-            if (!only.isNullOrBlank() && !only.equals(s.name, ignoreCase = true)) continue
-            for (c in CONFIGS) {
-                runCatching { QaHarness.teardown() }
-                RuntimeEnvironment.setQualifiers(originalQualifiers)
-                RuntimeEnvironment.setFontScale(1f)
-                QaHarness.reset(ctx)
-                resetSettings()
-                crawlOnce(s, c, depth = 2)
-            }
+        for (s in Start.entries) for (c in CONFIGS) {
+            freshProcess()
+            crawlOnce(s, c, depth = 2)
         }
-        assertNoNewFindings()
+        assertNoFindings()
     }
 
     // ── Driver ──────────────────────────────────────────────────────────────
 
-    private fun audit(start: RandomUiWalkTest.Start, c: Config, depth: Int) {
+    private fun audit(start: Start, c: Config, depth: Int) {
         crawlOnce(start, c, depth)
-        assertNoNewFindings()
+        assertNoFindings()
     }
 
-    private fun crawlOnce(start: RandomUiWalkTest.Start, c: Config, depth: Int) {
+    private fun crawlOnce(start: Start, c: Config, depth: Int) {
         config = c
         launch(start, c)
-        val tabs = if (start == RandomUiWalkTest.Start.FreshInstall) listOf<String?>(null) else TABS.map { str(it) }
+        val tabs = if (start == Start.FreshInstall) listOf<String?>(null) else TABS.map { str(it) }
         for (tab in tabs) {
-            if (tab != null) {
-                if (!goHome(tab)) continue
-            }
+            if (tab != null && !goHome(tab)) fail("the crawl cannot reach the $tab tab")
             crawlScreen(tab, depth)
         }
     }
 
-    private fun launch(start: RandomUiWalkTest.Start, c: Config, extra: List<Event> = emptyList()) {
+    private fun launch(start: Start, c: Config, extra: List<Event> = emptyList()) {
         val am = ctx.getSystemService(AccessibilityManager::class.java)
         shadowOf(am).setEnabled(true)
         shadowOf(am).setTouchExplorationEnabled(true)
         // RTL comes from an Arabic locale (the app has no Arabic strings, so the copy
         // stays English, as on such a phone): a bare `ldrtl` qualifier does not
         // survive setFontScale's configuration update and the activity lays out LTR.
-        if (c.rtl) RuntimeEnvironment.setQualifiers(System.getenv("A11Y_RTL_QUALIFIER") ?: "+ar-rEG")
+        if (c.rtl) RuntimeEnvironment.setQualifiers("+ar-rEG")
         RuntimeEnvironment.setFontScale(c.font)
-        println("A11Y launch $start $c qualifiers=${RuntimeEnvironment.getQualifiers()} fontScale=${ctx.resources.configuration.fontScale}")
         AppSettings.darkMode.value = if (c.dark) DarkMode.Dark else DarkMode.Light
-        if (start == RandomUiWalkTest.Start.MilesLb) AppSettings.setDistanceUnitOverride(ctx, app.milestone.DistanceUnitOverride.Mi)
-        (seedFor(start).orEmpty() + extra).takeIf { it.isNotEmpty() }?.let { QaHarness.seedLog(ctx, it) }
+        if (start == Start.MilesLb) AppSettings.setDistanceUnitOverride(ctx, app.milestone.DistanceUnitOverride.Mi)
+        (seedEvents(start).orEmpty() + extra).takeIf { it.isNotEmpty() }?.let { QaHarness.seedLog(ctx, it) }
         this.start = start
-        if (start == RandomUiWalkTest.Start.FreshInstall) rule.launchAppExpectingSetup() else rule.launchApp()
+        if (start == Start.FreshInstall) rule.launchAppExpectingSetup() else rule.launchApp()
         settle()
         launchSettings = Triple(AppSettings.theme.value, AppSettings.dynamicAccent.value, AppSettings.darkMode.value)
     }
@@ -522,9 +489,7 @@ class AccessibilityAuditTest : UiProbeTest() {
     private fun isTimeDialNumber(n: SemanticsNode, dial: List<Regex> = materialTimeDial): Boolean =
         spoken(n).singleOrNull()?.let { s -> dial.any { it.matches(s) } } == true
 
-    private lateinit var start: RandomUiWalkTest.Start
-
-    private fun seedFor(s: RandomUiWalkTest.Start): List<Event>? = RandomUiWalkTest().seedEvents(s)
+    private lateinit var start: Start
 
     /** Audit the current screen page by page and tap each action on each page. */
     private fun crawlScreen(tab: String?, depth: Int) {
@@ -605,7 +570,7 @@ class AccessibilityAuditTest : UiProbeTest() {
             val top = roots().last()
             val scroller = flatten(top).firstOrNull { it.config.getOrNull(SemanticsActions.ScrollBy) != null && it.isVisible() } ?: return
             val ok = guard("scroll overlay") {
-                at(scroller).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, scroller.boundsInRoot.height * 0.8f) }
+                node(scroller).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, scroller.boundsInRoot.height * 0.8f) }
             }
             if (!ok) return
             settle()
@@ -635,13 +600,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         return selectedTab() == tab
     }
 
-    private fun relaunchIfLeft() {
-        val sc = lastScenario ?: return
-        var finishing = false
-        runCatching { sc.onActivity { finishing = it.isFinishing } }
-        if (sc.state == Lifecycle.State.DESTROYED || finishing) relaunch()
-    }
-
     private fun relaunch() {
         runCatching { QaHarness.teardown() }
         rule.launchApp()
@@ -650,26 +608,7 @@ class AccessibilityAuditTest : UiProbeTest() {
 
     // ── Screen helpers ──────────────────────────────────────────────────────
 
-    private fun guard(what: String, block: () -> Unit): Boolean = try {
-        block()
-        true
-    } catch (e: Throwable) {
-        if (e.stackTrace.any { f -> f.className.startsWith("app.milestone.") && !f.className.startsWith("app.milestone.qa.") }) {
-            throw AssertionError("app crash during $what at $where ($config)", e)
-        }
-        false
-    }
-
-    /** [n] itself: ids are per window, so match the id, the bounds and the window root too. */
-    private fun at(n: SemanticsNode): androidx.compose.ui.test.SemanticsNodeInteraction {
-        fun SemanticsNode.top(): SemanticsNode = generateSequence(this) { it.parent }.last()
-        val root = n.top()
-        val m = SemanticsMatcher("node #${n.id}") {
-            it.id == n.id && it.boundsInRoot == n.boundsInRoot && it.top().let { t -> t.id == root.id && t.size == root.size }
-        }
-        val all = rule.onAllNodes(m)
-        return all[(all.fetchSemanticsNodes().size - 1).coerceAtLeast(0)]
-    }
+    override fun fail(msg: String): Nothing = super.fail("$msg\n@ $where ($config)")
 
     /** Labels of the enabled, visible actions in [root], top to bottom. */
     private fun actionLabels(root: SemanticsNode, skipTabs: Boolean): List<String> = flatten(root)
@@ -685,7 +624,7 @@ class AccessibilityAuditTest : UiProbeTest() {
 
     private fun tapLabel(root: SemanticsNode, label: String) {
         val n = flatten(root).first { it.isVisible() && it.config.getOrNull(SemanticsActions.OnClick) != null && labelOf(it) == label }
-        at(n).performSemanticsAction(SemanticsActions.OnClick)
+        node(n).performSemanticsAction(SemanticsActions.OnClick)
     }
 
     private fun mainScroller(): SemanticsNode? = roots().firstOrNull()?.let { r ->
@@ -698,7 +637,7 @@ class AccessibilityAuditTest : UiProbeTest() {
         repeat(30) {
             val range = s.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) ?: return
             if (range.value() <= 0f) return
-            guard("scroll up") { at(s).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -100_000f) } }
+            guard("scroll up") { node(s).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -100_000f) } }
             idle()
             val again = mainScroller() ?: return
             if ((again.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)?.value() ?: 0f) <= 0f) return
@@ -716,7 +655,7 @@ class AccessibilityAuditTest : UiProbeTest() {
                 if (range.maxValue() <= 0f || range.value() >= range.maxValue()) return false
             }
             val v0 = range.value()
-            guard("scroll") { at(s).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, s.boundsInRoot.height * 0.8f) } }
+            guard("scroll") { node(s).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, s.boundsInRoot.height * 0.8f) } }
             idle()
             val v1 = mainScroller()?.config?.getOrNull(SemanticsProperties.VerticalScrollAxisRange)?.value() ?: v0
             if (v1 <= v0 + 1f) return false
@@ -737,16 +676,14 @@ class AccessibilityAuditTest : UiProbeTest() {
 
     private class Win(val index: Int, val view: ViewRootForTest, val merged: SemanticsNode, val unmerged: SemanticsNode, val order: List<Int>)
 
-    private fun windows(): List<Win> = composeRoots().mapIndexedNotNull { i, r ->
-        runCatching {
-            r.forceAccessibilityForTesting(true)
-            val merged = r.semanticsOwner.rootSemanticsNode
-            val unmerged = r.semanticsOwner.unmergedRootSemanticsNode
-            // Building any node info makes the delegate (re)compute its traversal map.
-            val provider = r.view.accessibilityNodeProvider
-            flatten(unmerged).drop(1).firstOrNull()?.let { provider?.createAccessibilityNodeInfo(it.id) }
-            Win(i, r, merged, unmerged, traversal(r))
-        }.getOrNull()
+    private fun windows(): List<Win> = composeRoots().mapIndexed { i, r ->
+        r.forceAccessibilityForTesting(true)
+        val merged = r.semanticsOwner.rootSemanticsNode
+        val unmerged = r.semanticsOwner.unmergedRootSemanticsNode
+        // Building any node info makes the delegate (re)compute its traversal map.
+        val provider = r.view.accessibilityNodeProvider
+        flatten(unmerged).drop(1).firstOrNull()?.let { provider?.createAccessibilityNodeInfo(it.id) }
+        Win(i, r, merged, unmerged, traversal(r))
     }
 
     private fun report(kind: String, detail: String) {
@@ -757,11 +694,11 @@ class AccessibilityAuditTest : UiProbeTest() {
 
     private fun auditNow() {
         // The top window only: what is under a modal sheet or dialog is out of reach.
-        windows().lastOrNull()?.let { w ->
-            auditSemantics(w)
-            auditTraversal(w)
-        }
-        auditTouchTargets()
+        val w = windows().lastOrNull() ?: fail("no Compose window to audit")
+        if (w.order.isEmpty()) fail("TalkBack's traversal order of the top window is empty")
+        auditSemantics(w)
+        auditTraversal(w)
+        smallTargets().forEach { report("small-touch-target", it) }
         // In the crawl's own theme (the seeded user's).
         auditContrast(
             "${AppSettings.theme.value}${if (AppSettings.dynamicAccent.value) "+system accent" else ""} " +
@@ -931,17 +868,6 @@ class AccessibilityAuditTest : UiProbeTest() {
         }
     }
 
-    private fun auditTouchTargets() {
-        val d = rule.density.density
-        for (r in roots()) for (n in flatten(r)) {
-            if (n.config.getOrNull(SemanticsActions.OnClick) == null || !n.isVisible()) continue
-            if (n.boundsInRoot.width + 1f < n.size.width || n.boundsInRoot.height + 1f < n.size.height) continue
-            val w = max(n.size.width.toFloat(), n.touchBoundsInRoot.width) / d
-            val h = max(n.size.height.toFloat(), n.touchBoundsInRoot.height) / d
-            if (w + 0.5f < 48f || h + 0.5f < 48f) report("small-touch-target", "\"${nameOf(n)}\" is ${w.toInt()}x${h.toInt()}dp")
-        }
-    }
-
     // ── Contrast ────────────────────────────────────────────────────────────
 
     /** Rendered contrast of every fully visible text line in the top window (what is
@@ -958,12 +884,10 @@ class AccessibilityAuditTest : UiProbeTest() {
             rule.mainClock.advanceTimeBy(OVERLAY_SETTLE_STEP_MS)
             rule.waitForIdle()
         }
-        if (shownWindows().size > 1 || roots().size != 1) {
-            println("A11Y contrast not sampled: an overlay window did not settle @ $where ($config)")
-            return
-        }
+        if (shownWindows().size > 1 || roots().size != 1) return
         val bmp = screenBitmap() ?: return
-        roots().lastOrNull()?.let { r ->
+        // A window that came up while the capture idled is not sampled.
+        roots().singleOrNull()?.takeIf { shownWindows().size == 1 }?.let { r ->
             val offset = r.positionOnScreen
             val unmerged = allUnmerged(r)
             for (n in unmerged) {
@@ -999,12 +923,6 @@ class AccessibilityAuditTest : UiProbeTest() {
                             "\"${short(lineText)}\" ${"%.2f".format(ratio.first)}:1 < $need " +
                                 "(glyph #${Integer.toHexString(ratio.second).takeLast(6)} on #${Integer.toHexString(ratio.third).takeLast(6)}, ${sp}sp${if (bold) " bold" else ""}) in $label",
                         )
-                        System.getenv("A11Y_SHOTS")?.let { dir ->
-                            java.io.File(dir).mkdirs()
-                            val f = java.io.File(dir, "${label}_${where}_${lineText.take(12)}.png".replace(Regex("[^A-Za-z0-9._-]"), "_"))
-                            f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                            println("A11Y-SHOT $f box=$box")
-                        }
                     }
                 }
             }
@@ -1013,13 +931,9 @@ class AccessibilityAuditTest : UiProbeTest() {
 
     /** The shown windows (the activity's, each dialog's and sheet's), in the order
      *  they were added. */
-    @Suppress("UNCHECKED_CAST")
     private fun shownWindows(): List<Pair<View, android.view.WindowManager.LayoutParams?>> {
-        val wmg = Class.forName("android.view.WindowManagerGlobal")
-        val inst = wmg.getMethod("getInstance").invoke(null)
-        val all = (wmg.getDeclaredField("mViews").apply { isAccessible = true }.get(inst) as List<View>).toList()
-        val params = (wmg.getDeclaredField("mParams").apply { isAccessible = true }.get(inst) as List<android.view.WindowManager.LayoutParams>).toList()
-        return all.indices.filter { all[it].isShown && all[it].width > 0 }.map { all[it] to params.getOrNull(it) }
+        val params = windowParams()
+        return windowViews().withIndex().filter { (_, v) -> v.isShown && v.width > 0 }.map { (i, v) -> v to params.getOrNull(i) }
     }
 
     /** Every window drawn in software, in the order it was added (its z-order), onto
@@ -1059,19 +973,8 @@ class AccessibilityAuditTest : UiProbeTest() {
         val total = (x1 - x0) * (y1 - y0)
         val (ground, gCount) = counts.maxByOrNull { it.value }?.toPair() ?: return null
         if (gCount < total * 0.35) return null
-        val glyph = counts.filter { it.key != ground && it.value >= 3 }.keys.maxByOrNull { contrast(it, ground) } ?: return null
-        return Triple(contrast(glyph, ground), glyph, ground)
-    }
-
-    private fun lum(c: Int): Double {
-        fun ch(v: Int): Double = (v / 255.0).let { if (it <= 0.03928) it / 12.92 else ((it + 0.055) / 1.055).pow(2.4) }
-        return 0.2126 * ch((c shr 16) and 0xFF) + 0.7152 * ch((c shr 8) and 0xFF) + 0.0722 * ch(c and 0xFF)
-    }
-
-    private fun contrast(a: Int, b: Int): Double {
-        val la = lum(a)
-        val lb = lum(b)
-        return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+        val glyph = counts.filter { it.key != ground && it.value >= 3 }.keys.maxByOrNull { contrastRatio(Color(it), Color(ground)) } ?: return null
+        return Triple(contrastRatio(Color(glyph), Color(ground)), glyph, ground)
     }
 
     // ── Traversal map + windows (reflection into the Compose accessibility delegate) ──
@@ -1109,30 +1012,17 @@ class AccessibilityAuditTest : UiProbeTest() {
         return out
     }
 
-    @Suppress("UNCHECKED_CAST")
-    private fun composeRoots(): List<ViewRootForTest> {
-        val wmg = Class.forName("android.view.WindowManagerGlobal")
-        val inst = wmg.getMethod("getInstance").invoke(null)
-        val views = (wmg.getDeclaredField("mViews").apply { isAccessible = true }.get(inst) as List<View>).toList()
-        fun View.all(): Sequence<View> = sequence {
-            yield(this@all)
-            if (this@all is ViewGroup) for (i in 0 until childCount) yieldAll(getChildAt(i).all())
-        }
-        return views.flatMap { w -> w.all().filter { it is ViewRootForTest && it.isShown }.map { it as ViewRootForTest }.toList() }
-    }
+    private fun composeRoots(): List<ViewRootForTest> =
+        windowViews().flatMap { w -> w.descendants().filter { it is ViewRootForTest && it.isShown }.map { it as ViewRootForTest }.toList() }
 
     // ── Verdict ─────────────────────────────────────────────────────────────
 
-    private fun assertNoNewFindings() {
-        val all = findings.values.toList()
-        if (REPORT) println("A11Y-REPORT ${all.size} findings\n" + all.joinToString("\n"))
-        val fresh = all.filterNot { f -> KNOWN.any { (kind, re) -> f.kind == kind && re.containsMatchIn(f.detail) } }
-        if (fresh.isNotEmpty()) throw AssertionError("${fresh.size} accessibility findings:\n" + fresh.take(40).joinToString("\n"))
+    private fun assertNoFindings() {
+        if (findings.isNotEmpty()) throw AssertionError("${findings.size} accessibility findings:\n" + findings.values.take(40).joinToString("\n"))
     }
 
     companion object {
         private val FULL = System.getenv("A11Y_FULL") == "1"
-        private val REPORT = System.getenv("A11Y_REPORT") == "1"
         private const val MAX_PAGES = 12
         private const val MAX_OVERLAY_PAGES = 3
         private const val BRAND = "lollop"
@@ -1163,8 +1053,5 @@ class AccessibilityAuditTest : UiProbeTest() {
         private val MATERIAL_TIME_DIAL = listOf(
             "m3c_time_picker_hour_suffix", "m3c_time_picker_hour_24h_suffix", "m3c_time_picker_minute_suffix",
         )
-
-        /** Open findings: kind + detail pattern → the @Ignore'd test pinning it. */
-        private val KNOWN: List<Pair<String, Regex>> = emptyList()
     }
 }

@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Build
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,10 +46,10 @@ import app.milestone.DarkMode
 import app.milestone.OpenDest
 import app.milestone.Palette
 import app.milestone.R
+import app.milestone.latinDigitResources
 import app.milestone.openIntent
 import app.milestone.todayEpochDay
 import app.milestone.withDynamicAccent
-import app.milestone.withLatinDigits
 import androidx.glance.color.ColorProvider as DayNightColorProvider
 
 // The size breakpoints (visual-design-system §10, "Home screen widget").
@@ -83,19 +82,21 @@ internal class TodayWidget : GlanceAppWidget() {
         // choice lives in AppSettings' preferences.
         AppSettings.load(context)
         provideContent {
-            // The face's counts in Latin digits like the app's (AppLocale.kt).
-            CompositionLocalProvider(LocalContext provides LocalContext.current.withLatinDigits()) {
-                val ctx = LocalContext.current
-                // A write or a stale mark ticks the revision, so a session that is still
-                // running re-reads the file and today's date.
-                val revision by WidgetSnapshotStore.revision.collectAsState()
-                val theme by AppSettings.theme.collectAsState()
-                val darkMode by AppSettings.darkMode.collectAsState()
-                val dynamic by AppSettings.dynamicAccent.collectAsState()
-                val face = remember(revision) { widgetFace(WidgetSnapshotStore.read(ctx), todayEpochDay(), ctx.resources) }
-                val colors = remember(theme, darkMode, dynamic) { widgetColors(ctx, theme, darkMode, dynamic) }
-                TodayWidgetContent(face, colors, widgetLayout(LocalSize.current))
+            val ctx = LocalContext.current
+            // The face's counts in Latin digits like the app's (AppLocale.kt),
+            // rebuilt when the language changes.
+            val res = ctx.latinDigitResources()
+            // A write or a stale mark ticks the revision, so a session that is still
+            // running re-reads the file and today's date.
+            val revision by WidgetSnapshotStore.revision.collectAsState()
+            val theme by AppSettings.theme.collectAsState()
+            val darkMode by AppSettings.darkMode.collectAsState()
+            val dynamic by AppSettings.dynamicAccent.collectAsState()
+            val face = remember(revision, res.configuration.locales) {
+                widgetFace(WidgetSnapshotStore.read(ctx), todayEpochDay(), res)
             }
+            val colors = remember(theme, darkMode, dynamic) { widgetColors(ctx, theme, darkMode, dynamic) }
+            TodayWidgetContent(face, colors, widgetLayout(LocalSize.current))
         }
     }
 }
@@ -180,7 +181,7 @@ internal fun TodayWidgetContent(face: WidgetFace, colors: WidgetColors, layout: 
             ),
             maxLines = 2,
         )
-        visibleLines(face, layout.maxLines, ctx.resources).forEach { line ->
+        visibleLines(face, layout.maxLines, ctx.latinDigitResources()).forEach { line ->
             Text(line, style = TextStyle(color = colors.body, fontSize = 13.sp), maxLines = 2)
         }
         face.week?.takeIf { layout.showWeek }?.let {

@@ -456,7 +456,7 @@ object RunSession {
     /** Reset only the engine-state flags ([tracking], [locating], [armed]) to stopped,
      *  keeping the captured track and the save/pause bookkeeping (unlike [reset]).
      *  The service's teardown and [RunTrackingService.stop]'s dead-service catch call
-     *  this, so no stop leaves "Acquiring GPS" latched with no engine behind it. */
+     *  this, so no stop leaves "Finding GPS…" latched with no engine behind it. */
     fun markStopped() {
         tracking.value = false
         locating.value = false
@@ -631,7 +631,7 @@ internal fun movingLegKm(km: Double, dtSec: Double): Double? {
  *  new recording segment: the straight-line bridge across it (a pause+relocation,
  *  a tunnel, a signal dropout) is not counted as run distance. Conservative, a
  *  normal ~1–2 s fix cadence never trips it, so only genuine pauses/losses break. */
-private const val MAX_FIX_GAP_SEC = 30L
+internal const val MAX_FIX_GAP_SEC = 30L
 
 // ── GPS fix-quality & freshness gates ────────────────────────────────────────
 // Single-sourced here so the foreground service (live map + distance), the UI lock
@@ -770,7 +770,7 @@ enum class TrackerPill { PermissionNeeded, LocationOff, SignalLost, Paused, Reco
 /**
  * The map pill's state as a strict priority ladder. A missing precise-location grant
  * or a disabled system-location toggle outranks everything: the pill must never read
- * "Acquiring GPS…" while it physically cannot get a fix, which would contradict the
+ * "Finding GPS…" while it physically cannot get a fix, which would contradict the
  * sheet text below it. Then, while recording, a lost signal or a pause outranks the
  * "Recording" default; when merely armed the gate-aware waiting text outranks a fresh
  * lock; and a fresh lock outranks the acquiring hint. Extracted pure so the ladder is

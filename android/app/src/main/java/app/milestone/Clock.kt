@@ -1,6 +1,15 @@
 package app.milestone
 
-import android.text.format.DateUtils
+import android.icu.text.DisplayContext
+import android.icu.text.RelativeDateTimeFormatter
+import android.icu.text.RelativeDateTimeFormatter.AbsoluteUnit
+import android.icu.text.RelativeDateTimeFormatter.Direction
+import android.icu.text.RelativeDateTimeFormatter.RelativeUnit
+import android.icu.util.ULocale
+import java.time.Instant
+import java.time.ZoneId
+import java.util.Locale
+import kotlin.math.abs
 
 /**
  * The shell's wall clock: every "now" the app stamps or shows (today's epoch-day,
@@ -37,18 +46,34 @@ internal fun ViewModel.today(): Long = today_epoch_day ?: todayEpochDay()
 internal fun utcOffsetSec(): Int = java.util.TimeZone.getDefault().getOffset(AppClock.nowMillis()) / 1000
 
 /**
- * Friendly log date for a history card from a unix-seconds stamp, in whole days
- * ("Yesterday", "3 days ago"), a date ("Jul 15") from a week back. Empty for an
- * undated entry.
+ * Friendly log date for a history card from a unix-seconds stamp, in whole local
+ * days within a week ("Today", "Yesterday", "3 days ago", the wording DateUtils
+ * uses), a date ("Jul 15") from a week back. In the app's language with Latin
+ * digits ([appLocale]), not the device's. Empty for an undated entry.
  */
-internal fun formatLogDate(epochSec: Long, nowMillis: Long = AppClock.nowMillis()): String =
-    if (epochSec <= 0L) {
-        ""
-    } else {
-        DateUtils.getRelativeTimeSpanString(
-            epochSec * 1000L,
-            nowMillis,
-            DateUtils.DAY_IN_MILLIS,
-            DateUtils.FORMAT_ABBREV_RELATIVE,
-        ).toString()
+internal fun formatLogDate(
+    epochSec: Long,
+    nowMillis: Long = AppClock.nowMillis(),
+    locale: Locale = appLocale(),
+    zone: ZoneId = ZoneId.systemDefault(),
+): String {
+    if (epochSec <= 0L) return ""
+    val day = Instant.ofEpochSecond(epochSec).atZone(zone).toLocalDate().toEpochDay()
+    val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate().toEpochDay()
+    if (abs(nowMillis - epochSec * 1000L) >= WEEK_MILLIS) return epochDayShortLabel(day, today, locale)
+    val fmt = RelativeDateTimeFormatter.getInstance(
+        ULocale.forLocale(locale),
+        null,
+        RelativeDateTimeFormatter.Style.SHORT,
+        DisplayContext.CAPITALIZATION_FOR_BEGINNING_OF_SENTENCE,
+    )
+    val days = abs(today - day)
+    val direction = if (today >= day) Direction.LAST else Direction.NEXT
+    return when (days) {
+        0L -> fmt.format(Direction.THIS, AbsoluteUnit.DAY)
+        1L -> fmt.format(direction, AbsoluteUnit.DAY)
+        else -> fmt.format(days.toDouble(), direction, RelativeUnit.DAYS)
     }
+}
+
+private const val WEEK_MILLIS = 7 * 24 * 3_600_000L

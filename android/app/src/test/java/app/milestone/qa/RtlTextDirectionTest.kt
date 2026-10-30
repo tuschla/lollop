@@ -60,12 +60,11 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * B2: in an RTL locale (Arabic) the app keeps its mirrored layout, but its
- * English-only copy must still read left to right. Before the fix every
- * paragraph took the RTL layout direction as its base direction, so neutral
- * characters at the edges were reordered: the plan target "5.5 km" rendered as
- * "km 5.5" and a coach note's final '.' jumped to the start of the line. The
- * mirrored layout itself is covered too: canvas-ordered chart ticks, the chevron.
+ * In an RTL locale (Arabic) the app keeps its mirrored layout, but its
+ * English-only copy reads left to right: each paragraph's base direction is LTR,
+ * so neutral characters at the edges stay in place ("5.5 km", a coach note's
+ * final '.'). The mirrored layout itself is covered too: canvas-ordered chart
+ * ticks, the chevron.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "+ar")

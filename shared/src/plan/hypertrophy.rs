@@ -480,19 +480,7 @@ fn allocate_week(
             continue; // indirect work from the compounds already covers it
         }
         let mut total = (need.round() as u32).max(min_sets);
-        let upper = UPPER_MUSCLES.contains(muscle);
-        let mut eligible: Vec<usize> = (0..n)
-            .filter(|&s| {
-                if upper {
-                    regions[s].has_upper()
-                } else {
-                    regions[s].has_lower()
-                }
-            })
-            .collect();
-        if eligible.is_empty() {
-            eligible = (0..n).collect();
-        }
+        let mut eligible = eligible_days(regions, muscle);
         // A day with no room for even the per-exercise minimum is full.
         eligible.retain(|&s| load[s].saturating_add(min_sets) <= day_cap);
         if eligible.is_empty() {
@@ -539,7 +527,7 @@ fn allocate_week(
     items
 }
 
-/// Table 1 MEV floor (03-hypertrophy.md:520-529; MEV is the mesocycle start
+/// Table 1 MEV floor (03-hypertrophy.md:520-530; MEV is the mesocycle start
 /// point, :534): every muscle with a weekly target that the week has an
 /// exercise for receives at least min(target, MEV) fractional sets. The days
 /// fill in [`MUSCLE_ORDER`], so on an upper/lower split the upper days can be
@@ -594,19 +582,7 @@ fn raise_to_mev(
         if floor[mi] <= 0.0 {
             continue;
         }
-        let upper = UPPER_MUSCLES.contains(muscle);
-        let mut eligible: Vec<usize> = (0..regions.len())
-            .filter(|&s| {
-                if upper {
-                    regions[s].has_upper()
-                } else {
-                    regions[s].has_lower()
-                }
-            })
-            .collect();
-        if eligible.is_empty() {
-            eligible = (0..regions.len()).collect();
-        }
+        let eligible = eligible_days(regions, muscle);
         // Each placement adds at least one set of this muscle's own exercise
         // (or a fresh one at the per-exercise minimum), so the floor is met
         // within twice its size even at a ½-set credit.
@@ -677,6 +653,26 @@ fn raise_to_mev(
                 }
             }
         }
+    }
+}
+
+/// The days that train `muscle`'s region (an upper muscle on upper or full
+/// days, a lower one on lower or full days), or every day when none does.
+fn eligible_days(regions: &[DayRegion], muscle: &str) -> Vec<usize> {
+    let upper = UPPER_MUSCLES.contains(&muscle);
+    let days: Vec<usize> = (0..regions.len())
+        .filter(|&s| {
+            if upper {
+                regions[s].has_upper()
+            } else {
+                regions[s].has_lower()
+            }
+        })
+        .collect();
+    if days.is_empty() {
+        (0..regions.len()).collect()
+    } else {
+        days
     }
 }
 

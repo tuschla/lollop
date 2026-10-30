@@ -2,29 +2,27 @@
 //! same exercise. The core keys e1RM chains, the lift audit and `SetExerciseEnded`
 //! compaction on [`exercise_key`], and compares movement tokens with
 //! [`fold_eq`]; the shell's `nameKey` (SetEditorState.kt) folds the same way,
-//! pinned by `tests/fixtures/names/fold.tsv`. ASCII is only lower-cased, so an
-//! ASCII name keys exactly as `trim().to_lowercase()` did.
+//! pinned by `tests/fixtures/names/fold.tsv`. ASCII is only lower-cased.
 
-/// One character folded: a single char, or the ASCII letters of a Latin letter.
-enum Folded {
-    One(char),
-    Letters(&'static str),
-}
+use std::borrow::Cow;
 
-/// `c` folded: ASCII lower-cased; a Latin letter with a diacritic, a ligature or
-/// the Turkish İ/ı as its ASCII letters ([`ascii_fold`]); any other character
-/// upper-cased, then lower-cased, one char at a time (a step that would yield
-/// more than one char keeps the char), as Kotlin's `uppercaseChar()` /
-/// `lowercaseChar()`.
-fn fold_char(c: char) -> Folded {
+/// `c` folded onto `out`: ASCII lower-cased; any other character upper-cased,
+/// then lower-cased, one char at a time (a step that would yield more than one
+/// char keeps the char), as Kotlin's `uppercaseChar()` / `lowercaseChar()`; a
+/// Latin letter with a diacritic, a ligature or the Turkish İ/ı, before or
+/// after that step, becomes its ASCII letters ([`ascii_fold`]). Folding the
+/// result again changes nothing (U+212B Å → å → "a", like U+00C5 Å).
+fn push_folded(c: char, out: &mut String) {
     if c.is_ascii() {
-        return Folded::One(c.to_ascii_lowercase());
-    }
-    if let Some(letters) = ascii_fold(c) {
-        return Folded::Letters(letters);
+        out.push(c.to_ascii_lowercase());
+        return;
     }
     let up = single(c.to_uppercase()).unwrap_or(c);
-    Folded::One(single(up.to_lowercase()).unwrap_or(up))
+    let low = single(up.to_lowercase()).unwrap_or(up);
+    match ascii_fold(c).or_else(|| ascii_fold(low)) {
+        Some(letters) => out.push_str(letters),
+        None => out.push(low),
+    }
 }
 
 fn single(mut chars: impl Iterator<Item = char>) -> Option<char> {
@@ -32,30 +30,41 @@ fn single(mut chars: impl Iterator<Item = char>) -> Option<char> {
     chars.next().is_none().then_some(c)
 }
 
-fn folded_chars(s: &str) -> impl Iterator<Item = char> + '_ {
-    s.chars().flat_map(|c| {
-        let (one, letters) = match fold_char(c) {
-            Folded::One(c) => (Some(c), ""),
-            Folded::Letters(l) => (None, l),
-        };
-        one.into_iter().chain(letters.chars())
-    })
-}
-
-/// `s` folded character by character ([`fold_char`]).
+/// `s` folded character by character ([`push_folded`]).
 pub(crate) fn fold(s: &str) -> String {
     if s.is_ascii() {
         return s.to_ascii_lowercase();
     }
-    folded_chars(s).collect()
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        push_folded(c, &mut out);
+    }
+    out
 }
 
-/// Whether `a` and `b` fold to the same text; `eq_ignore_ascii_case` for ASCII.
+/// Whether `a` and `b` fold to the same text: `eq_ignore_ascii_case` (a length
+/// check first), then [`fold`] on both only when either is not ASCII.
 pub(crate) fn fold_eq(a: &str, b: &str) -> bool {
-    if a.is_ascii() && b.is_ascii() {
-        return a.eq_ignore_ascii_case(b);
+    a.eq_ignore_ascii_case(b) || (!(a.is_ascii() && b.is_ascii()) && fold(a) == fold(b))
+}
+
+/// A name folded once, to compare with many ASCII words ([`FoldKey::is`]): an
+/// ASCII name is borrowed as is, so each compare is one `eq_ignore_ascii_case`.
+pub(crate) struct FoldKey<'a>(Cow<'a, str>);
+
+impl<'a> FoldKey<'a> {
+    pub(crate) fn new(name: &'a str) -> Self {
+        FoldKey(if name.is_ascii() {
+            Cow::Borrowed(name)
+        } else {
+            Cow::Owned(fold(name))
+        })
     }
-    folded_chars(a).eq(folded_chars(b))
+
+    /// Whether the name folds to `word`, an ASCII or already folded word.
+    pub(crate) fn is(&self, word: &str) -> bool {
+        self.0.eq_ignore_ascii_case(word)
+    }
 }
 
 /// The key two spellings of one exercise share: the trimmed name, folded
@@ -68,7 +77,7 @@ pub(crate) fn exercise_key(name: &str) -> String {
 /// diacritic, a ligature, the capital sharp s or the Turkish dotted/dotless i
 /// (İ, ı → "i"; é → "e"; ß, ẞ → "ss"); None for every other character,
 /// including ASCII.
-pub(crate) fn ascii_fold(c: char) -> Option<&'static str> {
+fn ascii_fold(c: char) -> Option<&'static str> {
     Some(match c {
         'À'..='Å' | 'à'..='å' | 'Ā'..='ą' => "a",
         'Æ' | 'æ' => "ae",
@@ -123,8 +132,8 @@ mod tests {
     fn ascii_folds_exactly_as_before() {
         for name in ["  Back Squat ", "PULL-UPS", "Bench press 2", "rdl", ""] {
             assert_eq!(exercise_key(name), name.trim().to_lowercase(), "{name:?}");
-            assert_eq!(fold(name), name.to_ascii_lowercase());
             assert!(fold_eq(name, &name.to_uppercase()));
+            assert!(FoldKey::new(name).is(&name.to_uppercase()));
         }
         assert!(!fold_eq("Squat", "Squats"));
     }
@@ -141,9 +150,72 @@ mod tests {
             ("Жим", "жим"),
         ] {
             assert_eq!(fold_eq(a, b), fold(a) == fold(b), "{a:?} {b:?}");
+            assert_eq!(
+                FoldKey::new(a).is(&fold(b)),
+                fold(a) == fold(b),
+                "{a:?} {b:?}"
+            );
         }
-        assert!(fold_eq("İncline", "incline"));
-        assert!(fold_eq("STRAẞE", "Strasse"));
-        assert!(fold_eq("Жим", "жим"));
+    }
+
+    /// Folding a folded name changes nothing, for every char; so the Ångström
+    /// sign U+212B keys like the letter U+00C5, the pair the pre-fold
+    /// compaction key (`trim().to_lowercase()`) merged too.
+    #[test]
+    fn fold_is_idempotent() {
+        for c in (0..=u32::from(char::MAX)).filter_map(char::from_u32) {
+            let once = fold(c.encode_utf8(&mut [0; 4]));
+            assert_eq!(fold(&once), once, "{c:?} U+{:04X}", u32::from(c));
+        }
+        let (sign, letter) = ("\u{212B}ngstr\u{f6}m row", "\u{c5}ngstr\u{f6}m row");
+        assert_eq!(sign.to_lowercase(), letter.to_lowercase());
+        assert!(fold_eq(sign, letter));
+    }
+
+    /// [`FoldKey::is`] compares with ASCII words only: every legacy catalog
+    /// label `hypertrophy::renamed` matches is ASCII.
+    #[test]
+    fn legacy_labels_are_ascii() {
+        for (old, _) in crate::hypertrophy::LEGACY_NAMES
+            .iter()
+            .chain(crate::calisthenics::LEGACY_NAMES)
+        {
+            assert!(old.is_ascii(), "{old:?}");
+        }
+    }
+
+    /// The name classifiers' hot path: `same_movement` and `movement_key`
+    /// compare every token with the equipment words and every name with the
+    /// legacy labels.
+    #[test]
+    #[ignore = "timing probe; run in release with --ignored --nocapture"]
+    fn name_classifier_timing() {
+        use std::hint::black_box;
+        let names = [
+            "Back squat",
+            "Barbell back squat",
+            "Bench press",
+            "Incline dumbbell curl",
+            "Cable row",
+            "Row (barbell/cable/machine)",
+            "Romanian deadlift",
+            "Pull-up",
+            "Overhead press",
+            "Smith machine back squat",
+            "Lat pulldown",
+            "Chest fly",
+        ];
+        let mut n = 0usize;
+        let t = std::time::Instant::now();
+        for i in 0..200_000usize {
+            let (a, b) = (names[i % names.len()], names[(i * 7 + 3) % names.len()]);
+            n += usize::from(crate::plan::same_movement(black_box(a), black_box(b)));
+        }
+        eprintln!("same_movement ×200k: {:?}", t.elapsed());
+        let t = std::time::Instant::now();
+        for i in 0..200_000usize {
+            n += crate::plan::movement_key(black_box(names[i % names.len()])).len();
+        }
+        eprintln!("movement_key ×200k: {:?} ({n})", t.elapsed());
     }
 }

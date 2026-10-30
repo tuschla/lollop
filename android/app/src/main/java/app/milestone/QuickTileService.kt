@@ -64,9 +64,6 @@ internal fun tileFace(snapshot: WidgetSnapshot?): TileFace = when {
  */
 class QuickTileService : TileService() {
 
-    // The tile's text in Latin digits like the app's (AppLocale.kt).
-    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(newBase.withLatinDigits())
-
     override fun onTileAdded() {
         super.onTileAdded()
         setAdded(this, true)

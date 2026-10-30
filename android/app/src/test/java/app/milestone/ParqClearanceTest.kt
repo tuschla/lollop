@@ -67,4 +67,25 @@ class ParqClearanceTest {
         assertFalse("re-answering the symptom question replaces the legacy flag",
             chest.withParqAnswer(ParqItem.ChestPain, false).symptomatic)
     }
+
+    /** A legacy doctor flag (`parq_positive`, no follow-up bit) stays until a
+     *  follow-up question is answered, even when a legacy injury flag folded
+     *  into Q6 makes the mask non-zero. */
+    @Test
+    fun legacyDoctorFlagSurvivesAnUnrelatedNoWithALegacyInjury() {
+        val control = HealthScreen(parq_positive = true).withParqAnswer(ParqItem.ChestPain, false)
+        assertTrue("control: without the injury flag the doctor flag stays", control.parq_positive)
+
+        val withInjury = HealthScreen(parq_positive = true, injury_or_rehab = true)
+            .withParqAnswer(ParqItem.ChestPain, false)
+        assertTrue("the injury flag stays", withInjury.injury_or_rehab)
+        assertTrue("the legacy doctor flag stays raised", withInjury.parq_positive)
+        assertTrue("the legacy note still explains it", withInjury.legacyParq)
+
+        val symptomYes = control.withParqAnswer(ParqItem.DizzyOrFainting, true)
+        assertTrue("a symptom Yes is not a follow-up answer", symptomYes.parq_positive)
+
+        val followUpNo = withInjury.withParqAnswer(ParqItem.Medication, false)
+        assertFalse("answering a follow-up question replaces the legacy flag", followUpNo.parq_positive)
+    }
 }

@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.ScrollState
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import app.milestone.qa.QaHarness
@@ -65,9 +66,6 @@ class LocaleNumberTest {
         block(l)
     }
 
-    /** Every digit in [s] that is not 0–9 (Arabic-Indic, Persian, Devanagari, …). */
-    private fun foreignDigits(s: String): String = s.filter { Character.isDigit(it) && it !in '0'..'9' }
-
     // ── Keypad entry → saved value ────────────────────────────────────────────
 
     @Test
@@ -92,7 +90,7 @@ class LocaleNumberTest {
         assertEquals("$l", "80.5", bodyweightBufferText(80.5, WeightUnit.Kg))
         // Duration digits typed on the keypad.
         val dur = "13000".fold("") { d, k -> editDurationDigits(d, k, replaceAll = false) }
-        assertEquals("$l", "1:30:00", fmtDurationDigits(dur))
+        assertEquals("$l", "1:30:00", hmsDisplay(dur))
         assertEquals("$l", Triple(1, 30, 0), hmsDigits(dur))
         assertEquals("$l", "2615", appendRaceDigit("261", '5', fresh = false))
     }
@@ -127,7 +125,7 @@ class LocaleNumberTest {
         assertEquals("$l", "5:30 /km", runPaceLabel(10.0, 55.0, DistanceUnit.Km))
         assertEquals("$l", "8:51 /mi", runPaceLabel(10.0, 55.0, DistanceUnit.Mi))
         assertEquals("$l", "6:00", formatPaceMinutes(5.999))
-        assertEquals("$l", "45:30", fmtDurationDigits("4530"))
+        assertEquals("$l", "45:30", hmsDisplay("4530"))
         // Dates are the device's words and order, never its digits.
         val day = LocalDate.of(2026, 3, 4).toEpochDay()
         listOf(planDateLabel(day), epochDayLabel(day, l), epochDayShortLabel(day, day, l), importDateLabel(1_772_600_000L, l, ZoneOffset.UTC))
@@ -199,15 +197,17 @@ class LocaleNumberTest {
     /** A Turkish keyboard writes the plan's "Incline …" as "İncline …" (the search
      *  field auto-capitalises, SetEditor.kt `KeyboardCapitalization.Sentences`, and
      *  Turkish upper-cases i to İ) or, from the key where other layouts put i, as
-     *  "Inclıne …". The quick-pick treats each as the plan item, and so does
-     *  [nameKey] (both fold İ and ı to i), so the set is saved under the plan
-     *  item's name and attributed to it. */
+     *  "Inclıne …". The quick-pick offers the plan item for each spelling, and
+     *  [nameKey] folds İ and ı to i, so the set is saved under the plan item's name
+     *  and attributed to it. */
     @Test
     fun turkishKeyboardSpellings_resolveToTheKnownExercise() {
         val known = listOf("Incline bench press")
         val item = PrescriptionView(summary = "Incline bench press 3×8", exercise = "Incline bench press", sets = 3, reps_low = 8, reps_high = 8)
+        for (typed in listOf("İncline bench press", "İNCLİNE BENCH PRESS", "Inclıne bench press", "ıncline bench press", "ıncline", "İncl")) {
+            assertEquals(typed, known, quickPickCandidates(typed, known + "Back squat", emptyList(), emptyList()).filter { it in known })
+        }
         for (typed in listOf("İncline bench press", "İNCLİNE BENCH PRESS", "Inclıne bench press", "ıncline bench press")) {
-            assertTrue("quick-pick treats $typed as the known name", known.any { it.equals(typed, ignoreCase = true) })
             assertEquals(typed, "Incline bench press", resolveExerciseName(typed, known))
             assertNull(typed, newExerciseToAdd(typed, known))
             assertEquals(typed, item, planItemFor(listOf(item), typed))
@@ -222,25 +222,18 @@ class LocaleNumberTest {
         LiftResultView(exercise = "Back Squat", weight_kg = 102.5, reps = 5, observed_at = 1_790_000_360L),
     )
 
-    @Test
-    fun setSummaries_readTheSameInLatinDigitLocales() = Locales.filter { it.hasLatinDigits() }.forEach { l ->
-        Locale.setDefault(l)
-        val text = exerciseSetsSummary(resIn(l), squatSets, WeightUnit.Kg)
-        assertEquals("$l", "3 × 5 @ 102.5 kg", text)
-    }
-
-    /** "3 × 5 @ 102.5 kg" on a phone set to Arabic (Egypt), Persian or Hindi with
-     *  Devanagari digits: the counts go through a `%d` string resource, formatted in
-     *  the app's locale with Latin digits ([withLatinDigits]), like the load
-     *  ([loadFigure] → [trimDecimal], `Locale.US`). */
+    /** "3 × 5 @ 102.5 kg" in every locale, Arabic (Egypt), Persian and Hindi with
+     *  Devanagari digits included: the counts go through a `%d` string resource,
+     *  formatted in the app's locale with Latin digits ([withLatinDigits]), like the
+     *  load ([loadFigure] → [trimDecimal], `Locale.US`). */
     @Test
     fun setSummaries_keepOneDigitScript_inEveryLocale() {
         val bad = Locales.mapNotNull { l ->
             Locale.setDefault(l)
             val text = exerciseSetsSummary(resIn(l), squatSets, WeightUnit.Kg)
-            "$l → $text".takeIf { foreignDigits(text).isNotEmpty() }
+            "$l → $text".takeIf { text != "3 × 5 @ 102.5 kg" }
         }
-        assertEquals("set summaries mixing digit scripts", emptyList<String>(), bad)
+        assertEquals("set summaries other than 3 × 5 @ 102.5 kg", emptyList<String>(), bad)
     }
 
     /** The coach summary shared as text: its counts ("1 lifting session", "85
@@ -305,34 +298,29 @@ class LocaleNumberTest {
         rule.waitForIdle()
     }
 
-    /** Every text on screen, for assertions and failure messages. */
-    private fun shownTexts(): List<String> =
-        rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true).fetchSemanticsNodes()
-            .flatMap { it.config[SemanticsProperties.Text] }.map { it.text }
-
     private fun volumeShown(figure: String): Boolean {
         val volume = ctx.getString(R.string.history_session_volume, figure, "kg")
-        return shownTexts().any { volume in it }
+        return rule.shownTexts().any { volume in it }
     }
 
     @Test
     @Config(qualifiers = "en-rUS")
-    fun sessionVolume_groupsThousandsWithAComma_inEnglish() {
+    fun sessionVolume_groupsThousandsWithANarrowSpace_inEnglish() {
         Locale.setDefault(Locale.US)
         showSessionSheet()
-        assertTrue("4,690 kg lifted: ${shownTexts()}", volumeShown("4,690"))
+        assertTrue("4 690 kg lifted: ${rule.shownTexts()}", volumeShown("4\u202F690"))
     }
 
     /** On a German, Turkish or Brazilian phone the session sheet's volume groups
-     *  thousands with ',' ("4,690 kg lifted") like the app's other figures, right
-     *  above set rows of "234.5 kg": '.' is only ever a decimal point. */
+     *  thousands with a narrow space ("4 690 kg lifted"), right above set rows of
+     *  "234.5 kg": neither ',' nor '.' is ever a thousands mark. */
     @Test
     @Config(qualifiers = "de-rDE")
-    fun sessionVolume_neverUsesThePointAsAThousandsMark_inGerman() {
+    fun sessionVolume_neverUsesAPointOrCommaAsAThousandsMark_inGerman() {
         Locale.setDefault(Locale.GERMANY)
         showSessionSheet()
-        assertTrue("the set rows use '.' as the decimal point: ${shownTexts()}", shownTexts().any { "234.5" in it })
-        assertTrue("4,690 kg lifted (not 4.690): ${shownTexts()}", volumeShown("4,690"))
+        assertTrue("the set rows use '.' as the decimal point: ${rule.shownTexts()}", rule.shownTexts().any { "234.5" in it })
+        assertTrue("4 690 kg lifted (not 4.690 or 4,690): ${rule.shownTexts()}", volumeShown("4\u202F690"))
     }
 
     private companion object {
@@ -343,17 +331,22 @@ class LocaleNumberTest {
             "en-US", "de-DE", "fr-FR", "fr-CH", "ar-EG", "fa-IR", "hi-IN", "hi-IN-u-nu-deva",
             "ja-JP", "tr-TR", "ru-RU", "pt-BR", "nb-NO",
         ).map(Locale::forLanguageTag)
-
-        fun Locale.hasLatinDigits(): Boolean =
-            java.text.DecimalFormatSymbols.getInstance(this).zeroDigit == '0'
     }
 }
+
+/** Every digit in [s] that is not 0–9 (Arabic-Indic, Persian, Devanagari, …). */
+private fun foreignDigits(s: String): String = s.filter { Character.isDigit(it) && it !in '0'..'9' }
+
+/** Every text on screen, for assertions and failure messages. */
+private fun SemanticsNodeInteractionsProvider.shownTexts(): List<String> =
+    onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true).fetchSemanticsNodes()
+        .flatMap { it.config[SemanticsProperties.Text] }.map { it.text }
 
 /**
  * The real app over the real core on phones set to other locales: Today, History
  * and Profile with a seeded lift + run history, every visible text collected.
- * Comma-decimal locales never get a decimal comma; the default sweep is de-DE,
- * tr-TR and fr-CH, `LOCALE_SWEEP_ALL=1` adds fr-FR, ru-RU, pt-BR, nb-NO and ja-JP.
+ * Comma-decimal locales never get a decimal comma, and no locale gets non-ASCII
+ * digits.
  */
 @RunWith(RobolectricTestRunner::class)
 class LocaleNumberAppTest {
@@ -387,16 +380,14 @@ class LocaleNumberAppTest {
     private fun appTexts(qualifiers: String, locale: Locale): List<String> {
         QaHarness.teardown()
         RuntimeEnvironment.setQualifiers("$qualifiers-w411dp-h3000dp")
-        Locale.setDefault(locale)
         QaHarness.reset(ctx)
+        Locale.setDefault(locale)
         QaHarness.seedLog(ctx, history())
         rule.launchApp()
-        fun texts() = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
-            .fetchSemanticsNodes().flatMap { it.config[SemanticsProperties.Text] }.map { it.text }
-        val out = texts().toMutableList()
+        val out = rule.shownTexts().toMutableList()
         for (tab in listOf(R.string.main_dest_history, R.string.main_dest_profile)) {
             rule.selectTab(str(tab))
-            out += texts()
+            out += rule.shownTexts()
         }
         return out
     }
@@ -409,14 +400,8 @@ class LocaleNumberAppTest {
 
     @Test
     fun commaDecimalLocales_showEveryFigureWithAPoint() {
-        val sweep = buildList {
-            add("de-rDE" to Locale.GERMANY)
-            add("tr-rTR" to Locale.forLanguageTag("tr-TR"))
-            add("fr-rCH" to Locale.forLanguageTag("fr-CH"))
-            if (System.getenv("LOCALE_SWEEP_ALL") == "1") {
-                listOf("fr-FR", "ru-RU", "pt-BR", "nb-NO", "ja-JP").forEach { add(it.replace("-", "-r") to Locale.forLanguageTag(it)) }
-            }
-        }
+        val sweep = listOf("de-DE", "tr-TR", "fr-CH", "fr-FR", "ru-RU", "pt-BR", "nb-NO", "ja-JP")
+            .map { it.replace("-", "-r") to Locale.forLanguageTag(it) }
         val english = appTexts("en-rUS", Locale.US)
         assertTrue("the seeded history shows decimal figures: $english", english.count { decimalPoint.containsMatchIn(it) } >= 3)
         for ((q, l) in sweep) {
@@ -424,7 +409,7 @@ class LocaleNumberAppTest {
             assertTrue("$l: decimal figures are on screen: $texts", texts.count { decimalPoint.containsMatchIn(it) } >= 3)
             val commas = texts.filter { decimalComma.containsMatchIn(it) }
             assertEquals("$l: texts with a decimal comma", emptyList<String>(), commas)
-            val foreign = texts.filter { t -> t.any { Character.isDigit(it) && it !in '0'..'9' } }
+            val foreign = texts.filter { foreignDigits(it).isNotEmpty() }
             assertEquals("$l: texts with non-ASCII digits", emptyList<String>(), foreign)
         }
     }
@@ -436,7 +421,7 @@ class LocaleNumberAppTest {
         for ((q, l) in listOf("ar-rEG" to Locale.forLanguageTag("ar-EG"), "fa-rIR" to Locale.forLanguageTag("fa-IR"))) {
             val texts = appTexts(q, l)
             assertTrue("$l: decimal figures are on screen: $texts", texts.count { decimalPoint.containsMatchIn(it) } >= 3)
-            val foreign = texts.filter { t -> t.any { Character.isDigit(it) && it !in '0'..'9' } }
+            val foreign = texts.filter { foreignDigits(it).isNotEmpty() }
             assertEquals("$l: texts with non-ASCII digits", emptyList<String>(), foreign)
         }
     }

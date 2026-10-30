@@ -378,7 +378,7 @@ private fun FullScreenRouteMap(
             Modifier
                 .fillMaxSize()
                 .background(if (tiles) BgTop else BgSunken)
-                .windowTraversalGroup(),
+                .traversalGroup(),
         ) {
             if (topPx > 0 && bottomPx > 0) {
                 RouteLayer(
@@ -660,13 +660,15 @@ private fun PlainRouteLayer(
  * tail as a dashed `OnBgFaint` stroke without casing, and the start and finish
  * markers at the kept window's ends, moving live with the slider. No distance
  * markers. Framed to the FULL track, so dragging never re-zooms; static, so a drag
- * over it scrolls the sheet.
+ * over it scrolls the sheet. Described with [recordKm], the run's of-record
+ * distance, as [RouteMapCard] is.
  */
 @Composable
 fun TrimRouteMap(
     segments: List<List<GpxFix>>,
     keepFromSec: Long,
     keepUntilSec: Long,
+    recordKm: Double,
 ) {
     val track = remember(segments) { RouteTrack(segments) }
     if (track.isEmpty) return
@@ -674,7 +676,7 @@ fun TrimRouteMap(
     val options = remember(keepFromSec, keepUntilSec) {
         RouteDrawOptions(distanceMarkers = false, trim = true, keepFromSec = keepFromSec, keepUntilSec = keepUntilSec)
     }
-    val description = routeDescription(track, 0.0, rememberDistanceUnit())
+    val description = routeDescription(track, recordKm, rememberDistanceUnit())
     RouteCard(track, renderer, options, RouteMapHeight, Modifier.fillMaxSize()) {
         // Touches stop here, so the map never pans under the slider's thumb and a
         // vertical drag still scrolls the sheet.

@@ -43,7 +43,6 @@
     <string name="main_remove_report_message_hold">Only do this if it was logged by mistake. Deleting it ends the training pause it caused.</string>
     <string name="main_resume_run_title">Resume your run?</string>
     <string name="main_resume_run_message">A run was still recording when the app closed.</string>
-    <string name="main_resume">Resume</string>
     <string name="main_discard">Discard</string>
 
     <!-- Run import (the per-file reasons live in strings_history.xml) -->
@@ -278,7 +277,7 @@
     <string name="main_trim_keeps">Keeps %1$s · %2$s</string>
     <string name="main_trim_confirm">Trim</string>
     <string name="main_trim_confirm_title">Trim to %1$s (%2$s)?</string>
-    <string name="main_trim_confirm_message">Removes %1$d min from the start and %2$d min from the end. This can\'t be undone.</string>
+    <string name="main_trim_confirm_message">Removes %1$s from the start and %2$s from the end. This can\'t be undone.</string>
     <string name="main_edit">Edit</string>
 
     <!-- Disclosure button -->
@@ -457,7 +456,8 @@
         <item quantity="other">%d days</item>
     </plurals>
     <string name="history_bars_total">%1$s %2$s total</string>
-    <string name="history_bars_desc">%1$s, total %2$s %3$s, longest %4$s %3$s on %5$s</string>
+    <!-- Spoken: %1$s window ("14 days"), %2$s and %3$s distances with spoken units ("12 kilometers"), %4$s day. -->
+    <string name="history_bars_desc">%1$s, total %2$s, longest %3$s on %4$s</string>
     <string name="history_bars_desc_empty">%1$s, no distance logged</string>
     <!-- History: run card titles + duration (URH-12) -->
     <string name="history_run_steady">Steady run</string>
@@ -488,8 +488,14 @@
     <!-- Set logging (AndroidLogging): plan-item footer, rest timer, chooser, keypad a11y -->
     <string name="plan_set_not_counted">not counted (warm-up or light)</string>
     <string name="plan_skip_exercise">Skip exercise</string>
-    <string name="plan_secondary_action_cd">%1$s: %2$s</string>
-    <string name="plan_sets_done_cd">%1$d of %2$d sets done</string>
+    <!-- One label and its value, written and spoken: "Skip exercise: Bench press", a
+         coach-export lift line, a heatmap cell, a session-done row. -->
+    <string name="ui_label_value">%1$s: %2$s</string>
+    <!-- Keyed on the planned count (%2$d): one planned set reads "0 of 1 set done". -->
+    <plurals name="plan_sets_done_cd">
+        <item quantity="one">%1$d of %2$d set done</item>
+        <item quantity="other">%1$d of %2$d sets done</item>
+    </plurals>
     <string name="plan_rest_left_label">Rest left</string>
     <string name="plan_rest_done_label">Rest done</string>
     <string name="plan_rest_done_cd">Rest done. Time for your next set.</string>
@@ -501,11 +507,13 @@
 
     <!-- History (Wave 3): run progress, best efforts, run rating, lift bests (URH-2/4/12) -->
     <string name="history_progress_overline">Progress</string>
-    <string name="history_weekly_plan_legend">Plan %1$s %2$s a week</string>
+    <!-- Weekly chart legend for the dashed mark over this week's bar: the plan's run distance this week. -->
+    <string name="history_weekly_plan_legend">This week\'s plan: %1$s %2$s</string>
     <string name="history_weekly_this_week">This week</string>
-    <string name="history_weekly_desc">Weekly distance over %1$d weeks: %2$s %3$s in total, most %4$s %3$s in the week of %5$s, this week %6$s %3$s</string>
+    <!-- Spoken: %2$s, %3$s and %5$s distances with spoken units ("46 kilometers"), %4$s the busiest week's Monday. -->
+    <string name="history_weekly_desc">Weekly distance over %1$d weeks: %2$s in total, most %3$s in the week of %4$s, this week %5$s</string>
     <string name="history_weekly_desc_empty">Weekly distance over %1$d weeks: nothing logged yet</string>
-    <string name="history_weekly_desc_plan">. Plan %1$s %2$s a week</string>
+    <string name="history_weekly_desc_plan">. This week\'s plan: %1$s</string>
     <string name="history_longest_run">Longest run</string>
     <string name="history_best_effort_open">Open this run</string>
     <string name="history_effort_value">Effort %1$d of 10</string>
@@ -554,7 +562,6 @@
     <string name="plan_calis_easier">Easier</string>
     <string name="plan_calis_harder">Harder</string>
     <string name="plan_calis_chip_cd">%1$s: %2$s, %3$s</string>
-    <string name="plan_calis_chip_cd_short">%1$s: %2$s</string>
     <string name="plan_calis_rate_effort">Log reps left on your last set to move up</string>
     <string name="plan_calis_unplaced">If it feels easy, tap Harder.</string>
     <!-- Post-illness return check (AUTOREG-4) -->
@@ -673,8 +680,6 @@
     <!-- Session done card. -->
     <string name="main_session_done_review">Review session</string>
     <string name="main_session_done_resume">Resume session</string>
-    <!-- Session done row not fully met: %1$s exercise, %2$s its visible line ("6 of 6 sets · best 320 lb × 5 · short reps", "Skipped"). -->
-    <string name="main_session_done_status_cd">%1$s: %2$s</string>
     <!-- Week strip: a planned day credited by a session done on another day, %1$s = that day ("Done Tue 13 Oct"). -->
     <string name="main_week_done_on">Done %1$s</string>
     <string name="main_week_done_on_lighter">Done %1$s, lighter than planned</string>
@@ -694,8 +699,6 @@
     <string name="plan_stopped_pain">Stopped · pain</string>
     <!-- Session done, a run short of its plan: %1$s logged figure, %2$s planned figure with unit ("5 of 5.9 mi"). -->
     <string name="main_done_run_of">%1$s of %2$s</string>
-    <!-- Session evidence panel: one item's own line under a shared evidence block, %1$s = exercise, %2$s = detail. -->
-    <string name="main_evidence_item_detail">%1$s: %2$s</string>
     <!-- First lifting sessions: the prescription spelled out. %1$d sets, %2$s reps ("5" or "8–12"), %3$d reps left. -->
     <plurals name="plan_guide_spelled">
         <item quantity="one">%1$d sets of %2$s reps, stopping with about %3$d rep left</item>
@@ -707,7 +710,6 @@
     <string name="plan_guide_first_version">Pick the version you could do about %1$d times.</string>
     <!-- Today hero while a rest from the set loop runs, %1$s = "1:42". -->
     <string name="main_rest_pill">Rest %1$s</string>
-    <string name="main_rest_pill_cd">Rest: %1$s left</string>
     <!-- Pain / illness report feedback (snackbars; the action re-submits the removed report). -->
     <string name="main_pain_report_saved">Pain report saved</string>
     <string name="main_report_removed">Report deleted</string>

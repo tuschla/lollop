@@ -36,7 +36,6 @@ class ProfileCalculatorsTest {
 
     @Before
     fun setUp() {
-        java.util.Locale.setDefault(java.util.Locale.US)
         QaHarness.reset(ctx)
     }
 

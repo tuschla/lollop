@@ -18,17 +18,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * [runSaveCriticalSection] must persist the run and tear down the session as
- * ONE unit that survives the caller's scope being cancelled mid-save, a rotation
+ * [runSaveCriticalSection] persists the run and tears down the session as ONE
+ * unit that survives the caller's scope being cancelled mid-save (a rotation
  * cancels `rememberCoroutineScope` while the non-cancellable JNI `Core.send` is in
- * flight. The old bug: rotation cancels the job AFTER `Core.send` already appended
- * the run, `withContext` rethrows `CancellationException`, clear/reset are skipped,
- * and the `catch (Exception)` failure path re-shows Save/Discard for an
- * already-logged run → duplicate on Save-retry / phantom row on Discard.
- *
- * These tests drive a REAL coroutine cancellation against the extracted,
- * effect-injected function, the thing the on-device UI harness can't reproduce,
- * which is why it shipped without a guard until this refactor-for-testability.
+ * flight): clear and reset still run, and the cancellation never reaches the
+ * failure path that re-shows Save/Discard for an already-logged run. The tests
+ * drive a real coroutine cancellation against the effect-injected function.
  */
 @OptIn(DelicateCoroutinesApi::class)
 class RunSaveCriticalSectionTest {
@@ -56,16 +51,15 @@ class RunSaveCriticalSectionTest {
         val scope = CoroutineScope(Job() + Dispatchers.Default)
         val job = scope.launch {
             try {
-                runSaveCriticalSection<String>(
+                runSaveCriticalSection(
                     send = {
                         sendStarted.complete(Unit) // signal: persist is in flight
                         releaseSend.await()        // ...and suspended, like a slow JNI call
                         order.add("send")
-                        "vm"
                     },
                     clearSidecar = { order.add("clear") },
                     resetSession = { order.add("reset") },
-                    finish = { vm -> order.add("finish:$vm") },
+                    finish = { order.add("finish") },
                     onFailure = { failureCalled = true },
                 )
             } catch (t: Throwable) {
@@ -104,14 +98,14 @@ class RunSaveCriticalSectionTest {
         val order = Collections.synchronizedList(mutableListOf<String>())
         var failureCalled = false
 
-        runSaveCriticalSection<String>(
+        runSaveCriticalSection(
             send = {
                 order.add("send")
                 throw RuntimeException("JNI boom")
             },
             clearSidecar = { order.add("clear") },
             resetSession = { order.add("reset") },
-            finish = { vm -> order.add("finish:$vm") },
+            finish = { order.add("finish") },
             onFailure = { failureCalled = true },
         )
 
@@ -130,18 +124,17 @@ class RunSaveCriticalSectionTest {
         val order = Collections.synchronizedList(mutableListOf<String>())
         var failureCalled = false
 
-        runSaveCriticalSection<String>(
+        runSaveCriticalSection(
             send = {
                 order.add("send")
-                "vm"
             },
             clearSidecar = { order.add("clear") },
             resetSession = { order.add("reset") },
-            finish = { vm -> order.add("finish:$vm") },
+            finish = { order.add("finish") },
             onFailure = { failureCalled = true },
         )
 
-        assertEquals(listOf("send", "clear", "reset", "finish:vm"), order)
+        assertEquals(listOf("send", "clear", "reset", "finish"), order)
         assertFalse("happy path never touches the failure path", failureCalled)
     }
 
@@ -165,7 +158,7 @@ class RunSaveCriticalSectionTest {
         fun enter(): Boolean {
             if (!claimSaving(saving)) return false
             scope.launch {
-                runSaveCriticalSection<Unit>(
+                runSaveCriticalSection(
                     send = {
                         sendStarted.complete(Unit)
                         releaseSend.await()
@@ -228,7 +221,7 @@ class RunSaveCriticalSectionTest {
         val scope = CoroutineScope(Job() + Dispatchers.Default)
         scope.cancel()
         val job = scope.launch(start = CoroutineStart.ATOMIC) {
-            runSaveCriticalSection<Unit>(
+            runSaveCriticalSection(
                 send = { order.add("send") },
                 clearSidecar = { order.add("clear") },
                 resetSession = {

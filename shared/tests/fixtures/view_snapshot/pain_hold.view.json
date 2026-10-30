@@ -1632,7 +1632,7 @@
         "srpe_load_au": 0.0
       }
     ],
-    "planned_weekly_km": 40.0,
+    "planned_weekly_km": 19.1,
     "longest_run_km": 6.0,
     "longest_run_observed_at": 1728111600,
     "best_efforts": [],
@@ -2932,7 +2932,7 @@
       "status": "planned",
       "items": [
         {
-          "summary": "Back Squat: 5×3 @ 102.5 kg · ~2 reps left",
+          "summary": "Back Squat: 5×3 @ 102.5 kg · ~3 reps left",
           "exercise": "Back Squat",
           "sets": 5,
           "reps_low": 3,
@@ -2942,7 +2942,7 @@
           "rest_sec": 180,
           "rep_volume": "",
           "timed_hold": false,
-          "target_rpe": 8.0,
+          "target_rpe": 7.0,
           "last_set": {
             "entry_id": 10,
             "observed_at": 1728237600,
@@ -2976,7 +2976,7 @@
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "5×3 at 85% of your estimated max (136 kg), scaled to 90% in week 1 of 1 back from your break: 102.5 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "basis": "5×3 at 85% of your estimated max (136 kg), scaled to 90% in week 1 of 1 back from your break: 102.5 kg. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -2991,7 +2991,7 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Back Squat",
-          "face_detail": "5×3 @ 102.5 kg · ~2 reps left",
+          "face_detail": "5×3 @ 102.5 kg · ~3 reps left",
           "face_lead": "5×3 @ 102.5 kg",
           "run_head": "",
           "run_head_km": null

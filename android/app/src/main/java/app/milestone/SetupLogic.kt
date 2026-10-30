@@ -114,8 +114,10 @@ internal enum class SetupLevel(
 }
 
 /** A sex answer: stated, or explicitly not given ("Prefer not to say" → null). */
-internal enum class SexAnswer(val female: Boolean?) {
-    Male(false), Female(true), NotSaying(null);
+internal enum class SexAnswer(val female: Boolean?, val labelRes: Int) {
+    Male(false, R.string.setup_sex_male),
+    Female(true, R.string.setup_sex_female),
+    NotSaying(null, R.string.setup_sex_not_saying);
 
     companion object {
         /** A finished setup's stored answer. Setup stores "Prefer not to say" and a
@@ -297,12 +299,12 @@ internal fun toggleWeekday(mask: Int?, day: Int): Int? =
  *  "Any days" (null). Shared by the wizard's Days step and Profile › Training days. */
 internal fun weekdaysCover(mask: Int?, days: Int): Boolean = mask == null || weekdayCount(mask) >= days
 
-/** Short weekday name, Monday = 0. */
-internal fun weekdayShortName(day: Int, locale: Locale = Locale.getDefault()): String =
+/** Short weekday name, Monday = 0, in the app's language. */
+internal fun weekdayShortName(day: Int, locale: Locale = appLocale()): String =
     DayOfWeek.of(day + 1).getDisplayName(TextStyle.SHORT, locale)
 
 /** "Sat, Sun" for a mask (Monday first). */
-internal fun weekdaysLabel(mask: Int, locale: Locale = Locale.getDefault()): String =
+internal fun weekdaysLabel(mask: Int, locale: Locale = appLocale()): String =
     (0 until WEEK_DAYS).filter { mask and (1 shl it) != 0 }.joinToString(", ") { weekdayShortName(it, locale) }
 
 /** Lifting days a pure lifting plan can hold (app::Profile lift_days_per_week). */
@@ -419,25 +421,8 @@ internal fun appendRaceDigit(digits: String, key: Char, fresh: Boolean): String?
     return if (base.length < HMS_DIGITS_MAX) (base + key).trimStart('0') else null
 }
 
-/** The digit buffer as shown: "m:ss" up to four digits, "h:mm:ss" past that. */
-internal fun raceTimeDisplay(digits: String): String {
-    val p = digits.padStart(4, '0')
-    return if (p.length <= 4) {
-        "${p.substring(0, 2).toInt()}:${p.substring(2, 4)}"
-    } else {
-        val h = p.dropLast(4)
-        "${h.toInt()}:${p.takeLast(4).substring(0, 2)}:${p.takeLast(2)}"
-    }
-}
-
-/** Seconds → the digit buffer that displays them. */
-internal fun raceTimeDigits(sec: Int): String {
-    val h = sec / 3600
-    val m = sec % 3600 / 60
-    val s = sec % 60
-    val raw = if (h > 0) String.format(Locale.US, "%d%02d%02d", h, m, s) else String.format(Locale.US, "%d%02d", m, s)
-    return raw.trimStart('0')
-}
+/** The digit buffer as shown: "m:ss" up to four digits, "h:mm:ss" past that; "0:00" when empty. */
+internal fun raceTimeDisplay(digits: String): String = hmsDisplay(digits.ifEmpty { "0" })
 
 /** Running paces (min per km) a recent finish time must imply to be believed, so
  *  a typo like "25" (25 seconds) for a 5K is caught before it anchors every pace.
@@ -531,13 +516,13 @@ internal val CalisEquipment.canHang: Boolean get() = pull_up_bar || rings
 
 // ── Dates ───────────────────────────────────────────────────────────────────
 
-/** A local epoch day as a medium localized date ("Oct 6, 2026"). */
-internal fun epochDayLabel(day: Long, locale: Locale = Locale.getDefault()): String =
+/** A local epoch day as a medium date in the app's language ("Oct 6, 2026"). */
+internal fun epochDayLabel(day: Long, locale: Locale = appLocale()): String =
     LocalDate.ofEpochDay(day).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale))
 
 /** [day] as a short localized date, dropping the year when it is [today]'s year
  *  ("Sep 11"; "Dec 30, 2025" otherwise), for values that must fit a row. */
-internal fun epochDayShortLabel(day: Long, today: Long, locale: Locale = Locale.getDefault()): String {
+internal fun epochDayShortLabel(day: Long, today: Long, locale: Locale = appLocale()): String {
     val date = LocalDate.ofEpochDay(day)
     if (date.year != LocalDate.ofEpochDay(today).year) return epochDayLabel(day, locale)
     return date.format(localizedDayFormatter("MMMd", locale))
@@ -859,7 +844,7 @@ internal fun seedAnswers(
         raceDate = (initial?.goalRaceEpochDay ?: runStash?.raceEpochDay)?.takeIf { it > today },
         meetDate = initial?.meetEpochDay?.takeIf { it > today },
         recentDistance = recentDistance,
-        raceDigits = initial?.recentRace?.takeIf { recentDistance != null }?.let { raceTimeDigits(it.time_sec) } ?: "",
+        raceDigits = initial?.recentRace?.takeIf { recentDistance != null }?.let { secondsToHmsDigits(it.time_sec) } ?: "",
         equipment = initial?.calisEquipment,
         pushPlace = seededPlace(CalisLadder.HorizontalPush),
         pullPlace = seededPlace(CalisLadder.VerticalPull)?.takeIf { initial?.calisEquipment?.canHang != false },

@@ -15,16 +15,23 @@ import app.milestone.PrescriptionView
 import app.milestone.ProgressionCadence
 import app.milestone.ResistanceModality
 import app.milestone.RunSession
+import app.milestone.RecentRace
+import app.milestone.SendResult
 import app.milestone.ViewModel
 import app.milestone.isReturnCheckItem
 import app.milestone.isRunItem
 import app.milestone.setupPrefs
+import app.milestone.todayEpochDay
+import app.milestone.utcOffsetSec
 import app.milestone.UiMessages
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.junit4.ComposeTestRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import org.junit.Assert.fail
 import org.robolectric.Shadows.shadowOf
 import java.io.File
+import java.util.Locale
 
 /**
  * Offline QA harness: seeds the durable event log the REAL core replays on boot
@@ -38,20 +45,32 @@ import java.io.File
  */
 object QaHarness {
 
-    private fun logFile(ctx: Context) = File(ctx.filesDir, "event-log.ndjson")
+    internal fun logFile(ctx: Context) = File(ctx.filesDir, "event-log.ndjson")
+
+    /** The durable log's non-blank lines. */
+    fun logLines(ctx: Context): List<String> = logFile(ctx).readLines().filter { it.isNotBlank() }
+
+    /** Process death, then the boot sequence: restore (compaction + replay) and the
+     *  boot SetToday. */
+    fun reboot(ctx: Context): SendResult {
+        ProcessDeath.kill(ctx)
+        Core.restore(ctx)
+        return Core.send(Event.SetToday(todayEpochDay(), utcOffsetSec()))
+    }
 
     /**
      * Reset every process-scoped bit of state the app singletons hold so the next
-     * launched Activity boots as if the process were fresh: the native core's
-     * bridge, Core's replay guard + cached view, the EventDispatcher queue,
-     * consumer, boot gate and model flow, the setup SharedPreferences, and the
-     * on-disk event log.
+     * launched Activity boots as if the process were fresh: the JVM default locale
+     * (US), the native core's bridge, Core's replay guard + cached view, the
+     * EventDispatcher queue, consumer, boot gate and model flow, the setup
+     * SharedPreferences, and the on-disk event log.
      *
      * Robolectric shares one sandbox classloader across the whole suite, so these
      * statics survive between tests; without this reset a prior scenario's core
      * state and "already booted" flags would leak into the next.
      */
     fun reset(ctx: Context) {
+        Locale.setDefault(Locale.US)
         // A prior test may have bumped the font scale (the 1.3 clipping check);
         // it is process-global under Robolectric, so restore the default here or
         // it leaks into every later scenario's layout.
@@ -69,18 +88,7 @@ object QaHarness {
         java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
         AppClock.offsetMillis = PINNED_NOW_MILLIS - System.currentTimeMillis()
 
-        // Native core: drop the global bridge and rebuild it empty.
-        Core.resetForTest()
-
-        // Core's private replay/caching state (no public setters — this is the
-        // one place that legitimately reaches in, for test isolation only).
-        setPrivate(Core, "restored", false)
-        setPrivate(Core, "log", null)
-        setPrivate(Core, "lastGoodView", null)
-        setPrivate(Core, "appendTornGuard", false)
-        setPrivate(Core, "lastSetToday", null)
-        setPrivate(Core, "viewStale", false)
-        setPrivate(Core, "logDegraded", false)
+        resetCore()
 
         // Process-scoped session singletons (internal, same module → direct). The
         // dispatcher gets a fresh queue and consumer: a prior test's unit still in
@@ -109,6 +117,22 @@ object QaHarness {
         logFile(ctx).delete()
         File(ctx.filesDir, "event-log.ndjson.bak").delete()
         File(ctx.filesDir, "event-log.ndjson.tmp").delete()
+    }
+
+    /**
+     * The native core's bridge and Core's private replay/caching state, as a new
+     * process starts them. Core has no setters for these fields; tests reset them
+     * by reflection here and nowhere else.
+     */
+    fun resetCore() {
+        Core.resetForTest()
+        setPrivate(Core, "restored", false)
+        setPrivate(Core, "log", null)
+        setPrivate(Core, "lastGoodView", null)
+        setPrivate(Core, "appendTornGuard", false)
+        setPrivate(Core, "lastSetToday", null)
+        setPrivate(Core, "viewStale", false)
+        setPrivate(Core, "logDegraded", false)
     }
 
     /**
@@ -157,18 +181,31 @@ object QaHarness {
         app.milestone.ActiveRunStore.init(ctx)
     }
 
+    /** Point the run sidecar store at [ctx]'s files dir and empty it. */
+    fun clearSidecar(ctx: Context) {
+        resetActiveRunStore(ctx)
+        app.milestone.ActiveRunStore.clearSync()
+        File(ctx.filesDir, "active-run.ndjson").delete()
+    }
+
+    /** Idle the paused main looper until [done] holds (the core's replies and every
+     *  `Dispatchers.Main` hop land there); fails after [timeoutMs]. */
+    fun pumpMainUntil(what: String, timeoutMs: Long = 15_000, done: () -> Boolean) {
+        val end = System.currentTimeMillis() + timeoutMs
+        while (!done()) {
+            shadowOf(Looper.getMainLooper()).idle()
+            if (System.currentTimeMillis() > end) fail("timed out after ${timeoutMs}ms waiting for $what")
+            Thread.sleep(2)
+        }
+    }
+
     /** Run [block] on the app's process scope and pump the paused main looper until
      *  it completes: the serial event consumer and every `Dispatchers.Main` hop
      *  resume there, so a plain runBlocking on this thread would deadlock. */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun <T> onAppScope(timeoutMs: Long = 30_000, block: suspend () -> T): T {
         val job = EventDispatcher.scope.async { block() }
-        val end = System.currentTimeMillis() + timeoutMs
-        while (!job.isCompleted) {
-            shadowOf(Looper.getMainLooper()).idle()
-            if (System.currentTimeMillis() > end) fail("app-scope work did not finish in ${timeoutMs}ms")
-            Thread.sleep(2)
-        }
+        pumpMainUntil("app-scope work", timeoutMs) { job.isCompleted }
         return job.getCompleted()
     }
 
@@ -219,11 +256,12 @@ object QaHarness {
 
     /**
      * A unix-seconds instant `days` before the pinned "today" (which the boot
-     * SetToday derives from [app.milestone.todayEpochDay]), at midday, so seeded
-     * history lands inside the History screen's rolling windows.
+     * SetToday derives from [app.milestone.todayEpochDay]), at midday plus
+     * [plusSec], so seeded history lands inside the History screen's rolling windows.
      */
-    fun daysAgoAtMidday(days: Int): Long =
-        (app.milestone.todayEpochDay() - days) * 86_400L + 43_200L
+    fun daysAgoAtMidday(days: Int, plusSec: Long = 0): Long =
+        (app.milestone.todayEpochDay() - days) * 86_400L + 43_200L + plusSec
+
     /**
      * The exact RunCard distance label for [km] under the current locale's default
      * unit (miles for US/GB/…, km elsewhere), computed with the app's own
@@ -234,7 +272,6 @@ object QaHarness {
             km,
             app.milestone.resolveDistanceUnit(app.milestone.DistanceUnitOverride.System),
         )
-
 
     /**
      * A set-up strength lifter with no logged history. Boot sees a profile but no
@@ -263,6 +300,36 @@ object QaHarness {
     /** [strengthProfile] training for a 10K on 3 running days, 25 km a week. */
     fun hybridTenKProfile(): Event.SetProfile =
         strengthProfile().copy(goalDistance = GoalDistance.TenK, runningDaysPerWeek = 3, runningKmPerWeek = 25.0)
+
+    /** [strengthProfile] at 80 kg also training for a 5K on 3 running days, 20 km a
+     *  week: lifts and runs, so every chooser row and every calculator is offered. */
+    fun hybridFiveKProfile(): Event.SetProfile = strengthProfile().copy(
+        goalDistance = GoalDistance.FiveK, runningDaysPerWeek = 3, runningKmPerWeek = 20.0, bodyweightKg = 80.0,
+    )
+
+    /** An advanced 10K runner (4 days, 35 km a week, no lifting) with a resting HR and
+     *  a 25:00 5K two weeks ago, so run items carry pace, heart-rate and effort targets. */
+    fun tenKRunnerProfile(): Event.SetProfile = strengthProfile().copy(
+        goalDistance = GoalDistance.TenK, concurrentGoal = ConcurrentGoal.EndurancePriority, weeklySets = 0,
+        runningDaysPerWeek = 4, runningKmPerWeek = 35.0, advanced = true, bodyweightKg = 70.0, restingHrBpm = 55.0,
+        recentRace = RecentRace(distance_km = 5.0, time_sec = 25 * 60, epoch_day = app.milestone.todayEpochDay() - 14),
+    )
+
+    /** A 5K runner (4 days, 30 km a week, no lifting) with a 25:00 5K a week ago. */
+    fun fiveKRunnerProfile(): Event.SetProfile = strengthProfile().copy(
+        goalDistance = GoalDistance.FiveK, concurrentGoal = ConcurrentGoal.EndurancePriority, weeklySets = 0,
+        runningDaysPerWeek = 4, runningKmPerWeek = 30.0, bodyweightKg = 70.0,
+        recentRace = RecentRace(distance_km = 5.0, time_sec = 1500, epoch_day = app.milestone.todayEpochDay() - 7),
+    )
+
+    /** A 15-year-old 60 kg lifter (age only, no birthday). */
+    fun youthProfile(): Event.SetProfile = strengthProfile().copy(bodyweightKg = 60.0, ageYears = 15.0)
+
+    /** Seed [strengthProfile] with a Back Squat set 6, 4 and 2 days ago. */
+    fun seedStrengthHistory(ctx: Context) = seedLog(
+        ctx,
+        listOf(strengthProfile(), loggedSquat(daysAgoAtMidday(6)), loggedSquat(daysAgoAtMidday(4)), loggedSquat(daysAgoAtMidday(2))),
+    )
 
     /** A logged reps×load lift set (observed_at anchored to a fixed instant). */
     fun loggedSquat(observedAt: Long): Event = Event.LogSet(
@@ -326,4 +393,17 @@ object QaHarness {
         f.isAccessible = true
         f.set(target, value)
     }
+}
+
+/** Wait until at least one node matches [matcher]. */
+internal fun ComposeTestRule.waitForNode(matcher: SemanticsMatcher, timeoutMs: Long = 15_000) =
+    waitUntil(timeoutMs) { onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
+
+/** How many nodes match [matcher] now. */
+internal fun ComposeTestRule.countOf(matcher: SemanticsMatcher): Int = onAllNodes(matcher).fetchSemanticsNodes().size
+
+/** Wait until the launched app has booted (the boot effect ran and a model is published). */
+internal fun ComposeTestRule.waitForBoot() {
+    waitUntil(30_000) { EventDispatcher.bootHandled && EventDispatcher.model.value != null }
+    waitForIdle()
 }

@@ -549,9 +549,9 @@ fn program_week_cycles_with_the_periodized_block() {
 fn prescription_views_carry_numeric_prefill_targets() {
     // The wire carries a numeric RPE target for prefilling a log entry: an
     // RIR-prescribed lift maps its RIR to an RPE (RIR 3 → RPE 7.0), and a
-    // %e1RM-anchored lift carries the effort its percentage implies on the
-    // Epley model (strength-005 inverse, 1–4 RIR, never 0) — derived
-    // from the prescription, not invented.
+    // %e1RM-anchored lift carries the effort its load implies on the Epley
+    // model (strength-005 inverse, 1–4 RIR, never 0): the load as a share of
+    // the estimate, after the plate grid floored it.
     let (app, model) = planned_strength_model(true);
     let ns = app
         .view(&model)
@@ -567,16 +567,17 @@ fn prescription_views_carry_numeric_prefill_targets() {
         "the anchored lift is %e1RM-prescribed: {}",
         anchored.intensity_label
     );
-    let PlanIntensity::PercentE1rm { pct, .. } = &anchored.intensity else {
-        panic!("structured %e1RM target: {:?}", anchored.intensity)
-    };
-    let (pct, reps) = (*pct as f64, anchored.reps_low as u32);
+    let cx = ViewCtx::new(&model);
+    let now = cx.lift_anchors_now();
+    let e1 = now.e1rm_for("Back Squat").expect("an anchored squat")
+        * now.load_frac_for("Back Squat").map_or(1.0, |d| d.frac);
+    let (load, reps) = (anchored.load_kg.expect("a load"), anchored.reps_low as u32);
     assert_eq!(
         anchored.target_rpe,
         Some(crate::strength::rir_to_rpe(
-            crate::strength::effort_target_rir(pct, reps) as f64
+            crate::strength::effort_target_rir(100.0 * load / e1, reps) as f64
         )),
-        "a %e1RM lift carries the effort its percentage implies"
+        "a %e1RM lift carries the effort its load implies"
     );
     assert!(
         anchored.target_rpe.is_some_and(|r| r < 10.0),
@@ -757,4 +758,52 @@ fn the_weights_plan_never_prescribes_failure_or_a_max_attempt() {
         }
     }
     assert!(checked > 1000, "only {checked} lift prescriptions checked");
+}
+
+#[test]
+fn a_remade_plan_leaves_the_last_plans_deload_sets_out() {
+    // An intermediate MaxStrength lifter (5 load weeks, then the deload week,
+    // `plan::lift_block_position`): five weeks of 100 kg × 5 at RPE 8, then
+    // the planned deload week at 70 kg × 5 at RPE 7. Removing the plan and
+    // setting it up again the Monday after ("Remove plan" → ClearPlan, then
+    // GeneratePlan) keeps the deload sets out (`Model::past_plans`): the new
+    // plan's first session is not cut as an e1RM drop.
+    const DROP_CLAUSE: &str = "under your estimate";
+    let mon = POS_MON;
+    let (app, mut model) = planned_on(strength_profile(), [], mon);
+    assert!(crate::plan::lift_block_position(&strength_profile(), 5).recovery);
+    for w in 0..6 {
+        let (kg, rpe) = if w == 5 { (70.0, 7.0) } else { (100.0, 8.0) };
+        for d in [0, 2, 4] {
+            let day = mon + 7 * w + d;
+            set_today(&app, &mut model, day);
+            app.update(
+                log_set("Back Squat", kg, 5, rpe, day * DAY_SEC + 12 * HOUR),
+                &mut model,
+            )
+            .expect_only_render();
+        }
+    }
+    let next = mon + 42;
+    set_today(&app, &mut model, next);
+    let kept = vm_json(&app.view(&model));
+    assert!(
+        !kept.contains(DROP_CLAUSE),
+        "the running plan leaves its deload out"
+    );
+    for ev in [
+        Event::ClearPlan,
+        Event::GeneratePlan {
+            start_epoch_day: next,
+        },
+    ] {
+        app.update(ev, &mut model).expect_only_render();
+    }
+    let remade = vm_json(&app.view(&model));
+    let at = remade.find(DROP_CLAUSE);
+    assert!(
+        at.is_none(),
+        "the re-made plan cuts the first session for the deload's light sets: {}",
+        at.map_or("", |i| excerpt(&remade, i, 200, 260))
+    );
 }

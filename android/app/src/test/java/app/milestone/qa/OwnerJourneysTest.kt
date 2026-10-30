@@ -34,7 +34,6 @@ import app.milestone.ProgressionCadence
 import app.milestone.R
 import androidx.compose.ui.unit.dp
 import app.milestone.todayEpochDay
-import java.util.Locale
 import kotlin.math.abs
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
@@ -64,7 +63,6 @@ class OwnerJourneysTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 

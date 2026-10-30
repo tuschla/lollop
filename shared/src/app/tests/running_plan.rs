@@ -327,7 +327,7 @@ fn a_volume_dominated_long_run_card_still_cites_the_share_cap() {
     let mut model = Model::default();
     let mut p = running_profile();
     p.running_days_per_week = 4;
-    p.running_km_per_week = 60.0; // 0.30×60 = 18 km, volume-dominated
+    p.running_km_per_week = 48.0; // 0.30×48 = 14.4 → 14 km, volume-dominated
     app.update(Event::SetProfile(p), &mut model)
         .expect_only_render();
     app.update(
@@ -340,7 +340,7 @@ fn a_volume_dominated_long_run_card_still_cites_the_share_cap() {
     set_today(&app, &mut model, MON);
 
     let item = planned_long_run_item(&app, &model);
-    assert!(item.summary.starts_with("18 km"), "{:?}", item.summary);
+    assert!(item.summary.starts_with("14 km"), "{:?}", item.summary);
     assert!(
         item.evidence.citation.contains("Daniels"),
         "a volume-dominated long run keeps the ≤25% share citation, got {:?}",

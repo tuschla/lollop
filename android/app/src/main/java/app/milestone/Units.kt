@@ -217,6 +217,11 @@ internal fun trimDecimal(v: Double): String {
 internal fun weightFigure(kg: Double, unit: WeightUnit): String =
     trimDecimal(if (unit == WeightUnit.Lb) kgToLb(kg) else kg)
 
+/** [n] with its thousands split by a narrow no-break space ("4 690"): neither ','
+ *  nor '.', so no locale reads the mark as a decimal point. Every grouped figure
+ *  goes through it. Pure. */
+internal fun groupedFigure(n: Long): String = String.format(Locale.US, "%,d", n).replace(',', '\u202F')
+
 /** Longest timer-style digit buffer: hhmmss. */
 internal const val HMS_DIGITS_MAX = 6
 
@@ -227,4 +232,24 @@ internal fun hmsDigits(digits: String): Triple<Int, Int, Int>? {
     if (digits.isEmpty() || digits.length > HMS_DIGITS_MAX || !digits.all { it.isDigit() }) return null
     val p = digits.padStart(HMS_DIGITS_MAX, '0')
     return Triple(p.substring(0, 2).toInt(), p.substring(2, 4).toInt(), p.substring(4, 6).toInt())
+}
+
+/** A timer-style digit buffer as shown: "1:45:30", "45:30", "0:30"; "" when empty. Pure. */
+internal fun hmsDisplay(digits: String): String {
+    if (digits.isEmpty()) return ""
+    val p = digits.padStart(HMS_DIGITS_MAX, '0').takeLast(HMS_DIGITS_MAX)
+    val h = p.substring(0, 2).toInt()
+    val m = p.substring(2, 4)
+    val s = p.substring(4, 6)
+    return if (h > 0) "$h:$m:$s" else "${m.toInt()}:$s"
+}
+
+/** Whole seconds as the timer-style digit buffer that displays them
+ *  (6330 → "14530"); "" for zero. Pure. */
+internal fun secondsToHmsDigits(sec: Int): String {
+    val h = sec / 3600
+    val m = sec % 3600 / 60
+    val s = sec % 60
+    val raw = if (h > 0) String.format(Locale.US, "%d%02d%02d", h, m, s) else String.format(Locale.US, "%d%02d", m, s)
+    return raw.trimStart('0')
 }

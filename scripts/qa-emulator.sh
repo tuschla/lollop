@@ -100,7 +100,7 @@ log_set_flow() {
   # is its own window, so the dump only sees the editor's copy.
   tap_text "Log set 1 of"; sleep 2; screenshot set-loop-after-save
   tap_text "Finish"; sleep 2; screenshot today-after-set
-  has_text re '^1 of [0-9]+ sets done' || die "after logging a set the first slot is not marked done"
+  has_text re '^1 of [0-9]+ sets? done' || die "after logging a set the first slot is not marked done"
   log "per-set flow OK"
 }
 

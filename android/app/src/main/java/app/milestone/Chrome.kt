@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
 
@@ -271,15 +272,15 @@ fun RunInProgressChip(onClick: () -> Unit) {
 }
 
 /**
- * Call first inside every `ModalBottomSheet` content. The sheet runs in its own
- * dialog window, which on gesture-less (3-button) navigation gets the system's
- * contrast scrim, a near-white band under a light palette. Turning it off lets
- * the sheet's own surface (already drawn under the nav inset) be the band, the
- * same theme-derived ground the activity window gets in MainActivity. API 35+
- * ignores the nav bar colour (edge-to-edge), so only the scrim switch applies there.
+ * The sheet runs in its own dialog window, which on gesture-less (3-button)
+ * navigation gets the system's contrast scrim, a near-white band under a light
+ * palette. Turning it off lets the sheet's own surface (already drawn under the
+ * nav inset) be the band, the same theme-derived ground the activity window gets
+ * in MainActivity. API 35+ ignores the nav bar colour (edge-to-edge), so only the
+ * scrim switch applies there.
  */
 @Composable
-fun SheetNavBarScrim() {
+private fun SheetNavBarScrim() {
     val window = (LocalView.current.parent as? DialogWindowProvider)?.window ?: return
     SideEffect {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
@@ -307,7 +308,7 @@ internal fun AppSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        modifier = Modifier.windowTraversalGroup(),
+        modifier = Modifier.traversalGroup(),
         sheetState = sheetState,
         sheetGesturesEnabled = sheetGesturesEnabled,
         containerColor = containerColor,
@@ -318,18 +319,19 @@ internal fun AppSheet(
 }
 
 /**
- * Marks a window's top container (the activity's content, a sheet, a dialog) as a
- * traversal group. TalkBack's reading order sorts each group's rows by the group's
- * own layout direction, and a Compose window's root node is always left to right
- * (`AndroidComposeView` never sets its direction), so without this an RTL locale
- * hears a row outside a lazy list (the bottom nav, a dialog's buttons) end to start.
+ * Marks a node as a traversal group: TalkBack reads its children together, sorted
+ * by the group's own layout direction. Every window's top container (the
+ * activity's content, a sheet, a dialog) needs it: a Compose window's root node is
+ * always left to right (`AndroidComposeView` never sets its direction), so without
+ * it an RTL locale hears a row outside a lazy list (the bottom nav, a dialog's
+ * buttons) end to start.
  */
-internal fun Modifier.windowTraversalGroup(): Modifier = semantics { isTraversalGroup = true }
+internal fun Modifier.traversalGroup(): Modifier = semantics { isTraversalGroup = true }
 
 /** A sheet's scrolling body: full width, scrolled by [scroll], clear of the
- *  navigation bar, with the sheet's [sheetPadding]. */
-internal fun Modifier.sheetBody(scroll: ScrollState): Modifier =
-    fillMaxWidth().verticalScroll(scroll).navigationBarsPadding().sheetPadding()
+ *  navigation bar, with the sheet's [sheetPadding] at [gutter]. */
+internal fun Modifier.sheetBody(scroll: ScrollState, gutter: Dp = Space.Sheet.dp): Modifier =
+    fillMaxWidth().verticalScroll(scroll).navigationBarsPadding().sheetPadding(gutter)
 
-/** A sheet body's side and bottom padding. */
-internal fun Modifier.sheetPadding(): Modifier = padding(horizontal = Space.Sheet.dp).padding(bottom = Space.Lg.dp)
+/** A sheet body's side ([gutter]) and bottom padding. */
+internal fun Modifier.sheetPadding(gutter: Dp = Space.Sheet.dp): Modifier = padding(horizontal = gutter).padding(bottom = Space.Lg.dp)

@@ -289,7 +289,7 @@ pub(crate) fn movement_key(name: &str) -> Vec<String> {
 
 /// The tokens of [`movement_key`], unfolded and unallocated: the canonical
 /// name split on every non-alphanumeric char, empties and equipment words
-/// dropped (compared with [`crate::names::fold_eq`]).
+/// dropped (compared with [`crate::names::FoldKey`]).
 fn movement_tokens(name: &str) -> impl Iterator<Item = &str> {
     const EQUIPMENT: [&str; 7] = [
         "barbell",
@@ -302,7 +302,10 @@ fn movement_tokens(name: &str) -> impl Iterator<Item = &str> {
     ];
     hypertrophy::canonical_name(name)
         .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty() && !EQUIPMENT.iter().any(|e| crate::names::fold_eq(t, e)))
+        .filter(|t| {
+            let key = crate::names::FoldKey::new(t);
+            !t.is_empty() && !EQUIPMENT.iter().any(|e| key.is(e))
+        })
 }
 
 /// Heavy lifting: at or above 80 % 1RM, the floor of the max-strength band a
@@ -374,10 +377,9 @@ fn squat_e1rm(anchors: &Anchors) -> Option<f64> {
 /// [`same_movement`] match. Shared by the plan's depth-jump gate and the lift
 /// audit's.
 pub(crate) fn is_back_squat(name: &str) -> bool {
-    !name
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .any(|t| t.eq_ignore_ascii_case("smith") || t.eq_ignore_ascii_case("machine"))
-        && same_movement("Barbell back squat", name)
+    !with_name_tokens(name, |t| {
+        t.iter().any(|w| matches!(*w, "smith" | "machine"))
+    }) && same_movement("Barbell back squat", name)
 }
 
 /// The loading goal a DUP emphasis targets, so its inter-set REST comes from the
@@ -866,13 +868,7 @@ impl DoseCtx<'_> {
         } else {
             load.pct_1rm.0
         };
-        // A completed session is never followed by a lighter one: novice
-        // linear progression adds load after a session whose prescribed reps
-        // were all done and deloads a lift only after repeated misses (File 08
-        // indiv-008/009; STR-PCTPROG-001 "per successful week"). A set logged
-        // at its target effort cannot raise the estimate the percentage reads,
-        // and each %1RM load rounds DOWN onto the plate grid, so without this
-        // hold the load would slide one plate at a time across completed weeks.
+        // A completed session is never followed by a lighter one.
         let pct = match novice_hold_pct(self.anchors, self.exercise, reps) {
             Some(hold) if hold > pct => {
                 claim = Some(claims::STR_PCTPROG_001);
@@ -987,8 +983,14 @@ fn novice_jump_cap_pct(anchors: &Anchors, exercise: &str, reps: u8, upper: bool)
 /// load, when that session was completed: every working set reached today's
 /// `reps` and none was rated past RPE 9 (the miss [`earned_week`] withholds a
 /// step for; an unrated set cannot show one). `None` without an anchor, a
-/// loaded last session, or when it was not completed. The percentage is
-/// rounded UP so the plate-grid floor of anchor × % lands on the load lifted.
+/// loaded last session, or when it was not completed. Novice linear
+/// progression adds load after a completed session and deloads a lift only
+/// after repeated misses (File 08 indiv-008/009; STR-PCTPROG-001 "per
+/// successful week"), but a set done at its target effort cannot raise the
+/// estimate the percentage reads, and each %1RM load floors onto the plate
+/// grid: without this hold the load would slide one plate at a time across
+/// completed weeks. The percentage is rounded UP so the plate-grid floor of
+/// anchor × % lands on the load lifted.
 fn novice_hold_pct(anchors: &Anchors, exercise: &str, reps: u8) -> Option<u8> {
     let e1 = anchors.e1rm_for(exercise)?;
     let last = anchors
@@ -1125,6 +1127,16 @@ fn ballistic_item(
     )
 }
 
+/// Whether the meet taper ([`apply_meet_taper`]) reaches a lift session on one
+/// of `lift_days` (0 = Monday): the session falls 0–14 days before the meet
+/// (TAPER-001's duration).
+pub(super) fn meet_taper_reaches(days_to_meet_from_week_start: i64, lift_days: &[u16]) -> bool {
+    let taper_days = i64::from(strength::taper_rx().value.duration_days.1);
+    lift_days
+        .iter()
+        .any(|&day| (0..=taper_days).contains(&(days_to_meet_from_week_start - i64::from(day))))
+}
+
 /// Shape a barbell MaxStrength/Power week toward a strength test / meet.
 /// `days_to_meet_from_week_start` = meet day − this week's Monday; each
 /// session's own distance is that minus its `day` offset. Lift sessions only;
@@ -1145,7 +1157,6 @@ pub(super) fn apply_meet_taper(sessions: &mut [Session], days_to_meet_from_week_
     const CESSATION_DAYS: i64 = 2;
     // The taper's final week (3–7 days out) takes the deeper cut.
     const TAPER_DEEP_CUT_DAYS: i64 = 7;
-    let taper_days = taper.duration_days.1 as i64;
     let heavy = |i: &LiftIntensity| match *i {
         LiftIntensity::PercentOneRm(p) => p >= HEAVY_PCT_1RM,
         LiftIntensity::Rir(r) => r <= 3,
@@ -1153,13 +1164,12 @@ pub(super) fn apply_meet_taper(sessions: &mut [Session], days_to_meet_from_week_
         LiftIntensity::MaxIntent => false,
     };
     for s in sessions.iter_mut() {
-        if !matches!(s.session_type, SessionType::Lift(_)) {
+        if !matches!(s.session_type, SessionType::Lift(_))
+            || !meet_taper_reaches(days_to_meet_from_week_start, &[s.day])
+        {
             continue;
         }
         let d = days_to_meet_from_week_start - s.day as i64;
-        if !(0..=taper_days).contains(&d) {
-            continue;
-        }
         if d <= CESSATION_DAYS {
             s.session_type = SessionType::Rest;
             s.prescriptions.clear();

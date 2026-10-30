@@ -794,3 +794,40 @@ fn an_undated_race_copies_the_date_of_the_history_entry_it_follows() {
         Some(D0 - 3)
     );
 }
+
+/// A removed plan's span (`Model::past_plans`) replays the same from the
+/// compacted log: each plan's first GeneratePlan, the ClearPlan that removed
+/// it and the SetToday before that ClearPlan survive; a no-op ClearPlan and a
+/// repeated GeneratePlan do not.
+#[test]
+fn removed_plan_spans_survive_compaction() {
+    let plan = |start_epoch_day| Event::GeneratePlan { start_epoch_day };
+    let log = vec![
+        set_today_ev(D0),
+        plan(D0),
+        set_today_ev(D0 + 20),
+        plan(D0 + 20),
+        set_today_ev(D0 + 30),
+        Event::ClearPlan,
+        Event::ClearPlan,
+        set_today_ev(D0 + 31),
+        plan(D0 + 31),
+        set_today_ev(D0 + 40),
+        Event::ClearPlan,
+        set_today_ev(D0 + 41),
+        plan(D0 + 41),
+        set_today_ev(D0 + 50),
+    ];
+    let spans = |log: Vec<Event>| {
+        let mut m = Model::default();
+        for e in log {
+            let _ = Engine.update(e, &mut m);
+        }
+        m.past_plans
+    };
+    let want = [(D0, D0 + 30), (D0 + 31, D0 + 40)];
+    assert_eq!(spans(log.clone()), want);
+    let compacted = compact_event_log(log);
+    assert_eq!(compacted.len(), 8, "{compacted:?}");
+    assert_eq!(spans(compacted), want);
+}

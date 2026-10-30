@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
@@ -46,7 +45,6 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -530,36 +528,19 @@ private fun LazyListScope.DataSection(ctx: Context, model: ViewModel) {
                 pendingUri = null
                 pending = null
             }
-            AlertDialog(
-                onDismissRequest = dismiss,
-                modifier = Modifier.windowTraversalGroup(),
-                shape = RoundedCornerShape(Space.Card.dp),
-                title = { Text(stringResource(R.string.main_import_replace_title)) },
-                text = {
-                    ExportFirstBody(
-                        importSummaryText(p.summary) + " " + stringResource(R.string.main_import_replace_body),
-                        onExport = exportData,
-                        exported = exportedBeforeImport,
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        dismiss()
-                        restoreData(ctx.applicationContext, p.lines, p.summary.entries)
-                    }) {
-                        Text(stringResource(R.string.main_import_replace_confirm), color = DangerText)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = dismiss) { Text(stringResource(R.string.main_cancel)) }
-                },
-            )
+            ExportFirstDialog(
+                title = stringResource(R.string.main_import_replace_title),
+                body = importSummaryText(p.summary) + " " + stringResource(R.string.main_import_replace_body),
+                exported = exportedBeforeImport,
+                onExport = exportData,
+                confirmLabel = stringResource(R.string.main_import_replace_confirm),
+                onDismiss = dismiss,
+            ) { restoreData(ctx.applicationContext, p.lines, p.summary.entries) }
         }
 
         if (restoring) {
-            AlertDialog(
-                onDismissRequest = { /* the restart follows; nothing to go back to */ },
-                modifier = Modifier.windowTraversalGroup(),
+            AppDialog(
+                onDismiss = { /* the restart follows; nothing to go back to */ },
                 confirmButton = {},
                 text = {
                     Row(
@@ -677,40 +658,53 @@ internal fun ClearAllDataDialog(visible: Boolean, onDismiss: () -> Unit, onClear
     val exported = remember(visible) { mutableStateOf(false) }
     val exportData = rememberDataExport(onExported = { exported.value = true })
     if (!visible) return
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.windowTraversalGroup(),
-        shape = RoundedCornerShape(Space.Card.dp),
-        title = { Text(stringResource(R.string.main_clear_all_title)) },
-        text = {
-            ExportFirstBody(stringResource(R.string.main_clear_all_message), onExport = exportData, exported = exported.value)
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                onDismiss()
-                onClear()
-            }) { Text(stringResource(R.string.main_clear_all_confirm), color = DangerText) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }
-        },
+    ExportFirstDialog(
+        title = stringResource(R.string.main_clear_all_title),
+        body = stringResource(R.string.main_clear_all_message),
+        exported = exported.value,
+        onExport = exportData,
+        confirmLabel = stringResource(R.string.main_clear_all_confirm),
+        onDismiss = onDismiss,
+        onConfirm = onClear,
     )
 }
 
-/** The body of a replace/clear confirm: what goes, then "Export first" as a body
- *  action, so both dialogs keep the button row to Cancel · the destructive action.
- *  Once [exported], the action reads "Exported ✓" (tapping it saves another copy). */
+/** A replace/clear confirm: what goes ([body]), then "Export first" as a body
+ *  action, so the button row stays Cancel · the destructive [confirmLabel], which
+ *  closes the dialog, then runs [onConfirm]. Once [exported], the action reads
+ *  "Exported ✓" (tapping it saves another copy). */
 @Composable
-private fun ExportFirstBody(body: String, onExport: () -> Unit, exported: Boolean) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-        Text(body)
-        TextAction(
-            stringResource(if (exported) R.string.setup_export_first_done else R.string.main_export_first),
-            onClick = onExport,
-            modifier = Modifier.offset(x = -TextActionInset),
-            description = if (exported) stringResource(R.string.setup_export_first_done_cd) else null,
-        )
-    }
+private fun ExportFirstDialog(
+    title: String,
+    body: String,
+    exported: Boolean,
+    onExport: () -> Unit,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AppDialog(
+        onDismiss = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                onDismiss()
+                onConfirm()
+            }) { Text(confirmLabel, color = DangerText) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) } },
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+                Text(body)
+                TextAction(
+                    stringResource(if (exported) R.string.setup_export_first_done else R.string.main_export_first),
+                    onClick = onExport,
+                    modifier = Modifier.offset(x = -TextActionInset),
+                    description = if (exported) stringResource(R.string.setup_export_first_done_cd) else null,
+                )
+            }
+        },
+    )
 }
 
 /** A Profile action tile: a [TitleSubtitleRow] on its own outlined card. */

@@ -402,6 +402,8 @@ object Type {
     val Chip = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, textDirection = AppTextDirection)
     /** [Chip] at Regular weight: an unselected nav label. */
     val ChipRegular = Chip.copy(fontWeight = FontWeight.Normal)
+    /** [Chip] at Medium weight: an unselected segment or scale value. */
+    val ChipMedium = Chip.copy(fontWeight = FontWeight.Medium)
 
     /** Tile-scale overline (chrome §3): 12sp Bold, FieldLabel letter-spacing,
      *  UPPERCASE at the call site, color `OnBgFaint`. Top-left of every tile. */

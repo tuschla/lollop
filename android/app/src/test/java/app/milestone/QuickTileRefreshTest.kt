@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Looper
 import android.service.quicksettings.TileService
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.qa.QaHarness
 import app.milestone.widget.TodayWidgetReceiver
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetMidnight
@@ -68,14 +69,9 @@ class QuickTileRefreshTest {
 
     private fun taken(): List<ComponentName> = synchronized(requests) { requests.toList().also { requests.clear() } }
 
-    /** Requests made within [timeoutMs] (the receiver works on a background thread). */
-    private fun awaitRequests(timeoutMs: Long = 5_000): List<ComponentName> {
-        val end = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < end) {
-            shadowOf(Looper.getMainLooper()).idle()
-            if (synchronized(requests) { requests.isNotEmpty() }) return taken()
-            Thread.sleep(20)
-        }
+    /** The redraw requests, once there is one (the receiver works on a background thread). */
+    private fun awaitRequests(): List<ComponentName> {
+        QaHarness.pumpMainUntil("a tile redraw request", 5_000) { synchronized(requests) { requests.isNotEmpty() } }
         return taken()
     }
 

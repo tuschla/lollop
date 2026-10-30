@@ -29,9 +29,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.LayoutDirection
@@ -79,7 +79,7 @@ internal fun TrimRunSheetContent(
         modifier = Modifier.sheetBody(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
     ) {
-        Text(stringResource(R.string.main_trim_run), color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
+        SheetTitle(stringResource(R.string.main_trim_run))
 
         val firstFixSec = points.first().timeSec
         val lastFixSec = points.last().timeSec
@@ -115,18 +115,19 @@ internal fun TrimRunSheetContent(
         } else {
             0.0
         }
-        val keptTime = fmtRunTime(trimKeptMovingSec(points, firstKept, lastKept, run.duration_min * 60.0))
+        val keptTime = formatElapsed(trimKeptMovingSec(points, firstKept, lastKept, run.duration_min * 60.0).toLong())
         val headKm = trimPreviewShare(if (firstKept >= 0) points[firstKept].cumKm else trackKm, trackKm, run.distance_km)
         val tailKm = trimPreviewShare(if (lastKept >= 0) trackKm - points[lastKept].cumKm else 0.0, trackKm, run.distance_km)
         val headLabel = runDistLabel(headKm, unit)
         val tailLabel = runDistLabel(tailKm, unit)
 
-        TrimRouteMap(route.segments, keepFromSec, keepUntilSec)
+        TrimRouteMap(route.segments, keepFromSec, keepUntilSec, run.distance_km)
 
         val startDesc = stringResource(R.string.trim_start_thumb)
         val endDesc = stringResource(R.string.trim_end_thumb)
-        val startState = stringResource(R.string.trim_removed_state, headLabel)
-        val endState = stringResource(R.string.trim_removed_state, tailLabel)
+        val res = LocalResources.current
+        val startState = stringResource(R.string.trim_removed_state, spokenRunDistance(res, headKm, unit))
+        val endState = stringResource(R.string.trim_removed_state, spokenRunDistance(res, tailKm, unit))
         RangeSlider(
             value = range,
             onValueChange = { range = it },
@@ -173,11 +174,9 @@ internal fun TrimRunSheetContent(
         }
 
         if (confirm) {
-            val removedStartMin = Math.round((keepFromSec - firstFixSec) / 60.0).toInt()
-            val removedEndMin = Math.round((lastFixSec - keepUntilSec) / 60.0).toInt()
             ConfirmDialog(
                 title = stringResource(R.string.main_trim_confirm_title, runDistLabel(keptKm, unit), keptTime),
-                body = stringResource(R.string.main_trim_confirm_message, removedStartMin, removedEndMin),
+                body = stringResource(R.string.main_trim_confirm_message, headLabel, tailLabel),
                 confirmLabel = stringResource(R.string.main_trim_confirm),
                 onDismiss = { confirm = false },
                 onConfirm = {

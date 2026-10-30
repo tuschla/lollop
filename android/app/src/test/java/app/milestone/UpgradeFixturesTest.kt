@@ -11,7 +11,6 @@ import app.milestone.qa.launchApp
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.time.ZoneId
-import java.util.Locale
 import kotlin.math.abs
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -57,10 +56,7 @@ class UpgradeFixturesTest {
     private val fixtureToday = Event.SetToday(20725, 7200)
 
     @Before
-    fun setUp() {
-        Locale.setDefault(Locale.US)
-        QaHarness.reset(ctx)
-    }
+    fun setUp() = QaHarness.reset(ctx)
 
     @After
     fun tearDown() {
@@ -70,9 +66,7 @@ class UpgradeFixturesTest {
 
     private fun expected(v: String): JsonObject = Json.parseToJsonElement(fixture("upgrade/$v.history.json").decodeToString()).jsonObject
 
-    private val logFile get() = File(ctx.filesDir, "event-log.ndjson")
-
-    private fun logLines() = logFile.readLines().filter { it.isNotBlank() }
+    private val logFile get() = QaHarness.logFile(ctx)
 
     /** Install [v]'s log as the file the old build left, as an in-place update does. */
     private fun installOldLog(v: String) {
@@ -152,7 +146,7 @@ class UpgradeFixturesTest {
             installOldLog(v)
             // The old build's prefs: setup was done long ago.
             ctx.setupPrefs().edit().putBoolean("onboarding_done", true).commit()
-            val before = logLines()
+            val before = QaHarness.logLines(ctx)
             rule.launchApp()
             val model = checkNotNull(EventDispatcher.model.value) { "$v: no model after boot" }
             // The app runs on its own (pinned) clock here; the History is clock-free.
@@ -161,7 +155,7 @@ class UpgradeFixturesTest {
             assertNotNull("$v: the plan", model.program)
             // Boot must not re-anchor the kept plan with a fresh GeneratePlan.
             val plans = { lines: List<String> -> lines.count { EventLog.variantOf(it) == "GeneratePlan" } }
-            assertTrue("$v: boot generated a new plan", plans(logLines()) <= plans(before))
+            assertTrue("$v: boot generated a new plan", plans(QaHarness.logLines(ctx)) <= plans(before))
         }
     }
 
@@ -172,14 +166,14 @@ class UpgradeFixturesTest {
     fun aPlanRemovedInTheOldBuildStaysRemoved() {
         logFile.parentFile!!.mkdirs()
         logFile.writeBytes(fixture("upgrade/203ab56-plan-removed.log.ndjson"))
-        assertTrue("the old rewrite kept no plan line", logLines().none { EventLog.variantOf(it) in setOf("GeneratePlan", "ClearPlan") })
+        assertTrue("the old rewrite kept no plan line", QaHarness.logLines(ctx).none { EventLog.variantOf(it) in setOf("GeneratePlan", "ClearPlan") })
         ctx.setupPrefs().edit().putBoolean("onboarding_done", true).putBoolean(KEY_PLAN_CLEARED, true).commit()
         rule.launchApp()
         val model = checkNotNull(EventDispatcher.model.value)
         assertEquals("the set", 1, model.lifts.size)
         assertNotNull("the profile", model.profile)
         assertNull("no plan", model.program)
-        assertTrue("boot generated a plan", logLines().none { EventLog.variantOf(it) == "GeneratePlan" })
+        assertTrue("boot generated a plan", QaHarness.logLines(ctx).none { EventLog.variantOf(it) == "GeneratePlan" })
     }
 
     @Test

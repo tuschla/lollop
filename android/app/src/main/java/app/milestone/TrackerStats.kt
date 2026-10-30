@@ -73,8 +73,8 @@ internal fun TrackerStats(
     val avgPaceMinPerKm = averagePaceMinPerKm(elapsedSec, liveKm)
     // While paused nothing is moving "now": the window is stale until the next segment.
     val nowPace = if (paused) Double.NaN else currentPace
-    val nowText = if (nowPace.isFinite()) formatPaceMinutes(paceInUnit(nowPace, unit)) else EmptyValuePlaceholder
-    val avgText = if (avgPaceMinPerKm.isFinite()) formatPaceMinutes(paceInUnit(avgPaceMinPerKm, unit)) else EmptyValuePlaceholder
+    val nowText = paceFigure(nowPace, unit)
+    val avgText = paceFigure(avgPaceMinPerKm, unit)
     val distanceText = distanceFigure(liveKm, unit)
     val cue = paceTarget?.let { paceCue(nowPace, it.pace_fast_sec_per_km, it.pace_slow_sec_per_km) }
     val cueSpoken = when (cue) {
@@ -83,13 +83,9 @@ internal fun TrackerStats(
         PaceCue.OnTarget -> stringResource(R.string.track_cd_pace_status_on_target)
         null -> null
     }
-    val toGoText = planKm?.let { planned ->
-        val left = planned - liveKm
-        if (left > 0.0) {
-            stringResource(R.string.track_stat_to_go, runDistLabel(left, unit))
-        } else {
-            stringResource(R.string.track_stat_plan_done)
-        }
+    val toGoLeft = planKm?.let { it - liveKm }
+    val toGoText = toGoLeft?.let { left ->
+        if (left > 0.0) stringResource(R.string.track_stat_to_go, runDistLabel(left, unit)) else stringResource(R.string.track_stat_plan_done)
     }
     // The newest COMPLETED N-minute slice; the in-progress tail is not a finished split.
     val lastSlice = paceBuckets.lastOrNull { it.complete }
@@ -105,7 +101,10 @@ internal fun TrackerStats(
         spokenPace(res, nowPace, unit),
         spokenPace(res, avgPaceMinPerKm, unit),
     )
-    val spoken = listOfNotNull(spokenFigures, cueSpoken, toGoText).joinToString(" ")
+    val toGoSpoken = toGoLeft?.let { left ->
+        if (left > 0.0) stringResource(R.string.track_stat_to_go, spokenRunDistance(res, left, unit)) else toGoText
+    }
+    val spoken = listOfNotNull(spokenFigures, cueSpoken, toGoSpoken).joinToString(" ")
     val avgLine = stringResource(R.string.track_stat_avg_pace, avgText)
     val sliceLine = lastSlice?.let {
         stringResource(R.string.track_stat_last_slice, paceBucketN, formatPaceMinutes(paceInUnit(it.paceMinPerKm, unit)), unit.paceSuffix)
@@ -131,7 +130,7 @@ internal fun TrackerStats(
                 modifier = Modifier.weight(1f),
             )
             LiveFigure(
-                label = stringResource(R.string.track_stat_distance),
+                label = stringResource(R.string.run_stat_distance),
                 value = distanceText,
                 suffix = unit.distanceLabel,
                 known = liveKm > 0.0,
@@ -272,6 +271,10 @@ internal fun spokenDuration(res: Resources, totalSec: Long): String {
 /** A distance figure read aloud with its unit, e.g. "3.18 miles". */
 internal fun spokenDistance(res: Resources, figure: String, unit: DistanceUnit): String =
     res.getString(if (unit == DistanceUnit.Mi) R.string.track_cd_distance_mi else R.string.track_cd_distance_km, figure)
+
+/** A run distance (km) read aloud in the user's unit, e.g. "3.18 miles". */
+internal fun spokenRunDistance(res: Resources, km: Double, unit: DistanceUnit): String =
+    spokenDistance(res, distanceFigure(km, unit), unit)
 
 /** A canonical pace (min/km) read aloud in the user's unit, e.g. "5 minutes 15
  *  seconds per kilometer", or "not available yet" when unknown. */

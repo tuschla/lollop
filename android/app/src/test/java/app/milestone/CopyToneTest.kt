@@ -68,6 +68,7 @@ class CopyToneTest {
             "Ready to train" to "`Ready to`",
             "It's important to note the cap" to "`It's important to note`",
             "Easy run — keep it short" to "em dash",
+            "Training is on hold" to "`on hold`",
         )) {
             val v = violations(s)
             assertTrue("`$s` must flag $rule: $v", v.any { it.contains(rule) })
@@ -120,8 +121,12 @@ class CopyToneTest {
             v += "stock phrase `It's important to note`"
         }
         if ('—' in s && s.trim() != "—") v += "em dash in a sentence"
+        for ((term, say) in TERMS) if (phrase(term).containsMatchIn(n)) v += "term `$term` (say $say)"
         return v
     }
+
+    /** writing.md Terms: the word not to use to the app's word. */
+    private val TERMS = listOf("on hold" to "paused")
 
     /** A whole-word phrase in lowercase, straight-apostrophe text. */
     private fun phrase(p: String) = Regex("""(?<![\p{L}\p{N}])""" + Regex.escape(p) + """(?![\p{L}\p{N}])""")

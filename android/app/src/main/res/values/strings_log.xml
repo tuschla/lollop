@@ -312,8 +312,8 @@
     <!-- Primary action once the current exercise is complete -->
     <string name="log_primary_next">Next: %1$s</string>
     <string name="log_primary_finish_session">Finish session</string>
-    <!-- Rest readout, spoken on focus: "Rest timer: 1:42 left" -->
-    <string name="log_rest_left_cd">Rest timer: %1$s left</string>
+    <!-- Rest readout (set loop and Today's rest pill), spoken on focus: "Rest: 1:42 left" -->
+    <string name="log_rest_left_cd">Rest: %1$s left</string>
     <!-- In-session coaching cue actions: "Use 140 kg" applies the coach's load -->
     <string name="log_cue_use_load">Use %1$s</string>
     <string name="log_cue_end_exercise">End exercise</string>

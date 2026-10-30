@@ -16,7 +16,6 @@ import app.milestone.AppClock
 import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.RestAlarm
-import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -45,7 +44,6 @@ class ExactAlarmNoticeTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
         ShadowAlarmManager.setCanScheduleExactAlarms(false)
     }

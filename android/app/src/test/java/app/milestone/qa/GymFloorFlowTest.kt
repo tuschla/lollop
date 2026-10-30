@@ -66,7 +66,6 @@ class GymFloorFlowTest {
 
     @Before
     fun setUp() {
-        Locale.setDefault(Locale.US)
         QaHarness.reset(ctx)
     }
 
@@ -218,7 +217,8 @@ class GymFloorFlowTest {
         val restSec = EventDispatcher.model.value!!.week_plan
             .first { it.epoch_day == app.milestone.todayEpochDay() }.items.first { it.exercise == "Back Squat" }.rest_sec
         logSet()
-        rule.assertCountEventually(hasContentDescription(strPrefix(R.string.log_rest_left_cd), substring = true), 1)
+        // The loop's readout: Today's rest pill under the sheet speaks the same words.
+        rule.assertCountEventually(hasTestTag("rest-readout") and hasContentDescription(strPrefix(R.string.log_rest_left_cd), substring = true), 1)
         rest(restSec + 5L)
         rule.assertCountEventually(hasContentDescription(str(R.string.plan_rest_done_cd), substring = true), 1)
     }

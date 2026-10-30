@@ -38,8 +38,6 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -163,7 +161,7 @@ internal fun TodayDestination(
                     YouthActivityCard(activity, onLog = { onOpenSheet(LogMode.Activity) }, onEvent = onEvent)
                 }
             }
-            // The week stays in view, read-only (held days read "on hold").
+            // The week stays in view, read-only (held days read "paused").
             if (model.week_plan.isNotEmpty() || model.program != null) {
                 item { SectionOverline(stringResource(R.string.main_overline_this_week)) }
                 item {
@@ -1144,7 +1142,7 @@ private fun NextSessionCard(
                     horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
                 ) {
                     Column(Modifier.weight(1f, fill = false)) {
-                        Text(ns.title, color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
+                        SheetTitle(ns.title)
                         // Today is already marked in the week strip below; only a
                         // future-dated session keeps its date label.
                         if (!isToday) {
@@ -1211,47 +1209,26 @@ private fun NextSessionCard(
         } else {
             // next_session keeps done items: open items render first, settled ones
             // collapse to a ✓ row below.
-            val (openItems, doneItems) = ns.items.partition { !it.done }
-            val current = if (actionable) openItems.firstOrNull() else null
             // A ladder the athlete was never placed on (calisthenics): the current
             // item invites a Harder tap instead of weeks below their level.
             val unplaced = ladders.filter { it.current_rung == null }.map { it.ladder }.toSet()
-            val trackLabel = stringResource(R.string.main_plan_item_track)
-            openItems.forEach { item ->
-                if (item === current) {
-                    OpenPlanItemCard(
-                        item = item,
-                        isRun = isRun(item),
-                        onLog = { onLogItem(item) },
-                        onTrack = onTrackRun,
-                        onEndExercise = { onEndExercise(item) },
-                        runActionLabel = trackLabel,
-                        weightUnit = weightUnit,
-                        isCheck = isCheck(item),
-                        unplaced = item.calis?.let { it.ladder in unplaced && it.harder?.available == true } == true,
-                        onSetRung = onSetRung,
-                        guide = firstSessionGuide(item, isRun(item), isCheck(item), liftDaysLogged),
-                    )
-                } else {
-                    PlanItemRow(
-                        item = item,
-                        isRun = isRun(item),
-                        isCheck = isCheck(item),
-                        actionLabel = if (actionable) planItemActionLabel(item, isRun(item), isCheck(item), trackLabel) else null,
-                        onClick = { if (isRun(item)) onTrackRun() else onLogItem(item) },
-                    )
-                }
-            }
-            doneItems.forEach { item ->
-                DonePlanItemRow(
-                    item = item,
-                    isRun = isRun(item),
-                    reopenable = actionable,
-                    onReopen = { onReopen(item) },
-                    isCheck = isCheck(item),
-                    painArea = painArea,
-                )
-            }
+            SessionItemList(
+                items = ns.items,
+                isRun = isRun,
+                isCheck = isCheck,
+                actionable = actionable,
+                reopenable = actionable,
+                runActionLabel = stringResource(R.string.main_plan_item_track),
+                weightUnit = weightUnit,
+                painArea = painArea,
+                onLog = onLogItem,
+                onRun = onTrackRun,
+                onEndExercise = onEndExercise,
+                onReopen = onReopen,
+                unplaced = { item -> item.calis?.let { it.ladder in unplaced && it.harder?.available == true } == true },
+                onSetRung = onSetRung,
+                guide = { item -> firstSessionGuide(item, isRun(item), isCheck(item), liftDaysLogged) },
+            )
         }
     }
 }
@@ -1264,7 +1241,7 @@ private fun RestPill(run: RestAlarm.RestRun) {
     val leftSec = ((run.endAtMillis - now) / 1000L).toInt()
     if (leftSec <= 0) return
     val clock = fmtClock(leftSec)
-    val desc = stringResource(R.string.main_rest_pill_cd, clock)
+    val desc = stringResource(R.string.log_rest_left_cd, clock)
     Text(
         stringResource(R.string.main_rest_pill, clock),
         color = OnBgBody,
@@ -1402,12 +1379,7 @@ private fun SessionDoneCard(
     Box(Modifier.testTag("session-done")) {
         PlainCard {
             TileOverline(stringResource(R.string.main_session_done_overline), color = Accent)
-            Text(
-                done.title.ifBlank { stringResource(R.string.main_session_done_title) },
-                color = OnBgBody,
-                style = Type.Title,
-                modifier = Modifier.semantics { heading() },
-            )
+            SheetTitle(done.title.ifBlank { stringResource(R.string.main_session_done_title) })
             done.items.forEach { row ->
                 val skipped = row.status in SkippedItemStatuses
                 val summary = sessionDoneRunLine(row, distanceUnit) ?: row.summary
@@ -1415,7 +1387,7 @@ private fun SessionDoneCard(
                 val desc = if (row.met && !skipped) {
                     stringResource(R.string.main_session_done_met_cd, row.exercise, summary)
                 } else {
-                    stringResource(R.string.main_session_done_status_cd, row.exercise, line)
+                    stringResource(R.string.ui_label_value, row.exercise, line)
                 }
                 Row(
                     modifier = Modifier
@@ -1490,7 +1462,7 @@ private fun sessionDoneRunLine(row: SessionDoneItemView, unit: DistanceUnit): St
 @Composable
 private fun PromptCard(title: String, body: String, cta: String, onClick: () -> Unit) {
     PlainCard {
-        Text(title, color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
+        SheetTitle(title)
         Text(body, color = OnBgMuted, style = Type.Body)
         PrimaryButton(cta, onClick, Modifier.fillMaxWidth())
     }
