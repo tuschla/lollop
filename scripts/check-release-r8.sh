@@ -53,8 +53,12 @@ done
 SDK="$(sed -n 's/^sdk\.dir=//p' android/local.properties 2>/dev/null | tail -1)"
 SDK="${SDK:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}}"
 [[ -n "$SDK" ]] || { echo "no Android SDK: set sdk.dir in android/local.properties or \$ANDROID_HOME" >&2; exit 2; }
-DEXDUMP="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)/dexdump"
-[[ -x "$DEXDUMP" ]] || { echo "dexdump not found: $DEXDUMP" >&2; exit 2; }
+# Newest build-tools that ships dexdump (a preview or partial install may not).
+DEXDUMP=""
+for d in $(ls -d "$SDK"/build-tools/* 2>/dev/null | sort -V -r); do
+  [[ -x "$d/dexdump" ]] && { DEXDUMP="$d/dexdump"; break; }
+done
+[[ -n "$DEXDUMP" ]] || { echo "dexdump not found under $SDK/build-tools: $(ls "$SDK"/build-tools 2>/dev/null | tr '\n' ' ')" >&2; exit 2; }
 
 if [[ $BUILD -eq 1 ]]; then
   echo "==> gradle :app:minifyReleaseWithR8"
