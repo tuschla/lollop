@@ -50,7 +50,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SDK="$(sed -n 's/^sdk\.dir=//p' android/local.properties 2>/dev/null | tail -1)"
+SDK=""
+[[ -f android/local.properties ]] && SDK="$(sed -n 's/^sdk\.dir=//p' android/local.properties | tail -1)"
 SDK="${SDK:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}}"
 [[ -n "$SDK" ]] || { echo "no Android SDK: set sdk.dir in android/local.properties or \$ANDROID_HOME" >&2; exit 2; }
 # Newest build-tools that ships dexdump (a preview or partial install may not).
