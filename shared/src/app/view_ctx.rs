@@ -6,9 +6,21 @@ use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// `(longest_recent_run_km, recent_weekly_km, longest_run_detrained)`, see
-/// [`build_run_anchors`].
-pub(super) type RunAnchors = (Option<f64>, Option<f64>, bool);
+/// Run-history anchors for plan synthesis ([`build_run_anchors`]); each field
+/// feeds the [`crate::plan::Anchors`] field of the same name.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct RunAnchors {
+    /// Longest run of the trailing [`LONGEST_RUN_WINDOW_DAYS`] (the
+    /// RUN-SPIKE-001 window); an older run counts at its detraining credit.
+    /// `None` when no run carries credit.
+    pub(super) longest_recent_run_km: Option<f64>,
+    /// The trailing-28-day km ÷ the 1–4 weeks that window spans since its
+    /// first run ([`recent_weekly_km`]). `None` with no run in the window.
+    pub(super) recent_weekly_km: Option<f64>,
+    /// The longest run is older than the full-credit window, so the long run
+    /// cites DETRAIN-001.
+    pub(super) longest_run_detrained: bool,
+}
 
 /// What a set's exercise NAME says about it, resolved once per distinct name.
 #[derive(Clone, Copy, Debug)]
@@ -162,7 +174,7 @@ impl<'m> ViewCtx<'m> {
     pub(super) fn calis_anchors_now(&self) -> &[crate::plan::CalisAnchor] {
         self.calis_anchors_now.get_or_init(|| {
             let m = self.model;
-            let Some(p) = m.profile.as_ref() else {
+            let Some(p) = m.profile() else {
                 return Vec::new();
             };
             build_calisthenics_anchors(

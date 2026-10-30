@@ -19,17 +19,21 @@
 #              ListenableWorker its (Context, WorkerParameters) one: WorkManager
 #              creates both from the class name stored with the work request
 #              (Glance renders the widget in a SessionWorker)
+# A selected group that finds nothing to check (no Room database, merger or
+# worker, say, because R8 merged or renamed a base class) fails.
 #
 #   scripts/check-release-r8.sh [--build-dir DIR] [--no-build] [--init-script FILE]
 #                               [--only "jni manifest room work"]
 #
-# --build-dir   the app module's build directory (default android/app/build)
+# --build-dir   the app module's build directory (default android/app/build);
+#               required with --init-script
 # --no-build    check the existing R8 output instead of running
 #               `gradlew :app:minifyReleaseWithR8`
 # --init-script passed to gradle (-I), e.g. one that moves the build directory
-# --only        run only these check groups (default: all)
+# --only        run only these check groups (default: all); an unknown group
+#               exits 2
 # Exit 0 when every check passes. Needs the Android SDK (build-tools dexdump),
-# python3 and the JDK gradle needs. CI runs it in the android job
+# python3 and the JDK gradle needs. CI runs it in the release-r8 job
 # (.github/workflows/ci.yml).
 set -euo pipefail
 
@@ -39,16 +43,27 @@ BUILD_DIR="$REPO_ROOT/android/app/build"
 BUILD=1
 ONLY="jni manifest room work"
 GRADLE_ARGS=()
+BUILD_DIR_SET=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --build-dir) BUILD_DIR="$2"; shift 2 ;;
+    --build-dir) BUILD_DIR="$2"; BUILD_DIR_SET=1; shift 2 ;;
     --no-build) BUILD=0; shift ;;
     --init-script) GRADLE_ARGS+=(-I "$2"); shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
-    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR>1&&/^#/{print;next}NR>1{exit}' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+[[ -n "${ONLY// }" ]] || { echo "--only needs at least one group: jni manifest room work" >&2; exit 2; }
+for g in $ONLY; do
+  case "$g" in
+    jni|manifest|room|work) ;;
+    *) echo "unknown check group: $g (groups: jni manifest room work)" >&2; exit 2 ;;
+  esac
+done
+# An init script may move the build directory; the check must read the same one.
+[[ ${#GRADLE_ARGS[@]} -eq 0 || $BUILD_DIR_SET -eq 1 ]] \
+  || { echo "--init-script needs --build-dir (the app build directory it sets)" >&2; exit 2; }
 
 SDK=""
 [[ -f android/local.properties ]] && SDK="$(sed -n 's/^sdk\.dir=//p' android/local.properties | tail -1)"
@@ -153,6 +168,10 @@ def check(ok, what):
         failures.append(what)
         print(f"FAIL  {what}")
 
+# A group whose class search comes back empty would otherwise pass with no checks.
+def found(group, items, what):
+    check(bool(items), f"{group}: found at least one {what} to check")
+
 def has_public_noarg_init(cls):
     return any(n == "<init>" and t == "()V" and "PUBLIC" in a for n, t, a in classes[cls]["methods"])
 
@@ -167,6 +186,7 @@ def extends(cls, base):
 
 # jni: every Rust export has a NATIVE method on the unrenamed Core class.
 exports = sorted(set(re.findall(r"fn Java_app_milestone_Core_(\w+)", open(ffi).read())) - {"resetForTest"})
+found("jni", exports, "Java_app_milestone_Core_* export in shared/src/ffi.rs")
 check("app.milestone.Core" in classes, "jni: class app.milestone.Core kept under its JNI name")
 core = classes.get("app.milestone.Core", {"methods": []})
 for name in exports:
@@ -191,6 +211,7 @@ for prov in app.findall("provider"):
     for md in prov.findall("meta-data"):
         if md.get(ANDROID + "value") == "androidx.startup":
             names.append(("startup initializer", fq(md.get(ANDROID + "name"))))
+found("manifest", names, "manifest component")
 for kind, cls in names:
     present = cls in classes
     check(present and has_public_noarg_init(cls),
@@ -205,15 +226,24 @@ def room_impl(c):
     sup = classes[c]["super"] or ""
     return extends(c, "androidx.room.RoomDatabase") or original.get(sup, sup).endswith("Database")
 impls = [c for c in classes if room_impl(c)]
+found("room", impls, "Room database implementation (*_Impl)")
 for cls in sorted(impls):
     check(has_public_noarg_init(cls), f"room: {cls} keeps <init>() (Room creates it reflectively)")
 
 # work: InputMerger.fromClassName → newInstance(); WorkerFactory → (Context, WorkerParameters).
-mergers = [c for c in classes if extends(c, "androidx.work.InputMerger")]
+# As with Room, R8 may merge the base class away; a concrete class still named
+# `*InputMerger` counts too.
+def merger(c):
+    if "ABSTRACT" in classes[c]["flags"]:
+        return False
+    return extends(c, "androidx.work.InputMerger") or c.endswith("InputMerger")
+mergers = [c for c in classes if merger(c)]
+found("work", mergers, "InputMerger")
 for cls in sorted(mergers):
     check(has_public_noarg_init(cls), f"work: input merger {cls} keeps <init>() (WorkManager creates it by name)")
 WORKER_INIT = "(Landroid/content/Context;Landroidx/work/WorkerParameters;)V"
 workers = [c for c in classes if extends(c, "androidx.work.ListenableWorker") and "ABSTRACT" not in classes[c]["flags"]]
+found("work", workers, "ListenableWorker")
 for cls in sorted(workers):
     check(any(n == "<init>" and t == WORKER_INIT and "PUBLIC" in a for n, t, a in classes[cls]["methods"]),
           f"work: worker {cls} keeps <init>(Context, WorkerParameters) (WorkManager creates it by name)")

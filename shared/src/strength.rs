@@ -2,9 +2,7 @@
 //! Resistance-Training Programming Rules).
 //!
 //! Pure, deterministic math: e1RM estimators, RPE/RIR mapping, reps→%1RM
-//! estimation, and Prilepin volume governance. No IO. Values that make a
-//! prescriptive recommendation are wrapped in [`Recommended`] via
-//! [`Recommended::new`], which forces attached evidence + confidence.
+//! estimation, and Prilepin volume governance. No IO.
 //!
 //! All numbers transcribed verbatim from File 02 (rules strength-005,
 //! strength-007, strength-011 and the Prilepin's-chart verbatim table). Claim
@@ -315,18 +313,8 @@ pub fn loading_rx(goal: LiftGoal) -> Recommended<LoadingRx> {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Load progression (File 02 strength-012/014; STR-2FOR2-001 / STR-PCTPROG-001)
+// 5. Load progression (File 02 strength-014; STR-PCTPROG-001)
 // ---------------------------------------------------------------------------
-
-/// 2-for-2 rule (File 02 strength-012): increase load once the athlete beats the
-/// goal by >=2 reps on the last set in 2 consecutive sessions. STR-2FOR2-001
-/// (safety-critical per the KB: caps how fast load may ramp).
-pub fn two_for_two_met(reps_over_goal_last_set: u8, consecutive_sessions: u8) -> Recommended<bool> {
-    graded(
-        reps_over_goal_last_set >= 2 && consecutive_sessions >= 2,
-        claims::STR_2FOR2_001,
-    )
-}
 
 /// Percentage auto-progression per successful week (File 02 strength-014):
 /// lower-body +2.5-5%, upper-body +1-2.5% of load. Returns (min, max) fraction.
@@ -345,15 +333,6 @@ pub fn weekly_pct_increment(upper_body: bool) -> Recommended<(f64, f64)> {
 /// prescribed number"). A fixed plate step above this on a light load is more
 /// than the rule allows.
 pub const MAX_LOAD_STEP_FRAC: f64 = 0.10;
-
-/// Whether a stall triggers a deload / model switch (File 02 strength-039):
-/// (estimated) 1RM flat for >=2 weeks despite adequate recovery. STR-STALL-001.
-pub fn stall_triggers_deload(weeks_stalled: u8, recovery_adequate: bool) -> Recommended<bool> {
-    graded(
-        weeks_stalled >= 2 && recovery_adequate,
-        claims::STR_STALL_001,
-    )
-}
 
 // ---------------------------------------------------------------------------
 // 6b. Periodization model selection (File 02 strength-009/010; STR-MODEL-001)
@@ -904,43 +883,8 @@ pub fn lift_detrain_credit(days_since_trained: i64) -> Recommended<Option<f64>> 
 }
 
 // ---------------------------------------------------------------------------
-// 15. 1RM testing readiness gate (File 02 strength-040; SAFETY)
+// 15. Novice load-jump cap (File 02 strength-040; SAFETY)
 // ---------------------------------------------------------------------------
-
-/// Readiness context for a 1RM test attempt (File 02 strength-040).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OneRmTestContext {
-    /// Technically proficient in the lift.
-    pub technically_proficient: bool,
-    /// Adequately recovered.
-    pub adequately_recovered: bool,
-    /// Warmed up.
-    pub warmed_up: bool,
-    /// Athlete is a novice (novices must be supervised; prefer estimated 1RM
-    /// early on).
-    pub is_novice: bool,
-    /// Supervision is present.
-    pub supervised: bool,
-    /// The lift loads the spine (squat/deadlift class).
-    pub spinal_loading: bool,
-    /// Bracing competence is established (required for spinal loading).
-    pub bracing_competent: bool,
-}
-
-/// SAFETY gate: whether a 1RM test may proceed (File 02 strength-040). Test
-/// 1RM only when technically proficient, adequately recovered, and warmed up;
-/// novices only under supervision (and should prefer ESTIMATED 1RM early on -
-/// see [`e1rm_cross_check`]); spinal loading requires bracing competence.
-/// STR-1RMTEST-001 (ExpertOpinion/Moderate, registered conservatively;
-/// NSCA; safety-critical).
-pub fn one_rm_test_allowed(ctx: OneRmTestContext) -> Recommended<bool> {
-    let allowed = ctx.technically_proficient
-        && ctx.adequately_recovered
-        && ctx.warmed_up
-        && (!ctx.is_novice || ctx.supervised)
-        && (!ctx.spinal_loading || ctx.bracing_competent);
-    graded(allowed, claims::STR_1RMTEST_001)
-}
 
 /// Novice load-jump cap between 1RM-test attempts / progression steps, as a
 /// fraction of load (File 02 strength-040): upper-body 2.5-5%, lower-body

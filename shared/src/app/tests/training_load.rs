@@ -228,6 +228,59 @@ fn weekly_report_hybrid_ramp_guard_fires_for_a_lifting_runner() {
     );
 }
 
+/// The weekly-report summaries for a 40 m accidental tracker start
+/// `back_weeks` before this week, then three 10 km runs this week.
+fn report_over_a_40_m_base(weekly_sets: u8, back_weeks: i64) -> Vec<String> {
+    let app = Engine;
+    let mut model = Model::default();
+    set_today(&app, &mut model, POS_MON + 2);
+    let profile = Profile {
+        weekly_sets,
+        ..sample_profile()
+    };
+    app.update(Event::SetProfile(profile), &mut model)
+        .expect_only_render();
+    let base_at = (POS_MON - 7 * back_weeks) * DAY_SEC + 8 * HOUR;
+    app.update(log_run_at(0.04, 0.5, 75.0, base_at), &mut model)
+        .expect_only_render();
+    for d in 0..3 {
+        let at = (POS_MON + d) * DAY_SEC + 7 * HOUR;
+        app.update(log_run_at(10.0, 55.0, 75.0, at), &mut model)
+            .expect_only_render();
+    }
+    app.view(&model)
+        .weekly_report
+        .into_iter()
+        .map(|r| r.summary)
+        .collect()
+}
+
+/// A base under `MIN_RATIO_BASE_KM` is no baseline for the running-028
+/// two-week ramp row, exactly like the running-031 row: no "0.0 → 30.0 km".
+#[test]
+fn weekly_report_two_week_ramp_needs_a_ratio_base() {
+    let rows = report_over_a_40_m_base(0, 2);
+    assert!(
+        !rows.iter().any(|s| s.contains("in two weeks")),
+        "a 40 m run is no baseline: {rows:#?}"
+    );
+}
+
+/// The hybrid-021 ramp row judges the same baseline as the running-031 row,
+/// so a 40 m week is no baseline for either.
+#[test]
+fn weekly_report_hybrid_ramp_needs_a_ratio_base() {
+    let rows = report_over_a_40_m_base(10, 1);
+    assert!(
+        !rows.iter().any(|s| s.starts_with("Week-over-week")),
+        "the running-031 row treats 40 m as no baseline: {rows:#?}"
+    );
+    assert!(
+        !rows.iter().any(|s| s.contains("up more than 10%")),
+        "a 40 m run is no baseline: {rows:#?}"
+    );
+}
+
 #[test]
 fn backdated_run_weekly_report_matches_in_order_logging() {
     let app = Engine;

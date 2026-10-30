@@ -48,13 +48,13 @@ internal fun exerciseDisplayName(typed: String): String {
 /** The name a set is saved under: the known spelling (plan item / own history)
  *  of a name typed in any case, else [exerciseDisplayName] of what was typed. Pure. */
 internal fun resolveExerciseName(typed: String, known: List<String>): String =
-    known.firstOrNull { it.trim().equals(typed.trim(), ignoreCase = true) }?.trim() ?: exerciseDisplayName(typed)
+    known.firstOrNull { sameExercise(it, typed) }?.trim() ?: exerciseDisplayName(typed)
 
 /** The new exercise the search offers to add ("+ Add 'Dumbbell curl'"): the
  *  typed name in its saved form when it matches no known exercise; null while
  *  nothing is typed or the name is already known. Pure. */
 internal fun newExerciseToAdd(typed: String, known: List<String>): String? {
-    if (typed.isBlank() || known.any { it.trim().equals(typed.trim(), ignoreCase = true) }) return null
+    if (typed.isBlank() || known.any { sameExercise(it, typed) }) return null
     return exerciseDisplayName(typed)
 }
 
@@ -63,9 +63,8 @@ internal fun newExerciseToAdd(typed: String, known: List<String>): String? {
  *  free set opened from the Log chooser on a run day carries no run prescription.
  *  Null while no exercise is named. Pure. */
 internal fun planItemFor(items: List<PrescriptionView>, exercise: String): PrescriptionView? {
-    val name = exercise.trim()
-    if (name.isEmpty()) return null
-    return items.firstOrNull { it.exercise.isNotBlank() && it.exercise.trim().equals(name, ignoreCase = true) }
+    if (exercise.isBlank()) return null
+    return items.firstOrNull { it.exercise.isNotBlank() && sameExercise(it.exercise, exercise) }
 }
 
 /** Whether the set editor's exercise is settled, so its weight, reps and effort
@@ -73,10 +72,9 @@ internal fun planItemFor(items: List<PrescriptionView>, exercise: String): Presc
  *  exercise the editor opened on ([preset]) or one confirmed with "+ Add"
  *  ([added]). A half-typed search term is not. Pure. */
 internal fun exerciseChosen(exercise: String, known: List<String>, added: String?, preset: String?, editing: Boolean): Boolean {
-    val name = exercise.trim()
-    if (name.isEmpty()) return false
+    if (exercise.isBlank()) return false
     if (editing) return true
-    return (known + listOfNotNull(added, preset)).any { it.trim().equals(name, ignoreCase = true) }
+    return (known + listOfNotNull(added, preset)).any { sameExercise(it, exercise) }
 }
 
 /** The sets logged today (since [dayStartSec]) for the loop's exercise, oldest
@@ -90,11 +88,10 @@ internal fun todaySetsFor(
     dayStartSec: Long,
 ): List<LiftResultView> {
     val ids = item?.logged_sets.orEmpty().map { it.entry_id }.filter { it != 0L }.toSet()
-    val name = exercise.trim()
     return lifts.filter { l ->
         l.observed_at >= dayStartSec && (
             (l.entry_id != 0L && l.entry_id in ids) ||
-                (name.isNotEmpty() && l.exercise.trim().equals(name, ignoreCase = true))
+                (exercise.isNotBlank() && sameExercise(l.exercise, exercise))
             )
     }.sortedBy { it.observed_at }
 }
@@ -106,17 +103,22 @@ internal fun repsLeft(rpe: Double): Double = (10.0 - rpe).coerceAtLeast(0.0)
 /** An exercise name as a match key: trimmed, lower case. Pure. */
 internal fun nameKey(name: String): String = name.trim().lowercase()
 
+/** Whether two exercise names name the same exercise ([nameKey] on both). Pure. */
+internal fun sameExercise(a: String, b: String): Boolean = nameKey(a) == nameKey(b)
+
 /** Plain "reps left" for an RPE on the RIR-based scale: 10 → "0 reps left",
  *  9 → "1 rep left", 8 → "2 reps left", 6 or below → "4+ reps left", a half
  *  point → a range ("1–2 reps left"). Always says "reps", so it never reads as
- *  sets. The one wording for effort in the editor, the loop and History. */
-internal fun repsLeftText(res: Resources, rpe: Double): String {
+ *  sets. The one wording for effort in the editor, the loop and History; [short]
+ *  is History's set-table column ("2 left"), beside a load that already says what
+ *  is counted. */
+internal fun repsLeftText(res: Resources, rpe: Double, short: Boolean = false): String {
     val rir = repsLeft(rpe)
     val n = rir.toInt()
     return when {
-        rir >= 4.0 -> res.getString(R.string.log_reps_left_4plus)
-        rir % 1.0 == 0.0 -> res.getQuantityString(R.plurals.log_reps_left, n, n)
-        else -> res.getString(R.string.log_reps_left_range, n, n + 1)
+        rir >= 4.0 -> res.getString(if (short) R.string.history_set_left_4plus else R.string.log_reps_left_4plus)
+        rir % 1.0 == 0.0 -> res.getQuantityString(if (short) R.plurals.history_set_left else R.plurals.log_reps_left, n, n)
+        else -> res.getString(if (short) R.string.history_set_left_range else R.string.log_reps_left_range, n, n + 1)
     }
 }
 
@@ -155,9 +157,8 @@ internal fun inSessionCue(
     adjustments: List<AdjustmentView>,
     reviewAdjustments: List<AdjustmentView>,
 ): AdjustmentView? {
-    val name = exercise.trim()
     return adjustments.firstOrNull {
-        it.exercise?.trim()?.equals(name, ignoreCase = true) == true &&
+        it.exercise?.let { e -> sameExercise(e, exercise) } == true &&
             (it.suggested_load_kg != null || it.suggests_end_exercise)
     } ?: reviewAdjustments.firstOrNull { it.exercise == null && it.suggests_end_exercise }
 }
@@ -266,12 +267,13 @@ internal data class AppliedCue(val kg: Double, val atSec: Long)
 
 /** The cue loads applied in today's loops, process-scoped like the rest timer:
  *  closing and reopening the sheet must not drop the load the lifter chose. Keyed
- *  by the item's day and exercise; read on the main thread only. */
+ *  by today's date and the exercise, so only today's loop reads them; read on the
+ *  main thread only. */
 internal object AppliedCueLoads {
     private val byItem = HashMap<String, AppliedCue>()
 
     private fun key(item: PrescriptionView): String =
-        "${localDayStartSec(AppClock.nowSec())}|${item.exercise.trim().lowercase(Locale.ROOT)}"
+        "${localDayStartSec(AppClock.nowSec())}|${nameKey(item.exercise)}"
 
     fun record(item: PrescriptionView, kg: Double) {
         byItem[key(item)] = AppliedCue(kg, AppClock.nowSec())
@@ -415,7 +417,7 @@ internal fun SetEditorState.reseededTo(
     cueFor: (PrescriptionView) -> AppliedCue?,
 ): SetEditorState {
     val open = planItemFor(items.filter { !it.done }, name)
-    val last = if (open == null) recentLifts.lastOrNull { it.exercise.trim().equals(name.trim(), ignoreCase = true) } else null
+    val last = if (open == null) recentLifts.lastOrNull { sameExercise(it.exercise, name) } else null
     val seeded = when {
         open != null -> {
             val rx = prescriptionPrefill(open, weightUnit, cueFor(open))
@@ -495,7 +497,7 @@ internal fun firstOpenItem(items: List<PrescriptionView>): PrescriptionView? =
  *  not-done named item that is not [exercise] itself (a run item has no name and
  *  is logged elsewhere). Null when nothing else is open. */
 internal fun nextOpenItem(items: List<PrescriptionView>, exercise: String): PrescriptionView? =
-    items.firstOrNull { !it.done && it.exercise.isNotBlank() && !it.exercise.trim().equals(exercise.trim(), ignoreCase = true) }
+    items.firstOrNull { !it.done && it.exercise.isNotBlank() && !sameExercise(it.exercise, exercise) }
 
 /** Whether [kg] sits on the 0.01 kg wire grid every typed load is saved on
  *  ([lbToKgWire] for lb, the kg field's two decimals). A load off it was never

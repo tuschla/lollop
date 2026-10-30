@@ -72,7 +72,10 @@ pub fn derive_performance(
     utc_offset_sec: i64,
 ) -> Vec<MovementPerf> {
     use std::collections::{BTreeMap, HashMap};
-    let mut ordered: Vec<&PerfSet> = sets.iter().filter(|s| s.observed_at > 0).collect();
+    let mut ordered: Vec<&PerfSet> = sets
+        .iter()
+        .filter(|s| !crate::is_undated(s.observed_at))
+        .collect();
     ordered.sort_by_key(|s| s.observed_at);
     // One movement key per distinct exercise name, not per set.
     let mut keys: HashMap<&str, Vec<String>> = HashMap::new();

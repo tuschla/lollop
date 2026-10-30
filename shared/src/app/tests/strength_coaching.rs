@@ -203,27 +203,6 @@ fn post_return_anchor_is_unscaled_and_long_layoff_window_ends() {
 }
 
 #[test]
-fn rated_flat_sessions_report_a_stall_unrated_ones_never_do() {
-    // STR-STALL-001 input: ≥2 rated sessions failing to beat the anchor over
-    // 3 weeks → 3 weeks stalled; the same history logged unrated is no stall.
-    let rated: Vec<LoggedSet> = [0, 7, 14, 21]
-        .iter()
-        .map(|&d| set("Back Squat", 100.0, 5, 8.0, d))
-        .collect();
-    let a = anchors_at(&rated, AnchorCtx::default(), 22);
-    assert_eq!(a.lift_stall_weeks, vec![("Back Squat".to_string(), 3)]);
-    let unrated: Vec<LoggedSet> = [0, 7, 14, 21]
-        .iter()
-        .map(|&d| set("Back Squat", 100.0, 5, 0.0, d))
-        .collect();
-    assert!(
-        anchors_at(&unrated, AnchorCtx::default(), 22)
-            .lift_stall_weeks
-            .is_empty()
-    );
-}
-
-#[test]
 fn missed_target_cuts_next_load_5pct_unless_off_day() {
     // AUTOREG-E1RM-GATE-001: a session whose rated e1RM lands
     // >5 % under the baseline cuts that lift's next working load ~5 %.

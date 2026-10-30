@@ -9,6 +9,7 @@ import app.milestone.actionable
 import app.milestone.isDone
 import app.milestone.isReturnCheckItem
 import app.milestone.isRunItem
+import app.milestone.paceLabel
 import app.milestone.runFaceHead
 import app.milestone.sessionDiscipline
 import app.milestone.today
@@ -86,7 +87,8 @@ internal data class WidgetNext(val epochDay: Long, val title: String)
  * Rust core. [epochDay] is the local day it describes: a reader whose today is a
  * different day treats it as missing ([WidgetSnapshotStore.today]), and [stale] is
  * set at midnight, on a clock or a time zone change ([TodayWidgetReceiver]) until
- * the app writes a fresh one.
+ * the app writes one for the new day (or, after a zone change within the day,
+ * for the same day in the new zone).
  */
 @Serializable
 internal data class WidgetSnapshot(
@@ -212,9 +214,7 @@ private fun widgetItemOf(item: PrescriptionView, sessionType: String, unit: Dist
         },
         done = item.done,
         // Only beside a volume head: a run's full summary already states its pace.
-        pace = item.run_target?.takeIf { runHead != null }?.let {
-            if (unit == DistanceUnit.Mi) it.pace_label_mi.ifBlank { it.pace_label_km } else it.pace_label_km.ifBlank { it.pace_label_mi }
-        }.orEmpty(),
+        pace = item.run_target?.takeIf { runHead != null }?.paceLabel(unit).orEmpty(),
     )
 }
 
@@ -232,9 +232,9 @@ internal object WidgetSnapshotStore {
     val revision: StateFlow<Long> = _revision.asStateFlow()
     private val _staleMarks = MutableStateFlow(0L)
 
-    /** Ticks on every stale mark ([markStale]), so [WidgetSync] rewrites the
-     *  snapshot from the model the app process holds: a time zone change that
-     *  keeps the local day publishes no new model. */
+    /** Ticks when a time zone change keeps the local day ([markStale]), so
+     *  [WidgetSync] rewrites the snapshot from the model the app process holds:
+     *  no new model is published for it. */
     val staleMarks: StateFlow<Long> = _staleMarks.asStateFlow()
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE_NAME)
@@ -281,18 +281,23 @@ internal object WidgetSnapshotStore {
     /**
      * Mark the stored snapshot stale: always when [force] (a time zone change),
      * else only when it describes a day other than [today] (the midnight tick, a
-     * clock change). The next published model, or [WidgetSync] at once when the
-     * app process holds a model, writes a fresh one. A shown session reminder
-     * for a day other than [today] goes ([SessionReminder.onDayChanged]).
+     * clock change). True when it marked one. The next published model writes a
+     * fresh one; while the stored snapshot describes [today] and is stale (a zone
+     * change within the day, or a day that came back after a zone or clock change)
+     * [WidgetSync] rewrites it at once from the model the app process holds.
+     * Across a day change that model is the old day's as well, so it waits for the
+     * app to set the new day. A shown session reminder for a day other than
+     * [today] goes ([SessionReminder.onDayChanged]).
      */
     fun markStale(ctx: Context, force: Boolean, today: Long = todayEpochDay()): Boolean {
         SessionReminder.onDayChanged(ctx, today)
-        val marked = synchronized(lock) {
+        val (marked, staleToday) = synchronized(lock) {
             val current = read(ctx) ?: return false
-            if (current.stale || (!force && current.epochDay == today)) return false
-            write(ctx, current.copy(stale = true))
+            val mark = !current.stale && (force || current.epochDay != today)
+            if (mark) write(ctx, current.copy(stale = true))
+            mark to (current.epochDay == today && (mark || current.stale))
         }
-        if (marked) _staleMarks.value += 1
+        if (staleToday) _staleMarks.value += 1
         return marked
     }
 }

@@ -22,7 +22,7 @@ use crate::schema::{
     WorkoutType,
 };
 use crate::strength::LiftGoal;
-use crate::{DAY_SEC, local_day};
+use crate::{DAY_SEC, is_undated, local_day};
 use crate::{autoreg, feedback, hybrid, hypertrophy, individualization, load, running, strength};
 
 // State, wire types and builders live in submodules, glob-imported here.
@@ -64,7 +64,7 @@ pub use view_types::*;
 use youth_activity::*;
 
 // `log.rs` normalizes replayed entry ids through this.
-pub(crate) use format::sanitize_entry_id;
+pub(crate) use ingest::sanitize_entry_id;
 // `log.rs` compaction asks which store a legacy `SubmitReview` line replaces.
 pub(crate) use reviews::{submit_review_sets_session, submit_review_sets_weekly};
 
@@ -106,10 +106,6 @@ impl App for Engine {
                 signal,
                 observed_at,
             } => {
-                // For Pain, remove the report that DRIVES the hold (the worst
-                // active one the gate and readiness row resolve to), so a single
-                // "remove the pain report" tap actually lifts the training hold;
-                // every other signal removes its newest reading.
                 let pos = if signal == ReadinessSignal::Pain {
                     autoreg::worst_active_pain(&model.inputs)
                         .and_then(|w| model.inputs.iter().position(|i| std::ptr::eq(i, w)))
@@ -131,9 +127,6 @@ impl App for Engine {
                 signal,
                 observed_at,
             } => {
-                // "I'm better" / "I'm pain-free now": retract EVERY active report
-                // of the signal as resolved (dated), keeping it for the past days
-                // it shaped. An undated resolution is meaningless → no-op.
                 if !is_undated(observed_at) {
                     let (resolved, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut model.inputs)
                         .into_iter()
@@ -162,7 +155,7 @@ impl App for Engine {
             }
             Event::RestartHrvBaseline { observed_at } => {
                 // Latest restart wins (never moves the cutoff backwards).
-                if observed_at > 0 {
+                if !is_undated(observed_at) {
                     model.hrv_baseline_from = Some(
                         model
                             .hrv_baseline_from
@@ -207,10 +200,6 @@ impl App for Engine {
                 ended,
                 observed_at,
             } => {
-                // Last-write-wins per (same_movement-normalized exercise, day):
-                // drop any prior marker for the same movement on this day, then
-                // record the new state (`ended: false` reopens). Equipment-word
-                // variants of the same movement collapse to one marker.
                 model.ended_exercises.retain(|m| {
                     !(m.epoch_day == epoch_day
                         && crate::plan::same_movement(&m.exercise, &exercise))
@@ -274,9 +263,7 @@ impl App for Engine {
                 avg_hr_bpm,
                 utc_offset_sec,
             } => {
-                // Distance and duration derive from the track at `view()`; the
-                // spike baseline is floored like a manual run's, so the gate
-                // works without the shell fabricating a recent-longest figure.
+                // Distance and duration derive from the track at `view()`.
                 let mut run = logged_run(RunFields {
                     distance_km: 0.0,
                     duration_min: 0.0,
@@ -314,10 +301,6 @@ impl App for Engine {
                 }
             }
             Event::ClearActivities => model.activities.clear(),
-            // Delete/amend of a logged set or run. Both target the
-            // NEWEST matching row (id first, else `observed_at` for a legacy row)
-            // mirroring the compaction Rule 3 matcher exactly. Amend = remove +
-            // push carrying the SAME id, so `view()`'s derivation stays untouched.
             Event::DeleteEntry {
                 kind: EntryKind::Set,
                 entry_id,
@@ -419,14 +402,8 @@ impl App for Engine {
                 keep_from_sec,
                 keep_until_sec,
             } => {
-                // The run is mutated IN PLACE with its identity (entry_id,
-                // observed_at) unchanged, so its replay order stays stable; every
-                // derived figure re-derives from the sliced track at view(), and
-                // the spike baselines its new distance can move are re-derived
-                // here. An inverted range, a no-match, or a slice that is not a
-                // real trim leaves the run untouched (the shell clamps the slider
-                // so an invalid trim is never dispatched; a persisted no-op line
-                // replays as a harmless no-op).
+                // An inverted range, a no-match or a slice that is not a real
+                // trim (`trim_track`) leaves the run untouched.
                 if keep_from_sec <= keep_until_sec
                     && let Some(pos) = find_entry(&model.runs, entry_id, observed_at_fallback)
                     && let Some((track, starts)) =
@@ -445,13 +422,9 @@ impl App for Engine {
                 session_rpe,
                 workout_type,
             } => {
-                // In-place meta edit (rating + tag) of any run, GPS included: the
-                // run's identity, distance, time and track are untouched, so its
-                // position in replay order and every spike baseline stay stable
-                // (mirrors TrimRunTrack's in-place edit).
                 if let Some(pos) = find_entry(&model.runs, entry_id, observed_at_fallback) {
                     let run = &mut model.runs[pos];
-                    run.session_rpe = session_rpe.map(|r| r.min(10));
+                    run.session_rpe = sanitize_session_rpe(session_rpe);
                     run.workout_type = workout_type;
                 }
             }
@@ -460,7 +433,6 @@ impl App for Engine {
                 refresh_run_hr(model);
             }
             Event::ClearProfile => {
-                model.profile = None;
                 model.profile_history.clear();
                 // Every run falls back to the empty history, including the
                 // ones a legacy undated edit pinned (as a compacted log, which
@@ -534,14 +506,10 @@ impl App for Engine {
             Event::ComputeHrZones {
                 age_years,
                 resting_hr_bpm,
-                weeks_since_recalc,
-                weeks_since_pace_test,
             } => {
                 model.hr_zone_query = Some(HrZoneInputView {
                     age_years: sanitize_f64(age_years),
                     resting_hr_bpm: resting_hr_bpm.map(sanitize_f64),
-                    weeks_since_recalc,
-                    weeks_since_pace_test,
                 });
             }
             Event::ClearHrZones => model.hr_zone_query = None,
@@ -594,7 +562,7 @@ impl App for Engine {
         let cx = ViewCtx::new(model);
         // Display unit for every weight string the shell renders verbatim (the
         // numeric view fields stay kg regardless; see `Profile::weight_lb`).
-        let weight_lb = model.profile.as_ref().is_some_and(|p| p.weight_lb);
+        let weight_lb = model.profile().is_some_and(|p| p.weight_lb);
 
         // Today's readiness: the retained check-ins normalized into the
         // synthetic signals (WellnessZ / HrvLnRmssd / RestingHr) the autoreg
@@ -602,12 +570,7 @@ impl App for Engine {
         // same pipeline every past rendered day uses. The profile's lifting goal
         // selects goal-dependent thresholds (velocity-loss termination,
         // autoreg-010); no profile → conservative defaults.
-        let picture = readiness_picture(
-            model,
-            &cx.days,
-            model.profile.as_ref(),
-            model.today_epoch_day,
-        );
+        let picture = readiness_picture(model, &cx.days, model.profile(), model.today_epoch_day);
         let derived = &picture.derived;
         let readiness_inputs = &picture.inputs;
         let rule_ctx = picture.rule_ctx();
@@ -642,7 +605,7 @@ impl App for Engine {
                             readiness_recs: recommended,
                             train_blocked,
                             review_age: v.review.review_age,
-                            profile: model.profile.as_ref(),
+                            profile: model.profile(),
                             derived_hrv_streak,
                             derived_wellness_streak,
                         },
@@ -667,25 +630,19 @@ impl App for Engine {
         let trend_suppressed =
             train_blocked || feedback.as_ref().is_some_and(|f| f.suppresses_praise);
 
-        // The protein + HRmax calculators return their prose rows AND a
-        // structured figure, so a shell consumes numbers instead of scraping the
-        // summary strings. Computed here so both halves land in the literal.
-        let (protein_targets, protein_figures) = match model.protein_query.as_ref() {
-            Some(q) => build_protein_targets(q, reds_present, weight_lb),
-            None => (Vec::new(), Vec::new()),
-        };
         // One hold for Today, the plan calculators and the prescriptive
         // guidance: today's training hold, else a RED-S signal.
         let calc_hold = calculator_hold(v.safety.hold.as_ref(), reds_present);
-        let (hr_zones, hr_max, hr_zone_bands) = match model.hr_zone_query.as_ref() {
-            Some(q) => build_hr_zones(q, model.profile.as_ref().and_then(|p| p.measured_hr_max)),
-            None => (Vec::new(), None, Vec::new()),
-        };
-        let (hypertrophy_plan, hypertrophy_figures, hypertrophy_ramp) = model
-            .hypertrophy_plan_query
-            .as_ref()
-            .map(|q| build_hypertrophy_plan(q, model.profile.as_ref(), calc_hold.as_ref()))
-            .unwrap_or_default();
+        let CalcSection {
+            protein_targets,
+            protein_figures,
+            hr_zones,
+            hr_max,
+            hr_zone_bands,
+            hypertrophy_plan,
+            hypertrophy_figures,
+            hypertrophy_ramp,
+        } = calc_section(model, calc_hold.as_ref(), reds_present, weight_lb);
         let today_headline = build_headline(&HeadlineInputs {
             train_blocked,
             gates: &v.safety.gates,
@@ -707,13 +664,7 @@ impl App for Engine {
 
         ViewModel {
             safety_tier: v.safety.safety_tier,
-            train_blocked,
-            hold_reason: hold_reason(
-                train_blocked,
-                model.profile.as_ref().map(|p| &p.health),
-                recommended,
-                review_recs,
-            ),
+            hold_reason: hold_reason(v.safety.hold.as_ref(), model.profile().map(|p| &p.health)),
             checked_in_today: model.today_epoch_day.is_some_and(|t| {
                 model.checkins.iter().any(|c| {
                     !is_undated(c.observed_at)
@@ -727,21 +678,20 @@ impl App for Engine {
             lifts: lift_views(&model.sets, cx.sets_fp, weight_lb),
             runs,
             guidance: model
-                .profile
-                .as_ref()
+                .profile()
                 .map(|p| {
                     // Feed the km-gated safety/hybrid guards the athlete's real
                     // recent volume, not just the stated setup figure.
                     let recent_weekly = model
                         .today_epoch_day
-                        .and_then(|today| cx.run_anchors_on(today).1);
+                        .and_then(|today| cx.run_anchors_on(today).recent_weekly_km);
                     let (weekly_km, basis) = effective_weekly_km(p, recent_weekly);
                     build_guidance_measured(p, weekly_km, basis, calc_hold.as_ref())
                 })
                 .unwrap_or_default(),
             feedback,
             reference: build_reference(reds_present),
-            profile: model.profile.clone(),
+            profile: model.profile().cloned(),
             race_prediction: model
                 .race_query
                 .as_ref()
@@ -784,11 +734,7 @@ impl App for Engine {
             readiness_summary: build_readiness_summary(&display_inputs, rule_ctx, &derived.stale),
             today_headline,
             signal_groups: build_signal_groups(),
-            checkin_today: model
-                .checkins
-                .iter()
-                .max_by_key(|c| c.observed_at)
-                .map(to_checkin_echo),
+            latest_checkin: model.checkins.iter().max_by_key(|c| c.observed_at).cloned(),
             baseline_status: derived
                 .collecting
                 .iter()
@@ -811,10 +757,7 @@ impl App for Engine {
             calisthenics_ladders: build_calisthenics_ladders(&cx),
             hold_resolutions: hold_resolutions(
                 readiness_inputs,
-                model
-                    .profile
-                    .as_ref()
-                    .is_some_and(|p| p.health.acute_illness),
+                model.profile().is_some_and(|p| p.health.acute_illness),
             ),
             illness_check_prompt: autoreg::illness_active(readiness_inputs)
                 || autoreg::rhr_neck_check_due(readiness_inputs, rule_ctx),
@@ -822,7 +765,7 @@ impl App for Engine {
                 .today_epoch_day
                 .and_then(|d| profile_for_day(model, d))
                 .as_deref()
-                .or(model.profile.as_ref())
+                .or(model.profile())
                 .and_then(crate::plan::plan_withheld),
             activities: activity_views(&model.activities),
             youth_activity: build_youth_activity(&cx),
@@ -901,9 +844,9 @@ struct SafetyState {
     /// reflected in `safety_tier` and the hold so no shell can miss them.
     gates: Vec<Recommended<Adjustment>>,
     /// Today's training hold: the first blocking call (Stop / RestDay /
-    /// Defer) in the order [`hold_reason`] reads them: profile gate, then
-    /// readiness, then weekly check-in. The single source for Today's block
-    /// and for the plan calculators and %1RM guidance ([`calculator_hold`]).
+    /// Defer) of the profile gates, then readiness, then the weekly check-in.
+    /// The single source for Today's block, [`hold_reason`], the plan
+    /// calculators and %1RM guidance ([`calculator_hold`]).
     hold: Option<Recommended<Adjustment>>,
     safety_tier: Option<SafetyTier>,
     /// RED-S flagged on any channel as of today; feeds the safety-022 deficit
@@ -920,8 +863,7 @@ fn safety_state(
     review: &ReviewPipeline,
 ) -> SafetyState {
     let gates = model
-        .profile
-        .as_ref()
+        .profile()
         .map(|p| individualization::onboarding_gates(&p.health))
         .unwrap_or_default();
     let hold = gates
@@ -952,7 +894,7 @@ fn safety_state(
     // exercise, REDS-SCREEN-001 / safety-049) in force or within the screen
     // window.
     let reds_present = autoreg::reds_defer(readiness_inputs)
-        || model.profile.as_ref().is_some_and(|p| p.health.reds_signal)
+        || model.profile().is_some_and(|p| p.health.reds_signal)
         || model
             .weekly_checkin
             .as_ref()
@@ -960,7 +902,7 @@ fn safety_state(
         || model.weekly_history.iter().any(|r| {
             weekly_reds_signal(r)
                 && model.today_epoch_day.is_none_or(|today| {
-                    r.observed_at <= 0
+                    is_undated(r.observed_at)
                         || today
                             .saturating_sub(local_day(r.observed_at, model.today_utc_offset_sec))
                             < REDS_SCREEN_WINDOW_DAYS
@@ -1024,6 +966,7 @@ fn plan_section(
     weight_lb: bool,
 ) -> PlanSection {
     let model = cx.model;
+    let today = model.today_epoch_day;
     let recommended = &v.review.recommended;
     let review_recs = &v.review.review_recs;
     let train_blocked = v.safety.hold.is_some();
@@ -1038,7 +981,6 @@ fn plan_section(
     ];
     for (_, wording) in wordings.into_iter().filter(|(applies, _)| *applies) {
         adjustments.iter_mut().for_each(wording);
-        let today = model.today_epoch_day;
         for s in next_session.iter_mut().chain(week_plan.iter_mut()) {
             if Some(s.epoch_day) == today
                 && let Some(a) = s.adjustment.as_mut()
@@ -1047,64 +989,18 @@ fn plan_section(
             }
         }
     }
-    // Today's logged first work set of each lift, against that item's target,
-    // scopes a load cut (or an opt-in add) to THAT lift's remaining sets; a
-    // hard first set on a held day becomes the one-level downgrade by
-    // composition.
-    let mut fresh_rows: Vec<AdjustmentView> = Vec::new();
-    let mut fresh: Vec<Recommended<Adjustment>> = Vec::new();
-    let today_ns = next_session
-        .as_mut()
-        .filter(|ns| model.today_epoch_day == Some(ns.epoch_day));
-    let hold = autoreg::increase_hold(v.readiness_inputs, &v.rule_ctx)
-        || suppression_active(recommended, false)
-        || suppression_active(review_recs, false);
-    // Today's row honours the in-session cue loads too (a lift finished at
-    // the "remaining sets drop 5%" load is done, not lighter or open), so the
-    // strip and the Session Done card read what the hero reads.
-    if !train_blocked
-        && let Some(row) = week_plan.iter_mut().find(|s| {
-            model.today_epoch_day == Some(s.epoch_day)
-                && matches!(
-                    s.status,
-                    SessionStatus::Planned | SessionStatus::Next | SessionStatus::DoneLighter
-                )
-        })
-    {
-        let (status, adjustment) = (row.status, row.adjustment.take());
-        apply_first_set_autoreg(row, recommended, review_recs, hold, weight_lb);
-        row.adjustment = adjustment;
-        row.status = finished_status(&row.items).unwrap_or(status);
-    }
-    if !train_blocked && let Some(ns) = today_ns {
-        let cues = apply_first_set_autoreg(ns, recommended, review_recs, hold, weight_lb);
-        if !cues.is_empty() {
-            // A matched readiness rec keeps its row (rows 0..recommended.len()
-            // are `recommended`, in order), now carrying the cue's load.
-            for c in cues.iter().filter(|c| !c.fresh) {
-                if let Some(k) = recommended.iter().position(|r| *r == c.rec) {
-                    adjustments[k].suggested_load_kg = c.load_kg;
-                }
-            }
-            fresh = cues
-                .iter()
-                .filter(|c| c.fresh)
-                .map(|c| c.rec.clone())
-                .collect();
-            fresh_rows = cues
-                .iter()
-                .filter(|c| c.fresh)
-                .map(|c| {
-                    let mut row = to_view(&c.rec);
-                    row.suggested_load_kg = c.load_kg;
-                    row
-                })
-                .collect();
-            if let Some(row) = week_plan.iter_mut().find(|s| s.epoch_day == ns.epoch_day) {
-                *row = ns.clone();
-            }
-        }
-    }
+    let (fresh, fresh_rows) = if train_blocked {
+        Default::default()
+    } else {
+        apply_first_set_cues(
+            v,
+            today,
+            &mut next_session,
+            &mut week_plan,
+            adjustments,
+            weight_lb,
+        )
+    };
     // Every fold, hold and cue has moved its numbers: the why? basis restates
     // the planned prescription against today's, so the session panel reads
     // the face.
@@ -1128,18 +1024,16 @@ fn plan_section(
             annotate_last_time(row, model, &cx.set_index, now_anchors, weight_lb);
         }
     }
+    // Today's session: the hero while it is today's, else today's row (a
+    // finished session's hero has moved on to the next training day).
     let today_session = next_session
-        .as_ref()
-        .filter(|ns| model.today_epoch_day == Some(ns.epoch_day));
+        .iter()
+        .chain(&week_plan)
+        .find(|s| today == Some(s.epoch_day));
     // A tendon modify call names the lifts it eases in today's session.
-    if let Some(items) = today_session.map(|ns| ns.items.as_slice()).or_else(|| {
-        week_plan
-            .iter()
-            .find(|s| model.today_epoch_day == Some(s.epoch_day))
-            .map(|s| s.items.as_slice())
-    }) {
+    if let Some(ts) = today_session {
         for (row, r) in adjustments.iter_mut().zip(recommended) {
-            name_modified_exercises(&mut row.summary, r, items);
+            name_modified_exercises(&mut row.summary, r, &ts.items);
         }
     }
     // One cue per lift: today's in-session add replaces the "next time" add
@@ -1148,21 +1042,21 @@ fn plan_section(
     let mut drop_row = recommended.iter().zip(merged_away).map(|(r, merged)| {
         *merged
             || next_time_add_superseded(r, &fresh)
-            || today_session.is_some_and(|ns| remaining_sets_call_spent(r, ns))
+            || today_session.is_some_and(|ts| remaining_sets_call_spent(r, ts))
     });
     adjustments.retain(|_| !drop_row.next().unwrap_or(false));
     adjustments.extend(fresh_rows);
     // The "log your first work set" clause is spent once one is logged, on
     // the readiness rows and on the session's own hold line.
-    if today_session.is_some_and(|ns| {
-        ns.items
+    if today_session.is_some_and(|ts| {
+        ts.items
             .iter()
             .any(|it| !it.is_run() && (it.sets_done > 0 || !it.logged_sets.is_empty()))
     }) {
-        let today = model.today_epoch_day;
         let session_rows = next_session
             .iter_mut()
-            .chain(week_plan.iter_mut().filter(|s| Some(s.epoch_day) == today))
+            .chain(week_plan.iter_mut())
+            .filter(|s| Some(s.epoch_day) == today)
             .filter_map(|s| s.adjustment.as_mut());
         for row in adjustments.iter_mut().chain(session_rows) {
             if let Some(s) = row.summary.strip_suffix(FIRST_SET_CLAUSE) {
@@ -1175,6 +1069,115 @@ fn plan_section(
         week_plan,
         next_week_plan,
         program,
+    }
+}
+
+/// Today's logged first work set of each lift, against that item's target,
+/// scopes a load cut (or an opt-in add) to THAT lift's remaining sets; a
+/// hard first set on a held day becomes the one-level downgrade by
+/// composition. Returns the new calls (not among the readiness
+/// recommendations) and their rows.
+fn apply_first_set_cues(
+    v: &Verdicts,
+    today: Option<i64>,
+    next_session: &mut Option<SessionPlanView>,
+    week_plan: &mut [SessionPlanView],
+    adjustments: &mut [AdjustmentView],
+    weight_lb: bool,
+) -> (Vec<Recommended<Adjustment>>, Vec<AdjustmentView>) {
+    let recommended = &v.review.recommended;
+    let review_recs = &v.review.review_recs;
+    let no_increase = autoreg::increase_hold(v.readiness_inputs, &v.rule_ctx)
+        || suppression_active(recommended, false)
+        || suppression_active(review_recs, false);
+    // Today's row honours the in-session cue loads too (a lift finished at
+    // the "remaining sets drop 5%" load is done, not lighter or open), so the
+    // strip and the Session Done card read what the hero reads.
+    if let Some(row) = week_plan.iter_mut().find(|s| {
+        today == Some(s.epoch_day)
+            && matches!(
+                s.status,
+                SessionStatus::Planned | SessionStatus::Next | SessionStatus::DoneLighter
+            )
+    }) {
+        let (status, adjustment) = (row.status, row.adjustment.take());
+        apply_first_set_autoreg(row, recommended, review_recs, no_increase, weight_lb);
+        row.adjustment = adjustment;
+        row.status = finished_status(&row.items).unwrap_or(status);
+    }
+    let Some(ns) = next_session
+        .as_mut()
+        .filter(|ns| today == Some(ns.epoch_day))
+    else {
+        return Default::default();
+    };
+    let cues = apply_first_set_autoreg(ns, recommended, review_recs, no_increase, weight_lb);
+    if cues.is_empty() {
+        return Default::default();
+    }
+    // A matched readiness rec keeps its row (rows 0..recommended.len() are
+    // `recommended`, in order), now carrying the cue's load.
+    for c in cues.iter().filter(|c| !c.fresh) {
+        if let Some(k) = recommended.iter().position(|r| *r == c.rec) {
+            adjustments[k].suggested_load_kg = c.load_kg;
+        }
+    }
+    if let Some(row) = week_plan.iter_mut().find(|s| s.epoch_day == ns.epoch_day) {
+        *row = ns.clone();
+    }
+    cues.into_iter()
+        .filter(|c| c.fresh)
+        .map(|c| {
+            let mut row = to_view(&c.rec);
+            row.suggested_load_kg = c.load_kg;
+            (c.rec, row)
+        })
+        .unzip()
+}
+
+/// The calculators' prose rows and the structured figures beside them, so a
+/// shell reads numbers instead of scraping the summary strings.
+struct CalcSection {
+    protein_targets: Vec<GuidanceView>,
+    protein_figures: Vec<ProteinFigureView>,
+    hr_zones: Vec<GuidanceView>,
+    hr_max: Option<HrMaxView>,
+    hr_zone_bands: Vec<HrZoneBandView>,
+    hypertrophy_plan: Vec<GuidanceView>,
+    hypertrophy_figures: Option<HypertrophyFiguresView>,
+    hypertrophy_ramp: Vec<u8>,
+}
+
+fn calc_section(
+    model: &Model,
+    calc_hold: Option<&Recommended<Adjustment>>,
+    reds_present: bool,
+    weight_lb: bool,
+) -> CalcSection {
+    let (protein_targets, protein_figures) = model
+        .protein_query
+        .as_ref()
+        .map(|q| build_protein_targets(q, reds_present, weight_lb))
+        .unwrap_or_default();
+    let (hr_zones, hr_max, hr_zone_bands) = model
+        .hr_zone_query
+        .as_ref()
+        .map(|q| hr_zones_for(q, model))
+        .unwrap_or_default();
+    let (hypertrophy_plan, hypertrophy_figures, hypertrophy_ramp) = model
+        .hypertrophy_plan_query
+        .as_ref()
+        .map(|q| build_hypertrophy_plan(q, model.profile(), calc_hold))
+        .unwrap_or_default();
+    CalcSection {
+        protein_targets,
+        protein_figures,
+        hr_zones,
+        hr_max,
+        hr_zone_bands,
+        hypertrophy_plan,
+        hypertrophy_figures,
+        hypertrophy_ramp,
     }
 }
 
@@ -1195,14 +1198,11 @@ fn feedback_section(
 ) -> FeedbackSection {
     let model = cx.model;
     // Feedback personalization inputs (feedback-023/024/035).
-    let advanced_user = model.profile.as_ref().is_some_and(|p| {
+    let advanced_user = model.profile().is_some_and(|p| {
         individualization::training_age_from_cadence(p.progression_cadence).value
             == individualization::TrainingAge::Advanced
     });
-    let female_user = model
-        .profile
-        .as_ref()
-        .is_some_and(|p| p.female.unwrap_or(false));
+    let female_user = model.profile().is_some_and(|p| p.female.unwrap_or(false));
     let derived_exec = model
         .today_epoch_day
         .and_then(|t| derive_session_exec(week_plan, t));

@@ -1,17 +1,14 @@
 package app.milestone
 
-import android.Manifest
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.pm.PackageManager
 import android.content.res.Resources
 import android.net.Uri
 import android.os.Build
@@ -19,7 +16,6 @@ import android.os.SystemClock
 import android.provider.Settings
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,6 +50,8 @@ internal object RestAlarm {
     private const val PREFS = "rest_alarm"
     private const val KEY_START = "start_millis"
     private const val KEY_EXERCISE = "exercise"
+    // The next set's exercise the loop reported; "" = it reported none (after the
+    // session's last set). Absent until the loop reports.
     private const val KEY_NEXT_EXERCISE = "next_exercise"
     // The exact-alarm notice was dismissed or its action used: not shown again.
     private const val KEY_EXACT_PROMPT_DONE = "exact_alarm_prompt_done"
@@ -140,12 +138,12 @@ internal object RestAlarm {
         cancelNotifications(app)
     }
 
-    /** The open loop's next set; the countdown posted after the loop closes names
-     *  it, and the rest-done alert names its exercise. */
+    /** The open loop's next set (null: none); the countdown posted after the loop
+     *  closes names it, and the rest-done alert names its exercise. */
     fun setNextSet(ctx: Context, next: NextSet?) {
         nextSet = next
         if (endAtMillis == null) return
-        prefs(ctx.applicationContext).edit { putString(KEY_NEXT_EXERCISE, next?.exercise) }
+        prefs(ctx.applicationContext).edit { putString(KEY_NEXT_EXERCISE, next?.exercise.orEmpty()) }
     }
 
     /** The loop's rest readout entered/left a resumed screen. Leaving it while a
@@ -196,22 +194,21 @@ internal object RestAlarm {
         val app = ctx.applicationContext
         val saved = prefs(app)
         if (!saved.contains(KEY_START) || saved.getLong(KEY_START, 0L) != startMillis) return
-        val rested = saved.getString(KEY_EXERCISE, null).orEmpty()
-        val next = saved.getString(KEY_NEXT_EXERCISE, null) ?: rested
+        // Not reported yet: the rested exercise. Reported as none: no "next set" line.
+        val next = saved.getString(KEY_NEXT_EXERCISE, null) ?: saved.getString(KEY_EXERCISE, null).orEmpty()
         clearSavedRest(app)
         endAtMillis = null
         alarmInexact = false
         val nm = app.getSystemService(NotificationManager::class.java) ?: return
         nm.cancel(COUNTDOWN_NOTIF_ID)
-        if (inAppVisible || !canNotify(app)) {
+        if (inAppVisible || !canPostNotifications(app)) {
             nm.cancel(DONE_NOTIF_ID)
             return
         }
         ensureChannels(app)
-        val n = NotificationCompat.Builder(app, CHANNEL_DONE)
+        val b = NotificationCompat.Builder(app, CHANNEL_DONE)
             .setSmallIcon(R.drawable.ic_stat_mark)
             .setContentTitle(app.getString(R.string.log_rest_notif_done_title))
-            .setContentText(app.getString(R.string.log_rest_notif_done_body, next))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -221,15 +218,15 @@ internal object RestAlarm {
             // Profile "Rest timer alert" off: still say the rest is done, but
             // without the channel's sound or vibration.
             .setSilent(!AppSettings.restAlert.value)
-            .build()
-        nm.notify(DONE_NOTIF_ID, n)
+        if (next.isNotEmpty()) b.setContentText(app.getString(R.string.log_rest_notif_done_body, next))
+        nm.notify(DONE_NOTIF_ID, b.build())
     }
 
     private fun postCountdown(app: Context) {
         val end = endAtMillis ?: return
         val run = _running.value ?: return
         val leftMs = end - AppClock.nowMillis()
-        if (leftMs <= 0 || dismissed || !canNotify(app)) return
+        if (leftMs <= 0 || dismissed || !canPostNotifications(app)) return
         ensureChannels(app)
         val text = countdownText(app.resources, run.exercise, nextSet)
         val b = NotificationCompat.Builder(app, CHANNEL_COUNTDOWN)
@@ -287,11 +284,6 @@ internal object RestAlarm {
         _running.value = null
         _exactAlarmPrompt.value = false
     }
-
-    private fun canNotify(app: Context): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
 
     // Both channels stay above IMPORTANCE_MIN, which a Live Update can't use.
     private fun ensureChannels(app: Context) {
@@ -403,10 +395,4 @@ internal fun exactAlarmSettingsIntent(ctx: Context): Intent =
 
 /** Open [exactAlarmSettingsIntent]; the app's details page where a build lacks it. */
 @RequiresApi(Build.VERSION_CODES.S)
-internal fun openExactAlarmSettings(ctx: Context) {
-    try {
-        ctx.startActivity(exactAlarmSettingsIntent(ctx))
-    } catch (_: ActivityNotFoundException) {
-        runCatching { ctx.startActivity(appDetailsIntent(ctx)) }
-    }
-}
+internal fun openExactAlarmSettings(ctx: Context) = ctx.openFirst(exactAlarmSettingsIntent(ctx), appDetailsIntent(ctx))

@@ -89,7 +89,7 @@ pub struct SignalState {
 type Label = (Cow<'static, str>, Option<ClaimId>);
 
 /// State shown for a row whose displayed reading is recency-expired.
-const NO_CHECKIN_TODAY: &str = "out of date";
+const OUT_OF_DATE: &str = "out of date";
 
 /// Latest state of every signal that has at least one observation, in
 /// [`ALL_SIGNALS`] order, judged with the full rule context (individual
@@ -117,7 +117,7 @@ pub fn signal_states_in(
                 .iter()
                 .any(|i| i.signal == signal && i.observed_at == input.observed_at);
             let state = if stale_row {
-                NO_CHECKIN_TODAY.to_string()
+                OUT_OF_DATE.to_string()
             } else {
                 state.into_owned()
             };

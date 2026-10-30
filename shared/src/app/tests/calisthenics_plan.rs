@@ -40,6 +40,49 @@ fn pushup_anchors(sets: &[LoggedSet], inputs: &[ReadinessInput]) -> Vec<crate::p
     )
 }
 
+/// A plank day logged without hold seconds is neutral: it neither counts as a
+/// failed hold nor breaks the 2-for-2 run of the plank days around it.
+#[test]
+fn a_plank_day_without_hold_seconds_does_not_break_the_advance() {
+    let plank = |day: i64, hold: Option<u16>, id: u64| -> Vec<LoggedSet> {
+        (0..3)
+            .map(|k| LoggedSet {
+                hold_sec: hold,
+                exercise: "Plank".into(),
+                weight_kg: 0.0,
+                reps: if hold.is_some() { 0 } else { 1 },
+                rpe: 7.0,
+                observed_at: day * DAY_SEC + 18 * HOUR + k * 120,
+                entry_id: id + k as u64,
+            })
+            .collect()
+    };
+    let anchors = |sets: &[LoggedSet]| {
+        build_calisthenics_anchors(
+            sets.iter()
+                .map(|s| (s, crate::calisthenics::tier_by_name(&s.exercise))),
+            &[],
+            &[],
+            crate::strength::LiftGoal::MaxStrength,
+            Some(104),
+            0,
+        )
+    };
+    let control = [plank(100, Some(45), 0), plank(104, Some(45), 10)].concat();
+    let with_gap = [
+        plank(100, Some(45), 0),
+        plank(102, None, 20),
+        plank(104, Some(45), 10),
+    ]
+    .concat();
+    let want = anchors(&control);
+    assert!(
+        want.iter().any(|a| a.advance_ready),
+        "two 45 s plank days advance the core ladder: {want:?}"
+    );
+    assert_eq!(anchors(&with_gap), want);
+}
+
 #[test]
 fn calisthenics_plan_advances_a_rung_then_pain_suppresses_it() {
     let (app, mut model) = planned_calisthenics();
@@ -90,7 +133,10 @@ fn calisthenics_plan_advances_a_rung_then_pain_suppresses_it() {
     )
     .expect_only_render();
     let vm = app.view(&model);
-    assert!(!vm.train_blocked, "tolerable pain must not block training");
+    assert!(
+        vm.hold_reason.is_none(),
+        "tolerable pain must not block training"
+    );
     let push = cal_item(&vm, Lad::HorizontalPush).expect("a horizontal-push item");
     assert_eq!(
         push.exercise, "Full push-up",

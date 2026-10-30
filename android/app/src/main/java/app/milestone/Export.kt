@@ -10,19 +10,16 @@ import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileNotFoundException
-import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -242,8 +239,6 @@ data class ImportSummary(val entries: Int, val firstDay: Long?, val lastDay: Lon
 
 private val importEntryVariants = setOf("LogSet", "LogRun", "LogRunTrack", "LogActivity", "SubmitCheckin", "SubmitReadiness")
 
-private val summaryJson = Json { ignoreUnknownKeys = true }
-
 /** Summarize validated import [lines] as the restored log will hold them (compacted
  *  first, so cleared or superseded lines don't count), dating entries in [zone]. */
 internal fun summarizeImport(lines: List<String>, zone: ZoneId): ImportSummary {
@@ -254,7 +249,7 @@ internal fun summarizeImport(lines: List<String>, zone: ZoneId): ImportSummary {
         val variant = EventLog.variantOf(line) ?: continue
         if (variant !in importEntryVariants) continue
         entries++
-        val payload = runCatching { summaryJson.parseToJsonElement(line) as JsonObject }.getOrNull()
+        val payload = runCatching { coreJson.parseToJsonElement(line) as JsonObject }.getOrNull()
             ?.get(variant) as? JsonObject
         val at = payload?.get("observed_at")?.let { runCatching { it.jsonPrimitive.longOrNull }.getOrNull() }
         if (at == null || at <= 0L) continue
@@ -326,19 +321,7 @@ internal fun swapLogFile(dir: File, lines: List<String>) {
     val dst = eventLogFile(dir)
     val tmp = File(dst.path + ".import")
     try {
-        // fsync the bytes to disk BEFORE the rename: a rename-replace without fsync
-        // can commit the directory metadata (the new name) before the file's data
-        // reaches disk, so a power loss right after the rename can truncate the WHOLE
-        // log to zero/garbage.
-        FileOutputStream(tmp).use { out ->
-            val w = out.bufferedWriter(Charsets.UTF_8)
-            for (line in lines) {
-                w.write(line)
-                w.write('\n'.code)
-            }
-            w.flush()
-            out.fd.sync()
-        }
+        writeLinesSynced(tmp, lines)
         if (tmp.renameTo(dst)) return
         // Some filesystems refuse an atomic rename over an existing file. Move the live
         // log aside to a .bak before overwriting so a crash mid-swap can restore it,

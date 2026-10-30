@@ -92,8 +92,8 @@ fn android_wire_form_deserializes_with_optionals_omitted() {
 
 /// The consolidated person fields (age, bodyweight, sex, resting
 /// HR, measured HRmax) round-trip through the `SetProfile` wire exactly as
-/// Core.kt's guided setup / profile editor emit them. All are `#[serde(default)]`
-/// so the shell omits absent ones (previous test) and sends present ones here.
+/// Core.kt's guided setup / profile editor emit them. All are optional, so the
+/// shell omits absent ones (previous test) and sends present ones here.
 #[test]
 fn set_profile_person_fields_round_trip() {
     let wire = r#"{"SetProfile":{"progression_cadence":"EverySession","lift_goal":"Hypertrophy","goal_distance":"General","concurrent_goal":"Hypertrophy","weekly_sets":10,"running_days_per_week":0,"running_km_per_week":0.0,"advanced":false,"female":true,"bodyweight_kg":62.5,"age_years":34.0,"resting_hr_bpm":54.0,"measured_hr_max":188.0}}"#;
@@ -450,7 +450,7 @@ fn protein_and_hr_wire_fields_are_additive_and_serde_default() {
     // old ViewModel JSON lacking them still decodes.
     let app = Engine;
     let mut model = Model {
-        profile: Some(sample_profile()),
+        profile_history: vec![sample_profile()],
         ..Default::default()
     };
     // Request both calculators so the structured figures populate.
@@ -467,8 +467,6 @@ fn protein_and_hr_wire_fields_are_additive_and_serde_default() {
         Event::ComputeHrZones {
             age_years: 40.0,
             resting_hr_bpm: None,
-            weeks_since_recalc: None,
-            weeks_since_pace_test: None,
         },
         &mut model,
     )

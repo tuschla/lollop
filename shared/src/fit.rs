@@ -77,19 +77,6 @@ impl FitError {
             FitError::NotFit | FitError::Damaged | FitError::NoTrack => "",
         }
     }
-
-    /// The plain-language message shown to the user.
-    pub fn message(&self) -> String {
-        match self {
-            FitError::NotFit => "Not a FIT file".to_string(),
-            FitError::Damaged => {
-                "FIT file is damaged or incomplete; no usable GPS track".to_string()
-            }
-            FitError::NoTrack => "No GPS track in this FIT file".to_string(),
-            FitError::TooShort => "Too short to import as a run".to_string(),
-            FitError::NotARun(sport) => format!("This FIT file records {sport}, not a run"),
-        }
-    }
 }
 
 /// deg = semicircles × 180 / 2^31 (FIT profile scale 1, so fitparser returns raw

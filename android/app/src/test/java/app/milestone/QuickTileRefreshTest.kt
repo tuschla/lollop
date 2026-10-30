@@ -12,7 +12,6 @@ import androidx.test.core.app.ApplicationProvider
 import app.milestone.widget.TodayWidgetReceiver
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetMidnight
-import app.milestone.widget.WidgetSnapshot
 import app.milestone.widget.WidgetSnapshotStore
 import java.io.File
 import java.lang.reflect.Proxy
@@ -80,9 +79,6 @@ class QuickTileRefreshTest {
         return taken()
     }
 
-    private fun snapshot(kind: WidgetDayKind, day: Long = todayEpochDay()) =
-        WidgetSnapshot(epochDay = day, kind = kind, trackable = kind == WidgetDayKind.Run)
-
     @Test
     fun manifestDeclaresAnActiveTile() {
         val info = ctx.packageManager.getServiceInfo(tile, PackageManager.GET_META_DATA)
@@ -91,10 +87,10 @@ class QuickTileRefreshTest {
 
     @Test
     fun snapshotWriteAndStaleMarkRequestARedraw() {
-        WidgetSnapshotStore.write(ctx, snapshot(WidgetDayKind.Run))
+        WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Run))
         assertEquals(listOf(tile), taken())
         // The same snapshot again writes nothing and asks nothing.
-        WidgetSnapshotStore.write(ctx, snapshot(WidgetDayKind.Run))
+        WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Run))
         assertEquals(emptyList<ComponentName>(), taken())
         WidgetSnapshotStore.markStale(ctx, force = true)
         assertEquals(listOf(tile), taken())
@@ -102,7 +98,7 @@ class QuickTileRefreshTest {
 
     @Test
     fun runStartAndStopRequestARedraw() {
-        TileSync.start(ctx)
+        RecordingWatch.start(ctx)
         shadowOf(Looper.getMainLooper()).idle()
         taken()
         RunSession.tracking.value = true
@@ -114,7 +110,7 @@ class QuickTileRefreshTest {
     @Test
     fun dayChangesAndLocaleRequestARedraw() {
         // Yesterday's run day: every day change makes it read Log today.
-        WidgetSnapshotStore.write(ctx, snapshot(WidgetDayKind.Run, day = todayEpochDay() - 1))
+        WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Run, day = todayEpochDay() - 1))
         taken()
         for (action in listOf(
             TodayWidgetReceiver.ACTION_MIDNIGHT,
@@ -132,7 +128,7 @@ class QuickTileRefreshTest {
     @Test
     fun addedTileKeepsTheMidnightTickWithoutAWidget() {
         val alarms = shadowOf(ctx.getSystemService(AlarmManager::class.java))
-        WidgetSnapshotStore.write(ctx, snapshot(WidgetDayKind.Lift))
+        WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Lift))
         val service = Robolectric.buildService(QuickTileService::class.java).create().get()
         service.onTileAdded()
         assertTrue(QuickTileService.isAdded(ctx))

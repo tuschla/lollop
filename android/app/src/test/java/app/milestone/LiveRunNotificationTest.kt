@@ -170,7 +170,7 @@ class LiveRunNotificationTest {
         val start = Intent(ctx, RunTrackingService::class.java).setAction("app.milestone.action.START")
         val controller = Robolectric.buildService(RunTrackingService::class.java, start).create().startCommand(0, 1)
         val nm = shadowOf(ctx.getSystemService(NotificationManager::class.java))
-        fun posted(): Notification = nm.getNotification(1)
+        fun posted(): Notification = nm.getNotification(RunTrackingService.NOTIF_ID)
 
         val first = shadowOf(controller.get()).lastForegroundNotification
         assertPromotableLiveUpdate(first)

@@ -26,7 +26,7 @@ pub(in crate::app) fn build_training_load(
     // Chronological (`RunFacts::chrono`): a day's TRIMP is a float sum.
     for &i in &facts.chrono {
         let (r, minutes) = (&model.runs[i], facts.minutes[i]);
-        if r.observed_at <= 0
+        if is_undated(r.observed_at)
             || r.hr_pct_max <= 0.0
             || minutes <= 0.0
             || cutoff.is_some_and(|c| r.observed_at > c)
@@ -114,7 +114,6 @@ pub(in crate::app) fn build_srpe_load(p: &RunProgressView) -> Option<SrpeLoadVie
     let unrated = cur.runs.saturating_sub(cur.rated_runs);
     let g = graded((), claims::LOAD_SRPE_001);
     Some(SrpeLoadView {
-        week_au: cur.srpe_load_au,
         method: "Effort load: minutes of running × your 0–10 rating of the whole run, given about 30 minutes afterwards. Kept separate from heart-rate load.".to_string(),
         summary: if cur.rated_runs == 0 {
             format!(

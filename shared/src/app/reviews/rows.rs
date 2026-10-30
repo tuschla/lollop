@@ -402,7 +402,10 @@ fn push_monitoring_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &
         && autoreg::suspend_hrv_gating(n)
     {
         out.push(to_view_with(
-            "2 of your last 3 HRV readings look unreliable. Until clean readings return, plans follow how you feel and perform".to_string(),
+            format!(
+                "{} of your last 3 HRV readings look unreliable. Until clean readings return, plans follow how you feel and perform",
+                autoreg::HRV_UNRELIABLE_SUSPEND
+            ),
             &graded((), claims::AUTOREG_FALLBACK_001),
         ));
     }
@@ -414,8 +417,10 @@ fn push_monitoring_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &
         let rec = autoreg::hrv_suppressed_recovery_day(days);
         if rec.value {
             out.push(to_view_with(
-                "HRV has been below your normal on most of the last 3+ days. Take a recovery day or a few easy days."
-                    .to_string(),
+                format!(
+                    "HRV has been below your normal on most of the last {}+ days. Take a recovery day or a few easy days.",
+                    autoreg::HRV_ESCALATE_STREAK
+                ),
                 &rec,
             ));
         }
@@ -428,7 +433,10 @@ fn push_monitoring_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, ctx: &
         let easy = autoreg::wellness_rhr_multiday_easy(days, r.rhr_rising);
         if easy.value {
             out.push(to_view_with(
-                "You've felt run down for 2+ days and your resting heart rate is rising: take 1–3 easy days or cross-train".to_string(),
+                format!(
+                    "You've felt run down for {}+ days and your resting heart rate is rising: take 1–3 easy days or cross-train",
+                    autoreg::WELLNESS_DOWNGRADE_STREAK
+                ),
                 &easy,
             ));
         }
@@ -475,7 +483,10 @@ fn push_hypertrophy_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview) {
         let d = hypertrophy::deload_indicated(n);
         if d.value {
             out.push(to_view_with(
-                "2+ signs of doing too much: take the lighter week now".to_string(),
+                format!(
+                    "{}+ signs of doing too much: take the lighter week now",
+                    hypertrophy::DELOAD_TRIGGER_MIN
+                ),
                 &d,
             ));
         }
@@ -486,8 +497,10 @@ fn push_hypertrophy_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview) {
         let rest = hypertrophy::increase_rest_on_rep_drop(frac);
         if rest.value {
             out.push(to_view_with(
-                "Reps fell more than 10% from one set to the next. Rest longer between sets to keep your reps up"
-                    .to_string(),
+                format!(
+                    "Reps fell more than {:.0}% from one set to the next. Rest longer between sets to keep your reps up",
+                    hypertrophy::REP_DROP_REST_FRAC * 100.0
+                ),
                 &rest,
             ));
         }
@@ -522,8 +535,12 @@ fn push_profile_rows(out: &mut Vec<AdjustmentView>, r: &SessionReview, p: &Profi
         let adj = hypertrophy::recovery_adjusted_volume(p.weekly_sets, true);
         out.push(to_view_with(
             format!(
-                "You're not recovering well. Cut this week to {:.0}–{:.0} sets (70–80% of {}) and take fewer sets to failure",
-                adj.value.0, adj.value.1, p.weekly_sets
+                "You're not recovering well. Cut this week to {:.0}–{:.0} sets ({:.0}–{:.0}% of {}) and take fewer sets to failure",
+                adj.value.0,
+                adj.value.1,
+                hypertrophy::LOW_RECOVERY_VOLUME_FRAC.0 * 100.0,
+                hypertrophy::LOW_RECOVERY_VOLUME_FRAC.1 * 100.0,
+                p.weekly_sets
             ),
             &adj,
         ));
@@ -608,4 +625,53 @@ pub(in crate::app) fn remaining_sets_call_spent(
             .items
             .iter()
             .any(|it| it.done && !it.is_run() && crate::plan::same_movement(&it.exercise, exercise))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The threshold rows format the engine's thresholds in and read as they
+    /// did when the numbers were literals (rev4 P27).
+    #[test]
+    fn threshold_rows_state_the_engine_thresholds() {
+        let r = SessionReview {
+            hrv_unreliable_last_three: Some(2),
+            hrv_suppressed_days: Some(3),
+            wellness_suppressed_days: Some(2),
+            rhr_rising: true,
+            hypertrophy_deload_triggers: Some(2),
+            rep_drop_frac: Some(0.2),
+            low_recovery: true,
+            ..SessionReview::default()
+        };
+        let p = Profile {
+            weekly_sets: 20,
+            ..crate::app::tests::base_profile()
+        };
+        let ctx = ReviewCtx {
+            recs: &[],
+            readiness_recs: &[],
+            train_blocked: false,
+            review_age: None,
+            profile: Some(&p),
+            derived_hrv_streak: None,
+            derived_wellness_streak: None,
+        };
+        let mut out = Vec::new();
+        push_monitoring_rows(&mut out, &r, &ctx);
+        push_hypertrophy_rows(&mut out, &r);
+        push_profile_rows(&mut out, &r, &p);
+        let got: Vec<&str> = out.iter().map(|v| v.summary.as_str()).collect();
+        for want in [
+            "2 of your last 3 HRV readings look unreliable. Until clean readings return, plans follow how you feel and perform",
+            "HRV has been below your normal on most of the last 3+ days. Take a recovery day or a few easy days.",
+            "You've felt run down for 2+ days and your resting heart rate is rising: take 1–3 easy days or cross-train",
+            "2+ signs of doing too much: take the lighter week now",
+            "Reps fell more than 10% from one set to the next. Rest longer between sets to keep your reps up",
+            "You're not recovering well. Cut this week to 14–16 sets (70–80% of 20) and take fewer sets to failure",
+        ] {
+            assert!(got.contains(&want), "{want:?} missing from {got:#?}");
+        }
+    }
 }

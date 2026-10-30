@@ -247,4 +247,14 @@ class CalculatorResultsTest {
         )
         rule.shot("sheet-evidence-references-expanded-light")
     }
+
+    /** The reference library's training-load detail: the core counts one run with
+     *  heart rate as sessions_counted = 1 (calculators/training_load.rs). */
+    @Test
+    fun trainingLoadDetailUsesTheSingular() {
+        val one = ctx.resources.getQuantityString(R.plurals.main_training_load_detail, 1, "TRIMP", 1, 1)
+        val two = ctx.resources.getQuantityString(R.plurals.main_training_load_detail, 2, "TRIMP", 2, 1)
+        assertTrue(one, one.contains("Counted 1 session.") && !one.contains("1 sessions"))
+        assertTrue(two, two.contains("Counted 2 sessions."))
+    }
 }

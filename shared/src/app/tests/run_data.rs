@@ -43,10 +43,10 @@ fn flatten_with_targets(
 fn threshold_run_renders_pace_range_from_a_recent_10k() {
     let today = 704;
     let model = Model {
-        profile: Some(racer_profile(today)),
+        profile_history: vec![racer_profile(today)],
         ..Default::default()
     };
-    let vdot = super::super::run_targets::pace_anchor_vdot(model.profile.as_ref().unwrap(), today)
+    let vdot = super::super::run_targets::pace_anchor_vdot(model.profile().unwrap(), today)
         .expect("a 1-week-old 10K is a fresh pace anchor");
     assert!(
         (vdot - 40.0).abs() < 0.2,
@@ -170,7 +170,13 @@ fn easy_run_shows_bpm_from_measured_hrmax_and_pace_from_race() {
         !t.pace_label_km.is_empty(),
         "race anchor → easy pace: {t:?}"
     );
-    assert!(t.hr_high_bpm > 0 && t.hr_high_bpm <= 190, "{t:?}");
+    let high: u32 = t
+        .hr_label
+        .strip_suffix(" bpm")
+        .and_then(|s| s.rsplit(['–', ' ']).next())
+        .and_then(|h| h.parse().ok())
+        .unwrap_or_else(|| panic!("a bpm ceiling: {t:?}"));
+    assert!(high > 0 && high <= 190, "{t:?}");
     assert!(t.hr_max_measured);
     assert!(
         !t.effort_cue.contains("talk"),
@@ -279,8 +285,12 @@ fn tracked_run_with_session_rpe_carries_srpe_load() {
     assert_eq!(run.srpe_load_au, Some(280.0));
     // The separate weekly series carries it; the HR load does not.
     let s = vm.srpe_load.expect("a rated run opens the sRPE series");
-    assert_eq!(s.week_au, 280.0);
-    assert!(s.summary.contains("(1 rated run)"), "{}", s.summary);
+    assert!(
+        s.summary
+            .starts_with("Effort load 280 this week (1 rated run)"),
+        "{}",
+        s.summary
+    );
     assert!(
         vm.training_load.is_none(),
         "an HR-less run adds no heart-rate load"
@@ -370,8 +380,8 @@ fn best_effort_5k_is_found_inside_a_10k_gps_run() {
         .iter()
         .find(|b| b.distance_m == 5000)
         .expect("5K best effort");
+    // 1200 s is the faster second half (240 s/km), not the whole run's pace.
     assert!((five.time_sec as i64 - 1200).abs() <= 3, "{five:?}");
-    assert!(five.from_split, "taken from a stretch of the 10K");
     assert_eq!(five.entry_id, 9_004);
     let one = p
         .best_efforts
@@ -412,7 +422,6 @@ fn whole_hand_logged_5k_counts_and_a_faster_one_takes_the_record() {
         .unwrap();
     assert_eq!(five.time_sec, 1440);
     assert_eq!(five.entry_id, 2);
-    assert!(!five.from_split);
     assert_eq!(five.time_label, "24:00");
 }
 
@@ -681,7 +690,7 @@ fn easy_run_near_leg_day_is_not_treated_as_a_long_run() {
     // longest run, so it must not trip the heavy-leg/long-run CAP-3 spacing flag.
     // The actual long run (8 km, Sat) is 5 days from the squat, well clear.
     let model = Model {
-        profile: Some(hybrid_17km_profile()),
+        profile_history: vec![hybrid_17km_profile()],
         runs: three_run_week(),
         sets: vec![stored_heavy_squat(4 * DAY_SEC + 20 * 3600)], // Mon evening
         ..Default::default()
@@ -698,7 +707,7 @@ fn heavy_squat_close_to_the_actual_long_run_still_flags() {
     // long run on Sat 08:00. The 8 km run IS the week's longest and clears 25% of
     // the 17 km full-week basis, so CAP-3 must fire.
     let model = Model {
-        profile: Some(hybrid_17km_profile()),
+        profile_history: vec![hybrid_17km_profile()],
         runs: three_run_week(),
         sets: vec![stored_heavy_squat(8 * DAY_SEC + 20 * 3600)], // Fri evening
         ..Default::default()
@@ -716,7 +725,7 @@ fn a_pure_lifters_lone_jog_after_squats_is_not_a_long_run() {
     // trailing 7 days) the jog cannot certify itself as a long run, so CAP-3 stays
     // silent instead of flagging the recovery jog.
     let model = Model {
-        profile: Some(base_profile()),
+        profile_history: vec![base_profile()],
         runs: vec![logged_run(3.0, 18.0, 70.0, 5 * DAY_SEC + 8 * 3600)], // Tue morning
         sets: vec![stored_heavy_squat(4 * DAY_SEC + 20 * 3600)],         // Mon evening, ~12 h prior
         ..Default::default()
@@ -739,7 +748,7 @@ fn manual_run_bpm(id: u64, avg_hr_bpm: Option<f64>) -> Event {
 fn hr_pct_after(profile: Profile, events: Vec<Event>) -> f64 {
     let app = Engine;
     let mut model = Model {
-        profile: Some(profile),
+        profile_history: vec![profile],
         ..Default::default()
     };
     for e in events {
@@ -917,7 +926,7 @@ fn rated_bpm_run(avg_hr_bpm: Option<f64>, hr_pct_max: f64, session_rpe: Option<u
 fn run_view_after(profile: Profile, event: Event) -> RunResultView {
     let app = Engine;
     let mut model = Model {
-        profile: Some(profile),
+        profile_history: vec![profile],
         ..Default::default()
     };
     app.update(event, &mut model).expect_only_render();
@@ -984,8 +993,7 @@ fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_week
         .expect_only_render();
     let race_day = |model: &Model| {
         model
-            .profile
-            .as_ref()
+            .profile()
             .unwrap()
             .recent_race
             .as_ref()
@@ -998,7 +1006,7 @@ fn an_undated_race_is_dated_when_stated_and_stops_setting_paces_after_eight_week
         "an undated race is dated when first stated"
     );
     let anchor = |model: &Model, day: i64| {
-        super::super::run_targets::pace_anchor_vdot(model.profile.as_ref().unwrap(), day)
+        super::super::run_targets::pace_anchor_vdot(model.profile().unwrap(), day)
     };
     assert!(anchor(&model, today + 7).is_some());
 
@@ -1045,7 +1053,7 @@ fn an_undated_race_in_an_undated_profile_edit_stays_undated() {
     });
     app.update(Event::SetProfile(p), &mut model)
         .expect_only_render();
-    let p = model.profile.as_ref().unwrap();
+    let p = model.profile().unwrap();
     assert_eq!(p.recent_race.as_ref().unwrap().epoch_day, None);
     assert_eq!(super::super::run_targets::pace_anchor_vdot(p, 704), None);
 }
@@ -1082,7 +1090,7 @@ fn an_unset_weekly_distance_is_stored_as_unset_never_as_a_figure() {
     p.running_km_per_week_set = false;
     app.update(Event::SetProfile(p), &mut model)
         .expect_only_render();
-    let stored = model.profile.as_ref().unwrap();
+    let stored = model.profile().unwrap();
     assert_eq!(stored.running_km_per_week, 0.0);
     assert!(!stored.running_km_per_week_set);
     let vm = app.view(&model);
@@ -1173,42 +1181,34 @@ fn a_tracked_run_keeps_its_entered_bpm() {
 }
 
 #[test]
-fn gps_qc_drops_teleport_and_stuck_time_fixes_and_reports_the_count() {
+fn gps_qc_drops_teleport_and_stuck_time_fixes() {
     let app = Engine;
     let mut model = Model::default();
-    app.update(
-        log_run_track(
-            vec![
-                gps(0.000, 0),
-                gps(0.001, 20),
-                // Teleport: ~11 km implied in 1 s (>12 m/s), dropped.
-                gps(0.100, 21),
-                gps(0.002, 40),
-                // Non-advancing timestamp, dropped.
-                gps(0.0025, 40),
-                gps(0.003, 60),
-            ],
-            78.0,
-            12.0,
-            0,
-            0,
-        ),
-        &mut model,
-    )
-    .expect_only_render();
+    let pts = vec![
+        gps(0.000, 0),
+        gps(0.001, 20),
+        // Teleport: ~11 km implied in 1 s (>12 m/s), dropped.
+        gps(0.100, 21),
+        gps(0.002, 40),
+        // Non-advancing timestamp, dropped.
+        gps(0.0025, 40),
+        gps(0.003, 60),
+    ];
+    assert_eq!(
+        pts.len() - qc_track(&pts, &[]).track.len(),
+        2,
+        "teleport + stuck-time fixes dropped"
+    );
+    app.update(log_run_track(pts, 78.0, 12.0, 0, 0), &mut model)
+        .expect_only_render();
 
     let run = &app.view(&model).runs[0];
-    assert_eq!(run.qc_dropped, 2, "teleport + stuck-time fixes dropped");
     // Distance is the clean 3-hop track (~0.33 km), not an 11 km teleport.
     assert!(
         run.distance_km > 0.2 && run.distance_km < 0.5,
         "QC'd distance, got {}",
         run.distance_km
     );
-    // Manual runs report zero dropped fixes.
-    app.update(log_run_at(5.0, 30.0, 75.0, 0), &mut model)
-        .expect_only_render();
-    assert_eq!(app.view(&model).runs[1].qc_dropped, 0);
 }
 
 #[test]
@@ -1248,7 +1248,8 @@ fn a_short_stop_swallowed_by_the_jitter_gate_is_not_moving_time() {
     }
     let qc = qc_track(&pts, &[]);
     assert_eq!(
-        qc.dropped, 5,
+        pts.len() - qc.track.len(),
+        5,
         "the standing fixes are jitter-dropped, but the last, where the runner stood until, is kept"
     );
     let moving_sec = moving_duration_min(&qc) * 60.0;

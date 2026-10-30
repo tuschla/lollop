@@ -11,9 +11,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import app.milestone.widget.WidgetSync
@@ -34,13 +33,11 @@ class MainActivity : ComponentActivity() {
         // recreate the app on every toggle and has no "follow system" reset).
         AppSettings.load(this)
         // Home screen widget: every published model refreshes its snapshot; the
-        // Quick Settings tile also redraws when a run starts or stops.
+        // Quick Settings tile and a shown "Start run" reminder follow the recording run.
         WidgetSync.start(applicationContext)
-        TileSync.start(applicationContext)
+        RecordingWatch.start(applicationContext)
         // A force stop clears the session reminder's alarm; any start sets it again.
         SessionReminder.reschedule(applicationContext)
-        // A shown "Start run" reminder goes once a run records.
-        SessionReminder.watchRecording(applicationContext)
         when (AppSettings.darkMode.value) {
             DarkMode.Light -> setTheme(R.style.Theme_Milestone_Forced_Light)
             DarkMode.Dark -> setTheme(R.style.Theme_Milestone_Forced_Dark)
@@ -62,28 +59,22 @@ class MainActivity : ComponentActivity() {
         Configuration.getInstance().osmdroidBasePath = File(cacheDir, "osmdroid")
         Configuration.getInstance().osmdroidTileCache = File(cacheDir, "osmdroid/tiles")
         Configuration.getInstance().userAgentValue = packageName
-        // "Open with" / "Share to" run import (GPX/TCX/FIT). Only on a FRESH create
-        // that the share itself started: a rotation or process-restore re-delivers
-        // the same getIntent(), and reopening the task from recents replays the
-        // original VIEW intent (its URI grant possibly expired); neither may import
-        // the files again.
+        // "Open with" / "Share to" run import (GPX/TCX/FIT) and an open intent
+        // (widget, tile, notification) act only on a FRESH create that the intent
+        // itself started: a rotation or process-restore re-delivers the same
+        // getIntent(), and reopening the task from recents replays the original
+        // intent (a VIEW's URI grant possibly expired); neither may act again.
         val fromRecents = (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
-        if (savedInstanceState == null && !fromRecents) RunImport.importRuns(this, RunImport.urisFrom(intent))
-        // An open intent (widget, tile, notification) navigates on the same terms: a
-        // rotation or process-restore re-delivers getIntent() with saved state, and a
-        // relaunch from recents replays it; neither navigates again.
         if (savedInstanceState == null && !fromRecents) {
+            RunImport.importRuns(this, RunImport.urisFrom(intent))
             openDestOf(intent)?.let { openRequest.value = it }
             SessionReminder.onOpenIntent(this, intent)
         }
         // The window ground under the first Compose frame (and the import restart's
         // "Restoring your data…" screen) is the resolved palette's, not the theme's
         // plain white/black windowBackground.
-        val nightUi = when (AppSettings.darkMode.value) {
-            DarkMode.System -> (resources.configuration.uiMode and UiConfiguration.UI_MODE_NIGHT_MASK) == UiConfiguration.UI_MODE_NIGHT_YES
-            DarkMode.Light -> false
-            DarkMode.Dark -> true
-        }
+        val systemNight = (resources.configuration.uiMode and UiConfiguration.UI_MODE_NIGHT_MASK) == UiConfiguration.UI_MODE_NIGHT_YES
+        val nightUi = AppSettings.darkMode.value.isDark(systemNight)
         val theme = AppSettings.theme.value
         window.setBackgroundDrawable(ColorDrawable((if (nightUi) theme.dark else theme.light).bgTop.toArgb()))
         setContent {
@@ -95,8 +86,8 @@ class MainActivity : ComponentActivity() {
                 // light/dark style turns off the system's contrast scrim, which would
                 // otherwise paint a near-white (or cool grey) band under the palette.
                 val bgTop = LocalPalette.current.bgTop
-                val dark = bgTop.luminance() < 0.5f
-                DisposableEffect(bgTop) {
+                val dark = LocalPalette.current.isDark
+                SideEffect {
                     window.setBackgroundDrawable(ColorDrawable(bgTop.toArgb()))
                     val navScrim = bgTop.copy(alpha = NAV_SCRIM_ALPHA).toArgb()
                     enableEdgeToEdge(
@@ -111,7 +102,6 @@ class MainActivity : ComponentActivity() {
                             SystemBarStyle.light(navScrim, NAV_SCRIM_DARK)
                         },
                     )
-                    onDispose {}
                 }
                 Surface(modifier = Modifier.fillMaxSize(), color = BgTop) {
                     CoachScreen(openRequest)

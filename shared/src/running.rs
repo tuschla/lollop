@@ -161,11 +161,11 @@ pub const MARATHON_M: f64 = 42_195.0;
 /// run 10–20 % slower than MP). MP is the athlete's Daniels marathon prediction
 /// ÷ the marathon distance in km. `None` for a non-positive VDOT or a row
 /// without both bounds.
-pub fn mp_relative_pace_sec_per_km(vdot: f64, workout: RunWorkout) -> Option<(f64, f64)> {
+pub fn mp_relative_pace_sec_per_km(vdot: f64, kind: RunSessionType) -> Option<(f64, f64)> {
     if !vdot.is_finite() || vdot <= 0.0 {
         return None;
     }
-    let (Some(lo), Some(hi)) = workout_rx(workout).value.pct_slower_than_mp else {
+    let (Some(lo), Some(hi)) = workout_rx(kind).value.pct_slower_than_mp else {
         return None;
     };
     let mp = crate::load::daniels_predict(vdot, MARATHON_M) / (MARATHON_M / KM_M);
@@ -473,19 +473,7 @@ pub struct RunWorkoutRx {
     pub hr_governed: bool,
 }
 
-/// A run workout to prescribe. Wraps [`RunSessionType`] and adds the
-/// Easy/General-Aerobic session (running-015), which is distinct from Recovery
-/// (running-014) in pace, HR, RPE, and duration but has no schema variant -
-/// the KB itself maps Easy runs to `RunSessionType::Recovery`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunWorkout {
-    Session(RunSessionType),
-    /// Easy / General-Aerobic run (running-015): E pace 15–25 % slower than
-    /// MP, 65–79 %HRmax, RPE 3–4, 30–90 min.
-    EasyGeneralAerobic,
-}
-
-/// Look up the prescription band for a run workout. Rules running-014…022 +
+/// Look up the prescription band for a run session type. Rules running-014…022 +
 /// the VDOT R row. Per-rule claims: Recovery running-014 → RUN-RECOVERY-001,
 /// Easy running-015 → RUN-EASY-001, LongRun running-016 → RUN-LONGRUN-001,
 /// RacePace running-017 → RUN-RACEPACE-001, Tempo running-018 → RUN-TEMPO-001,
@@ -494,7 +482,7 @@ pub enum RunWorkout {
 /// blends running-021/022 and stays on the workout-table synthesis claim
 /// (RUN-WORKOUT-001), the hill-sprint-specific numbers live in
 /// [`hill_sprint_rx`].
-pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
+pub fn workout_rx(kind: RunSessionType) -> Recommended<RunWorkoutRx> {
     use RunSessionType::*;
     let open = RunWorkoutRx {
         pct_hr_max: (None, None),
@@ -505,11 +493,11 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
         distance_km: (None, None),
         hr_governed: false,
     };
-    let (rx, claim_id) = match workout {
+    let (rx, claim_id) = match kind {
         // running-014 Recovery: ≥20 % slower than MP (no upper slowness
         // bound), ceilings <76 %HRmax AND <70 %HRR (the KB states no lower HR
         // bound), RPE 2–3, 20–40 min.
-        RunWorkout::Session(Recovery) => (
+        Recovery => (
             RunWorkoutRx {
                 pct_hr_max: (None, Some(0.76)),
                 pct_hrr_max: Some(0.70),
@@ -523,7 +511,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
         ),
         // running-015 Easy / General-Aerobic: E pace 15–25 % slower than MP,
         // 65–79 %HRmax, RPE 3–4, 30–90 min.
-        RunWorkout::EasyGeneralAerobic | RunWorkout::Session(Easy) => (
+        Easy => (
             RunWorkoutRx {
                 pct_hr_max: (Some(0.65), Some(0.79)),
                 pct_slower_than_mp: (Some(15.0), Some(25.0)),
@@ -539,8 +527,8 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
         // the KB caps are shares (25–30 % weekly, single run ≤25 %) plus a
         // soft time-cap "~2:00–2:30": 150 min is the outer edge of that
         // window, kept as the only defensible hard ceiling. Share/guardrail
-        // checks live in `long_run_within_cap` / `long_run_within_daily_avg`.
-        RunWorkout::Session(LongRun) => (
+        // checks live in `check_volume_caps` / `long_run_within_daily_avg`.
+        LongRun => (
             RunWorkoutRx {
                 pct_hr_max: (Some(0.65), Some(0.80)),
                 pct_slower_than_mp: (Some(10.0), Some(20.0)),
@@ -555,7 +543,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
         // 20–40 min. The KB's "~90 % MP" does not say whether it means pace or
         // speed, so no MP-relative band is encoded (cruise-interval structure:
         // `cruise_interval_rx`).
-        RunWorkout::Session(Tempo) => (
+        Tempo => (
             RunWorkoutRx {
                 pct_hr_max: (Some(0.88), Some(0.92)),
                 rpe: Some((6, 7)),
@@ -569,7 +557,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
         // definition), 80–85 %HRmax, RPE 5–6, 8–26 km blocks: the KB states
         // the blocks in km, not minutes, so no duration band is set. No weekly
         // M-pace cap exists (VDOT table M-row cap: "-").
-        RunWorkout::Session(RacePace) => (
+        RacePace => (
             RunWorkoutRx {
                 pct_hr_max: (Some(0.80), Some(0.85)),
                 pct_slower_than_mp: (Some(0.0), Some(0.0)),
@@ -584,7 +572,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
         // VDOT table gives 97–100 %HRmax (running-019 prose says 95–100; the
         // table is authoritative and matches `vdot_band_hr_pct`), RPE 8–9, 3–5
         // min reps (structure: `vo2max_interval_rx`).
-        RunWorkout::Session(Interval) => (
+        Interval => (
             RunWorkoutRx {
                 pct_hr_max: (Some(0.97), Some(1.00)),
                 rpe: Some((8, 9)),
@@ -596,7 +584,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
         // VDOT R row: >100 %VO2max, "use pace, not HR" (no HR band), reps
         // ≤2 min, ≤5 % weekly. The KB has NO dedicated R-session rule, rep
         // distance/count, recovery, and RPE are unstated, so none is set.
-        RunWorkout::Session(Repetition) => (
+        Repetition => (
             RunWorkoutRx {
                 duration_min: (None, Some(2)),
                 ..open
@@ -605,7 +593,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
         ),
         // running-020 Strides (neuromuscular; 15–30 s reps are sub-minute, so
         // only a coarse ≤1-min row here, exact seconds in `strides_rx`).
-        RunWorkout::Session(Strides) => (
+        Strides => (
             RunWorkoutRx {
                 rpe: Some((6, 7)),
                 duration_min: (None, Some(1)),
@@ -615,7 +603,7 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
         ),
         // running-021 / running-022 Hill sprints & long hill reps (blended
         // row; hill-sprint specifics in `hill_sprint_rx`).
-        RunWorkout::Session(Hills) => (
+        Hills => (
             RunWorkoutRx {
                 pct_hr_max: (Some(0.90), Some(1.00)),
                 rpe: Some((7, 9)),
@@ -626,13 +614,6 @@ pub fn workout_rx(workout: RunWorkout) -> Recommended<RunWorkoutRx> {
         ),
     };
     crate::evidence::graded(rx, claim_id)
-}
-
-/// Prescription band for a schema run session type. Delegates to
-/// [`workout_rx`]; use [`RunWorkout::EasyGeneralAerobic`] for Easy/GA runs
-/// (running-015), which the schema folds into `Recovery`.
-pub fn run_workout_rx(kind: RunSessionType) -> Recommended<RunWorkoutRx> {
-    workout_rx(RunWorkout::Session(kind))
 }
 
 // ---------------------------------------------------------------------------
@@ -800,18 +781,6 @@ pub fn long_run_share_default() -> Recommended<(f64, f64)> {
 // Run/walk extension, single-variable progression, recovery-week depth
 // (running-026/032/033)
 // ---------------------------------------------------------------------------
-
-/// running-032: progress only ONE variable at a time, volume OR intensity,
-/// never both in the same week. `true` = the week's plan is OK.
-pub fn single_variable_progression_ok(
-    volume_increased: bool,
-    intensity_increased: bool,
-) -> Recommended<bool> {
-    crate::evidence::graded(
-        !(volume_increased && intensity_increased),
-        claims::RUN_ONEVAR_001,
-    )
-}
 
 /// Mileage band for recovery-week depth (running-033). The KB gives NO numeric
 /// threshold separating higher- from lower-mileage runners, the caller
@@ -1565,26 +1534,6 @@ pub fn maf_cap_bpm(age_years: f64, adj: MafAdjustment) -> Recommended<f64> {
 /// (running-011): true when the easy (Z1) time share is at least 80%. RUN-DIST-001.
 pub fn easy_share_floor_ok(easy_frac_by_time: f64) -> Recommended<bool> {
     crate::evidence::graded(easy_frac_by_time >= 0.80, claims::RUN_DIST_001)
-}
-
-/// Intensity-counting method (running-012). Pick ONE per athlete and declare it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IntensityCountingMethod {
-    /// Time spent in each zone, default for distribution *reporting*.
-    TimeInZone,
-    /// Primary session goal, default for plan *design*.
-    SessionGoal,
-}
-
-/// Default intensity-counting method by use (running-012): session-goal for plan
-/// design, time-in-zone for distribution reporting. RUN-DIST-001.
-pub fn default_counting_method(for_plan_design: bool) -> Recommended<IntensityCountingMethod> {
-    let m = if for_plan_design {
-        IntensityCountingMethod::SessionGoal
-    } else {
-        IntensityCountingMethod::TimeInZone
-    };
-    crate::evidence::graded(m, claims::RUN_DIST_001)
 }
 
 // ---------------------------------------------------------------------------

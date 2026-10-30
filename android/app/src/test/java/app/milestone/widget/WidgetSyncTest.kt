@@ -30,6 +30,8 @@ class WidgetSyncTest {
     val rule = createEmptyComposeRule()
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
+    private val savedLocale: Locale = Locale.getDefault()
+    private val savedZone: TimeZone = TimeZone.getDefault()
 
     @Before
     fun setUp() {
@@ -40,8 +42,9 @@ class WidgetSyncTest {
 
     @After
     fun tearDown() {
-        TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
         QaHarness.teardown()
+        TimeZone.setDefault(savedZone)
+        Locale.setDefault(savedLocale)
     }
 
     /**
@@ -68,6 +71,30 @@ class WidgetSyncTest {
         assertSame("no new model was published", model, EventDispatcher.model.value)
         assertEquals(before.copy(zone = "Europe/London"), WidgetSnapshotStore.read(ctx))
         assertEquals(before.copy(zone = "Europe/London"), WidgetSnapshotStore.today(ctx, before.epochDay))
+    }
+
+    /** The midnight tick marks yesterday's snapshot stale; the model the process
+     *  holds is still yesterday's, so nothing rewrites it until the app sets the
+     *  new day: the widget keeps "Open lollop to update". */
+    @Test
+    fun theMidnightMarkLeavesYesterdaysSnapshotStale() {
+        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
+        lastScenario = launchMain()
+        rule.waitUntil(30_000) { EventDispatcher.bootHandled && EventDispatcher.model.value != null }
+        rule.waitForIdle()
+        rule.waitUntil(10_000) { WidgetSnapshotStore.read(ctx) != null }
+        val before = checkNotNull(WidgetSnapshotStore.read(ctx))
+        val revision = WidgetSnapshotStore.revision.value
+
+        assertTrue(WidgetSnapshotStore.markStale(ctx, force = false, today = before.epochDay + 1))
+        val until = System.currentTimeMillis() + 2_000
+        while (System.currentTimeMillis() < until) {
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(20)
+        }
+
+        assertEquals(before.copy(stale = true), WidgetSnapshotStore.read(ctx))
+        assertEquals("one write: the stale mark", revision + 1, WidgetSnapshotStore.revision.value)
     }
 
     /** Run the main looper (where [WidgetSync] collects) until [done]. */

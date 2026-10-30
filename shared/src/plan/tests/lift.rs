@@ -206,11 +206,6 @@ fn goal_weighted_dup_orders() {
     assert_eq!(dup_emphasis(LiftGoal::Power, true, 2), DupDay::HeavyVolume);
     // A strong power athlete keeps the classic order.
     assert_eq!(dup_emphasis(LiftGoal::Power, false, 2), DupDay::Hypertrophy);
-    // Hypertrophy leads with a hypertrophy day.
-    assert_eq!(
-        dup_emphasis(LiftGoal::Hypertrophy, false, 0),
-        DupDay::Hypertrophy
-    );
 }
 
 fn lift_type_on_day(prog: &Program, day: u16) -> Option<LiftSessionType> {
@@ -884,7 +879,7 @@ fn meet_taper_cuts_volume_holds_intensity_and_spares_the_last_days() {
     let mut sessions = normal.mesocycle.sessions.clone();
     // Meet on the Sunday 7 days after this Monday: Mon = 7 d out, Wed = 5,
     // Fri = 3.
-    crate::plan::lift::apply_meet_taper(&mut sessions, LiftGoal::MaxStrength, 7);
+    crate::plan::lift::apply_meet_taper(&mut sessions, 7);
     for (before, after) in normal.mesocycle.sessions.iter().zip(&sessions) {
         if !matches!(before.session_type, SessionType::Lift(_)) {
             continue;
@@ -893,7 +888,10 @@ fn meet_taper_cuts_volume_holds_intensity_and_spares_the_last_days() {
             let Prescription::Lift(l) = &rx.value else {
                 continue;
             };
-            assert_ne!(l.exercise, "Deadlift", "no deadlift inside 10 days");
+            let heavy_pull = l.exercise == "Deadlift"
+                && matches!(l.intensity, LiftIntensity::PercentOneRm(p)
+                    if p >= crate::plan::lift::HEAVY_PCT_1RM);
+            assert!(!heavy_pull, "no heavy deadlift inside 10 days");
             let orig = before
                 .prescriptions
                 .iter()
@@ -914,10 +912,83 @@ fn meet_taper_cuts_volume_holds_intensity_and_spares_the_last_days() {
     }
     // Meet in 2 days from Monday: Monday's lift day becomes rest.
     let mut close = normal.mesocycle.sessions.clone();
-    crate::plan::lift::apply_meet_taper(&mut close, LiftGoal::MaxStrength, 2);
+    crate::plan::lift::apply_meet_taper(&mut close, 2);
     let monday = close.iter().find(|s| s.day == 0).unwrap();
     assert_eq!(monday.session_type, SessionType::Rest);
     assert!(monday.prescriptions.is_empty());
+}
+
+#[test]
+fn meet_taper_keeps_a_light_deadlift() {
+    // STR-DLPEAK-001 times the last near-max pull; the 70 % Friday deadlift
+    // 6 days out stays (with its volume cut).
+    let anchors = Anchors {
+        lift_e1rm: vec![
+            ("Back squat".into(), 150.0),
+            ("Deadlift".into(), 200.0),
+            ("Bench press".into(), 100.0),
+        ],
+        week_start_epoch_day: Some(20_000),
+        ..Default::default()
+    };
+    let friday_lifts = |meet: Option<i64>| -> Vec<(String, LiftIntensity)> {
+        let p = Profile {
+            meet_epoch_day: meet,
+            ..base_profile()
+        };
+        let prog = synthesize(&p, &anchors, 0).unwrap();
+        let fri = prog.mesocycle.sessions.iter().find(|s| s.day == 4).unwrap();
+        fri.prescriptions
+            .iter()
+            .filter_map(|rx| match &rx.value {
+                Prescription::Lift(l) => Some((l.exercise.clone(), l.intensity)),
+                _ => None,
+            })
+            .collect()
+    };
+    let plain = friday_lifts(None);
+    assert!(
+        plain
+            .iter()
+            .any(|(n, i)| n == "Deadlift"
+                && matches!(i, LiftIntensity::PercentOneRm(p) if *p < 80.0)),
+        "without a meet Friday carries a light (<80 %) deadlift: {plain:?}"
+    );
+    let tapered = friday_lifts(Some(20_010));
+    assert!(
+        tapered.iter().any(|(n, _)| n == "Deadlift"),
+        "light deadlift 6 days out was dropped: {tapered:?}"
+    );
+}
+
+#[test]
+fn meet_date_without_taper_keeps_the_deload_week() {
+    // The taper replaces the deload only for barbell MaxStrength/Power; a
+    // hypertrophy or calisthenics lifter with a meet date still deloads.
+    let dated = Anchors {
+        week_start_epoch_day: Some(20_000),
+        ..Default::default()
+    };
+    for base in [
+        Profile {
+            lift_goal: LiftGoal::Hypertrophy,
+            ..base_profile()
+        },
+        Profile {
+            resistance_modality: crate::app::ResistanceModality::Calisthenics,
+            ..base_profile()
+        },
+    ] {
+        // Week index 5 is the deload week of the (5, 6) lifting block.
+        let plain = synthesize(&base, &dated, 5).unwrap();
+        assert_eq!(plain.mesocycle.phase, MesoPhase::Deload, "{base:?}");
+        let with_meet = Profile {
+            meet_epoch_day: Some(20_010),
+            ..base.clone()
+        };
+        let prog = synthesize(&with_meet, &dated, 5).unwrap();
+        assert_eq!(prog.mesocycle.phase, MesoPhase::Deload, "{base:?}");
+    }
 }
 
 #[test]

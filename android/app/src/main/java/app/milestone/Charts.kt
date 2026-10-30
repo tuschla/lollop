@@ -33,8 +33,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -110,16 +112,8 @@ internal fun localizedDayFormatter(skeleton: String, locale: Locale = Locale.get
 internal fun DateTimeFormatter.formatEpochDay(epochDay: Long): String = LocalDate.ofEpochDay(epochDay).format(this)
 
 /**
- * GitHub-style activity heatmap: one cell per day over the last [weeks] weeks,
- * columns = weeks, rows = day-of-week (Monday top, matching the plan's weeks). A
- * cell is tinted by DISCIPLINE ([days], keyed by local-day index): the accent for a
- * run day, the muted ink for a lifting day, split half and half on a day with both
- * (diagonally under an ink accent such as Paper's, where the two greys sit close).
- * One session a day is the norm, so the tint answers "what did I do", not "how
- * much". Purely a factual layout of when sessions were logged, no coaching, no
- * streak-nudging; empty days read as the faint track, future cells in the current
- * week are blank. Day indices are local-day numbers (days since the Unix epoch in
- * the device timezone) so the caller keeps timezone handling out of the core. A
+ * GitHub-style activity heatmap over the last [weeks] weeks (columns = weeks, Monday
+ * top), tinted by discipline per local day in [days]; future cells are blank. A
  * logged day is tappable when [onDayClick] is given.
  */
 @Composable
@@ -163,7 +157,7 @@ internal fun ContributionHeatmap(
 
     // Axis labels: localized narrow weekday initials down the left gutter (Mon top),
     // month ticks along the bottom at each column where the month first changes.
-    val locale = Locale.getDefault()
+    val locale = LocalConfiguration.current.locales[0]
     val weekdayInitials = remember(locale) { (0..6).map { DayOfWeek.of(it + 1).getDisplayName(TextStyle.NARROW, locale) } }
     val monthFmt = remember(locale) { localizedDayFormatter("MMM", locale) }
     val cellDateFmt = remember(locale) { localizedDayFormatter("EEEEMMMMd", locale) }
@@ -175,7 +169,7 @@ internal fun ContributionHeatmap(
     }
     val liftLabel = stringResource(R.string.history_heatmap_lift)
     val openLabel = stringResource(R.string.history_heatmap_open_day)
-    val res = androidx.compose.ui.platform.LocalContext.current.resources
+    val res = LocalResources.current
 
     val gap = Space.Xs.dp
     val density = LocalDensity.current
@@ -594,7 +588,7 @@ fun WeeklyDistanceChart(
     plannedKm: Double,
     unit: DistanceUnit,
     chartHeight: Dp,
-    planStartEpochDay: Long? = null,
+    planStartEpochDay: Long?,
 ) {
     if (weeks.isEmpty()) return
     val vals = weeks.map { metersToDisplay(it.km * 1000.0, unit) }
@@ -696,7 +690,7 @@ fun WeeklyDistanceChart(
             }
         }
         AxisTicks(weekLabel(weeks.first().week_start_epoch_day), stringResource(R.string.history_weekly_this_week))
-        selected?.takeIf { it < n }?.let { i ->
+        selected?.let { i ->
             Text(
                 stringResource(
                     R.string.history_weekly_bar_value,

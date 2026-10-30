@@ -71,7 +71,7 @@ fn weekly_bone_pain_referral_survives_a_later_session_review() {
     assert!(fb.message.contains("doctor"), "{}", fb.message);
     // The weekly referral also defers training (safety-040): it owns the
     // headline as a safety hold, and the session review does not lift it.
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
     assert_eq!(vm.safety_tier, Some(SafetyTier::MedicalReferral));
     assert_eq!(vm.today_headline.kind, HeadlineKind::SafetyHold);
     assert!(vm.today_headline.evidence.safety_critical);
@@ -549,7 +549,6 @@ fn e1rm_pr_beyond_5pct_emits_anchored_mastery() {
     .expect_only_render();
     let fb = app.view(&model).feedback.expect("mastery feedback");
     assert_eq!(fb.category, FeedbackCategory::PositiveMastery);
-    assert!(fb.anchor_mastery);
     assert!(fb.message.contains("New best"), "{}", fb.message);
     assert!(fb.message.contains("110 kg × 5"), "{}", fb.message);
     assert_eq!(

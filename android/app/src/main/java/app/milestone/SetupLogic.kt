@@ -21,7 +21,7 @@ internal enum class Modality(val titleRes: Int, val consequenceRes: Int, val foc
 
 /** The modality a stored profile trains: whichever sides carry volume (null when
  *  neither does). */
-internal fun modalityOf(draft: ProfileDraft): Modality? = when {
+internal fun modalityOf(draft: Event.SetProfile): Modality? = when {
     draft.weeklySets > 0 && draft.runningDaysPerWeek > 0 -> Modality.Both
     draft.weeklySets > 0 -> Modality.Lift
     draft.runningDaysPerWeek > 0 -> Modality.Run
@@ -145,7 +145,7 @@ internal val ResistanceModality.setupConsequenceRes: Int
 
 /** The kg|lb the bodyweight field opens in: a re-run keeps the profile's choice; a
  *  first run follows the phone's region (lb in the US/LR/MM). */
-internal fun seedWeightUnit(initial: ProfileDraft?, locale: Locale = Locale.getDefault()): WeightUnit =
+internal fun seedWeightUnit(initial: Event.SetProfile?, locale: Locale = Locale.getDefault()): WeightUnit =
     initial?.weightUnit ?: localeWeightUnit(locale)
 
 /** Age at which the core's pediatric hold (SAFE-PEDS-001) stops applying. */
@@ -340,11 +340,9 @@ internal fun hybridRunDayOptions(liftDays: Int, lead: BothPriority?): IntRange {
 }
 
 /** Run days the engine schedules in a Both week: the rest of the athlete's days,
- *  capped at [HYBRID_CAPPED_DAYS] while lifting leads. */
-internal fun hybridRunDays(totalDays: Int, liftDays: Int, lead: BothPriority?): Int {
-    val rest = (totalDays - liftDays).coerceAtLeast(1)
-    return if (lead == BothPriority.RunLean) rest else minOf(rest, HYBRID_CAPPED_DAYS)
-}
+ *  within [hybridRunDayOptions] (capped at [HYBRID_CAPPED_DAYS] while lifting leads). */
+internal fun hybridRunDays(totalDays: Int, liftDays: Int, lead: BothPriority?): Int =
+    (totalDays - liftDays).coerceIn(1, hybridRunDayOptions(liftDays, lead).last)
 
 /** Days-step range per modality: a lifting plan holds [LIFT_DAYS] sessions, a Both
  *  week needs room for [HYBRID_DEFAULT_LIFT_DAYS] lift days plus a run. */
@@ -358,11 +356,11 @@ internal fun dayOptions(modality: Modality?): IntRange = when (modality) {
  *  run + lift days (Both, which stores the two sides separately), inside
  *  [dayOptions]. Lift falls back to the engine's default for a profile from before
  *  the lift-days answer. */
-internal fun seedTotalDays(modality: Modality?, initial: ProfileDraft?): Int? =
+internal fun seedTotalDays(modality: Modality?, initial: Event.SetProfile?): Int? =
     storedTotalDays(modality, initial)?.coerceIn(dayOptions(modality))
 
 /** [seedTotalDays] before it is fitted to [dayOptions]. */
-private fun storedTotalDays(modality: Modality?, initial: ProfileDraft?): Int? = when (modality) {
+private fun storedTotalDays(modality: Modality?, initial: Event.SetProfile?): Int? = when (modality) {
     Modality.Run -> initial?.runningDaysPerWeek
     Modality.Both -> initial?.runningDaysPerWeek?.let { it + (initial.liftDaysPerWeek ?: HYBRID_DEFAULT_LIFT_DAYS) }
     Modality.Lift -> initial?.liftDaysPerWeek ?: LIFT_ONLY_DEFAULT_DAYS
@@ -372,7 +370,7 @@ private fun storedTotalDays(modality: Modality?, initial: ProfileDraft?): Int? =
 /** Days-step seed for a Profile Focus switch to [target]: only days the user
  *  already gave for the sides [target] trains (either side's days may come from
  *  the stash kept when that side was switched off). Null asks afresh. */
-internal fun switchSeedDays(target: Modality, initial: ProfileDraft, stashedRunDays: Int?, stashedLiftDays: Int? = null): Int? {
+internal fun switchSeedDays(target: Modality, initial: Event.SetProfile, stashedRunDays: Int?, stashedLiftDays: Int? = null): Int? {
     val liftDays = initial.liftDaysPerWeek?.takeIf { initial.weeklySets > 0 } ?: stashedLiftDays?.takeIf { it > 0 }
     val runDays = initial.runningDaysPerWeek.takeIf { it > 0 } ?: stashedRunDays?.takeIf { it > 0 }
     val total = when (target) {
@@ -405,16 +403,10 @@ internal enum class RaceDistance(val km: Double, val labelRes: Int) {
     }
 }
 
-/** Finish-time keypad: digits fill from the right (h mm ss), like a microwave. */
-private const val RACE_TIME_DIGITS = 6
-
-/** The digit buffer as seconds; null when empty or minutes/seconds ≥ 60. */
+/** Finish-time keypad: digits fill from the right (h mm ss), like a microwave.
+ *  The buffer as seconds; null when empty or minutes/seconds ≥ 60. */
 internal fun raceTimeSec(digits: String): Int? {
-    if (digits.isEmpty() || digits.length > RACE_TIME_DIGITS) return null
-    val p = digits.padStart(RACE_TIME_DIGITS, '0')
-    val h = p.substring(0, 2).toInt()
-    val m = p.substring(2, 4).toInt()
-    val s = p.substring(4, 6).toInt()
+    val (h, m, s) = hmsDigits(digits) ?: return null
     if (m >= 60 || s >= 60) return null
     return (h * 3600 + m * 60 + s).takeIf { it > 0 }
 }
@@ -424,7 +416,7 @@ internal fun raceTimeSec(digits: String): Int? {
 internal fun appendRaceDigit(digits: String, key: Char, fresh: Boolean): String? {
     if (!key.isDigit()) return null
     val base = if (fresh) "" else digits
-    return if (base.length < RACE_TIME_DIGITS) (base + key).trimStart('0') else null
+    return if (base.length < HMS_DIGITS_MAX) (base + key).trimStart('0') else null
 }
 
 /** The digit buffer as shown: "m:ss" up to four digits, "h:mm:ss" past that. */
@@ -554,7 +546,7 @@ internal fun epochDayShortLabel(day: Long, today: Long, locale: Locale = Locale.
 // ── Answers → profile ───────────────────────────────────────────────────────
 
 /**
- * The guided answers as ONE [ProfileDraft] (shell mapping, no KB claim). Both
+ * The guided answers as ONE [Event.SetProfile] (shell mapping, no KB claim). Both
  * splits [daysPerWeek] into the picked lift days and the run days the engine
  * schedules (HYB-RUNCAP-001). A skipped weekly distance ([weeklyRunKm] null) is
  * sent as not set, so the engine picks its own start. The `keep*` flags carry the
@@ -573,7 +565,7 @@ internal fun deriveDraft(
     restingHrBpm: Double?,
     weightLb: Boolean,
     health: HealthScreen,
-    initial: ProfileDraft?,
+    initial: Event.SetProfile?,
     keepLiftVolume: Boolean,
     keepRunVolume: Boolean,
     keepRunDays: Boolean,
@@ -589,7 +581,7 @@ internal fun deriveDraft(
     meetEpochDay: Long? = null,
     calisEquipment: CalisEquipment? = null,
     birthEpochDay: Long? = null,
-): ProfileDraft {
+): Event.SetProfile {
     val lifts = modality != Modality.Run
     val runs = modality != Modality.Lift
     // A Both profile has a separate running level; a single-modality profile's
@@ -647,7 +639,7 @@ internal fun deriveDraft(
     }
     val race = runs && goalDistanceVal.isRace
 
-    return ProfileDraft(
+    return Event.SetProfile(
         progressionCadence = level.cadence,
         liftGoal = liftGoal,
         goalDistance = goalDistanceVal,
@@ -700,7 +692,7 @@ internal fun deriveDraft(
 internal data class KeepFlags(val liftVolume: Boolean, val runVolume: Boolean, val runDays: Boolean, val advanced: Boolean)
 
 internal fun keepFlags(
-    initial: ProfileDraft?,
+    initial: Event.SetProfile?,
     seedModality: Modality?,
     seedLevel: SetupLevel?,
     seedRunLevel: SetupLevel?,
@@ -826,7 +818,7 @@ internal data class SetupAnswers(
 
 /** The weekly distance a running profile (or the stash kept while running was
  *  off) already states; null when never given. */
-internal fun seedWeeklyRunKm(initial: ProfileDraft?, runStash: StashedRun?): Double? =
+internal fun seedWeeklyRunKm(initial: Event.SetProfile?, runStash: StashedRun?): Double? =
     initial?.takeIf { it.runningDaysPerWeek > 0 && it.runningKmPerWeekSet }?.runningKmPerWeek ?: runStash?.km
 
 /**
@@ -837,7 +829,7 @@ internal fun seedWeeklyRunKm(initial: ProfileDraft?, runStash: StashedRun?): Dou
  * name its [currentRungs] (a pull-up rung only while the kit can hang).
  */
 internal fun seedAnswers(
-    initial: ProfileDraft?,
+    initial: Event.SetProfile?,
     today: Long,
     recordedRunLevel: SetupLevel?,
     distanceUnit: DistanceUnit,
@@ -898,7 +890,7 @@ internal fun seedAnswers(
 internal fun switchedAnswers(
     seed: SetupAnswers,
     target: Modality,
-    initial: ProfileDraft,
+    initial: Event.SetProfile,
     runStash: StashedRun?,
     liftStash: StashedLift?,
 ): SetupAnswers = seed.copy(
@@ -937,7 +929,7 @@ internal fun switchStartStep(start: SetupAnswers, base: ReviewReturn): Int {
 internal class SetupValues(
     private val answers: SetupAnswers,
     private val seed: SetupAnswers,
-    private val initial: ProfileDraft?,
+    private val initial: Event.SetProfile?,
     seedWeeklyKm: Double?,
     distanceUnit: DistanceUnit,
     private val today: Long,
@@ -1009,7 +1001,7 @@ internal class SetupValues(
     /** The answers mapped to the profile Finish would send; null until the required
      *  answers exist. The review renders this same draft, so what the user reviews
      *  is exactly what is saved. */
-    fun draft(): ProfileDraft? {
+    fun draft(): Event.SetProfile? {
         val m = answers.modality ?: return null
         val l = answers.level ?: return null
         val d = answers.days ?: return null

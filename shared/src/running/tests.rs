@@ -737,14 +737,6 @@ fn vdot_derate_and_goal_plan() {
 fn distribution_and_progression_guards() {
     assert!(easy_share_floor_ok(0.80).value);
     assert!(!easy_share_floor_ok(0.79).value);
-    assert_eq!(
-        default_counting_method(true).value,
-        IntensityCountingMethod::SessionGoal
-    );
-    assert_eq!(
-        default_counting_method(false).value,
-        IntensityCountingMethod::TimeInZone
-    );
     assert_eq!(novice_volume_bump_hold_weeks(0.5).value, Some((2, 3)));
     assert_eq!(novice_volume_bump_hold_weeks(3.0).value, None);
 }
@@ -834,27 +826,27 @@ fn check_volume_caps_flags_every_violation() {
 #[test]
 fn workout_rx_hr_governance_split() {
     // Aerobic sessions are HR-governed.
-    assert!(run_workout_rx(RunSessionType::Recovery).value.hr_governed);
-    assert!(run_workout_rx(RunSessionType::LongRun).value.hr_governed);
-    assert!(run_workout_rx(RunSessionType::Tempo).value.hr_governed);
-    assert!(run_workout_rx(RunSessionType::RacePace).value.hr_governed);
-    assert!(workout_rx(RunWorkout::EasyGeneralAerobic).value.hr_governed);
+    assert!(workout_rx(RunSessionType::Recovery).value.hr_governed);
+    assert!(workout_rx(RunSessionType::LongRun).value.hr_governed);
+    assert!(workout_rx(RunSessionType::Tempo).value.hr_governed);
+    assert!(workout_rx(RunSessionType::RacePace).value.hr_governed);
+    assert!(workout_rx(RunSessionType::Easy).value.hr_governed);
     // Short/max efforts are effort-governed, HR lags.
-    assert!(!run_workout_rx(RunSessionType::Interval).value.hr_governed);
-    assert!(!run_workout_rx(RunSessionType::Repetition).value.hr_governed);
-    assert!(!run_workout_rx(RunSessionType::Strides).value.hr_governed);
-    assert!(!run_workout_rx(RunSessionType::Hills).value.hr_governed);
+    assert!(!workout_rx(RunSessionType::Interval).value.hr_governed);
+    assert!(!workout_rx(RunSessionType::Repetition).value.hr_governed);
+    assert!(!workout_rx(RunSessionType::Strides).value.hr_governed);
+    assert!(!workout_rx(RunSessionType::Hills).value.hr_governed);
 }
 
 #[test]
 fn workout_rx_bands_verbatim() {
     // running-018 Tempo 88–92 %HRmax, RPE 6–7, 20–40 min continuous.
-    let t = run_workout_rx(RunSessionType::Tempo).value;
+    let t = workout_rx(RunSessionType::Tempo).value;
     assert_eq!(t.pct_hr_max, (Some(0.88), Some(0.92)));
     assert_eq!(t.rpe, Some((6, 7)));
     assert_eq!(t.duration_min, (Some(20), Some(40)));
     // VDOT-table Interval 97–100 %HRmax (matches `vdot_band_hr_pct`), 3–5 min.
-    let i = run_workout_rx(RunSessionType::Interval).value;
+    let i = workout_rx(RunSessionType::Interval).value;
     assert_eq!(i.pct_hr_max, (Some(0.97), Some(1.00)));
     assert_eq!(i.duration_min, (Some(3), Some(5)));
     assert_eq!(i.rpe, Some((8, 9)));
@@ -865,7 +857,7 @@ fn recovery_rx_has_open_lower_hr_and_both_ceilings() {
     // running-014: KB gives NO lower HR bound, <76 %HRmax AND <70 %HRR
     // ceilings, pace ≥20 % slower than MP with no upper slowness bound,
     // RPE 2–3, 20–40 min.
-    let r = run_workout_rx(RunSessionType::Recovery);
+    let r = workout_rx(RunSessionType::Recovery);
     assert_eq!(r.value.pct_hr_max, (None, Some(0.76)));
     assert_eq!(r.value.pct_hrr_max, Some(0.70));
     assert_eq!(r.value.pct_slower_than_mp, (Some(20.0), None));
@@ -878,20 +870,20 @@ fn recovery_rx_has_open_lower_hr_and_both_ceilings() {
 fn easy_ga_is_distinct_from_recovery() {
     // running-015: E pace 15–25 % slower than MP, 65–79 %HRmax, RPE 3–4,
     // 30–90 min, a different band set from Recovery on every axis.
-    let e = workout_rx(RunWorkout::EasyGeneralAerobic);
+    let e = workout_rx(RunSessionType::Easy);
     assert_eq!(e.value.pct_hr_max, (Some(0.65), Some(0.79)));
     assert_eq!(e.value.pct_slower_than_mp, (Some(15.0), Some(25.0)));
     assert_eq!(e.value.rpe, Some((3, 4)));
     assert_eq!(e.value.duration_min, (Some(30), Some(90)));
     assert_eq!(e.claim_id(), claims::RUN_EASY_001);
-    assert_ne!(e.value, run_workout_rx(RunSessionType::Recovery).value);
+    assert_ne!(e.value, workout_rx(RunSessionType::Recovery).value);
 }
 
 #[test]
 fn long_run_rx_has_no_duration_floor() {
     // running-016: no duration floor in the KB; soft time-cap ~2:00–2:30 →
     // 150-min outer ceiling; pace MP −10–20 %; 65–80 %HRmax; RPE 3–5.
-    let lr = run_workout_rx(RunSessionType::LongRun).value;
+    let lr = workout_rx(RunSessionType::LongRun).value;
     assert_eq!(lr.duration_min, (None, Some(150)));
     assert_eq!(lr.pct_hr_max, (Some(0.65), Some(0.80)));
     assert_eq!(lr.pct_slower_than_mp, (Some(10.0), Some(20.0)));
@@ -902,7 +894,7 @@ fn long_run_rx_has_no_duration_floor() {
 fn race_pace_rx_is_km_blocks_not_minutes() {
     // running-017: 8–26 km blocks (KB states km, not minutes), M pace,
     // 80–85 %HRmax, RPE 5–6. No weekly M cap exists (VDOT M row: "-").
-    let m = run_workout_rx(RunSessionType::RacePace).value;
+    let m = workout_rx(RunSessionType::RacePace).value;
     assert_eq!(m.distance_km, (Some(8.0), Some(26.0)));
     assert_eq!(m.duration_min, (None, None));
     assert_eq!(m.pct_hr_max, (Some(0.80), Some(0.85)));
@@ -914,7 +906,7 @@ fn race_pace_rx_is_km_blocks_not_minutes() {
 fn repetition_rx_carries_only_kb_backed_parameters() {
     // VDOT R row only: reps ≤2 min, pace-not-HR. RPE is NOT stated in the
     // KB and no HR band exists.
-    let r = run_workout_rx(RunSessionType::Repetition);
+    let r = workout_rx(RunSessionType::Repetition);
     assert_eq!(r.value.rpe, None);
     assert_eq!(r.value.pct_hr_max, (None, None));
     assert_eq!(r.value.duration_min, (None, Some(2)));
@@ -990,15 +982,6 @@ fn hr_method_preference_branches() {
         hr_method_preference(70.0).value,
         HrMethodPreference::EitherConverged
     );
-}
-
-#[test]
-fn single_variable_progression_gate() {
-    // running-032: volume OR intensity, never both in one week.
-    assert!(single_variable_progression_ok(true, false).value);
-    assert!(single_variable_progression_ok(false, true).value);
-    assert!(single_variable_progression_ok(false, false).value);
-    assert!(!single_variable_progression_ok(true, true).value);
 }
 
 #[test]

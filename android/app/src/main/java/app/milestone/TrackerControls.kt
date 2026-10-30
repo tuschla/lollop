@@ -34,7 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -437,14 +437,14 @@ internal fun startGatesCaptionRes(precise: Boolean, moving: Boolean): Int = when
 /** Before Start: the planned run the tracker will follow, with its targets. */
 @Composable
 private fun RunPlanPreview(item: PrescriptionView, unit: DistanceUnit) {
-    val res = LocalContext.current.resources
+    val res = LocalResources.current
     val targets = remember(item.run_target, unit) { runTargetLines(res, item.run_target, unit) }
     val headline = remember(item, unit) { runPlanHeadline(item, unit) }
     PlanCard {
         Text(
             stringResource(R.string.track_plan_title, headline),
             color = OnBgBody,
-            style = Type.Body.copy(fontWeight = FontWeight.Bold),
+            style = Type.BodyBold,
         )
         targets.forEach { Text(it, color = OnBgMuted, style = Type.Caption.merge(TabularFigures)) }
     }
@@ -474,7 +474,7 @@ private fun PlanCard(content: @Composable ColumnScope.() -> Unit) {
  */
 @Composable
 internal fun RunGuideCard(item: PrescriptionView, progress: StepProgress?, unit: DistanceUnit, onSkip: () -> Unit) {
-    val res = LocalContext.current.resources
+    val res = LocalResources.current
     val targets = remember(item.run_target, unit) { runTargetSummary(res, item.run_target, unit) }
     if (progress == null && targets == null) return
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
@@ -499,7 +499,7 @@ private fun RunStepCard(res: Resources, progress: StepProgress, onSkip: () -> Un
             Text(
                 title,
                 color = OnBgBody,
-                style = Type.Body.copy(fontWeight = FontWeight.Bold),
+                style = Type.BodyBold,
                 modifier = Modifier
                     .weight(1f)
                     .semantics { liveRegion = LiveRegionMode.Polite },
@@ -544,7 +544,7 @@ internal fun LocationPermissionPanel(
     prompt: LocationPrompt,
     onAllow: () -> Unit,
     onClose: () -> Unit,
-    onLogManually: (() -> Unit)?,
+    onLogManually: () -> Unit,
     onSaveRun: (() -> Unit)?,
 ) {
     val resuming = onSaveRun != null
@@ -570,7 +570,7 @@ internal fun LocationPermissionPanel(
                 chevron = true,
                 modifier = Modifier.offset(x = -TextActionInset),
             )
-        } else if (prompt != LocationPrompt.Rationale && onLogManually != null) {
+        } else if (prompt != LocationPrompt.Rationale) {
             // A text action, so no tonal slab sits over the primary below it.
             TextAction(
                 stringResource(R.string.track_btn_log_manually),

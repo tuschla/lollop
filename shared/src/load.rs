@@ -125,7 +125,7 @@ pub fn tsb(ctl: f64, atl: f64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// HRmax estimators & HR zones (File 07)
+// Karvonen target HR (File 07)
 // ---------------------------------------------------------------------------
 
 /// Karvonen target HR: `target = HRrest + frac·(HRmax − HRrest)` (File 07).
@@ -237,7 +237,7 @@ pub fn vdot_band_pace_sec_per_km(vdot: f64, band: crate::schema::VdotBand) -> Op
     if matches!(band, crate::schema::VdotBand::Easy) {
         return crate::running::mp_relative_pace_sec_per_km(
             vdot,
-            crate::running::RunWorkout::EasyGeneralAerobic,
+            crate::schema::RunSessionType::Easy,
         );
     }
     let (lo_pct, hi_pct) = crate::running::vdot_band_vo2max_pct(band);

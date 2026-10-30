@@ -13,7 +13,7 @@ fn set_profile_sanitizes_poison_floats() {
     p.running_km_per_week = 1e300;
     app.update(Event::SetProfile(p), &mut model)
         .expect_only_render();
-    let km = model.profile.as_ref().unwrap().running_km_per_week;
+    let km = model.profile().unwrap().running_km_per_week;
     assert!(
         km.is_finite() && km <= 1.0e12,
         "running_km_per_week must clamp, got {km}"
@@ -24,7 +24,7 @@ fn set_profile_sanitizes_poison_floats() {
     app.update(Event::SetProfile(p2), &mut model)
         .expect_only_render();
     assert_eq!(
-        model.profile.as_ref().unwrap().running_km_per_week,
+        model.profile().unwrap().running_km_per_week,
         0.0,
         "a negative weekly volume floors at 0"
     );
@@ -35,7 +35,7 @@ fn set_profile_sanitizes_poison_floats() {
     app.update(Event::SetProfile(p3), &mut model)
         .expect_only_render();
     assert!(
-        model.profile.as_ref().unwrap().health.youth,
+        model.profile().unwrap().health.youth,
         "a NaN age must sanitize to 0 and fire the youth gate"
     );
 }
@@ -256,7 +256,7 @@ fn submit_events_1e300_inputs_never_serialize_to_null() {
             row.signal
         );
     }
-    let echo = vm.checkin_today.expect("today's check-in is echoed");
+    let echo = vm.latest_checkin.expect("today's check-in is echoed");
     for v in [echo.resting_hr_bpm, echo.hrv_rmssd_ms]
         .into_iter()
         .flatten()

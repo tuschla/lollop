@@ -136,6 +136,21 @@ class WidgetSnapshotTest {
         assertTrue(WidgetSnapshotStore.read(ctx)!!.stale)
     }
 
+    /** A zone change back across midnight (or a clock set forward and back) brings
+     *  a stale snapshot's own day back: the mark ticks [WidgetSnapshotStore.staleMarks]
+     *  so WidgetSync derives it again from the model the process holds. */
+    @Test
+    fun aStaleSnapshotWhoseDayComesBackIsDerivedAgain() {
+        WidgetSnapshotStore.write(ctx, widgetSnapshotOf(model(), DistanceUnit.Km))
+        val marks = WidgetSnapshotStore.staleMarks.value
+        // West across zones: the local day is the one before.
+        assertTrue(WidgetSnapshotStore.markStale(ctx, force = true, today = day - 1))
+        assertEquals("another day: nothing to derive", marks, WidgetSnapshotStore.staleMarks.value)
+        // Local midnight: the snapshot's day again.
+        assertFalse(WidgetSnapshotStore.markStale(ctx, force = false, today = day))
+        assertEquals(marks + 1, WidgetSnapshotStore.staleMarks.value)
+    }
+
     @Test
     fun midnightAlarmIsTheNextLocalMidnight() {
         val zone = ZoneId.of("Europe/Berlin")
@@ -227,7 +242,7 @@ class WidgetSnapshotTest {
     @Test
     fun holdSaysTrainingIsPausedButNotWhy() {
         val ns = SessionPlanView(day, "Lower body", "Lift(MaxEffort)", "blocked", listOf(lift("Squat", "3 × 5 @ 100 kg")))
-        val m = model(ns).copy(train_blocked = true, hold_reason = "pain", safety_tier = "Pain")
+        val m = model(ns).copy(hold_reason = "pain", safety_tier = "Pain")
         val snap = widgetSnapshotOf(m, DistanceUnit.Km)
         assertEquals(WidgetDayKind.Paused, snap.kind)
         // A paused day carries no session, items, week count or Track run.
@@ -246,7 +261,6 @@ class WidgetSnapshotTest {
     @Test
     fun underEighteenPauseIsGenericAndNotInTheDangerColour() {
         val m = model().copy(
-            train_blocked = true,
             hold_reason = "youth",
             youth_activity = YouthActivityView(minutes = 150, weekly_target_minutes = 420),
         )

@@ -71,7 +71,7 @@ while [[ $# -gt 0 ]]; do
     --apk) APK="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
     --keep-emulator) KEEP_EMU=1; shift ;;
-    -h|--help) sed -n '2,50p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR>1&&/^#/{print;next}NR>1{exit}' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -85,7 +85,6 @@ mkdir -p "$OUT"/{shots,ui,logs}
 : >"$OUT/checks.tsv"
 # shellcheck source=lib.sh
 source "$HELP/lib.sh"
-EV() { python3 "$HELP/events.py" "$@"; }
 API=0
 
 # ── Emulator ─────────────────────────────────────────────────────────────────
@@ -97,12 +96,6 @@ check_surfaceflinger() {
       "check target= in ~/.android/avd/$AVD.ini (see the header)"
     exit 1
   fi
-}
-# `adb install` streams over the package service; on some API 37 images that
-# fails with "Broken pipe" while a pushed `pm install` works.
-install_apk() {
-  adb_ install -r "$APK" >/dev/null 2>&1 && return 0
-  adb_ push "$APK" /data/local/tmp/surfaces.apk >/dev/null && sh_ pm install -r /data/local/tmp/surfaces.apk | grep -q Success
 }
 
 # ── Device state ─────────────────────────────────────────────────────────────
@@ -176,18 +169,6 @@ wait_screen() { local i s=""; for i in $(seq 1 "${2:-10}"); do s="$(screen)"; [[
 last_screen() { cat "$OUT/.last_screen" 2>/dev/null; }
 
 # ── System UI ────────────────────────────────────────────────────────────────
-# Every window (status bar, shade, launcher, app) into ui/NAME.xml.
-wdump() {
-  local i
-  for i in 1 2 3; do
-    adb_ shell uiautomator dump --windows /sdcard/surf.xml >/dev/null 2>&1 &&
-      adb_ exec-out cat /sdcard/surf.xml >"$OUT/ui/$1.xml" 2>/dev/null &&
-      grep -q '</displays>' "$OUT/ui/$1.xml" && return 0
-    sleep 1
-  done
-  return 1
-}
-wfind() { python3 "$HELP/node.py" "$2" "$3" <"$OUT/ui/$1.xml"; } # wfind DUMP MODE TEXT
 # The status-bar chip text (SystemUI `ongoing_activity_chip_content`), dumped as ui/NAME.xml.
 chip() { wdump "$1" && wfind "$1" ridtext ongoing_activity_chip_content 2>/dev/null; }
 # Screenshot + its status-bar strip (shots/NAME.png, shots/NAME-statusbar.png).
@@ -235,7 +216,6 @@ ocr_find() {
   tesseract "$OUT/shots/$1.png" - --psm 11 -l "$lang" tsv 2>/dev/null |
     awk -F'\t' -v w="$2" '$12 == w { print int($7 + $9 / 2), int($8 + $10 / 2); found = 1; exit } END { exit !found }'
 }
-home() { adb_ shell input keyevent 3; sleep 2; }
 mmss() { python3 -c "import re,sys;m=re.fullmatch(r'(?:(\d+):)?(\d+):(\d\d)',sys.argv[1].strip());print(int(m.group(1) or 0)*3600+int(m.group(2))*60+int(m.group(3)) if m else -1)" "$1"; }
 
 # ── Run helpers ──────────────────────────────────────────────────────────────
@@ -253,41 +233,7 @@ finish_run() {
   ! has_text eq "Save run"
 }
 
-# ── Tile helpers ─────────────────────────────────────────────────────────────
-TILE="$APP_ID/.QuickTileService"
-# Open Quick Settings and dump it as ui/NAME.xml; echo the tile's label. The QS
-# tile node carries the label as its text (content-desc adds the state). The
-# panel binds the tile when it opens (onStartListening), so the label is read
-# again 2 s after it first shows to get the settled state.
-tile_label() {
-  local i l re='^(Log|Log set|Start run|Run · recording)$'
-  adb_ shell cmd statusbar expand-settings; sleep 3
-  for i in 1 2 3; do
-    wdump "$1" || continue
-    l="$(wfind "$1" re "$re" | cut -d' ' -f7-)"
-    if [[ -n "$l" ]]; then
-      sleep 2
-      wdump "$1" && l="$(wfind "$1" re "$re" | cut -d' ' -f7-)"
-      [[ -n "$l" ]] && { echo "$l"; return 0; }
-    fi
-    # The added tile lands on the last QS page.
-    adb_ shell input swipe 900 700 150 700 300; sleep 2
-  done
-  return 1
-}
-# add_tile: `cmd statusbar add-tile`, then wait (max ~40 s) until the tile shows
-# on the QS panel (it takes a while to bind on API 34).
-add_tile() {
-  local i
-  sh_ cmd statusbar add-tile "$TILE" >/dev/null
-  for i in 1 2 3 4 5 6; do
-    sleep 3
-    tile_label tile-added >/dev/null && { adb_ shell cmd statusbar collapse; return 0; }
-    adb_ shell cmd statusbar collapse
-  done
-  log "tile $TILE not on the QS panel after add-tile"
-  return 1
-}
+# ── Tile helpers (tile_label, add_tile in lib.sh) ────────────────────────────
 tap_tile() { # tap_tile DUMP LABEL (QS already open from tile_label)
   local r p
   r="$(wfind "$1" eq "$2")" || return 1
@@ -405,59 +351,7 @@ sc_tilefresh() {
   fi
 }
 
-# ── Widget ───────────────────────────────────────────────────────────────────
-LAUNCHER="com.google.android.apps.nexuslauncher"
-# drag X1 Y1 X2 Y2: a long-press drag as raw motion events (the launcher's
-# widget-picker preview starts a drag only after a held touch; `input
-# draganddrop` does not hold long enough on API 34).
-drag() {
-  local i
-  adb_ shell input motionevent DOWN "$1" "$2"; sleep 2
-  for i in 1 2 3 4 5 6 7 8; do
-    adb_ shell input motionevent MOVE $(( $1 + ($3 - $1) * i / 8 )) $(( $2 + ($4 - $2) * i / 8 ))
-  done
-  sleep 1
-  adb_ shell input motionevent UP "$3" "$4"
-}
-# Place the Today widget through the launcher's picker on a reset home screen
-# (launcher data cleared, so a long-press lands on empty grid): long-press home →
-# Widgets → search "lollop" → Today → tap the preview → "Add Today widget"
-# (API 35+), else (API 34: no Add button) drag the preview image
-# (`widget_preview_container`) onto the home grid.
-place_widget() {
-  local r p preview='^[0-9]+ wide by [0-9]+ high$'
-  adb_ shell pm clear "$LAUNCHER" >/dev/null 2>&1; sleep 3
-  home; home; sleep 3
-  evidence widget-home-clean
-  adb_ shell input swipe 540 1300 540 1300 1500; sleep 2
-  tap_node eq Widgets || return 1; sleep 3
-  if tap_node eq Search 2; then sleep 1; adb_ shell input text lollop; sleep 3; fi
-  scroll_to eq lollop 6 || return 1
-  has_text re "$preview" || { tap_node eq lollop; sleep 2; }
-  has_text re "$preview" || { tap_node eq Today 2; sleep 2; }
-  evidence widget-picker
-  has_text eq "Add Today widget" || { tap_node re "$preview" 2; sleep 2; }
-  evidence widget-picker-preview
-  if has_text eq "Add Today widget"; then
-    tap_node eq "Add Today widget"; sleep 4
-  else
-    r="$(find_node rid widget_preview_container)" || r="$(find_node rid widget_preview)" || return 1
-    read -r -a p <<<"$r"
-    drag "${p[0]}" "${p[1]}" 540 800; sleep 4
-  fi
-  # The launcher leaves the new widget in resize mode (no idle UI state for
-  # uiautomator until it is dismissed).
-  home
-  evidence widget-placed
-  sh_ dumpsys appwidget | grep -q "cmp:ComponentInfo{$APP_ID/$APP_ID.widget.TodayWidgetReceiver}" &&
-    wait_text eq "Open Today in lollop" 15
-}
-# widget_texts NAME: the widget's labels (home screen dump) one per line.
-widget_texts() {
-  home; sleep 2
-  evidence "$1"
-  python3 "$HELP/node.py" texts <"$OUT/ui/$1.xml" | sed -n '/content-desc=Open Today in lollop/,$p' | head -12
-}
+# ── Widget (place_widget, widget_texts in lib.sh) ────────────────────────────
 # widget_tap NAME LABEL WANT-SCREEN
 widget_tap() {
   local S=widget s
@@ -885,12 +779,6 @@ sc_toggle() {
 REM_ID=4301
 REM_PIN=1234
 REM_ALARM=""
-# The reminder alarm's next time ("YYYY-MM-DD HH:MM:SS", device local); empty
-# when none is set.
-rem_alarm() {
-  sh_ dumpsys alarm | grep -A3 'walarm\*:app.milestone.action.SESSION_REMINDER' |
-    sed -n 's/.*origWhen=\([0-9-]* [0-9:]*\).*/\1/p' | head -1
-}
 rem_epoch() { echo $(( $(TZ=UTC date -d "$1" +%s) / 86400 )); }
 # rem_want [DAY]: "title<TAB>line<TAB>action" the reminder should show for the
 # stored snapshot's own day, or for its day ahead DAY (the copy rules of
@@ -1229,7 +1117,7 @@ trap 'touch "$OUT/feed.stop"; kill ${LOGCAT_PID:-} 2>/dev/null; stop_emulator' E
 check_surfaceflinger
 API="$(sh_ getprop ro.build.version.sdk)"
 echo "device:    $(sh_ getprop ro.product.model), API $API ($(sh_ getprop ro.build.version.release))" >>"$OUT/config.txt"
-install_apk || { log "install failed"; exit 1; }
+install_apk "$APK" -r >/dev/null || { log "install failed"; exit 1; }
 adb_ logcat -c 2>/dev/null || true
 adb_ logcat -G 16M >/dev/null 2>&1 || true
 adb_ logcat -v threadtime -b main,system,crash,events >"$OUT/logcat.txt" 2>&1 &
@@ -1243,18 +1131,7 @@ for sc in $ONLY; do
   shot "end-$sc"
 done
 sleep 2
-kill "$LOGCAT_PID" 2>/dev/null; wait "$LOGCAT_PID" 2>/dev/null
-
-python3 "$HELP/scan_logcat.py" "$OUT/logcat.txt" "$OUT/logcat-scan.json" >/dev/null
-python3 - "$OUT/logcat-scan.json" "$OUT/checks.tsv" <<'PY'
-import json, sys
-s = json.load(open(sys.argv[1]))
-out = open(sys.argv[2], "a")
-for k, label in (("fatal", "Java FATAL EXCEPTION"), ("native", "native crash"), ("anr", "ANR"),
-                 ("oom", "OutOfMemoryError"), ("fgs", "foreground-service failure")):
-    out.write(f"{'PASS' if s[k] == 0 else 'FAIL'}\tlogcat\t{label}\t{s[k]} occurrence(s) {json.dumps(s['by_phase'].get(k, {}))}\n")
-out.write(f"{'PASS' if s['strictmode'] == 0 else 'INFO'}\tlogcat\tStrictMode\t{s['strictmode']} line(s)\n")
-PY
+logcat_checks
 python3 "$HELP/report.py" "$OUT"
 sed -i '1s/.*/# System surfaces report/' "$OUT/REPORT.md"
 log "report: $OUT/REPORT.md"

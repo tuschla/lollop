@@ -15,8 +15,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,13 +47,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -62,7 +62,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.traversalIndex
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -97,7 +96,7 @@ private val MapTopRowHeight = 64.dp
 /** The sheet map's "open in full" control: visual square and glyph. */
 private val ExpandVisual = 40.dp
 private val ExpandGlyph = 20.dp
-/** The full-screen "Fit route" control glyph. */
+/** The full-screen map's control glyphs (close, Fit route). */
 private val FitGlyph = 24.dp
 /** Desaturation the dark tile filter applies before inverting. */
 private const val DARK_TILE_SATURATION = 0.3f
@@ -113,29 +112,25 @@ internal fun newOsmMapView(context: Context): MapView = MapView(context).apply {
     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
 }
 
-/** A round-capped, round-joined route line of [widthPx] in [argb] over [points]. */
-internal fun routeLine(argb: Int, widthPx: Float, points: List<GeoPoint> = emptyList()): Polyline = Polyline().apply {
-    if (points.isNotEmpty()) setPoints(points)
+/** A round-capped, round-joined route line of [widthPx] in [argb]. */
+internal fun routeLine(argb: Int, widthPx: Float): Polyline = Polyline().apply {
     outlinePaint.color = argb
     outlinePaint.strokeWidth = widthPx
     outlinePaint.strokeCap = Paint.Cap.ROUND
     outlinePaint.strokeJoin = Paint.Join.ROUND
 }
 
-/** Whether a map drawn in [palette] reads dark: its tiles are inverted and its ground
- *  is the palette's dark ground, so overlays on it (the attribution) take light ink. */
-internal fun mapIsDark(palette: Palette): Boolean = palette.bgTop.luminance() < 0.5f
-
 /**
- * Theme the osmdroid map for [palette]: in a dark theme the (always light) OSM tiles
- * are desaturated then inverted so the map reads as a dark ground instead of a bright
- * block; the not-yet-loaded placeholder takes the palette's ground and grid colours
+ * Theme the osmdroid map for [palette]: in a dark theme ([Palette.isDark]) the
+ * (always light) OSM tiles are desaturated then inverted so the map reads as a
+ * dark ground instead of a bright block; the not-yet-loaded placeholder takes the
+ * palette's ground and grid colours
  * in both themes. The tile filter also paints the placeholder, so in a dark theme the
  * placeholder is given the colours the filter maps onto the ground and grid. A light
  * theme clears the filter.
  */
 internal fun MapView.applyMapTheme(palette: Palette) {
-    val dark = mapIsDark(palette)
+    val dark = palette.isDark
     val ground = palette.bgTop.toArgb()
     val grid = palette.bgElevated.toArgb()
     val tiles = overlayManager.tilesOverlay
@@ -181,9 +176,9 @@ internal val DistanceUnit.metres: Double get() = if (this == DistanceUnit.Mi) ME
 /** The header and stats the full-screen route map shows over the map. */
 internal data class RouteFullScreen(val title: String, val subtitle: String, val stats: List<RunStat>)
 
-/** The theme's route style (colours, marker sizes, label text), resolved once per palette and density. */
+/** The theme's route renderer (colours, label text), resolved once per palette and density. */
 @Composable
-private fun rememberRouteStyle(): RouteStyle {
+private fun rememberRouteRenderer(): RouteRenderer {
     val palette = LocalPalette.current
     val ctx = LocalContext.current
     val density = LocalDensity.current
@@ -194,7 +189,7 @@ private fun rememberRouteStyle(): RouteStyle {
     return remember(palette, density.density, textPx, start, finish, loop) {
         val flag = ContextCompat.getDrawable(ctx, R.drawable.ic_route_finish_flag)!!.mutate()
         flag.setTint(palette.bgTop.toArgb())
-        RouteStyle(
+        RouteRenderer(RouteStyle(
             ramp = IntArray(RouteRampSteps + 1) { palette.routeRamp(it / RouteRampSteps.toFloat()).toArgb() },
             casing = palette.bgTop.toArgb(),
             accent = palette.accent.toArgb(),
@@ -209,14 +204,7 @@ private fun rememberRouteStyle(): RouteStyle {
             startLabel = start,
             finishLabel = finish,
             loopLabel = loop,
-            startDp = RouteMarker.StartSize.value,
-            startRingDp = RouteMarker.StartRing.value,
-            finishDp = RouteMarker.FinishSize.value,
-            flagDp = RouteMarker.FinishGlyph.value,
-            distanceDp = RouteMarker.DistanceSize.value,
-            distanceRingDp = RouteMarker.DistanceRing.value,
-            haloDp = RouteMarker.Halo.value,
-        )
+        ))
     }
 }
 
@@ -227,8 +215,7 @@ private const val TrimCutAlpha = 0.6f
 @Composable
 private fun routeDescription(track: RouteTrack, recordKm: Double, unit: DistanceUnit): String {
     val km = if (recordKm > 0.0) recordKm else track.totalM / 1000.0
-    val figure = distanceFigure(km, unit)
-    val distance = stringResource(if (unit == DistanceUnit.Mi) R.string.run_unit_miles else R.string.run_unit_km, figure)
+    val distance = spokenDistance(LocalResources.current, distanceFigure(km, unit), unit)
     val first = track.segs.first().first()
     val last = track.segs.last().last()
     val loop = haversineM(first.lat, first.lon, last.lat, last.lon) <= LoopCoincidenceM
@@ -249,7 +236,6 @@ private fun routeDescription(track: RouteTrack, recordKm: Double, unit: Distance
 internal fun RouteMapCard(
     segments: List<List<GpxFix>>,
     entryId: Long,
-    modifier: Modifier = Modifier,
     height: Dp = RouteMapHeight,
     distanceMarkers: Boolean = true,
     fullScreen: RouteFullScreen? = null,
@@ -257,10 +243,8 @@ internal fun RouteMapCard(
 ) {
     val track = remember(segments) { RouteTrack(segments) }
     if (track.isEmpty) return
-    val tiles by AppSettings.showRouteMaps.collectAsStateWithLifecycle()
     val unit = rememberDistanceUnit()
-    val style = rememberRouteStyle()
-    val renderer = remember(style) { RouteRenderer(style) }
+    val renderer = rememberRouteRenderer()
     val options = remember(track, unit, distanceMarkers, recordKm) {
         RouteDrawOptions(
             distanceMarkers = distanceMarkers,
@@ -273,20 +257,7 @@ internal fun RouteMapCard(
     var open by rememberSaveable(entryId) { mutableStateOf(false) }
     val appear = remember(track) { Animatable(0f) }
     LaunchedEffect(track) { appear.animateTo(1f, tween(MotionMedium)) }
-    val shape = RoundedCornerShape(Space.Card.dp)
-    val inset = with(LocalDensity.current) { CardFrameInsetDp.dp.toPx() }
-    Box(
-        modifier
-            .fillMaxWidth()
-            .height(height)
-            .clip(shape)
-            .background(BgElevated)
-            .then(if (tiles) Modifier else Modifier.border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Card), shape)),
-    ) {
-        RouteLayer(
-            track, renderer, options, tiles, interactive = false, insetPx = inset,
-            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = appear.value },
-        )
+    RouteCard(track, renderer, options, height, Modifier.fillMaxSize().graphicsLayer { alpha = appear.value }) {
         if (fullScreen != null) {
             // The tap target sits OVER the map, so the map never sees a touch and a
             // vertical drag falls through to the sheet's scroll.
@@ -303,6 +274,34 @@ internal fun RouteMapCard(
     }
     if (open && fullScreen != null) {
         FullScreenRouteMap(track, renderer, options, description, fullScreen) { open = false }
+    }
+}
+
+/** The §2.3 card both sheet route maps draw [track] in: [height] tall, over map tiles
+ *  or (maps off) on the plain `BgElevated` card with a hairline, framed with a 24dp
+ *  inset and static. [layer] styles the route layer; [overlay] sits over it. */
+@Composable
+private fun RouteCard(
+    track: RouteTrack,
+    renderer: RouteRenderer,
+    options: RouteDrawOptions,
+    height: Dp,
+    layer: Modifier,
+    overlay: @Composable BoxScope.() -> Unit,
+) {
+    val tiles by AppSettings.showRouteMaps.collectAsStateWithLifecycle()
+    val shape = RoundedCornerShape(Space.Card.dp)
+    val inset = with(LocalDensity.current) { CardFrameInsetDp.dp.toPx() }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(shape)
+            .background(BgElevated)
+            .then(if (tiles) Modifier else Modifier.border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Card), shape)),
+    ) {
+        RouteLayer(track, renderer, options, tiles, interactive = false, insetPx = inset, modifier = layer)
+        overlay()
     }
 }
 
@@ -362,7 +361,7 @@ private fun FullScreenRouteMap(
     ) {
         val view = LocalView.current
         val window = (view.parent as? DialogWindowProvider)?.window
-        val lightBars = !mapIsDark(palette)
+        val lightBars = !palette.isDark
         DisposableEffect(window, lightBars) {
             if (window != null) {
                 @Suppress("DEPRECATION")
@@ -423,7 +422,7 @@ private fun FullScreenRouteMap(
                         Text(
                             info.title,
                             color = OnBgBody,
-                            style = Type.Body.copy(fontWeight = FontWeight.Bold),
+                            style = Type.BodyBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -446,7 +445,13 @@ private fun FullScreenRouteMap(
                         .padding(Space.Screen.dp),
                     contentAlignment = Alignment.CenterEnd,
                 ) {
-                    FitRouteButton { fitRequests++ }
+                    MapOverlayButton(
+                        R.drawable.ic_ui_fit_bounds,
+                        stringResource(R.string.runmap_fit_route),
+                        size = LargeControlHeight,
+                        glyph = FitGlyph,
+                        alpha = MapChromeAlpha,
+                    ) { fitRequests++ }
                 }
                 Box(
                     Modifier
@@ -463,27 +468,6 @@ private fun FullScreenRouteMap(
                 }
             }
         }
-    }
-}
-
-/** "Fit route": a 56dp `BgElevated` @ [MapChromeAlpha] circle with a hairline (spec §3.3). */
-@Composable
-private fun FitRouteButton(onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(LargeControlHeight)
-            .clip(PillShape)
-            .background(BgElevated.copy(alpha = MapChromeAlpha))
-            .border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Control), PillShape)
-            .clickable(role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            painterResource(R.drawable.ic_ui_fit_bounds),
-            contentDescription = stringResource(R.string.runmap_fit_route),
-            tint = OnBgBody,
-            modifier = Modifier.size(FitGlyph),
-        )
     }
 }
 
@@ -684,47 +668,44 @@ fun TrimRouteMap(
     segments: List<List<GpxFix>>,
     keepFromSec: Long,
     keepUntilSec: Long,
-    modifier: Modifier = Modifier,
 ) {
     val track = remember(segments) { RouteTrack(segments) }
     if (track.isEmpty) return
-    val tiles by AppSettings.showRouteMaps.collectAsStateWithLifecycle()
-    val style = rememberRouteStyle()
-    val renderer = remember(style) { RouteRenderer(style) }
+    val renderer = rememberRouteRenderer()
     val options = remember(keepFromSec, keepUntilSec) {
         RouteDrawOptions(distanceMarkers = false, trim = true, keepFromSec = keepFromSec, keepUntilSec = keepUntilSec)
     }
     val description = routeDescription(track, 0.0, rememberDistanceUnit())
-    val shape = RoundedCornerShape(Space.Card.dp)
-    val inset = with(LocalDensity.current) { CardFrameInsetDp.dp.toPx() }
-    Box(
-        modifier
-            .fillMaxWidth()
-            .height(RouteMapHeight)
-            .clip(shape)
-            .background(BgElevated)
-            .then(if (tiles) Modifier else Modifier.border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Card), shape)),
-    ) {
-        RouteLayer(track, renderer, options, tiles, interactive = false, insetPx = inset, modifier = Modifier.fillMaxSize())
+    RouteCard(track, renderer, options, RouteMapHeight, Modifier.fillMaxSize()) {
         // Touches stop here, so the map never pans under the slider's thumb and a
         // vertical drag still scrolls the sheet.
         Box(Modifier.matchParentSize().pointerInput(Unit) {}.semantics { contentDescription = description })
     }
 }
 
-/** A 48dp round button floating over a map (full-screen route, tracker Recenter). */
+/** A round `BgElevated` button with a hairline floating over a map: the full-screen
+ *  route's 56dp "Fit route" (spec §3.3, ground at [MapChromeAlpha]) and the tracker's
+ *  48dp Recenter (opaque ground). */
 @Composable
-internal fun MapOverlayButton(icon: Int, description: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun MapOverlayButton(
+    icon: Int,
+    description: String,
+    size: Dp,
+    glyph: Dp,
+    alpha: Float,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     Box(
         modifier = modifier
-            .size(ActionMinHeight)
+            .size(size)
             .clip(PillShape)
-            .background(BgElevated)
+            .background(BgElevated.copy(alpha = alpha))
             .border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Control), PillShape)
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(icon), contentDescription = description, tint = OnBgBody, modifier = Modifier.size(20.dp))
+        Icon(painterResource(icon), contentDescription = description, tint = OnBgBody, modifier = Modifier.size(glyph))
     }
 }
 
@@ -765,15 +746,4 @@ internal fun frameLongitudes(lons: List<Double>): LonBounds {
     // yielding the west>east pair osmdroid reads as a crossing box.
     fun wrap(v: Double) = if (v > 180.0) v - 360.0 else v
     return LonBounds(west = wrap(minShift), east = wrap(maxShift))
-}
-
-/**
- * Build the auto-frame [BoundingBox] for a route. Latitude has no wrap hazard for
- * a ground track (a run never spans a pole), so plain min/max; longitude goes
- * through [frameLongitudes] for the antimeridian case. Constructor order is
- * `(north, east, south, west)` (osmdroid 6.1.20).
- */
-internal fun frameRoute(lats: List<Double>, lons: List<Double>): BoundingBox {
-    val lon = frameLongitudes(lons)
-    return BoundingBox(lats.max(), lon.east, lats.min(), lon.west)
 }

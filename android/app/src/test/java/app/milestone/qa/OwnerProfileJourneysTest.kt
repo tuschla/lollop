@@ -73,7 +73,7 @@ class OwnerProfileJourneysTest {
     private fun born(day: Long, age: Int) = str(R.string.setup_birthday_value, epochDayLabel(day), age)
 
     private fun profileWith(health: HealthScreen = HealthScreen(), birthDay: Long? = null, age: Double = 30.0): Event =
-        (QaHarness.strengthProfile() as Event.SetProfile).copy(health = health, birthEpochDay = birthDay, ageYears = age)
+        QaHarness.strengthProfile().copy(health = health, birthEpochDay = birthDay, ageYears = age)
 
     // ── 7a. Everyday sections first, "Your plan answers" folded ──────────────
     @Test

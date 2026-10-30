@@ -198,28 +198,18 @@ fn checkin_soreness_to_seven_point(raw: f64) -> f64 {
 /// morning still counts, so a single bad item can trip the floor or the z
 /// downgrade (HARD RULE 3). `None` when no item was answered.
 pub(super) fn wellness_goodness(c: &CheckinInput) -> Option<f64> {
-    let mut sum = 0.0;
-    let mut n = 0.0;
-    if let Some(s) = c.sleep_quality {
-        sum += scale5(s); // higher = better
-        n += 1.0;
-    }
-    if let Some(s) = c.soreness {
-        sum += 6.0 - scale5(s); // higher soreness = worse → reverse-score
-        n += 1.0;
-    }
-    if let Some(f) = c.fatigue {
-        sum += 6.0 - scale5(f); // higher fatigue = worse → reverse-score
-        n += 1.0;
-    }
-    if let Some(s) = c.stress {
-        sum += 6.0 - scale5(s); // higher stress = worse → reverse-score
-        n += 1.0;
-    }
-    if let Some(m) = c.mood {
-        sum += scale5(m); // higher = better
-        n += 1.0;
-    }
+    // (item, reverse-scored): higher soreness, fatigue and stress are worse.
+    let items = [
+        (c.sleep_quality, false),
+        (c.soreness, true),
+        (c.fatigue, true),
+        (c.stress, true),
+        (c.mood, false),
+    ];
+    let (sum, n) = items
+        .iter()
+        .filter_map(|&(v, rev)| v.map(|v| if rev { 6.0 - scale5(v) } else { scale5(v) }))
+        .fold((0.0, 0.0), |(sum, n), v| (sum + v, n + 1.0));
     if n == 0.0 { None } else { Some(sum / n) }
 }
 
@@ -241,7 +231,7 @@ type DaySample = (i64, f64, i64);
 /// `newest − day < window_days`, so `window_days` inclusive days). Each tuple is
 /// `(day, raw_value, observed_at)`. Check-ins bucket by the device's LOCAL day
 /// (`utc_offset_sec`; 0 = UTC), so a late-evening + next-morning pair spans two
-/// days. Readings with `observed_at <= 0` are skipped; the newest check-in per
+/// days. Undated readings (`crate::is_undated`) are skipped; the newest check-in per
 /// local day wins, so a redone check-in overwrites, never double-counts.
 fn per_day_series(
     checkins: &[CheckinInput],
@@ -252,7 +242,7 @@ fn per_day_series(
     use std::collections::BTreeMap;
     let mut by_day: BTreeMap<i64, (i64, f64)> = BTreeMap::new();
     for c in checkins {
-        if c.observed_at <= 0 {
+        if crate::is_undated(c.observed_at) {
             continue;
         }
         let Some(v) = extract(c) else {
@@ -603,7 +593,7 @@ pub fn derive_readiness(
         today_epoch_day,
         global_newest_day: checkins
             .iter()
-            .filter(|c| c.observed_at > 0)
+            .filter(|c| !crate::is_undated(c.observed_at))
             .map(|c| crate::local_day(c.observed_at, utc_offset_sec))
             .max(),
     };
@@ -758,14 +748,13 @@ fn derive_rhr(history: &History, out: &mut DerivedReadiness) {
         .find(|i| i.signal == ReadinessSignal::RestingHr)
         .map(|i| i.observed_at);
     if let Some(observed_at) = derived_at {
-        let mut stop_pass = DerivedReadiness::default();
-        derive_channel(&series, spec, |d| d >= stop_bpm, &mut stop_pass);
-        let stop_level_days = stop_pass
-            .inputs
-            .iter()
-            .chain(&stop_pass.stale)
-            .next()
-            .map_or(0, |i| i.streak);
+        // Same series and spec as the pass above, so its gates already held.
+        let scorer = Scorer {
+            series: &series,
+            mode: spec.mode,
+            abs_floor: spec.abs_floor,
+        };
+        let stop_level_days = streak_pass(&scorer, |d| d >= stop_bpm).1;
         out.rhr = Some(RhrNoise {
             sd_bpm,
             stop_level_days,

@@ -749,7 +749,7 @@ fn a_dated_resave_of_a_legacy_undated_race_anchors_paces_again() {
         race(Some(D0 + 1)),
     ];
     let (_, model) = replay(&log);
-    let p = model.profile.as_ref().unwrap();
+    let p = model.profile().unwrap();
     assert!(
         super::super::run_targets::pace_anchor_vdot(p, D0 + 1).is_some(),
         "the race re-entered today anchors no paces (race {:?})",

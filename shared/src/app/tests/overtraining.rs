@@ -19,7 +19,7 @@ fn nfor_cluster_review_defers_at_medical_referral_tier() {
 
     let vm = app.view(&model);
     assert_eq!(vm.safety_tier, Some(SafetyTier::MedicalReferral));
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
     assert!(
         vm.review_adjustments
             .iter()
@@ -28,11 +28,11 @@ fn nfor_cluster_review_defers_at_medical_referral_tier() {
     // A routine session review never lifts it…
     app.update(Event::SubmitReview(SessionReview::default()), &mut model)
         .expect_only_render();
-    assert!(app.view(&model).train_blocked);
+    assert!(app.view(&model).hold_reason.is_some());
     // …ClearWeeklyCheckin does.
     app.update(Event::ClearWeeklyCheckin, &mut model)
         .expect_only_render();
-    assert!(!app.view(&model).train_blocked);
+    assert!(app.view(&model).hold_reason.is_none());
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn sub_threshold_decline_reviews_add_nothing() {
         .expect_only_render();
     let vm = app.view(&model);
     assert!(vm.review_adjustments.is_empty());
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     assert_eq!(vm.safety_tier, None);
 }
 
@@ -101,7 +101,7 @@ fn mrv_cluster_and_threshold_retest_surface_in_review() {
         "autoreg-032 threshold re-test cue surfaces"
     );
     // Neither blocks training.
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     // One week of improvement is below the autoreg-032 bound → no cue.
     let review = SessionReview {
         pace_at_hr_improved_weeks: Some(1),

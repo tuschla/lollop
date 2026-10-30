@@ -260,7 +260,7 @@ fn android_shaped_graded_pain_readiness_round_trips_the_bridge() {
 
     // Clean up the Pain we submitted into the shared global bridge before
     // releasing PAIN_TESTS: otherwise, depending on parallel scheduling order,
-    // a leftover Pain keeps `train_blocked` set and flakes the sibling
+    // a leftover Pain keeps `hold_reason` set and flakes the sibling
     // `remove_readiness_wire_shape_round_trips_the_bridge` test (which removes
     // only its OWN Pain and then asserts the hold is lifted).
     let remove = serde_json::json!({ "RemoveReadiness": { "signal": "Pain" } });
@@ -281,7 +281,7 @@ fn remove_readiness_wire_shape_round_trips_the_bridge() {
     });
     process_event(submit.to_string().as_bytes());
     let view: serde_json::Value = serde_json::from_slice(&current_view()).unwrap();
-    assert!(view["train_blocked"].as_bool().unwrap());
+    assert!(!view["hold_reason"].is_null());
 
     let remove = serde_json::json!({ "RemoveReadiness": { "signal": "Pain" } });
     let requests = process_event(remove.to_string().as_bytes());
@@ -292,7 +292,7 @@ fn remove_readiness_wire_shape_round_trips_the_bridge() {
     );
     let view: serde_json::Value = serde_json::from_slice(&current_view()).unwrap();
     assert!(
-        !view["train_blocked"].as_bool().unwrap(),
+        view["hold_reason"].is_null(),
         "removing the mis-tapped pain report must lift the hold"
     );
 }
@@ -552,8 +552,7 @@ fn hr_zone_event_accepts_both_old_and_extended_wire_forms() {
     let new = serde_json::json!({
         "ComputeHrZones": {
             "age_years": 30.0,
-            "resting_hr_bpm": 50.0,
-            "weeks_since_recalc": 5
+            "resting_hr_bpm": 50.0
         }
     });
     let requests = process_event(new.to_string().as_bytes());
@@ -864,9 +863,9 @@ fn android_shaped_checkin_round_trips_and_surfaces_baseline_status() {
     let view = current_view();
     let view: serde_json::Value = serde_json::from_slice(&view).unwrap();
     // The check-in is echoed for rehydration.
-    let echo = view["checkin_today"]
+    let echo = view["latest_checkin"]
         .as_object()
-        .expect("checkin_today object");
+        .expect("latest_checkin object");
     assert_eq!(echo["sleep_quality"], 2);
     assert_eq!(echo["soreness"], 4);
     // Honest collecting-baseline status is present (no z was fabricated).

@@ -95,14 +95,6 @@ pub(in crate::app) fn overtraining_count(r: &SessionReview) -> u8 {
         .map_or(r.overtraining_signal_count, |s| s.count())
 }
 
-/// Whether a wire `observed_at` stamp carries no date: legacy lines decode it
-/// as 0, and a non-positive stamp names no real day. The one predicate every
-/// review-age, review-window and retraction check shares, so a stamp is never
-/// dated for one of them and undated for another.
-pub(in crate::app) fn is_undated(observed_at: i64) -> bool {
-    observed_at <= 0
-}
-
 /// Days since the review was recorded, in local time; `None` when the review is
 /// undated ([`is_undated`], so it has no age to expire against) or when the
 /// shell has supplied no clock. Consumed by the review-expiry checks.

@@ -73,7 +73,7 @@ const RETIRED: [&str; 6] = [
 type Identity = (Family, u64, i64);
 
 /// The row a `DeleteEntry` / `AmendSet` / `AmendRun` targets: its family and
-/// the `(id, observed_at)` match key `update`'s `find_set`/`find_run` use.
+/// the `(id, observed_at)` match key `update`'s `find_entry` uses.
 #[derive(Clone, Copy, Debug)]
 struct EditTarget {
     fam: Family,
@@ -97,7 +97,7 @@ enum EntryLine {
 enum Rule {
     Plain,
     Submit(ReadinessSignal),
-    /// `RemoveReadiness`; `dated` = `observed_at > 0`.
+    /// `RemoveReadiness`; `dated` = `!is_undated(observed_at)`.
     Remove {
         signal: ReadinessSignal,
         dated: bool,
@@ -208,12 +208,12 @@ impl LineFacts {
         use Family as F;
         let id = crate::app::sanitize_entry_id;
         // An amend targets its OLD row: for a legacy (`id == 0`) row whose date
-        // changed, that is `observed_at_fallback`, as in `find_set`/`find_run`.
+        // changed, that is `observed_at_fallback`, as in `find_entry`.
         let amend_time = |observed_at: i64, fallback: i64| {
             if fallback != 0 { fallback } else { observed_at }
         };
-        let entry =
-            |kind, valid: bool, fam, entry_id: u64, time, target_time: Option<i64>| Rule::Entry {
+        let entry = |kind, valid: bool, fam, entry_id: u64, time, target_time: Option<i64>| {
+            let rule = Rule::Entry {
                 kind,
                 id: id(entry_id),
                 identity: valid.then_some((fam, id(entry_id), time)),
@@ -223,6 +223,8 @@ impl LineFacts {
                     time,
                 }),
             };
+            (fam, false, rule)
+        };
         let (family, clear, rule) = match event {
             Event::SubmitReadiness(input) => (F::Readiness, false, Rule::Submit(input.signal)),
             Event::RemoveReadiness {
@@ -233,7 +235,7 @@ impl LineFacts {
                 false,
                 Rule::Remove {
                     signal: *signal,
-                    dated: *observed_at > 0,
+                    dated: !crate::is_undated(*observed_at),
                 },
             ),
             Event::ResolveHold {
@@ -244,7 +246,7 @@ impl LineFacts {
                 false,
                 Rule::ResolveHold {
                     signal: *signal,
-                    dated: *observed_at > 0,
+                    dated: !crate::is_undated(*observed_at),
                 },
             ),
             Event::LogSet {
@@ -254,17 +256,13 @@ impl LineFacts {
                 reps,
                 hold_sec,
                 ..
-            } => (
+            } => entry(
+                EntryLine::Log,
+                set_passes_gate(*weight_kg, *reps, *hold_sec),
                 F::Sets,
-                false,
-                entry(
-                    EntryLine::Log,
-                    set_passes_gate(*weight_kg, *reps, *hold_sec),
-                    F::Sets,
-                    *entry_id,
-                    *observed_at,
-                    None,
-                ),
+                *entry_id,
+                *observed_at,
+                None,
             ),
             Event::AmendSet {
                 entry_id,
@@ -274,17 +272,13 @@ impl LineFacts {
                 reps,
                 hold_sec,
                 ..
-            } => (
+            } => entry(
+                EntryLine::Amend,
+                set_passes_gate(*weight_kg, *reps, *hold_sec),
                 F::Sets,
-                false,
-                entry(
-                    EntryLine::Amend,
-                    set_passes_gate(*weight_kg, *reps, *hold_sec),
-                    F::Sets,
-                    *entry_id,
-                    *observed_at,
-                    Some(amend_time(*observed_at, *observed_at_fallback)),
-                ),
+                *entry_id,
+                *observed_at,
+                Some(amend_time(*observed_at, *observed_at_fallback)),
             ),
             Event::SetExerciseEnded {
                 exercise,
@@ -307,27 +301,19 @@ impl LineFacts {
                 entry_id,
                 observed_at,
                 ..
-            } => (
-                F::Runs,
-                false,
-                entry(EntryLine::Log, true, F::Runs, *entry_id, *observed_at, None),
-            ),
+            } => entry(EntryLine::Log, true, F::Runs, *entry_id, *observed_at, None),
             Event::AmendRun {
                 entry_id,
                 observed_at,
                 observed_at_fallback,
                 ..
-            } => (
+            } => entry(
+                EntryLine::Amend,
+                true,
                 F::Runs,
-                false,
-                entry(
-                    EntryLine::Amend,
-                    true,
-                    F::Runs,
-                    *entry_id,
-                    *observed_at,
-                    Some(amend_time(*observed_at, *observed_at_fallback)),
-                ),
+                *entry_id,
+                *observed_at,
+                Some(amend_time(*observed_at, *observed_at_fallback)),
             ),
             // A trim or meta edit names its run by `observed_at_fallback`.
             Event::TrimRunTrack {
@@ -339,34 +325,26 @@ impl LineFacts {
                 entry_id,
                 observed_at_fallback,
                 ..
-            } => (
+            } => entry(
+                EntryLine::Trim,
+                true,
                 F::Runs,
-                false,
-                entry(
-                    EntryLine::Trim,
-                    true,
-                    F::Runs,
-                    *entry_id,
-                    *observed_at_fallback,
-                    None,
-                ),
+                *entry_id,
+                *observed_at_fallback,
+                None,
             ),
             Event::LogActivity {
                 entry_id,
                 observed_at,
                 minutes,
                 ..
-            } => (
+            } => entry(
+                EntryLine::Log,
+                crate::app::activity_passes_gate(*minutes),
                 F::Activities,
-                false,
-                entry(
-                    EntryLine::Log,
-                    crate::app::activity_passes_gate(*minutes),
-                    F::Activities,
-                    *entry_id,
-                    *observed_at,
-                    None,
-                ),
+                *entry_id,
+                *observed_at,
+                None,
             ),
             // A delete joins the family it targets, so a later clear sweeps it.
             Event::DeleteEntry {
@@ -465,7 +443,7 @@ impl LineFacts {
 
     /// Whether this is the row an edit of `t` names: same family, and the
     /// same id, or the same `observed_at` for a legacy (`id == 0`) row.
-    /// Mirrors `find_set`/`find_run`.
+    /// Mirrors `find_entry`.
     fn matches(&self, t: &EditTarget) -> bool {
         match self.rule() {
             Rule::Entry {
@@ -821,7 +799,7 @@ fn rule2_review_clears(lines: &[LineFacts], remove: &mut [bool]) {
 /// same-day edits all survive; an undated edit replaces everything). An
 /// undated edit also pins the %HRmax of every run logged before it, so once a
 /// run line survives before it, no line kills an earlier one across it. The
-/// last line is never dead, so `model.profile` is always kept. Runs after
+/// last line is never dead, so the current profile is always kept. Runs after
 /// Rules 1 and 3.
 fn rule2_profile_history(lines: &[LineFacts], remove: &mut [bool]) {
     let first_run = (0..lines.len()).find(|&j| {

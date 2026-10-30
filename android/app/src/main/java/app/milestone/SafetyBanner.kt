@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -47,8 +46,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -147,7 +144,7 @@ internal fun SafetyBannerHost(
     model: ViewModel,
     onEvent: (Event) -> Unit,
     modifier: Modifier = Modifier,
-    lastPain: PainDetail? = null,
+    lastPain: PainDetail?,
     onAddDetails: (() -> Unit)? = null,
     onOpenProfile: ((ProfileRowId) -> Unit)? = null,
 ) {
@@ -460,22 +457,19 @@ private fun SafetyBanner(
 @Composable
 private fun HoldEvidencePanel(model: ViewModel, profileHold: Boolean, strong: Color, muted: Color) {
     val hold = remember(model.today_headline, model.adjustments) { holdEvidence(model) }
-    val holdSummary = hold?.summary
-    val holdGrade = hold?.grade
-    val holdCitation = hold?.citation
-    if (holdSummary != null) {
+    if (hold != null) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-            Text(holdSummary, color = strong, style = Type.Caption)
-            gradeLabel(holdGrade ?: "")?.let { gradeText ->
+            Text(hold.summary, color = strong, style = Type.Caption)
+            gradeLabel(hold.grade)?.let { gradeText ->
                 Text(
                     stringResource(R.string.main_evidence_prefix, gradeText),
                     color = muted,
                     style = Type.Caption,
                 )
             }
-            if (!holdCitation.isNullOrBlank()) {
+            if (hold.citation.isNotBlank()) {
                 Text(
-                    citationLabel(holdCitation),
+                    citationLabel(hold.citation),
                     color = muted,
                     style = Type.Caption,
                 )
@@ -555,7 +549,7 @@ private fun BannerSolidAction(label: String, onFill: Color, onClick: () -> Unit,
             .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = onFill, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+        Text(label, color = onFill, style = Type.BodyBold)
     }
 }
 
@@ -608,8 +602,8 @@ internal fun holdResolutionEvents(
     return buildList {
         add(Event.ResolveHold(signal, nowSec))
         if (resolution.ends_profile_illness && profile != null) {
-            val draft = ProfileDraft.from(profile)
-            add(draft.copy(health = draft.health.copy(acute_illness = false)).toEvent(today))
+            val draft = Event.SetProfile.from(profile)
+            add(draft.copy(health = draft.health.copy(acute_illness = false)).effectiveFrom(today))
         }
     }
 }

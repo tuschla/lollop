@@ -146,7 +146,7 @@ const HOLD_LIFTS: &str = "lifts add no weight and stop 1 rep earlier";
 /// the signal that fired as a sentence opener, whether runs go easy, and
 /// whether the first-set clause follows. A check-in signal stays in force for
 /// its recency window after the day it was given, so no opener says "today".
-fn hold_reason(r: &Recommended<Adjustment>) -> Option<(&'static str, bool, bool)> {
+fn lift_hold_reason(r: &Recommended<Adjustment>) -> Option<(&'static str, bool, bool)> {
     match (&r.value, r.claim_id()) {
         (Adjustment::CapTopEnd { trigger }, _) => Some(match trigger {
             ReadinessSignal::HrvLnRmssd => (HRV_WEEK, true, true),
@@ -212,7 +212,7 @@ pub(super) fn merge_hold_rows(
     let holds: Vec<(usize, (&'static str, bool, bool))> = recs
         .iter()
         .enumerate()
-        .filter_map(|(k, r)| hold_reason(r).map(|h| (k, h)))
+        .filter_map(|(k, r)| lift_hold_reason(r).map(|h| (k, h)))
         .collect();
     if let [(first, _), rest @ ..] = holds.as_slice()
         && !rest.is_empty()
@@ -232,7 +232,7 @@ pub(super) fn merge_hold_rows(
 /// fired and what changes today, in plain language. Falls back
 /// to [`describe`] for calls that need no signal-specific wording.
 pub(super) fn describe_rec(r: &Recommended<Adjustment>) -> String {
-    if let Some(h) = hold_reason(r) {
+    if let Some(h) = lift_hold_reason(r) {
         return hold_summary(&[h]);
     }
     let claim = r.claim_id();

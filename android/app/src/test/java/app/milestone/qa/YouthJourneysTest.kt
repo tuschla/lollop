@@ -58,7 +58,7 @@ class YouthJourneysTest {
     private val youthBirthday = LocalDate.of(2011, 3, 15).toEpochDay()
 
     private fun youthProfile(): Event =
-        (QaHarness.strengthProfile() as Event.SetProfile).copy(birthEpochDay = youthBirthday, ageYears = 15.0)
+        QaHarness.strengthProfile().copy(birthEpochDay = youthBirthday, ageYears = 15.0)
 
     /** Scroll Today's list to [matcher]. */
     private fun scrollTodayTo(matcher: SemanticsMatcher) {

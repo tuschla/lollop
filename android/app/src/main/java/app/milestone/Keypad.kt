@@ -104,7 +104,6 @@ fun KeypadValueField(
     onUnitClick: (() -> Unit)? = null,
     unitClickDescription: String? = null,
 ) {
-    val status = LocalStatusColors.current
     Column(Modifier.fillMaxWidth()) {
         FieldLabel(
             label,
@@ -253,17 +252,13 @@ internal fun Modifier.keypadWell(invalid: Boolean, active: Boolean, description:
  */
 @Composable
 fun NumericKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit, allowDecimal: Boolean = true, onDone: (() -> Unit)? = null) {
-    // Keypad ground (spec 05-log §2): the palette's recessed [bgSunken] surface —
-    // a hair off BgElevated in the dark themes, the plain ground on light — so it
-    // follows the RESOLVED palette (a forced-Light-on-dark-OS sheet gets the light
-    // ground) without an OS/luminance probe.
-    val ground = BgSunken
     Column(
         modifier = Modifier
             .testTag("numeric-keypad")
             .fillMaxWidth()
             .clip(RoundedCornerShape(Space.Card.dp))
-            .background(ground)
+            // The palette's recessed ground, so it follows the resolved theme.
+            .background(BgSunken)
             .padding(Space.Sm.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
@@ -297,7 +292,7 @@ fun NumericKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit, allowDecimal: 
                 Text(
                     stringResource(R.string.log_keypad_done),
                     color = Accent,
-                    style = Type.Body.copy(fontWeight = FontWeight.Bold),
+                    style = Type.BodyBold,
                 )
             }
         }

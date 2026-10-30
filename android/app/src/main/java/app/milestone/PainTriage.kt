@@ -55,22 +55,17 @@ internal fun painAreaLabel(location: String?, coreDetail: String?): String? {
 private val PainSeverityValues = (0..10).toList()
 
 /**
- * Pain triage sheet: a ~10-second characterization that opens
- * BEFORE any hold is set, so an accidental tap can't freeze the app. It captures
- * exactly what the File-08 pain gate needs: body area, character (→ [PainKind]),
- * severity 0–10, and whether it's worsening (→ [PainTrend]); then "Report pain"
- * sends a [PainDetail] via [Event.SubmitReadiness] and the core decides hold vs
- * modify-and-monitor. Nothing is pre-answered: character starts at "Not sure"
- * (the conservative stop) and severity unrated (sent as absent), so one quick
- * tap never records a pain the user didn't describe. The "Report pain" commit is
- * [EditorScaffold]'s danger primary and always enabled (safety escape hatch).
+ * Pain triage: a ~10-second characterization BEFORE any hold is set (body area,
+ * character, severity 0–10, worsening), sent as a [PainDetail]; the core decides
+ * hold vs modify-and-monitor. Nothing is pre-answered (character "Not sure", the
+ * conservative stop; severity unrated), and "Report pain" is always enabled.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PainTriageSheet(
-    onClose: () -> Unit = {},
+    onClose: () -> Unit,
     // Report unsaved-triage state so a host sheet's swipe-down can guard it.
-    onDirtyChange: (Boolean) -> Unit = {},
+    onDirtyChange: (Boolean) -> Unit,
     onSubmit: (Event.SubmitReadiness) -> Unit,
 ) {
     var location by rememberSaveable { mutableStateOf<PainArea?>(null) }

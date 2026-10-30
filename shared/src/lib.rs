@@ -1,6 +1,6 @@
 //! lollop's training core: the deterministic, evidence-cited engine every
 //! shell renders. The rules below are referenced throughout this crate by
-//! number ("HARD RULE 1" and so on); they are defined here and nowhere else.
+//! number ("HARD RULE 1" and so on); `planning/CLAUDE.md` holds the full list.
 //!
 //! **HARD RULE 1 — the knowledge base is authoritative.** Nothing enters the
 //! engine that the knowledge base does not state. No invented thresholds, no
@@ -56,6 +56,14 @@ pub(crate) fn local_day(observed_at: i64, offset: i64) -> i64 {
     observed_at.saturating_add(offset).div_euclid(DAY_SEC)
 }
 
+/// Whether a wire `observed_at` stamp carries no date: legacy lines decode it
+/// as 0, and a non-positive stamp names no real day. The one predicate every
+/// dated-row filter shares, so a stamp is never dated for one check and
+/// undated for another.
+pub(crate) fn is_undated(observed_at: i64) -> bool {
+    observed_at <= 0
+}
+
 /// Convert a count of days since the unix epoch (1970-01-01) to a civil
 /// `(year, month, day)`. Howard Hinnant, "chrono-Compatible Low-Level Date
 /// Algorithms" (public domain).
@@ -73,14 +81,13 @@ pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 pub use app::{
-    ActivityKind, ActivityResultView, AdjustmentView, BaselineStatusView, CheckinEchoView,
-    Decouple, E1rmRangeView, Effect, Engine, EntryKind, Event, FeedbackView, GradeDefView,
-    GuidanceView, HrMaxView, HrZoneInputView, HypertrophyInputView, IntervalExec,
-    IntervalVerdictView, LiftExec, LiftResultView, Model, PrescriptionView, Profile,
-    ProgramSummaryView, ProteinFigureView, ProteinInputView, RacePredictionView,
-    ReadinessSignalView, ResistanceModality, RunResultView, RunSplitView, SessionPlanView,
-    SessionReview, SignalGroupView, SplitVerdictView, TodayHeadlineView, TrainingLoadView,
-    ViewModel, WhyView, YouthActivityView,
+    ActivityKind, ActivityResultView, AdjustmentView, BaselineStatusView, Decouple, E1rmRangeView,
+    Effect, Engine, EntryKind, Event, FeedbackView, GradeDefView, GuidanceView, HrMaxView,
+    HrZoneInputView, HypertrophyInputView, IntervalExec, IntervalVerdictView, LiftExec,
+    LiftResultView, Model, PrescriptionView, Profile, ProgramSummaryView, ProteinFigureView,
+    ProteinInputView, RacePredictionView, ReadinessSignalView, ResistanceModality, RunResultView,
+    RunSplitView, SessionPlanView, SessionReview, SignalGroupView, SplitVerdictView,
+    TodayHeadlineView, TrainingLoadView, ViewModel, WhyView, YouthActivityView,
 };
 pub use crux_core::Core;
 pub use log::compact_event_log;

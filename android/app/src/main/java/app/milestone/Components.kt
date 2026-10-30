@@ -2,7 +2,6 @@ package app.milestone
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,25 +15,15 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import java.util.Locale
 
 /** The elevated content card (hairline outline, no shadow); with [onClick] the
  *  whole card is one tappable surface. [contentPadding] and [spacing] default to
@@ -107,7 +96,7 @@ internal fun ReferenceRow(row: GuidanceView) {
         Text(
             guidanceTitle(row),
             color = OnBgBody,
-            style = Type.Body.copy(fontWeight = FontWeight.Bold),
+            style = Type.BodyBold,
         )
         Text(citationLabel(row.citation), color = OnBgFaint, style = Type.Caption)
     }
@@ -125,34 +114,57 @@ internal fun guidanceTitle(row: GuidanceView): String =
 internal fun guidanceSummary(row: GuidanceView): String =
     if (rememberDistanceUnit() == DistanceUnit.Mi) row.summary_mi.ifBlank { row.summary } else row.summary
 
-/** The irreversible-clear confirmation [AlertDialog] (chrome §6), shared by every
- *  destructive confirm (remove plan or report, delete an entry, discard a run).
+/** A confirmation [AlertDialog] (chrome §6): [title], an optional [body], a
+ *  dismiss button ([dismissLabel]) and one confirm button in [confirmColor]
+ *  (`DangerText` when destructive, else the button's own colour), disabled while
+ *  not [confirmEnabled]. Each button runs exactly its own callback. */
+@Composable
+internal fun ConfirmDialog(
+    title: String,
+    body: String?,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    confirmColor: Color = Color.Unspecified,
+    confirmEnabled: Boolean = true,
+    dismissLabel: String = stringResource(R.string.main_cancel),
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(Space.Card.dp),
+        title = { Text(title) },
+        text = body?.let { { Text(it) } },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(confirmLabel, color = confirmColor) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(dismissLabel) } },
+    )
+}
+
+/** The irreversible-clear confirmation (remove a plan or report, a hold
+ *  resolution): a [ConfirmDialog] whose confirm closes it, then clears.
  *  [confirmColor] is `DangerText` unless the confirm is not destructive. */
 @Composable
 internal fun ClearConfirmDialog(
     visible: Boolean,
-    title: String = stringResource(R.string.main_clear_confirm_title_default),
-    message: String = stringResource(R.string.main_clear_confirm_message_default),
+    title: String,
+    message: String,
     confirmLabel: String = stringResource(R.string.main_clear),
     confirmColor: Color = DangerText,
     onDismiss: () -> Unit,
     onClear: () -> Unit,
 ) {
     if (visible) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            shape = RoundedCornerShape(Space.Card.dp),
-            title = { Text(title) },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = {
-                    onDismiss()
-                    onClear()
-                }) { Text(confirmLabel, color = confirmColor) }
+        ConfirmDialog(
+            title = title,
+            body = message,
+            confirmLabel = confirmLabel,
+            onDismiss = onDismiss,
+            onConfirm = {
+                onDismiss()
+                onClear()
             },
-            dismissButton = {
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }
-            },
+            confirmColor = confirmColor,
         )
     }
 }
@@ -176,7 +188,7 @@ internal fun KeyValueRow(label: String, value: String, emphasis: Boolean = false
         Text(
             value,
             color = OnBgBody,
-            style = (if (emphasis) Type.Body.copy(fontWeight = FontWeight.Bold) else Type.Body).merge(TabularFigures),
+            style = (if (emphasis) Type.BodyBold else Type.Body).merge(TabularFigures),
             textAlign = TextAlign.End,
             modifier = Modifier.weight(1f),
         )

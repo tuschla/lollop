@@ -75,24 +75,12 @@ internal fun Context.setupPrefs(): SharedPreferences = getSharedPreferences(SETU
 // restore sets it from the imported log ([replaceEventLog]).
 internal const val KEY_PLAN_CLEARED = "plan_cleared"
 
-// Process-scoped serial event dispatcher. The queue AND its single consumer live
-// here, at PROCESS scope, not in composition: a config change (rotation) cancels
-// the Composable's coroutines, so a composition-scoped consumer would drop any
-// event still queued-but-undrained at that instant (a half-applied Clear-all, a
-// GPX import toasted as done before it ran, a guided-setup completion without its
-// GeneratePlan).
-//
-// Strict serial order is the WHOLE ordering guarantee: `Core.send` is not
-// reentrant-safe and the core's event log + state are order-sensitive, so exactly
-// ONE send is ever in flight, on CoreJniDispatcher (single thread, keeps the
-// core's thread_local view memos hot). Each resulting ViewModel is published to
-// [model]; the composition collects that flow into its own `model` state, so an
-// Activity recreation seeds the freshest snapshot with no spinner. Work that must
-// run a Core.send sequence OFF the plain event queue as ONE atomic turn (boot
-// hydration, a run save, a GPX import, the data import's log swap) goes through
-// [exclusive]: the body runs as a single exclusive turn of the SAME serial
-// consumer, so no queued event interleaves with its sends, and its non-null result
-// is published in queue order — a rotation right after it is fresh too.
+// Process-scoped serial event dispatcher: the queue and its one consumer outlive
+// composition, so a rotation never drops a queued event. Exactly one unit (an
+// event, a batch, or an [exclusive] body) is in flight at a time, on
+// CoreJniDispatcher, and its ViewModel is published to [model] in enqueue order.
+// That serial order is the whole ordering guarantee: the core's log and state are
+// order-sensitive.
 internal object EventDispatcher {
     private sealed interface Msg
     private class Ev(val e: Event) : Msg
@@ -133,6 +121,11 @@ internal object EventDispatcher {
     // resets on process death, when the ActiveRunStore recovery check must re-run.
     var bootHandled = false
 
+    // The (local epoch-day, utc-offset-sec) the core was last told is "today"; null
+    // until boot sends it. Process-scoped, so a rotation's boot re-run can tell the
+    // core already has this clock and skip the resend.
+    @Volatile var lastToday: Pair<Long, Int>? = null
+
     // The crash-recovery sidecar fixes read ONCE at boot when a resume prompt is
     // offered, so the Resume action reuses them instead of re-reading the sidecar
     // file off disk. Null when no interrupted run was found / after it is consumed.
@@ -155,16 +148,8 @@ internal object EventDispatcher {
 
     private var consumer: Job = startConsumer(channel)
 
-    // One serial consumer per process (only [resetForTest] replaces it), on the
-    // immediate main dispatcher under a SupervisorJob. It drains the queue
-    // STRICTLY IN ORDER: an [Ev] runs one Core.send, a [Batch] one Core.sendAll,
-    // a [Block] an exclusive body as ONE turn. Either way exactly one unit of
-    // work is ever in flight and results reach [model] in enqueue order.
-    //
-    // Only [resetForTest] cancels a consumer, after cancelling its queue, so a
-    // cancelled consumer never takes another unit; one still in flight then (a
-    // non-cancellable body) publishes nothing, though an exclusive body's awaiter
-    // still gets its outcome.
+    // One serial consumer per process on the main dispatcher; it drains the queue
+    // strictly in order. Only [resetForTest] cancels it, after cancelling its queue.
     private fun startConsumer(queue: Channel<Msg>): Job = scope.launch {
         for (m in queue) when (m) {
             // A malformed view (or any send throw) must drop THIS unit, never
@@ -189,18 +174,9 @@ internal object EventDispatcher {
         }
     }
 
-    /**
-     * Test isolation only: the process-scoped state of a freshly started process —
-     * a new queue and consumer, the real core send paths, no model, no pending
-     * notice, boot not handled. Robolectric recycles the main looper's pending
-     * messages between tests while this object lives on, so a test that ends with a
-     * unit in flight (the core answered on its thread, the consumer's resumption
-     * still queued on main) would otherwise leave a consumer that never runs again,
-     * and every later boot would wait on it forever. The old consumer is cancelled:
-     * if it does resume, it runs and publishes nothing more and stops. Every
-     * [exclusive] still queued on the old queue is cancelled, so its awaiter never
-     * hangs.
-     */
+    /** Test isolation: fresh process state (new queue and consumer, real send
+     *  paths, no model or notice, boot not handled). Cancels the old queue so no
+     *  [exclusive] awaiter hangs. */
     fun resetForTest() {
         val old = channel
         channel = newQueue()
@@ -213,6 +189,7 @@ internal object EventDispatcher {
         model.value = null
         coreUnavailable.value = false
         bootHandled = false
+        lastToday = null
         recoveredSidecar = null
         staleReported = false
     }
@@ -275,7 +252,7 @@ internal class CoachSession(
     loadedState: MutableState<Boolean>,
     modelState: MutableState<ViewModel>,
     showSetupState: MutableState<Boolean>,
-    setupInitialState: MutableState<ProfileDraft?>,
+    setupInitialState: MutableState<Event.SetProfile?>,
     showTrackerState: MutableState<Boolean>,
     showResumePromptState: MutableState<Boolean>,
     lastPainState: MutableState<PainDetail?>,
@@ -332,7 +309,7 @@ private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): Coac
     // "Re-run guided setup" row seeds it from the current profile). null = a genuine
     // first-run pass. Drives the onboarding-flag behaviour at the call site: only a
     // first-run pass (null) touches the onboarding pref on complete/skip.
-    val setupInitialState = rememberSaveable { mutableStateOf<ProfileDraft?>(null) }
+    val setupInitialState = rememberSaveable { mutableStateOf<Event.SetProfile?>(null) }
     val setupPrefs = remember { ctx.setupPrefs() }
     val markOnboardingDone = { setupPrefs.edit { putBoolean("onboarding_done", true) } }
 
@@ -345,13 +322,6 @@ private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): Coac
     // A crash-recovery sidecar is offered for resume, never resumed unasked; a
     // stale sidecar (newest fix older than RESUME_STALE_SEC) is discarded outright.
     val showResumePromptState = rememberSaveable { mutableStateOf(false) }
-
-    // The (local epoch-day, utc-offset-sec) the core was last told is "today".
-    // Seeded by the boot effect's SetToday below and re-sent on ON_RESUME whenever
-    // the day rolls over or the offset changes (app left alive across midnight, or
-    // travel). null until the boot effect's first send owns it, so the resume
-    // observer can never fire before boot (which decides the fresh-install path).
-    var lastToday by remember { mutableStateOf<Pair<Long, Int>?>(null) }
 
     // Shell echo of the most recent pain report, so the DO-NOT-TRAIN banner can
     // name the body part immediately after triage even before the core surfaces
@@ -403,71 +373,46 @@ private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): Coac
         )
     }
 
+    // Boot hydration as ONE exclusive turn of the serial consumer: no queued event
+    // interleaves with restore/SetToday/GeneratePlan. A re-run (rotation) queues after
+    // it, skips the probe and the one-time block, and resends SetToday only when the
+    // day or offset changed since the last send.
     LaunchedEffect(Unit) {
-        // The whole boot hydration runs as ONE exclusive turn of the serial
-        // consumer: no queued event interleaves with restore/SetToday/GeneratePlan,
-        // and the GeneratePlan gate below reads core state that no later event can
-        // outrun. It always completes on the consumer, and a re-run boot block
-        // (rotation) queues AFTER it.
         var fresh = false
         val vm = EventDispatcher.exclusive {
-            // A core that can't answer (library missing, an arm64-only release on an
-            // x86_64 phone under translation, every JNI call returning null) would
-            // otherwise boot onto an EMPTY model: the "Set up your training" screen
-            // over a user who has data, inviting a re-setup on a dead engine. Probe it
-            // before the log is touched and show the error state instead. A re-run
-            // (rotation) after a handled boot skips the probe: it already passed.
+            // A core that can't answer would boot onto an empty model (the setup screen
+            // over a user who has data): show the error state instead.
             if (!EventDispatcher.bootHandled && !withContext(CoreJniDispatcher) { Core.probe() }) return@exclusive null
             fresh = withContext(CoreJniDispatcher) { Core.restore(ctx) }
-            // A fresh install renders the empty Today and routes first-run into the
-            // guided setup, which writes user-asserted profile values.
-            // The shell's clock enters the core as event data so it can date the
-            // plan week and pick today's next session (determinism; no clock
-            // in-core). Sent on launch; the last-write-wins singleton keeps one
-            // line. Its result view reflects the freshly restored state (SetToday
-            // creates/destroys no lift/run/plan), so the boot gates below read it
-            // directly instead of a separate currentView() round-trip.
-            val bootDay = todayEpochDay()
-            val bootOffset = utcOffsetSec()
-            val today = withContext(CoreJniDispatcher) { Core.send(Event.SetToday(bootDay, bootOffset)) }
-            // Every working core accepts the clock event; one that reads a view but
-            // refuses it can't apply anything the user does either.
-            if (!today.accepted) {
-                Core.markUnavailable()
-                return@exclusive null
+            // The shell's clock enters the core as event data (no clock in-core).
+            val bootToday = todayEpochDay() to utcOffsetSec()
+            val published = EventDispatcher.model.value
+            var v = if (EventDispatcher.bootHandled && published != null && EventDispatcher.lastToday == bootToday) {
+                published
+            } else {
+                val today = withContext(CoreJniDispatcher) { Core.send(Event.SetToday(bootToday.first, bootToday.second)) }
+                // A core that reads a view but refuses the clock can't apply anything either.
+                if (!today.accepted) {
+                    Core.markUnavailable()
+                    return@exclusive null
+                }
+                // An unreadable log or a replay that had to skip lines surfaces here.
+                EventDispatcher.report(today)
+                EventDispatcher.lastToday = bootToday
+                today.view
             }
-            // An unreadable log or a replay that had to skip lines surfaces here.
-            EventDispatcher.report(today)
-            var v = today.view
-            // Remember what we told the core so the ON_RESUME observer below can
-            // detect a midnight rollover / offset change and re-send (see [lastToday]).
-            lastToday = bootDay to bootOffset
-            // KEY_PLAN_CLEARED reconcile: [dispatch] writes the marker BEFORE the
-            // ClearPlan event durably persists, so a process death in that gap can
-            // leave marker=true while the plan is still alive in the replayed core.
-            // The replayed core is the source of truth: a surviving program means
-            // the ClearPlan never landed, so clear the stale marker to re-arm boot
-            // auto-generation to match the visible state.
+            // A surviving program means a ClearPlan never landed: drop the stale marker.
             if (v.program != null && setupPrefs.getBoolean(KEY_PLAN_CLEARED, false)) {
                 setupPrefs.edit { putBoolean(KEY_PLAN_CLEARED, false) }
             }
-            // The other direction: the log itself records a removal (compaction keeps
-            // a final ClearPlan, [RestoredLog.planRemoved]), so a log that ends with
-            // the plan removed re-arms a lost marker (prefs cleared or corrupted, or
-            // the async apply() of the ClearPlan echo never reached disk). Only on the
-            // process's first boot turn: a later re-run (rotation) follows the
-            // in-session marker, which a GeneratePlan tap clears.
+            // A log that ends with the plan removed re-arms a lost marker (first turn only).
             if (!EventDispatcher.bootHandled && v.program == null && Core.restoredPlanRemoved &&
                 !setupPrefs.getBoolean(KEY_PLAN_CLEARED, false)
             ) {
                 setupPrefs.edit { putBoolean(KEY_PLAN_CLEARED, true) }
             }
-            // Auto-generate the plan on boot for a set-up user with no plan, so they
-            // land on today's prescription with zero taps. Gated on `program == null`
-            // (re-firing would re-anchor the week to today) and on KEY_PLAN_CLEARED, so
-            // a "Remove plan" holds across rotation and relaunch until the user
-            // generates one from the plan prompt card. A re-run boot block queues
-            // after this turn, sees program != null, and cannot fire twice.
+            // A set-up user without a plan gets one unless they removed it; a re-run
+            // then sees the program and cannot fire twice.
             if (v.profile != null && v.program == null &&
                 !setupPrefs.getBoolean(KEY_PLAN_CLEARED, false)
             ) {
@@ -477,31 +422,23 @@ private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): Coac
             }
             v
         }
-        // No model: the core is unavailable. [CoachScreen] shows the error state; no
-        // setup decision, no run recovery, nothing that could dispatch an event.
+        // No model: the core is unavailable. Show the error state, dispatch nothing.
         if (vm == null) {
             EventDispatcher.coreUnavailable.value = true
             return@LaunchedEffect
         }
+        // The consumer already published vm in queue order.
         session.model = vm
-        // The consumer already published this hydrated model IN QUEUE ORDER (no
-        // separate publish needed), so a later Activity recreation (rotation) renders
-        // it instantly with no spinner and the model collector re-seeds `model`.
-        // Everything below is one-time-per-process. On a rotation the effect
-        // re-runs, but EventDispatcher.bootHandled is already true (process-scoped),
-        // so we DON'T recompute showSetup (which would clobber mid-setup answers)
-        // and DON'T re-offer run recovery. model + loaded are still refreshed above.
+        // Once per process: a re-run must not recompute showSetup (mid-setup answers)
+        // or re-offer run recovery.
         if (!EventDispatcher.bootHandled) {
             EventDispatcher.bootHandled = true
-            // A new process restored with the saved tracker flag set (Android killed
-            // it mid-run) has nothing recording: RunTrackingService is NOT_STICKY.
-            // Leave that idle tracker so the resume prompt below is the way back, not
-            // a Start that would truncate the interrupted run's sidecar.
+            // A new process restored with the tracker flag set records nothing (the
+            // service is NOT_STICKY): leave it so the resume prompt is the way back.
             if (!RunSession.tracking.value && !RunSession.armed.value && !RunSession.locating.value) {
                 session.showTracker = false
             }
-            // Offer the guided setup only on a genuine first run that hasn't already
-            // completed/skipped it (persisted flag), and only while no profile exists.
+            // The guided setup only on a first run not yet completed or skipped.
             session.showSetup = fresh && !setupPrefs.getBoolean("onboarding_done", false) && vm.profile == null
             // A data import just restarted the process: confirm what it restored.
             val restoredEntries = setupPrefs.getInt(KEY_RESTORED_ENTRIES, -1)
@@ -511,10 +448,8 @@ private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): Coac
                     UiMessage(res.getQuantityString(R.plurals.main_restored_entries, restoredEntries, restoredEntries)),
                 )
             }
-            // An interrupted GPS run's crash-durable sidecar. Do NOT auto-resume;
-            // a sidecar left by a process/service kill can be hours stale and one
-            // Stop&save would then write a garbage multi-hour run. Skipped when a run
-            // is already live in memory (a mere config change, not a fresh process).
+            // An interrupted run's sidecar is offered, never auto-resumed; skipped when
+            // a run is live in memory.
             if (!RunSession.tracking.value && RunSession.points.value.isEmpty() &&
                 ActiveRunStore.hasActiveRun(ctx)
             ) {
@@ -522,16 +457,12 @@ private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): Coac
                 val newestSec = recovered.maxOfOrNull { it.observedAt } ?: 0L
                 val ageSec = System.currentTimeMillis() / 1000 - newestSec
                 when {
-                    // <2 fixes (crashed before a real route): nothing to resume.
+                    // Under 2 fixes: nothing to resume.
                     recovered.size < 2 -> ActiveRunStore.clear()
-                    // Newest fix is old: the app was gone long enough that this is
-                    // almost certainly a dead run, not a genuine continuation. Drop it
-                    // so it can't become a multi-hour logged run.
+                    // An old newest fix is a dead run; it must not become a multi-hour run.
                     ageSec > RESUME_STALE_SEC -> ActiveRunStore.clear()
-                    // Recent enough to plausibly resume: ASK the user (consent).
+                    // Ask; Resume reuses these fixes instead of re-reading the file.
                     else -> {
-                        // Cache the fixes read here so the Resume action reuses them
-                        // instead of re-reading the sidecar file off disk.
                         EventDispatcher.recoveredSidecar = recovered
                         session.showResumePrompt = true
                     }
@@ -543,25 +474,19 @@ private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): Coac
 
     // Live only once the boot gate has passed, never during the loading spinner.
     if (session.loaded) {
-        // An app process left alive across local midnight (or moved across a
-        // timezone / DST boundary) keeps the core dating the plan to the day the boot
-        // effect sent; "Next"/week-number/missed-status freeze on yesterday while the
-        // shell-side week-strip today-ring has already advanced, so the two disagree.
-        // Re-send SetToday on every ON_RESUME whose day or offset differs from the last
-        // value we sent. Cheap no-op when nothing changed. Deliberately does NOT touch
-        // the one-time boot logic (guided-setup decision + run recovery, gated on
-        // bootHandled), it only re-dates the core clock; `lastToday == null` (boot
-        // hasn't sent yet) is skipped so this can never pre-empt the fresh-install path.
+        // An app left alive across local midnight (or a timezone / DST change) keeps
+        // the core dating the plan to the last day it was told. Re-send SetToday on
+        // every ON_RESUME whose day or offset differs from the last send; never
+        // before boot's first send (`lastToday == null`), which owns the fresh-install path.
         val lifecycleOwner = LocalLifecycleOwner.current
         DisposableEffect(lifecycleOwner) {
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
-                    val day = todayEpochDay()
-                    val offset = utcOffsetSec()
-                    val last = lastToday
-                    if (last != null && (last.first != day || last.second != offset)) {
-                        lastToday = day to offset
-                        session.dispatch(Event.SetToday(day, offset))
+                    val now = todayEpochDay() to utcOffsetSec()
+                    val last = EventDispatcher.lastToday
+                    if (last != null && last != now) {
+                        EventDispatcher.lastToday = now
+                        session.dispatch(Event.SetToday(now.first, now.second))
                     }
                 }
             }

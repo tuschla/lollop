@@ -16,7 +16,7 @@ pub(super) fn refresh_lift_summary(it: &mut PrescriptionView, weight_lb: bool) {
         set_named_summary(it, ": ", lead, &[label]);
         return;
     }
-    let reps = reps_text(it);
+    let reps = range_text(it.reps_low, it.reps_high);
     // The face line: load in the headline, then ONE effort statement in the
     // "reps left" vocabulary, then a speed/jump item's execution cue ("move
     // fast"). A %e1RM item shows its load, not the percentage (the percentage
@@ -135,19 +135,39 @@ pub(super) fn with_reps_left(n: i64) -> String {
     }
 }
 
-/// The face's rep count: the plan's rep RANGE when it gives one
-/// (calisthenics rungs are "5–8"), else the one figure.
-fn reps_text(it: &PrescriptionView) -> String {
-    if it.reps_high > it.reps_low {
-        format!("{}–{}", it.reps_low, it.reps_high)
+/// A rep band as the face writes it: `"5–8"`, or the one figure when `hi` is
+/// not above `lo` (calisthenics rungs give a range, most lifts one count).
+pub(super) fn range_text(lo: u8, hi: u8) -> String {
+    if hi > lo {
+        format!("{lo}–{hi}")
     } else {
-        it.reps_low.to_string()
+        lo.to_string()
+    }
+}
+
+/// A timed-hold band, collapsed to one figure when `lo == hi` so a
+/// fixed-duration rung reads "30 s hold", not "30–30 s hold".
+pub(super) fn hold_band(lo: u16, hi: u16) -> String {
+    if lo == hi {
+        format!("{hi} s hold")
+    } else {
+        format!("{lo}–{hi} s hold")
+    }
+}
+
+/// A reps-in-reserve band in the face wording: "1–2 reps left", or
+/// [`reps_left`] when both ends are equal.
+pub(super) fn rir_band_left(lo: i32, hi: i32) -> String {
+    if lo == hi {
+        reps_left(i64::from(lo))
+    } else {
+        format!("{lo}–{hi} reps left")
     }
 }
 
 /// The face's sets×reps lead without the load: `"3×5"`, `"3×8–12"`.
 pub(super) fn sets_reps_lead(it: &PrescriptionView) -> String {
-    format!("{}×{}", it.sets, reps_text(it))
+    format!("{}×{}", it.sets, range_text(it.reps_low, it.reps_high))
 }
 
 /// The single reps-left number [`effort_phrase`] shows, if it shows one: a
@@ -191,7 +211,7 @@ fn effort_phrase(it: &PrescriptionView, load_shown: bool) -> String {
         return reps_left(n);
     }
     match it.intensity {
-        PlanIntensity::RirRange { lo, hi } => format!("{lo}–{hi} reps left"),
+        PlanIntensity::RirRange { lo, hi } => rir_band_left(lo, hi),
         PlanIntensity::PercentE1rm { .. } if load_shown => String::new(),
         _ => it.intensity_label.clone(),
     }
@@ -250,7 +270,7 @@ pub(super) fn derate_reason(cause: crate::plan::DerateCause) -> String {
         ),
         crate::plan::DerateCause::E1rmDrop => format!(
             "because your last session came in more than {:.0}% under your estimate",
-            (1.0 - crate::app::anchors::E1RM_DROP_GATE) * 100.0
+            crate::app::anchors::E1RM_DROP_PCT
         ),
     }
 }
@@ -398,9 +418,7 @@ pub(super) fn cap_run_item_easy(
     } else {
         it.run_volume.filter(|v| *v != RunAmount::RunWalk)
     };
-    it.rep_count = 0;
-    it.rep_volume = String::new();
-    it.rep_amount = None;
+    clear_run_reps(it);
     it.run_volume = vol;
     // The tracker walks `run_structure`: drop the reps and strides with the
     // card's hard work. A beginner's run/walk bouts are the easy session itself

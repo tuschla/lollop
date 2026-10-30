@@ -25,14 +25,16 @@ pub(in crate::app) fn plan_week_index(
     days: &LoggedDays,
     week_monday: i64,
 ) -> Option<u32> {
-    let records = plan_week_records(model, days, week_monday)?;
-    Some(
-        records
-            .iter()
-            .filter(|r| r.advanced)
-            .count()
-            .min(u32::MAX as usize) as u32,
-    )
+    let weeks = plan_weeks(model, days)?;
+    let advanced = |records: &[PlanWeekRecord]| {
+        let n = records.iter().filter(|r| r.advanced).count();
+        n.min(u32::MAX as usize) as u32
+    };
+    Some(if week_monday <= weeks.through_monday {
+        advanced(weeks.before(week_monday))
+    } else {
+        advanced(&plan_week_records(model, days, week_monday)?)
+    })
 }
 
 /// How far back plan weeks are scored (20 years): bounds the per-view work
@@ -40,13 +42,46 @@ pub(in crate::app) fn plan_week_index(
 const MAX_TRACKED_WEEKS: i64 = 1_040;
 
 /// One finished plan week: planned vs done, and whether it moved the plan on.
-struct PlanWeekRecord {
+pub(super) struct PlanWeekRecord {
     monday: i64,
     done: usize,
     planned: usize,
     /// The plan started mid-way through this week.
     partial: bool,
     advanced: bool,
+}
+
+/// A view's plan-week records: every plan week before `through_monday` (next
+/// week's Monday, so this week's own record is the last).
+pub(super) struct PlanWeeks {
+    through_monday: i64,
+    records: Vec<PlanWeekRecord>,
+}
+
+impl PlanWeeks {
+    /// The records of the weeks before `week_monday` (at most
+    /// `through_monday`).
+    fn before(&self, week_monday: i64) -> &[PlanWeekRecord] {
+        &self.records[..self.records.partition_point(|r| r.monday < week_monday)]
+    }
+}
+
+/// The view's [`PlanWeeks`], built once per view on `days`: the plan-week
+/// index of this and next week, the consistency card, the readiness
+/// high-load check and the weekly report all read it.
+fn plan_weeks<'d>(model: &Model, days: &'d LoggedDays) -> Option<&'d PlanWeeks> {
+    days.plan_weeks
+        .get_or_init(|| {
+            let req = model.plan_request?;
+            let today = model.today_epoch_day.unwrap_or(req.start_epoch_day);
+            let through_monday = monday_of(today).saturating_add(7);
+            let records = plan_week_records(model, days, through_monday)?;
+            Some(PlanWeeks {
+                through_monday,
+                records,
+            })
+        })
+        .as_ref()
 }
 
 /// Every finished plan week from the plan's start week up to, not including,
@@ -58,10 +93,10 @@ fn plan_week_records(
     days: &LoggedDays,
     week_monday: i64,
 ) -> Option<Vec<PlanWeekRecord>> {
-    let profile = model.profile.as_ref()?;
+    let profile = model.profile()?;
     let req = model.plan_request?;
     let start = req.start_epoch_day;
-    let start_monday = start.saturating_sub(mon0_weekday(start));
+    let start_monday = monday_of(start);
     let weeks = week_monday
         .saturating_sub(start_monday)
         .div_euclid(7)
@@ -139,11 +174,10 @@ pub(in crate::app) fn build_consistency(
     hold: bool,
 ) -> Option<ConsistencyView> {
     let req = model.plan_request?;
-    let profile = model.profile.as_ref()?;
+    let profile = model.profile()?;
     let start = req.start_epoch_day;
     let today = model.today_epoch_day.unwrap_or(start);
-    let week_monday = today.saturating_sub(mon0_weekday(today));
-    let records = plan_week_records(model, days, week_monday)?;
+    let records = plan_weeks(model, days)?.before(monday_of(today));
     let planned_rows: Vec<&SessionPlanView> = week
         .iter()
         .filter(|s| s.session_type != SessionType::Rest && s.epoch_day >= start)
@@ -190,63 +224,8 @@ pub(in crate::app) fn build_consistency(
         }
     }
 
-    // A missed session this week: make it up on a later free day only if the
-    // spacing allows, never double up (ADH-MISSED-001 / ADH-RESCHED-001). No
-    // nudge while a hold is active, or when the same kind of session was
-    // logged within the credit window (the work was done, just not that day).
-    let logged = &days.by_discipline;
-    let logged_nearby = |s: &SessionPlanView| {
-        let w = CREDIT_WINDOW_DAYS as i64;
-        let from = s.epoch_day.saturating_sub(w).max(start);
-        let to = s.epoch_day.saturating_add(w);
-        from <= to
-            && discipline(s.session_type)
-                .is_some_and(|k| logged[k as usize].range(from..=to).next().is_some())
-    };
-    if !hold
-        && let Some(missed) = week
-            .iter()
-            .find(|s| s.status == SessionStatus::Missed && !logged_nearby(s))
-    {
-        let day = weekday_name(missed.epoch_day);
-        // Lower-case the session name's first letter mid-sentence ("Monday's
-        // easy run"), keeping any acronym inside it.
-        let mut chars = missed.title.chars();
-        let title: String = chars
-            .next()
-            .map(|c| c.to_lowercase().chain(chars).collect())
-            .unwrap_or_default();
-        let never_double =
-            format!("Don't do two sessions on one day to catch up. {MISSED_SESSION_COSTS_LITTLE}");
-        match missed.move_targets.first() {
-            Some(&t) => {
-                let rs = graded((), claims::ADH_RESCHED_001);
-                let (to, basis_day) = if t == today {
-                    ("today", "Today")
-                } else {
-                    (weekday_name(t), weekday_name(t))
-                };
-                push_guidance_basis(
-                    &mut notes,
-                    "Consistency",
-                    format!("Missed {day}'s {title}. Move it to {to}, or carry on with the plan."),
-                    Some(format!(
-                        "{basis_day} still leaves a rest day before your next hard session. {never_double}"
-                    )),
-                    &rs,
-                );
-            }
-            None => {
-                let ms = graded((), claims::ADH_MISSED_001);
-                push_guidance_basis(
-                    &mut notes,
-                    "Consistency",
-                    format!("Missed {day}'s {title}. Carry on with the plan."),
-                    Some(never_double),
-                    &ms,
-                );
-            }
-        }
+    if !hold {
+        push_missed_session_note(&mut notes, days, week, start, today);
     }
 
     Some(ConsistencyView {
@@ -264,4 +243,71 @@ pub(in crate::app) fn build_consistency(
         repeating_week,
         notes,
     })
+}
+
+/// A missed session this week: make it up on a later free day only if the
+/// spacing allows, never double up (ADH-MISSED-001 / ADH-RESCHED-001). No
+/// note when the same kind of session was logged within the credit window
+/// (the work was done, just not that day).
+fn push_missed_session_note(
+    notes: &mut Vec<GuidanceView>,
+    days: &LoggedDays,
+    week: &[SessionPlanView],
+    start: i64,
+    today: i64,
+) {
+    let logged = &days.by_discipline;
+    let logged_nearby = |s: &SessionPlanView| {
+        let w = CREDIT_WINDOW_DAYS as i64;
+        let from = s.epoch_day.saturating_sub(w).max(start);
+        let to = s.epoch_day.saturating_add(w);
+        from <= to
+            && discipline(s.session_type)
+                .is_some_and(|k| logged[k as usize].range(from..=to).next().is_some())
+    };
+    let Some(missed) = week
+        .iter()
+        .find(|s| s.status == SessionStatus::Missed && !logged_nearby(s))
+    else {
+        return;
+    };
+    let day = weekday_name(missed.epoch_day);
+    // Lower-case the session name's first letter mid-sentence ("Monday's
+    // easy run"), keeping any acronym inside it.
+    let mut chars = missed.title.chars();
+    let title: String = chars
+        .next()
+        .map(|c| c.to_lowercase().chain(chars).collect())
+        .unwrap_or_default();
+    let never_double =
+        format!("Don't do two sessions on one day to catch up. {MISSED_SESSION_COSTS_LITTLE}");
+    match missed.move_targets.first() {
+        Some(&t) => {
+            let rs = graded((), claims::ADH_RESCHED_001);
+            let (to, basis_day) = if t == today {
+                ("today", "Today")
+            } else {
+                (weekday_name(t), weekday_name(t))
+            };
+            push_guidance_basis(
+                notes,
+                "Consistency",
+                format!("Missed {day}'s {title}. Move it to {to}, or carry on with the plan."),
+                Some(format!(
+                    "{basis_day} still leaves a rest day before your next hard session. {never_double}"
+                )),
+                &rs,
+            );
+        }
+        None => {
+            let ms = graded((), claims::ADH_MISSED_001);
+            push_guidance_basis(
+                notes,
+                "Consistency",
+                format!("Missed {day}'s {title}. Carry on with the plan."),
+                Some(never_double),
+                &ms,
+            );
+        }
+    }
 }

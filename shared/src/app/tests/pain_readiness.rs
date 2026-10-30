@@ -28,7 +28,7 @@ fn removing_the_worst_active_pain_report_lifts_the_hold_in_one_tap() {
     )
     .expect_only_render();
     assert!(
-        app.view(&model).train_blocked,
+        app.view(&model).hold_reason.is_some(),
         "the sharp-joint report holds training"
     );
 
@@ -41,7 +41,7 @@ fn removing_the_worst_active_pain_report_lifts_the_hold_in_one_tap() {
     )
     .expect_only_render();
     assert!(
-        !app.view(&model).train_blocked,
+        app.view(&model).hold_reason.is_none(),
         "removing the worst-active report lifts the hold in one tap"
     );
 }
@@ -61,7 +61,10 @@ fn graded_tendon_pain_modifies_without_blocking_through_the_view() {
 
     let vm = app.view(&model);
     assert_eq!(vm.safety_tier, Some(SafetyTier::Pain));
-    assert!(!vm.train_blocked, "tolerable tendon pain must not block");
+    assert!(
+        vm.hold_reason.is_none(),
+        "tolerable tendon pain must not block"
+    );
     let adj = vm
         .adjustments
         .iter()
@@ -84,7 +87,7 @@ fn pain_blocks_training_with_a_single_stop() {
 
     let vm = app.view(&model);
     assert_eq!(vm.safety_tier, Some(SafetyTier::Pain));
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
     assert_eq!(vm.adjustments.len(), 1);
     assert!(vm.adjustments[0].evidence.safety_critical);
     assert!(
@@ -150,7 +153,7 @@ fn the_pain_hold_line_says_paused_only_when_training_is_paused() {
             .expect("a pain resolve action is offered")
             .paused_text
             .clone();
-        (vm.train_blocked, line)
+        (vm.hold_reason.is_some(), line)
     };
     let (blocked, scoped) = pain_line(
         r#"{"SubmitReadiness":{"signal":"Pain","value":1.0,"observed_at":0,"pain":{"kind":"SharpJoint","severity":6,"trend":"Stable","location":"Left knee"}}}"#,

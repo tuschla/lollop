@@ -81,7 +81,8 @@ fn history_only(view: &Value) -> Value {
 fn dump_expected_history() {
     let wt = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
     let tag = wt.file_name().unwrap().to_str().unwrap().trim_start_matches("upg-").to_string();
-    let dir = PathBuf::from(std::env::var("HOME").unwrap()).join(".cache/UpgradePath/gen").join(&tag);
+    let gen_dir = std::env::var("UPG_GEN_DIR").expect("UPG_GEN_DIR unset: run scripts/upgrade-fixtures/generate.sh");
+    let dir = PathBuf::from(gen_dir).join(&tag);
     let raw = view_of(&fs::read_to_string(dir.join("raw.ndjson")).unwrap(), "raw");
     let log = view_of(&fs::read_to_string(dir.join("log.ndjson")).unwrap(), "log");
     assert_eq!(raw, log, "old boot compaction changed the old view");

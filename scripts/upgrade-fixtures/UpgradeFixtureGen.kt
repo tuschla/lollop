@@ -1,21 +1,24 @@
 package app.milestone
 
 import java.io.File
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import kotlinx.serialization.json.buildJsonObject // only:4728546
+import kotlinx.serialization.json.put // only:4728546
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
+import org.junit.runner.RunWith // only:901d239
+import org.robolectric.RobolectricTestRunner // only:901d239
 
 /**
- * Upgrade fixture generator (generate.sh): runs INSIDE an old worktree, so
- * `Event.toJson()` and `EventLog` are that version's shell code. Writes:
+ * Upgrade fixture generator for 4728546 and 901d239 (generate.sh): runs INSIDE
+ * an old worktree, so `Event.toJson()` and `EventLog` are that version's shell
+ * code. generate.sh drops each line tagged `// only:<sha>` for another build.
+ * Writes to $UPG_GEN_DIR/<sha>/:
  *  - raw.ndjson         every persisted line as the old shell appended it
  *  - log.ndjson         the same file after the old boot's EventLog.load (its rewrite)
  *  - backup.ndjson      what the old Profile › Your data export wrote (EventLog.read lines)
- *  - active-run.ndjson  an interrupted run's sidecar in the old ActiveRunStore format
+ *  - active-run.ndjson  4728546 only: an interrupted run's sidecar in the old
+ *                       ActiveRunStore format
  */
-@RunWith(RobolectricTestRunner::class)
+@RunWith(RobolectricTestRunner::class) // only:901d239
 class UpgradeFixtureGen {
     private val today = 20725L // 2026-09-29, a Tuesday
     private val off = 7200 // Berlin summer
@@ -61,7 +64,11 @@ class UpgradeFixtureGen {
         ev += Event.ComputeHrZones(ageYears = 36.0, restingHrBpm = 54.0)
         ev += Event.ComputeProtein(bodyweightKg = 78.0, masters = false, deficit = false)
         ev += Event.GeneratePlan(d0)
-        // Retired calculators (Cooper / critical speed / APRE): raw old-core wire lines.
+        // Retired calculators (Cooper / critical speed / APRE): raw old-core wire lines. // only:4728546
+        ev += """{"ComputeCooper":{"distance_m_12min":2650.0}}""" // only:4728546
+        ev += """{"ComputeCriticalSpeed":{"efforts":[{"distance_m":1200.0,"time_sec":270.0},{"distance_m":3600.0,"time_sec":900.0}]}}""" // only:4728546
+        ev += "\"ClearCooper\"" // only:4728546
+        ev += """{"ComputeCooper":{"distance_m_12min":2710.0}}""" // only:4728546
         var id = 1_790_000_000_000L
         val setIds = ArrayList<Pair<Long, Long>>()
         val runIds = ArrayList<Pair<Long, Long>>()
@@ -103,6 +110,7 @@ class UpgradeFixtureGen {
                     distanceKm = km,
                     durationMin = km * 5.6,
                     hrPctMax = 0.0,
+                    longestRecentKm = if (w == 0) 0.0 else 10.0 + (w - 1) * 0.5, // only:4728546
                     observedAt = t,
                     entryId = id,
                     workoutType = if (k == 2) WorkoutType.LongRun else WorkoutType.Easy,
@@ -135,6 +143,7 @@ class UpgradeFixtureGen {
         ev += Event.LogRunTrack(
             points = pts,
             hrPctMax = 0.0,
+            longestRecentKm = 12.5, // only:4728546
             observedAt = pts.last().observedAt,
             entryId = gpsId,
             workoutType = WorkoutType.Steady,
@@ -170,6 +179,7 @@ class UpgradeFixtureGen {
         ev += Event.PlanHypertrophyMeso("Chest", 4)
         ev += Event.ClearHypertrophyPlan
         ev += Event.PlanHypertrophyMeso("Quads", 5, notGrowing = true)
+        ev += """{"ComputeApre":{"scheme":"Apre6","reps":8,"current_load_kg":80.0}}""" // only:4728546
         ev += Event.SubmitWeeklyCheckin(Event.SubmitReview(badDay = false, observedAt = at(today - 2, 20)))
         // Profile edit three weeks in, plan removed and re-generated.
         ev += Event.SetProfile(
@@ -198,7 +208,8 @@ class UpgradeFixtureGen {
         ev += Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, at(today - 1, 18), pain = PainDetail(PainKind.SharpJoint, 7, PainTrend.Stable, location = "Left knee"))
         ev += Event.RemoveReadiness(ReadinessSignal.Pain, at(today - 1, 18))
         ev += Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, at(today - 1, 18, 1), pain = PainDetail(PainKind.TendonLoadRelated, 3, PainTrend.Stable, location = "Left knee"))
-        ev += Event.SubmitReadiness(ReadinessSignal.Rpe, 8.5, at(today - 1, 19))
+        ev += Event.SubmitReadiness(ReadinessSignal.Rpe, 8.5, at(today - 1, 19), streak = 2) // only:4728546
+        ev += Event.SubmitReadiness(ReadinessSignal.Rpe, 8.5, at(today - 1, 19)) // only:901d239
         ev += Event.SetToday(today, off) // not persisted by these builds
         return ev
     }
@@ -206,7 +217,8 @@ class UpgradeFixtureGen {
     @Test
     fun generate() {
         val tag = File(".").canonicalPath.substringAfter("upg-").substringBefore('/')
-        val out = File(System.getProperty("user.home"), ".cache/UpgradePath/gen/$tag").apply { mkdirs() }
+        val genDir = System.getenv("UPG_GEN_DIR") ?: error("UPG_GEN_DIR unset: run scripts/upgrade-fixtures/generate.sh")
+        val out = File(genDir, tag).apply { mkdirs() }
         val lines = scenario().mapNotNull {
             when (it) {
                 is String -> it
@@ -222,22 +234,22 @@ class UpgradeFixtureGen {
         log.copyTo(File(out, "log.ndjson"), overwrite = true)
         val backup = EventLog.read(log).lines
         File(out, "backup.ndjson").writeText(backup.joinToString("\n", postfix = "\n"))
-        // Interrupted-run sidecar, written exactly as ActiveRunStore.begin/append do.
-        val (pts, _) = track(at(today, 7), 40, pauseAt = 25)
-        val side = StringBuilder("{\"run\":\"active\"}\n")
-        pts.forEachIndexed { i, p ->
-            side.append(
-                buildJsonObject {
-                    put("lat", p.lat)
-                    put("lon", p.lon)
-                    put("observed_at", p.observedAt)
-                    put("accuracy_m", p.accuracyM)
-                    if (i == 25) put("seg", true)
-                }.toString(),
-            ).append('\n')
-        }
-        side.append("{\"lat\":52.53,\"lon\":13.4") // torn tail (killed mid-append)
-        File(out, "active-run.ndjson").writeText(side.toString())
+        // Interrupted-run sidecar, written exactly as ActiveRunStore.begin/append do. // only:4728546
+        val (pts, _) = track(at(today, 7), 40, pauseAt = 25) // only:4728546
+        val side = StringBuilder("{\"run\":\"active\"}\n") // only:4728546
+        pts.forEachIndexed { i, p -> // only:4728546
+            side.append( // only:4728546
+                buildJsonObject { // only:4728546
+                    put("lat", p.lat) // only:4728546
+                    put("lon", p.lon) // only:4728546
+                    put("observed_at", p.observedAt) // only:4728546
+                    put("accuracy_m", p.accuracyM) // only:4728546
+                    if (i == 25) put("seg", true) // only:4728546
+                }.toString(), // only:4728546
+            ).append('\n') // only:4728546
+        } // only:4728546
+        side.append("{\"lat\":52.53,\"lon\":13.4") // torn tail (killed mid-append) // only:4728546
+        File(out, "active-run.ndjson").writeText(side.toString()) // only:4728546
         work.deleteRecursively()
         println("UPG wrote ${lines.size} raw, ${backup.size} kept lines to $out")
     }

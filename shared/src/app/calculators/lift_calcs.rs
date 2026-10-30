@@ -182,7 +182,6 @@ pub(in crate::app) fn build_hypertrophy_plan(
     face_rows.extend([dose_row, dose_row + 1, rest_row, rest_row + 1, shape_row]);
     let ramp = ramp.value;
     let figures = (!ramp.is_empty()).then_some(HypertrophyFiguresView {
-        min_sets: lm.mev,
         productive_low: lm.mav.0,
         productive_high: lm.mav.1,
         max_sets: lm.mrv,
@@ -216,7 +215,7 @@ fn push_ramp_row(
     let ramp_str = ramp
         .value
         .iter()
-        .map(|n| n.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(" → ");
     let cap_note = if session_trimmed {
@@ -273,7 +272,7 @@ fn push_dose_rows(
     let first = hypertrophy::block_rir(1, weeks, novice);
     let rir_str = rir_vals
         .iter()
-        .map(|n| n.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(" → ");
     push_guidance(
@@ -291,8 +290,8 @@ fn push_dose_rows(
         section,
         format!(
             "Peak frequency: {}×/wk · {} sets/session",
-            fmt_u8_range(freq.value.freq.0, freq.value.freq.1),
-            fmt_u8_range(freq.value.per_session.0, freq.value.per_session.1)
+            fmt_u8_range(freq.value.freq),
+            fmt_u8_range(freq.value.per_session)
         ),
         &freq,
     );
@@ -367,13 +366,10 @@ fn push_execution_rows(rows: &mut Vec<GuidanceView>, section: &str) -> hypertrop
         section,
         format!(
             "Block shape: {} building weeks, then {} lighter week{} (every {} weeks)",
-            fmt_u8_range(ms.value.accumulation_weeks.0, ms.value.accumulation_weeks.1),
+            fmt_u8_range(ms.value.accumulation_weeks),
             ms.value.deload_weeks,
             if ms.value.deload_weeks == 1 { "" } else { "s" },
-            fmt_u8_range(
-                ms.value.deload_cadence_weeks.0,
-                ms.value.deload_cadence_weeks.1
-            )
+            fmt_u8_range(ms.value.deload_cadence_weeks)
         ),
         &ms,
     );
@@ -385,15 +381,14 @@ fn push_execution_rows(rows: &mut Vec<GuidanceView>, section: &str) -> hypertrop
         section,
         format!(
             "Stop most sets with {} reps left. Going to failure isn't needed and slows recovery",
-            fmt_u8_range(rir_band.value.0, rir_band.value.1)
+            fmt_u8_range(rir_band.value)
         ),
         &rir_band,
     );
 
-    // hypertrophy-021: where failure is permitted at all (machines/isolation;
-    // never heavy free-weight compounds). Educational, the calls' arguments
-    // only inherit the rule's citation.
-    let fail = hypertrophy::failure_allowed(hypertrophy::ExerciseClass::Isolation, true);
+    // hypertrophy-021: failure only on machines/isolation. The plan programs
+    // no set to failure on any weighted lift (RIR ≥ 1); this row states the rule.
+    let fail = graded((), claims::HYP_FAIL_SAFE_001);
     push_guidance(
         rows,
         section,
@@ -410,7 +405,7 @@ fn push_execution_rows(rows: &mut Vec<GuidanceView>, section: &str) -> hypertrop
         format!(
             "Lifts that take a lot of skill or balance: at least {} reps a set, and stop with {} or more reps left, to protect technique",
             guard.value.min_reps,
-            fmt_u8_range(guard.value.min_rir.0, guard.value.min_rir.1)
+            fmt_u8_range(guard.value.min_rir)
         ),
         &guard,
     );
@@ -506,7 +501,7 @@ fn push_training_age_rows(rows: &mut Vec<GuidanceView>, section: &str, profile: 
                     section,
                     format!(
                         "If you're new to counting reps left, start with {} reps left and now and then take a set to failure to check your count",
-                        fmt_u8_range(start.value.0, start.value.1)
+                        fmt_u8_range(start.value)
                     ),
                     &start,
                 );
@@ -519,12 +514,12 @@ fn push_training_age_rows(rows: &mut Vec<GuidanceView>, section: &str, profile: 
                     format!(
                         "Standard plan: each muscle {}×/wk, {} sets/wk; compound lifts {} reps, single-joint lifts {}; {} reps left in week 1 down to {}; a lighter week in week {}",
                         prog.value.frequency_per_week,
-                        fmt_u8_range(prog.value.weekly_sets.0, prog.value.weekly_sets.1),
-                        fmt_u8_range(prog.value.compound_reps.0, prog.value.compound_reps.1),
-                        fmt_u8_range(prog.value.isolation_reps.0, prog.value.isolation_reps.1),
+                        fmt_u8_range(prog.value.weekly_sets),
+                        fmt_u8_range(prog.value.compound_reps),
+                        fmt_u8_range(prog.value.isolation_reps),
                         prog.value.week1_rir,
                         prog.value.final_rir,
-                        fmt_u8_range(prog.value.deload_week.0, prog.value.deload_week.1)
+                        fmt_u8_range(prog.value.deload_week)
                     ),
                     &prog,
                 );

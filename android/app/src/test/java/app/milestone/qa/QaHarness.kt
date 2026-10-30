@@ -1,6 +1,7 @@
 package app.milestone.qa
 
 import android.content.Context
+import android.os.Looper
 import app.milestone.AppClock
 import app.milestone.ConcurrentGoal
 import app.milestone.Core
@@ -10,11 +11,19 @@ import app.milestone.GoalDistance
 import app.milestone.GpsPoint
 import app.milestone.HistoryFocus
 import app.milestone.LiftGoal
+import app.milestone.PrescriptionView
 import app.milestone.ProgressionCadence
 import app.milestone.ResistanceModality
 import app.milestone.RunSession
+import app.milestone.ViewModel
+import app.milestone.isReturnCheckItem
+import app.milestone.isRunItem
 import app.milestone.setupPrefs
 import app.milestone.UiMessages
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import org.junit.Assert.fail
+import org.robolectric.Shadows.shadowOf
 import java.io.File
 
 /**
@@ -148,6 +157,61 @@ object QaHarness {
         app.milestone.ActiveRunStore.init(ctx)
     }
 
+    /** Run [block] on the app's process scope and pump the paused main looper until
+     *  it completes: the serial event consumer and every `Dispatchers.Main` hop
+     *  resume there, so a plain runBlocking on this thread would deadlock. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun <T> onAppScope(timeoutMs: Long = 30_000, block: suspend () -> T): T {
+        val job = EventDispatcher.scope.async { block() }
+        val end = System.currentTimeMillis() + timeoutMs
+        while (!job.isCompleted) {
+            shadowOf(Looper.getMainLooper()).idle()
+            if (System.currentTimeMillis() > end) fail("app-scope work did not finish in ${timeoutMs}ms")
+            Thread.sleep(2)
+        }
+        return job.getCompleted()
+    }
+
+    /** The bytes of test resource [name] (a path under `src/test/resources` or a
+     *  `shared/tests/fixtures` source root). */
+    fun fixture(name: String): ByteArray =
+        checkNotNull(QaHarness::class.java.classLoader!!.getResourceAsStream(name)) { "fixture $name not on the test classpath" }
+            .use { it.readBytes() }
+
+    /**
+     * Log [items] of a [sessionType] plan session to the real core, dated midday on
+     * [day], with entry ids after [firstId]: a `LogRun` per run item and each lift's
+     * sets at its top reps (and hold), skipping a return check. [onModel] sees the
+     * model after each send. Null when nothing was logged.
+     */
+    fun logPlanItems(
+        day: Long,
+        sessionType: String,
+        items: List<PrescriptionView>,
+        firstId: Long,
+        onModel: (ViewModel, PrescriptionView) -> Unit = { _, _ -> },
+    ): ViewModel? {
+        var v: ViewModel? = null
+        var id = firstId
+        val at = day * 86_400L + 43_200L
+        for (item in items) {
+            if (isRunItem(item, sessionType)) {
+                v = Core.send(Event.LogRun(distanceKm = item.run_head_km ?: 6.0, durationMin = 40.0, hrPctMax = 0.7, observedAt = at, entryId = ++id))
+                    .view.also { onModel(it, item) }
+            } else if (!isReturnCheckItem(item, sessionType)) {
+                repeat(item.sets.coerceAtLeast(1)) {
+                    v = Core.send(
+                        Event.LogSet(
+                            exercise = item.exercise, weightKg = item.load_kg ?: 0.0, reps = item.reps_high.coerceAtLeast(1), rpe = 7.0,
+                            observedAt = at, entryId = ++id, holdSec = item.hold_high_sec.takeIf { s -> item.timed_hold && s > 0 },
+                        ),
+                    ).view.also { onModel(it, item) }
+                }
+            }
+        }
+        return v
+    }
+
     // ── Scenario event builders ────────────────────────────────────────────
 
     /** Monday 2026-09-21 10:00 UTC: the instant [reset] pins [AppClock] to. */
@@ -176,7 +240,7 @@ object QaHarness {
      * A set-up strength lifter with no logged history. Boot sees a profile but no
      * program and auto-generates the plan, so Today renders the prescription hero.
      */
-    fun strengthProfile(): Event = Event.SetProfile(
+    fun strengthProfile(): Event.SetProfile = Event.SetProfile(
         progressionCadence = ProgressionCadence.WeekToWeek,
         liftGoal = LiftGoal.MaxStrength,
         goalDistance = GoalDistance.General,
@@ -190,34 +254,15 @@ object QaHarness {
     )
 
     /** [strengthProfile] with loads displayed in pounds. */
-    fun strengthProfileLb(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
-        goalDistance = GoalDistance.General,
-        concurrentGoal = ConcurrentGoal.Strength,
-        weeklySets = 12,
-        runningDaysPerWeek = 0,
-        runningKmPerWeek = 0.0,
-        advanced = false,
-        bodyweightKg = 85.0,
-        ageYears = 30.0,
-        weightLb = true,
-    )
+    fun strengthProfileLb(): Event.SetProfile = strengthProfile().copy(weightLb = true)
 
     /** A calisthenics athlete profile, for a bodyweight/hold-set history. */
-    fun calisthenicsProfile(): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
-        goalDistance = GoalDistance.General,
-        concurrentGoal = ConcurrentGoal.Strength,
-        weeklySets = 12,
-        runningDaysPerWeek = 0,
-        runningKmPerWeek = 0.0,
-        advanced = false,
-        bodyweightKg = 72.0,
-        ageYears = 30.0,
-        resistanceModality = ResistanceModality.Calisthenics,
-    )
+    fun calisthenicsProfile(): Event.SetProfile =
+        strengthProfile().copy(bodyweightKg = 72.0, resistanceModality = ResistanceModality.Calisthenics)
+
+    /** [strengthProfile] training for a 10K on 3 running days, 25 km a week. */
+    fun hybridTenKProfile(): Event.SetProfile =
+        strengthProfile().copy(goalDistance = GoalDistance.TenK, runningDaysPerWeek = 3, runningKmPerWeek = 25.0)
 
     /** A logged reps×load lift set (observed_at anchored to a fixed instant). */
     fun loggedSquat(observedAt: Long): Event = Event.LogSet(

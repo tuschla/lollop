@@ -64,7 +64,7 @@ fn headline_prioritizes_safety_hold_over_adjustments_and_feedback() {
     )
     .expect_only_render();
     let vm = app.view(&model);
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
     assert_eq!(vm.today_headline.kind, HeadlineKind::SafetyHold);
     assert!(
         vm.today_headline.summary.contains("training is paused"),
@@ -245,7 +245,7 @@ fn tolerable_pain_headline_is_the_pain_call_and_caps_the_session() {
     .expect_only_render();
 
     let vm = app.view(&model);
-    assert!(!vm.train_blocked, "tolerable pain must not block");
+    assert!(vm.hold_reason.is_none(), "tolerable pain must not block");
     // The headline is the adjustment (pain) call, NOT the full-load session.
     assert_eq!(
         vm.today_headline.kind,

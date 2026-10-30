@@ -1,6 +1,6 @@
 //! Graded return after a pain / illness hold (ready-upd-003/004).
 
-use super::pain::{PainGate, pain_gate};
+use super::pain::pain_hold_active;
 use super::rules::{illness_downgrade, illness_stop};
 use crate::evidence::{self, claims};
 use crate::schema::{Adjustment, ReadinessInput, ReadinessSignal, Recommended};
@@ -52,7 +52,7 @@ impl HoldState {
         } else {
             IllnessLevel::None
         };
-        let pain = matches!(pain_gate(active), PainGate::Block(_) | PainGate::Scoped(_));
+        let pain = pain_hold_active(active);
         HoldState { illness, pain }
     }
 

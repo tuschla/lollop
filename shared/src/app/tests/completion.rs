@@ -130,9 +130,131 @@ fn the_warm_up_ramp_top_step_does_not_count_before_the_first_work_set() {
         it.sets_done, 0,
         "the warm-up ramp before {load} kg × {reps} counts no work set: {flags:?}"
     );
-    assert!(
-        flags.iter().all(|f| !f.2),
-        "every ramp step is a warm-up: {flags:?}"
+}
+
+/// An advanced MaxStrength lifter, no running, logging four days of `kg` ×
+/// `reps` on `lifts` before a plan starting on `start`; today is the first
+/// day from `mon` on whose hero carries an item `pick` accepts.
+fn strength_day_with(
+    lifts: &[&str],
+    kg: f64,
+    reps: u32,
+    mon: i64,
+    pick: impl Fn(&PrescriptionView) -> bool,
+) -> (Engine, Model, i64, PrescriptionView, u64) {
+    let profile = Profile {
+        goal_distance: GoalDistance::Marathon,
+        concurrent_goal: ConcurrentGoal::EndurancePriority,
+        weekly_sets: 14,
+        advanced: true,
+        bodyweight_kg: Some(80.0),
+        age_years: Some(34.0),
+        resting_hr_bpm: Some(52.0),
+        ..base_profile()
+    };
+    let mut id = 0;
+    let mut history = Vec::new();
+    for (k, d) in [mon - 9, mon - 7, mon - 5, mon - 3].into_iter().enumerate() {
+        for ex in lifts {
+            for _ in 0..3 {
+                id += 1;
+                let w = kg + k as f64 * 2.5;
+                history.push(with_entry_id(
+                    log_set(ex, w, reps, 8.0, d * DAY_SEC + 17 * HOUR + id as i64 * 60),
+                    id,
+                ));
+            }
+        }
+    }
+    let (app, mut model) = planned_on(profile, history, mon - 9);
+    for d in mon..mon + 7 {
+        set_today(&app, &mut model, d);
+        if let Some(it) = app
+            .view(&model)
+            .next_session
+            .filter(|s| s.epoch_day == d)
+            .and_then(|s| s.items.into_iter().find(|it| pick(it)))
+        {
+            return (app, model, d, it, id);
+        }
+    }
+    panic!("no hero item this week");
+}
+
+/// Five triples at 80 % of the load: more reps than the ramp's 80 % × 2 step,
+/// so every one is lighter work, not a warm-up.
+#[test]
+fn sets_at_eighty_percent_for_triples_count_as_lighter_work() {
+    let lifts = ["Back Squat", "Bench Press", "Deadlift", "Overhead Press"];
+    let (app, mut model, day, item, mut id) =
+        strength_day_with(&lifts, 80.0, 5, POS_MON, |it| it.load_kg.is_some());
+    let load = item.load_kg.unwrap();
+    let sets = u64::from(item.sets.max(1));
+    for _ in 0..sets {
+        id += 1;
+        let at = day * DAY_SEC + 17 * HOUR + id as i64 * 60;
+        app.update(
+            with_entry_id(log_set(&item.exercise, 0.8 * load, 3, 8.0, at), id),
+            &mut model,
+        )
+        .expect_only_render();
+    }
+    let it = day_row(&app, &model, day)
+        .items
+        .into_iter()
+        .find(|it| it.exercise == item.exercise)
+        .unwrap();
+    assert_eq!(
+        u64::from(it.sets_done),
+        sets,
+        "{}: {sets} × 3 at 80 % of {load} kg: {:?}",
+        item.exercise,
+        it.logged_sets
+    );
+}
+
+/// A barbell item with only a suggested start (no e1RM anchor): the set
+/// screen ramps to the suggestion, so its first step is a warm-up although it
+/// is the day's heaviest set when logged.
+#[test]
+fn the_first_warm_up_step_of_a_suggested_load_item_is_not_work() {
+    let lifts = [
+        "Back Squat",
+        "Bench Press",
+        "Deadlift",
+        "Overhead Press",
+        "Barbell Row",
+        "Romanian Deadlift",
+        "Incline Bench Press",
+        "Front Squat",
+    ];
+    // 20-rep sets only: no anchor, but a last top set.
+    let (app, mut model, day, item, id) = strength_day_with(&lifts, 60.0, 20, POS_MON, |it| {
+        it.load_kg.is_none()
+            && it.suggested_load_kg.is_some()
+            && !it.plates_per_side.is_empty()
+            && !it.exercise.to_lowercase().contains("deadlift")
+    });
+    let work = item.suggested_load_kg.unwrap();
+    let first_step = (work * 0.4 / 2.5).round() * 2.5;
+    let at = day * DAY_SEC + 17 * HOUR + (id as i64 + 1) * 60;
+    app.update(
+        with_entry_id(log_set(&item.exercise, first_step, 5, 0.0, at), id + 1),
+        &mut model,
+    )
+    .expect_only_render();
+    let it = app
+        .view(&model)
+        .next_session
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|it| it.exercise == item.exercise)
+        .unwrap();
+    assert_eq!(
+        it.sets_done, 0,
+        "{}: {first_step} kg × 5 before {work} kg: {:?}",
+        item.exercise, it.logged_sets
     );
 }
 

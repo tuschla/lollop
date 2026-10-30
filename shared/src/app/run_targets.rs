@@ -31,10 +31,7 @@ pub(super) fn pace_anchor_vdot(profile: &Profile, today_epoch_day: i64) -> Optio
     if running::race_input_freshness(weeks).value == running::RaceInputFreshness::Stale {
         return None;
     }
-    if profile.weeks_off.is_some_and(|w| w > 0.0)
-        && let Some(returned) = profile
-            .layoff_returned_epoch_day
-            .or(profile.effective_from_epoch_day)
+    if let Some(Some(returned)) = profile.declared_layoff_return()
         && day < returned
     {
         return None;
@@ -74,7 +71,7 @@ pub(super) fn logged_hr_pct_max(
 ) -> f64 {
     let bpm = plausible_avg_hr_bpm(avg_hr_bpm);
     match (bpm, profile.and_then(hr_max_anchor)) {
-        (Some(b), Some((max, _))) => (b / max * 1000.0).round() / 10.0,
+        (Some(b), Some((max, _))) => round_tenths(b / max * 100.0),
         _ => hr_pct_max,
     }
 }
@@ -144,18 +141,17 @@ impl TargetBand {
     }
 
     /// The KB workout row carrying this band's RPE (running-014…022).
-    fn workout(self) -> running::RunWorkout {
-        use crate::running::RunWorkout::{EasyGeneralAerobic, Session};
+    fn workout(self) -> RunSessionType {
         match self {
-            TargetBand::Recovery => Session(RunSessionType::Recovery),
-            TargetBand::Easy => EasyGeneralAerobic,
-            TargetBand::LongRun => Session(RunSessionType::LongRun),
-            TargetBand::Marathon => Session(RunSessionType::RacePace),
-            TargetBand::Threshold => Session(RunSessionType::Tempo),
-            TargetBand::Interval => Session(RunSessionType::Interval),
-            TargetBand::Repetition => Session(RunSessionType::Repetition),
-            TargetBand::Strides => Session(RunSessionType::Strides),
-            TargetBand::Hills => Session(RunSessionType::Hills),
+            TargetBand::Recovery => RunSessionType::Recovery,
+            TargetBand::Easy => RunSessionType::Easy,
+            TargetBand::LongRun => RunSessionType::LongRun,
+            TargetBand::Marathon => RunSessionType::RacePace,
+            TargetBand::Threshold => RunSessionType::Tempo,
+            TargetBand::Interval => RunSessionType::Interval,
+            TargetBand::Repetition => RunSessionType::Repetition,
+            TargetBand::Strides => RunSessionType::Strides,
+            TargetBand::Hills => RunSessionType::Hills,
         }
     }
 
@@ -237,10 +233,7 @@ fn recovery_pace_floor(vdot: f64) -> Option<f64> {
 fn band_pace(band: TargetBand, vdot: f64) -> Option<(f64, f64)> {
     match band {
         TargetBand::Recovery => recovery_pace_floor(vdot).map(|p| (0.0, p)),
-        TargetBand::LongRun => running::mp_relative_pace_sec_per_km(
-            vdot,
-            running::RunWorkout::Session(RunSessionType::LongRun),
-        ),
+        TargetBand::LongRun => running::mp_relative_pace_sec_per_km(vdot, RunSessionType::LongRun),
         TargetBand::Repetition | TargetBand::Strides => {
             load::vdot_band_pace_sec_per_km(vdot, VdotBand::Repetition).map(|(f, _)| (f, 0.0))
         }
@@ -347,8 +340,6 @@ pub(super) fn resolve_target(
             let k = load::karvonen_target_hr(hr.rest_bpm, hr.max_bpm, hrr / 100.0).round();
             hi_bpm = Some(hi_bpm.map_or(k, |h| h.min(k)));
         }
-        t.hr_low_bpm = lo_bpm.unwrap_or(0.0) as u32;
-        t.hr_high_bpm = hi_bpm.unwrap_or(0.0) as u32;
         t.hr_label = match (lo_bpm, hi_bpm) {
             (Some(l), Some(h)) if h > l => format!("{l:.0}–{h:.0} bpm"),
             (_, Some(h)) => format!("≤ {h:.0} bpm"),
@@ -364,10 +355,6 @@ pub(super) fn resolve_target(
     // talk test on easy runs when neither a pace nor a measured HRmax anchors
     // them (RUN-TALKTEST-001).
     let rpe = running::workout_rx(band.workout()).value.rpe;
-    if let Some((lo, hi)) = rpe {
-        t.rpe_low = lo;
-        t.rpe_high = hi;
-    }
     let mut detail = match rpe {
         Some((lo, hi)) if lo == hi => format!("{lo} of 10"),
         Some((lo, hi)) => format!("{lo}–{hi} of 10"),
@@ -504,7 +491,7 @@ pub(super) fn apply_run_targets(
         _ => None,
     };
     let day_profile = profile_for_day(model, epoch_day);
-    let hr = hr_anchor(day_profile.as_deref().or(model.profile.as_ref()));
+    let hr = hr_anchor(day_profile.as_deref().or(model.profile()));
     for (rx, it) in s.prescriptions.iter().zip(items.iter_mut()) {
         let Prescription::Run(r) = &rx.value else {
             continue;

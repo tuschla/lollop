@@ -41,30 +41,28 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 import kotlin.math.roundToInt
 
 /** The four on-demand Coach calculators, launched from the Profile calculator rows. */
-internal enum class CoachTool { Race, Volume, Protein, HrZones }
+internal enum class CoachTool(@StringRes val titleRes: Int) {
+    Race(R.string.main_tool_race_title),
+    Volume(R.string.main_tool_volume_title),
+    Protein(R.string.main_tool_protein_title),
+    HrZones(R.string.main_tool_hr_title),
+}
 
 /**
- * The calculators as one card of modality-gated rows (Profile → CALCULATORS).
- * Race predictor + HR zones are running tools; Volume planner is a lifting tool;
- * Protein shows for every adult (a caloric deficit can apply at any adult age), but
- * under 65 its row says it only computes in a deficit ([proteinDeficitOnly]).
- * Under 18 neither Volume nor Protein shows: no autonomous load prescription
- * for youth (safety-011), and the KB's protein targets are adult ones ([underEighteen]).
- * A not-yet-set-up user (profile == null) sees them all. Each row names its
- * tool, then the computed value once there is one, else what a tap does;
- * tapping a row hands its [CoachTool] to [onOpen], whose caller hosts the
- * [CoachToolSheet].
+ * The calculators as one card of modality-gated rows (Profile → CALCULATORS); no
+ * Volume or Protein row under 18 (safety-011, adult protein targets). Tapping a
+ * row hands its [CoachTool] to [onOpen], whose caller hosts the [CoachToolSheet].
  */
 @Composable
 internal fun CalculatorsCard(model: ViewModel, onOpen: (CoachTool) -> Unit) {
@@ -75,14 +73,14 @@ internal fun CalculatorsCard(model: ViewModel, onOpen: (CoachTool) -> Unit) {
     CoachToolList {
         if (showRace) {
             CoachToolRow(
-                stringResource(R.string.main_tool_race_title),
+                stringResource(CoachTool.Race.titleRes),
                 cta = stringResource(R.string.main_tool_race_cta),
                 value = model.race_prediction?.let { listOf(it.predicted, it.goal_label).filter(String::isNotBlank).joinToString(" · ") },
             ) { onOpen(CoachTool.Race) }
         }
         if (showVolume) {
             CoachToolRow(
-                stringResource(R.string.main_tool_volume_title),
+                stringResource(CoachTool.Volume.titleRes),
                 cta = stringResource(R.string.main_tool_volume_cta),
                 // The last plan's weekly sets ("12→20 sets"), from the core's
                 // structured ramp; the block length alone when it shows no ramp.
@@ -106,7 +104,7 @@ internal fun CalculatorsCard(model: ViewModel, onOpen: (CoachTool) -> Unit) {
                 .firstOrNull { !it.refused }
                 ?.let { wholeRange(it.low_g_per_day, it.high_g_per_day) }
             CoachToolRow(
-                stringResource(R.string.main_tool_protein_title),
+                stringResource(CoachTool.Protein.titleRes),
                 cta = when {
                     model.proteinDeficitOnly() -> stringResource(R.string.main_tool_protein_cta_deficit)
                     model.profile?.bodyweight_kg != null -> stringResource(R.string.main_tool_protein_cta_compute)
@@ -124,7 +122,7 @@ internal fun CalculatorsCard(model: ViewModel, onOpen: (CoachTool) -> Unit) {
             // the core's structured hr_max (never recomputed).
             val hrMax = model.hr_max?.bpm?.toInt()
             CoachToolRow(
-                stringResource(R.string.main_tool_hr_title),
+                stringResource(CoachTool.HrZones.titleRes),
                 cta = if (model.profile?.age_years != null) stringResource(R.string.main_tool_hr_cta_compute) else stringResource(R.string.main_tool_hr_cta_add_age),
                 value = when {
                     hrMax != null -> stringResource(R.string.main_calc_value_hrmax, hrMax)
@@ -166,7 +164,7 @@ private fun CoachToolList(rows: @Composable ColumnScope.() -> Unit) {
             .fillMaxWidth()
             .clip(shape)
             .background(BgElevated)
-            .border(1.dp, OnBgBody.copy(alpha = 0.06f), shape)
+            .border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Card), shape)
             .padding(vertical = Space.Xs.dp),
         content = rows,
     )
@@ -220,7 +218,7 @@ private val ResultAnswerRoom = 168.dp
 
 /**
  * Body of the Coach calculator [ModalBottomSheet]: a title, the tool's FORM, then
- * its one [CalculatorResultCard] (ui-sweep §10). The forms' keypad shows only
+ * its one [CalculatorResultCard]. The forms' keypad shows only
  * while a field is active: tapping a well opens it; the primary action, Back, a
  * tap on the sheet's bare ground or any other control folds it, so a sheet opens
  * with its result card in view. Computing scrolls the result into view.
@@ -231,12 +229,7 @@ internal fun CoachToolSheet(
     model: ViewModel,
     onEvent: (Event) -> Unit,
 ) {
-    val title = when (tool) {
-        CoachTool.Race -> stringResource(R.string.main_tool_race_title)
-        CoachTool.Volume -> stringResource(R.string.main_tool_volume_title)
-        CoachTool.Protein -> stringResource(R.string.main_tool_protein_title)
-        CoachTool.HrZones -> stringResource(R.string.main_tool_hr_title)
-    }
+    val title = stringResource(tool.titleRes)
     // Weight-unit choice for the bodyweight keypad form below.
     val weightUnit = model.weightUnit()
     val scroll = rememberScrollState()
@@ -354,7 +347,7 @@ internal fun CoachToolSheet(
  *  emits under `guidance` that is NOT the one Profile-context block). Shared by
  *  the Profile "Evidence & references" screen. */
 private fun referenceGuidance(model: ViewModel): List<GuidanceView> =
-    model.guidance.filterNot { it.section == "Profile" }
+    model.guidance.filterNot { it.section == PROFILE_GUIDANCE_SECTION }
 
 /** Cards in the Reference library's Training load group: the weekly report rows plus
  *  the heart-rate and session-effort (sRPE) load cards, two separate series. */
@@ -418,7 +411,7 @@ internal fun ReferenceLibrarySheet(model: ViewModel) {
                             ReferenceItem {
                                 ReferenceEvidenceCard(
                                     tl.summary, tl.grade, tl.citation, tl.confidence, tl.safety_critical, tl.contested,
-                                    extraDetail = stringResource(R.string.main_training_load_detail, tl.method, tl.sessions_counted, tl.sessions_skipped),
+                                    extraDetail = pluralStringResource(R.plurals.main_training_load_detail, tl.sessions_counted, tl.method, tl.sessions_counted, tl.sessions_skipped),
                                 )
                             }
                         }
@@ -490,7 +483,7 @@ private fun ReferenceGroup(title: String, count: Int, cards: @Composable () -> U
             Text(
                 title,
                 color = OnBgBody,
-                style = Type.Body.copy(fontWeight = FontWeight.Bold),
+                style = Type.BodyBold,
                 modifier = Modifier.weight(1f, fill = false),
             )
             Text(
@@ -537,17 +530,17 @@ private fun ReferenceEvidenceCard(
 )
 
 /**
- * Standard road-race distances the predictor works over, with their exact metre
- * length. Display-only labels; the wire value the core reads is [meters], fed to
- * [Event.PredictRace], the core runs the Riegel + Daniels equivalency on the raw
- * distances, so these presets never encode coaching logic.
+ * The road-race distances the predictor offers: the setup's race chips minus the
+ * mile. The core runs the Riegel + Daniels equivalency on the raw distance
+ * ([RaceDistance.km] × 1000 m, sent in [Event.PredictRace]), so these encode no
+ * coaching logic.
  */
-private enum class RacePreset(val meters: Double, @StringRes val labelRes: Int) {
-    FiveK(5000.0, R.string.log_race_5k),
-    TenK(10000.0, R.string.log_race_10k),
-    Half(21097.5, R.string.log_race_half),
-    Full(42195.0, R.string.log_race_marathon),
-}
+private val RacePresets = RaceDistance.entries - RaceDistance.Mile
+
+/** A preset's segment label: the half marathon reads "Half" to fit the row. */
+@get:StringRes
+private val RaceDistance.presetLabelRes: Int
+    get() = if (this == RaceDistance.Half) R.string.log_race_half else labelRes
 
 /** Which numeric field the race form's shared keypad currently edits. */
 private enum class RaceField { Minutes, Seconds, Volume }
@@ -602,13 +595,13 @@ fun RacePredictorForm(
     // log replay) when present; otherwise the hardcoded starter defaults. The
     // rememberSaveable initial lambda runs once: a warm reopen restores the
     // user's own last edits, a cold start falls back here to the replayed query.
-    fun presetFor(meters: Double, fallback: RacePreset) =
-        RacePreset.entries.firstOrNull { kotlin.math.abs(it.meters - meters) < 1.0 } ?: fallback
+    fun presetFor(meters: Double, fallback: RaceDistance) =
+        RaceDistance.of(meters / 1000.0)?.takeIf { it != RaceDistance.Mile } ?: fallback
     var recent by rememberSaveable {
-        mutableStateOf(initial?.let { presetFor(it.recent_distance_m, RacePreset.FiveK) } ?: RacePreset.FiveK)
+        mutableStateOf(initial?.let { presetFor(it.recent_distance_m, RaceDistance.FiveK) } ?: RaceDistance.FiveK)
     }
     var goal by rememberSaveable {
-        mutableStateOf(initial?.let { presetFor(it.goal_distance_m, RacePreset.TenK) } ?: RacePreset.TenK)
+        mutableStateOf(initial?.let { presetFor(it.goal_distance_m, RaceDistance.TenK) } ?: RaceDistance.TenK)
     }
     // Keypad-driven numeric entry, the same primitives as Log set: an in-form
     // keypad and scale rows, never a −/+ stepper as the primary control.
@@ -639,7 +632,7 @@ fun RacePredictorForm(
     // Bound in the displayed unit: the mi ceiling is the EXACT converted km limit
     // (155.34 mi) so a wire-valid high-mileage volume stays editable in mi.
     val kmMax = if (unit == DistanceUnit.Mi) kmToMi(WeeklyVolumeMaxKm) else WeeklyVolumeMaxKm
-    val presetLabels = RacePreset.entries.associateWith { stringResource(it.labelRes) }
+    val presetLabels = RacePresets.associateWith { stringResource(it.presetLabelRes) }
     val kmValid = kmParsed != null && kmParsed in 0.0..kmMax
 
     fun buffer() = when (active) {
@@ -714,9 +707,9 @@ fun RacePredictorForm(
                 if (minParsed != null && secParsed != null && kmParsed != null) {
                     onPredict(
                         Event.PredictRace(
-                            recentDistanceM = recent.meters,
+                            recentDistanceM = recent.km * 1000.0,
                             recentTimeSec = minParsed * 60.0 + secParsed,
-                            goalDistanceM = goal.meters,
+                            goalDistanceM = goal.km * 1000.0,
                             // Canonical km on the wire: a mi entry converts at save.
                             weeklyKm = if (unit == DistanceUnit.Mi) miToKmWire(kmParsed) else kmParsed,
                             weeksSinceRace = if (raceStale) weeksSinceRace else null,
@@ -733,10 +726,10 @@ fun RacePredictorForm(
 /** A race-distance pick: its [FieldLabel] over the segmented row, the label
  *  hugging the control the way a keypad field's label hugs its well. */
 @Composable
-private fun RacePresetField(label: String, current: RacePreset, labels: Map<RacePreset, String>, onSelect: (RacePreset) -> Unit) {
+private fun RacePresetField(label: String, current: RaceDistance, labels: Map<RaceDistance, String>, onSelect: (RaceDistance) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
         FieldLabel(label)
-        SegmentedEnumRow(null, RacePreset.entries.toList(), current, display = { labels.getValue(it) }, onSelect = onSelect)
+        SegmentedEnumRow(null, RacePresets, current, display = { labels.getValue(it) }, onSelect = onSelect)
     }
 }
 
@@ -780,7 +773,7 @@ private const val AccumulationWeeksSeed = 4
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun HypertrophyPlannerForm(initial: HypertrophyInputView? = null, onPlan: (Event.PlanHypertrophyMeso) -> Unit) {
+fun HypertrophyPlannerForm(initial: HypertrophyInputView?, onPlan: (Event.PlanHypertrophyMeso) -> Unit) {
     // Rehydrate from the core's echoed query on a cold start; else defaults.
     var muscle by rememberSaveable {
         mutableStateOf(
@@ -849,11 +842,11 @@ fun ProteinForm(
     initial: ProteinInputView?,
     keypadOpen: Boolean,
     onKeypad: (Boolean) -> Unit,
-    profileBodyweightKg: Double? = null,
+    profileBodyweightKg: Double?,
     // Display unit for the bodyweight field. The core computes from kg; lb is a
     // display edge (prefill kg→lb, Compute lb→kg).
-    weightUnit: WeightUnit = WeightUnit.Kg,
-    mastersAvailable: Boolean = true,
+    weightUnit: WeightUnit,
+    mastersAvailable: Boolean,
     onCompute: (Double, Boolean, Boolean) -> Unit,
 ) {
     // Keypad-driven bodyweight (Log-set primitives, never a −/+ stepper). The
@@ -953,8 +946,8 @@ fun HrZonesForm(
     initial: HrZoneInputView?,
     keypadOpen: Boolean,
     onKeypad: (Boolean) -> Unit,
-    profileAgeYears: Double? = null,
-    profileRestingHrBpm: Double? = null,
+    profileAgeYears: Double?,
+    profileRestingHrBpm: Double?,
     // (age, restingHrBpm?), a non-null RHR lets the core run Karvonen
     // heart-rate-reserve zones (running-005) instead of plain %HRmax.
     onCompute: (Double, Double?) -> Unit,

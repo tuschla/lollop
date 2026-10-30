@@ -252,19 +252,6 @@ fn rir_accuracy_degrades_far_from_failure() {
     assert_eq!(novice_start_rir().grade(), EvidenceGrade::Moderate);
 }
 
-// -- hyp-021 --
-#[test]
-fn failure_reserved_for_machines_and_isolation() {
-    // Machines and isolation: allowed.
-    assert!(failure_allowed(ExerciseClass::Isolation, false).value);
-    assert!(failure_allowed(ExerciseClass::HeavyCompound, true).value); // e.g. hack squat
-    // Free-weight compounds (unspotted squat/bench): never.
-    assert!(!failure_allowed(ExerciseClass::HeavyCompound, false).value);
-    assert!(!failure_allowed(ExerciseClass::ModerateCompound, false).value);
-    let f = failure_allowed(ExerciseClass::HeavyCompound, false);
-    assert!(f.safety_critical());
-}
-
 // -- hyp-027/028 + Table 4 --
 #[test]
 fn table_4_is_complete_and_verbatim() {
@@ -290,17 +277,6 @@ fn meso_structure_is_4_to_6_plus_1_deload() {
     assert_eq!(m.deload_weeks, 1);
     assert_eq!(m.deload_cadence_weeks, (4, 8));
     assert_eq!(meso_structure().grade(), EvidenceGrade::Moderate);
-}
-
-// -- hyp-037 --
-#[test]
-fn layoff_flags_reduced_mev() {
-    assert!(layoff_reduces_mev(true).value);
-    assert!(!layoff_reduces_mev(false).value);
-    assert_eq!(
-        layoff_reduces_mev(true).grade(),
-        EvidenceGrade::ExpertOpinion
-    );
 }
 
 // -- hyp-043 --

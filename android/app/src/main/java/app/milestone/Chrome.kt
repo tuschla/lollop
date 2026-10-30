@@ -1,37 +1,44 @@
 package app.milestone
 
 import android.os.Build
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
+import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -106,10 +113,9 @@ fun BrandTopBar() {
  */
 @Composable
 fun MilestoneNavBar(selected: Dest, onSelect: (Dest) -> Unit) {
-    // Derive "is dark" from the palette MilestoneTheme actually resolved, not
-    // the OS setting, so the divider stays right when the DarkMode override
-    // forces Dark on a light OS (or vice-versa). A dark ground has low luminance.
-    val dark = LocalPalette.current.bgTop.luminance() < 0.5f
+    // The palette MilestoneTheme actually resolved, not the OS setting, so the
+    // divider stays right when the DarkMode override forces the other mode.
+    val dark = LocalPalette.current.isDark
     Column(Modifier.fillMaxWidth().background(BgTop).testTag("bottom-nav")) {
         HorizontalDivider(
             thickness = 1.dp,
@@ -152,7 +158,7 @@ fun MilestoneNavBar(selected: Dest, onSelect: (Dest) -> Unit) {
                     Text(
                         stringResource(dest.labelRes),
                         color = if (active) Accent else OnBgFaint,
-                        style = if (active) Type.Chip else Type.Chip.copy(fontWeight = FontWeight.Normal),
+                        style = if (active) Type.Chip else Type.ChipRegular,
                     )
                 }
             }
@@ -210,7 +216,7 @@ fun MilestoneNavRail(selected: Dest, onSelect: (Dest) -> Unit, onLog: (() -> Uni
                 label = {
                     Text(
                         stringResource(dest.labelRes),
-                        style = if (active) Type.Chip else Type.Chip.copy(fontWeight = FontWeight.Normal),
+                        style = if (active) Type.Chip else Type.ChipRegular,
                     )
                 },
                 colors = NavigationRailItemDefaults.colors(
@@ -254,11 +260,11 @@ fun RunInProgressChip(onClick: () -> Unit) {
         Text(
             stringResource(R.string.main_run_in_progress),
             color = OnBgBody,
-            style = Type.Body.copy(fontWeight = FontWeight.Bold),
+            style = Type.BodyBold,
             modifier = Modifier.weight(1f),
         )
         // Drawn like a TextAction (Bold Accent + chevron); the whole chip is the target.
-        Text(stringResource(R.string.main_return), color = Accent, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+        Text(stringResource(R.string.main_return), color = Accent, style = Type.BodyBold)
         RowChevron(tint = Accent)
     }
 }
@@ -282,3 +288,37 @@ fun SheetNavBarScrim() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isNavigationBarContrastEnforced = false
     }
 }
+
+/**
+ * The app's bottom sheet: fully expanded by default, so Back and a swipe close it
+ * in one step (a half-height detent made Back collapse it first), on the sheet
+ * ground [BgSunken] unless [containerColor] says otherwise, with
+ * [SheetNavBarScrim] applied.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun AppSheet(
+    onDismiss: () -> Unit,
+    sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    containerColor: Color = BgSunken,
+    sheetGesturesEnabled: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        sheetGesturesEnabled = sheetGesturesEnabled,
+        containerColor = containerColor,
+    ) {
+        SheetNavBarScrim()
+        content()
+    }
+}
+
+/** A sheet's scrolling body: full width, scrolled by [scroll], clear of the
+ *  navigation bar, with the sheet's [sheetPadding]. */
+internal fun Modifier.sheetBody(scroll: ScrollState): Modifier =
+    fillMaxWidth().verticalScroll(scroll).navigationBarsPadding().sheetPadding()
+
+/** A sheet body's side and bottom padding. */
+internal fun Modifier.sheetPadding(): Modifier = padding(horizontal = Space.Sheet.dp).padding(bottom = Space.Lg.dp)

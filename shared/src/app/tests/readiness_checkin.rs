@@ -29,9 +29,9 @@ fn a_single_checkin_shows_building_baseline_not_a_fabricated_z() {
         .expect_only_render();
 
     let vm = app.view(&model);
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     // The check-in is echoed so the shell can rehydrate + show it's recorded.
-    let echo = vm.checkin_today.expect("checkin echoed");
+    let echo = vm.latest_checkin.expect("checkin echoed");
     assert_eq!(echo.sleep_quality, Some(2));
     assert_eq!(echo.soreness, Some(4));
     // Honest collecting status, no derived WellnessZ row yet.
@@ -159,7 +159,7 @@ fn checkins_and_old_readiness_logs_coexist() {
 
     let vm = app.view(&model);
     assert!(
-        vm.checkin_today.is_some(),
+        vm.latest_checkin.is_some(),
         "ClearReadiness must not wipe the check-in history"
     );
     assert!(
@@ -172,7 +172,7 @@ fn checkins_and_old_readiness_logs_coexist() {
     app.update(Event::ClearCheckins, &mut model)
         .expect_only_render();
     let vm = app.view(&model);
-    assert!(vm.checkin_today.is_none());
+    assert!(vm.latest_checkin.is_none());
     assert!(vm.baseline_status.is_empty());
 }
 
@@ -198,7 +198,7 @@ fn medical_red_flags_surface_referral_tier_through_the_view() {
             Some(SafetyTier::MedicalReferral),
             "{signal:?} must raise the referral tier"
         );
-        assert!(vm.train_blocked, "{signal:?} must block training");
+        assert!(vm.hold_reason.is_some(), "{signal:?} must block training");
     }
 }
 
@@ -220,7 +220,7 @@ fn illness_severity_bands_map_to_tier_through_the_view() {
     let vm = app.view(&above);
     assert_eq!(vm.safety_tier, Some(SafetyTier::Illness));
     assert!(
-        !vm.train_blocked,
+        vm.hold_reason.is_none(),
         "above-neck illness downgrades but must not block training"
     );
 
@@ -233,7 +233,7 @@ fn illness_severity_bands_map_to_tier_through_the_view() {
     let vm = app.view(&fever);
     assert_eq!(vm.safety_tier, Some(SafetyTier::Illness));
     assert!(
-        vm.train_blocked,
+        vm.hold_reason.is_some(),
         "below-neck/fever illness must block training"
     );
 }
@@ -242,7 +242,7 @@ fn illness_severity_bands_map_to_tier_through_the_view() {
 fn resting_hr_plus_ten_blocks_training_through_the_view() {
     // ready-upd-002 (AUTOREG-RHR-NOISE-001): ONE +10 morning is likely noise →
     // an easier day plus the illness check, no block; stop level on 2
-    // consecutive mornings forces the rest day, which trips train_blocked at
+    // consecutive mornings forces the rest day, which holds training at
     // the Illness tier. A single +5 bpm reading stays a no-op.
     let app = Engine;
     let mut single = Model::default();
@@ -253,7 +253,7 @@ fn resting_hr_plus_ten_blocks_training_through_the_view() {
     .expect_only_render();
     let vm = app.view(&single);
     assert!(
-        !vm.train_blocked,
+        vm.hold_reason.is_none(),
         "one +10 morning must not force a rest day"
     );
     assert_eq!(vm.safety_tier, Some(SafetyTier::SingleDayMarker));
@@ -271,7 +271,7 @@ fn resting_hr_plus_ten_blocks_training_through_the_view() {
     let vm = app.view(&blocked);
     assert_eq!(vm.safety_tier, Some(SafetyTier::Illness));
     assert!(
-        vm.train_blocked,
+        vm.hold_reason.is_some(),
         "RHR +10 on 2 mornings must block training"
     );
 
@@ -283,7 +283,7 @@ fn resting_hr_plus_ten_blocks_training_through_the_view() {
     .expect_only_render();
     let vm = app.view(&downgrade);
     assert!(
-        !vm.train_blocked,
+        vm.hold_reason.is_none(),
         "a single RHR +5 bpm day must not block training"
     );
 }
@@ -301,7 +301,7 @@ fn clean_inputs_leave_training_open() {
 
     let vm = app.view(&model);
     assert_eq!(vm.safety_tier, None);
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     assert!(vm.adjustments.is_empty());
     assert_eq!(vm.input_count, 1);
 }
@@ -321,7 +321,7 @@ fn a_single_deep_low_wellness_day_downgrades_via_the_single_day_arm() {
     .expect_only_render();
 
     let vm = app.view(&model);
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     assert_eq!(vm.safety_tier, None);
     assert!(
         vm.adjustments.iter().any(|a| a
@@ -350,7 +350,7 @@ fn clear_resets_inputs() {
 
     let vm = app.view(&model);
     assert_eq!(vm.input_count, 0);
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
 }
 
 #[test]

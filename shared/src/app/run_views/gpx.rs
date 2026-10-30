@@ -18,7 +18,7 @@ struct GpxSource {
     label: String,
 }
 
-/// Keyed by the run identity `(entry_id, observed_at)` `find_run` matches on.
+/// Keyed by the run identity `(entry_id, observed_at)` `find_entry` matches on.
 type Registry = HashMap<(u64, i64), GpxSource>;
 
 // Process-global in shipping builds: the shell's export call may land on a
@@ -77,7 +77,7 @@ pub(in crate::app) fn refresh_gpx_registry(runs: &[LoggedRun], facts: &RunFacts)
                     content_key,
                     track: std::sync::Arc::new(track),
                     seg_starts,
-                    label: format!("Run {:.1} km", q.distance_km),
+                    label: format!("Run {}", fmt_km_or_mi(q.distance_km, false)),
                 },
             );
         }

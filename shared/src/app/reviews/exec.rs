@@ -236,25 +236,20 @@ pub(super) fn run_done_message(r: &RunOutcome, mi: bool) -> String {
     }
 }
 
-/// Which arm produced the execution verdict, so the copy names the right thing
-/// with its numbers.
+/// Which arm produced the execution verdict, where a category has more than
+/// one copy, so the copy names the right thing with its numbers. `None` on an
+/// [`Exec`] = the category's own copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::app) enum Trigger {
-    Missed,
     RepsMetAtRir0,
     HarderThanPlanned,
-    Nudge,
-    LiftMastery,
     LiftCompleted,
     IntervalMastery,
     DecouplingHigh,
     MildDrift,
     Durability,
-    EasyHr,
     PositiveSplit,
-    Pacing,
     RunCompleted,
-    BadDay,
     Mastery,
 }
 
@@ -284,7 +279,7 @@ pub(in crate::app) struct ExecInput {
 #[derive(Debug, Clone)]
 pub(in crate::app) struct Exec {
     pub(super) rec: Recommended<FeedbackCategory>,
-    pub(super) trigger: Trigger,
+    pub(super) trigger: Option<Trigger>,
     pub(super) lift: Option<LiftEval>,
 }
 
@@ -329,7 +324,7 @@ pub(in crate::app) fn session_execution(inp: &ExecInput) -> Option<Exec> {
     if inp.bad_day && !positive {
         return Some(Exec {
             rec: feedback::bad_day_feedback(),
-            trigger: Trigger::BadDay,
+            trigger: None,
             lift: exec.lift,
         });
     }
@@ -339,17 +334,15 @@ pub(in crate::app) fn session_execution(inp: &ExecInput) -> Option<Exec> {
 fn execution_arm(inp: &ExecInput) -> Option<Exec> {
     if let Some(l) = &inp.lift {
         let (rec, trigger) = match (l.reps_met, l.rir_actual, l.rir_target) {
-            (false, ..) => {
-                let (r, _) = feedback::lifting_feedback(false, 0, 0);
-                (r, Trigger::Missed)
-            }
+            (false, ..) => (feedback::lifting_feedback(false, 0, 0).0, None),
             (true, Some(a), Some(t)) => {
                 let (r, ct) = feedback::lifting_feedback(true, a, t);
                 let trig = match (r.value, ct) {
-                    (_, Some(feedback::CorrectiveTrigger::RepsMetAtRir0)) => Trigger::RepsMetAtRir0,
-                    (FeedbackCategory::ProgressionNudge, _) => Trigger::Nudge,
-                    (FeedbackCategory::PositiveMastery, _) => Trigger::LiftMastery,
-                    _ => Trigger::HarderThanPlanned,
+                    (_, Some(feedback::CorrectiveTrigger::RepsMetAtRir0)) => {
+                        Some(Trigger::RepsMetAtRir0)
+                    }
+                    (FeedbackCategory::InformationalNeutral, _) => Some(Trigger::HarderThanPlanned),
+                    _ => None,
                 };
                 (r, trig)
             }
@@ -361,7 +354,7 @@ fn execution_arm(inp: &ExecInput) -> Option<Exec> {
                     FeedbackCategory::PositiveMastery,
                     claims::FB_MASTERY_ANCHOR_001,
                 ),
-                Trigger::LiftCompleted,
+                Some(Trigger::LiftCompleted),
             ),
         };
         return Some(Exec {
@@ -382,7 +375,7 @@ fn execution_arm(inp: &ExecInput) -> Option<Exec> {
         && let Some(f) =
             feedback::interval_mastery_feedback(i.target_paces_met, i.rpe_at_or_below_target)
     {
-        return plain(f, Trigger::IntervalMastery);
+        return plain(f, Some(Trigger::IntervalMastery));
     }
     if let Some(d) = &inp.decoupling
         && let Some((f, ct)) = feedback::decoupling_feedback(d.drift_pct, d.cool_steady_context)
@@ -392,20 +385,17 @@ fn execution_arm(inp: &ExecInput) -> Option<Exec> {
             (FeedbackCategory::PositiveExecution, _) => Trigger::Durability,
             _ => Trigger::MildDrift,
         };
-        return plain(f, trig);
+        return plain(f, Some(trig));
     }
     if let Some(frac) = inp.easy_frac
         && let Some(f) = feedback::easy_run_intensity_discipline(frac)
     {
-        return plain(f, Trigger::EasyHr);
+        return plain(f, None);
     }
     if let Some(ps) = inp.split_pct {
         let f = feedback::positive_split_discipline(ps);
-        let trig = if f.value == FeedbackCategory::IntensityDiscipline {
-            Trigger::PositiveSplit
-        } else {
-            Trigger::Pacing
-        };
+        let trig =
+            (f.value == FeedbackCategory::IntensityDiscipline).then_some(Trigger::PositiveSplit);
         return plain(f, trig);
     }
     if inp.run.is_some() {
@@ -414,11 +404,11 @@ fn execution_arm(inp: &ExecInput) -> Option<Exec> {
                 FeedbackCategory::PositiveMastery,
                 claims::FB_MASTERY_ANCHOR_001,
             ),
-            Trigger::RunCompleted,
+            Some(Trigger::RunCompleted),
         );
     }
     if inp.bad_day {
-        return plain(feedback::bad_day_feedback(), Trigger::BadDay);
+        return plain(feedback::bad_day_feedback(), None);
     }
     None
 }

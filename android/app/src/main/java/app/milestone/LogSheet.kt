@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -53,21 +54,21 @@ internal fun LogSheetContent(
     onTrackRun: () -> Unit,
     onDismiss: () -> Unit,
     // The shown editor reports whether it has unsaved edits so the host's
-    // swipe-down dismissal can guard it. Default no-op keeps other callers simple.
-    onDirtyChange: (Boolean) -> Unit = {},
+    // swipe-down dismissal can guard it.
+    onDirtyChange: (Boolean) -> Unit,
     // Coach prescription to prefill the Set editor from (NEW mode only); null
     // opens blank. `onPlanPrefill` records which exercise the "Today's plan"
     // fast-path picked so the host can resolve it against the live model.
-    planPrefill: PrescriptionView? = null,
-    onPlanPrefill: (String) -> Unit = {},
+    planPrefill: PrescriptionView?,
+    onPlanPrefill: (String) -> Unit,
     // Seed the Set/Run editor's stamp to a PAST plan day's local noon; null =
     // today's flow. The editors' date chips stay user-editable.
-    planObservedAt: Long? = null,
+    planObservedAt: Long?,
     // The Set editor's loop locks the sheet against swipe / scrim dismissal.
-    onSheetLockChange: (Boolean) -> Unit = {},
+    onSheetLockChange: (Boolean) -> Unit,
     // The loop's "Done for now" / "Finish session": closes the sheet like
     // [onDismiss]; the host also returns Today to its top.
-    onFinishSession: () -> Unit = onDismiss,
+    onFinishSession: () -> Unit,
 ) {
     val ctx = LocalContext.current
     // Weight-unit choice for the set editor's keypad + load faces.
@@ -120,8 +121,7 @@ internal fun LogSheetContent(
             // The tallest form exceeds a ModalBottomSheet's max height; without a
             // scroll the fields below the fold would be unreachable.
             .then(if (pinnedEditor) Modifier else Modifier.verticalScroll(scroll))
-            .padding(horizontal = Space.Sheet.dp)
-            .padding(bottom = Space.Lg.dp),
+            .sheetPadding(),
         verticalArrangement = Arrangement.spacedBy(Space.Md.dp + Space.Xs.dp),
     ) {
       CompositionLocalProvider(LocalEditorPinnedActions provides pinnedEditor) {
@@ -210,11 +210,10 @@ internal fun LogSheetContent(
                 // Morning check-in: the engine's main readiness input, in a fixed
                 // slot; once today's is in, its subline says so, so nobody
                 // double-submits or skips it by guesswork.
-                val checkinDay = model.checkin_today?.observed_at?.let { localEpochDay(it, java.time.ZoneId.systemDefault()) }
                 LogOptionRow(
                     stringResource(R.string.main_morning_checkin_title),
                     stringResource(
-                        if (checkinDay == model.today()) R.string.main_morning_checkin_done_sub
+                        if (model.checked_in_today) R.string.main_morning_checkin_done_sub
                         else R.string.main_morning_checkin_sub,
                     ),
                     R.drawable.ic_content_readiness_heart,
@@ -335,7 +334,8 @@ internal fun LogSheetContent(
                 // Finish via onFinish.
                 onDone = onDismiss,
                 onFinish = onFinishSession,
-              ) { set -> onEvent(set) }
+                onSave = onEvent,
+              )
             }
             LogMode.Run -> LogRunEditor(
                 initialObservedAt = planObservedAt,
@@ -358,7 +358,7 @@ internal fun LogSheetContent(
             // The primary human morning check-in. The core derives
             // the z-scores; the user never enters one.
             LogMode.Checkin -> MorningCheckinSheet(
-                echo = model.checkin_today,
+                echo = model.latest_checkin,
                 illnessPrompt = model.illness_check_prompt,
                 onClose = { onMode(LogMode.Chooser) },
                 onDirtyChange = onDirtyChange,
@@ -475,7 +475,7 @@ private fun LogOptionRow(
             size = 38.dp,
         )
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-            Text(title, color = titleColor, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+            Text(title, color = titleColor, style = Type.BodyBold)
             Text(subtitle, color = subColor, style = Type.Caption)
         }
         if (tone == LogRowTone.Plain) {
@@ -506,25 +506,10 @@ private val FigureUnit = Regex("""(\d) (kg|lb|km|mi|min|s)\b""")
 private val AtFigure = Regex("""@ (\d)""")
 
 /** A compact chooser entry inside a [ChooserGroup]: a bold title over a
- *  one-line subtitle and a trailing chevron, no icon tile. Full-width ≥48dp tap. */
+ *  one-line subtitle and a trailing chevron, no icon tile. */
 @Composable
-private fun ChooserTextRow(title: String, subtitle: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = ActionMinHeight)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = Space.Card.dp, vertical = Space.Sm.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.Card.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-            Text(title, color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
-            Text(subtitle, color = OnBgFaint, style = Type.Caption)
-        }
-        RowChevron()
-    }
-}
+private fun ChooserTextRow(title: String, subtitle: String, onClick: () -> Unit) =
+    TitleSubtitleRow(title, subtitle, onClick, contentPadding = PaddingValues(horizontal = Space.Card.dp, vertical = Space.Sm.dp))
 
 /** One rounded list surface holding several [ChooserTextRow]s; clipped before
  *  the rows' clickables so their ripples stay inside the rounded shape. */

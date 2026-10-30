@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
     --port) PORT="$2"; shift 2 ;;
     --apk) APK="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
-    -h|--help) sed -n '2,45p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR>1&&/^#/{print;next}NR>1{exit}' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -86,7 +86,6 @@ mkdir -p "$OUT"/{shots,ui,logs,seed,probe}
 # shellcheck source=emu-scenarios/lib.sh
 source "$HELP/lib.sh"
 measure() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$OUT/measurements.tsv"; log "measure $1 · $2 = $3"; }
-EV() { python3 "$HELP/events.py" "$@"; }
 dev_now() { sh_ date +%s; }
 
 # ── App state ────────────────────────────────────────────────────────────────
@@ -112,27 +111,7 @@ reset_app() {
   fi
 }
 
-# ── Set editor ───────────────────────────────────────────────────────────────
-open_set_editor() {
-  tap_node eq Log || return 1; sleep 2
-  tap_node eq "Log set" || return 1
-  wait_text eq "Exercise" 8 || return 1
-  # No exercise chosen yet: the search field shows its placeholder.
-  if has_text eq "Search exercises"; then tap_node eq "Back Squat" || return 1; sleep 2; fi
-  return 0
-}
-# Tap MODE TEXT inside the editor, scrolling its content up to reveal it (large
-# fonts / display sizes push the weight and reps rows below the pinned footer).
-tap_scroll() {
-  local i b
-  for i in 1 2 3 4 5 6; do
-    tap_node "$1" "$2" 1 2>/dev/null && return 0
-    b="$(find_node scroll)" || b="0 450 1080 1050"
-    read -r -a b <<<"$b"
-    adb_ shell input swipe 540 $(( b[3] - 40 )) 540 $(( b[1] + (b[3] - b[1]) / 4 )) 400; sleep 1
-  done
-  return 1
-}
+# ── Set editor (open_set_editor, tap_scroll, close_editor in lib.sh) ─────────
 # 120 → 122.5 kg, 5 reps, 2 reps left (RPE 8).
 editor_fill() {
   tap_scroll eq "Add 2.5 kg" || return 1
@@ -145,15 +124,6 @@ editor_has_values() { # editor_has_values WEIGHT
   x="$(dump_ui)" || return 1
   python3 "$HELP/node.py" eq "Weight, $1 kg" <<<"$x" >/dev/null &&
     python3 "$HELP/node.py" on "Reps, 5" <<<"$x" && python3 "$HELP/node.py" on "2 reps left" <<<"$x"
-}
-close_editor() {
-  if has_text eq "Done for now"; then tap_node eq "Done for now"
-  else tap_node eq Close; fi
-  sleep 2
-  has_text eq Discard && { tap_node eq Discard; sleep 1; }
-  # An editor opened from the Log sheet returns to it: dismiss that too.
-  has_text eq "Exercise, weight, reps" && { adb_ shell input keyevent 4; sleep 2; }
-  return 0
 }
 # The editor's "Logged" time chip ("Today · 8:00 AM"), scrolled into view.
 editor_chip() {
@@ -645,7 +615,7 @@ sc_update() {
   tap_nav Today; sleep 2
   open_set_editor && editor_fill && tap_node re '^Log set [0-9]+$'; sleep 3; close_editor
   pull_log "$OUT/logs/update-before.ndjson"; m0="$(md5sum <"$OUT/logs/update-before.ndjson" | cut -c1-12)"
-  r="$(adb_ install -r "$APK" 2>&1 | tail -1)"
+  r="$(install_apk "$APK" -r)"
   check INFO $S "install -r over the running app" "$r; pid after: '$(app_pid)'"
   pull_log "$OUT/logs/update-after.ndjson"; m1="$(md5sum <"$OUT/logs/update-after.ndjson" | cut -c1-12)"
   expect $S "event log byte-identical across the update" "md5 $m0 → $m1 ($(grep -c . "$OUT/logs/update-after.ndjson") lines)" test "$m0" = "$m1"
@@ -658,7 +628,7 @@ sc_update() {
   start_feeder update
   if start_run; then
     sleep 15
-    r="$(adb_ install -r "$APK" 2>&1 | tail -1)"
+    r="$(install_apk "$APK" -r)"
     launch
     expect $S "relaunch after an update mid-run offers to resume" "'$r'" wait_text eq "Resume your run?" 20
     evidence update-02-resume-prompt
@@ -893,7 +863,7 @@ sc_longlog() {
 boot_emulator "$AVD" "$OUT/logs/emulator.log" 2048
 trap 'touch "$OUT/feed.stop"; kill ${LOGCAT_PID:-} 2>/dev/null; stop_emulator' EXIT
 echo "device:    $(sh_ getprop ro.product.model), API $(sh_ getprop ro.build.version.sdk), heapgrowthlimit $(sh_ getprop dalvik.vm.heapgrowthlimit)" >>"$OUT/config.txt"
-adb_ install -r "$APK" >/dev/null || { log "install failed"; exit 1; }
+install_apk "$APK" -r >/dev/null || { log "install failed"; exit 1; }
 adb_ logcat -c 2>/dev/null || true
 adb_ logcat -G 16M >/dev/null 2>&1 || true
 adb_ logcat -v threadtime -b main,system,crash,events >"$OUT/logcat.txt" 2>&1 &
@@ -911,19 +881,7 @@ for sc in $ONLY; do
 done
 baseline_device
 sleep 2
-kill "$LOGCAT_PID" 2>/dev/null; wait "$LOGCAT_PID" 2>/dev/null
-
-python3 "$HELP/scan_logcat.py" "$OUT/logcat.txt" "$OUT/logcat-scan.json" >/dev/null
-python3 - "$OUT/logcat-scan.json" "$OUT/checks.tsv" <<'PY'
-import json, sys
-s = json.load(open(sys.argv[1]))
-out = open(sys.argv[2], "a")
-for k, label in (("fatal", "Java FATAL EXCEPTION (not induced)"), ("native", "native crash"), ("anr", "ANR"),
-                 ("oom", "OutOfMemoryError"), ("fgs", "foreground-service failure")):
-    out.write(f"{'PASS' if s[k] == 0 else 'FAIL'}\tlogcat\t{label}\t{s[k]} occurrence(s) {json.dumps(s['by_phase'].get(k, {}))}\n")
-out.write(f"{'PASS' if s['strictmode'] == 0 else 'INFO'}\tlogcat\tStrictMode\t{s['strictmode']} line(s)\n")
-out.write(f"INFO\tlogcat\tinduced crashes (am crash)\t{s['induced']}\n")
-PY
+logcat_checks
 python3 "$HELP/report.py" "$OUT"
 log "report: $OUT/REPORT.md"
 ! grep -q '^FAIL' "$OUT/checks.tsv"

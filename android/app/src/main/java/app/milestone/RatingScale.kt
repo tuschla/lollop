@@ -78,7 +78,7 @@ fun RatingScale(
                 Text(
                     selected?.let(selectedText).orEmpty(),
                     color = OnBgBody,
-                    style = Type.Body.copy(fontWeight = FontWeight.Bold).merge(TabularFigures),
+                    style = Type.BodyBold.merge(TabularFigures),
                     textAlign = TextAlign.End,
                     // The track speaks the value; the word stays in the tree for tests.
                     modifier = Modifier.semantics { hideFromAccessibility() },

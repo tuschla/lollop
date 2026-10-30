@@ -1,7 +1,6 @@
 package app.milestone
 
 import android.Manifest
-import android.app.AlarmManager
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
@@ -39,30 +38,18 @@ class LiveRestNotificationTest {
     fun setUp() {
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         RestAlarm.cancel(app)
-        RestAlarm.setInAppVisible(app, false)
+        RestAlarm.resetProcessState()
         AppSettings.restAlert.value = true
     }
 
     @After
     fun tearDown() {
         RestAlarm.cancel(app)
-        RestAlarm.setInAppVisible(app, false)
+        RestAlarm.resetProcessState()
+        AppSettings.restAlert.value = true
     }
 
-    /** What the rest shows: the rest-done alert, else the countdown; never both. */
-    private fun posted(): Notification? {
-        val done = shadowOf(nm).getNotification(RestAlarm.DONE_NOTIF_ID)
-        val countdown = shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID)
-        assertTrue("countdown and rest-done alert both posted", done == null || countdown == null)
-        return done ?: countdown
-    }
-
-    /** The system delivers the rest-end alarm: its broadcast reaches the receiver. */
-    private fun fireRestEnd() {
-        val am = app.getSystemService(AlarmManager::class.java)
-        val alarm = shadowOf(am).scheduledAlarms.single()
-        RestEndReceiver().onReceive(app, shadowOf(alarm.operation).savedIntent)
-    }
+    private fun posted() = postedRest(app)
 
     private fun squatNext() = RestAlarm.NextSet("Back squat", "Set 3 of 4 · 100\u00A0kg × 5")
 
@@ -101,7 +88,7 @@ class LiveRestNotificationTest {
     @Test
     fun restEndReplacesTheChipWithTheNonPromotedDoneAlert() {
         RestAlarm.schedule(app, 90, "Back squat")
-        fireRestEnd()
+        fireRestEnd(app)
         val n = posted()!!
         assertEquals(res.getString(R.string.log_rest_notif_done_title), n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
         assertFalse("not promoted", NotificationCompat.isRequestPromotedOngoing(n))
@@ -136,7 +123,7 @@ class LiveRestNotificationTest {
         RestAlarm.setInAppVisible(app, false)
         assertNull("not reposted", posted())
         // The rest-done alert still comes.
-        fireRestEnd()
+        fireRestEnd(app)
         assertEquals(res.getString(R.string.log_rest_notif_done_title), posted()!!.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
 
         // The next rest posts its countdown again.
@@ -167,7 +154,7 @@ class LiveRestNotificationTest {
         shadowOf(app).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
         RestAlarm.schedule(app, 90, "Back squat")
         assertNull(posted())
-        fireRestEnd()
+        fireRestEnd(app)
         assertNull(posted())
     }
 

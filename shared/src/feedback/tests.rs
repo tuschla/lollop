@@ -197,7 +197,7 @@ fn resolve_suppresses_praise_under_concern() {
         ..Default::default()
     };
     assert_eq!(
-        resolve_feedback(injury, praise).value,
+        resolve_feedback(safety_gate(injury), praise).value,
         FeedbackCategory::ConcernInjury
     );
 
@@ -207,13 +207,13 @@ fn resolve_suppresses_praise_under_concern() {
         claims::AUTOREG_RIR_001,
     ));
     assert_eq!(
-        resolve_feedback(SafetySignals::default(), praise).value,
+        resolve_feedback(safety_gate(SafetySignals::default()), praise).value,
         FeedbackCategory::PositiveMastery
     );
 
     // Safety-clear, no execution: informational default.
     assert_eq!(
-        resolve_feedback(SafetySignals::default(), None).value,
+        resolve_feedback(safety_gate(SafetySignals::default()), None).value,
         FeedbackCategory::InformationalNeutral
     );
 }
@@ -309,16 +309,6 @@ fn decoupling_gated_and_banded() {
     ));
 }
 
-#[test]
-fn goal_framing_defaults_to_process() {
-    // Process framing is the default (never outcome-first), graded as the
-    // KB rule is: Moderate and contested (feedback-003).
-    let g = default_goal_framing();
-    assert_eq!(g.value, GoalFraming::Process);
-    assert_eq!(g.grade(), crate::schema::EvidenceGrade::Moderate);
-    assert!(g.contested().is_some());
-}
-
 // --- feedback-036: the >=1-2 wk duration condition ---
 
 #[test]
@@ -391,29 +381,5 @@ fn verbosity_defaults_by_experience() {
     assert_eq!(
         verbosity_for_experience(true).claim_id(),
         claims::FB_VERBOSITY_001
-    );
-}
-
-// --- feedback-005: mastery anchoring in praise copy ---
-
-#[test]
-fn mastery_anchor_only_for_praise_categories() {
-    assert!(mastery_anchor_required(FeedbackCategory::PositiveMastery).value);
-    // Durability/pacing affirmed is an observation, not a mastery
-    // experience: the KB trigger names mastery and consistency only.
-    for c in [
-        FeedbackCategory::PositiveExecution,
-        FeedbackCategory::ConcernInjury,
-        FeedbackCategory::ConcernRecovery,
-        FeedbackCategory::CorrectiveProcess,
-        FeedbackCategory::InformationalNeutral,
-        FeedbackCategory::ContextualBadDay,
-    ] {
-        assert!(!mastery_anchor_required(c).value, "{c:?} never anchored");
-    }
-    // Strong (Bandura self-efficacy), the best-evidenced feedback rule.
-    assert!(
-        (mastery_anchor_required(FeedbackCategory::PositiveMastery).confidence() - 0.90).abs()
-            < f32::EPSILON
     );
 }

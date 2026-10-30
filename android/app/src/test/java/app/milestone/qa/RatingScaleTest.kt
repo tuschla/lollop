@@ -28,6 +28,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.milestone.AppClock
+import app.milestone.AppliedCueLoads
 import app.milestone.EffortScale
 import app.milestone.EventDispatcher
 import app.milestone.LiftResultView
@@ -45,6 +46,7 @@ import app.milestone.ViewModel
 import app.milestone.WeightUnit
 import app.milestone.WorkoutType
 import app.milestone.localizedDayFormatter
+import app.milestone.planDayObservedAt
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -62,7 +64,7 @@ import java.util.Locale
  * (one adjustable TalkBack node, no gap cell), run type is a chip row, and a
  * free set opened from the Log chooser on a run day shows nothing of the run.
  * The editors' chips keep what they show: a two-decimal kg load through a ±
- * step, the locale's day/month order on the date chip.
+ * step, the locale's day/month order on the date chip, a past day's own load.
  */
 @RunWith(RobolectricTestRunner::class)
 class RatingScaleTest {
@@ -253,6 +255,30 @@ class RatingScaleTest {
         rule.waitForIdle()
         val shown = rule.onAllNodes(hasContentDescription("103.75", substring = true)).fetchSemanticsNodes()
         assertTrue("+2.5 on 101.25 kg reads 103.75, not 103.8", shown.isNotEmpty())
+    }
+
+    /** A cue load applied in today's loop ("Use 140 kg") never seeds a past
+     *  day's entry of the same exercise: it opens on its prescribed 100 kg. */
+    @Test
+    fun aPastDayEntryIgnoresTodaysCueLoad() {
+        Locale.setDefault(Locale.US)
+        val item = PrescriptionView(
+            summary = "Pause Squat 3×5", exercise = "Pause Squat", sets = 3, reps_low = 5, reps_high = 5, load_kg = 100.0,
+        )
+        AppliedCueLoads.record(item, 140.0)
+        val pastNoon = planDayObservedAt(java.time.LocalDate.now().minusDays(2).toEpochDay())
+        rule.setContent {
+            MilestoneTheme {
+                Column(Modifier.fillMaxSize()) {
+                    CompositionLocalProvider(LocalEditorPinnedActions provides true) {
+                        LogSetEditor(prescription = item, initialObservedAt = pastNoon, weightUnit = WeightUnit.Kg, onSave = {})
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        assertEquals(0, rule.onAllNodes(hasContentDescription(", 140 kg", substring = true)).fetchSemanticsNodes().size)
+        assertTrue(rule.onAllNodes(hasContentDescription(", 100 kg", substring = true)).fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test

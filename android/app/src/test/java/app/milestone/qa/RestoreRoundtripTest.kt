@@ -332,7 +332,7 @@ class RestoreRoundtripTest {
         ProcessDeath.kill(ctx)
         rule.launchApp()
         assertTrue(model.checked_in_today)
-        val echo = checkNotNull(model.checkin_today)
+        val echo = checkNotNull(model.latest_checkin)
         assertEquals(2, echo.sleep_quality)
         assertEquals(4, echo.soreness)
         assertEquals(3, echo.mood)

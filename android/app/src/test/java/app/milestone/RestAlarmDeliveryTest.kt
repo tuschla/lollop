@@ -49,22 +49,14 @@ class RestAlarmDeliveryTest {
     fun tearDown() {
         RestAlarm.cancel(app)
         RestAlarm.resetProcessState()
+        AppSettings.restAlert.value = true
     }
 
-    /** What the rest shows: the rest-done alert, else the countdown; never both. */
-    private fun posted(): Notification? {
-        val done = shadowOf(nm).getNotification(RestAlarm.DONE_NOTIF_ID)
-        val countdown = shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID)
-        assertTrue("countdown and rest-done alert both posted", done == null || countdown == null)
-        return done ?: countdown
-    }
+    private fun posted() = postedRest(app)
     private fun title(n: Notification?) = n?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
     private val resting get() = app.getString(R.string.log_rest_notif_title, "Back squat")
     private val restDone get() = app.getString(R.string.log_rest_notif_done_title)
     private fun alarm() = shadowOf(am).scheduledAlarms.single()
-    /** The broadcast the system sends when [alarm] goes off, as it was set (a
-     *  copy: a later rest updates the PendingIntent's extras in place). */
-    private fun broadcastOf(a: ShadowAlarmManager.ScheduledAlarm): Intent = Intent(shadowOf(a.operation).savedIntent)
     private fun deliver(intent: Intent) = RestEndReceiver().onReceive(app, intent)
 
     /** One rest-end alarm, [restSec] from [before] (elapsed realtime), waking the
@@ -126,7 +118,7 @@ class RestAlarmDeliveryTest {
         RestAlarm.schedule(app, 90, "Back squat")
         RestAlarm.setNextSet(app, RestAlarm.NextSet("Bench press", "Set 1 of 3"))
         assertEquals(resting, title(posted()))
-        val fired = broadcastOf(alarm())
+        val fired = restEndBroadcast(app)
 
         RestAlarm.resetProcessState()
         AppSettings.restAlert.value = true
@@ -148,6 +140,21 @@ class RestAlarmDeliveryTest {
         assertNull(posted())
     }
 
+    /** After the session's last set the loop's primary is FinishSession, so it
+     *  reports no next set: the rest-done alert names none. */
+    @Test
+    fun restDoneAfterTheLastSetPromisesNoNextSet() {
+        ShadowAlarmManager.setCanScheduleExactAlarms(true)
+        RestAlarm.schedule(app, 90, "Back squat")
+        RestAlarm.setNextSet(app, restNextSet(app.resources, LoopPrimary.FinishSession, "Back squat", null, null, 5, null))
+        RestAlarm.setInAppVisible(app, false)
+        fireRestEnd(app)
+
+        val n = posted()!!
+        assertEquals(restDone, title(n))
+        assertNull("no next set follows the session's last set", n.extras.getCharSequence(Notification.EXTRA_TEXT))
+    }
+
     /** The countdown's timeout is the rest end, as is the exact alarm, so the
      *  system can remove the countdown's id just after the alert is posted: the
      *  alert has its own id and stays. */
@@ -156,7 +163,7 @@ class RestAlarmDeliveryTest {
         ShadowAlarmManager.setCanScheduleExactAlarms(true)
         RestAlarm.schedule(app, 90, "Back squat")
         assertEquals(resting, title(shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID)))
-        deliver(broadcastOf(alarm()))
+        fireRestEnd(app)
         assertNull("the countdown is taken down explicitly", shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID))
 
         // The countdown's setTimeoutAfter fires: the system cancels its id.
@@ -173,7 +180,7 @@ class RestAlarmDeliveryTest {
     fun cancelRemovesTheAlarmAndItsBroadcastDoesNothing() {
         ShadowAlarmManager.setCanScheduleExactAlarms(true)
         RestAlarm.schedule(app, 90, "Back squat")
-        val fired = broadcastOf(alarm())
+        val fired = restEndBroadcast(app)
         RestAlarm.cancel(app)
         assertTrue(shadowOf(am).scheduledAlarms.isEmpty())
         deliver(fired)
@@ -186,7 +193,7 @@ class RestAlarmDeliveryTest {
     fun aNewRestReplacesTheAlarm() {
         ShadowAlarmManager.setCanScheduleExactAlarms(true)
         RestAlarm.schedule(app, 90, "Back squat")
-        val first = broadcastOf(alarm())
+        val first = restEndBroadcast(app)
         AppClock.offsetMillis += 5_000L
         try {
             val before = SystemClock.elapsedRealtime()
@@ -195,7 +202,7 @@ class RestAlarmDeliveryTest {
             assertRestEndAlarm(a, before, SystemClock.elapsedRealtime(), 60)
             deliver(first)
             assertEquals("still counting down", resting, title(posted()))
-            deliver(broadcastOf(a))
+            fireRestEnd(app)
             assertEquals(restDone, title(posted()))
         } finally {
             AppClock.offsetMillis -= 5_000L

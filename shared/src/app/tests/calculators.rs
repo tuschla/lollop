@@ -136,13 +136,8 @@ fn plan_hypertrophy_meso_produces_graded_rows() {
     // frequency, rest and shape rows; every other row stays a note.
     let fig = view.hypertrophy_figures.expect("figures with a ramp");
     assert_eq!(
-        (
-            fig.min_sets,
-            fig.productive_low,
-            fig.productive_high,
-            fig.max_sets
-        ),
-        (10, 12, 20, 22)
+        (fig.productive_low, fig.productive_high, fig.max_sets),
+        (12, 20, 22)
     );
     assert_eq!(fig.rir_by_week.len(), 4);
     let face = |prefix: &str| {
@@ -321,8 +316,6 @@ fn compute_hr_zones_builds_graded_hrmax_and_five_bands() {
         Event::ComputeHrZones {
             age_years: 30.0,
             resting_hr_bpm: None,
-            weeks_since_recalc: None,
-            weeks_since_pace_test: None,
         },
         &mut model,
     )
@@ -476,8 +469,6 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
                 &HrZoneInputView {
                     age_years: age,
                     resting_hr_bpm: None,
-                    weeks_since_recalc: None,
-                    weeks_since_pace_test: None,
                 },
                 None,
             )
@@ -486,21 +477,42 @@ fn coach_query_builders_never_panic_on_degenerate_inputs() {
     }
 }
 
-#[test]
-fn hr_zone_table_extends_with_karvonen_maf_and_recalc_cues() {
+/// An athlete whose measured HRmax (187, the Tanaka value at 30) was stated
+/// `measured_days` ago and whose dated 10 km race was `race_days` ago, with
+/// the HR-zone calculator run at age 30 / RHR 50.
+fn hr_zones_after(measured_days: i64, race_days: i64) -> Vec<GuidanceView> {
     let app = Engine;
     let mut model = Model::default();
+    let today = 20_400;
+    set_today(&app, &mut model, today);
+    app.update(
+        Event::SetProfile(Profile {
+            measured_hr_max: Some(187.0),
+            effective_from_epoch_day: Some(today - measured_days),
+            recent_race: Some(RecentRace {
+                distance_km: 10.0,
+                time_sec: 2_700,
+                epoch_day: Some(today - race_days),
+            }),
+            ..base_profile()
+        }),
+        &mut model,
+    )
+    .expect_only_render();
     app.update(
         Event::ComputeHrZones {
             age_years: 30.0,
             resting_hr_bpm: Some(50.0),
-            weeks_since_recalc: Some(5),
-            weeks_since_pace_test: Some(6),
         },
         &mut model,
     )
     .expect_only_render();
-    let zones = app.view(&model).hr_zones;
+    app.view(&model).hr_zones
+}
+
+#[test]
+fn hr_zone_table_extends_with_karvonen_maf_and_recalc_cues() {
+    let zones = hr_zones_after(35, 42);
     let has = |needle: &str| zones.iter().any(|z| z.summary.contains(needle));
     assert!(
         has("heart-rate-reserve (Karvonen) range"),
@@ -528,8 +540,27 @@ fn hr_zone_table_extends_with_karvonen_maf_and_recalc_cues() {
         rep.summary
     );
     assert!(has("easy-run cap (MAF)"), "MAF row");
-    assert!(has("Recompute from a measured HRmax"), "recalc-due row");
-    assert!(has("Re-test to set paces"), "pace-retest row");
+    assert!(
+        has("Zones last recalculated 5 weeks ago"),
+        "recalc-due row: {zones:#?}"
+    );
+    assert!(
+        has("Paces last tested 6 weeks ago"),
+        "pace-retest row: {zones:#?}"
+    );
+}
+
+/// running-006/041: the re-test rows wait for 4 weeks after the measured max
+/// was stated and after the race.
+#[test]
+fn retest_reminders_wait_four_weeks() {
+    let zones = hr_zones_after(27, 21);
+    assert!(
+        !zones
+            .iter()
+            .any(|z| z.summary.contains("last recalculated") || z.summary.contains("last tested")),
+        "{zones:#?}"
+    );
 }
 
 #[test]
@@ -774,8 +805,6 @@ fn calculators_echo_their_inputs_for_form_rehydration() {
         Event::ComputeHrZones {
             age_years: 47.0,
             resting_hr_bpm: Some(52.0),
-            weeks_since_recalc: Some(5),
-            weeks_since_pace_test: None,
         },
         &mut model,
     )
@@ -812,8 +841,6 @@ fn calculators_echo_their_inputs_for_form_rehydration() {
     let hz = v.hr_zone_input.expect("hr zone input");
     assert_eq!(hz.age_years, 47.0);
     assert_eq!(hz.resting_hr_bpm, Some(52.0));
-    assert_eq!(hz.weeks_since_recalc, Some(5));
-    assert_eq!(hz.weeks_since_pace_test, None);
 
     let pr = v.protein_input.expect("protein input");
     assert_eq!(pr.bodyweight_kg, 82.5);
@@ -831,8 +858,6 @@ fn an_implausible_measured_hr_max_falls_back_to_tanaka() {
     let q = HrZoneInputView {
         age_years: 30.0,
         resting_hr_bpm: None,
-        weeks_since_recalc: None,
-        weeks_since_pace_test: None,
     };
     let (rows, hr_max, _) = build_hr_zones(&q, Some(9999.0));
     let hrmax_row = rows.iter().find(|r| r.summary.contains("HRmax")).unwrap();
@@ -854,8 +879,6 @@ fn maf_row_skipped_when_age_out_of_range_with_measured_max() {
         let q = HrZoneInputView {
             age_years: age,
             resting_hr_bpm: None,
-            weeks_since_recalc: None,
-            weeks_since_pace_test: None,
         };
         let (rows, hm, _) = build_hr_zones(&q, Some(190.0));
         assert!(hm.is_some_and(|h| h.measured));

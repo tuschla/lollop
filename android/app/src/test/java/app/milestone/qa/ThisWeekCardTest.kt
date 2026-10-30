@@ -3,9 +3,16 @@ package app.milestone.qa
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -13,13 +20,20 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
 import app.milestone.MilestoneTheme
 import app.milestone.R
 import app.milestone.ConsistencyView
 import app.milestone.GuidanceView
+import app.milestone.MuscleVolumeView
+import app.milestone.PrescriptionView
+import app.milestone.ProgramSummaryView
+import app.milestone.ReadinessSignalView
 import app.milestone.SessionPlanView
 import app.milestone.ThisWeekCard
+import app.milestone.TodayDestination
+import app.milestone.ViewModel
 import app.milestone.WeekActions
 import app.milestone.WeightUnit
 import org.junit.Assert.assertEquals
@@ -56,6 +70,7 @@ class ThisWeekCardTest {
                     weightUnit = WeightUnit.Kg,
                     program = null,
                     footnote = null,
+                    painArea = null,
                     onRemovePlan = {},
                     actions = noActions,
                     heroDay = monday + 3,
@@ -79,7 +94,7 @@ class ThisWeekCardTest {
             MilestoneTheme {
                 ThisWeekCard(
                     consistency = null, week = week, today = monday, weightUnit = WeightUnit.Kg, program = null,
-                    footnote = null, onRemovePlan = {}, actions = noActions,
+                    footnote = null, painArea = null, onRemovePlan = {}, actions = noActions,
                     heroDay = monday, selectedDay = -1L, onSelectDay = {},
                 )
             }
@@ -118,7 +133,7 @@ class ThisWeekCardTest {
             MilestoneTheme {
                 ThisWeekCard(
                     consistency = consistency, week = week, today = monday + 1, weightUnit = WeightUnit.Kg,
-                    program = null, footnote = null, onRemovePlan = {}, actions = null,
+                    program = null, footnote = null, painArea = null, onRemovePlan = {}, actions = null,
                     heroDay = -1L, selectedDay = -1L, onSelectDay = {},
                 )
             }
@@ -128,6 +143,72 @@ class ThisWeekCardTest {
             rule.onAllNodesWithText("Repeating this plan week", substring = true, useUnmergedTree = true)
                 .fetchSemanticsNodes().size,
         )
+    }
+
+    /** An item a left-knee report stopped reads "Stopped · Left knee" in the week
+     *  strip, as in the hero, never the bare "Stopped · pain". */
+    @Test
+    fun aPainStoppedItemReadsTheSameAreaInTheWeekStrip() {
+        java.util.Locale.setDefault(java.util.Locale.US)
+        val day = java.time.LocalDate.of(2026, 9, 24).toEpochDay()
+        val stopped = PrescriptionView(
+            summary = "Back Squat 3×5", exercise = "Back Squat", sets = 3, sets_done = 1,
+            done = true, status = "stopped_pain",
+        )
+        val open = PrescriptionView(summary = "Bench Press 3×5", exercise = "Bench Press", sets = 3)
+        val session = SessionPlanView(
+            epoch_day = day, title = "Strength A", session_type = "Lift(MaxEffort)", status = "next",
+            items = listOf(stopped, open),
+        )
+        val model = ViewModel(
+            today_epoch_day = day,
+            next_session = session,
+            week_plan = listOf(session),
+            readiness_summary = listOf(
+                ReadinessSignalView(signal = "Pain", state = "reported", detail = "Left knee · sharp/joint · 6/10"),
+            ),
+        )
+        rule.setContent {
+            MilestoneTheme {
+                TodayDestination(
+                    model, rememberLazyListState(), onEvent = {}, onStartSetup = {}, onLogPlanItem = {},
+                    onLogPastItem = { _, _ -> }, onLogPastRun = {}, onTrackRun = {}, onOpenSheet = {},
+                    lastPain = null, onOpenProfile = {}, onRerunSetup = {},
+                )
+            }
+        }
+        val list = rule.onNode(hasScrollToNodeAction())
+        list.performScrollToNode(hasTestTag("this-week"))
+        rule.onNodeWithContentDescription("Thursday", substring = true).performClick()
+        rule.waitForIdle()
+        val inWeek = hasAnyAncestor(hasTestTag("this-week"))
+        list.performScrollToNode(inWeek and hasTestTag("plan-item:Back Squat"))
+        val bare = str(R.string.plan_stopped_pain)
+        val area = str(R.string.plan_stopped_area, "Left knee")
+        assertEquals(0, rule.onAllNodes(inWeek and hasText(bare), useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertTrue(rule.onAllNodes(inWeek and hasText(area), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+    }
+
+    /** The muscle-volume toggle tells TalkBack whether its table is open. */
+    @Test
+    fun theMuscleVolumeToggleSpeaksItsState() {
+        val program = ProgramSummaryView(
+            name = "Hypertrophy", phase = "Build", week = 1, weeks_total = 6,
+            muscle_volume = listOf(MuscleVolumeView(muscle = "Chest", target_sets = 10, delivered_sets = 10f, label = "Chest 10 of 10")),
+        )
+        rule.setContent {
+            MilestoneTheme {
+                ThisWeekCard(
+                    consistency = null, week = emptyList(), today = 0L, weightUnit = WeightUnit.Kg,
+                    program = program, footnote = null, painArea = null, onRemovePlan = {}, actions = null,
+                    heroDay = -1L, selectedDay = -1L, onSelectDay = {},
+                )
+            }
+        }
+        val toggle = rule.onNode(hasText(str(R.string.main_muscle_volume_all_on_target)) and hasClickAction())
+        toggle.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, str(R.string.ui_cd_collapsed)))
+        toggle.performClick()
+        toggle.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, str(R.string.ui_cd_expanded)))
     }
 
     private val noActions = WeekActions(

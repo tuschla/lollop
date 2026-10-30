@@ -96,15 +96,17 @@ private const val DRAG_HANDLE_ALPHA = 0.22f
  * followed plan. They are superseded by the core's derivation on save.
  *
  * [onLogRunManually] opens the manual run log; the location-denied panel offers it
- * as the way out when GPS can't be used (hidden when null).
+ * as the way out when GPS can't be used.
  */
 @OptIn(DelicateCoroutinesApi::class)
 @Composable
 fun RunTrackingScreen(
     model: ViewModel,
-    onEvent: (Event) -> Unit = {},
-    onFinish: (ViewModel?) -> Unit,
-    onLogRunManually: (() -> Unit)? = null,
+    onEvent: (Event) -> Unit,
+    // The pain report as last entered: the banner's pain line and its "Remove report" Undo.
+    lastPain: PainDetail?,
+    onFinish: () -> Unit,
+    onLogRunManually: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -115,7 +117,7 @@ fun RunTrackingScreen(
 
     // FINE only: GPS tracking is unusable on a coarse-only grant.
     var hasPermission by remember { mutableStateOf(hasFineLocation(ctx)) }
-    var notifGranted by remember { mutableStateOf(notificationsAllowed(ctx)) }
+    var notifGranted by remember { mutableStateOf(canPostNotifications(ctx)) }
     var locationOn by remember { mutableStateOf(isLocationEnabled(ctx)) }
     // Battery-optimization exemption: a non-exempt app can be Dozed/frozen on a long
     // background run, silently starving the location stream. Tracked so the tracker
@@ -148,7 +150,7 @@ fun RunTrackingScreen(
         locationOn = isLocationEnabled(ctx)
     }
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        notifGranted = notificationsAllowed(ctx)
+        notifGranted = canPostNotifications(ctx)
     }
 
     fun requestPermissions() {
@@ -269,7 +271,7 @@ fun RunTrackingScreen(
                 Lifecycle.Event.ON_RESUME -> {
                     map.view.onResume()
                     hasPermission = hasFineLocation(ctx)
-                    notifGranted = notificationsAllowed(ctx)
+                    notifGranted = canPostNotifications(ctx)
                     locationOn = isLocationEnabled(ctx)
                     // Re-sample after returning from the battery-optimization dialog /
                     // settings so the guidance caption disappears once exempted.
@@ -397,7 +399,7 @@ fun RunTrackingScreen(
         RunTrackingService.stop(ctx)
         ActiveRunStore.clear()
         RunSession.reset()
-        onFinish(null)
+        onFinish()
     }
 
     // Discard the current session and leave without logging anything. Refused while
@@ -464,14 +466,14 @@ fun RunTrackingScreen(
                             if (!result.accepted || !result.persisted) error("run save not persisted")
                             result.view
                         }
-                    }!!
+                    }
                 },
                 // clearSync orders the sidecar delete against the just-returned
                 // event-log append (a crash in that gap would otherwise
                 // resurrect the saved run via the recovery prompt).
                 clearSidecar = { ActiveRunStore.clearSync() },
                 resetSession = { RunSession.reset() },
-                finish = { vm ->
+                finish = {
                     // Confirm the save landed the way a manual save does, with a way to
                     // the run (it now has a route worth opening); the screen navigates away.
                     val savedAt = runObservedAt
@@ -482,7 +484,7 @@ fun RunTrackingScreen(
                             onAction = { HistoryFocus.request(entryId, savedAt) },
                         ),
                     )
-                    onFinish(vm)
+                    onFinish()
                 },
                 onFailure = {
                     // Keep the captured run and its sidecar: the fixes stay in
@@ -523,7 +525,7 @@ fun RunTrackingScreen(
                     Toast.makeText(ctx, notEnoughGpsText, Toast.LENGTH_LONG).show()
                     ActiveRunStore.clear()
                     RunSession.reset()
-                    onFinish(null)
+                    onFinish()
                     return@launch
                 }
                 // A short run was already flagged inline on the Finish review, so
@@ -548,7 +550,7 @@ fun RunTrackingScreen(
     // stays recoverable on next launch; only an exit with nothing captured (incl. the
     // locate-only preview) tears the session down.
     BackHandler {
-        if (tracking || unsavedCapture) onFinish(null) else leaveTracker()
+        if (tracking || unsavedCapture) onFinish() else leaveTracker()
     }
 
     // Perform one Finish-review action: the pure [finishTransition] picks the next step
@@ -626,6 +628,7 @@ fun RunTrackingScreen(
         SafetyBannerHost(
             model,
             onEvent = onEvent,
+            lastPain = lastPain,
             modifier = Modifier
                 .padding(horizontal = Space.Screen.dp)
                 .padding(top = Space.Md.dp, bottom = Space.Md.dp),
@@ -694,12 +697,12 @@ fun RunTrackingScreen(
                     // Once permanently denied ("don't ask again") the system dialog won't
                     // appear, so re-requesting silently no-ops; deep-link to app
                     // settings instead, the only place the grant can then be restored.
-                    onAllow = { if (prompt == LocationPrompt.Blocked) openAppDetailsSettings(ctx) else requestPermissions() },
+                    onAllow = { if (prompt == LocationPrompt.Blocked) ctx.openFirst(appDetailsIntent(ctx)) else requestPermissions() },
                     // A resumed run waiting on the grant holds recorded fixes: ✕ is a
                     // confirmed discard and Save keeps what was recorded, never a
                     // silent leave that deletes the run.
                     onClose = { if (resumeWaiting && unsavedCapture) confirmDiscard = true else leaveTracker() },
-                    onLogManually = onLogRunManually?.let { open -> { leaveTracker(); open() } },
+                    onLogManually = { leaveTracker(); onLogRunManually() },
                     onSaveRun = if (resumeWaiting && unsavedCapture) ({ logCaptured() }) else null,
                 )
             } else {
@@ -748,7 +751,7 @@ fun RunTrackingScreen(
                 // Degraded-state surfacing: location off = loud warn row; a GPS
                 // start failure / denied notifications = an inline notice. Each carries
                 // an inline action so the state is actionable, not a dead end.
-                if (!locationOn) LocationOffNotice(onOpenSettings = { openLocationSettings(ctx) })
+                if (!locationOn) LocationOffNotice(onOpenSettings = { ctx.openFirst(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) })
                 if (locateFailed && locationOn && !tracking && !armed && (!unsavedCapture || resumeWaiting)) {
                     InlineNotice(
                         stringResource(R.string.track_location_failed_caption),
@@ -762,7 +765,7 @@ fun RunTrackingScreen(
                     InlineNotice(
                         stringResource(R.string.track_notifications_off_caption),
                         actionLabel = stringResource(R.string.track_open_settings),
-                        onAction = { openNotificationSettings(ctx) },
+                        onAction = { ctx.openFirst(appNotificationSettingsIntent(ctx)) },
                     )
                 }
                 // Today's plan + optional start gates, ONLY in the locate-preview state
@@ -843,24 +846,6 @@ private fun ColumnScope.DragHandle() {
     )
 }
 
-// Deep-links for the sheet's degraded-state actions. All wrapped so a device with no
-// matching Settings activity can't crash the tracker.
-
-/** The system location settings. */
-private fun openLocationSettings(ctx: Context) {
-    runCatching { ctx.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
-}
-
-/** This app's details page: the only place a permanently-denied grant is restored. */
-private fun openAppDetailsSettings(ctx: Context) {
-    runCatching { ctx.startActivity(appDetailsIntent(ctx)) }
-}
-
-/** This app's notification settings (its details page before API 26). */
-private fun openNotificationSettings(ctx: Context) {
-    runCatching { ctx.startActivity(appNotificationSettingsIntent(ctx)) }
-}
-
 /**
  * Ask the system to exempt this app from battery optimization. The direct
  * REQUEST_IGNORE_BATTERY_OPTIMIZATIONS dialog (needs the same-named permission,
@@ -868,19 +853,10 @@ private fun openNotificationSettings(ctx: Context) {
  * rejects/omits it, fall back to the general battery-optimization settings list.
  */
 @SuppressLint("BatteryLife")
-private fun requestIgnoreBatteryOptimizations(ctx: Context) {
-    val direct = runCatching {
-        ctx.startActivity(
-            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                .setData(Uri.fromParts("package", ctx.packageName, null)),
-        )
-    }.isSuccess
-    if (!direct) {
-        runCatching {
-            ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        }
-    }
-}
+private fun requestIgnoreBatteryOptimizations(ctx: Context) = ctx.openFirst(
+    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).setData(Uri.fromParts("package", ctx.packageName, null)),
+    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+)
 
 /** The "Precise start" gate's accuracy bound (m): recording only begins on a fix at
  *  or under this. Typical post-lock consumer GPS is 5–15 m open sky, so 20 m is a
@@ -1051,7 +1027,7 @@ internal fun workoutTypeForPlan(sessionType: String?, band: String?): WorkoutTyp
 internal fun runTargetLines(res: Resources, t: RunTargetView?, unit: DistanceUnit): List<String> {
     if (t == null) return emptyList()
     val out = ArrayList<String>(3)
-    val pace = paceLabel(t, unit)
+    val pace = t.paceLabel(unit)
     if (pace.isNotBlank()) out += res.getString(R.string.track_target_pace, pace)
     if (t.hr_label.isNotBlank()) out += res.getString(R.string.track_target_hr, t.hr_label)
     if (t.effort_detail.isNotBlank()) out += res.getString(R.string.plan_face_effort, t.effort_detail)
@@ -1062,14 +1038,10 @@ internal fun runTargetLines(res: Resources, t: RunTargetView?, unit: DistanceUni
  *  9:00–9:50 /mi · ≤ 140 bpm · effort 3–5 of 10"), or null without targets. */
 internal fun runTargetSummary(res: Resources, t: RunTargetView?, unit: DistanceUnit): String? {
     if (t == null) return null
-    val parts = listOf(paceLabel(t, unit), t.hr_label, t.effort_cue).filter { it.isNotBlank() }
+    val parts = listOf(t.paceLabel(unit), t.hr_label, t.effort_cue).filter { it.isNotBlank() }
     if (parts.isEmpty()) return null
     return res.getString(R.string.track_plan_targets_line, parts.joinToString(" · "))
 }
-
-/** The target pace label in [unit], falling back to the other unit's label. */
-private fun paceLabel(t: RunTargetView, unit: DistanceUnit): String =
-    if (unit == DistanceUnit.Mi) t.pace_label_mi.ifBlank { t.pace_label_km } else t.pace_label_km.ifBlank { t.pace_label_mi }
 
 /** The planned distance (km) of a SINGLE-STEP planned run (a continuous run: no
  *  warm-up / reps / strides guide), for the live "X to go" line; null for a guided
@@ -1101,10 +1073,10 @@ internal fun runPlanHeadline(item: PrescriptionView, unit: DistanceUnit): String
 internal enum class PaceCue { OnTarget, SpeedUp, EaseOff }
 
 /**
- * [paceMinPerKm] (the "Pace now" figure, already smoothed over a ≥30 s / ≥200 m
- * rolling window by [RollingPace], so it doesn't flicker leg to leg) against the
- * plan's range in seconds per km (RunTargetView pace_fast/slow_sec_per_km, either
- * order). Null when the plan has no pace range or there is no current pace.
+ * [paceMinPerKm] (the "Pace now" figure, smoothed over the trailing [RollingPace]
+ * window, so it doesn't flicker leg to leg) against the plan's range in seconds per
+ * km (RunTargetView pace_fast/slow_sec_per_km, either order). Null when the plan has
+ * no pace range or there is no current pace.
  */
 internal fun paceCue(paceMinPerKm: Double, fastSecPerKm: Int, slowSecPerKm: Int): PaceCue? {
     if (!paceMinPerKm.isFinite() || paceMinPerKm <= 0.0) return null
@@ -1177,13 +1149,6 @@ internal fun trackSegments(points: List<GpsPoint>, segmentStarts: Collection<Int
  *  live accumulator ([RunSession.add]), recovery ([RunSession.restore]), the pace
  *  slices and the start-on-move gate. */
 internal fun segmentKm(a: GpsPoint, b: GpsPoint): Double = haversineM(a.lat, a.lon, b.lat, b.lon) / 1000.0
-
-/** True when the app may post notifications: below API 33 there is no runtime
- *  gate; from 33 on, the POST_NOTIFICATIONS grant decides. */
-private fun notificationsAllowed(ctx: Context): Boolean =
-    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
 
 /** True when the system-wide location toggle is on. A fine-location grant alone
  *  delivers no fixes while location services are disabled, so the tracking UI

@@ -161,7 +161,10 @@ fn a_do_not_train_hold_blocks_the_prescription() {
     .expect_only_render();
 
     let vm = app.view(&model);
-    assert!(vm.train_blocked, "a bare pain report holds training");
+    assert!(
+        vm.hold_reason.is_some(),
+        "a bare pain report holds training"
+    );
     let ns = vm
         .next_session
         .expect("the next session still renders, but blocked");
@@ -198,7 +201,10 @@ fn low_wrapped_next_session_is_not_folded_with_todays_adjustment() {
     .expect_only_render();
 
     let vm = app.view(&model);
-    assert!(!vm.train_blocked, "a downgrade must not block training");
+    assert!(
+        vm.hold_reason.is_none(),
+        "a downgrade must not block training"
+    );
     let ns = vm.next_session.expect("a wrapped next session renders");
     assert!(
         ns.epoch_day > MON + 5,
@@ -229,7 +235,7 @@ fn low_wrapped_next_session_still_blanks_under_a_safety_hold() {
     // session regardless of its date (HARD RULE 3).
     let (app, mut model) = planned_strength_model(true);
     set_today(&app, &mut model, MON + 5);
-    // Generic pain report → hard Stop → train_blocked.
+    // Generic pain report → hard Stop → training held.
     app.update(
         Event::SubmitReadiness(ReadinessInput {
             signal: ReadinessSignal::Pain,
@@ -243,7 +249,7 @@ fn low_wrapped_next_session_still_blanks_under_a_safety_hold() {
     )
     .expect_only_render();
     let vm = app.view(&model);
-    assert!(vm.train_blocked, "generic pain blocks training");
+    assert!(vm.hold_reason.is_some(), "generic pain blocks training");
     let ns = vm.next_session.expect("a wrapped next session renders");
     assert!(
         ns.epoch_day > MON + 5,

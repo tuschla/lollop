@@ -42,7 +42,7 @@ fn profile_with_run_days(days: u8, km: f64) -> Profile {
 #[test]
 fn weekly_report_uses_run_day_average() {
     let model = Model {
-        profile: Some(profile_with_run_days(3, 30.0)),
+        profile_history: vec![profile_with_run_days(3, 30.0)],
         runs: vec![
             run(15.0, 90.0, 75.0, None, MON),
             run(10.0, 60.0, 75.0, None, MON + 2 * DAY),
@@ -158,8 +158,6 @@ fn repetition_hr_row_reads_cleanly() {
     let q = HrZoneInputView {
         age_years: 30.0,
         resting_hr_bpm: None,
-        weeks_since_recalc: None,
-        weeks_since_pace_test: None,
     };
     let (rows, _, _) = build_hr_zones(&q, None);
     let rep = rows
@@ -196,7 +194,7 @@ fn repetition_hr_row_reads_cleanly() {
 #[test]
 fn low_mileage_long_run_within_2x_daily_average_is_informational() {
     let model = Model {
-        profile: Some(profile_with_run_days(3, 20.0)),
+        profile_history: vec![profile_with_run_days(3, 20.0)],
         runs: vec![
             run(5.0, 30.0, 75.0, None, MON),
             run(5.0, 30.0, 75.0, None, MON + DAY),
@@ -228,7 +226,7 @@ fn low_mileage_long_run_within_2x_daily_average_is_informational() {
 #[test]
 fn hybrid_report_uses_the_capped_run_day_count() {
     let model = Model {
-        profile: Some(profile_with_run_days(5, 30.0)),
+        profile_history: vec![profile_with_run_days(5, 30.0)],
         runs: vec![
             run(13.0, 78.0, 75.0, None, MON),
             run(5.0, 30.0, 75.0, None, MON + DAY),
@@ -294,7 +292,7 @@ fn long_run_rows(report: &[GuidanceView]) -> Vec<&str> {
 #[test]
 fn low_mileage_long_run_over_2x_daily_average_is_one_row() {
     let model = Model {
-        profile: Some(profile_with_run_days(3, 20.0)),
+        profile_history: vec![profile_with_run_days(3, 20.0)],
         runs: vec![
             run(14.0, 84.0, 75.0, None, MON),
             run(3.0, 18.0, 75.0, None, MON + DAY),
@@ -327,7 +325,7 @@ fn low_mileage_long_run_over_2x_daily_average_is_one_row() {
 #[test]
 fn high_mileage_long_run_over_the_share_cap_is_one_row() {
     let model = Model {
-        profile: Some(profile_with_run_days(3, 70.0)),
+        profile_history: vec![profile_with_run_days(3, 70.0)],
         runs: vec![
             run(30.0, 180.0, 75.0, None, MON),
             run(20.0, 120.0, 75.0, None, MON + DAY),

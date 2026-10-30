@@ -9,7 +9,9 @@ use std::path::Path;
 
 use crux_core::App;
 use shared::log::{LineFacts, compact_lines};
-use shared::{Engine, Event, Model, compact_event_log};
+use shared::{Engine, Event, compact_event_log};
+
+mod common;
 
 /// The events of one fixture file; a failure names the file.
 fn parse(path: &Path) -> Vec<Event> {
@@ -26,12 +28,8 @@ fn parse(path: &Path) -> Vec<Event> {
 
 /// The view JSON a shell renders after replaying `events` from an empty model.
 fn replayed_view(events: &[Event]) -> String {
-    let app = Engine;
-    let mut model = Model::default();
-    for ev in events {
-        let _ = app.update(ev.clone(), &mut model);
-    }
-    serde_json::to_string(&app.view(&model)).expect("view serializes")
+    serde_json::to_string(&Engine.view(&common::replay(events.iter().cloned())))
+        .expect("view serializes")
 }
 
 #[test]

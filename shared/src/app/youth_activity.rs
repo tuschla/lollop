@@ -48,7 +48,7 @@ pub(super) fn build_youth_activity(cx: &ViewCtx) -> Option<YouthActivityView> {
     }
     let offset = model.today_utc_offset_sec;
     // Saturating: a corrupt log's SetToday near i64::MIN/MAX must not overflow.
-    let monday = today.saturating_sub(mon0_weekday(today));
+    let monday = monday_of(today);
     let end_of_today = end_of_local_today_sec(model)?;
     // The local day of a dated entry inside this week up to today, as an index 0..7.
     let week_day = |observed_at: i64| {

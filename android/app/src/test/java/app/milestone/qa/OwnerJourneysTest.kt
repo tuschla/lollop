@@ -74,8 +74,8 @@ class OwnerJourneysTest {
     private val doNotTrain get() = str(R.string.main_do_not_train)
 
     /** A set-up strength lifter who answered "I'm ill right now", as guided setup leaves them. */
-    private fun illProfile(): Event = (QaHarness.strengthProfile() as Event.SetProfile)
-        .copy(health = HealthScreen(acute_illness = true), effectiveFromEpochDay = todayEpochDay())
+    private fun illProfile(): Event =
+        QaHarness.strengthProfile().copy(health = HealthScreen(acute_illness = true), effectiveFromEpochDay = todayEpochDay())
 
     /** The last SetProfile in the log no longer says "ill right now" (the all-clear
      *  wire omits the health object entirely). */

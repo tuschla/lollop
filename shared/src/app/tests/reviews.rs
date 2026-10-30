@@ -92,7 +92,10 @@ fn review_week_level_deloads_surface_as_adjustments() {
         vm.adjustments.is_empty(),
         "a review deload must not leak into the readiness-driven list"
     );
-    assert!(!vm.train_blocked, "a volume deload must not block training");
+    assert!(
+        vm.hold_reason.is_none(),
+        "a volume deload must not block training"
+    );
 }
 
 #[test]
@@ -414,7 +417,7 @@ fn weekly_red_flag_answers_defer_training_like_the_readiness_signals() {
         app.update(Event::SubmitWeeklyCheckin(review.clone()), &mut model)
             .expect_only_render();
         let vm = app.view(&model);
-        assert!(vm.train_blocked, "{review:?}");
+        assert!(vm.hold_reason.is_some(), "{review:?}");
         assert_eq!(vm.safety_tier, Some(SafetyTier::MedicalReferral));
         assert_eq!(vm.today_headline.kind, HeadlineKind::SafetyHold);
         let ns = vm.next_session.as_ref().expect("hero present");

@@ -5,8 +5,8 @@
 //! pure and deterministic; thresholds verbatim from File 06.
 
 use super::rules::{
-    HRV_ESCALATE_STREAK, HRV_MIN_WEEKLY_READINGS, HRV_SWC_UPPER_Z, WELLNESS_DOWNGRADE_STREAK,
-    WELLNESS_MULTIDAY_STREAK,
+    HRV_ESCALATE_STREAK, HRV_MIN_WEEKLY_READINGS, HRV_SWC_UPPER_Z, RPE_DELTA_ABOVE,
+    RPE_DELTA_BELOW, WELLNESS_DOWNGRADE_STREAK, WELLNESS_MULTIDAY_STREAK,
 };
 use crate::evidence::{self, claims};
 use crate::schema::{Adjustment, Recommended};
@@ -70,9 +70,9 @@ pub fn set_volume_action(
     rpe_delta: f64,
     wellness_normal: bool,
 ) -> Recommended<SetVolumeAction> {
-    let a = if first_set_reps_met && rpe_delta <= -1.0 && wellness_normal {
+    let a = if first_set_reps_met && rpe_delta <= RPE_DELTA_BELOW && wellness_normal {
         SetVolumeAction::AddSet
-    } else if !first_set_reps_met || rpe_delta >= 1.0 {
+    } else if !first_set_reps_met || rpe_delta >= RPE_DELTA_ABOVE {
         SetVolumeAction::DropLastSet
     } else {
         SetVolumeAction::HoldPlanned
@@ -184,11 +184,15 @@ pub fn autoreg_source(
     evidence::graded(s, claims::AUTOREG_FALLBACK_001)
 }
 
+/// Unreliable readings among the last 3 at which HRV gating is suspended
+/// (autoreg-050).
+pub(crate) const HRV_UNRELIABLE_SUSPEND: u8 = 2;
+
 /// Suspend HRV gating once ≥2 of the last 3 readings were flagged unreliable
 /// (File 06 autoreg-050); use subjective + performance until a clean baseline
 /// returns. `true` = suspend HRV gating.
 pub fn suspend_hrv_gating(unreliable_in_last_three: u8) -> bool {
-    unreliable_in_last_three >= 2
+    unreliable_in_last_three >= HRV_UNRELIABLE_SUSPEND
 }
 
 /// autoreg-034: a multi-day lnRMSSD suppression streak (≥3–4 consecutive days

@@ -1,6 +1,5 @@
 package app.milestone
 
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -43,10 +42,11 @@ internal fun appDetailsIntent(ctx: Context): Intent =
 /** Open [promotedNotificationSettingsIntent]. The platform documents that the
  *  promotion screen may be missing on some builds, so that case falls back to the
  *  app's notification settings. */
-internal fun openPromotedNotificationSettings(ctx: Context) {
-    try {
-        ctx.startActivity(promotedNotificationSettingsIntent(ctx))
-    } catch (_: ActivityNotFoundException) {
-        runCatching { ctx.startActivity(appNotificationSettingsIntent(ctx)) }
-    }
+internal fun openPromotedNotificationSettings(ctx: Context) =
+    ctx.openFirst(promotedNotificationSettingsIntent(ctx), appNotificationSettingsIntent(ctx))
+
+/** Start the first of [intents] that opens; none does: nothing happens (a device
+ *  without the Settings screen must not crash the caller). */
+internal fun Context.openFirst(vararg intents: Intent) {
+    intents.any { runCatching { startActivity(it) }.isSuccess }
 }

@@ -23,10 +23,7 @@ pub(in crate::app) struct RunSpike {
 /// The most recent logged run's spike over the athlete's recent-longest
 /// baseline (`frac` 0.15 = 15 % over). `None` when there is no baseline yet: a
 /// first run has nothing to be a spike *over*, so the safety gate must not
-/// defer on it (the run view already says why it looks unbounded). The
-/// feedback resolver reads it whenever the latest run is less than a week old,
-/// with or without a session review: a spike warning needs no form. A review's
-/// own stated fraction still wins over it.
+/// defer on it (the run view already says why it looks unbounded).
 ///
 /// "Most recent" is log TIME (ties → most recently logged), so a backdated run
 /// never poses as the latest. A FUTURE-dated import (a mis-timestamped 2030
@@ -55,11 +52,10 @@ pub(in crate::app) fn latest_run_spike(model: &Model, facts: &RunFacts) -> Optio
         return None;
     }
     let km = facts.km[idx];
-    let frac = km / baseline - 1.0;
     Some(RunSpike {
-        frac,
+        frac: km / baseline - 1.0,
         km,
-        baseline_km: km / (1.0 + frac),
+        baseline_km: baseline,
         // The run's day is the local day it STARTED, the plan day its run is
         // credited to (and the day the freshness window counts from).
         day: (!is_undated(r.observed_at))
@@ -163,16 +159,7 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
     let spike = c.spike.filter(|s| fresh(s.day));
 
     let w = c.weekly;
-    let safety = feedback::SafetySignals {
-        bone_pain_red_flag: w.is_some_and(|w| w.bone_pain_red_flag),
-        compulsive_flag: w.is_some_and(|w| w.compulsive_flag),
-        reds_signal_reported: w.is_some_and(|w| w.reds_signal_reported),
-        overtraining_signal_count: w.map_or(0, overtraining_count),
-        overtraining_weeks: w.and_then(|w| w.overtraining_signal_weeks),
-        single_session_spike_frac: session
-            .and_then(|s| s.single_session_spike_frac)
-            .or(spike.map(|s| s.frac)),
-    };
+    let safety = safety_signals(w, session, spike);
 
     let (inp, exec_day) = execution_input(&c, session, session_day, derived);
     let mut exec = session_execution(&inp);
@@ -198,9 +185,9 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
     if concern.is_none() && exec.is_none() && c.session.is_none() {
         return None;
     }
-    let trigger = exec.as_ref().map(|e| e.trigger);
+    let trigger = exec.as_ref().and_then(|e| e.trigger);
     let lift = exec.as_ref().and_then(|e| e.lift.clone());
-    let resolved = feedback::resolve_feedback(safety, exec.map(|e| e.rec));
+    let resolved = feedback::resolve_feedback(concern, exec.map(|e| e.rec));
     // autoreg-044 / feedback-042: while today's plan is eased or held, praise
     // and a load-increase cue would contradict it; the card says to keep to the
     // plan instead.
@@ -220,24 +207,12 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
 
     let verbosity = feedback::verbosity_for_experience(c.advanced_user).value;
     let double_progression = model
-        .profile
-        .as_ref()
+        .profile()
         .is_some_and(crate::plan::uses_double_progression);
-    let lighter_next = lift
-        .as_ref()
-        .and_then(|l| l.detail.as_ref())
-        .is_some_and(|o| {
-            c.cx.lift_anchors_now()
-                .load_frac_for(&o.exercise)
-                .is_some_and(|d| matches!(d.cause, crate::plan::DerateCause::E1rmDrop))
-        });
-    let mut ctx = MessageCtx {
+    let lighter_next = lighter_next(c.cx, lift.as_ref());
+    let ctx = MessageCtx {
         cat: resolved.value,
-        trigger: if resolved.value.suppresses_competing_praise() {
-            None
-        } else {
-            trigger
-        },
+        trigger,
         lift: lift.as_ref(),
         drift_pct: inp.decoupling.as_ref().map(|d| d.drift_pct),
         split_pct: inp.split_pct,
@@ -257,6 +232,43 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
         distance_mi: false,
         today: model.today_epoch_day,
     };
+    let (message, message_mi) = card_messages(ctx, held, c.female_user);
+    Some(feedback_view(
+        category, message, message_mi, &resolved, ungraded,
+    ))
+}
+
+/// The weekly check-in's safety signals and the run spike for the safety gate:
+/// a spike fraction stated on the session review wins over the derived one.
+fn safety_signals(
+    w: Option<&SessionReview>,
+    session: Option<&SessionReview>,
+    spike: Option<RunSpike>,
+) -> feedback::SafetySignals {
+    feedback::SafetySignals {
+        bone_pain_red_flag: w.is_some_and(|w| w.bone_pain_red_flag),
+        compulsive_flag: w.is_some_and(|w| w.compulsive_flag),
+        reds_signal_reported: w.is_some_and(|w| w.reds_signal_reported),
+        overtraining_signal_count: w.map_or(0, overtraining_count),
+        overtraining_weeks: w.and_then(|w| w.overtraining_signal_weeks),
+        single_session_spike_frac: session
+            .and_then(|s| s.single_session_spike_frac)
+            .or(spike.map(|s| s.frac)),
+    }
+}
+
+/// The plan derated this lift's next session for an e1RM drop
+/// (AUTOREG-E1RM-GATE-001).
+fn lighter_next(cx: &ViewCtx, lift: Option<&LiftEval>) -> bool {
+    lift.and_then(|l| l.detail.as_ref()).is_some_and(|o| {
+        cx.lift_anchors_now()
+            .load_frac_for(&o.exercise)
+            .is_some_and(|d| matches!(d.cause, crate::plan::DerateCause::E1rmDrop))
+    })
+}
+
+/// The card message and its miles twin (empty when it reads the same).
+fn card_messages(mut ctx: MessageCtx, held: bool, female_user: bool) -> (String, String) {
     let (mut message, mut message_mi) = if held {
         (
             "Session logged. Today's plan is eased: no extra weight for now.".to_string(),
@@ -273,8 +285,8 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
     // feedback-035: a female user routed to the bone-stress referral gets the
     // gentle menstrual/nutrition clinician prompt appended (safety-critical,
     // defers to the professional, never a diagnosis).
-    let bsi_referral = resolved.value == FeedbackCategory::ConcernInjury;
-    if feedback::bsi_menstrual_nutrition_prompt(c.female_user, bsi_referral).value {
+    let bsi_referral = ctx.cat == FeedbackCategory::ConcernInjury;
+    if feedback::bsi_menstrual_nutrition_prompt(female_user, bsi_referral).value {
         message.push(' ');
         message.push_str(feedback::BSI_FEMALE_PROMPT);
         if !message_mi.is_empty() {
@@ -282,10 +294,7 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
             message_mi.push_str(feedback::BSI_FEMALE_PROMPT);
         }
     }
-
-    Some(feedback_view(
-        category, message, message_mi, &resolved, ungraded,
-    ))
+    (message, message_mi)
 }
 
 /// The execution input and the day it judges. The manual review leads for its
@@ -381,7 +390,7 @@ fn mastery_lead(exec: Option<Exec>, exec_day: Option<i64>, m: &Mastery) -> Optio
                 FeedbackCategory::PositiveMastery,
                 claims::FB_MASTERY_ANCHOR_001,
             ),
-            trigger: Trigger::Mastery,
+            trigger: Some(Trigger::Mastery),
             lift: None,
         });
     }
@@ -403,8 +412,6 @@ fn feedback_view(
         message,
         message_mi,
         suppresses_praise: category.suppresses_competing_praise(),
-        // feedback-005 mastery anchoring.
-        anchor_mastery: feedback::mastery_anchor_required(category).value,
         evidence: EvidenceTagView::default(),
         why: WhyView::default(),
     };
@@ -468,6 +475,25 @@ pub(in crate::app) struct MessageCtx<'a> {
     pub(in crate::app) today: Option<i64>,
 }
 
+impl<'a> MessageCtx<'a> {
+    /// The judged lift's logged outcome.
+    fn detail(&self) -> Option<&'a LiftOutcome> {
+        self.lift.and_then(|l| l.detail.as_ref())
+    }
+
+    /// The judged lift's name.
+    fn lift_name(&self) -> Option<&'a str> {
+        self.detail().map(|o| o.exercise.as_str())
+    }
+
+    /// " at 70 kg": the lift's top-set load; empty when unknown.
+    fn at_load(&self, o: &LiftOutcome) -> String {
+        o.load_kg
+            .map(|kg| format!(" at {}", fmt_weight(kg, self.weight_lb)))
+            .unwrap_or_default()
+    }
+}
+
 /// What a short lift did against what was planned, e.g. " (5 reps at 154.5 lb
 /// instead of 3 at 165 lb)"; empty when nothing is known, or when the top set
 /// matched the plan as shown and only the set count fell short.
@@ -484,10 +510,9 @@ fn short_detail(o: &LiftOutcome, w: &dyn Fn(f64) -> String) -> String {
         || matches!((o.load_kg, o.planned_kg), (Some(a), Some(b)) if w(a) != w(b));
     match (did, planned) {
         (Some(d), Some(p)) if differs => format!(" ({d} instead of {p})"),
-        (Some(_), Some(_)) => String::new(),
         (Some(d), None) => format!(" ({d})"),
         (None, Some(p)) => format!(" (target {p})"),
-        (None, None) => String::new(),
+        _ => String::new(),
     }
 }
 
@@ -498,6 +523,18 @@ pub(super) fn reserve(n: u8) -> String {
         "no reps left".to_string()
     } else {
         format!("{} left", reps_word(n))
+    }
+}
+
+/// " with 2 reps left" from a rated RPE; empty for an unrated set (RPE 0).
+pub(super) fn with_reserve_from_rpe(rpe: f64) -> String {
+    if rpe > 0.0 {
+        format!(
+            " with {}",
+            reserve(crate::strength::rpe_to_rir(rpe).round() as u8)
+        )
+    } else {
+        String::new()
     }
 }
 
@@ -630,8 +667,6 @@ fn pacing_message(m: &MessageCtx) -> String {
 /// The neutral note: mild drift, a lift that felt harder than planned, or
 /// nothing to adjust.
 fn neutral_message(m: &MessageCtx) -> String {
-    let detail = m.lift.and_then(|l| l.detail.as_ref());
-    let lift_name = detail.map(|o| o.exercise.as_str());
     match (m.trigger, m.lift) {
         (Some(Trigger::MildDrift), _) => format!(
             "Heart-rate drift was {:.1}%: your heart rate crept up late in the run. Common while you build endurance.",
@@ -639,7 +674,7 @@ fn neutral_message(m: &MessageCtx) -> String {
         ),
         (Some(Trigger::HarderThanPlanned), Some(l)) => {
             let (a, t) = (l.rir_actual.unwrap_or(0), l.rir_target.unwrap_or(0));
-            let who = lift_name.unwrap_or("That");
+            let who = m.lift_name().unwrap_or("That");
             format!(
                 "{who} felt harder than planned ({}, target {}). Keep the same weight next time.",
                 reserve(a),
@@ -654,12 +689,11 @@ fn neutral_message(m: &MessageCtx) -> String {
 /// or a lift that came up short.
 fn corrective_message(m: &MessageCtx) -> String {
     let w = |kg: f64| fmt_weight(kg, m.weight_lb);
-    let detail = m.lift.and_then(|l| l.detail.as_ref());
-    let lift_name = detail.map(|o| o.exercise.as_str());
+    let detail = m.detail();
     match m.trigger {
         Some(Trigger::RepsMetAtRir0) => {
             let t = m.lift.and_then(|l| l.rir_target).unwrap_or(2);
-            let on = lift_name.map(|n| format!(" on {n}")).unwrap_or_default();
+            let on = m.lift_name().map(|n| format!(" on {n}")).unwrap_or_default();
             format!(
                 "You hit the reps{on} with {} (target {}). Keep the same weight next time, or go slightly lighter.",
                 reserve(0),
@@ -677,7 +711,7 @@ fn corrective_message(m: &MessageCtx) -> String {
                     format!(
                         " Your next {} session is set about {:.0}% lighter.",
                         o.exercise,
-                        (1.0 - crate::app::anchors::E1RM_DROP_GATE) * 100.0
+                        crate::app::anchors::E1RM_DROP_PCT
                     )
                 } else {
                     " Keep the same weight next time and aim to finish every set.".to_string()
@@ -708,16 +742,12 @@ fn corrective_message(m: &MessageCtx) -> String {
 /// Praise with its numbers: a mastery experience, a completed session or run,
 /// interval mastery, or a lift right on target.
 fn positive_mastery_message(m: &MessageCtx) -> String {
-    let w = |kg: f64| fmt_weight(kg, m.weight_lb);
-    let detail = m.lift.and_then(|l| l.detail.as_ref());
+    let detail = m.detail();
     match (m.trigger, m.mastery) {
         (Some(Trigger::Mastery), Some(k)) => mastery_message(k, m),
         (Some(Trigger::LiftCompleted), _) => match detail {
             Some(o) => {
-                let load = o
-                    .load_kg
-                    .map(|kg| format!(" at {}", w(kg)))
-                    .unwrap_or_default();
+                let load = m.at_load(o);
                 let others = if m.derived_lift_count > 1 {
                     format!(", and all {} exercises are done", m.derived_lift_count)
                 } else {
@@ -744,10 +774,7 @@ fn positive_mastery_message(m: &MessageCtx) -> String {
                 .unwrap_or_default();
             match detail {
                 Some(o) => {
-                    let load = o
-                        .load_kg
-                        .map(|kg| format!(" at {}", w(kg)))
-                        .unwrap_or_default();
+                    let load = m.at_load(o);
                     format!(
                         "All {} sets of {}{load}{res}, as planned. {}",
                         o.sets_planned,
@@ -766,11 +793,10 @@ fn positive_mastery_message(m: &MessageCtx) -> String {
 
 /// The progression nudge: the lift felt easy, so progress it.
 fn nudge_message(m: &MessageCtx) -> String {
-    let detail = m.lift.and_then(|l| l.detail.as_ref());
-    let lift_name = detail.map(|o| o.exercise.as_str());
     let feel = match m.lift.and_then(|l| l.rir_actual.zip(l.rir_target)) {
         Some((a, t)) => {
-            let who = lift_name
+            let who = m
+                .lift_name()
                 .map(|n| format!("{n} "))
                 .unwrap_or_else(|| "That ".to_string());
             format!("{who}felt easy ({}, target {}).", reserve(a), reserve(t))
@@ -806,12 +832,7 @@ fn mastery_message(k: &MasteryKind, m: &MessageCtx) -> String {
                     w(gain)
                 )
             } else {
-                let left = if *rpe > 0.0 {
-                    let rir = crate::strength::rpe_to_rir(*rpe).round() as u8;
-                    format!(" with {}", reserve(rir))
-                } else {
-                    String::new()
-                };
+                let left = with_reserve_from_rpe(*rpe);
                 format!(
                     "New best: {exercise} {} {} (+{}, +{:.0}% on your 90-day best) from {} × {reps}{left}.",
                     max_term(false),

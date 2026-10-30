@@ -44,8 +44,6 @@ fn karvonen_band_uses_hr_reserve_not_hrmax_fractions() {
     let q = HrZoneInputView {
         age_years: 30.0,
         resting_hr_bpm: Some(50.0),
-        weeks_since_recalc: None,
-        weeks_since_pace_test: None,
     };
     let (rows, _, _) = build_hr_zones(&q, Some(190.0));
     let easy = rows
@@ -242,7 +240,7 @@ fn a_stale_stated_long_run_yields_to_the_logged_run() {
 fn re_saving_an_unchanged_stated_long_run_does_not_refresh_it() {
     let today = SEEDED_10K_DAY + 35;
     let (app, mut model) = seeded_10k_model(SEEDED_10K_DAY, today);
-    let mut p = model.profile.clone().expect("profile");
+    let mut p = model.profile().cloned().expect("profile");
     p.effective_from_epoch_day = Some(today);
     p.weekly_sets = 10;
     let _ = app.update(Event::SetProfile(p), &mut model);

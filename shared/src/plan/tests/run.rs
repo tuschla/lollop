@@ -142,7 +142,7 @@ fn ctx(weekly_km: f64, baseline: Option<f64>, n: usize) -> DayCtx {
         goal: GoalDistance::TenK,
         vdot: None,
         easy_pace: 390.0,
-        long_km: None,
+        long: None,
     }
 }
 
@@ -1359,4 +1359,36 @@ fn c25k_never_skips_the_bridge_run_with_fewer_run_days() {
         })
         .collect();
     assert_eq!(bouts, vec![vec![(480, 300), (480, 0)], vec![(1200, 0)]]);
+}
+
+#[test]
+fn hard_runs_never_land_back_to_back() {
+    // RUN-QUALITY-001: hard runs ≥48 h apart. A 10K build week on four
+    // consecutive days (Thu–Sun) has room for two hard runs, so one quality
+    // session becomes easy.
+    let p = Profile {
+        concurrent_goal: ConcurrentGoal::EndurancePriority,
+        training_weekdays: Some(0x78),
+        ..runner(GoalDistance::TenK, 4, 40.0)
+    };
+    // Week 4 opens the second rolling cycle: a Build week.
+    let prog = synthesize(&p, &Anchors::default(), 4).unwrap();
+    let kinds: Vec<(u16, SessionType)> = prog
+        .mesocycle
+        .sessions
+        .iter()
+        .map(|s| (s.day, s.session_type))
+        .collect();
+    let hard_days: Vec<u16> = kinds
+        .iter()
+        .filter(|(_, t)| {
+            matches!(t, SessionType::Run(k) if *k == RunSessionType::LongRun || is_quality(*k))
+        })
+        .map(|(d, _)| *d)
+        .collect();
+    assert_eq!(hard_days.len(), 2, "{kinds:?}");
+    assert!(
+        !hard_days.windows(2).any(|w| w[1] == w[0] + 1),
+        "hard runs on consecutive days: {kinds:?}"
+    );
 }

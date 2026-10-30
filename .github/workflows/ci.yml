@@ -67,6 +67,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
@@ -87,12 +88,51 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest
 
+  release-r8:
+    name: Release R8 keep check
+    # Its own job so it runs beside the unit tests. minifyReleaseWithR8 builds no
+    # Rust (the APK's core comes from cargo-ndk jniLibs), so no Rust steps.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
       - name: Release R8 keep check
         # Classes created by name at run time (JNI Core, manifest components,
         # startup initializers, Room/WorkManager reflection) must survive
         # minification; a miss only crashes the release APK. Builds
         # :app:minifyReleaseWithR8 and checks its dex.
         run: scripts/check-release-r8.sh
+
+  android-lint:
+    name: Android lint
+    # Lint reads sources and resources only; no Rust steps. Errors fail the job.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
+      - name: Lint (debug)
+        working-directory: android
+        run: ./gradlew --no-daemon lintDebug
 
   emulator-smoke:
     name: Android on-device smoke (emulator)
@@ -107,6 +147,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master

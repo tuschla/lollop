@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
@@ -52,12 +53,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import java.util.Locale
 
-/**
- * Per-set completion chrome shared by the Coach hero, the week-strip expander,
- * and the set editor's gym-floor loop. Everything here
- * renders wire fields the core owns (sets_done / logged_sets / ended_early /
- * run_logged_*); this file adds no coaching logic and invents no numbers.
- */
+// Per-set completion chrome (Today's session card, the week-strip expander and the
+// set editor's gym-floor loop), plus the rest readout and its in-app alarm scope.
 
 /** Ends [item] on [epochDay] and confirms it: "Squat ended at 4/6 · Undo" (or
  *  "Squat skipped · Undo" with nothing logged); Undo reopens it. */
@@ -301,7 +298,7 @@ internal fun RestReadout(lastSetSec: Long?, itemRestSec: Int) {
 /** The rest readout's face: a quiet caption word over the bold clock,
  *  right-aligned so it closes the loop header's first row. */
 @Composable
-private fun RestClock(label: String, clock: String, color: Color, modifier: Modifier = Modifier) {
+private fun RestClock(label: String, clock: String, color: Color, modifier: Modifier) {
     Column(modifier = modifier, horizontalAlignment = Alignment.End) {
         Text(label, color = OnBgMuted, style = Type.Caption)
         Text(
@@ -397,7 +394,7 @@ internal fun PlanItemCompletion(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
         if (isRun) {
-            val logged = runProgressText(LocalContext.current.resources, item, rememberDistanceUnit())
+            val logged = runProgressText(LocalResources.current, item, rememberDistanceUnit())
             if (logged.isNotBlank()) {
                 Text(
                     stringResource(R.string.plan_run_logged, logged),
@@ -578,7 +575,7 @@ private fun PlanItemFace(
         if (isRun) {
             val t = item.run_target
             if (t != null && runHead != null) {
-                val pace = if (distanceUnit == DistanceUnit.Mi) t.pace_label_mi else t.pace_label_km
+                val pace = t.paceLabel(distanceUnit)
                 // The band key ("threshold") is engine vocabulary; the Effort line
                 // below already says how hard in plain words.
                 if (pace.isNotBlank()) add(stringResource(R.string.plan_face_pace_only, pace))
@@ -622,14 +619,11 @@ private fun CalisControls(
     onSetRung: ((CalisLadder, Int) -> Unit)?,
 ) {
     if (calis.needs_effort_rating) FaceLine(stringResource(R.string.plan_calis_rate_effort))
-    val chips = if (onSetRung == null) {
-        emptyList()
-    } else {
-        listOfNotNull(
-            calis.easier?.takeIf { it.available }?.let { R.string.plan_calis_easier to it },
-            calis.harder?.takeIf { it.available }?.let { R.string.plan_calis_harder to it },
-        )
-    }
+    val setRung = onSetRung ?: return
+    val chips = listOfNotNull(
+        calis.easier?.takeIf { it.available }?.let { R.string.plan_calis_easier to it },
+        calis.harder?.takeIf { it.available }?.let { R.string.plan_calis_harder to it },
+    )
     if (unplaced && chips.any { it.first == R.string.plan_calis_harder }) {
         FaceLine(stringResource(R.string.plan_calis_unplaced))
     }
@@ -650,7 +644,7 @@ private fun CalisControls(
                     .heightIn(min = ActionMinHeight)
                     .clip(RoundedCornerShape(Space.Md.dp))
                     .border(1.dp, Accent, RoundedCornerShape(Space.Md.dp))
-                    .clickable(role = Role.Button) { onSetRung?.invoke(calis.ladder, rung.rung) }
+                    .clickable(role = Role.Button) { setRung(calis.ladder, rung.rung) }
                     // The clickable merges the label + rung name; the description
                     // reads the whole choice ("Harder: Decline push-up, 5–8 reps").
                     .semantics { contentDescription = cd }
@@ -752,7 +746,7 @@ internal fun OpenPlanItemCard(
     val actionLabel = planItemActionLabel(item, isRun, isCheck, runActionLabel)
     // A run with nothing logged has no completion footer: no "Not logged yet"
     // restating what its Track / Log run action already says.
-    val runUnlogged = isRun && !isCheck && runProgressText(LocalContext.current.resources, item, distanceUnit).isBlank()
+    val runUnlogged = isRun && runProgressText(LocalResources.current, item, distanceUnit).isBlank()
     // A safety cap states its reason in place of a bare SAFETY badge.
     val safetyReason = safetyReasonText(item, distanceUnit)
     val shape = RoundedCornerShape(Space.Card.dp)
@@ -772,11 +766,11 @@ internal fun OpenPlanItemCard(
             // The HRmax glossary term is linked from the session's "?" panel.
             if (split != null) {
                 Column {
-                    Text(split.first, color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+                    Text(split.first, color = OnBgBody, style = Type.BodyBold)
                     Text(split.second, color = OnBgBody, style = Type.Body.merge(TabularFigures))
                 }
             } else {
-                Text(summary, color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+                Text(summary, color = OnBgBody, style = Type.BodyBold)
             }
             Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
                 if (!isCheck) PlanItemFace(item, isRun, runHead, weightUnit, distanceUnit, lastOnFace)
@@ -819,7 +813,7 @@ internal fun PlanItemRow(
         else -> item.face_lead
     }?.takeIf { it.isNotBlank() && it != name }
     val note = noteOnFace(item, isRun, isCheck)?.let(::stripClaimIds)
-    val runLogged = if (isRun && !isCheck) runProgressText(LocalContext.current.resources, item, distanceUnit) else ""
+    val runLogged = if (isRun) runProgressText(LocalResources.current, item, distanceUnit) else ""
     val safetyReason = safetyReasonText(item, distanceUnit)
     val cd = actionLabel?.let { stringResource(R.string.main_action_subject, it, name) }
     val shape = RoundedCornerShape(Space.Card.dp)
@@ -845,7 +839,7 @@ internal fun PlanItemRow(
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
                 if (item.safety_critical && safetyReason == null) Chip(stringResource(R.string.main_chip_safety), status.danger)
-                Text(name, color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+                Text(name, color = OnBgBody, style = Type.BodyBold)
                 detail?.let { Text(it, color = OnBgMuted, style = Type.Caption.merge(TabularFigures)) }
                 safetyReason?.let { Text(it, color = OnBgBody, style = Type.Caption.merge(TabularFigures)) }
                 note?.let { Text(it, color = OnBgMuted, style = Type.Caption) }
@@ -948,14 +942,14 @@ internal fun DonePlanItemRow(
     onReopen: () -> Unit,
     isCheck: Boolean,
     // The reported body area ("Left knee"), when known.
-    painArea: String? = null,
+    painArea: String?,
 ) {
     val tag = planItemTag(item, isRun, isCheck)
     val stopped = !isCheck && item.status == "stopped_pain"
     val skipped = !isCheck && item.status in SkippedItemStatuses
     val progress = when {
         isCheck -> ""
-        isRun -> runProgressText(LocalContext.current.resources, item, rememberDistanceUnit())
+        isRun -> runProgressText(LocalResources.current, item, rememberDistanceUnit())
         else -> "${item.sets_done}/${plannedSetCount(item)}"
     }
     val label = when {
@@ -1015,7 +1009,7 @@ internal fun SettledMark(skipped: Boolean) {
     Text(
         if (skipped) "\u2013" else "\u2713",
         color = if (skipped) OnBgMuted else LocalStatusColors.current.done,
-        style = Type.Body.copy(fontWeight = FontWeight.Bold),
+        style = Type.BodyBold,
     )
 }
 
@@ -1040,11 +1034,10 @@ internal fun SetLoopHeader(
     // Newest set logged today for this exercise (unix seconds) and its line.
     lastSetSec: Long?,
     lastSetLine: String?,
-    // The coach's in-session cue for this exercise (one line), the label of its
-    // load action and the actions themselves; null hides each.
+    // The coach's in-session cue for this exercise (one line) and its load
+    // action's label and action; null hides each.
     cueText: String?,
-    cueLoadLabel: String?,
-    onUseCueLoad: (() -> Unit)?,
+    cueLoad: Pair<String, () -> Unit>?,
     onEndExercise: (() -> Unit)?,
     nextItem: PrescriptionView?,
     onDone: () -> Unit,
@@ -1072,13 +1065,13 @@ internal fun SetLoopHeader(
                 else -> stringResource(R.string.log_set_header_n_of_n, nextSetNumber(item), plannedSetCount(item))
             }
             // The rest length is not repeated here: the rest readout counts it.
-            val band = if (item != null && !done) setTargetBand(LocalContext.current.resources, item) else ""
+            val band = if (item != null && !done) setTargetBand(LocalResources.current, item) else ""
             // The set count and the target share the line as two texts, so the
             // count stays its own readable node. When the rest readout leaves too
             // little room beside the count (a narrow phone at a large font), the
             // target moves under it whole instead of breaking inside its words.
             FlowRow(modifier = Modifier.weight(1f), itemVerticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+                Text(title, color = OnBgBody, style = Type.BodyBold)
                 if (band.isNotBlank()) {
                     Text(" \u00b7 $band", color = OnBgMuted, style = Type.Body)
                 }
@@ -1094,7 +1087,6 @@ internal fun SetLoopHeader(
                     .testTag("loop-cue")
                     .semantics { liveRegion = LiveRegionMode.Polite },
             )
-            val cueLoad = cueLoadLabel?.let { label -> onUseCueLoad?.let { label to it } }
             if (cueLoad != null || onEndExercise != null) {
                 FlowRow(
                     modifier = Modifier.offset(x = -TextActionInset),

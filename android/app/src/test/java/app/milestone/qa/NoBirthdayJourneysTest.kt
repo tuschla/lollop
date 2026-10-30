@@ -14,7 +14,6 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.epochDayLabel
@@ -120,7 +119,7 @@ class NoBirthdayJourneysTest {
     fun profilePreferNotToSay_clearsBirthdayAndAge_andThePlanStays() {
         QaHarness.seedLog(
             ctx,
-            listOf((QaHarness.strengthProfile() as Event.SetProfile).copy(birthEpochDay = adultBirthday, ageYears = 35.0)),
+            listOf(QaHarness.strengthProfile().copy(birthEpochDay = adultBirthday, ageYears = 35.0)),
         )
         rule.launchApp()
         rule.waitForState { EventDispatcher.model.value?.next_session != null }

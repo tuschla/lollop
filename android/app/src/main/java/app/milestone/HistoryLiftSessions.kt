@@ -17,13 +17,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -55,17 +55,15 @@ internal data class LiftSession(val epochDay: Long?, val sets: List<LiftResultVi
     /** Stable, saveable selection + list key. */
     val key: String = epochDay?.toString() ?: "undated"
 
-    /** Exercises in first-logged order, keyed by [exerciseKey] and named by their
-     *  first-logged spelling, each with its own sets in logged order. */
+    /** Exercises in first-logged order, keyed by [nameKey] (the key the core chains
+     *  an exercise's e1RM and PRs on) and named by their first-logged spelling, each
+     *  with its own sets in logged order. */
     val exercises: List<Pair<String, List<LiftResultView>>> =
-        sets.groupBy { exerciseKey(it.exercise) }.values.map { it.first().exercise to it }
+        sets.groupBy { nameKey(it.exercise) }.values.map { it.first().exercise to it }
 
     /** Stamp of the session's first set (0 when undated): dates the card and its month header. */
     val firstObservedAt: Long get() = sets.firstOrNull()?.observed_at ?: 0L
 }
-
-/** The key the core chains an exercise's e1RM and PRs on: trimmed, lowercased name. */
-internal fun exerciseKey(name: String): String = name.trim().lowercase()
 
 /**
  * Group the set stream into per-local-day sessions, newest day first; undated
@@ -113,7 +111,7 @@ internal fun historyActivityDays(
 }
 
 /**
- * Per [exerciseKey], its best e1RM of each dated session in ascending day order: the
+ * Per [nameKey], its best e1RM of each dated session in ascending day order: the
  * factual series behind the session sheet's e1RM change line (one point per
  * session, so warm-up sets don't count as a change within a day). Holds and sets
  * without an estimate (e1RM 0) contribute nothing.
@@ -124,7 +122,7 @@ internal fun bestE1rmByExerciseDay(sessions: List<LiftSession>): Map<String, Lis
         val day = s.epochDay ?: continue
         for ((name, sets) in s.exercises) {
             val best = bestE1rmKg(sets) ?: continue
-            out.getOrPut(exerciseKey(name)) { ArrayList() } += day to best
+            out.getOrPut(nameKey(name)) { ArrayList() } += day to best
         }
     }
     return out
@@ -255,26 +253,37 @@ private fun e1rmChangeLabels(deltaKg: Double, sessions: Int, weightUnit: WeightU
         pluralStringResource(R.plurals.history_e1rm_change, sessions, signed, unit, sessions)
 }
 
-/** The set table's reps-left column: "2 left", "1–2 left", "4+ left" (the short
- *  form of [repsLeftText], beside a load that already says what is counted). */
-private fun repsLeftShort(res: Resources, rpe: Double): String {
-    val rir = (10.0 - rpe).coerceAtLeast(0.0)
-    val n = rir.toInt()
-    return when {
-        rir >= 4.0 -> res.getString(R.string.history_set_left_4plus)
-        rir % 1.0 == 0.0 -> res.getQuantityString(R.plurals.history_set_left, n, n)
-        else -> res.getString(R.string.history_set_left_range, n, n + 1)
-    }
-}
-
 /** The day's volume (the sum of the core's per-set [LiftResultView.tonnage_kg]),
- *  whole units in the display unit with locale grouping ("4,690"), or null for a
+ *  whole units in the display unit with [locale] grouping ("4,690"), or null for a
  *  bodyweight-only day. */
-private fun sessionVolume(sets: List<LiftResultView>, weightUnit: WeightUnit): String? {
+private fun sessionVolume(sets: List<LiftResultView>, weightUnit: WeightUnit, locale: Locale): String? {
     val kg = sets.sumOf { it.tonnage_kg }
     if (kg <= 0.0) return null
     val shown = if (weightUnit == WeightUnit.Lb) kgToLb(kg) else kg
-    return java.text.NumberFormat.getIntegerInstance(Locale.getDefault()).format(Math.round(shown))
+    return java.text.NumberFormat.getIntegerInstance(locale).format(Math.round(shown))
+}
+
+/** The hairline that keeps a non-safety card readable as a card on a BgElevated sheet
+ *  (a safety card keeps its danger border). */
+internal val SheetCardBorder: Color @Composable get() = OnBgFaint.copy(alpha = 0.25f)
+
+/** An exercise's name in bold (or "Set" when blank), with "New best" when a set
+ *  beat every prior e1RM of the exercise: right after the name, or [endAligned]. */
+@Composable
+private fun ExerciseNameRow(name: String, sets: List<LiftResultView>, endAligned: Boolean) {
+    Row(
+        modifier = if (endAligned) Modifier.fillMaxWidth() else Modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+    ) {
+        Text(
+            name.ifBlank { stringResource(R.string.main_set) },
+            color = OnBgBody,
+            style = Type.BodyBold,
+            modifier = Modifier.weight(1f, fill = endAligned),
+        )
+        if (sets.any { it.e1rm_pr }) NewBestChip(name)
+    }
 }
 
 /**
@@ -300,21 +309,9 @@ internal fun LiftSessionCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
-                ) {
-                    Text(
-                        name.ifBlank { stringResource(R.string.main_set) },
-                        color = OnBgBody,
-                        style = Type.Body.copy(fontWeight = FontWeight.Bold),
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    // A set this day beat every prior e1RM of the exercise.
-                    if (sets.any { it.e1rm_pr }) NewBestChip(name)
-                }
+                ExerciseNameRow(name, sets, endAligned = false)
                 Text(
-                    exerciseSetsSummary(LocalContext.current.resources, sets, weightUnit),
+                    exerciseSetsSummary(LocalResources.current, sets, weightUnit),
                     color = OnBgMuted,
                     style = Type.Body.merge(TabularFigures),
                 )
@@ -348,30 +345,25 @@ internal fun LiftSessionSheet(
     onDismiss: () -> Unit,
     onEvent: (Event) -> Unit,
 ) {
-    val ctx = LocalContext.current
+    val deletedText = stringResource(R.string.history_session_deleted)
+    val undoLabel = stringResource(R.string.log_undo)
     // Full height: the message host below the list ("Set updated · Undo") must be
     // on screen when the sheet returns from the set editor.
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = BgElevated,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-    ) {
-        SheetNavBarScrim()
+    AppSheet(onDismiss = onDismiss, containerColor = BgElevated) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 // Leaves room below for the message host when the sheet is full height.
                 .weight(1f, fill = false)
                 .verticalScroll(scrollState)
-                .padding(horizontal = Space.Sheet.dp)
-                .padding(bottom = Space.Lg.dp),
+                .sheetPadding(),
             verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
         ) {
             LiftSessionSheetHeader(session, weightUnit)
             val glossaryAt = session.firstE1rmIndex()
             session.exercises.forEachIndexed { i, (name, sets) ->
                 val series = session.epochDay?.let { day ->
-                    e1rmSeries[exerciseKey(name)].orEmpty().filter { it.first <= day }.map { it.second }
+                    e1rmSeries[nameKey(name)].orEmpty().filter { it.first <= day }.map { it.second }
                 }.orEmpty()
                 ExerciseSetsCard(
                     name = name,
@@ -390,14 +382,10 @@ internal fun LiftSessionSheet(
             val isLatestSession = session.holdsNewestSet(model.lifts)
             if (isLatestSession && (model.trend != null || model.lift_audit.isNotEmpty())) {
                 TileOverline(stringResource(R.string.main_lift_session_audit))
-                // The cards sit on the sheet's own BgElevated ground, so a non-safety
-                // card gets a faint hairline to read as a card (a safety card keeps its
-                // danger border).
-                val hairline = OnBgFaint.copy(alpha = 0.25f)
                 model.trend?.let { t ->
                     EvidenceCard(
                         t.summary, t.grade, t.citation, t.confidence, t.safety_critical, t.contested,
-                        border = if (t.safety_critical) null else hairline,
+                        border = if (t.safety_critical) null else SheetCardBorder,
                         why = t.why,
                     )
                 }
@@ -405,7 +393,7 @@ internal fun LiftSessionSheet(
                     EvidenceCard(
                         g.summary, g.grade, g.citation, g.confidence, g.safety_critical, g.contested,
                         g.section.takeIf { it.isNotBlank() },
-                        border = if (g.safety_critical) null else hairline,
+                        border = if (g.safety_critical) null else SheetCardBorder,
                         why = g.why,
                     )
                 }
@@ -424,8 +412,8 @@ internal fun LiftSessionSheet(
                         session.sets.forEach { onEvent(deleteEventFor(HistoryEntry.Lift(it))) }
                         onDismiss()
                         postUndoable(
-                            ctx.getString(R.string.history_session_deleted),
-                            ctx.getString(R.string.log_undo),
+                            deletedText,
+                            undoLabel,
                             session.sets.mapNotNull { restoreEventFor(HistoryEntry.Lift(it), emptyList()) },
                         )
                     },
@@ -443,7 +431,7 @@ internal fun LiftSessionSheet(
 /** The session sheet's title: the day, then "3 exercises · 9 sets · 4,690 lb lifted". */
 @Composable
 private fun LiftSessionSheetHeader(session: LiftSession, weightUnit: WeightUnit) {
-    val volume = sessionVolume(session.sets, weightUnit)?.let {
+    val volume = sessionVolume(session.sets, weightUnit, LocalConfiguration.current.locales[0])?.let {
         stringResource(R.string.history_session_volume, it, weightSuffix(weightUnit))
     }
     Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
@@ -475,7 +463,7 @@ private fun ExerciseSetsCard(
     weightUnit: WeightUnit,
     onOpenSet: (LiftResultView) -> Unit,
 ) {
-    val res = LocalContext.current.resources
+    val res = LocalResources.current
     PlainCard(
         contentPadding = PaddingValues(start = Space.Card.dp, end = Space.Card.dp, top = Space.Card.dp, bottom = Space.Xs.dp),
         spacing = 0.dp,
@@ -484,20 +472,7 @@ private fun ExerciseSetsCard(
             modifier = Modifier.padding(bottom = Space.Md.dp),
             verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
-            ) {
-                Text(
-                    name.ifBlank { stringResource(R.string.main_set) },
-                    color = OnBgBody,
-                    style = Type.Body.copy(fontWeight = FontWeight.Bold),
-                    modifier = Modifier.weight(1f),
-                )
-                // A record session says so once, beside the exercise name, never per set.
-                if (sets.any { it.e1rm_pr }) NewBestChip(name)
-            }
+            ExerciseNameRow(name, sets, endAligned = true)
             bestE1rmKg(sets)?.let { best ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -533,7 +508,7 @@ private fun ExerciseSetsCard(
         sets.forEachIndexed { i, s ->
             HorizontalDivider(color = Hairline)
             val load = liftSetLine(res, s.hold_sec, s.weight_kg, s.reps, s.rpe, rpeRecorded = false, weightUnit = weightUnit)
-            val left = if (s.hold_sec == null && s.rpe_recorded) repsLeftShort(res, s.rpe) else null
+            val left = if (s.hold_sec == null && s.rpe_recorded) repsLeftText(res, s.rpe, short = true) else null
             val spoken = stringResource(
                 R.string.history_set_row_cd,
                 stringResource(R.string.history_set_n, i + 1),

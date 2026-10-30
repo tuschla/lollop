@@ -38,10 +38,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -101,35 +102,20 @@ private fun UndoRow(text: String, undoDescription: String, onUndo: () -> Unit) {
             )
         }
     }
-    Layout(
-        contents = listOf(line, undo),
+    val density = LocalDensity.current
+    BesideOrStacked(
+        line,
+        undo,
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Space.Card.dp))
             .background(OnBgBody)
             .padding(start = Space.Card.dp),
-    ) { (lineM, undoM), constraints ->
-        val width = constraints.maxWidth
-        val u = undoM.single().measure(Constraints())
-        val besideWidth = (width - u.width).coerceAtLeast(0)
-        val beside = measurer.measure(text, style, constraints = Constraints(maxWidth = besideWidth), density = this)
+        // Under the line, the row keeps the start inset at its end too.
+        stackedEndInset = Space.Card.dp,
+    ) { _, undoWidth, width ->
+        measurer.measure(text, style, constraints = Constraints(maxWidth = (width - undoWidth).coerceAtLeast(0)), density = density)
             .lineCount <= UndoRowMaxLinesBeside
-        if (beside) {
-            val l = lineM.single().measure(Constraints(maxWidth = besideWidth))
-            val h = maxOf(l.height, u.height)
-            // placeRelative: the line at the start, Undo at the end (mirrored in RTL).
-            layout(width, h) {
-                l.placeRelative(0, (h - l.height) / 2)
-                u.placeRelative(width - u.width, (h - u.height) / 2)
-            }
-        } else {
-            // Under the line, the row keeps the start inset at its end too.
-            val l = lineM.single().measure(Constraints(maxWidth = (width - Space.Card.dp.roundToPx()).coerceAtLeast(0)))
-            layout(width, l.height + u.height) {
-                l.placeRelative(0, 0)
-                u.placeRelative(width - u.width, l.height)
-            }
-        }
     }
 }
 
@@ -137,14 +123,11 @@ private fun UndoRow(text: String, undoDescription: String, onUndo: () -> Unit) {
 private const val UndoRowMaxLinesBeside = 2
 
 /**
- * Manual lift-set entry. Emits a real [Event.LogSet] with the user's own
- * exercise / weight / reps / RPE; the e1RM + RIR derivation lives in the Rust
- * core, so this form carries no coaching logic. Weight is typed on the in-form
- * [NumericKeypad]; the buffer text is what gets parsed at submit, so the
- * display-committed invariant holds (an invalid buffer blocks the button).
- * Exercise quick-pick chips sit over the free-text field: today's open plan
- * items, then the user's own recent lifts, then the rest of the week's plan,
- * filtered by what is typed.
+ * Manual lift-set entry: emits [Event.LogSet] (or [Event.AmendSet] in EDIT mode)
+ * with the user's own exercise, weight, reps and effort; the core derives e1RM
+ * and RIR. The weight is the [NumericKeypad] buffer as typed, so an invalid
+ * buffer blocks Save. Quick-pick chips: today's open items, recent lifts, the
+ * week's plan, filtered by what is typed.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -202,11 +185,14 @@ fun LogSetEditor(
     onSave: (Event) -> Unit,
 ) {
     val ctx = LocalContext.current
+    val res = LocalResources.current
     val haptic = LocalHapticFeedback.current
     val focusManager = LocalFocusManager.current
+    // Cue loads are applied in today's loop: a past day's entry never reads them.
+    val cueFor: (PrescriptionView) -> AppliedCue? = if (initialObservedAt == null) AppliedCueLoads::forItem else { _ -> null }
     // NEW-entry coach prefill (null in EDIT mode): seeds the fields below, all
     // still user-editable. `initial` always wins so an EDIT is never clobbered.
-    val rx = if (initial == null) prescription?.let { prescriptionPrefill(it, weightUnit, AppliedCueLoads.forItem(it)) } else null
+    val rx = if (initial == null) prescription?.let { prescriptionPrefill(it, weightUnit, cueFor(it)) } else null
     // Field seeds: an edited row prefills from itself, a coach prescription seeds a
     // NEW entry, and a blank open seeds NOTHING (empty exercise/weight, no
     // highlighted reps/RPE) so the editor fabricates no entry (HARD RULE 1).
@@ -306,7 +292,7 @@ fun LogSetEditor(
     // entry's prescription while its exercise is still the one typed. Feeds the
     // "Last time" line, the plates per side and the calisthenics cues.
     val currentItem = liveItem ?: prescription?.takeIf {
-        initial == null && it.exercise.isNotBlank() && it.exercise.trim().equals(fields.exercise.trim(), ignoreCase = true)
+        initial == null && it.exercise.isNotBlank() && sameExercise(it.exercise, fields.exercise)
     }
     // The coach's effort target for the current exercise: a hint on the scale only,
     // and none for a ballistic power item (max intent, never rated toward a target).
@@ -314,7 +300,7 @@ fun LogSetEditor(
         null
     } else {
         liveItem?.target_rpe
-            ?: rx?.takeIf { it.exercise.trim().equals(fields.exercise.trim(), ignoreCase = true) }?.targetRpe
+            ?: rx?.takeIf { sameExercise(it.exercise, fields.exercise) }?.targetRpe
     }
     val dayStartSec = localDayStartSec(AppClock.nowSec())
     val todaySets = remember(recentLifts, liveItem, fields.exercise, dayStartSec) {
@@ -372,7 +358,7 @@ fun LogSetEditor(
     // after it needs no prompt); a chip switch is the user's own edit and marks
     // it dirty.
     fun reseedTo(name: String, markDirty: Boolean = true) {
-        fields = fields.reseededTo(name, planSession?.items.orEmpty(), recentLifts, weightUnit, AppliedCueLoads::forItem)
+        fields = fields.reseededTo(name, planSession?.items.orEmpty(), recentLifts, weightUnit, cueFor)
         // A picked exercise closes the picker again (it stays open while the
         // name matches no plan item).
         pickerOpen = false
@@ -405,7 +391,7 @@ fun LogSetEditor(
         val logged = item.logged_sets.firstOrNull { it.entry_id == id } ?: return@LaunchedEffect
         pendingQualifyId = null
         if (!logged.qualifies && fields.weightFresh) {
-            fields = fields.withWorkingLoad(item, holdMode, weightUnit, AppliedCueLoads::forItem)
+            fields = fields.withWorkingLoad(item, holdMode, weightUnit, cueFor)
         }
     }
 
@@ -441,7 +427,7 @@ fun LogSetEditor(
             fields = fields.afterLoggedSet(name, kg, liveItem, holdMode, weightUnit)
             undoEntryId = id
             undoIsWarmUp = false
-            undoLine = "$name ${liftSetLine(ctx.resources, setHold, kg, setReps, effort ?: 0.0, effort != null, weightUnit)}"
+            undoLine = "$name ${liftSetLine(res, setHold, kg, setReps, effort ?: 0.0, effort != null, weightUnit)}"
             pendingQualifyId = id
             // A set with no prescribed rest leaves a running rest alone.
             val rest = liveItem?.rest_sec ?: 0
@@ -471,7 +457,7 @@ fun LogSetEditor(
         undoEntryId = ev.entryId
         undoIsWarmUp = true
         undoRestScheduled = false
-        undoLine = "${item.exercise} ${liftSetLine(ctx.resources, null, step.kg, step.reps, 0.0, false, weightUnit)}"
+        undoLine = "${item.exercise} ${liftSetLine(res, null, step.kg, step.reps, 0.0, false, weightUnit)}"
         loggedHere += 1
     }
 
@@ -498,7 +484,6 @@ fun LogSetEditor(
     val requestFinish: () -> Unit = { if (dirty) confirmDone = true else finishLoop() }
     // The rest countdown notification names the set this loop logs next.
     if (loop) {
-        val res = ctx.resources
         val kg = resolveSaveWeightKg(bodyweightMode, fields.weightFresh, fields.weightVerbatim, fields.weightText, weightUnit)
         val load = restNextLoad(res, if (holdMode) fields.holdSec else null, kg, fields.reps, bodyweightMode, weightUnit)
         val next = restNextSet(res, primary, fields.exercise.trim(), liveItem, nextItem, todaySets.size + 1, load)
@@ -517,8 +502,13 @@ fun LogSetEditor(
     val cueLoadKg = cue?.suggested_load_kg?.takeIf { s ->
         !(fields.weightFresh && fields.weightVerbatim?.let { Math.abs(it - s) < 1e-6 } == true)
     }
-    val cueLoadLabel = cueLoadKg?.let {
-        stringResource(R.string.log_cue_use_load, "${loadFigure(it, weightUnit)}\u00A0${weightSuffix(weightUnit)}")
+    // "Use 140 kg": its label and the action that puts the load in the field.
+    val cueLoad: Pair<String, () -> Unit>? = cueLoadKg?.let { kg ->
+        stringResource(R.string.log_cue_use_load, "${loadFigure(kg, weightUnit)}\u00A0${weightSuffix(weightUnit)}") to {
+            fields = fields.copy(weightText = loadFigure(kg, weightUnit), weightVerbatim = kg, weightFresh = true)
+            keypadOpen = false
+            liveItem?.let { AppliedCueLoads.record(it, kg) }
+        }
     }
     // Barbell warm-ups before the first work set of a plate-loaded item.
     val workKg = liveItem?.let { it.load_kg ?: it.suggested_load_kg }
@@ -575,8 +565,8 @@ fun LogSetEditor(
                             stringResource(R.string.log_field_rpe),
                             when {
                                 // An older half-point effort matches no cell: say it.
-                                picked != null && picked !in RepsLeftValues -> repsLeftText(ctx.resources, picked)
-                                targetRpe != null -> stringResource(R.string.log_rpe_target_hint, repsLeftText(ctx.resources, targetRpe))
+                                picked != null && picked !in RepsLeftValues -> repsLeftText(res, picked)
+                                targetRpe != null -> stringResource(R.string.log_rpe_target_hint, repsLeftText(res, targetRpe))
                                 picked != null -> null
                                 else -> stringResource(R.string.log_optional)
                             },
@@ -601,19 +591,12 @@ fun LogSetEditor(
                     // set just logged; the header's "Last: … · Edit" line returns
                     // once the undo window closes.
                     lastSetLine = lastSet?.takeIf { undoEntryId == null }?.let {
-                        liftSetLine(ctx.resources, it.hold_sec, it.weight_kg, it.reps, it.rpe, it.rpe_recorded, weightUnit)
+                        liftSetLine(res, it.hold_sec, it.weight_kg, it.reps, it.rpe, it.rpe_recorded, weightUnit)
                     },
                     cueText = cue?.summary?.takeIf { it.isNotBlank() },
-                    cueLoadLabel = cueLoadLabel,
-                    onUseCueLoad = cueLoadKg?.let { kg ->
-                        {
-                            fields = fields.copy(weightText = loadFigure(kg, weightUnit), weightVerbatim = kg, weightFresh = true)
-                            keypadOpen = false
-                            liveItem?.let { AppliedCueLoads.record(it, kg) }
-                        }
-                    },
+                    cueLoad = cueLoad,
                     onEndExercise = if (cue?.suggests_end_exercise == true && liveItem != null) {
-                        { endExerciseWithUndo(ctx.resources, liveItem, planSession.epoch_day, onSave) }
+                        { endExerciseWithUndo(res, liveItem, planSession.epoch_day, onSave) }
                     } else {
                         null
                     },
@@ -700,7 +683,7 @@ fun LogSetEditor(
                     Text(
                         pickedName,
                         color = OnBgBody,
-                        style = Type.Body.copy(fontWeight = FontWeight.Bold),
+                        style = Type.BodyBold,
                         modifier = Modifier.weight(1f).testTag("loop-exercise"),
                     )
                     TextAction(
@@ -737,7 +720,7 @@ fun LogSetEditor(
                     verticalArrangement = Arrangement.spacedBy(ChoiceChipGap),
                 ) {
                     quickPicks.forEach { name ->
-                        ChoiceChip(name, selected = name.equals(fields.exercise.trim(), ignoreCase = true), onClick = { reseedTo(name) })
+                        ChoiceChip(name, selected = sameExercise(name, fields.exercise), onClick = { reseedTo(name) })
                     }
                 }
                 // A name the app doesn't know yet is offered as a new exercise, in
@@ -776,10 +759,7 @@ fun LogSetEditor(
                     val notes = weightNoteLines(
                         enterHint = weightEmpty,
                         // A first session with no load to start from: how to pick one.
-                        firstWeightTimes = currentItem?.takeIf {
-                            initial == null && it.calis == null && it.reps_low > 0 && it.last_set == null &&
-                                it.logged_sets.isEmpty() && it.load_kg == null && it.suggested_load_kg == null
-                        }?.let { item -> item.target_rpe?.let(::prescribedRir)?.let { item.reps_low + it } },
+                        firstWeightTimes = currentItem?.takeIf { initial == null && it.calis == null }?.firstWeightReps(),
                         // "Last session" only while today's "Last: …" line and the undo
                         // row (both naming today's newest set) are absent.
                         lastTime = currentItem?.last_set?.summary?.takeIf {
@@ -878,7 +858,7 @@ fun LogSetEditor(
                 shape = RoundedCornerShape(Space.Card.dp),
                 modifier = Modifier.fillMaxWidth().padding(Space.Md.dp),
             ) {
-                Column(Modifier.padding(horizontal = Space.Sheet.dp).padding(bottom = Space.Lg.dp)) {
+                Column(Modifier.sheetPadding()) {
                     CompositionLocalProvider(LocalEditorPinnedActions provides true) {
                         LogSetEditor(
                             recentExercises = recentExercises,
@@ -889,7 +869,8 @@ fun LogSetEditor(
                             onClose = closeEdit,
                             onDirtyChange = { editDirty = it },
                             onDone = closeEdit,
-                        ) { ev -> onSave(ev) }
+                            onSave = onSave,
+                        )
                     }
                 }
             }

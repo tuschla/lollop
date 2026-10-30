@@ -20,9 +20,9 @@ import kotlinx.coroutines.withContext
  * Keeps the widget snapshot in step with the app: every published model
  * ([EventDispatcher.model]) is turned into a [WidgetSnapshot] and, when it
  * differs from the stored one, written and the widget updated. A stale mark
- * ([WidgetSnapshotStore.staleMarks]) derives it again from the current model, in
- * the zone now in force: after a time zone change that keeps the local day the
- * model is unchanged and nothing else would replace the stale snapshot. A theme
+ * after a time zone change that keeps the local day
+ * ([WidgetSnapshotStore.staleMarks]) derives it again from the current model in
+ * the new zone: the model is unchanged and nothing else would replace it. A theme
  * or dark-mode change re-renders the widget. Process-scoped, started once from
  * MainActivity; a second call is a no-op.
  */

@@ -21,7 +21,7 @@ class GuidedSetupDraftTest {
     // level-derived seeds (weeklySets 21 ≠ the level's 12; km 37; advanced ON while
     // the level is Intermediate; a measured HRmax and a priority muscle the wizard
     // has no step for).
-    private val customised = ProfileDraft(
+    private val customised = Event.SetProfile(
         progressionCadence = ProgressionCadence.WeekToWeek,
         liftGoal = LiftGoal.Hypertrophy,
         goalDistance = GoalDistance.HalfMarathon,
@@ -42,7 +42,7 @@ class GuidedSetupDraftTest {
     /** deriveDraft as GuidedSetup calls it for a Both re-run of [customised] with
      *  the level the user (re-)picked and every other driving answer unchanged;
      *  the keep-flags come from the production [keepFlags]. */
-    private fun rerun(level: SetupLevel): ProfileDraft {
+    private fun rerun(level: SetupLevel): Event.SetProfile {
         val seedLevel = SetupLevel.fromCadence(customised.progressionCadence)
         val seedDays = seedTotalDays(Modality.Both, customised)!!
         val keep = keepFlags(
@@ -84,7 +84,7 @@ class GuidedSetupDraftTest {
     @Test
     fun keepFlagsFollowTheDrivingAnswers() {
         fun flags(
-            initial: ProfileDraft? = customised,
+            initial: Event.SetProfile? = customised,
             modality: Modality = Modality.Both,
             level: SetupLevel = SetupLevel.Intermediate,
             days: Int = 5,
@@ -138,7 +138,7 @@ class GuidedSetupDraftTest {
         // integer scales cannot represent. An untouched Finish passes the seed
         // doubles straight through (the composable's touched-flag gate keeps them),
         // and keepRunDays preserves the exact run-day count.
-        val seed = ProfileDraft(
+        val seed = Event.SetProfile(
             progressionCadence = ProgressionCadence.WeekToWeek,
             liftGoal = LiftGoal.MaxStrength,
             goalDistance = GoalDistance.FiveK,
@@ -184,7 +184,7 @@ class GuidedSetupDraftTest {
     fun rerun_preserves_training_context_fields() {
         // The wizard has no step for the advanced training-context fields, so a
         // re-run must carry the profile's values through verbatim, not null them.
-        val seed = ProfileDraft(
+        val seed = Event.SetProfile(
             progressionCadence = ProgressionCadence.WeekToWeek,
             liftGoal = LiftGoal.MaxStrength,
             goalDistance = GoalDistance.TenK,
@@ -230,7 +230,7 @@ class GuidedSetupDraftTest {
         // A Both profile stores run days and lift days separately; a re-run
         // recovers the total as run days + lift days (the hybrid default 2 while
         // the lift days were never answered), not run × 2.
-        val seed = ProfileDraft(
+        val seed = Event.SetProfile(
             progressionCadence = ProgressionCadence.WeekToWeek,
             liftGoal = LiftGoal.MaxStrength,
             goalDistance = GoalDistance.TenK,
@@ -428,7 +428,7 @@ class GuidedSetupDraftTest {
         val skipped = firstRun(Modality.Run, days = 4)
         assertEquals(0.0, skipped.runningKmPerWeek, 0.0)
         assertFalse(skipped.runningKmPerWeekSet)
-        assertTrue(skipped.toEvent().toJson().toString().contains("\"running_km_per_week_set\":false"))
+        assertTrue(skipped.toJson().toString().contains("\"running_km_per_week_set\":false"))
         // Answered: exactly what the athlete runs now, including "I don't run yet".
         val answered = firstRun(Modality.Run, days = 4, weeklyRunKm = 20.0)
         assertEquals(20.0, answered.runningKmPerWeek, 1e-9)
@@ -437,7 +437,7 @@ class GuidedSetupDraftTest {
         assertEquals(0.0, none.runningKmPerWeek, 1e-9)
         assertTrue(none.runningKmPerWeekSet)
         // An answered profile keeps the legacy wire (no flag emitted).
-        assertFalse(answered.toEvent().toJson().toString().contains("running_km_per_week_set"))
+        assertFalse(answered.toJson().toString().contains("running_km_per_week_set"))
         // A lifter has no running to leave unset.
         assertTrue(firstRun(Modality.Lift, days = 3).runningKmPerWeekSet)
         // A display-unit answer converts back to canonical km.
@@ -737,7 +737,7 @@ class GuidedSetupDraftTest {
     private val rerunDay = 20_000L
 
     /** The draft an untouched re-run of [initial] sends on Finish. */
-    private fun untouchedRerun(initial: ProfileDraft): ProfileDraft {
+    private fun untouchedRerun(initial: Event.SetProfile): Event.SetProfile {
         val seed = seedAnswers(initial, rerunDay, null, DistanceUnit.Km, null)
         return SetupValues(seed, seed, initial, seedWeeklyRunKm(initial, null), DistanceUnit.Km, rerunDay).draft()!!
     }
@@ -892,7 +892,7 @@ class GuidedSetupDraftTest {
         val draft = v.draft()!!
         assertNull(draft.birthEpochDay)
         assertNull(draft.ageYears)
-        val wire = draft.toEvent().toJson().toString()
+        val wire = draft.toJson().toString()
         assertFalse(wire.contains("birth_epoch_day"))
         assertFalse(wire.contains("age_years"))
 
@@ -920,5 +920,17 @@ class GuidedSetupDraftTest {
         val rerun = SetupValues(reseed, reseed, noAge, null, DistanceUnit.Km, today)
         assertTrue(rerun.ready(SetupStep.About))
         assertNull(rerun.draft()!!.ageYears)
+    }
+
+    /** The profile's resting-HR band is the core's (run_targets.rs `hr_rest_anchor`,
+     *  25..=120) and the morning check-in's: a 28 bpm athlete can enter it in setup. */
+    @Test
+    fun setupAcceptsTheRestingHrTheCoreAccepts() {
+        val today = 20_743L
+        val seed = seedAnswers(customised, today, null, DistanceUnit.Km, null)
+        val low = SetupValues(seed.copy(rhrText = "28", restingHrTouched = true), seed, customised, null, DistanceUnit.Km, today)
+        assertFalse(low.restingHrInvalid)
+        assertEquals(28.0, low.draft()!!.restingHrBpm!!, 0.0)
+        assertTrue(25.0 in RESTING_HR_RANGE && 24.0 !in RESTING_HR_RANGE)
     }
 }

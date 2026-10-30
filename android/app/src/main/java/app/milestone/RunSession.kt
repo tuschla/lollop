@@ -143,8 +143,9 @@ object RunSession {
      *  capped at [ROLLING_PACE_MAX_SPAN_MS]), so a surge, hill or rep shows up within
      *  one window instead of being averaged away over the whole run.
      *  Non-finite = not enough recent ground covered (standing still, a fresh
-     *  segment) → rendered "-". Standing-still legs keep their time in the window, so
-     *  stopping drives it to "-" rather than freezing the last running pace. */
+     *  segment) → rendered [EmptyValuePlaceholder]. Standing-still legs keep their time
+     *  in the window, so stopping drives it to the placeholder rather than freezing
+     *  the last running pace. */
     val currentPaceMinPerKm = MutableStateFlow(Double.NaN)
     private val rollingPace = RollingPace()
 
@@ -245,7 +246,7 @@ object RunSession {
                 feedPaceLeg(legKm, dtMs / 1000.0)
             } else {
                 // Standing still: the time stays in the current-pace window with no
-                // distance, so "Pace now" decays to "-".
+                // distance, so "Pace now" decays to [EmptyValuePlaceholder].
                 rollingPace.add(dtMs, 0.0)
             }
         }
@@ -537,9 +538,9 @@ object RunSession {
 /**
  * One per-N-minute pace slice of [RunSession.paceBucketsFlow]. [paceMinPerKm] is
  * canonical minutes-per-km (convert to the display unit with `paceInUnit`; a
- * non-finite value means "no distance covered" → render "-"). [minutes] is the
- * moving-time span of the slice, always the bucket size for a [complete] slice,
- * less for the trailing in-progress one.
+ * non-finite value means "no distance covered" → render [EmptyValuePlaceholder]).
+ * [minutes] is the moving-time span of the slice, always the bucket size for a
+ * [complete] slice, less for the trailing in-progress one.
  */
 data class PaceBucket(
     val paceMinPerKm: Double,
@@ -558,7 +559,7 @@ private const val ROLLING_PACE_MIN_SHOW_METERS = 20.0
  * (duration, distance) with running sums). The window is the shortest suffix spanning
  * at least [ROLLING_PACE_MIN_SPAN_MS] and [ROLLING_PACE_MIN_METERS] (so one noisy 1 s
  * leg can't swing it), never more than [ROLLING_PACE_MAX_SPAN_MS] (so standing still
- * empties it of distance and the pace reads "-"). Below
+ * empties it of distance and the pace reads [EmptyValuePlaceholder]). Below
  * [ROLLING_PACE_MIN_SHOW_SPAN_MS] / [ROLLING_PACE_MIN_SHOW_METERS] it reports NaN.
  */
 internal class RollingPace {
@@ -619,7 +620,8 @@ internal const val MIN_MOVING_SPEED_MPS = 0.5
 /** The distance (km) a leg of [km] over [dtSec] adds to a run, or null when it is not
  *  a moving leg (no elapsed time, or slower than [MIN_MOVING_SPEED_MPS]). A moving
  *  leg keeps all its time; its distance is capped at [MAX_PLAUSIBLE_SPEED_MPS]·dt
- *  (GPS jitter). Shared by the live figures, the pace slices and crash recovery. */
+ *  (GPS jitter). Shared by the live figures, the pace slices, crash recovery, the
+ *  import gates and the trim preview, which test it against null for the moving rule. */
 internal fun movingLegKm(km: Double, dtSec: Double): Double? {
     if (dtSec <= 0.0 || km * 1000.0 / dtSec < MIN_MOVING_SPEED_MPS) return null
     return minOf(km, MAX_PLAUSIBLE_SPEED_MPS * dtSec / 1000.0)
@@ -644,24 +646,14 @@ private const val MAX_FIX_GAP_SEC = 30L
  *  ([GPS_PRECISE_ACCURACY_M], RunTracking.kt) is stricter still. */
 internal const val MAX_GPS_ACCURACY_M = 30.0
 
-/** Max age (ms, monotonic elapsedRealtime) a fix may have while merely ARMED or
- *  previewing before the tracker rejects it as a stale cached location (the fused
- *  provider's first callback is often minutes old / far away). NOT applied while
- *  RECORDING: batched fixes (Doze wakeups, main-looper stalls) must all reach
- *  [RunSession.add] + the sidecar — the FusedEngine forwards every batched fix, and
- *  [RunSession.add]'s dt<0 drop-guard + the segment boundaries handle ordering. */
+/** Max age (ms, monotonic) of an armed or preview fix; see [armedFixPassesAgeGate]. */
 internal const val ARMED_FIX_MAX_AGE_MS = 10_000L
 
-/** The armed/preview staleness decision, pure so the batched-delivery exemption is
- *  unit-testable without a Location/SystemClock. A fix older than
- *  [ARMED_FIX_MAX_AGE_MS] is rejected ONLY when it arrives ALONE ([batchSize] == 1):
- *  that is the lone cached first callback the fused provider hands back minutes old,
- *  the exact hazard this gate exists for. A fix delivered as part of a MULTI-fix
- *  batch ([batchSize] > 1) is genuine ongoing screen-off delivery, so it is exempt
- *  even when old — otherwise a batch flushed >~10 s late lets only its newest fix
- *  through and the [ArmTrigger] moving window can never fill, so a screen-off
- *  'Start on move' silently never fires. Never consulted while recording (batched
- *  fixes are always kept then). */
+/** The armed/preview staleness gate (never consulted while recording, which keeps every
+ *  batched fix). A fix older than [ARMED_FIX_MAX_AGE_MS] is rejected only when it
+ *  arrives alone: the fused provider's first callback is often a cached fix minutes
+ *  old. A fix in a multi-fix batch is screen-off delivery and passes even when old,
+ *  or the [ArmTrigger] window could never fill and 'Start on move' would never fire. */
 internal fun armedFixPassesAgeGate(ageMs: Long, batchSize: Int): Boolean =
     batchSize > 1 || ageMs <= ARMED_FIX_MAX_AGE_MS
 
@@ -816,8 +808,8 @@ const val TRACK_DECIMATION_CAP = 5400
  * The indices (ascending) kept when thinning an [n]-fix track to ~[maxPoints]: a
  * uniform stride (ceil division, so the strided count stays within the cap) plus the
  * last fix and every segment start in [starts]. At or below the cap, every index.
- * Shared by the save ([RunSession.decimatedTrackForCore]) and crash recovery
- * ([ActiveRunStore.thinForRecovery]).
+ * Shared by the save ([RunSession.decimatedTrackForCore]), crash recovery
+ * ([ActiveRunStore.thinForRecovery]) and the import ([importedRunEvent]).
  */
 internal fun decimationKeep(n: Int, maxPoints: Int, starts: Collection<Int>): List<Int> {
     if (n <= maxPoints || maxPoints < 2) return (0 until n).toList()

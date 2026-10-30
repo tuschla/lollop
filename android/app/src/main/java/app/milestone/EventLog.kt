@@ -4,7 +4,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -47,8 +46,6 @@ internal class LogCompaction(
  * minus torn lines, so the raw-log export still works.
  */
 object EventLog {
-    private val json = Json { ignoreUnknownKeys = true }
-
     /** Event variants that serialize as a BARE JSON string (Rust unit variants). A
      *  named object such as {"ClearSets":{}} is not one: the core rejects a unit
      *  variant carrying a payload. */
@@ -108,19 +105,7 @@ object EventLog {
         if (torn || compactionWorthRewriting(parsed.total - kept.size, parsed.total)) {
             val tmp = File(file.path + ".tmp")
             runCatching {
-                // fsync before the rename: a rename can reach the disk before the
-                // data, and a power loss then truncates the whole log. Streamed line
-                // by line so no joined copy of a multi-year log doubles the heap.
-                FileOutputStream(tmp).use { out ->
-                    val w = out.bufferedWriter()
-                    if (kept.isEmpty()) w.write("\n")
-                    for (line in kept) {
-                        w.write(line)
-                        w.write("\n")
-                    }
-                    w.flush()
-                    out.fd.sync()
-                }
+                writeLinesSynced(tmp, kept.ifEmpty { listOf("") })
                 if (!tmp.renameTo(file)) tmp.delete()
             }
         }
@@ -158,7 +143,7 @@ object EventLog {
         val lines = ArrayList<String>()
         file.bufferedReader().useLines { all -> all.filterTo(lines) { it.isNotBlank() } }
         val verdict = Core.compaction(lines)
-            ?: LogCompaction(torn = lines.indices.filter { runCatching { json.parseToJsonElement(lines[it]) }.isFailure })
+            ?: LogCompaction(torn = lines.indices.filter { runCatching { coreJson.parseToJsonElement(lines[it]) }.isFailure })
         val skip = BooleanArray(lines.size)
         verdict.dropped.forEach { skip[it] = true }
         verdict.torn.forEach { skip[it] = true }
@@ -185,9 +170,25 @@ object EventLog {
      *  core accepts in that shape: unit variants are a bare JSON string
      *  (`"ClearRuns"`), struct variants a single-key object (`{"LogRun": {…}}`). */
     fun variantOf(line: String): String? =
-        when (val el = runCatching { json.parseToJsonElement(line) }.getOrNull()) {
+        when (val el = runCatching { coreJson.parseToJsonElement(line) }.getOrNull()) {
             is JsonPrimitive -> if (el.isString && el.content in unitVariants) el.content else null
             is JsonObject -> el.keys.singleOrNull()?.takeIf { it in structVariants && el[it] is JsonObject }
             else -> null
         }
+}
+
+/** Write [lines] to [file], one per line, and fsync before returning: a rename
+ *  over the log can reach the disk before the data, and a power loss then
+ *  truncates the whole log. Streamed line by line so no joined copy of a
+ *  multi-year log doubles the heap. */
+internal fun writeLinesSynced(file: File, lines: List<String>) {
+    FileOutputStream(file).use { out ->
+        val w = out.bufferedWriter(Charsets.UTF_8)
+        for (line in lines) {
+            w.write(line)
+            w.write("\n")
+        }
+        w.flush()
+        out.fd.sync()
+    }
 }

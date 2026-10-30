@@ -1,6 +1,22 @@
 package app.milestone.qa
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performSemanticsAction
+import app.milestone.Accent
+import app.milestone.AppSettings
+import app.milestone.GpxFix
+import app.milestone.RunResultView
+import app.milestone.RunRoute
+import app.milestone.TrimRunSheetContent
+import app.milestone.timedTrackFromSegments
+import kotlin.math.abs
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -246,5 +262,49 @@ class RtlTextDirectionTest {
     fun statusCardFooter_secondaryAtTheStart_leftToRight() {
         val (secondary, primary) = footer(LayoutDirection.Ltr)
         assertTrue("LTR: secondary $secondary must sit left of primary $primary", secondary.right <= primary.left)
+    }
+
+    /** The trim slider mirrors its thumbs under RTL; the track's kept window sits
+     *  between them on screen in both directions. */
+    @Test
+    fun trimTrack_keptWindowSitsBetweenTheThumbs_inBothDirections() {
+        AppSettings.showRouteMaps.value = false
+        try {
+            val fixes = (0..20).map { GpxFix(48.0, 11.0 + it * 0.0005, 1_700_000_000L + it * 10L, hrBpm = null) }
+            val segments = listOf(fixes)
+            val route = RunRoute(gpx = null, segments = segments, trimmable = true, track = timedTrackFromSegments(segments))
+            val run = RunResultView(distance_km = 0.75, duration_min = 200 / 60.0, entry_id = 1L, observed_at = 1_700_000_200L, has_gpx = true)
+            var dir by mutableStateOf(LayoutDirection.Ltr)
+            var accent = Color.Unspecified
+            rule.setContent {
+                MilestoneTheme {
+                    accent = Accent
+                    CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                        TrimRunSheetContent(run, route, onCancel = {}, onConfirm = { _, _ -> })
+                    }
+                }
+            }
+            val thumbs = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
+            val span = thumbs[0].fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo].range.endInclusive
+            // Keep the second half: the start thumb moves to the middle.
+            thumbs[0].performSemanticsAction(SemanticsActions.SetProgress) { it(span * 0.5f) }
+            rule.waitForIdle()
+            fun midwayIsAccent(): Boolean {
+                val a = thumbs[0].fetchSemanticsNode().boundsInRoot
+                val b = thumbs[1].fetchSemanticsNode().boundsInRoot
+                val c = rule.onRoot().captureToImage().toPixelMap()[((a.center.x + b.center.x) / 2f).toInt(), a.center.y.toInt()]
+                return abs(c.red - accent.red) < 0.08f && abs(c.green - accent.green) < 0.08f && abs(c.blue - accent.blue) < 0.08f
+            }
+            assertTrue("LTR: the kept window between the thumbs is Accent", midwayIsAccent())
+
+            dir = LayoutDirection.Rtl
+            rule.waitForIdle()
+            val a = thumbs[0].fetchSemanticsNode().boundsInRoot
+            val b = thumbs[1].fetchSemanticsNode().boundsInRoot
+            assertTrue("RTL mirrors the thumbs: the end thumb sits left of the start thumb", b.center.x < a.center.x)
+            assertTrue("RTL: the kept window between the thumbs is Accent", midwayIsAccent())
+        } finally {
+            AppSettings.showRouteMaps.value = true
+        }
     }
 }

@@ -12,8 +12,7 @@ pub(in crate::app) fn build_calisthenics_guidance(cx: &ViewCtx) -> Vec<GuidanceV
     let model = cx.model;
     let mut rows = Vec::new();
     let Some(profile) = model
-        .profile
-        .as_ref()
+        .profile()
         .filter(|p| p.resistance_modality == ResistanceModality::Calisthenics)
     else {
         return rows;
@@ -66,66 +65,57 @@ pub(in crate::app) fn build_calisthenics_guidance(cx: &ViewCtx) -> Vec<GuidanceV
         );
     }
 
-    // Equipment swaps in force (CAL-EQUIP-001): say what replaces what, once.
-    if !kit.hang() {
-        push_guidance(
-            &mut rows,
-            "Calisthenics",
+    // One pass over the active tiers: wrist extension gates hand-balancing;
+    // straight-arm lever tiers carry a tendon rate-limit and a breath-holding
+    // hazard.
+    let (mut wrist_tier, mut straight_arm_tier) = (false, false);
+    for t in anchors
+        .iter()
+        .filter(|a| a.active)
+        .filter_map(|a| cal::tier(a.ladder, a.tier))
+    {
+        wrist_tier |= t.wrist_gate;
+        straight_arm_tier |= t.straight_arm;
+    }
+    // The equipment swaps in force (CAL-EQUIP-001: say what replaces what,
+    // once), then the safety cues for the active tiers, each its own
+    // evidence-cited row so the claim's grade travels (HARD RULE 2).
+    let fixed_rows = [
+        (
+            !kit.hang(),
             "No pull-up bar or rings on your profile: pulling is done as table or \
-             inverted rows, which also take over the pull-up sets."
-                .to_string(),
-            &cal::equipment_substitution(),
-        );
-    }
-    if !kit.dip_support() {
-        push_guidance(
-            &mut rows,
-            "Calisthenics",
+             inverted rows, which also take over the pull-up sets.",
+            cal::equipment_substitution(),
+        ),
+        (
+            !kit.dip_support(),
             "No dip bars or rings on your profile: pike and handstand push-ups replace \
-             every dip."
-                .to_string(),
-            &cal::equipment_substitution(),
-        );
-    }
-
-    // Safety cues for the athlete's active tiers, surfaced as their own
-    // evidence-cited rows so each claim's grade travels (HARD RULE 2). Wrist
-    // extension gates hand-balancing; straight-arm lever tiers carry a tendon
-    // rate-limit and a breath-holding hazard.
-    let wrist_tier = anchors
-        .iter()
-        .filter(|a| a.active)
-        .any(|a| cal::tier(a.ladder, a.tier).is_some_and(|t| t.wrist_gate));
-    let straight_arm_tier = anchors
-        .iter()
-        .filter(|a| a.active)
-        .any(|a| cal::tier(a.ladder, a.tier).is_some_and(|t| t.straight_arm));
-    if wrist_tier {
-        push_guidance(
-            &mut rows,
-            "Calisthenics",
+             every dip.",
+            cal::equipment_substitution(),
+        ),
+        (
+            wrist_tier,
             "Handstand and pike work loads your wrists. Warm up first (wrist circles, \
              rocking on all fours), and only progress while bending the wrist back \
-             under load is pain-free."
-                .to_string(),
-            &graded((), claims::CAL_INJURY_WRIST_001),
-        );
-    }
-    if straight_arm_tier {
-        push_guidance(
-            &mut rows,
-            "Calisthenics",
+             under load is pain-free.",
+            graded((), claims::CAL_INJURY_WRIST_001),
+        ),
+        (
+            straight_arm_tier,
             "Straight-arm holds load the elbow tendons, which adapt slowly: stay at \
-             least 4 weeks per lever stage and stop if the front of the elbow hurts."
-                .to_string(),
-            &graded((), claims::CAL_TENDON_001),
-        );
-        push_guidance(
-            &mut rows,
-            "Calisthenics",
-            "Keep breathing through every hold.".to_string(),
-            &graded((), claims::CAL_BP_VALSALVA_001),
-        );
+             least 4 weeks per lever stage and stop if the front of the elbow hurts.",
+            graded((), claims::CAL_TENDON_001),
+        ),
+        (
+            straight_arm_tier,
+            "Keep breathing through every hold.",
+            graded((), claims::CAL_BP_VALSALVA_001),
+        ),
+    ];
+    for (show, text, claim) in fixed_rows {
+        if show {
+            push_guidance(&mut rows, "Calisthenics", text.to_string(), &claim);
+        }
     }
     rows
 }

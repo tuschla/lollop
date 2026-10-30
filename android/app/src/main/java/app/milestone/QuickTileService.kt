@@ -13,7 +13,7 @@ import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetMidnight
 import app.milestone.widget.WidgetSnapshot
 import app.milestone.widget.WidgetSnapshotStore
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.withIndex
 import kotlinx.coroutines.launch
 
 /** What the tile shows and opens. */
@@ -51,7 +51,7 @@ internal fun tileFace(snapshot: WidgetSnapshot?): TileFace = when {
  *
  * An active tile (manifest meta-data `ACTIVE_TILE`): System UI redraws it only
  * when the app asks ([requestTileRefresh]) or on a tap, so the app asks whenever
- * the face can change: a run starts or stops ([TileSync]), the day snapshot is
+ * the face can change: a run starts or stops ([RecordingWatch]), the day snapshot is
  * written or marked stale ([WidgetSnapshotStore.write]), and the day changes
  * (local midnight, clock or time zone change in
  * [app.milestone.widget.TodayWidgetReceiver]).
@@ -152,12 +152,13 @@ internal fun requestTileRefresh(ctx: Context) {
 }
 
 /**
- * Redraws the tile when a run starts or stops recording ([RunSession.tracking], the
- * flag behind [TileFace.Recording]), whoever changes it. Process-scoped, started from
+ * Follows [RunSession.tracking], whoever changes it: redraws the tile on every
+ * change ([TileFace.Recording]) and takes a shown run reminder down when a run
+ * starts recording ([SessionReminder.onRecording]). Process-scoped, started from
  * MainActivity and [RunTrackingService]; a later call only replaces the context
  * (Robolectric gives each test a new Application under the same collector).
  */
-internal object TileSync {
+internal object RecordingWatch {
     @Volatile private var started = false
     @Volatile private var app: Context? = null
 
@@ -166,7 +167,11 @@ internal object TileSync {
         if (started) return
         started = true
         EventDispatcher.scope.launch {
-            RunSession.tracking.drop(1).collect { app?.let(::requestTileRefresh) }
+            RunSession.tracking.withIndex().collect { (i, recording) ->
+                val app = app ?: return@collect
+                if (i > 0) requestTileRefresh(app)
+                if (recording) SessionReminder.onRecording(app)
+            }
         }
     }
 }

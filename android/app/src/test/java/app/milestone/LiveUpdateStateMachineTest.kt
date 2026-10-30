@@ -6,9 +6,11 @@ import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Looper
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.test.core.app.ApplicationProvider
 import java.time.Duration
 import kotlin.math.abs
@@ -31,29 +33,10 @@ import org.robolectric.shadows.ShadowAlarmManager
 import org.robolectric.shadows.ShadowSystemClock
 
 /**
- * Seeded state machines over the two Live Updates on Android 16 (SDK 36).
- *
- * Rest: random rests started, undone or replaced; the set loop's rest readout
- * shown and hidden; the next set changing; the clock passing the rest end (the
- * rest-end alarm delivered on time, or late when it is inexact); the countdown
- * swiped away; the notification permission and the exact-alarm grant toggled;
- * process death. After every step the countdown and the rest-done alert never
- * both show, a countdown is a promotable Live Update for the rest that is
- * running now (its exercise, its end, before that end, never while the loop shows
- * the rest), the rest-done alert follows only the rest that ended, and exactly
- * the running rest holds the rest-end alarm.
- *
- * Run: the tracker's commands to [RunTrackingService] (locate, start, arm, start
- * now, stop, save), GPS fixes and stretches without one, the notification's
- * Pause/Resume and dismissal, the in-app pause, the system killing the service
- * and process death. After every step the notification shows exactly while the
- * service runs and was not dismissed, it is a promotable Live Update whose title,
- * chip and actions match the state (the chip is the current moving time, "No GPS"
- * only after the loss window and soon after it, "Paused" while paused), and after
- * a stop or a save no run notification or recording flag remains.
- *
- * `LIVE_SM_SEEDS` / `LIVE_SM_STEPS` / `LIVE_SM_SEED` lengthen or pin a run; a
- * failure names its seed and the last steps.
+ * Seeded walks over the rest countdown and the run notification as Android 16
+ * Live Updates (steps in `restWalk`/`runWalk`); after every step the posted
+ * notifications must match the walk's model. `LIVE_SM_SEEDS` / `LIVE_SM_STEPS` /
+ * `LIVE_SM_SEED` lengthen or pin a run; a failure prints its replay line.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -85,19 +68,11 @@ class LiveUpdateStateMachineTest {
         nm.cancelAll()
     }
 
-    private fun walk(name: String, seed: Long, steps: Int, body: (Random, (String) -> Unit) -> Unit) {
-        val trace = ArrayDeque<String>()
-        try {
-            body(Random(seed)) { s ->
-                trace.addLast(s)
-                if (trace.size > 25) trace.removeFirst()
-            }
-        } catch (e: Throwable) {
-            val msg = "$name seed=$seed (LIVE_SM_SEED=$seed LIVE_SM_SEEDS=1 LIVE_SM_STEPS=$steps)\n  ${trace.joinToString("\n  ")}\n${e.message}"
-            println("LiveUpdateStateMachineTest FAILED $msg")
-            throw AssertionError(msg, e)
-        }
-    }
+    private fun walk(name: String, seed: Long, steps: Int, body: (Random, (String) -> Unit) -> Unit) =
+        seededWalk("$name seed=$seed", "LIVE_SM_SEED=$seed LIVE_SM_SEEDS=1 LIVE_SM_STEPS=$steps") { note -> body(Random(seed), note) }
+
+    private fun canNotify() =
+        ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     // ── Rest ─────────────────────────────────────────────────────────────────
 
@@ -141,6 +116,8 @@ class LiveUpdateStateMachineTest {
         fun observe() {
             val c = shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID)
             if (c != null && c !== countdown) {
+                assertFalse("a countdown re-posted after the user swiped it away", dismissed && ownsCurrent)
+                assertTrue("a countdown posted without the notification permission", canNotify())
                 countdownAt = appNow()
                 // At post time the chip counts down to the rest end.
                 val r = checkNotNull(current) { "a countdown with no rest running" }
@@ -223,9 +200,7 @@ class LiveUpdateStateMachineTest {
                 assertTrue("a rest-end alarm with no rest running", alarms.isEmpty())
             }
             // Liveness: this process's running rest shows its countdown off-loop.
-            val canNotify = androidx.core.content.ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (current != null && ownsCurrent && !inApp && !dismissed && canNotify && appNow() < current!!.end && op.startsWith("schedule")) {
+            if (current != null && ownsCurrent && !inApp && !dismissed && canNotify() && appNow() < current!!.end && op.startsWith("schedule")) {
                 assertNotNull("no countdown for the rest just started", c)
             }
         }
@@ -265,7 +240,14 @@ class LiveUpdateStateMachineTest {
                         nm.cancel(RestAlarm.COUNTDOWN_NOTIF_ID)
                         RestDismissReceiver().onReceive(app, Intent(shadowOf(c.deleteIntent).savedIntent))
                         if (ownsCurrent) dismissed = true
-                        "swipe countdown"
+                        // Half the time the loop then opens and closes again, the path that would re-post it.
+                        if (rng.nextBoolean()) {
+                            RestAlarm.setInAppVisible(app, true)
+                            RestAlarm.setInAppVisible(app, false)
+                            "swipe countdown, loop opened and closed"
+                        } else {
+                            "swipe countdown"
+                        }
                     }
                 }
                 w < 80 -> {
@@ -326,12 +308,13 @@ class LiveUpdateStateMachineTest {
         var running = false
         var recording = false
         var armed = false
+        var paused = false
         var dismissed = false
         // When the run last became live (recording, not paused), for the loss watchdog.
         var wasLive = false
         var liveSince = 0L
 
-        fun notif(): Notification? = shadowOf(nm).getNotification(RUN_NOTIF_ID)
+        fun notif(): Notification? = shadowOf(nm).getNotification(RunTrackingService.NOTIF_ID)
         fun idle() = shadowOf(Looper.getMainLooper()).idle()
 
         fun send(action: String): ServiceController<RunTrackingService> {
@@ -362,7 +345,8 @@ class LiveUpdateStateMachineTest {
             idle()
             val n = notif()
             assertEquals("recording flag", recording, RunSession.tracking.value)
-            val live = recording && !RunSession.paused.value
+            assertEquals("paused flag", paused, RunSession.paused.value)
+            val live = recording && !paused
             if (live && !wasLive) liveSince = SystemClock.elapsedRealtime()
             wasLive = live
             if (!running) {
@@ -379,8 +363,7 @@ class LiveUpdateStateMachineTest {
             n!!
             assertPromotableLiveUpdate(n)
             runNotifsSeen++
-            if (recording && RunSession.paused.value) pausedSeen++
-            val paused = RunSession.paused.value
+            if (recording && paused) pausedSeen++
             assertEquals("title", app.getString(trackingNotifTitleRes(recording, armed, paused)), n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
             val chip = n.shortCriticalText?.toString()
             val sinceFix = SystemClock.elapsedRealtime() - RunSession.lastFixElapsedMs.value
@@ -437,15 +420,17 @@ class LiveUpdateStateMachineTest {
                     val pause = rng.nextBoolean()
                     send(if (pause) "PAUSE" else "RESUME")
                     destroyIfStopped()
+                    // Only a recording run pauses or resumes.
+                    if (recording) paused = pause
                     "notification ${if (pause) "pause" else "resume"}"
                 }
-                w < 60 -> if (recording) { RunSession.setPaused(!RunSession.paused.value); "in-app pause=${RunSession.paused.value}" } else "in-app pause (not recording)"
+                w < 60 -> if (recording) { paused = !paused; RunSession.setPaused(paused); "in-app pause=$paused" } else "in-app pause (not recording)"
                 w < 70 -> {
                     val n = notif()
                     if (n == null) {
                         "dismiss (none)"
                     } else {
-                        nm.cancel(RUN_NOTIF_ID)
+                        nm.cancel(RunTrackingService.NOTIF_ID)
                         val c = svc
                         if (c != null) {
                             c.withIntent(Intent(shadowOf(n.deleteIntent).savedIntent)).startCommand(0, ++startId)
@@ -458,10 +443,10 @@ class LiveUpdateStateMachineTest {
                 w < 80 -> { send("STOP"); destroyIfStopped(); stopModel(); "stop" }
                 w < 88 -> {
                     // Finish → Save (or Discard): the tracker stops the service, then clears the session.
-                    send("STOP"); destroyIfStopped(); RunSession.reset(); stopModel(); "save"
+                    send("STOP"); destroyIfStopped(); RunSession.reset(); stopModel(); paused = false; "save"
                 }
                 w < 94 -> { svc?.destroy(); svc = null; idle(); stopModel(); "system stops the service" }
-                w < 100 -> { svc?.destroy(); svc = null; RunSession.reset(); idle(); stopModel(); "process death" }
+                w < 100 -> { svc?.destroy(); svc = null; RunSession.reset(); idle(); stopModel(); paused = false; "process death" }
                 w < 118 -> {
                     // A GPS fix a few seconds and ~10 m on.
                     val dt = rng.nextLong(1_000, 5_000)
@@ -497,7 +482,6 @@ class LiveUpdateStateMachineTest {
 
     companion object {
         private const val DAY = 24 * 60 * 60_000L
-        private const val RUN_NOTIF_ID = 1
         private val SEED_BASE = System.getenv("LIVE_SM_SEED")?.toLongOrNull() ?: 20_261_030L
     }
 }

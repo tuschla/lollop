@@ -47,8 +47,38 @@ pub(in crate::app) fn build_hr_zones(
     if running::tanaka_age_in_range(q.age_years) {
         push_maf_row(&mut rows, q.age_years);
     }
-    push_retest_rows(&mut rows, q);
     (rows, Some(hr_max_view(q, measured, hr_max)), bands)
+}
+
+/// [`build_hr_zones`] for the athlete in `model`: the current profile's
+/// measured HRmax, plus the re-test reminders derived from the log.
+pub(in crate::app) fn hr_zones_for(
+    q: &HrZoneInputView,
+    model: &Model,
+) -> (Vec<GuidanceView>, Option<HrMaxView>, Vec<HrZoneBandView>) {
+    let (mut rows, hr_max, bands) =
+        build_hr_zones(q, model.profile().and_then(|p| p.measured_hr_max));
+    if hr_max.is_some() {
+        push_retest_rows(&mut rows, retest_weeks(model));
+    }
+    (rows, hr_max, bands)
+}
+
+/// Whole weeks, as of today, since the measured HRmax the zones use was first
+/// stated (running-006) and since the dated race the paces come from
+/// (running-041). `None` without that date or a clock.
+fn retest_weeks(model: &Model) -> [Option<u8>; 2] {
+    let (Some(today), Some(p)) = (model.today_epoch_day, model.profile()) else {
+        return [None, None];
+    };
+    let weeks_since = |day: Option<i64>| {
+        let days = today.checked_sub(day?).filter(|d| *d >= 0)?;
+        Some(u8::try_from(days / 7).unwrap_or(u8::MAX))
+    };
+    let measured_since = running::plausible_measured_hr_max(p.measured_hr_max)
+        .and_then(|_| crate::app::model::stated_since(model, p, |q| q.measured_hr_max));
+    let race_day = p.recent_race.as_ref().and_then(|r| r.epoch_day);
+    [weeks_since(measured_since), weeks_since(race_day)]
 }
 
 /// The HRmax row: the measured maximum when trusted, else the Tanaka
@@ -60,7 +90,9 @@ fn push_hr_max_row(
     hr_max: f64,
 ) {
     let hr_max_row = graded((), claims::RUN_HRMAX_001);
-    let shown = whole_bpm(hr_max);
+    // Round half away from zero before `{:.0}` (which rounds half to even), so
+    // the prose and the structured figure agree (Tanaka at age 25 = 190.5).
+    let shown = hr_max.round();
     let (hr_max_text, hr_max_basis) = if measured.is_some() {
         (
             format!("Measured HRmax: {shown:.0} bpm"),
@@ -140,8 +172,8 @@ fn push_band_rows(
         let (lo_pct, hi_pct) = running::vdot_band_hr_pct(band);
         let (vo2_lo, vo2_hi) = running::vdot_band_vo2max_pct(band);
         let hr_anchored = running::vdot_band_uses_hr(band);
-        let bpm_lo = whole_bpm(hr_max * lo_pct / 100.0);
-        let bpm_hi = whole_bpm(hr_max * hi_pct / 100.0);
+        let bpm_lo = (hr_max * lo_pct / 100.0).round();
+        let bpm_hi = (hr_max * hi_pct / 100.0).round();
         let band_row = graded((), claims::RUN_VDOT_001);
         let range = if bpm_lo == bpm_hi {
             format!("{bpm_lo:.0} bpm")
@@ -155,8 +187,8 @@ fn push_band_rows(
         // preference targets (running-005 formula: RHR + frac·(HRmax − RHR)).
         let karvonen = match (karvonen_rhr, vo2_hi) {
             (Some(rhr), Some(vo2_hi)) if hr_anchored => Some((
-                whole_bpm(load::karvonen_target_hr(rhr, hr_max, vo2_lo / 100.0)),
-                whole_bpm(load::karvonen_target_hr(rhr, hr_max, vo2_hi / 100.0)),
+                load::karvonen_target_hr(rhr, hr_max, vo2_lo / 100.0).round(),
+                load::karvonen_target_hr(rhr, hr_max, vo2_hi / 100.0).round(),
             )),
             _ => None,
         };
@@ -177,12 +209,7 @@ fn push_band_rows(
         } else {
             " · go by pace, not heart rate".to_string()
         };
-        let (lo_str, hi_str) = (format!("{lo_pct:.0}"), format!("{hi_pct:.0}"));
-        let pct_range = if lo_str == hi_str {
-            lo_str
-        } else {
-            format!("{lo_str}–{hi_str}")
-        };
+        let pct_range = fmt_pct_range(lo_pct, hi_pct);
         bands.push(HrZoneBandView {
             kind: band,
             name: plan_views::vdot_band_name(band).to_string(),
@@ -228,24 +255,22 @@ fn push_maf_row(rows: &mut Vec<GuidanceView>, age_years: f64) {
 }
 
 /// Re-test reminders: zones (running-006) and training paces (running-041)
-/// due on the 4–6-week cadence.
-fn push_retest_rows(rows: &mut Vec<GuidanceView>, q: &HrZoneInputView) {
-    type Reminder<'a> = (Option<u8>, fn(u8) -> Recommended<bool>, &'a str, &'a str);
+/// due on the 4–6-week cadence. `weeks` is [`retest_weeks`].
+fn push_retest_rows(rows: &mut Vec<GuidanceView>, weeks: [Option<u8>; 2]) {
+    type Reminder<'a> = (fn(u8) -> Recommended<bool>, &'a str, &'a str);
     let reminders: [Reminder; 2] = [
         (
-            q.weeks_since_recalc,
             running::hr_zone_recalc_due,
             "Zones last recalculated",
             "Recompute from a measured HRmax (every 4–6 weeks)",
         ),
         (
-            q.weeks_since_pace_test,
             running::pace_retest_due,
             "Paces last tested",
             "Re-test to set paces from your current fitness",
         ),
     ];
-    for (weeks, due_fn, last, advice) in reminders {
+    for (weeks, (due_fn, last, advice)) in weeks.into_iter().zip(reminders) {
         let Some(weeks) = weeks else { continue };
         let due = due_fn(weeks);
         if due.value {
@@ -260,34 +285,24 @@ fn push_retest_rows(rows: &mut Vec<GuidanceView>, q: &HrZoneInputView) {
     }
 }
 
-/// The ONE bpm rounding (half away from zero) for every heart-rate figure
-/// this table states, prose and structured alike: `{:.0}` on an unrounded
-/// .5 rounds half to EVEN, so formatting the raw value would print 190 beside
-/// a structured 191 (Tanaka at age 25 = 190.5).
-fn whole_bpm(bpm: f64) -> f64 {
-    bpm.round()
-}
-
 /// The same resolved figure as the prose HRmax row above, structured so a
 /// shell reads bpm / measured-vs-estimate / the Tanaka split from data.
 /// The intercept / slope are `running::hr_max_tanaka`'s own constants;
 /// they apply only to the age-based estimate, so they are 0 when measured.
 fn hr_max_view(q: &HrZoneInputView, measured: Option<f64>, hr_max: f64) -> HrMaxView {
-    if measured.is_some() {
-        HrMaxView {
-            bpm: whole_bpm(hr_max),
-            measured: true,
-            age_years: 0.0,
-            tanaka_intercept: 0.0,
-            tanaka_slope: 0.0,
-        }
-    } else {
-        HrMaxView {
-            bpm: whole_bpm(hr_max),
-            measured: false,
-            age_years: q.age_years,
-            tanaka_intercept: running::TANAKA_INTERCEPT_BPM,
-            tanaka_slope: running::TANAKA_SLOPE_BPM_PER_YEAR,
-        }
+    let (age_years, tanaka_intercept, tanaka_slope) = match measured {
+        Some(_) => (0.0, 0.0, 0.0),
+        None => (
+            q.age_years,
+            running::TANAKA_INTERCEPT_BPM,
+            running::TANAKA_SLOPE_BPM_PER_YEAR,
+        ),
+    };
+    HrMaxView {
+        bpm: hr_max.round(),
+        measured: measured.is_some(),
+        age_years,
+        tanaka_intercept,
+        tanaka_slope,
     }
 }

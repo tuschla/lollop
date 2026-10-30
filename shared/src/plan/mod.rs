@@ -1,33 +1,16 @@
-//! Program synthesis: compose the graded band functions
-//! (`strength::dup_day_rx`, `strength::loading_rx`, `running::run_workout_rx`,
-//! `running::goal_week_plan`) into a concrete, dated [`Program`] of
-//! `Recommended<Prescription>` for the user's profile.
+//! Program synthesis: compose the graded band functions (`strength::dup_day_rx`,
+//! `strength::loading_rx`, `running::workout_rx`, `running::goal_week_plan`)
+//! into a dated [`Program`] of `Recommended<Prescription>` for ONE Mon..Sun
+//! week at 0-based `day` offsets. Pure and deterministic; `app/` maps the
+//! offsets to calendar days and applies readiness/safety downstream.
 //!
-//! Pure and deterministic: no clock, no IO, no randomness. Time enters `view()`
-//! as `observed_at`/`epoch_day` event data; this module lays out ONE week as a
-//! Mon..Sun microcycle at 0-based `day` offsets; `app/` maps those offsets to
-//! calendar days and applies readiness/safety downstream (HARD RULE 3).
-//!
-//! The week is built in four steps:
-//! 1. **Shape**: how many lift and run days (the athlete's chosen lift-day count
-//!    and run days, fitted into the weekdays they can train, LIFT-DAYS-001 /
-//!    ADH-DAYS-001; the ≤3-run-day hybrid default, HYB-RUNCAP-001).
-//! 2. **Content**: the run week's session kinds and volume (`run::run_week_plan`,
-//!    phase-aware) and the lift-day template (full-body / upper-lower,
-//!    Table 1.6), each side dosed by which goal leads a hybrid week
+//! 1. Shape: lift and run day counts on the athlete's weekdays (LIFT-DAYS-001,
+//!    ADH-DAYS-001, HYB-RUNCAP-001).
+//! 2. Content: run kinds and volume, lift-day template, hybrid dosing
 //!    (HYB-MAINT-001/002, HYB-TENDON-001).
-//! 3. **Placement**: `schedule::place_week` puts each session on a weekday so
-//!    same-muscle days are ~48 h apart and long/hard runs stay ≥24 h from heavy
-//!    leg work (HYB-CAP-001).
-//! 4. **Block position**: lifting runs its own accumulation block with a deload
-//!    every 5th–6th week (HYP-DELOAD-CADENCE-001; strength goals deload by
-//!    volume, STR-DELOAD-VOL-001); a running recovery week leaves lifting alone.
-//!
-//! HARD RULE 1/2: every prescription is graded with the SAME registry claim id
-//! that produced its number. No new training claim is invented; loads are honest
-//! arithmetic (%1RM × the user's logged e1RM) computed in `app/` at render time.
-//! When no e1RM anchor exists the lift is prescribed by RIR, never a fabricated
-//! load. The `MarketingMyth` choke point in `Recommended::new` is untouched.
+//! 3. Placement: `schedule::place_week` (HYB-CAP-001, RUN-QUALITY-001).
+//! 4. Block position: lift deload every 5th–6th week (HYP-DELOAD-CADENCE-001,
+//!    STR-DELOAD-VOL-001) or the meet taper.
 
 mod calis;
 mod hypertrophy;
@@ -66,10 +49,12 @@ pub(crate) use run::is_quality as is_quality_run;
 pub use run::{daily_avg_run_km, run_slot_count};
 pub(crate) use schedule::{DayLoad, MoveBlock, move_conflict, move_options, session_load};
 
-/// Anchors derived from the user's logged history in `app/mod.rs::view()`. Turns the
-/// %1RM bands into real kg and lets the plan lead with the user's OWN exercises
-/// — a lift the user has logged carries an e1RM anchor and
-/// is prescribed by load; anything unlogged falls back to RIR.
+/// Anchors derived from the user's logged history by
+/// `app/anchors.rs::build_plan_anchors` and completed per week in
+/// `app/plan_views/plan_week.rs::build_plan_views`. Turns the %1RM bands into
+/// real kg and lets the plan lead with the user's OWN exercises — a lift the
+/// user has logged carries an e1RM anchor and is prescribed by load; anything
+/// unlogged falls back to RIR.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Anchors {
     /// (exercise name, e1RM kg), most-recent-first, one entry per MOVEMENT
@@ -85,9 +70,10 @@ pub struct Anchors {
     /// Same window and predicate as the RUN-SPIKE-001 baseline
     /// (`spike_baseline_km`), so a long run at this value is no spike.
     pub longest_recent_run_km: Option<f64>,
-    /// Measured weekly running volume (km): trailing-28-day total ÷ 4, from
+    /// Measured weekly running volume (km): trailing-28-day total ÷ the 1–4
+    /// weeks the window spans since its first run, from
     /// `app/anchors.rs::build_run_anchors`; `None` with no run in the window.
-    /// Input volume to the long-run share rule (RUN-LONGRUN-001).
+    /// Read by `run::effective_weekly_km`, which sizes the whole run week.
     pub recent_weekly_km: Option<f64>,
     /// `true` when `longest_recent_run_km` comes from a run older than the
     /// 30-day window, tapered per DETRAIN-001 in
@@ -115,10 +101,6 @@ pub struct Anchors {
     /// are dropped from `lift_e1rm` during the window; a movement logged since the
     /// return anchors normally. Cleared once the ramp window ends.
     pub reentry_novice: bool,
-    /// (exercise name, whole weeks the lift's e1RM has been flat), only for
-    /// lifts where ≥2 RATED sessions failed to beat the anchor; feeds
-    /// `strength::stall_triggers_deload` (STR-STALL-001: flat ≥2 weeks).
-    pub lift_stall_weeks: Vec<(String, u8)>,
     /// Per-ladder calisthenics tier state, derived in
     /// `app/plan_views/calis_anchors.rs::build_calisthenics_anchors`
     /// from logged sets (empty for a `Weights` profile). A dynamic ladder with no
@@ -135,10 +117,12 @@ pub struct Anchors {
     /// The athlete's LAST working sets per movement (one entry per movement,
     /// most-recent-first), derived in `app/anchors.rs::build_plan_anchors` from
     /// the newest logged session of that movement within the detraining
-    /// horizon. Drives hypertrophy double progression (HYP-DOUBLEPROG-001): the
-    /// next session carries this load forward, or adds the smallest step once
-    /// every set reached the top of the rep range. Unlike `lift_e1rm` it covers
-    /// isolation and bodyweight lifts too, so a logged curl stays in the plan.
+    /// horizon. Unlike `lift_e1rm` it covers isolation and bodyweight lifts
+    /// too, so a logged curl stays in the plan. Read by:
+    /// - hypertrophy double progression (HYP-DOUBLEPROG-001);
+    /// - `lift::earned_week` (a missed rep withholds the STR-PCTPROG-001 step);
+    /// - `lift::novice_jump_cap_pct` (the STR-1RMTEST-001 novice step cap);
+    /// - [`Anchors::carried_derate_for`] and the app's carried load.
     pub last_working: Vec<LastWorking>,
     /// Local epoch day of the Monday of the week being synthesized, set in
     /// `app/plan_views/plan_week.rs::build_plan_views`. Dates the week against
@@ -163,9 +147,10 @@ pub struct Anchors {
     /// re-entry ramp runs, or a run from before it still carries long-run
     /// credit). `None` without one, or when the stated weekly distance was
     /// entered after the break began (the athlete's current answer then
-    /// governs). Drives the File 08 Table 3.4b running re-entry
-    /// (RUN-REENTRY-001) in `run::effective_weekly_km` and the long-run /
-    /// spike baselines in `run::run_week_sessions`.
+    /// governs). Read by `run::effective_weekly_km` (the File 08 Table 3.4b
+    /// running re-entry, RUN-REENTRY-001), `run::base_weekly_km` (pre-break
+    /// weeks never carry the cycle's load level) and `run::day_ctx` (the
+    /// long-run and spike baselines).
     pub run_break: Option<RunBreak>,
 }
 
@@ -292,7 +277,7 @@ impl Anchors {
 
     /// The e1RM the working load is computed from: the logged anchor times its
     /// derate (1.0 when none applies).
-    pub fn working_e1rm_for(&self, exercise: &str) -> Option<f64> {
+    fn working_e1rm_for(&self, exercise: &str) -> Option<f64> {
         self.e1rm_for(exercise)
             .map(|e| e * self.load_frac_for(exercise).map_or(1.0, |d| d.frac))
     }
@@ -374,6 +359,20 @@ impl DayRegion {
     pub(crate) fn overlaps(self, other: DayRegion) -> bool {
         (self.has_lower() && other.has_lower()) || (self.has_upper() && other.has_upper())
     }
+
+    /// A lift of movement pattern `p` belongs on this day: push/pull on upper
+    /// days, squat/hinge on lower days, an unclassified lift anywhere.
+    pub(crate) fn fits(self, p: Option<MovementPattern>) -> bool {
+        match (self, p) {
+            (DayRegion::Full, _) | (_, None) => true,
+            (DayRegion::Upper, Some(p)) => {
+                matches!(p, MovementPattern::Push | MovementPattern::Pull)
+            }
+            (DayRegion::Lower, Some(p)) => {
+                matches!(p, MovementPattern::Squat | MovementPattern::Hinge)
+            }
+        }
+    }
 }
 
 /// The region of every lift day of one week, in weekday order (index = the
@@ -429,13 +428,13 @@ pub fn hybrid_lead(profile: &Profile) -> Option<HybridLead> {
 
 /// A run-only athlete who opted into supplemental strength work
 /// (RUN-STRENGTH-001: two short heavy sessions a week help runners).
-pub fn runner_strength_active(profile: &Profile) -> bool {
+fn runner_strength_active(profile: &Profile) -> bool {
     profile.weekly_sets == 0 && profile.running_days_per_week > 0 && profile.runner_strength
 }
 
 /// Weekdays the athlete can train (ADH-DAYS-001: the athlete picks the days).
 /// `None` or an empty mask means any day. Bit 0 = Monday … bit 6 = Sunday.
-pub fn available_weekdays(profile: &Profile) -> [bool; 7] {
+fn available_weekdays(profile: &Profile) -> [bool; 7] {
     let mask = profile
         .training_weekdays
         .map(|m| m & 0x7f)
@@ -447,9 +446,18 @@ pub fn available_weekdays(profile: &Profile) -> [bool; 7] {
 /// How many lift and run days a week holds once fitted into the athlete's
 /// available weekdays (one session per day: never doubling up).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WeekShape {
-    pub lift_days: usize,
-    pub run_days: usize,
+pub(crate) struct WeekShape {
+    pub(crate) lift_days: usize,
+    pub(crate) run_days: usize,
+}
+
+/// The lift-day count when the athlete chose none: 3 pure, 2 hybrid.
+fn default_lift_days(profile: &Profile) -> usize {
+    if profile.running_days_per_week > 0 {
+        2
+    } else {
+        3
+    }
 }
 
 /// The week's lift/run day counts. Lift days come from the athlete's chosen
@@ -460,7 +468,7 @@ pub struct WeekShape {
 /// When the chosen weekdays can't hold both, the SUPPORTING side gives way
 /// first (down to 2 days, HYB-MAINT-002's maintenance floor), then the leading
 /// side.
-pub fn week_shape(profile: &Profile) -> WeekShape {
+pub(crate) fn week_shape(profile: &Profile) -> WeekShape {
     let lifting = profile.weekly_sets > 0;
     let running = profile.running_days_per_week > 0;
     let lead = hybrid_lead(profile);
@@ -468,7 +476,7 @@ pub fn week_shape(profile: &Profile) -> WeekShape {
         let chosen = profile
             .lift_days_per_week
             .map(|d| (d as usize).clamp(2, 5))
-            .unwrap_or(if running { 2 } else { 3 });
+            .unwrap_or(default_lift_days(profile));
         if lead == Some(HybridLead::Running) {
             chosen.min(hybrid::maintenance_lift_sessions().value.1 as usize)
         } else {
@@ -571,18 +579,8 @@ fn exposures(week: &[DayRegion], region: DayRegion) -> usize {
 /// preserves compounds and cuts accessories). Classified compounds lead, so
 /// the first name stays a valid DUP primary.
 fn names_for_region(names: &[String], region: DayRegion, compounds_only: bool) -> Vec<String> {
-    let fits = |n: &String| {
-        let in_region = match (region, movement_pattern(n)) {
-            (DayRegion::Full, _) | (_, None) => true,
-            (DayRegion::Upper, Some(p)) => {
-                matches!(p, MovementPattern::Push | MovementPattern::Pull)
-            }
-            (DayRegion::Lower, Some(p)) => {
-                matches!(p, MovementPattern::Squat | MovementPattern::Hinge)
-            }
-        };
-        in_region && !(compounds_only && is_isolation_lift(n))
-    };
+    let fits =
+        |n: &String| region.fits(movement_pattern(n)) && !(compounds_only && is_isolation_lift(n));
     let (mut out, rest): (Vec<String>, Vec<String>) = names
         .iter()
         .filter(|n| fits(n))
@@ -594,7 +592,7 @@ fn names_for_region(names: &[String], region: DayRegion, compounds_only: bool) -
 
 /// Lifting accumulation block length: 5 load weeks before a deload week
 /// (HYP-DELOAD-CADENCE-001: deload about every 4–6 weeks, prefer 5).
-const LIFT_LOAD_WEEKS: u32 = 5;
+const LIFT_LOAD_WEEKS: u8 = 5;
 
 /// `(load_weeks, cycle_len)` of the LIFTING block, independent of any running
 /// cadence (a hybrid lifter does not inherit the 3:1 running deload).
@@ -602,7 +600,7 @@ const LIFT_LOAD_WEEKS: u32 = 5;
 /// (`cycle_len == load_weeks`): their deloads come from the review triggers
 /// (stalls / effort gaps) instead of the calendar (STR-DELOAD-VOL-001,
 /// HYP-DELOAD-CADENCE-001 "deload earlier only on fatigue signs").
-fn lift_cycle(profile: &Profile) -> (u32, u32) {
+fn lift_cycle(profile: &Profile) -> (u8, u8) {
     let ta = training_age_from_cadence(profile.progression_cadence).value;
     if ta == TrainingAge::Novice {
         (LIFT_LOAD_WEEKS, LIFT_LOAD_WEEKS)
@@ -627,18 +625,17 @@ pub struct BlockPosition {
 /// (maintenance dose, no set ramp: HYB-MAINT-001, and HYB-TENDON-001's
 /// "progress one side, hold the other").
 pub fn lift_block_position(profile: &Profile, week_index: u32) -> BlockPosition {
-    let (load_weeks, cycle_len) = lift_cycle(profile);
-    let pos = week_index % cycle_len;
-    let recovery = pos == load_weeks;
-    let block_weeks = load_weeks.min(u8::MAX as u32) as u8;
-    let mut week_in_block = if recovery {
+    let (block_weeks, cycle_len) = lift_cycle(profile);
+    // `pos < cycle_len`, a `u8`.
+    let pos = (week_index % u32::from(cycle_len)) as u8;
+    let recovery = pos == block_weeks;
+    let week_in_block = if hybrid_lead(profile) == Some(HybridLead::Running) {
+        1
+    } else if recovery {
         block_weeks
     } else {
-        (pos + 1).min(u8::MAX as u32) as u8
+        pos + 1
     };
-    if hybrid_lead(profile) == Some(HybridLead::Running) {
-        week_in_block = 1;
-    }
     BlockPosition {
         week_in_block,
         block_weeks,
@@ -927,11 +924,7 @@ fn apply_lift_week_modifiers(
     // Same weekly sets per exercise whatever the day count (LIFT-DAYS-001).
     // The hypertrophy builder sizes per-muscle weekly volume itself; a
     // maintenance dose replaces the volume target outright.
-    let default_n = if profile.running_days_per_week > 0 {
-        2
-    } else {
-        3
-    };
+    let default_n = default_lift_days(profile);
     let default_layout = n_lift == default_n
         && week
             .regions
@@ -970,17 +963,20 @@ fn apply_lift_week_modifiers(
         modifiers::apply_lower_cap(sessions, cap);
     }
 
-    // A meet taper (applied per session, 0–14 days out) replaces the calendar
-    // deload while it runs.
+    // A meet taper (barbell MaxStrength/Power, applied per session 0–14 days
+    // out) replaces the calendar deload in the weeks it touches. Other goals
+    // and calisthenics keep the deload: the taper rules are barbell-meet rules.
     let meet_offset = match (profile.meet_epoch_day, week.anchors.week_start_epoch_day) {
         (Some(meet), Some(ws)) if lifting => Some(meet.saturating_sub(ws)),
         _ => None,
     };
-    if let Some(days) = meet_offset.filter(|d| (-6..=20).contains(d)) {
-        lift::apply_meet_taper(sessions, profile.lift_goal, days);
+    let tapers = matches!(profile.lift_goal, LiftGoal::MaxStrength | LiftGoal::Power)
+        && !calisthenics_mode(profile);
+    let taper_offset = meet_offset.filter(|d| tapers && (0..=20).contains(d));
+    if let Some(days) = taper_offset {
+        lift::apply_meet_taper(sessions, days);
     }
-    let lift_deload =
-        lifting && week.block.recovery && !meet_offset.is_some_and(|d| (0..=20).contains(&d));
+    let lift_deload = lifting && week.block.recovery && taper_offset.is_none();
     if lift_deload {
         modifiers::apply_deload_week(sessions, profile.lift_goal);
     } else if run_recovery && n_lift > 0 {
@@ -1013,17 +1009,17 @@ fn program_phase_weeks(
     lift_deload: bool,
     run_plan: Option<&RunWeekPlan>,
 ) -> (MesoPhase, u8) {
-    let (phase, weeks) = if profile.weekly_sets > 0 {
+    if profile.weekly_sets > 0 {
         let phase = if lift_deload {
             MesoPhase::Deload
         } else {
             run_plan.map_or(MesoPhase::Build, |p| p.phase)
         };
-        (phase, lift_cycle(profile).1)
-    } else {
-        run_plan.map_or((MesoPhase::Build, 1), |p| (p.phase, p.cycle_len))
-    };
-    (phase, weeks.clamp(1, u8::MAX as u32) as u8)
+        return (phase, lift_cycle(profile).1);
+    }
+    run_plan.map_or((MesoPhase::Build, 1), |p| {
+        (p.phase, p.cycle_len.clamp(1, u8::MAX as u32) as u8)
+    })
 }
 
 /// Training-age in years for the running weekly-increase cap. The KB gives no
@@ -1042,7 +1038,8 @@ pub(crate) fn training_age_years(ta: TrainingAge) -> f64 {
 /// deload cadence (3:1, or 2:1 for masters / novices, RUN-DELOAD-001).
 pub fn cycle_shape(profile: &Profile) -> (u32, u32) {
     if profile.weekly_sets > 0 {
-        return lift_cycle(profile);
+        let (load_weeks, cycle_len) = lift_cycle(profile);
+        return (load_weeks.into(), cycle_len.into());
     }
     let load_weeks = run_load_weeks(profile);
     (load_weeks, load_weeks + 1)
@@ -1137,9 +1134,7 @@ fn program_goal_name(profile: &Profile, lifting: bool, running: bool) -> (Goal, 
             };
             (Goal::Hybrid, format!("{lift} + running"))
         }
-        (true, false)
-            if profile.resistance_modality == crate::app::ResistanceModality::Calisthenics =>
-        {
+        (true, false) if calisthenics_mode(profile) => {
             match profile.lift_goal {
                 LiftGoal::Hypertrophy => (Goal::Hypertrophy, "Calisthenics muscle building".into()),
                 // A Power goal leads every day with ballistic jump / explosive
@@ -1179,7 +1174,7 @@ pub fn summary_claim(profile: &Profile) -> crate::evidence::ClaimId {
     let running = profile.running_days_per_week > 0;
     match (lifting, running) {
         (true, _) => {
-            if profile.resistance_modality == crate::app::ResistanceModality::Calisthenics {
+            if calisthenics_mode(profile) {
                 return claims::CAL_PROG_MECHANIC_001;
             }
             let ta = training_age_from_cadence(profile.progression_cadence).value;
@@ -1189,8 +1184,6 @@ pub fn summary_claim(profile: &Profile) -> crate::evidence::ClaimId {
                     _ => claims::STR_INTENT_001,
                 }
             } else if profile.lift_goal == LiftGoal::Hypertrophy {
-                // Hypertrophy runs its own week, not the strength DUP week
-                // (HYP-PERIOD-001).
                 claims::HYP_DEFAULT_PROG_001
             } else {
                 claims::STR_DUP_001

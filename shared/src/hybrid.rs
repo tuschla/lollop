@@ -7,13 +7,7 @@
 //!
 //! Interference is quality-specific and modest (Schumann 2022): explosive power
 //! is attenuated most, maximal lower-body strength lightly (in men, HYB-SEX-001),
-//! whole-muscle hypertrophy essentially spared. Every prescriptive value is
-//! wrapped in [`Recommended`] via [`Recommended::new`] with evidence from
-//! `crate::evidence`. Claim ids: CONC-ORDER-001, CONC-SEP-001, HYB-CAP-001,
-//! HYB-RUNCAP-001, CONC-RE-001, HYB-SEX-001, HYB-THRESH-001, HYB-MAINT-001,
-//! HYB-BSI-001, HYB-PROG-001. The claim-only reference rules (HYB-DURATION-001,
-//! HYB-SCHED-001, HYB-CHO-001, HYB-PHASE-001, HYB-EA-001, HYB-TENDON-001) are
-//! graded where `app::guidance` shows them.
+//! whole-muscle hypertrophy essentially spared.
 
 use crate::evidence;
 use crate::evidence::claims;
@@ -290,7 +284,7 @@ const COMBINED_RAMP_CAP_FRAC: f64 = 0.10;
 ///
 /// NOTE: the ACWR "sweet spot" (0.8–1.3) from this rule is deliberately NOT
 /// encoded, it is the hard-blocked `LOAD-ACWR-001` myth (mathematically
-/// coupled; see `load.rs`). Only the ≤10 %/wk ramp is enforced.
+/// coupled; see `running.rs`). Only the ≤10 %/wk ramp is enforced.
 /// HYB-PROG-001 (Moderate, safety-critical, contested CQ-05).
 pub fn combined_load_progression_ok(current_km: f64, next_km: f64) -> Recommended<Option<bool>> {
     // No baseline volume → the growth ratio is undefined, so the guard is

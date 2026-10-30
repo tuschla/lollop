@@ -226,7 +226,7 @@ pub(super) const E1RM_INCREASE_LOAD_PCT: f32 = 3.5;
 pub(super) const WELLNESS_SINGLE_DAY_Z: f64 = -1.5;
 pub(super) const WELLNESS_MULTIDAY_Z: f64 = -1.0;
 /// Consecutive suppressed days that arm the wellness multi-day intensity downgrade.
-pub(super) const WELLNESS_DOWNGRADE_STREAK: u8 = 2;
+pub(crate) const WELLNESS_DOWNGRADE_STREAK: u8 = 2;
 /// Consecutive suppressed days that raise the §5 tier-4 SubjectiveMultiDay tier.
 pub(super) const WELLNESS_MULTIDAY_STREAK: u8 = 3;
 
@@ -432,7 +432,7 @@ pub(super) fn vl_stop(
 /// Consecutive suppressed HRV days at which a lift session is lowered, not
 /// just held (autoreg-034: "lnRMSSD7d suppressed ≥3–4 days → recovery day /
 /// easy block"; ready-upd-001 "several days of feeling run-down").
-pub(super) const HRV_ESCALATE_STREAK: u8 = 3;
+pub(crate) const HRV_ESCALATE_STREAK: u8 = 3;
 
 /// HRV rolling-baseline verdict (autoreg-028 as scoped by ready-upd-001).
 /// `HrvLnRmssd` carries the 7-day mean z vs the rolling baseline; z < −0.5
@@ -461,7 +461,7 @@ pub(super) fn hrv_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adj
 /// undated legacy reading, or no clock, counts as today).
 pub(super) fn dated_today(i: &ReadinessInput, ctx: &RuleContext) -> bool {
     ctx.today_epoch_day.is_none_or(|t| {
-        i.observed_at <= 0 || crate::local_day(i.observed_at, ctx.utc_offset_sec) == t
+        crate::is_undated(i.observed_at) || crate::local_day(i.observed_at, ctx.utc_offset_sec) == t
     })
 }
 
@@ -742,28 +742,16 @@ pub fn increase_hold(inputs: &[ReadinessInput], ctx: &RuleContext) -> bool {
 }
 
 /// Apply the File 06 IF/THEN rules (as amended by File 13 ready-upd-001..007),
-/// emitting evidence-cited adjustments.
-///
-/// When a Stop-level safety condition fires (structural/uncharacterized pain,
-/// fever/below-neck illness, or a corroborated resting-HR elevation) it
-/// dominates: the returned vec contains only the safety stop (led by any
-/// non-blocking pain response, which outranks it on the ladder). Otherwise
-/// every matching optimization rule contributes its adjustment, and a final
-/// reconciliation pass (autoreg-044) strips every load increase whenever
-/// [`increase_hold`] holds: the engine never auto-increases load into
-/// suppressed recovery.
-///
-/// Magnitudes follow the evidence (ready-upd-001): HRV, resting HR, a single
-/// low check-in and soreness only HOLD progression on lifts (`CapTopEnd`); a
-/// lift session is lowered (`DowngradeSession`, one level) only on several days
-/// of suppression or a hard logged first set (the per-item first-set rule,
-/// applied plan-side).
+/// emitting evidence-cited adjustments. A safety stop dominates and returns
+/// alone (led by any non-blocking pain response); otherwise every matching
+/// rule contributes, and the autoreg-044 pass strips every load increase
+/// while [`increase_hold`] holds.
 pub fn adjustments_in(
     inputs: &[ReadinessInput],
     ctx: &RuleContext,
 ) -> Vec<Recommended<Adjustment>> {
-    // Safety override: medical referral (File 08) > pain (autoreg-043 /
-    // Table 4.1) > illness/fever (autoreg-046) > corroborated RHR (ready-upd-002).
+    // Medical referral (File 08) > pain (autoreg-043 / Table 4.1) >
+    // illness/fever (autoreg-046) > corroborated RHR (ready-upd-002).
     if let Some(defer) = medical_referral(inputs) {
         return vec![defer];
     }

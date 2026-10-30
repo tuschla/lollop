@@ -38,20 +38,13 @@ pub(in crate::app) fn to_race_view(
         longest_logged_km.and_then(|longest| {
             let opt = running::marathon_prediction_optimistic(longest);
             opt.value.then(|| {
-                (
-                    longest,
-                    opt,
-                    running::marathon_derated_band(low_sec, high_sec, vdot),
-                )
+                (low_sec, high_sec) = running::marathon_derated_band(low_sec, high_sec, vdot).value;
+                (longest, opt)
             })
         })
     } else {
         None
     };
-    if let Some((_, _, band)) = &marathon_derate {
-        low_sec = band.value.0;
-        high_sec = band.value.1;
-    }
 
     let goal_label = race_distance_title(q.goal_distance_m / 1000.0);
     let plausible = (1.0..=MAX_RACE_DISTANCE_M).contains(&q.goal_distance_m)
@@ -100,7 +93,7 @@ pub(in crate::app) fn to_race_view(
                 ),
             }
         }
-        if let Some((longest, opt, _band)) = &marathon_derate {
+        if let Some((longest, opt)) = &marathon_derate {
             let derate = running::vdot_derate_points(GoalDistance::Marathon, true);
             let note = |mi: bool| {
                 format!(

@@ -259,4 +259,28 @@ class BootResilienceTest {
         assertEquals(1, EventDispatcher.model.value?.runs?.size)
         assertEquals(0, count(str(R.string.main_core_unavailable_title)))
     }
+
+    /** Rev3 D4: the boot effect re-runs on every rotation; on the same day it reuses
+     *  the published model instead of sending the core a fresh SetToday. */
+    @Test
+    fun aRotationDoesNotResendTheBootClock() {
+        QaHarness.seedLog(ctx, seeded)
+        rule.launchApp()
+        val lastSetToday = Core.javaClass.getDeclaredField("lastSetToday").apply { isAccessible = true }
+        assertTrue("boot sent the clock", lastSetToday.get(Core) != null)
+        lastSetToday.set(Core, null)
+
+        checkNotNull(lastScenario).recreate()
+        rule.waitForIdle()
+        // The re-run's exclusive turn is queued by now; one queued after it settles last.
+        var settled = false
+        EventDispatcher.scope.launch {
+            EventDispatcher.exclusive { null }
+            settled = true
+        }
+        rule.waitForState(30_000) { settled }
+
+        assertNull("no SetToday reached the core on the rotation", lastSetToday.get(Core))
+        assertEquals(1, EventDispatcher.model.value?.runs?.size)
+    }
 }

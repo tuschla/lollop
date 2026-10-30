@@ -10,13 +10,7 @@
 //! explosive push-ups) follow `13-calisthenics-addendum.md` cal-add-005/006.
 //! No IO, no clock, no randomness.
 //!
-//! The intensity axis is leverage tier (primary) → added load (top of ladder) →
-//! RIR/RPE (within-tier) — rep-max-at-tier replaces %1RM (CAL-INTENSITY-001).
-//! Advance trigger = the working band's TOP on 2 consecutive qualifying sessions
-//! (CAL-PROG-TRIGGER-001, contested CQ-F11-01), or one session far over the top
-//! (CAL-PLACE-001); straight-arm lever tiers are additionally rate-limited on a
-//! tendon timescale (CAL-TENDON-001). Goal shapes the band and effort
-//! (CAL-GOAL-RIR-001), equipment filters the rungs (CAL-EQUIP-001).
+//! Intensity is the leverage tier, then added load, then RIR (CAL-INTENSITY-001).
 
 use crate::evidence::claims;
 use crate::evidence::graded;
@@ -358,15 +352,11 @@ static PLYO_PUSH_TIERS: &[Tier] = &[
     mk("Clap push-up",               reps(3, 5), false, None, INF, Ballistic, false, false),
 ];
 
-/// Every leverage ladder (8 dynamic + 5 skill tracks + 2 power ladders). The
-/// order is the `LadderId` enum order; skill tracks are round-robined by it in
-/// plan synthesis.
-pub static LADDERS: &[Ladder] = &LADDER_ROWS;
-
-/// Fixed-size backing array of [`LADDERS`], so [`ladder`]'s constant indices
-/// are bounds-checked at compile time.
+/// Every leverage ladder (8 dynamic + 5 skill tracks + 2 power ladders), in
+/// `LadderId` enum order: [`ladder`] indexes it by `id as usize`. Skill tracks
+/// are round-robined by this order in plan synthesis.
 #[rustfmt::skip]
-static LADDER_ROWS: [Ladder; 15] = [
+pub static LADDERS: &[Ladder] = &[
     Ladder { id: HorizontalPush, pattern: "Push-up",             skill: false, tiers: HORIZONTAL_PUSH_TIERS, weighted_rungs: &[8],    power: false },
     Ladder { id: Dip,            pattern: "Dip",                 skill: false, tiers: DIP_TIERS,             weighted_rungs: &[5],    power: false },
     Ladder { id: VerticalPush,   pattern: "Overhead push",       skill: false, tiers: VERTICAL_PUSH_TIERS,   weighted_rungs: &[6],    power: false },
@@ -445,27 +435,10 @@ pub const LEGACY_NAMES: &[(&str, &str)] = &[
 // Lookups
 // ---------------------------------------------------------------------------
 
-/// The ladder for an id. The match is exhaustive over `LadderId` and each
-/// arm's constant index is checked against `LADDER_ROWS` at compile time; the
-/// `every_ladder_id_resolves` test pins the id-to-row map.
+/// The ladder for an id. `every_ladder_id_resolves_to_a_nonempty_ladder` pins
+/// the id-to-row order.
 pub fn ladder(id: LadderId) -> &'static Ladder {
-    match id {
-        HorizontalPush => &LADDER_ROWS[0],
-        Dip => &LADDER_ROWS[1],
-        VerticalPush => &LADDER_ROWS[2],
-        HorizontalPull => &LADDER_ROWS[3],
-        VerticalPull => &LADDER_ROWS[4],
-        Squat => &LADDER_ROWS[5],
-        Hinge => &LADDER_ROWS[6],
-        Core => &LADDER_ROWS[7],
-        Handstand => &LADDER_ROWS[8],
-        FrontLever => &LADDER_ROWS[9],
-        Planche => &LADDER_ROWS[10],
-        BackLever => &LADDER_ROWS[11],
-        MuscleUp => &LADDER_ROWS[12],
-        Jump => &LADDER_ROWS[13],
-        PlyoPush => &LADDER_ROWS[14],
-    }
+    &LADDERS[id as usize]
 }
 
 /// The rung at `idx` in `id`'s ladder, if it exists.
@@ -659,8 +632,8 @@ pub fn equipment_substitution() -> Recommended<()> {
 // ---------------------------------------------------------------------------
 
 /// Tier-advance trigger (CAL-PROG-TRIGGER-001, contested CQ-F11-01): fires after
-/// 2 consecutive qualifying sessions — the calisthenics analogue of
-/// `strength::two_for_two_met`.
+/// 2 consecutive qualifying sessions — the calisthenics analogue of the
+/// strength 2-for-2 rule (STR-2FOR2-001).
 pub fn tier_advance_met(qualifying_consecutive_sessions: u8) -> Recommended<bool> {
     graded(
         qualifying_consecutive_sessions >= 2,

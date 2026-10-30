@@ -151,7 +151,8 @@ internal fun interface RouteProjector {
     fun project(lat: Double, lon: Double, out: FloatArray)
 }
 
-/** The theme's route colours and sizes, resolved once per palette and density. */
+/** The theme's route colours, density and labels, resolved once per palette and
+ *  density; the marker sizes come from [RouteMarker]. */
 internal class RouteStyle(
     /** [RouteRampSteps] + 1 progression colours, `AccentFaint` → `Accent` (§0.2). */
     val ramp: IntArray,
@@ -169,13 +170,6 @@ internal class RouteStyle(
     val startLabel: String,
     val finishLabel: String,
     val loopLabel: String,
-    val startDp: Float,
-    val startRingDp: Float,
-    val finishDp: Float,
-    val flagDp: Float,
-    val distanceDp: Float,
-    val distanceRingDp: Float,
-    val haloDp: Float,
 )
 
 /** What to draw on top of the geometry. */
@@ -340,24 +334,24 @@ internal class RouteRenderer(private val s: RouteStyle) {
         }
         placedCount = placed
 
-        val halo = s.haloDp * d
+        val halo = RouteMarker.Halo.value * d
         for (m in 0 until placed) {
             val label = marks[m * 3 + 2].toInt()
             if (label > 0) drawDistance(c, marks[m * 3], marks[m * 3 + 1], label, halo)
         }
-        val finishR = s.finishDp * d / 2
+        val finishR = RouteMarker.FinishSize.value * d / 2
         if (loop) {
             // The start ring drawn around the finish flag disc, a hairline gap apart.
-            val ringOuter = finishR + LoopRingGapDp * d + s.startRingDp * d
+            val ringOuter = finishR + LoopRingGapDp * d + RouteMarker.StartRing.value * d
             drawStart(c, fx, fy, ringOuter, halo)
             drawFinish(c, fx, fy, finishR, halo = 0f)
         } else {
-            drawStart(c, sx, sy, s.startDp * d / 2, halo)
+            drawStart(c, sx, sy, RouteMarker.StartSize.value * d / 2, halo)
             drawFinish(c, fx, fy, finishR, halo)
         }
 
         // Label pills: finish (or the one loop label) first, then start avoiding it.
-        val startR = (if (loop) finishR + LoopRingGapDp * d + s.startRingDp * d else s.startDp * d / 2) + halo
+        val startR = (if (loop) finishR + LoopRingGapDp * d + RouteMarker.StartRing.value * d else RouteMarker.StartSize.value * d / 2) + halo
         if (loop) {
             placeLabel(s.loopLabel, fx, fy, startR, bounds, avoid = null, avoidX = Float.NaN, avoidY = 0f, avoidR = 0f, out = pillA)
             drawPill(c, s.loopLabel, pillA)
@@ -395,7 +389,7 @@ internal class RouteRenderer(private val s: RouteStyle) {
     }
 
     private fun drawStart(c: Canvas, x: Float, y: Float, r: Float, halo: Float) {
-        val ringW = s.startRingDp * d
+        val ringW = RouteMarker.StartRing.value * d
         if (halo > 0f) {
             fill.color = s.casing
             c.drawCircle(x, y, r + halo, fill)
@@ -414,14 +408,14 @@ internal class RouteRenderer(private val s: RouteStyle) {
         }
         fill.color = s.accent
         c.drawCircle(x, y, r, fill)
-        val g = (s.flagDp * d / 2).roundToInt()
+        val g = (RouteMarker.FinishGlyph.value * d / 2).roundToInt()
         s.flag.setBounds(x.roundToInt() - g, y.roundToInt() - g, x.roundToInt() + g, y.roundToInt() + g)
         s.flag.draw(c)
     }
 
     private fun drawDistance(c: Canvas, x: Float, y: Float, n: Int, halo: Float) {
-        val r = s.distanceDp * d / 2
-        val ringW = s.distanceRingDp * d
+        val r = RouteMarker.DistanceSize.value * d / 2
+        val ringW = RouteMarker.DistanceRing.value * d
         fill.color = s.casing
         c.drawCircle(x, y, r + halo, fill)
         fill.color = s.elevated
@@ -442,7 +436,7 @@ internal class RouteRenderer(private val s: RouteStyle) {
 
     /** Whether [rect] covers any numbered distance marker placed in this draw. */
     private fun hitsNumbered(rect: RectF): Boolean {
-        val r = (s.distanceDp / 2 + s.haloDp) * d
+        val r = (RouteMarker.DistanceSize.value / 2 + RouteMarker.Halo.value) * d
         for (m in 0 until placedCount) {
             if (marks[m * 3 + 2] > 0f && circleHits(rect, marks[m * 3], marks[m * 3 + 1], r)) return true
         }
@@ -532,7 +526,7 @@ internal class MercatorFit : RouteProjector {
 
     fun fit(
         track: RouteTrack, width: Float, height: Float, insetPx: Float, topPx: Float, bottomPx: Float,
-        userScale: Float = 1f, panX: Float = 0f, panY: Float = 0f,
+        userScale: Float, panX: Float, panY: Float,
     ) {
         shift = track.crossesDateLine
         west = track.west

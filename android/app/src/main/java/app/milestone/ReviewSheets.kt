@@ -1,13 +1,11 @@
 package app.milestone
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,16 +103,7 @@ fun SessionReviewSheet(
             Text(stringResource(R.string.log_review_run_header), color = OnBgBody, style = Type.Body)
             LabeledSwitchRow(stringResource(R.string.log_switch_decoupling_recorded), hasDecoupling) { hasDecoupling = it }
             if (hasDecoupling) {
-                FieldLabel(
-                    stringResource(R.string.log_field_decoupling_drift),
-                    stringResource(R.string.log_value_pct, String.format(Locale.US, "%.1f", driftPct)),
-                )
-                ScrollableScaleRow(
-                    HalfPercentScale,
-                    driftPct,
-                    { String.format(Locale.US, "%.1f", it) },
-                    label = stringResource(R.string.log_field_decoupling_drift),
-                ) { driftPct = it }
+                HalfPercentField(R.string.log_field_decoupling_drift, driftPct) { driftPct = it }
                 // The core only judges drift on a cool, steady, easy effort; leave
                 // this on for a genuine easy run.
                 LabeledSwitchRow(stringResource(R.string.log_switch_cool_steady), coolSteady) { coolSteady = it }
@@ -130,27 +119,24 @@ fun SessionReviewSheet(
             if (hasPositiveSplit) {
                 // Second half slower than the first, as a percent; the core flags
                 // pacing strictly beyond +3 %. Tap-scale over 0–30 % in 0.5 steps.
-                FieldLabel(
-                    stringResource(R.string.log_field_second_half_slowdown),
-                    stringResource(R.string.log_value_pct, String.format(Locale.US, "%.1f", positiveSplitPct)),
-                )
-                ScrollableScaleRow(
-                    HalfPercentScale,
-                    positiveSplitPct,
-                    { String.format(Locale.US, "%.1f", it) },
-                    label = stringResource(R.string.log_field_second_half_slowdown),
-                ) { positiveSplitPct = it }
+                HalfPercentField(R.string.log_field_second_half_slowdown, positiveSplitPct) { positiveSplitPct = it }
             }
         }
         ObservedAtRow(observedAt, withTime = false) { observedAt = it }
     }
 }
 
+/** A labelled 0–30 % tap scale in half-percent steps, its value in the label. */
+@Composable
+private fun HalfPercentField(@StringRes label: Int, value: Double, onPick: (Double) -> Unit) {
+    val text = stringResource(label)
+    FieldLabel(text, stringResource(R.string.log_value_pct, String.format(Locale.US, "%.1f", value)))
+    ScrollableScaleRow(HalfPercentScale, value, { String.format(Locale.US, "%.1f", it) }, label = text, onSelect = onPick)
+}
+
 /** Whether today's session review asks the run details: today's plan has a run,
- *  or a run is logged today. Without a model yet it asks them (nothing to rule
- *  them out). Pure. */
-internal fun reviewAsksRun(model: ViewModel?, zone: ZoneId = ZoneId.systemDefault()): Boolean {
-    if (model == null) return true
+ *  or a run is logged today. Pure. */
+internal fun reviewAsksRun(model: ViewModel, zone: ZoneId = ZoneId.systemDefault()): Boolean {
     val today = model.today()
     val plannedRun = model.week_plan.firstOrNull { it.epoch_day == today }?.let { s ->
         sessionDiscipline(s.session_type) == "Run" ||
@@ -397,23 +383,14 @@ fun WeeklyCheckinSheet(
             )
         }
     }
-    if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            shape = RoundedCornerShape(Space.Card.dp),
-            title = { Text(stringResource(R.string.log_weekly_clear_title)) },
-            text = { Text(stringResource(R.string.log_weekly_clear_body)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmClear = false
-                    onClear()
-                }) { Text(stringResource(R.string.log_weekly_clear_confirm)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.main_cancel)) }
-            },
-        )
-    }
+    ClearConfirmDialog(
+        visible = confirmClear,
+        title = stringResource(R.string.log_weekly_clear_title),
+        message = stringResource(R.string.log_weekly_clear_body),
+        confirmLabel = stringResource(R.string.log_weekly_clear_confirm),
+        onDismiss = { confirmClear = false },
+        onClear = onClear,
+    )
 }
 
 /** A 0–7 sessions-this-week [RatingScale]; a picked count cannot be cleared. */

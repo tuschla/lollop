@@ -4,17 +4,18 @@ use super::*;
 use std::fmt::Write as _;
 
 /// The program summary card, graded with the plan's representative claim.
-/// `(week, weeks_total)` is the current program week (advances with
-/// `SetToday`), 1-based, of its block or race countdown; `week_index` is the
-/// block-cycle week index the plan was synthesized for (it locates this
-/// week's per-muscle volume targets).
+/// `(week, weeks_total)` is the current program week, 1-based, of its block or
+/// race countdown (it advances with completed plan weeks, see
+/// `plan_week::program_week`); `week_index` is the block-cycle week index the
+/// plan was synthesized for (it locates this week's per-muscle volume
+/// targets).
 pub(super) fn build_program_summary(
     profile: &Profile,
-    meso: &Mesocycle,
     program: &Program,
     (week, weeks_total): (u8, u8),
     week_index: u32,
 ) -> ProgramSummaryView {
+    let meso = &program.mesocycle;
     let g = graded((), crate::plan::summary_claim(profile));
     let (muscle_volume, muscle_volume_note) = muscle_volume_rows(profile, meso, week_index);
     ProgramSummaryView {
@@ -94,13 +95,7 @@ fn muscle_volume_rows(
             })
             .sum()
     };
-    let fmt_sets = |x: f32| -> String {
-        if (x - x.round()).abs() < 0.05 {
-            format!("{:.0}", x.round())
-        } else {
-            format!("{x:.1}")
-        }
-    };
+    let fmt_sets = |x: f32| fmt_rounded(round_tenths(f64::from(x)));
     let mut rows = Vec::new();
     let mut uncovered: Vec<&str> = Vec::new();
     for (muscle, got) in delivered {
@@ -114,7 +109,8 @@ fn muscle_volume_rows(
             uncovered.push(muscle);
         }
         let ind = indirect(muscle);
-        let mut label = format!("{}: {} sets", capitalize_first(muscle), fmt_sets(got));
+        let name = capitalize_first(muscle);
+        let mut label = format!("{name}: {} sets", fmt_sets(got));
         if ind >= 0.05 && ind < got - 0.05 {
             let _ = write!(label, " ({} from compound lifts)", fmt_sets(ind));
         }
@@ -131,12 +127,25 @@ fn muscle_volume_rows(
             }
         }
         rows.push(MuscleVolumeView {
-            muscle: capitalize_first(muscle),
+            muscle: name,
             target_sets: if no_targets { 0 } else { target },
-            delivered_sets: (got * 10.0).round() / 10.0,
+            delivered_sets: round_tenths(f64::from(got)) as f32,
             label,
         });
     }
+    let note = muscle_volume_note(profile, ta, recovery, maintenance, &uncovered);
+    (rows, note)
+}
+
+/// The plain note under the per-muscle rows: why a week sits below target,
+/// what a specialization request does, and the muscles nothing trains.
+fn muscle_volume_note(
+    profile: &Profile,
+    ta: crate::individualization::TrainingAge,
+    recovery: bool,
+    maintenance: bool,
+    uncovered: &[&str],
+) -> String {
     let mut notes: Vec<String> = Vec::new();
     if recovery {
         notes.push("Lighter week: about half the usual sets, so counts are below target.".into());
@@ -171,5 +180,5 @@ fn muscle_volume_rows(
             uncovered.join(", ")
         ));
     }
-    (rows, notes.join(" "))
+    notes.join(" ")
 }

@@ -1,6 +1,5 @@
 {
   "safety_tier": "SingleDayMarker",
-  "train_blocked": false,
   "hold_reason": null,
   "checked_in_today": true,
   "adjustments": [
@@ -3367,38 +3366,6 @@
         "improves": "-"
       },
       "training_age": ""
-    },
-    {
-      "section": "Heart-rate zones",
-      "summary": "Zones last recalculated 5 weeks ago. Recompute from a measured HRmax (every 4–6 weeks)",
-      "summary_mi": "",
-      "grade": "Strong",
-      "citation": "Tanaka, Monahan & Seals 2001, J Am Coll Cardiol 37(1):153-156 (age-predicted maximal HR; 351 studies/18,712 subjects)",
-      "confidence": 0.9,
-      "safety_critical": true,
-      "contested": false,
-      "why": {
-        "basis": "Prefer a measured max HR (all-out field test) over age formulas; recalculate HR zones every 4–6 weeks.",
-        "grade_note": "Strong evidence: many good studies agree.",
-        "improves": "-"
-      },
-      "training_age": ""
-    },
-    {
-      "section": "Heart-rate zones",
-      "summary": "Paces last tested 6 weeks ago. Re-test to set paces from your current fitness",
-      "summary_mi": "",
-      "grade": "Moderate",
-      "citation": "Daniels 2022, Daniels' Running Formula (4th ed., Human Kinetics)",
-      "confidence": 0.65,
-      "safety_critical": false,
-      "contested": false,
-      "why": {
-        "basis": "Set training paces from your current fitness, not your goal, re-test every 4–6 weeks, and update paces as your fitness improves. Use a recent race (within 6–8 weeks), run all-out on a flat course in cool weather. Heat above about 15 °C and altitude above about 900 m call for a correction, but how big is not established.",
-        "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
-        "improves": "-"
-      },
-      "training_age": ""
     }
   ],
   "training_load": {
@@ -3650,9 +3617,7 @@
   ],
   "hr_zone_input": {
     "age_years": 34.0,
-    "resting_hr_bpm": 52.0,
-    "weeks_since_recalc": 5,
-    "weeks_since_pace_test": 6
+    "resting_hr_bpm": 52.0
   },
   "protein_input": {
     "bodyweight_kg": 80.0,
@@ -3812,7 +3777,7 @@
       "group": "red_flag"
     }
   ],
-  "checkin_today": {
+  "latest_checkin": {
     "observed_at": 1728259300,
     "sleep_quality": 4,
     "soreness": 2,
@@ -5049,12 +5014,12 @@
       "status": "planned",
       "items": [
         {
-          "summary": "Back Squat: 1×3 @ 122.5 kg · ~2 reps left",
+          "summary": "Back Squat: 1×3 @ 110 kg · ~2 reps left",
           "exercise": "Back Squat",
           "sets": 1,
           "reps_low": 3,
           "reps_high": 3,
-          "load_kg": 122.5,
+          "load_kg": 110.0,
           "intensity_label": "85% e1RM",
           "rest_sec": 180,
           "rep_volume": "",
@@ -5076,8 +5041,7 @@
           "plates_per_side": [
             20.0,
             20.0,
-            10.0,
-            1.25
+            5.0
           ],
           "effort_cue": "",
           "hold_low_sec": 0,
@@ -5088,14 +5052,14 @@
           "adjusted_note": "",
           "safety_reason": "",
           "safety_reason_mi": "",
-          "grade": "Moderate",
-          "citation": "Jones et al. 2013 (endurance-frequency dose-response for interference)",
-          "confidence": 0.65,
+          "grade": "ExpertOpinion",
+          "citation": "Bosquet et al. 2013, Scand J Med Sci Sports 23(3):e140-e149 (training-cessation meta-analysis, 103 studies)",
+          "confidence": 0.3,
           "safety_critical": false,
-          "contested": true,
+          "contested": false,
           "why": {
-            "basis": "1×3 at 85% of your estimated max (144.9 kg): 122.5 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
-            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+            "basis": "1×3 at 85% of your estimated max (144.9 kg), scaled to 90% in week 1 of 1 back from your break: 110 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
           "done": false,
@@ -5109,18 +5073,18 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Back Squat",
-          "face_detail": "1×3 @ 122.5 kg · ~2 reps left",
-          "face_lead": "1×3 @ 122.5 kg",
+          "face_detail": "1×3 @ 110 kg · ~2 reps left",
+          "face_lead": "1×3 @ 110 kg",
           "run_head": "",
           "run_head_km": null
         },
         {
-          "summary": "Deadlift: 1×3 @ 145 kg · ~2 reps left",
+          "summary": "Deadlift: 1×3 @ 130 kg · ~2 reps left",
           "exercise": "Deadlift",
           "sets": 1,
           "reps_low": 3,
           "reps_high": 3,
-          "load_kg": 145.0,
+          "load_kg": 130.0,
           "intensity_label": "85% e1RM",
           "rest_sec": 180,
           "rep_volume": "",
@@ -5142,8 +5106,7 @@
           "plates_per_side": [
             20.0,
             20.0,
-            20.0,
-            2.5
+            15.0
           ],
           "effort_cue": "",
           "hold_low_sec": 0,
@@ -5154,14 +5117,14 @@
           "adjusted_note": "",
           "safety_reason": "",
           "safety_reason_mi": "",
-          "grade": "Moderate",
-          "citation": "Jones et al. 2013 (endurance-frequency dose-response for interference)",
-          "confidence": 0.65,
+          "grade": "ExpertOpinion",
+          "citation": "Bosquet et al. 2013, Scand J Med Sci Sports 23(3):e140-e149 (training-cessation meta-analysis, 103 studies)",
+          "confidence": 0.3,
           "safety_critical": false,
-          "contested": true,
+          "contested": false,
           "why": {
-            "basis": "1×3 at 85% of your estimated max (172.1 kg): 145 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
-            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet. Contested: experts disagree on the best order and spacing for lifting and running on the same day. The plan's default: lift first when strength is the goal, with at least 3 hours (ideally 6–24) between sessions.",
+            "basis": "1×3 at 85% of your estimated max (172.1 kg), scaled to 90% in week 1 of 1 back from your break: 130 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
           "done": false,
@@ -5175,18 +5138,18 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Deadlift",
-          "face_detail": "1×3 @ 145 kg · ~2 reps left",
-          "face_lead": "1×3 @ 145 kg",
+          "face_detail": "1×3 @ 130 kg · ~2 reps left",
+          "face_lead": "1×3 @ 130 kg",
           "run_head": "",
           "run_head_km": null
         },
         {
-          "summary": "Bench Press: 2×3 @ 90 kg · ~2 reps left",
+          "summary": "Bench Press: 2×3 @ 82.5 kg · ~2 reps left",
           "exercise": "Bench Press",
           "sets": 2,
           "reps_low": 3,
           "reps_high": 3,
-          "load_kg": 90.0,
+          "load_kg": 82.5,
           "intensity_label": "85% e1RM",
           "rest_sec": 180,
           "rep_volume": "",
@@ -5207,7 +5170,8 @@
           "suggested_load_kg": null,
           "plates_per_side": [
             20.0,
-            15.0
+            10.0,
+            1.25
           ],
           "effort_cue": "",
           "hold_low_sec": 0,
@@ -5219,12 +5183,12 @@
           "safety_reason": "",
           "safety_reason_mi": "",
           "grade": "ExpertOpinion",
-          "citation": "Bickel, Cross & Bamman 2011, Med Sci Sports Exerc 43(7):1177-1187 (adaptations retained on ~1/3 volume)",
+          "citation": "Bosquet et al. 2013, Scand J Med Sci Sports 23(3):e140-e149 (training-cessation meta-analysis, 103 studies)",
           "confidence": 0.3,
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "2×3 at 85% of your estimated max (107.9 kg): 90 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "basis": "2×3 at 85% of your estimated max (107.9 kg), scaled to 90% in week 1 of 1 back from your break: 82.5 kg. Stop each set with ~2 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -5239,8 +5203,8 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Bench Press",
-          "face_detail": "2×3 @ 90 kg · ~2 reps left",
-          "face_lead": "2×3 @ 90 kg",
+          "face_detail": "2×3 @ 82.5 kg · ~2 reps left",
+          "face_lead": "2×3 @ 82.5 kg",
           "run_head": "",
           "run_head_km": null
         },
@@ -5309,7 +5273,7 @@
       "status": "planned",
       "items": [
         {
-          "summary": "9.5 km · 65–79% HRmax (120–146 bpm) · effort 3–4 of 10, easy enough to talk in full sentences · then 6 × 20 s relaxed strides, 80 s easy between",
+          "summary": "7.5 km · 65–79% HRmax (120–146 bpm) · effort 3–4 of 10, easy enough to talk in full sentences · then 6 × 20 s relaxed strides, 80 s easy between",
           "exercise": "",
           "sets": 0,
           "reps_low": 0,
@@ -5381,9 +5345,9 @@
           },
           "face_name": "",
           "face_detail": "",
-          "face_lead": "9.5 km",
-          "run_head": "9.5 km",
-          "run_head_km": 9.5
+          "face_lead": "7.5 km",
+          "run_head": "7.5 km",
+          "run_head_km": 7.5
         }
       ],
       "adjustment": null,
@@ -5402,12 +5366,12 @@
       "status": "planned",
       "items": [
         {
-          "summary": "Back Squat: 2×5 @ 115 kg · ~3 reps left",
+          "summary": "Back Squat: 2×5 @ 95 kg · ~3 reps left",
           "exercise": "Back Squat",
           "sets": 2,
           "reps_low": 5,
           "reps_high": 5,
-          "load_kg": 115.0,
+          "load_kg": 95.0,
           "intensity_label": "80% e1RM",
           "rest_sec": 180,
           "rep_volume": "",
@@ -5428,8 +5392,7 @@
           "suggested_load_kg": null,
           "plates_per_side": [
             20.0,
-            20.0,
-            5.0,
+            15.0,
             2.5
           ],
           "effort_cue": "",
@@ -5442,12 +5405,12 @@
           "safety_reason": "",
           "safety_reason_mi": "",
           "grade": "ExpertOpinion",
-          "citation": "Bickel, Cross & Bamman 2011, Med Sci Sports Exerc 43(7):1177-1187 (adaptations retained on ~1/3 volume)",
+          "citation": "Bosquet et al. 2013, Scand J Med Sci Sports 23(3):e140-e149 (training-cessation meta-analysis, 103 studies)",
           "confidence": 0.3,
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "2×5 at 80% of your estimated max (144.9 kg): 115 kg. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "basis": "2×5 at 80% of your estimated max (144.9 kg), scaled to 82% in week 1 of 2 back from your break: 95 kg. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -5462,18 +5425,18 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Back Squat",
-          "face_detail": "2×5 @ 115 kg · ~3 reps left",
-          "face_lead": "2×5 @ 115 kg",
+          "face_detail": "2×5 @ 95 kg · ~3 reps left",
+          "face_lead": "2×5 @ 95 kg",
           "run_head": "",
           "run_head_km": null
         },
         {
-          "summary": "Deadlift: 2×5 @ 137.5 kg · ~3 reps left",
+          "summary": "Deadlift: 2×5 @ 122.5 kg · ~3 reps left",
           "exercise": "Deadlift",
           "sets": 2,
           "reps_low": 5,
           "reps_high": 5,
-          "load_kg": 137.5,
+          "load_kg": 122.5,
           "intensity_label": "80% e1RM",
           "rest_sec": 180,
           "rep_volume": "",
@@ -5495,8 +5458,7 @@
           "plates_per_side": [
             20.0,
             20.0,
-            15.0,
-            2.5,
+            10.0,
             1.25
           ],
           "effort_cue": "",
@@ -5509,12 +5471,12 @@
           "safety_reason": "",
           "safety_reason_mi": "",
           "grade": "ExpertOpinion",
-          "citation": "Bickel, Cross & Bamman 2011, Med Sci Sports Exerc 43(7):1177-1187 (adaptations retained on ~1/3 volume)",
+          "citation": "Bosquet et al. 2013, Scand J Med Sci Sports 23(3):e140-e149 (training-cessation meta-analysis, 103 studies)",
           "confidence": 0.3,
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "2×5 at 80% of your estimated max (172.1 kg): 137.5 kg. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "basis": "2×5 at 80% of your estimated max (172.1 kg), scaled to 90% in week 1 of 1 back from your break: 122.5 kg. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -5529,18 +5491,18 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Deadlift",
-          "face_detail": "2×5 @ 137.5 kg · ~3 reps left",
-          "face_lead": "2×5 @ 137.5 kg",
+          "face_detail": "2×5 @ 122.5 kg · ~3 reps left",
+          "face_lead": "2×5 @ 122.5 kg",
           "run_head": "",
           "run_head_km": null
         },
         {
-          "summary": "Bench Press: 2×5 @ 85 kg · ~3 reps left",
+          "summary": "Bench Press: 2×5 @ 77.5 kg · ~3 reps left",
           "exercise": "Bench Press",
           "sets": 2,
           "reps_low": 5,
           "reps_high": 5,
-          "load_kg": 85.0,
+          "load_kg": 77.5,
           "intensity_label": "80% e1RM",
           "rest_sec": 180,
           "rep_volume": "",
@@ -5561,8 +5523,9 @@
           "suggested_load_kg": null,
           "plates_per_side": [
             20.0,
-            10.0,
-            2.5
+            5.0,
+            2.5,
+            1.25
           ],
           "effort_cue": "",
           "hold_low_sec": 0,
@@ -5574,12 +5537,12 @@
           "safety_reason": "",
           "safety_reason_mi": "",
           "grade": "ExpertOpinion",
-          "citation": "Bickel, Cross & Bamman 2011, Med Sci Sports Exerc 43(7):1177-1187 (adaptations retained on ~1/3 volume)",
+          "citation": "Bosquet et al. 2013, Scand J Med Sci Sports 23(3):e140-e149 (training-cessation meta-analysis, 103 studies)",
           "confidence": 0.3,
           "safety_critical": false,
           "contested": false,
           "why": {
-            "basis": "2×5 at 80% of your estimated max (107.9 kg): 85 kg. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
+            "basis": "2×5 at 80% of your estimated max (107.9 kg), scaled to 90% in week 1 of 1 back from your break: 77.5 kg. Stop each set with ~3 reps left. If a set feels much harder, you're below your estimate today: end the exercise there.",
             "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Rate how hard each set felt so your estimated max, and next week's weights, stay current."
           },
@@ -5594,8 +5557,8 @@
           "calis": null,
           "run_structure": null,
           "face_name": "Bench Press",
-          "face_detail": "2×5 @ 85 kg · ~3 reps left",
-          "face_lead": "2×5 @ 85 kg",
+          "face_detail": "2×5 @ 77.5 kg · ~3 reps left",
+          "face_lead": "2×5 @ 77.5 kg",
           "run_head": "",
           "run_head_km": null
         },
@@ -5664,7 +5627,7 @@
       "status": "planned",
       "items": [
         {
-          "summary": "9.5 km · 65–79% HRmax (120–146 bpm) · effort 3–4 of 10, easy enough to talk in full sentences · then 6 × 20 s relaxed strides, 80 s easy between",
+          "summary": "7.5 km · 65–79% HRmax (120–146 bpm) · effort 3–4 of 10, easy enough to talk in full sentences · then 6 × 20 s relaxed strides, 80 s easy between",
           "exercise": "",
           "sets": 0,
           "reps_low": 0,
@@ -5736,9 +5699,9 @@
           },
           "face_name": "",
           "face_detail": "",
-          "face_lead": "9.5 km",
-          "run_head": "9.5 km",
-          "run_head_km": 9.5
+          "face_lead": "7.5 km",
+          "run_head": "7.5 km",
+          "run_head_km": 7.5
         }
       ],
       "adjustment": null,
@@ -5757,7 +5720,7 @@
       "status": "planned",
       "items": [
         {
-          "summary": "4.4 km · 88–92% HRmax (162–169 bpm) · effort 6–7 of 10 · warm up 10 min easy first, cool down 10 min easy after",
+          "summary": "3.9 km · 88–92% HRmax (162–169 bpm) · effort 6–7 of 10 · warm up 10 min easy first, cool down 10 min easy after",
           "exercise": "",
           "sets": 0,
           "reps_low": 0,
@@ -5829,9 +5792,9 @@
           },
           "face_name": "",
           "face_detail": "",
-          "face_lead": "4.4 km",
-          "run_head": "4.4 km",
-          "run_head_km": 4.4
+          "face_lead": "3.9 km",
+          "run_head": "3.9 km",
+          "run_head_km": 3.9
         }
       ],
       "adjustment": null,

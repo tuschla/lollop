@@ -381,9 +381,16 @@ fn run_card(r: &LoggedRun) -> RunResultView {
     to_run_view(r, facts.keys[0], facts.qc[0].as_deref())
 }
 
-/// [`build_run_anchors`] over `runs` with their realised distances.
-fn run_anchors(runs: &[LoggedRun], today: i64, offset: i64) -> RunAnchors {
-    build_run_anchors(&RunFacts::new(runs), today, offset)
+/// [`build_run_anchors`] over `runs` with their realised distances, as
+/// `(longest_recent_run_km, recent_weekly_km, longest_run_detrained)` for
+/// terse test destructuring.
+fn run_anchors(runs: &[LoggedRun], today: i64, offset: i64) -> (Option<f64>, Option<f64>, bool) {
+    let a = build_run_anchors(&RunFacts::new(runs), today, offset);
+    (
+        a.longest_recent_run_km,
+        a.recent_weekly_km,
+        a.longest_run_detrained,
+    )
 }
 
 const HOUR: i64 = 3_600;

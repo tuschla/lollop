@@ -55,6 +55,10 @@ GRADLE_TASKS=(assembleDebug assembleRelease)
 [[ $RUN_TESTS == 1 ]] && GRADLE_TASKS=(testDebugUnitTest verifyRoborazziDebug "${GRADLE_TASKS[@]}")
 (cd android && ./gradlew -q "${GRADLE_TASKS[@]}")
 
+echo "==> Release R8 keep check"
+# assembleRelease ran minifyReleaseWithR8; check its dex keeps what is reached by name.
+scripts/check-release-r8.sh --no-build
+
 echo "==> Signing release APK"
 REL_DIR=android/app/build/outputs/apk/release
 if [[ -n "${MILESTONE_KEYSTORE:-}" ]]; then

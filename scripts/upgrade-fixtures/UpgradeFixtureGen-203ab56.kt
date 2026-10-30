@@ -159,7 +159,8 @@ class UpgradeFixtureGen {
     @Test
     fun generate() {
         val tag = File(".").canonicalPath.substringAfter("upg-").substringBefore('/')
-        val out = File(System.getProperty("user.home"), ".cache/UpgradePath/gen/$tag").apply { mkdirs() }
+        val genDir = System.getenv("UPG_GEN_DIR") ?: error("UPG_GEN_DIR unset: run scripts/upgrade-fixtures/generate.sh")
+        val out = File(genDir, tag).apply { mkdirs() }
         val lines = scenario().map {
             when (it) {
                 is String -> it

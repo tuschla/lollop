@@ -1,8 +1,8 @@
 use super::*;
 
 /// File 07 GPS quality gates over a fix track, applied BEFORE any distance /
-/// duration / split is derived. Returns the surviving fixes, the dropped
-/// count (accuracy-gated fixes included) and the remapped segment starts.
+/// duration / split is derived. Returns the surviving fixes and the remapped
+/// segment starts.
 /// Gates, in order per surviving pair: a non-advancing timestamp (speed
 /// undefined), an implied speed over 12 m/s (`load::gps_speed_plausible`,
 /// impossible for a runner), and a move under 2.5 m (`load::gps_point_accept`,
@@ -23,10 +23,7 @@ pub(in crate::app) fn qc_track(points: &[GpsPoint], segment_starts: &[u32]) -> Q
         let next = qc_pass(&q.track, &q.seg_starts);
         if next.track.len() == q.track.len() {
             // Same fixes; the boundaries as this pass remapped them.
-            return QcFixes {
-                dropped: (points.len() - next.track.len()) as u32,
-                ..next
-            };
+            return next;
         }
         q = next;
     }
@@ -129,7 +126,6 @@ fn qc_pass(points: &[GpsPoint], segment_starts: &[u32]) -> QcFixes {
         out.push(p);
     }
     QcFixes {
-        dropped: (points.len() - out.len()) as u32,
         track: out,
         seg_starts: out_starts,
     }
@@ -232,7 +228,6 @@ fn stride_out_start(
 /// [`qc_track`]'s output.
 pub(in crate::app) struct QcFixes {
     pub(in crate::app) track: Vec<GpsPoint>,
-    pub(in crate::app) dropped: u32,
     pub(in crate::app) seg_starts: Vec<u32>,
 }
 
@@ -310,7 +305,6 @@ fn qc_figures(points: &[GpsPoint], segment_starts: &[u32]) -> QcTrack {
     let moving_min = moving_duration_min(&qc);
     QcTrack {
         track: qc.track,
-        dropped: qc.dropped,
         seg_starts: qc.seg_starts,
         distance_km,
         moving_min,

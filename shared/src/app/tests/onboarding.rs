@@ -21,7 +21,7 @@ fn pregnancy_screen_gates_the_view_at_medical_referral() {
 
     let vm = app.view(&model);
     assert_eq!(vm.safety_tier, Some(SafetyTier::MedicalReferral));
-    assert!(vm.train_blocked, "a deferral gate blocks training");
+    assert!(vm.hold_reason.is_some(), "a deferral gate blocks training");
     let safety_rows: Vec<_> = vm
         .guidance
         .iter()
@@ -124,7 +124,7 @@ fn parq_gate_clears_with_medical_clearance() {
     )
     .expect_only_render();
     let vm = app.view(&model);
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
     assert!(
         vm.guidance
             .iter()
@@ -142,7 +142,7 @@ fn parq_gate_clears_with_medical_clearance() {
     )
     .expect_only_render();
     let vm = app.view(&model);
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     assert_eq!(vm.safety_tier, None);
 }
 
@@ -161,7 +161,7 @@ fn youth_and_injury_screens_defer_visibly() {
     .expect_only_render();
     let vm = app.view(&model);
     assert_eq!(vm.safety_tier, Some(SafetyTier::MedicalReferral));
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
     // Both gates surface: pediatric says no plan is built (safety-011),
     // injury defers to doctor or physio (safety-048).
     assert!(
@@ -173,7 +173,7 @@ fn youth_and_injury_screens_defer_visibly() {
     // A clean profile clears everything again.
     app.update(Event::SetProfile(sample_profile()), &mut model)
         .expect_only_render();
-    assert!(!app.view(&model).train_blocked);
+    assert!(app.view(&model).hold_reason.is_none());
 }
 
 #[test]
@@ -236,7 +236,7 @@ fn reds_screen_flag_also_blocks_deficit() {
     let vm = app.view(&model);
     assert!(vm.protein_targets[0].summary.contains("not prescribed"));
     // And the screen flag itself defers training.
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
 }
 
 #[test]
@@ -329,7 +329,7 @@ fn age_15_gates_even_with_empty_health_screen() {
 
     // The pediatric gate fires from age alone: MedicalReferral tier, blocked.
     let vm = app.view(&model);
-    assert!(vm.train_blocked, "age 15 must block training");
+    assert!(vm.hold_reason.is_some(), "age 15 must block training");
     assert_eq!(vm.safety_tier, Some(SafetyTier::MedicalReferral));
     // No adult plan renders through the gate.
     assert!(
@@ -338,7 +338,7 @@ fn age_15_gates_even_with_empty_health_screen() {
     );
     assert!(vm.program.is_none());
     // And the model's derived flag is set.
-    assert!(model.profile.as_ref().unwrap().health.youth);
+    assert!(model.profile().unwrap().health.youth);
     // A gates-only hold produces NO adjustment rows: the headline's
     // safety_hold rung is therefore the ONLY cited surface for this state,
     // and the shells (blocked-branch card + SafetyBanner why-panel) render
@@ -361,10 +361,7 @@ fn age_15_gates_even_with_empty_health_screen() {
         &mut m2,
     )
     .expect_only_render();
-    assert!(
-        !m2.profile.as_ref().unwrap().health.youth,
-        "18 is not youth"
-    );
+    assert!(!m2.profile().unwrap().health.youth, "18 is not youth");
 }
 
 // ── Birthday: age derived from the model's today, never stale ──
@@ -390,9 +387,9 @@ fn birthday_age_is_derived_and_ticks_over_on_the_birthday() {
         &mut model,
     )
     .expect_only_render();
-    assert_eq!(model.profile.as_ref().unwrap().age_years, Some(34.0));
+    assert_eq!(model.profile().unwrap().age_years, Some(34.0));
     set_today(&app, &mut model, D_2026_03_12);
-    assert_eq!(model.profile.as_ref().unwrap().age_years, Some(35.0));
+    assert_eq!(model.profile().unwrap().age_years, Some(35.0));
     assert!(
         model
             .profile_history
@@ -419,9 +416,9 @@ fn birthday_profile_set_before_the_clock_derives_on_set_today() {
         &mut model,
     )
     .expect_only_render();
-    assert_eq!(model.profile.as_ref().unwrap().age_years, None);
+    assert_eq!(model.profile().unwrap().age_years, None);
     set_today(&app, &mut model, D_2026_03_12);
-    assert_eq!(model.profile.as_ref().unwrap().age_years, Some(35.0));
+    assert_eq!(model.profile().unwrap().age_years, Some(35.0));
 }
 
 #[test]
@@ -438,7 +435,7 @@ fn legacy_stated_age_without_birthday_is_kept_across_days() {
     )
     .expect_only_render();
     set_today(&app, &mut model, D_2026_03_11 + 400);
-    assert_eq!(model.profile.as_ref().unwrap().age_years, Some(34.0));
+    assert_eq!(model.profile().unwrap().age_years, Some(34.0));
 }
 
 #[test]
@@ -468,15 +465,21 @@ fn youth_gate_lifts_on_the_eighteenth_birthday() {
     )
     .expect_only_render();
     let vm = app.view(&model);
-    assert!(vm.train_blocked, "17 the day before the birthday: held");
+    assert!(
+        vm.hold_reason.is_some(),
+        "17 the day before the birthday: held"
+    );
     assert_eq!(vm.safety_tier, Some(SafetyTier::MedicalReferral));
-    assert_eq!(model.profile.as_ref().unwrap().age_years, Some(17.0));
+    assert_eq!(model.profile().unwrap().age_years, Some(17.0));
 
     set_today(&app, &mut model, D_2026_10_18);
     let vm = app.view(&model);
-    assert_eq!(model.profile.as_ref().unwrap().age_years, Some(18.0));
-    assert!(!model.profile.as_ref().unwrap().health.youth);
-    assert!(!vm.train_blocked, "18 on the birthday: the hold lifts");
+    assert_eq!(model.profile().unwrap().age_years, Some(18.0));
+    assert!(!model.profile().unwrap().health.youth);
+    assert!(
+        vm.hold_reason.is_none(),
+        "18 on the birthday: the hold lifts"
+    );
     assert!(vm.program.is_some(), "the plan builds once the gate lifts");
 }
 

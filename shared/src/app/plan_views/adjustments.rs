@@ -381,10 +381,10 @@ pub(super) fn fold_item_numbers(it: &mut PrescriptionView, fold: AdjustFold, wei
     }
 }
 
-/// The hero's full fold in one call over a hand-built session: the numeric fold
-/// [`flatten_session`] gives every row, then [`annotate_adjustments`]. Stacked
-/// deloads/reduce-loads take the single deepest cut instead of compounding,
-/// matching the per-day completion judgement.
+/// The numeric fold [`flatten_session`] gives every row, then the hero's
+/// [`annotate_and_rejudge`], over a hand-built session; no first-set step.
+/// Stacked deloads/reduce-loads take the single deepest cut instead of
+/// compounding, matching the per-day completion judgement.
 #[cfg(test)]
 pub(in crate::app) fn apply_adjustments_to_session(
     ns: &mut SessionPlanView,
@@ -395,10 +395,21 @@ pub(in crate::app) fn apply_adjustments_to_session(
     for it in ns.items.iter_mut() {
         fold_item_numbers(it, fold, weight_lb);
     }
-    annotate_adjustments(ns, recommended, weight_lb);
+    annotate_and_rejudge(ns, recommended, weight_lb);
     for it in ns.items.iter_mut() {
         restate_basis(it, weight_lb);
     }
+}
+
+/// The hero's fold: [`annotate_adjustments`], then each item's status
+/// re-judged against the same adjustments.
+pub(super) fn annotate_and_rejudge(
+    ns: &mut SessionPlanView,
+    recommended: &[Recommended<Adjustment>],
+    weight_lb: bool,
+) {
+    annotate_adjustments(ns, recommended, weight_lb);
+    refresh_item_statuses(&mut ns.items, recommended);
 }
 
 /// Fold the active (non-blocking) readiness adjustments INTO today's session,
@@ -448,12 +459,7 @@ pub(super) fn annotate_adjustments(
             Adjustment::ReturnCheck => {
                 // ready-upd-003 (IOC 2022): the first session after a fever or
                 // chest illness is a short, easy self-test, not the planned work.
-                let logged = ns.items.iter().any(|i| {
-                    i.sets_done > 0
-                        || !i.logged_sets.is_empty()
-                        || i.run_logged_min > 0.0
-                        || i.run_logged_km > 0.0
-                });
+                let logged = ns.items.iter().any(PrescriptionView::has_work);
                 ns.items = vec![return_check_item(r, logged)];
                 stopped = vec![false];
                 applied = Some(to_view(r));
@@ -1050,11 +1056,23 @@ fn ease_lift_item(it: &mut PrescriptionView, label: &str, note: &str, weight_lb:
     it.intensity = PlanIntensity::Prose;
     let easy = crate::strength::rir_to_rpe(f64::from(EASY_DAY_RIR));
     it.target_rpe = Some(it.target_rpe.map_or(easy, |r| r.min(easy)));
+    clear_anchored_on(it);
+    it.adjusted_note = note.into();
+    refresh_lift_summary(it, weight_lb);
+}
+
+/// Drop the "anchored on" basis of an item whose load no longer comes from it.
+fn clear_anchored_on(it: &mut PrescriptionView) {
     it.anchored_on.clear();
     it.anchored_on_last = false;
     it.anchored_on_single_set = false;
-    it.adjusted_note = note.into();
-    refresh_lift_summary(it, weight_lb);
+}
+
+/// Drop a run item's rep structure ("N × …" and its per-rep amount).
+pub(super) fn clear_run_reps(it: &mut PrescriptionView) {
+    it.rep_count = 0;
+    it.rep_volume.clear();
+    it.rep_amount = None;
 }
 
 /// Cut a run item's volume by `frac` (autoreg-045 "cut duration ~50%"): an
@@ -1112,15 +1130,11 @@ fn stop_item_for_pain(it: &mut PrescriptionView, location: &str, r: &Recommended
     } else {
         set_named_summary(it, ": ", format!("skip today ({location} pain)"), &[]);
     }
-    it.rep_count = 0;
-    it.rep_volume = String::new();
-    it.rep_amount = None;
+    clear_run_reps(it);
     it.run_volume = None;
     // Nothing to run: the tracker must not walk the planned intervals.
     it.run_structure = None;
-    it.anchored_on.clear();
-    it.anchored_on_last = false;
-    it.anchored_on_single_set = false;
+    clear_anchored_on(it);
     it.adjusted_note =
         format!("Stopped for {location} pain. Skip it, or swap in a movement that doesn't hurt.");
     repoint_evidence(it, r, None);
@@ -1154,9 +1168,7 @@ fn return_check_item(r: &Recommended<Adjustment>, done: bool) -> PrescriptionVie
 /// once any run is logged on its day.
 fn cap_run_for_head_cold(it: &mut PrescriptionView) {
     let r = graded(Adjustment::DowngradeSession, HEAD_COLD_RUN_CLAIM);
-    it.rep_count = 0;
-    it.rep_volume.clear();
-    it.rep_amount = None;
+    clear_run_reps(it);
     it.run_volume = Some(RunAmount::MinutesRange(
         RETURN_DOSE_MIN.0,
         RETURN_DOSE_MIN.1,
@@ -1166,5 +1178,5 @@ fn cap_run_for_head_cold(it: &mut PrescriptionView) {
     set_easy_run_face(it);
     it.adjusted_note = "Head cold: short easy run only, or rest".into();
     repoint_evidence(it, &r, None);
-    it.done = it.run_logged_km > 0.0 || it.run_logged_min > 0.0;
+    it.done = it.ran();
 }

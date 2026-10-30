@@ -7,18 +7,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -28,7 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -159,7 +152,6 @@ internal fun EntryActionSheets(
     srpeLoad: SrpeLoadView?,
 ) {
     if (selected == null) return
-    val ctx = LocalContext.current
     val undoLabel = stringResource(R.string.log_undo)
     // Saveable so a rotation mid-edit keeps the editor open (keyed on the
     // selected entry, so picking a different entry resets these).
@@ -167,17 +159,13 @@ internal fun EntryActionSheets(
     var trimming by rememberSaveable(selected) { mutableStateOf(false) }
     // The run's route, loaded once for both its detail and its trim sheet.
     val route = (selected as? HistoryEntry.Run)?.let { rememberRunRoute(it.v) }
-    val deletedText = ctx.getString(
-        if (selected is HistoryEntry.Run) R.string.history_run_deleted else R.string.history_set_deleted,
-    )
+    val isRun = selected is HistoryEntry.Run
+    val deletedText = stringResource(if (isRun) R.string.history_run_deleted else R.string.history_set_deleted)
+    val updatedText = stringResource(if (isRun) R.string.history_run_updated else R.string.history_set_updated)
     val saveEdit: (Event) -> Unit = { ev ->
         onEvent(ev)
         onDismiss()
-        postUndoable(
-            ctx.getString(if (selected is HistoryEntry.Run) R.string.history_run_updated else R.string.history_set_updated),
-            undoLabel,
-            listOfNotNull(undoEditFor(selected, ev)),
-        )
+        postUndoable(updatedText, undoLabel, listOfNotNull(undoEditFor(selected, ev)))
     }
 
     // Edit-sheet hardening, mirroring the Log sheet host: hoist the editor's dirty
@@ -202,16 +190,11 @@ internal fun EntryActionSheets(
     )
 
     if (editing) {
-        ModalBottomSheet(
-            // The dirty-editor guard lives in editSheetState.confirmValueChange
-            // (which keeps the sheet visible while confirming); by the time this
-            // fires the hide is committed on a clean sheet, so just finish closing.
-            onDismissRequest = { editDirty = false; editing = false },
-            sheetState = editSheetState,
-            // The Log sheet's ground, since the same editors render on it.
-            containerColor = BgSunken,
-        ) {
-            SheetNavBarScrim()
+        // The dirty-editor guard lives in editSheetState.confirmValueChange (which
+        // keeps the sheet visible while confirming); by the time onDismiss fires the
+        // hide is committed on a clean sheet, so it just finishes closing. The Log
+        // sheet's ground, since the same editors render on it.
+        AppSheet(onDismiss = { editDirty = false; editing = false }, sheetState = editSheetState) {
             // The editor scrolls its own form and pins Save in thumb reach, as in the
             // Log sheet, so Save sits in one place for a new and an edited entry.
             Column(
@@ -220,8 +203,7 @@ internal fun EntryActionSheets(
                     // Grow the bottom inset with the keyboard so the exercise-search
                     // IME can't cover the form (mirrors LogSheetContent).
                     .imePadding()
-                    .padding(horizontal = Space.Sheet.dp)
-                    .padding(bottom = Space.Lg.dp),
+                    .sheetPadding(),
                 verticalArrangement = Arrangement.spacedBy(Space.Md.dp + Space.Xs.dp),
             ) {
               CompositionLocalProvider(LocalEditorPinnedActions provides true) {
@@ -251,14 +233,9 @@ internal fun EntryActionSheets(
         // Opens only on a loaded route (the detail sheet's, else once a recreated
         // screen has reloaded it), so its body is final in its first frame.
         val loaded = route
-        if (loaded != null) ModalBottomSheet(
-            onDismissRequest = { trimming = false },
-            containerColor = BgSunken,
-            // Open fully expanded: the route map + slider + Trim shouldn't strand below a
-            // partial detent (mirrors the edit sheet above).
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        ) {
-            SheetNavBarScrim()
+        // Fully expanded: the route map + slider + Trim shouldn't strand below a
+        // partial detent.
+        if (loaded != null) AppSheet(onDismiss = { trimming = false }) {
             TrimRunSheetContent(
                 run = runView,
                 route = loaded,
@@ -280,15 +257,9 @@ internal fun EntryActionSheets(
             )
         }
     } else if (selected !is HistoryEntry.Run || !selected.v.has_gpx || route != null) {
-        // Fully expanded only: Back (and a swipe) close the sheet in one step instead
-        // of first collapsing it to a half-height detent. A GPS run's sheet opens once
-        // its route has loaded (map, Trim), so its body is final in its first frame.
-        ModalBottomSheet(
-            onDismissRequest = onDismiss,
-            containerColor = if (selected is HistoryEntry.Run) BgSunken else BgElevated,
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        ) {
-            SheetNavBarScrim()
+        // A GPS run's sheet opens once its route has loaded (map, Trim), so its body
+        // is final in its first frame.
+        AppSheet(onDismiss = onDismiss, containerColor = if (selected is HistoryEntry.Run) BgSunken else BgElevated) {
             val onDelete: (Event?) -> Unit = { restore ->
                 onEvent(deleteEventFor(selected))
                 onDismiss()
@@ -318,23 +289,11 @@ internal fun EntryActionSheets(
     // The swipe-down discard confirmation for a dirty edit sheet (the editor's
     // own X routes through EditorScaffold's identical guard).
     if (confirmDiscardEdit) {
-        AlertDialog(
-            onDismissRequest = { confirmDiscardEdit = false },
-            shape = RoundedCornerShape(Space.Card.dp),
-            title = { Text(stringResource(R.string.log_discard_title)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmDiscardEdit = false
-                    editDirty = false
-                    editing = false
-                }) { Text(stringResource(R.string.log_discard_confirm), color = DangerText) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDiscardEdit = false }) {
-                    Text(stringResource(R.string.log_keep_editing))
-                }
-            },
-        )
+        DiscardEntryDialog(onKeepEditing = { confirmDiscardEdit = false }) {
+            confirmDiscardEdit = false
+            editDirty = false
+            editing = false
+        }
     }
 }
 
@@ -354,14 +313,9 @@ private fun EntryDetailContent(
     onDelete: (restore: Event?) -> Unit,
 ) {
     val v = entry.v
-    val res = LocalContext.current.resources
+    val res = LocalResources.current
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
-            .padding(horizontal = Space.Sheet.dp)
-            .padding(bottom = Space.Lg.dp),
+        modifier = Modifier.sheetBody(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
     ) {
         val exercise = v.exercise.ifBlank { stringResource(R.string.main_set) }
@@ -418,8 +372,7 @@ private fun EntryDetailContent(
                     weightSuffix(weightUnit), cc.formulas,
                 ),
                 cc.grade, cc.citation, cc.confidence, cc.safety_critical, cc.contested,
-                // On the sheet's own BgElevated ground: a hairline keeps it a card.
-                border = if (cc.safety_critical) null else OnBgFaint.copy(alpha = 0.25f),
+                border = if (cc.safety_critical) null else SheetCardBorder,
             )
         }
         // Session-level audit + longitudinal trend live on the lift SESSION sheet

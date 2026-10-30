@@ -1,8 +1,8 @@
 //! Feedback & coaching-communication decision core (knowledge-base File 05).
 //!
 //! Pure, deterministic message-category selection. Given observed session
-//! signals it decides *which* feedback category to emit; rendering the actual
-//! copy (slot-filling the templates in File 05 §6.2) is a shell concern.
+//! signals it decides *which* feedback category to emit; the copy for it is
+//! rendered in `app::reviews::feedback::feedback_message`.
 //!
 //! The overriding rule is feedback-042: **safety gates run first**. Any
 //! CONCERN_INJURY / CONCERN_BEHAVIOR / CONCERN_RECOVERY (and the dangerous
@@ -65,8 +65,8 @@ impl FeedbackCategory {
 }
 
 /// Which condition produced a [`FeedbackCategory::CorrectiveProcess`] verdict, so
-/// the shell can pick trigger-specific copy (KB File 05 §6.2) rather than one
-/// generic corrective line.
+/// `app::reviews::feedback::feedback_message` can write trigger-specific copy
+/// (KB File 05 §6.2) rather than one generic corrective line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CorrectiveTrigger {
     /// Lifting reps not completed (feedback-021).
@@ -210,8 +210,7 @@ pub fn lifting_feedback(
 
 /// Running interval/threshold mastery (feedback-015; FB-INTERVAL-MASTERY-001,
 /// Moderate): when every rep hit its target pace at or below the target RPE,
-/// emit POSITIVE_MASTERY confirming the intended adaptation ("You hit every
-/// rep at target and it cost RPE {rpe}. Exactly the adaptation we want.").
+/// emit POSITIVE_MASTERY confirming the intended adaptation.
 /// `None` when either condition misses: other arms then evaluate the session.
 pub fn interval_mastery_feedback(
     target_paces_met: bool,
@@ -313,18 +312,15 @@ pub fn positive_split_discipline(second_half_slower_pct: f64) -> Recommended<Fee
 // 4. Top-level resolution: safety short-circuits execution (feedback-042)
 // ---------------------------------------------------------------------------
 
-/// Resolve the cycle's single feedback category: run the safety gate first and,
-/// if any concern fires, emit it (suppressing the supplied execution praise).
+/// Resolve the cycle's single feedback category from the [`safety_gate`]
+/// verdict: a concern wins (suppressing the supplied execution praise).
 /// Otherwise emit the execution category, defaulting to an informational,
 /// competence-affirming note when execution produced nothing (feedback-042/009).
 pub fn resolve_feedback(
-    safety: SafetySignals,
+    concern: Option<Recommended<FeedbackCategory>>,
     execution: Option<Recommended<FeedbackCategory>>,
 ) -> Recommended<FeedbackCategory> {
-    if let Some(concern) = safety_gate(safety) {
-        return concern;
-    }
-    execution.unwrap_or_else(|| {
+    concern.or(execution).unwrap_or_else(|| {
         evidence::graded(FeedbackCategory::InformationalNeutral, claims::FEEDBACK_001)
     })
 }
@@ -387,38 +383,9 @@ pub fn verbosity_for_experience(advanced: bool) -> Recommended<FeedbackVerbosity
     evidence::graded(v, claims::FB_VERBOSITY_001)
 }
 
-/// Whether praise copy must anchor to a concrete mastery experience, a named
-/// PR, completed session, or barrier overcome (feedback-005;
-/// FB-MASTERY-ANCHOR-001, Strong, Bandura 1997). The rule triggers on the
-/// mastery and consistency categories; both resolve to `PositiveMastery` here
-/// (a completed planned week is a mastery experience, rendered with its
-/// count). `PositiveExecution` (durability/pacing affirmed) is a descriptive
-/// observation, and the concern/corrective categories suppress praise outright
-/// (feedback-042).
-pub fn mastery_anchor_required(category: FeedbackCategory) -> Recommended<bool> {
-    let anchored = matches!(category, FeedbackCategory::PositiveMastery);
-    evidence::graded(anchored, claims::FB_MASTERY_ANCHOR_001)
-}
-
 // ---------------------------------------------------------------------------
 // 5. Voice constraints & contested-metric guards
 // ---------------------------------------------------------------------------
-
-/// Default framing for any next-step / goal-setting copy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GoalFraming {
-    /// Controllable process goal (cadence, pacing discipline, RIR target), default.
-    Process,
-    /// Outcome/result goal, only per individual goal-efficacy signal.
-    Outcome,
-}
-
-/// Default all goal framing to controllable process goals (feedback-003;
-/// FB-PROCESS-GOAL-001: Moderate and contested, since process vs specific
-/// outcome goals is unresolved in the sport literature).
-pub fn default_goal_framing() -> Recommended<GoalFraming> {
-    evidence::graded(GoalFraming::Process, claims::FB_PROCESS_GOAL_001)
-}
 
 // ---------------------------------------------------------------------------
 // 6. Longitudinal trend summary (feedback-027/028/029)

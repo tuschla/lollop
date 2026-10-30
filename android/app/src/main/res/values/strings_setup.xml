@@ -377,17 +377,6 @@
     <string name="setup_row_equipment">Equipment</string>
     <string name="setup_row_priority_muscle">Priority muscle</string>
     <string name="setup_priority_none">None</string>
-    <string name="setup_muscle_chest">Chest</string>
-    <string name="setup_muscle_back">Back</string>
-    <string name="setup_muscle_quads">Quads</string>
-    <string name="setup_muscle_hamstrings">Hamstrings</string>
-    <string name="setup_muscle_glutes">Glutes</string>
-    <string name="setup_muscle_side_delts">Side delts (shoulders)</string>
-    <string name="setup_muscle_rear_delts">Rear delts (shoulders)</string>
-    <string name="setup_muscle_biceps">Biceps</string>
-    <string name="setup_muscle_triceps">Triceps</string>
-    <string name="setup_muscle_calves">Calves</string>
-    <string name="setup_muscle_abs">Abs</string>
     <string name="setup_row_runner_strength">Add 2 short strength sessions a week</string>
     <string name="setup_row_health_questions">Health questions</string>
     <string name="setup_parq_value_clear">None apply</string>

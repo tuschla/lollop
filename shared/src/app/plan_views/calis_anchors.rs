@@ -1,6 +1,7 @@
 //! Calisthenics ladder anchors, replayed from logged sets and rung placements.
 
 use super::*;
+use std::collections::BTreeMap;
 
 /// How the current rung of a ladder was entered, while replaying its history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +49,15 @@ const CALIS_UNRATED_MARGIN: u32 = 2;
 const MUSCLE_UP_GATE_PULL_RUNG: u8 = 4;
 const MUSCLE_UP_GATE_DIP_RUNG: u8 = 3;
 
+/// A set's metric on a rung: hold seconds on a timed rung, else reps.
+fn calis_metric(timed: bool, s: &LoggedSet) -> u32 {
+    if timed {
+        u32::from(s.hold_sec.unwrap_or(0))
+    } else {
+        s.reps
+    }
+}
+
 /// Judge the sessions logged at one rung (CAL-PROG-TRIGGER-001 2-for-2 at the
 /// band top, over test sessions on a straight-arm rung; CAL-PLACE-001
 /// one-session skip far over the top; regress on missed floors on 2 sessions,
@@ -69,16 +79,11 @@ fn judge_calis_rung(
         .and_then(|(_, ss)| ss.last())
         .is_some_and(|s| s.weight_kg > 0.0);
     let top = cal::advance_top(tier, goal, loaded) as u32;
-    let floor = cal::working_target(tier, goal, loaded).floor() as u32;
+    let target = cal::working_target(tier, goal, loaded);
+    let floor = target.floor() as u32;
     let timed = tier.target.is_timed();
-    let val = |s: &LoggedSet| -> u32 {
-        if timed {
-            s.hold_sec.unwrap_or(0) as u32
-        } else {
-            s.reps
-        }
-    };
-    let perf_only = cal::performance_gated(tier, cal::working_target(tier, goal, loaded), loaded);
+    let val = |s: &LoggedSet| calis_metric(timed, s);
+    let perf_only = cal::performance_gated(tier, target, loaded);
     let effort_ok = |s: &LoggedSet| {
         perf_only
             || (s.rpe > 0.0 && s.rpe <= CALIS_MAX_QUALIFYING_RPE)
@@ -123,7 +128,7 @@ fn judge_calis_rung(
     // from the working holds (which stay below it), so "2 in a row" runs over
     // TEST sessions only: a day with a hold past the working band is a test
     // (a missed test breaks the run; plain working days neither count nor break it).
-    let work_top = cal::working_target(tier, goal, loaded).top() as u32;
+    let work_top = target.top() as u32;
     let judged: Vec<&[&LoggedSet]> = days
         .iter()
         .map(|(_, ss)| ss.as_slice())
@@ -217,7 +222,6 @@ pub(in crate::app) fn build_calisthenics_anchors<'a>(
 ) -> Vec<crate::plan::CalisAnchor> {
     use crate::calisthenics as cal;
     use crate::plan::CalisAnchor;
-    use std::collections::BTreeMap;
 
     // An active gating pain report (File 08 Table 4.1, `pain_blocks_progression`)
     // freezes progression on every ladder (CAL-GATE-NUMBERS-001); DOMS never does.
@@ -247,7 +251,6 @@ pub(in crate::app) fn build_calisthenics_anchors<'a>(
 
     let mut out = Vec::new();
     for l in cal::LADDERS {
-        let n_rungs = l.tiers.len() as u8;
         // This ladder's sessions: local day → (rung, set), chronological.
         let mut by_day: BTreeMap<i64, Vec<(u8, &LoggedSet)>> = BTreeMap::new();
         for (lid, r, s) in &matched {
@@ -269,164 +272,21 @@ pub(in crate::app) fn build_calisthenics_anchors<'a>(
             v.sort_by(|(_, a), (_, b)| a.chrono_cmp(b));
         }
         places.sort_by_key(|p| p.observed_at);
-        let place = |p: &CalisPlacement| CalisState {
-            rung: p.rung.min(n_rungs - 1),
-            entry: CalisEntry::Placed,
-            days: Vec::new(),
-            // `<= 0` (undated) = the acclimation clock is not started yet.
-            since_ts: p.observed_at,
-            // A placement is a fresh start: it re-dates the break clock.
-            last_day: (p.observed_at > 0).then(|| day_of(p.observed_at)),
+        let sessions = split_at_placements(&by_day, &places);
+        let Some(cur) = replay_ladder(l, &sessions, &places, goal, day_of) else {
+            continue;
         };
-
-        // Each day's sets split at any placement that falls between two of
-        // them, so a placement applies in timestamp order: sets before it are
-        // judged at the old rung, sets after it are the placed rung's first
-        // session.
-        let mut sessions: Vec<(i64, Vec<(u8, &LoggedSet)>)> = Vec::new();
-        for (&day, day_sets) in &by_day {
-            let mut chunk: Vec<(u8, &LoggedSet)> = Vec::new();
-            for &(r, s) in day_sets {
-                if let Some(&(_, prev)) = chunk.last()
-                    && places
-                        .iter()
-                        .any(|p| p.observed_at >= prev.observed_at && p.observed_at < s.observed_at)
-                {
-                    sessions.push((day, std::mem::take(&mut chunk)));
-                }
-                chunk.push((r, s));
-            }
-            sessions.push((day, chunk));
-        }
-
-        let mut st: Option<CalisState> = None;
-        let mut pi = 0;
-        for (day, day_sets) in &sessions {
-            let day = *day;
-            let first_ts = day_sets[0].1.observed_at;
-            while pi < places.len() && places[pi].observed_at < first_ts {
-                st = Some(place(places[pi]));
-                pi += 1;
-            }
-            // The session's rung: the most sets that day (ties → the easier rung).
-            let mut counts: BTreeMap<u8, usize> = BTreeMap::new();
-            for (r, _) in day_sets {
-                *counts.entry(*r).or_default() += 1;
-            }
-            let r = counts
-                .iter()
-                .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
-                .map_or(0, |(r, _)| *r)
-                .min(n_rungs - 1);
-            let r_tier = &l.tiers[r as usize];
-            let at_r: Vec<&LoggedSet> = day_sets
-                .iter()
-                .filter(|(rr, _)| *rr == r)
-                .map(|(_, s)| *s)
-                // A timed rung logged without a hold duration carries no metric:
-                // neutral (skipped), never a failed 0-second hold.
-                .filter(|s| !(r_tier.target.is_timed() && s.hold_sec.is_none()))
-                .collect();
-            let r_ts = at_r.first().map_or(first_ts, |s| s.observed_at);
-            let dated = first_ts > 0;
-            let cur = match st.as_mut() {
-                Some(cur) => cur,
-                None => {
-                    st = Some(CalisState {
-                        rung: r,
-                        entry: CalisEntry::Logged,
-                        days: vec![(day, at_r)],
-                        since_ts: r_ts,
-                        last_day: dated.then_some(day),
-                    });
-                    continue;
-                }
-            };
-            let gap = cur.last_day.filter(|_| dated).map_or(0, |d| day - d);
-            let re = cal::reentry(gap).value;
-            let cur_tier = &l.tiers[cur.rung as usize];
-            let v = judge_calis_rung(l, cur_tier, &cur.days, cur.entry, goal);
-            let advance_ok = v.advance && (!cur_tier.straight_arm || calis_acclimated(cur));
-            let expected = if re.steps > 0 {
-                cur.rung.saturating_sub(re.steps)
-            } else if advance_ok && !cal::weighted_ok(l.id, cur.rung) {
-                cur.rung.saturating_add(v.steps).min(n_rungs - 1)
-            } else if v.regress && !v.loaded {
-                cur.rung.saturating_sub(1)
-            } else {
-                cur.rung
-            };
-            let floor_met = {
-                let loaded = at_r.last().is_some_and(|s| s.weight_kg > 0.0);
-                let floor = cal::working_target(r_tier, goal, loaded).floor() as u32;
-                at_r.iter().any(|s| {
-                    let x = if r_tier.target.is_timed() {
-                        s.hold_sec.unwrap_or(0) as u32
-                    } else {
-                        s.reps
-                    };
-                    x >= floor
-                })
-            };
-            if r <= cur.rung.max(expected) || floor_met {
-                if r == cur.rung {
-                    if re.steps > 0 && cur_tier.straight_arm {
-                        // CAL-REENTRY-001: a straight-arm rung restarts its
-                        // tendon acclimation window after a break.
-                        cur.since_ts = r_ts;
-                    }
-                    if cur.since_ts <= 0 {
-                        // First dated session after an undated placement.
-                        cur.since_ts = r_ts;
-                    }
-                    cur.days.push((day, at_r));
-                } else {
-                    let entry = if r == expected && r > cur.rung {
-                        CalisEntry::Advanced
-                    } else if r == expected && r < cur.rung && v.regress && re.steps == 0 {
-                        CalisEntry::Regressed
-                    } else {
-                        CalisEntry::Logged
-                    };
-                    cur.rung = r;
-                    cur.entry = entry;
-                    cur.days = vec![(day, at_r)];
-                    cur.since_ts = r_ts;
-                }
-            }
-            // Every session (accepted or an ignored exploratory attempt) is a
-            // training day on this ladder for the break clock.
-            if dated {
-                cur.last_day = Some(day);
-            }
-        }
-        while pi < places.len() {
-            st = Some(place(places[pi]));
-            pi += 1;
-        }
-        let Some(cur) = st else { continue };
 
         let tier = &l.tiers[cur.rung as usize];
         let v = judge_calis_rung(l, tier, &cur.days, cur.entry, goal);
-        let mut advance_ready = v.advance;
-        // Tendon rate-limit on straight-arm rungs (CAL-TENDON-001).
-        if advance_ready && tier.straight_arm && !calis_acclimated(&cur) {
-            advance_ready = false;
-        }
-        if pain_present {
-            advance_ready = false;
-        }
-        let mut regress = v.regress;
         // A break up to the prescribed day steps the rung down (CAL-REENTRY-001).
         let gap = match (through_day, cur.last_day) {
             (Some(t), Some(d)) => t.saturating_add(1).saturating_sub(d),
             _ => 0,
         };
         let re = cal::reentry(gap).value;
-        if re.steps > 0 {
-            advance_ready = false;
-            regress = false;
-        }
+        let advance_ready = advance_met(&v, tier, &cur) && !pain_present && re.steps == 0;
+        let regress = v.regress && re.steps == 0;
 
         // Newest added load at the current rung (the user's own, never invented).
         let last_added_kg = cur
@@ -468,6 +328,171 @@ pub(in crate::app) fn build_calisthenics_anchors<'a>(
     out
 }
 
+/// Whether the verdict's advance stands: a straight-arm rung also needs its
+/// tendon acclimation span (CAL-TENDON-001).
+fn advance_met(v: &CalisVerdict, tier: &crate::calisthenics::Tier, cur: &CalisState) -> bool {
+    v.advance && (!tier.straight_arm || calis_acclimated(cur))
+}
+
+/// Each day's sets split at any placement that falls between two of them, so
+/// a placement applies in timestamp order: sets before it are judged at the
+/// old rung, sets after it are the placed rung's first session.
+fn split_at_placements<'s>(
+    by_day: &BTreeMap<i64, Vec<(u8, &'s LoggedSet)>>,
+    places: &[&CalisPlacement],
+) -> Vec<(i64, Vec<(u8, &'s LoggedSet)>)> {
+    let mut sessions = Vec::new();
+    for (&day, day_sets) in by_day {
+        let mut chunk: Vec<(u8, &LoggedSet)> = Vec::new();
+        for &(r, s) in day_sets {
+            if let Some(&(_, prev)) = chunk.last()
+                && places
+                    .iter()
+                    .any(|p| p.observed_at >= prev.observed_at && p.observed_at < s.observed_at)
+            {
+                sessions.push((day, std::mem::take(&mut chunk)));
+            }
+            chunk.push((r, s));
+        }
+        sessions.push((day, chunk));
+    }
+    sessions
+}
+
+/// One ladder's state after replaying its `sessions` and sorted `places` in
+/// time order (the rules in [`build_calisthenics_anchors`]); `None` with
+/// neither.
+fn replay_ladder<'s>(
+    l: &crate::calisthenics::Ladder,
+    sessions: &[(i64, Vec<(u8, &'s LoggedSet)>)],
+    places: &[&CalisPlacement],
+    goal: LiftGoal,
+    day_of: impl Fn(i64) -> i64,
+) -> Option<CalisState<'s>> {
+    use crate::calisthenics as cal;
+    let n_rungs = l.tiers.len() as u8;
+    let place = |p: &CalisPlacement| CalisState {
+        rung: p.rung.min(n_rungs - 1),
+        entry: CalisEntry::Placed,
+        days: Vec::new(),
+        // `<= 0` (undated) = the acclimation clock is not started yet.
+        since_ts: p.observed_at,
+        // A placement is a fresh start: it re-dates the break clock.
+        last_day: (!is_undated(p.observed_at)).then(|| day_of(p.observed_at)),
+    };
+    let mut st: Option<CalisState> = None;
+    let mut pi = 0;
+    for (day, day_sets) in sessions {
+        let day = *day;
+        let first_ts = day_sets[0].1.observed_at;
+        while pi < places.len() && places[pi].observed_at < first_ts {
+            st = Some(place(places[pi]));
+            pi += 1;
+        }
+        // The session's rung: the most sets that day (ties → the easier rung).
+        let mut counts: BTreeMap<u8, usize> = BTreeMap::new();
+        for (r, _) in day_sets {
+            *counts.entry(*r).or_default() += 1;
+        }
+        let r = counts
+            .iter()
+            .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+            .map_or(0, |(r, _)| *r)
+            .min(n_rungs - 1);
+        let r_tier = &l.tiers[r as usize];
+        let timed = r_tier.target.is_timed();
+        let at_r: Vec<&LoggedSet> = day_sets
+            .iter()
+            .filter(|(rr, _)| *rr == r)
+            .map(|(_, s)| *s)
+            // A timed rung logged without a hold duration carries no metric:
+            // neutral (skipped), never a failed 0-second hold.
+            .filter(|s| !(timed && s.hold_sec.is_none()))
+            .collect();
+        let r_ts = at_r.first().map_or(first_ts, |s| s.observed_at);
+        let dated = first_ts > 0;
+        let cur = match st.as_mut() {
+            Some(cur) => cur,
+            None => {
+                st = Some(CalisState {
+                    rung: r,
+                    entry: CalisEntry::Logged,
+                    days: if at_r.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![(day, at_r)]
+                    },
+                    since_ts: r_ts,
+                    last_day: dated.then_some(day),
+                });
+                continue;
+            }
+        };
+        if at_r.is_empty() {
+            // Only hold-less sets: a training day for the break clock, never
+            // a session at the rung.
+            if dated {
+                cur.last_day = Some(day);
+            }
+            continue;
+        }
+        let gap = cur.last_day.filter(|_| dated).map_or(0, |d| day - d);
+        let re = cal::reentry(gap).value;
+        let cur_tier = &l.tiers[cur.rung as usize];
+        let v = judge_calis_rung(l, cur_tier, &cur.days, cur.entry, goal);
+        let expected = if re.steps > 0 {
+            cur.rung.saturating_sub(re.steps)
+        } else if advance_met(&v, cur_tier, cur) && !cal::weighted_ok(l.id, cur.rung) {
+            cur.rung.saturating_add(v.steps).min(n_rungs - 1)
+        } else if v.regress && !v.loaded {
+            cur.rung.saturating_sub(1)
+        } else {
+            cur.rung
+        };
+        let floor_met = {
+            let loaded = at_r.last().is_some_and(|s| s.weight_kg > 0.0);
+            let floor = cal::working_target(r_tier, goal, loaded).floor() as u32;
+            at_r.iter().any(|s| calis_metric(timed, s) >= floor)
+        };
+        if r <= cur.rung.max(expected) || floor_met {
+            if r == cur.rung {
+                if re.steps > 0 && cur_tier.straight_arm {
+                    // CAL-REENTRY-001: a straight-arm rung restarts its
+                    // tendon acclimation window after a break.
+                    cur.since_ts = r_ts;
+                }
+                if cur.since_ts <= 0 {
+                    // First dated session after an undated placement.
+                    cur.since_ts = r_ts;
+                }
+                cur.days.push((day, at_r));
+            } else {
+                let entry = if r == expected && r > cur.rung {
+                    CalisEntry::Advanced
+                } else if r == expected && r < cur.rung && v.regress && re.steps == 0 {
+                    CalisEntry::Regressed
+                } else {
+                    CalisEntry::Logged
+                };
+                cur.rung = r;
+                cur.entry = entry;
+                cur.days = vec![(day, at_r)];
+                cur.since_ts = r_ts;
+            }
+        }
+        // Every session (accepted or an ignored exploratory attempt) is a
+        // training day on this ladder for the break clock.
+        if dated {
+            cur.last_day = Some(day);
+        }
+    }
+    while pi < places.len() {
+        st = Some(place(places[pi]));
+        pi += 1;
+    }
+    st
+}
+
 /// The placements in force for a prescription built from history through local
 /// day `through`: every placement dated up to the NEXT day (the day being
 /// prescribed) — an Easier / Harder choice applies to that same day's item —
@@ -478,7 +503,8 @@ pub(super) fn calis_placements_through(model: &Model, through: i64) -> Vec<Calis
         .calis_placements
         .iter()
         .filter(|p| {
-            p.observed_at <= 0 || local_day(p.observed_at, offset) <= through.saturating_add(1)
+            is_undated(p.observed_at)
+                || local_day(p.observed_at, offset) <= through.saturating_add(1)
         })
         .copied()
         .collect()

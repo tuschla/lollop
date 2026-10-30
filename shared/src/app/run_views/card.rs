@@ -64,28 +64,18 @@ thread_local! {
         std::cell::RefCell::new(Memo::new(VIEW_LIST_CACHE_CAP));
 }
 
-/// The ordered runs list for the ViewModel, memoized. Chronological order,
-/// tie-broken by `entry_id` (shell epoch-MILLIS log id) so same-second runs keep
-/// a deterministic order across an `AmendRun` remove+push (the amended run
-/// carries its original `entry_id` to the Vec tail). Legacy rows
-/// (`entry_id == 0`) keep the stable sort's insertion order; a backdated run
+/// The ordered runs list for the ViewModel, memoized, in [`RunFacts::chrono`]
+/// order: chronological, tie-broken by `entry_id` (shell epoch-MILLIS log id)
+/// so same-second runs keep a deterministic order across an `AmendRun`
+/// remove+push (the amended run carries its original `entry_id` to the Vec
+/// tail). Legacy rows (`entry_id == 0`) keep insertion order; a backdated run
 /// slots into its true position.
 pub(in crate::app) fn run_views(runs: &[LoggedRun], facts: &RunFacts) -> Vec<RunResultView> {
     memoized(&RUNS_VIEWS_CACHE, runs_fingerprint(&facts.keys), || {
-        let mut ordered: Vec<(&LoggedRun, u64, Option<&QcTrack>)> = runs
+        facts
+            .chrono
             .iter()
-            .zip(&facts.keys)
-            .zip(&facts.qc)
-            .map(|((r, &k), q)| (r, k, q.as_deref()))
-            .collect();
-        ordered.sort_by(|(a, ..), (b, ..)| {
-            a.observed_at
-                .cmp(&b.observed_at)
-                .then(a.entry_id.cmp(&b.entry_id))
-        });
-        ordered
-            .into_iter()
-            .map(|(r, k, q)| to_run_view(r, k, q))
+            .map(|&i| to_run_view(&runs[i], facts.keys[i], facts.qc[i].as_deref()))
             .collect()
     })
 }
@@ -126,9 +116,9 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     let gps = qc.is_some();
     // File 07 QC gates ran BEFORE any derivation (accuracy, implausible speed,
     // jitter, non-advancing time).
-    let (track, qc_dropped, seg_starts): (&[GpsPoint], u32, &[u32]) = match qc {
-        Some(q) => (&q.track, q.dropped, &q.seg_starts),
-        None => (&[], 0, &[]),
+    let (track, seg_starts): (&[GpsPoint], &[u32]) = match qc {
+        Some(q) => (&q.track, &q.seg_starts),
+        None => (&[], &[]),
     };
 
     // A GPS run whose fixes all fail the QC gates has no measurable route:
@@ -136,7 +126,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     // "0.0km @ -" entry *and* trip the spike gate against a phantom baseline.
     // Report the signal problem honestly instead of fabricating a null run.
     if gps && track.len() < 2 {
-        return unmeasurable_gps_view(r, hr_pct_max, qc_dropped);
+        return unmeasurable_gps_view(r, hr_pct_max);
     }
 
     // GPS duration is MOVING time (File 07 auto-pause: <0.5 m/s intervals are
@@ -213,7 +203,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         summary: format!(
             "{}{:.1}km @ {} ({}){}{}",
             if gps { "GPS " } else { "" },
-            distance_km,
+            round_tenths(distance_km),
             pace,
             zone_label(shown_zone),
             spike_seg,
@@ -222,7 +212,6 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
         evidence: EvidenceTagView::of(&spike),
         splits_km,
         splits_mi,
-        qc_dropped,
         // The ~0.5 MB GPX document never rides the list payload. A GPS run
         // reaching here has ≥2 usable fixes (the degenerate case returned
         // above), so it HAS an exportable route; the shell fetches the document
@@ -249,7 +238,7 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
 
 /// The card for a GPS run whose fixes all fail the QC gates: no distance, pace,
 /// zone or spike verdict, only the signal problem and the echoed inputs.
-fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64, qc_dropped: u32) -> RunResultView {
+fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64) -> RunResultView {
     RunResultView {
         zone: None,
         pace: "-".to_string(),
@@ -266,7 +255,6 @@ fn unmeasurable_gps_view(r: &LoggedRun, hr_pct_max: f64, qc_dropped: u32) -> Run
         // No measurable distance → the spike gate never ran; carry an
         // empty evidence tag rather than citing a claim that was not used.
         evidence: EvidenceTagView::default(),
-        qc_dropped,
         has_gpx: false,
         gps_unmeasurable: true,
         observed_at: r.observed_at,
@@ -324,7 +312,7 @@ fn displayed_zone(hr_pct_max: f64, session_rpe: Option<u8>) -> Option<ThreeZone>
     // athlete rated at or above that floor was not an easy effort, so a Z1 label
     // from the average HR alone (a low HRmax estimate, a strap dropout) would
     // contradict their own rating: the zone is left off instead.
-    let tempo_rpe_floor = running::run_workout_rx(crate::schema::RunSessionType::Tempo)
+    let tempo_rpe_floor = running::workout_rx(crate::schema::RunSessionType::Tempo)
         .value
         .rpe
         .map(|(lo, _)| lo);
@@ -459,7 +447,6 @@ pub(in crate::app) fn interval_verdict_view(vi: f64) -> IntervalVerdictView {
         kind,
         label,
         message,
-        variability_index: vi,
         evidence: EvidenceTagView::of(&r),
     }
 }

@@ -5,7 +5,6 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.double
@@ -36,7 +35,6 @@ object ActiveRunStore {
     private const val HEADER = "{\"run\":\"active\"}"
 
     private val io = Executors.newSingleThreadExecutor()
-    private val json = Json { ignoreUnknownKeys = true }
 
     @Volatile private var file: File? = null
 
@@ -134,7 +132,7 @@ object ActiveRunStore {
                 val t = line.trim()
                 if (t.isEmpty() || t.startsWith("{\"run\"")) return@forEachLine
                 runCatching {
-                    val o = json.parseToJsonElement(t).jsonObject
+                    val o = coreJson.parseToJsonElement(t).jsonObject
                     val p = GpsPoint(
                         lat = o["lat"]!!.jsonPrimitive.double,
                         lon = o["lon"]!!.jsonPrimitive.double,

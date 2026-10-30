@@ -8,6 +8,8 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
+import app.milestone.qa.QaHarness.fixture
+import app.milestone.qa.QaHarness.onAppScope
 import app.milestone.qa.assertCountEventually
 import app.milestone.qa.launchApp
 import app.milestone.qa.launchAppExpectingSetup
@@ -21,8 +23,6 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.async
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -76,21 +76,6 @@ class ImportExportRoundtripTest {
     }
 
     // ── Driving the process-scoped coroutines from the (main-looper) test thread ──
-
-    /** Run [block] on the app's process scope and pump the paused main looper until
-     *  it completes: the serial event consumer and every `Dispatchers.Main` hop
-     *  resume there, so a plain runBlocking on this thread would deadlock. */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun <T> onAppScope(timeoutMs: Long = 30_000, block: suspend () -> T): T {
-        val job = EventDispatcher.scope.async { block() }
-        val end = System.currentTimeMillis() + timeoutMs
-        while (!job.isCompleted) {
-            shadowOf(Looper.getMainLooper()).idle()
-            if (System.currentTimeMillis() > end) fail("app-scope work did not finish in ${timeoutMs}ms")
-            Thread.sleep(2)
-        }
-        return job.getCompleted()
-    }
 
     /** Pump the main looper until [cond] holds (the core's reply lands there). */
     private fun waitFor(timeoutMs: Long = 15_000, what: String = "condition", cond: () -> Boolean) {
@@ -222,9 +207,6 @@ class ImportExportRoundtripTest {
         )
 
     private fun reasonsByFile(plan: RunImportPlan) = plan.failures.associate { it.fileName to it.reason }
-
-    private fun fixture(name: String): ByteArray =
-        checkNotNull(javaClass.classLoader!!.getResourceAsStream(name)) { "fixture $name not on the test classpath" }.use { it.readBytes() }
 
     private fun gpxOf(run: RunResultView): String =
         checkNotNull(Core.exportGpx(run.entry_id, run.observed_at)?.takeIf { it.isNotBlank() }) { "no GPX for ${run.entry_id}" }

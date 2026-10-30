@@ -37,8 +37,8 @@ type JsonBridge = Bridge<Engine, JsonFfiFormat>;
 static BRIDGE: LazyLock<Mutex<JsonBridge>> =
     LazyLock::new(|| Mutex::new(Bridge::new(Core::default())));
 
-/// The plain-string FIT error envelope, used when the parser panics or its
-/// payload cannot be produced. Kotlin reads any `{"error":…}` without an
+/// The plain-string FIT error envelope, used when the FIT payload cannot be
+/// produced or the JNI glue fails. Kotlin reads any `{"error":…}` without an
 /// object body as a damaged file.
 const FIT_FALLBACK_ERR: &str = r#"{"error":"Couldn't read this FIT file"}"#;
 
@@ -164,19 +164,18 @@ fn current_view() -> Vec<u8> {
 /// bridge, model or event log; the shell builds its own `LogRunTrack` event.
 /// Success: the [`crate::fit::FitTrack`] serialization. Failure: the
 /// [`ErrorEnvelope`] object filled from [`crate::fit::FitError`]. A parser panic
-/// returns [`FIT_FALLBACK_ERR`] and leaves the bridge untouched.
+/// returns the non-resetting `panic` object (see [`catch_panic`]).
 fn parse_fit_json(bytes: &[u8]) -> Vec<u8> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        || match crate::fit::parse_fit(bytes)
+    catch_panic("parse_fit", false, || {
+        match crate::fit::parse_fit(bytes)
             .and_then(|track| crate::fit::import_gate(&track).map(|()| track))
         {
             Ok(track) => {
                 serde_json::to_vec(&track).unwrap_or_else(|_| FIT_FALLBACK_ERR.as_bytes().to_vec())
             }
-            Err(err) => error_envelope(err.kind(), err.context(), &err.message()),
-        },
-    ))
-    .unwrap_or_else(|_| FIT_FALLBACK_ERR.as_bytes().to_vec())
+            Err(err) => error_envelope(err.kind(), err.context(), ""),
+        }
+    })
 }
 
 /// The figures a `LogRunTrack` will be saved with, before it is sent:
@@ -285,6 +284,23 @@ mod android {
         }
     }
 
+    /// Run the panic-firewalled `f` on the input bytes and return its JSON as
+    /// a JNI string. A failed byte-array read (jni clears that throwable), a
+    /// non-UTF-8 result (`serde_json` cannot emit one) or a failed string
+    /// allocation degrades to `fallback`.
+    fn json_from_bytes<'local>(
+        env: &mut Env<'local>,
+        input: &JByteArray<'local>,
+        f: fn(&[u8]) -> Vec<u8>,
+        fallback: &str,
+    ) -> JString<'local> {
+        let json = match env.convert_byte_array(input) {
+            Ok(bytes) => String::from_utf8(f(&bytes)).unwrap_or_else(|_| fallback.to_string()),
+            Err(_) => fallback.to_string(),
+        };
+        string_or_null(env, &json, fallback)
+    }
+
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_app_milestone_Core_update<'local>(
         mut env: EnvUnowned<'local>,
@@ -329,21 +345,13 @@ mod android {
         _class: JClass<'local>,
         fit_bytes: JByteArray<'local>,
     ) -> JString<'local> {
-        // Every fallible step here, reading the JNI byte array (e.g. OOM on the
-        // 32 MB FIT cap; jni clears that throwable itself), parsing the FIT,
-        // and allocating the return JNI string, degrades to the shell's
-        // `{"error":…}` envelope. `parse_fit_json` is itself panic-firewalled,
-        // so a FIT-parser panic is caught inside it.
         env.with_env(|env| -> jni::errors::Result<_> {
-            let json: String = match env.convert_byte_array(&fit_bytes) {
-                // `serde_json` only emits UTF-8, so this cannot fail; degrade to
-                // the error envelope rather than unwrap so the firewall holds
-                // regardless.
-                Ok(bytes) => String::from_utf8(parse_fit_json(&bytes))
-                    .unwrap_or_else(|_| FIT_FALLBACK_ERR.to_string()),
-                Err(_) => FIT_FALLBACK_ERR.to_string(),
-            };
-            Ok(string_or_null(env, &json, FIT_FALLBACK_ERR))
+            Ok(json_from_bytes(
+                env,
+                &fit_bytes,
+                parse_fit_json,
+                FIT_FALLBACK_ERR,
+            ))
         })
         .resolve::<LogErrorAndDefault>()
     }
@@ -390,12 +398,7 @@ mod android {
     ) -> JString<'local> {
         const FALLBACK: &str = r#"{"error":"track figures unavailable"}"#;
         env.with_env(|env| -> jni::errors::Result<_> {
-            let json: String = match env.convert_byte_array(&event) {
-                Ok(bytes) => String::from_utf8(track_figures_json(&bytes))
-                    .unwrap_or_else(|_| FALLBACK.to_string()),
-                Err(_) => FALLBACK.to_string(),
-            };
-            Ok(string_or_null(env, &json, FALLBACK))
+            Ok(json_from_bytes(env, &event, track_figures_json, FALLBACK))
         })
         .resolve::<LogErrorAndDefault>()
     }

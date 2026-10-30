@@ -116,9 +116,9 @@ class EventJsonTest {
     @Test
     fun setProfileEmitsTheBirthdayAndTheDraftRoundTripsIt() {
         val view = ProfileView(progression_cadence = "WeekToWeek", lift_goal = "MaxStrength", goal_distance = "TenK", concurrent_goal = "Strength", weekly_sets = 12, birth_epoch_day = 7_740L, age_years = 35.0)
-        val draft = ProfileDraft.from(view)
+        val draft = Event.SetProfile.from(view)
         assertEquals(7_740L, draft.birthEpochDay)
-        val fields = obj(draft.toEvent())["SetProfile"]!!.jsonObject
+        val fields = obj(draft)["SetProfile"]!!.jsonObject
         assertEquals(7_740L, fields["birth_epoch_day"]!!.jsonPrimitive.content.toLong())
     }
 
@@ -531,14 +531,14 @@ class EventJsonTest {
             """{"safety_tier":null,"train_blocked":false,"adjustments":[],
                 "review_adjustments":[],"input_count":0,"lifts":[],"runs":[],
                 "guidance":[],"feedback":null,"reference":[],
-                "checkin_today":{"observed_at":1700000000,"sleep_quality":2,
+                "latest_checkin":{"observed_at":1700000000,"sleep_quality":2,
                   "soreness":4,"mood":3,"resting_hr_bpm":52.0,"hrv_rmssd_ms":null},
                 "baseline_status":[
                   {"signal":"WellnessZ","label":"Sleep, soreness & mood","have":1,"need":7}]}"""
         )
-        assertEquals(2, vm.checkin_today!!.sleep_quality)
-        assertEquals(4, vm.checkin_today.soreness)
-        assertEquals(null, vm.checkin_today.hrv_rmssd_ms)
+        assertEquals(2, vm.latest_checkin!!.sleep_quality)
+        assertEquals(4, vm.latest_checkin.soreness)
+        assertEquals(null, vm.latest_checkin.hrv_rmssd_ms)
         assertEquals("WellnessZ", vm.baseline_status[0].signal)
         assertEquals(1, vm.baseline_status[0].have)
     }
@@ -796,7 +796,7 @@ class EventJsonTest {
         assertEquals(null, vm.trend)
         assertEquals(null, vm.provisional)
         assertEquals(null, vm.autoreg_source)
-        assertEquals(null, vm.checkin_today)
+        assertEquals(null, vm.latest_checkin)
         assertTrue(vm.baseline_status.isEmpty())
         assertEquals(null, vm.hr_max)
         assertTrue(vm.protein_figures.isEmpty())

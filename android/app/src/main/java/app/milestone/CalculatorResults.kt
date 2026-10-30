@@ -34,7 +34,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -49,7 +48,7 @@ internal data class CalcHeadline(val value: String, val caption: String, val bas
 internal data class CalcClaim(val row: GuidanceView, val extraDetail: String? = null)
 
 /**
- * The ONE calculator result card (ui-sweep §10), shared by all four tools: a
+ * The ONE calculator result card, shared by all four tools: a
  * [TileOverline] with the card's single "?", the answer as a `Type.Display`
  * headline over its caption (and basis line), the tool's own key/value rows or
  * table, the core's remaining notes, then "Clear result". The "?" panel stacks the
@@ -98,7 +97,7 @@ internal fun CalculatorResultCard(
                 claims.forEachIndexed { i, c ->
                     if (i > 0) RowHairline()
                     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-                        Text(stripClaimIds(guidanceSummary(c.row)), color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+                        Text(stripClaimIds(guidanceSummary(c.row)), color = OnBgBody, style = Type.BodyBold)
                         WhyDetail(
                             why = c.row.why,
                             grade = c.row.grade,
@@ -125,17 +124,12 @@ internal fun CalculatorResultCard(
                     Text(
                         stripClaimIds(guidanceSummary(n)),
                         color = OnBgBody,
-                        style = if (n.safety_critical) Type.Body.copy(fontWeight = FontWeight.Bold) else Type.Body,
+                        style = if (n.safety_critical) Type.BodyBold else Type.Body,
                     )
                 }
             }
             RowHairline()
-            TextAction(
-                stringResource(R.string.main_calc_clear),
-                onClick = onClear,
-                modifier = Modifier.offset(x = -TextActionInset),
-                description = stringResource(R.string.main_calc_clear_subject, overline),
-            )
+            ClearResultAction(overline, onClear)
         }
     }
 }
@@ -147,6 +141,12 @@ private fun PlainCalcRows(rows: List<GuidanceView>, overline: String, onClear: (
     rows.forEach {
         EvidenceCard(guidanceSummary(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, it.section, why = it.why)
     }
+    ClearResultAction(overline, onClear)
+}
+
+/** "Clear result" under a calculator result, naming the tool ([overline]) to TalkBack. */
+@Composable
+private fun ClearResultAction(overline: String, onClear: () -> Unit) {
     TextAction(
         stringResource(R.string.main_calc_clear),
         onClick = onClear,
@@ -307,14 +307,14 @@ private fun hrZoneTexts(band: HrZoneBandView): HrZoneTexts {
         pct = pct,
         bpm = bpm,
         bpmColor = if (band.pace_governed) OnBgMuted else OnBgBody,
-        bpmStyle = if (band.pace_governed) Type.Caption else Type.Body.copy(fontWeight = FontWeight.Bold).merge(TabularFigures),
+        bpmStyle = if (band.pace_governed) Type.Caption else Type.BodyBold.merge(TabularFigures),
         reserve = reserve,
         spoken = spoken,
         swatch = bandSwatch(band.kind),
     )
 }
 
-private val HrZoneNameStyle get() = Type.Body.copy(fontWeight = FontWeight.Bold)
+private val HrZoneNameStyle get() = Type.BodyBold
 private val HrZoneCaptionStyle get() = Type.Caption.merge(TabularFigures)
 private val HrZoneSwatch = 12.dp
 
@@ -326,7 +326,7 @@ private const val HrZoneBpmWeight = 1.2f
 /**
  * The zone table: swatch, name, %HRmax, then bpm (or "by pace") end-aligned. When
  * any word of any row (a range such as "122–148" counts as one word) would not fit
- * its column at this width and font scale, every row wraps to stacked (spec §10):
+ * its column at this width and font scale, every row wraps to stacked:
  * name, then %HRmax, then bpm under it, start-aligned, so no name or range ever
  * breaks inside a word. Decided by measuring the texts, not by a font-scale step.
  */
@@ -478,7 +478,7 @@ private fun VolumeRampChart(ramp: List<Int>, fig: HypertrophyFiguresView) {
         productive,
         fig.max_sets,
     )
-    val top = (maxOf(fig.max_sets, ramp.maxOrNull() ?: 0) + 1).coerceAtLeast(1)
+    val top = maxOf(fig.max_sets, ramp.maxOrNull() ?: 0) + 1
     // Laid out once per composition: the band label (two lines) sets the end
     // gutter, the week labels add a caption row under the 112dp plot.
     val bandLayouts = bandLabel.split(' ', limit = 2).map { measurer.measure(it, captionStyle) }

@@ -183,16 +183,16 @@ fun ComposeTestRule.typeWeight(figures: String) {
     waitForIdle()
 }
 
-/** Open the set loop for [exercise] from Today: the current item's filled pill or
- *  another open item's compact row (both speak "Log set 1 of N, <exercise>"). */
-fun ComposeTestRule.openLoopFor(exercise: String) {
+/** Open the set loop at [set] for [exercise] from Today: the current item's filled
+ *  pill or another open item's compact row (both speak "Log set k of N, <exercise>"). */
+fun ComposeTestRule.openLoopFor(exercise: String, set: Int = 1) {
     onNode(
         androidx.compose.ui.test.hasClickAction() and
-            androidx.compose.ui.test.hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n, 1), substring = true) and
+            androidx.compose.ui.test.hasContentDescription(strPrefix(R.string.plan_log_set_n_of_n, set), substring = true) and
             androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasTestTag("plan-item:$exercise")),
     ).performScrollTo().performClick()
     waitUntil(15_000) {
-        onAllNodes(hasText(strPrefix(R.string.log_set_header_n_of_n, 1), substring = true)).fetchSemanticsNodes().isNotEmpty()
+        onAllNodes(hasText(strPrefix(R.string.log_set_header_n_of_n, set), substring = true)).fetchSemanticsNodes().isNotEmpty()
     }
 }
 

@@ -4,20 +4,27 @@
 use super::*;
 use std::rc::Rc;
 
-/// One `view()`'s plan snapshots: the picture through today (what the future
-/// days, the next session and the summary read) plus each past/today day's own
-/// morning snapshot, tagged with its epoch-day. `gated` lists the past days
-/// whose own profile raised a health gate (no plan existed that morning).
-/// `next` is next week's picture: the current anchors dated a week on,
-/// synthesized at the block position next week has when nothing more is
-/// logged (`None` when that raises a gate). Next week's rows, and so a hero
-/// wrapped into next week, read it: they sit where next week's own views put
-/// them, not on this week's placement a week later.
-struct PlanSnapshots {
+/// One week's plan snapshots as that week's view on `today` builds them: the
+/// picture through `today` (the days after it read it; for this week also the
+/// next session and the summary) plus each past/today day's own morning
+/// snapshot, tagged with its epoch-day. `gated` lists the past days whose own
+/// profile raised a health gate (no plan existed that morning).
+struct WeekSnapshots {
+    /// Completed plan weeks before this one: the block position it was
+    /// synthesized at.
+    week_index: u32,
     current: (crate::plan::Anchors, Program),
     past: Vec<(i64, crate::plan::Anchors, Program)>,
     gated: Vec<i64>,
-    next: Option<(crate::plan::Anchors, Program)>,
+}
+
+/// One `view()`'s plan snapshots: this week's, and next week's exactly as next
+/// Monday's own view builds them when nothing more is logged (`None` when next
+/// Monday's profile raises a gate). Next week's rows, and so a hero wrapped
+/// into next week, read `next`.
+struct PlanSnapshots {
+    this: WeekSnapshots,
+    next: Option<WeekSnapshots>,
 }
 
 /// Everything [`PlanSnapshots`] is a pure function of: the logged-set and
@@ -71,11 +78,12 @@ struct PlanCacheValue {
 }
 
 thread_local! {
-    /// Synthesizing the week costs one `plan::synthesize` pass per past/today
-    /// day plus one for today, and judging each past day reruns the readiness
-    /// pipeline over the whole history; both only change when the history,
-    /// profile, readiness or date changes. Output is identical to the uncached
-    /// rebuild (the adjustment folding still runs every view).
+    /// Synthesizing costs one `plan::synthesize` pass per past/today day of
+    /// this week, one for today and two for next week (its Monday and the
+    /// rest), and judging each past day reruns the readiness pipeline over the
+    /// whole history; both only change when the history, profile, readiness or
+    /// date changes. Output is identical to the uncached rebuild (the
+    /// adjustment folding still runs every view).
     static PLAN_SNAPSHOT_CACHE: std::cell::RefCell<LastMemo<PlanSnapshotKey<'static>, PlanCacheValue>> =
         const { std::cell::RefCell::new(LastMemo::new()) };
 }
@@ -119,6 +127,125 @@ impl<'a> PlanFrame<'a> {
             run_days: &self.cx.days.runs,
             run_facts: &self.cx.runs,
         }
+    }
+
+    /// Anchors + program synthesized from the history attributed to session
+    /// days `<= through`, with `day_profile` (the profile effective on the day
+    /// being prescribed), for the week starting `monday` at block position
+    /// `week_index`. A day is prescribed with `through = day - 1`, so the sets
+    /// logged ON it never move its own target; undated rows always count;
+    /// readiness inputs use the same cutoff and keep removals dated after it.
+    /// `through` is also the decay/window reference.
+    fn plan_through(
+        &self,
+        through: i64,
+        day_profile: &Profile,
+        monday: i64,
+        week_index: u32,
+        run_week_km: &[f64],
+    ) -> Option<(crate::plan::Anchors, Program)> {
+        let (cx, model, offset) = (self.cx, self.model, self.offset);
+        let dated_sets = || {
+            cx.set_index
+                .with_facts(&model.sets)
+                .enumerate()
+                .filter(|(i, _)| cx.days.sets[*i].is_none_or(|d| d <= through))
+                .map(|(_, set)| set)
+        };
+        let mut anchors = build_plan_anchors(
+            dated_sets(),
+            AnchorCtx::for_profile(Some(day_profile), model, offset),
+            through,
+            offset,
+        );
+        let run = cx.run_anchors_on(through);
+        anchors.longest_recent_run_km = run.longest_recent_run_km;
+        anchors.recent_weekly_km = run.recent_weekly_km;
+        anchors.longest_run_detrained = run.longest_run_detrained;
+        let stated_longest_on = stated_since(model, day_profile, |q| q.stated_longest_recent_km);
+        anchors.stated_longest_in_window =
+            stated_longest_on.is_some_and(|d| through.saturating_sub(d) <= LONGEST_RUN_WINDOW_DAYS);
+        // An undeclared break from running (RUN-REENTRY-001), unless the
+        // weekly distance was stated after it began (a current answer). A
+        // longest run stated after it began is a current answer too
+        // (RUN-START-001), so it counts through the long-run rebuild.
+        anchors.run_break = build_run_break(&model.runs, &cx.runs, through, offset)
+            .filter(|b| {
+                stated_since(model, day_profile, |q| {
+                    Some(q.running_km_per_week).filter(|km| *km > 0.0)
+                })
+                .is_none_or(|s| s <= b.last_run_epoch_day)
+            })
+            .map(|b| crate::plan::RunBreak {
+                stated_longest_after: stated_longest_on.is_some_and(|s| s > b.last_run_epoch_day),
+                ..b
+            });
+        // Race-date periodization dates the week; the cross-cycle volume
+        // carry reads whole calendar weeks before it (RUN-VOLUME-001).
+        anchors.week_start_epoch_day = Some(monday);
+        anchors.plan_start_epoch_day = Some(self.start);
+        anchors.run_week_km = run_week_km.to_vec();
+        // Pace anchor: a fresh recent race (≤8 wk) on the day being
+        // prescribed (`through + 1`).
+        anchors.run_vdot =
+            crate::app::run_targets::pace_anchor_vdot(day_profile, through.saturating_add(1));
+        let day_inputs = manual_inputs_on(model, through, through.saturating_add(1), offset);
+        anchors.calisthenics = build_calisthenics_anchors(
+            dated_sets().map(|(s, facts)| (s, facts.calis_tier)),
+            &calis_placements_through(model, through),
+            &day_inputs,
+            day_profile.lift_goal,
+            Some(through),
+            offset,
+        );
+        #[cfg(test)]
+        PLAN_SYNTH_BUILDS.with(|c| c.set(c.get() + 1));
+        let program = crate::plan::synthesize(day_profile, &anchors, week_index)?;
+        Some((anchors, program))
+    }
+
+    /// The snapshots of the week starting `monday`, as that week's view on
+    /// `today` builds them with `today_profile`. `None` when `today_profile`
+    /// raises a health gate (the whole plan is withheld).
+    fn week_snapshots(
+        &self,
+        today: i64,
+        today_profile: &Profile,
+        monday: i64,
+        week_index: u32,
+    ) -> Option<WeekSnapshots> {
+        let run_week_km = build_run_week_km(&self.model.runs, &self.cx.runs, monday, self.offset);
+        let current = self.plan_through(today, today_profile, monday, week_index, &run_week_km)?;
+        let mut past = Vec::with_capacity(7);
+        let mut gated = Vec::new();
+        for d in 0..7u16 {
+            let epoch_day = monday.saturating_add(d as i64);
+            if epoch_day > today {
+                continue;
+            }
+            // A past/today day keeps the prescription it had on its own
+            // morning: prescribed from the history logged strictly before it,
+            // with the profile effective that day. A day whose own profile was
+            // still gated (cleared mid-week) had no plan: it renders blocked,
+            // never wiping the rest of the week.
+            let day_profile = profile_for_day(self.model, epoch_day);
+            match self.plan_through(
+                epoch_day.saturating_sub(1),
+                day_profile.as_deref().unwrap_or(self.profile),
+                monday,
+                week_index,
+                &run_week_km,
+            ) {
+                Some((a, p)) => past.push((epoch_day, a, p)),
+                None => gated.push(epoch_day),
+            }
+        }
+        Some(WeekSnapshots {
+            week_index,
+            current,
+            past,
+            gated,
+        })
     }
 }
 
@@ -182,15 +309,13 @@ pub(in crate::app) fn build_plan_views(
     Option<ProgramSummaryView>,
 ) {
     let model = cx.model;
-    let (Some(profile), Some(req)) = (model.profile.as_ref(), model.plan_request) else {
+    let (Some(profile), Some(req)) = (model.profile(), model.plan_request) else {
         return (None, Vec::new(), Vec::new(), None);
     };
     let start = req.start_epoch_day;
     let today = model.today_epoch_day.unwrap_or(start);
     let offset = model.today_utc_offset_sec;
-    // Saturating so a corrupt wire `today`/`start` near i64::MIN/MAX can't
-    // debug-overflow (a panic would brick every later view via the FFI firewall).
-    let week_monday = today.saturating_sub(mon0_weekday(today));
+    let week_monday = monday_of(today);
     let today_profile = profile_for_day(model, today);
     let f = PlanFrame {
         cx,
@@ -217,15 +342,18 @@ pub(in crate::app) fn build_plan_views(
         past,
         windows: review_windows(model, today, offset),
     };
-    let mut week = week_rows(&f, &snapshots.current, &snapshots.past, &recs);
-    let next_frame = PlanFrame {
-        week_monday: week_monday.saturating_add(7),
-        ..f
-    };
+    let mut week = week_rows(&f, &snapshots.this, &recs);
     let mut next_week = snapshots
         .next
         .as_ref()
-        .map(|next| week_rows(&next_frame, next, &[], &recs))
+        .map(|next| {
+            let next_frame = PlanFrame {
+                week_monday: week_monday.saturating_add(7),
+                week_index: next.week_index,
+                ..f
+            };
+            week_rows(&next_frame, next, &recs)
+        })
         .unwrap_or_default();
     let next_session = resolve_next_session(&f, &recs, train_blocked, &mut week, &mut next_week);
 
@@ -249,20 +377,26 @@ pub(in crate::app) fn build_plan_views(
         }
     }
     // A past day whose own profile was still gated had no plan that morning.
+    let gated = |day: i64| {
+        snapshots.this.gated.contains(&day)
+            || snapshots
+                .next
+                .as_ref()
+                .is_some_and(|n| n.gated.contains(&day))
+    };
     for row in week
         .iter_mut()
-        .filter(|s| snapshots.gated.contains(&s.epoch_day) && !s.items.is_empty())
+        .chain(next_week.iter_mut())
+        .filter(|s| gated(s.epoch_day) && !s.items.is_empty())
     {
         blank_row(row);
     }
 
-    let cur_program = &snapshots.current.1;
-    let meso = &cur_program.mesocycle;
+    let cur_program = &snapshots.this.current.1;
     let program_view = Some(build_program_summary(
         f.today_profile,
-        meso,
         cur_program,
-        program_week(&f, meso),
+        program_week(&f, &cur_program.mesocycle),
         f.week_index,
     ));
     (next_session, week, next_week, program_view)
@@ -284,85 +418,6 @@ fn plan_snapshots(f: &PlanFrame) -> Option<(Rc<PlanSnapshots>, Rc<PastReadiness>
         week_index,
         ..
     } = *f;
-    // The view's one session-day attribution pass, shared by the completion
-    // counts (in `flatten_session`) and the per-day snapshot cutoff below.
-    let session_days = &cx.days.sets;
-
-    // Anchors + program synthesized from the history attributed to session days
-    // `<= through`, with the profile effective on the day being prescribed.
-    // Every day is prescribed with `through = day - 1`, so the sets logged ON a
-    // day can never move that day's own target. Undated legacy rows
-    // (`observed_at <= 0`) have no session day and always count, exactly as
-    // `build_plan_anchors` already treats them for decay. Readiness inputs are
-    // date-filtered to the same cutoff, so a pain report logged AFTER finishing a
-    // rung cannot rewrite that day's rung, and an input removed after the
-    // prescribed day `through + 1` still counts for it, so a later removal cannot
-    // rewrite it either. `through` is also the
-    // decay/window reference, so an anchor ages against the day being prescribed.
-    let run_week_km = build_run_week_km(&model.runs, &cx.runs, week_monday, offset);
-    let plan_through = |through: i64,
-                        day_profile: &Profile|
-     -> Option<(crate::plan::Anchors, Program)> {
-        // The sets attributed to session days `<= through`, with their
-        // name facts.
-        let dated_sets = || {
-            cx.set_index
-                .with_facts(&model.sets)
-                .enumerate()
-                .filter(|(i, _)| session_days[*i].is_none_or(|d| d <= through))
-                .map(|(_, set)| set)
-        };
-        let mut anchors = build_plan_anchors(
-            dated_sets(),
-            AnchorCtx::for_profile(Some(day_profile), model, offset),
-            through,
-            offset,
-        );
-        let (longest_recent, recent_weekly, detrained) = cx.run_anchors_on(through);
-        anchors.longest_recent_run_km = longest_recent;
-        anchors.recent_weekly_km = recent_weekly;
-        anchors.longest_run_detrained = detrained;
-        let stated_longest_on = stated_since(model, day_profile, |q| q.stated_longest_recent_km);
-        anchors.stated_longest_in_window =
-            stated_longest_on.is_some_and(|d| through.saturating_sub(d) <= LONGEST_RUN_WINDOW_DAYS);
-        // An undeclared break from running (RUN-REENTRY-001), unless the
-        // weekly distance was stated after it began (a current answer). A
-        // longest run stated after it began is a current answer too
-        // (RUN-START-001), so it counts through the long-run rebuild.
-        anchors.run_break = build_run_break(&model.runs, &cx.runs, through, offset)
-            .filter(|b| {
-                stated_since(model, day_profile, |q| {
-                    Some(q.running_km_per_week).filter(|km| *km > 0.0)
-                })
-                .is_none_or(|s| s <= b.last_run_epoch_day)
-            })
-            .map(|b| crate::plan::RunBreak {
-                stated_longest_after: stated_longest_on.is_some_and(|s| s > b.last_run_epoch_day),
-                ..b
-            });
-        // Race-date periodization dates the week; the cross-cycle volume
-        // carry reads whole calendar weeks before it (RUN-VOLUME-001).
-        anchors.week_start_epoch_day = Some(week_monday);
-        anchors.plan_start_epoch_day = Some(start);
-        anchors.run_week_km = run_week_km.clone();
-        // Pace anchor: a fresh recent race (≤8 wk) on the day being
-        // prescribed (`through + 1`).
-        anchors.run_vdot =
-            crate::app::run_targets::pace_anchor_vdot(day_profile, through.saturating_add(1));
-        let day_inputs = manual_inputs_on(model, through, through.saturating_add(1), offset);
-        anchors.calisthenics = build_calisthenics_anchors(
-            dated_sets().map(|(s, facts)| (s, facts.calis_tier)),
-            &calis_placements_through(model, through),
-            &day_inputs,
-            day_profile.lift_goal,
-            Some(through),
-            offset,
-        );
-        #[cfg(test)]
-        PLAN_SYNTH_BUILDS.with(|c| c.set(c.get() + 1));
-        let program = crate::plan::synthesize(day_profile, &anchors, week_index)?;
-        Some((anchors, program))
-    };
 
     // The snapshots are a pure function of the key below, so a view driven by an
     // unrelated event (a calculator query, a readiness echo) reuses them instead
@@ -415,51 +470,19 @@ fn plan_snapshots(f: &PlanFrame) -> Option<(Rc<PlanSnapshots>, Rc<PastReadiness>
             (snapshots, past)
         }
         None => {
-            // Everything through today: the future days and the program summary
-            // read this current picture. A health gate on TODAY's profile
-            // withholds the whole plan.
-            let current = plan_through(today, today_profile)?;
-            let mut past = Vec::with_capacity(7);
-            let mut gated = Vec::new();
-            for d in 0..7u16 {
-                let epoch_day = week_monday.saturating_add(d as i64);
-                if epoch_day > today {
-                    continue;
-                }
-                // A past/today day keeps the prescription it had on its own
-                // morning: prescribed from the history logged strictly before it,
-                // with the profile effective that day. A day whose own profile was
-                // still gated (cleared mid-week) had no plan: it renders blocked,
-                // never wiping the rest of the week.
-                let day_profile = profile_for_day(model, epoch_day);
-                match plan_through(
-                    epoch_day.saturating_sub(1),
-                    day_profile.as_deref().unwrap_or(profile),
-                ) {
-                    Some((a, p)) => past.push((epoch_day, a, p)),
-                    None => gated.push(epoch_day),
-                }
-            }
-            // Next week's picture, from the same history and profile: only the
-            // week's Monday (start-week placement, race and meet dating), the
-            // volume carry over whole weeks before it and the block position
-            // (this week counts once it ends) change.
-            let next = {
-                let next_monday = week_monday.saturating_add(7);
-                let mut anchors = current.0.clone();
-                anchors.week_start_epoch_day = Some(next_monday);
-                anchors.run_week_km = build_run_week_km(&model.runs, &cx.runs, next_monday, offset);
-                let next_index = plan_week_index(model, &cx.days, next_monday).unwrap_or(0);
-                #[cfg(test)]
-                PLAN_SYNTH_BUILDS.with(|c| c.set(c.get() + 1));
-                crate::plan::synthesize(today_profile, &anchors, next_index).map(|p| (anchors, p))
-            };
-            let snapshots = Rc::new(PlanSnapshots {
-                current,
-                past,
-                gated,
-                next,
-            });
+            let this = f.week_snapshots(today, today_profile, week_monday, week_index)?;
+            // Next week as next Monday's own view builds it when nothing more
+            // is logged.
+            let next_monday = week_monday.saturating_add(7);
+            let next = f.week_snapshots(
+                next_monday,
+                profile_for_day(model, next_monday)
+                    .as_deref()
+                    .unwrap_or(profile),
+                next_monday,
+                plan_week_index(model, &cx.days, next_monday).unwrap_or(0),
+            );
+            let snapshots = Rc::new(PlanSnapshots { this, next });
             let readiness = past_readiness();
             PLAN_SNAPSHOT_CACHE.with(|c| {
                 c.borrow_mut().set(
@@ -477,14 +500,10 @@ fn plan_snapshots(f: &PlanFrame) -> Option<(Rc<PlanSnapshots>, Rc<PastReadiness>
 
 /// The week strip of the week starting `f.week_monday`: each weekday's session
 /// under that week's arrangement, judged against its own day's logs and
-/// adjustments. A past/today day keeps its own morning's snapshot from `past`;
-/// a future day shares `current` and carries an active illness.
-fn week_rows(
-    f: &PlanFrame,
-    current: &(crate::plan::Anchors, Program),
-    past: &[(i64, crate::plan::Anchors, Program)],
-    recs: &WeekRecs,
-) -> Vec<SessionPlanView> {
+/// adjustments. A past/today day keeps its own morning's snapshot from
+/// `snaps.past`; a later day shares `snaps.current` and carries an active
+/// illness.
+fn week_rows(f: &PlanFrame, snaps: &WeekSnapshots, recs: &WeekRecs) -> Vec<SessionPlanView> {
     let PlanFrame {
         cx,
         model,
@@ -495,7 +514,7 @@ fn week_rows(
         ..
     } = *f;
     let ctx = f.flatten_ctx();
-    let (cur_anchors, cur_program) = (&current.0, &current.1);
+    let (past, cur_anchors, cur_program) = (&snaps.past, &snaps.current.0, &snaps.current.1);
     // The athlete's session moves for this week (ADH-RESCHED-001): `source[d]`
     // is the plan day whose session shows on weekday `d`.
     let cur_sessions = &cur_program.mesocycle.sessions;
@@ -635,23 +654,14 @@ fn resolve_next_session(
             // HARD RULE 3: never program through a hold. Blank the session.
             blank_row(ns);
         } else if ns.epoch_day <= today {
-            // Fold BOTH the readiness adjustments AND the non-blocking
-            // review-channel deloads/downgrades (rpe-load-gap / velocity /
-            // failed-session / MRV deloads, HRV downgrade) into the rendered
-            // session, so the NextSessionCard loads match a headline that says
-            // "deload". Blocking review recs (Stop/RestDay/Defer) fall through
-            // `annotate_adjustments`'s catch-all untouched (a blocking one would
-            // have set `train_blocked` and blanked the session above). The row
-            // is today's, already carrying `today_recs`' fold from
-            // `flatten_session`, so only the per-adjustment rewrite runs here.
-            annotate_adjustments(ns, &recs.today, weight_lb);
-            refresh_item_statuses(&mut ns.items, &recs.today);
+            // The row already carries `today_recs`' numeric fold; only the
+            // per-adjustment rewrite runs here.
+            annotate_and_rejudge(ns, &recs.today, weight_lb);
         } else if let Some(r) = return_step_on(model, &cx.days, ns.epoch_day, offset) {
             // ready-upd-003/004: the first session after a resolved hold is the
             // easy one (or the post-illness return check) even when it falls
             // after today (the hold was resolved on a rest day).
-            annotate_adjustments(ns, std::slice::from_ref(&r), weight_lb);
-            refresh_item_statuses(&mut ns.items, std::slice::from_ref(&r));
+            annotate_and_rejudge(ns, std::slice::from_ref(&r), weight_lb);
         }
         // Mirror the resolved row into its week's strip.
         if let Some(row) = week
@@ -697,7 +707,7 @@ fn program_week(f: &PlanFrame, meso: &Mesocycle) -> (u8, u8) {
         .map(|race| race.saturating_sub(week_monday) / 7);
     match race_weeks_out {
         Some(out) => {
-            let start_monday = start.saturating_sub(mon0_weekday(start));
+            let start_monday = monday_of(start);
             let week = (week_monday.saturating_sub(start_monday) / 7).max(0) + 1;
             let clamp = |w: i64| w.clamp(1, i64::from(u8::MAX)) as u8;
             (clamp(week), clamp(week.saturating_add(out)))

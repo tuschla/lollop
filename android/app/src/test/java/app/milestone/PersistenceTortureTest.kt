@@ -1,12 +1,12 @@
 package app.milestone
 
 import android.content.Context
-import android.os.Looper
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.LongHistorySeed
 import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
+import app.milestone.qa.QaHarness.onAppScope
 import app.milestone.qa.launchApp
 import app.milestone.qa.str
 import java.io.ByteArrayInputStream
@@ -21,8 +21,6 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlin.system.exitProcess
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.async
 import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -30,14 +28,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows.shadowOf
 
 /**
  * Fault-injection / torture tests of the shell's persistence: the append-only event
@@ -638,20 +634,6 @@ class PersistenceTortureTest {
         }
         assertEquals(ImportCheck.Invalid, streamValidateImport(endless, MAX_IMPORT_BYTES))
         assertTrue("read ${endless.served} bytes", endless.served <= MAX_IMPORT_LINE_BYTES + 64 * 1024)
-    }
-
-    /** Run [block] on the app's process scope, pumping the paused main looper (the
-     *  serial event consumer resumes there). */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun <T> onAppScope(block: suspend () -> T): T {
-        val job = EventDispatcher.scope.async { block() }
-        val end = System.currentTimeMillis() + 30_000
-        while (!job.isCompleted) {
-            shadowOf(Looper.getMainLooper()).idle()
-            if (System.currentTimeMillis() > end) fail("app-scope work did not finish")
-            Thread.sleep(2)
-        }
-        return job.getCompleted()
     }
 
     /** A data import that cannot write its temporary (disk full / read-only) fails

@@ -71,8 +71,7 @@ pub(in crate::app) fn detect_mastery(
     let today = model.today_epoch_day;
     let dated = |t: i64| t > 0 && cutoff.is_none_or(|c| t <= c);
     let calis = model
-        .profile
-        .as_ref()
+        .profile()
         .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics);
     // A run's day is the local day it STARTED (`RunFacts::started`), the day
     // plan completion credits and its card names.

@@ -16,8 +16,8 @@ const BEST_EFFORT_DISTANCES: [(f64, u32); 4] = [
 /// time is scaled to the exact distance at the run's own average pace.
 const WHOLE_RUN_MATCH: (f64, f64) = (0.995, 1.03);
 
-/// One run's best effort per standard distance: `(seconds, from_split)`.
-type RunBests = [Option<(f64, bool)>; BEST_EFFORT_DISTANCES.len()];
+/// One run's best effort per standard distance, in seconds.
+type RunBests = [Option<f64>; BEST_EFFORT_DISTANCES.len()];
 
 thread_local! {
     /// Per-run best efforts keyed by the run's content fingerprint: a GPS
@@ -82,17 +82,15 @@ fn run_best_efforts(r: &LoggedRun, key: u64, qc: Option<&QcTrack>) -> RunBests {
                     for (slot, (m, _)) in out.iter_mut().zip(BEST_EFFORT_DISTANCES) {
                         let d = km * 1000.0;
                         if d >= m * WHOLE_RUN_MATCH.0 && d <= m * WHOLE_RUN_MATCH.1 {
-                            *slot = Some((min * 60.0 * m / d, false));
+                            *slot = Some(min * 60.0 * m / d);
                         }
                     }
                 }
             }
             Some(q) => {
                 let legs = running::moving_legs(&q.track, &q.seg_starts);
-                let total_m: f64 = legs.iter().map(|(_, d)| d).sum();
                 for (slot, (m, _)) in out.iter_mut().zip(BEST_EFFORT_DISTANCES) {
-                    *slot =
-                        fastest_window_sec(&legs, m).map(|t| (t, total_m > m * WHOLE_RUN_MATCH.1));
+                    *slot = fastest_window_sec(&legs, m);
                 }
             }
         }
@@ -119,26 +117,25 @@ pub(in crate::app) fn build_run_progress(
     facts: &RunFacts,
 ) -> Option<RunProgressView> {
     let offset = model.today_utc_offset_sec;
-    let dated: Vec<(usize, &LoggedRun, i64)> = model
-        .runs
+    // Chronological ([`RunFacts::chrono`]): the weekly float sums are rounded
+    // to 0.1, so summing in storage order would let an Undo (the re-logged row
+    // moves to the tail) move a week by 0.1.
+    let dated: Vec<(usize, &LoggedRun, i64)> = facts
+        .chrono
         .iter()
-        .enumerate()
-        .filter(|(_, r)| r.observed_at > 0)
+        .map(|&i| (i, &model.runs[i]))
+        .filter(|(_, r)| !is_undated(r.observed_at))
         .map(|(i, r)| (i, r, local_day(facts.started[i], offset)))
         .collect();
     let today = model
         .today_epoch_day
         .or_else(|| dated.iter().map(|(_, _, d)| *d).max())?;
-    // Chronological (`observed_at`, then `entry_id`), the `runs` order: the
-    // weekly float sums are rounded to 0.1, so summing in storage order would
-    // let an Undo (the re-logged row moves to the tail) move a week by 0.1.
-    let mut live: Vec<(usize, &LoggedRun, i64)> =
+    let live: Vec<(usize, &LoggedRun, i64)> =
         dated.into_iter().filter(|(_, _, d)| *d <= today).collect();
-    live.sort_by_key(|(_, r, _)| (r.observed_at, r.entry_id));
     if !live.iter().any(|(i, ..)| facts.km[*i] > 0.0) {
         return None;
     }
-    let cur_monday = today.saturating_sub(mon0_weekday(today));
+    let cur_monday = monday_of(today);
     let first_monday = cur_monday.saturating_sub((PROGRESS_WEEKS - 1) * 7);
     let mut weekly: Vec<RunWeekView> = (0..PROGRESS_WEEKS)
         .map(|w| RunWeekView {
@@ -147,13 +144,13 @@ pub(in crate::app) fn build_run_progress(
         })
         .collect();
     let mut longest = (0.0_f64, 0_i64);
-    let mut bests = [None::<(f64, bool, u64, i64)>; BEST_EFFORT_DISTANCES.len()];
+    let mut bests = [None::<(f64, u64, i64)>; BEST_EFFORT_DISTANCES.len()];
     for (i, r, day) in &live {
         let (km, min) = (facts.km[*i], facts.minutes[*i]);
         if km > longest.0 {
             longest = (km, r.observed_at);
         }
-        let monday = day - mon0_weekday(*day);
+        let monday = monday_of(*day);
         if monday >= first_monday {
             let w = &mut weekly[((monday - first_monday) / 7) as usize];
             w.km += km;
@@ -167,11 +164,11 @@ pub(in crate::app) fn build_run_progress(
         }
         let efforts = run_best_efforts(r, facts.keys[*i], facts.qc[*i].as_deref());
         for (slot, effort) in bests.iter_mut().zip(efforts) {
-            if let Some((t, split)) = effort {
+            if let Some(t) = effort {
                 // `live` is in chronological order, so a tie keeps the earlier run.
                 let better = slot.is_none_or(|(bt, ..)| t < bt - BEST_EFFORT_TIE_SEC);
                 if better {
-                    *slot = Some((t, split, r.entry_id, r.observed_at));
+                    *slot = Some((t, r.entry_id, r.observed_at));
                 }
             }
         }
@@ -184,14 +181,13 @@ pub(in crate::app) fn build_run_progress(
         .iter()
         .zip(BEST_EFFORT_DISTANCES)
         .filter_map(|(b, (m, wire_m))| {
-            b.map(|(t, from_split, entry_id, observed_at)| BestEffortView {
+            b.map(|(t, entry_id, observed_at)| BestEffortView {
                 distance_m: wire_m,
                 label: race_distance_title(m / 1000.0),
                 time_sec: whole_seconds(t).min(u64::from(u32::MAX)) as u32,
                 time_label: fmt_clock(t),
                 entry_id,
                 observed_at,
-                from_split,
             })
         })
         .collect();
@@ -199,8 +195,7 @@ pub(in crate::app) fn build_run_progress(
     Some(RunProgressView {
         weekly,
         planned_weekly_km: model
-            .profile
-            .as_ref()
+            .profile()
             .map(|p| p.running_km_per_week.max(0.0))
             .unwrap_or(0.0),
         longest_run_km: round_tenths(longest.0),

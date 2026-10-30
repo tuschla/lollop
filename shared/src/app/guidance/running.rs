@@ -23,16 +23,15 @@ fn push_goal_week_row(p: &Profile, rows: &mut Vec<GuidanceView>) {
     // C25K), so drop the "long run …%" fragment when the share is zero rather
     // than printing a misleading "long run 0–0%". The goal distance renders as
     // a human label, not the raw Debug enum name.
-    let (q_lo, q_hi) = gp.value.quality_per_week;
-    let hard = if q_hi == 0 {
+    let hard = if gp.value.quality_per_week.1 == 0 {
         "none".to_string()
     } else {
-        fmt_u8_range(q_lo, q_hi)
+        fmt_u8_range(gp.value.quality_per_week)
     };
     let head = format!(
         "{}: {} runs a week, {hard} of them hard",
         goal_distance_label(p.goal_distance),
-        fmt_u8_range(gp.value.sessions_per_week.0, gp.value.sessions_per_week.1),
+        fmt_u8_range(gp.value.sessions_per_week),
     );
     let summary = if gp.value.long_run_share.1 > 0.0 {
         format!(
@@ -140,48 +139,50 @@ fn push_volume_progression_rows(
     );
 }
 
+/// One run Rx row's figures in display order: the %HRmax band, the pace band
+/// vs marathon pace (when `with_mp_pace`), effort, and duration ("30–90 min",
+/// or "up to 150 min" for a ceiling alone).
+fn rx_parts(rx: &running::RunWorkoutRx, with_mp_pace: bool) -> Vec<String> {
+    let mut parts = Vec::new();
+    if let (Some(lo), Some(hi)) = rx.pct_hr_max {
+        parts.push(format!("{}% HRmax", fmt_frac_pct_range(lo, hi)));
+    }
+    if with_mp_pace && let (Some(lo), Some(hi)) = rx.pct_slower_than_mp {
+        parts.push(format!(
+            "{}% slower than marathon pace",
+            fmt_pct_range(lo, hi)
+        ));
+    }
+    if let Some(rpe) = rx.rpe {
+        parts.push(format!("effort {} of 10", fmt_u8_range(rpe)));
+    }
+    match rx.duration_min {
+        (Some(lo), Some(hi)) => parts.push(format!("{lo}–{hi} min")),
+        (None, Some(hi)) => parts.push(format!("up to {hi} min")),
+        _ => {}
+    }
+    parts
+}
+
 /// Session-type prescriptions (running-014…020) for an athlete who runs:
 /// the easy-run band, long runs, cruise-interval and VO2max-interval
 /// structure, hill sprints and strides. Each row is built from the Rx struct
 /// so no number is retyped.
 fn push_session_rx_rows(p: &Profile, rows: &mut Vec<GuidanceView>) {
-    let easy = running::workout_rx(running::RunWorkout::EasyGeneralAerobic);
-    let mut parts: Vec<String> = Vec::new();
-    if let (Some(lo), Some(hi)) = easy.value.pct_hr_max {
-        parts.push(format!("{:.0}–{:.0}% HRmax", lo * 100.0, hi * 100.0));
-    }
-    if let Some((lo, hi)) = easy.value.rpe {
-        parts.push(format!("effort {lo}–{hi} of 10"));
-    }
-    if let (Some(lo), Some(hi)) = easy.value.duration_min {
-        parts.push(format!("{lo}–{hi} min"));
-    }
+    let easy = running::workout_rx(crate::schema::RunSessionType::Easy);
     push_guidance(
         rows,
         "Running",
-        format!("Easy runs: {}", parts.join(", ")),
+        format!("Easy runs: {}", rx_parts(&easy.value, false).join(", ")),
         &easy,
     );
 
-    // running-016/018 session Rx from the schema session types.
-    let long = running::run_workout_rx(crate::schema::RunSessionType::LongRun);
-    let mut long_parts: Vec<String> = Vec::new();
-    if let (Some(lo), Some(hi)) = long.value.pct_hr_max {
-        long_parts.push(format!("{:.0}–{:.0}% HRmax", lo * 100.0, hi * 100.0));
-    }
-    if let (Some(lo), Some(hi)) = long.value.pct_slower_than_mp {
-        long_parts.push(format!("{lo:.0}–{hi:.0}% slower than marathon pace"));
-    }
-    if let Some((lo, hi)) = long.value.rpe {
-        long_parts.push(format!("effort {lo}–{hi} of 10"));
-    }
-    if let (None, Some(hi)) = long.value.duration_min {
-        long_parts.push(format!("up to {hi} min"));
-    }
+    // running-016 long-run Rx.
+    let long = running::workout_rx(crate::schema::RunSessionType::LongRun);
     push_guidance(
         rows,
         "Running",
-        format!("Long runs: {}", long_parts.join(", ")),
+        format!("Long runs: {}", rx_parts(&long.value, true).join(", ")),
         &long,
     );
 
@@ -284,7 +285,7 @@ fn push_recovery_and_taper_rows(p: &Profile, rows: &mut Vec<GuidanceView>) {
             format!(
                 "Race taper ({}): {} days, cut volume {}%{}. Hold intensity and frequency",
                 goal_distance_label(p.goal_distance),
-                fmt_u8_range(t.days.0, t.days.1),
+                fmt_u8_range(t.days),
                 fmt_frac_pct_range(t.volume_cut_frac.0, t.volume_cut_frac.1),
                 if t.keep_mp_touches_and_short_tempo {
                     ", keep a few short marathon-pace and tempo efforts"
@@ -298,10 +299,8 @@ fn push_recovery_and_taper_rows(p: &Profile, rows: &mut Vec<GuidanceView>) {
         );
     }
 
-    // running-032 single-variable rule, stated educationally (the call's
-    // both-true arguments only inherit the citation, same pattern as the
-    // two-for-two reference row).
-    let onevar = running::single_variable_progression_ok(true, true);
+    // running-032 single-variable rule, stated as a reference row.
+    let onevar = graded((), claims::RUN_ONEVAR_001);
     push_guidance(
         rows,
         "Running",

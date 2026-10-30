@@ -59,11 +59,11 @@ internal fun ActionRows(
     PlainCard(contentPadding = PaddingValues(0.dp), spacing = 0.dp) {
         rows.forEachIndexed { i, row ->
             if (i > 0) HorizontalDivider(color = Hairline)
-            ActionRowLine(row.label, row.icon, OnBgMuted, OnBgBody, chevron = true, row.testTag, row.onClick)
+            ActionRowLine(row.label, row.icon, destructive = false, row.testTag, row.onClick)
         }
         destructive?.let { d ->
             if (rows.isNotEmpty()) HorizontalDivider(color = Hairline)
-            ActionRowLine(d.label, d.icon, DangerText, DangerText, chevron = false, d.testTag) { confirming = true }
+            ActionRowLine(d.label, d.icon, destructive = true, d.testTag) { confirming = true }
         }
     }
     destructive?.let { d ->
@@ -82,9 +82,8 @@ internal fun ActionRows(
 private fun ActionRowLine(
     label: String,
     icon: Painter,
-    iconTint: Color,
-    labelColor: Color,
-    chevron: Boolean,
+    // DangerText icon and label, no chevron (it confirms first).
+    destructive: Boolean,
     tag: String?,
     onClick: () -> Unit,
 ) {
@@ -98,8 +97,8 @@ private fun ActionRowLine(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.Card.dp),
     ) {
-        Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(24.dp))
-        Text(label, color = labelColor, style = Type.Body, modifier = Modifier.weight(1f))
-        if (chevron) RowChevron()
+        Icon(icon, contentDescription = null, tint = if (destructive) DangerText else OnBgMuted, modifier = Modifier.size(24.dp))
+        Text(label, color = if (destructive) DangerText else OnBgBody, style = Type.Body, modifier = Modifier.weight(1f))
+        if (!destructive) RowChevron()
     }
 }

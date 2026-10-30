@@ -22,7 +22,7 @@ const SESSION_CHAIN_CUTOFF_SEC: i64 = 4 * 3_600;
 const SESSION_CHAIN_GAP_SEC: i64 = 3 * 3_600;
 
 /// Session-day attribution for every logged set, aligned to `sets` by
-/// index: `None` for an undated legacy row (`observed_at <= 0`, which never
+/// index: `None` for an undated legacy row ([`is_undated`], which never
 /// counts toward a day), else the local day it belongs to. Sets are walked in
 /// `observed_at` order; a set logged before [`SESSION_CHAIN_CUTOFF_SEC`]
 /// inherits the previous set's session day when that set is at most
@@ -32,7 +32,7 @@ const SESSION_CHAIN_GAP_SEC: i64 = 3 * 3_600;
 /// the per-day plan-snapshot cutoff both read it, so no rescan per rendered day.
 fn attribute_session_days(sets: &[LoggedSet], offset: i64) -> Vec<Option<i64>> {
     let mut order: Vec<usize> = (0..sets.len())
-        .filter(|&i| sets[i].observed_at > 0)
+        .filter(|&i| !is_undated(sets[i].observed_at))
         .collect();
     order.sort_by_key(|&i| sets[i].observed_at);
     let mut out = vec![None; sets.len()];
@@ -60,11 +60,11 @@ fn attribute_session_days(sets: &[LoggedSet], offset: i64) -> Vec<Option<i64>> {
 /// Per-run session day, aligned to `runs` by index: the local day of the run's
 /// START, [`RunFacts::started`] (its first QC'd fix, else its stamp minus its
 /// duration), the one start every view and coaching bucket uses. `None` for an
-/// undated legacy run (`observed_at <= 0`), which never counts.
+/// undated legacy run ([`is_undated`]), which never counts.
 fn attribute_run_days(runs: &[LoggedRun], facts: &RunFacts, offset: i64) -> Vec<Option<i64>> {
     runs.iter()
         .zip(&facts.started)
-        .map(|(r, &start)| (r.observed_at > 0).then(|| local_day(start, offset)))
+        .map(|(r, &start)| (!is_undated(r.observed_at)).then(|| local_day(start, offset)))
         .collect()
 }
 
@@ -80,6 +80,9 @@ pub(in crate::app) struct LoggedDays {
     pub(super) by_discipline: [std::collections::BTreeSet<i64>; 2],
     /// Distinct days with any logged training.
     pub(super) active: std::collections::BTreeSet<i64>,
+    /// The view's plan-week records through today's week, built on first use
+    /// (`consistency::plan_weeks`).
+    pub(super) plan_weeks: std::cell::OnceCell<Option<PlanWeeks>>,
 }
 
 impl LoggedDays {
@@ -97,6 +100,7 @@ impl LoggedDays {
             runs,
             by_discipline,
             active,
+            plan_weeks: std::cell::OnceCell::new(),
         }
     }
 
@@ -119,29 +123,27 @@ enum SetCredit {
 }
 
 /// The share of the shown prescribed load a set must reach to count as a
-/// (lighter) work set. The specific warm-up ramp tops out at ~80 % of the
-/// working load for 1–3 reps (STR-WARMUP-001), so a heavier set, or one at
-/// that load done for more reps than the ramp step, is work.
+/// (lighter) work set: the specific warm-up ramp tops out at ~80 % of the
+/// working load (STR-WARMUP-001), so a lighter set is never work.
 const WORK_SET_FLOOR: f64 = 0.80;
-/// Reps of the warm-up ramp's top step (STR-WARMUP-001: 80 % × 1–3).
-const RAMP_TOP_MAX_REPS: u32 = 3;
 /// Without a prescribed load, a working set is one at this share of the day's
 /// heaviest same-movement weight; lighter sets are warm-ups.
 const NO_LOAD_WORK_SHARE: f64 = 0.9;
+/// The set screen's warm-up ramp after its first step (STR-WARMUP-001; the
+/// exact steps are expert opinion): 40 % × 5, 60 % × 3 and 80 % × 2 of the
+/// working load.
+const WARM_UP_RAMP: [(f64, u32); 3] = [(0.4, 5), (0.6, 3), (0.8, 2)];
 
-/// How a logged set counts toward a plan item. The caller has matched
-/// movement (`same_movement`); RPE never gates. Any set of one rep (or one
-/// hold second) or more can count: a short set still fills its slot. `fold` is
-/// the adjustment picture shown for that day: a load cut lowers the bar to what
-/// the user actually saw, and a downgrade/modify day (`load_dropped`) removes
-/// the load bar entirely. With a prescribed load, a set within one plate step
-/// of it is full work, one at ≥80 % of it is lighter work unless it is a
-/// warm-up ramp top step of 1–3 reps (STR-WARMUP-001): at most the set
-/// screen's 80 % step of the working load (`warmUpSteps`, on the nearest
-/// plate) however the day's sets were ordered, or any set clearly under the
-/// session's heaviest same-movement set. Without a prescribed load the bar is
-/// [`NO_LOAD_WORK_SHARE`] of the day's heaviest same-movement weight, so a
-/// 0 kg bodyweight set passes (0 >= 0.9·0).
+/// How a logged set that is not a warm-up counts toward a plan item. The
+/// caller has matched movement (`same_movement`); RPE never gates. Any set of
+/// one rep (or one hold second) or more can count: a short set still fills its
+/// slot. `fold` is the adjustment picture shown for that day: a load cut
+/// lowers the bar to what the user actually saw, and a downgrade/modify day
+/// (`load_dropped`) removes the load bar entirely. With a prescribed load, a
+/// set within one plate step of it is full work and one at ≥80 % of it is
+/// lighter work. Without a prescribed load the bar is [`NO_LOAD_WORK_SHARE`]
+/// of the day's heaviest same-movement weight, so a 0 kg bodyweight set
+/// passes (0 >= 0.9·0).
 fn set_credit(
     it: &PrescriptionView,
     s: &LoggedSet,
@@ -174,19 +176,54 @@ fn set_credit(
         (None, Some(added)) => added,
         (None, None) => return near_heaviest,
     };
-    // The set loop logs the ramp BEFORE the first work set, while its top step
-    // is still the day's heaviest set: it is a warm-up by its load alone.
-    let ramp_step = it.load_kg.is_some() && s.weight_kg <= WORK_SET_FLOOR * bar + step / 2.0 + 1e-9;
-    let ramp_top = s.hold_sec.is_none()
-        && s.reps <= RAMP_TOP_MAX_REPS
-        && (ramp_step || s.weight_kg < heaviest - step);
     if s.weight_kg >= bar - step {
         SetCredit::Full
-    } else if s.weight_kg >= WORK_SET_FLOOR * bar && !ramp_top {
+    } else if s.weight_kg >= WORK_SET_FLOOR * bar {
         SetCredit::Lighter
     } else {
         SetCredit::NotCounted
     }
+}
+
+/// The warm-up steps `(kg, reps)` the set screen offers before the first work
+/// set at `work_kg` of a barbell lift (`warmUpSteps` in `SetEditorState.kt`):
+/// a first step × 5 (the empty bar, or for a pull from the floor the bar with
+/// one full plate a side), then [`WARM_UP_RAMP`] on the unit's plate grid. A
+/// ramp step that rounds onto the first step or up to the work load is
+/// dropped. Empty at or below the first step.
+fn warm_up_steps(work_kg: f64, weight_lb: bool, exercise: &str) -> Vec<(f64, u32)> {
+    let lb_kg = |lb: f64| (lb / LB_PER_KG * 100.0).round() / 100.0;
+    let first = match (starts_from_floor(exercise), weight_lb) {
+        (true, true) => lb_kg(135.0),
+        (true, false) => 60.0,
+        (false, true) => lb_kg(45.0),
+        (false, false) => 20.0,
+    };
+    if work_kg <= first + 1e-6 {
+        return Vec::new();
+    }
+    let mut steps = vec![(first, 5)];
+    for (share, reps) in WARM_UP_RAMP {
+        let kg = if weight_lb {
+            lb_kg((work_kg * share * LB_PER_KG / 5.0).round() * 5.0)
+        } else {
+            (work_kg * share / 2.5).round() * 2.5
+        };
+        if kg > first + 1e-6 && kg < work_kg - 1e-6 && steps.iter().all(|(k, _)| *k != kg) {
+            steps.push((kg, reps));
+        }
+    }
+    steps
+}
+
+/// Whether `exercise` starts each rep from the floor (a deadlift, a clean or
+/// snatch from the floor, a Pendlay row; not a Romanian, stiff-leg or hang
+/// variant), as `isFloorLift` in `SetEditorState.kt` reads it.
+fn starts_from_floor(exercise: &str) -> bool {
+    let e = exercise.to_lowercase();
+    let has = |k: &str| e.contains(k);
+    !(has("romanian") || has("rdl") || has("stiff") || has("hang"))
+        && (has("deadlift") || has("clean") || has("snatch") || has("pendlay"))
 }
 
 /// Whether a set fell short of the prescribed reps (or hold).
@@ -543,11 +580,28 @@ fn pain_stopped(it: &PrescriptionView, recs: &[Recommended<Adjustment>]) -> bool
     })
 }
 
+impl PrescriptionView {
+    /// A run item with a run logged against it.
+    pub(super) fn ran(&self) -> bool {
+        self.run_logged_km > 0.0 || self.run_logged_min > 0.0
+    }
+
+    /// Whether any work is logged against the item: a run, or a set of its
+    /// movement.
+    pub(super) fn has_work(&self) -> bool {
+        if self.is_run() {
+            self.ran()
+        } else {
+            self.sets_done > 0 || !self.logged_sets.is_empty()
+        }
+    }
+}
+
 /// One item's status from its completion fields. `pain`: a pain report
 /// stopped it.
 fn item_status(it: &PrescriptionView, pain: bool) -> ItemStatus {
     if it.is_run() {
-        let ran = it.run_logged_km > 0.0 || it.run_logged_min > 0.0;
+        let ran = it.ran();
         return if pain && !ran {
             ItemStatus::SkippedPain
         } else if it.done {
@@ -584,7 +638,7 @@ fn item_status(it: &PrescriptionView, pain: bool) -> ItemStatus {
         } else {
             ItemStatus::DoneLighter
         }
-    } else if !it.logged_sets.is_empty() || it.sets_done > 0 {
+    } else if it.has_work() {
         ItemStatus::InProgress
     } else {
         ItemStatus::Open
@@ -636,12 +690,7 @@ fn most_work_logged(items: &[PrescriptionView]) -> bool {
 /// it: a lift set of the movement, or a run.
 fn any_work_logged(items: &[PrescriptionView]) -> bool {
     items.iter().any(|it| {
-        !matches!(it.status, ItemStatus::SkippedPain | ItemStatus::StoppedPain)
-            && if it.is_run() {
-                it.run_logged_km > 0.0 || it.run_logged_min > 0.0
-            } else {
-                it.sets_done > 0 || !it.logged_sets.is_empty()
-            }
+        !matches!(it.status, ItemStatus::SkippedPain | ItemStatus::StoppedPain) && it.has_work()
     })
 }
 
@@ -737,7 +786,7 @@ pub(super) fn flatten_session(
     } = *ctx;
     let fold = judge.fold;
     let judge_day = judge.day;
-    let bodyweight = model.profile.as_ref().and_then(|p| p.bodyweight_kg);
+    let bodyweight = model.profile().and_then(|p| p.bodyweight_kg);
     let mut items: Vec<PrescriptionView> = s
         .prescriptions
         .iter()
@@ -868,10 +917,10 @@ fn judge_lift_item(it: &mut PrescriptionView, judge: &DayJudge, ctx: &FlattenCtx
         .iter()
         .map(|srec| srec.weight_kg)
         .fold(0.0, f64::max);
+    let credits = day_credits(it, &day_sets, heaviest, step, fold, weight_lb);
     let mut sets_done = 0u8;
     let mut logged = Vec::with_capacity(day_sets.len());
-    for srec in &day_sets {
-        let credit = set_credit(it, srec, heaviest, step, fold);
+    for (srec, credit) in day_sets.iter().zip(credits) {
         let q = credit != SetCredit::NotCounted;
         if q {
             sets_done = sets_done.saturating_add(1);
@@ -887,6 +936,56 @@ fn judge_lift_item(it: &mut PrescriptionView, judge: &DayJudge, ctx: &FlattenCtx
     it.logged_sets = logged;
     it.ended_early = ended_early(model, &it.exercise, judge.day);
     it.done = sets_done >= required_sets(it.sets, fold.vol_frac) || it.ended_early;
+}
+
+/// Each of a day's chronological same-movement sets credited ([`set_credit`]),
+/// except a warm-up: a set logged before the first work set that matches a
+/// not-yet-taken step of the set screen's ramp ([`warm_up_steps`]) for the
+/// load shown that day, else the suggested start (`SetEditor.kt`:
+/// `load_kg ?: suggested_load_kg`): within half a plate of the step's load,
+/// at most its reps. Each step is taken once, so a day holds at most as many
+/// warm-ups as the ramp has steps.
+fn day_credits(
+    it: &PrescriptionView,
+    day_sets: &[&LoggedSet],
+    heaviest: f64,
+    step: f64,
+    fold: AdjustFold,
+    weight_lb: bool,
+) -> Vec<SetCredit> {
+    let shown_load = if fold.drops_load(it) {
+        None
+    } else if fold.load_frac > 0.0 {
+        it.load_kg
+            .and_then(|kg| round_load_or_drop(kg * (1.0 - fold.load_frac), weight_lb))
+    } else {
+        it.load_kg
+    };
+    let mut ramp = match shown_load.or(it.suggested_load_kg) {
+        Some(work) if !it.timed_hold && crate::plan::is_barbell_lift(&it.exercise) => {
+            warm_up_steps(work, weight_lb, &it.exercise)
+        }
+        _ => Vec::new(),
+    };
+    let mut working = false;
+    day_sets
+        .iter()
+        .map(|s| {
+            let matches = |&(kg, reps): &(f64, u32)| {
+                (s.weight_kg - kg).abs() <= step / 2.0 + 1e-9 && (1..=reps).contains(&s.reps)
+            };
+            if !working
+                && s.hold_sec.is_none()
+                && let Some(i) = ramp.iter().position(matches)
+            {
+                ramp.remove(i);
+                return SetCredit::NotCounted;
+            }
+            let credit = set_credit(it, s, heaviest, step, fold);
+            working |= credit != SetCredit::NotCounted;
+            credit
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -992,42 +1091,63 @@ mod tests {
         );
     }
 
+    /// The credits of `sets` (kg, reps), logged in that order, for `it`.
+    fn credits(it: &PrescriptionView, sets: &[(f64, u32)], weight_lb: bool) -> Vec<SetCredit> {
+        let logged: Vec<LoggedSet> = sets.iter().map(|&(kg, r)| set_at(kg, r, 0)).collect();
+        let day: Vec<&LoggedSet> = logged.iter().collect();
+        let heaviest = sets.iter().map(|s| s.0).fold(0.0, f64::max);
+        let step = movement_step_kg(weight_lb);
+        day_credits(it, &day, heaviest, step, AdjustFold::default(), weight_lb)
+    }
+
     #[test]
-    fn the_warm_up_ramp_top_step_and_lighter_sets_do_not_count() {
-        // STR-WARMUP-001: 80 % × 1–3 before the 290 lb work sets is a warm-up;
-        // anything under 80 % of the prescribed load is never work.
-        let it = squat(290.0, 5, 6);
-        let step = movement_step_kg(true);
-        let top = 290.0 * LB;
-        let ramp = set_at(232.0 * LB, 2, 0);
+    fn the_set_screens_warm_up_ramp_before_the_first_work_set_does_not_count() {
+        use SetCredit::*;
+        // The ramp for 285 lb: the bar × 5, 115 × 5, 170 × 3 and 230 × 2 (80 %
+        // is 228 lb, on the 5 lb grid 230).
+        let it = squat(285.0, 5, 3);
+        let lb = |sets: &[(f64, u32)]| -> Vec<(f64, u32)> {
+            sets.iter().map(|&(w, r)| (w * LB, r)).collect()
+        };
+        let ramp = [(45.0, 5), (115.0, 5), (170.0, 3), (230.0, 2)];
+        let day = lb(&[ramp.as_slice(), &[(285.0, 5), (285.0, 5)]].concat());
         assert_eq!(
-            set_credit(&it, &ramp, top, step, AdjustFold::default()),
-            SetCredit::NotCounted
+            credits(&it, &day, true),
+            [NotCounted, NotCounted, NotCounted, NotCounted, Full, Full]
         );
-        // Logged first (the set loop's order) it is the day's heaviest set; the
-        // set screen's step for 285 lb rounds 228 up to 230 lb, above 80 %.
-        let first = set_at(230.0 * LB, 2, 0);
+        // After a work set the same double is a lighter back-off set.
+        let back_off = lb(&[(285.0, 5), (230.0, 2)]);
+        assert_eq!(credits(&it, &back_off, true), [Full, Lighter]);
+        // Each step is taken once; more reps than the step is work.
+        let twice = lb(&[(230.0, 2), (230.0, 2), (230.0, 3)]);
+        assert_eq!(credits(&it, &twice, true), [NotCounted, Lighter, Lighter]);
+        // Under 80 % is never work, and a set of no reps never counts.
+        let short = lb(&[(200.0, 5), (285.0, 0)]);
+        assert_eq!(credits(&it, &short, true), [NotCounted, NotCounted]);
+    }
+
+    #[test]
+    fn a_suggested_load_ramps_like_a_prescribed_one() {
+        use SetCredit::*;
+        // No load anchor, a 62.5 kg suggested start: the ramp is the bar, 25 × 5,
+        // 37.5 × 3 and 50 × 2. The first step is no work set although it is the
+        // day's heaviest set when logged.
+        let it = PrescriptionView {
+            exercise: "Back Squat".to_string(),
+            sets: 3,
+            reps_low: 5,
+            reps_high: 5,
+            suggested_load_kg: Some(62.5),
+            ..Default::default()
+        };
+        assert_eq!(credits(&it, &[(25.0, 5)], false), [NotCounted]);
         assert_eq!(
-            set_credit(
-                &squat(285.0, 5, 6),
-                &first,
-                first.weight_kg,
-                step,
-                AdjustFold::default()
-            ),
-            SetCredit::NotCounted,
-            "the ramp top logged before any work set is still a warm-up"
+            credits(&it, &[(20.0, 5), (25.0, 5), (62.5, 5), (62.5, 5)], false),
+            [NotCounted, NotCounted, Full, Full]
         );
-        let light = set_at(200.0 * LB, 5, 0);
-        assert_eq!(
-            set_credit(&it, &light, top, step, AdjustFold::default()),
-            SetCredit::NotCounted
-        );
-        let zero = set_at(290.0 * LB, 0, 0);
-        assert_eq!(
-            set_credit(&it, &zero, top, step, AdjustFold::default()),
-            SetCredit::NotCounted
-        );
+        // A floor pull starts at 60 kg, so 25 kg × 5 is no step of its ramp.
+        assert_eq!(warm_up_steps(62.5, false, "Deadlift"), [(60.0, 5)]);
+        assert_eq!(warm_up_steps(20.0, false, "Back Squat"), []);
     }
 
     #[test]

@@ -1,14 +1,14 @@
 //! Autoregulation core: readiness inputs → evidence-cited adjustments.
 //!
-//! Pure, deterministic logic derived from knowledge-base File 06
+//! Pure logic derived from knowledge-base File 06
 //! (`knowledge-base/extracted/06-autoregulation.md`): readiness-signal
 //! definitions, the ~50 IF→THEN adjustment rules with verbatim thresholds, and
-//! the §5 six-tier safety ladder. No IO, no `SystemTime`, no randomness.
+//! the §5 six-tier safety ladder.
 //!
 //! Every emitted recommendation is a [`Recommended<Adjustment>`] whose
 //! [`ClaimId`](crate::evidence::ClaimId) resolves to its evidence row in the compile-time claim registry
-//! (`crate::evidence`). Safety-critical stops (pain, fever/illness, RHR +10 bpm)
-//! dominate all optimization triggers.
+//! (`crate::evidence`). Safety-critical stops (pain, fever/illness, a
+//! corroborated resting-HR elevation) dominate all optimization triggers.
 //!
 //! [`Recommended<Adjustment>`]: crate::schema::Recommended
 
@@ -39,8 +39,10 @@ pub use prescriptions::{
     wellness_rhr_multiday_easy,
 };
 pub(crate) use prescriptions::{
-    RPE_LOAD_GAP_DELOAD_PCT, VBT_RELIABILITY_M_S, VBT_WEEKLY_DROP_DELOAD_M_S,
+    HRV_UNRELIABLE_SUSPEND, RPE_LOAD_GAP_DELOAD_PCT, VBT_RELIABILITY_M_S,
+    VBT_WEEKLY_DROP_DELOAD_M_S,
 };
+pub(crate) use rules::{HRV_ESCALATE_STREAK, WELLNESS_DOWNGRADE_STREAK};
 pub use rules::{
     RhrNoise, RuleContext, adjustments_in, bone_stress_referral, failed_set_stop,
     first_set_rpe_adjust, hrv_below_swc, illness_active, illness_plan_recs, illness_stop,

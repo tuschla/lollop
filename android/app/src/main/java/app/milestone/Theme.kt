@@ -16,6 +16,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -64,6 +65,9 @@ data class Palette(
     val warnText: Color,
     val dangerText: Color,
 )
+
+/** A dark palette: its ground has low luminance (a forced Dark on a light OS too). */
+internal val Palette.isDark: Boolean get() = bgTop.luminance() < 0.5f
 
 // Warn ochre for text. #E0A33A clears ≥5.85:1 on every dark ground (worst
 // Meadow-dark bgElevated), #8A5300 ≥5.19:1 on every light ground (worst
@@ -381,6 +385,8 @@ object Type {
         lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
         textDirection = AppTextDirection,
     )
+    /** [Body] in Bold: a row title, a figure or a text action. */
+    val BodyBold = Body.copy(fontWeight = FontWeight.Bold)
     // Secondary running text. Explicit 20sp line height, untrimmed: the extra
     // leading is split above the first and below the last line, so a multi-line
     // caption's final-line descenders ("goes", "you're") never touch, and get cut
@@ -394,6 +400,8 @@ object Type {
     /** Chip / control / short-label text (choice chips, segments, nav labels,
      *  chart legends): 13sp Bold. */
     val Chip = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, textDirection = AppTextDirection)
+    /** [Chip] at Regular weight: an unselected nav label. */
+    val ChipRegular = Chip.copy(fontWeight = FontWeight.Normal)
 
     /** Tile-scale overline (chrome §3): 12sp Bold, FieldLabel letter-spacing,
      *  UPPERCASE at the call site, color `OnBgFaint`. Top-left of every tile. */
@@ -520,11 +528,7 @@ fun MilestoneTheme(
     // Light/dark source: respect the OS by default, or honor a forced override
     // (the "respect system dark mode" toggle). Each theme supplies both grounds;
     // only the decorative palette (and the done mark) flips, never the fills.
-    val dark = when (darkMode) {
-        DarkMode.System -> isSystemInDarkTheme()
-        DarkMode.Light -> false
-        DarkMode.Dark -> true
-    }
+    val dark = darkMode.isDark(isSystemInDarkTheme())
     val base = if (dark) appTheme.dark else appTheme.light
     // The other ground of the same palette: M3 draws snackbars on the inverse
     // roles, so they take this theme's opposite ground instead of M3's baseline

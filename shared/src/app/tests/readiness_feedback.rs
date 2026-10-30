@@ -18,7 +18,10 @@ fn e1rm_dip_view_shows_rpe_cap_row() {
             .iter()
             .any(|a| a.summary.contains("Stop 1 rep earlier than planned"))
     );
-    assert!(!vm.train_blocked, "an RPE cap modifies, never blocks");
+    assert!(
+        vm.hold_reason.is_none(),
+        "an RPE cap modifies, never blocks"
+    );
 }
 
 #[test]
@@ -79,10 +82,6 @@ fn interval_mastery_review_reaches_feedback() {
         .expect_only_render();
     let fb = app.view(&model).feedback.expect("feedback present");
     assert_eq!(fb.category, FeedbackCategory::PositiveMastery);
-    assert!(
-        fb.anchor_mastery,
-        "praise must anchor a concrete achievement"
-    );
     // Reps over target RPE fall through to other arms, not mastery.
     let review = SessionReview {
         interval: Some(IntervalExec {

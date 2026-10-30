@@ -9,8 +9,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -59,13 +61,13 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
@@ -82,6 +84,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -121,12 +124,12 @@ val ChoiceCellBorder: Color @Composable get() = HairlineStrong
 /** Clip + fill (+ hairline when unselected) for one selectable cell. Chain the
  *  caller's `.selectable(...)` and inner padding after it. */
 @Composable
-fun Modifier.choiceCell(selected: Boolean, shape: Shape = ChoiceCellShape): Modifier {
-    val clipped = clip(shape)
+fun Modifier.choiceCell(selected: Boolean): Modifier {
+    val clipped = clip(ChoiceCellShape)
     return if (selected) {
         clipped.background(Accent)
     } else {
-        clipped.background(ChoiceCellFill).border(1.dp, ChoiceCellBorder, shape)
+        clipped.background(ChoiceCellFill).border(1.dp, ChoiceCellBorder, ChoiceCellShape)
     }
 }
 
@@ -256,7 +259,7 @@ fun <T> OptionList(
                 Text(
                     display(value),
                     color = OnBgBody,
-                    style = if (selected) Type.Body.copy(fontWeight = FontWeight.Bold) else Type.Body,
+                    style = if (selected) Type.BodyBold else Type.Body,
                     modifier = Modifier.weight(1f),
                 )
                 if (selected) {
@@ -416,7 +419,7 @@ fun FieldLabel(
         Text(
             label,
             color = OnBgMuted,
-            style = Type.Body.copy(fontWeight = FontWeight.Bold),
+            style = Type.BodyBold,
             modifier = if (heading) Modifier.semantics { heading() } else Modifier,
         )
     }
@@ -568,26 +571,10 @@ fun <T> ChoiceScaleRow(
             maxItemsInEachRow = cols,
         ) {
             options.forEach { opt ->
-                val selected = opt == current
-                Box(
-                    modifier = Modifier
-                        .width(cellWidth)
-                        .heightIn(min = ActionMinHeight)
-                        .choiceCell(selected)
-                        // Selectable (not bare clickable) so TalkBack reads the picked
-                        // state + radio role instead of a stateless tap target.
-                        .selectable(selected = selected, role = Role.RadioButton, onClick = { onSelect(opt) })
-                        .then(scaleCellDescription(label, render(opt)))
-                        .padding(vertical = Space.Md.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        render(opt),
-                        color = choiceCellContent(selected),
-                        style = Type.Body.merge(TabularFigures),
-                        maxLines = 1,
-                    )
-                }
+                ScaleCell(
+                    render(opt), opt == current, label, Modifier.width(cellWidth),
+                    PaddingValues(vertical = Space.Md.dp),
+                ) { onSelect(opt) }
             }
         }
     }
@@ -641,17 +628,14 @@ fun <T> ScrollableScaleRow(
         horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
         options.forEach { opt ->
-            val selected = opt == current
-            Box(
-                modifier = Modifier
-                    .heightIn(min = ActionMinHeight)
-                    .choiceCell(selected)
-                    .selectable(selected = selected, role = Role.RadioButton, onClick = { onSelect(opt) })
-                    .then(scaleCellDescription(label, render(opt)))
+            ScaleCell(
+                render(opt),
+                opt == current,
+                label,
+                Modifier
                     .widthIn(min = ActionMinHeight)
-                    .padding(vertical = Space.Md.dp, horizontal = Space.Md.dp)
                     .then(
-                        // Record the selected cell's content-space centre. Scroll is 0
+                        // Record the anchor cell's content-space centre. Scroll is 0
                         // on the first layout pass, so positionInParent is the intrinsic
                         // position we scroll toward.
                         if (opt == anchor) {
@@ -662,16 +646,34 @@ fun <T> ScrollableScaleRow(
                             Modifier
                         },
                     ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    render(opt),
-                    color = choiceCellContent(selected),
-                    style = Type.Body.merge(TabularFigures),
-                    maxLines = 1,
-                )
-            }
+                PaddingValues(Space.Md.dp),
+            ) { onSelect(opt) }
         }
+    }
+}
+
+/** One cell of a scale row: the [choiceCell] look, sized by [modifier] and padded
+ *  by [padding]. Selectable (not bare clickable) so TalkBack reads the picked state
+ *  and radio role, with [label] spoken before the value. */
+@Composable
+private fun ScaleCell(
+    text: String,
+    selected: Boolean,
+    label: String?,
+    modifier: Modifier,
+    padding: PaddingValues,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .heightIn(min = ActionMinHeight)
+            .choiceCell(selected)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .then(scaleCellDescription(label, text))
+            .padding(padding),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = choiceCellContent(selected), style = Type.Body.merge(TabularFigures), maxLines = 1)
     }
 }
 
@@ -831,6 +833,85 @@ fun RowChevron(expanded: Boolean = false, tint: Color = OnBgFaint) {
     )
 }
 
+/** A whole-row ≥48dp button: [content] stacked at the start, the [RowChevron]
+ *  at the end (none without [chevron]). [modifier] is the row's surface (clip,
+ *  ground, border) under the click; [contentPadding] sits inside it. With
+ *  [expanded] the row folds a section open: the chevron turns and TalkBack
+ *  hears "Expanded" / "Collapsed". */
+@Composable
+internal fun ChevronRow(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    expanded: Boolean? = null,
+    chevron: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(),
+    spacing: Dp = Space.Card.dp,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val state = expanded?.let { stringResource(if (it) R.string.ui_cd_expanded else R.string.ui_cd_collapsed) }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = ActionMinHeight)
+            .clickable(role = Role.Button, onClick = onClick)
+            .then(if (state != null) Modifier.semantics { stateDescription = state } else Modifier)
+            .padding(contentPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp), content = content)
+        if (chevron) RowChevron(expanded == true)
+    }
+}
+
+/** A [ChevronRow] reading a bold [title] over a faint one-line [subtitle]. */
+@Composable
+internal fun TitleSubtitleRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    expanded: Boolean? = null,
+    contentPadding: PaddingValues = PaddingValues(),
+) = ChevronRow(onClick, modifier, expanded, contentPadding = contentPadding) {
+    Text(title, color = OnBgBody, style = Type.BodyBold)
+    Text(subtitle, color = OnBgFaint, style = Type.Caption)
+}
+
+/** [lead] at the start and [trail] at the end of one row, each centred on the
+ *  row's height, while [fitsBeside] (the lead, the trail's width, the row's
+ *  width) says the lead fits; otherwise [trail] goes under [lead], at the end,
+ *  and the lead may take the row's width less [stackedEndInset]. Start and end
+ *  mirror under RTL. */
+@Composable
+internal fun BesideOrStacked(
+    lead: @Composable () -> Unit,
+    trail: @Composable () -> Unit,
+    modifier: Modifier,
+    stackedEndInset: Dp = 0.dp,
+    fitsBeside: (lead: Measurable, trailWidth: Int, width: Int) -> Boolean,
+) {
+    Layout(contents = listOf(lead, trail), modifier = modifier) { (leadM, trailM), constraints ->
+        val width = constraints.maxWidth
+        val leadMeasurable = leadM.single()
+        val t = trailM.single().measure(Constraints(maxWidth = width))
+        if (fitsBeside(leadMeasurable, t.width, width)) {
+            val l = leadMeasurable.measure(Constraints(maxWidth = (width - t.width).coerceAtLeast(0)))
+            val h = maxOf(l.height, t.height)
+            layout(width, h) {
+                l.placeRelative(0, (h - l.height) / 2)
+                t.placeRelative(width - t.width, (h - t.height) / 2)
+            }
+        } else {
+            val l = leadMeasurable.measure(Constraints(maxWidth = (width - stackedEndInset.roundToPx()).coerceAtLeast(0)))
+            layout(width, l.height + t.height) {
+                l.placeRelative(0, 0)
+                t.placeRelative(width - t.width, l.height)
+            }
+        }
+    }
+}
+
 // --- Action buttons: ONE system, three tiers ---
 // * PrimaryButton: the one "do this next" of a screen or card. Solid Accent fill,
 //   ExtraBold OnAccent label.
@@ -880,12 +961,10 @@ fun SecondaryButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true,
     description: String? = null,
-    minHeight: Dp = ActionMinHeight,
 ) {
     ActionButton(
-        label, onClick, modifier, enabled, description, minHeight,
+        label, onClick, modifier, true, description, ActionMinHeight,
         AccentTint, OnBgBody, FontWeight.Bold,
     )
 }
@@ -967,7 +1046,7 @@ fun TextAction(
     ) {
         // Weighted (not filling): a label that fills the line wraps, and the
         // chevron keeps its room instead of being squeezed out at a large font.
-        Text(label, color = tone, style = Type.Body.copy(fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f, fill = false))
+        Text(label, color = tone, style = Type.BodyBold, modifier = Modifier.weight(1f, fill = false))
         if (chevron) RowChevron(tint = tone)
     }
 }

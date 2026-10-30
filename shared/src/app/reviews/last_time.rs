@@ -37,12 +37,7 @@ pub(in crate::app) fn annotate_last_time(
         let top = &model.sets[top_i];
         // "with 2 reps left" from the rated effort (never "@ RPE 8" behind the
         // "?" either: one effort vocabulary everywhere).
-        let left = if top.rpe > 0.0 {
-            let n = crate::strength::rpe_to_rir(top.rpe).round().max(0.0) as u8;
-            format!(" with {}", reserve(n))
-        } else {
-            String::new()
-        };
+        let left = with_reserve_from_rpe(top.rpe);
         let mut line = format!(
             "Last time: {} × {}{left}.",
             fmt_weight(top.weight_kg, weight_lb),
@@ -65,7 +60,7 @@ pub(in crate::app) fn annotate_last_time(
                 let reason = if diff < 0.0 && derated {
                     format!(
                         " because your last session's estimated max came in more than {:.0}% under your best.",
-                        (1.0 - crate::app::anchors::E1RM_DROP_GATE) * 100.0
+                        crate::app::anchors::E1RM_DROP_PCT
                     )
                 } else if diff < 0.0 && !it.adjusted_note.is_empty() {
                     " because of today's adjustment.".to_string()

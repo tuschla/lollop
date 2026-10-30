@@ -22,7 +22,7 @@ fn block_bests(
     let mut best = [0.0_f64; TREND_BLOCKS];
     for &i in set_index.movement_sets(movement) {
         let s = &model.sets[i];
-        if s.observed_at <= 0 {
+        if is_undated(s.observed_at) {
             continue;
         }
         let Ok(back) = usize::try_from(today.saturating_sub(local_day(s.observed_at, offset)))
@@ -91,6 +91,63 @@ fn lift_trend(
     })
 }
 
+/// The most decisive lift trend among the movements trained in the last 4
+/// weeks (a load-explained decline, then improving, then a plateau); `None`
+/// when every one is steady or has no comparable block.
+fn pick_lift_trend(
+    model: &Model,
+    set_index: &SetIndex,
+    today: i64,
+    low_recovery: bool,
+) -> Option<(LiftTrend, Recommended<feedback::TrendSummary>)> {
+    let calis = model
+        .profile()
+        .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics);
+    // Distinct movements trained in the last 4 weeks, each under its
+    // first-logged name: chronological (`observed_at`, then `entry_id`, the
+    // `lifts` order), so the name and the tie between equal-rank trends do
+    // not depend on storage order (an Undo or amend moves a set to the tail).
+    let offset = model.today_utc_offset_sec;
+    let mut recent: Vec<usize> = (0..model.sets.len())
+        .filter(|&i| {
+            let s = &model.sets[i];
+            !is_undated(s.observed_at)
+                && today.saturating_sub(local_day(s.observed_at, offset)) <= 27
+        })
+        .collect();
+    recent.sort_by_key(|&i| (model.sets[i].observed_at, model.sets[i].entry_id));
+    let mut names: Vec<(&str, u32)> = Vec::new();
+    for i in recent {
+        let movement = set_index.facts(i).movement;
+        if !names.iter().any(|&(_, m)| m == movement) {
+            names.push((&model.sets[i].exercise, movement));
+        }
+    }
+    let mut picked: Option<(u8, LiftTrend, Recommended<feedback::TrendSummary>)> = None;
+    for name in names {
+        let Some(t) = lift_trend(model, set_index, name, today, calis) else {
+            continue;
+        };
+        let rec = feedback::trend_summary(
+            t.dir,
+            t.weeks_flat,
+            t.dir == feedback::TrendDirection::Down,
+            false,
+            low_recovery,
+        );
+        let rank = match rec.value {
+            feedback::TrendSummary::LoadExplainedDecline => 3,
+            feedback::TrendSummary::Improving => 2,
+            feedback::TrendSummary::Plateau => 1,
+            feedback::TrendSummary::Stable => 0,
+        };
+        if rank > 0 && picked.as_ref().is_none_or(|(r, ..)| rank > *r) {
+            picked = Some((rank, t, rec));
+        }
+    }
+    picked.map(|(_, t, rec)| (t, rec))
+}
+
 /// The feedback-027/028/029 longitudinal trend message, derived from the
 /// logged lifts (per main lift: best estimated max over the last 4 weeks vs
 /// the 4 before, ±5 % noise band), with recovery read from the weekly
@@ -123,8 +180,7 @@ pub(in crate::app) fn build_trend(
     // feedback-028: exactly ONE lever, taken from the KB rule for the goal
     // (hypertrophy-008 adds sets; a strength stall takes a lighter week).
     let (lever, lever_claim) = if model
-        .profile
-        .as_ref()
+        .profile()
         .is_some_and(|p| p.lift_goal == LiftGoal::Hypertrophy)
     {
         (
@@ -137,76 +193,31 @@ pub(in crate::app) fn build_trend(
             claims::STR_STALL_001,
         )
     };
-    if let Some(today) = model.today_epoch_day {
-        let calis = model
-            .profile
-            .as_ref()
-            .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics);
-        // Distinct movements trained in the last 4 weeks, each under its
-        // first-logged name: chronological (`observed_at`, then `entry_id`, the
-        // `lifts` order), so the name and the tie between equal-rank trends do
-        // not depend on storage order (an Undo or amend moves a set to the tail).
-        let offset = model.today_utc_offset_sec;
-        let mut recent: Vec<usize> = (0..model.sets.len())
-            .filter(|&i| {
-                let s = &model.sets[i];
-                s.observed_at > 0 && today.saturating_sub(local_day(s.observed_at, offset)) <= 27
-            })
-            .collect();
-        recent.sort_by_key(|&i| (model.sets[i].observed_at, model.sets[i].entry_id));
-        let mut names: Vec<(&str, u32)> = Vec::new();
-        for i in recent {
-            let movement = set_index.facts(i).movement;
-            if !names.iter().any(|&(_, m)| m == movement) {
-                names.push((&model.sets[i].exercise, movement));
+    if let Some(today) = model.today_epoch_day
+        && let Some((t, rec)) = pick_lift_trend(model, set_index, today, low_recovery)
+    {
+        let max = fmt_weight(t.current, weight_lb);
+        let text = match rec.value {
+            feedback::TrendSummary::Improving => format!(
+                "{}: best estimated max over the last 4 weeks is {max}, up {:.0}% on the 4 weeks before.",
+                t.exercise,
+                t.delta * 100.0
+            ),
+            feedback::TrendSummary::Plateau => {
+                let text = format!(
+                    "{} has held steady for {} weeks (estimated max {max}). Suggested change: {lever}.",
+                    t.exercise, t.weeks_flat
+                );
+                return Some(to_view_with(text, &graded(rec.value, lever_claim)));
             }
-        }
-        let mut picked: Option<(u8, LiftTrend, Recommended<feedback::TrendSummary>)> = None;
-        for name in names {
-            let Some(t) = lift_trend(model, set_index, name, today, calis) else {
-                continue;
-            };
-            let rec = feedback::trend_summary(
-                t.dir,
-                t.weeks_flat,
-                t.dir == feedback::TrendDirection::Down,
-                false,
-                low_recovery,
-            );
-            let rank = match rec.value {
-                feedback::TrendSummary::LoadExplainedDecline => 3,
-                feedback::TrendSummary::Improving => 2,
-                feedback::TrendSummary::Plateau => 1,
-                feedback::TrendSummary::Stable => 0,
-            };
-            if rank > 0 && picked.as_ref().is_none_or(|(r, ..)| rank > *r) {
-                picked = Some((rank, t, rec));
-            }
-        }
-        if let Some((_, t, rec)) = picked {
-            let max = fmt_weight(t.current, weight_lb);
-            let text = match rec.value {
-                feedback::TrendSummary::Improving => format!(
-                    "{}: best estimated max over the last 4 weeks is {max}, up {:.0}% on the 4 weeks before.",
-                    t.exercise,
-                    t.delta * 100.0
-                ),
-                feedback::TrendSummary::Plateau => {
-                    let text = format!(
-                        "{} has held steady for {} weeks (estimated max {max}). Suggested change: {lever}.",
-                        t.exercise, t.weeks_flat
-                    );
-                    return Some(to_view_with(text, &graded(rec.value, lever_claim)));
-                }
-                feedback::TrendSummary::LoadExplainedDecline => format!(
-                    "{} is down {:.0}% over the last 4 weeks, likely from low recovery, not lost fitness. Take a lighter week first.",
-                    t.exercise,
-                    t.delta.abs() * 100.0,
-                ),
-                feedback::TrendSummary::Stable => unreachable!("Stable is never picked"),
-            };
-            return Some(to_view_with(text, &rec));
-        }
+            feedback::TrendSummary::LoadExplainedDecline => format!(
+                "{} is down {:.0}% over the last 4 weeks, likely from low recovery, not lost fitness. Take a lighter week first.",
+                t.exercise,
+                t.delta.abs() * 100.0,
+            ),
+            feedback::TrendSummary::Stable => unreachable!("Stable is never picked"),
+        };
+        return Some(to_view_with(text, &rec));
     }
     // Legacy: a trend stated on a review payload.
     let w = weekly?;

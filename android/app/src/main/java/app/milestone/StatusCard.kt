@@ -73,20 +73,15 @@ private val StatusMarkSize = 40.dp
 private val StatusGlyphSize = 22.dp
 
 /**
- * The card for "this is not normal" (ui-sweep §0.3): the theme's card surface
- * with no fill tint; the tone shows only in the [StatusRingWidth] ring and the
- * solid mark tile.
- *
- * Header: mark tile ([glyph], else the tone's default), the [overline], the red
- * SAFETY chip when [safety], then [trailing] flush to the end. [content] follows
- * full width; [footer] (usually [StatusCardFooter]) closes it. The card is one
- * semantics group.
+ * The card for "this is not normal": the card surface, the tone only in the
+ * ring and the mark tile. Header: the mark ([glyph], else the tone's), the
+ * [overline], the SAFETY chip when [safety], [trailing] at the end; then
+ * [content] and the [footer]. One semantics group.
  */
 @Composable
 internal fun StatusCard(
     tone: StatusTone,
     overline: String,
-    modifier: Modifier = Modifier,
     glyph: Painter? = null,
     markDescription: String? = null,
     safety: Boolean = false,
@@ -112,7 +107,7 @@ internal fun StatusCard(
         },
     )
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(BgElevated)

@@ -114,7 +114,6 @@ fun parseGpx(text: String): List<List<GpxFix>> = parseGpxRuns(text).flatMap { it
 /** One [ImportedRun] per `<trk>` that holds fixes: its segments, its own `<type>` as
  *  [ImportedRun.sport] and lollop's `<lollop:logged_at>` stamp. */
 internal fun parseGpxRuns(text: String): List<ImportedRun> {
-    val parser = importPullParser(text)
     val runs = mutableListOf<ImportedRun>()
     var segments = mutableListOf<List<GpxFix>>()
     var segment = mutableListOf<GpxFix>()
@@ -134,16 +133,7 @@ internal fun parseGpxRuns(text: String): List<ImportedRun> {
     var timeSec = 0L
     var hr: Int? = null
     var accuracyM: Double? = null
-    // A cut-off download often ends right after a tag: the pull parser then
-    // reaches END_DOCUMENT without throwing, with `<trkseg>/<trk>/<gpx>` still
-    // open and only the segments closed so far parsed. Only a closed root
-    // proves the file is whole; anything else is Damaged (thrown as the parse
-    // error the caller maps to it), never a shorter run.
-    var rootClosed = false
-    var event = parser.eventType
-    while (event != XmlPullParser.END_DOCUMENT) {
-        val name = parser.name?.substringAfterLast(':')
-        if (event == XmlPullParser.START_TAG) checkImportDepth(parser)
+    pullImportTags(text, "gpx") { parser, event, name ->
         when (event) {
             XmlPullParser.START_TAG -> when (name) {
                 "trk" -> if (!inTrk) {
@@ -194,12 +184,9 @@ internal fun parseGpxRuns(text: String): List<ImportedRun> {
                     inTrk = false
                     if (segments.isNotEmpty()) runs.add(ImportedRun(segments, sport, loggedAtSec))
                 }
-                "gpx" -> if (parser.depth == 1) rootClosed = true
             }
         }
-        event = parser.next()
     }
-    if (!rootClosed) throw XmlPullParserException("GPX ends before </gpx>: truncated")
     return runs
 }
 
@@ -210,19 +197,37 @@ internal fun parseGpxRuns(text: String): List<ImportedRun> {
  *  so a deeper file is refused as damaged as soon as it gets there. */
 internal const val MAX_IMPORT_XML_DEPTH = 64
 
-/** The GPX/TCX readers' pull parser over [text]. Namespace processing is off, so a
- *  name keeps its prefix (`gpxtpx:hr`) and the readers match by local name. */
-internal fun importPullParser(text: String): XmlPullParser = Xml.newPullParser().apply {
-    setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-    setInput(StringReader(text))
-}
-
-/** Throws the parse error the import maps to [ImportFailure.Damaged] once the
- *  element [parser] just opened sits deeper than [MAX_IMPORT_XML_DEPTH]. */
-internal fun checkImportDepth(parser: XmlPullParser) {
-    if (parser.depth > MAX_IMPORT_XML_DEPTH) {
-        throw XmlPullParserException("elements nest deeper than $MAX_IMPORT_XML_DEPTH levels", parser, null)
+/**
+ * Pulls [text] through [onTag]: every start and end tag with its local name (namespace
+ * processing is off, so `gpxtpx:hr` reads as `hr`). A file nesting deeper than
+ * [MAX_IMPORT_XML_DEPTH] throws. A cut-off download often ends right after a tag, and
+ * the pull parser then reaches END_DOCUMENT without throwing, so only a closed [root]
+ * proves the file is whole; anything else throws too. Both throw the parse error the
+ * import maps to [ImportFailure.Damaged].
+ */
+internal inline fun pullImportTags(
+    text: String,
+    root: String,
+    onTag: (parser: XmlPullParser, event: Int, name: String) -> Unit,
+) {
+    val parser = Xml.newPullParser().apply {
+        setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+        setInput(StringReader(text))
     }
+    var rootClosed = false
+    var event = parser.eventType
+    while (event != XmlPullParser.END_DOCUMENT) {
+        if (event == XmlPullParser.START_TAG && parser.depth > MAX_IMPORT_XML_DEPTH) {
+            throw XmlPullParserException("elements nest deeper than $MAX_IMPORT_XML_DEPTH levels", parser, null)
+        }
+        if (event == XmlPullParser.START_TAG || event == XmlPullParser.END_TAG) {
+            val name = parser.name.substringAfterLast(':')
+            if (event == XmlPullParser.END_TAG && name == root && parser.depth == 1) rootClosed = true
+            onTag(parser, event, name)
+        }
+        event = parser.next()
+    }
+    if (!rootClosed) throw XmlPullParserException("Import ends before </$root>: truncated")
 }
 
 /** Physiologically plausible heart-rate samples (bpm) an import keeps. */
@@ -362,7 +367,7 @@ internal fun legTotals(points: List<GpsPoint>, segmentStarts: Collection<Int>): 
         val legKm = segmentKm(points[i - 1], points[i])
         km += legKm
         sec += dt
-        if (legKm * 1000.0 / dt >= MIN_MOVING_SPEED_MPS) movingSec += dt
+        if (movingLegKm(legKm, dt.toDouble()) != null) movingSec += dt
     }
     return LegTotals(km, sec, movingSec)
 }
@@ -467,16 +472,7 @@ internal fun importedRunEvent(run: ImportedRun, measuredHrMax: Double?): Event.L
         idx += seg.size
     }
 
-    // Stride-decimate over the cap, always keeping the first/last point and
-    // every segment boundary (mirrors RunSession's decimation contract).
-    val n = all.size
-    val keep: List<Int> = if (n <= TRACK_DECIMATION_CAP) {
-        (0 until n).toList()
-    } else {
-        val stride = (n + TRACK_DECIMATION_CAP - 1) / TRACK_DECIMATION_CAP
-        (0 until n).filter { it % stride == 0 || it == n - 1 || it in boundaryIdx }
-    }
-    val indexMap = keep.withIndex().associate { (new, old) -> old to new }
+    val keep = decimationKeep(all.size, TRACK_DECIMATION_CAP, boundaryIdx)
     val points = keep.map { i ->
         val f = all[i]
         GpsPoint(
@@ -486,7 +482,7 @@ internal fun importedRunEvent(run: ImportedRun, measuredHrMax: Double?): Event.L
             accuracyM = f.accuracyM ?: IMPORT_UNKNOWN_ACCURACY_M,
         )
     }
-    val segmentStarts = boundaryIdx.sorted().mapNotNull { indexMap[it] }
+    val segmentStarts = remapStarts(keep, boundaryIdx)
     val legs = legTotals(points, segmentStarts)
     if (legs.implausiblyFast) throw ImportException(ImportFailure.ImplausiblePace)
     if (legs.tooShort) throw ImportException(ImportFailure.TooShort)

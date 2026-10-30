@@ -408,6 +408,10 @@ pub fn over_mrv_deload(
     )
 }
 
+/// Share of the base weekly sets kept under low recovery, `(lo, hi)`
+/// (hypertrophy-010/045).
+pub(crate) const LOW_RECOVERY_VOLUME_FRAC: (f64, f64) = (0.70, 0.80);
+
 /// Recovery-adjusted weekly volume (File 03 hypertrophy-010/045;
 /// HYP-RECOVOL-001, ExpertOpinion): in a deficit
 /// or with poor sleep/high stress, scale weekly sets to 70–80% of the base and
@@ -419,7 +423,10 @@ pub fn recovery_adjusted_volume(
 ) -> Recommended<(f64, f64)> {
     let b = base_weekly_sets as f64;
     let range = if low_recovery {
-        (b * 0.70, b * 0.80)
+        (
+            b * LOW_RECOVERY_VOLUME_FRAC.0,
+            b * LOW_RECOVERY_VOLUME_FRAC.1,
+        )
     } else {
         (b, b)
     };
@@ -457,13 +464,19 @@ pub fn per_session_over_cap(session_sets: u8) -> Recommended<bool> {
     )
 }
 
+/// Accumulated overreaching triggers that call a deload now (hypertrophy-035).
+pub(crate) const DELOAD_TRIGGER_MIN: u8 = 2;
+
 /// Deload gate from accumulated overreaching triggers (File 03 hypertrophy-035;
 /// HYP-DELOAD-TRIG-001, Moderate):
 /// deload now once ≥2 triggers appear (performance decrement, RIR drift to 0,
 /// persistent joint/tendon aches, disrupted sleep, elevated RHR, mood drop) -
 /// otherwise follow the preplanned 4–8 week schedule.
 pub fn deload_indicated(trigger_count: u8) -> Recommended<bool> {
-    evidence::graded(trigger_count >= 2, claims::HYP_DELOAD_TRIG_001)
+    evidence::graded(
+        trigger_count >= DELOAD_TRIGGER_MIN,
+        claims::HYP_DELOAD_TRIG_001,
+    )
 }
 
 /// A one-week hypertrophy deload prescription (File 03 hypertrophy-036).
@@ -491,11 +504,15 @@ pub fn deload_rx() -> Recommended<DeloadRx> {
     )
 }
 
+/// Set-to-set rep drop, as a fraction, above which rest is lengthened
+/// (hypertrophy-039).
+pub(crate) const REP_DROP_REST_FRAC: f64 = 0.10;
+
 /// Increase rest when per-set reps fall > ~10% set-to-set (File 03
 /// hypertrophy-039): the mechanism is preserving per-set volume, not rest
 /// duration itself. `true` = lengthen the rest interval.
 pub fn increase_rest_on_rep_drop(rep_drop_frac: f64) -> Recommended<bool> {
-    evidence::graded(rep_drop_frac > 0.10, claims::HYP_REST_001)
+    evidence::graded(rep_drop_frac > REP_DROP_REST_FRAC, claims::HYP_REST_001)
 }
 
 // ---------------------------------------------------------------------------
@@ -589,18 +606,6 @@ pub fn rir_reliability(reported_rir: u8) -> Recommended<RirReliability> {
 /// start at 3–4 RIR and calibrate against actual failure. Returns `(min, max)`.
 pub fn novice_start_rir() -> Recommended<(u8, u8)> {
     evidence::graded((3, 4), claims::HYP_RIR_ACC_001)
-}
-
-/// Whether training to true failure (0 RIR) is permitted (File 03
-/// hypertrophy-021; HYP-FAIL-SAFE-001, ExpertOpinion, SAFETY): reserved for
-/// machines and isolation where failure is safe; never on heavy free-weight
-/// compounds (e.g. unspotted squat/bench). Anything that is neither a machine
-/// nor isolation is conservatively denied.
-pub fn failure_allowed(class: ExerciseClass, machine: bool) -> Recommended<bool> {
-    evidence::graded(
-        machine || matches!(class, ExerciseClass::Isolation),
-        claims::HYP_FAIL_SAFE_001,
-    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1296,14 +1301,6 @@ pub fn meso_structure() -> Recommended<MesoStructure> {
         },
         claims::HYP_MESO_STRUCT_001,
     )
-}
-
-/// Post-layoff MEV reduction flag (File 03 hypertrophy-037; HYP-LAYOFF-001,
-/// ExpertOpinion): after a layoff, restart at a lower MEV because landmarks
-/// are temporarily reduced. The KB states no numeric reduction factor -
-/// documented gap; the engine only flags that MEV must be lowered.
-pub fn layoff_reduces_mev(returning_from_layoff: bool) -> Recommended<bool> {
-    evidence::graded(returning_from_layoff, claims::HYP_LAYOFF_001)
 }
 
 // ---------------------------------------------------------------------------

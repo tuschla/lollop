@@ -485,8 +485,8 @@ fn frequency_guidance_collapses_equal_bounds() {
         "degenerate span not collapsed: {}",
         peak.summary
     );
-    assert_eq!(fmt_u8_range(3, 3), "3");
-    assert_eq!(fmt_u8_range(6, 9), "6–9");
+    assert_eq!(fmt_u8_range((3, 3)), "3");
+    assert_eq!(fmt_u8_range((6, 9)), "6–9");
 }
 
 #[test]

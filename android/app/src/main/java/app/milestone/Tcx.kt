@@ -1,7 +1,6 @@
 package app.milestone
 
 import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserException
 
 // Minimal TCX (Garmin Training Center XML) track reader for run import
 // (Garmin/Strava/etc. exports that ship TCX instead of GPX). Reads only
@@ -19,7 +18,6 @@ import org.xmlpull.v1.XmlPullParserException
  * during pauses) are skipped.
  */
 internal fun parseTcxActivities(text: String): List<ImportedRun> {
-    val parser = importPullParser(text)
     val activities = mutableListOf<ImportedRun>()
     var sport: String? = null
     // One raw fix list per `<Track>` in the current `<Activity>`, merged at Activity end.
@@ -38,16 +36,7 @@ internal fun parseTcxActivities(text: String): List<ImportedRun> {
     var lon = Double.NaN
     var timeSec = 0L
     var hr: Int? = null
-    // A cut-off download often ends right after a tag: the pull parser then
-    // reaches END_DOCUMENT without throwing, with only the activities closed so
-    // far parsed. As for GPX ([parseGpxRuns]), only a closed root proves the file
-    // is whole; anything else is Damaged (thrown as the parse error the caller
-    // maps to it), never a shorter run or "no GPS points".
-    var rootClosed = false
-    var event = parser.eventType
-    while (event != XmlPullParser.END_DOCUMENT) {
-        val name = parser.name?.substringAfterLast(':')
-        if (event == XmlPullParser.START_TAG) checkImportDepth(parser)
+    pullImportTags(text, "TrainingCenterDatabase") { parser, event, name ->
         when (event) {
             XmlPullParser.START_TAG -> when (name) {
                 "Activity" -> {
@@ -92,12 +81,9 @@ internal fun parseTcxActivities(text: String): List<ImportedRun> {
                     val merged = mergeTcxTracks(tracks)
                     if (merged.isNotEmpty()) activities.add(ImportedRun(merged, sport))
                 }
-                "TrainingCenterDatabase" -> if (parser.depth == 1) rootClosed = true
             }
         }
-        event = parser.next()
     }
-    if (!rootClosed) throw XmlPullParserException("TCX ends before </TrainingCenterDatabase>: truncated")
     return activities
 }
 
@@ -119,12 +105,7 @@ internal fun mergeTcxTracks(tracks: List<List<GpxFix>>): List<List<GpxFix>> {
     for (track in tracks) {
         if (track.isEmpty()) continue
         val prev = segments.lastOrNull()
-        val gap = if (prev != null && prev.isNotEmpty()) {
-            track.first().timeSec - prev.last().timeSec
-        } else {
-            Long.MAX_VALUE
-        }
-        if (prev != null && gap in 0..MAX_TRACK_MERGE_GAP_SEC) {
+        if (prev != null && track.first().timeSec - prev.last().timeSec in 0..MAX_TRACK_MERGE_GAP_SEC) {
             prev.addAll(track)
         } else {
             segments.add(track.toMutableList())

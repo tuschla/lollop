@@ -96,16 +96,13 @@ pub(super) fn flatten_calisthenics_prescription(
     };
 
     let mut it = PrescriptionView {
-        summary: String::new(),
         exercise: c.exercise.clone(),
         sets: c.sets,
         reps_low,
         reps_high,
-        load_kg: None,
         intensity_label,
         intensity,
         rest_sec: c.rest_sec,
-        rep_count: 0,
         rep_volume,
         timed_hold: timed,
         target_rpe,
@@ -116,8 +113,6 @@ pub(super) fn flatten_calisthenics_prescription(
         // to show the added-load field regardless.
         added_kg: Some(added),
         anchored_on,
-        adjusted_note: String::new(),
-        safety_reason: String::new(),
         evidence: EvidenceTagView::of(rx),
         why,
         effort_cue: if c.table_row {
@@ -152,8 +147,7 @@ struct CalisShape<'c> {
     loaded: bool,
     /// " per side" for a unilateral rung, else empty.
     per_side: &'static str,
-    /// The timed-hold band, a degenerate band (lo == hi) collapsed to one
-    /// figure so a fixed-duration rung reads "30 s hold", not "30–30 s hold".
+    /// The timed-hold band ([`hold_band`]).
     hold_label: String,
 }
 
@@ -175,11 +169,7 @@ impl<'c> CalisShape<'c> {
             } else {
                 ""
             },
-            hold_label: if lo == hi {
-                format!("{hi} s hold")
-            } else {
-                format!("{lo}–{hi} s hold")
-            },
+            hold_label: hold_band(lo, hi),
         }
     }
 }
@@ -204,11 +194,7 @@ fn calis_anchored_on(
                 .first()
                 .copied()
                 .unwrap_or("");
-            let pct = if (flo - fhi).abs() < f64::EPSILON {
-                format!("~{:.0}%", flo * 100.0)
-            } else {
-                format!("~{:.0}–{:.0}%", flo * 100.0, fhi * 100.0)
-            };
+            let pct = format!("~{}%", fmt_frac_pct_range(flo, fhi));
             // The push/pull/dip ladders load the hands; the squat ladder loads the
             // working (stance/front) leg — never mislabel a leg share "at the hands".
             let site = if c.ladder == crate::schema::LadderId::Squat {
@@ -440,11 +426,7 @@ fn calis_summary(
     let mut clauses = Vec::with_capacity(1);
     // A dynamic rung's effort, in the same "reps left" words as every lift.
     if let PlanIntensity::RirRange { lo: rlo, hi: rhi } = *intensity {
-        clauses.push(if rlo == rhi {
-            reps_left(i64::from(rlo))
-        } else {
-            format!("{rlo}–{rhi} reps left")
-        });
+        clauses.push(rir_band_left(rlo, rhi));
     }
     (lead, clauses)
 }
@@ -460,8 +442,7 @@ fn calis_rung_view(ladder: crate::schema::LadderId, rung: u8, available: bool) -
     let band = match t.target {
         crate::schema::TierTarget::Reps { low, high } if low == high => format!("{high} reps"),
         crate::schema::TierTarget::Reps { low, high } => format!("{low}–{high} reps"),
-        crate::schema::TierTarget::HoldSec { low, high } if low == high => format!("{high} s hold"),
-        crate::schema::TierTarget::HoldSec { low, high } => format!("{low}–{high} s hold"),
+        crate::schema::TierTarget::HoldSec { low, high } => hold_band(low, high),
     };
     CalisRungView {
         rung,
@@ -485,8 +466,7 @@ pub(in crate::app) fn build_calisthenics_ladders(cx: &ViewCtx) -> Vec<CalisLadde
     use crate::calisthenics as cal;
     let Some(profile) = cx
         .model
-        .profile
-        .as_ref()
+        .profile()
         .filter(|p| p.resistance_modality == ResistanceModality::Calisthenics)
     else {
         return Vec::new();

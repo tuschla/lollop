@@ -101,12 +101,8 @@
         <item quantity="one">%1$d active minute from runs and other activity</item>
         <item quantity="other">%1$d active minutes from runs and other activity</item>
     </plurals>
-    <!-- Lift line: %1$s = exercise, %2$s = its set groups joined by ", ". -->
+    <!-- Lift line: %1$s = exercise, %2$s = its set groups (history_sets_*). -->
     <string name="coach_export_lift">%1$s: %2$s</string>
-    <!-- %1$d sets × %2$d reps @ %3$s load ("100 kg"). -->
-    <string name="coach_export_sets_load">%1$d × %2$d @ %3$s</string>
-    <string name="coach_export_sets_reps">%1$d × %2$d</string>
-    <string name="coach_export_sets_hold">%1$d × %2$d s hold</string>
     <!-- Run line: %1$s distance, %2$s duration ("27:30"), %3$s pace ("5:30 /km"). -->
     <string name="coach_export_run">Run: %1$s · %2$s · %3$s</string>
     <string name="coach_export_run_effort">effort %1$d/10</string>

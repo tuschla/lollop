@@ -23,6 +23,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -31,7 +32,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
-import java.util.Locale
 
 // ── Run cards (History "Runs" stream) ───────────────────────────────────────
 
@@ -55,7 +55,7 @@ internal fun runTitle(r: RunResultView): String {
     if (tagged != null) return stringResource(tagged)
     if (r.started_at <= 0L) return stringResource(R.string.main_run)
     val weekday = Instant.ofEpochSecond(r.started_at).atZone(ZoneId.systemDefault()).dayOfWeek
-        .getDisplayName(java.time.format.TextStyle.FULL, Locale.getDefault())
+        .getDisplayName(java.time.format.TextStyle.FULL, LocalConfiguration.current.locales[0])
     return stringResource(R.string.history_run_weekday, weekday)
 }
 
@@ -203,7 +203,7 @@ internal fun RunProgressSection(
     unit: DistanceUnit,
     // The local day the active plan began (null = no plan, or older than the core
     // reports): the weekly chart's plan line starts there.
-    planStartEpochDay: Long? = null,
+    planStartEpochDay: Long?,
 ) {
     val weekly = progress.weekly
     var window by rememberSaveable { mutableStateOf(RunProgressWindow.Weeks) }
@@ -267,7 +267,6 @@ internal fun RunRecordsSection(
             add(RecordCell(b.label, b.time_label, formatLogDate(recordDaySec(run, b.observed_at), nowMillis), run))
         }
     }
-    if (cells.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
         SectionOverline(stringResource(R.string.history_records))
         PlainCard(contentPadding = PaddingValues(0.dp), spacing = 0.dp) {

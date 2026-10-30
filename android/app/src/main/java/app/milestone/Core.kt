@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -288,21 +289,10 @@ object Core {
     /** How [apply] ended for one event. */
     private enum class Applied { Rejected, Saved, NotPersisted }
 
-    /** Apply one event: dispatch it to the core, persist it to the log (only if
-     *  the core accepted it AND the event is [Event.persist]), and log a rejection.
-     *  Does NOT read the view back — the caller does that once, so a multi-event
-     *  batch decodes the view a single time.
-     *
-     *  Only ever called under the [Core] monitor (via [send]/[sendAll]), which it
-     *  shares with [restore] and [currentView]. Every caller routes through
-     *  [CoreJniDispatcher] via `EventDispatcher`; the monitor guards
-     *  `restore`/`currentView` re-entrancy. Without the lock two concurrent calls
-     *  could interleave their JNI `update` → `appendText` steps and persist the
-     *  event log in a different order than the in-memory core applied them, or race the
-     *  [lastGoodView] cache. The monitor makes each apply → append (and the trailing
-     *  read-back) atomic, so the guarantee holds: **the log is written in exactly the
-     *  order the core accepted the events, so a later replay reconstructs the
-     *  identical model.** */
+    /** Apply one event: dispatch it to the core, persist it when the core accepted it
+     *  and it is [Event.persist], log a rejection; no view read (the caller reads once
+     *  per batch). Called only under the [Core] monitor, so the log order equals the
+     *  apply order and a replay rebuilds the same model. */
     private fun apply(event: Event): Applied {
         // A core found unusable at boot refuses everything: nothing reaches the log.
         if (unavailable) return Applied.Rejected
@@ -414,10 +404,7 @@ object Core {
     /** True if the core ACCEPTED an event: crux emits a non-empty JSON effect
      *  array. A rejected event yields empty bytes; a panic yields an `{"error"…}`
      *  object (leading `{`); a null (JNI alloc failure) is likewise not accepted. */
-    private fun isAccepted(response: ByteArray?): Boolean {
-        val first = response?.firstOrNull { !it.toInt().toChar().isWhitespace() } ?: return false
-        return first == '['.code.toByte()
-    }
+    private fun isAccepted(response: ByteArray?): Boolean = response.firstNonBlank() == '['.code.toByte()
 
     /** Current view model without dispatching an event. Shares the [Core] monitor
      *  with [send]/[restore] so a read-back never observes a half-applied event or
@@ -478,10 +465,11 @@ internal fun isCorePanicReset(text: String): Boolean =
 /** Whether a raw JNI `update` response is a `panic_reset` envelope. An accepted
  *  event's response is an effect array (`[`), so only a response opening with `{`
  *  is decoded to text. */
-internal fun isPanicResetResponse(response: ByteArray?): Boolean {
-    val first = response?.firstOrNull { !it.toInt().toChar().isWhitespace() } ?: return false
-    return first == '{'.code.toByte() && isCorePanicReset(String(response, Charsets.UTF_8))
-}
+internal fun isPanicResetResponse(response: ByteArray?): Boolean =
+    response != null && response.firstNonBlank() == '{'.code.toByte() && isCorePanicReset(String(response, Charsets.UTF_8))
+
+/** The first non-whitespace byte of a JNI response; null for a blank or missing one. */
+private fun ByteArray?.firstNonBlank(): Byte? = this?.firstOrNull { !it.toInt().toChar().isWhitespace() }
 
 /** Outcome of [replayLog]: the indices of lines skipped because applying them reset
  *  the core, and whether the final pass replayed every other line ([complete] is
@@ -526,7 +514,6 @@ data class SendResult(
 @Serializable
 data class ViewModel(
     val safety_tier: String? = null,
-    val train_blocked: Boolean = false,
     val adjustments: List<AdjustmentView> = emptyList(),
     val review_adjustments: List<AdjustmentView> = emptyList(),
     val weekly_checkin_present: Boolean = false,
@@ -567,8 +554,8 @@ data class ViewModel(
     val readiness_summary: List<ReadinessSignalView> = emptyList(),
     val today_headline: TodayHeadlineView? = null,
     val signal_groups: List<SignalGroupView> = emptyList(),
-    // Null until a check-in exists.
-    val checkin_today: CheckinEchoView? = null,
+    // The latest check-in of any day; null until a check-in exists.
+    val latest_checkin: CheckinEchoView? = null,
     val baseline_status: List<BaselineStatusView> = emptyList(),
     val grade_definitions: List<GradeDefView> = emptyList(),
     // Null/empty until the user accepts a plan.
@@ -593,7 +580,7 @@ data class ViewModel(
     val hold_resolutions: List<HoldResolutionView> = emptyList(),
     // Null without a plan.
     val consistency: ConsistencyView? = null,
-    // Set whenever train_blocked: parq | youth | pregnancy | reds | injury_rehab |
+    // Null when training is not held: parq | youth | pregnancy | reds | injury_rehab |
     // symptomatic | acute_illness_profile | illness | pain | medical_signal.
     val hold_reason: String? = null,
     // False: the readiness pills come from an earlier check-in.
@@ -603,7 +590,10 @@ data class ViewModel(
     val activities: List<ActivityResultView> = emptyList(),
     // Set only for an under-18 profile once SetToday has run.
     val youth_activity: YouthActivityView? = null,
-)
+) {
+    /** Training is on hold (a Stop-level or rest-day call): [hold_reason] is set. */
+    val train_blocked: Boolean get() = hold_reason != null
+}
 
 /** Mirrors view_types.rs HrMaxView. `tanaka_intercept`/`tanaka_slope` are 0 when [measured]. */
 @Serializable
@@ -1151,9 +1141,14 @@ private val PARQ_FOLLOW_UP_BITS: Int = ParqItem.entries
     .filter { !it.symptom && !it.injury }
     .fold(0) { acc, it -> acc or (1 shl it.bit) }
 
+/** The symptom questions (Q2/Q3) as a [HealthScreen.parq_yes] mask. */
+private val PARQ_SYMPTOM_BITS: Int = ParqItem.entries
+    .filter { it.symptom }
+    .fold(0) { acc, it -> acc or (1 shl it.bit) }
+
 /**
  * Mirrors schema.rs HealthScreen. `youth` is derived core-side from age. Kotlin
- * `Serializable` so it can ride in the `ProfileDraft` rememberSaveable bundle.
+ * `Serializable` so it can ride in the profile draft's rememberSaveable bundle.
  * The gate flags are derived from [parq_yes] by [withParqAnswer]: Q1/Q4/Q5/Q7 →
  * `parq_positive`, Q2/Q3 → `symptomatic`, Q6 → `injury_or_rehab`.
  */
@@ -1197,10 +1192,12 @@ data class HealthScreen(
 
     /** Answer one PAR-Q+ question and re-derive the gate flags from all seven.
      *  Once any per-question answer exists the answers are authoritative; a
-     *  legacy raised toggle is kept only while none is. A clearance survives
-     *  only while every follow-up Yes was already covered by it: a NEW follow-up
-     *  Yes drops `medically_cleared` (safety-044); symptoms are never clearable
-     *  (onboard-052). */
+     *  legacy raised toggle is kept only while none is. A legacy `symptomatic`
+     *  flag (no symptom bit) stays until a symptom question itself is answered:
+     *  symptoms are never clearable (onboard-052), so an unrelated answer must
+     *  not drop it. A clearance survives only while every follow-up Yes was
+     *  already covered by it: a NEW follow-up Yes drops `medically_cleared`
+     *  (safety-044). */
     fun withParqAnswer(item: ParqItem, yes: Boolean): HealthScreen {
         val bit = 1 shl item.bit
         // Fold a legacy injury flag into its question first, so answering another
@@ -1227,7 +1224,8 @@ data class HealthScreen(
             parq_positive = followUp,
             medically_cleared = stillCleared,
             cleared_parq_mask = if (stillCleared) newFollowUps else 0,
-            symptomatic = ParqItem.entries.any { it.symptom && has(it) },
+            symptomatic = mask and PARQ_SYMPTOM_BITS != 0 ||
+                (symptomatic && parq_yes and PARQ_SYMPTOM_BITS == 0 && !item.symptom),
             injury_or_rehab = has(ParqItem.BoneOrJoint),
         )
     }
@@ -1509,8 +1507,7 @@ data class RunWeekView(
     val srpe_load_au: Double = 0.0,
 )
 
-/** Mirrors view_types.rs BestEffortView. Derive the displayed pace from [time_sec]
- *  and [distance_m]. */
+/** Mirrors view_types.rs BestEffortView. */
 @Serializable
 data class BestEffortView(
     val distance_m: Int = 0,
@@ -1653,7 +1650,7 @@ sealed interface Event {
                 put("streak", 0)
                 if (pain != null) put("pain", buildJsonObject {
                     put("kind", pain.kind.name)
-                    pain.severity?.let { put("severity", it) }
+                    if (pain.severity != null) put("severity", pain.severity)
                     put("trend", pain.trend.name)
                     put("persists", pain.persists)
                     // Optional free-text/body-part location; omitted when absent
@@ -1730,7 +1727,7 @@ sealed interface Event {
         val runningDaysPerWeek: Int,
         val runningKmPerWeek: Double,
         val advanced: Boolean,
-        // False = the athlete never gave a weekly distance (C9): the core forces
+        // False = the athlete never gave a weekly distance: the core forces
         // runningKmPerWeek to 0.0 and plans from logged runs or its KB floors. A
         // real "I don't run yet" answer is 0.0 with this true.
         val runningKmPerWeekSet: Boolean = true,
@@ -1787,9 +1784,11 @@ sealed interface Event {
         val birthEpochDay: Long? = null,
         // When the edit was made (unix seconds): on its effective day the edit is in
         // force only from this instant, so an evening edit never re-converts a run
-        // logged that morning. Stamped by ProfileDraft.toEvent for a dated edit.
+        // logged that morning. Stamped by [effectiveFrom] for a dated edit.
         val editedAtSec: Long? = null,
-    ) : Event {
+        // java.io.Serializable: the Profile editor and guided setup keep the event
+        // itself as their rememberSaveable draft.
+    ) : Event, java.io.Serializable {
         override fun toJson() = buildJsonObject {
             put("SetProfile", buildJsonObject {
                 put("progression_cadence", progressionCadence.name)
@@ -1857,6 +1856,9 @@ sealed interface Event {
                 })
             })
         }
+
+        /** Holds [from] and [SEED] (ProfileEditor.kt). */
+        companion object
     }
 
     data object ClearProfile : Event {
@@ -1909,7 +1911,7 @@ sealed interface Event {
                 put("rpe", rpe)
                 put("observed_at", observedAt)
                 put("entry_id", entryId)
-                holdSec?.let { put("hold_sec", it) }
+                if (holdSec != null) put("hold_sec", holdSec)
             })
         }
     }
@@ -1964,17 +1966,9 @@ sealed interface Event {
     ) : Event {
         override fun toJson() = buildJsonObject {
             put("LogRun", buildJsonObject {
-                put("distance_km", distanceKm)
-                put("duration_min", durationMin)
-                put("hr_pct_max", hrPctMax)
-                // Always 0: the core derives the baseline from logged runs.
-                put("longest_recent_km", 0.0)
-                put("observed_at", observedAt)
+                putManualRun(distanceKm, durationMin, hrPctMax, observedAt, workoutType, sessionRpe, avgHrBpm)
                 put("entry_id", entryId)
-                workoutType?.let { put("workout_type", it.name) }
-                sessionRpe?.let { put("session_rpe", it) }
-                avgHrBpm?.let { put("avg_hr_bpm", it) }
-                utcOffsetSec?.let { put("utc_offset_sec", it) }
+                if (utcOffsetSec != null) put("utc_offset_sec", utcOffsetSec)
             })
         }
     }
@@ -2017,13 +2011,13 @@ sealed interface Event {
                 put("longest_recent_km", 0.0)
                 put("observed_at", observedAt)
                 put("entry_id", entryId)
-                workoutType?.let { put("workout_type", it.name) }
+                if (workoutType != null) put("workout_type", workoutType.name)
                 if (segmentStarts.isNotEmpty()) {
                     putJsonArray("segment_starts") { segmentStarts.forEach { add(it) } }
                 }
-                sessionRpe?.let { put("session_rpe", it) }
-                avgHrBpm?.let { put("avg_hr_bpm", it) }
-                utcOffsetSec?.let { put("utc_offset_sec", it) }
+                if (sessionRpe != null) put("session_rpe", sessionRpe)
+                if (avgHrBpm != null) put("avg_hr_bpm", avgHrBpm)
+                if (utcOffsetSec != null) put("utc_offset_sec", utcOffsetSec)
             })
         }
     }
@@ -2108,7 +2102,7 @@ sealed interface Event {
                 put("rpe", rpe)
                 put("observed_at", observedAt)
                 put("observed_at_fallback", observedAtFallback)
-                holdSec?.let { put("hold_sec", it) }
+                if (holdSec != null) put("hold_sec", holdSec)
             })
         }
     }
@@ -2135,15 +2129,8 @@ sealed interface Event {
         override fun toJson() = buildJsonObject {
             put("AmendRun", buildJsonObject {
                 put("entry_id", entryId)
-                put("distance_km", distanceKm)
-                put("duration_min", durationMin)
-                put("hr_pct_max", hrPctMax)
-                put("longest_recent_km", 0.0)
-                put("observed_at", observedAt)
+                putManualRun(distanceKm, durationMin, hrPctMax, observedAt, workoutType, sessionRpe, avgHrBpm)
                 put("observed_at_fallback", observedAtFallback)
-                workoutType?.let { put("workout_type", it.name) }
-                sessionRpe?.let { put("session_rpe", it) }
-                avgHrBpm?.let { put("avg_hr_bpm", it) }
             })
         }
     }
@@ -2408,6 +2395,27 @@ sealed interface Event {
             })
         }
     }
+}
+
+/** The fields a hand-entered run's [Event.LogRun] and [Event.AmendRun] share. */
+private fun JsonObjectBuilder.putManualRun(
+    distanceKm: Double,
+    durationMin: Double,
+    hrPctMax: Double,
+    observedAt: Long,
+    workoutType: WorkoutType?,
+    sessionRpe: Int?,
+    avgHrBpm: Double?,
+) {
+    put("distance_km", distanceKm)
+    put("duration_min", durationMin)
+    put("hr_pct_max", hrPctMax)
+    // Always 0: the core derives the baseline from logged runs.
+    put("longest_recent_km", 0.0)
+    put("observed_at", observedAt)
+    if (workoutType != null) put("workout_type", workoutType.name)
+    if (sessionRpe != null) put("session_rpe", sessionRpe)
+    if (avgHrBpm != null) put("avg_hr_bpm", avgHrBpm)
 }
 
 /** The four listed overtraining signs on the weekly check-in (model.rs OvertrainingSigns). */

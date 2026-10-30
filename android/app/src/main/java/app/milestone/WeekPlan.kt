@@ -237,6 +237,8 @@ internal fun ThisWeekCard(
     program: ProgramSummaryView?,
     // One quiet closing line (the "nothing logged yet" hint), or null.
     footnote: String?,
+    // The area an active pain report names: a row it stopped reads "Stopped · <area>".
+    painArea: String?,
     onRemovePlan: () -> Unit,
     actions: WeekActions?,
     heroDay: Long,
@@ -336,6 +338,7 @@ internal fun ThisWeekCard(
                     week,
                     today = today,
                     weightUnit = weightUnit,
+                    painArea = painArea,
                     actions = actions,
                     heroDay = heroDay,
                     selectedDay = selectedDay,
@@ -387,20 +390,14 @@ private fun MuscleVolumeSection(prog: ProgramSummaryView) {
             short.joinToString(", ") { it.muscle.replaceFirstChar { c -> c.lowercase(Locale.US) } },
         )
     }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = ActionMinHeight)
-            .clip(RoundedCornerShape(Space.Md.dp))
-            .clickable(role = Role.Button) { expanded = !expanded },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+    ChevronRow(
+        onClick = { expanded = !expanded },
+        modifier = Modifier.clip(RoundedCornerShape(Space.Md.dp)),
+        expanded = expanded,
+        spacing = Space.Md.dp,
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-            TileOverline(stringResource(R.string.main_muscle_volume_title))
-            Text(summary, color = OnBgMuted, style = Type.Caption)
-        }
-        RowChevron(expanded)
+        TileOverline(stringResource(R.string.main_muscle_volume_title))
+        Text(summary, color = OnBgMuted, style = Type.Caption)
     }
     if (!expanded) return
     val firstShort = prog.muscle_volume.indexOfFirst(isShort)
@@ -478,6 +475,7 @@ private fun WeekStrip(
     week: List<SessionPlanView>,
     today: Long,
     weightUnit: WeightUnit,
+    painArea: String?,
     // Null on a read-only week: the strip logs, moves and reopens nothing.
     actions: WeekActions?,
     // The day the hero card shows: its move control lives there, not twice.
@@ -621,6 +619,7 @@ private fun WeekStrip(
                             reopenable = reopenable,
                             onReopen = { actions?.onReopen(item, s.epoch_day) },
                             isCheck = isCheck(item),
+                            painArea = painArea,
                         )
                     }
                 }
@@ -646,7 +645,6 @@ private fun WeekStripDay(
         "next" -> Accent to true
         "adjusted" -> status.warn to true
         "blocked" -> status.danger to true
-        "done", "done_lighter" -> status.done to true
         "missed", "partial" -> OnBgMuted to false
         else -> OnBgFaint to false // planned
     }
@@ -701,7 +699,7 @@ private fun WeekStripDay(
         Text(
             weekdayShort(s.epoch_day),
             color = if (isToday || sel) Accent else OnBgBody,
-            style = if (isToday) Type.Chip else Type.Chip.copy(fontWeight = FontWeight.Normal),
+            style = if (isToday) Type.Chip else Type.ChipRegular,
             maxLines = 1,
         )
         // Day-type/label token, from the core's session_type.

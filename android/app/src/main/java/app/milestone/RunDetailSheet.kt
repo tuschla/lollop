@@ -10,18 +10,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -41,7 +38,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -61,10 +57,11 @@ internal data class RunStat(val label: String, val value: String, val unit: Stri
 @Composable
 internal fun runStats(run: RunResultView, unit: DistanceUnit): List<RunStat> {
     val stats = ArrayList<RunStat>(3)
+    val res = LocalResources.current
     if (run.distance_km > 0.0) {
         val dist = distanceFigure(run.distance_km, unit)
         val label = stringResource(R.string.run_stat_distance)
-        val spoken = stringResource(if (unit == DistanceUnit.Mi) R.string.run_unit_miles else R.string.run_unit_km, dist)
+        val spoken = spokenDistance(res, dist, unit)
         stats += RunStat(label, dist, unit.distanceLabel, stringResource(R.string.run_stat_cd, label, spoken))
     }
     if (run.duration_min > 0.0) {
@@ -73,9 +70,10 @@ internal fun runStats(run: RunResultView, unit: DistanceUnit): List<RunStat> {
         stats += RunStat(label, time, "", stringResource(R.string.run_stat_cd, label, time))
     }
     if (run.distance_km > 0.0 && run.duration_min > 0.0) {
-        val pace = formatPaceMinutes(paceInUnit(run.duration_min / run.distance_km, unit))
+        val paceMinPerKm = run.duration_min / run.distance_km
+        val pace = formatPaceMinutes(paceInUnit(paceMinPerKm, unit))
         val label = stringResource(R.string.run_stat_avg_pace)
-        val spoken = stringResource(if (unit == DistanceUnit.Mi) R.string.run_unit_per_mile else R.string.run_unit_per_km, pace)
+        val spoken = spokenPace(res, paceMinPerKm, unit)
         stats += RunStat(label, pace, unit.paceSuffix, stringResource(R.string.run_stat_cd, label, spoken))
     }
     return stats
@@ -249,12 +247,7 @@ internal fun RunDetailContent(
     var rating by rememberSaveable(run.entry_id, run.observed_at) { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
-            .padding(horizontal = Space.Sheet.dp)
-            .padding(bottom = Space.Lg.dp),
+        modifier = Modifier.sheetBody(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
     ) {
         // 2.1 Header: name + top record badge on one baseline, then the start date.
@@ -418,7 +411,7 @@ private fun LogRow(
         Text(
             value,
             color = if (prompt) Accent else OnBgBody,
-            style = (if (bold || prompt) Type.Body.copy(fontWeight = FontWeight.Bold) else Type.Body).merge(TabularFigures),
+            style = (if (bold || prompt) Type.BodyBold else Type.Body).merge(TabularFigures),
             textAlign = TextAlign.End,
             modifier = Modifier.weight(1f),
         )
@@ -436,6 +429,7 @@ private fun LogRow(
 private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit, onDelete: (Event?) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val exportFailed = stringResource(R.string.main_export_gpx_failed)
     val rows = buildList {
         if (run.has_gpx) {
             add(
@@ -451,7 +445,7 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
                             } else {
                                 android.widget.Toast.makeText(
                                     ctx,
-                                    ctx.getString(R.string.main_export_gpx_failed),
+                                    exportFailed,
                                     android.widget.Toast.LENGTH_LONG,
                                 ).show()
                             }
@@ -494,19 +488,9 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
 private fun RateRunSheet(run: RunResultView, onDismiss: () -> Unit, onSave: (Int?, WorkoutType?) -> Unit) {
     var rpe by rememberSaveable(run.entry_id, run.observed_at) { mutableStateOf(run.session_rpe) }
     var type by rememberSaveable(run.entry_id, run.observed_at) { mutableStateOf(WorkoutType.fromWire(run.workout_type)) }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = BgSunken,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-    ) {
-        SheetNavBarScrim()
+    AppSheet(onDismiss = onDismiss) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .padding(horizontal = Space.Sheet.dp)
-                .padding(bottom = Space.Lg.dp),
+            modifier = Modifier.sheetBody(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
         ) {
             Text(stringResource(R.string.run_rate_title), color = OnBgBody, style = Type.Title)

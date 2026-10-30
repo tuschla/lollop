@@ -1,23 +1,15 @@
 package app.milestone
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,13 +19,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
@@ -60,7 +49,7 @@ private const val ActivityMinutesMax = 600.0
  */
 @Composable
 internal fun YouthActivityCard(view: YouthActivityView, onLog: () -> Unit, onEvent: (Event) -> Unit) {
-    val res = LocalContext.current.resources
+    val res = LocalResources.current
     fun reached(line: String, met: Boolean) = if (met) res.getString(R.string.activity_line_reached, line) else line
     val target = view.weekly_target_minutes
     val summary = reached(
@@ -85,7 +74,13 @@ internal fun YouthActivityCard(view: YouthActivityView, onLog: () -> Unit, onEve
         onAction = onLog,
         subline = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-                ActivityBar(if (target > 0) view.minutes.toFloat() / target else 0f)
+                // The summary line above states the figure; the bar adds nothing to hear.
+                ProgressPill(
+                    if (target > 0) view.minutes.toFloat() / target else 0f,
+                    ActivityBarHeight,
+                    OnBgFaint.copy(alpha = ActivityBarTrackAlpha),
+                    Modifier.fillMaxWidth().clearAndSetSemantics {},
+                )
                 if (view.daily_target_minutes > 0) {
                     Text(stringResource(R.string.activity_daily_hint, view.daily_target_minutes), color = OnBgMuted, style = Type.Caption)
                 }
@@ -111,33 +106,10 @@ internal fun YouthActivityCard(view: YouthActivityView, onLog: () -> Unit, onEve
     )
 }
 
-/** The card's weekly-minutes bar: an accent fill over a faint track, capped full. */
-@Composable
-private fun ActivityBar(fraction: Float) {
-    val shape = RoundedCornerShape(50)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(ActivityBarHeight)
-            .clip(shape)
-            .background(OnBgFaint.copy(alpha = ActivityBarTrackAlpha))
-            // The summary line above states the figure; the bar adds nothing to hear.
-            .clearAndSetSemantics {},
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth(fraction.coerceIn(0f, 1f))
-                .fillMaxHeight()
-                .clip(shape)
-                .background(Accent),
-        )
-    }
-}
-
 /** This week's logged activities, newest last, each with Delete (Undo re-logs it). */
 @Composable
 private fun WeekActivityList(entries: List<ActivityResultView>, onEvent: (Event) -> Unit) {
-    val res = LocalContext.current.resources
+    val res = LocalResources.current
     val zone = ZoneId.systemDefault()
     Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
         TileOverline(stringResource(R.string.activity_logged_this_week))
@@ -149,13 +121,7 @@ private fun WeekActivityList(entries: List<ActivityResultView>, onEvent: (Event)
                     stringResource(R.string.main_delete),
                     onClick = {
                         onEvent(Event.DeleteEntry(Event.EntryKind.Activity, a.entry_id, observedAtFallback = a.observed_at))
-                        UiMessages.post(
-                            UiMessage(
-                                res.getString(R.string.activity_removed),
-                                actionLabel = res.getString(R.string.log_undo),
-                                onAction = { EventDispatcher.send(restoreActivityEvent(a)) },
-                            ),
-                        )
+                        postUndoable(res.getString(R.string.activity_removed), res.getString(R.string.log_undo), listOf(restoreActivityEvent(a)))
                     },
                     description = stringResource(R.string.activity_remove_cd, line),
                 )
@@ -194,8 +160,8 @@ internal fun restoreActivityEvent(a: ActivityResultView): Event.LogActivity =
  */
 @Composable
 fun LogActivityEditor(
-    onClose: () -> Unit = {},
-    onDirtyChange: (Boolean) -> Unit = {},
+    onClose: () -> Unit,
+    onDirtyChange: (Boolean) -> Unit,
     onSave: (Event) -> Unit,
 ) {
     var kind by rememberSaveable { mutableStateOf<ActivityKind?>(null) }
@@ -321,23 +287,7 @@ private fun ActivityEffortField(vigorous: Boolean, onSelect: (Boolean) -> Unit) 
             verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
         ) {
             options.forEach { (value, text) ->
-                val selected = vigorous == value
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = ActionMinHeight)
-                        .choiceCell(selected)
-                        .selectable(selected = selected, role = Role.RadioButton) { onSelect(value) }
-                        .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
-                    verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
-                ) {
-                    Text(
-                        text.first,
-                        color = choiceCellContent(selected),
-                        style = if (selected) Type.Body.copy(fontWeight = FontWeight.Bold) else Type.Body,
-                    )
-                    Text(text.second, color = choiceCellContent(selected), style = Type.Caption)
-                }
+                ChoiceRow(text.first, text.second, selected = vigorous == value) { onSelect(value) }
             }
         }
     }

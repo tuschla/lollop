@@ -109,11 +109,11 @@ pub(super) fn calisthenics_session(
         template: calisthenics::session_template(goal).value,
     };
     let region = region_at(regions, day_index);
-    let upper = matches!(region, DayRegion::Full | DayRegion::Upper);
-    let lower = matches!(region, DayRegion::Full | DayRegion::Lower);
+    let upper = region.has_upper();
+    let lower = region.has_lower();
     let upper_ordinal = days_before(regions, day_index)
         .iter()
-        .filter(|r| matches!(r, DayRegion::Full | DayRegion::Upper))
+        .filter(|r| r.has_upper())
         .count();
     let n = n_exposures.max(1);
     let weekly = profile.weekly_sets;
@@ -188,9 +188,8 @@ pub(super) fn calisthenics_session(
         }
     }
 
-    // A bodyweight day is its own session type (still under `SessionType::Lift`
-    // so the shell's discipline parsing is unchanged), titled honestly rather
-    // than borrowing a barbell Heavy/Power/Volume label it does not train.
+    // A calisthenics day is `Lift(Calisthenics)`, not a barbell
+    // Heavy/Power/Volume day.
     Session {
         session_type: SessionType::Lift(LiftSessionType::Calisthenics),
         day,

@@ -175,7 +175,7 @@ fn set_profile_cleans_implausible_planning_fields_and_the_view_renders() {
     };
     app.update(Event::SetProfile(poisoned), &mut model)
         .expect_only_render();
-    let p = model.profile.clone().expect("profile stored");
+    let p = model.profile().cloned().expect("profile stored");
     assert_eq!(p.lift_days_per_week, None);
     assert_eq!(p.training_weekdays, None, "no weekday bit left → any day");
     assert_eq!(p.goal_race_epoch_day, None);
@@ -213,7 +213,7 @@ fn set_profile_cleans_implausible_planning_fields_and_the_view_renders() {
     };
     app.update(Event::SetProfile(fine), &mut model)
         .expect_only_render();
-    let p = model.profile.clone().expect("profile stored");
+    let p = model.profile().cloned().expect("profile stored");
     assert_eq!(p.lift_days_per_week, Some(4));
     assert_eq!(p.training_weekdays, Some(0b0110_0000));
     assert_eq!(p.goal_race_epoch_day, Some(20_600));
@@ -234,7 +234,7 @@ fn set_profile_cleans_implausible_planning_fields_and_the_view_renders() {
     };
     app.update(Event::SetProfile(too_fast), &mut model)
         .expect_only_render();
-    assert_eq!(model.profile.as_ref().unwrap().recent_race, None);
+    assert_eq!(model.profile().unwrap().recent_race, None);
 }
 
 #[test]

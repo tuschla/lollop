@@ -10,18 +10,16 @@ pub(super) struct LoggedSet {
     pub(super) weight_kg: f64,
     pub(super) reps: u32,
     pub(super) rpe: f64,
-    /// Log time, unix seconds; 0 when undated (pre-timestamp persisted event).
+    /// Log time, unix seconds; 0 when undated.
     pub(super) observed_at: i64,
     /// Stable per-entry identity: a shell-assigned monotonic id
     /// (epoch-millis at first log) that survives edits so `AmendSet`/`DeleteEntry`
     /// target THIS row even when its `observed_at` was backdated to collide with
-    /// another. 0 = legacy/absent; those fall back to matching
-    /// on `observed_at`.
+    /// another. 0 = no id; such a row is matched on `observed_at`.
     pub(super) entry_id: u64,
     /// Timed-hold duration, seconds — `Some` for a static/hold set (plank,
     /// dead hang, lever), `None` for a reps×load set. History renders a hold row
-    /// as "<name> — <s> s hold". `#[serde(default)]` on the events keeps old logs
-    /// (which decode as `None`) replaying unchanged.
+    /// as "<name> — <s> s hold".
     pub(super) hold_sec: Option<u16>,
 }
 
@@ -73,7 +71,7 @@ pub(super) struct LoggedRun {
     /// GPX export breaks a `<trkseg>` there. Empty = one continuous segment, the
     /// legacy (re-anchored) and hand-logged path. Model-internal, not wire-decoded.
     pub(super) track_segment_starts: Vec<u32>,
-    /// Log time, unix seconds; 0 when undated (pre-timestamp persisted event).
+    /// Log time, unix seconds; 0 when undated.
     pub(super) observed_at: i64,
     /// Stable per-entry identity; see [`LoggedSet::entry_id`]. 0 =
     /// legacy/absent → matched on `observed_at` instead.
@@ -101,8 +99,7 @@ pub(super) struct LoggedRun {
     /// The average heart rate the athlete entered, bpm, when plausible
     /// (`run_targets::plausible_avg_hr_bpm`). Kept beside the derived
     /// `hr_pct_max` so the run card shows the figure the user typed rather than
-    /// a re-derived percentage. `None` = not entered (a tracked run's HR arrives
-    /// as %HRmax only).
+    /// a re-derived percentage. `None` = not entered.
     pub(super) avg_hr_bpm: Option<f64>,
 }
 
@@ -160,8 +157,7 @@ pub(super) struct RetractedInput {
 /// How the athlete trains resistance: external loads (barbell/dumbbell) or
 /// bodyweight leverage (calisthenics). A calisthenics user's plan is built from
 /// leverage ladders instead of %1RM; they may still log arbitrary barbell sets
-/// (those stay plain logged lifts). Default `Weights`; `#[serde(default)]` on the
-/// `Profile` field keeps profiles persisted before this existed parsing unchanged.
+/// (those stay plain logged lifts). Default `Weights`.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResistanceModality {
     #[default]
@@ -191,146 +187,136 @@ pub struct Profile {
     /// Whether the athlete actually answered the weekly-distance question.
     /// `false` = "not set": the core zeroes `running_km_per_week` and the plan
     /// sizes from logged runs, else the KB session-duration floors, never from
-    /// an invented figure. Wire default `true`: profiles persisted before this
-    /// field carried the athlete's (or setup's) answer.
+    /// an invented figure. Missing on the wire = `true`.
     #[serde(default = "serde_true")]
     pub running_km_per_week_set: bool,
     /// Advanced marathoner → extended session range.
     pub advanced: bool,
     /// Female user: routes the feedback-035 menstrual/nutrition clinician
     /// prompt on a bone-stress referral and the hybrid-024 energy-availability
-    /// risk cohort. Absent on the wire (old profiles) → `None`, read as not-female.
-    #[serde(default)]
+    /// risk cohort. `None` reads as not-female.
     pub female: Option<bool>,
     /// Currently inside a high-load/overload mesocycle: arms the autoreg-029
     /// parasympathetic-saturation guard (HRV above the SWC upper band then
-    /// blocks auto load-adds). Wire default `false`.
+    /// blocks auto load-adds).
     #[serde(default)]
     pub high_load_block: bool,
     /// Stage-0 onboarding health screen (File 08 onboard-050). Every flag
-    /// defaults to `false`, so profiles persisted before the screen existed
-    /// parse unchanged and gate nothing.
+    /// defaults to `false` and gates nothing.
     #[serde(default)]
     pub health: HealthScreen,
     /// Training-environment context (File 08 indiv-025 / safety-024): heat,
-    /// altitude, or cold arms the environment-modifier guidance. `None` (wire
-    /// default) states nothing and gates nothing.
-    #[serde(default)]
+    /// altitude, or cold arms the environment-modifier guidance. `None` states
+    /// nothing and gates nothing.
     pub environment: Option<Environment>,
     /// Typical session temperature, °C, running-041 pace-correction trigger
     /// (heat correction above ~15 °C). `None` = unstated, no row.
-    #[serde(default)]
     pub env_temp_c: Option<f64>,
     /// Typical session altitude, m, running-041 pace-correction trigger
     /// (altitude correction above ~900 m). `None` = unstated, no row.
-    #[serde(default)]
     pub env_altitude_m: Option<f64>,
     /// Weeks fully off training when returning from a layoff: arms the
     /// REENTRY-001 resistance re-entry ramp and the hypertrophy-045 reduced
     /// re-entry MEV note. `None` = not returning.
-    #[serde(default)]
     pub weeks_off: Option<f64>,
     /// Bodyweight, kg (optional): arms the strength-plyo depth-jump
     /// readiness gate (needs squat 1RM ≥ 1.5× bodyweight). `None` = no gate.
     /// Also the consolidated person-data source the protein calculator prefills
     /// from: person data is entered once, on the profile.
-    #[serde(default)]
     pub bodyweight_kg: Option<f64>,
-    /// Age in years (optional): consolidated person data. The
-    /// HR-zone calculator prefills its age input from here; no rule branches on
-    /// it (display/prefill only, HARD RULE 1; invents no claim). `None` =
-    /// unstated (old profiles parse unchanged). With a `birth_epoch_day` the
-    /// core owns this value: it is re-derived from the birthday and the
-    /// model's today on every `SetProfile` and `SetToday`, so it never goes
-    /// stale; a legacy profile with only an age keeps the stated value.
-    #[serde(default)]
+    /// Age in years (optional). Read by the under-18 gate (`ingest`), the
+    /// Tanaka HRmax behind run targets and logged-run %HRmax
+    /// (`run_targets::hr_max_anchor`) when no measured max is set, the HR-zone
+    /// calculator's age input, and the conservative deload cadence
+    /// (`plan::conservative_deload`). `None` = unstated: no Tanaka estimate,
+    /// adult rules. With a `birth_epoch_day` the core owns this value: it is
+    /// re-derived from the birthday and the model's today on every
+    /// `SetProfile` and `SetToday`; a profile with only an age keeps the
+    /// stated value.
     pub age_years: Option<f64>,
     /// Birthday, local epoch day (optional). Source of the derived
-    /// `age_years` and the under-18 gate. `None` (wire default) = only a
-    /// legacy stated age, or no age at all.
-    #[serde(default)]
+    /// `age_years` and the under-18 gate. `None` = only a stated age, or no
+    /// age at all.
     pub birth_epoch_day: Option<i64>,
-    /// Resting HR, bpm (optional), consolidated person data. Prefills the
-    /// HR-zone Karvonen input and can seed the morning-checkin RHR baseline.
-    /// Display/prefill only; `None` = unstated.
-    #[serde(default)]
+    /// Resting HR, bpm (optional). Sets the Karvonen ceiling of run heart-rate
+    /// targets (`run_targets::hr_rest_anchor`) and prefills the HR-zone
+    /// calculator's Karvonen input. `None` = unstated.
     pub resting_hr_bpm: Option<f64>,
-    /// Measured maximum HR, bpm (optional), consolidated person data. Stored so
-    /// it is entered once; the HR-zone estimate still shows the honest Tanaka
-    /// age formula (no rule branches on this, HARD RULE 1). `None` = unstated.
-    #[serde(default)]
+    /// Measured maximum HR, bpm (optional). When plausible it replaces the
+    /// Tanaka age estimate in the HR-zone calculator, run targets and
+    /// logged-run %HRmax, and dates the HR-zone re-test reminder. `None` =
+    /// unstated.
     pub measured_hr_max: Option<f64>,
     /// Display weights in pounds instead of kilograms. DISPLAY-ONLY: every
     /// NUMERIC wire/view field (`weight_kg`, `e1rm_kg`, `load_kg`, …) stays in
     /// kg regardless; only the human-facing weight strings the shell renders
     /// verbatim convert (kg × `LB_PER_KG`, "lb" suffix, via the `weight_num` /
-    /// `weight_suffix` / `fmt_weight` helpers). Wire default `false` keeps old
-    /// persisted profiles (no field) parsing and metric.
+    /// `weight_suffix` / `fmt_weight` helpers).
     #[serde(default)]
     pub weight_lb: bool,
     /// Resistance-training modality: `Weights` (default) or `Calisthenics`.
     /// A calisthenics profile routes lift days through the leverage-ladder
-    /// synthesizer (`plan::calisthenics_session`). Wire default `Weights` keeps
-    /// old persisted profiles parsing.
+    /// synthesizer (`plan::calisthenics_session`).
     #[serde(default)]
     pub resistance_modality: ResistanceModality,
     /// The local epoch-day this profile edit takes effect.
     /// The core keeps a `profile_history`; a past/today plan day is prescribed
     /// with the latest profile whose `effective_from_epoch_day <= that day`, so
     /// editing a goal or weekly-set target never re-prescribes an already-shown
-    /// past day. `None` (wire default) = effective from the beginning of time
-    /// (−∞): a None-dated edit replaces the whole history, matching a shell that
-    /// predates dated profiles, but applies only from its position in the log
-    /// to logged runs (it pins the %HRmax of the runs already logged,
-    /// `LoggedRun::hr_pinned`). Production shells send the core's today.
-    #[serde(default)]
+    /// past day. `None` = effective from the beginning of time (−∞): a
+    /// None-dated edit replaces the whole history, but applies only from its
+    /// position in the log to logged runs (it pins the %HRmax of the runs
+    /// already logged, `LoggedRun::hr_pinned`). Production shells send the
+    /// core's today.
     pub effective_from_epoch_day: Option<i64>,
     /// When the edit was made, unix seconds (the shell's clock). On its
     /// effective day the edit is in force only from this instant, so an
     /// evening edit leaves a run logged that morning on the profile it was
     /// logged under ([`profile_at`]); it also orders same-day edits in the
-    /// history. `None` (wire default, legacy) = from the start of that day.
+    /// history. `None` = from the start of that day.
     /// Ignored on an undated edit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited_at: Option<i64>,
-    /// Lifting sessions per week the athlete commits to, 2..=5. `None` (wire
-    /// default) = the legacy fixed lift layout, so old profiles plan unchanged.
-    #[serde(default)]
+    /// Lifting sessions per week the athlete commits to, 2..=5. `None` = the
+    /// fixed default lift layout.
     pub lift_days_per_week: Option<u8>,
     /// Days the athlete can train, as a bitmask: bit0 = Monday … bit6 =
-    /// Sunday. `None` (wire default) = the engine's default weekday layout.
-    #[serde(default)]
+    /// Sunday. `None` = the engine's default weekday layout.
     pub training_weekdays: Option<u8>,
     /// Target race date, local epoch day. `None` = no race scheduled.
-    #[serde(default)]
     pub goal_race_epoch_day: Option<i64>,
     /// A recent race result the athlete reports (distance, finish time,
     /// optional date). `None` = none stated.
-    #[serde(default)]
     pub recent_race: Option<RecentRace>,
     /// Athlete-stated longest run in the last 30 days, km. Logged runs
     /// supersede it once present. `None` = unstated.
-    #[serde(default)]
     pub stated_longest_recent_km: Option<f64>,
     /// Local epoch day training resumed after the `weeks_off` layoff. `None`
-    /// = unstated (re-entry is then dated from the profile edit as before).
-    #[serde(default)]
+    /// = unstated (re-entry is then dated from the profile edit).
     pub layoff_returned_epoch_day: Option<i64>,
     /// Strength test / meet date, local epoch day. `None` = no meet scheduled.
-    #[serde(default)]
     pub meet_epoch_day: Option<i64>,
-    /// Calisthenics equipment on hand. `None` (wire default) = assume every
-    /// piece is available.
-    #[serde(default)]
+    /// Calisthenics equipment on hand. `None` = assume every piece is available.
     pub calis_equipment: Option<CalisEquipment>,
     /// Hypertrophy priority muscle key the athlete wants to specialize.
     /// `None` = no specialization.
-    #[serde(default)]
     pub specialization_muscle: Option<String>,
-    /// A pure runner opted into supplemental strength sessions. Wire default
-    /// `false` keeps old profiles running-only.
+    /// A pure runner opted into supplemental strength sessions.
     #[serde(default)]
     pub runner_strength: bool,
+}
+
+impl Profile {
+    /// The declared layoff's return day: `None` without a layoff (`weeks_off`
+    /// unset or 0), `Some(None)` when it cannot be dated, else the local epoch
+    /// day training resumed (`layoff_returned_epoch_day`, else the day this
+    /// profile took effect).
+    pub fn declared_layoff_return(&self) -> Option<Option<i64>> {
+        self.weeks_off.is_some_and(|w| w > 0.0).then_some(
+            self.layoff_returned_epoch_day
+                .or(self.effective_from_epoch_day),
+        )
+    }
 }
 
 /// Serde default for flags that were implicitly on before they existed.
@@ -346,7 +332,6 @@ pub struct RecentRace {
     /// Finish time, seconds.
     pub time_sec: u32,
     /// Race date, local epoch day. `None` = undated.
-    #[serde(default)]
     pub epoch_day: Option<i64>,
 }
 
@@ -388,14 +373,11 @@ pub struct IntervalExec {
 /// IS the number of signs ticked (it overrides the bare
 /// `overtraining_signal_count`), so "a sign" always means one of these four.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(default)]
 pub struct OvertrainingSigns {
-    #[serde(default)]
     pub worse_performance: bool,
-    #[serde(default)]
     pub low_mood: bool,
-    #[serde(default)]
     pub higher_resting_hr: bool,
-    #[serde(default)]
     pub worse_sleep: bool,
 }
 
@@ -434,19 +416,15 @@ pub struct SessionReview {
     pub overtraining_signal_count: u8,
     /// How long the overtraining/NFOR signals have co-occurred, in weeks
     /// (feedback-036 duration condition: fire only over ≥1–2 wks, never on a
-    /// single noisy night). `None` = untracked → count alone gates
-    /// (pre-duration behavior, protective).
-    #[serde(default)]
+    /// single noisy night). `None` = untracked → the count alone gates.
     pub overtraining_signal_weeks: Option<f64>,
     /// Which of the four listed overtraining signs were ticked (weekly
     /// check-in). `Some` → the effective signal count is the ticked count.
-    #[serde(default)]
     pub overtraining_signs: Option<OvertrainingSigns>,
     /// Single-session distance over the prior-30-day longest, as a fraction.
     pub single_session_spike_frac: Option<f64>,
     pub lift: Option<LiftExec>,
     /// Interval/threshold execution for the feedback-015 mastery arm.
-    #[serde(default)]
     pub interval: Option<IntervalExec>,
     pub decoupling: Option<Decouple>,
     /// Fraction of an easy run spent above VT1/Zone-2 ceiling.
@@ -467,23 +445,19 @@ pub struct SessionReview {
     pub mrv_sign_cluster: bool,
     /// Weeks of unexplained performance decline (safety-042 / autoreg-042
     /// NFOR triggers; both need ≥2).
-    #[serde(default)]
     pub decline_weeks: Option<u8>,
     /// Wellness domains currently suppressed alongside the decline -
     /// fatigue/mood/sleep/etc. (autoreg-042 needs ≥2).
-    #[serde(default)]
     pub suppressed_wellness_domains: Option<u8>,
     /// The decline has persisted DESPITE a deload (safety-042 escalation).
     #[serde(default)]
     pub despite_deload: bool,
     /// Pace at target HR improved ≥ the smallest-worthwhile change, and for how
     /// many weeks it has held (autoreg-032; ≥2 → re-test threshold pace).
-    #[serde(default)]
     pub pace_at_hr_improved_weeks: Option<u8>,
     /// Count of hypertrophy overreaching triggers present this week -
     /// performance decrement, RIR drift to 0, persistent joint/tendon aches,
     /// disrupted sleep, elevated RHR, mood drop (hypertrophy-035; ≥2 → deload).
-    #[serde(default)]
     pub hypertrophy_deload_triggers: Option<u8>,
     /// Persistent joint aches this week (hypertrophy-009 over-MRV sign).
     #[serde(default)]
@@ -499,17 +473,13 @@ pub struct SessionReview {
     pub low_recovery: bool,
     /// Set-to-set rep drop as a fraction (e.g. 0.15 = reps fell 15% between
     /// sets), hypertrophy-039: >10% → lengthen rest.
-    #[serde(default)]
     pub rep_drop_frac: Option<f64>,
     /// Today's reference-load mean concentric velocity minus baseline, m/s
     /// (autoreg-008/009 VBT daily readiness; ±0.06 m/s reliability band).
-    #[serde(default)]
     pub mcv_delta_m_s: Option<f64>,
     /// First work set hit its target reps (autoreg-011/012 set-volume gate).
-    #[serde(default)]
     pub first_set_reps_met: Option<bool>,
     /// First work set RPE minus target RPE (autoreg-011/012).
-    #[serde(default)]
     pub first_set_rpe_delta: Option<f64>,
     /// The same lift needed set cuts in both of the last two sessions
     /// (autoreg-014 → hold weekly volume, no add).
@@ -521,26 +491,20 @@ pub struct SessionReview {
     pub rpe_creep_plus_one: bool,
     /// Days the wellness composite z-score has been ≤ −1 (autoreg-024 second
     /// condition; ≥3 with the creep → deload).
-    #[serde(default)]
     pub wellness_z_low_days: Option<u8>,
     /// Interval reps that landed at RPE ≥ target+1 or above the HR cap
     /// (autoreg-031; ≥2 → cut remaining-rep pace ~2–4%).
-    #[serde(default)]
     pub interval_reps_over_target: Option<u8>,
     /// Whether the prescribed easy pace was holdable under the HR cap
     /// (autoreg-033; `Some(false)` → slow the easy pace).
-    #[serde(default)]
     pub can_hold_easy_pace_under_hr_cap: Option<bool>,
     /// HRV readings flagged unreliable among the last three (autoreg-050;
     /// ≥2 → suspend HRV gating, fall back to subjective + performance).
-    #[serde(default)]
     pub hrv_unreliable_last_three: Option<u8>,
     /// Consecutive days lnRMSSD has sat below the SWC band (autoreg-034;
     /// ≥3 → insert a recovery day / easy block).
-    #[serde(default)]
     pub hrv_suppressed_days: Option<u8>,
     /// Days subjective wellness has been suppressed (autoreg-035).
-    #[serde(default)]
     pub wellness_suppressed_days: Option<u8>,
     /// Morning resting HR is trending up (autoreg-035; with ≥2 suppressed
     /// wellness days → 1–3 easy days or cross-training).
@@ -548,10 +512,8 @@ pub struct SessionReview {
     pub rhr_rising: bool,
     /// Single-day lnRMSSD z-score vs baseline (autoreg-028 second trigger;
     /// < −1 with a ≥2-day downtrend → downgrade hard→easy).
-    #[serde(default)]
     pub hrv_single_day_z: Option<f64>,
     /// Days the HRV has been trending down (autoreg-028 second trigger).
-    #[serde(default)]
     pub hrv_downtrend_days: Option<u8>,
     /// Concurrent-training interference symptoms present (hybrid-018/CAP-6;
     /// with running not mandatory → substitute cycling/rowing for part of
@@ -561,7 +523,6 @@ pub struct SessionReview {
     /// Consecutive failed sessions on one novice linear-progression lift
     /// (Starting Strength stall governance; ≥3 with adequate recovery →
     /// deload that lift ~10% and re-ramp).
-    #[serde(default)]
     pub stall_failed_sessions: Option<u8>,
     /// Recovery (sleep/food/stress) was adequate across the stall, required
     /// before the stall triggers a deload rather than a recovery fix.
@@ -574,22 +535,18 @@ pub struct SessionReview {
     /// Whether the reviewed session was planned-hard (feedback-026 tone:
     /// planned-hard → praise effort; planned-easy → celebrate restraint).
     /// `None` = unstated, no tone modifier.
-    #[serde(default)]
     pub planned_hard: Option<bool>,
     /// Rolling multi-week trend direction of the athlete's key metric:
     /// `"up"` / `"flat"` / `"down"` (feedback-027/028/029; any other value
     /// reads as flat). `None` = no trend submitted.
-    #[serde(default)]
     pub trend_direction: Option<crate::feedback::TrendDirection>,
     /// Weeks the rolling trend has been flat (feedback-028; ≥4 → plateau
     /// reframing).
-    #[serde(default)]
     pub weeks_flat: Option<u8>,
     /// Target missed on a genuine high-RPE off day.
     pub bad_day: bool,
     /// When the review was submitted, unix seconds; shell-supplied (the core
-    /// holds no clock), `#[serde(default)]` keeps pre-timestamp persisted events
-    /// replayable (decode as 0 = undated). Consumed by review expiry: week-scoped
+    /// holds no clock), 0 = undated. Consumed by review expiry: week-scoped
     /// deloads age out after `7 × weeks` days and a session-execution note after
     /// a week (safety rows never expire); an undated review never expires.
     #[serde(default)]
@@ -620,14 +577,11 @@ pub struct Model {
     /// Logged other activities (sport, cycling…), in submission order.
     /// Cleared by `ClearActivities`.
     pub(super) activities: Vec<LoggedActivity>,
-    /// The athlete's programming profile, if set — the latest applied. Its
-    /// dated history lives in `profile_history`; this stays the current profile.
-    pub(super) profile: Option<Profile>,
-    /// Every applied profile in effect-order. A `SetProfile`
-    /// with effective-day E drops every entry with eff >= E (None = −∞) then
-    /// appends, so a past plan day reads the profile effective THAT day and a
-    /// later goal/weekly-set edit never re-prescribes it. `ClearProfile` clears
-    /// both this and `profile`.
+    /// Every applied profile in effect-order; the last is the current one
+    /// ([`Model::profile`]). A `SetProfile` with effective-day E drops every
+    /// entry with eff >= E (None = −∞) then appends, so a past plan day reads
+    /// the profile effective THAT day and a later goal/weekly-set edit never
+    /// re-prescribes it. `ClearProfile` clears it.
     pub(super) profile_history: Vec<Profile>,
     /// User-declared "I ended this exercise early" markers, keyed by
     /// `same_movement`-normalized exercise + local epoch-day, last-write-wins.
@@ -683,6 +637,13 @@ pub struct Model {
     /// the week's spacing rules; a move that breaks them is ignored and
     /// reported. Plan family: `ClearPlan` clears them.
     pub(super) session_moves: Vec<SessionMove>,
+}
+
+impl Model {
+    /// The athlete's current programming profile: the latest applied.
+    pub(super) fn profile(&self) -> Option<&Profile> {
+        self.profile_history.last()
+    }
 }
 
 /// Inputs for a synthesized training plan: the epoch-day the user
@@ -764,7 +725,7 @@ pub enum Event {
     /// No-op when no such input exists. A dated remove (`observed_at > 0`,
     /// unix seconds) retracts the input: gone for today and the future, still
     /// in force for any past day before the removal's local day. An undated
-    /// (legacy) remove deletes it outright.
+    /// remove deletes it outright.
     RemoveReadiness {
         signal: ReadinessSignal,
         #[serde(default)]
@@ -802,20 +763,16 @@ pub enum Event {
         reps: u32,
         rpe: f64,
         /// When the set was logged, unix seconds; shell-supplied (the core holds
-        /// no clock). `#[serde(default)]` keeps event logs persisted before this
-        /// field existed replayable, they decode as 0 ("undated").
+        /// no clock). 0 = undated.
         #[serde(default)]
         observed_at: i64,
         /// Stable per-entry id: a shell-assigned monotonic value
         /// (epoch-millis at log) so `AmendSet`/`DeleteEntry` can target this exact
-        /// set. `#[serde(default)]` → 0 for legacy logs (matched on
-        /// `observed_at` instead).
+        /// set. 0 = no id (matched on `observed_at` instead).
         #[serde(default)]
         entry_id: u64,
         /// Timed-hold duration, seconds — `Some` for a static/hold set (a
-        /// calisthenics lever/plank/dead-hang rung). `#[serde(default)]` → `None`
-        /// for a reps×load set and for logs persisted before this field existed.
-        #[serde(default)]
+        /// calisthenics lever/plank/dead-hang rung), `None` for a reps×load set.
         hold_sec: Option<u16>,
     },
     /// Drop all logged sets.
@@ -829,8 +786,7 @@ pub enum Event {
         exercise: String,
         epoch_day: i64,
         ended: bool,
-        /// When the marker was set, unix seconds (shell clock). `#[serde(default)]`
-        /// → 0 for old logs.
+        /// When the marker was set, unix seconds (shell clock); 0 = undated.
         #[serde(default)]
         observed_at: i64,
     },
@@ -841,72 +797,58 @@ pub enum Event {
         duration_min: f64,
         hr_pct_max: f64,
         longest_recent_km: f64,
-        /// Log time, unix seconds; shell-supplied, `#[serde(default)]` for
-        /// back-compat with pre-timestamp persisted events (decode as 0).
+        /// Log time, unix seconds; shell-supplied, 0 = undated.
         #[serde(default)]
         observed_at: i64,
-        /// Stable per-entry id; see [`Event::LogSet`]. 0 = legacy.
+        /// Stable per-entry id; see [`Event::LogSet`].
         #[serde(default)]
         entry_id: u64,
         /// User-declared run-intent label. USER DATA with no evidence of its
         /// own: the weekly report's hard-session checks honor it as the
-        /// session's declared goal (running-012/023). `#[serde(default)]` →
-        /// `None` so old logs / shells that never sent it replay unchanged.
-        #[serde(default)]
+        /// session's declared goal (running-012/023). `None` = untagged.
         workout_type: Option<WorkoutType>,
         /// Whole-session effort on the CR-10 scale (0–10), rated ~30 min after
-        /// the run (LOAD-SRPE-001). `#[serde(default)]` → `None` (unrated) for
-        /// old logs; values above 10 clamp to 10 at ingest.
-        #[serde(default)]
+        /// the run (LOAD-SRPE-001). `None` = unrated; values above 10 clamp to
+        /// 10 at ingest.
         session_rpe: Option<u8>,
         /// Average heart rate in bpm as the user's watch shows it (UXL-12). When
         /// set and plausible, `update` converts it to `hr_pct_max` against the
         /// measured HRmax, else the Tanaka age estimate (RUN-HRMAX-001), of the
         /// profile in force at the run's instant (re-derived when the profile
         /// history changes); with neither known the sent `hr_pct_max` stands.
-        /// `#[serde(default)]`
-        /// → `None` for old logs and shells.
-        #[serde(default)]
         avg_hr_bpm: Option<f64>,
         /// The device's UTC offset, seconds east, when the run was logged. The
         /// bpm conversion reads the run's local day with it, so a later
-        /// time-zone change never re-converts the run. `None` (old logs and
-        /// shells; omitted from the wire) = the clock's current offset.
+        /// time-zone change never re-converts the run. `None` (omitted from the
+        /// wire) = the clock's current offset.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         utc_offset_sec: Option<i64>,
     },
     /// Log one GPS-tracked run. Distance and duration are derived in-core from
     /// the fix track (haversine + time span); `hr_pct_max` comes from a paired
-    /// HR sensor (0.0 when none), `longest_recent_km` drives the spike gate.
+    /// HR sensor (0.0 when none). `longest_recent_km` floors the run card's
+    /// spike-chip baseline; the spike gate derives its own from the logged runs.
     LogRunTrack {
         points: Vec<GpsPoint>,
         hr_pct_max: f64,
         longest_recent_km: f64,
         /// Indices into `points` that begin a new recording segment: the shell's
-        /// pause/relocation boundaries. `#[serde(default)]` → empty for
-        /// old logs and shells that never sent it (they pre-collapsed the geometry
-        /// by re-anchoring), which replay as one continuous segment, unchanged.
+        /// pause/relocation boundaries. Empty = one continuous segment.
         #[serde(default)]
         segment_starts: Vec<u32>,
-        /// Log time, unix seconds; shell-supplied, `#[serde(default)]` for
-        /// back-compat with pre-timestamp persisted events (decode as 0). The
-        /// GPS fixes carry their own per-point `observed_at`; this is the
-        /// session's logged-at stamp for history display.
+        /// Log time, unix seconds; shell-supplied, 0 = undated. The GPS fixes
+        /// carry their own per-point `observed_at`; this is the session's
+        /// logged-at stamp for history display.
         #[serde(default)]
         observed_at: i64,
-        /// Stable per-entry id; see [`Event::LogSet`]. 0 = legacy.
+        /// Stable per-entry id; see [`Event::LogSet`].
         #[serde(default)]
         entry_id: u64,
         /// User-declared run-intent label; see [`Event::LogRun`].
-        /// `#[serde(default)]` → `None` so old logs / shells that never sent
-        /// it replay unchanged.
-        #[serde(default)]
         workout_type: Option<WorkoutType>,
         /// Whole-session effort, CR-10 (0–10), see [`Event::LogRun`].
-        #[serde(default)]
         session_rpe: Option<u8>,
         /// Average heart rate the athlete entered, bpm; see [`Event::LogRun`].
-        #[serde(default)]
         avg_hr_bpm: Option<f64>,
         /// The device's UTC offset when the run was logged; see [`Event::LogRun`].
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -927,24 +869,23 @@ pub enum Event {
         /// Strengthened muscle or bone (jumping, climbing, bodyweight work).
         #[serde(default)]
         strengthening: bool,
-        /// Log time, unix seconds; shell-supplied. `#[serde(default)]` → 0.
+        /// Log time, unix seconds; shell-supplied, 0 = undated.
         #[serde(default)]
         observed_at: i64,
-        /// Stable per-entry id; see [`Event::LogSet`]. 0 = legacy.
+        /// Stable per-entry id; see [`Event::LogSet`].
         #[serde(default)]
         entry_id: u64,
     },
     /// Drop all logged activities (part of "Clear all data").
     ClearActivities,
     /// Delete one logged set, run or activity. Targets the newest entry
-    /// whose `entry_id` matches (or, for a legacy row with no id, whose
+    /// whose `entry_id` matches (or, for a row with no id, whose
     /// `observed_at` matches `observed_at_fallback`). A no-op when nothing
     /// matches. Compaction cancels it against its matched log line (Rule 3).
     DeleteEntry {
         kind: EntryKind,
         entry_id: u64,
-        /// Match target for a legacy (`entry_id == 0`) row that predates entry
-        /// ids. `#[serde(default)]` → 0.
+        /// Match target for a row with no entry id (`entry_id == 0`).
         #[serde(default)]
         observed_at_fallback: i64,
     },
@@ -961,22 +902,20 @@ pub enum Event {
         /// when the user re-dates a set).
         #[serde(default)]
         observed_at: i64,
-        /// The OLD `observed_at` of the row being amended. For a legacy row
+        /// The OLD `observed_at` of the row being amended. For a row with no id
         /// (`entry_id == 0`) whose date the user CHANGED, the original entry can
         /// only be located by its old timestamp; matching on the new one would
-        /// find nothing and push a DUPLICATE. `#[serde(default)]` → 0 (old logs;
-        /// the handler falls back to `observed_at` then).
+        /// find nothing and push a DUPLICATE. 0 = match on `observed_at`.
         #[serde(default)]
         observed_at_fallback: i64,
-        /// Timed-hold duration, seconds (see [`Event::LogSet`]). `#[serde(default)]`
-        /// → `None`.
-        #[serde(default)]
+        /// Timed-hold duration, seconds (see [`Event::LogSet`]).
         hold_sec: Option<u16>,
     },
     /// Edit one hand-entered run's fields. GPS-tracked runs are delete-only for
     /// field edits (their measured track is not field-editable), so amending one
-    /// replaces it with a manual run; the sole exception is [`Event::TrimRunTrack`],
-    /// which cuts a GPS run's head/tail without leaving the track store. Matches
+    /// replaces it with a manual run. The exceptions: [`Event::TrimRunTrack`]
+    /// cuts a GPS run's head/tail without leaving the track store, and
+    /// [`Event::AmendRunMeta`] edits any run's rating and tag in place. Matches
     /// like `DeleteEntry`.
     AmendRun {
         entry_id: u64,
@@ -992,15 +931,10 @@ pub enum Event {
         #[serde(default)]
         observed_at_fallback: i64,
         /// User-declared run-intent label; see [`Event::LogRun`].
-        /// `#[serde(default)]` → `None` so old logs / shells that never sent
-        /// it replay unchanged.
-        #[serde(default)]
         workout_type: Option<WorkoutType>,
         /// Whole-session effort, CR-10 (0–10), see [`Event::LogRun`].
-        #[serde(default)]
         session_rpe: Option<u8>,
         /// Average heart rate in bpm, converted like [`Event::LogRun`]'s.
-        #[serde(default)]
         avg_hr_bpm: Option<f64>,
     },
     /// Trim a GPS run's recorded head/tail: keep only the fixes whose per-point
@@ -1010,8 +944,8 @@ pub enum Event {
     /// from the sliced track at `view()`. Matches like `DeleteEntry`/`AmendRun`.
     TrimRunTrack {
         entry_id: u64,
-        /// The run's `observed_at`, so a legacy (`entry_id == 0`) run is located
-        /// by timestamp; see [`Event::AmendRun`]. `#[serde(default)]` → 0.
+        /// The run's `observed_at`, so a run with no id (`entry_id == 0`) is
+        /// located by timestamp; see [`Event::AmendRun`].
         #[serde(default)]
         observed_at_fallback: i64,
         keep_from_sec: i64,
@@ -1024,14 +958,12 @@ pub enum Event {
     /// matches. Compaction family 2 (runs), kept like a trim line.
     AmendRunMeta {
         entry_id: u64,
-        /// The run's `observed_at`, so a legacy (`entry_id == 0`) run is located
-        /// by timestamp. `#[serde(default)]` → 0.
+        /// The run's `observed_at`, so a run with no id (`entry_id == 0`) is
+        /// located by timestamp.
         #[serde(default)]
         observed_at_fallback: i64,
         /// Whole-session effort, CR-10 (0–10); values above 10 clamp to 10.
-        #[serde(default)]
         session_rpe: Option<u8>,
-        #[serde(default)]
         workout_type: Option<WorkoutType>,
     },
     /// Set the athlete's programming profile, then recompute guidance.
@@ -1060,9 +992,7 @@ pub enum Event {
         recent_time_sec: f64,
         goal_distance_m: f64,
         weekly_km: f64,
-        /// Weeks since the input race (running-041 freshness; serde default
-        /// `None` keeps old persisted events replayable).
-        #[serde(default)]
+        /// Weeks since the input race (running-041 freshness).
         weeks_since_race: Option<u8>,
     },
     /// Drop the race prediction (clears the prediction section).
@@ -1092,19 +1022,13 @@ pub enum Event {
     },
     /// Drop the protein target (clears the protein section).
     ClearProtein,
-    /// Compute a heart-rate-zone table from age: an estimated HRmax (Tanaka) and
-    /// the five Daniels %HRmax training bands mapped to absolute bpm ranges.
-    /// Optional extras (all serde-default for replay compatibility): a resting
-    /// HR arms the running-005 Karvonen preference + band targets; the two
-    /// weeks-since fields arm the running-006/041 recalibration-due checks.
+    /// Compute a heart-rate-zone table: HRmax (the profile's measured max,
+    /// else Tanaka from `age_years`) and the five Daniels %HRmax training bands
+    /// mapped to absolute bpm ranges. A resting HR arms the running-005
+    /// Karvonen preference + band targets.
     ComputeHrZones {
         age_years: f64,
-        #[serde(default)]
         resting_hr_bpm: Option<f64>,
-        #[serde(default)]
-        weeks_since_recalc: Option<u8>,
-        #[serde(default)]
-        weeks_since_pace_test: Option<u8>,
     },
     /// Drop the heart-rate-zone table (clears the zone section).
     ClearHrZones,
@@ -1117,15 +1041,8 @@ pub enum Event {
     /// The shell's clock as event data: today's LOCAL epoch-day, sent
     /// on foreground so `view()` dates the week + picks the next session with no
     /// clock in-core. Last-write-wins singleton (compaction keeps one line).
-    ///
-    /// Local/UTC day convention: `epoch_day` is the shell's LOCAL calendar
-    /// day (days since 1970-01-01 in the device's timezone). `utc_offset_sec` is
-    /// the device's current offset east of UTC in seconds (e.g. Berlin summer =
-    /// +7200); the core buckets a run/set's UTC `observed_at` into the SAME local
-    /// day via `(observed_at + utc_offset_sec).div_euclid(86_400)`, so "was this
-    /// planned session done today?" compares like-for-like. `#[serde(default)]`
-    /// → 0 (old logs / a shell that only knows UTC fall back to UTC bucketing,
-    /// unchanged behavior).
+    /// `utc_offset_sec` is the device's offset east of UTC (0 = UTC), which
+    /// buckets every UTC `observed_at` into a local day (`crate::local_day`).
     SetToday {
         epoch_day: i64,
         #[serde(default)]
@@ -1140,8 +1057,8 @@ pub enum Event {
     SetCalisthenicsRung {
         ladder: crate::schema::LadderId,
         rung: u8,
-        /// Unix seconds (shell clock). `#[serde(default)]` → 0 = undated
-        /// (applies from the start of history).
+        /// Unix seconds (shell clock); 0 = undated (applies from the start of
+        /// history).
         #[serde(default)]
         observed_at: i64,
     },
@@ -1211,9 +1128,8 @@ pub(super) fn history_key(p: &Profile) -> (i64, i64) {
 /// The profile effective on local day `day`: the latest history entry whose
 /// effective day ([`history_key`]) is `<= day`. When every entry is dated
 /// strictly after `day` (a plan day before the first edit), the earliest entry
-/// is used so the day still has a profile. Falls back to `model.profile` only
-/// when the history is empty (defensive; every applied `SetProfile` populates
-/// the history). A birthday-carrying profile is aged for `day` itself
+/// is used so the day still has a profile. A birthday-carrying profile is
+/// aged for `day` itself
 /// (`ingest::aged_on`), so a day the under-18 gate held keeps its gate after
 /// the 18th birthday.
 pub(super) fn profile_for_day(model: &Model, day: i64) -> Option<std::borrow::Cow<'_, Profile>> {
@@ -1244,16 +1160,12 @@ fn in_force(
     day: i64,
     admit: impl Fn(&Profile) -> bool,
 ) -> Option<std::borrow::Cow<'_, Profile>> {
-    let p = if model.profile_history.is_empty() {
-        model.profile.as_ref()
-    } else {
-        model
-            .profile_history
-            .iter()
-            .rev()
-            .find(|p| history_key(p).0 <= day && admit(p))
-            .or_else(|| model.profile_history.first())
-    }?;
+    let p = model
+        .profile_history
+        .iter()
+        .rev()
+        .find(|p| history_key(p).0 <= day && admit(p))
+        .or_else(|| model.profile_history.first())?;
     Some(super::ingest::aged_on(p, day))
 }
 

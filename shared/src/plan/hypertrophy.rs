@@ -24,7 +24,7 @@ use crate::schema::{
 use crate::strength::{self, LiftGoal};
 
 use super::lift::{BlockCtx, is_isolation_lift, movement_key, same_movement};
-use super::{Anchors, DayRegion, MovementPattern, movement_pattern};
+use super::{Anchors, DayRegion, movement_pattern};
 
 /// Whether a profile's lift days run this hypertrophy week with double
 /// progression: a Hypertrophy goal on external loads. (A calisthenics profile
@@ -298,25 +298,6 @@ struct Item {
     order: (u8, usize),
 }
 
-fn trains(region: DayRegion, muscle: &str) -> bool {
-    let upper = UPPER_MUSCLES.contains(&muscle);
-    match region {
-        DayRegion::Full => true,
-        DayRegion::Upper => upper,
-        DayRegion::Lower => !upper,
-    }
-}
-
-/// Whether a lift with no Table 1 primary muscle belongs on a day's region:
-/// push/pull on upper days, squat/hinge on lower days, anything else anywhere.
-fn region_fits(region: DayRegion, name: &str) -> bool {
-    match (region, movement_pattern(name)) {
-        (DayRegion::Full, _) | (_, None) => true,
-        (DayRegion::Upper, Some(p)) => matches!(p, MovementPattern::Push | MovementPattern::Pull),
-        (DayRegion::Lower, Some(p)) => !matches!(p, MovementPattern::Push | MovementPattern::Pull),
-    }
-}
-
 fn class_rank(class: ExerciseClass) -> u8 {
     match class {
         ExerciseClass::HeavyCompound => 0,
@@ -396,8 +377,27 @@ fn pick_slots(eligible: &[usize], load: &[u32], f: usize) -> Vec<usize> {
     chosen
 }
 
-/// Allocate the whole week: which exercise lands on which lift day with how
-/// many sets, so each muscle's fractional weekly sets meet its target.
+/// The week's allocation for the athlete's stated volume ([`allocate_week`]).
+fn plan_week(profile: &Profile, anchors: &Anchors, ta: TrainingAge, block: BlockCtx) -> Vec<Item> {
+    let regions = block.week_regions.as_slice();
+    let targets = hypertrophy_week_targets(
+        profile,
+        ta,
+        block.week_in_block,
+        block.block_weeks,
+        regions.len(),
+    );
+    allocate_week(
+        anchors,
+        regions,
+        &targets,
+        u32::from(hypertrophy::SESSION_WORKING_SET_CAP),
+    )
+}
+
+/// Allocate the whole week: which exercise lands on which lift day (one per
+/// entry of `regions`) with how many sets, so each muscle's fractional weekly
+/// sets meet its `targets` entry.
 ///
 /// Per muscle (in [`MUSCLE_ORDER`]): the sets still needed = target − the ½-set
 /// credit it already receives from earlier muscles' compounds; spread over the
@@ -410,35 +410,8 @@ fn pick_slots(eligible: &[usize], load: &[u32], f: usize) -> Vec<usize> {
 /// days (LIFT-DAYS-001).
 ///
 /// Whole-session cap (HYP-VOL-CAP-001): the targets come already fitted to
-/// the cap ([`hypertrophy_week_targets`]), and no single day takes more than
-/// [`hypertrophy::SESSION_WORKING_SET_CAP`] working sets (a full day accepts
-/// no further muscle).
-fn plan_week(profile: &Profile, anchors: &Anchors, ta: TrainingAge, block: BlockCtx) -> Vec<Item> {
-    let regions: Vec<DayRegion> = {
-        let r = block.week_regions.as_slice();
-        if r.is_empty() {
-            vec![DayRegion::Full]
-        } else {
-            r.to_vec()
-        }
-    };
-    let targets = hypertrophy_week_targets(
-        profile,
-        ta,
-        block.week_in_block,
-        block.block_weeks,
-        regions.len(),
-    );
-    allocate_week(
-        anchors,
-        &regions,
-        &targets,
-        u32::from(hypertrophy::SESSION_WORKING_SET_CAP),
-    )
-}
-
-/// One allocation pass: each muscle sized to its `targets` entry over the
-/// days in `regions`, no day filled past `day_cap` working sets.
+/// the cap ([`hypertrophy_week_targets`]), and no day is filled past
+/// `day_cap` working sets (a full day accepts no further muscle).
 fn allocate_week(
     anchors: &Anchors,
     regions: &[DayRegion],
@@ -465,7 +438,9 @@ fn allocate_week(
         .filter(|(_, p)| p.is_none())
         .take(MAX_UNMAPPED_LOGGED)
     {
-        let mut eligible: Vec<usize> = (0..n).filter(|&s| region_fits(regions[s], name)).collect();
+        let mut eligible: Vec<usize> = (0..n)
+            .filter(|&s| regions[s].fits(movement_pattern(name)))
+            .collect();
         if eligible.is_empty() {
             eligible = (0..n).collect();
         }
@@ -503,7 +478,16 @@ fn allocate_week(
             continue; // indirect work from the compounds already covers it
         }
         let mut total = (need.round() as u32).max(min_sets);
-        let mut eligible: Vec<usize> = (0..n).filter(|&s| trains(regions[s], muscle)).collect();
+        let upper = UPPER_MUSCLES.contains(muscle);
+        let mut eligible: Vec<usize> = (0..n)
+            .filter(|&s| {
+                if upper {
+                    regions[s].has_upper()
+                } else {
+                    regions[s].has_lower()
+                }
+            })
+            .collect();
         if eligible.is_empty() {
             eligible = (0..n).collect();
         }

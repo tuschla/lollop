@@ -15,7 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -63,7 +63,6 @@ internal fun TrackerStats(
     large: Boolean,
     paceTarget: RunTargetView?,
     planKm: Double?,
-    modifier: Modifier = Modifier,
 ) {
     // Elapsed is the MONOTONIC recording span (immune to an NTP step); distance is the
     // incrementally-accumulated live haversine; average pace is over that span.
@@ -94,15 +93,12 @@ internal fun TrackerStats(
     }
     // The newest COMPLETED N-minute slice; the in-progress tail is not a finished split.
     val lastSlice = paceBuckets.lastOrNull { it.complete }
-    val res = LocalContext.current.resources
+    val res = LocalResources.current
     val spokenFigures = stringResource(
         R.string.track_cd_stats,
         spokenDuration(res, elapsedSec),
         if (liveKm > 0.0) {
-            stringResource(
-                if (unit == DistanceUnit.Mi) R.string.track_cd_distance_mi else R.string.track_cd_distance_km,
-                distanceText,
-            )
+            spokenDistance(res, distanceText, unit)
         } else {
             stringResource(R.string.track_cd_not_available)
         },
@@ -115,7 +111,7 @@ internal fun TrackerStats(
         stringResource(R.string.track_stat_last_slice, paceBucketN, formatPaceMinutes(paceInUnit(it.paceMinPerKm, unit)), unit.paceSuffix)
     }
     Column(
-        modifier = modifier
+        modifier = Modifier
             .clearAndSetSemantics { contentDescription = spoken }
             // Paused: the figures are frozen, so all of them step back together.
             .alpha(if (paused) PAUSED_FIGURE_ALPHA else 1f),
@@ -253,7 +249,7 @@ private fun PaceStatusLine(cue: PaceCue) {
         Text(
             stringResource(textRes),
             color = tone,
-            style = Type.Body.copy(fontWeight = FontWeight.Bold),
+            style = Type.BodyBold,
             modifier = Modifier.weight(1f, fill = false),
         )
     }
@@ -272,6 +268,10 @@ internal fun spokenDuration(res: Resources, totalSec: Long): String {
     parts += res.getQuantityString(R.plurals.track_cd_seconds, sec, sec)
     return parts.joinToString(" ")
 }
+
+/** A distance figure read aloud with its unit, e.g. "3.18 miles". */
+internal fun spokenDistance(res: Resources, figure: String, unit: DistanceUnit): String =
+    res.getString(if (unit == DistanceUnit.Mi) R.string.track_cd_distance_mi else R.string.track_cd_distance_km, figure)
 
 /** A canonical pace (min/km) read aloud in the user's unit, e.g. "5 minutes 15
  *  seconds per kilometer", or "not available yet" when unknown. */

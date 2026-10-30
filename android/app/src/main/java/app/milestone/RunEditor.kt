@@ -31,10 +31,9 @@ private fun runEditEvent(
     avgHrBpm: Double?,
 ): Event = when {
     initial == null -> Event.LogRun(distanceKm, durationMin, hrPctMax, observedAt, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm, utcOffsetSec = utcOffsetSec())
-    // observedAtFallback = the row's ORIGINAL stamp → replace, don't duplicate.
-    initial.entry_id != 0L ->
-        Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, observedAt, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
-    else -> Event.AmendRun(0L, distanceKm, durationMin, hrPctMax, initial.observed_at, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
+    // observedAtFallback = the row's ORIGINAL stamp → replace, don't duplicate. A row
+    // without an entry id (entry_id 0) keeps its original stamp.
+    else -> Event.AmendRun(initial.entry_id, distanceKm, durationMin, hrPctMax, if (initial.entry_id != 0L) observedAt else initial.observed_at, observedAtFallback = initial.observed_at, workoutType = workoutType, sessionRpe = sessionRpe, avgHrBpm = avgHrBpm)
 }
 
 /** Which numeric field the run editor's shared keypad currently edits. */
@@ -92,9 +91,10 @@ fun LogRunEditor(
     onSave: (Event) -> Unit,
 ) {
     // Distance honors the mi override symmetric with the lb weight field: entry is in
-    // the display unit, canonical km on the wire. `unit` fixes the editor's unit for
-    // its lifetime (read once, like the set editor's weightUnit).
-    val unit = rememberDistanceUnit()
+    // the display unit, canonical km on the wire. `unit` is resolved once and saved
+    // with the typed text, so a locale or override change mid-edit never reads a
+    // typed mi figure as km.
+    val unit = rememberSaveable { resolveDistanceUnit(AppSettings.distanceUnitOverride.value) }
     var distText by rememberSaveable {
         // km-native prefill is lossless; mi shows the converted %.2f figure. A blank
         // buffer (a fresh entry with nothing to seed) stays empty.
@@ -334,19 +334,12 @@ internal fun runSaveDistanceKm(
 ): Double = if (initial != null && distFresh) initial.distance_km
     else if (unit == DistanceUnit.Mi) miToKmWire(distParsed) else distParsed
 
-/** Longest timer-style duration buffer: hhmmss. */
-private const val DurationDigitsMax = 6
-
 /** Timer-style duration digits → minutes. Digits fill right to left: the last two
  *  are seconds, the two before minutes, the rest hours ("14530" = 1:45:30 =
  *  105.5 min). Null when empty, when seconds reach 60, or when minutes reach 60
  *  under an hours field (with no hours, "9000" reads 90:00 = 90 min). Pure. */
 internal fun durationDigitsToMin(digits: String): Double? {
-    if (digits.isEmpty() || digits.length > DurationDigitsMax || !digits.all { it.isDigit() }) return null
-    val p = digits.padStart(DurationDigitsMax, '0')
-    val h = p.substring(0, 2).toInt()
-    val m = p.substring(2, 4).toInt()
-    val s = p.substring(4, 6).toInt()
+    val (h, m, s) = hmsDigits(digits) ?: return null
     if (s >= 60 || (h > 0 && m >= 60)) return null
     return h * 60.0 + m + s / 60.0
 }
@@ -354,7 +347,7 @@ internal fun durationDigitsToMin(digits: String): Double? {
 /** Display form of a duration digit buffer: "1:45:30", "45:30", "0:30"; "" when empty. Pure. */
 internal fun fmtDurationDigits(digits: String): String {
     if (digits.isEmpty()) return ""
-    val p = digits.padStart(DurationDigitsMax, '0').takeLast(DurationDigitsMax)
+    val p = digits.padStart(HMS_DIGITS_MAX, '0').takeLast(HMS_DIGITS_MAX)
     val h = p.substring(0, 2).toInt()
     val m = p.substring(2, 4)
     val s = p.substring(4, 6)
@@ -382,7 +375,7 @@ internal fun minutesToDurationDigits(min: Double): String {
 internal fun editDurationDigits(digits: String, key: Char, replaceAll: Boolean): String {
     if (!key.isDigit()) return digits
     val base = if (replaceAll) "" else digits
-    if (base.length >= DurationDigitsMax) return base
+    if (base.length >= HMS_DIGITS_MAX) return base
     if (base.isEmpty() && key == '0') return base
     return base + key
 }

@@ -142,7 +142,6 @@
          above-neck tier (1), flu/fever/body aches = below-neck-or-fever tier (2). -->
     <string name="log_illness_q">Illness</string>
     <string name="log_illness_help">Head cold: easier, shorter sessions. Flu or fever: no training until you\'ve recovered.</string>
-    <string name="log_illness_none">None</string>
     <string name="log_illness_above_neck">Head cold only: runny nose, sore throat, sneezing</string>
     <string name="log_illness_below_neck">Flu, fever, body aches, chest or stomach symptoms</string>
 
@@ -365,11 +364,8 @@
     <string name="log_signal_reds_explainer">Signs of under-eating (RED-S). Logging it pauses training. See a doctor or registered dietitian.</string>
     <string name="log_signal_cardiac_explainer">Chest pain, fainting or a racing heartbeat. Training stops until a doctor clears you.</string>
     <string name="log_signal_bone_stress_explainer">Bone pain in one spot, a possible stress injury. Logging it pauses training. See a doctor.</string>
-    <!-- Race predictor distance presets -->
-    <string name="log_race_5k">5K</string>
-    <string name="log_race_10k">10K</string>
+    <!-- Race predictor: the half marathon's short segment label -->
     <string name="log_race_half">Half</string>
-    <string name="log_race_marathon">Marathon</string>
     <!-- Hypertrophy planner muscles (display only; the wire key is fixed) -->
     <string name="log_muscle_chest">Chest</string>
     <string name="log_muscle_back">Back</string>

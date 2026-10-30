@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -57,7 +58,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -282,20 +282,30 @@ internal fun SubHeading(text: String) {
     FieldLabel(text, heading = true)
 }
 
-/** One exclusive set of [SetupChoiceCard]s, announced as a radio group. */
+/** One exclusive set of [SetupChoiceCard]s, one per option, announced as a radio group. */
 @Composable
-internal fun ChoiceGroup(content: @Composable () -> Unit) {
+internal fun <T> ChoiceCards(
+    options: List<T>,
+    selected: T?,
+    title: @Composable (T) -> String,
+    subtitle: @Composable (T) -> String,
+    onPick: (T) -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxWidth().selectableGroup(),
         verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
-    ) { content() }
+    ) {
+        options.forEach { option ->
+            SetupChoiceCard(title(option), subtitle(option), selected = option == selected) { onPick(option) }
+        }
+    }
 }
 
 /** A selectable option: title + one-line consequence on the shared choice-card
  *  surface (selected = solid accent, like every other selection). A radio button
  *  to TalkBack, so the chosen card is announced as selected. */
 @Composable
-internal fun SetupChoiceCard(title: String, subtitle: String, selected: Boolean, onClick: () -> Unit) {
+private fun SetupChoiceCard(title: String, subtitle: String, selected: Boolean, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -304,8 +314,31 @@ internal fun SetupChoiceCard(title: String, subtitle: String, selected: Boolean,
             .padding(Space.Card.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
     ) {
-        Text(title, color = choiceCellContent(selected), style = Type.Body.copy(fontWeight = FontWeight.Bold))
+        Text(title, color = choiceCellContent(selected), style = Type.BodyBold)
         Text(subtitle, color = choiceCellSecondaryContent(selected), style = Type.Caption)
+    }
+}
+
+/** One whole-row option of a pick-one list inside a `selectableGroup`, on the
+ *  scale cells' surface: [title] (bold while selected) over an optional
+ *  [subtitle]. A radio button to TalkBack. */
+@Composable
+internal fun ChoiceRow(title: String, subtitle: String?, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = ActionMinHeight)
+            .choiceCell(selected)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.Xs.dp, Alignment.CenterVertically),
+    ) {
+        Text(
+            title,
+            color = choiceCellContent(selected),
+            style = if (selected) Type.BodyBold else Type.Body,
+        )
+        if (subtitle != null) Text(subtitle, color = choiceCellContent(selected), style = Type.Caption)
     }
 }
 
@@ -484,27 +517,26 @@ private fun EpochDayPickerDialog(state: DatePickerState, pick: Long?, onPick: (L
 }
 
 /**
- * A date answer: an optional "No date yet" pill ([noneLabel]) and a calendar pill
- * showing the picked date (or "Pick a date") that opens the date picker. With a
- * "No date yet" choice the two are a radio pair (the picked date shows selected);
- * alone (a restart date) the pill is a plain picker button, never a selection.
- * [future] limits the picker to days after [today] (a race or meet); otherwise to
- * today or earlier (a restart date). Values are local epoch days.
+ * A date answer: a calendar pill showing the picked date (or "Pick a date") that
+ * opens the date picker. A [future] date (a race or meet) is optional: a "No date
+ * yet" pill makes the two a radio pair and the picker offers days after [today].
+ * Otherwise (a restart date) the pill is a plain picker button, never a selection,
+ * and the picker offers today or earlier. Values are local epoch days.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-internal fun DateAnswerRow(value: Long?, today: Long, future: Boolean, noneLabel: String?, onChange: (Long?) -> Unit) {
+internal fun DateAnswerRow(value: Long?, today: Long, future: Boolean, onChange: (Long?) -> Unit) {
     var picking by rememberSaveable { mutableStateOf(false) }
     FlowRow(
-        modifier = Modifier.fillMaxWidth().then(if (noneLabel != null) Modifier.selectableGroup() else Modifier),
+        modifier = Modifier.fillMaxWidth().then(if (future) Modifier.selectableGroup() else Modifier),
         horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
-        if (noneLabel != null) AnswerChip(noneLabel, selected = value == null) { onChange(null) }
+        if (future) AnswerChip(stringResource(R.string.setup_date_none), selected = value == null) { onChange(null) }
         DateChip(
             value?.let { epochDayLabel(it) } ?: stringResource(R.string.setup_date_pick),
-            selected = noneLabel != null && value != null,
-            role = if (noneLabel != null) Role.RadioButton else Role.Button,
+            selected = future && value != null,
+            role = if (future) Role.RadioButton else Role.Button,
         ) { picking = true }
     }
     if (picking) {
@@ -677,7 +709,7 @@ internal fun ReviewCard(rows: List<ReviewEntry>, reveal: SetupStep?, onRevealed:
                     verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
                 ) {
                     TileOverline(row.label)
-                    Text(lines.first(), color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+                    Text(lines.first(), color = OnBgBody, style = Type.BodyBold)
                     if (lines.size > 1) {
                         Text(lines.drop(1).joinToString("\n"), color = OnBgMuted, style = Type.Body)
                     }
@@ -711,20 +743,26 @@ private const val StepProgressTrackAlpha = 0.08f
 internal fun StepProgress(stepNumber: Int, stepCount: Int, fraction: Float, modifier: Modifier = Modifier) {
     val progress = stringResource(R.string.setup_step_progress, stepNumber, stepCount)
     val shown by animateFloatAsState(fraction.coerceIn(0f, 1f), label = "setup-progress")
+    ProgressPill(
+        shown,
+        StepProgressHeight,
+        OnBgBody.copy(alpha = StepProgressTrackAlpha),
+        modifier.clearAndSetSemantics {
+            contentDescription = progress
+            liveRegion = LiveRegionMode.Polite
+        },
+    )
+}
+
+/** A fully rounded bar: an accent fill over [fraction] (capped full) of a [track]
+ *  of [height]; [modifier] sets the width and the semantics. */
+@Composable
+internal fun ProgressPill(fraction: Float, height: Dp, track: Color, modifier: Modifier) {
     val shape = RoundedCornerShape(50)
-    Box(
-        modifier = modifier
-            .height(StepProgressHeight)
-            .clip(shape)
-            .background(OnBgBody.copy(alpha = StepProgressTrackAlpha))
-            .clearAndSetSemantics {
-                contentDescription = progress
-                liveRegion = LiveRegionMode.Polite
-            },
-    ) {
+    Box(modifier.height(height).clip(shape).background(track)) {
         Box(
             Modifier
-                .fillMaxWidth(shown)
+                .fillMaxWidth(fraction.coerceIn(0f, 1f))
                 .fillMaxHeight()
                 .clip(shape)
                 .background(Accent),

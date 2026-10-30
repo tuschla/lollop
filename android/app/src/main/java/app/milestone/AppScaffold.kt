@@ -14,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
@@ -53,15 +52,7 @@ internal fun CoachScaffold(session: CoachSession) {
     // Live tracking state drives the "run in progress" reentry chip below.
     val liveTracking by RunSession.tracking.collectAsState()
 
-    // The bottom-nav destination, hoisted ABOVE the full-screen setup/tracker
-    // early-returns below so its rememberSaveable slot stays in composition across
-    // a tracker/setup round-trip (declared after them, it would be disposed while
-    // the tracker replaces the scaffold and come back as Today). It also
-    // survives a config change (rotation): saved as the enum NAME with an
-    // unknown-name fallback, since the default autoSaver Java-serializes the enum
-    // and restoring an icicle that still holds a REMOVED constant (a pre-merge
-    // build's "Coach") would throw inside readObject; the same decode-safe pattern
-    // as WorkoutType.fromWire.
+    // Hoisted above the full-screen setup/tracker returns so it survives them.
     var selected by rememberSaveable(stateSaver = DestSaver) { mutableStateOf(Dest.Today) }
     // A Profile Focus switch that needs the new side's answers opens the setup at
     // those questions (null = a plain re-run or first run).
@@ -167,14 +158,14 @@ internal fun CoachScaffold(session: CoachSession) {
                 switchTo = setupSwitchTo,
                 calisLadders = session.model.calisthenics_ladders,
                 onComplete = { draft, rungs ->
-                    session.dispatch(draft.toEvent(session.model.today()))
+                    session.dispatch(draft.effectiveFrom(session.model.today()))
                     // Calisthenics self-placement: each answered ladder starts at
                     // its rung (after the profile, before the plan is generated).
                     rungs.forEach { session.dispatch(it) }
                     // Zero-tap after setup: now that a profile exists, generate the
-                    // plan immediately so the user lands on the prescription-led
-                    // Coach/Today in THIS session (not only after a relaunch). The
-                    // core preserves this anchor on later boots.
+                    // plan immediately so the user lands on Today's prescription in
+                    // THIS session (not only after a relaunch). The core preserves
+                    // this anchor on later boots.
                     session.dispatch(Event.GeneratePlan(todayEpochDay()))
                     if (firstRun) session.markOnboardingDone()
                     session.showSetup = false
@@ -200,7 +191,8 @@ internal fun CoachScaffold(session: CoachSession) {
         RunTrackingScreen(
             model = session.model,
             onEvent = { session.dispatch(it) },
-            onFinish = { _ ->
+            lastPain = session.lastPain,
+            onFinish = {
                 // The run save routes its Core.send through EventDispatcher.exclusive,
                 // so the consumer already published the saved model in queue order and
                 // the model collector re-seeds session.model — nothing to publish here.
@@ -228,7 +220,7 @@ internal fun CoachScaffold(session: CoachSession) {
     // Focus switch opens it at the new side's questions. A re-run leaves the
     // onboarding pref untouched (handled at the call site).
     val rerunSetup: (Modality?) -> Unit = { switchTo ->
-        session.setupInitial = session.model.profile?.let { ProfileDraft.from(it) } ?: ProfileDraft.SEED
+        session.setupInitial = session.model.profile?.let { Event.SetProfile.from(it) } ?: Event.SetProfile.SEED
         setupSwitchTo = switchTo
         session.showSetup = true
     }
@@ -461,22 +453,18 @@ internal fun CoachScaffold(session: CoachSession) {
                 if (sheetOpen) {
                     // A set loop in progress can't be swiped or scrim-tapped away (a scroll
                     // back up to the timer closed the whole loop); it closes via X or Finish.
-                    ModalBottomSheet(
+                    AppSheet(
                         // The dirty-editor and loop guards live in sheetState.confirmValueChange
                         // (which keeps the sheet visible while confirming). By the time
                         // onDismissRequest fires the hide is already committed on a clean,
                         // unlocked sheet, so this just finishes the close.
-                        onDismissRequest = {
+                        onDismiss = {
                             resetSheet()
                             sheetOpen = false
                         },
                         sheetState = sheetState,
                         sheetGesturesEnabled = !loopLocked(),
-                        // Sheet ground a hair off BgElevated for separation (05-log §1);
-                        // on paper the elevated surface already separates.
-                        containerColor = BgSunken,
                     ) {
-                        SheetNavBarScrim()
                         LogSheetContent(
                             mode = sheetMode,
                             model = session.model,
@@ -513,28 +501,14 @@ internal fun CoachScaffold(session: CoachSession) {
                 // "How evidence grading works" legend, reached from the "?" on any
                 // grade badge. Static reference copy; no coaching logic.
                 if (showLegend) {
-                    ModalBottomSheet(
-                        onDismissRequest = { showLegend = false },
-                        // Fully expanded only: Back and swipe close the sheet in one step
-                        // (a half-height detent made Back collapse it first).
-                        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                        containerColor = BgSunken,
-                    ) {
-                        SheetNavBarScrim()
+                    AppSheet(onDismiss = { showLegend = false }) {
                         EvidenceLegendSheet(session.model.grade_definitions)
                     }
                 }
                 // Glossary: one app-wide sheet defining the jargon, opened from any
                 // term chip. Static UI copy; no coaching logic, no KB claim.
                 glossaryTerm?.let { term ->
-                    ModalBottomSheet(
-                        onDismissRequest = { glossaryTerm = null },
-                        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                        containerColor = BgSunken,
-                    ) {
-                        SheetNavBarScrim()
-                        GlossarySheet(term)
-                    }
+                    AppSheet(onDismiss = { glossaryTerm = null }) { GlossarySheet(term) }
                 }
             }
         }
@@ -587,7 +561,8 @@ private fun TopChrome(
 
 /** Decode-safe saver for the selected bottom-nav tab: stores the enum NAME and
  *  falls back to Today when the saved name no longer exists (e.g. "Coach"
- *  from a build before the Today+Coach merge). */
+ *  from a build before the Today+Coach merge). The default saver Java-serializes
+ *  the enum, and a removed constant would throw inside readObject. */
 private val DestSaver = androidx.compose.runtime.saveable.Saver<Dest, String>(
     save = { it.name },
     restore = { name -> Dest.entries.firstOrNull { it.name == name } ?: Dest.Today },

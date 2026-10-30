@@ -10,20 +10,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.RangeSliderState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +33,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
 /** Saves a [RangeSlider] window as its two ends. */
@@ -80,12 +75,7 @@ internal fun TrimRunSheetContent(
     val unit = rememberDistanceUnit()
     val points = route.track
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
-            .padding(horizontal = Space.Sheet.dp)
-            .padding(bottom = Space.Lg.dp),
+        modifier = Modifier.sheetBody(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
     ) {
         Text(stringResource(R.string.main_trim_run), color = OnBgBody, style = Type.Title)
@@ -184,23 +174,14 @@ internal fun TrimRunSheetContent(
         if (confirm) {
             val removedStartMin = Math.round((keepFromSec - firstFixSec) / 60.0).toInt()
             val removedEndMin = Math.round((lastFixSec - keepUntilSec) / 60.0).toInt()
-            AlertDialog(
-                onDismissRequest = { confirm = false },
-                shape = RoundedCornerShape(Space.Card.dp),
-                title = {
-                    Text(stringResource(R.string.main_trim_confirm_title, runDistLabel(keptKm, unit), keptTime))
-                },
-                text = {
-                    Text(stringResource(R.string.main_trim_confirm_message, removedStartMin, removedEndMin))
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        confirm = false
-                        onConfirm(keepFromSec, keepUntilSec)
-                    }) { Text(stringResource(R.string.main_trim_confirm)) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { confirm = false }) { Text(stringResource(R.string.main_cancel)) }
+            ConfirmDialog(
+                title = stringResource(R.string.main_trim_confirm_title, runDistLabel(keptKm, unit), keptTime),
+                body = stringResource(R.string.main_trim_confirm_message, removedStartMin, removedEndMin),
+                confirmLabel = stringResource(R.string.main_trim_confirm),
+                onDismiss = { confirm = false },
+                onConfirm = {
+                    confirm = false
+                    onConfirm(keepFromSec, keepUntilSec)
                 },
             )
         }
@@ -237,7 +218,8 @@ private fun TrimThumb(start: Boolean, description: String, state: String) {
     }
 }
 
-/** The trim slider's track: `OnBgBody` @ 12% end to end, `Accent` over the kept window; no ticks. */
+/** The trim slider's track: `OnBgBody` @ 12% end to end, `Accent` over the kept
+ *  window (mirrored under RTL, as the slider's thumbs are); no ticks. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TrimTrack(state: RangeSliderState) {
@@ -249,9 +231,11 @@ private fun TrimTrack(state: RangeSliderState) {
         val to = (state.activeRangeEnd - state.valueRange.start) / span
         val r = CornerRadius(size.height / 2, size.height / 2)
         drawRoundRect(inactive, cornerRadius = r)
+        // A DrawScope is not mirrored under RTL, while the RangeSlider's thumbs are.
+        val left = if (layoutDirection == LayoutDirection.Rtl) 1f - to else from
         drawRoundRect(
             active,
-            topLeft = Offset(size.width * from, 0f),
+            topLeft = Offset(size.width * left, 0f),
             size = Size(size.width * (to - from), size.height),
             cornerRadius = r,
         )
@@ -304,7 +288,7 @@ fun timedTrackFromSegments(segments: List<List<GpxFix>>): List<TimedTrackPoint> 
                 val legM = haversineM(prev.lat, prev.lon, fix.lat, fix.lon)
                 runningM += legM
                 val dt = (fix.timeSec - prev.timeSec).toDouble()
-                if (dt > 0.0 && legM / dt >= MIN_MOVING_SPEED_MPS) movingSec += dt
+                if (movingLegKm(legM / 1000.0, dt) != null) movingSec += dt
             }
             out += TimedTrackPoint(fix.timeSec, runningM / 1000.0, movingSec)
             prev = fix

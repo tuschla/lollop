@@ -15,9 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,17 +34,16 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import java.io.Serializable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -75,7 +72,7 @@ internal object ModalityStash {
     private fun p(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /** Keep [draft]'s running answers as running is switched off. */
-    fun stashRun(ctx: Context, draft: ProfileDraft) {
+    fun stashRun(ctx: Context, draft: Event.SetProfile) {
         // A side already at 0 has nothing worth keeping: writing it would
         // clobber the last real numbers.
         if (draft.runningDaysPerWeek <= 0) return
@@ -90,7 +87,7 @@ internal object ModalityStash {
     }
 
     /** Keep [draft]'s lifting answers as lifting is switched off. */
-    fun stashLift(ctx: Context, draft: ProfileDraft) {
+    fun stashLift(ctx: Context, draft: Event.SetProfile) {
         if (draft.weeklySets <= 0) return
         p(ctx).edit().apply {
             putInt(K_LIFT_SETS, draft.weeklySets)
@@ -140,7 +137,7 @@ internal data class StashedLift(val days: Int?, val goal: LiftGoal, val weeklySe
  * [withoutSide] does. Null = ask in the guided setup. Both always asks (which side
  * leads is never stashed).
  */
-internal fun ProfileDraft.resumedSide(target: Modality, lift: StashedLift?, run: StashedRun?, today: Long): ProfileDraft? = when (target) {
+internal fun Event.SetProfile.resumedSide(target: Modality, lift: StashedLift?, run: StashedRun?, today: Long): Event.SetProfile? = when (target) {
     Modality.Lift -> lift?.takeIf { s ->
         weeklySets == 0 && s.weeklySets > 0 && s.days != null && s.days in LIFT_DAYS && weekdaysCover(s.weekdays, s.days)
     }?.let { s ->
@@ -217,179 +214,85 @@ internal fun parqRevealItem(id: ProfileRowId?, health: HealthScreen): ParqItem? 
     else -> null
 }
 
+/** The profile edit dated for dispatch: in force from [today] (the core's today,
+ *  so settled past days keep the profile they had), stamped with the instant it
+ *  is made (a run logged earlier that day stays on the profile it was logged
+ *  under). An undated SetProfile replaces the whole profile history (tests only). */
+internal fun Event.SetProfile.effectiveFrom(today: Long): Event.SetProfile =
+    copy(effectiveFromEpochDay = today, editedAtSec = AppClock.nowSec())
+
 /**
- * Plain data holder for the [Event.SetProfile] fields: the editor mutates a draft
- * and emits a `SetProfile` per committed change. Every field is re-sent by each
- * SetProfile (last-write-wins), so the draft carries all of them.
+ * Rebuild a draft from the core-echoed profile (post log-replay hydration).
+ * Runs on the first frame, so an unknown enum name (a forward-incompatible
+ * log line, or a future core/shell variant divergence) must fall back to a
+ * SEED default rather than throwing `valueOf` into a launch crash: the same
+ * drop-don't-crash stance the FFI layer takes on replay.
  */
-data class ProfileDraft(
-    val progressionCadence: ProgressionCadence,
-    val liftGoal: LiftGoal,
-    val goalDistance: GoalDistance,
-    val concurrentGoal: ConcurrentGoal,
-    val weeklySets: Int,
-    val runningDaysPerWeek: Int,
-    val runningKmPerWeek: Double,
-    // False while the weekly distance was never given: runningKmPerWeek is then
-    // 0.0 on the wire and the engine picks its own conservative start.
-    val runningKmPerWeekSet: Boolean = true,
-    val advanced: Boolean,
-    // Null until answered (the Sex row reads "Not set"); Male is an explicit false.
-    val female: Boolean? = null,
-    val bodyweightKg: Double? = null,
-    // With a birthday, the core's derived age (echoed each day); without one, a
-    // legacy stated age.
-    val ageYears: Double? = null,
-    val restingHrBpm: Double? = null,
-    val measuredHrMax: Double? = null,
-    // Display-unit preference.
-    val weightLb: Boolean = false,
-    // Onboarding health screen. youth is core-derived from age; never set here.
-    val health: HealthScreen = HealthScreen(),
-    // "Weights" (default, emits nothing on the wire) or "Calisthenics".
-    val resistanceModality: ResistanceModality = ResistanceModality.Weights,
-    // Training-context fields (mirror app::Profile); unset by default, so a plain
-    // profile emits the legacy wire.
-    val highLoadBlock: Boolean = false,
-    val environment: Environment? = null,
-    val envTempC: Double? = null,
-    val envAltitudeM: Double? = null,
-    val weeksOff: Double? = null,
-    // Coaching inputs (mirror app::Profile); null/false = unanswered (legacy wire).
-    val liftDaysPerWeek: Int? = null,
-    val trainingWeekdays: Int? = null,
-    val goalRaceEpochDay: Long? = null,
-    val recentRace: RecentRace? = null,
-    val statedLongestRecentKm: Double? = null,
-    val layoffReturnedEpochDay: Long? = null,
-    val meetEpochDay: Long? = null,
-    val calisEquipment: CalisEquipment? = null,
-    val specializationMuscle: String? = null,
-    val runnerStrength: Boolean = false,
-    // Birthday, local epoch day; the source of ageYears once set.
-    val birthEpochDay: Long? = null,
-) : Serializable {
-    /** [effectiveFromEpochDay] is the day this profile takes effect:
-     *  pass the core's today so an edit re-prescribes only from today forward and
-     *  leaves settled past days alone. Null (the default) replaces the whole
-     *  profile history — used by tests, never a production edit. A dated edit is
-     *  stamped with the instant it is made ([editedAtSec], the core keeps a run
-     *  logged earlier that day on the profile it was logged under). */
-    fun toEvent(
-        effectiveFromEpochDay: Long? = null,
-        editedAtSec: Long? = effectiveFromEpochDay?.let { AppClock.nowSec() },
-    ) = Event.SetProfile(
-        progressionCadence = progressionCadence,
-        liftGoal = liftGoal,
-        goalDistance = goalDistance,
-        concurrentGoal = concurrentGoal,
-        weeklySets = weeklySets,
-        runningDaysPerWeek = runningDaysPerWeek,
-        runningKmPerWeek = runningKmPerWeek,
-        runningKmPerWeekSet = runningKmPerWeekSet,
-        advanced = advanced,
-        female = female,
-        bodyweightKg = bodyweightKg,
-        ageYears = ageYears,
-        restingHrBpm = restingHrBpm,
-        measuredHrMax = measuredHrMax,
-        weightLb = weightLb,
-        health = health,
-        resistanceModality = resistanceModality,
-        highLoadBlock = highLoadBlock,
-        environment = environment,
-        envTempC = envTempC,
-        envAltitudeM = envAltitudeM,
-        weeksOff = weeksOff,
-        liftDaysPerWeek = liftDaysPerWeek,
-        trainingWeekdays = trainingWeekdays,
-        goalRaceEpochDay = goalRaceEpochDay,
-        recentRace = recentRace,
-        statedLongestRecentKm = statedLongestRecentKm,
-        layoffReturnedEpochDay = layoffReturnedEpochDay,
-        meetEpochDay = meetEpochDay,
-        calisEquipment = calisEquipment,
-        specializationMuscle = specializationMuscle,
-        runnerStrength = runnerStrength,
-        effectiveFromEpochDay = effectiveFromEpochDay,
-        birthEpochDay = birthEpochDay,
-        editedAtSec = editedAtSec,
-    )
+internal fun Event.SetProfile.Companion.from(p: ProfileView) = Event.SetProfile(
+    progressionCadence = enumOr(p.progression_cadence, SEED.progressionCadence),
+    liftGoal = enumOr(p.lift_goal, SEED.liftGoal),
+    goalDistance = enumOr(p.goal_distance, SEED.goalDistance),
+    concurrentGoal = enumOr(p.concurrent_goal, SEED.concurrentGoal),
+    weeklySets = p.weekly_sets,
+    runningDaysPerWeek = p.running_days_per_week,
+    runningKmPerWeek = p.running_km_per_week,
+    runningKmPerWeekSet = p.running_km_per_week_set,
+    advanced = p.advanced,
+    female = p.female,
+    bodyweightKg = p.bodyweight_kg,
+    ageYears = p.age_years,
+    restingHrBpm = p.resting_hr_bpm,
+    measuredHrMax = p.measured_hr_max,
+    weightLb = p.weight_lb,
+    // Drop the core-DERIVED youth flag from the editable draft so a later
+    // edit never re-asserts it (youth is owned by the core, keyed off age).
+    health = p.health.copy(youth = false),
+    // Values are "Weights"|"Calisthenics", matching the enum names exactly.
+    resistanceModality = enumOr(p.resistance_modality, SEED.resistanceModality),
+    highLoadBlock = p.high_load_block,
+    // Bare Rust variant name → enum; an unknown/absent value falls back to
+    // unset (same drop-don't-crash stance as enumOr above).
+    environment = p.environment?.let { runCatching { enumValueOf<Environment>(it) }.getOrNull() },
+    envTempC = p.env_temp_c,
+    envAltitudeM = p.env_altitude_m,
+    weeksOff = p.weeks_off,
+    liftDaysPerWeek = p.lift_days_per_week,
+    trainingWeekdays = p.training_weekdays?.takeIf { it and ALL_WEEKDAYS != 0 },
+    goalRaceEpochDay = p.goal_race_epoch_day,
+    recentRace = p.recent_race,
+    statedLongestRecentKm = p.stated_longest_recent_km,
+    layoffReturnedEpochDay = p.layoff_returned_epoch_day,
+    meetEpochDay = p.meet_epoch_day,
+    calisEquipment = p.calis_equipment,
+    specializationMuscle = p.specialization_muscle,
+    runnerStrength = p.runner_strength,
+    birthEpochDay = p.birth_epoch_day,
+)
 
-    companion object {
-        /**
-         * Rebuild a draft from the core-echoed profile (post log-replay hydration).
-         * Runs on the first frame, so an unknown enum name (a forward-incompatible
-         * log line, or a future core/shell variant divergence) must fall back to a
-         * SEED default rather than throwing `valueOf` into a launch crash: the same
-         * drop-don't-crash stance the FFI layer takes on replay.
-         */
-        fun from(p: ProfileView) = ProfileDraft(
-            progressionCadence = enumOr(p.progression_cadence, SEED.progressionCadence),
-            liftGoal = enumOr(p.lift_goal, SEED.liftGoal),
-            goalDistance = enumOr(p.goal_distance, SEED.goalDistance),
-            concurrentGoal = enumOr(p.concurrent_goal, SEED.concurrentGoal),
-            weeklySets = p.weekly_sets,
-            runningDaysPerWeek = p.running_days_per_week,
-            runningKmPerWeek = p.running_km_per_week,
-            runningKmPerWeekSet = p.running_km_per_week_set,
-            advanced = p.advanced,
-            female = p.female,
-            bodyweightKg = p.bodyweight_kg,
-            ageYears = p.age_years,
-            restingHrBpm = p.resting_hr_bpm,
-            measuredHrMax = p.measured_hr_max,
-            weightLb = p.weight_lb,
-            // Drop the core-DERIVED youth flag from the editable draft so a later
-            // edit never re-asserts it (youth is owned by the core, keyed off age).
-            health = p.health.copy(youth = false),
-            // Values are "Weights"|"Calisthenics", matching the enum names exactly.
-            resistanceModality = enumOr(p.resistance_modality, SEED.resistanceModality),
-            highLoadBlock = p.high_load_block,
-            // Bare Rust variant name → enum; an unknown/absent value falls back to
-            // unset (same drop-don't-crash stance as enumOr above).
-            environment = p.environment?.let { runCatching { enumValueOf<Environment>(it) }.getOrNull() },
-            envTempC = p.env_temp_c,
-            envAltitudeM = p.env_altitude_m,
-            weeksOff = p.weeks_off,
-            liftDaysPerWeek = p.lift_days_per_week,
-            trainingWeekdays = p.training_weekdays?.takeIf { it and ALL_WEEKDAYS != 0 },
-            goalRaceEpochDay = p.goal_race_epoch_day,
-            recentRace = p.recent_race,
-            statedLongestRecentKm = p.stated_longest_recent_km,
-            layoffReturnedEpochDay = p.layoff_returned_epoch_day,
-            meetEpochDay = p.meet_epoch_day,
-            calisEquipment = p.calis_equipment,
-            specializationMuscle = p.specialization_muscle,
-            runnerStrength = p.runner_strength,
-            birthEpochDay = p.birth_epoch_day,
-        )
+private inline fun <reified T : Enum<T>> enumOr(name: String, default: T): T =
+    runCatching { enumValueOf<T>(name) }.getOrDefault(default)
 
-        private inline fun <reified T : Enum<T>> enumOr(name: String, default: T): T =
-            runCatching { enumValueOf<T>(name) }.getOrDefault(default)
+/**
+ * Fallback starting point for the full editor only (rehydration when no
+ * profile is echoed). Never seeded on a fresh install: first run goes
+ * through the guided setup, which writes user-asserted values rather than
+ * these opinionated defaults.
+ */
+internal val Event.SetProfile.Companion.SEED: Event.SetProfile get() = ProfileSeed
 
-        /**
-         * Fallback starting point for the full editor only (rehydration when no
-         * profile is echoed). Never seeded on a fresh install: first run goes
-         * through the guided setup, which writes user-asserted values rather than
-         * these opinionated defaults.
-         */
-        val SEED = ProfileDraft(
-            progressionCadence = ProgressionCadence.WeekToWeek,
-            liftGoal = LiftGoal.MaxStrength,
-            goalDistance = GoalDistance.TenK,
-            concurrentGoal = ConcurrentGoal.Strength,
-            weeklySets = 14,
-            runningDaysPerWeek = 4,
-            runningKmPerWeek = 45.0,
-            advanced = false,
-            resistanceModality = ResistanceModality.Weights,
-        )
-    }
-}
+private val ProfileSeed = Event.SetProfile(
+    progressionCadence = ProgressionCadence.WeekToWeek,
+    liftGoal = LiftGoal.MaxStrength,
+    goalDistance = GoalDistance.TenK,
+    concurrentGoal = ConcurrentGoal.Strength,
+    weeklySets = 14,
+    runningDaysPerWeek = 4,
+    runningKmPerWeek = 45.0,
+    advanced = false,
+)
 
 /** The kg|lb the profile shows weights in. */
-internal val ProfileDraft.weightUnit: WeightUnit get() = if (weightLb) WeightUnit.Lb else WeightUnit.Kg
+internal val Event.SetProfile.weightUnit: WeightUnit get() = if (weightLb) WeightUnit.Lb else WeightUnit.Kg
 
 // Human-readable labels for the profile pickers. Display-only, the wire value is
 // still each variant's `.name` (see Event.SetProfile), so these strings can change
@@ -420,7 +323,7 @@ internal val GoalDistance.labelRes: Int
  * lifting leads (and always for a lift-only profile, where the row is hidden) the
  * concurrent goal follows the new lift goal; a run-led hybrid stays run-led.
  */
-internal fun ProfileDraft.withLiftGoal(goal: LiftGoal): ProfileDraft {
+internal fun Event.SetProfile.withLiftGoal(goal: LiftGoal): Event.SetProfile {
     val runLeads = weeklySets > 0 && runningDaysPerWeek > 0 &&
         concurrentGoal == ConcurrentGoal.EndurancePriority
     return copy(
@@ -431,7 +334,7 @@ internal fun ProfileDraft.withLiftGoal(goal: LiftGoal): ProfileDraft {
 
 /** The two-way "Which leads?" answer mapped onto the concurrent goal (same mapping
  *  the guided setup uses), with the day counts fitted to that lead's caps. */
-internal fun ProfileDraft.withLead(lead: BothPriority): ProfileDraft {
+internal fun Event.SetProfile.withLead(lead: BothPriority): Event.SetProfile {
     val liftDays = liftDaysPerWeek?.coerceIn(hybridLiftDayRange(lead))
     val runMax = hybridRunDayOptions(liftDays ?: HYBRID_DEFAULT_LIFT_DAYS, lead).last
     return copy(
@@ -462,21 +365,22 @@ internal val Environment.labelRes: Int
  */
 @Composable
 internal fun ProfileEditor(
-    initial: ProfileDraft,
+    initial: Event.SetProfile,
     distanceUnit: DistanceUnit,
     today: Long,
     onRerunSetup: (Modality?) -> Unit,
-    focusRow: ProfileRowId? = null,
-    onFocusHandled: () -> Unit = {},
-    onApply: (ProfileDraft) -> Unit,
+    focusRow: ProfileRowId?,
+    onFocusHandled: () -> Unit,
+    onApply: (Event.SetProfile) -> Unit,
 ) {
     val ctx = LocalContext.current
+    val res = LocalResources.current
     // Saveable: this item leaves composition when scrolled away. Keyed on
     // `initial` so a new core profile (e.g. after a re-run setup) replaces a stale
     // draft that the next edit would otherwise re-send over it (HARD RULE 3).
     var draft by rememberSaveable(initial) { mutableStateOf(initial) }
     // Commit-and-apply: the single funnel every edit goes through.
-    val commit: (ProfileDraft) -> Unit = {
+    val commit: (Event.SetProfile) -> Unit = {
         draft = it
         onApply(it)
     }
@@ -493,6 +397,26 @@ internal fun ProfileEditor(
             open = focusRow.pickerRow
             reveal = focusRow
             onFocusHandled()
+        }
+    }
+
+    // A future-only date row (meet, race day); a stored day that has passed reads as none.
+    @Composable
+    fun FutureDateRow(id: ProfileRowId, label: String, stored: Long?, onPick: (Long?) -> Unit) {
+        val day = stored?.takeIf { it > today }
+        ProfileRow(open == id, { toggle(id) }, label, day?.let { epochDayLabel(it) }, placeholder = stringResource(R.string.setup_date_none)) {
+            DateAnswerRow(day, today, future = true, onChange = onPick)
+        }
+    }
+
+    // An environment follow-up scale (temperature, altitude): shown for [env], or
+    // while it holds a value so a set value can always be seen and cleared.
+    @Composable
+    fun EnvScaleRow(env: Environment, id: ProfileRowId, label: String, valueRes: Int, value: Double?, options: IntProgression, set: (Double) -> Event.SetProfile) {
+        if (draft.environment != env && value == null) return
+        RowHairline()
+        ProfileRow(open == id, { toggle(id) }, label, value?.let { stringResource(valueRes, it.toInt()) }) {
+            ScrollableScaleRow(options.toList(), value?.toInt(), { "$it" }, label = label) { commit(set(it.toDouble())) }
         }
     }
 
@@ -528,29 +452,22 @@ internal fun ProfileEditor(
         } else {
             stringResource(copy.bodyRes)
         }
-        AlertDialog(
-            onDismissRequest = { pendingFocus = null },
-            shape = RoundedCornerShape(Space.Card.dp),
-            title = { Text(title) },
-            text = { Text(body) },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingFocus = null
-                    open = null
-                    // A side switched off: keep its answers for a later switch back.
-                    if (target == Modality.Lift && run) ModalityStash.stashRun(ctx, draft)
-                    if (target == Modality.Run && lift) ModalityStash.stashLift(ctx, draft)
-                    when {
-                        resumed != null -> commit(resumed)
-                        addsSide -> onRerunSetup(target)
-                        else -> commit(draft.withoutSide(target))
-                    }
-                }) {
-                    Text(stringResource(if (resumed != null) R.string.setup_focus_switch_confirm else copy.confirmRes))
+        ConfirmDialog(
+            title = title,
+            body = body,
+            confirmLabel = stringResource(if (resumed != null) R.string.setup_focus_switch_confirm else copy.confirmRes),
+            onDismiss = { pendingFocus = null },
+            onConfirm = {
+                pendingFocus = null
+                open = null
+                // A side switched off: keep its answers for a later switch back.
+                if (target == Modality.Lift && run) ModalityStash.stashRun(ctx, draft)
+                if (target == Modality.Run && lift) ModalityStash.stashLift(ctx, draft)
+                when {
+                    resumed != null -> commit(resumed)
+                    addsSide -> onRerunSetup(target)
+                    else -> commit(draft.withoutSide(target))
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingFocus = null }) { Text(stringResource(R.string.main_cancel)) }
             },
         )
     }
@@ -565,7 +482,7 @@ internal fun ProfileEditor(
                 label = stringResource(R.string.setup_row_focus),
                 values = Modality.entries.toList(),
                 current = focus,
-                display = { ctx.getString(it.focusLabelRes) },
+                display = { res.getString(it.focusLabelRes) },
                 onSelect = { if (it != focus) pendingFocus = it },
             )
             RowHairline()
@@ -577,7 +494,7 @@ internal fun ProfileEditor(
                     label = stringResource(R.string.setup_row_which_leads),
                     values = BothPriority.entries.toList(),
                     current = draft.concurrentGoal.lead(),
-                    display = { ctx.getString(it.labelRes) },
+                    display = { res.getString(it.labelRes) },
                 ) { commit(draft.withLead(it)) }
                 RowHairline()
             }
@@ -601,7 +518,7 @@ internal fun ProfileEditor(
                 // day (or be "Any days"). Picks stage here and apply only once
                 // they agree; collapsing the row drops a mismatched pick.
                 var work by rememberSaveable(draft) { mutableStateOf(draft) }
-                val stage: (ProfileDraft) -> Unit = { next ->
+                val stage: (Event.SetProfile) -> Unit = { next ->
                     work = next
                     if (weekdaysCover(next.trainingWeekdays, next.trainingDayTotal())) commit(next)
                 }
@@ -651,7 +568,7 @@ internal fun ProfileEditor(
                 stringResource(if (both) R.string.setup_row_lift_experience else R.string.setup_row_experience),
                 stringResource(level.titleRes),
             ) {
-                OptionList(SetupLevel.entries.toList(), level, { ctx.getString(it.titleRes) }) {
+                OptionList(SetupLevel.entries.toList(), level, { res.getString(it.titleRes) }) {
                     commit(draft.copy(progressionCadence = it.cadence))
                     open = null
                 }
@@ -668,7 +585,7 @@ internal fun ProfileEditor(
                     stringResource(R.string.setup_row_run_experience),
                     shownRunLevel?.let { stringResource(it.titleRes) } ?: stringResource(R.string.setup_not_set),
                 ) {
-                    OptionList<SetupLevel?>(SetupLevel.entries.toList(), shownRunLevel, { l -> l?.let { ctx.getString(it.titleRes) }.orEmpty() }) { l ->
+                    OptionList<SetupLevel?>(SetupLevel.entries.toList(), shownRunLevel, { l -> l?.let { res.getString(it.titleRes) }.orEmpty() }) { l ->
                         if (l != null) {
                             RunLevelAnswer.save(ctx, l)
                             runLevel = l
@@ -690,7 +607,7 @@ internal fun ProfileEditor(
                     label = stringResource(R.string.setup_row_training_goal),
                     values = LiftFocus.entries.map { it.liftGoal },
                     current = draft.liftGoal,
-                    display = { ctx.getString(it.labelRes) },
+                    display = { res.getString(it.labelRes) },
                 ) { commit(draft.withLiftGoal(it)) }
                 Text(stringResource(R.string.setup_row_training_goal_sub), color = OnBgFaint, style = Type.Caption)
                 RowHairline()
@@ -699,7 +616,7 @@ internal fun ProfileEditor(
                     values = ResistanceModality.entries.toList(),
                     current = draft.resistanceModality,
                     display = {
-                        ctx.getString(
+                        res.getString(
                             when (it) {
                                 ResistanceModality.Weights -> R.string.setup_modality_weights_short
                                 ResistanceModality.Calisthenics -> R.string.setup_modality_calis_short
@@ -711,35 +628,27 @@ internal fun ProfileEditor(
                 if (draft.liftGoal == LiftGoal.Hypertrophy) {
                     // Optional specialization; the core applies it only for
                     // experienced lifters (HYP-SPEC-BLOCK-001).
+                    val muscle = HypertrophyMuscle.entries.firstOrNull { it.wire == draft.specializationMuscle }
                     ProfileRow(
                         open == ProfileRowId.PriorityMuscle,
                         { toggle(ProfileRowId.PriorityMuscle) },
                         stringResource(R.string.setup_row_priority_muscle),
-                        draft.specializationMuscle?.let { m -> PRIORITY_MUSCLES[m]?.let { stringResource(it) } ?: m },
+                        draft.specializationMuscle?.let { hypertrophyMuscleLabel(it) },
                         placeholder = stringResource(R.string.setup_priority_none),
                     ) {
                         OptionList(
-                            listOf<String?>(null) + PRIORITY_MUSCLES.keys,
-                            draft.specializationMuscle,
-                            { key -> ctx.getString(PRIORITY_MUSCLES[key] ?: R.string.setup_priority_none) },
+                            listOf<HypertrophyMuscle?>(null) + HypertrophyMuscle.entries,
+                            muscle,
+                            { m -> res.getString(m?.labelRes ?: R.string.setup_priority_none) },
                         ) {
-                            commit(draft.copy(specializationMuscle = it))
+                            commit(draft.copy(specializationMuscle = it?.wire))
                             open = null
                         }
                     }
                 } else {
                     // A test/meet date shapes the taper and peak; a past one no longer does.
-                    val meet = draft.meetEpochDay?.takeIf { it > today }
-                    ProfileRow(
-                        open == ProfileRowId.Meet,
-                        { toggle(ProfileRowId.Meet) },
-                        stringResource(R.string.setup_row_meet),
-                        meet?.let { epochDayLabel(it) },
-                        placeholder = stringResource(R.string.setup_date_none),
-                    ) {
-                        DateAnswerRow(meet, today, future = true, noneLabel = stringResource(R.string.setup_date_none)) {
-                            commit(draft.copy(meetEpochDay = it))
-                        }
+                    FutureDateRow(ProfileRowId.Meet, stringResource(R.string.setup_row_meet), draft.meetEpochDay) {
+                        commit(draft.copy(meetEpochDay = it))
                     }
                 }
                 if (draft.resistanceModality == ResistanceModality.Calisthenics) {
@@ -771,24 +680,15 @@ internal fun ProfileEditor(
                     stringResource(R.string.setup_row_goal_distance),
                     stringResource(draft.goalDistance.labelRes),
                 ) {
-                    OptionList(GoalDistance.entries.toList(), draft.goalDistance, { ctx.getString(it.labelRes) }) {
+                    OptionList(GoalDistance.entries.toList(), draft.goalDistance, { res.getString(it.labelRes) }) {
                         commit(draft.copy(goalDistance = it))
                         open = null
                     }
                 }
                 if (draft.goalDistance.isRace) {
                     RowHairline()
-                    val raceDay = draft.goalRaceEpochDay?.takeIf { it > today }
-                    ProfileRow(
-                        open == ProfileRowId.RaceDate,
-                        { toggle(ProfileRowId.RaceDate) },
-                        stringResource(R.string.setup_row_race_date),
-                        raceDay?.let { epochDayLabel(it) },
-                        placeholder = stringResource(R.string.setup_date_none),
-                    ) {
-                        DateAnswerRow(raceDay, today, future = true, noneLabel = stringResource(R.string.setup_date_none)) {
-                            commit(draft.copy(goalRaceEpochDay = it))
-                        }
+                    FutureDateRow(ProfileRowId.RaceDate, stringResource(R.string.setup_row_race_date), draft.goalRaceEpochDay) {
+                        commit(draft.copy(goalRaceEpochDay = it))
                     }
                     RowHairline()
                     ProfileRow(
@@ -848,7 +748,6 @@ internal fun ProfileEditor(
                                 distanceUnit.distanceLabel,
                                 draft.statedLongestRecentKm?.let { distanceBufferText(it, distanceUnit) },
                                 distanceBounds(LONGEST_RUN_KM, distanceUnit),
-                                "%.1f",
                                 allowDecimal = true,
                             ) { commit(draft.copy(statedLongestRecentKm = displayToKm(it, distanceUnit))) }
                         }
@@ -894,7 +793,7 @@ internal fun ProfileEditor(
                     OptionList(
                         listOf<Boolean?>(false, true, null),
                         draft.female,
-                        { ctx.getString(sexLabelRes(it)) },
+                        { res.getString(sexLabelRes(it)) },
                     ) {
                         commit(draft.copy(female = it))
                         open = null
@@ -960,7 +859,7 @@ internal fun ProfileEditor(
                 // the canonical kg wire value. Keyed on the unit so a unit switch
                 // re-seeds the buffer instead of reinterpreting the typed number.
                 key(bwUnit) {
-                    ProfileKeypadEditor(bwLabel, weightSuffix(bwUnit), draft.bodyweightKg?.let { bodyweightBufferText(it, bwUnit) }, bodyweightBounds(bwUnit), "%.1f", allowDecimal = true) {
+                    ProfileKeypadEditor(bwLabel, weightSuffix(bwUnit), draft.bodyweightKg?.let { bodyweightBufferText(it, bwUnit) }, bodyweightBounds(bwUnit), allowDecimal = true) {
                         commit(draft.copy(bodyweightKg = bodyweightDisplayToKg(it, bwUnit)))
                     }
                 }
@@ -974,7 +873,7 @@ internal fun ProfileEditor(
                 draft.restingHrBpm?.let { stringResource(R.string.setup_bpm_value, trimDecimal(it)) },
                 revealContent = true,
             ) {
-                ProfileKeypadEditor(rhrLabel, stringResource(R.string.setup_unit_bpm), draft.restingHrBpm?.let(::trimDecimal), RESTING_HR_RANGE, "%.0f") {
+                ProfileKeypadEditor(rhrLabel, stringResource(R.string.setup_unit_bpm), draft.restingHrBpm?.let(::trimDecimal), RESTING_HR_RANGE) {
                     commit(draft.copy(restingHrBpm = it))
                 }
             }
@@ -992,7 +891,6 @@ internal fun ProfileEditor(
                     stringResource(R.string.setup_unit_bpm),
                     draft.measuredHrMax?.let(::trimDecimal),
                     MAX_HR_RANGE,
-                    "%.0f",
                     hint = stringResource(R.string.setup_max_hr_hint),
                 ) {
                     commit(draft.copy(measuredHrMax = it))
@@ -1054,34 +952,22 @@ internal fun ProfileEditor(
                     open == ProfileRowId.Environment,
                     { toggle(ProfileRowId.Environment) },
                     stringResource(R.string.setup_row_environment),
-                    draft.environment?.let { ctx.getString(it.labelRes) },
+                    draft.environment?.let { stringResource(it.labelRes) },
                 ) {
                     OptionList(
                         listOf<Environment?>(null, Environment.Heat, Environment.Altitude, Environment.Cold, Environment.Neutral),
                         draft.environment,
-                        { it?.let { e -> ctx.getString(e.labelRes) } ?: ctx.getString(R.string.setup_not_set) },
+                        { it?.let { e -> res.getString(e.labelRes) } ?: res.getString(R.string.setup_not_set) },
                     ) {
                         commit(draft.copy(environment = it))
                         open = null
                     }
                 }
-                if (draft.environment == Environment.Heat || draft.envTempC != null) {
-                    RowHairline()
-                    val tempLabel = stringResource(R.string.setup_row_env_temp)
-                    ProfileRow(open == ProfileRowId.EnvTemp, { toggle(ProfileRowId.EnvTemp) }, tempLabel, draft.envTempC?.let { stringResource(R.string.setup_temp_value, it.toInt()) }) {
-                        ScrollableScaleRow(ENV_TEMP_OPTIONS_C.toList(), draft.envTempC?.toInt(), { "$it" }, label = tempLabel) {
-                            commit(draft.copy(envTempC = it.toDouble()))
-                        }
-                    }
+                EnvScaleRow(Environment.Heat, ProfileRowId.EnvTemp, stringResource(R.string.setup_row_env_temp), R.string.setup_temp_value, draft.envTempC, ENV_TEMP_OPTIONS_C) {
+                    draft.copy(envTempC = it)
                 }
-                if (draft.environment == Environment.Altitude || draft.envAltitudeM != null) {
-                    RowHairline()
-                    val altLabel = stringResource(R.string.setup_row_env_altitude)
-                    ProfileRow(open == ProfileRowId.EnvAltitude, { toggle(ProfileRowId.EnvAltitude) }, altLabel, draft.envAltitudeM?.let { stringResource(R.string.setup_altitude_value, it.toInt()) }) {
-                        ScrollableScaleRow(ENV_ALTITUDE_OPTIONS_M.toList(), draft.envAltitudeM?.toInt(), { "$it" }, label = altLabel) {
-                            commit(draft.copy(envAltitudeM = it.toDouble()))
-                        }
-                    }
+                EnvScaleRow(Environment.Altitude, ProfileRowId.EnvAltitude, stringResource(R.string.setup_row_env_altitude), R.string.setup_altitude_value, draft.envAltitudeM, ENV_ALTITUDE_OPTIONS_M) {
+                    draft.copy(envAltitudeM = it)
                 }
                 RowHairline()
             }
@@ -1101,7 +987,7 @@ internal fun ProfileEditor(
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                     val weeksLabel = stringResource(R.string.setup_break_weeks_label)
                     FieldLabel(weeksLabel)
-                    ScrollableScaleRow(WEEKS_OFF_OPTIONS.toList(), draft.weeksOff?.toInt(), { ctx.getString(R.string.setup_weeks_value, it) }, label = weeksLabel) {
+                    ScrollableScaleRow(WEEKS_OFF_OPTIONS.toList(), draft.weeksOff?.toInt(), { res.getString(R.string.setup_weeks_value, it) }, label = weeksLabel) {
                         // A first answer dates the restart today; the date pill below moves it.
                         commit(draft.copy(weeksOff = it.toDouble(), layoffReturnedEpochDay = draft.layoffReturnedEpochDay ?: today))
                     }
@@ -1110,8 +996,8 @@ internal fun ProfileEditor(
                     }
                     if (draft.weeksOff != null) {
                         FieldLabel(stringResource(R.string.setup_break_restart_label))
-                        DateAnswerRow(draft.layoffReturnedEpochDay ?: today, today, future = false, noneLabel = null) {
-                            commit(draft.copy(layoffReturnedEpochDay = it ?: today))
+                        DateAnswerRow(draft.layoffReturnedEpochDay ?: today, today, future = false) {
+                            commit(draft.copy(layoffReturnedEpochDay = it))
                         }
                     }
                 }
@@ -1126,22 +1012,6 @@ internal fun ProfileEditor(
         }
     }
 }
-
-/** Hypertrophy priority-muscle keys (the Table 1 landmark keys the core resolves,
- *  shared/src/hypertrophy.rs LANDMARKS) → display labels, in display order. */
-internal val PRIORITY_MUSCLES: Map<String, Int> = mapOf(
-    "chest" to R.string.setup_muscle_chest,
-    "back" to R.string.setup_muscle_back,
-    "quads" to R.string.setup_muscle_quads,
-    "hamstrings" to R.string.setup_muscle_hamstrings,
-    "glutes" to R.string.setup_muscle_glutes,
-    "side delts" to R.string.setup_muscle_side_delts,
-    "rear delts" to R.string.setup_muscle_rear_delts,
-    "biceps" to R.string.setup_muscle_biceps,
-    "triceps" to R.string.setup_muscle_triceps,
-    "calves" to R.string.setup_muscle_calves,
-    "abs" to R.string.setup_muscle_abs,
-)
 
 /** Copy for the Focus-switch confirm: title, body and confirm label. */
 internal class FocusSwitchCopy(val titleRes: Int, val bodyRes: Int, val confirmRes: Int)
@@ -1167,7 +1037,7 @@ internal fun focusSwitchCopy(from: Modality, to: Modality): FocusSwitchCopy = wh
 /** A Both profile with one side dropped ([keep] = the side that stays). The
  *  concurrent goal follows the guided setup's mapping: lift-only = the lift
  *  goal, run-only = endurance priority. */
-internal fun ProfileDraft.withoutSide(keep: Modality): ProfileDraft = when (keep) {
+internal fun Event.SetProfile.withoutSide(keep: Modality): Event.SetProfile = when (keep) {
     Modality.Lift -> copy(
         runningDaysPerWeek = 0,
         runningKmPerWeek = 0.0,
@@ -1180,11 +1050,11 @@ internal fun ProfileDraft.withoutSide(keep: Modality): ProfileDraft = when (keep
 
 /** Lift days as the Training days row shows them: unanswered = what the engine
  *  schedules (plan::mod). */
-internal fun ProfileDraft.shownLiftDays(): Int =
+internal fun Event.SetProfile.shownLiftDays(): Int =
     liftDaysPerWeek ?: if (runningDaysPerWeek > 0) HYBRID_DEFAULT_LIFT_DAYS else LIFT_ONLY_DEFAULT_DAYS
 
 /** The week's session days: lift days, run days, or both added up. */
-internal fun ProfileDraft.trainingDayTotal(): Int {
+internal fun Event.SetProfile.trainingDayTotal(): Int {
     val lift = weeklySets > 0
     val run = runningDaysPerWeek > 0
     return when {
@@ -1232,9 +1102,11 @@ private fun RecentRaceEditor(race: RecentRace?, onChange: (RecentRace?) -> Unit)
     }
 }
 
-/** Accepted keypad ranges for the person numbers (wizard + Profile share them). */
+/** Accepted keypad ranges for the person numbers (wizard, Profile and the morning
+ *  check-in share them). Resting HR matches the core's plausible band
+ *  (run_targets.rs `hr_rest_anchor`, 25..=120). */
 internal val AGE_RANGE = 14.0..100.0
-internal val RESTING_HR_RANGE = 30.0..120.0
+internal val RESTING_HR_RANGE = 25.0..120.0
 internal val MAX_HR_RANGE = 120.0..230.0
 
 /** Weekly sets per muscle the Profile scale offers. Starts at 1, not 0: a
@@ -1272,7 +1144,6 @@ private fun ProfileKeypadEditor(
     unit: String,
     seedText: String?,
     range: ClosedFloatingPointRange<Double>,
-    format: String,
     // Whole-number fields (heart rates) get no decimal key that would do nothing.
     allowDecimal: Boolean = false,
     hint: String? = null,
@@ -1308,7 +1179,7 @@ private fun ProfileKeypadEditor(
                 label, unit, text,
                 active = true,
                 invalid = touched && text.isNotEmpty() && !valid,
-                min = range.start, max = range.endInclusive, format = format,
+                min = range.start, max = range.endInclusive, format = if (allowDecimal) "%.1f" else "%.0f",
                 // The keypad below is the one input; no ±1 steppers beside it.
                 adjustments = emptyList(),
                 onActivate = { fresh = true },
@@ -1395,7 +1266,7 @@ private fun ProfileRow(
         if (revealRequest) onRevealed()
     }
     val shown = value ?: placeholder ?: stringResource(R.string.setup_not_set)
-    val valueStyle = if (value == null) Type.Body else Type.Body.copy(fontWeight = FontWeight.Bold).merge(TabularFigures)
+    val valueStyle = if (value == null) Type.Body else Type.BodyBold.merge(TabularFigures)
     val valueColor = if (value == null) OnBgFaint else OnBgBody
     val measurer = rememberTextMeasurer()
     Column(

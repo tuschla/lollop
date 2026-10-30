@@ -93,7 +93,7 @@ fn illness_actions(vm: &ViewModel) -> Vec<&HoldResolutionView> {
 fn the_profile_illness_answer_offers_the_one_im_better_action() {
     let (app, mut model) = set_up(true);
     let vm = app.view(&model);
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
     assert_eq!(vm.hold_reason, Some(HoldReason::AcuteIllnessProfile));
     let actions = illness_actions(&vm);
     assert_eq!(actions.len(), 1);
@@ -104,7 +104,7 @@ fn the_profile_illness_answer_offers_the_one_im_better_action() {
 
     confirm_illness_action(&app, &mut model);
     let vm = app.view(&model);
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     assert!(vm.hold_resolutions.is_empty());
     assert_eq!(vm.plan_withheld, None);
     let ns = vm.next_session.expect("the plan resumes today");
@@ -129,7 +129,7 @@ fn a_reported_illness_alone_keeps_ive_recovered_and_the_return_check() {
         }),
     );
     let vm = app.view(&model);
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
     let actions = illness_actions(&vm);
     assert_eq!(actions.len(), 1);
     assert_eq!(actions[0].action_label, "I've recovered");
@@ -141,7 +141,7 @@ fn a_reported_illness_alone_keeps_ive_recovered_and_the_return_check() {
 
     confirm_illness_action(&app, &mut model);
     let vm = app.view(&model);
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     assert!(vm.hold_resolutions.is_empty());
     let ns = vm.next_session.expect("today's session");
     assert_eq!(ns.items.len(), 1);
@@ -168,10 +168,13 @@ fn one_tap_ends_a_reported_illness_and_the_profile_answer_together() {
 
     confirm_illness_action(&app, &mut model);
     let vm = app.view(&model);
-    assert!(!vm.train_blocked, "no second switch-off in Profile needed");
+    assert!(
+        vm.hold_reason.is_none(),
+        "no second switch-off in Profile needed"
+    );
     assert_eq!(vm.hold_reason, None);
     assert!(vm.hold_resolutions.is_empty());
-    assert!(!model.profile.as_ref().unwrap().health.acute_illness);
+    assert!(!model.profile().unwrap().health.acute_illness);
     let ns = vm.next_session.expect("today's session");
     assert!(
         ns.items[0].return_check,
@@ -255,7 +258,7 @@ fn a_profile_with_nothing_to_plan_says_so() {
     );
     let vm = app.view(&model);
     assert_eq!(vm.plan_withheld, Some(PlanWithheld::NothingToPlan));
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
 }
 
 #[test]
@@ -311,7 +314,7 @@ fn the_illness_line_says_paused_only_when_training_is_paused() {
         let line = illness_actions(&vm)[0].paused_text.clone();
         assert_eq!(
             line.to_lowercase().contains("paused"),
-            vm.train_blocked,
+            vm.hold_reason.is_some(),
             "severity {severity}, profile ill {profile_ill}: {line}"
         );
     }

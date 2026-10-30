@@ -11,18 +11,9 @@ use std::fs;
 use std::path::Path;
 
 use crux_core::App;
-use shared::{Engine, Event, Model};
+use shared::{Engine, Event};
 
-fn replay(ndjson: &str) -> Model {
-    let app = Engine;
-    let mut model = Model::default();
-    for line in ndjson.lines().filter(|l| !l.trim().is_empty()) {
-        let event: Event = serde_json::from_str(line)
-            .unwrap_or_else(|e| panic!("unparseable fixture line {line:?}: {e}"));
-        let _ = app.update(event, &mut model);
-    }
-    model
-}
+mod common;
 
 #[test]
 fn view_json_matches_snapshot() {
@@ -41,7 +32,10 @@ fn view_json_matches_snapshot() {
     for case in &cases {
         let events_name = format!("{case}.events.ndjson");
         let events = fs::read_to_string(dir.join(&events_name)).unwrap();
-        let model = replay(&events);
+        let model = common::replay(events.lines().filter(|l| !l.trim().is_empty()).map(|line| {
+            serde_json::from_str::<Event>(line)
+                .unwrap_or_else(|e| panic!("unparseable fixture line {line:?}: {e}"))
+        }));
         let mut json = serde_json::to_string_pretty(&Engine.view(&model)).unwrap();
         json.push('\n');
         let name = format!("{case}.view.json");

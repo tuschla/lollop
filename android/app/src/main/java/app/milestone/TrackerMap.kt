@@ -289,7 +289,7 @@ internal fun TrackerMapFrame(
             // tile filter and placeholder), not the screen chrome.
             Text(
                 stringResource(R.string.track_map_attribution),
-                color = (if (mapIsDark(LocalPalette.current)) Color.White else Color.Black).copy(alpha = ATTRIBUTION_ALPHA),
+                color = (if (LocalPalette.current.isDark) Color.White else Color.Black).copy(alpha = ATTRIBUTION_ALPHA),
                 style = Type.Caption,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -301,6 +301,9 @@ internal fun TrackerMapFrame(
                 MapOverlayButton(
                     R.drawable.ic_track_recenter,
                     stringResource(R.string.track_cd_recenter),
+                    size = ActionMinHeight,
+                    glyph = 20.dp,
+                    alpha = 1f,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(Space.Md.dp),

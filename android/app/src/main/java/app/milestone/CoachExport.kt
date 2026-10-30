@@ -106,31 +106,12 @@ private fun weekTotals(
     return res.getString(R.string.coach_export_totals, parts.joinToString(" · "))
 }
 
-/** One line per exercise in first-logged order; runs of identical sets fold into
- *  "3 × 5 @ 100 kg". */
+/** One line per exercise in first-logged order, its sets as History summarises
+ *  them ([exerciseSetsSummary]): "Bench: 3 × 5 @ 100 kg". */
 private fun liftLines(res: Resources, sets: List<LiftResultView>, unit: WeightUnit): List<String> =
     sets.sortedBy { it.observed_at }.groupBy { it.exercise }.map { (exercise, rows) ->
-        val groups = mutableListOf<Pair<LiftResultView, Int>>()
-        for (s in rows) {
-            val last = groups.lastOrNull()
-            if (last != null && sameSet(last.first, s)) groups[groups.lastIndex] = last.first to last.second + 1
-            else groups += s to 1
-        }
-        val text = groups.joinToString(", ") { (s, n) ->
-            val hold = s.hold_sec
-            when {
-                hold != null -> res.getString(R.string.coach_export_sets_hold, n, hold)
-                s.weight_kg > 0.0 -> res.getString(
-                    R.string.coach_export_sets_load, n, s.reps, "${weightFigure(s.weight_kg, unit)} ${weightSuffix(unit)}",
-                )
-                else -> res.getString(R.string.coach_export_sets_reps, n, s.reps)
-            }
-        }
-        res.getString(R.string.coach_export_lift, exercise, text)
+        res.getString(R.string.coach_export_lift, exercise, exerciseSetsSummary(res, rows, unit))
     }
-
-private fun sameSet(a: LiftResultView, b: LiftResultView): Boolean =
-    a.reps == b.reps && a.weight_kg == b.weight_kg && a.hold_sec == b.hold_sec
 
 private fun runLine(res: Resources, r: RunResultView, unit: DistanceUnit): String {
     val line = res.getString(

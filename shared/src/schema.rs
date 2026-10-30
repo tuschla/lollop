@@ -379,7 +379,8 @@ pub enum RunVolume {
 }
 
 /// One run/walk bout of a beginner session (NHS Couch to 5K): run for
-/// `run_sec`, then walk for `walk_sec` (0 on the final bout).
+/// `run_sec`, then walk for `walk_sec`. Weeks 1-3 end on a walk; from week 4
+/// the final bout's walk is 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunSegment {
     pub run_sec: u16,
@@ -408,8 +409,8 @@ pub struct RunPrescription {
     pub warmup_min: Option<u16>,
     /// Easy cool-down after the main set, minutes.
     pub cooldown_min: Option<u16>,
-    /// Ordered run/walk bouts of a beginner session (C25K), the last bout's
-    /// walk 0; empty for every other run.
+    /// Ordered run/walk bouts of a beginner session (C25K); empty for every
+    /// other run.
     pub segments: Vec<RunSegment>,
     /// Strides to finish an easy run with; `None` = no strides.
     pub strides: Option<StridesAddOn>,

@@ -8,31 +8,24 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -53,9 +46,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -80,8 +71,8 @@ internal fun ProfileDestination(
     onRerunSetup: (Modality?) -> Unit,
     // A row to expand and scroll to (a hold banner's "Check age" / "Review health
     // answers"); [onFocusHandled] fires once the request is taken.
-    focusRow: ProfileRowId? = null,
-    onFocusHandled: () -> Unit = {},
+    focusRow: ProfileRowId?,
+    onFocusHandled: () -> Unit,
     // Whether "Your plan answers" is unfolded, hoisted above the tabs so it stays
     // as the user left it when they come back to Profile.
     planAnswersOpen: Boolean,
@@ -93,13 +84,7 @@ internal fun ProfileDestination(
     // section gets a callback.
     var showReferences by rememberSaveable { mutableStateOf(false) }
     if (showReferences) {
-        ModalBottomSheet(
-            onDismissRequest = { showReferences = false },
-            // Fully expanded only, so Back closes it in one press.
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = BgSunken,
-        ) {
-            SheetNavBarScrim()
+        AppSheet(onDismiss = { showReferences = false }) {
             ReferenceLibrarySheet(model)
         }
     }
@@ -111,14 +96,9 @@ internal fun ProfileDestination(
     var activeTool by rememberSaveable { mutableStateOf<CoachTool?>(null) }
     val tool = activeTool
     if (tool != null) {
-        ModalBottomSheet(
-            onDismissRequest = { activeTool = null },
-            // Fully expanded: every calculator form (keypad, fields, results)
-            // exceeds the partial detent.
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = BgSunken,
-        ) {
-            SheetNavBarScrim()
+        // Fully expanded: every calculator form (keypad, fields, results) exceeds
+        // the partial detent.
+        AppSheet(onDismiss = { activeTool = null }) {
             CoachToolSheet(tool, model, onEvent)
         }
     }
@@ -214,15 +194,9 @@ private fun LazyListScope.PlanAnswersSection(
             ) { onOpenChange(!open) }
             if (open) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Screen.dp)) {
-                    // Training profile, grouped rows; tapping a row opens its inline
-                    // editor (OptionList / scale rows, no dropdowns, no steppers as
-                    // primary). Profile owns bodyweight (the "You" group carries the
-                    // Bodyweight row); the protein calculator prefills from it and
-                    // keeps any per-calculation override local to the calculator,
-                    // never written back here. Re-run guided setup reopens the wizard
-                    // PRE-FILLED from the current profile; the seed + onboarding
-                    // semantics live at the call site.
-                    val initialProfile = model.profile?.let { ProfileDraft.from(it) } ?: ProfileDraft.SEED
+                    // The training profile's grouped rows, each opening its inline
+                    // editor; Re-run guided setup reopens the wizard pre-filled.
+                    val initialProfile = model.profile?.let { Event.SetProfile.from(it) } ?: Event.SetProfile.SEED
                     ProfileEditor(
                         initial = initialProfile,
                         distanceUnit = rememberDistanceUnit(),
@@ -231,7 +205,7 @@ private fun LazyListScope.PlanAnswersSection(
                         focusRow = focusRow,
                         onFocusHandled = onFocusHandled,
                     ) { draft ->
-                        onEvent(draft.toEvent(model.today()))
+                        onEvent(draft.effectiveFrom(model.today()))
                     }
                     if (profileGuidance.isNotEmpty()) {
                         // A standard action tile, no count pill on an overline: the
@@ -242,17 +216,9 @@ private fun LazyListScope.PlanAnswersSection(
                             subtitle = pluralStringResource(R.plurals.main_coach_reads_sub, profileGuidance.size, profileGuidance.size),
                         ) { coachReadsOpen = true }
                         if (coachReadsOpen) {
-                            ModalBottomSheet(
-                                onDismissRequest = { coachReadsOpen = false },
-                                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                                containerColor = BgSunken,
-                            ) {
-                                SheetNavBarScrim()
+                            AppSheet(onDismiss = { coachReadsOpen = false }) {
                                 Column(
-                                    modifier = Modifier
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(horizontal = Space.Sheet.dp)
-                                        .padding(bottom = Space.Lg.dp),
+                                    modifier = Modifier.sheetBody(rememberScrollState()),
                                     verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
                                 ) {
                                     SectionOverline(stringResource(R.string.main_section_how_coach_reads))
@@ -270,7 +236,7 @@ private fun LazyListScope.PlanAnswersSection(
 }
 
 /** The core's guidance section of profile-context rows (shared/src/app/guidance.rs). */
-private const val PROFILE_GUIDANCE_SECTION = "Profile"
+internal const val PROFILE_GUIDANCE_SECTION = "Profile"
 
 /** Appearance: theme swatches, then one card with light/dark, the system accent
  *  (API 31+) and route maps. By default light/dark follows the OS. */
@@ -340,7 +306,7 @@ private fun LazyListScope.UnitsSection(ctx: Context, model: ViewModel, onEvent: 
                     // Hidden until a profile exists (nothing to write to yet).
                     val profile = model.profile
                     if (profile != null) {
-                        val draft = ProfileDraft.from(profile)
+                        val draft = Event.SetProfile.from(profile)
                         SegmentedEnumRow(
                             label = stringResource(R.string.main_label_weight),
                             values = listOf(WeightUnit.Kg, WeightUnit.Lb),
@@ -349,7 +315,7 @@ private fun LazyListScope.UnitsSection(ctx: Context, model: ViewModel, onEvent: 
                             onSelect = { sel ->
                                 val lb = sel == WeightUnit.Lb
                                 if (lb != draft.weightLb) {
-                                    onEvent(draft.toEvent(model.today()).copy(weightLb = lb))
+                                    onEvent(draft.effectiveFrom(model.today()).copy(weightLb = lb))
                                 }
                             },
                         )
@@ -496,15 +462,13 @@ private fun LazyListScope.DangerZoneSection(onClearAll: () -> Unit) {
         val status = LocalStatusColors.current
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
             SectionOverline(stringResource(R.string.main_overline_danger_zone))
-            Column(
+            ChevronRow(
+                onClick = onClearAll,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = ActionMinHeight)
                     .clip(RoundedCornerShape(Space.Card.dp))
-                    .border(1.dp, status.danger.copy(alpha = 0.4f), RoundedCornerShape(Space.Card.dp))
-                    .clickable(role = Role.Button) { onClearAll() }
-                    .padding(Space.Card.dp),
-                verticalArrangement = Arrangement.spacedBy(Space.Xs.dp, Alignment.CenterVertically),
+                    .border(1.dp, status.danger.copy(alpha = 0.4f), RoundedCornerShape(Space.Card.dp)),
+                chevron = false,
+                contentPadding = PaddingValues(Space.Card.dp),
             ) {
                 Text(
                     stringResource(R.string.main_clear_all_data),
@@ -746,30 +710,16 @@ private fun ExportFirstBody(body: String, onExport: () -> Unit, exported: Boolea
     }
 }
 
-/** A whole-row ≥48dp Profile action tile on its own outlined card: bold title,
- *  faint caption, chevron. With [expanded] it folds a section open below it: the
- *  chevron turns and TalkBack hears the state. */
+/** A Profile action tile: a [TitleSubtitleRow] on its own outlined card. */
 @Composable
-private fun ProfileActionTile(title: String, subtitle: String, expanded: Boolean? = null, onClick: () -> Unit) {
-    val state = expanded?.let { stringResource(if (it) R.string.ui_cd_expanded else R.string.ui_cd_collapsed) }
-    Row(
+private fun ProfileActionTile(title: String, subtitle: String, expanded: Boolean? = null, onClick: () -> Unit) =
+    TitleSubtitleRow(
+        title, subtitle, onClick,
         modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = ActionMinHeight)
             .clip(RoundedCornerShape(Space.Card.dp))
             .background(BgElevated)
-            .border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Control), RoundedCornerShape(Space.Card.dp))
-            .clickable(role = Role.Button) { onClick() }
-            .then(if (state != null) Modifier.semantics { stateDescription = state } else Modifier)
-            .padding(Space.Card.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.Card.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-            Text(title, color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
-            Text(subtitle, color = OnBgFaint, style = Type.Caption)
-        }
-        RowChevron(expanded == true)
-    }
-}
+            .border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Control), RoundedCornerShape(Space.Card.dp)),
+        expanded = expanded,
+        contentPadding = PaddingValues(Space.Card.dp),
+    )
 

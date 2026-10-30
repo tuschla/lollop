@@ -140,7 +140,7 @@ fn request_calculators(s: &mut Sim) {
 /// and neither the hero nor today's week-strip row carries any prescription.
 #[track_caller]
 fn assert_held(vm: &ViewModel, reason: HoldReason, ctx: &str) {
-    assert!(vm.train_blocked, "{ctx}: training must be blocked");
+    assert!(vm.hold_reason.is_some(), "{ctx}: training must be blocked");
     assert_eq!(vm.hold_reason, Some(reason), "{ctx}: hold reason");
     assert_eq!(
         vm.today_headline.kind,
@@ -425,7 +425,10 @@ fn every_rung_pair_resolves_to_the_higher_rung() {
         match reason {
             Some(r) => assert_held(&vm, r, name),
             None => {
-                assert!(!vm.train_blocked, "{name}: a non-blocking pair blocks");
+                assert!(
+                    vm.hold_reason.is_none(),
+                    "{name}: a non-blocking pair blocks"
+                );
                 assert_no_load_increase(&vm, name);
             }
         }
@@ -448,7 +451,7 @@ fn sharp_joint_pain_holds_even_when_everything_else_says_go() {
     s.report(ReadinessSignal::EstimatedOneRm, 1.10, local(TODAY, 7));
     let vm = s.vm();
     assert!(
-        !vm.train_blocked,
+        vm.hold_reason.is_none(),
         "fixture: the green signals alone don't hold training"
     );
     s.pain(PainKind::SharpJoint, None, local(TODAY, 8));
@@ -544,7 +547,7 @@ fn a_reds_answer_refuses_the_deficit_and_holds_the_hypertrophy_ramp() {
     type Channel = (&'static str, fn(&mut Sim));
     let channels: [Channel; 3] = [
         ("profile", |s| {
-            let mut p = s.model.profile.clone().unwrap();
+            let mut p = s.model.profile().cloned().unwrap();
             p.health.reds_signal = true;
             s.ev(Event::SetProfile(p));
         }),
@@ -720,7 +723,7 @@ fn report_delete_undo_restores_the_exact_hold_and_compaction_keeps_it() {
         signal: ReadinessSignal::Illness,
         observed_at: 0,
     });
-    assert!(!s.vm().train_blocked, "removed: the hold lifts");
+    assert!(s.vm().hold_reason.is_none(), "removed: the hold lifts");
     s.report(ReadinessSignal::Illness, row_value, local(TODAY, 8));
     let undone = s.vm();
     assert_held(&undone, HoldReason::Illness, "undo");
@@ -760,7 +763,7 @@ fn undoing_the_pain_resolution_restores_the_hold() {
         signal: ReadinessSignal::Pain,
         observed_at: local(TODAY, 8),
     });
-    assert!(!s.vm().train_blocked);
+    assert!(s.vm().hold_reason.is_none());
     let mut log = s.log.clone();
     log.pop();
     let undone = Sim::replayed(&log);
@@ -781,7 +784,7 @@ fn the_first_session_after_a_fever_is_the_return_check_not_the_plan() {
         observed_at: local(TODAY, 7),
     });
     let vm = s.vm();
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     assert_no_load_increase(&vm, "return");
     let ns = vm.next_session.clone().expect("a session after recovery");
     assert!(!ns.items.is_empty());
@@ -796,8 +799,16 @@ fn the_first_session_after_a_fever_is_the_return_check_not_the_plan() {
                 assert!(m <= 20.0, "return run over 20 min: {}", it.summary);
             }
             if let Some(t) = &it.run_target {
+                // The CR-10 ceiling in the "effort lo–hi of 10" cue; 0 without one.
+                let rpe_high: u8 = t
+                    .effort_cue
+                    .split(" of 10")
+                    .next()
+                    .and_then(|s| s.rsplit(['–', ' ']).next())
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(0);
                 assert!(
-                    t.rpe_high <= 4 || t.band.to_lowercase().contains("easy"),
+                    rpe_high <= 4 || t.band.to_lowercase().contains("easy"),
                     "{t:?}"
                 );
             }
@@ -940,7 +951,7 @@ fn a_head_cold_caps_every_modality_of_a_hybrid_week_even_after_moves() {
         }
     }
     let vm = s.vm();
-    assert!(!vm.train_blocked, "a head cold eases, never blocks");
+    assert!(vm.hold_reason.is_none(), "a head cold eases, never blocks");
     assert_no_load_increase(&vm, "head cold");
     let mut runs = 0;
     let mut lifts = 0;
@@ -1043,7 +1054,7 @@ fn readiness_deferrals_hold_the_plan_calculators_like_profile_gates() {
         request_calculators(&mut s);
         s.report(signal, value, local(TODAY, 7));
         let vm = s.vm();
-        assert!(vm.train_blocked, "{signal:?}");
+        assert!(vm.hold_reason.is_some(), "{signal:?}");
         if !vm
             .hypertrophy_plan
             .iter()
@@ -1122,7 +1133,7 @@ fn editing_a_gate_away_never_rewrites_the_days_it_held() {
             age_years: age,
             ..hybrid_profile()
         });
-        assert!(s.vm().train_blocked, "{name}: fixture gate holds");
+        assert!(s.vm().hold_reason.is_some(), "{name}: fixture gate holds");
         s.today(TODAY + 3, OFFSET);
         s.ev(Event::SetProfile(Profile {
             effective_from_epoch_day: Some(TODAY + 3),
@@ -1130,7 +1141,10 @@ fn editing_a_gate_away_never_rewrites_the_days_it_held() {
             ..hybrid_profile()
         }));
         let vm = s.vm();
-        assert!(!vm.train_blocked, "{name}: the edit lifts today's hold");
+        assert!(
+            vm.hold_reason.is_none(),
+            "{name}: the edit lifts today's hold"
+        );
         for row in vm.week_plan.iter().filter(|r| r.epoch_day < TODAY + 3) {
             assert!(
                 row.items.is_empty() && row.status != SessionStatus::Missed,
@@ -1181,8 +1195,8 @@ fn a_new_parq_yes_after_clearance_gates_again() {
     });
     // PAR-Q+ follow-up bits (schema::PARQ_FOLLOWUP_BITS = Q1, Q4, Q5, Q7):
     // Q1 answered Yes and cleared; Q4 added later.
-    assert!(!s.vm().train_blocked, "fixture: Q1 cleared");
-    let mut p = s.model.profile.clone().unwrap();
+    assert!(s.vm().hold_reason.is_none(), "fixture: Q1 cleared");
+    let mut p = s.model.profile().cloned().unwrap();
     p.health.parq_yes |= 0b0000_1000;
     s.ev(Event::SetProfile(p));
     assert_held(&s.vm(), HoldReason::Parq, "uncovered PAR-Q Yes");
@@ -1202,7 +1216,7 @@ fn rhr_spike_and_low_hrv_on_one_morning() {
     }));
     let vm = s.vm();
     assert!(
-        !vm.train_blocked,
+        vm.hold_reason.is_none(),
         "one RHR morning is noise (ready-upd-002)"
     );
     assert_eq!(vm.safety_tier, Some(SafetyTier::SingleDayMarker));
@@ -1215,7 +1229,7 @@ fn rhr_spike_and_low_hrv_on_one_morning() {
         ..input(ReadinessSignal::HrvLnRmssd, -1.5)
     }));
     let vm = s.vm();
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     assert_eq!(vm.safety_tier, Some(SafetyTier::HrvTrend));
     assert!(
         vm.illness_check_prompt,
@@ -1265,7 +1279,7 @@ fn an_overtraining_referral_holds_through_a_great_morning() {
     assert_upcoming_days_blank(&vm, "OTS");
     // A week later with no new check-in the referral is still in force.
     s.today(TODAY + 8, OFFSET);
-    assert!(s.vm().train_blocked, "a deferral does not age out");
+    assert!(s.vm().hold_reason.is_some(), "a deferral does not age out");
 }
 
 // ── More dodges ────────────────────────────────────────────────────────────

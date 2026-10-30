@@ -74,7 +74,7 @@ fn a_head_cold_today_turns_tomorrows_long_run_into_a_short_easy_run() {
     report_illness(&app, &mut model, 1.0, (long_day - 1) * DAY_SEC + 3_600);
     let vm = app.view(&model);
     assert!(
-        !vm.train_blocked,
+        vm.hold_reason.is_none(),
         "a head cold eases training, never blocks it"
     );
     assert!(
@@ -167,7 +167,7 @@ fn flu_rests_every_upcoming_day_then_the_return_check_then_the_plan() {
     let today = long_day - 1;
     report_illness(&app, &mut model, 2.0, today * DAY_SEC + 3_600);
     let vm = app.view(&model);
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
     let recovered = vm
         .hold_resolutions
         .iter()
@@ -212,7 +212,7 @@ fn flu_rests_every_upcoming_day_then_the_return_check_then_the_plan() {
     )
     .expect_only_render();
     let vm = app.view(&model);
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     let ns = vm.next_session.expect("tomorrow's session");
     assert_eq!(ns.epoch_day, long_day);
     assert_eq!(ns.items.len(), 1, "one return-check item");

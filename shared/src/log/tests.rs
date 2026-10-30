@@ -338,7 +338,7 @@ fn remove_readiness_cancels_only_the_latest_matching_submit() {
     let out = compact_event_log(events.clone());
     assert_eq!(out, vec![pain()]);
     assert_replay_equivalent(events);
-    assert!(replay(&[pain()]).train_blocked);
+    assert!(replay(&[pain()]).hold_reason.is_some());
 }
 
 #[test]
@@ -399,8 +399,6 @@ fn hr_zones(age_years: f64) -> Event {
     Event::ComputeHrZones {
         age_years,
         resting_hr_bpm: None,
-        weeks_since_recalc: None,
-        weeks_since_pace_test: None,
     }
 }
 

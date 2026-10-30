@@ -8,40 +8,10 @@
 //! never be surfaced as advice. The rows live in [`claims`], one file per
 //! discipline; the contested questions in [`CONTESTED_QUESTIONS`].
 //!
-//! The File 09 canonical claims keep their original statements, except where
-//! the 2026-10 evidence update (`knowledge-base/extracted/12-*.md`,
-//! `13-*.md`) re-stated or re-graded them against newer primary sources
-//! (RUN-DIST-001, CONC-MODE-001). Where
-//! an engine rule comes from a specific KB rule whose grade/citation/safety
-//! metadata differs from the nearest File 09 claim, a *per-rule* entry exists
-//! (e.g. `STR-PAP-001` for File 02 strength-034) so call sites never over- or
-//! under-state the source rule's grade. Grades and citations are transcribed
-//! from the KB rule blocks, never overstated. Every primary citation of the
-//! 2026-10 update rows was resolved against Crossref/PubMed (the per-rule
-//! `verification` lines in the KB files); where a rule mixes a strong
-//! principle with expert-opinion parameters, the claim carries the lower grade
-//! (GRADE good-practice precedent) and flags the parameters in
-//! `contradicting`.
-//!
-//! Every `statement` is shown to users verbatim (the "?" panel basis line), so
-//! it is plain language: no arrows, rule numbers, claim ids, ALL_CAPS category
-//! names or internal gate codes (`statements_are_plain_language` test). Ids
-//! live only in `claim_id`.
-//!
-//! Contested-question convention: bare `CQ-##` ids always mean File 09's
-//! GLOBAL contested-question index (CQ-01…CQ-15). Files 02–08/10 number their
-//! local contested lists independently; when a local question corresponds to a
-//! global one, the global id is used (File 02 block-periodization "CQ-02" →
-//! global CQ-03; File 04 interval-length "CQ-06" → global CQ-10; File 10 ACWR
-//! "CQ-04" → global CQ-05, HRV "CQ-05" → global CQ-04, interference "CQ-02/03"
-//! → global CQ-06). A file-local question with no global counterpart gets a
-//! namespaced id `CQ-F<file>-<local>` (e.g. `CQ-F03-04`) and its own
-//! [`ContestedQuestion`] row, a global number is never reused for a different
-//! question.
-//!
-//! Short-form citations only; full statistics + DOIs live in
-//! `knowledge-base/extracted/09-evidence-map.md`. Verify DOIs against primary
-//! sources before production use.
+//! Every `statement` is shown to users verbatim, so it is plain language
+//! (`statements_are_plain_language`); ids live only in `claim_id`. Short-form
+//! citations only; full statistics + DOIs live in
+//! `knowledge-base/extracted/09-evidence-map.md`.
 
 mod cite;
 pub mod claims;
@@ -191,15 +161,8 @@ pub struct ContestedQuestion {
     pub question: &'static str,
     /// Current engine default / lean while the question stays open.
     pub engine_default: &'static str,
-    /// One credible OPPOSING view from the literature, the side the engine's
-    /// `engine_default` does NOT take, in plain language, with its KB citation
-    /// (shown as "experts differ … one view: {other_side}"). `None` when the KB
-    /// names no attributable opposing reference for this question (the
-    /// dissenting camp is only "some coaches" / vendor marketing /
-    /// unattributed); NEVER fabricated - every populated string is sourced
-    /// verbatim-in-substance from the contested-question tables in
-    /// `knowledge-base/extracted/` (File 09 global table + Files 02/03 local
-    /// lists). HARD RULE 1.
+    /// One attributable opposing view, shown as "one view: {other_side}";
+    /// `None` when the KB names none.
     pub other_side: Option<&'static str>,
 }
 

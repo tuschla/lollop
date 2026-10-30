@@ -6,15 +6,13 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.pm.PackageManager
 import android.content.res.Resources
+import android.os.Bundle
 import android.os.Build
-import android.provider.Settings
 import android.text.format.DateFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -44,12 +42,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.core.content.edit
-import androidx.core.os.bundleOf
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
+import app.milestone.widget.WidgetMidnight
 import app.milestone.widget.WidgetItemKind
 import app.milestone.widget.WidgetSnapshot
 import app.milestone.widget.WidgetSnapshotStore
@@ -59,36 +56,18 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.Calendar
 import kotlin.math.abs
-import kotlinx.coroutines.launch
 
 /**
  * The daily session reminder (Profile › During training, off by default). At the
- * chosen local time an inexact, idle-allowed alarm sends [SessionReminderReceiver]
- * a broadcast; it sets the next day's alarm and posts one notification when today
- * has a planned session that is still open: the session title, one line of what
- * is planned, a tap that opens Today and one action that starts the session
- * (`track` on a run day, the tracker's pre-start screen; `log_set` on a lift day,
- * the set editor at the first open exercise). Nothing on a rest day, without a
- * plan, while training is paused (a hold or the under-18 pause), once the session
- * is done, while a run is recording, or when the day is not known. At most one
- * per local day: the days reminded are stored (those within [REMINDED_DAYS_KEPT]
- * days of the latest), so an alarm set again for a date already reminded (a time
- * zone change west, the clock set back, a later reminder time) posts nothing.
- *
- * It reads only the widget snapshot ([WidgetSnapshotStore]), never the core. The
- * snapshot describes the day the app last published, usually an earlier day at
- * reminder time, so it also carries the planned days ahead
- * ([WidgetSnapshot.ahead]); today's entry there is used when the snapshot is at
- * most [AHEAD_MAX_DAYS] old, was written in the current time zone and was not
- * paused or planless. A newer snapshot for today ([onSnapshot]) takes a posted
- * reminder down once the session is done or today is no longer a session day.
- * A run reminder goes once a run records ([watchRecording]), any reminder once
- * its action is tapped ([onOpenIntent]) and once the local day it was posted for
- * has passed ([onDayChanged]: the midnight tick, a time zone or clock change).
- *
- * The alarm is set again after it fires, after boot or an app update, on a time
- * zone or clock change ([SessionReminderReceiver]), when the app starts and when
- * the setting changes.
+ * chosen local time an inexact, idle-allowed alarm ([SessionReminderReceiver]) sets
+ * the next day's alarm and posts at most one notification per local day when
+ * today has a planned session that is still open ([reminderOf]): its title, one
+ * line of what is planned, a tap that opens Today and one action that starts it.
+ * It reads only the widget snapshot ([WidgetSnapshotStore]), never the core. A
+ * posted reminder follows later snapshots and goes once its session is done, its
+ * run records, its action is tapped or its local day has passed. The alarm is set
+ * again after it fires, after boot or an app update, on a time zone or clock
+ * change, when the app starts and when the setting changes.
  */
 internal object SessionReminder {
     internal const val CHANNEL = "session_reminder"
@@ -110,7 +89,7 @@ internal object SessionReminder {
 
     /** How far from the latest post a reminded day is kept. A time zone change moves
      *  the local date by two days at most; a clock set back further reminds again. */
-    internal const val REMINDED_DAYS_KEPT = 7L
+    private const val REMINDED_DAYS_KEPT = 7L
 
     // The shown reminder's local day and kind, read back from the posted notification.
     private const val EXTRA_DAY = "app.milestone.reminder.epoch_day"
@@ -200,14 +179,14 @@ internal object SessionReminder {
     ): Boolean {
         val app = ctx.applicationContext
         if (!setting(app).enabled || !canNotify(app)) return false
-        if (today in remindedDays(app)) return false
+        val days = remindedDays(app)
+        if (today in days) return false
         val reminder = reminderOf(WidgetSnapshotStore.read(app), today, zone) ?: return false
         // A run already recording is today's run under way.
         if (recording && reminder.kind == WidgetDayKind.Run) return false
         notify(app, reminder, today, silent = false)
-        val kept = (remindedDays(app) + today).filter { abs(it - today) <= REMINDED_DAYS_KEPT }
+        val kept = (days + today).filter { abs(it - today) <= REMINDED_DAYS_KEPT }
         prefs(app).edit { putString(KEY_REMINDED_DAYS, kept.joinToString(",")) }
-        watchRecording(app)
         return true
     }
 
@@ -225,9 +204,9 @@ internal object SessionReminder {
         recording: Boolean = RunSession.tracking.value,
     ) {
         val app = ctx.applicationContext
-        val nm = app.getSystemService(NotificationManager::class.java) ?: return
-        val shown = shown(nm) ?: return
-        if (shown.extras.getLong(EXTRA_DAY, Long.MIN_VALUE) != today) {
+        val nm = nm(app) ?: return
+        val day = shownDay(nm) ?: return
+        if (day != today) {
             nm.cancel(NOTIF_ID)
             return
         }
@@ -246,34 +225,15 @@ internal object SessionReminder {
      * timeout alone runs to the midnight of the zone and clock it was posted in.
      */
     internal fun onDayChanged(ctx: Context, today: Long = todayEpochDay()) {
-        val nm = ctx.applicationContext.getSystemService(NotificationManager::class.java) ?: return
-        val shown = shown(nm) ?: return
-        if (shown.extras.getLong(EXTRA_DAY, Long.MIN_VALUE) != today) nm.cancel(NOTIF_ID)
+        val nm = nm(ctx) ?: return
+        if ((shownDay(nm) ?: return) != today) nm.cancel(NOTIF_ID)
     }
 
-    /** A shown run reminder goes once a run records: its "Start run" is done. */
+    /** A shown run reminder goes once a run records ([RecordingWatch]): its "Start
+     *  run" is done. */
     internal fun onRecording(ctx: Context) {
-        val nm = ctx.applicationContext.getSystemService(NotificationManager::class.java) ?: return
-        val shown = shown(nm) ?: return
-        if (shown.extras.getString(EXTRA_KIND) == WidgetDayKind.Run.name) nm.cancel(NOTIF_ID)
-    }
-
-    @Volatile private var watching = false
-    @Volatile private var watchApp: Context? = null
-
-    /**
-     * Runs [onRecording] whenever [RunSession.tracking] turns on, whoever turns it
-     * on, at once on the main thread. Process-scoped, started by [post], MainActivity
-     * and [RunTrackingService]; a later call only replaces the context (Robolectric
-     * gives each test a new Application under the same collector).
-     */
-    fun watchRecording(ctx: Context) {
-        watchApp = ctx.applicationContext
-        if (watching) return
-        watching = true
-        EventDispatcher.scope.launch {
-            RunSession.tracking.collect { recording -> if (recording) watchApp?.let(::onRecording) }
-        }
+        val nm = nm(ctx) ?: return
+        if (shown(nm)?.extras?.getString(EXTRA_KIND) == WidgetDayKind.Run.name) nm.cancel(NOTIF_ID)
     }
 
     /** MainActivity got [intent]: the reminder's action was tapped, so the reminder goes
@@ -282,11 +242,17 @@ internal object SessionReminder {
         if (intent?.getBooleanExtra(EXTRA_FROM_REMINDER, false) == true) cancelNotification(ctx)
     }
 
+    private fun nm(ctx: Context): NotificationManager? =
+        ctx.applicationContext.getSystemService(NotificationManager::class.java)
+
     private fun shown(nm: NotificationManager): Notification? =
         nm.activeNotifications.firstOrNull { it.id == NOTIF_ID }?.notification
 
-    fun cancelNotification(ctx: Context) {
-        ctx.applicationContext.getSystemService(NotificationManager::class.java)?.cancel(NOTIF_ID)
+    /** The local day the shown reminder was posted for; null when none is shown. */
+    private fun shownDay(nm: NotificationManager): Long? = shown(nm)?.extras?.getLong(EXTRA_DAY, Long.MIN_VALUE)
+
+    private fun cancelNotification(ctx: Context) {
+        nm(ctx)?.cancel(NOTIF_ID)
     }
 
     /** [reminder] for local day [day]. */
@@ -314,11 +280,11 @@ internal object SessionReminder {
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setSilent(silent)
-            .addExtras(bundleOf(EXTRA_DAY to day, EXTRA_KIND to reminder.kind.name))
+            .addExtras(Bundle().apply { putLong(EXTRA_DAY, day); putString(EXTRA_KIND, reminder.kind.name) })
             // Today's reminder never stands into tomorrow.
-            .setTimeoutAfter((nextFireMillis(now, 0, ZoneId.systemDefault()) - now).coerceAtLeast(1L))
+            .setTimeoutAfter((WidgetMidnight.nextMidnightMillis(now) - now).coerceAtLeast(1L))
         if (line != null) b.setContentText(line)
-        app.getSystemService(NotificationManager::class.java)?.notify(NOTIF_ID, b.build())
+        nm(app)?.notify(NOTIF_ID, b.build())
     }
 
     /** The action's open intent to [dest], marked so that MainActivity takes the
@@ -333,15 +299,11 @@ internal object SessionReminder {
 
     /** POST_NOTIFICATIONS granted (API 33+) and the app's notifications not blocked. */
     internal fun canNotify(ctx: Context): Boolean =
-        (
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED
-            ) && NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+        canPostNotifications(ctx) && NotificationManagerCompat.from(ctx).areNotificationsEnabled()
 
     private fun ensureChannel(app: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val nm = app.getSystemService(NotificationManager::class.java) ?: return
+        val nm = nm(app) ?: return
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL, app.getString(R.string.reminder_channel), NotificationManager.IMPORTANCE_DEFAULT)
                 .apply { description = app.getString(R.string.reminder_channel_description) },
@@ -475,9 +437,7 @@ internal fun SessionReminderRows(ctx: Context) {
         onCheckedChange = { on ->
             SessionReminder.setEnabled(ctx, on)
             setting = SessionReminder.setting(ctx)
-            if (on && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-            ) {
+            if (on && !canPostNotifications(ctx)) {
                 permission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         },
@@ -503,7 +463,12 @@ internal fun SessionReminderRows(ctx: Context) {
         InlineNotice(
             stringResource(R.string.reminder_notifications_off),
             actionLabel = stringResource(R.string.reminder_open_settings),
-            onAction = { openAppNotificationSettings(ctx) },
+            onAction = {
+                ctx.openFirst(
+                    appNotificationSettingsIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    appDetailsIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            },
         )
     }
     if (picking) {
@@ -539,19 +504,4 @@ internal fun reminderTimeText(ctx: Context, minuteOfDay: Int): String {
         set(Calendar.MILLISECOND, 0)
     }
     return DateFormat.getTimeFormat(ctx).format(cal.time)
-}
-
-/** The system screen with this app's notification settings. */
-private fun openAppNotificationSettings(ctx: Context) {
-    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-        .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    try {
-        ctx.startActivity(intent)
-    } catch (_: ActivityNotFoundException) {
-        ctx.startActivity(
-            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", ctx.packageName, null))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    }
 }

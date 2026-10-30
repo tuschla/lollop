@@ -245,8 +245,6 @@ fn hr_query(age: f64, rhr: Option<f64>) -> HrZoneInputView {
     HrZoneInputView {
         age_years: age,
         resting_hr_bpm: rhr,
-        weeks_since_recalc: None,
-        weeks_since_pace_test: None,
     }
 }
 
@@ -402,8 +400,6 @@ fn hr_zones_reach_the_view_and_maf_matches_180_minus_age() {
             Event::ComputeHrZones {
                 age_years: age,
                 resting_hr_bpm: Some(50.0),
-                weeks_since_recalc: None,
-                weeks_since_pace_test: None,
             },
             &mut model,
         );
@@ -739,11 +735,7 @@ fn band_paces_match_vo2_inverse_and_mp_relative_oracles() {
                 "VDOT {vdot} {band:?} slow {slow} vs {want_slow}"
             );
         }
-        let lr = running::mp_relative_pace_sec_per_km(
-            vdot,
-            running::RunWorkout::Session(RunSessionType::LongRun),
-        )
-        .unwrap();
+        let lr = running::mp_relative_pace_sec_per_km(vdot, RunSessionType::LongRun).unwrap();
         assert!((lr.0 - mp * 1.10).abs() < 1e-6 * mp && (lr.1 - mp * 1.20).abs() < 1e-6 * mp);
         let rec = resolve_target(
             run_target_band(RunSessionType::Recovery),
@@ -871,27 +863,25 @@ fn run_target_heart_rate_matches_pct_hrmax_oracle() {
             let tb = band_for(None, claims::RUN_VDOT_001, &RunIntensity::Vdot(band)).unwrap();
             let t = resolve_target(tb, &RunIntensity::Vdot(band), None, hr);
             let (lo, hi) = oracle::band_row(band).2.unwrap();
+            let (lo_bpm, hi_bpm) = t
+                .hr_label
+                .strip_suffix(" bpm")
+                .and_then(|s| s.split_once('–'))
+                .map(|(l, h)| (l.parse::<f64>().unwrap(), h.parse::<f64>().unwrap()))
+                .unwrap_or_else(|| panic!("age {age} {band:?}: {}", t.hr_label));
             assert!(
-                rounds_to(f64::from(t.hr_low_bpm), hr.max_bpm * lo / 100.0),
+                rounds_to(lo_bpm, hr.max_bpm * lo / 100.0),
                 "age {age} {band:?}"
             );
             assert!(
-                rounds_to(f64::from(t.hr_high_bpm), hr.max_bpm * hi / 100.0),
+                rounds_to(hi_bpm, hr.max_bpm * hi / 100.0),
                 "age {age} {band:?}"
-            );
-            assert_eq!(
-                t.hr_label,
-                format!("{}–{} bpm", t.hr_low_bpm, t.hr_high_bpm)
             );
         }
         for band in [VdotBand::Interval, VdotBand::Repetition] {
             let tb = band_for(None, claims::RUN_VDOT_001, &RunIntensity::Vdot(band)).unwrap();
             let t = resolve_target(tb, &RunIntensity::Vdot(band), None, hr);
-            assert_eq!(
-                (t.hr_low_bpm, t.hr_high_bpm),
-                (0, 0),
-                "{band:?} is pace-governed"
-            );
+            assert!(t.hr_label.is_empty(), "{band:?} is pace-governed");
         }
     }
 }
@@ -1514,8 +1504,8 @@ fn hypertrophy_figures_match_table1_and_ramps_obey_the_kb_rules() {
                 let ctx = format!("{muscle} stated {stated:?} {weeks} wk");
                 let f = f.unwrap_or_else(|| panic!("{ctx}: no figures"));
                 assert_eq!(
-                    (f.min_sets, f.productive_low, f.productive_high, f.max_sets),
-                    (mev, mav_lo, mav_hi, mrv),
+                    (f.productive_low, f.productive_high, f.max_sets),
+                    (mav_lo, mav_hi, mrv),
                     "{ctx}"
                 );
                 assert_eq!(ramp.len(), usize::from(weeks), "{ctx}");

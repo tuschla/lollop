@@ -371,7 +371,7 @@ fn a_feb_29_birthday_crosses_18_on_march_1_of_a_common_year() {
             vm.hold_reason
         );
         assert_eq!(vm.youth_activity.is_some(), youth, "{ctx}");
-        assert_eq!(vm.train_blocked, youth, "{ctx}");
+        assert_eq!(vm.hold_reason.is_some(), youth, "{ctx}");
         assert_eq!(vm.profile.as_ref().unwrap().health.youth, youth, "{ctx}");
     };
     check(&mut model, days_from_civil(2026, 2, 28), 17.0, true);
@@ -951,7 +951,7 @@ fn an_18th_birthday_mid_week_does_not_turn_held_days_into_missed_ones() {
     }
     set_today(&app, &mut model, thu);
     let vm = app.view(&model);
-    assert!(!vm.train_blocked, "18 today: {:?}", vm.hold_reason);
+    assert!(vm.hold_reason.is_none(), "18 today: {:?}", vm.hold_reason);
     assert_calendar(&vm, thu, "18th birthday");
     for d in mon..thu {
         let r = row(&vm, d);
@@ -992,7 +992,7 @@ fn a_health_gate_lifted_mid_week_does_not_turn_held_days_into_missed_ones() {
         if d == mon - 14 {
             send(&app, &mut model, Event::GeneratePlan { start_epoch_day: d });
         }
-        assert!(app.view(&model).train_blocked, "day {d}");
+        assert!(app.view(&model).hold_reason.is_some(), "day {d}");
     }
     set_today(&app, &mut model, thu);
     send(
@@ -1004,7 +1004,7 @@ fn a_health_gate_lifted_mid_week_does_not_turn_held_days_into_missed_ones() {
         }),
     );
     let vm = app.view(&model);
-    assert!(!vm.train_blocked, "{:?}", vm.hold_reason);
+    assert!(vm.hold_reason.is_none(), "{:?}", vm.hold_reason);
     assert_calendar(&vm, thu, "gate lifted");
     for d in mon..thu {
         assert_ne!(row(&vm, d).status, SessionStatus::Missed, "held day {d}");
@@ -1496,6 +1496,46 @@ fn each_day_carries_next_weeks_own_days() {
         matches!(monday.session_type, SessionType::Run(_)) && !monday.items.is_empty(),
         "Monday is a run day: {monday:?}"
     );
+}
+
+/// Next week is built as next Monday's own view builds it, so what ages with
+/// the prescribing day ages into it too: the last run on Sunday, seen on
+/// Saturday (six days off), next Monday's own view sees a week off and ramps
+/// the volume back (RUN-REENTRY-001), and Saturday's next week says so.
+#[test]
+fn next_week_after_a_run_gap_is_next_mondays_own_strip() {
+    let mon = monday_of(20_400);
+    let profile = Profile {
+        goal_distance: GoalDistance::Marathon,
+        concurrent_goal: ConcurrentGoal::EndurancePriority,
+        weekly_sets: 0,
+        running_days_per_week: 4,
+        running_km_per_week: 40.0,
+        advanced: true,
+        bodyweight_kg: Some(80.0),
+        age_years: Some(34.0),
+        resting_hr_bpm: Some(52.0),
+        ..base_profile()
+    };
+    let runs = (mon - 28..mon)
+        .rev()
+        .step_by(2)
+        .zip(1..)
+        .map(|(d, id)| log_run(10.0, 55.0, 74.0, 16.0, d * DAY_SEC + 18 * HOUR, id));
+    let (app, mut model) = planned_on(profile, runs, mon - 28);
+    let run_km = |rows: &[SessionPlanView]| -> Vec<(i64, String, f64)> {
+        rows.iter()
+            .map(|r| {
+                let km = r.items.iter().filter_map(|it| it.run_head_km).sum();
+                (r.epoch_day, r.title.clone(), km)
+            })
+            .collect()
+    };
+    set_today(&app, &mut model, mon + 5);
+    let seen = run_km(&app.view(&model).next_week_plan);
+    set_today(&app, &mut model, mon + 7);
+    let own = run_km(&app.view(&model).week_plan);
+    assert_eq!(seen, own, "Saturday's next week vs Monday's own week");
 }
 
 /// A race today, earlier this week, or weeks ago never yields a program week

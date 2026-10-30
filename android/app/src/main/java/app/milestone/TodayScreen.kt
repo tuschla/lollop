@@ -1,8 +1,6 @@
 package app.milestone
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +12,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -34,22 +31,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import java.util.Locale
 
 /**
  * Today: the status cards, the readiness strip, the hero (the next session, else
@@ -64,24 +58,24 @@ internal fun TodayDestination(
     listState: androidx.compose.foundation.lazy.LazyListState,
     onEvent: (Event) -> Unit,
     onStartSetup: () -> Unit,
-    onLogPlanItem: (PrescriptionView) -> Unit = {},
-    onLogPastItem: (PrescriptionView, Long) -> Unit = { _, _ -> },
-    onLogPastRun: (Long) -> Unit = {},
-    onTrackRun: () -> Unit = {},
+    onLogPlanItem: (PrescriptionView) -> Unit,
+    onLogPastItem: (PrescriptionView, Long) -> Unit,
+    onLogPastRun: (Long) -> Unit,
+    onTrackRun: () -> Unit,
     // Opens the Log sheet on one editor (today's check-in, the session review).
-    onOpenSheet: (LogMode) -> Unit = {},
+    onOpenSheet: (LogMode) -> Unit,
     // The pain report as last entered (its area, and the Undo after removing it).
-    lastPain: PainDetail? = null,
+    lastPain: PainDetail?,
     // Opens Profile at a row (the way to fix a plan that can't be built).
-    onOpenProfile: (ProfileRowId) -> Unit = {},
+    onOpenProfile: (ProfileRowId) -> Unit,
     // Re-runs guided setup seeded from the profile (a profile with nothing to plan).
-    onRerunSetup: () -> Unit = {},
+    onRerunSetup: () -> Unit,
 ) {
     // Removing the generated plan is confirm-gated.
     var confirmRemovePlan by rememberSaveable { mutableStateOf(false) }
     // The day open under the week strip, hoisted so a move opens its target day.
     var weekSelectedDay by rememberSaveable { mutableStateOf(-1L) }
-    val res = LocalContext.current.resources
+    val res = LocalResources.current
     val moveSession = { from: Long, to: Long ->
         onEvent(Event.MoveSession(from, to))
         weekSelectedDay = to
@@ -100,7 +94,7 @@ internal fun TodayDestination(
         model.input_count > 0 ||
         // A morning check-in is coaching signal too; even pre-baseline
         // (the "collecting baseline" honesty state), and once derived signals land.
-        model.checkin_today != null ||
+        model.latest_checkin != null ||
         model.readiness_summary.isNotEmpty() ||
         model.baseline_status.isNotEmpty()
     val hasAnything = hasCoachSignal || model.lifts.isNotEmpty() || model.runs.isNotEmpty()
@@ -112,6 +106,9 @@ internal fun TodayDestination(
     val showLifting = model.profile == null || model.showLifting()
     val weightUnit = model.weightUnit()
     val hold = remember(model.today_headline, model.adjustments) { holdEvidence(model) }
+    // The area an active pain report names: an exercise it stopped reads
+    // "Stopped · <area>" in the hero and the week strip alike.
+    val painArea = painAreaLabel(lastPain?.location, model.readiness_summary.firstOrNull { it.signal == "Pain" }?.detail)
 
     LazyColumn(
         state = listState,
@@ -175,6 +172,7 @@ internal fun TodayDestination(
                         weightUnit = weightUnit,
                         program = model.program,
                         footnote = null,
+                        painArea = painArea,
                         onRemovePlan = { confirmRemovePlan = true },
                         actions = null,
                         heroDay = -1L,
@@ -200,6 +198,7 @@ internal fun TodayDestination(
                 onOpenSheet = onOpenSheet,
                 onMove = moveSession,
                 lastPain = lastPain,
+                painArea = painArea,
                 onOpenProfile = onOpenProfile,
                 onRerunSetup = onRerunSetup,
                 readinessStrip = if (hasReadinessPills) {
@@ -225,6 +224,7 @@ internal fun TodayDestination(
                     program = model.program,
                     // Nothing logged yet: the week card's last line.
                     footnote = if (!hasAnything) stringResource(R.string.main_today_empty) else null,
+                    painArea = painArea,
                     onRemovePlan = { confirmRemovePlan = true },
                     actions = WeekActions(
                         onLogItem = onLogPastItem,
@@ -329,13 +329,13 @@ internal fun todayCards(model: ViewModel, hasSignal: Boolean, distanceUnit: Dist
     // An in-session cue is spent as soon as its own exercise is settled.
     val settledToday = todayItems
         .filter { it.exercise.isNotBlank() && (it.done || it.status in SettledItemStatuses) }
-        .map { it.exercise.trim().lowercase(Locale.ROOT) }
+        .map { nameKey(it.exercise) }
         .toSet()
     val spent = { a: AdjustmentView ->
         !a.safety_critical && (
             sessionDone != null ||
                 ((a.suggested_load_kg != null || a.suggests_end_exercise) &&
-                    a.exercise?.trim()?.lowercase(Locale.ROOT) in settledToday)
+                    a.exercise?.let(::nameKey) in settledToday)
             )
     }
     // Dedup key is (summary, citation): several rules emit the same summary.
@@ -464,8 +464,10 @@ private fun TodayHeroCard(
     onOpenSheet: (LogMode) -> Unit,
     // Moves a session (posts "Moved to … · Undo").
     onMove: (from: Long, to: Long) -> Unit,
-    // The pain report as last entered here (its body area), for "Report removed · Undo".
+    // The pain report as last entered here, for "Report removed · Undo".
     lastPain: PainDetail?,
+    // The area that report names ("Stopped · <area>").
+    painArea: String?,
     onOpenProfile: (ProfileRowId) -> Unit,
     onRerunSetup: () -> Unit,
     // The readiness strip, placed between the status cards and the hero.
@@ -476,14 +478,11 @@ private fun TodayHeroCard(
     val today = model.today()
     val nextSession = model.next_session
     val distanceUnit = rememberDistanceUnit()
-    val res = LocalContext.current.resources
+    val res = LocalResources.current
     val c = remember(model, hasSignal, distanceUnit) { todayCards(model, hasSignal, distanceUnit) }
     var resolveSignal by rememberSaveable { mutableStateOf<String?>(null) }
     var removePain by rememberSaveable { mutableStateOf(false) }
     var notesOpen by rememberSaveable(today) { mutableStateOf(false) }
-    // The area an active pain report names: an exercise it stopped reads
-    // "Stopped · <area>", never a done ✓.
-    val painArea = painAreaLabel(lastPain?.location, model.readiness_summary.firstOrNull { it.signal == "Pain" }?.detail)
     val painOnHost = c.painReported && c.hasSafetyHost
     // The hold group: call + one supporting line + its action on the face, the
     // other safety rows behind the host's "?".
@@ -572,7 +571,7 @@ private fun TodayHeroCard(
                     Text(
                         headline.summary,
                         color = OnBgBody,
-                        style = Type.Body.copy(fontWeight = FontWeight.Bold),
+                        style = Type.BodyBold,
                     )
                 }
             }
@@ -609,23 +608,21 @@ private fun TodayHeroCard(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-        if (hasSignal && c.headlineHosts) headlineCard()
-        if (hasSignal) {
-            c.hostAdjustment?.let { a ->
-                EvidenceCard(
-                    a.summary, a.grade, a.citation, a.confidence, a.safety_critical, a.contested,
-                    why = a.why,
-                    status = StatusTone.Adjusted,
-                    statusOverline = safetyOverline,
-                    footer = groupFooter,
-                    panelExtra = groupPanel,
-                    actionLabel = groupActionLabel,
-                    onAction = groupOnAction,
-                    secondaryActionLabel = if (painOnHost) removeReportLabel else null,
-                    onSecondaryAction = { removePain = true },
-                    actionPrimary = false,
-                )
-            }
+        if (c.headlineHosts) headlineCard()
+        c.hostAdjustment?.let { a ->
+            EvidenceCard(
+                a.summary, a.grade, a.citation, a.confidence, a.safety_critical, a.contested,
+                why = a.why,
+                status = StatusTone.Adjusted,
+                statusOverline = safetyOverline,
+                footer = groupFooter,
+                panelExtra = groupPanel,
+                actionLabel = groupActionLabel,
+                onAction = groupOnAction,
+                secondaryActionLabel = if (painOnHost) removeReportLabel else null,
+                onSecondaryAction = { removePain = true },
+                actionPrimary = false,
+            )
         }
         c.softResolutions.filterNot { it === c.foldedResolution }.forEach { r ->
             HoldResolutionCard(
@@ -681,6 +678,7 @@ private fun TodayHeroCard(
                 done,
                 feedback = if (c.doneOwnsFeedback) fb else null,
                 painArea = painArea,
+                distanceUnit = distanceUnit,
                 onResume = ended.firstOrNull()?.let { first ->
                     {
                         ended.forEach { reopenExercise(it, today, onEvent) }
@@ -760,23 +758,13 @@ private fun TodayHeroCard(
 @Composable
 private fun CoachingNotesRow(count: Int, open: Boolean, onToggle: () -> Unit) {
     PlainCard {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = ActionMinHeight)
-                .clip(RoundedCornerShape(Space.Md.dp))
-                .clickable(role = Role.Button, onClick = onToggle)
-                .testTag("coaching-notes"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+        ChevronRow(
+            onClick = onToggle,
+            modifier = Modifier.clip(RoundedCornerShape(Space.Md.dp)).testTag("coaching-notes"),
+            expanded = open,
+            spacing = Space.Md.dp,
         ) {
-            Text(
-                pluralStringResource(R.plurals.main_coaching_notes, count, count),
-                color = OnBgBody,
-                style = Type.Body,
-                modifier = Modifier.weight(1f),
-            )
-            RowChevron(open)
+            Text(pluralStringResource(R.plurals.main_coaching_notes, count, count), color = OnBgBody, style = Type.Body)
         }
     }
 }
@@ -803,9 +791,9 @@ internal fun winAdviceFor(winText: String, coaching: List<AdjustmentView>): Adju
  * exercise all stay. Order is preserved. Pure.
  */
 internal fun coachingPerExercise(headlineExercise: String?, candidates: List<AdjustmentView>): List<AdjustmentView> {
-    val key = { a: AdjustmentView -> a.exercise?.takeIf { it.isNotBlank() }?.lowercase(Locale.ROOT) }
+    val key = { a: AdjustmentView -> a.exercise?.takeIf { it.isNotBlank() }?.let(::nameKey) }
     val inSession = { a: AdjustmentView -> a.suggested_load_kg != null || a.suggests_end_exercise }
-    val headlineKey = headlineExercise?.takeIf { it.isNotBlank() }?.lowercase(Locale.ROOT)
+    val headlineKey = headlineExercise?.takeIf { it.isNotBlank() }?.let(::nameKey)
     val chosen = candidates.groupBy(key).mapValues { (_, group) -> group.firstOrNull(inSession) ?: group.first() }
     return candidates.filter { a ->
         val k = key(a)
@@ -1011,7 +999,7 @@ private fun E1rmTrendCard(trend: E1rmTrend, weightUnit: WeightUnit) {
             Text(
                 stringResource(R.string.main_e1rm_title, trend.exercise),
                 color = OnBgBody,
-                style = Type.Body.copy(fontWeight = FontWeight.Bold),
+                style = Type.BodyBold,
                 modifier = Modifier.weight(1f),
             )
             GlossaryInfo("e1rm")
@@ -1078,16 +1066,9 @@ private fun E1rmTrendCard(trend: E1rmTrend, weightUnit: WeightUnit) {
 }
 
 /**
- * The Today hero session card: a "TODAY'S SESSION" / "NEXT SESSION" overline, the
- * title with its discipline icon, and ONE "?" whose panel holds all the
- * evidence the card rests on (engine status lines [coachStatus], the session's
- * adjustment, each item's grade and citation).
- *
- * In today's actionable session the first open item is a full
- * [OpenPlanItemCard] and every other open item a [PlanItemRow] a tap logs; any
- * other session is a read-only preview. Settled items collapse to a ✓ row. The
- * session's adjustment is stated on the face only when it is not already in
- * [renderedKeys] (a safety-critical one keeps its SAFETY card).
+ * The Today hero session card: the overline, the title, ONE "?" over all its
+ * evidence, then the items: in today's actionable session the first open item
+ * is an [OpenPlanItemCard], the others [PlanItemRow]s; settled items are ✓ rows.
  */
 @Composable
 private fun NextSessionCard(
@@ -1185,28 +1166,8 @@ private fun NextSessionCard(
                 }
             }
         }
-        Layout(contents = listOf(titleLead, titleActions), modifier = Modifier.fillMaxWidth()) { (leadM, actionsM), constraints ->
-            val width = constraints.maxWidth
-            val lead = leadM.single()
-            val actions = actionsM.single()
-            val actionsWidth = actions.maxIntrinsicWidth(Constraints.Infinity)
-            if (lead.minIntrinsicWidth(Constraints.Infinity) + actionsWidth <= width) {
-                val a = actions.measure(Constraints(maxWidth = width))
-                val l = lead.measure(Constraints(maxWidth = width - a.width))
-                val h = maxOf(l.height, a.height)
-                // placeRelative: the title at the start, the actions at the end (mirrored in RTL).
-                layout(width, h) {
-                    l.placeRelative(0, (h - l.height) / 2)
-                    a.placeRelative(width - a.width, (h - a.height) / 2)
-                }
-            } else {
-                val l = lead.measure(Constraints(maxWidth = width))
-                val a = actions.measure(Constraints(maxWidth = width))
-                layout(width, l.height + a.height) {
-                    l.placeRelative(0, 0)
-                    a.placeRelative(width - a.width, l.height)
-                }
-            }
+        BesideOrStacked(titleLead, titleActions, Modifier.fillMaxWidth()) { lead, actionsWidth, width ->
+            lead.minIntrinsicWidth(Constraints.Infinity) + actionsWidth <= width
         }
         // A rest running from the set loop stays visible after the sheet closes.
         if (actionable) {
@@ -1324,6 +1285,14 @@ internal fun prescribedRir(rpe: Double): Int? {
     return if (rir >= 0.0 && rir < 4.0 && rir % 1.0 == 0.0) rir.toInt() else null
 }
 
+/** For an item with no load to start from (never logged, no prescribed or
+ *  suggested load): the reps a first weight should be liftable for, reps_low
+ *  plus the prescribed reps in reserve. Null otherwise. Pure. */
+internal fun PrescriptionView.firstWeightReps(): Int? {
+    if (reps_low <= 0 || last_set != null || logged_sets.isNotEmpty() || load_kg != null || suggested_load_kg != null) return null
+    return target_rpe?.let(::prescribedRir)?.let { reps_low + it }
+}
+
 /**
  * Plain-language lines for a newcomer's current lift, from the item's own numbers:
  * the prescription spelled out ("5 sets of 5 reps, stopping about 3 reps short of
@@ -1339,18 +1308,11 @@ private fun firstSessionGuide(item: PrescriptionView, isRun: Boolean, isCheck: B
     if (item.sets <= 0 || item.reps_low <= 0) return emptyList()
     val rir = item.target_rpe?.let(::prescribedRir) ?: return emptyList()
     val reps = if (item.reps_high > item.reps_low) "${item.reps_low}\u2013${item.reps_high}" else "${item.reps_low}"
-    val noStart = item.last_set == null && item.logged_sets.isEmpty() &&
-        item.load_kg == null && item.suggested_load_kg == null
     val bodyweight = item.calis != null && (item.added_kg ?: 0.0) == 0.0
     return buildList {
         add(pluralStringResource(R.plurals.plan_guide_spelled, rir, item.sets, reps, rir))
-        if (noStart) {
-            add(
-                stringResource(
-                    if (bodyweight) R.string.plan_guide_first_version else R.string.plan_guide_first_weight,
-                    item.reps_low + rir,
-                ),
-            )
+        item.firstWeightReps()?.let {
+            add(stringResource(if (bodyweight) R.string.plan_guide_first_version else R.string.plan_guide_first_weight, it))
         }
     }
 }
@@ -1397,7 +1359,7 @@ private fun HoldResolutionCard(
     r: HoldResolutionView,
     overline: String,
     onResolve: () -> Unit,
-    onRemoveReport: (() -> Unit)? = null,
+    onRemoveReport: (() -> Unit)?,
 ) {
     StatusCard(
         tone = StatusTone.Adjusted,
@@ -1431,10 +1393,10 @@ private fun SessionDoneCard(
     feedback: FeedbackView?,
     // The area an active pain report names: a row it stopped reads "Stopped · <area>".
     painArea: String?,
+    distanceUnit: DistanceUnit,
     onResume: (() -> Unit)?,
     onReview: () -> Unit,
 ) {
-    val distanceUnit = rememberDistanceUnit()
     Box(Modifier.testTag("session-done")) {
         PlainCard {
             TileOverline(stringResource(R.string.main_session_done_overline), color = Accent)

@@ -392,7 +392,7 @@ fn payload(out: &FitOutcome) -> serde_json::Value {
     match out {
         FitOutcome::Track(t) => serde_json::to_value(t).expect("a track serializes"),
         FitOutcome::Fail(e) => serde_json::json!({
-            "error": {"kind": e.kind(), "context": e.context(), "message": e.message()}
+            "error": {"kind": e.kind(), "context": e.context(), "message": ""}
         }),
     }
 }
@@ -439,7 +439,7 @@ fn check_fit(bytes: &[u8]) -> Result<FitOutcome, String> {
                 FitError::TooShort => e.context() == "too_short",
                 _ => e.context().is_empty(),
             };
-            if !ok_ctx || e.message().is_empty() {
+            if !ok_ctx {
                 return Err(format!("bad error envelope {e:?}"));
             }
         }

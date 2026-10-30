@@ -956,7 +956,7 @@ impl Sim {
             vm.program
                 .as_ref()
                 .map(|p| (p.phase, p.week, p.weeks_total)),
-            vm.train_blocked,
+            vm.hold_reason.is_some(),
             vm.hold_reason
         );
         for s in &vm.week_plan {
@@ -1130,7 +1130,7 @@ impl Sim {
             if self.today - self.last_hold_day <= 14 {
                 self.hit("hold lifts");
             }
-            if vm.train_blocked {
+            if vm.hold_reason.is_some() {
                 let msg = format!(
                     "blocked with no hold: {:?} {:?}",
                     vm.hold_reason, vm.today_headline.summary
@@ -1161,7 +1161,7 @@ impl Sim {
             return;
         };
         self.hit("hold blocks");
-        if top != Hold::Youth && !vm.train_blocked {
+        if top != Hold::Youth && vm.hold_reason.is_none() {
             self.fail(
                 "hold blocks",
                 format!("{top:?} active but training not blocked"),

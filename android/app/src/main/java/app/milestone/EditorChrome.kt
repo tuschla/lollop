@@ -53,8 +53,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -211,19 +209,16 @@ fun EditorScaffold(
  *  entry via [onDiscard]; Keep editing, Back or an outside tap ([onKeepEditing])
  *  return to it. */
 @Composable
-internal fun DiscardEntryDialog(onKeepEditing: () -> Unit, onDiscard: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onKeepEditing,
-        shape = RoundedCornerShape(Space.Card.dp),
-        title = { Text(stringResource(R.string.log_discard_title)) },
-        confirmButton = {
-            TextButton(onClick = onDiscard) { Text(stringResource(R.string.log_discard_confirm), color = DangerText) }
-        },
-        dismissButton = {
-            TextButton(onClick = onKeepEditing) { Text(stringResource(R.string.log_keep_editing)) }
-        },
+internal fun DiscardEntryDialog(onKeepEditing: () -> Unit, onDiscard: () -> Unit) =
+    ConfirmDialog(
+        title = stringResource(R.string.log_discard_title),
+        body = null,
+        confirmLabel = stringResource(R.string.log_discard_confirm),
+        onDismiss = onKeepEditing,
+        onConfirm = onDiscard,
+        confirmColor = DangerText,
+        dismissLabel = stringResource(R.string.log_keep_editing),
     )
-}
 
 /** Mirrors an editor's unsaved-edits flag up to its host, so the host sheet's
  *  swipe-down dismissal can guard it. */
@@ -294,14 +289,9 @@ internal fun planDayObservedAt(epochDay: Long): Long =
         .toEpochSecond()
 
 /**
- * Backdating control for every log editor: a compact chip stating when the
- * entry is logged ("Today · 14:32" / "15 Jul · 09:10"), defaulting to now.
- * Tapping opens a Material 3 date picker (future dates unselectable); [withTime]
- * (sets/runs) chains a time picker after the date. The result is clamped to
- * now so a future stamp can never be submitted. Date-only editors
- * (readiness/review) keep the current time-of-day on the chosen date, so
- * same-day ordering vs other inputs stays sensible. The value rides the
- * wire's existing `observed_at` unix seconds, the core holds no clock.
+ * Backdating chip for every log editor ("Today · 14:32"), defaulting to now: a
+ * date picker (no future dates), then a time picker with [withTime]; the result
+ * is clamped to now. A date-only editor keeps the current time of day.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -494,27 +484,10 @@ private fun formatObservedAt(epochSec: Long, withTime: Boolean, use24h: Boolean,
  *  shared row chevron, turned down while [expanded]. A whole-row ≥48dp target,
  *  announced as expanded / collapsed. The caller renders the folded content. */
 @Composable
-internal fun ExpandRow(label: String, expanded: Boolean, onToggle: () -> Unit) {
-    val state = stringResource(if (expanded) R.string.ui_cd_expanded else R.string.ui_cd_collapsed)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = ActionMinHeight)
-            .clip(RoundedCornerShape(Space.Md.dp))
-            .clickable(role = Role.Button, onClick = onToggle)
-            .semantics { stateDescription = state },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
-    ) {
-        Text(
-            label,
-            color = Accent,
-            style = Type.Body.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.weight(1f),
-        )
-        RowChevron(expanded)
+internal fun ExpandRow(label: String, expanded: Boolean, onToggle: () -> Unit) =
+    ChevronRow(onToggle, Modifier.clip(RoundedCornerShape(Space.Md.dp)), expanded, spacing = Space.Sm.dp) {
+        Text(label, color = Accent, style = Type.BodyBold)
     }
-}
 
 /** The editors' flat field card: the elevated ground, fields a step apart. */
 @Composable

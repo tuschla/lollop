@@ -968,7 +968,7 @@ fn sweep_empty(hits: &mut Hits) {
         if lb {
             let p = Profile {
                 weight_lb: true,
-                ..model.profile.clone().expect("a profile")
+                ..model.profile().cloned().expect("a profile")
             };
             let _ = app.update(Event::SetProfile(p), &mut model);
         }
@@ -1033,7 +1033,7 @@ fn sweep_long_history() -> Hits {
     }
     let p = Profile {
         weight_lb: true,
-        ..model.profile.clone().expect("big history has a profile")
+        ..model.profile().cloned().expect("big history has a profile")
     };
     let _ = app.update(Event::SetProfile(p), &mut model);
     for d in [END_MON, END_MON + 2] {

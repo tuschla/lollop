@@ -168,7 +168,7 @@ fn knee_pain_stops_leg_work_and_keeps_upper_body_work() {
     app.update(Event::SubmitReadiness(inputs[0].clone()), &mut model)
         .expect_only_render();
     let vm = app.view(&model);
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     assert!(
         vm.hold_resolutions
             .iter()
@@ -194,7 +194,7 @@ fn symptomatic_screen_blocks_training_even_when_medically_cleared() {
     )
     .expect_only_render();
     let vm = app.view(&model);
-    assert!(vm.train_blocked);
+    assert!(vm.hold_reason.is_some());
     assert_eq!(vm.safety_tier, Some(SafetyTier::MedicalReferral));
 }
 

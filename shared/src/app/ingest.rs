@@ -1,8 +1,111 @@
-//! Wire → model ingest for the logging and profile events `update` applies.
-//! Every wire float is sanitized and every entry id normalized here, once, so
-//! a logged row and its amended replacement are built by the same code.
+//! Wire → model ingest: the wire sanitizers and the row builders for the
+//! logging and profile events `update` applies, so a logged row and its
+//! amended replacement are built by the same code.
 
 use super::*;
+
+/// Clamp a wire float to a finite, bounded domain on ingest. `serde_json`
+/// already refuses NaN/Inf *tokens*, but a huge FINITE magnitude (e.g. 1e300)
+/// can multiply/accumulate to `inf` in `view()`; which then serializes to
+/// `null` and breaks a non-null Kotlin decode (a persistent view-brick). NaN
+/// maps to 0.0; the ±1e12 bound keeps any downstream product well inside f64
+/// range while comfortably covering every real kg / km / min / bpm value.
+pub(super) fn sanitize_f64(x: f64) -> f64 {
+    if x.is_nan() {
+        0.0
+    } else {
+        x.clamp(-1.0e12, 1.0e12)
+    }
+}
+
+/// Plausible calendar window for a wire epoch day on the profile (race / meet
+/// / layoff / race-result dates): 1920-01-02 through 2120-01-02. A corrupt
+/// value outside it would push week arithmetic toward overflow or make a
+/// race "decades away"; it is dropped (`None` = unstated) instead.
+pub(super) const PROFILE_EPOCH_DAY_RANGE: std::ops::RangeInclusive<i64> = -18_262..=54_787;
+
+/// Clean the planning fields of a wire `Profile` on `SetProfile` ingest, so a
+/// corrupt or hand-edited event can neither poison plan math nor surface an
+/// impossible value. Anything implausible becomes "unstated" (`None`), which
+/// every consumer already handles as the conservative default:
+/// - `lift_days_per_week`: 2..=5, else `None`;
+/// - `training_weekdays`: only the seven weekday bits; an empty mask → `None`;
+/// - race / meet / layoff-return / birth dates: inside [`PROFILE_EPOCH_DAY_RANGE`];
+/// - `recent_race`: distance 0.4–100 km, positive time no faster than
+///   2:00/km, an in-range date (an out-of-range date alone is dropped);
+/// - `stated_longest_recent_km`: finite, 0–200 km;
+/// - `specialization_muscle`: must resolve to a tracked muscle and is stored
+///   as its canonical key.
+pub(super) fn sanitize_planning_fields(p: &mut Profile) {
+    p.lift_days_per_week = p.lift_days_per_week.filter(|d| (2..=5).contains(d));
+    p.training_weekdays = p.training_weekdays.map(|m| m & 0x7f).filter(|m| *m != 0);
+    let date_ok = |d: &i64| PROFILE_EPOCH_DAY_RANGE.contains(d);
+    p.goal_race_epoch_day = p.goal_race_epoch_day.filter(date_ok);
+    p.meet_epoch_day = p.meet_epoch_day.filter(date_ok);
+    p.layoff_returned_epoch_day = p.layoff_returned_epoch_day.filter(date_ok);
+    p.birth_epoch_day = p.birth_epoch_day.filter(date_ok);
+    p.recent_race = p.recent_race.take().and_then(|mut r| {
+        let plausible = r.distance_km.is_finite()
+            && (0.4..=100.0).contains(&r.distance_km)
+            && r.time_sec > 0
+            && r.time_sec as f64 / r.distance_km >= 120.0;
+        r.epoch_day = r.epoch_day.filter(date_ok);
+        plausible.then_some(r)
+    });
+    p.stated_longest_recent_km = p
+        .stated_longest_recent_km
+        .filter(|km| km.is_finite() && (0.0..=200.0).contains(km));
+    p.specialization_muscle = p
+        .specialization_muscle
+        .take()
+        .and_then(|m| hypertrophy::resolve_muscle(&m).map(|lm| lm.muscle.to_string()));
+}
+
+/// Clamp a wire rep count to a sane maximum on ingest. A corrupt or malicious
+/// event could carry `u32::MAX` reps, which overflows an e1RM product to `inf`
+/// and bricks the view; no real set exceeds a few thousand reps.
+pub(super) fn sanitize_reps(r: u32) -> u32 {
+    r.min(10_000)
+}
+
+/// Clamp a wire entry id into the range a Kotlin `Long` (`i64`) can decode: a
+/// `u64` above `i64::MAX` round-trips out of range and breaks the shell. Every
+/// store and match key in `update` and every compaction identity in `log.rs`
+/// goes through this, so replay and compaction agree on which rows an id names.
+pub(crate) fn sanitize_entry_id(id: u64) -> u64 {
+    id.min(i64::MAX as u64)
+}
+
+/// Clamp every wire float on a submitted review, including the nested
+/// execution contexts. A review is replayed from the event log, so an
+/// out-of-domain magnitude that reached disk once would otherwise poison
+/// `view()` on every launch.
+pub(super) fn sanitize_review(r: &mut SessionReview) {
+    for v in [
+        &mut r.overtraining_signal_weeks,
+        &mut r.single_session_spike_frac,
+        &mut r.easy_frac_time_above_vt1,
+        &mut r.positive_split_pct,
+        &mut r.weekly_velocity_drop_m_s,
+        &mut r.rep_drop_frac,
+        &mut r.mcv_delta_m_s,
+        &mut r.first_set_rpe_delta,
+        &mut r.hrv_single_day_z,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        *v = sanitize_f64(*v);
+    }
+    if let Some(d) = r.decoupling.as_mut() {
+        d.drift_pct = sanitize_f64(d.drift_pct);
+    }
+}
+
+/// Clamp a wire whole-session CR-10 rating to the 0–10 scale.
+pub(super) fn sanitize_session_rpe(rpe: Option<u8>) -> Option<u8> {
+    rpe.map(|r| r.min(10))
+}
 
 /// A lift set as `LogSet` and `AmendSet` carry it.
 pub(super) struct SetFields {
@@ -84,7 +187,7 @@ pub(super) fn logged_run(f: RunFields) -> LoggedRun {
         observed_at: f.observed_at,
         entry_id: sanitize_entry_id(f.entry_id),
         workout_type: f.workout_type,
-        session_rpe: f.session_rpe.map(|r| r.min(10)),
+        session_rpe: sanitize_session_rpe(f.session_rpe),
         avg_hr_bpm: run_targets::plausible_avg_hr_bpm(f.avg_hr_bpm),
     }
 }
@@ -107,14 +210,9 @@ pub(super) fn store_run(model: &mut Model, mut run: LoggedRun, replaced: Option<
 }
 
 /// A run's stored %HRmax: a plausible typed bpm converted against the HRmax
-/// of the profile in force at the run's instant on the clock it was logged
-/// under (`profile_at` with `logged_utc_offset_sec`, else the current offset
-/// for a legacy row: a birthday's age is that local day's, and an edit made
-/// later that day is not yet in force), else the wire figure. A pure function
-/// of the row and the profile history, never of log order or of where the
-/// viewer is now: a full replay, a compacted one (superseded profiles and
-/// days dropped) and the shell's delete and Undo (which re-sends the row's
-/// offset) all store the same figure, and a later time-zone change moves none.
+/// of the profile in force at the run's instant (`profile_at`, on the clock
+/// the row was logged under), else the wire figure. A pure function of the
+/// row and the profile history, never of log order.
 pub(super) fn derived_hr_pct_max(model: &Model, run: &LoggedRun) -> f64 {
     if run.avg_hr_bpm.is_none() {
         return run.wire_hr_pct_max;
@@ -123,11 +221,7 @@ pub(super) fn derived_hr_pct_max(model: &Model, run: &LoggedRun) -> f64 {
         .logged_utc_offset_sec
         .unwrap_or(model.today_utc_offset_sec);
     let profile = profile_at(model, run.observed_at, offset);
-    sanitize_f64(run_targets::logged_hr_pct_max(
-        run.wire_hr_pct_max,
-        run.avg_hr_bpm,
-        profile.as_deref(),
-    ))
+    run_targets::logged_hr_pct_max(run.wire_hr_pct_max, run.avg_hr_bpm, profile.as_deref())
 }
 
 /// Re-derive every typed-bpm run's %HRmax ([`derived_hr_pct_max`]) after the
@@ -325,10 +419,8 @@ pub(super) fn apply_profile(model: &mut Model, mut profile: Profile) {
     // undated edit, −∞, the whole history), so a
     // later goal/weekly-set change never re-prescribes an already-shown past
     // day, and an evening edit leaves the morning's in force for the morning.
-    // `model.profile` stays the latest applied.
     model.profile_history.retain(|p| history_key(p) < key);
-    model.profile_history.push(profile.clone());
-    model.profile = Some(profile);
+    model.profile_history.push(profile);
 }
 
 /// Age below which the pediatric gate is set (safety-011 names no numeric
@@ -344,11 +436,7 @@ pub(super) fn refresh_birthday_ages(model: &mut Model) {
     let Some(today) = model.today_epoch_day else {
         return;
     };
-    for p in model
-        .profile
-        .iter_mut()
-        .chain(model.profile_history.iter_mut())
-    {
+    for p in &mut model.profile_history {
         derive_birthday_age(p, today);
     }
 }
@@ -387,7 +475,7 @@ fn derive_birthday_age(p: &mut Profile, today: i64) {
 /// `today` is clamped to the profile date window so a corrupt clock can't
 /// overflow the calendar math.
 pub(super) fn whole_years_between(birth: i64, today: i64) -> i64 {
-    let range = super::format::PROFILE_EPOCH_DAY_RANGE;
+    let range = PROFILE_EPOCH_DAY_RANGE;
     let today = today.clamp(*range.start(), *range.end());
     if today <= birth {
         return 0;

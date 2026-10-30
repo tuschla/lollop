@@ -106,7 +106,7 @@ fn week_log(profile: Profile) -> Vec<Event> {
 fn the_card_counts_runs_lift_spans_and_activities_within_the_week() {
     let (app, model) = replay(week_log(youth()));
     let vm = app.view(&model);
-    assert!(vm.train_blocked, "the youth hold is unchanged");
+    assert!(vm.hold_reason.is_some(), "the youth hold is unchanged");
     assert_eq!(vm.hold_reason, Some(HoldReason::Youth));
     let y = vm
         .youth_activity

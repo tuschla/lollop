@@ -117,7 +117,6 @@ pub(super) fn spike_km(r: &LoggedRun) -> f64 {
 /// from it, memoized per run by [`run_qc_keyed`].
 pub(super) struct QcTrack {
     pub(super) track: Vec<GpsPoint>,
-    pub(super) dropped: u32,
     pub(super) seg_starts: Vec<u32>,
     /// Distance over the QC'd, segment-aware track (km).
     pub(super) distance_km: f64,

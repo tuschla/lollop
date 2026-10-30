@@ -19,14 +19,14 @@ fn no_age(p: Profile) -> Profile {
 #[test]
 fn a_profile_with_no_age_plans_like_an_adult() {
     let (app, model) = planned(no_age(strength_profile()));
-    let p = model.profile.as_ref().unwrap();
+    let p = model.profile().unwrap();
     assert!(!p.health.youth, "no age is not youth");
     assert_eq!(
         p.age_years, None,
         "SetToday derives no age without a birthday"
     );
     let vm = app.view(&model);
-    assert!(!vm.train_blocked);
+    assert!(vm.hold_reason.is_none());
     assert_eq!(vm.hold_reason, None);
     assert_eq!(vm.plan_withheld, None);
     assert!(vm.program.is_some(), "GeneratePlan builds a program");
@@ -80,12 +80,8 @@ fn no_age_run_targets_carry_no_age_estimated_heart_rate() {
     assert!(!targets.is_empty(), "the running week has run targets");
     for t in &targets {
         assert!(t.hr_label.is_empty(), "no HRmax, no bpm: {t:?}");
-        assert_eq!((t.hr_low_bpm, t.hr_high_bpm), (0, 0), "{t:?}");
         assert_eq!(t.hr_max_bpm, 0.0, "{t:?}");
-        assert!(
-            !t.effort_cue.is_empty() || t.rpe_high > 0,
-            "the effort cue stays: {t:?}"
-        );
+        assert!(!t.effort_cue.is_empty(), "the effort cue stays: {t:?}");
     }
     let long = planned_long_run_item(&app, &model);
     let t = long.run_target.expect("the long run has a target");
@@ -103,5 +99,11 @@ fn no_age_run_targets_use_a_measured_hrmax() {
         .expect("the long run has a target");
     assert!(t.hr_max_measured, "{t:?}");
     assert_eq!(t.hr_max_bpm, 190.0);
-    assert!(t.hr_high_bpm > 0 && t.hr_high_bpm <= 190, "{t:?}");
+    let high: u32 = t
+        .hr_label
+        .strip_suffix(" bpm")
+        .and_then(|s| s.rsplit(['–', ' ']).next())
+        .and_then(|h| h.parse().ok())
+        .unwrap_or_else(|| panic!("a bpm ceiling: {t:?}"));
+    assert!(high > 0 && high <= 190, "{t:?}");
 }

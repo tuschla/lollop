@@ -31,8 +31,9 @@ import org.robolectric.Shadows.shadowOf
 /**
  * The open-intent contract (action `app.milestone.action.OPEN`, extra `dest`) the
  * widget, the Quick Settings tile and the Live Update notifications use: the intent
- * itself, the pure routing, and the real app landing on each destination from a cold
- * start and from onNewIntent, including setup and a training hold.
+ * itself, the `log_set` target, and the real app landing on each destination from a
+ * cold start and from onNewIntent, including setup and a training hold. The routing
+ * from every navigation state is [DeepLinkPropertyTest].
  */
 @RunWith(RobolectricTestRunner::class)
 class DeepLinkTest {
@@ -103,11 +104,6 @@ class DeepLinkTest {
     private val bench = PrescriptionView(exercise = "Bench Press", sets = 3)
     private val liftDay = ViewModel(today_epoch_day = day, next_session = lift(squat, bench), week_plan = listOf(lift(squat, bench)))
 
-    private val home = OpenNav(
-        showTracker = false, selected = Dest.History, sheetOpen = false, sheetMode = LogMode.Chooser,
-        sheetPlanExercise = null, sheetPlanDay = null,
-    )
-
     @Test
     fun logSetTargetsTodaysOpenLiftItemOnly() {
         assertEquals("Back Squat", logSetTarget(liftDay))
@@ -121,44 +117,7 @@ class DeepLinkTest {
         val run = SessionPlanView(epoch_day = day, session_type = "RunEasy", status = "next", items = listOf(PrescriptionView()))
         assertNull(logSetTarget(ViewModel(today_epoch_day = day, next_session = run, week_plan = listOf(run))))
         assertNull(logSetTarget(ViewModel(today_epoch_day = day)))
-        assertNull(logSetTarget(liftDay.copy(train_blocked = true)))
-    }
-
-    @Test
-    fun routeOpensEachDest() {
-        fun route(d: OpenDest, nav: OpenNav = home, busy: Boolean = false, pinned: Boolean = false) =
-            routeOpen(d, nav, liftDay, sheetBusy = busy, trackerPinned = pinned)
-        assertEquals(home.copy(selected = Dest.Today), route(OpenDest.Today))
-        assertEquals(home.copy(selected = Dest.Today, sheetOpen = true), route(OpenDest.Log))
-        assertEquals(
-            home.copy(selected = Dest.Today, sheetOpen = true, sheetMode = LogMode.Set, sheetPlanExercise = "Back Squat"),
-            route(OpenDest.LogSet),
-        )
-        assertEquals(home.copy(showTracker = true), route(OpenDest.Track))
-        // A clean open sheet gives way; Today closes it.
-        val runSheet = home.copy(selected = Dest.Today, sheetOpen = true, sheetMode = LogMode.Run, sheetPlanDay = day - 1)
-        assertEquals(home.copy(selected = Dest.Today), route(OpenDest.Today, runSheet))
-        assertEquals(home.copy(selected = Dest.Today, sheetOpen = true), route(OpenDest.Log, runSheet))
-    }
-
-    @Test
-    fun routeKeepsUnsavedInputAndAPinnedTracker() {
-        val busy = home.copy(selected = Dest.Today, sheetOpen = true, sheetMode = LogMode.Set, sheetPlanExercise = "Bench Press")
-        for (d in listOf(OpenDest.Today, OpenDest.Log, OpenDest.LogSet)) {
-            assertEquals(d.wire, busy, routeOpen(d, busy, liftDay, sheetBusy = true, trackerPinned = false))
-        }
-        // Track still opens the tracker over it (the sheet is untouched underneath).
-        assertEquals(busy.copy(showTracker = true), routeOpen(OpenDest.Track, busy, liftDay, sheetBusy = true, trackerPinned = false))
-        // An armed or locating tracker is the only way to cancel its service: it stays.
-        val tracker = home.copy(showTracker = true)
-        for (d in OpenDest.entries) {
-            assertEquals(d.wire, tracker, routeOpen(d, tracker, liftDay, sheetBusy = false, trackerPinned = true))
-        }
-        // A recording run's tracker steps aside, like Back (the in-app chip leads back).
-        assertEquals(
-            home.copy(selected = Dest.Today, sheetOpen = true),
-            routeOpen(OpenDest.Log, tracker, liftDay, sheetBusy = false, trackerPinned = false),
-        )
+        assertNull(logSetTarget(liftDay.copy(hold_reason = "pain")))
     }
 
     // ── The real app ──────────────────────────────────────────────────────

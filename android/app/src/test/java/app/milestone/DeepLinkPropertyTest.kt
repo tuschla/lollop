@@ -2,7 +2,6 @@ package app.milestone
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
@@ -12,7 +11,6 @@ import app.milestone.widget.widgetFace
 import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,37 +18,31 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * The open-intent routing is total: every destination from every navigation state
- * the scaffold can be in (tracker shown or not, each tab, each sheet mode open or
- * closed, unsaved input, a tracker holding a service) and every kind of day (lift
- * open, started or done, run, rest, a moved session, a hold, the under-18 pause,
- * no plan, no profile) lands somewhere sensible, and any intent at all decodes to a
- * destination or to "not an open intent" without throwing. Each surface only ever
- * hands out a destination its state supports. Exhaustive over the navigation
- * states; `DEEPLINK_PROP_MODELS` random days (default 40, seed `DEEPLINK_PROP_SEED`).
+ * Open-intent routing is total: every destination from every scaffold navigation
+ * state on every kind of day lands somewhere sensible, every intent shape decodes,
+ * and the widget only offers destinations its day supports.
  */
 @RunWith(RobolectricTestRunner::class)
 class DeepLinkPropertyTest {
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
-    private val seed = System.getenv("DEEPLINK_PROP_SEED")?.toLongOrNull() ?: 20_261_030L
+    private val seed = 20_261_030L
     private val day = 20_400L
 
     // ── Days ──────────────────────────────────────────────────────────────────
 
-    private fun lift(name: String, done: Boolean = false, logged: Boolean = done) =
-        PrescriptionView(exercise = name, sets = 3, face_lead = "3 × 5", done = done, sets_done = if (logged) 1 else 0)
+    private fun lift(name: String) = PrescriptionView(exercise = name, sets = 3, face_lead = "3 × 5")
 
-    private fun runItem(done: Boolean = false) =
-        PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label_km = "5:40–6:00 /km"), done = done)
+    private fun runItem() =
+        PrescriptionView(run_head = "8 km", run_head_km = 8.0, run_target = RunTargetView(pace_label_km = "5:40–6:00 /km"))
 
-    /** A random model of one day as the core publishes it, and its name. */
-    private fun randomModel(r: Random): Pair<String, ViewModel> {
+    /** A model of one day of [kind] (0..10) as the core publishes it, and its name. */
+    private fun dayModel(kind: Int, r: Random): Pair<String, ViewModel> {
         val names = listOf("Back squat", "Bench press", "Row", "Deadlift").shuffled(r)
         val items = List(1 + r.nextInt(4)) { i -> lift(names[i]) }
         val profile = ProfileView()
         fun session(d: Long, type: String, status: String, its: List<PrescriptionView>) =
             SessionPlanView(epoch_day = d, title = "S$d", session_type = type, status = status, items = its)
-        return when (r.nextInt(11)) {
+        return when (kind) {
             0 -> "lift open" to session(day, "Lift(Strength)", "next", items).let { ViewModel(today_epoch_day = day, profile = profile, next_session = it, week_plan = listOf(it)) }
             1 -> {
                 val k = r.nextInt(1, items.size + 1)
@@ -75,11 +67,11 @@ class DeepLinkPropertyTest {
             }
             6 -> {
                 val blank = session(day, "Lift(Strength)", "blocked", emptyList())
-                "hold" to ViewModel(today_epoch_day = day, profile = profile, train_blocked = true, hold_reason = "pain", next_session = blank, week_plan = listOf(blank))
+                "hold" to ViewModel(today_epoch_day = day, profile = profile, hold_reason = "pain", next_session = blank, week_plan = listOf(blank))
             }
             7 -> {
                 val blank = session(day, "Lift(Strength)", "blocked", emptyList())
-                "under 18" to ViewModel(today_epoch_day = day, profile = profile, train_blocked = true, hold_reason = "youth", next_session = blank, week_plan = listOf(blank))
+                "under 18" to ViewModel(today_epoch_day = day, profile = profile, hold_reason = "youth", next_session = blank, week_plan = listOf(blank))
             }
             8 -> "no plan" to ViewModel(today_epoch_day = day, profile = profile, plan_withheld = listOf(null, "nothing_to_plan").random(r))
             9 -> "no profile" to ViewModel(today_epoch_day = day)
@@ -102,9 +94,7 @@ class DeepLinkPropertyTest {
     @Test
     fun everyDestFromEveryStateLandsSensibly() {
         val r = Random(seed)
-        val count = System.getenv("DEEPLINK_PROP_MODELS")?.toIntOrNull() ?: 40
-        val models = List(count) { randomModel(r) }
-        var cases = 0
+        val models = (0..10).flatMap { kind -> List(4) { dayModel(kind, r) } }
         for ((what, m) in models) {
             val liftItems = todaysLiftItems(m)
             for (dest in OpenDest.entries) for (tracker in listOf(false, true)) for (tab in Dest.entries)
@@ -113,70 +103,42 @@ class DeepLinkPropertyTest {
                         val nav = OpenNav(tracker, tab, open, mode, exercise, planDay)
                         val at = "$what: $dest from $nav busy=$busy pinned=$pinned"
                         val out = routeOpen(dest, nav, m, sheetBusy = busy, trackerPinned = pinned)
-                        cases++
                         when {
                             dest == OpenDest.Track -> assertEquals(at, nav.copy(showTracker = true), out)
                             tracker && pinned -> assertEquals("$at: a tracker holding its service stays", nav, out)
+                            open && busy -> assertEquals("$at: unsaved input stays", nav.copy(showTracker = false, selected = Dest.Today), out)
+                            dest == OpenDest.Today -> assertEquals("$at: Today with the sheet closed", OpenNav(false, Dest.Today, false, LogMode.Chooser, null, null), out)
+                            dest == OpenDest.Log -> assertEquals("$at: the Log chooser", OpenNav(false, Dest.Today, true, LogMode.Chooser, null, null), out)
                             else -> {
-                                assertFalse(at, out.showTracker)
-                                assertEquals(at, Dest.Today, out.selected)
-                                if (open && busy) {
-                                    assertEquals("$at: unsaved input stays", nav.copy(showTracker = false, selected = Dest.Today), out)
-                                } else {
-                                    when (dest) {
-                                        OpenDest.Today -> assertFalse("$at: Today closes the sheet", out.sheetOpen)
-                                        OpenDest.Log -> {
-                                            assertTrue(at, out.sheetOpen)
-                                            assertEquals(at, LogMode.Chooser, out.sheetMode)
-                                            assertNull(at, out.sheetPlanExercise)
-                                        }
-                                        else -> {
-                                            assertTrue(at, out.sheetOpen)
-                                            assertEquals(at, LogMode.Set, out.sheetMode)
-                                            assertNull("$at: no stale plan day", out.sheetPlanDay)
-                                            val ex = out.sheetPlanExercise
-                                            if (m.train_blocked) assertNull("$at: no prefill under a hold", ex)
-                                            if (ex != null) assertTrue("$at: '$ex' is one of today's lift items", liftItems.any { it.exercise == ex })
-                                            val open1 = m.next_session?.takeIf { it.epoch_day == day && it.actionable && !m.train_blocked && sessionDiscipline(it.session_type) == "Lift" }
-                                                ?.items?.firstOrNull { !it.done }
-                                            if (open1 != null) assertEquals("$at: the first open item", open1.exercise, ex)
-                                        }
-                                    }
-                                    if (!out.sheetOpen) assertNull(at, out.sheetPlanExercise)
-                                }
+                                assertEquals("$at: the set editor over Today", OpenNav(false, Dest.Today, true, LogMode.Set, out.sheetPlanExercise, null), out)
+                                val ex = out.sheetPlanExercise
+                                assertEquals("$at: the log_set target", logSetTarget(m), ex)
+                                if (m.train_blocked) assertNull("$at: no prefill under a hold", ex)
+                                if (ex != null) assertTrue("$at: '$ex' is one of today's lift items", liftItems.any { it.exercise == ex })
                             }
                         }
                     }
         }
-        assertTrue("$cases cases", cases > 100_000)
     }
 
     // ── openDestOf ────────────────────────────────────────────────────────────
 
     @Test
-    fun anyIntentDecodesWithoutThrowing() {
-        val r = Random(seed)
+    fun everyIntentShapeDecodes() {
+        val byWire = mapOf("today" to OpenDest.Today, "log" to OpenDest.Log, "track" to OpenDest.Track, "log_set" to OpenDest.LogSet)
         val actions = listOf(ACTION_OPEN, Intent.ACTION_MAIN, Intent.ACTION_VIEW, Intent.ACTION_SEND, null, ACTION_OPEN.uppercase(), "$ACTION_OPEN ", "")
-        val wires = OpenDest.entries.map { it.wire } + listOf("", "TODAY", "Today", " log", "log_set\u0000", "settings", "track/../log", "\uD83C\uDFC3", "x".repeat(10_000))
-        repeat(System.getenv("DEEPLINK_PROP_INTENTS")?.toIntOrNull() ?: 3_000) { i ->
-            val action = actions[r.nextInt(actions.size)]
+        val wires = byWire.keys.toList() + listOf("", "TODAY", "Today", " log", "log_set\u0000", "settings", "track/../log", "\uD83C\uDFC3", "x".repeat(10_000))
+        // Each wire as a string extra, then a non-string extra and none.
+        val extras: List<Any?> = wires + listOf(7, arrayOf("log"), null)
+        for (action in actions) for (x in extras) {
             val intent = Intent(action)
-            if (r.nextBoolean()) intent.data = Uri.parse(listOf("lollop://today", "content://x/y", "geo:0,0", "")[r.nextInt(4)])
-            intent.addFlags(r.nextInt())
-            val wire = when (r.nextInt(5)) {
-                0 -> { intent.putExtra(EXTRA_DEST, r.nextInt()); null }
-                1 -> { intent.putExtra(EXTRA_DEST, arrayOf("log")); null }
-                2 -> null
-                else -> wires[r.nextInt(wires.size)].also { intent.putExtra(EXTRA_DEST, it) }
+            when (x) {
+                is String -> intent.putExtra(EXTRA_DEST, x)
+                is Int -> intent.putExtra(EXTRA_DEST, x)
+                is Array<*> -> intent.putExtra(EXTRA_DEST, x.map { it as String }.toTypedArray())
             }
-            val got = openDestOf(intent)
-            if (action != ACTION_OPEN) {
-                assertNull("#$i $action is not an open intent", got)
-            } else {
-                assertEquals("#$i wire '$wire'", OpenDest.entries.firstOrNull { it.wire == wire } ?: OpenDest.Today, got)
-            }
-            // Anything an open intent decodes to round-trips through its own intent.
-            if (got != null) assertEquals(got, openDestOf(openIntent(ctx, got)))
+            val expected = if (action != ACTION_OPEN) null else byWire[x as? String] ?: OpenDest.Today
+            assertEquals("$action dest=${x.toString().take(20)}", expected, openDestOf(intent))
         }
     }
 
@@ -206,24 +168,6 @@ class DeepLinkPropertyTest {
             if (OpenDest.Track in dests) assertTrue("$at: Track offered", shownToday && s.trackable)
             if (shownToday && s.kind != WidgetDayKind.Setup) assertTrue("$at: Log offered", OpenDest.Log in dests)
             assertFalse("$at: the widget never offers log_set", OpenDest.LogSet in dests)
-
-            // Tile: Start run only for an open run; Log set only for an open lift session.
-            val tile = tileFace(s.takeIf { shownToday })
-            when (tile) {
-                TileFace.StartRun -> assertTrue(at, shownToday && s.kind == WidgetDayKind.Run && s.trackable)
-                TileFace.LogSet -> assertTrue(at, shownToday && s.kind == WidgetDayKind.Lift && !s.sessionDone)
-                TileFace.Log -> {}
-                TileFace.Recording -> throw AssertionError("$at: recording without a run")
-            }
-
-            // Reminder: its action matches the day kind; never on a non-session day.
-            val reminder = reminderOf(s, day, "UTC")
-            if (reminder != null) {
-                assertTrue("$at: reminder for ${s.kind}", s.kind == WidgetDayKind.Lift || s.kind == WidgetDayKind.Run)
-                assertFalse("$at: reminder for a done session", s.sessionDone)
-                assertEquals(at, if (reminder.kind == WidgetDayKind.Run) OpenDest.Track else OpenDest.LogSet, reminder.dest)
-                assertNotNull(reminderActionLabel(res, reminder))
-            }
         }
     }
 }

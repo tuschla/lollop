@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
     --mid) MID="$2"; shift 2 ;;
     --new) NEW="$2"; shift 2 ;;
     --keep-emulator) KEEP_EMU=1; shift ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR>1&&/^#/{print;next}NR>1{exit}' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -56,109 +56,10 @@ mkdir -p "$OUT"/{shots,ui,logs,seed}
 : >"$OUT/checks.tsv"
 # shellcheck source=lib.sh
 source "$HELP/lib.sh"
-EV() { python3 "$HELP/events.py" "$@"; }
 S=upgrade
 
-# ── Helpers (as in emulator-scenarios.sh / surfaces.sh) ──────────────────────
-home() { adb_ shell input keyevent 3; sleep 2; }
-wdump() {
-  local i
-  for i in 1 2 3; do
-    adb_ shell uiautomator dump --windows /sdcard/upg.xml >/dev/null 2>&1 &&
-      adb_ exec-out cat /sdcard/upg.xml >"$OUT/ui/$1.xml" 2>/dev/null &&
-      grep -q '</displays>' "$OUT/ui/$1.xml" && return 0
-    sleep 1
-  done
-  return 1
-}
-wfind() { python3 "$HELP/node.py" "$2" "$3" <"$OUT/ui/$1.xml"; }
-snapshot() { adb_ exec-out cat "$APP_FILES/widget-today.json" 2>/dev/null; }
+# ── Helpers (the shared device, tile and widget helpers are in lib.sh) ───────
 snap_kind() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kind",""))' "$1" 2>/dev/null; }
-rem_alarm() {
-  sh_ dumpsys alarm | grep -A3 'walarm\*:app.milestone.action.SESSION_REMINDER' |
-    sed -n 's/.*origWhen=\([0-9-]* [0-9:]*\).*/\1/p' | head -1
-}
-widget_bound() { sh_ dumpsys appwidget | grep -q "cmp:ComponentInfo{$APP_ID/$APP_ID.widget.TodayWidgetReceiver}"; }
-widget_texts() { # NAME: the widget's labels on the home screen
-  home; sleep 2
-  evidence "$1"
-  python3 "$HELP/node.py" texts <"$OUT/ui/$1.xml" | sed -n '/content-desc=Open Today in lollop/,$p' | head -12
-}
-TILE="$APP_ID/.QuickTileService"
-tile_label() {
-  local i l re='^(Log|Log set|Start run|Run · recording)$'
-  adb_ shell cmd statusbar expand-settings; sleep 3
-  for i in 1 2 3; do
-    wdump "$1" || continue
-    l="$(wfind "$1" re "$re" | cut -d' ' -f7-)"
-    [[ -n "$l" ]] && { sleep 2; wdump "$1" && l="$(wfind "$1" re "$re" | cut -d' ' -f7-)"; }
-    [[ -n "$l" ]] && { adb_ shell cmd statusbar collapse; echo "$l"; return 0; }
-    adb_ shell input swipe 900 700 150 700 300; sleep 2
-  done
-  adb_ shell cmd statusbar collapse
-  return 1
-}
-add_tile() {
-  local i
-  sh_ cmd statusbar add-tile "$TILE" >/dev/null
-  for i in 1 2 3 4 5 6; do sleep 3; tile_label tile-added >/dev/null && return 0; done
-  return 1
-}
-LAUNCHER="com.google.android.apps.nexuslauncher"
-drag() {
-  local i
-  adb_ shell input motionevent DOWN "$1" "$2"; sleep 2
-  for i in 1 2 3 4 5 6 7 8; do
-    adb_ shell input motionevent MOVE $(( $1 + ($3 - $1) * i / 8 )) $(( $2 + ($4 - $2) * i / 8 ))
-  done
-  sleep 1
-  adb_ shell input motionevent UP "$3" "$4"
-}
-place_widget() {
-  local r p preview='^[0-9]+ wide by [0-9]+ high$'
-  adb_ shell pm clear "$LAUNCHER" >/dev/null 2>&1; sleep 3
-  home; home; sleep 3
-  adb_ shell input swipe 540 1300 540 1300 1500; sleep 2
-  tap_node eq Widgets || return 1; sleep 3
-  if tap_node eq Search 2; then sleep 1; adb_ shell input text lollop; sleep 3; fi
-  scroll_to eq lollop 6 || return 1
-  has_text re "$preview" || { tap_node eq lollop; sleep 2; }
-  has_text re "$preview" || { tap_node eq Today 2; sleep 2; }
-  has_text eq "Add Today widget" || { tap_node re "$preview" 2; sleep 2; }
-  if has_text eq "Add Today widget"; then
-    tap_node eq "Add Today widget"; sleep 4
-  else
-    r="$(find_node rid widget_preview_container)" || r="$(find_node rid widget_preview)" || return 1
-    read -r -a p <<<"$r"
-    drag "${p[0]}" "${p[1]}" 540 800; sleep 4
-  fi
-  home
-  evidence widget-placed
-  widget_bound && wait_text eq "Open Today in lollop" 15
-}
-open_set_editor() {
-  tap_node eq Log || return 1; sleep 2
-  tap_node eq "Log set" || return 1
-  wait_text eq "Exercise" 8 || return 1
-  if has_text eq "Search exercises"; then tap_node eq "Back Squat" || return 1; sleep 2; fi
-}
-tap_scroll() {
-  local i b
-  for i in 1 2 3 4 5 6; do
-    tap_node "$1" "$2" 1 2>/dev/null && return 0
-    b="$(find_node scroll)" || b="0 450 1080 1050"
-    read -r -a b <<<"$b"
-    adb_ shell input swipe 540 $(( b[3] - 40 )) 540 $(( b[1] + (b[3] - b[1]) / 4 )) 400; sleep 1
-  done
-  return 1
-}
-close_editor() {
-  if has_text eq "Done for now"; then tap_node eq "Done for now"; else tap_node eq Close; fi
-  sleep 2
-  has_text eq Discard && { tap_node eq Discard; sleep 1; }
-  has_text eq "Exercise, weight, reps" && { adb_ shell input keyevent 4; sleep 2; }
-  return 0
-}
 log_two_sets() {
   open_set_editor || return 1
   tap_scroll eq "Add 2.5 kg" || return 1
@@ -218,8 +119,7 @@ reminder_is_on() {
 }
 install_r() { # APK TAG
   local r
-  r="$(adb_ install -r "$1" 2>&1 | tail -1)"
-  [[ "$r" == Success ]] || { adb_ push "$1" /data/local/tmp/upg.apk >/dev/null; r="$(sh_ pm install -r /data/local/tmp/upg.apk | tail -1)"; }
+  r="$(install_apk "$1" -r)"
   check INFO $S "install -r $2" "$r ($(basename "$1"), $(sha256sum "$1" | cut -c1-12)); version $(sh_ dumpsys package "$APP_ID" | sed -n 's/.*lastUpdateTime=//p' | head -1)"
   [[ "$r" == Success ]]
 }
@@ -243,7 +143,7 @@ LOGCAT_PID=$!
 
 mark old-install
 adb_ uninstall "$APP_ID" >/dev/null 2>&1 || true
-adb_ install "$OLD" >/dev/null 2>&1 || { adb_ push "$OLD" /data/local/tmp/upg.apk >/dev/null; sh_ pm install /data/local/tmp/upg.apk >/dev/null; }
+install_apk "$OLD" >/dev/null || check FAIL $S "install old" "$(basename "$OLD") did not install"
 baseline_device; grant_perms; pin_clock "$PIN_DATE"
 launch; sleep 5; adb_ shell am force-stop "$APP_ID"
 seed_basic 2026-09-20 2 >"$OUT/seed/basic.ndjson"
@@ -263,7 +163,7 @@ home
 expect $S "old build: widget placed" "" place_widget
 OLD_WIDGET="$(widget_texts old-03-widget)"; echo "$OLD_WIDGET" >"$OUT/logs/old-widget.txt"
 expect $S "old build: tile added" "" add_tile
-OLD_TILE="$(tile_label old-04-tile)"
+OLD_TILE="$(tile_label old-04-tile)"; adb_ shell cmd statusbar collapse
 check INFO $S "old tile label" "'$OLD_TILE'"
 snapshot >"$OUT/logs/old-snapshot.json"
 launch; wait_text eq Today 20
@@ -307,12 +207,16 @@ expect $S "the old pain report still eases today" "ui/new-02-today.xml" python3 
 pull_log "$OUT/logs/new.ndjson"
 check INFO $S "new log" "$(facts "$OUT/logs/new.ndjson")"
 EV canon "$OUT/logs/new.ndjson" >"$OUT/logs/new.canon"
-# Every event the old build logged is still there (boot compaction may drop only
-# superseded lines: compare the entry lines).
-for k in LogSet LogRun LogRunTrack SubmitReadiness SetProfile; do
+# Every entry the old build logged is still there (boot compaction drops only
+# superseded lines).
+for k in LogSet LogRun LogRunTrack SubmitReadiness; do
   b="$(EV count "$BEFORE" "$k")"; a="$(EV count "$OUT/logs/new.ndjson" "$k")"
   expect $S "new build keeps every $k" "$b before, $a after" test "$a" -eq "$b"
 done
+# Compaction drops a SetProfile a later edit supersedes (log.rs rule 2) but never
+# the last one: that one must survive unchanged.
+sp="$(grep '^{"SetProfile"' "$OUT/logs/before.canon" | tail -1)"
+expect $S "new build keeps the current SetProfile" "$(cut -c1-200 <<<"$sp")" grep -Fxq "$sp" "$OUT/logs/new.canon"
 p0="$(grep -c '"GeneratePlan"' "$BEFORE")"; p1="$(grep -c '"GeneratePlan"' "$OUT/logs/new.ndjson")"
 expect $S "plan kept: no new GeneratePlan on the first launch" "$p0 → $p1; $(grep -o '"GeneratePlan":{[^}]*}' "$OUT/logs/new.ndjson" | tail -1)" test "$p1" -eq "$p0"
 tap_nav History; sleep 3; evidence new-03-history
@@ -330,7 +234,7 @@ k0="$(snap_kind "$OUT/logs/old-snapshot.json")"; k1="$(snap_kind "$OUT/logs/new-
 expect $S "widget snapshot keeps today's day kind" "kind $k0 → $k1" test -n "$k1" -a "$k0" = "$k1"
 W1="$(widget_texts new-04-widget)"; echo "$W1" >"$OUT/logs/new-widget.txt"
 expect $S "widget shows the same face after the update" "old $(tr '\n' '|' <<<"$OLD_WIDGET") / new $(tr '\n' '|' <<<"$W1")" test "$OLD_WIDGET" = "$W1"
-NEW_TILE="$(tile_label new-05-tile)"
+NEW_TILE="$(tile_label new-05-tile)"; adb_ shell cmd statusbar collapse
 expect $S "tile still on Quick Settings with its label" "'$OLD_TILE' → '$NEW_TILE'" test -n "$NEW_TILE" -a "$NEW_TILE" = "$OLD_TILE"
 if [[ -n "$MID" ]]; then
   launch; wait_text eq Today 20
@@ -347,7 +251,7 @@ check INFO $S "log after the second launch" "$(facts "$OUT/logs/new-2.ndjson")"
 mark mid-run
 home
 adb_ uninstall "$APP_ID" >/dev/null 2>&1 || true
-adb_ install "$OLD" >/dev/null 2>&1 || { adb_ push "$OLD" /data/local/tmp/upg.apk >/dev/null; sh_ pm install /data/local/tmp/upg.apk >/dev/null; }
+install_apk "$OLD" >/dev/null || check FAIL $S "mid-run: install old" "$(basename "$OLD") did not install"
 grant_perms; pin_clock "$PIN_DATE"
 launch; sleep 5; adb_ shell am force-stop "$APP_ID"
 push_log "$OUT/seed/basic.ndjson"
@@ -383,15 +287,7 @@ else
   check FAIL $S "mid-run: old build boots the seed" "Today never rendered"
 fi
 
-kill "$LOGCAT_PID" 2>/dev/null; wait "$LOGCAT_PID" 2>/dev/null
-python3 "$HELP/scan_logcat.py" "$OUT/logcat.txt" "$OUT/logcat-scan.json" >/dev/null 2>&1 &&
-  python3 - "$OUT/logcat-scan.json" "$OUT/checks.tsv" <<'PY'
-import json, sys
-s = json.load(open(sys.argv[1]))
-out = open(sys.argv[2], "a")
-for k, label in (("fatal", "Java FATAL EXCEPTION"), ("native", "native crash"), ("anr", "ANR")):
-    out.write(f"{'PASS' if s[k] == 0 else 'FAIL'}\tlogcat\t{label}\t{s[k]} occurrence(s)\n")
-PY
+logcat_checks
 python3 "$HELP/report.py" "$OUT" >/dev/null 2>&1 || true
 log "checks: $OUT/checks.tsv"
 ! grep -q '^FAIL' "$OUT/checks.tsv"

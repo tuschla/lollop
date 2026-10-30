@@ -6,8 +6,8 @@ import java.util.Locale
  * Distance/pace units. The core (crux) is unit-agnostic: it stores and reasons in
  * SI (meters, min/km). Unit choice is pure shell chrome, resolved here and applied
  * only at the display edge. Everything in this file is a pure function of its inputs
- * (the one exception, [localeDistanceUnit], reads the JVM default locale) so the math
- * is unit-testable without an Android context.
+ * (the locale defaults [localeDistanceUnit] and [localeWeightUnit] read the JVM
+ * default locale) so the math is unit-testable without an Android context.
  */
 enum class DistanceUnit(
     /** Short distance label, e.g. "5.2 km" / "3.2 mi". */
@@ -34,7 +34,7 @@ private val MILE_COUNTRIES = setOf("US", "GB", "LR", "MM")
 
 /**
  * Locale-derived default unit: miles for US/GB/LR/MM, kilometers everywhere else.
- * Reads [Locale.getDefault], the only non-pure call in this file. Kept separate from
+ * Reads [Locale.getDefault] by default. Kept separate from
  * the pure math so tests can drive [resolveDistanceUnit] with an explicit locale.
  */
 fun localeDistanceUnit(locale: Locale = Locale.getDefault()): DistanceUnit =
@@ -67,6 +67,10 @@ fun paceInUnit(minPerKm: Double, unit: DistanceUnit): Double = when (unit) {
     DistanceUnit.Km -> minPerKm
     DistanceUnit.Mi -> miToKm(minPerKm) // min/km × km/mi = min/mi
 }
+
+/** The run target's pace label in [unit], falling back to the other unit's label. */
+internal fun RunTargetView.paceLabel(unit: DistanceUnit): String =
+    if (unit == DistanceUnit.Mi) pace_label_mi.ifBlank { pace_label_km } else pace_label_km.ifBlank { pace_label_mi }
 
 /** Kilometers → miles. Pure. */
 fun kmToMi(km: Double): Double = km / (METERS_PER_MILE / 1000.0)
@@ -212,3 +216,15 @@ internal fun trimDecimal(v: Double): String {
 /** A kg weight in [unit], trimmed like [trimDecimal] ("102.5", "226"). Pure. */
 internal fun weightFigure(kg: Double, unit: WeightUnit): String =
     trimDecimal(if (unit == WeightUnit.Lb) kgToLb(kg) else kg)
+
+/** Longest timer-style digit buffer: hhmmss. */
+internal const val HMS_DIGITS_MAX = 6
+
+/** A timer-style digit buffer filled right to left ("14530" = 1:45:30) as hours,
+ *  minutes and seconds; null when empty, longer than [HMS_DIGITS_MAX] or not all
+ *  digits. Each caller applies its own validity rule. Pure. */
+internal fun hmsDigits(digits: String): Triple<Int, Int, Int>? {
+    if (digits.isEmpty() || digits.length > HMS_DIGITS_MAX || !digits.all { it.isDigit() }) return null
+    val p = digits.padStart(HMS_DIGITS_MAX, '0')
+    return Triple(p.substring(0, 2).toInt(), p.substring(2, 4).toInt(), p.substring(4, 6).toInt())
+}

@@ -108,7 +108,10 @@
 
     <!-- M13: core training-load / lift-audit / honesty sections the shell now surfaces -->
     <string name="main_overline_training_load">Training load</string>
-    <string name="main_training_load_detail">%1$s. Counted %2$d sessions. Left out %3$d (lifts or runs without heart rate).</string>
+    <plurals name="main_training_load_detail">
+        <item quantity="one">%1$s. Counted %2$d session. Left out %3$d (lifts or runs without heart rate).</item>
+        <item quantity="other">%1$s. Counted %2$d sessions. Left out %3$d (lifts or runs without heart rate).</item>
+    </plurals>
     <string name="main_lift_session_audit">Session notes</string>
 
     <!-- Calculator sheet: the one result card (overline, headline caption, rows) -->
@@ -243,9 +246,6 @@
     <string name="main_clear_all_data">Clear all data</string>
     <string name="main_danger_zone_sub">Deletes everything you\'ve logged, the plan and calculator results. Profile settings stay.</string>
 
-    <!-- ClearConfirmDialog defaults -->
-    <string name="main_clear_confirm_title_default">Clear all?</string>
-    <string name="main_clear_confirm_message_default">This deletes every logged entry in this list. This can\'t be undone.</string>
     <string name="main_cancel">Cancel</string>
 
     <!-- Safety banner -->

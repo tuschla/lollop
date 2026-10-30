@@ -73,7 +73,7 @@ while [[ $# -gt 0 ]]; do
     --skip-monkey) DO_MONKEY=0; shift ;;
     --skip-gps) DO_GPS=0; shift ;;
     --keep-emulator) KEEP_EMU=1; shift ;;
-    -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR>1&&/^#/{print;next}NR>1{exit}' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done

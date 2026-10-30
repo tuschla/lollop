@@ -16,7 +16,7 @@ struct DatedRun {
     hard: running::HardRunKind,
 }
 
-/// Dated (`observed_at > 0`) runs at or before `cutoff`, with their realised
+/// Dated ([`is_undated`] false) runs at or before `cutoff`, with their realised
 /// distance, moving duration, start and avg-HR zone, chronological
 /// ([`RunFacts::chrono`]): the report's float sums are rounded for display, so
 /// summing in storage order would let an Undo or amend (the row moves to the
@@ -29,7 +29,7 @@ fn dated_runs(model: &Model, facts: &RunFacts, cutoff: Option<i64>) -> Vec<Dated
         .chrono
         .iter()
         .map(|&i| (&model.runs[i], i))
-        .filter(|(r, _)| r.observed_at > 0 && cutoff.is_none_or(|c| r.observed_at <= c))
+        .filter(|(r, _)| !is_undated(r.observed_at) && cutoff.is_none_or(|c| r.observed_at <= c))
         .map(|(r, i)| DatedRun {
             idx: i,
             observed_at: r.observed_at,
@@ -159,10 +159,9 @@ impl WeekRuns {
             .collect();
         let pace_day = model
             .today_epoch_day
-            .unwrap_or_else(|| cur_week.saturating_mul(7).saturating_add(10));
+            .unwrap_or_else(|| week_monday(cur_week).saturating_add(6));
         let threshold_slow_pace = model
-            .profile
-            .as_ref()
+            .profile()
             .and_then(|p| crate::app::run_targets::pace_anchor_vdot(p, pace_day))
             .and_then(|v| load::vdot_band_pace_sec_per_km(v, crate::schema::VdotBand::Threshold))
             .map(|(_, slow)| slow);
@@ -183,13 +182,12 @@ impl WeekRuns {
 
         // Plan-awareness: a recovery week is a PLANNED cut, so the athlete's own logged
         // reduction must not be flagged, and the week AFTER a recovery week must ratio
-        // against the last LOAD week, not the deloaded one. Mondays fall on epoch days
-        // ≡ 4 (mod 7) — epoch day 0 is a Thursday — so local-week `w`'s Monday is
-        // `w * 7 + 4`. False without a profile/plan.
+        // against the last LOAD week, not the deloaded one. False without a profile/plan.
         let is_recovery = |w: i64| -> bool {
-            model.profile.as_ref().is_some_and(|profile| {
-                crate::app::plan_views::plan_week_index(model, &cx.days, w * 7 + 4)
-                    .is_some_and(|wi| crate::plan::planned_recovery_week(profile, wi, w * 7 + 4))
+            model.profile().is_some_and(|profile| {
+                let monday = week_monday(w);
+                crate::app::plan_views::plan_week_index(model, &cx.days, monday)
+                    .is_some_and(|wi| crate::plan::planned_recovery_week(profile, wi, monday))
             })
         };
         let recovery_this_week = is_recovery(cur_week);
@@ -216,19 +214,20 @@ impl WeekRuns {
             .filter(move |r| local_week(r.started_at, self.offset) == self.cur_week)
     }
 
-    /// The week-over-week ramp baseline and its label suffix. After a recovery
-    /// week, ratio against the last LOAD week (two weeks back), so the planned
-    /// rebound off the deload is not scored as an over-cap jump. Shared by the
-    /// running-031 row and the hybrid-021 row, so the two ramp checks always
-    /// judge the same baseline and can never contradict.
-    fn ramp_base(&self) -> (f64, &'static str) {
-        if self.prev_was_recovery && self.baseline2_km > 0.0 {
-            (
+    /// The week-over-week ramp baseline and its label suffix, `None` without a
+    /// ratio base ([`is_ratio_base_km`]). After a recovery week, ratio against
+    /// the last LOAD week (two weeks back), so the planned rebound off the
+    /// deload is not scored as an over-cap jump. Shared by the running-031 row
+    /// and the hybrid-021 row, so the two ramp checks always judge the same
+    /// baseline and can never contradict.
+    fn ramp_base(&self) -> Option<(f64, &'static str)> {
+        if self.prev_was_recovery && is_ratio_base_km(self.baseline2_km) {
+            Some((
                 self.baseline2_km,
                 " vs your last full week; last week was the planned lighter week",
-            )
+            ))
         } else {
-            (self.prev_km, "")
+            is_ratio_base_km(self.prev_km).then_some((self.prev_km, ""))
         }
     }
 }
@@ -244,15 +243,6 @@ fn dist_num(km: f64, mi: bool) -> String {
 /// "20.0 → 26.0 km" / "12.4 → 16.2 mi": a week-to-week distance change.
 fn dist_change(from_km: f64, to_km: f64, mi: bool) -> String {
     format!("{} → {}", dist_num(from_km, mi), fmt_km_or_mi(to_km, mi))
-}
-
-/// A weekly-distance threshold in whole units ("64 km", "40 mi").
-fn dist_whole(km: f64, mi: bool) -> String {
-    if mi {
-        format!("{:.0} mi", km * 1000.0 / running::MILE_M)
-    } else {
-        format!("{km:.0} km")
-    }
 }
 
 /// The weekly running-volume system (File 04): aggregates the most recent
@@ -280,8 +270,7 @@ pub(in crate::app) fn build_weekly_report(
         // ≤2×-daily-average guardrail here and the plan's long-run sizing average
         // over the same run days.
         let n_run_days = model
-            .profile
-            .as_ref()
+            .profile()
             .filter(|p| p.running_days_per_week > 0)
             .map(crate::plan::run_slot_count)
             .unwrap_or(7);
@@ -307,30 +296,24 @@ fn push_increase_row(rows: &mut Vec<GuidanceView>, model: &Model, week: &WeekRun
     if week.recovery_this_week {
         return;
     }
+    let Some((base_km, base_label)) = week.ramp_base() else {
+        return;
+    };
     let weekly_km = week.weekly_km;
-    let (base_km, base_label) = week.ramp_base();
-    // A base under MIN_RATIO_BASE_KM is no prior week (a subnormal
-    // corrupt-log distance would divide to "+inf%").
-    if base_km >= MIN_RATIO_BASE_KM {
-        let ok = running::weekly_increase_ok(
-            base_km,
-            weekly_km,
-            training_age_years(model.profile.as_ref()),
-        );
-        let pct = (weekly_km - base_km) / base_km * 100.0;
-        let text = |mi: bool| {
-            format!(
-                "Week-over-week {} ({pct:+.0}%): {}{base_label}",
-                dist_change(base_km, weekly_km, mi),
-                if ok.value {
-                    "within the increase cap"
-                } else {
-                    "over the increase cap; hold or trim next week"
-                }
-            )
-        };
-        push_guidance_mi(rows, "Weekly volume", text(false), text(true), &ok);
-    }
+    let ok = running::weekly_increase_ok(base_km, weekly_km, training_age_years(model.profile()));
+    let pct = (weekly_km - base_km) / base_km * 100.0;
+    let text = |mi: bool| {
+        format!(
+            "Week-over-week {} ({pct:+.0}%): {}{base_label}",
+            dist_change(base_km, weekly_km, mi),
+            if ok.value {
+                "within the increase cap"
+            } else {
+                "over the increase cap; hold or trim next week"
+            }
+        )
+    };
+    push_guidance_mi(rows, "Weekly volume", text(false), text(true), &ok);
 }
 
 /// Two-week ramp flag (running-028: >30% over two weeks ≈ 1.6× injury odds).
@@ -347,7 +330,7 @@ fn push_two_week_ramp_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
     } else {
         week.baseline2_km
     };
-    if ramp_baseline > 0.0 {
+    if is_ratio_base_km(ramp_baseline) {
         let flag = running::two_week_increase_flag(ramp_baseline, weekly_km);
         if flag.value {
             let text = |mi: bool| {
@@ -364,7 +347,7 @@ fn push_two_week_ramp_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
 /// Zone-counting convention note (running-012): time-in-zone is the
 /// reporting default; the T/I shares below are avg-HR-classified.
 fn push_counting_method_row(rows: &mut Vec<GuidanceView>) {
-    let method = running::default_counting_method(false);
+    let method = graded((), claims::RUN_DIST_001);
     push_guidance(
         rows,
         "Weekly volume",
@@ -408,7 +391,7 @@ fn push_volume_cap_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns, daily_avg_
                 if daily.value {
                     format!(
                         "Long run {long} is {pct:.0}% of the week. The 25% limit applies from {} a week; under that, the limit is twice your average daily distance ({}).",
-                        dist_whole(running::LONG_RUN_SHARE_SPLIT_KM, mi),
+                        fmt_whole_km_or_mi(running::LONG_RUN_SHARE_SPLIT_KM, mi),
                         fmt_km_or_mi(2.0 * daily_avg_km, mi)
                     )
                 } else {
@@ -460,11 +443,10 @@ fn push_long_run_share_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
     let share = running::long_run_share_default();
     let text = |mi: bool| {
         format!(
-            "Long run {} is {:.0}% of the week (usual share {:.0}–{:.0}%)",
+            "Long run {} is {:.0}% of the week (usual share {}%)",
             fmt_km_or_mi(long_run_km, mi),
             long_run_km / week.weekly_km * 100.0,
-            share.value.0 * 100.0,
-            share.value.1 * 100.0
+            fmt_frac_pct_range(share.value.0, share.value.1)
         )
     };
     push_guidance_mi(rows, "Weekly volume", text(false), text(true), &share);
@@ -511,8 +493,7 @@ fn push_easy_share_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
 /// pace — so runs without a heart-rate strap count too.
 fn push_quality_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
     let offset = week.offset;
-    let mut quality: Vec<i64> = week.hard_runs.clone();
-    quality.sort_unstable();
+    let quality = &week.hard_runs;
     if !quality.is_empty() {
         let min_gap_hours = quality
             .windows(2)
@@ -551,11 +532,10 @@ fn push_quality_row(rows: &mut Vec<GuidanceView>, week: &WeekRuns) {
 /// Same baseline and same recovery-week skip as the running-031 row.
 fn push_hybrid_ramp_row(rows: &mut Vec<GuidanceView>, model: &Model, week: &WeekRuns) {
     let weekly_km = week.weekly_km;
-    let (ramp_base_km, ramp_base_label) = week.ramp_base();
-    if let Some(p) = model.profile.as_ref()
+    if let Some(p) = model.profile()
         && p.weekly_sets > 0
         && !week.recovery_this_week
-        && ramp_base_km > 0.0
+        && let Some((ramp_base_km, ramp_base_label)) = week.ramp_base()
     {
         let ok = hybrid::combined_load_progression_ok(ramp_base_km, weekly_km);
         if ok.value == Some(false) {
@@ -583,11 +563,10 @@ fn push_hybrid_ramp_row(rows: &mut Vec<GuidanceView>, model: &Model, week: &Week
 fn spaced_run_times(model: &Model, week: &WeekRuns) -> Vec<i64> {
     let long_run_km = week.long_run_km;
     let planned_km = model
-        .profile
-        .as_ref()
+        .profile()
         .map(|p| p.running_km_per_week.max(0.0))
         .unwrap_or(0.0);
-    let pure_lifter = model.profile.as_ref().is_some_and(|p| {
+    let pure_lifter = model.profile().is_some_and(|p| {
         p.weekly_sets > 0 && p.running_days_per_week == 0 && p.running_km_per_week <= 0.0
     });
     let mut spaced_runs: Vec<i64> = week
@@ -638,7 +617,7 @@ fn push_heavy_leg_spacing_row(rows: &mut Vec<GuidanceView>, cx: &ViewCtx, week: 
     let mut same_day_ok_h: Option<f64> = None;
     for &run_at in &spaced_runs {
         let run_day = local_day(run_at, offset);
-        for s in model.sets.iter().filter(|s| s.observed_at > 0) {
+        for s in model.sets.iter().filter(|s| !is_undated(s.observed_at)) {
             let set_day = local_day(s.observed_at, offset);
             if (set_day - run_day).abs() > 1 {
                 continue;
@@ -690,14 +669,14 @@ fn push_heavy_leg_spacing_row(rows: &mut Vec<GuidanceView>, cx: &ViewCtx, week: 
 
 /// Novice volume-bump hold (running-031): hold 2–3 weeks between bumps.
 fn push_bump_hold_row(rows: &mut Vec<GuidanceView>, model: &Model) {
-    let hold = running::novice_volume_bump_hold_weeks(training_age_years(model.profile.as_ref()));
+    let hold = running::novice_volume_bump_hold_weeks(training_age_years(model.profile()));
     if let Some((lo, hi)) = hold.value {
         push_guidance(
             rows,
             "Weekly volume",
             format!(
                 "After raising your weekly distance, hold it {} weeks before raising it again",
-                fmt_u8_range(lo, hi)
+                fmt_u8_range((lo, hi))
             ),
             &hold,
         );

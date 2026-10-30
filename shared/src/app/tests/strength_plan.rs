@@ -512,7 +512,7 @@ fn a_gate_profile_shows_no_plan() {
         vm.next_session.is_none(),
         "a gated profile never gets a plan"
     );
-    assert!(vm.train_blocked, "the deferral holds training");
+    assert!(vm.hold_reason.is_some(), "the deferral holds training");
 }
 
 // ── The program week cycles 1..=weeks_total as the block repeats ──
@@ -685,4 +685,76 @@ fn sets_logged_under_a_retired_catalog_name_show_the_current_name() {
             .any(|n| n.eq_ignore_ascii_case("Barbell back squat")),
         "{planned:?}"
     );
+}
+
+/// STR-1RMTEST-001 / HYP-FAIL-SAFE-001: the plan never programs a true max
+/// attempt or a set to failure on a weighted lift, whatever the goal,
+/// cadence, meet date, week or anchors: every RIR target is ≥ 1, every RPE
+/// < 10 and every %1RM leaves `MIN_STRENGTH_RIR` in reserve at its reps.
+#[test]
+fn the_weights_plan_never_prescribes_failure_or_a_max_attempt() {
+    use crate::schema::LiftIntensity;
+    use crate::strength::{LiftGoal, MIN_STRENGTH_RIR, pct_1rm_leaving_rir};
+    let lifts = |p: &crate::schema::Program| -> Vec<crate::schema::LiftPrescription> {
+        p.mesocycle
+            .sessions
+            .iter()
+            .flat_map(|s| &s.prescriptions)
+            .filter_map(|rx| match &rx.value {
+                Prescription::Lift(l) => Some(l.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut checked = 0;
+    for goal in [
+        LiftGoal::MaxStrength,
+        LiftGoal::Power,
+        LiftGoal::Hypertrophy,
+    ] {
+        for cadence in [
+            ProgressionCadence::EverySession,
+            ProgressionCadence::WeekToWeek,
+            ProgressionCadence::MonthToMonth,
+        ] {
+            for meet in [None, Some(20_400 + 30)] {
+                let profile = Profile {
+                    lift_goal: goal,
+                    progression_cadence: cadence,
+                    meet_epoch_day: meet,
+                    ..base_profile()
+                };
+                let names: Vec<String> = synthesize(&profile, &Anchors::default(), 0)
+                    .map(|p| lifts(&p).into_iter().map(|l| l.exercise).collect())
+                    .unwrap_or_default();
+                let anchored = Anchors {
+                    lift_e1rm: names.iter().map(|n| (n.clone(), 120.0)).collect(),
+                    ..Anchors::default()
+                };
+                for anchors in [Anchors::default(), anchored] {
+                    for week in 0..20 {
+                        let Some(p) = synthesize(&profile, &anchors, week) else {
+                            continue;
+                        };
+                        for l in lifts(&p) {
+                            checked += 1;
+                            let ctx =
+                                format!("{goal:?} {cadence:?} meet {meet:?} week {week}: {l:?}");
+                            match l.intensity {
+                                LiftIntensity::Rir(r) => assert!(r >= 1, "{ctx}"),
+                                LiftIntensity::Rpe(x) => assert!(x < 10.0, "{ctx}"),
+                                LiftIntensity::PercentOneRm(pct) => assert!(
+                                    f64::from(pct)
+                                        <= pct_1rm_leaving_rir(l.reps, MIN_STRENGTH_RIR) + 1e-3,
+                                    "{ctx}"
+                                ),
+                                LiftIntensity::MaxIntent => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 1000, "only {checked} lift prescriptions checked");
 }

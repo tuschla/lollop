@@ -66,7 +66,7 @@ class RunTrackingService : Service() {
     // Locate-only vs recording. Opening the tracker starts the
     // engine to preview fix quality, but records NOTHING until the user taps
     // Start; no route point, no crash-durable sidecar line. `recording` flips
-    // true on ACTION_START.
+    // true on START, or at the armed trigger ([beginRecording]).
     private var recording = false
 
     // This instance ran startTracking; distinguishes a live locate/armed/recording
@@ -191,11 +191,9 @@ class RunTrackingService : Service() {
      *  "Moving", the biggest figure is MOVING time, not wall-clock elapsed, matching
      *  the tracker tile's overline so the two surfaces never disagree) plus the
      *  current pace, a "Paused · " line while paused, the signal-lost line, the armed
-     *  "starts when ready" copy, or the static locate-preview text. The state→resource
-     *  SELECTION lives in the pure [trackingNotifContentSpec] (unit-tested against the
-     *  real R.string ids, so a swapped id can't hide behind caller-supplied literals);
-     *  this just resolves. Part of the [notifyIfChanged] throttle key: because the
-     *  paused and signal-lost states fold into the line, toggling either re-posts. */
+     *  "starts when ready" copy, or the static locate-preview text, resolved from
+     *  [trackingNotifContentSpec]. Part of the [notifyIfChanged] throttle key: because
+     *  the paused and signal-lost states fold into the line, toggling either re-posts. */
     private fun currentNotifContent(): String {
         val spec = trackingNotifContentSpec(
             recording = recording,
@@ -392,11 +390,8 @@ class RunTrackingService : Service() {
             unwindLocationFailure(failed = false)
             return
         }
-        // Gate implausible fixes for the LIVE display + map: the fused provider's
-        // first callback is often a stale cached location (many minutes old, far
-        // away) that would draw a giant phantom leg and inflate live distance; a
-        // very-low-accuracy fix is likewise noise. The core's QC still gates the
-        // of-record figures, but these must not reach the live UX at all.
+        // Gate implausible fixes for the live display + map ([armedFixPassesAgeGate],
+        // [MAX_GPS_ACCURACY_M]); the core's QC still gates the of-record figures.
         if (!isPlausibleLiveFix(loc, recording = recording, batchSize = batchSize)) return
         val point = GpsPoint(
             lat = loc.latitude,
@@ -481,8 +476,7 @@ class RunTrackingService : Service() {
         ActiveRunStore.init(this)
         // The Quick Settings tile reads "Run · recording" while this records, and a
         // shown "Start run" reminder goes.
-        TileSync.start(this)
-        SessionReminder.watchRecording(this)
+        RecordingWatch.start(this)
         engine = if (hasPlayServices(this)) FusedEngine(this) else PlatformEngine(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -748,9 +742,7 @@ class RunTrackingService : Service() {
      *  style are set per frame by [buildRunNotification], not here. */
     private fun buildBuilder(shape: NotifShape): NotificationCompat.Builder {
         // One "acquiring" wording everywhere (the map pill + Start button both say
-        // "Acquiring GPS"). The title/content id selection is the pure
-        // [trackingNotifTitleRes]/[trackingNotifContentSpec] (unit-tested against the
-        // real R.string ids); the call site only resolves.
+        // "Acquiring GPS").
         val builder = runNotificationBuilder(
             this,
             CHANNEL,
@@ -842,7 +834,7 @@ class RunTrackingService : Service() {
         private const val EXTRA_REQUIRE_PRECISE = "app.milestone.extra.REQUIRE_PRECISE"
         private const val EXTRA_REQUIRE_MOVING = "app.milestone.extra.REQUIRE_MOVING"
         private const val CHANNEL = "run_tracking"
-        private const val NOTIF_ID = 1
+        internal const val NOTIF_ID = 1
 
         // Service-side haptic cues (VIBRATE permission). Recording started: one firm
         // pulse. Signal lost: two pulses, so the two can be told apart in a pocket.
@@ -945,17 +937,12 @@ class RunTrackingService : Service() {
     }
 }
 
-// Ongoing-notification copy. Top-level + internal so the state→copy mapping below
-// is a pure function unit-testable without a running service: it selects R.string
-// ids, and the caller (the service, which has a Context) resolves them, so the
-// selection logic stays free of Android resource lookups.
+// Ongoing-notification copy. The state→R.string selection is a pure top-level function
+// the service only resolves, so it is unit-tested against the real ids and a swapped
+// id can't hide behind a caller's string literals.
 
-/** The ongoing-notification TITLE resource id for a given tracking state. A paused
- *  recording selects the paused title so the lockscreen reflects the same paused
- *  state the in-app control shows. The state→resource selection lives HERE, in the
- *  pure layer, so a call-site id swap can't hide from a test behind the caller's
- *  own string literals (R.string constants resolve as plain ints in JVM unit
- *  tests; only getString needs a Context). The caller resolves getString(res). */
+/** The ongoing-notification title for a tracking state; a paused recording gets the
+ *  paused title. */
 internal fun trackingNotifTitleRes(recording: Boolean, armed: Boolean, paused: Boolean): Int = when {
     recording && paused -> R.string.track_notif_paused_title
     recording -> R.string.track_notif_recording_title
@@ -963,13 +950,9 @@ internal fun trackingNotifTitleRes(recording: Boolean, armed: Boolean, paused: B
     else -> R.string.track_notif_locate_title
 }
 
-/** The ongoing-notification CONTENT for a given tracking state. [Literal] selects a
- *  fixed string resource; [Progress] is the raw "elapsed · dist" line while actively
- *  recording+unpaused plus the current pace ([Progress.paceNow], null when unknown),
- *  resolved through `track_notif_progress(_pace)`; [PausedProgress] is the
- *  parameterized "Paused · %1$s" resource with [PausedProgress.progress] as its
- *  format arg. Pure → unit-testable without a Context, pinning the state→resource
- *  wiring itself. */
+/** The ongoing-notification content for a tracking state: a fixed string ([Literal]),
+ *  the "elapsed · dist" line plus the current pace ([Progress], resolved through
+ *  `track_notif_progress(_pace)`), or the "Paused · %1$s" line ([PausedProgress]). */
 internal sealed class NotifContentSpec {
     data class Literal(@StringRes val res: Int) : NotifContentSpec()
     data class Progress(val text: String, val paceNow: String?) : NotifContentSpec()
@@ -1051,7 +1034,7 @@ internal data class RunNotifFrame(val content: String, val chip: String, val ste
 /**
  * The run notification's per-state builder: everything but the per-frame fields and
  * the actions. It requests promotion to a Live Update (Android 16+; an ignored extra
- * below, where it posts as the same ongoing notification as before) and meets the
+ * below, where it posts as an ordinary ongoing notification) and meets the
  * documented criteria: ongoing, a title, no custom views, not a group summary, not
  * colorized, on an IMPORTANCE_LOW channel. [dismiss] reports a user swipe so the
  * service stops re-posting.
@@ -1112,6 +1095,13 @@ private fun hasPlayServices(ctx: Context): Boolean =
  *  FINE, so every GPS code path gates on this, never on "any location grant". */
 internal fun hasFineLocation(ctx: Context): Boolean =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
+
+/** True when the app may post notifications: below API 33 there is no runtime
+ *  gate; from 33 on, the POST_NOTIFICATIONS grant decides. */
+internal fun canPostNotifications(ctx: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
         PackageManager.PERMISSION_GRANTED
 
 /** A high-accuracy fix stream (~1–2 s cadence screen-on, ~3–4 s screen-off).
@@ -1199,11 +1189,8 @@ private class FusedEngine(ctx: Context) : LocationEngine {
                 .setMinUpdateIntervalMillis(
                     if (background) FUSED_BG_MIN_INTERVAL_MS else FUSED_FG_MIN_INTERVAL_MS,
                 )
-                // No setMaxUpdateAgeMillis: the contract is that EVERY batched fix is
-                // forwarded (a Doze/screen-off callback can carry several seconds-old
-                // fixes that must all reach the route), so an age filter here would
-                // silently drop them. The stale cached first-fix is instead rejected by
-                // the armed/preview freshness gate in [isPlausibleLiveFix].
+                // No setMaxUpdateAgeMillis: every batched fix must reach the route; the
+                // stale cached first fix is rejected by [armedFixPassesAgeGate].
                 .build(),
             cb,
             Looper.getMainLooper(),

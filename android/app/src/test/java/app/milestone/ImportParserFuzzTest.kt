@@ -3,6 +3,7 @@ package app.milestone
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.QaHarness
+import app.milestone.qa.QaHarness.fixture
 import java.io.File
 import java.time.Instant
 import java.util.Locale
@@ -253,9 +254,6 @@ class ImportParserFuzzTest {
         f.le(fitCrc(all).toLong(), 2)
         return f.toByteArray()
     }
-
-    private fun fixture(name: String): ByteArray =
-        checkNotNull(javaClass.classLoader!!.getResourceAsStream(name)) { "fixture $name" }.use { it.readBytes() }
 
     /** The core's own GPX export of a logged run (what Share / Undo read). */
     private fun coreGpx(points: List<GpsPoint>, starts: List<Int> = emptyList(), entryId: Long = 99L): String {

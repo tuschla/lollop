@@ -4,11 +4,8 @@ import androidx.annotation.ArrayRes
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,14 +14,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 
@@ -36,9 +28,8 @@ private const val DecouplingDefaultMin = 30.0
 private const val DecouplingRunMaxMin = 180
 private const val DecouplingRunStepMin = 5
 
-/** The morning check-in's watch numbers: a plausible resting HR (bpm) and HRV
- *  rMSSD (ms) a user can type. */
-private val RestingHrBpmRange = 25.0..120.0
+/** The morning check-in's HRV rMSSD (ms) a user can type; resting HR takes
+ *  [RESTING_HR_RANGE] like the profile. */
 private val HrvMsRange = 1.0..300.0
 
 /**
@@ -50,10 +41,9 @@ private val HrvMsRange = 1.0..300.0
  */
 @Composable
 fun ReadinessEditor(
-    // Core-exported signal→group map (ViewModel.signal_groups): the red-flag
-    // fence in the picker is drawn where the core says the block starts, not
-    // from a shell-side predicate. Empty map (old core) falls back to Pain.
-    signalGroups: Map<String, String> = emptyMap(),
+    // Core-exported signal→group map (ViewModel.signal_groups): picker order and
+    // the red-flag fence come from it, not from a shell-side predicate.
+    signalGroups: Map<String, String>,
     // Deep-link entry point (Today "+ Add" chips): the signal the editor opens
     // pre-selected. Defaults to WellnessZ (the manual/advanced default).
     initialSignal: ReadinessSignal = ReadinessSignal.WellnessZ,
@@ -71,12 +61,11 @@ fun ReadinessEditor(
     var effortMin by rememberSaveable { mutableStateOf(DecouplingDefaultMin) }
     var dirty by rememberSaveable { mutableStateOf(false) }
     ReportDirty(dirty, onDirtyChange)
+    // First red-flag signal in wire order, so the fence lands before the first
+    // medical flag as displayed.
     val firstRedFlag = remember(signalGroups) {
-        // First red-flag signal in wire order (matches the picker's ordering),
-        // so the fence lands before the first medical flag as displayed.
         signalGroups.entries.firstOrNull { it.value == "red_flag" }
             ?.let { e -> ReadinessSignal.entries.firstOrNull { it.name == e.key } }
-            ?: ReadinessSignal.Pain
     }
 
     EditorScaffold(
@@ -105,12 +94,9 @@ fun ReadinessEditor(
             )
             // Picker order comes from the core's signal_groups metadata (ALL_SIGNALS
             // order on the wire), so routine metrics, Soreness included, render
-            // together above the medical red-flag fence. Empty map (old core) falls
-            // back to the enum's declaration order.
+            // together above the medical red-flag fence.
             val ordered = remember(signalGroups) {
-                signalGroups.keys
-                    .mapNotNull { name -> ReadinessSignal.entries.firstOrNull { it.name == name } }
-                    .ifEmpty { ReadinessSignal.entries.toList() }
+                signalGroups.keys.mapNotNull { name -> ReadinessSignal.entries.firstOrNull { it.name == name } }
             }
             val signalLabels = ordered.associateWith { stringResource(it.labelRes) }
             EnumRow(
@@ -129,29 +115,12 @@ fun ReadinessEditor(
             // One-line neutral explainer for the selected signal: what it is, not
             // what number triggers what (the value hints below cite thresholds,
             // see [ValueSpec]).
-            Text(stringResource(signal.explainerRes), color = OnBgMuted, style = Type.Caption)
+            Text(stringResource(signal.ui.explainer), color = OnBgMuted, style = Type.Caption)
+            val spec = signal.ui.spec
             when {
-                signal.isBinaryFlag ->
-                    // A yes/no answer to a red-flag symptom question (the signal and
-                    // its explainer sit right above), so the switch is the affirmative.
-                    LabeledSwitchRow(stringResource(R.string.log_switch_yes_have), value > 0.0) {
-                        value = if (it) 1.0 else 0.0
-                        dirty = true
-                    }
-                signal == ReadinessSignal.Illness -> {
-                    val level = IllnessLevel.entries.lastOrNull { value >= it.value } ?: IllnessLevel.None
-                    val levelLabels = IllnessLevel.entries.associateWith { stringResource(it.labelRes) }
-                    // Whole-row option list, not segmented: the triage labels are too
-                    // long to segment and must not be abbreviated (safety-relevant).
-                    EnumRow(stringResource(R.string.log_field_severity), IllnessLevel.entries.toList(), level, display = { levelLabels.getValue(it) }) {
-                        value = it.value
-                        dirty = true
-                    }
-                }
-                else -> {
+                spec != null -> {
                     // The whole value grid is visible and one tap picks any point,
                     // negatives (z-scores, deltas) included, which the keypad can't type.
-                    val spec = continuousSpec(signal)
                     FieldLabel(stringResource(R.string.log_field_value), String.format(Locale.US, spec.format, value))
                     ScrollableScaleRow(
                         spec.gridOptions(),
@@ -165,6 +134,23 @@ fun ReadinessEditor(
                     // The unit and the point where the value starts to matter.
                     Text(stringResource(spec.hint), color = OnBgMuted, style = Type.Caption)
                 }
+                signal == ReadinessSignal.Illness -> {
+                    val level = IllnessLevel.entries.lastOrNull { value >= it.value } ?: IllnessLevel.None
+                    val levelLabels = IllnessLevel.entries.associateWith { stringResource(it.labelRes) }
+                    // Whole-row option list, not segmented: the triage labels are too
+                    // long to segment and must not be abbreviated (safety-relevant).
+                    EnumRow(stringResource(R.string.log_field_severity), IllnessLevel.entries.toList(), level, display = { levelLabels.getValue(it) }) {
+                        value = it.value
+                        dirty = true
+                    }
+                }
+                else ->
+                    // A yes/no answer to a red-flag symptom question (the signal and
+                    // its explainer sit right above), so the switch is the affirmative.
+                    LabeledSwitchRow(stringResource(R.string.log_switch_yes_have), value > 0.0) {
+                        value = if (it) 1.0 else 0.0
+                        dirty = true
+                    }
             }
             // AerobicDecoupling is duration-gated (valid only >20 min, File 06): the
             // core discards a reading with no duration, so the run length is sent too.
@@ -207,16 +193,9 @@ internal fun checkinEchoIsToday(echoObservedAt: Long, nowSec: Long, zone: java.t
     localEpochDay(echoObservedAt, zone) == localEpochDay(nowSec, zone)
 
 /**
- * Morning check-in: the PRIMARY readiness entry point. The user answers any of
- * the five wellness scales (sleep / soreness / mood / fatigue / stress, the KB
- * 5-item short-form) on a 1–5 scale with word anchors, plus two optional watch
- * numbers (resting HR, HRV rMSSD); every item is optional and Save opens with the
- * first answer. The CORE normalizes the retained history into
- * z-scores/deltas/streaks; the user never enters a z-score. One Submit → one
- * [Event.SubmitCheckin] (none when only the illness item was answered), plus an Illness
- * [Event.SubmitReadiness] when the Illness item is answered (asked first
- * when the core raises [illnessPrompt]). The raw-signal editor stays reachable
- * from the Log chooser's "More" group.
+ * Morning check-in, the primary readiness entry: the five 1–5 wellness items, two
+ * optional watch numbers and the Illness item (first when [illnessPrompt]), all
+ * optional. The core turns the history into z-scores; the user never enters one.
  */
 @Composable
 fun MorningCheckinSheet(
@@ -229,8 +208,7 @@ fun MorningCheckinSheet(
     // resting-HR morning): the Illness item moves to the top.
     illnessPrompt: Boolean = false,
     // The check-in (null when only the illness question was answered), and the
-    // illness answer when one was given (value 0 none, 1 above the neck, 2 below
-    // the neck or fever).
+    // illness answer when one was given.
     onSubmit: (Event.SubmitCheckin?, Event.SubmitReadiness?) -> Unit,
 ) {
     // Today's own check-in is today's answer, so a reopen rehydrates it for
@@ -250,7 +228,7 @@ fun MorningCheckinSheet(
     var stress by rememberSaveable { mutableStateOf(todayEcho?.stress) }
     var observedAt by rememberSaveable { mutableStateOf(AppClock.nowSec()) }
     // Optional illness answer (AUTOREG-4): null = not answered, nothing sent.
-    var illness by rememberSaveable { mutableStateOf<Int?>(null) }
+    var illness by rememberSaveable { mutableStateOf<IllnessLevel?>(null) }
     var dirty by rememberSaveable { mutableStateOf(false) }
     ReportDirty(dirty, onDirtyChange)
 
@@ -275,7 +253,7 @@ fun MorningCheckinSheet(
 
     val rhrParsed = parseKeypadNumber(rhrText)
     val hrvParsed = parseKeypadNumber(hrvText)
-    val rhrValid = !hasRhr || rhrText.isEmpty() || (rhrParsed != null && rhrParsed in RestingHrBpmRange)
+    val rhrValid = !hasRhr || rhrText.isEmpty() || (rhrParsed != null && rhrParsed in RESTING_HR_RANGE)
     val hrvValid = !hasHrv || hrvText.isEmpty() || (hrvParsed != null && hrvParsed in HrvMsRange)
     val savedMessage = stringResource(R.string.log_checkin_saved)
 
@@ -341,7 +319,7 @@ fun MorningCheckinSheet(
             } else {
                 null
             }
-            val ill = illness?.let { Event.SubmitReadiness(ReadinessSignal.Illness, it.toDouble(), observedAt) }
+            val ill = illness?.let { Event.SubmitReadiness(ReadinessSignal.Illness, it.value, observedAt) }
             onSubmit(checkin, ill)
             UiMessages.post(UiMessage(savedMessage))
         },
@@ -387,7 +365,7 @@ fun MorningCheckinSheet(
                     // Red only once something out-of-range is typed: an empty
                     // field isn't an error, it sends nothing.
                     invalid = if (rhr) !rhrValid else !hrvValid,
-                    range = if (rhr) RestingHrBpmRange else HrvMsRange,
+                    range = if (rhr) RESTING_HR_RANGE else HrvMsRange,
                     adjustments = if (rhr) listOf(-1.0, 1.0) else listOf(-1.0, 1.0, 5.0),
                     lastValue = if (rhr) pastEcho?.resting_hr_bpm else pastEcho?.hrv_rmssd_ms,
                     keypadOpen = keypadOpen && active == field,
@@ -510,12 +488,7 @@ private fun WatchNumberRow(
  * not a paragraph. Optional unless the core asks first ([prompted]).
  */
 @Composable
-private fun IllnessQuestion(value: Int?, prompted: Boolean, onValue: (Int) -> Unit) {
-    val labels = listOf(
-        stringResource(R.string.log_illness_none),
-        stringResource(R.string.log_illness_above_neck),
-        stringResource(R.string.log_illness_below_neck),
-    )
+private fun IllnessQuestion(value: IllnessLevel?, prompted: Boolean, onValue: (IllnessLevel) -> Unit) {
     FieldLabel(
         stringResource(R.string.log_illness_q),
         trailing = if (prompted) null else stringResource(R.string.log_optional),
@@ -526,37 +499,11 @@ private fun IllnessQuestion(value: Int?, prompted: Boolean, onValue: (Int) -> Un
         modifier = Modifier.fillMaxWidth().selectableGroup(),
         verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
-        labels.forEachIndexed { i, label ->
-            val selected = value == i
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = ActionMinHeight)
-                    .choiceCell(selected)
-                    .selectable(selected = selected, role = Role.RadioButton) { onValue(i) }
-                    .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    label,
-                    color = choiceCellContent(selected),
-                    style = if (selected) Type.Body.copy(fontWeight = FontWeight.Bold) else Type.Body,
-                )
-            }
+        IllnessLevel.entries.forEach { level ->
+            ChoiceRow(stringResource(level.answerRes), null, selected = value == level) { onValue(level) }
         }
     }
 }
-
-/**
- * Signals the core treats as a present/absent red flag (`value > 0` fires). A
- * value scale's 0.0 default would record the *absence* of the flag, so the
- * editor shows a plain on/off switch.
- */
-private val ReadinessSignal.isBinaryFlag: Boolean
-    get() = this == ReadinessSignal.Pain ||
-        this == ReadinessSignal.RedS ||
-        this == ReadinessSignal.CardiacRedFlag ||
-        this == ReadinessSignal.BoneStress
 
 /**
  * The value a freshly-selected signal should start at. Flags default to 1.0
@@ -565,11 +512,8 @@ private val ReadinessSignal.isBinaryFlag: Boolean
  * signals start at their spec default (neutral for deltas/z-scores, 1.0 for the
  * e1RM ratio, a value the core reads as "no change vs baseline").
  */
-private fun defaultReadinessValue(signal: ReadinessSignal): Double = when {
-    signal.isBinaryFlag -> 1.0
-    signal == ReadinessSignal.Illness -> IllnessLevel.AboveNeck.value
-    else -> continuousSpec(signal).default
-}
+private fun defaultReadinessValue(signal: ReadinessSignal): Double =
+    signal.ui.spec?.default ?: if (signal == ReadinessSignal.Illness) IllnessLevel.AboveNeck.value else 1.0
 
 /**
  * Scale bounds/step/default for one continuous readiness signal, mapped to the
@@ -601,105 +545,95 @@ private fun ValueSpec.gridOptions(): List<Double> {
     return (0..n).map { String.format(Locale.US, format, min + it * step).toDouble() }
 }
 
-private fun continuousSpec(signal: ReadinessSignal): ValueSpec = when (signal) {
-    // Signed RPE delta (actual − target); ±1/±2 gate load adjustments.
-    ReadinessSignal.Rpe ->
-        ValueSpec(-4.0, 4.0, 0.5, 0.0, R.string.log_spec_rpe)
-    // e1RM today ÷ baseline; <0.90/<0.95/>1.05 gate deload/cap/add-load.
-    ReadinessSignal.EstimatedOneRm ->
-        ValueSpec(0.70, 1.15, 0.01, 1.0, R.string.log_spec_e1rm, "%.2f")
-    // Mean concentric velocity, m/s (dormant, no autoreg gate yet).
-    ReadinessSignal.BarVelocity ->
-        ValueSpec(0.0, 2.0, 0.05, 0.5, R.string.log_spec_bar_velocity, "%.2f")
-    // Within-set velocity-loss %; ≥20 terminates the set.
-    ReadinessSignal.VelocityLoss ->
-        ValueSpec(0.0, 50.0, 5.0, 0.0, R.string.log_spec_velocity_loss, "%.0f")
-    // Composite wellness z-score; ≤ −1.5 downgrades.
-    ReadinessSignal.WellnessZ ->
-        ValueSpec(-3.0, 3.0, 0.5, 0.0, R.string.log_spec_wellness)
-    // lnRMSSD z vs rolling baseline; < −0.5 downgrades.
-    ReadinessSignal.HrvLnRmssd ->
-        ValueSpec(-3.0, 3.0, 0.5, 0.0, R.string.log_spec_hrv)
-    // HRV coefficient of variation % (dormant, no autoreg gate yet).
-    ReadinessSignal.HrvCv ->
-        ValueSpec(0.0, 15.0, 0.5, 0.0, R.string.log_spec_hrv_cv)
-    // Aerobic-decoupling drift %; >10 keeps the run easy.
-    ReadinessSignal.AerobicDecoupling ->
-        ValueSpec(0.0, 30.0, 1.0, 0.0, R.string.log_spec_decoupling, "%.0f")
-    // RHR delta vs baseline, bpm; 5–9 downgrades, ≥10 stops.
-    ReadinessSignal.RestingHr ->
-        ValueSpec(-5.0, 20.0, 1.0, 0.0, R.string.log_spec_rhr, "%.0f")
-    // Soreness on the 1–7 Hooper scale; ≥6 downgrades intensity one level.
-    ReadinessSignal.Soreness ->
-        ValueSpec(1.0, 7.0, 1.0, 3.0, R.string.log_spec_soreness, "%.0f")
-    ReadinessSignal.Pain, ReadinessSignal.Illness, ReadinessSignal.RedS,
-    ReadinessSignal.CardiacRedFlag, ReadinessSignal.BoneStress ->
-        error("$signal is not a continuous signal")
+/**
+ * The picker's view of one signal: its label, a one-line explainer (what the
+ * signal IS and, for the medical flags, the core-documented consequence; no
+ * shell-side thresholds), and the value scale of a continuous signal. [spec] is
+ * null for Illness (a severity picker) and for the flags the core reads as
+ * present at `value > 0` (Pain, RedS, CardiacRedFlag, BoneStress): those get an
+ * on/off switch, since a scale's 0.0 default would record the flag's absence.
+ */
+private class SignalUi(@StringRes val label: Int, @StringRes val explainer: Int, val spec: ValueSpec? = null)
+
+/** One exhaustive `when`, so a new [ReadinessSignal] fails to compile until it
+ *  has a label, an explainer and a scale decision. Display-only: the wire value
+ *  is still `signal.name` (see [Event.SubmitReadiness]). */
+private val SignalUis: Map<ReadinessSignal, SignalUi> = ReadinessSignal.entries.associateWith { signal ->
+    when (signal) {
+        // Signed RPE delta (actual − target); ±1/±2 gate load adjustments.
+        ReadinessSignal.Rpe -> SignalUi(
+            R.string.log_signal_rpe, R.string.log_signal_rpe_explainer,
+            ValueSpec(-4.0, 4.0, 0.5, 0.0, R.string.log_spec_rpe),
+        )
+        // e1RM today ÷ baseline; <0.90/<0.95/>1.05 gate deload/cap/add-load.
+        ReadinessSignal.EstimatedOneRm -> SignalUi(
+            R.string.log_signal_e1rm, R.string.log_signal_e1rm_explainer,
+            ValueSpec(0.70, 1.15, 0.01, 1.0, R.string.log_spec_e1rm, "%.2f"),
+        )
+        // Mean concentric velocity, m/s (dormant, no autoreg gate yet).
+        ReadinessSignal.BarVelocity -> SignalUi(
+            R.string.log_signal_bar_velocity, R.string.log_signal_bar_velocity_explainer,
+            ValueSpec(0.0, 2.0, 0.05, 0.5, R.string.log_spec_bar_velocity, "%.2f"),
+        )
+        // Within-set velocity-loss %; ≥20 terminates the set.
+        ReadinessSignal.VelocityLoss -> SignalUi(
+            R.string.log_signal_velocity_loss, R.string.log_signal_velocity_loss_explainer,
+            ValueSpec(0.0, 50.0, 5.0, 0.0, R.string.log_spec_velocity_loss, "%.0f"),
+        )
+        // Composite wellness z-score; ≤ −1.5 downgrades.
+        ReadinessSignal.WellnessZ -> SignalUi(
+            R.string.log_signal_wellness, R.string.log_signal_wellness_explainer,
+            ValueSpec(-3.0, 3.0, 0.5, 0.0, R.string.log_spec_wellness),
+        )
+        // lnRMSSD z vs rolling baseline; < −0.5 downgrades.
+        ReadinessSignal.HrvLnRmssd -> SignalUi(
+            R.string.log_signal_hrv, R.string.log_signal_hrv_explainer,
+            ValueSpec(-3.0, 3.0, 0.5, 0.0, R.string.log_spec_hrv),
+        )
+        // HRV coefficient of variation % (dormant, no autoreg gate yet).
+        ReadinessSignal.HrvCv -> SignalUi(
+            R.string.log_signal_hrv_cv, R.string.log_signal_hrv_cv_explainer,
+            ValueSpec(0.0, 15.0, 0.5, 0.0, R.string.log_spec_hrv_cv),
+        )
+        // Aerobic-decoupling drift %; >10 keeps the run easy.
+        ReadinessSignal.AerobicDecoupling -> SignalUi(
+            R.string.log_signal_decoupling, R.string.log_signal_decoupling_explainer,
+            ValueSpec(0.0, 30.0, 1.0, 0.0, R.string.log_spec_decoupling, "%.0f"),
+        )
+        // RHR delta vs baseline, bpm; 5–9 downgrades, ≥10 stops. The label says
+        // "vs normal": this field submits a delta, not the absolute bpm the
+        // morning check-in takes.
+        ReadinessSignal.RestingHr -> SignalUi(
+            R.string.log_signal_rhr, R.string.log_signal_rhr_explainer,
+            ValueSpec(-5.0, 20.0, 1.0, 0.0, R.string.log_spec_rhr, "%.0f"),
+        )
+        // Soreness on the 1–7 Hooper scale; ≥6 downgrades intensity one level.
+        ReadinessSignal.Soreness -> SignalUi(
+            R.string.log_signal_soreness, R.string.log_signal_soreness_explainer,
+            ValueSpec(1.0, 7.0, 1.0, 3.0, R.string.log_spec_soreness, "%.0f"),
+        )
+        ReadinessSignal.Pain -> SignalUi(R.string.log_signal_pain, R.string.log_signal_pain_explainer)
+        ReadinessSignal.Illness -> SignalUi(R.string.log_signal_illness, R.string.log_signal_illness_explainer)
+        ReadinessSignal.RedS -> SignalUi(R.string.log_signal_reds, R.string.log_signal_reds_explainer)
+        ReadinessSignal.CardiacRedFlag -> SignalUi(R.string.log_signal_cardiac, R.string.log_signal_cardiac_explainer)
+        ReadinessSignal.BoneStress -> SignalUi(R.string.log_signal_bone_stress, R.string.log_signal_bone_stress_explainer)
+    }
 }
 
+private val ReadinessSignal.ui: SignalUi get() = SignalUis.getValue(this)
+
+/** The signal's picker label (the readiness editor and Today's chips). */
+@get:StringRes
+internal val ReadinessSignal.labelRes: Int get() = ui.label
+
 /**
- * Shell-side severity picker for the Illness signal. The wire value is still the
- * numeric `value` the core decodes (schema.rs `IllnessSeverity::from_value`:
- * ≥2 below-neck/fever, ≥1 above-neck, else none), this enum only drives the UI.
+ * The Illness answer (AUTOREG-4, ILLNESS-RTT-001). [value] is the wire value the
+ * core decodes (schema.rs `IllnessSeverity::from_value`: ≥2 below-neck/fever, ≥1
+ * above-neck, else none); [labelRes] is the raw-signal editor's short label,
+ * [answerRes] the check-in's longer answer.
  */
-private enum class IllnessLevel(val value: Double, @StringRes val labelRes: Int) {
-    None(0.0, R.string.log_illness_level_none),
-    AboveNeck(1.0, R.string.log_illness_level_above),
-    BelowNeckOrFever(2.0, R.string.log_illness_level_below),
+private enum class IllnessLevel(val value: Double, @StringRes val labelRes: Int, @StringRes val answerRes: Int) {
+    None(0.0, R.string.log_illness_level_none, R.string.log_illness_level_none),
+    AboveNeck(1.0, R.string.log_illness_level_above, R.string.log_illness_above_neck),
+    BelowNeckOrFever(2.0, R.string.log_illness_level_below, R.string.log_illness_below_neck),
 }
-
-/**
- * Label for the readiness signal picker. Display-only, the wire value is still
- * `signal.name` (see [Event.SubmitReadiness]). Exhaustive `when` (no `else`) so
- * a new [ReadinessSignal] variant fails to compile until it is given a label
- * rather than silently showing a cryptic raw name.
- */
-@get:StringRes
-internal val ReadinessSignal.labelRes: Int
-    get() = when (this) {
-        ReadinessSignal.Rpe -> R.string.log_signal_rpe
-        ReadinessSignal.EstimatedOneRm -> R.string.log_signal_e1rm
-        ReadinessSignal.BarVelocity -> R.string.log_signal_bar_velocity
-        ReadinessSignal.VelocityLoss -> R.string.log_signal_velocity_loss
-        ReadinessSignal.WellnessZ -> R.string.log_signal_wellness
-        ReadinessSignal.HrvLnRmssd -> R.string.log_signal_hrv
-        ReadinessSignal.HrvCv -> R.string.log_signal_hrv_cv
-        ReadinessSignal.AerobicDecoupling -> R.string.log_signal_decoupling
-        // This raw-signal field submits a DELTA versus baseline (the core reads it
-        // as a bpm delta), NOT an absolute bpm, so the label says "vs normal" to
-        // match its hint and explainer. Absolute resting HR is entered in the
-        // morning check-in instead.
-        ReadinessSignal.RestingHr -> R.string.log_signal_rhr
-        ReadinessSignal.Soreness -> R.string.log_signal_soreness
-        ReadinessSignal.Pain -> R.string.log_signal_pain
-        ReadinessSignal.Illness -> R.string.log_signal_illness
-        ReadinessSignal.RedS -> R.string.log_signal_reds
-        ReadinessSignal.CardiacRedFlag -> R.string.log_signal_cardiac
-        ReadinessSignal.BoneStress -> R.string.log_signal_bone_stress
-    }
-
-/**
- * One-line neutral explainer for the readiness picker: says what the signal IS
- * (and, for the medical flags, the core-documented consequence of reporting
- * it). Deliberately no shell-side thresholds: the numbers that trigger
- * adjustments live only in the core (see the ValueSpec note above).
- */
-@get:StringRes
-private val ReadinessSignal.explainerRes: Int
-    get() = when (this) {
-        ReadinessSignal.Rpe -> R.string.log_signal_rpe_explainer
-        ReadinessSignal.EstimatedOneRm -> R.string.log_signal_e1rm_explainer
-        ReadinessSignal.BarVelocity -> R.string.log_signal_bar_velocity_explainer
-        ReadinessSignal.VelocityLoss -> R.string.log_signal_velocity_loss_explainer
-        ReadinessSignal.WellnessZ -> R.string.log_signal_wellness_explainer
-        ReadinessSignal.HrvLnRmssd -> R.string.log_signal_hrv_explainer
-        ReadinessSignal.HrvCv -> R.string.log_signal_hrv_cv_explainer
-        ReadinessSignal.AerobicDecoupling -> R.string.log_signal_decoupling_explainer
-        ReadinessSignal.RestingHr -> R.string.log_signal_rhr_explainer
-        ReadinessSignal.Soreness -> R.string.log_signal_soreness_explainer
-        ReadinessSignal.Pain -> R.string.log_signal_pain_explainer
-        ReadinessSignal.Illness -> R.string.log_signal_illness_explainer
-        ReadinessSignal.RedS -> R.string.log_signal_reds_explainer
-        ReadinessSignal.CardiacRedFlag -> R.string.log_signal_cardiac_explainer
-        ReadinessSignal.BoneStress -> R.string.log_signal_bone_stress_explainer
-    }

@@ -26,7 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -51,9 +51,9 @@ internal fun runDistLabel(distanceKm: Double, unit: DistanceUnit): String = "${d
 
 /** Pace in the display unit, e.g. "5:34 /km" / "8:57 /mi". Recomputed from the
  *  run's distance+duration (not the core's always-/km `pace` string) so every run
- *  readout honours the chosen unit. "-" for a degenerate run. */
+ *  readout honours the chosen unit. [EmptyValuePlaceholder] for a degenerate run. */
 internal fun runPaceLabel(distanceKm: Double, durationMin: Double, unit: DistanceUnit): String {
-    if (distanceKm <= 0.0 || durationMin <= 0.0) return "-"
+    if (distanceKm <= 0.0 || durationMin <= 0.0) return EmptyValuePlaceholder
     return formatPaceMinutes(paceInUnit(durationMin / distanceKm, unit)) + " " + unit.paceSuffix
 }
 
@@ -340,7 +340,7 @@ private val SplitIndexWidth = 24.dp
  */
 @Composable
 internal fun RunSplitsSection(run: RunResultView, splits: List<RunSplitView>, unit: DistanceUnit) {
-    val res = LocalContext.current.resources
+    val res = LocalResources.current
     val bars = remember(splits) { splitBars(splits) }
     var showAll by rememberSaveable(run.entry_id, run.observed_at) { mutableStateOf(false) }
     val indexLabels = splits.mapIndexed { i, s -> if (s.partial) partialIndexLabel(partialLength(splits, i, unit)) else "${s.index}" }
@@ -355,7 +355,7 @@ internal fun RunSplitsSection(run: RunResultView, splits: List<RunSplitView>, un
     val fastestWord = stringResource(R.string.run_split_fastest)
     val slowestWord = stringResource(R.string.run_split_slowest)
     val indexStyle = Type.Chip.merge(TabularFigures)
-    val paceStyle = Type.Body.copy(fontWeight = FontWeight.Bold).merge(TabularFigures)
+    val paceStyle = Type.BodyBold.merge(TabularFigures)
     val deltaStyle = Type.Caption.merge(TabularFigures)
     val tagStyle = Type.Caption.copy(fontWeight = FontWeight.Bold)
     val measurer = rememberTextMeasurer()

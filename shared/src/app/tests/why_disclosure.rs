@@ -15,8 +15,6 @@ fn why_disclosure_on_hr_zones_carries_basis_grade_note_and_improves() {
         Event::ComputeHrZones {
             age_years: 30.0,
             resting_hr_bpm: None,
-            weeks_since_recalc: None,
-            weeks_since_pace_test: None,
         },
         &mut model,
     )
@@ -68,7 +66,7 @@ fn contested_guidance_grade_note_names_the_contested_question() {
     // question to the grade note, not just restate the badge.
     let app = Engine;
     let model = Model {
-        profile: Some(sample_profile()),
+        profile_history: vec![sample_profile()],
         ..Default::default()
     };
     let vm = app.view(&model);

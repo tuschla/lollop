@@ -78,6 +78,24 @@ class CoachSummaryTest {
         assertTrue(text, text.contains("- Push-up: 1 × 12"))
     }
 
+    /** The export reads each set as History does: the logged kg figure, and the
+     *  load of a weighted hold. */
+    @Test
+    fun liftsKeepTheLoggedLoadAndAWeightedHoldsLoad() {
+        val text = buildCoachSummary(
+            res,
+            ViewModel(
+                lifts = listOf(
+                    LiftResultView(exercise = "Bench", weight_kg = 101.25, reps = 5, observed_at = at(monday)),
+                    LiftResultView(exercise = "Plank", weight_kg = 10.0, reps = 1, hold_sec = 30, observed_at = at(monday, 1)),
+                ),
+            ),
+            today, ZoneOffset.UTC, WeightUnit.Kg, DistanceUnit.Km, weeks = 1,
+        )
+        assertTrue(text, text.contains("- Bench: 1 × 5 @ 101.25 kg"))
+        assertTrue(text, text.contains("- Plank: 1 × 30 s hold · +10 kg"))
+    }
+
     @Test
     fun runsAndActivitiesReadInTheUsersUnits() {
         val text = summary()

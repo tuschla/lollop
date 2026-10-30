@@ -49,8 +49,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -190,10 +188,6 @@ internal fun EvidenceCard(
     statusOverline: String? = null,
     extraDetail: String? = null,
     why: WhyView? = null,
-    // A jargon term the card names without spelling it out (e.g. "hrmax"): its
-    // glossary link joins the term links inside the "?" panel, so the card face
-    // never carries a second "?" next to the disclosure.
-    glossaryKey: String? = null,
     // Optional action pill at the tail of the content column. Kept OFF the card
     // body (the whole card is deliberately non-clickable, see below): the ripple
     // stays bounded to the small pill, matching the DisclosureButton precedent.
@@ -214,10 +208,6 @@ internal fun EvidenceCard(
     // Face detail directly under the summary (load, plates, effort, pace), ABOVE
     // the "?" panel: the do-this numbers stay on the face next to the summary.
     subline: (@Composable () -> Unit)? = null,
-    // Styled face text (e.g. a bold exercise line over a regular prescription
-    // line). Renders in place of [summary] on the face; [summary] stays the
-    // disclosure-state key and the glossary-scan source.
-    summaryRich: AnnotatedString? = null,
     // Card-owned detail rendered INSIDE the "?" panel, after the evidence lines
     // (e.g. a hold card's follow-up evidence), so the card keeps ONE "?".
     panelExtra: (@Composable () -> Unit)? = null,
@@ -235,24 +225,21 @@ internal fun EvidenceCard(
     // also resets the panel when a slot's content changes, correct, since the
     // disclosure belongs to the claim, not the slot.
     var expanded by rememberSaveable(summary, citation) { mutableStateOf(false) }
-    // Jargon in the summary (RIR, RPE, e1RM, …) plus the caller's [glossaryKey]
-    // get glossary links inside the "?" panel, so the face stays clean (ONE "?")
-    // but every term has a path to its meaning.
-    val panelGlossaryKeys = remember(summary, glossaryKey) {
-        (listOfNotNull(glossaryKey) + glossaryKeysIn(summary)).distinct()
-    }
+    // Jargon in the summary (RIR, RPE, e1RM, …) gets glossary links inside the
+    // "?" panel, so the face stays clean (ONE "?") but every term has a path to
+    // its meaning.
+    val panelGlossaryKeys = remember(summary) { glossaryKeysIn(summary) }
     // Bold is a summary weight: a long coaching paragraph (or a sectioned
     // note under its own overline) reads as prose, so it drops to regular
-    // weight and stops outweighing the card titles around it. A safety
-    // card keeps bold (maximal emphasis), and a rich summary carries its
-    // own spans over the bold base.
+    // weight and stops outweighing the card titles around it. A safety card
+    // keeps bold (maximal emphasis).
     val summaryStyle = if (
-        summaryRich == null && !safetyCritical &&
+        !safetyCritical &&
         (proseSummary || section != null || summary.length > ProseSummaryChars)
     ) {
         Type.Body
     } else {
-        Type.Body.copy(fontWeight = FontWeight.Bold)
+        Type.BodyBold
     }
     val disclosure: @Composable () -> Unit = {
         DisclosureButton(expanded, subject = disclosureSubject) { expanded = !expanded }
@@ -297,7 +284,7 @@ internal fun EvidenceCard(
                 null
             },
         ) {
-            SummaryText(summary, summaryRich, summaryStyle, Modifier.fillMaxWidth())
+            Text(summary, modifier = Modifier.fillMaxWidth(), color = OnBgBody, style = summaryStyle)
             details()
         }
         return
@@ -334,7 +321,7 @@ internal fun EvidenceCard(
             // keeps the two-row face.
             if (!safetyCritical && section == null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    SummaryText(summary, summaryRich, summaryStyle, Modifier.weight(1f))
+                    Text(summary, modifier = Modifier.weight(1f), color = OnBgBody, style = summaryStyle)
                     Box(Modifier.offset(x = DisclosureEdgeInset)) { disclosure() }
                 }
             } else {
@@ -368,7 +355,7 @@ internal fun EvidenceCard(
                             disclosure()
                         }
                     }
-                    SummaryText(summary, summaryRich, summaryStyle, Modifier.fillMaxWidth())
+                    Text(summary, modifier = Modifier.fillMaxWidth(), color = OnBgBody, style = summaryStyle)
                 }
             }
             details()
@@ -413,16 +400,6 @@ private val CompactHeaderHeight = 28.dp
 /** A [DisclosureButton]'s 48dp target is wider than its disc: a trailing "?"
  *  shifts by this so the disc (not the target) ends at the content edge. */
 internal val DisclosureEdgeInset = (ActionMinHeight - DisclosureDiscSize) / 2
-
-/** The card's face summary: [rich] when the caller styled it, else plain [summary]. */
-@Composable
-private fun SummaryText(summary: String, rich: AnnotatedString?, style: TextStyle, modifier: Modifier) {
-    if (rich != null) {
-        Text(rich, modifier = modifier, color = OnBgBody, style = style)
-    } else {
-        Text(summary, modifier = modifier, color = OnBgBody, style = style)
-    }
-}
 
 /**
  * The three-part "why?" disclosure body. Renders the core-provided [WhyView] as:
@@ -837,7 +814,7 @@ private fun GlossaryTerm(row: GlossaryRow, highlighted: Boolean) {
             .padding(Space.Md.dp)
             .semantics(mergeDescendants = true) {},
     ) {
-        Text(row.term, color = OnBgBody, style = Type.Body.copy(fontWeight = FontWeight.Bold))
+        Text(row.term, color = OnBgBody, style = Type.BodyBold)
         Text(row.definition, color = OnBgMuted, style = Type.Body)
     }
 }

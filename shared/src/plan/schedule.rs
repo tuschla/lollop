@@ -1,24 +1,13 @@
 //! Weekday placement for one week's lift and run sessions.
 //!
-//! The week is laid out by an exhaustive, deterministic search over the
-//! athlete's available weekdays (ADH-DAYS-001: the user picks the days), scoring
-//! every arrangement against the spacing rules the KB states:
-//!
-//! - same-muscle lift days need about 48 h between them (LIFT-DAYS-001
-//!   templates; ADH-RESCHED-001 "48+ hours before the next hard session");
-//! - long or hard runs stay at least 24 h, ideally 48 h, from heavy leg work in
-//!   BOTH directions (HYB-CAP-001 / File 10 CAP-3, hybrid-012);
-//! - two hard sessions never land on back-to-back days (quality sessions spaced
-//!   ≥48 h, RUN-QUALITY limits);
-//! - otherwise spread sessions so rest days fall between them, and prefer a
-//!   late-week long run.
-//!
-//! A week of 7 days is small enough to enumerate fully (at most a few thousand
-//! arrangements), so the result is the exact minimum of the cost below with a
-//! fixed lexicographic tie-break: pure, no clock, no randomness.
+//! An exhaustive search over the athlete's available weekdays (ADH-DAYS-001)
+//! scores every arrangement with the spacing costs below and keeps the exact
+//! minimum, with a fixed lexicographic tie-break. When the free days cannot keep
+//! the hard runs ≥48 h apart, a quality session becomes easy (RUN-QUALITY-001).
 
 use super::DayRegion;
 use super::lift::{HEAVY_PCT_1RM, MovementPattern, movement_pattern};
+use crate::running;
 use crate::schema::{
     LiftIntensity, LiftSessionType, Prescription, RunSessionType, Session, SessionType,
 };
@@ -74,9 +63,6 @@ const HARD_BEFORE_LEGS: i32 = 20;
 /// Any two sessions on consecutive days: spread the week so rest days fall
 /// between sessions where the day count allows.
 const CONSECUTIVE: i32 = 5;
-/// Costs at or above this are spacing-rule violations (not mere preferences);
-/// a session move that creates one is refused.
-const VIOLATION: i32 = HARD_BEFORE_HEAVY_LEGS;
 
 fn is_hard_run(kind: RunSessionType) -> bool {
     kind == RunSessionType::LongRun || super::run::is_quality(kind)
@@ -245,6 +231,10 @@ fn trim_kinds(kinds: &[RunSessionType], n: usize) -> Vec<RunSessionType> {
 /// `avail[d]` = the athlete can train on weekday `d` (0 = Monday). `anchor`:
 /// a weekday that must hold a session when any arrangement allows it (the
 /// plan's first day, so a new plan never opens on a rest day).
+///
+/// Hard runs closer than RUN-QUALITY-001's 48 h (the week repeats, so Sunday
+/// and Monday are adjacent) cost a quality session: the last one in `runs`
+/// becomes an easy run and the week is placed again.
 pub(super) fn place_week(
     avail: [bool; 7],
     lifts: &[LiftSpec],
@@ -253,12 +243,35 @@ pub(super) fn place_week(
     anchor: Option<u16>,
 ) -> Placement {
     let anchor = anchor.filter(|&a| avail.get(usize::from(a)).copied().unwrap_or(false));
-    match anchor {
-        Some(a) => search_week(avail, lifts, runs, run_before, Some(a))
-            .or_else(|| search_week(avail, lifts, runs, run_before, None)),
-        None => search_week(avail, lifts, runs, run_before, None),
+    let mut runs = runs.to_vec();
+    loop {
+        let placement = match anchor {
+            Some(a) => search_week(avail, lifts, &runs, run_before, Some(a))
+                .or_else(|| search_week(avail, lifts, &runs, run_before, None)),
+            None => search_week(avail, lifts, &runs, run_before, None),
+        }
+        .unwrap_or_default();
+        match runs.iter().rposition(|k| super::run::is_quality(*k)) {
+            Some(i) if hard_runs_too_close(&placement.runs) => runs[i] = RunSessionType::Easy,
+            _ => return placement,
+        }
     }
-    .unwrap_or_default()
+}
+
+/// Two placed hard runs fall closer than RUN-QUALITY-001's minimum spacing.
+fn hard_runs_too_close(runs: &[(u16, RunSessionType)]) -> bool {
+    let min_gap = u16::from(running::quality_limits().value.min_spacing_hours / 24);
+    let hard: Vec<u16> = runs
+        .iter()
+        .filter(|(_, k)| is_hard_run(*k))
+        .map(|(d, _)| *d)
+        .collect();
+    hard.iter().enumerate().any(|(i, a)| {
+        hard[i + 1..].iter().any(|b| {
+            let gap = a.abs_diff(*b);
+            gap.min(7 - gap) < min_gap
+        })
+    })
 }
 
 /// The cheapest arrangement for [`place_week`]; with `anchor`, only the
@@ -424,13 +437,8 @@ pub(crate) fn move_conflict(
     let prev = spaced((to + 6) % 7, to == 0);
     let next = spaced((to + 1) % 7, to == 6);
     for (a, b) in [(prev, after[to]), (after[to], next)] {
-        let (c, reason) = adjacent_cost(a, b);
-        if c >= VIOLATION {
-            return Some(
-                reason
-                    .unwrap_or("it breaks the spacing between hard sessions")
-                    .into(),
-            );
+        if let (_, Some(reason)) = adjacent_cost(a, b) {
+            return Some(reason.into());
         }
     }
     None

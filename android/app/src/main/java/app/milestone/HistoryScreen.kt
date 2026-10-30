@@ -277,7 +277,7 @@ internal fun HistoryDestination(
         state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(Space.Screen.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
     ) {
         // 1. Stat strip over the rolling last 7 days (now − 7 days) of ALL activity,
         // so it sits above the Lifts | Runs filter. Nothing logged: only the empty line below.
@@ -317,7 +317,7 @@ internal fun HistoryDestination(
                     // tile taller than its neighbours.
                     Row(
                         modifier = Modifier.height(IntrinsicSize.Min),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.Md.dp + Space.Xs.dp),
                     ) {
                         StatTile("$sessionCount", null, pluralStringResource(R.plurals.history_stat_sessions, sessionCount))
                         if (showLifting || liftsPresent) {

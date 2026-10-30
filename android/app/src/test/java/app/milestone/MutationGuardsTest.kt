@@ -2,30 +2,26 @@ package app.milestone
 
 import android.content.Context
 import android.net.Uri
-import android.os.Looper
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
+import app.milestone.qa.QaHarness.onAppScope
 import app.milestone.qa.launchApp
 import app.milestone.qa.launchAppExpectingSetup
 import java.io.File
 import java.util.Locale
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.async
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows.shadowOf
 
 /**
  * Guards for behaviours no other test pins (see
@@ -50,20 +46,6 @@ class MutationGuardsTest {
     fun tearDown() {
         QaHarness.teardown()
         RunSession.reset()
-    }
-
-    /** Run [block] on the app's process scope, pumping the paused main looper
-     *  (same driver as ImportExportRoundtripTest.onAppScope). */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun <T> onAppScope(timeoutMs: Long = 30_000, block: suspend () -> T): T {
-        val job = EventDispatcher.scope.async { block() }
-        val end = System.currentTimeMillis() + timeoutMs
-        while (!job.isCompleted) {
-            shadowOf(Looper.getMainLooper()).idle()
-            if (System.currentTimeMillis() > end) fail("app-scope work did not finish in ${timeoutMs}ms")
-            Thread.sleep(2)
-        }
-        return job.getCompleted()
     }
 
     private fun logLines(): List<String> =

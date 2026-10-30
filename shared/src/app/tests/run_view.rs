@@ -93,6 +93,23 @@ fn pace_rounds_to_the_nearest_second_and_zero_pads() {
     assert_eq!(fmt_mss(1.0e10), "166666666:40");
 }
 
+/// The run card summary rounds its distance like every other distance line
+/// (`round_tenths`, half away from zero): `{:.1}` on the raw 5.25 km would
+/// round the tie half to even and print 5.2 beside a 5.3 elsewhere.
+#[test]
+fn run_card_summary_rounds_distance_like_every_distance_line() {
+    let app = Engine;
+    let mut model = Model::default();
+    set_today(&app, &mut model, POS_MON);
+    app.update(
+        log_run(5.25, 30.0, 0.0, 0.0, POS_MON * DAY_SEC + 7 * HOUR, 1),
+        &mut model,
+    )
+    .expect_only_render();
+    let summary = &app.view(&model).runs[0].summary;
+    assert!(summary.starts_with("5.3km @ "), "{summary}");
+}
+
 #[test]
 fn gps_tracked_run_derives_distance_and_pace_from_fixes() {
     let app = Engine;
@@ -403,19 +420,11 @@ fn run_view_differentiates_interval_from_steady_same_average() {
 
     let s = sv.interval.expect("steady interval verdict");
     let i = iv.interval.expect("interval verdict");
-    assert_eq!(
-        s.kind,
-        PaceVariability::Steady,
-        "VI {}",
-        s.variability_index
-    );
-    assert_eq!(
-        i.kind,
-        PaceVariability::Interval,
-        "VI {}",
-        i.variability_index
-    );
-    assert!(i.variability_index > s.variability_index);
+    let vi =
+        |v: &IntervalVerdictView| -> f64 { v.label.rsplit(' ').next().unwrap().parse().unwrap() };
+    assert_eq!(s.kind, PaceVariability::Steady, "{}", s.label);
+    assert_eq!(i.kind, PaceVariability::Interval, "{}", i.label);
+    assert!(vi(&i) > vi(&s), "{} vs {}", i.label, s.label);
     // Honestly graded Weak (flat-ground GOVSS/NGP simplification).
     assert_eq!(i.evidence.grade, Some(EvidenceGrade::Weak));
     assert!(
@@ -540,15 +549,21 @@ fn logged_run_track_excludes_the_pause_bridge_and_breaks_the_gpx() {
     // half of the run is LOST. The boundary is exactly what lets the core keep
     // segment 2 (real distance) while still excluding the bridge.
     let mut naive = Model::default();
-    app.update(log_run_track(relocation, 70.0, 0.0, 1000, 2), &mut naive)
-        .expect_only_render();
+    app.update(
+        log_run_track(relocation.clone(), 70.0, 0.0, 1000, 2),
+        &mut naive,
+    )
+    .expect_only_render();
     let naive_run = &app.view(&naive).runs[0];
     assert!(
         naive_run.distance_km < 0.6,
         "no boundary → segment 2 dropped as a teleport: {}",
         naive_run.distance_km,
     );
-    assert!(naive_run.qc_dropped >= 5, "the 5 seg-2 fixes were dropped");
+    assert!(
+        relocation.len() - qc_track(&relocation, &[]).track.len() >= 5,
+        "the 5 seg-2 fixes were dropped"
+    );
 }
 
 #[test]

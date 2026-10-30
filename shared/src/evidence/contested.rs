@@ -1,4 +1,13 @@
 //! The contested-question table (File 09 global index plus file-local rows).
+//!
+//! Id convention: bare `CQ-##` ids always mean File 09's GLOBAL index
+//! (CQ-01…CQ-15). Files 02–08/10 number their local lists independently; a
+//! local question with a global counterpart uses the global id (File 02
+//! block-periodization "CQ-02" → CQ-03; File 04 interval-length "CQ-06" →
+//! CQ-10; File 10 ACWR "CQ-04" → CQ-05, HRV "CQ-05" → CQ-04, interference
+//! "CQ-02/03" → CQ-06). A file-local question with no global counterpart gets
+//! `CQ-F<file>-<local>` (e.g. `CQ-F03-04`) and its own row; a global number is
+//! never reused for a different question.
 
 use super::ContestedQuestion;
 

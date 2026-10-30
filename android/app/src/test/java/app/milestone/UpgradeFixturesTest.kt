@@ -1,24 +1,26 @@
 package app.milestone
 
 import android.content.Context
-import android.os.Looper
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.ProcessDeath
 import app.milestone.qa.QaHarness
+import app.milestone.qa.QaHarness.fixture
+import app.milestone.qa.QaHarness.onAppScope
 import app.milestone.qa.launchApp
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.async
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.double
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -27,14 +29,13 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows.shadowOf
 
 /**
  * Upgrading keeps the user's data: the event logs, a data backup and an
@@ -67,11 +68,7 @@ class UpgradeFixturesTest {
         RunSession.reset()
     }
 
-    private fun fixture(name: String): ByteArray =
-        checkNotNull(javaClass.classLoader!!.getResourceAsStream("upgrade/$name")) { "fixture upgrade/$name not on the test classpath" }
-            .use { it.readBytes() }
-
-    private fun expected(v: String): JsonObject = Json.parseToJsonElement(fixture("$v.history.json").decodeToString()).jsonObject
+    private fun expected(v: String): JsonObject = Json.parseToJsonElement(fixture("upgrade/$v.history.json").decodeToString()).jsonObject
 
     private val logFile get() = File(ctx.filesDir, "event-log.ndjson")
 
@@ -80,7 +77,7 @@ class UpgradeFixturesTest {
     /** Install [v]'s log as the file the old build left, as an in-place update does. */
     private fun installOldLog(v: String) {
         logFile.parentFile!!.mkdirs()
-        logFile.writeBytes(fixture("$v.log.ndjson"))
+        logFile.writeBytes(fixture("upgrade/$v.log.ndjson"))
     }
 
     /** Boot the core over the log on disk, dated to the fixtures' day. */
@@ -89,7 +86,8 @@ class UpgradeFixturesTest {
         return Core.send(fixtureToday)
     }
 
-    /** Every History entry [v]'s build listed is in [view], unchanged and in order. */
+    /** Every History entry [v]'s build listed is in [view], unchanged and in order.
+     *  A field the old build's view did not have is not compared. */
     private fun assertSameHistory(what: String, v: String, view: ViewModel) {
         val e = expected(v)
         val lifts = e["lifts"]!!.jsonArray
@@ -103,6 +101,7 @@ class UpgradeFixturesTest {
             assertEquals(at, o["reps"]!!.jsonPrimitive.int, l.reps)
             assertEquals(at, o["rpe"]!!.jsonPrimitive.double, l.rpe, 1e-9)
             assertEquals(at, o["observed_at"]!!.jsonPrimitive.long, l.observed_at)
+            o["hold_sec"]?.let { assertEquals("$at hold", it.jsonPrimitive.intOrNull, l.hold_sec) }
         }
         val runs = e["runs"]!!.jsonArray
         assertEquals("$what: runs", runs.size, view.runs.size)
@@ -115,6 +114,9 @@ class UpgradeFixturesTest {
             assertTrue("$at distance $km vs ${r.distance_km}", abs(km - r.distance_km) <= 1e-9 * km.coerceAtLeast(1.0))
             val min = o["duration_min"]!!.jsonPrimitive.double
             assertTrue("$at duration $min vs ${r.duration_min}", abs(min - r.duration_min) <= 1e-9 * min.coerceAtLeast(1.0))
+            o["workout_type"]?.let { assertEquals("$at type", it.jsonPrimitive.contentOrNull, r.workout_type) }
+            o["session_rpe"]?.let { assertEquals("$at session RPE", it.jsonPrimitive.intOrNull, r.session_rpe) }
+            o["avg_hr_bpm"]?.let { assertEquals("$at avg HR", it.jsonPrimitive.doubleOrNull, r.avg_hr_bpm) }
         }
         assertEquals("$what: safety tier", e["safety_tier"]!!.jsonPrimitive.content, view.safety_tier)
         assertEquals("$what: training paused", e["train_blocked"]!!.jsonPrimitive.boolean, view.train_blocked)
@@ -169,29 +171,15 @@ class UpgradeFixturesTest {
     @Test
     fun aPlanRemovedInTheOldBuildStaysRemoved() {
         logFile.parentFile!!.mkdirs()
-        logFile.writeBytes(fixture("203ab56-plan-removed.log.ndjson"))
+        logFile.writeBytes(fixture("upgrade/203ab56-plan-removed.log.ndjson"))
         assertTrue("the old rewrite kept no plan line", logLines().none { EventLog.variantOf(it) in setOf("GeneratePlan", "ClearPlan") })
         ctx.setupPrefs().edit().putBoolean("onboarding_done", true).putBoolean(KEY_PLAN_CLEARED, true).commit()
         rule.launchApp()
         val model = checkNotNull(EventDispatcher.model.value)
         assertEquals("the set", 1, model.lifts.size)
         assertNotNull("the profile", model.profile)
-        assertEquals("no plan", null, model.program)
+        assertNull("no plan", model.program)
         assertTrue("boot generated a plan", logLines().none { EventLog.variantOf(it) == "GeneratePlan" })
-    }
-
-    // ── Driving process-scoped coroutines from the (main-looper) test thread ──
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun <T> onAppScope(timeoutMs: Long = 30_000, block: suspend () -> T): T {
-        val job = EventDispatcher.scope.async { block() }
-        val end = System.currentTimeMillis() + timeoutMs
-        while (!job.isCompleted) {
-            shadowOf(Looper.getMainLooper()).idle()
-            if (System.currentTimeMillis() > end) fail("app-scope work did not finish in ${timeoutMs}ms")
-            Thread.sleep(2)
-        }
-        return job.getCompleted()
     }
 
     @Test
@@ -199,13 +187,11 @@ class UpgradeFixturesTest {
         // Another phone with its own data, about to restore the old backup.
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         bootCore()
-        val check = streamValidateImport(ByteArrayInputStream(fixture("4728546.backup.ndjson")), MAX_IMPORT_BYTES)
-        if (check !is ImportCheck.Valid) {
-            fail("the 4728546 backup is refused: $check")
-            return
-        }
-        val lines = check.lines
-        assertEquals("every backup line is read", fixture("4728546.backup.ndjson").decodeToString().lines().count { it.isNotBlank() }, lines.size)
+        val backup = fixture("upgrade/4728546.backup.ndjson")
+        val result = streamValidateImport(ByteArrayInputStream(backup), MAX_IMPORT_BYTES)
+        check(result is ImportCheck.Valid) { "the 4728546 backup is refused: $result" }
+        val lines = result.lines
+        assertEquals("every backup line is read", backup.decodeToString().lines().count { it.isNotBlank() }, lines.size)
         val summary = summarizeImport(lines, ZoneId.of("Europe/Berlin"))
         val e = expected("4728546")
         // Sets, runs and the activity, plus the 32 check-ins and the 3 readiness
@@ -227,7 +213,7 @@ class UpgradeFixturesTest {
         val firstFix = 20725L * 86_400 + 7 * 3600 - 7200
         for ((v, starts) in listOf("203ab56" to emptyList(), "4728546" to listOf(25))) {
             QaHarness.resetActiveRunStore(ctx)
-            File(ctx.filesDir, "active-run.ndjson").writeBytes(fixture("$v.active-run.ndjson"))
+            File(ctx.filesDir, "active-run.ndjson").writeBytes(fixture("upgrade/$v.active-run.ndjson"))
             assertTrue("$v: the sidecar marks a run in progress", ActiveRunStore.hasActiveRun(ctx))
             val track = ActiveRunStore.recover(ctx)
             // 40 fixes; the torn last line (killed mid-append) is not one.

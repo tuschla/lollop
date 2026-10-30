@@ -309,7 +309,7 @@ fn build_reentry_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
             Some(frac) => format!(
                 "After {off} off: restart at ~{:.0}% of your old weights and build back over {} {}",
                 frac * 100.0,
-                fmt_u8_range(lo, hi),
+                fmt_u8_range((lo, hi)),
                 weeks(hi)
             ),
             None => format!(
@@ -317,15 +317,13 @@ fn build_reentry_guidance(p: &Profile, rows: &mut Vec<GuidanceView>) {
             ),
         };
         push_guidance(rows, "Return to training", summary, &re);
-        let mev = hypertrophy::layoff_reduces_mev(true);
-        if mev.value {
-            push_guidance(
-                rows,
-                "Return to training",
-                "After a break, fewer sets regrow muscle: restart below your old set counts"
-                    .to_string(),
-                &mev,
-            );
-        }
+        let mev = graded((), claims::HYP_LAYOFF_001);
+        push_guidance(
+            rows,
+            "Return to training",
+            "After a break, fewer sets regrow muscle: restart below your old set counts"
+                .to_string(),
+            &mev,
+        );
     }
 }

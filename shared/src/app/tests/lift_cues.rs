@@ -499,6 +499,40 @@ fn the_first_set_clause_goes_once_a_set_is_logged() {
 }
 
 #[test]
+fn the_first_set_clause_stays_spent_once_the_session_is_finished() {
+    // A finished session hands the hero to the next training day; the clause
+    // still reads today's own row.
+    let (app, mut model) = planned_strength_model(true);
+    report_low_hrv(&app, &mut model);
+    let clause = "Log your first work set";
+    let has_clause = |vm: &ViewModel| vm.adjustments.iter().any(|a| a.summary.contains(clause));
+    let vm = app.view(&model);
+    assert!(has_clause(&vm), "the hold asks for the first set");
+    let ns = vm.next_session.expect("today's session");
+    assert_eq!(ns.epoch_day, MON);
+    let mut at = MON * DAY_SEC + 3_600;
+    for it in ns.items.iter().filter(|it| !it.is_run()) {
+        for _ in 0..it.sets {
+            let reps = u32::from(it.reps_high.max(1));
+            log(
+                &app,
+                &mut model,
+                &it.exercise,
+                set(it.load_kg.unwrap_or(60.0), reps, 7.0, at),
+            );
+            at += 120;
+        }
+    }
+    let vm = app.view(&model);
+    assert_ne!(
+        vm.next_session.as_ref().map(|s| s.epoch_day),
+        Some(MON),
+        "the finished session hands the hero on"
+    );
+    assert!(!has_clause(&vm), "{:?}", vm.adjustments);
+}
+
+#[test]
 fn a_short_lift_note_names_the_day_and_expires_on_its_next_session() {
     // "Came up short on <lift> on <day>: k of n sets (did instead of
     // planned)", gone once that lift's next session is today.

@@ -60,10 +60,6 @@
     <string name="run_stat_avg_pace">Avg pace</string>
     <!-- Spoken stat: %1$s label, %2$s value with spoken unit, e.g. "Distance, 3.18 miles". -->
     <string name="run_stat_cd">%1$s, %2$s</string>
-    <string name="run_unit_miles">%1$s miles</string>
-    <string name="run_unit_km">%1$s kilometers</string>
-    <string name="run_unit_per_mile">%1$s per mile</string>
-    <string name="run_unit_per_km">%1$s per kilometer</string>
     <string name="run_your_log">Your log</string>
     <string name="run_rate_title">Rate this run</string>
     <string name="run_effort_value">%1$d of 10 · %2$s</string>

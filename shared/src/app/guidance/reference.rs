@@ -40,7 +40,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
         "Hybrid",
         format!(
             "Two sessions on one day: ideally {} h apart, at least {} h",
-            fmt_u8_range(sp.value.ideal_min_hours, sp.value.ideal_max_hours),
+            fmt_u8_range((sp.value.ideal_min_hours, sp.value.ideal_max_hours)),
             sp.value.fallback_min_hours
         ),
         &sp,
@@ -52,7 +52,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
         "Hybrid",
         format!(
             "Keep {} lift sessions a week in a running block",
-            fmt_u8_range(ml.value.0, ml.value.1)
+            fmt_u8_range(ml.value)
         ),
         &ml,
     );
@@ -116,10 +116,7 @@ fn push_hybrid_reference(rows: &mut Vec<GuidanceView>) {
         "Hybrid",
         format!(
             "In a peak strength or power block: {} easy runs a week, no hard intervals, and long runs at least {} hours from heavy leg days",
-            fmt_u8_range(
-                pk.value.max_easy_runs_per_week.0,
-                pk.value.max_easy_runs_per_week.1
-            ),
+            fmt_u8_range(pk.value.max_easy_runs_per_week),
             pk.value.long_run_min_gap_hours
         ),
         &pk,
@@ -156,7 +153,7 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
                 tr.value.volume_reduction_frac.0,
                 tr.value.volume_reduction_frac.1
             ),
-            fmt_u8_range(tr.value.duration_days.0, tr.value.duration_days.1)
+            fmt_u8_range(tr.value.duration_days)
         ),
         &tr,
     );
@@ -167,7 +164,7 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         "Strength",
         format!(
             "Last near-max deadlift {} days out from a meet",
-            fmt_u8_range(dl.value.0, dl.value.1)
+            fmt_u8_range(dl.value)
         ),
         &dl,
     );
@@ -178,7 +175,7 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         "Strength",
         format!(
             "Heavy set before a jump or sprint: rest {} min between them",
-            fmt_u8_range(pap.value.0, pap.value.1)
+            fmt_u8_range(pap.value)
         ),
         &pap,
     );
@@ -203,9 +200,9 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         "Strength",
         format!(
             "Olympic-lift pulls: {} sets × {} reps at {}% 1RM, {}–{} min rest",
-            fmt_u8_range(od.value.sets.0, od.value.sets.1),
-            fmt_u8_range(od.value.reps.0, od.value.reps.1),
-            fmt_u8_range(od.value.pct_1rm.0, od.value.pct_1rm.1),
+            fmt_u8_range(od.value.sets),
+            fmt_u8_range(od.value.reps),
+            fmt_u8_range(od.value.pct_1rm),
             od.value.rest_sec.0 / 60,
             od.value.rest_sec.1 / 60
         ),
@@ -217,17 +214,16 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         rows,
         "Strength",
         format!(
-            "Top set with ~{:.0} reps left, then back-off sets {:.0}–{:.0}% lighter",
+            "Top set with ~{:.0} reps left, then back-off sets {}% lighter",
             strength::rpe_to_rir(f64::from(bo.value.top_set_rpe)),
-            bo.value.drop_frac.0 * 100.0,
-            bo.value.drop_frac.1 * 100.0
+            fmt_frac_pct_range(bo.value.drop_frac.0, bo.value.drop_frac.1)
         ),
         &bo,
     );
 
-    // Call with the rule's own trigger thresholds purely to inherit the graded
-    // citation; the prose states the rule itself (educational, not a live verdict).
-    let two = strength::two_for_two_met(2, 2);
+    // The plan's own step-up follows STR-LOADPROG-001 (`apply_last_sets`); the
+    // stall check is `reviews/trend.rs`. These rows state the rules.
+    let two = graded((), claims::STR_2FOR2_001);
     push_guidance(
         rows,
         "Strength",
@@ -235,7 +231,7 @@ fn push_strength_reference(rows: &mut Vec<GuidanceView>) {
         &two,
     );
 
-    let stall = strength::stall_triggers_deload(2, true);
+    let stall = graded((), claims::STR_STALL_001);
     push_guidance(
         rows,
         "Strength",
@@ -260,11 +256,13 @@ fn push_hypertrophy_reference(rows: &mut Vec<GuidanceView>) {
         rows,
         "Hypertrophy",
         format!(
-            "Lighter week: about {:.0}% of your sets, ~{} reps left, {:.0}–{:.0}% of your usual weights",
+            "Lighter week: about {:.0}% of your sets, ~{} reps left, {}% of your usual weights",
             hd.value.sets_fraction * 100.0,
-            fmt_u8_range(hd.value.rir.0, hd.value.rir.1),
-            hd.value.load_frac_of_working.0 * 100.0,
-            hd.value.load_frac_of_working.1 * 100.0
+            fmt_u8_range(hd.value.rir),
+            fmt_frac_pct_range(
+                hd.value.load_frac_of_working.0,
+                hd.value.load_frac_of_working.1
+            )
         ),
         &hd,
     );
@@ -283,8 +281,8 @@ fn push_hypertrophy_reference(rows: &mut Vec<GuidanceView>) {
         "Hypertrophy",
         format!(
             "Joint pain at heavy weights: shift that muscle to {} reps at {}% 1RM (lighter weights still build muscle)",
-            fmt_u8_range(jp.value.reps.0, jp.value.reps.1),
-            fmt_u8_range(jp.value.pct_1rm.0, jp.value.pct_1rm.1)
+            fmt_u8_range(jp.value.reps),
+            fmt_u8_range(jp.value.pct_1rm)
         ),
         &jp,
     );
@@ -334,6 +332,14 @@ fn push_nutrition_reference(reds_present: bool, rows: &mut Vec<GuidanceView>) {
     );
 }
 
+/// "70% easy, 20% moderate, 10% hard".
+fn fmt_split(d: &running::IntensityDistribution) -> String {
+    format!(
+        "{}% easy, {}% moderate, {}% hard",
+        d.easy_pct, d.moderate_pct, d.hard_pct
+    )
+}
+
 /// Couch-to-5K structure and the intensity-distribution models.
 fn push_running_reference(rows: &mut Vec<GuidanceView>) {
     let c25k = running::c25k_plan();
@@ -352,8 +358,8 @@ fn push_running_reference(rows: &mut Vec<GuidanceView>) {
         rows,
         "Running",
         format!(
-            "Pyramidal split (base / newer runners): {}% easy, {}% moderate, {}% hard",
-            pyr.value.easy_pct, pyr.value.moderate_pct, pyr.value.hard_pct
+            "Pyramidal split (base / newer runners): {}",
+            fmt_split(&pyr.value)
         ),
         &pyr,
     );
@@ -363,8 +369,8 @@ fn push_running_reference(rows: &mut Vec<GuidanceView>) {
         rows,
         "Running",
         format!(
-            "Polarized split (trained / peak phase): {}% easy, {}% moderate, {}% hard",
-            pol.value.easy_pct, pol.value.moderate_pct, pol.value.hard_pct
+            "Polarized split (trained / peak phase): {}",
+            fmt_split(&pol.value)
         ),
         &pol,
     );
@@ -422,14 +428,11 @@ fn push_coaching_reference(rows: &mut Vec<GuidanceView>) {
         &sub,
     );
 
-    let framing = feedback::default_goal_framing();
-    let framing_text = match framing.value {
-        feedback::GoalFraming::Process => {
-            "Next steps name things you can control: pacing, effort and technique"
-        }
-        feedback::GoalFraming::Outcome => {
-            "Outcome/result framing (only where an individual goal-efficacy signal supports it)"
-        }
-    };
-    push_guidance(rows, "Coaching", framing_text.to_string(), &framing);
+    let framing = graded((), claims::FB_PROCESS_GOAL_001);
+    push_guidance(
+        rows,
+        "Coaching",
+        "Next steps name things you can control: pacing, effort and technique".to_string(),
+        &framing,
+    );
 }

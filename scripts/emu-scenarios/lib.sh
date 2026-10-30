@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # Device helpers for scripts/emulator-scenarios.sh, scripts/emu-scenarios/
-# surfaces.sh, scripts/qa-emulator.sh and scripts/soak-emulator.sh (sourced; also
-# usable from an interactive shell: `source scripts/emu-scenarios/lib.sh`).
+# surfaces.sh, scripts/emu-scenarios/upgrade.sh, scripts/qa-emulator.sh and
+# scripts/soak-emulator.sh (sourced; also usable from an interactive shell:
+# `source scripts/emu-scenarios/lib.sh`).
 #   Needs: SERIAL, APP_ID, OUT (an existing dir), TZ0; the Android SDK from sdk.dir
 #   in android/local.properties, else $ANDROID_HOME / $ANDROID_SDK_ROOT.
 
@@ -149,6 +150,179 @@ meminfo_kb() {
 }
 # Count of event-log lines on device.
 log_lines() { adb_ exec-out cat "$APP_FILES/event-log.ndjson" 2>/dev/null | grep -c . || true; }
+EV() { python3 "$HELP/events.py" "$@"; }
+# install_apk APK [pm install flags, e.g. -r]: `adb install`, else a pushed
+# `pm install` (on some API 37 images `adb install` fails with "Broken pipe").
+# Echoes the last status line; succeeds on "Success".
+install_apk() {
+  local apk="$1" r; shift
+  r="$(adb_ install "$@" "$apk" 2>&1 | tail -1)"
+  if [[ "$r" != Success ]]; then
+    adb_ push "$apk" /data/local/tmp/emu-install.apk >/dev/null &&
+      r="$(sh_ pm install "$@" /data/local/tmp/emu-install.apk | tail -1)"
+  fi
+  echo "$r"
+  [[ "$r" == Success ]]
+}
+# logcat_checks: stop the logcat capture ($LOGCAT_PID), scan $OUT/logcat.txt
+# (scan_logcat.py) and add its crash / ANR / OOM / FGS / StrictMode rows to
+# checks.tsv. A scan that fails is a FAIL row, never a silent gap.
+logcat_checks() {
+  kill "$LOGCAT_PID" 2>/dev/null; wait "$LOGCAT_PID" 2>/dev/null
+  python3 "$HELP/scan_logcat.py" "$OUT/logcat.txt" "$OUT/logcat-scan.json" >/dev/null ||
+    { check FAIL logcat "logcat scan" "scan_logcat.py failed on $OUT/logcat.txt"; return 0; }
+  python3 - "$OUT/logcat-scan.json" "$OUT/checks.tsv" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))
+out = open(sys.argv[2], "a")
+for k, label in (("fatal", "Java FATAL EXCEPTION (not induced)"), ("native", "native crash"), ("anr", "ANR"),
+                 ("oom", "OutOfMemoryError"), ("fgs", "foreground-service failure")):
+    out.write(f"{'PASS' if s[k] == 0 else 'FAIL'}\tlogcat\t{label}\t{s[k]} occurrence(s) {json.dumps(s['by_phase'].get(k, {}))}\n")
+out.write(f"{'PASS' if s['strictmode'] == 0 else 'INFO'}\tlogcat\tStrictMode\t{s['strictmode']} line(s)\n")
+if s["induced"]:
+    out.write(f"INFO\tlogcat\tinduced crashes (am crash)\t{s['induced']}\n")
+PY
+}
+
+# ── Set editor ───────────────────────────────────────────────────────────────
+open_set_editor() {
+  tap_node eq Log || return 1; sleep 2
+  tap_node eq "Log set" || return 1
+  wait_text eq "Exercise" 8 || return 1
+  # No exercise chosen yet: the search field shows its placeholder.
+  if has_text eq "Search exercises"; then tap_node eq "Back Squat" || return 1; sleep 2; fi
+  return 0
+}
+# Tap MODE TEXT inside the editor, scrolling its content up to reveal it (large
+# fonts / display sizes push the weight and reps rows below the pinned footer).
+tap_scroll() {
+  local i b
+  for i in 1 2 3 4 5 6; do
+    tap_node "$1" "$2" 1 2>/dev/null && return 0
+    b="$(find_node scroll)" || b="0 450 1080 1050"
+    read -r -a b <<<"$b"
+    adb_ shell input swipe 540 $(( b[3] - 40 )) 540 $(( b[1] + (b[3] - b[1]) / 4 )) 400; sleep 1
+  done
+  return 1
+}
+close_editor() {
+  if has_text eq "Done for now"; then tap_node eq "Done for now"
+  else tap_node eq Close; fi
+  sleep 2
+  has_text eq Discard && { tap_node eq Discard; sleep 1; }
+  # An editor opened from the Log sheet returns to it: dismiss that too.
+  has_text eq "Exercise, weight, reps" && { adb_ shell input keyevent 4; sleep 2; }
+  return 0
+}
+
+# ── System UI: home screen, Quick Settings tile, Today widget ────────────────
+home() { adb_ shell input keyevent 3; sleep 2; }
+# Every window (status bar, shade, launcher, app) into ui/NAME.xml.
+wdump() {
+  local i
+  for i in 1 2 3; do
+    adb_ shell uiautomator dump --windows /sdcard/emu-wdump.xml >/dev/null 2>&1 &&
+      adb_ exec-out cat /sdcard/emu-wdump.xml >"$OUT/ui/$1.xml" 2>/dev/null &&
+      grep -q '</displays>' "$OUT/ui/$1.xml" && return 0
+    sleep 1
+  done
+  return 1
+}
+wfind() { python3 "$HELP/node.py" "$2" "$3" <"$OUT/ui/$1.xml"; } # wfind DUMP MODE TEXT
+snapshot() { adb_ exec-out cat "$APP_FILES/widget-today.json" 2>/dev/null; }
+# The reminder alarm's next time ("YYYY-MM-DD HH:MM:SS", device local); empty
+# when none is set.
+rem_alarm() {
+  sh_ dumpsys alarm | grep -A3 'walarm\*:app.milestone.action.SESSION_REMINDER' |
+    sed -n 's/.*origWhen=\([0-9-]* [0-9:]*\).*/\1/p' | head -1
+}
+TILE="$APP_ID/.QuickTileService"
+# Open Quick Settings and dump it as ui/NAME.xml; echo the tile's label and leave
+# the panel open (collapse it with `cmd statusbar collapse`). The QS tile node
+# carries the label as its text (content-desc adds the state). The panel binds
+# the tile when it opens (onStartListening), so the label is read again 2 s after
+# it first shows to get the settled state.
+tile_label() {
+  local i l re='^(Log|Log set|Start run|Run · recording)$'
+  adb_ shell cmd statusbar expand-settings; sleep 3
+  for i in 1 2 3; do
+    wdump "$1" || continue
+    l="$(wfind "$1" re "$re" | cut -d' ' -f7-)"
+    if [[ -n "$l" ]]; then
+      sleep 2
+      wdump "$1" && l="$(wfind "$1" re "$re" | cut -d' ' -f7-)"
+      [[ -n "$l" ]] && { echo "$l"; return 0; }
+    fi
+    # The added tile lands on the last QS page.
+    adb_ shell input swipe 900 700 150 700 300; sleep 2
+  done
+  return 1
+}
+# add_tile: `cmd statusbar add-tile`, then wait (max ~40 s) until the tile shows
+# on the QS panel (it takes a while to bind on API 34).
+add_tile() {
+  local i
+  sh_ cmd statusbar add-tile "$TILE" >/dev/null
+  for i in 1 2 3 4 5 6; do
+    sleep 3
+    tile_label tile-added >/dev/null && { adb_ shell cmd statusbar collapse; return 0; }
+    adb_ shell cmd statusbar collapse
+  done
+  log "tile $TILE not on the QS panel after add-tile"
+  return 1
+}
+LAUNCHER="com.google.android.apps.nexuslauncher"
+# drag X1 Y1 X2 Y2: a long-press drag as raw motion events (the launcher's
+# widget-picker preview starts a drag only after a held touch; `input
+# draganddrop` does not hold long enough on API 34).
+drag() {
+  local i
+  adb_ shell input motionevent DOWN "$1" "$2"; sleep 2
+  for i in 1 2 3 4 5 6 7 8; do
+    adb_ shell input motionevent MOVE $(( $1 + ($3 - $1) * i / 8 )) $(( $2 + ($4 - $2) * i / 8 ))
+  done
+  sleep 1
+  adb_ shell input motionevent UP "$3" "$4"
+}
+widget_bound() { sh_ dumpsys appwidget | grep -q "cmp:ComponentInfo{$APP_ID/$APP_ID.widget.TodayWidgetReceiver}"; }
+# Place the Today widget through the launcher's picker on a reset home screen
+# (launcher data cleared, so a long-press lands on empty grid): long-press home →
+# Widgets → search "lollop" → Today → tap the preview → "Add Today widget"
+# (API 35+), else (API 34: no Add button) drag the preview image
+# (`widget_preview_container`) onto the home grid.
+place_widget() {
+  local r p preview='^[0-9]+ wide by [0-9]+ high$'
+  adb_ shell pm clear "$LAUNCHER" >/dev/null 2>&1; sleep 3
+  home; home; sleep 3
+  evidence widget-home-clean
+  adb_ shell input swipe 540 1300 540 1300 1500; sleep 2
+  tap_node eq Widgets || return 1; sleep 3
+  if tap_node eq Search 2; then sleep 1; adb_ shell input text lollop; sleep 3; fi
+  scroll_to eq lollop 6 || return 1
+  has_text re "$preview" || { tap_node eq lollop; sleep 2; }
+  has_text re "$preview" || { tap_node eq Today 2; sleep 2; }
+  evidence widget-picker
+  has_text eq "Add Today widget" || { tap_node re "$preview" 2; sleep 2; }
+  evidence widget-picker-preview
+  if has_text eq "Add Today widget"; then
+    tap_node eq "Add Today widget"; sleep 4
+  else
+    r="$(find_node rid widget_preview_container)" || r="$(find_node rid widget_preview)" || return 1
+    read -r -a p <<<"$r"
+    drag "${p[0]}" "${p[1]}" 540 800; sleep 4
+  fi
+  # The launcher leaves the new widget in resize mode (no idle UI state for
+  # uiautomator until it is dismissed).
+  home
+  evidence widget-placed
+  widget_bound && wait_text eq "Open Today in lollop" 15
+}
+# widget_texts NAME: the widget's labels (home screen dump) one per line.
+widget_texts() {
+  home; sleep 2
+  evidence "$1"
+  python3 "$HELP/node.py" texts <"$OUT/ui/$1.xml" | sed -n '/content-desc=Open Today in lollop/,$p' | head -12
+}
 
 # ── Emulator lifecycle ───────────────────────────────────────────────────────
 EMU_PID=""

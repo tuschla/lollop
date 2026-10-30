@@ -1,22 +1,8 @@
 //! Readiness assembly helpers: performance-signal expiry, provisional/autoreg
-//! source rows, the Today headline, check-in/baseline echoes, and the readiness
-//! signal groups.
+//! source rows, the Today headline, baseline echoes, and the readiness signal
+//! groups.
 
 use super::*;
-
-/// Echo the most recent check-in for shell rehydration.
-pub(super) fn to_checkin_echo(c: &CheckinInput) -> CheckinEchoView {
-    CheckinEchoView {
-        observed_at: c.observed_at,
-        sleep_quality: c.sleep_quality,
-        soreness: c.soreness,
-        mood: c.mood,
-        fatigue: c.fatigue,
-        stress: c.stress,
-        resting_hr_bpm: c.resting_hr_bpm,
-        hrv_rmssd_ms: c.hrv_rmssd_ms,
-    }
-}
 
 /// Human label for one still-collecting check-in channel. The shell phrases
 /// the progress row itself from `kind`/`have`/`need`; no training claim
@@ -91,7 +77,7 @@ pub(super) fn build_provisional(model: &Model, facts: &RunFacts) -> Option<Adjus
                 .runs
                 .iter()
                 .zip(&facts.started)
-                .filter(|(r, _)| r.observed_at > 0)
+                .filter(|(r, _)| !is_undated(r.observed_at))
                 .map(|(_, &start)| local_day(start, offset)),
         )
         .collect();
@@ -101,11 +87,11 @@ pub(super) fn build_provisional(model: &Model, facts: &RunFacts) -> Option<Adjus
     let newest_checkin_day = model
         .checkins
         .iter()
-        .filter(|c| c.observed_at > 0)
+        .filter(|c| !is_undated(c.observed_at))
         .map(|c| local_day(c.observed_at, offset))
         .max();
     for c in &model.checkins {
-        if c.observed_at > 0 {
+        if !is_undated(c.observed_at) {
             let d = local_day(c.observed_at, offset);
             if newest_checkin_day.is_none_or(|n| n - d < autoreg::LONG_BASELINE_WINDOW_DAYS) {
                 days.insert(d);
@@ -164,13 +150,9 @@ pub(super) fn build_autoreg_source(
             ReadinessSignal::WellnessZ | ReadinessSignal::Soreness
         )
     });
-    // The derived HRV channel collapses the whole rolling baseline into ONE
-    // `HrvLnRmssd` input dated at the newest HRV day (see
-    // `autoreg::derive_readiness`), so counting inputs in the trailing week
-    // undercounts an active baseline — it sees 1, not the ≥7 days behind it —
-    // whenever the newest HRV day isn't the global latest day. An active baseline
-    // is the state that actually arms the autoreg-028 downgrade, so treat it as
-    // usable HRV regardless of whether a reading landed on the latest day.
+    // An active baseline is collapsed into one `HrvLnRmssd` input dated at the
+    // newest HRV day (`autoreg::derive_readiness`), so it counts as usable HRV
+    // even when that day is not the latest.
     let src = autoreg::autoreg_source(hrv_today || hrv_baseline_active, recent_hrv, subjective);
     // One plain line: what the weights follow right now.
     let text = match src.value {
@@ -279,18 +261,13 @@ pub(super) fn blocks_training(r: &Recommended<Adjustment>) -> bool {
 }
 
 /// Why training is on hold (contract C2), the most specific reason first: a
-/// profile health gate (it stops the plan itself), then the readiness block in
-/// the ladder order the rule layer applies (medical red flag > pain > illness),
-/// then a weekly-check-in referral. `None` unless `train_blocked`.
+/// profile health gate (it stops the plan itself), else the reason of the
+/// blocking call itself (`SafetyState::hold`). `None` without a hold.
 pub(super) fn hold_reason(
-    train_blocked: bool,
+    hold: Option<&Recommended<Adjustment>>,
     health: Option<&HealthScreen>,
-    recommended: &[Recommended<Adjustment>],
-    review_recs: &[Recommended<Adjustment>],
 ) -> Option<HoldReason> {
-    if !train_blocked {
-        return None;
-    }
+    let hold = hold?;
     if let Some(h) = health.filter(|h| h.any_gate()) {
         return Some(if h.youth {
             HoldReason::Youth
@@ -308,24 +285,16 @@ pub(super) fn hold_reason(
             HoldReason::AcuteIllnessProfile
         });
     }
-    let reason = |r: &Recommended<Adjustment>| {
-        let claim = r.claim_id();
-        if claim == claims::SAFE_REDS_001 {
-            HoldReason::Reds
-        } else if is_pain_claim(claim) {
-            HoldReason::Pain
-        } else if is_illness_claim(claim) || matches!(r.value, Adjustment::RestDay) {
-            HoldReason::Illness
-        } else {
-            HoldReason::MedicalSignal
-        }
-    };
-    recommended
-        .iter()
-        .chain(review_recs)
-        .find(|r| blocks_training(r))
-        .map(reason)
-        .or(Some(HoldReason::MedicalSignal))
+    let claim = hold.claim_id();
+    Some(if claim == claims::SAFE_REDS_001 {
+        HoldReason::Reds
+    } else if is_pain_claim(claim) {
+        HoldReason::Pain
+    } else if is_illness_claim(claim) || matches!(hold.value, Adjustment::RestDay) {
+        HoldReason::Illness
+    } else {
+        HoldReason::MedicalSignal
+    })
 }
 
 /// Content fingerprint of the check-in history (every field the derivation
@@ -535,7 +504,7 @@ pub(super) fn perf_sets(
     offset: i64,
 ) -> Vec<autoreg::PerfSet<'_>> {
     sets.iter()
-        .filter(|s| s.hold_sec.is_none() && s.observed_at > 0)
+        .filter(|s| s.hold_sec.is_none() && !is_undated(s.observed_at))
         .filter(|s| local_day(s.observed_at, offset) <= through)
         .map(|s| autoreg::PerfSet {
             exercise: &s.exercise,
@@ -561,7 +530,7 @@ pub(super) fn effective_high_load_block(
     if profile.high_load_block {
         return true;
     }
-    let Some(idx) = plan_week_index(model, days, day.saturating_sub(mon0_weekday(day))) else {
+    let Some(idx) = plan_week_index(model, days, monday_of(day)) else {
         return false;
     };
     let (load_weeks, cycle_len) = crate::plan::cycle_shape(profile);

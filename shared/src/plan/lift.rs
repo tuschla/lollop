@@ -311,8 +311,6 @@ fn movement_tokens(name: &str) -> impl Iterator<Item = &str> {
 pub(super) const HEAVY_PCT_1RM: f32 = 80.0;
 
 /// The DUP emphasis for a lift day, GOAL-AWARE (`day_index % 3`):
-/// - Hypertrophy leads with its hypertrophy day, so even 2 lift days carry one
-///   6–12-rep day.
 /// - MaxStrength: Heavy → HeavyVolume → Hypertrophy. Each main lift gets ≥80 %
 ///   1RM in ≥2 sessions a week at 2 OR 3+ lift days; the lighter day adds to
 ///   the heavy ones rather than replacing one (STR-HEAVYFREQ-001; strength-001
@@ -323,10 +321,14 @@ pub(super) const HEAVY_PCT_1RM: f32 = 80.0;
 ///   Heavy → Power → HeavyVolume — two heavy days and one power day, because
 ///   weaker athletes gain jump/sprint performance about as much from heavy
 ///   strength work and far more 1RM (STR-BASE-POWER-001).
+///
+/// A Hypertrophy goal runs its own week (`plan::hypertrophy`) and never reads
+/// this; it takes the MaxStrength row.
 pub(super) fn dup_emphasis(goal: LiftGoal, power_base: bool, day_index: usize) -> DupDay {
     let base = match goal {
-        LiftGoal::Hypertrophy => [DupDay::Hypertrophy, DupDay::Heavy, DupDay::Power],
-        LiftGoal::MaxStrength => [DupDay::Heavy, DupDay::HeavyVolume, DupDay::Hypertrophy],
+        LiftGoal::MaxStrength | LiftGoal::Hypertrophy => {
+            [DupDay::Heavy, DupDay::HeavyVolume, DupDay::Hypertrophy]
+        }
         LiftGoal::Power if power_base => [DupDay::Heavy, DupDay::Power, DupDay::HeavyVolume],
         LiftGoal::Power => [DupDay::Heavy, DupDay::Power, DupDay::Hypertrophy],
     };
@@ -397,7 +399,7 @@ fn emphasis_goal(emphasis: DupDay) -> LiftGoal {
 /// week within the accumulation block, the block length, this day's 0-based
 /// position among the week's lift days in weekday order (`slot`), and the
 /// region every lift day of the week trains (`week_regions`, LIFT-DAYS-001
-/// templates), so this day's region is `week_regions.region(slot)`.
+/// templates), so this day's region is `week_regions.as_slice()[slot]`.
 #[derive(Clone, Copy)]
 pub(super) struct BlockCtx {
     pub(super) n_lift_days: usize,
@@ -421,11 +423,7 @@ pub(super) fn lift_session(
     day: u16,
     block: BlockCtx,
 ) -> Session {
-    // A hypertrophy goal does not run the strength DUP week (HYP-PERIOD-001:
-    // linear ≈ DUP for growth, so no heavy/power days; HYP-RIR-DOSE-001 /
-    // HYP-VL-001: speed sets far from failure are a weak growth stimulus). Its
-    // own week builder sizes every muscle's weekly sets and programs each day
-    // at 1–3 RIR with double progression (`plan::hypertrophy`).
+    // A hypertrophy goal runs its own week (`plan::hypertrophy`).
     if super::hypertrophy::uses_double_progression(profile) {
         return super::hypertrophy::hypertrophy_session(profile, anchors, ta, day, block);
     }
@@ -479,8 +477,6 @@ pub(super) fn lift_session(
             DupDay::Power => LiftSessionType::DynamicEffort,
             DupDay::Hypertrophy => LiftSessionType::Repetition,
         }
-    } else if goal == LiftGoal::Hypertrophy {
-        LiftSessionType::Repetition
     } else {
         LiftSessionType::FullBody
     };
@@ -650,13 +646,7 @@ pub(super) fn lift_prescription(
         load_kg: None,
     });
 
-    // Evidence travels with the claim that set this week's number: a %1RM ramp
-    // (STR-PCTPROG-001), the goal-weighted week (STR-HEAVYFREQ-001 /
-    // STR-BASE-POWER-001), the calibration test set, the Olympic-derivative
-    // optimum; else on the DUP path the volume-sized set count
-    // (HYP-VOL-DOSE-001, or the weaker HYP-SETRAMP-001 when the ramp moved it);
-    // else the loading band itself. The badge never reads stronger than the
-    // claim that produced the figure.
+    // The badge never reads stronger than the claim that produced the figure.
     if let Some(id) = dose.claim {
         crate::evidence::graded(pres, id)
     } else if dup && dose.set_ramped {
@@ -1001,13 +991,11 @@ fn is_upper_body(name: &str) -> bool {
 /// jerk variants, high pulls, jump shrugs). Only ever programmed when the
 /// athlete already logs one — the skill prerequisite.
 fn is_olympic_derivative(name: &str) -> bool {
-    let key = movement_key(name);
-    let has = |t: &str| key.iter().any(|k| k == t || k.strip_suffix('s') == Some(t));
-    has("clean")
-        || has("snatch")
-        || has("jerk")
-        || key.windows(2).any(|w| w[0] == "high" && w[1] == "pull")
-        || key.windows(2).any(|w| w[0] == "jump" && w[1] == "shrug")
+    with_name_tokens(name, |t| {
+        ["clean", "snatch", "jerk", "high pull", "jump shrug"]
+            .iter()
+            .any(|kw| has_phrase(t, kw))
+    })
 }
 
 /// Whether a lift is loaded on a standard straight barbell, so a plate
@@ -1020,11 +1008,7 @@ pub(crate) fn is_barbell_lift(name: &str) -> bool {
 }
 
 fn barbell_tokens(tokens: &[&str]) -> bool {
-    let has = |t: &str| {
-        tokens
-            .iter()
-            .any(|k| *k == t || k.strip_suffix('s') == Some(t))
-    };
+    let has = |t: &str| has_phrase(tokens, t);
     const NOT_BARBELL: &[&str] = &[
         "dumbbell",
         "db",
@@ -1060,9 +1044,7 @@ fn barbell_tokens(tokens: &[&str]) -> bool {
         || has("clean")
         || has("snatch")
         || has("jerk")
-        || tokens
-            .windows(2)
-            .any(|w| w[0] == "good" && w[1] == "morning")
+        || has("good morning")
 }
 
 /// The ballistic opener of a power day (STR-POWER-SELECT-001): a
@@ -1103,7 +1085,7 @@ fn ballistic_item(
     )
 }
 
-/// Shape a week toward a strength test / meet.
+/// Shape a barbell MaxStrength/Power week toward a strength test / meet.
 /// `days_to_meet_from_week_start` = meet day − this week's Monday; each
 /// session's own distance is that minus its `day` offset. Lift sessions only;
 /// runs and rest days are untouched. For a lift session `d` days out:
@@ -1116,14 +1098,7 @@ fn ballistic_item(
 ///
 /// A session left with nothing becomes a rest day. Beyond 14 days, or after the
 /// meet, the week is unchanged.
-pub(super) fn apply_meet_taper(
-    sessions: &mut [Session],
-    goal: LiftGoal,
-    days_to_meet_from_week_start: i64,
-) {
-    if !matches!(goal, LiftGoal::MaxStrength | LiftGoal::Power) {
-        return;
-    }
+pub(super) fn apply_meet_taper(sessions: &mut [Session], days_to_meet_from_week_start: i64) {
     let taper = strength::taper_rx().value;
     let dl_cutoff = strength::deadlift_peak_days_out().value.0 as i64;
     const SQUAT_BENCH_CUTOFF: i64 = 4;
@@ -1168,8 +1143,9 @@ pub(super) fn apply_meet_taper(
             });
             let squat_or_bench =
                 movement_pattern(&l.exercise) == Some(MovementPattern::Squat) || bench;
-            let drop_dl = deadlift && d < dl_cutoff;
-            let drop_sb = squat_or_bench && d <= SQUAT_BENCH_CUTOFF && heavy(&l.intensity);
+            let heavy = heavy(&l.intensity);
+            let drop_dl = deadlift && d < dl_cutoff && heavy;
+            let drop_sb = squat_or_bench && d <= SQUAT_BENCH_CUTOFF && heavy;
             !(drop_dl || drop_sb)
         });
         for rx in s.prescriptions.iter_mut() {

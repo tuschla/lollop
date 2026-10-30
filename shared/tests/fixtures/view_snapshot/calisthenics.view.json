@@ -1,6 +1,5 @@
 {
   "safety_tier": null,
-  "train_blocked": false,
   "hold_reason": null,
   "checked_in_today": false,
   "adjustments": [],
@@ -1569,7 +1568,7 @@
       "group": "red_flag"
     }
   ],
-  "checkin_today": null,
+  "latest_checkin": null,
   "baseline_status": [],
   "grade_definitions": [
     {
@@ -3637,11 +3636,11 @@
           "run_head_km": null
         },
         {
-          "summary": "Full pull-up: 5×5–8 · 1–2 reps left",
-          "exercise": "Full pull-up",
+          "summary": "Negative pull-up: 5×3–5 · 1–2 reps left",
+          "exercise": "Negative pull-up",
           "sets": 5,
-          "reps_low": 5,
-          "reps_high": 8,
+          "reps_low": 3,
+          "reps_high": 5,
           "load_kg": null,
           "intensity_label": "RIR 1–2",
           "rest_sec": 180,
@@ -3660,14 +3659,14 @@
           "adjusted_note": "",
           "safety_reason": "",
           "safety_reason_mi": "",
-          "grade": "Moderate",
-          "citation": "Kotarsky 2018 (PMID 29466268)",
-          "confidence": 0.65,
-          "safety_critical": false,
+          "grade": "ExpertOpinion",
+          "citation": "McKenzie 2022 (PMID 36293792)",
+          "confidence": 0.3,
+          "safety_critical": true,
           "contested": false,
           "why": {
-            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. For a harder version instead of added weight, choose Harder for L-sit pull-up.",
-            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "basis": "Step 4/8 of the pull-up progression. Reaching 5 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Full pull-up. You haven't trained this for a while, so this is one step easier.",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
           },
           "done": false,
@@ -3680,29 +3679,29 @@
           "run_target": null,
           "calis": {
             "ladder": "VerticalPull",
-            "rung": 4,
+            "rung": 3,
             "easier": {
-              "rung": 3,
-              "name": "Negative pull-up",
-              "target": "3–5 reps",
-              "available": true,
-              "timed_hold": false
-            },
-            "harder": {
-              "rung": 5,
-              "name": "L-sit pull-up",
+              "rung": 2,
+              "name": "Assisted pull-up",
               "target": "5–8 reps",
               "available": true,
               "timed_hold": false
             },
-            "load_capable": true,
+            "harder": {
+              "rung": 4,
+              "name": "Full pull-up",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
             "ballistic": false,
             "needs_effort_rating": false
           },
           "run_structure": null,
-          "face_name": "Full pull-up",
-          "face_detail": "5×5–8 · 1–2 reps left",
-          "face_lead": "5×5–8",
+          "face_name": "Negative pull-up",
+          "face_detail": "5×3–5 · 1–2 reps left",
+          "face_lead": "5×3–5",
           "run_head": "",
           "run_head_km": null
         },
@@ -4126,11 +4125,11 @@
           "run_head_km": null
         },
         {
-          "summary": "Full pull-up: 5×5–8 · 1–2 reps left",
-          "exercise": "Full pull-up",
+          "summary": "Negative pull-up: 5×3–5 · 1–2 reps left",
+          "exercise": "Negative pull-up",
           "sets": 5,
-          "reps_low": 5,
-          "reps_high": 8,
+          "reps_low": 3,
+          "reps_high": 5,
           "load_kg": null,
           "intensity_label": "RIR 1–2",
           "rest_sec": 180,
@@ -4149,14 +4148,14 @@
           "adjusted_note": "",
           "safety_reason": "",
           "safety_reason_mi": "",
-          "grade": "Moderate",
-          "citation": "Kotarsky 2018 (PMID 29466268)",
-          "confidence": 0.65,
-          "safety_critical": false,
+          "grade": "ExpertOpinion",
+          "citation": "McKenzie 2022 (PMID 36293792)",
+          "confidence": 0.3,
+          "safety_critical": true,
           "contested": false,
           "why": {
-            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. For a harder version instead of added weight, choose Harder for L-sit pull-up.",
-            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "basis": "Step 4/8 of the pull-up progression. Reaching 5 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Full pull-up. You haven't trained this for a while, so this is one step easier.",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
           },
           "done": false,
@@ -4169,29 +4168,29 @@
           "run_target": null,
           "calis": {
             "ladder": "VerticalPull",
-            "rung": 4,
+            "rung": 3,
             "easier": {
-              "rung": 3,
-              "name": "Negative pull-up",
-              "target": "3–5 reps",
-              "available": true,
-              "timed_hold": false
-            },
-            "harder": {
-              "rung": 5,
-              "name": "L-sit pull-up",
+              "rung": 2,
+              "name": "Assisted pull-up",
               "target": "5–8 reps",
               "available": true,
               "timed_hold": false
             },
-            "load_capable": true,
+            "harder": {
+              "rung": 4,
+              "name": "Full pull-up",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
             "ballistic": false,
             "needs_effort_rating": false
           },
           "run_structure": null,
-          "face_name": "Full pull-up",
-          "face_detail": "5×5–8 · 1–2 reps left",
-          "face_lead": "5×5–8",
+          "face_name": "Negative pull-up",
+          "face_detail": "5×3–5 · 1–2 reps left",
+          "face_lead": "5×3–5",
           "run_head": "",
           "run_head_km": null
         },
@@ -4549,11 +4548,11 @@
           "run_head_km": null
         },
         {
-          "summary": "Full pull-up: 5×5–8 · 1–2 reps left",
-          "exercise": "Full pull-up",
+          "summary": "Negative pull-up: 5×3–5 · 1–2 reps left",
+          "exercise": "Negative pull-up",
           "sets": 5,
-          "reps_low": 5,
-          "reps_high": 8,
+          "reps_low": 3,
+          "reps_high": 5,
           "load_kg": null,
           "intensity_label": "RIR 1–2",
           "rest_sec": 180,
@@ -4572,14 +4571,14 @@
           "adjusted_note": "",
           "safety_reason": "",
           "safety_reason_mi": "",
-          "grade": "Moderate",
-          "citation": "Kotarsky 2018 (PMID 29466268)",
-          "confidence": 0.65,
-          "safety_critical": false,
+          "grade": "ExpertOpinion",
+          "citation": "McKenzie 2022 (PMID 36293792)",
+          "confidence": 0.3,
+          "safety_critical": true,
           "contested": false,
           "why": {
-            "basis": "Step 5/8 of the pull-up progression. Reaching 8 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to adding weight. Managing 12+ reps on every set means this step is too easy: the plan starts added weight after one session. This step takes added weight: reach the top of the range on 2 sessions and the plan starts a small belt or vest weight. For a harder version instead of added weight, choose Harder for L-sit pull-up.",
-            "grade_note": "Moderate evidence: some good studies support it, but it isn't settled yet.",
+            "basis": "Step 4/8 of the pull-up progression. Reaching 5 reps on every set, with at least 1 rep left on the last one, on 2 sessions in a row moves you up to Full pull-up. You haven't trained this for a while, so this is one step easier.",
+            "grade_note": "Expert opinion: what experienced coaches do; not yet tested in trials.",
             "improves": "Log your reps (or hold time) and how hard the last set felt so the plan can time your next step."
           },
           "done": false,
@@ -4592,29 +4591,29 @@
           "run_target": null,
           "calis": {
             "ladder": "VerticalPull",
-            "rung": 4,
+            "rung": 3,
             "easier": {
-              "rung": 3,
-              "name": "Negative pull-up",
-              "target": "3–5 reps",
-              "available": true,
-              "timed_hold": false
-            },
-            "harder": {
-              "rung": 5,
-              "name": "L-sit pull-up",
+              "rung": 2,
+              "name": "Assisted pull-up",
               "target": "5–8 reps",
               "available": true,
               "timed_hold": false
             },
-            "load_capable": true,
+            "harder": {
+              "rung": 4,
+              "name": "Full pull-up",
+              "target": "5–8 reps",
+              "available": true,
+              "timed_hold": false
+            },
+            "load_capable": false,
             "ballistic": false,
             "needs_effort_rating": false
           },
           "run_structure": null,
-          "face_name": "Full pull-up",
-          "face_detail": "5×5–8 · 1–2 reps left",
-          "face_lead": "5×5–8",
+          "face_name": "Negative pull-up",
+          "face_detail": "5×3–5 · 1–2 reps left",
+          "face_lead": "5×3–5",
           "run_head": "",
           "run_head_km": null
         },

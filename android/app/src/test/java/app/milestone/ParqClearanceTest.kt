@@ -47,4 +47,24 @@ class ParqClearanceTest {
         assertFalse(old.withParqAnswer(ParqItem.SupervisedOnly, true).medically_cleared)
         assertTrue(old.withParqAnswer(ParqItem.ChestPain, true).medically_cleared)
     }
+
+    /** A legacy `symptomatic` flag (no symptom bit) is a hold no clearance lifts
+     *  (onboard-052): an unrelated answer keeps it, only re-answering a symptom
+     *  question replaces it. */
+    @Test
+    fun legacySymptomHoldSurvivesAnUnrelatedFollowUpToggle() {
+        val legacy = HealthScreen(symptomatic = true)
+
+        val yes = legacy.withParqAnswer(ParqItem.HeartOrBloodPressure, true)
+        assertTrue("a follow-up Yes is not an answer to Q2/Q3", yes.symptomatic)
+
+        val backToNo = yes.withParqAnswer(ParqItem.HeartOrBloodPressure, false)
+        assertTrue("the symptom hold is still raised", backToNo.symptomatic)
+        assertTrue("the SetProfile still carries the health screen", backToNo.anyRaised())
+
+        val chest = backToNo.withParqAnswer(ParqItem.ChestPain, true)
+        assertTrue(chest.symptomatic)
+        assertFalse("re-answering the symptom question replaces the legacy flag",
+            chest.withParqAnswer(ParqItem.ChestPain, false).symptomatic)
+    }
 }

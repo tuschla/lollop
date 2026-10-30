@@ -4,17 +4,16 @@
 //! own boot compaction rewrote them. `<sha>.history.json` is what that build's
 //! core showed for the log on 2026-09-29 (UTC+2), copy text removed: the History
 //! entries and profile for 203ab56 and 901d239, the whole view for 4728546 (the
-//! last release before the 901d239 cleanup). `4728546.backup.ndjson` is that
-//! build's Profile › Your data export; `203ab56-plan-removed.log.ndjson` a
-//! removed plan after that build's rewrite (UpgradeFixturesTest.kt). Regenerate with
-//! `scripts/upgrade-fixtures/generate.sh`.
+//! last release before the 901d239 cleanup). `4728546.backup.ndjson` (that
+//! build's Profile › Your data export) and `203ab56-plan-removed.log.ndjson` (a
+//! removed plan after that build's rewrite) are read by UpgradeFixturesTest.kt.
+//! Regenerate with `scripts/upgrade-fixtures/generate.sh`.
 //!
 //! - 203ab56 (2026-08-08): persisted every `SetToday`, a legacy set without
 //!   `entry_id`, `endurance_intensity_pct_vo2max` in `SetProfile`, no `female`
 //!   when false, measured `longest_recent_km`, the `streak` field.
 //! - 4728546 (2026-10-29): the Kotlin compaction, `streak` and
-//!   `longest_recent_km` as the shell computed them. 4673acc writes the same
-//!   bytes for the same scenario.
+//!   `longest_recent_km` as the shell computed them.
 //! - 901d239: the Rust compaction over JNI, `streak`/`longest_recent_km` sent as 0.
 //!
 //! An intended engine change that moves a value the old build showed fails
@@ -32,7 +31,9 @@ use std::path::{Path, PathBuf};
 use crux_core::App;
 use serde_json::Value;
 use shared::log::{LineFacts, compact_lines};
-use shared::{Engine, Event, Model};
+use shared::{Engine, Event};
+
+mod common;
 
 const TODAY: i64 = 20725;
 const OFF: i64 = 7200;
@@ -70,14 +71,11 @@ fn tag(line: &str) -> String {
 /// The view after replaying `lines` and the boot `SetToday`, plus the indices of
 /// the lines this core rejects.
 fn replay<'a>(lines: impl IntoIterator<Item = &'a String>) -> (Value, Vec<usize>) {
-    let app = Engine;
-    let mut model = Model::default();
     let mut rejected = Vec::new();
+    let mut events = Vec::new();
     for (i, line) in lines.into_iter().enumerate() {
         match serde_json::from_str::<Event>(line) {
-            Ok(e) => {
-                let _ = app.update(e, &mut model);
-            }
+            Ok(e) => events.push(e),
             Err(_) => rejected.push(i),
         }
     }
@@ -85,8 +83,8 @@ fn replay<'a>(lines: impl IntoIterator<Item = &'a String>) -> (Value, Vec<usize>
         epoch_day: TODAY,
         utc_offset_sec: OFF,
     };
-    let _ = app.update(today, &mut model);
-    (serde_json::to_value(app.view(&model)).unwrap(), rejected)
+    let model = common::replay(events.into_iter().chain([today]));
+    (serde_json::to_value(Engine.view(&model)).unwrap(), rejected)
 }
 
 /// The view minus its copy ([`is_copy`]).
@@ -239,13 +237,6 @@ fn old_logs_show_the_same_history_and_plan() {
         let (view, _) = replay(&lines(&file));
         assert_shows(v, &file, &view);
     }
-}
-
-#[test]
-fn old_backup_replays_to_the_same_history_and_plan() {
-    let (view, rejected) = replay(&lines("4728546.backup.ndjson"));
-    assert!(rejected.is_empty(), "backup lines rejected: {rejected:?}");
-    assert_shows("4728546", "4728546.backup.ndjson", &view);
 }
 
 /// The fixtures hold what the scenario logged: a regenerated corpus that lost

@@ -1,5 +1,5 @@
 //! Calculator and report builders: training load, the weekly running report,
-//! race and field-test estimates, lift-plan calculators, heart-rate zones.
+//! race predictions, lift-plan calculators, heart-rate zones.
 
 use super::*;
 

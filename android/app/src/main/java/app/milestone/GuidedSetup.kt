@@ -18,12 +18,9 @@ import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -104,10 +101,10 @@ private class SetupKeypad(
  */
 @Composable
 internal fun GuidedSetup(
-    initial: ProfileDraft?,
+    initial: Event.SetProfile?,
     switchTo: Modality?,
     calisLadders: List<CalisLadderView>,
-    onComplete: (ProfileDraft, List<Event.SetCalisthenicsRung>) -> Unit,
+    onComplete: (Event.SetProfile, List<Event.SetCalisthenicsRung>) -> Unit,
     onSkip: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -330,35 +327,23 @@ internal fun GuidedSetup(
                 when (current) {
                     SetupStep.Train -> {
                         StepHeader(stringResource(R.string.setup_step_train_q))
-                        ChoiceGroup {
-                            Modality.entries.forEach { m ->
-                                SetupChoiceCard(stringResource(m.titleRes), stringResource(m.consequenceRes), selected = a.modality == m) {
-                                    update { it.copy(modality = m) }
-                                }
-                            }
+                        ChoiceCards(Modality.entries, a.modality, { stringResource(it.titleRes) }, { stringResource(it.consequenceRes) }) { m ->
+                            update { it.copy(modality = m) }
                         }
                     }
                     SetupStep.LiftGoal -> LiftGoalStep(a, today, update)
                     SetupStep.Placement -> PlacementStep(a, currentRungs.keys, update)
                     SetupStep.RunGoal -> {
                         StepHeader(stringResource(R.string.setup_step_run_q))
-                        ChoiceGroup {
-                            GoalDistance.entries.forEach { d ->
-                                SetupChoiceCard(stringResource(d.labelRes), goalBlurb(d, distanceUnit), selected = a.goalDistance == d) {
-                                    update { it.copy(goalDistance = d) }
-                                }
-                            }
+                        ChoiceCards(GoalDistance.entries, a.goalDistance, { stringResource(it.labelRes) }, { goalBlurb(it, distanceUnit) }) { d ->
+                            update { it.copy(goalDistance = d) }
                         }
                     }
                     SetupStep.Race -> RaceStep(a, v, today, keypad, update)
                     SetupStep.Lead -> {
                         StepHeader(stringResource(R.string.setup_step_lead_q), stringResource(R.string.setup_step_lead_sub))
-                        ChoiceGroup {
-                            BothPriority.entries.forEach { p ->
-                                SetupChoiceCard(stringResource(p.titleRes), stringResource(p.consequenceRes), selected = a.bothPriority == p) {
-                                    update { it.copy(bothPriority = p) }
-                                }
-                            }
+                        ChoiceCards(BothPriority.entries, a.bothPriority, { stringResource(it.titleRes) }, { stringResource(it.consequenceRes) }) { p ->
+                            update { it.copy(bothPriority = p) }
                         }
                     }
                     SetupStep.Days -> DaysStep(a, v, update)
@@ -504,13 +489,18 @@ internal fun GuidedSetup(
             }
         }
 
+        // "Leave setup?": confirms dropping answers that were never sent.
         if (confirmLeave) {
-            LeaveSetupDialog(
+            ConfirmDialog(
+                title = stringResource(R.string.setup_leave_title),
+                body = stringResource(R.string.setup_leave_body),
+                confirmLabel = stringResource(R.string.setup_leave_confirm),
                 onDismiss = { confirmLeave = false },
-                onLeave = {
+                onConfirm = {
                     confirmLeave = false
                     onSkip()
                 },
+                dismissLabel = stringResource(R.string.setup_leave_dismiss),
             )
         }
     }
@@ -537,30 +527,22 @@ private fun stepBlockedHint(step: SetupStep, v: SetupValues): String? = when (st
 @Composable
 private fun LiftGoalStep(a: SetupAnswers, today: Long, update: UpdateAnswers) {
     StepHeader(stringResource(R.string.setup_step_lift_q))
-    ChoiceGroup {
-        LiftFocus.entries.forEach { g ->
-            SetupChoiceCard(stringResource(g.titleRes), stringResource(g.consequenceRes), selected = a.liftFocus == g) {
-                update { it.copy(liftFocus = g) }
-            }
-        }
+    ChoiceCards(LiftFocus.entries, a.liftFocus, { stringResource(it.titleRes) }, { stringResource(it.consequenceRes) }) { g ->
+        update { it.copy(liftFocus = g) }
     }
     // A test day or meet shapes strength/power work (taper and peak).
     if (a.liftFocus != null && a.liftFocus != LiftFocus.Muscle) {
         Spacer(Modifier.size(Space.Sm.dp))
         SubHeading(stringResource(R.string.setup_meet_q))
         Text(stringResource(R.string.setup_meet_sub), color = OnBgMuted, style = Type.Caption)
-        DateAnswerRow(a.meetDate, today, future = true, noneLabel = stringResource(R.string.setup_date_none)) { day ->
+        DateAnswerRow(a.meetDate, today, future = true) { day ->
             update { it.copy(meetDate = day) }
         }
     }
     Spacer(Modifier.size(Space.Sm.dp))
     SubHeading(stringResource(R.string.setup_modality_strength_q))
-    ChoiceGroup {
-        ResistanceModality.entries.forEach { rm ->
-            SetupChoiceCard(stringResource(rm.setupTitleRes), stringResource(rm.setupConsequenceRes), selected = a.resistanceModality == rm) {
-                update { it.copy(resistanceModality = rm) }
-            }
-        }
+    ChoiceCards(ResistanceModality.entries, a.resistanceModality, { stringResource(it.setupTitleRes) }, { stringResource(it.setupConsequenceRes) }) { rm ->
+        update { it.copy(resistanceModality = rm) }
     }
 }
 
@@ -614,7 +596,7 @@ private fun PlacementStep(a: SetupAnswers, kept: Set<CalisLadder>, update: Updat
 private fun RaceStep(a: SetupAnswers, v: SetupValues, today: Long, keypad: SetupKeypad, update: UpdateAnswers) {
     StepHeader(stringResource(R.string.setup_step_race_q), stringResource(R.string.setup_step_race_sub))
     SubHeading(stringResource(R.string.setup_race_date_q))
-    DateAnswerRow(a.raceDate, today, future = true, noneLabel = stringResource(R.string.setup_date_none)) { day ->
+    DateAnswerRow(a.raceDate, today, future = true) { day ->
         update { it.copy(raceDate = day) }
     }
     Spacer(Modifier.size(Space.Sm.dp))
@@ -670,23 +652,15 @@ private fun LevelStep(a: SetupAnswers, update: UpdateAnswers) {
     if (a.modality == Modality.Both) SubHeading(stringResource(R.string.setup_level_lifting))
     // Each card describes the person. A run-only profile's one level is its
     // running level, so it reads the running lines.
-    ChoiceGroup {
-        SetupLevel.entries.forEach { l ->
-            val line = if (a.modality == Modality.Run) l.runConsequenceRes else l.consequenceRes
-            SetupChoiceCard(stringResource(l.titleRes), stringResource(line), selected = a.level == l) {
-                update { it.copy(level = l) }
-            }
-        }
+    val runLines = a.modality == Modality.Run
+    ChoiceCards(SetupLevel.entries, a.level, { stringResource(it.titleRes) }, { stringResource(if (runLines) it.runConsequenceRes else it.consequenceRes) }) { l ->
+        update { it.copy(level = l) }
     }
     if (a.modality == Modality.Both) {
         Spacer(Modifier.size(Space.Sm.dp))
         SubHeading(stringResource(R.string.setup_level_running))
-        ChoiceGroup {
-            SetupLevel.entries.forEach { l ->
-                SetupChoiceCard(stringResource(l.titleRes), stringResource(l.runConsequenceRes), selected = a.runLevel == l) {
-                    update { it.copy(runLevel = l) }
-                }
-            }
+        ChoiceCards(SetupLevel.entries, a.runLevel, { stringResource(it.titleRes) }, { stringResource(it.runConsequenceRes) }) { l ->
+            update { it.copy(runLevel = l) }
         }
     }
 }
@@ -858,7 +832,7 @@ private fun HealthStep(a: SetupAnswers, v: SetupValues, update: UpdateAnswers) {
 /** The review rows for [draft] (what Finish sends): each answer once, unanswered
  *  optional fields left out. [today] dates the birthday's age. */
 @Composable
-private fun reviewEntries(a: SetupAnswers, m: Modality, draft: ProfileDraft, distanceUnit: DistanceUnit, kept: Set<CalisLadder>, today: Long): List<ReviewEntry> {
+private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile, distanceUnit: DistanceUnit, kept: Set<CalisLadder>, today: Long): List<ReviewEntry> {
     val unit = distanceUnit.distanceLabel
     return buildList {
         add(ReviewEntry(stringResource(R.string.setup_review_train), stringResource(m.titleRes), SetupStep.Train))
@@ -1034,21 +1008,4 @@ private fun KeypadBand(
             NumericKeypad(onKey = onKey, onBackspace = onBackspace, allowDecimal = allowDecimal)
         }
     }
-}
-
-/** "Leave setup?": confirms dropping answers that were never sent. */
-@Composable
-private fun LeaveSetupDialog(onDismiss: () -> Unit, onLeave: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(Space.Card.dp),
-        title = { Text(stringResource(R.string.setup_leave_title)) },
-        text = { Text(stringResource(R.string.setup_leave_body)) },
-        confirmButton = {
-            TextButton(onClick = onLeave) { Text(stringResource(R.string.setup_leave_confirm)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.setup_leave_dismiss)) }
-        },
-    )
 }

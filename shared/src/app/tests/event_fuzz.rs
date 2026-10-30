@@ -1450,8 +1450,6 @@ impl Gen {
             _ => Event::ComputeHrZones {
                 age_years: self.f(12.0, 85.0, 0.15),
                 resting_hr_bpm: self.opt_f(0.5, 40.0, 80.0),
-                weeks_since_recalc: self.rng.opt(0.3, |_| 0).map(|_| self.u8w(0, 12)),
-                weeks_since_pace_test: self.rng.opt(0.3, |_| 0).map(|_| self.u8w(0, 12)),
             },
         }
     }
@@ -1765,12 +1763,12 @@ fn check_numbers(vm: &ViewModel) -> Result<(), String> {
             }
         }
     }
-    if vm.train_blocked
+    if vm.hold_reason.is_some()
         && let Some(ns) = &vm.next_session
         && (ns.status != SessionStatus::Blocked || !ns.items.is_empty())
     {
         return Err(format!(
-            "train_blocked but the next session is {:?} with {} item(s): {:?}",
+            "training held but the next session is {:?} with {} item(s): {:?}",
             ns.status,
             ns.items.len(),
             ns.items.iter().map(|i| &i.summary).collect::<Vec<_>>()
@@ -1852,7 +1850,7 @@ fn check_step(prev: &ViewModel, e: &Event, next: &ViewModel, model: &Model) -> R
             ReadinessSignal::CardiacRedFlag => input.value > 0.0,
             _ => false,
         };
-        if red && !next.train_blocked {
+        if red && next.hold_reason.is_none() {
             return Err(format!(
                 "{:?} {} reported today but training is not blocked (tier {:?})",
                 input.signal, input.value, next.safety_tier
@@ -2821,8 +2819,7 @@ fn compaction_keeps_the_date_of_an_undated_race() {
             let _ = app.update(e, &mut model);
         }
         let day = model
-            .profile
-            .as_ref()
+            .profile()
             .and_then(|p| p.recent_race.as_ref())
             .and_then(|r| r.epoch_day);
         assert_eq!(day, Some(BASE_DAY), "the re-sent race keeps its first day");

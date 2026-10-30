@@ -70,7 +70,7 @@ fn push_loading_rows(
     // number; every other goal states its RIR band.
     let rir_clause = match lr.value.rir {
         None => "never to failure; stop before bar speed drops".to_string(),
-        Some((lo, hi)) => format!("~{} reps left", fmt_u8_range(lo, hi)),
+        Some(rir) => format!("~{} reps left", fmt_u8_range(rir)),
     };
     // A single "0–95% 1RM" band tells nobody what weight to use. The Power band
     // is an ENVELOPE across exercise types (strength-002/030;
@@ -79,16 +79,16 @@ fn push_loading_rows(
     let loading = if p.lift_goal == LiftGoal::Power {
         format!(
             "Weights for power: jumps at bodyweight up to about 30% 1RM, weighted squats 30–70%, cleans and pulls 70–95% 1RM. {} fast reps, {} sets, never to failure",
-            fmt_u8_range(lr.value.reps.0, lr.value.reps.1),
-            fmt_u8_range(lr.value.sets.0, lr.value.sets.1)
+            fmt_u8_range(lr.value.reps),
+            fmt_u8_range(lr.value.sets)
         )
     } else {
         format!(
             "Weights for {}: {}% 1RM, {} reps, {} sets, {}",
             lift_goal_phrase(p.lift_goal),
-            fmt_u8_range(lr.value.pct_1rm.0, lr.value.pct_1rm.1),
-            fmt_u8_range(lr.value.reps.0, lr.value.reps.1),
-            fmt_u8_range(lr.value.sets.0, lr.value.sets.1),
+            fmt_u8_range(lr.value.pct_1rm),
+            fmt_u8_range(lr.value.reps),
+            fmt_u8_range(lr.value.sets),
             rir_clause
         )
     };
@@ -112,18 +112,11 @@ fn push_loading_rows(
 
 /// The 1RM-test gate and, for a novice, the load-jump caps between attempts.
 fn push_one_rm_rows(age: individualization::TrainingAge, rows: &mut Vec<GuidanceView>) {
-    // strength-040 1RM-test gate, stated educationally (the all-clear call
-    // only inherits the safety-critical citation; the conditions are the row).
+    // strength-040 1RM-test conditions. The plan never programs a max attempt
+    // (every %1RM leaves `strength::MIN_STRENGTH_RIR` in reserve) and caps a
+    // novice's load jumps (`plan/lift.rs`); this row states the gate.
     let novice = matches!(age, individualization::TrainingAge::Novice);
-    let test_gate = strength::one_rm_test_allowed(strength::OneRmTestContext {
-        technically_proficient: true,
-        adequately_recovered: true,
-        warmed_up: true,
-        is_novice: novice,
-        supervised: true,
-        spinal_loading: true,
-        bracing_competent: true,
-    });
+    let test_gate = graded((), claims::STR_1RMTEST_001);
     push_guidance(
         rows,
         "Strength",
@@ -182,24 +175,23 @@ fn push_periodization_rows(age: individualization::TrainingAge, rows: &mut Vec<G
     // left as the label only.
     let fmt_phase = |rx: &strength::PhaseRx| -> String {
         let mut parts = Vec::new();
-        if let Some((lo, hi)) = rx.pct_1rm {
-            parts.push(format!("{}% 1RM", fmt_u8_range(lo, hi)));
+        if let Some(pct) = rx.pct_1rm {
+            parts.push(format!("{}% 1RM", fmt_u8_range(pct)));
         }
-        if let (Some((slo, shi)), Some((rlo, rhi))) = (rx.sets, rx.reps) {
-            parts.push(format!(
-                "{}×{}",
-                fmt_u8_range(slo, shi),
-                fmt_u8_range(rlo, rhi)
-            ));
-        } else if let Some((rlo, rhi)) = rx.reps {
-            parts.push(format!("{} reps", fmt_u8_range(rlo, rhi)));
+        if let (Some(sets), Some(reps)) = (rx.sets, rx.reps) {
+            parts.push(format!("{}×{}", fmt_u8_range(sets), fmt_u8_range(reps)));
+        } else if let Some(reps) = rx.reps {
+            parts.push(format!("{} reps", fmt_u8_range(reps)));
         }
         if parts.is_empty() {
             parts.push("keep the weights the same (taper)".to_string());
         }
-        let (wlo, whi) = rx.weeks;
-        let weeks = if wlo == whi { "week" } else { "weeks" };
-        format!("{} · {weeks} {}", parts.join(", "), fmt_u8_range(wlo, whi))
+        let weeks = if rx.weeks.0 == rx.weeks.1 {
+            "week"
+        } else {
+            "weeks"
+        };
+        format!("{} · {weeks} {}", parts.join(", "), fmt_u8_range(rx.weeks))
     };
     match pm.value {
         strength::PeriodizationModel::Linear => {
@@ -301,7 +293,7 @@ fn push_prilepin_row(lr: &Recommended<strength::LoadingRx>, rows: &mut Vec<Guida
             format!(
                 "Prilepin chart at ~{:.0}% 1RM: {} reps a set, about {} reps in total (range {}–{})",
                 pct_mid,
-                fmt_u8_range(pr.value.reps_per_set.0, pr.value.reps_per_set.1),
+                fmt_u8_range(pr.value.reps_per_set),
                 pr.value.optimal_total,
                 pr.value.total_range.0,
                 pr.value.total_range.1
@@ -343,8 +335,8 @@ fn push_hypertrophy_rows(
         format!(
             "{} weekly sets → {}×/wk, {} sets/session",
             p.weekly_sets,
-            fmt_u8_range(fr.value.freq.0, fr.value.freq.1),
-            fmt_u8_range(fr.value.per_session.0, fr.value.per_session.1)
+            fmt_u8_range(fr.value.freq),
+            fmt_u8_range(fr.value.per_session)
         ),
         &fr,
     );
@@ -377,12 +369,12 @@ fn push_hypertrophy_rows(
         "Hypertrophy",
         format!(
             "Reps and weight: big lifts {} reps at {}% 1RM, other compound lifts {} at {}%, single-joint lifts {} at {}%",
-            fmt_u8_range(heavy.value.reps.0, heavy.value.reps.1),
-            fmt_u8_range(heavy.value.pct_1rm.0, heavy.value.pct_1rm.1),
-            fmt_u8_range(moderate.value.reps.0, moderate.value.reps.1),
-            fmt_u8_range(moderate.value.pct_1rm.0, moderate.value.pct_1rm.1),
-            fmt_u8_range(iso.value.reps.0, iso.value.reps.1),
-            fmt_u8_range(iso.value.pct_1rm.0, iso.value.pct_1rm.1)
+            fmt_u8_range(heavy.value.reps),
+            fmt_u8_range(heavy.value.pct_1rm),
+            fmt_u8_range(moderate.value.reps),
+            fmt_u8_range(moderate.value.pct_1rm),
+            fmt_u8_range(iso.value.reps),
+            fmt_u8_range(iso.value.pct_1rm)
         ),
         &heavy,
     );
@@ -406,7 +398,7 @@ fn push_hypertrophy_rows(
         format!(
             "Fewest sets that still build muscle ({}): {} per muscle a week",
             training_age_label(age),
-            fmt_u8_range(mev.value.0, mev.value.1)
+            fmt_u8_range(mev.value)
         ),
         &mev,
     );

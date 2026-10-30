@@ -129,10 +129,7 @@ fn percent_arm(
         crate::plan::DerateCause::Reentry { .. } => claims::REENTRY_RAMP_001,
         crate::plan::DerateCause::E1rmDrop => claims::AUTOREG_E1RM_GATE_001,
     });
-    let reps_txt = match l.reps_max.filter(|top| *top > l.reps) {
-        Some(top) => format!("{}–{}", l.reps, top),
-        None => l.reps.to_string(),
-    };
+    let reps_txt = range_text(l.reps, l.reps_max.unwrap_or(l.reps));
     // The effort the percentage implies on the Epley model (85 %×3 → ~2 in
     // reserve), 1–4 RIR: the "how hard" target on the face and the editor's
     // RPE hint. A set that feels much harder than this means today sits below
@@ -316,11 +313,7 @@ fn rep_range_arm(
         "Add a rep each session. Once every set reaches {top} reps with at least {} left, the weight goes up a small step (at most a tenth) and you start again at {bottom}.",
         reps_word(n)
     );
-    let reps_txt = if top > l.reps {
-        format!("{}–{top}", l.reps)
-    } else {
-        l.reps.to_string()
-    };
+    let reps_txt = range_text(l.reps, top);
     let step = crate::hypertrophy::SMALLEST_LOAD_STEP_KG;
     let deload = rx.claim_id() == claims::HYP_DELOAD_RX_001;
     let effort = with_reps_left(i64::from(n));

@@ -359,6 +359,14 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
         };
         PainGate::Block(evidence::graded(Adjustment::Defer { reason }, claim))
     };
+    let location = || {
+        input
+            .pain
+            .as_ref()
+            .and_then(pain_location)
+            .unwrap_or_default()
+            .to_string()
+    };
     match classify_pain(input) {
         PainVerdict::BareStop | PainVerdict::OtherStop => {
             PainGate::Block(evidence::graded(Adjustment::Stop, claims::SAFE_PAIN_001))
@@ -369,12 +377,7 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
         ),
         PainVerdict::StructuralScoped => PainGate::Scoped(evidence::graded(
             Adjustment::StopItems {
-                location: input
-                    .pain
-                    .as_ref()
-                    .and_then(pain_location)
-                    .unwrap_or_default()
-                    .to_string(),
+                location: location(),
             },
             claims::SAFE_PAIN_STRUCT_001,
         )),
@@ -395,12 +398,7 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
         // Tolerable band: modify/continue with monitoring; avoid complete rest.
         PainVerdict::TendonModify => PainGate::Adjust(evidence::graded(
             Adjustment::ModifyAndMonitor {
-                location: input
-                    .pain
-                    .as_ref()
-                    .and_then(pain_location)
-                    .unwrap_or_default()
-                    .to_string(),
+                location: location(),
             },
             claims::SAFE_TENDON_001,
         )),
@@ -412,15 +410,19 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
     }
 }
 
-/// Severity rank of a graded verdict for choosing the WORST active pain report:
-/// Block > Scoped > Adjust > Continue; 0 is the absence of any active report.
-fn pain_gate_rank(gate: &PainGate) -> u8 {
-    match gate {
-        PainGate::Block(_) => 4,
-        PainGate::Scoped(_) => 3,
-        PainGate::Adjust(_) => 2,
-        PainGate::Continue => 1,
-        PainGate::None => 0,
+/// Severity rank of a verdict for choosing the WORST active pain report, by
+/// the gate [`grade_pain`] gives it: Block > Scoped > Adjust > Continue.
+fn verdict_rank(verdict: PainVerdict) -> u8 {
+    match verdict {
+        PainVerdict::BareStop
+        | PainVerdict::OtherStop
+        | PainVerdict::StructuralDefer
+        | PainVerdict::StructuralStop
+        | PainVerdict::TendonDefer
+        | PainVerdict::OtherDefer => 4,
+        PainVerdict::StructuralScoped => 3,
+        PainVerdict::TendonReduce | PainVerdict::TendonModify => 2,
+        PainVerdict::Doms => 1,
     }
 }
 
@@ -432,7 +434,7 @@ pub fn worst_active_pain(inputs: &[ReadinessInput]) -> Option<&ReadinessInput> {
     let mut worst: Option<&ReadinessInput> = None;
     let mut worst_rank = 0u8;
     for input in active_pain_reports(inputs) {
-        let rank = pain_gate_rank(&grade_pain(input));
+        let rank = verdict_rank(classify_pain(input));
         let wins = match worst {
             None => true,
             Some(w) => {

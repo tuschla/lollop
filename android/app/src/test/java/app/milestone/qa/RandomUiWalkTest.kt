@@ -1,8 +1,6 @@
 package app.milestone.qa
 
-import android.content.Context
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
@@ -11,20 +9,6 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.hasAnyAncestor
-import androidx.compose.ui.test.hasAnyDescendant
-import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasContentDescription
-import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isDialog
-import androidx.compose.ui.test.hasScrollAction
-import androidx.compose.ui.test.isRoot
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performScrollToNode
-import androidx.compose.ui.test.hasScrollToNodeAction
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
@@ -33,9 +17,7 @@ import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.swipeUp
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.lifecycle.Lifecycle
-import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso
 import app.milestone.AppSettings
 import app.milestone.AppTheme
@@ -58,19 +40,12 @@ import app.milestone.ViewModel
 import app.milestone.groupLiftSessions
 import app.milestone.showLifting
 import app.milestone.showRunning
-import org.junit.After
 import org.junit.Assume.assumeTrue
-import org.junit.Before
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertTrue
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import java.time.ZoneId
-import java.util.Locale
 
 /**
  * Seeded, model-based random UI exploration ("monkey with an oracle") over the
@@ -89,8 +64,8 @@ import java.util.Locale
  *    renders one row per core entry; Today never shows a session while the core
  *    holds training; process death + relaunch replays the same entries.
  *
- * The bugs the walk found are pinned by the regression tests
- * below; the walk tolerates none of them, so it guards them too.
+ * The bugs the walk found are pinned in [LayoutRegressionTest]; the walk
+ * tolerates none of them, so it guards them too.
  *
  * Replay: every failure prints the start state, seed, step and the action trace.
  * Environment (read by the test JVM):
@@ -103,46 +78,7 @@ import java.util.Locale
  * Gradle caches a passed test task: add `--rerun` when only the environment changed.
  */
 @RunWith(RobolectricTestRunner::class)
-class RandomUiWalkTest {
-
-    @get:Rule
-    val rule = createEmptyComposeRule()
-
-    private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
-    private lateinit var originalQualifiers: String
-
-    @Before
-    fun setUp() {
-        Locale.setDefault(Locale.US)
-        originalQualifiers = RuntimeEnvironment.getQualifiers()
-        QaHarness.reset(ctx)
-        resetSettings()
-    }
-
-    @After
-    fun tearDown() {
-        QaHarness.teardown()
-        RuntimeEnvironment.setQualifiers(originalQualifiers)
-        RuntimeEnvironment.setFontScale(1f)
-        resetSettings()
-    }
-
-    private fun resetSettings() {
-        AppSettings.theme.value = AppTheme.Paper
-        AppSettings.dynamicAccent.value = true
-        AppSettings.darkMode.value = DarkMode.System
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-        AppSettings.showRouteMaps.value = true
-        clearAppliedCueLoads()
-    }
-
-    /** A cue load applied in a loop is process-scoped (keyed by day and exercise;
-     *  QaHarness.reset does not clear it): it must not prefill the next walk's or
-     *  another test's loop, and a process death drops it. */
-    private fun clearAppliedCueLoads() {
-        (app.milestone.AppliedCueLoads.javaClass.getDeclaredField("byItem").apply { isAccessible = true }
-            .get(app.milestone.AppliedCueLoads) as MutableMap<*, *>).clear()
-    }
+class RandomUiWalkTest : UiProbeTest() {
 
     // ── Starting states ─────────────────────────────────────────────────────
 
@@ -159,457 +95,6 @@ class RandomUiWalkTest {
     @Test fun pregnancy() = walk(Start.Pregnancy)
     @Test fun longHistory() = walk(Start.LongHistory)
     @Test fun milesAndPounds() = walk(Start.MilesLb)
-
-    // ── Bugs the walk found, pinned as regression tests ──────────────────
-
-    /**
-     * In landscape the Log run sheet opens with its keypad up
-     * (RunEditor `keypadOpen = true`) under Duration, below the sheet's fold: the
-     * user saw no keypad and the first Back only folded it, so the screen did not
-     * change. The editor now scrolls the open keypad (and its field) into view.
-     */
-    @Test
-    fun landscapeLogRun_keypadOpensInView() {
-        start = Start.Hybrid
-        RuntimeEnvironment.setQualifiers("w891dp-h411dp-land-xxhdpi")
-        QaHarness.seedLog(ctx, listOf(profile(runDays = 3, runKm = 20.0, goal = GoalDistance.FiveK)))
-        rule.launchApp()
-        rule.onNode(hasContentDescription(str(R.string.main_log)) and hasClickAction()).performClick()
-        settle()
-        rule.onNode(hasText(str(R.string.main_log_run_title)) and hasClickAction()).performClick()
-        settle()
-        assertTrue("precondition: the Log run sheet opens with its keypad", keypadComposed())
-        assertFalse("the open keypad is on screen (it lies below the sheet's fold):\n${screenDump()}", offscreenKeypad())
-        val before = fingerprint()
-        Espresso.pressBackUnconditionally()
-        settle()
-        assertNotEquals("Back changes what the user sees:\n${screenDump()}", before, fingerprint())
-    }
-
-    /**
-     * The Log set editor's exercise search (a Widgets.kt `SearchWell`) keeps an
-     * accessible name once it holds text: it names itself with the hint, not only
-     * through the placeholder shown while it is empty.
-     */
-    @Test
-    fun exerciseSearch_keepsItsAccessibleName() {
-        start = Start.Lifter
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        rule.launchApp()
-        rule.onNode(hasContentDescription(str(R.string.main_log)) and hasClickAction()).performClick()
-        settle()
-        rule.onNode(hasText(str(R.string.main_log_set_title)) and hasClickAction()).performClick()
-        settle()
-        val search = rule.onNode(hasTestTag("exercise-search"))
-        search.performTextReplacement(" ")
-        settle()
-        val unlabeled = UxInvariants.check(rule, rule.density).filter { it.kind == "unlabeled-action" }
-        assertTrue("a blank search leaves no unlabeled action:\n" + unlabeled.joinToString("\n"), unlabeled.isEmpty())
-        search.performTextReplacement("squat")
-        settle()
-        val name = search.fetchSemanticsNode().config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
-        assertTrue("the field keeps its name \"${str(R.string.log_exercise_search_hint)}\" while it holds text: $name", str(R.string.log_exercise_search_hint) in name)
-    }
-
-    /**
-     * A kg value the app itself derived from pounds (the core's
-     * lb loads are exact divisions, e.g. `230.0 / LB_PER_KG` in completion.rs, and
-     * an untouched lb Save re-emitted that exact kg) was shown in the kg weight
-     * field unrounded (`fmtLosslessPrefill`, every digit): editing a 225-lb set read
-     * "102.05828325225797" and overflowed the well. The field now shows the kg to
-     * two decimals (`loadFigure`), and an untouched Save stores the figure shown.
-     */
-    @Test
-    fun kgWeightField_showsAnLbDerivedLoadAtTwoDecimals() {
-        start = Start.Lifter
-        val at = QaHarness.daysAgoAtMidday(1)
-        val lbDerivedKg = 225.0 / 2.2046226218
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), Event.LogSet("Bench Press", lbDerivedKg, 5, 8.0, at, at * 1000)))
-        rule.launchApp()
-        rule.onNode(hasText(str(R.string.main_dest_history)) and hasClickAction()).performClick()
-        settle()
-        rule.onNode(hasClickAction() and SemanticsMatcher("a lift session card") { n ->
-            n.config.getOrNull(SemanticsProperties.Text).orEmpty().any { LIFT_COUNT.matches(it.text) }
-        }).performSemanticsAction(SemanticsActions.OnClick)
-        settle()
-        rule.onNode(hasTestTag("lift-set-row")).performClick()
-        settle()
-        rule.onNode(hasText(str(R.string.history_edit_set)) and hasClickAction()).performClick()
-        settle()
-        val well = "${str(R.string.log_field_weight)}, "
-        val shown = roots().flatMap { flatten(it) }
-            .flatMap { it.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() }
-            .firstOrNull { it.startsWith(well) && it.endsWith(" kg") }
-        assertTrue("the weight well is on screen:\n${screenDump()}", shown != null)
-        val figure = shown!!.removePrefix(well).removeSuffix(" kg")
-        assertTrue("the kg field shows at most two decimals, got \"$figure\"", Regex("""^\d+(\.\d{1,2})?$""").matches(figure))
-        // An untouched Save stores the figure the field shows, not the raw division.
-        rule.onNode(hasTestTag("editor-primary")).performClick()
-        settle()
-        val saved = Core.currentView().lifts.single().weight_kg
-        assertTrue("an untouched Save stores the shown $figure kg, got $saved", saved == figure.toDouble())
-    }
-
-    /**
-     * A phone in landscape (411dp tall) at 200 % font with a pain
-     * report on top of an illness hold: the pinned DO-NOT-TRAIN banner (two
-     * resolve actions, shown whole by design) leaves the destination no room, and
-     * the "lollop" wordmark row was laid out over the bottom navigation, its text
-     * on top of the Today / History / Profile labels. The top chrome now leaves the
-     * wordmark out when the banner leaves it no room above the bottom bar.
-     */
-    @Test
-    fun landscapeFont200_holdBanner_wordmarkClearsTheNav() {
-        start = Start.Illness
-        RuntimeEnvironment.setQualifiers("w891dp-h411dp-land-xxhdpi")
-        RuntimeEnvironment.setFontScale(2f)
-        QaHarness.seedLog(ctx, seedEvents(Start.Illness)!! + Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, morning + 600))
-        rule.launchApp()
-        settle()
-        val overlaps = textProblems().filter { it.startsWith("overlap:") }
-        assertTrue("no text overlaps another:\n" + overlaps.joinToString("\n") + "\n" + screenDump(), overlaps.isEmpty())
-    }
-
-    /**
-     * The pinned DO-NOT-TRAIN banner is never overlapped (INVARIANT 3): in
-     * landscape at 100/150/200 % font on a 360dp- and a 411dp-tall phone, with a
-     * two-action hold (illness + pain), no banner node (the card, any tap target's
-     * touch bounds, the "?") intersects the bottom nav or the Log button, and Log
-     * stays reachable.
-     */
-    @Test
-    fun landscapeHoldBanner_isNeverOverlappedByNavOrLog() {
-        start = Start.Illness
-        val bad = ArrayList<String>()
-        for ((w, h) in listOf(800 to 360, 891 to 411)) for (scale in listOf(1f, 1.5f, 2f)) {
-            QaHarness.teardown()
-            QaHarness.reset(ctx)
-            resetSettings()
-            RuntimeEnvironment.setQualifiers("w${w}dp-h${h}dp-land-xxhdpi")
-            RuntimeEnvironment.setFontScale(scale)
-            QaHarness.seedLog(ctx, seedEvents(Start.Illness)!! + Event.SubmitReadiness(ReadinessSignal.Pain, 1.0, morning + 600))
-            rule.launchApp()
-            settle()
-            val config = "${h}dp-tall, font ${(scale * 100).toInt()} %"
-            val banner = allUnmerged(roots().first()).firstOrNull { it.config.getOrNull(SemanticsProperties.TestTag) == "safety-banner" }
-            if (banner == null || !banner.isVisible()) {
-                bad += "$config: the hold banner is not on screen"
-                continue
-            }
-            bad += chromeOverBanner().map { "$config: $it" }
-            val log = flatten(roots().first()).filter { n ->
-                n.isVisible() && n.config.getOrNull(SemanticsActions.OnClick) != null &&
-                    str(R.string.main_log) in n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
-            }
-            if (log.isEmpty()) bad += "$config: no Log action on screen"
-        }
-        assertTrue("the hold banner is never overlapped and Log stays reachable:\n" + bad.joinToString("\n"), bad.isEmpty())
-    }
-
-    /**
-     * Walk `UIWALK_STATE=Runner UIWALK_SEED=1594695423
-     * UIWALK_STEPS=49`: the week strip's done ✓ (the non-colour done cue) sat in a
-     * fixed 16dp slot: at 130 % font its 13sp line is taller than 16dp and was cut
-     * off. The slot now grows to the ✓'s measured line.
-     */
-    @Test
-    fun weekStripDoneMark_font130_isNotCutOff() {
-        start = Start.Lifter
-        RuntimeEnvironment.setFontScale(1.3f)
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        rule.launchApp()
-        settle()
-        // Complete today's session: every set of every item, at its load.
-        val items = EventDispatcher.model.value!!.week_plan.first { it.epoch_day == app.milestone.todayEpochDay() }.items
-        var id = 0L
-        EventDispatcher.sendAll(
-            items.filter { it.exercise.isNotEmpty() }.flatMap { item ->
-                (0 until maxOf(item.sets, 1)).map {
-                    id++
-                    Event.LogSet(item.exercise, item.load_kg ?: 60.0, maxOf(item.reps_high, item.reps_low, 1), 8.0, QaHarness.daysAgoAtMidday(0) + id, id)
-                }
-            },
-        )
-        awaitCoreLifts(id.toInt())
-        // The week strip sits below the hero: bring it on screen.
-        rule.onAllNodes(hasScrollToNodeAction())[0].performScrollToNode(hasTestTag("this-week"))
-        settle()
-        val strip = allUnmergedRoots().flatMap { flatten(it) }.first { it.config.getOrNull(SemanticsProperties.TestTag) == "this-week" }
-        val marks = flatten(strip).filter { n ->
-            n.isVisible() && n.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == "\u2713" }
-        }
-        assertTrue("precondition: today's week-strip day shows its done ✓:\n${screenDump()}", marks.isNotEmpty())
-        val cut = textProblems().filter { it.startsWith("cut off: \"\u2713\"") }
-        assertTrue("the done ✓ is not cut off:\n" + cut.joinToString("\n"), cut.isEmpty())
-    }
-
-    /**
-     * Walk `UIWALK_STATE=PainHold UIWALK_SEED=1595153934
-     * UIWALK_STEPS=65`: the set loop's "Last: 100 kg × 3 · 3 reps left" line beside
-     * "Edit" had `maxLines = 1` and clipped at 200 % font. It now wraps.
-     */
-    @Test
-    fun setLoopLastSetLine_font200_isNotCutOff() {
-        start = Start.Lifter
-        RuntimeEnvironment.setFontScale(2f)
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        rule.launchApp()
-        settle()
-        // One rated work set of today's first lift at its load: the loop then shows
-        // "Last: <load> × <reps> · 3 reps left".
-        val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() }
-        val at = QaHarness.daysAgoAtMidday(0)
-        EventDispatcher.send(Event.LogSet(first.exercise, first.load_kg ?: 100.0, maxOf(first.reps_low, 1), 7.0, at, at * 1000))
-        awaitCoreLifts(1)
-        rule.onNode(
-            hasClickAction() and hasContentDescription(str(R.string.plan_log_set_n_of_n, 2, first.sets), substring = true) and
-                hasAnyAncestor(hasTestTag("plan-item:${first.exercise}")),
-        ).performScrollTo().performClick()
-        settle()
-        val prefix = str(R.string.log_last_set, "")
-        val line = allUnmergedRoots().flatMap { flatten(it) }.flatMap { n ->
-            n.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
-        }.firstOrNull { it.startsWith(prefix) }
-        assertTrue("precondition: the loop shows the last set's line:\n${screenDump()}", line != null)
-        val cut = textProblems().filter { it.startsWith("cut off: \"$prefix") }
-        assertTrue("the last set's line \"$line\" is not cut off:\n" + cut.joinToString("\n"), cut.isEmpty())
-    }
-
-    /**
-     * Walk `UIWALK_STATE=Lifter UIWALK_SEED=1593027678
-     * UIWALK_STEPS=157`: a keypad field's value figure was one Display-size line
-     * (`maxLines = 1`): in the loop's Edit set dialog at 200 % font a typed
-     * 6-character "127.52" did not fit the well and was cut off. The figure now
-     * steps down to the Title size, then wraps (Keypad.kt `fittedValueStyle`), in
-     * every keypad editor.
-     */
-    @Test
-    fun keypadValueField_font200_showsASixCharacterWeightWhole() {
-        start = Start.Lifter
-        RuntimeEnvironment.setFontScale(2f)
-        QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        rule.launchApp()
-        settle()
-        val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() }
-        val at = QaHarness.daysAgoAtMidday(0)
-        EventDispatcher.send(Event.LogSet(first.exercise, first.load_kg ?: 125.0, maxOf(first.reps_low, 1), 7.0, at, at * 1000))
-        awaitCoreLifts(1)
-        rule.onNode(
-            hasClickAction() and hasContentDescription(str(R.string.plan_log_set_n_of_n, 2, first.sets), substring = true) and
-                hasAnyAncestor(hasTestTag("plan-item:${first.exercise}")),
-        ).performScrollTo().performClick()
-        settle()
-        // The loop's "Last: … · Edit" row opens the Edit set dialog.
-        rule.onNode(hasClickAction() and hasContentDescription(str(R.string.log_edit_set_cd, ""), substring = true)).performScrollTo().performClick()
-        settle()
-        // Type in the Edit set dialog, the top window (the loop under it has a
-        // weight field and a keypad of its own).
-        fun topmost(m: SemanticsMatcher): SemanticsNodeInteraction =
-            rule.onAllNodes(m).let { all -> all[all.fetchSemanticsNodes().size - 1] }
-        // Tap the figure at the well's start (its centre can be a ± chip at 200 %).
-        topmost(hasClickAction() and hasContentDescription("${str(R.string.log_field_weight)}, ", substring = true))
-            .performScrollTo().performTouchInput { click(centerLeft + Offset(48f * density, 0f)) }
-        settle()
-        for (k in "127.52") {
-            val key = if (k == '.') hasContentDescription(str(R.string.ui_cd_decimal_point)) else hasText("$k")
-            topmost(hasClickAction() and (key or hasAnyDescendant(key)) and hasAnyAncestor(hasTestTag("numeric-keypad")))
-                .performScrollTo().performClick()
-        }
-        settle()
-        val shown = allUnmergedRoots().flatMap { flatten(it) }.any { n -> n.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == "127.52" } }
-        assertTrue("precondition: the weight field shows the typed 127.52:\n${screenDump()}", shown)
-        val cut = textProblems().filter { it.startsWith("cut off: \"127.52\"") }
-        assertTrue("the weight field shows 127.52 whole:\n" + cut.joinToString("\n"), cut.isEmpty())
-    }
-
-    /**
-     * Walk `UIWALK_STATE=MilesLb UIWALK_SEED=1592776843 UIWALK_STEPS=214`: on set 1
-     * of a barbell lift at 200 % font, a warm-up step already logged showed
-     * "✓ <load>" in its quarter-width cell with `maxLines = 1`; "✓ Bar" fit, a
-     * figure such as "✓ 42.5" did not and was cut off. The ✓ now leads the
-     * reps line ("✓ ×3"); no done mark may be cut off.
-     */
-    @Test
-    fun warmUpDoneMark_font200_isNotCutOff() {
-        start = Start.Lifter
-        RuntimeEnvironment.setFontScale(2f)
-        // Logged lifts give today's items a load, so they show plates and warm-ups.
-        QaHarness.seedLog(ctx, seedEvents(Start.Lifter)!!)
-        rule.launchApp()
-        settle()
-        // Today's first plate-loaded lift with its warm-ups under 80 % of the work
-        // load logged as the loop's one-tap warm-up logs them (unrated). The ramp's
-        // top step is left out: logged first, the core counts it as a work set
-        // (completion.rs `the_warm_up_ramp_top_step_does_not_count_before_the_first_work_set`)
-        // and the loop drops its warm-up row.
-        val first = EventDispatcher.model.value!!.next_session!!.items.first { it.exercise.isNotEmpty() && it.plates_per_side.isNotEmpty() }
-        assertTrue("precondition: ${first.exercise} has no set logged today", first.sets_done == 0)
-        val workKg = first.load_kg ?: first.suggested_load_kg!!
-        val steps = app.milestone.warmUpSteps(workKg, app.milestone.WeightUnit.Kg, first.exercise).filter { it.kg < 0.8 * workKg }
-        assertTrue("precondition: ${first.exercise} at $workKg kg has a load step besides the bar: $steps", steps.any { !it.bar })
-        val at = QaHarness.daysAgoAtMidday(0)
-        val seeded = Core.currentView().lifts.size
-        EventDispatcher.sendAll(steps.mapIndexed { i, s -> Event.LogSet(first.exercise, s.kg, s.reps, 0.0, at + i, (at + i) * 1000) })
-        awaitCoreLifts(seeded + steps.size)
-        rule.onNode(
-            hasClickAction() and hasContentDescription(str(R.string.plan_log_set_n_of_n, 1, first.sets), substring = true) and
-                hasAnyAncestor(hasTestTag("plan-item:${first.exercise}")),
-        ).performScrollTo().performClick()
-        settle()
-        val marks = allUnmergedRoots().flatMap { flatten(it) }.flatMap { n ->
-            n.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
-        }.filter { it.startsWith("\u2713\u00A0") }
-        assertTrue("precondition: the warm-up row shows a done step per warm-up:\n${screenDump()}", marks.size == steps.size)
-        val cut = textProblems().filter { it.startsWith("cut off: \"\u2713") }
-        assertTrue("the done warm-up steps $marks are not cut off:\n" + cut.joinToString("\n"), cut.isEmpty())
-    }
-
-    /**
-     * Walk `UIWALK_STATE=LongHistory UIWALK_SEED=1593292569 UIWALK_STEPS=149`: in
-     * landscape at 200 % font, "Move" on a session the core cannot move opens a
-     * dialog whose body is the core's reason ("No other day this week works. On
-     * Thursday, …"). The body did not scroll, so the reason was cut off.
-     */
-    @Test
-    fun moveBlockedDialog_landscapeFont200_showsTheWholeReason() {
-        start = Start.LongHistory
-        RuntimeEnvironment.setQualifiers("w891dp-h411dp-land-xxhdpi")
-        RuntimeEnvironment.setFontScale(2f)
-        QaHarness.seedLog(ctx, seedEvents(Start.LongHistory)!!)
-        rule.launchApp()
-        settle()
-        val vm = EventDispatcher.model.value!!
-        val blocked = (listOfNotNull(vm.next_session) + vm.week_plan).firstOrNull { s ->
-            s.move_targets.isEmpty() && !s.move_blocked_reason.isNullOrBlank()
-        }
-        assertTrue("precondition: a session the core cannot move, with its reason", blocked != null)
-        val reason = blocked!!.move_blocked_reason!!
-        // The semantics action, not a touch: after performScrollTo's minimal scroll
-        // the floating Log button can sit over "Move" in landscape.
-        rule.onAllNodes(
-            hasClickAction() and hasContentDescription(str(R.string.plan_secondary_action_cd, str(R.string.main_move_session), blocked.title)),
-        )[0].performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
-        settle()
-        val shown = allUnmergedRoots().flatMap { flatten(it) }.any { n -> n.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == reason } }
-        assertTrue("precondition: the dialog shows the core's reason \"$reason\":\n${screenDump()}", shown)
-        val cut = textProblems().filter { it.startsWith("cut off: \"${reason.take(20)}") }
-        assertTrue("the move-blocked reason is shown whole:\n" + cut.joinToString("\n"), cut.isEmpty())
-    }
-
-    /**
-     * The move day picker in landscape at 200 % font with the most target days a
-     * generated week offers (one run day: the long run may go to all four free
-     * days). The body did not scroll, so the fourth row was clipped to a 2dp
-     * sliver above Cancel. Every target row must scroll whole (≥ 48dp) into the
-     * body between the title and Cancel, and a tap on the last one moves the
-     * session there.
-     */
-    @Test
-    fun moveDayPicker_landscapeFont200_reachesEveryTargetDay() {
-        start = Start.Hybrid
-        RuntimeEnvironment.setQualifiers("w891dp-h411dp-land-xxhdpi")
-        RuntimeEnvironment.setFontScale(2f)
-        QaHarness.seedLog(ctx, listOf(profile(runDays = 1, runKm = 6.0)))
-        rule.launchApp()
-        settle()
-        val vm = EventDispatcher.model.value!!
-        val session = (listOfNotNull(vm.next_session) + vm.week_plan).maxBy { it.move_targets.size }
-        val targets = session.move_targets
-        assertTrue("precondition: a session with four target days, got ${session.title} $targets", targets.size >= 4)
-        // A day other than the hero's shows its "Move" once picked in the week strip.
-        if (session.epoch_day != vm.next_session?.epoch_day) {
-            val weekday = java.time.LocalDate.ofEpochDay(session.epoch_day).dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, Locale.ENGLISH)
-            rule.onAllNodes(hasScrollToNodeAction())[0].performScrollToNode(hasTestTag("this-week"))
-            settle()
-            rule.onNode(hasClickAction() and hasContentDescription("$weekday, ", substring = true)).performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
-            settle()
-        }
-        rule.onAllNodes(
-            hasClickAction() and hasContentDescription(str(R.string.plan_secondary_action_cd, str(R.string.main_move_session), session.title)),
-        )[0].performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
-        settle()
-        val inDialog = hasAnyAncestor(isDialog())
-        val title = rule.onNode(hasText(str(R.string.main_move_session_title, session.title)) and inDialog, useUnmergedTree = true)
-            .fetchSemanticsNode().boundsInRoot
-        val cancel = rule.onNode(hasText(str(R.string.main_cancel)) and inDialog, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        val d = rule.density.density
-        val slack = 2f * d
-        val unreachable = targets.mapNotNull { day ->
-            val tag = hasTestTag("move-target:$day") and hasClickAction()
-            // Scroll it into view when the body scrolls; a fixed body leaves it where it is.
-            if (rule.onAllNodes(tag and hasAnyAncestor(hasScrollAction())).fetchSemanticsNodes().isNotEmpty()) {
-                rule.onNode(tag).performScrollTo()
-                settle()
-            }
-            val b = rule.onNode(tag).fetchSemanticsNode().boundsInRoot
-            // boundsInRoot is clipped by the dialog: a clipped row shows only a sliver.
-            if (b.top >= title.bottom - slack && b.bottom <= cancel.top + slack && b.height >= app.milestone.ActionMinHeight.value * d - slack) {
-                null
-            } else {
-                "move-target:$day at ${(b.top / d).toInt()}-${(b.bottom / d).toInt()}dp (title ends ${(title.bottom / d).toInt()}dp, Cancel starts ${(cancel.top / d).toInt()}dp)"
-            }
-        }
-        assertTrue("every target day is in view between the title and Cancel once scrolled to:\n" + unreachable.joinToString("\n"), unreachable.isEmpty())
-        val last = targets.last()
-        rule.onNode(hasTestTag("move-target:$last") and hasClickAction()).performClick()
-        settle()
-        val moved = Core.currentView().let { listOfNotNull(it.next_session) + it.week_plan }
-            .any { it.epoch_day == last && it.moved_from_epoch_day == session.epoch_day }
-        assertTrue("a tap on the last target day moves ${session.title} there", moved)
-    }
-
-    /** Wait until the core holds [n] logged sets (an [EventDispatcher] send reaches
-     *  it on its consumer), then [settle] the UI onto that view. */
-    private fun awaitCoreLifts(n: Int) {
-        val t0 = System.currentTimeMillis()
-        while (Core.currentView().lifts.size != n) {
-            if (System.currentTimeMillis() - t0 > 10_000) fail("the core holds ${Core.currentView().lifts.size} sets, expected $n")
-            rule.waitForIdle()
-            Thread.sleep(20)
-        }
-        settle()
-    }
-
-    private val morning get() = app.milestone.todayEpochDay() * 86_400L + 8 * 3_600L
-
-    private fun profile(
-        weeklySets: Int = 12,
-        runDays: Int = 0,
-        runKm: Double = 0.0,
-        goal: GoalDistance = GoalDistance.General,
-        concurrent: ConcurrentGoal = ConcurrentGoal.Strength,
-        age: Double = 30.0,
-        lb: Boolean = false,
-        health: HealthScreen = HealthScreen(),
-    ): Event = Event.SetProfile(
-        progressionCadence = ProgressionCadence.WeekToWeek,
-        liftGoal = LiftGoal.MaxStrength,
-        goalDistance = goal,
-        concurrentGoal = concurrent,
-        weeklySets = weeklySets,
-        runningDaysPerWeek = runDays,
-        runningKmPerWeek = runKm,
-        advanced = false,
-        bodyweightKg = 78.0,
-        ageYears = age,
-        weightLb = lb,
-        health = health,
-    )
-
-    private fun liftDays(vararg daysAgo: Int): List<Event> = daysAgo.flatMap { d ->
-        val t = QaHarness.daysAgoAtMidday(d)
-        listOf("Back Squat" to 100.0, "Bench Press" to 70.0, "Deadlift" to 120.0).flatMapIndexed { ei, (ex, kg) ->
-            (0 until 3).map { s ->
-                val at = t + ei * 600L + s * 150L
-                Event.LogSet(ex, kg, 5, 8.0, at, at * 1000)
-            }
-        }
-    }
-
-    private fun runs(vararg daysAgo: Int): List<Event> = daysAgo.mapIndexed { i, d ->
-        val at = QaHarness.daysAgoAtMidday(d) + 3_600L
-        Event.LogRun(5.0 + i, 28.0 + 5 * i, 0.0, at, at * 1000)
-    }
 
     private fun seedEvents(start: Start): List<Event>? = when (start) {
         Start.FreshInstall -> null
@@ -879,28 +364,11 @@ class RandomUiWalkTest {
 
     // ── Settling ────────────────────────────────────────────────────────────
 
-    /** Idle the UI, then wait until the published model agrees with the core (a
-     *  tap's event reaches the core on its JNI thread and the view comes back on a
-     *  later main-looper turn). Diverging for 15 s is a failure. */
-    private fun settle() {
-        val t0 = System.currentTimeMillis()
-        while (true) {
-            guard("idle") { rule.waitForIdle() }
-            val core = Core.currentView()
-            guard("idle") { roots() }
-            val ui = EventDispatcher.model.value
-            if (ui != null && entrySignature(ui) == entrySignature(core)) return
-            if (ui == null && System.currentTimeMillis() - t0 > 30_000) fail("stuck splash: no model published after 30 s")
-            if (ui != null && System.currentTimeMillis() - t0 > 15_000) {
-                fail("UI model diverged from the core:\n ui   ${entrySignature(ui)}\n core ${entrySignature(core)}")
-            }
-            Thread.sleep(20)
-        }
+    /** Idle with framework hiccups skipped and an app crash failing the walk. */
+    override fun idle() {
+        guard("idle") { rule.waitForIdle() }
+        guard("idle") { roots() }
     }
-
-    private fun entrySignature(m: ViewModel) =
-        "lifts=${m.lifts.size} runs=${m.runs.size} activities=${m.activities.size} blocked=${m.train_blocked} hold=${m.hold_reason} " +
-            "liftIds=${m.lifts.map { it.entry_id }.hashCode()} runIds=${m.runs.map { it.entry_id }.hashCode()}"
 
     // ── Invariants ──────────────────────────────────────────────────────────
 
@@ -950,7 +418,7 @@ class RandomUiWalkTest {
             .filterNot { v -> v.kind == "duplicate-action-in-card" && sharedCards.any { "in card \"$it\"" in v.detail } }
             .map { it.toString() } + smallTargets()
         if (ux.isNotEmpty()) fail("UX invariants:\n" + ux.take(12).joinToString("\n"))
-        val text = textProblems()
+        val text = textProblems(typed)
         if (text.isNotEmpty()) fail("text cut off / overlapping (${text.size}):\n" + text.take(12).joinToString("\n"))
         // The pinned hold banner is never overlapped (INVARIANT 3): not by the
         // bottom nav, not by the Log button, text or not.
@@ -1055,20 +523,6 @@ class RandomUiWalkTest {
 
     // ── Screen helpers ──────────────────────────────────────────────────────
 
-    private fun roots(): List<SemanticsNode> = rule.onAllNodes(isRoot()).fetchSemanticsNodes()
-
-    private fun flatten(n: SemanticsNode): List<SemanticsNode> = listOf(n) + n.children.flatMap { flatten(it) }
-
-    private fun allUnmerged(root: SemanticsNode): List<SemanticsNode> {
-        val unmerged = rule.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes()
-            .firstOrNull { it.id == root.id } ?: return emptyList()
-        return flatten(unmerged)
-    }
-
-    private fun allUnmergedRoots(): List<SemanticsNode> = rule.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes()
-
-    private fun SemanticsNode.isVisible() = boundsInRoot.width > 0f && boundsInRoot.height > 0f
-
     private fun SemanticsNode.isSheet() =
         flatten(this).any { n -> n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it == SHEET_SCRIM } }
 
@@ -1109,12 +563,6 @@ class RandomUiWalkTest {
         }
     }
 
-    private fun labelOf(n: SemanticsNode): String =
-        (n.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } +
-            n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() +
-            listOfNotNull(n.config.getOrNull(SemanticsProperties.EditableText)?.text))
-            .firstOrNull { it.isNotBlank() }?.take(60) ?: (n.config.getOrNull(SemanticsProperties.TestTag) ?: "")
-
     private fun node(n: SemanticsNode): SemanticsNodeInteraction {
         val id = n.id
         val b = n.boundsInRoot
@@ -1125,136 +573,9 @@ class RandomUiWalkTest {
 
     private fun rootNode(r: SemanticsNode): SemanticsNodeInteraction = node(r)
 
-    /** The selected bottom-nav destination, or null off the main scaffold. */
-    private fun selectedTab(): String? {
-        val tabs = setOf(str(R.string.main_dest_today), str(R.string.main_dest_history), str(R.string.main_dest_profile))
-        return flatten(roots().first()).firstOrNull { n ->
-            n.config.getOrNull(SemanticsProperties.Selected) == true && labelOf(n) in tabs
-        }?.let { labelOf(it) }
-    }
-
-    /** The top window holds an open numeric keypad the user cannot see. */
-    private fun offscreenKeypad(): Boolean = keypadNodes().let { k -> k.isNotEmpty() && k.none { it.isVisible() } }
-
-    private fun keypadComposed(): Boolean = keypadNodes().isNotEmpty()
-
-    private fun keypadNodes(): List<SemanticsNode> = roots().lastOrNull()?.let { top ->
-        allUnmerged(top).filter { it.config.getOrNull(SemanticsProperties.TestTag) == "numeric-keypad" }
-    }.orEmpty()
-
-    /** What a user perceives: the windows, the selected tab, and the top window's texts. */
-    private fun fingerprint(): String {
-        val roots = roots()
-        val top = roots.lastOrNull() ?: return "<none>"
-        val texts = flatten(top).filter { it.isVisible() }.map { labelOf(it) + "@" + it.boundsInRoot.top.toInt() }
-        return "${roots.size}|${selectedTab()}|${texts.hashCode()}"
-    }
-    private fun screenDump(): String = roots().mapIndexed { i, r ->
-        "window $i: " + flatten(r).filter { it.isVisible() }.map { labelOf(it) }.filter { it.isNotBlank() }.distinct().take(40).joinToString(" | ")
-    }.joinToString("\n")
-
-    /** Visible text the layout cut off (ellipsis, lines past maxLines, an unwrapped
-     *  line wider than its box) or that overlaps another visible text in the same
-     *  window by more than 2dp each way (same rules as LongHistoryUiTest). */
-    private fun textProblems(): List<String> {
-        val out = ArrayList<String>()
-        val d = rule.density.density
-        val slack = 2f * d
-        // Floating layers ride over the scrolling list by design: the "Log" button
-        // (the list's end clearance is RedesignFlowsTest's gate) and a snackbar
-        // (its host is the node with a dismiss action), so text under them is not
-        // an overlap.
-        val floating = roots().firstOrNull()?.let { r ->
-            flatten(r).filter { n ->
-                (
-                    n.config.getOrNull(SemanticsActions.OnClick) != null &&
-                        n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it == str(R.string.main_log) }
-                    ) || n.config.getOrNull(SemanticsActions.Dismiss) != null
-            }.map { it.boundsInRoot }
-        }.orEmpty()
-        rule.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes().forEachIndexed { ri, root ->
-            val boxes = ArrayList<Pair<String, Rect>>()
-            fun visit(n: SemanticsNode) {
-                // A composed-but-unplaced group (SetEditor's shownOnly) draws nothing.
-                if (!n.layoutInfo.isPlaced) return
-                val b = n.boundsInRoot
-                if (b.width > 0f && b.height > 0f) {
-                    n.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.let { get ->
-                        val layouts = ArrayList<TextLayoutResult>()
-                        if (get(layouts)) {
-                            layouts.filter { it.cutsOffText }
-                                .filterNot { l -> typed.any { it.isNotBlank() && l.layoutInput.text.text.contains(it.take(20)) } }
-                                .forEach { l ->
-                                    val why = when {
-                                        l.didOverflowHeight -> "taller than its ${(l.size.height / d).toInt()}dp box"
-                                        (0 until l.lineCount).any { l.isLineEllipsized(it) } -> "ellipsized at ${l.lineCount} line(s)"
-                                        else -> "one line wider than its ${(l.size.width / d).toInt()}dp box"
-                                    }
-                                    out += "cut off: \"${l.layoutInput.text.text}\" ($why, font ${l.layoutInput.style.fontSize}, node at ${(b.left / d).toInt()},${(b.top / d).toInt()}dp)"
-                                }
-                        }
-                    }
-                    n.config.getOrNull(SemanticsProperties.Text)?.let { t -> boxes += t.joinToString(" ") { it.text } to b }
-                }
-                n.children.forEach(::visit)
-            }
-            visit(root)
-            for (i in boxes.indices) for (j in i + 1 until boxes.size) {
-                val a = boxes[i].second
-                val b = boxes[j].second
-                val w = minOf(a.right, b.right) - maxOf(a.left, b.left)
-                val hgt = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
-                val under = ri == 0 && floating.any { f -> a.overlaps(f) || b.overlaps(f) }
-                // The M3 date picker keeps its year grid composed behind the day grid.
-                val yearGrid = listOf(boxes[i].first, boxes[j].first).any { it.startsWith("Navigate to year") }
-                if (w > slack && hgt > slack && !under && !yearGrid) {
-                    fun Rect.dp() = "(${(left / d).toInt()},${(top / d).toInt()})-(${(right / d).toInt()},${(bottom / d).toInt()})dp"
-                    out += "overlap: \"${boxes[i].first}\" ${a.dp()} × \"${boxes[j].first}\" ${b.dp()}"
-                }
-            }
-        }
-        return out.distinct()
-    }
-
-    /** The activity window's chrome that could be laid over the banner: the
-     *  bottom nav, the side rail and the Log button, where placed and visible. */
-    private fun chromeNodes(): List<SemanticsNode> = allUnmerged(roots().first()).filter { n ->
-        n.layoutInfo.isPlaced && n.isVisible() && n.config.getOrNull(SemanticsProperties.TestTag) in setOf("bottom-nav", "nav-rail", "log-fab")
-    }
-
-    /** Every intersection of the safety banner (its card, and each of its nodes'
-     *  bounds and touch bounds) with [chromeNodes], beyond half a dp. */
-    private fun chromeOverBanner(): List<String> {
-        val all = allUnmerged(roots().first())
-        val banner = all.firstOrNull { it.layoutInfo.isPlaced && it.config.getOrNull(SemanticsProperties.TestTag) == "safety-banner" }
-            ?: return emptyList()
-        val d = rule.density.density
-        fun Rect.dp() = "(${(left / d).toInt()},${(top / d).toInt()})-(${(right / d).toInt()},${(bottom / d).toInt()})dp"
-        val parts = flatten(banner).filter { it.layoutInfo.isPlaced && it.isVisible() }
-            .flatMap { n -> listOf(n to n.boundsInRoot, n to n.touchBoundsInRoot) }
-        val out = ArrayList<String>()
-        for (c in chromeNodes()) {
-            val cb = c.boundsInRoot
-            for ((n, b) in parts) {
-                val w = minOf(b.right, cb.right) - maxOf(b.left, cb.left)
-                val h = minOf(b.bottom, cb.bottom) - maxOf(b.top, cb.top)
-                if (w > 0.5f * d && h > 0.5f * d) {
-                    val name = if (n.id == banner.id) "the banner card" else "\"${labelOf(n).ifBlank { "<node>" }}\""
-                    out += "${c.config.getOrNull(SemanticsProperties.TestTag)} ${cb.dp()} × $name ${b.dp()}"
-                }
-            }
-        }
-        return out.distinct()
-    }
-
-    private val TextLayoutResult.cutsOffText: Boolean
-        get() = didOverflowHeight ||
-            (0 until lineCount).any { isLineEllipsized(it) } ||
-            (!layoutInput.softWrap && multiParagraph.intrinsics.maxIntrinsicWidth > size.width + 0.5f)
-
     private fun quote(s: String) = "\"" + (if (s.length > 24) s.take(24) + "…(${s.length})" else s).replace("\n", "\\n") + "\""
 
-    private fun fail(msg: String): Nothing {
+    override fun fail(msg: String): Nothing {
         val replay = "UIWALK_STATE=${start.name} UIWALK_SEED=$seed UIWALK_STEPS=$step"
         throw AssertionError(
             "UIWALK [$start] seed=$seed step=$step font=$fontScale land=$landscape: $msg\n" +
@@ -1278,9 +599,6 @@ class RandomUiWalkTest {
         private val UX_KINDS = UxInvariants.KINDS - "small-touch-target"
 
         private val FONT_SCALES = listOf(1f, 1f, 1.3f, 2f)
-
-        /** A History lift-session card's count line ("1 exercise · 1 set"). */
-        private val LIFT_COUNT = Regex("""^\d+ exercises? · \d+ sets?$""")
 
         /** Plausible and hostile text-field input: empty, blank, numbers with
          *  commas / dots / signs, huge, unicode, emoji, RTL, control characters. */
