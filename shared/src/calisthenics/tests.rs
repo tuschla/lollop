@@ -102,6 +102,23 @@ fn tier_by_name_matches_names_and_aliases() {
     }
 }
 
+/// A Turkish keyboard capitalises the i of "incline" as İ (the shell's search
+/// field auto-capitalises sentences) and types ı where other layouts put i.
+/// `name_key` folds both to i, so "İncline push-up (low)" keys like its ASCII
+/// spelling.
+#[test]
+fn tier_by_name_matches_turkish_keyboard_spellings() {
+    for (typed, canonical) in [
+        ("İncline push-up (low)", "Incline push-up (low)"),
+        ("İnclined body row", "Inclined body row"),
+        ("PİSTOL SQUAT", "Pistol squat"),
+        ("Inclıne push-up (low)", "Incline push-up (low)"),
+    ] {
+        assert!(tier_by_name(canonical).is_some(), "{canonical:?}");
+        assert_eq!(tier_by_name(typed), tier_by_name(canonical), "{typed:?}");
+    }
+}
+
 #[test]
 fn every_load_and_graded_claim_is_citable() {
     for l in LADDERS {

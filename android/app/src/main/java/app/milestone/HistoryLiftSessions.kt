@@ -22,7 +22,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -31,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -55,9 +55,10 @@ internal data class LiftSession(val epochDay: Long?, val sets: List<LiftResultVi
     /** Stable, saveable selection + list key. */
     val key: String = epochDay?.toString() ?: "undated"
 
-    /** Exercises in first-logged order, keyed by [nameKey] (the key the core chains
-     *  an exercise's e1RM and PRs on) and named by their first-logged spelling, each
-     *  with its own sets in logged order. */
+    /** Exercises in first-logged order, keyed by [nameKey] (the core chains an
+     *  exercise's e1RM and PRs on its lower-cased name, the same key except that
+     *  [nameKey] folds a few letters further, İ and ı to i among them) and named by
+     *  their first-logged spelling, each with its own sets in logged order. */
     val exercises: List<Pair<String, List<LiftResultView>>> =
         sets.groupBy { nameKey(it.exercise) }.values.map { it.first().exercise to it }
 
@@ -254,13 +255,14 @@ private fun e1rmChangeLabels(deltaKg: Double, sessions: Int, weightUnit: WeightU
 }
 
 /** The day's volume (the sum of the core's per-set [LiftResultView.tonnage_kg]),
- *  whole units in the display unit with [locale] grouping ("4,690"), or null for a
- *  bodyweight-only day. */
-private fun sessionVolume(sets: List<LiftResultView>, weightUnit: WeightUnit, locale: Locale): String? {
+ *  whole units in the display unit grouped with ',' ("4,690"), or null for a
+ *  bodyweight-only day. `Locale.US` like every figure (History's tonnage tile, the
+ *  set rows' "234.5"), so '.' is never a thousands mark beside a decimal point. */
+private fun sessionVolume(sets: List<LiftResultView>, weightUnit: WeightUnit): String? {
     val kg = sets.sumOf { it.tonnage_kg }
     if (kg <= 0.0) return null
     val shown = if (weightUnit == WeightUnit.Lb) kgToLb(kg) else kg
-    return java.text.NumberFormat.getIntegerInstance(locale).format(Math.round(shown))
+    return String.format(Locale.US, "%,d", Math.round(shown))
 }
 
 /** The hairline that keeps a non-safety card readable as a card on a BgElevated sheet
@@ -431,11 +433,11 @@ internal fun LiftSessionSheet(
 /** The session sheet's title: the day, then "3 exercises · 9 sets · 4,690 lb lifted". */
 @Composable
 private fun LiftSessionSheetHeader(session: LiftSession, weightUnit: WeightUnit) {
-    val volume = sessionVolume(session.sets, weightUnit, LocalConfiguration.current.locales[0])?.let {
+    val volume = sessionVolume(session.sets, weightUnit)?.let {
         stringResource(R.string.history_session_volume, it, weightSuffix(weightUnit))
     }
     Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
-        Text(liftSessionTitle(session), style = Type.Title, color = OnBgBody)
+        Text(liftSessionTitle(session), style = Type.Title, color = OnBgBody, modifier = Modifier.semantics { heading() })
         Text(
             (sessionCounts(session) + listOfNotNull(volume)).joinToString(" · "),
             color = OnBgMuted,

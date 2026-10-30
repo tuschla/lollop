@@ -163,7 +163,10 @@ internal sealed interface RestFace {
  * exercise is on screen, so the countdown carries into the next exercise. With
  * none running, an exercise without a prescribed rest ([itemRestSec] 0) counts up
  * from its newest set today ([lastSetSec], unix seconds). Null when nothing is in
- * its [RestReadoutWindowSec] window. Pure.
+ * its [RestReadoutWindowSec] window. A [nowMillis] before the rest's start (the
+ * 1 s ticker last read the clock just before the set was logged) reads as the
+ * start, so the full rest shows at once instead of nothing until the next tick.
+ * Pure.
  */
 internal fun restFace(
     restStartMillis: Long?,
@@ -173,9 +176,9 @@ internal fun restFace(
     nowMillis: Long,
 ): RestFace? {
     if (restStartMillis != null && restEndMillis != null) {
-        val sinceStart = nowMillis - restStartMillis
-        if (sinceStart >= 0 && sinceStart <= RestReadoutWindowSec * 1000L) {
-            val leftMs = restEndMillis - nowMillis
+        val at = maxOf(nowMillis, restStartMillis)
+        if (at - restStartMillis <= RestReadoutWindowSec * 1000L) {
+            val leftMs = restEndMillis - at
             return if (leftMs > 0) {
                 // Rounded up: "0:01" shows until the rest is really over.
                 RestFace.Counting(((leftMs + 999) / 1000).toInt())

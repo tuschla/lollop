@@ -133,8 +133,14 @@ fn percent_arm(
     // The effort the percentage implies on the Epley model (85 %×3 → ~2 in
     // reserve), 1–4 RIR: the "how hard" target on the face and the editor's
     // RPE hint. A set that feels much harder than this means today sits below
-    // the estimate (true 1RM varies day to day).
-    let effort_rir = crate::strength::effort_target_rir(p as f64, l.reps as u32);
+    // the estimate (true 1RM varies day to day). An e1RM-drop cut also caps
+    // the session at the planned RPE − 1 (autoreg-006, "cap session at planned
+    // RPE − 1 and reduce top-set load ~5%", extracted/06-autoregulation.md:134),
+    // still within 1–4: the lighter load at the planned effort would itself
+    // read as another drop.
+    let drop_cut = derate.is_some_and(|d| d.cause == crate::plan::DerateCause::E1rmDrop);
+    let effort_rir =
+        (crate::strength::effort_target_rir(p as f64, l.reps as u32) + u8::from(drop_cut)).min(4);
     if matches!(load, Some(kg) if kg <= 0.0) {
         // The anchor exists but shrinks below the plate grid (a tiny dumbbell
         // best, or a real anchor cut hard by a derate), so the rounded working

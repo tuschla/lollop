@@ -29,7 +29,7 @@ fn anchors_at(sets: &[LoggedSet], ctx: AnchorCtx, today: i64) -> crate::plan::An
     )
 }
 
-fn layoff(weeks_off: f64, returned: i64) -> AnchorCtx {
+fn layoff(weeks_off: f64, returned: i64) -> AnchorCtx<'static> {
     AnchorCtx {
         layoff: Some(Layoff {
             weeks_off,
@@ -205,11 +205,13 @@ fn post_return_anchor_is_unscaled_and_long_layoff_window_ends() {
 #[test]
 fn missed_target_cuts_next_load_5pct_unless_off_day() {
     // AUTOREG-E1RM-GATE-001: a session whose rated e1RM lands
-    // >5 % under the baseline cuts that lift's next working load ~5 %.
+    // >5 % under the baseline cuts that lift's next working load ~5 %. 100 kg
+    // × 4 at RPE 10 reads 113.3 kg, 8 % under 123.3 kg, and still 5.8 % under
+    // when credited the 2.5 kg plate-grid step.
     let sets = [
         set("Back Squat", 100.0, 5, 8.0, 0),
         set("Back Squat", 100.0, 5, 8.0, 7),
-        set("Back Squat", 100.0, 5, 10.0, 14),
+        set("Back Squat", 100.0, 4, 10.0, 14),
     ];
     let a = anchors_at(&sets, AnchorCtx::default(), 15);
     let d = a.load_frac_for("Back Squat").expect("an e1RM-drop cut");
@@ -224,6 +226,120 @@ fn missed_target_cuts_next_load_5pct_unless_off_day() {
             .load_frac_for("Back Squat")
             .is_none(),
         "a session marked as an off day keeps the load"
+    );
+}
+
+#[test]
+fn a_plate_floored_load_done_as_asked_is_no_e1rm_drop() {
+    // 85 % of a 55.5 kg overhead-press anchor is 47.2 kg, floored onto the
+    // 2.5 kg grid to 45 kg. 45 kg × 3 at the card's ~2 reps left (RPE 8) reads
+    // 52.5 kg, 94.6 % of the anchor; one plate step heavier, the most the
+    // floor took off, it reads 55.4 kg. The floor is not a drop
+    // (AUTOREG-E1RM-GATE-001 at fixed RPE, autoreg-022).
+    let asked = [
+        set("Overhead Press", 45.0, 5, 8.0, 0),
+        set("Overhead Press", 45.0, 3, 8.0, 3),
+    ];
+    let a = anchors_at(&asked, AnchorCtx::default(), 4);
+    assert_eq!(a.load_frac_for("Overhead Press"), None);
+    // A set more than one plate step under it still is: 42.5 kg × 3 at RPE 8
+    // reads 52.5 kg even credited 45 kg, under 95 % of 55.5 kg (52.7 kg).
+    let missed = [
+        set("Overhead Press", 45.0, 5, 8.0, 0),
+        set("Overhead Press", 42.5, 3, 8.0, 3),
+    ];
+    let d = anchors_at(&missed, AnchorCtx::default(), 4)
+        .load_frac_for("Overhead Press")
+        .cloned()
+        .expect("an e1RM-drop cut");
+    assert_eq!(d.cause, DerateCause::E1rmDrop);
+}
+
+#[test]
+fn e1rm_drop_cut_also_leaves_one_more_rep_in_reserve() {
+    // AUTOREG-E1RM-GATE-001 (autoreg-006): the cut session aims for one more
+    // rep left than planned as well as ~5 % less weight, so the lighter load
+    // done as asked reads at the estimate instead of as a second drop.
+    let anchors = crate::plan::Anchors {
+        lift_e1rm: vec![("Back Squat".into(), 100.0)],
+        lift_derates: vec![crate::plan::LiftDerate {
+            exercise: "Back Squat".into(),
+            frac: crate::app::anchors::E1RM_DROP_GATE,
+            cause: DerateCause::E1rmDrop,
+        }],
+        ..Default::default()
+    };
+    let it = flatten_prescription(&pct_rx(85.0, 3, None), &anchors, None, false);
+    // 100 kg × 85 % × 95 % = 80.75 kg, floored to 80 kg; 85 % × 3 alone
+    // targets ~2 reps left (RPE 8).
+    assert_eq!(it.load_kg, Some(80.0));
+    assert_eq!(it.target_rpe, Some(7.0));
+    assert!(it.summary.contains("~3 reps left"), "{}", it.summary);
+}
+
+#[test]
+fn planned_deload_sets_neither_cut_nor_anchor_the_next_load() {
+    // A planned deload's light sets (here 70 % at ~3 reps left, a hypertrophy
+    // deload's RIR) are prescribed, not a performance drop (autoreg-022 reads
+    // e1RM at fixed RPE): the e1RM-drop cut (AUTOREG-E1RM-GATE-001) and the
+    // last working sets the next block resumes from (HYP-DELOAD-RX-001) skip
+    // them. Epoch day 4 is a Monday.
+    let sets = [
+        set("Back Squat", 100.0, 5, 8.0, 4),
+        set("Back Squat", 100.0, 5, 8.0, 6),
+        set("Back Squat", 100.0, 5, 8.0, 8),
+        set("Back Squat", 70.0, 5, 7.0, 11),
+        set("Back Squat", 70.0, 5, 7.0, 13),
+    ];
+    let deload = AnchorCtx {
+        deloads: DeloadWeeks(&[11]),
+        ..Default::default()
+    };
+    let a = anchors_at(&sets, deload, 14);
+    let work = (crate::strength::e1rm_epley_rpe(100.0, 5, 8.0) * 10.0).round() / 10.0;
+    assert_eq!(a.e1rm_for("Back Squat"), Some(work));
+    assert!(a.load_frac_for("Back Squat").is_none(), "no e1RM-drop cut");
+    assert_eq!(a.last_working_for("Back Squat").unwrap().weight_kg, 100.0);
+    // The same sets outside a planned deload are a >5 % drop.
+    let b = anchors_at(&sets, AnchorCtx::default(), 14);
+    assert!(
+        b.load_frac_for("Back Squat")
+            .is_some_and(|d| matches!(d.cause, DerateCause::E1rmDrop))
+    );
+    assert_eq!(b.last_working_for("Back Squat").unwrap().weight_kg, 70.0);
+}
+
+#[test]
+fn planned_deload_sets_never_score_as_a_readiness_e1rm_drop() {
+    // The same deload through the readiness gate (autoreg-006 today's cut,
+    // autoreg-022 the decline deload; e1RM at fixed RPE,
+    // extracted/06-autoregulation.md:278-280): a deload week's sets rated
+    // exactly (70 % × 5 at RPE 7: 72 % of the 123.3 kg best, 74 % credited a
+    // plate step) are left out, so the last scored session is day 8's.
+    let sets = [
+        set("Back Squat", 100.0, 5, 8.0, 4),
+        set("Back Squat", 100.0, 5, 8.0, 6),
+        set("Back Squat", 100.0, 5, 8.0, 8),
+        set("Back Squat", 70.0, 5, 7.0, 11),
+        set("Back Squat", 70.0, 5, 7.0, 13),
+    ];
+    let perf = |deloads| {
+        let scored = crate::app::readiness::perf_sets(&sets, 13, 0, deloads, false);
+        crate::autoreg::derive_performance(&scored, 13, 0)
+    };
+    let deload = perf(DeloadWeeks(&[11]));
+    assert!(
+        deload
+            .iter()
+            .all(|p| !p.today && p.ratio >= 1.0 && p.decline_streak == 0),
+        "{deload:?}"
+    );
+    // Outside a planned deload they are a drop: today's cut and a two-session
+    // decline.
+    let plain = perf(DeloadWeeks(&[]));
+    assert!(
+        plain.iter().any(|p| p.today && p.decline_streak == 2),
+        "{plain:?}"
     );
 }
 

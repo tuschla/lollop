@@ -145,7 +145,7 @@ internal val ActivityKind.labelRes: Int
  *  profile's weight unit and the chosen distance unit. */
 internal fun shareCoachSummary(ctx: Context, model: ViewModel) {
     val text = buildCoachSummary(
-        ctx.resources,
+        ctx.withLatinDigits().resources,
         model,
         today = model.today(),
         zone = ZoneId.systemDefault(),

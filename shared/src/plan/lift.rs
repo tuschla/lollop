@@ -40,10 +40,11 @@ pub(crate) fn movement_pattern(name: &str) -> Option<MovementPattern> {
     })
 }
 
-/// Lowercase ASCII word tokens of an exercise name (split on every
-/// non-alphanumeric ASCII char, empties dropped), handed to `f`.
+/// Lowercase ASCII word tokens of an exercise name, folded first
+/// ([`crate::names::fold`]: "İncline" → "incline"), split on every
+/// non-alphanumeric ASCII char, empties dropped, handed to `f`.
 fn with_name_tokens<R>(name: &str, f: impl FnOnce(&[&str]) -> R) -> R {
-    let lower = name.to_ascii_lowercase();
+    let lower = crate::names::fold(name);
     let tokens: Vec<&str> = lower
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|t| !t.is_empty())
@@ -270,7 +271,7 @@ pub(crate) fn same_movement(a: &str, b: &str) -> bool {
     loop {
         match (x.next(), y.next()) {
             (None, None) => return true,
-            (Some(p), Some(q)) if p.eq_ignore_ascii_case(q) => {}
+            (Some(p), Some(q)) if crate::names::fold_eq(p, q) => {}
             _ => return false,
         }
     }
@@ -283,12 +284,12 @@ pub(crate) fn same_movement(a: &str, b: &str) -> bool {
 /// ("Hack squat"), so history logged under the old label stays the same lift.
 pub(crate) fn movement_key(name: &str) -> Vec<String> {
     count_name_classification();
-    movement_tokens(name).map(str::to_ascii_lowercase).collect()
+    movement_tokens(name).map(crate::names::fold).collect()
 }
 
-/// The tokens of [`movement_key`], unlowered and unallocated: the canonical
+/// The tokens of [`movement_key`], unfolded and unallocated: the canonical
 /// name split on every non-alphanumeric char, empties and equipment words
-/// dropped (compared ASCII-case-insensitively).
+/// dropped (compared with [`crate::names::fold_eq`]).
 fn movement_tokens(name: &str) -> impl Iterator<Item = &str> {
     const EQUIPMENT: [&str; 7] = [
         "barbell",
@@ -301,7 +302,7 @@ fn movement_tokens(name: &str) -> impl Iterator<Item = &str> {
     ];
     hypertrophy::canonical_name(name)
         .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty() && !EQUIPMENT.iter().any(|e| t.eq_ignore_ascii_case(e)))
+        .filter(|t| !t.is_empty() && !EQUIPMENT.iter().any(|e| crate::names::fold_eq(t, e)))
 }
 
 /// Heavy lifting: at or above 80 % 1RM, the floor of the max-strength band a
@@ -310,11 +311,12 @@ fn movement_tokens(name: &str) -> impl Iterator<Item = &str> {
 /// HYB-CAP-001) and the meet taper's heavy squat/bench cut.
 pub(super) const HEAVY_PCT_1RM: f32 = 80.0;
 
-/// The DUP emphasis for a lift day, GOAL-AWARE (`day_index % 3`):
+/// The DUP emphasis for a lift day, GOAL-AWARE (`day_index % 3`, the day's
+/// exposure index within its region, `plan::region_exposure_index`):
 /// - MaxStrength: Heavy → HeavyVolume → Hypertrophy. Each main lift gets ≥80 %
-///   1RM in ≥2 sessions a week at 2 OR 3+ lift days; the lighter day adds to
-///   the heavy ones rather than replacing one (STR-HEAVYFREQ-001; strength-001
-///   80–100 %).
+///   1RM in ≥2 sessions a week at 2+ full-body days or an upper/lower split;
+///   the lighter day adds to the heavy ones rather than replacing one
+///   (STR-HEAVYFREQ-001; strength-001 80–100 %).
 /// - Power, strong athlete: the classic Heavy → Power → Hypertrophy week
 ///   (strength-023).
 /// - Power, novice or below the ~1.5×BW squat benchmark (`power_base`):
@@ -846,7 +848,8 @@ impl DoseCtx<'_> {
     /// itself refresh the anchor. A strength day ramps the load week over week
     /// (STR-PCTPROG-001: novices progress linearly, strength-010/014),
     /// 80 → 82 → 83 % for a lower-body ×5, held where 5 reps would leave under
-    /// 1 in reserve.
+    /// 1 in reserve, and never below the load of a completed last session
+    /// ([`novice_hold_pct`]).
     fn novice_linear_dose(&self) -> LiftDose {
         let load = &self.load;
         let reps = load.reps.1.min(strength::E1RM_RELIABLE_REP_CAP as u8);
@@ -862,6 +865,20 @@ impl DoseCtx<'_> {
             p
         } else {
             load.pct_1rm.0
+        };
+        // A completed session is never followed by a lighter one: novice
+        // linear progression adds load after a session whose prescribed reps
+        // were all done and deloads a lift only after repeated misses (File 08
+        // indiv-008/009; STR-PCTPROG-001 "per successful week"). A set logged
+        // at its target effort cannot raise the estimate the percentage reads,
+        // and each %1RM load rounds DOWN onto the plate grid, so without this
+        // hold the load would slide one plate at a time across completed weeks.
+        let pct = match novice_hold_pct(self.anchors, self.exercise, reps) {
+            Some(hold) if hold > pct => {
+                claim = Some(claims::STR_PCTPROG_001);
+                hold
+            }
+            _ => pct,
         };
         // A novice's load never jumps past the novice step cap over their last
         // session of the lift (File 02 strength-040, STR-1RMTEST-001: lower
@@ -964,6 +981,29 @@ fn novice_jump_cap_pct(anchors: &Anchors, exercise: &str, reps: u8, upper: bool)
         / strength::e1rm_epley(1.0, u32::from(reps.max(1)));
     let jump = strength::novice_load_jump_cap_frac(upper).value.1;
     Some((100.0 * base * (1.0 + jump) / e1).floor().clamp(0.0, 100.0) as u8)
+}
+
+/// Lowest whole %1RM of a novice's anchor that repeats the lift's last working
+/// load, when that session was completed: every working set reached today's
+/// `reps` and none was rated past RPE 9 (the miss [`earned_week`] withholds a
+/// step for; an unrated set cannot show one). `None` without an anchor, a
+/// loaded last session, or when it was not completed. The percentage is
+/// rounded UP so the plate-grid floor of anchor × % lands on the load lifted.
+fn novice_hold_pct(anchors: &Anchors, exercise: &str, reps: u8) -> Option<u8> {
+    let e1 = anchors.e1rm_for(exercise)?;
+    let last = anchors
+        .last_working_for(exercise)
+        .filter(|w| w.weight_kg > 0.0)?;
+    let completed = !last.sets.is_empty()
+        && last
+            .sets
+            .iter()
+            .all(|&(r, rpe)| r >= u32::from(reps) && rpe <= 9.0);
+    completed.then(|| {
+        (100.0 * last.weight_kg / e1 - 1e-6)
+            .ceil()
+            .clamp(0.0, 100.0) as u8
+    })
 }
 
 /// Calibration set for an unanchored lift on a power day: one set of 5 at

@@ -818,7 +818,7 @@ pub fn renamed(name: &str) -> Option<&'static str> {
     LEGACY_NAMES
         .iter()
         .chain(crate::calisthenics::LEGACY_NAMES)
-        .find(|&&(old, _)| old.eq_ignore_ascii_case(trimmed))
+        .find(|&&(old, _)| crate::names::fold_eq(old, trimmed))
         .map(|&(_, new)| new)
 }
 

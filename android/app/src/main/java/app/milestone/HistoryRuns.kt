@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -117,7 +118,9 @@ internal fun runFaceLine(r: RunResultView, unit: DistanceUnit): String {
 // ── Records, run rating and run progress ────────────────────────────────────
 
 /** Filled Accent pill for a record ("Fastest 5K", "New best"): OnAccent text holds
- *  AA on every theme's accent. Not an action, so no touch target. */
+ *  AA on every theme's accent. Not an action, so no touch target. A [description]
+ *  replaces the visible text for TalkBack ("New best" is read once, as "New best
+ *  estimated max for …"). */
 @Composable
 internal fun RecordChip(text: String, description: String? = null, modifier: Modifier = Modifier) {
     Text(
@@ -127,7 +130,7 @@ internal fun RecordChip(text: String, description: String? = null, modifier: Mod
         modifier = modifier
             .background(Accent, SegmentShape)
             .chipPadding()
-            .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
+            .then(if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier),
     )
 }
 

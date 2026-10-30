@@ -1090,6 +1090,38 @@ fn e1rm_dip_caps_session_rpe_alongside_load_cut() {
     );
 }
 
+#[test]
+fn plate_floored_top_set_done_as_asked_holds_the_e1rm_baseline() {
+    let set = |weight_kg, reps, rpe, day: i64| PerfSet {
+        exercise: "Overhead Press",
+        weight_kg,
+        reps,
+        rpe,
+        observed_at: day * crate::DAY_SEC + 3_600,
+        grid_step_kg: 2.5,
+    };
+    // 45 kg × 5 at RPE 8 sets a 55.5 kg best; the plan's 85 % (47.2 kg) is
+    // floored to 45 kg, and 45 kg × 3 at the card's RPE 8 reads 52.5 kg
+    // (94.6 %, under the 5 % gate). One plate step heavier it reads 55.4 kg:
+    // credited that step, the session holds the baseline, so no cut today.
+    let perf = derive_performance(&[set(45.0, 5, 8.0, 0), set(45.0, 3, 8.0, 3)], 3, 0);
+    let p = perf
+        .iter()
+        .find(|p| p.today)
+        .expect("today's session is scored");
+    let credited = crate::strength::e1rm_epley_rpe(47.5, 3, 8.0)
+        / crate::strength::e1rm_epley_rpe(45.0, 5, 8.0);
+    assert!((p.ratio - credited).abs() < 1e-12, "{}", p.ratio);
+    assert!(super::perf::perf_adjustments(&perf).is_empty());
+    // The credit never makes an increase: the ratio stops at 1.
+    let perf = derive_performance(&[set(45.0, 5, 8.0, 0), set(45.0, 5, 8.0, 3)], 3, 0);
+    assert_eq!(perf.iter().find(|p| p.today).map(|p| p.ratio), Some(1.0));
+    // "4+ reps left" (RPE 6) is a lower bound, never an e1RM at RPE: 37.5 kg
+    // × 8 read as 8 reps to failure (47.5 kg, 86 %) is not a drop.
+    let perf = derive_performance(&[set(45.0, 5, 8.0, 0), set(37.5, 8, 6.0, 3)], 3, 0);
+    assert!(perf.iter().all(|p| !p.today), "{perf:?}");
+}
+
 // --- autoreg-029: parasympathetic saturation blocks auto load-adds ---
 
 #[test]

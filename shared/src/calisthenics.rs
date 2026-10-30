@@ -448,17 +448,26 @@ pub fn tier(id: LadderId, idx: u8) -> Option<&'static Tier> {
 
 /// Normalized lookup key for an exercise name: lowercase ASCII alphanumeric
 /// tokens with a plural trailing "s" dropped, joined without separators, so
-/// "Pull ups", "pull-up" and "PULLUPS" share one key.
+/// "Pull ups", "pull-up" and "PULLUPS" share one key. A Latin letter with a
+/// diacritic and the Turkish İ/ı fold to their ASCII letters first
+/// ([`crate::names::ascii_fold`]), so "PİSTOL SQUAT" and "Inclıne push-up" key
+/// like their ASCII spelling; any other character is a separator.
 fn name_key(name: &str) -> String {
-    let mut key = String::with_capacity(name.len());
-    for tok in name
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|t| !t.is_empty())
-    {
-        let lower = tok.to_ascii_lowercase();
-        let singular = match lower.strip_suffix('s') {
+    let mut folded = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            folded.push(c.to_ascii_lowercase());
+        } else if let Some(ascii) = crate::names::ascii_fold(c) {
+            folded.push_str(ascii);
+        } else {
+            folded.push(' ');
+        }
+    }
+    let mut key = String::with_capacity(folded.len());
+    for tok in folded.split(' ').filter(|t| !t.is_empty()) {
+        let singular = match tok.strip_suffix('s') {
             Some(s) if s.len() >= 2 && !s.ends_with('s') => s,
-            _ => lower.as_str(),
+            _ => tok,
         };
         key.push_str(singular);
     }

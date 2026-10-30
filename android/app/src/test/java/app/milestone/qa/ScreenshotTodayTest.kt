@@ -482,6 +482,10 @@ class ScreenshotTodayTest {
         rule.onNodeWithText("+2.5").performClick()
         rule.onNodeWithText(str(R.string.log_set_done)).performClick()
         waitForText(str(R.string.log_finish_unsaved_title))
+        // The loop's rest readout shows under the dialog: pin it to the rest's first
+        // second ("Rest left 3:00"), whatever time the steps above took.
+        pinRestReadout(0)
+        waitFor(hasContentDescription(str(R.string.log_rest_left_cd, "3:00")))
         rule.shot("log-finish-unsaved-${mode.suffix}")
     }
 

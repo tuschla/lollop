@@ -700,7 +700,7 @@ internal fun ReviewCard(rows: List<ReviewEntry>, reveal: SetupStep?, onRevealed:
                     .fillMaxWidth()
                     .then(if (i == revealAt) Modifier.bringIntoViewRequester(revealRequester) else Modifier)
                     .heightIn(min = ActionMinHeight)
-                    .clickable(onClickLabel = edit) { onEdit(row.step) }
+                    .clickable(role = Role.Button, onClickLabel = edit) { onEdit(row.step) }
                     .padding(Space.Card.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

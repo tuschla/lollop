@@ -20,15 +20,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** The elevated content card (hairline outline, no shadow); with [onClick] the
- *  whole card is one tappable surface. [contentPadding] and [spacing] default to
- *  the card recipe; edge-to-edge row lists ([ActionRows], a hairline grid) pass
- *  zero and draw their own row padding. */
+ *  whole card is one tappable surface, a button to TalkBack. [contentPadding] and
+ *  [spacing] default to the card recipe; edge-to-edge row lists ([ActionRows], a
+ *  hairline grid) pass zero and draw their own row padding. */
 @Composable
 internal fun PlainCard(
     onClick: (() -> Unit)? = null,
@@ -56,7 +58,8 @@ internal fun PlainCard(
             elevation = elevation,
             shape = shape,
             border = border,
-            modifier = Modifier.fillMaxWidth(),
+            // Material's clickable Card sets no role.
+            modifier = Modifier.fillMaxWidth().semantics { role = Role.Button },
         ) { body() }
     } else {
         Card(
@@ -131,6 +134,7 @@ internal fun ConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.windowTraversalGroup(),
         shape = RoundedCornerShape(Space.Card.dp),
         title = { Text(title) },
         text = body?.let { { Text(it) } },

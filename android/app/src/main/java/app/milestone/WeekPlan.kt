@@ -156,6 +156,7 @@ internal fun SessionMoveAction(s: SessionPlanView, today: Long, onMove: (Long, L
     if (s.move_targets.isEmpty()) {
         AlertDialog(
             onDismissRequest = { picking = false },
+            modifier = Modifier.windowTraversalGroup(),
             shape = RoundedCornerShape(Space.Card.dp),
             title = { Text(stringResource(R.string.main_move_blocked_title, s.title)) },
             // Scrolls: in landscape at 200 % font the reason is taller than the slot.
@@ -173,6 +174,7 @@ internal fun SessionMoveAction(s: SessionPlanView, today: Long, onMove: (Long, L
     val todayLabel = stringResource(R.string.main_move_today)
     AlertDialog(
         onDismissRequest = { picking = false },
+        modifier = Modifier.windowTraversalGroup(),
         shape = RoundedCornerShape(Space.Card.dp),
         title = { Text(stringResource(R.string.main_move_session_title, s.title)) },
         text = {

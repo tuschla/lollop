@@ -532,6 +532,7 @@ private fun LazyListScope.DataSection(ctx: Context, model: ViewModel) {
             }
             AlertDialog(
                 onDismissRequest = dismiss,
+                modifier = Modifier.windowTraversalGroup(),
                 shape = RoundedCornerShape(Space.Card.dp),
                 title = { Text(stringResource(R.string.main_import_replace_title)) },
                 text = {
@@ -558,6 +559,7 @@ private fun LazyListScope.DataSection(ctx: Context, model: ViewModel) {
         if (restoring) {
             AlertDialog(
                 onDismissRequest = { /* the restart follows; nothing to go back to */ },
+                modifier = Modifier.windowTraversalGroup(),
                 confirmButton = {},
                 text = {
                     Row(
@@ -677,6 +679,7 @@ internal fun ClearAllDataDialog(visible: Boolean, onDismiss: () -> Unit, onClear
     if (!visible) return
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.windowTraversalGroup(),
         shape = RoundedCornerShape(Space.Card.dp),
         title = { Text(stringResource(R.string.main_clear_all_title)) },
         text = {

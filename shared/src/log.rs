@@ -129,7 +129,7 @@ enum Rule {
     ClearWeeklyCheckin,
     GeneratePlan,
     ClearPlan,
-    /// `SetExerciseEnded` by `(exercise.trim().lowercase(), epoch_day)`.
+    /// `SetExerciseEnded` by `(names::exercise_key(exercise), epoch_day)`.
     Ended(String, i64),
     Today {
         utc_offset_sec: i64,
@@ -287,7 +287,7 @@ impl LineFacts {
             } => (
                 F::Sets,
                 false,
-                Rule::Ended(exercise.trim().to_lowercase(), *epoch_day),
+                Rule::Ended(crate::names::exercise_key(exercise), *epoch_day),
             ),
             // Every rung placement is history (a past day's rung depends on
             // the placements before it): only ClearSets sweeps one.
@@ -836,9 +836,10 @@ fn rule2_profile_history(lines: &[LineFacts], remove: &mut [bool]) {
 }
 
 /// Rule 2 (`SetExerciseEnded`): last write wins per EXACT key
-/// `(exercise.trim().lowercase(), epoch_day)`. `update` keys end-markers by a
-/// looser movement-normalized name, so the exact-key subset is always safe
-/// (lines differing only in equipment words are conservatively kept).
+/// `(names::exercise_key(exercise), epoch_day)`. `update` keys end-markers by a
+/// looser movement-normalized name (`plan::same_movement`, whose tokens compare
+/// with the same fold), so the exact-key subset is always safe (lines differing
+/// only in equipment words are conservatively kept).
 fn rule2_exercise_ended(lines: &[LineFacts], remove: &mut [bool]) {
     let mut last_ended: HashMap<(&str, i64), usize> = HashMap::new();
     for (j, line) in lines.iter().enumerate() {

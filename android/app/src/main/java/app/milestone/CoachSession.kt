@@ -520,6 +520,7 @@ internal fun ResumeRunDialog(session: CoachSession) {
     val liveRun = { RunSession.tracking.value || RunSession.armed.value }
     AlertDialog(
         onDismissRequest = { /* deliberate choice required */ },
+        modifier = Modifier.windowTraversalGroup(),
         shape = RoundedCornerShape(Space.Card.dp),
         title = { Text(stringResource(R.string.main_resume_run_title)) },
         text = { Text(stringResource(R.string.main_resume_run_message)) },

@@ -34,8 +34,10 @@
 #
 # Exit status: 0 when every check passed, 1 when any check failed (see REPORT.md).
 # Requires: Android SDK (sdk.dir in android/local.properties or $ANDROID_HOME),
-# python3, KVM and an x86_64 google_apis AVD (Google Play services for fused
-# location; adb root, which lib.sh's event-log push/pull use).
+# python3, cargo (the core's figures of the saved run:
+# shared/tests/track_figures_of_record.rs), KVM and an x86_64 google_apis AVD
+# (Google Play services for fused location; adb root, which lib.sh's event-log
+# push/pull use).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -216,9 +218,10 @@ PY
 
 cat >"$PY/analyze_run.py" <<'PY'
 """Compare the saved tracked run with the fed route.
-argv: event_log.ndjson expected.json t0 feeder.log ui.json out.json"""
+argv: event_log.ndjson expected.json t0 feeder.log ui.json core.json out.json
+core.json: the core's own figures of the run (shared/tests/track_figures_of_record.rs)."""
 import json, math, sys
-logp, expp, t0, feedp, uip, outp = sys.argv[1:7]
+logp, expp, t0, feedp, uip, corep, outp = sys.argv[1:8]
 t0 = float(t0)
 exp = json.load(open(expp)); ui = json.load(open(uip))
 runs = []
@@ -238,50 +241,6 @@ def hav(a, b):
     dla, dlo = la2 - la1, math.radians(b["lon"] - a["lon"])
     h = math.sin(dla / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(dlo / 2) ** 2
     return 2 * 6371000.0 * math.asin(min(1.0, math.sqrt(h)))
-def leg(a, b):
-    dt = b["observed_at"] - a["observed_at"]
-    if dt <= 0:
-        return None
-    d = hav(a, b)
-    return None if d / dt < 0.5 else (dt, d)
-def core_qc(points, starts):
-    """Replica of the core's of-record derivation (app/run_views/qc.rs qc_track +
-    running::track_distance_km_seg + moving_duration_min + the track_splits_seg
-    clock), so the History figures can be told apart from a display bug."""
-    out, still, ost, standing, pend = [], [], [], None, False
-    for i, p in enumerate(points):
-        pend = pend or i in starts
-        if p.get("accuracy_m", 99) > 30:
-            continue
-        if not pend and out:
-            last = out[-1]; dt = p["observed_at"] - last["observed_at"]
-            if dt <= 0:
-                continue
-            d = hav(last, p)
-            if d / dt > 12:
-                continue
-            if d < 2.5:
-                if leg(last, p) is None:
-                    standing = p
-                continue
-        if pend and out:
-            ost.append(len(out))
-        pend = False; out.append(p); still.append(standing); standing = None
-    bounds, prev, segs = sorted(set(ost)), 0, []
-    for b in bounds:
-        segs.append((prev, b)); prev = b
-    segs.append((prev, len(out)))
-    dist = head_s = split_s = 0.0
-    for a, b in segs:
-        for i in range(a + 1, b):
-            l = leg(out[i - 1], out[i])
-            if l:
-                dist += min(l[1], 12 * l[0]); split_s += l[0]
-            l2 = leg(still[i] or out[i - 1], out[i])
-            if l2:
-                head_s += l2[0]
-    return {"distance_m": round(dist, 1), "moving_s": int(head_s), "split_clock_s": int(split_s),
-            "survivors": len(out)}
 if runs:
     r = runs[-1]
     pts = [p for p in r["points"] if p.get("accuracy_m", 99) <= 30]
@@ -315,8 +274,11 @@ if runs:
         windows={"screen_off": window("SCREEN_FROM", "SCREEN_TO"),
                  "background": window("BG_FROM", "BG_TO"),
                  "pocket_doze": window("POCKET_FROM", "POCKET_TO")},
-        core=core_qc(r["points"], seg),
     )
+    try:
+        res["core"] = json.load(open(corep))
+    except (OSError, ValueError):
+        res["core"] = None
 fails = 0
 for line in open(feedp):
     fails += "\tFAIL" in line
@@ -402,10 +364,10 @@ if os.path.exists(gp):
     g = json.load(open(gp)); e = g["expected"]; ui = g["ui"]
     w("## Tracked run vs fed route\n")
     c = g.get("core") or {}
-    w("| quantity | fed route | saved track, raw moving legs | saved track, of-record (core QC replica) | finish sheet | History row |\n|---|---|---|---|---|---|")
+    w("| quantity | fed route | saved track, raw moving legs | saved track, of-record (core) | finish sheet | History row |\n|---|---|---|---|---|---|")
     w(f"| moving distance (km) | {e['fed_moving_m']/1000:.3f} (path {e['true_moving_m']/1000:.3f}) | "
       f"{g.get('log_moving_m', 0)/1000:.3f} | {c.get('distance_m', 0)/1000:.3f} | {ui.get('finish_km')} | {ui.get('history_km')} |")
-    w(f"| moving time (s) | {e['moving_s']} | {g.get('log_moving_s')} | {c.get('moving_s')} (splits clock {c.get('split_clock_s')}) | "
+    w(f"| moving time (s) | {e['moving_s']} | {g.get('log_moving_s')} | {c.get('moving_s')} (km splits clock {c.get('split_clock_s')}) | "
       f"{ui.get('finish_moving_s')} | {ui.get('history_s')} |")
     w(f"\nFinish sheet: `{ui.get('finish')}` · History row: `{ui.get('history')}`")
     w(f"\npoints saved: {g.get('points')} (usable {g.get('usable_points')}), segment_starts: {g.get('segment_starts')}, "
@@ -472,12 +434,16 @@ notif_action() {
   tap_node eq "$1"
 }
 
-# reset_app seeded|fresh: wipe app data, re-grant, optionally seed the event log
-# (3 run days, a squat and a 5 km run yesterday).
+# reset_app seeded|fresh: wipe app data, re-grant, set the device clock to the
+# host's (the seed's dates and the fed route's schedule are host-clock based; a
+# scenario script may have left the emulator on a pinned clock), optionally seed
+# the event log (3 run days, a squat and a 5 km run yesterday).
 reset_app() {
   adb_ shell am force-stop "$APP_ID"
   adb_ shell pm clear "$APP_ID" >/dev/null
   grant_perms
+  sh_ cmd alarm set-timezone "$TZ0" >/dev/null
+  sh_ cmd alarm set-time "$(date +%s)000" >/dev/null
   if [[ "$1" == seeded ]]; then
     launch; sleep 4; adb_ shell am force-stop "$APP_ID"
     seed_basic "$(date -d yesterday +%F)" 3 >"$OUT/seed.ndjson"
@@ -583,9 +549,15 @@ live() {
 to_km() { # "3.21 mi" / "5.20 km" → km
   python3 -c "import re,sys;m=re.search(r'([0-9.]+)\s*(mi|km)',sys.argv[1]);print(round(float(m.group(1))*(1.609344 if m.group(2)=='mi' else 1),3) if m else '')" "$1"
 }
-to_sec() { # first h:mm:ss / m:ss → seconds
-  python3 -c "import re,sys;m=re.search(r'\b(?:(\d+):)?(\d+):(\d\d)\b',sys.argv[1]);print(int(m.group(1) or 0)*3600+int(m.group(2))*60+int(m.group(3)) if m else '')" "$1"
-}
+# First h:mm:ss / m:ss → seconds; else the first spoken duration ("15 minutes 51
+# seconds", the label the Finish sheet's UI tree carries).
+to_sec() { python3 -c "
+import re,sys
+s=sys.argv[1]
+m=re.search(r'\b(?:(\d+):)?(\d+):(\d\d)\b',s)
+if m: print(int(m.group(1) or 0)*3600+int(m.group(2))*60+int(m.group(3))); sys.exit()
+m=re.search(r'(?:\d+ (?:hours?|minutes?|seconds?)\b ?)+',s)
+print(sum(int(n)*{'h':3600,'m':60,'s':1}[u[0]] for n,u in re.findall(r'(\d+) (\w+)',m.group(0))) if m else '')" "$1"; }
 
 gps_run() {
   local rec=$(( GPS_MINUTES * 60 )) pid0 pid1 summary
@@ -670,10 +642,12 @@ gps_run() {
     || check PASS "service stopped after save" "no foreground tracking service"
   kill "$FEEDER_PID" 2>/dev/null || true; wait "$FEEDER_PID" 2>/dev/null || true
   pull_log "$G/event-log.ndjson"
-  # History › newest run row → run detail.
+  # History › newest run row → run detail. A run tracked from the Log sheet
+  # returns to it after Save: dismiss it first.
   mark "gps-history"
   local hist="" row
-  tap_nav "History"; sleep 3
+  has_text eq "Exercise, weight, reps" && { adb_ shell input keyevent 4; sleep 2; }
+  tap_nav "History" || true; sleep 3
   for _ in 1 2 3 4 5 6; do
     row="$(find_node re '^(?!Track|Log)[A-Z][A-Za-z]*( [A-Za-z]+)? run$' || true)"
     [[ -n "$row" ]] && break
@@ -698,7 +672,11 @@ gps_run() {
   fkm="$(to_km "$summary")"; fs="$(to_sec "${summary#*·}")"; hkm="$(to_km "$hist")"; hs="$(to_sec "$(awk -F' · ' '{print $NF}' <<<"$hist")")"
   printf '{"finish":"%s","finish_km":"%s","finish_moving_s":"%s","history":"%s","history_km":"%s","history_s":"%s"}\n' \
     "$summary" "$fkm" "$fs" "$hist" "$hkm" "$hs" >"$G/ui.json"
-  python3 "$PY/analyze_run.py" "$G/event-log.ndjson" "$G/expected.json" "$T0" "$G/feeder.log" "$G/ui.json" "$G/result.json" >/dev/null
+  # The core's own of-record figures of the saved run (needs cargo; on failure
+  # the core checks FAIL with logs in gps/core-cargo.log).
+  (cd "$REPO_ROOT" && TRACK_FIGURES_LOG="$G/event-log.ndjson" TRACK_FIGURES_OUT="$G/core.json" \
+    cargo test -q -p shared --test track_figures_of_record) >"$G/core-cargo.log" 2>&1 || rm -f "$G/core.json"
+  python3 "$PY/analyze_run.py" "$G/event-log.ndjson" "$G/expected.json" "$T0" "$G/feeder.log" "$G/ui.json" "$G/core.json" "$G/result.json" >/dev/null
   python3 - "$G/result.json" "$CHECKS" <<'PY'
 import json, sys
 g = json.load(open(sys.argv[1])); e = g["expected"]; ui = g["ui"]
@@ -707,15 +685,17 @@ def chk(ok, name, detail):
     out.write(f"{'PASS' if ok else 'FAIL'}\t{name}\t{detail}\n")
 chk(g["tracked_runs_in_log"] == 1, "exactly one tracked run saved", f"{g['tracked_runs_in_log']} LogRunTrack event(s) in the log")
 chk(g.get("workout_type") == "Easy", "run type chosen on Finish is saved", f"workout_type {g.get('workout_type')!r}")
-if g["tracked_runs_in_log"]:
+if g["tracked_runs_in_log"] and not g["core"]:
+    chk(False, "core figures of the saved run", "cargo test --test track_figures_of_record failed: gps/core-cargo.log")
+elif g["tracked_runs_in_log"]:
     c = g["core"]
     fed, recm = e["fed_moving_m"], c["distance_m"]
     chk(abs(recm - fed) <= 0.03 * fed, "saved distance vs fed route",
         f"of-record {recm/1000:.3f} km vs fed {fed/1000:.3f} km ({(recm/fed-1)*100:+.1f}%; raw moving legs {g['log_moving_m']/1000:.3f} km)")
     chk(abs(c["moving_s"] - e["moving_s"]) <= max(45, 0.03 * e["moving_s"]), "saved moving time vs fed route",
-        f"of-record {c['moving_s']} s vs fed {e['moving_s']} s")
+        f"of-record {c['moving_s']:.0f} s vs fed {e['moving_s']} s")
     chk(abs(c["split_clock_s"] - c["moving_s"]) <= 2, "splits clock equals headline moving time",
-        f"splits sum {c['split_clock_s']} s vs headline {c['moving_s']} s (core replica)")
+        f"km splits sum {c['split_clock_s']:.1f} s vs headline {c['moving_s']:.0f} s (core)")
     for k, v in g["windows"].items():
         chk(v["max_gap_s"] is not None and v["max_gap_s"] <= 30, f"fixes kept while {k}", f"{v['points']} fixes over {v['span_s']} s, max gap {v['max_gap_s']} s")
     # Display rounding: 0.01 mi ≈ 16 m, so a correct readout is within ~9 m.

@@ -31,6 +31,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.LayoutDirection
@@ -78,7 +79,7 @@ internal fun TrimRunSheetContent(
         modifier = Modifier.sheetBody(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
     ) {
-        Text(stringResource(R.string.main_trim_run), color = OnBgBody, style = Type.Title)
+        Text(stringResource(R.string.main_trim_run), color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
 
         val firstFixSec = points.first().timeSec
         val lastFixSec = points.last().timeSec

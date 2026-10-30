@@ -258,7 +258,7 @@ internal object SessionReminder {
     /** [reminder] for local day [day]. */
     private fun notify(app: Context, reminder: Reminder, day: Long, silent: Boolean) {
         ensureChannel(app)
-        val res = app.resources
+        val res = app.withLatinDigits().resources
         val start = NotificationCompat.Action.Builder(
             if (reminder.kind == WidgetDayKind.Run) R.drawable.ic_content_track_run else R.drawable.ic_content_set_dumbbell,
             reminderActionLabel(res, reminder),
@@ -479,6 +479,7 @@ internal fun SessionReminderRows(ctx: Context) {
         )
         AlertDialog(
             onDismissRequest = { picking = false },
+            modifier = Modifier.windowTraversalGroup(),
             title = { Text(stringResource(R.string.reminder_time_title)) },
             text = { TimePicker(state) },
             confirmButton = {

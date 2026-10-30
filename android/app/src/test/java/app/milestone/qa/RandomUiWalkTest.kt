@@ -96,7 +96,7 @@ class RandomUiWalkTest : UiProbeTest() {
     @Test fun longHistory() = walk(Start.LongHistory)
     @Test fun milesAndPounds() = walk(Start.MilesLb)
 
-    private fun seedEvents(start: Start): List<Event>? = when (start) {
+    internal fun seedEvents(start: Start): List<Event>? = when (start) {
         Start.FreshInstall -> null
         Start.Runner -> listOf(
             Event.SetProfile(
@@ -159,9 +159,11 @@ class RandomUiWalkTest : UiProbeTest() {
             try {
                 walkOnce(s, fixed ?: (BASE_SEED + s.ordinal * 7_919L + (first + k) * 104_729L), steps)
             } catch (e: AssertionError) {
-                if (!keepGoing) throw e
-                println("UIWALK-FAIL " + e.message)
-                failures += e.message.orEmpty().lineSequence().first()
+                // A framework assertion (not [fail]) carries no seed: give it the replay line.
+                val err = if (e.message?.startsWith("UIWALK") == true) e else walkError("${e.javaClass.simpleName}: ${e.message}").apply { initCause(e) }
+                if (!keepGoing) throw err
+                println("UIWALK-FAIL " + err.message)
+                failures += err.message.orEmpty().lineSequence().first()
             }
         }
         if (failures.isNotEmpty()) throw AssertionError("${failures.size} of $count walks failed:\n" + failures.joinToString("\n"))
@@ -502,15 +504,21 @@ class RandomUiWalkTest : UiProbeTest() {
         }
     }
 
-    /** The History LazyColumn's item count, read from its scroll-to-index bound. */
+    /** The History LazyColumn's item count, read from its scroll-to-index bound;
+     *  null when there is no list, or when it moved or left in the frame the
+     *  lookup waited for (`node` matches id AND bounds): the next step counts. */
     private fun historyItemCount(): Int? {
         val lists = flatten(roots().first()).filter { it.config.getOrNull(SemanticsActions.ScrollToIndex) != null && it.isVisible() }
         val list = lists.maxByOrNull { it.boundsInRoot.height } ?: return null
+        val target = node(list)
         return try {
-            node(list).performSemanticsAction(SemanticsActions.ScrollToIndex) { it(Int.MAX_VALUE) }
+            target.performSemanticsAction(SemanticsActions.ScrollToIndex) { it(Int.MAX_VALUE) }
             null
         } catch (e: IllegalArgumentException) {
             Regex("""out of bounds \[0, (\d+)\)""").find(e.message.orEmpty())?.groupValues?.get(1)?.toInt()
+        } catch (e: AssertionError) {
+            if (runCatching { target.fetchSemanticsNode() }.isSuccess) throw e
+            null
         }
     }
 
@@ -575,9 +583,11 @@ class RandomUiWalkTest : UiProbeTest() {
 
     private fun quote(s: String) = "\"" + (if (s.length > 24) s.take(24) + "…(${s.length})" else s).replace("\n", "\\n") + "\""
 
-    override fun fail(msg: String): Nothing {
+    override fun fail(msg: String): Nothing = throw walkError(msg)
+
+    private fun walkError(msg: String): AssertionError {
         val replay = "UIWALK_STATE=${start.name} UIWALK_SEED=$seed UIWALK_STEPS=$step"
-        throw AssertionError(
+        return AssertionError(
             "UIWALK [$start] seed=$seed step=$step font=$fontScale land=$landscape: $msg\n" +
                 "replay: $replay ./gradlew :app:testDebugUnitTest --tests 'app.milestone.qa.RandomUiWalkTest'\n" +
                 "trace:\n" + trace.takeLast(200).joinToString("\n") + "\n" +

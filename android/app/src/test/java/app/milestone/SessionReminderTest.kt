@@ -554,6 +554,49 @@ class SessionReminderTest {
         assertNull("Thursday's reminder on Friday", posted())
     }
 
+    /** Two zone changes in one evening, the app not opened: the first (Chicago →
+     *  Denver, still Thursday) marks the snapshot stale, so the second (into New
+     *  York, already Friday) writes no snapshot and only the receiver's day check
+     *  can take Thursday's reminder down (mutant KH03, `mutate_kt.py`). */
+    @Test
+    fun aSecondZoneChangePastMidnightTakesYesterdaysReminderDown() {
+        TimeZone.setDefault(TimeZone.getTimeZone("America/Chicago"))
+        AppClock.offsetMillis = millis("2026-10-29T20:00:30", "America/Chicago") - System.currentTimeMillis()
+        SessionReminder.setMinuteOfDay(app, 20 * 60)
+        SessionReminder.setEnabled(app, true)
+        store(liftDay())
+        fire()
+        assertNotNull(posted())
+
+        fun crossInto(at: String, zone: String) {
+            AppClock.offsetMillis = millis(at, "America/Chicago") - System.currentTimeMillis()
+            TimeZone.setDefault(TimeZone.getTimeZone(zone))
+            SessionReminderReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
+            WidgetSnapshotStore.markStale(app, force = true, today = todayEpochDay())
+        }
+        crossInto("2026-10-29T21:00:00", "America/Denver")
+        assertTrue("the snapshot is stale", WidgetSnapshotStore.read(app)!!.stale)
+        assertNotNull("still Thursday in Denver", posted())
+        crossInto("2026-10-29T23:30:00", "America/New_York")
+        assertEquals("it is Friday in New York", LocalDate.parse("2026-10-30").toEpochDay(), today)
+        assertNull("Thursday's reminder on Friday", posted())
+    }
+
+    /** A snapshot written for a new day (the app opened on Friday, no midnight
+     *  tick or clock broadcast before it) takes Thursday's reminder down and posts
+     *  none itself (mutant KH05, `mutate_kt.py`). */
+    @Test
+    fun aSnapshotForTheNextDayTakesYesterdaysReminderDown() {
+        AppClock.offsetMillis = millis("2026-10-29T07:30:30", "Europe/Berlin") - System.currentTimeMillis()
+        SessionReminder.setEnabled(app, true)
+        store(liftDay())
+        fire()
+        assertNotNull(posted())
+        AppClock.offsetMillis = millis("2026-10-30T08:00:00", "Europe/Berlin") - System.currentTimeMillis()
+        store(liftDay())
+        assertNull("Thursday's reminder on Friday", posted())
+    }
+
     // ── Days ahead from the real core ────────────────────────────────────────
 
     /** Fire the reminder at 07:30:30 UTC on [day] from [snapshot], the one the app last wrote. */

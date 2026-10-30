@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -286,7 +287,7 @@ internal fun CoachToolSheet(
             .padding(bottom = Space.Lg.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
     ) {
-        Text(title, color = OnBgBody, style = Type.Title)
+        Text(title, color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
         // The tool's FORM, seeded from the core's echoed query so it rehydrates
         // after a cold start. Profile owns bodyweight and age; the forms prefill
         // from it and keep an override local (never written back to the profile).
@@ -384,7 +385,7 @@ internal fun ReferenceLibrarySheet(model: ViewModel) {
             .padding(bottom = Space.Lg.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
     ) {
-        Text(stringResource(R.string.main_evidence_references_title), color = OnBgBody, style = Type.Title)
+        Text(stringResource(R.string.main_evidence_references_title), color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
         Text(
             stringResource(R.string.main_evidence_references_body),
             color = OnBgMuted,

@@ -97,9 +97,9 @@ fn push_day_audit_rows(
         .filter(|s| include(s) && local_day(s.observed_at, offset) == last_day)
         .collect();
     day_sets.sort_by_key(|s| (s.observed_at, s.entry_id));
-    // Key on the trimmed lower-cased name (matching the e1RM chain's key)
-    // so "back squat"/"Back squat" are one exercise.
-    let key = |s: &LoggedSet| s.exercise.trim().to_lowercase();
+    // Key on the folded name (`names::exercise_key`, the e1RM chain's key) so
+    // "back squat"/"Back squat"/"BACK SQUAT" are one exercise.
+    let key = |s: &LoggedSet| crate::names::exercise_key(&s.exercise);
     let mut heaviest: BTreeMap<String, f64> = BTreeMap::new();
     for s in &day_sets {
         let h = heaviest.entry(key(s)).or_insert(0.0);
@@ -337,8 +337,9 @@ fn lift_views_uncached(sets: &[LoggedSet], weight_lb: bool) -> Vec<LiftResultVie
     ordered.sort_by_key(|s| (s.observed_at, s.entry_id));
     // Per distinct exercise name, resolved once (a history repeats a handful
     // of names thousands of times): its PR chain and isolation class.
-    // Key the chain on the trimmed, lowercased name so "Squat" and "squat"
-    // share one chain. This is NOT the plan anchors' `movement_key`: "Smith
+    // Key the chain on the folded name (`names::exercise_key`) so "Squat",
+    // "squat" and a Turkish keyboard's "İncline …" for "Incline …" share one
+    // chain. This is NOT the plan anchors' `movement_key`: "Smith
     // machine back squat" and "Back squat" keep separate chains here. A
     // retired catalog label ("Barbell back squat") was stored under its
     // current name at ingest, so it shares the current name's chain.
@@ -353,7 +354,7 @@ fn lift_views_uncached(sets: &[LoggedSet], weight_lb: bool) -> Vec<LiftResultVie
             let (chain, isolation) = *names.entry(s.exercise.as_str()).or_insert_with(|| {
                 let next = chain_of.len();
                 let chain = *chain_of
-                    .entry(s.exercise.trim().to_lowercase())
+                    .entry(crate::names::exercise_key(&s.exercise))
                     .or_insert(next);
                 if chain == chains.len() {
                     chains.push(None);

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -43,6 +44,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
@@ -579,8 +581,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawAxisCeiling(col
  * canonical km, 0 = none) a dashed reference line marks it, starting at the week
  * the plan began ([planStartEpochDay]; null = the whole window). Tapping a bar
  * reads out its week and distance ("Week of Sep 21 · 16 mi"); tapping it again
- * clears it. One TalkBack summary (total, busiest week, this week, plan) stands
- * in for the canvas.
+ * clears it. TalkBack reads a summary (total, busiest week, this week, plan), then
+ * each week's figure from a node over its bar, so no week needs the tap readout.
  */
 @Composable
 fun WeeklyDistanceChart(
@@ -658,11 +660,18 @@ fun WeeklyDistanceChart(
             }
         }
         val bars = rememberBarColors()
-        Canvas(
+        val weekDescs = weeks.mapIndexed { i, w ->
+            stringResource(R.string.history_weekly_bar_value, weekLabel(w.week_start_epoch_day), trimDecimal(vals[i]), unit.distanceLabel)
+        }
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(chartHeight)
-                .semantics { contentDescription = chartDesc }
+                // A group, so the summary is read before the weeks inside it.
+                .semantics {
+                    contentDescription = chartDesc
+                    isTraversalGroup = true
+                }
                 .pointerInput(n) {
                     detectTapGestures { tap ->
                         val i = (tap.x / (size.width.toFloat() / n)).toInt().coerceIn(0, n - 1)
@@ -670,23 +679,34 @@ fun WeeklyDistanceChart(
                     }
                 },
         ) {
-            val picked = selected
-            val usableH = drawDistanceBars(vals, yMax, barFrac = 0.62f, bars, currentIndex = n - 1) { i ->
-                if (picked == null || picked == i) accent else accentDimmed
+            Canvas(Modifier.matchParentSize()) {
+                val picked = selected
+                val usableH = drawDistanceBars(vals, yMax, barFrac = 0.62f, bars, currentIndex = n - 1) { i ->
+                    if (picked == null || picked == i) accent else accentDimmed
+                }
+                // The planned weekly distance as a dashed reference line across the bars of
+                // the weeks the plan existed.
+                if (planned > 0.0 && yMax > 0.0) {
+                    val y = usableH - (planned / yMax).toFloat().coerceIn(0f, 1f) * usableH
+                    drawLine(
+                        color = planColor,
+                        start = Offset(size.width / n * planFrom, y),
+                        end = Offset(size.width, y),
+                        strokeWidth = stroke(1.5f),
+                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                            floatArrayOf(stroke(5f), stroke(4f)),
+                        ),
+                    )
+                }
             }
-            // The planned weekly distance as a dashed reference line across the bars of
-            // the weeks the plan existed.
-            if (planned > 0.0 && yMax > 0.0) {
-                val y = usableH - (planned / yMax).toFloat().coerceIn(0f, 1f) * usableH
-                drawLine(
-                    color = planColor,
-                    start = Offset(size.width / n * planFrom, y),
-                    end = Offset(size.width, y),
-                    strokeWidth = stroke(1.5f),
-                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
-                        floatArrayOf(stroke(5f), stroke(4f)),
-                    ),
-                )
+            // One node per week over its bar; the bars run oldest-left in every
+            // layout direction, so the slots do too.
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Row(Modifier.matchParentSize()) {
+                    weekDescs.forEach { desc ->
+                        Box(Modifier.weight(1f).fillMaxHeight().semantics { contentDescription = desc })
+                    }
+                }
             }
         }
         AxisTicks(weekLabel(weeks.first().week_start_epoch_day), stringResource(R.string.history_weekly_this_week))

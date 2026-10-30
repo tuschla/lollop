@@ -35,7 +35,9 @@ pub(super) use calis_anchors::build_calisthenics_anchors;
 pub(super) use calis_views::build_calisthenics_ladders;
 pub(super) use completion::finished_status;
 pub(super) use completion::{LoggedDays, last_top_set};
-pub(super) use consistency::{build_consistency, plan_week_index, weekday_name};
+pub(super) use consistency::{
+    DeloadWeeks, build_consistency, lift_deload_weeks, plan_week_index, weekday_name,
+};
 pub(super) use first_set::apply_first_set_autoreg;
 pub(super) use flatten::{flatten_prescription, plan_session_title};
 pub(super) use flatten_run::vdot_band_name;

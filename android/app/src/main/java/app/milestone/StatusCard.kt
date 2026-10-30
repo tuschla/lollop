@@ -121,12 +121,14 @@ internal fun StatusCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
         ) {
+            // With the SAFETY chip shown the chip names the card; the mark tile then
+            // stays silent, so TalkBack does not say "safety" twice.
             Box(
                 Modifier
                     .size(StatusMarkSize)
                     .clip(ChoiceCellShape)
                     .background(colors.tileFill)
-                    .semantics { contentDescription = mark },
+                    .then(if (safety) Modifier else Modifier.semantics { contentDescription = mark }),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(icon, contentDescription = null, tint = colors.glyph, modifier = Modifier.size(StatusGlyphSize))

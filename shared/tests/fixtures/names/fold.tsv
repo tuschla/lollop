@@ -1,0 +1,17 @@
+# Exercise name<TAB>key. The core's names::exercise_key and the shell's nameKey
+# (SetEditorState.kt) must both map each name to its key.
+  Back Squat 	back squat
+Romanian deadlift	romanian deadlift
+İncline bench press	incline bench press
+İNCLİNE BENCH PRESS	incline bench press
+Inclıne bench press	incline bench press
+ıncline bench press	incline bench press
+PİSTOL SQUAT	pistol squat
+Straße	strasse
+STRAẞE	strasse
+Crème brûlée	creme brulee
+Ćwiczenie ŁÓDŹ	cwiczenie lodz
+Œuf Æ Ø Þ	oeuf ae o th
+Жим ЛЁЖА	жим лёжа
+ΣΚΟΥΑΤ ς	σκουατ σ
+µ curl	μ curl

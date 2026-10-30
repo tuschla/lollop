@@ -973,3 +973,430 @@ fn track_figures_json_previews_a_log_run_track_and_refuses_other_events() {
     let other = super::track_figures_json(br#""ClearRuns""#);
     assert!(other.starts_with(br#"{"error""#));
 }
+
+/// One bridge, many JVM threads: `Core.kt` drives the global bridge from the
+/// `core-jni` executor, boot and the tracker save, while the GPX export, the
+/// Finish-review preview and boot compaction call the pure queries from IO
+/// and main. Eight threads log sets, manual runs and GPS tracks, trim them,
+/// and undo/redo at speed (delete + re-log, amend + amend back), each send
+/// followed by a view, while `track_figures_json`, `parse_fit_json` and
+/// `compact_lines` run beside them with no monitor. As in `Core.kt`, one
+/// monitor makes each apply + log append atomic (the log order is the apply
+/// order); views and queries take none.
+///
+/// Invariants: no error envelope, refused event or panic; at every
+/// checkpoint each thread's view (its thread-local memos warm with states
+/// the others moved past) equals a cold thread's; the Finish-review preview
+/// equals the saved card; the final view equals a cold-thread replay of the
+/// log and of its compaction; no step waits past the deadlock bound.
+/// `FFI_STRESS_ROUNDS` scales the run (default 5).
+#[test]
+fn many_threads_on_the_bridge_lose_nothing_and_match_a_cold_replay() {
+    use crate::app::{EntryKind, Event, Profile};
+    use crate::log::{LineFacts, compact_lines};
+    use crate::running::GpsPoint;
+    use std::sync::{Arc, Barrier, Mutex, mpsc};
+    use std::time::Duration;
+
+    const THREADS: usize = 8;
+    const PER_ROUND: usize = 6;
+    const DAY: i64 = 20_400;
+    const DAY_SEC: i64 = 86_400;
+    const STALL: Duration = Duration::from_secs(120);
+
+    /// `Core.send`: apply, then append, under one monitor.
+    fn send(log: &Mutex<Vec<Vec<u8>>>, e: &Event) -> Result<(), String> {
+        let wire = serde_json::to_vec(e).map_err(|err| err.to_string())?;
+        let mut log = log.lock().unwrap_or_else(|p| p.into_inner());
+        let out = process_event(&wire);
+        if out.first() != Some(&b'[') {
+            let head = String::from_utf8_lossy(&wire[..wire.len().min(160)]).into_owned();
+            return Err(format!("refused {head}: {}", String::from_utf8_lossy(&out)));
+        }
+        log.push(wire);
+        Ok(())
+    }
+
+    /// A view that is a ViewModel, not the firewall's error envelope.
+    fn view_ok() -> Result<String, String> {
+        let v = String::from_utf8(current_view()).map_err(|e| e.to_string())?;
+        if v.starts_with("{\"error\"") {
+            return Err(format!("view error envelope: {v}"));
+        }
+        Ok(v)
+    }
+
+    /// The view a fresh thread (every thread-local memo cold) renders.
+    fn cold_view() -> Result<String, String> {
+        std::thread::Builder::new()
+            .stack_size(32 << 20)
+            .spawn(view_ok)
+            .map_err(|e| e.to_string())?
+            .join()
+            .map_err(|_| "cold view thread panicked".to_owned())?
+    }
+
+    /// `lines` replayed into a reset bridge on a fresh thread: its view.
+    fn cold_replay(lines: Vec<Vec<u8>>) -> Result<String, String> {
+        super::reset_bridge();
+        std::thread::Builder::new()
+            .stack_size(32 << 20)
+            .spawn(move || {
+                for l in &lines {
+                    process_event(l);
+                }
+                view_ok()
+            })
+            .map_err(|e| e.to_string())?
+            .join()
+            .map_err(|_| "replay thread panicked".to_owned())?
+    }
+
+    fn first_diff(a: &str, b: &str) -> String {
+        let at = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
+        let window = |s: &str| {
+            let bytes = &s.as_bytes()[at.saturating_sub(80).min(s.len())..(at + 80).min(s.len())];
+            String::from_utf8_lossy(bytes).into_owned()
+        };
+        format!("at byte {at}: …{}… vs …{}…", window(a), window(b))
+    }
+
+    struct Lcg(u64);
+    impl Lcg {
+        fn below(&mut self, n: u64) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (self.0 >> 33) % n.max(1)
+        }
+    }
+
+    /// A ~0.7 km run east at ~3 m/s, one fix every 3 s, ending at `end`.
+    fn track(rng: &mut Lcg, end: i64) -> Vec<GpsPoint> {
+        let n = 240;
+        let mut x = 0.0;
+        (0..n)
+            .map(|i| {
+                x += 7.0 + rng.below(40) as f64 / 10.0;
+                GpsPoint {
+                    lat: 47.0 + rng.below(10) as f64 * 1e-6,
+                    lon: 8.0 + x / 75_800.0,
+                    observed_at: end - (n - 1 - i) * 3,
+                    accuracy_m: 5.0,
+                }
+            })
+            .collect()
+    }
+
+    let _bridge = BRIDGE_RESET.write().unwrap_or_else(|e| e.into_inner());
+    struct FreshBridgeOnDrop;
+    impl Drop for FreshBridgeOnDrop {
+        fn drop(&mut self) {
+            super::reset_bridge();
+        }
+    }
+    let _fresh = FreshBridgeOnDrop;
+    super::reset_bridge();
+
+    let rounds: usize = std::env::var("FFI_STRESS_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5);
+    let fit = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/Activity.fit"
+    ))
+    .expect("Activity.fit fixture");
+    let fit_reference = super::parse_fit_json(&fit);
+
+    let log: Arc<Mutex<Vec<Vec<u8>>>> = Arc::default();
+    for e in [
+        Event::SetToday {
+            epoch_day: DAY,
+            utc_offset_sec: 3600,
+        },
+        Event::SetProfile(Profile {
+            running_days_per_week: 3,
+            running_km_per_week: 25.0,
+            ..crate::app::tests::base_profile()
+        }),
+        Event::GeneratePlan {
+            start_epoch_day: DAY - 7,
+        },
+    ] {
+        send(&log, &e).expect("seed");
+    }
+
+    let (tx, rx) = mpsc::channel::<(usize, Result<String, String>)>();
+    let all_views_taken = Arc::new(Barrier::new(THREADS + 1));
+    let quiet = Arc::new(Barrier::new(THREADS));
+    let workers: Vec<_> = (0..THREADS)
+        .map(|t| {
+            let (log, tx, quiet, all_views_taken) = (
+                log.clone(),
+                tx.clone(),
+                quiet.clone(),
+                all_views_taken.clone(),
+            );
+            let fit = fit.clone();
+            let fit_reference = fit_reference.clone();
+            std::thread::Builder::new()
+                .name(format!("jni-{t}"))
+                .stack_size(32 << 20)
+                .spawn(move || {
+                    let mut rng = Lcg(0x5EED_0000 + t as u64 * 0x9E37_79B9);
+                    let mut next_id = 1_800_000_000_000 + t as u64 * 1_000_000;
+                    let exercises = ["Back squat", "Bench press", "Deadlift", "Row"];
+                    let mut sets: Vec<(u64, i64, String, f64, u32)> = Vec::new();
+                    let mut gps: Vec<(u64, i64, Event)> = Vec::new();
+                    let mut failed: Option<String> = None;
+                    let mut step = |rng: &mut Lcg| -> Result<(), String> {
+                        let at = (DAY - rng.below(20) as i64) * DAY_SEC
+                            + 30_000
+                            + rng.below(30_000) as i64;
+                        next_id += 1 + rng.below(50);
+                        let id = next_id;
+                        let mut evs: Vec<Event> = Vec::new();
+                        match rng.below(10) {
+                            0..=3 => {
+                                let ex = exercises[rng.below(4) as usize].to_owned();
+                                let (kg, reps) =
+                                    (40.0 + 2.5 * rng.below(40) as f64, 1 + rng.below(10) as u32);
+                                sets.push((id, at, ex.clone(), kg, reps));
+                                evs.push(Event::LogSet {
+                                    exercise: ex,
+                                    weight_kg: kg,
+                                    reps,
+                                    rpe: 8.0,
+                                    observed_at: at,
+                                    entry_id: id,
+                                    hold_sec: None,
+                                });
+                            }
+                            4 if !sets.is_empty() => {
+                                // Delete, then the shell's Undo re-logs the same row.
+                                let (id, at, ex, kg, reps) =
+                                    sets[rng.below(sets.len() as u64) as usize].clone();
+                                evs.push(Event::DeleteEntry {
+                                    kind: EntryKind::Set,
+                                    entry_id: id,
+                                    observed_at_fallback: at,
+                                });
+                                evs.push(Event::LogSet {
+                                    exercise: ex,
+                                    weight_kg: kg,
+                                    reps,
+                                    rpe: 8.0,
+                                    observed_at: at,
+                                    entry_id: id,
+                                    hold_sec: None,
+                                });
+                            }
+                            5 if !sets.is_empty() => {
+                                // Edit, then Undo of the edit (amend back).
+                                let (id, at, ex, kg, reps) =
+                                    sets[rng.below(sets.len() as u64) as usize].clone();
+                                let amend = |kg: f64, reps: u32| Event::AmendSet {
+                                    entry_id: id,
+                                    exercise: ex.clone(),
+                                    weight_kg: kg,
+                                    reps,
+                                    rpe: 8.0,
+                                    observed_at: at,
+                                    observed_at_fallback: at,
+                                    hold_sec: None,
+                                };
+                                evs.push(amend(kg + 5.0, reps + 1));
+                                evs.push(amend(kg, reps));
+                            }
+                            6 => {
+                                let pts = track(rng, at);
+                                let ev = Event::LogRunTrack {
+                                    points: pts,
+                                    hr_pct_max: 0.0,
+                                    longest_recent_km: 0.0,
+                                    segment_starts: Vec::new(),
+                                    observed_at: at,
+                                    entry_id: id,
+                                    workout_type: None,
+                                    session_rpe: None,
+                                    avg_hr_bpm: None,
+                                    utc_offset_sec: Some(3600),
+                                };
+                                let wire = serde_json::to_vec(&ev).map_err(|e| e.to_string())?;
+                                let preview: serde_json::Value =
+                                    serde_json::from_slice(&super::track_figures_json(&wire))
+                                        .map_err(|e| e.to_string())?;
+                                let km = preview["distance_km"]
+                                    .as_f64()
+                                    .ok_or(format!("no preview: {preview}"))?;
+                                send(&log, &ev)?;
+                                let v: serde_json::Value =
+                                    serde_json::from_str(&view_ok()?).map_err(|e| e.to_string())?;
+                                let card = v["runs"]
+                                    .as_array()
+                                    .into_iter()
+                                    .flatten()
+                                    .find(|r| r["entry_id"].as_u64() == Some(id))
+                                    .ok_or(format!(
+                                        "GPS run {id} missing from the view after its save"
+                                    ))?;
+                                if card["distance_km"].as_f64() != Some(km) {
+                                    return Err(format!(
+                                        "preview {km} km, saved card {}",
+                                        card["distance_km"]
+                                    ));
+                                }
+                                gps.push((id, at, ev));
+                            }
+                            7 if !gps.is_empty() => {
+                                // Trim, or delete + Undo (the same track re-logged).
+                                let (id, at, ev) =
+                                    gps[rng.below(gps.len() as u64) as usize].clone();
+                                if rng.below(2) == 0 {
+                                    evs.push(Event::TrimRunTrack {
+                                        entry_id: id,
+                                        observed_at_fallback: at,
+                                        keep_from_sec: at - 600,
+                                        keep_until_sec: at - 30,
+                                    });
+                                } else {
+                                    evs.push(Event::DeleteEntry {
+                                        kind: EntryKind::Run,
+                                        entry_id: id,
+                                        observed_at_fallback: at,
+                                    });
+                                    evs.push(ev);
+                                }
+                            }
+                            8 => evs.push(Event::LogRun {
+                                distance_km: 3.0 + rng.below(80) as f64 / 10.0,
+                                duration_min: 20.0 + rng.below(30) as f64,
+                                hr_pct_max: 0.0,
+                                longest_recent_km: 0.0,
+                                observed_at: at,
+                                entry_id: id,
+                                workout_type: None,
+                                session_rpe: None,
+                                avg_hr_bpm: None,
+                                utc_offset_sec: Some(3600),
+                            }),
+                            _ => {
+                                // Pure queries beside the senders, no monitor.
+                                if super::parse_fit_json(&fit) != fit_reference {
+                                    return Err(
+                                        "parse_fit_json answered differently under load".into()
+                                    );
+                                }
+                                let snapshot =
+                                    log.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                                let facts: Vec<LineFacts> = snapshot
+                                    .iter()
+                                    .map(|l| LineFacts::parse(std::str::from_utf8(l).unwrap_or("")))
+                                    .collect();
+                                let c = compact_lines(&facts);
+                                if c.dropped.iter().any(|&i| i >= snapshot.len())
+                                    || !c.torn.is_empty()
+                                {
+                                    return Err(format!(
+                                        "compaction of a {}-line log: {c:?}",
+                                        snapshot.len()
+                                    ));
+                                }
+                            }
+                        }
+                        for e in &evs {
+                            send(&log, e)?;
+                            view_ok()?;
+                        }
+                        Ok(())
+                    };
+                    for _ in 0..rounds {
+                        for _ in 0..PER_ROUND {
+                            if failed.is_none() {
+                                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    step(&mut rng)
+                                })) {
+                                    Ok(Ok(())) => {}
+                                    Ok(Err(m)) => failed = Some(m),
+                                    Err(_) => failed = Some("worker panicked".into()),
+                                }
+                            }
+                        }
+                        // Checkpoint: every sender is idle, then each thread views.
+                        quiet.wait();
+                        let v = match &failed {
+                            Some(m) => Err(m.clone()),
+                            None => view_ok(),
+                        };
+                        let _ = tx.send((t, v));
+                        all_views_taken.wait();
+                    }
+                })
+                .expect("spawn worker")
+        })
+        .collect();
+    drop(tx);
+
+    let mut live = String::new();
+    for round in 0..rounds {
+        let mut views = Vec::with_capacity(THREADS);
+        for _ in 0..THREADS {
+            let (t, v) = rx.recv_timeout(STALL).unwrap_or_else(|_| {
+                panic!("round {round}: no checkpoint in {STALL:?} (deadlock?)")
+            });
+            views.push((
+                t,
+                v.unwrap_or_else(|m| panic!("round {round}, thread {t}: {m}")),
+            ));
+        }
+        let cold = cold_view().expect("cold view");
+        for (t, v) in &views {
+            assert!(
+                *v == cold,
+                "round {round}: thread {t}'s warm view differs from a cold thread's {}",
+                first_diff(v, &cold)
+            );
+        }
+        live = cold;
+        all_views_taken.wait();
+    }
+    for w in workers {
+        w.join().expect("worker joined");
+    }
+
+    let lines = log.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    assert!(
+        lines.len() > THREADS * rounds,
+        "only {} lines logged",
+        lines.len()
+    );
+    let replayed = cold_replay(lines.clone()).expect("replay");
+    assert!(
+        replayed == live,
+        "replay of the {}-line log differs from the live view {}",
+        lines.len(),
+        first_diff(&live, &replayed)
+    );
+    let facts: Vec<LineFacts> = lines
+        .iter()
+        .map(|l| LineFacts::parse(std::str::from_utf8(l).unwrap_or("")))
+        .collect();
+    let dropped: std::collections::HashSet<usize> =
+        compact_lines(&facts).dropped.into_iter().collect();
+    let kept: Vec<Vec<u8>> = lines
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !dropped.contains(i))
+        .map(|(_, l)| l.clone())
+        .collect();
+    let compacted = cold_replay(kept.clone()).expect("compacted replay");
+    assert!(
+        compacted == live,
+        "the compacted log ({} of {} lines) differs from the live view {}",
+        kept.len(),
+        lines.len(),
+        first_diff(&live, &compacted)
+    );
+}

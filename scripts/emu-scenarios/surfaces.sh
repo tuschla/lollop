@@ -20,12 +20,16 @@
 #   tilefresh (opt-in, run alone on a freshly booted emulator) the tile's
 #           run-day, stale-day and recording cases with no force-stop or
 #           `pm clear` after the tile is added
-#   reminder (opt-in, ~30 min, reboots the device) the daily session reminder:
+#   tilelock (opt-in) the tile tapped over the PIN keyguard asks for the PIN,
+#           then opens its screen (app in the background, process killed, a
+#           lift day)
+#   reminder (opt-in, ~40 min, reboots the device) the daily session reminder:
 #           Profile switch + time picker, the posted reminder (title, line, one
 #           action) on a run day and a lift day, its action from the shade and
-#           from the lock screen (PIN), content tap → Today, nothing on a rest
-#           day / under a hold / once done, removed when the session is done or
-#           moved, the snapshot-ahead path, a time zone change and a reboot.
+#           from the lock screen (PIN), which takes it down, content tap →
+#           Today, at most one a day, nothing on a rest day / under a hold /
+#           once done, removed when the session is done or moved, the
+#           snapshot-ahead path, a time zone change and a reboot.
 #           Uses its own week (Mon 2026-11-02 …): a clock pinned before the
 #           system image's build date is moved to it at boot.
 # The Live Update checks (chip, promoted flag, toggle) need API 36+; below that
@@ -33,7 +37,7 @@
 # hidden.
 #
 #   scripts/emu-scenarios/surfaces.sh [--avd e37] [--port 5582] [--apk PATH]
-#                                     [--only "links tile widget run guided rest toggle restbg tilefresh reminder"]
+#                                     [--only "links tile widget run guided rest toggle restbg tilefresh tilelock reminder"]
 #                                     [--keep-emulator]
 #
 # Outputs: a new folder per run, ~/.cache/emu-surfaces/<avd>/<YYYYmmdd-HHMMSS>/
@@ -50,7 +54,7 @@
 # fix the .ini to `target=android-37.0`.
 set -uo pipefail
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 REPO_ROOT="$(pwd)"
 HELP="$REPO_ROOT/scripts/emu-scenarios"
 APP_ID="app.milestone"
@@ -349,6 +353,50 @@ sc_tilefresh() {
   else
     evidence tilefresh-no-tracker; check FAIL $S "open the tracker from the Log sheet" "shots/tilefresh-no-tracker.png"
   fi
+}
+
+# tilelock_case NAME LABEL WANT-SCREEN: lock the device with a PIN, open Quick
+# Settings over the keyguard and tap the tile labelled LABEL; System UI asks for
+# the PIN (API 34+: it starts the tile's PendingIntent dismissing the keyguard;
+# below 34: TileService.unlockAndRun), then the app must open WANT-SCREEN.
+# Clears the PIN.
+tilelock_case() {
+  local d="tilelock-$1" r="" p s bouncer="" want="$3"
+  home
+  sh_ locksettings set-pin $REM_PIN >/dev/null
+  adb_ shell input keyevent 26; sleep 2; adb_ shell input keyevent 224; sleep 2
+  adb_ shell cmd statusbar expand-settings; sleep 3
+  wdump "$d"; shot "$d"
+  r="$(wfind "$d" eq "$2")" || r="$(ocr_find "$d" "${2%% *}")" || r=""
+  if [[ -n "$r" ]]; then
+    read -r -a p <<<"$r"; tap_xy "${p[0]}" "${p[1]}"; sleep 3
+    sh_ dumpsys window >"$OUT/logs/$d-bouncer-window.txt"
+    bouncer="$(grep -m1 -oE '(isKeyguardShowing|mKeyguardShowing)=true' "$OUT/logs/$d-bouncer-window.txt"); focus $(focus)"
+    adb_ shell input text $REM_PIN; adb_ shell input keyevent 66; sleep 4
+    wait_screen "$3" 10; s="$(screen)"
+  else
+    s="(no '$2' tile over the keyguard; ui/$d.xml)"
+  fi
+  evidence "$d-unlocked"
+  sh_ locksettings clear --old $REM_PIN >/dev/null
+  expect $S "$1: tile '$2' on the lock screen asks for the PIN, then opens $3" \
+    "before the PIN: '${bouncer:-tile not tapped}'; after: screen '$s'; shots/$d.png logs/$d-bouncer-window.txt shots/$d-unlocked.png" \
+    eval '[[ "$bouncer" == *KeyguardShowing=true* && "$bouncer" != *"focus $APP_ID"* && "$s" == "$want" ]]'
+  adb_ shell cmd statusbar collapse
+}
+# The tile from the lock screen: with the app in the background, after its
+# process was killed, and on a lift day.
+sc_tilelock() {
+  local S=tilelock n
+  fresh_app "$RUN_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
+  add_tile || check FAIL $S "tile added to Quick Settings" "not on the QS panel ~40 s after add-tile; ui/tile-added.xml"
+  tilelock_case background "Start run" track
+  adb_ shell input keyevent 4; sleep 2; home
+  n="$(app_pid)"; [[ -n "$n" ]] && sh_ kill -9 "$n"; sleep 2
+  tilelock_case killed "Start run" track
+  adb_ shell input keyevent 4; sleep 2
+  reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
+  tilelock_case lift-day "Log set" log_set
 }
 
 # ── Widget (place_widget, widget_texts in lib.sh) ────────────────────────────
@@ -762,10 +810,10 @@ sc_toggle() {
     adb_ shell input keyevent 4; sleep 3
     wait_screen other 5 || true
     s="$(focus)"
-    has_text pre "Live updates are off."; local still=$?
+    local notice=gone; has_text pre "Live updates are off." && notice=shown
     evidence toggle-profile-on
-    expect $S "back on + return to the app: the notice is gone" "switch now '$r'; focus $s; shots/toggle-profile-on.png" \
-      eval '[[ $still -ne 0 && "$s" == "$APP_ID"* ]]'
+    expect $S "back on + return to the app: the notice is gone" "switch now '$r'; notice $notice; focus $s; shots/toggle-profile-on.png" \
+      eval '[[ "$notice" == gone && "$s" == "$APP_ID"* ]]'
   else
     check FAIL $S "'Open settings' opens the system Live Updates screen" "no Open settings button; shots/toggle-profile-off.png"
   fi
@@ -825,6 +873,17 @@ seed_rem_run_done() {
   seed_basic "$SEED_DAY" 2
   echo "{\"LogRun\":{\"distance_km\":5.5,\"duration_min\":31.0,\"hr_pct_max\":0.0,\"longest_recent_km\":0.0,\"observed_at\":$y,\"entry_id\":${y}001}}"
 }
+# rem_forget: with the app stopped, drop SessionReminder's record of the local
+# days it already reminded about (at most one post per day), so that a case can
+# replay a day an earlier case posted for. `cat >` keeps the file's owner and
+# SELinux label.
+rem_forget() {
+  local f="/data/data/$APP_ID/shared_prefs/session_reminder.xml"
+  adb_ shell am force-stop "$APP_ID"
+  adb_ shell "[ -f $f ] && grep -v reminded_epoch_days $f >/data/local/tmp/emu-rem.xml && cat /data/local/tmp/emu-rem.xml >$f; rm -f /data/local/tmp/emu-rem.xml" >/dev/null 2>&1
+}
+# rem_reseed DAY SEED-FN [ARG]: rem_forget, then reseed.
+rem_reseed() { stop_feeder; rem_forget; seed_boot "$@"; }
 # rem_fire NAME DAY [MODE]: background the app and move the clock to DAY
 # 07:44:20 (the reminder is set for 07:45), then wait (max 5 min) until the
 # alarm has gone off: it then points past DAY 07:45. MODE `keep` leaves app and
@@ -882,13 +941,14 @@ rem_case() {
 # bouncer. The app must then open WANT-SCREEN. On the way to ACTION: the
 # reminder's Expand button when it is collapsed, and the icon shelf when it
 # sits there (API 37 shows one notification in full, the rest as icons).
-# Clears the PIN.
+# The action is looked up after the reminder's title: the Quick Settings tile
+# above it can carry the same label ("Start run"). Clears the PIN.
 rem_lock() {
   local e r="" p s="" bouncer="" i d=rem-lock want="$3"
   adb_ shell input keyevent 224; sleep 3
   for i in 1 2 3 4; do
     wdump "$d"; shot "$d"
-    r="$(wfind "$d" eq "$1")" && break
+    r="$(python3 "$HELP/node.py" eq "$1" "$2" <"$OUT/ui/$d.xml")" && break
     # The keyguard's shade can keep its pre-expansion tree in the dump; the
     # screenshot then shows the action (as in tap_shade).
     r="$(ocr_find "$d" "${1%% *}")" && { log "rem_lock: '$1' located by OCR at $r on shots/$d.png"; break; }
@@ -954,7 +1014,7 @@ sc_reminder() {
     eval '[[ "$a1" == "$REST_DAY 07:45"* ]] && python3 "$HELP/node.py" re "^7:45\sAM$" <"$OUT/ui/rem-profile-time.xml" >/dev/null'
 
   # Run day: posted with the app in the background; its action from the lock
-  # screen; a moved session takes it down.
+  # screen, which takes the reminder down.
   mark reminder-run
   w="$(rem_want)"; IFS=$'\t' read -r t l a <<<"$w"
   rem_case run "$RUN_DAY" "$w" locked
@@ -964,10 +1024,16 @@ sc_reminder() {
   expect $S "run: the action lands on the tracker before the start (not recording)" \
     "Start on screen, no Stop; ui/rem-lock-unlocked.xml" \
     eval 'python3 "$HELP/node.py" eq Start <"$OUT/ui/rem-lock-unlocked.xml" >/dev/null && ! python3 "$HELP/node.py" eq Stop <"$OUT/ui/rem-lock-unlocked.xml" >/dev/null'
-  mark reminder-move
-  n="$(notif rem-run-kept $REM_ID)"
+  n="$(notif rem-run-acted $REM_ID)"
+  expect $S "run: the action takes the reminder down" "notification after the action: $n; logs/rem-run-acted-notif.txt" test "$n" = null
   # A locating tracker keeps the screen against an open intent: leave it first.
   adb_ shell input keyevent 4; sleep 2
+
+  # A moved session takes a posted reminder down.
+  mark reminder-move
+  rem_reseed "$RUN_DAY" seed_basic "$SEED_DAY" 2
+  rem_case run-move "$RUN_DAY" "$w"
+  n="$(cat "$OUT/logs/rem-run-move-notif.json")"
   adb_ shell am start -a app.milestone.action.OPEN -n "$APP_ID/.MainActivity" --es dest today >/dev/null
   wait_screen today 15
   r=""
@@ -982,17 +1048,26 @@ sc_reminder() {
     "before the move: $([[ "$n" != null ]] && echo posted || echo 'not posted'); after: $(cat "$OUT/logs/rem-moved-notif.json"); snapshot kind '$(snap_field kind)'; shots/rem-move-dialog.png shots/rem-moved.png" \
     eval '[[ "$n" != null && -n "$r" && "$(cat "$OUT/logs/rem-moved-notif.json")" == null && "$(snap_field kind)" == Rest ]]'
 
-  # Lift day: the action from the shade, then a content tap.
+  # Lift day: the action from the shade takes the reminder down; the same
+  # day's alarm again posts nothing; then a content tap.
   mark reminder-lift
-  reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
+  rem_reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
   w="$(rem_want)"; IFS=$'\t' read -r t l a <<<"$w"; ex="$(rem_open_lift)"
   rem_case lift "$LIFT_DAY" "$w"
   s="(no '$a' in the shade)"
   tap_shade rem-lift-action eq "$a" "$t" && { wait_screen log_set 10; s="$(screen)"; }
   evidence rem-lift-action
-  expect $S "lift: '$a' (shade) opens the set editor at '$ex'" "screen '$s'; shots/rem-lift-action.png" \
-    eval '[[ "$s" == log_set ]] && python3 "$HELP/node.py" eq "Change exercise: $ex" <"$OUT/ui/rem-lift-action.xml" >/dev/null'
+  n="$(notif rem-lift-acted $REM_ID)"
+  expect $S "lift: '$a' (shade) opens the set editor at '$ex' and takes the reminder down" \
+    "screen '$s'; notification after: $n; shots/rem-lift-action.png" \
+    eval '[[ "$s" == log_set && "$n" == null ]] && python3 "$HELP/node.py" eq "Change exercise: $ex" <"$OUT/ui/rem-lift-action.xml" >/dev/null'
   tap_node eq Close 2; sleep 2; has_text eq Discard && { tap_node eq Discard; sleep 1; }
+  mark reminder-once
+  reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
+  rem_case once "$LIFT_DAY" ""
+  mark reminder-content
+  rem_reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
+  rem_case content "$LIFT_DAY" "$w"
   home
   s="(no '$l' in the shade)"
   tap_shade rem-lift-content eq "$l" "$t" && { wait_screen today 10; s="$(screen)"; }
@@ -1001,44 +1076,53 @@ sc_reminder() {
   expect $S "content tap opens Today and clears the reminder" "screen '$s'; notification after: $n; shots/rem-lift-content.png" \
     eval '[[ "$s" == today && "$n" == null ]]'
 
-  # Lift day under way: "Log next set"; the last set logged from its editor
-  # finishes the session, which takes the reminder down.
+  # Lift day under way: "Log next set" opens the editor at the next exercise;
+  # the last set logged in an editor opened from the app finishes the session,
+  # which takes a posted reminder down.
   mark reminder-lift-next
-  reseed "$LIFT_DAY" seed_rem_lift_left
+  rem_reseed "$LIFT_DAY" seed_rem_lift_left
   w="$(rem_want)"; IFS=$'\t' read -r t l a <<<"$w"; ex="$(rem_open_lift)"
   rem_case lift-next "$LIFT_DAY" "$w"
   s="(no '$a' in the shade)"
   tap_shade rem-next-action eq "$a" "$t" && { wait_screen log_set 10; s="$(screen)"; }
   evidence rem-next-action
-  expect $S "lift under way: '$a' opens the set editor at the next exercise '$ex'" "screen '$s'; shots/rem-next-action.png" \
-    eval '[[ "$s" == log_set ]] && python3 "$HELP/node.py" eq "Change exercise: $ex" <"$OUT/ui/rem-next-action.xml" >/dev/null'
-  n="$(notif rem-next-kept $REM_ID)"
+  n="$(notif rem-next-acted $REM_ID)"
+  expect $S "lift under way: '$a' opens the set editor at the next exercise '$ex' and takes the reminder down" \
+    "screen '$s'; notification after: $n; shots/rem-next-action.png" \
+    eval '[[ "$s" == log_set && "$n" == null ]] && python3 "$HELP/node.py" eq "Change exercise: $ex" <"$OUT/ui/rem-next-action.xml" >/dev/null'
+  tap_node eq Close 2; sleep 2; has_text eq Discard && { tap_node eq Discard; sleep 1; }
+  mark reminder-lift-done
+  rem_reseed "$LIFT_DAY" seed_rem_lift_left
+  rem_case lift-left "$LIFT_DAY" "$w"
+  n="$(cat "$OUT/logs/rem-lift-left-notif.json")"
+  adb_ shell am start -a app.milestone.action.OPEN -n "$APP_ID/.MainActivity" --es dest log_set >/dev/null
+  wait_screen log_set 15
   r="$(node_label re '^Log set [0-9]+( of [0-9]+)?$')"
   tap_top re '^Log set [0-9]+( of [0-9]+)?$'; sleep 4
   evidence rem-next-logged
   notif rem-done-removed $REM_ID >/dev/null
-  expect $S "session done (last set, '$r', logged in that editor): the reminder is removed" \
+  expect $S "session done (last set, '$r', logged in the editor the app opened): the reminder is removed" \
     "before: $([[ "$n" != null ]] && echo posted || echo 'not posted'); after: $(cat "$OUT/logs/rem-done-removed-notif.json"); snapshot sessionDone $(snap_field sessionDone); shots/rem-next-logged.png" \
     eval '[[ "$n" != null && "$(cat "$OUT/logs/rem-done-removed-notif.json")" == null && "$(snap_field sessionDone)" == True ]]'
   tap_node eq Close 2; sleep 2; has_text eq Discard && { tap_node eq Discard; sleep 1; }
 
   # Nothing on a rest day, under a hold, once the session is done.
   mark reminder-rest
-  reseed "$REST_DAY" seed_basic "$SEED_DAY" 2
+  rem_reseed "$REST_DAY" seed_basic "$SEED_DAY" 2
   expect $S "rest: today is a plan rest day" "snapshot kind '$(snap_field kind)', restDay $(snap_field restDay)" test "$(snap_field kind)" = Rest
   rem_case rest "$REST_DAY" ""
   mark reminder-hold
-  reseed "$RUN_DAY" seed_hold "$RUN_DAY"
+  rem_reseed "$RUN_DAY" seed_hold "$RUN_DAY"
   expect $S "hold: a pain report pauses training" "snapshot kind '$(snap_field kind)'" test "$(snap_field kind)" = Paused
   rem_case hold "$RUN_DAY" ""
   mark reminder-done
-  reseed "$RUN_DAY" seed_rem_run_done
+  rem_reseed "$RUN_DAY" seed_rem_run_done
   expect $S "done: today's run is logged" "snapshot kind '$(snap_field kind)', sessionDone $(snap_field sessionDone)" test "$(snap_field sessionDone)" = True
-  rem_case done "$RUN_DAY" ""
+  rem_case "done" "$RUN_DAY" ""
 
   # The app last ran on Tue (rest day); the clock moves to Wed morning.
   mark reminder-ahead
-  reseed "$REST_DAY" seed_basic "$SEED_DAY" 2
+  rem_reseed "$REST_DAY" seed_basic "$SEED_DAY" 2
   w="$(rem_want "$LIFT_DAY")"
   rem_case ahead "$LIFT_DAY" "$w"
   expect $S "ahead: posted from Tue's snapshot (its day ahead), app not opened" \
@@ -1049,7 +1133,7 @@ sc_reminder() {
   # opened): Berlin 08:43 (today's 07:45 has passed) → London 07:43 (it is
   # ahead again).
   mark reminder-tz
-  reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
+  rem_reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
   w="$(rem_want)"
   home
   pin_clock "$LIFT_DAY" 08:43; sleep 2; a0="$(rem_alarm)"
@@ -1064,8 +1148,9 @@ sc_reminder() {
   # so today's snapshot stays stale and nothing posts until the app is opened.
   mark reminder-tz-cold
   # The force stop takes down the reminder the last case posted (and its alarm,
-  # which the launch sets again).
-  adb_ shell am force-stop "$APP_ID"
+  # which the launch sets again); rem_forget makes the stale snapshot the only
+  # reason nothing posts.
+  rem_forget
   pin_clock "$LIFT_DAY" 08:43; launch; wait_screen today 20; home; sleep 3
   n="$(app_pid)"; [[ -n "$n" ]] && sh_ kill -9 "$n"; sleep 2
   sh_ cmd alarm set-timezone Europe/London >/dev/null; sleep 3
@@ -1080,7 +1165,7 @@ sc_reminder() {
   # TIME_SET also sets the alarm) before waiting for it.
   mark reminder-reboot
   pin_clock "$LIFT_DAY" 08:00
-  reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
+  rem_reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2
   w="$(rem_want)"
   home
   pin_clock "$LIFT_DAY" 07:42; sleep 2; a0="$(rem_alarm)"
@@ -1095,7 +1180,7 @@ sc_reminder() {
   # The boot broadcast reaches the app a little after boot_completed.
   for i in $(seq 1 24); do a1="$(rem_alarm)"; [[ -n "$a1" ]] && break; sleep 5; done
   n="$(sh_ "date '+%F %H%M'")"
-  if [[ "${n#* }" < 0745 ]]; then want="${n%% *} 07:45"; else want="$(date -d "${n%% *} +1 day" +%F) 07:45"; fi
+  if (( 10#${n#* } < 745 )); then want="${n%% *} 07:45"; else want="$(date -d "${n%% *} +1 day" +%F) 07:45"; fi
   expect $S "reboot: the alarm is set again after boot, for the next 07:45 by the device clock (app not opened)" \
     "before '$a0', after boot '$a1' (want '$want', ~$((i * 5)) s after boot_completed); device $(sh_ "date '+%F %T %Z'"), uptime $(sh_ cut -d. -f1 /proc/uptime) s; focus '$(focus)'" \
     eval '[[ "$a1" == "$want"* && "$(focus)" != "$APP_ID"* ]]'

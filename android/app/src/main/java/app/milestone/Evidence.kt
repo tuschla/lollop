@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
@@ -595,7 +596,7 @@ internal fun EvidenceLegendSheet(definitions: List<GradeDefView>) {
             .padding(bottom = Space.Lg.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
     ) {
-        Text(stringResource(R.string.main_evidence_legend_title), color = OnBgBody, style = Type.Title)
+        Text(stringResource(R.string.main_evidence_legend_title), color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
         Text(
             stringResource(R.string.main_evidence_legend_body),
             color = OnBgMuted,
@@ -768,7 +769,7 @@ internal fun GlossarySheet(initialKey: String) {
             .padding(horizontal = Space.ReadingSheet.dp),
         verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
     ) {
-        Text(stringResource(R.string.main_glossary_title), color = OnBgBody, style = Type.Title)
+        Text(stringResource(R.string.main_glossary_title), color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
         SearchWell(
             query,
             { query = it },

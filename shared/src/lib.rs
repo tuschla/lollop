@@ -40,6 +40,7 @@ pub mod hypertrophy;
 pub mod individualization;
 pub mod load;
 pub mod log;
+pub(crate) mod names;
 pub mod plan;
 pub mod running;
 pub mod schema;

@@ -1436,3 +1436,34 @@ fn retired_calculator_lines_are_dropped() {
     .map(str::to_owned);
     assert_eq!(compact_wire(&lines).dropped, vec![0, 1, 2]);
 }
+
+/// A Turkish keyboard's "İNCLİNE BENCH PRESS" / "Inclıne bench press" is the same
+/// `SetExerciseEnded` key as "Incline bench press" (`names::exercise_key`), as
+/// `update` treats it (`plan::same_movement`): the later marker replaces the
+/// earlier one, and the compacted log replays to the same view.
+#[test]
+fn turkish_keyboard_spellings_share_one_ended_marker_key() {
+    let ended = |exercise: &str, ended: bool, at: i64| Event::SetExerciseEnded {
+        exercise: exercise.into(),
+        epoch_day: 700,
+        ended,
+        observed_at: at,
+    };
+    let events = vec![
+        set("Incline bench press"),
+        ended("Incline bench press", true, 700 * DAY_SEC + 10),
+        ended("İNCLİNE BENCH PRESS", false, 700 * DAY_SEC + 20),
+        ended("Inclıne bench press", true, 700 * DAY_SEC + 30),
+    ];
+    assert_eq!(
+        compact_event_log(events.clone()),
+        vec![events[0].clone(), events[3].clone()]
+    );
+    assert_replay_equivalent(events);
+    // A different exercise on the same day keeps its own marker.
+    let other = vec![
+        ended("Incline bench press", true, 700 * DAY_SEC + 10),
+        ended("Decline bench press", true, 700 * DAY_SEC + 20),
+    ];
+    assert_eq!(compact_event_log(other.clone()), other);
+}

@@ -153,6 +153,30 @@ fn km_of(v: RunVolume) -> f64 {
     }
 }
 
+/// A week's prescribed km as the plan counts it: main sets (reps × rep for a
+/// repeat set), minutes at the accounting easy pace, and every warm-up and
+/// cool-down.
+fn sessions_km(sessions: &[Session]) -> f64 {
+    let pace = running::warmup_rx().value.accounting_easy_pace_sec_per_km;
+    let km_or_min = |v: RunVolume| match v {
+        RunVolume::DurationMin(m) => f64::from(m) * 60.0 / pace,
+        v => km_of(v),
+    };
+    sessions
+        .iter()
+        .map(|s| {
+            let r = run_of(s);
+            let main = match r.repeats {
+                Some((n, rep)) => f64::from(n) * km_of(rep),
+                None => km_or_min(r.volume),
+            };
+            let wucd =
+                f64::from(r.warmup_min.unwrap_or(0) + r.cooldown_min.unwrap_or(0)) * 60.0 / pace;
+            main + wucd
+        })
+        .sum()
+}
+
 // ── Basic week shape ─────────────────────────────────────────────────────
 
 #[test]
@@ -271,15 +295,25 @@ fn tenk_race_six_weeks_out_tapers_the_final_two_weeks_per_bosquet() {
     );
 
     // The last pre-taper week is the top load week; both taper weeks cut its
-    // volume by 41–60 % (Bosquet), deepening toward the race.
-    let top = plans[4].0.weekly_km;
+    // volume by 41–60 % (Bosquet), deepening toward the race. The cut is
+    // judged on the km each week prescribes: with 12 km a day the easy days
+    // hit running-015's 90-min ceiling, so the top week holds less than its
+    // ramp figure. Half a kilometre of rounding per run day.
+    let top = sessions_km(&plans[4].1);
     let t1 = plans[5].0.weekly_km;
     let t2 = plans[6].0.weekly_km;
-    for t in [t1, t2] {
+    assert!(top < plans[4].0.weekly_km, "the ceiling binds: {top} km");
+    for (t, sessions) in [(t1, &plans[5].1), (t2, &plans[6].1)] {
+        let tol = 0.5 * sessions.len() as f64;
+        let held = sessions_km(sessions);
+        assert!(
+            (top * 0.40 - tol..=top * 0.59 + tol).contains(&held),
+            "taper week {held} km of a {top} km top week"
+        );
         let cut = 1.0 - t / top;
         assert!(
-            (0.41 - 1e-9..=0.60 + 1e-9).contains(&cut),
-            "taper cut {cut}"
+            (0.41 - 0.01..=0.60 + 0.01).contains(&cut),
+            "taper cut {cut} of {top} km"
         );
     }
     assert!(t2 < t1);

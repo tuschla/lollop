@@ -20,6 +20,10 @@ pub struct PerfSet<'a> {
     /// Logged RPE; `0` = not recorded (the set is not scored).
     pub rpe: f64,
     pub observed_at: i64,
+    /// One step of the plate grid the plan floors this load onto, kg: a set
+    /// done as asked may sit up to this much under the load its target
+    /// called for.
+    pub grid_step_kg: f64,
 }
 
 /// One lift's newest session, scored against its own recent best.
@@ -27,7 +31,10 @@ pub struct PerfSet<'a> {
 pub struct MovementPerf {
     /// Exercise name of that session's top set, as logged.
     pub exercise: String,
-    /// Top-set e1RM ÷ the best e1RM of the previous 14 local days.
+    /// Top-set e1RM ÷ the best e1RM of the previous 14 local days. A top set
+    /// under that best is credited up to one plate-grid step of load at its
+    /// reps and RPE, never past 1: the plan's floor onto the plate grid is
+    /// not a drop, and never an increase.
     pub ratio: f64,
     /// Consecutive sessions, ending with this one, whose ratio was < 0.90.
     pub decline_streak: u8,
@@ -43,19 +50,31 @@ const E1RM_BASELINE_DAYS: i64 = 14;
 /// How long a confirmed e1RM-decline deload stays in force after the session
 /// that confirmed it: the rule's own one week (autoreg-022, "1 wk").
 const E1RM_DELOAD_HOLD_DAYS: i64 = 7;
-/// Lowest logged RPE whose reps-in-reserve the KB maps (Zourdos RPE 6–10 ↔ RIR
-/// 4–0, File 02 strength-007): below it the e1RM estimate is not "at RPE".
-const E1RM_MIN_RPE: f64 = 6.0;
 
 /// e1RM of one set when it is a valid "e1RM at RPE" estimate: a loaded,
-/// compound (non-isolation) set inside the reliable rep range with an RPE the
-/// RIR mapping covers. `None` otherwise (never a fabricated anchor).
+/// compound (non-isolation) set inside the reliable rep range with an exact
+/// rating (`strength::rpe_is_exact`; "4+ reps left" is only a lower bound, so
+/// it never scores as a drop). `None` otherwise (never a fabricated anchor).
 fn scored_e1rm(s: &PerfSet) -> Option<f64> {
     (s.weight_kg > 0.0
-        && s.rpe >= E1RM_MIN_RPE
+        && strength::rpe_is_exact(s.rpe)
         && strength::e1rm_reliable(strength::effective_reps(s.reps, s.rpe), false).value
         && !crate::plan::is_isolation_lift(s.exercise))
     .then(|| strength::e1rm_epley_rpe(s.weight_kg, s.reps, s.rpe))
+}
+
+/// One lift's scored sets on one local day.
+struct DaySlot<'a> {
+    /// Heaviest scored load.
+    top_kg: f64,
+    /// e1RM of the first set at that load.
+    top_e1: f64,
+    /// The same set's e1RM one plate-grid step heavier.
+    top_grid_e1: f64,
+    /// That set's exercise name, as logged.
+    exercise: &'a str,
+    /// Best e1RM of the day.
+    best: f64,
 }
 
 /// Per-lift performance from logged sets: for every lift with a
@@ -83,8 +102,6 @@ pub fn derive_performance(
         keys.entry(s.exercise)
             .or_insert_with(|| crate::plan::movement_key(s.exercise));
     }
-    // Per local day: (top weight, first top-set e1RM, its exercise name, best e1RM).
-    type DaySlot<'a> = (f64, f64, &'a str, f64);
     // movement key → local day → DaySlot.
     let mut by_lift: BTreeMap<&[String], BTreeMap<i64, DaySlot>> = BTreeMap::new();
     for s in ordered {
@@ -93,31 +110,39 @@ pub fn derive_performance(
         if day > today_epoch_day {
             continue;
         }
+        let top = || DaySlot {
+            top_kg: s.weight_kg,
+            top_e1: e,
+            top_grid_e1: strength::e1rm_epley_rpe(s.weight_kg + s.grid_step_kg, s.reps, s.rpe),
+            exercise: s.exercise,
+            best: e,
+        };
         let slot = by_lift
             .entry(keys[s.exercise].as_slice())
             .or_default()
             .entry(day)
-            .or_insert((s.weight_kg, e, s.exercise, e));
-        if s.weight_kg > slot.0 {
-            *slot = (s.weight_kg, e, s.exercise, slot.3.max(e));
+            .or_insert_with(top);
+        if s.weight_kg > slot.top_kg {
+            *slot = DaySlot {
+                best: slot.best.max(e),
+                ..top()
+            };
         } else {
-            slot.3 = slot.3.max(e);
+            slot.best = slot.best.max(e);
         }
     }
     let mut out = Vec::new();
     for days in by_lift.values() {
-        let sessions: Vec<(i64, f64, &str, f64)> = days
-            .iter()
-            .map(|(d, (_, top, n, best))| (*d, *top, *n, *best))
-            .collect();
+        let sessions: Vec<(i64, &DaySlot)> = days.iter().map(|(d, s)| (*d, s)).collect();
         let ratio_at = |i: usize| -> Option<f64> {
-            let (d, top, _, _) = sessions[i];
+            let (d, top) = sessions[i];
             let base = sessions[..i]
                 .iter()
-                .filter(|(pd, ..)| d - pd <= E1RM_BASELINE_DAYS)
-                .map(|(.., best)| *best)
+                .filter(|(pd, _)| d - pd <= E1RM_BASELINE_DAYS)
+                .map(|(_, s)| s.best)
                 .fold(f64::NAN, f64::max);
-            (base.is_finite() && base > 0.0).then(|| top / base)
+            (base.is_finite() && base > 0.0)
+                .then(|| (top.top_e1 / base).max((top.top_grid_e1 / base).min(1.0)))
         };
         let Some(last) = sessions.len().checked_sub(1) else {
             continue;
@@ -131,7 +156,7 @@ pub fn derive_performance(
             candidates.push(last - 1);
         }
         for idx in candidates {
-            let (day, _, name, _) = sessions[idx];
+            let (day, top) = sessions[idx];
             if today_epoch_day.saturating_sub(day) > E1RM_DELOAD_HOLD_DAYS {
                 continue;
             }
@@ -148,7 +173,7 @@ pub fn derive_performance(
                 }
             }
             out.push(MovementPerf {
-                exercise: name.to_string(),
+                exercise: top.exercise.to_string(),
                 ratio,
                 decline_streak,
                 day,

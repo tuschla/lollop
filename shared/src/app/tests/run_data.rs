@@ -449,6 +449,31 @@ fn lift_e1rm_pr_marks_only_a_new_best() {
     assert_eq!(pr, vec![false, true, false]);
 }
 
+/// A Turkish keyboard's "İNCLİNE BENCH PRESS" and "Inclıne bench press" continue
+/// the e1RM chain of "Incline bench press" (`names::exercise_key`): the heavier
+/// set is a PR over the ASCII spelling's, the lighter one is not.
+#[test]
+fn turkish_keyboard_spellings_continue_the_e1rm_chain() {
+    let app = Engine;
+    let mut model = Model::default();
+    for (i, (name, kg)) in [
+        ("Incline bench press", 100.0),
+        ("İNCLİNE BENCH PRESS", 110.0),
+        ("Inclıne bench press", 105.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        app.update(
+            log_set_id(name, kg, i as u64 + 1, (700 + i as i64) * DAY_SEC),
+            &mut model,
+        )
+        .expect_only_render();
+    }
+    let pr: Vec<bool> = app.view(&model).lifts.iter().map(|l| l.e1rm_pr).collect();
+    assert_eq!(pr, vec![false, true, false]);
+}
+
 // ── Hard-run spacing and CAP-3 ────────────
 
 fn heavy_squat_at(at: i64) -> Event {

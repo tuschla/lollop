@@ -61,6 +61,9 @@ import com.google.android.gms.location.Priority
  */
 class RunTrackingService : Service() {
 
+    // The notification's counts and times in Latin digits (AppLocale.kt).
+    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(newBase.withLatinDigits())
+
     private lateinit var engine: LocationEngine
 
     // Locate-only vs recording. Opening the tracker starts the

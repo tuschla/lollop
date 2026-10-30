@@ -64,6 +64,9 @@ internal fun tileFace(snapshot: WidgetSnapshot?): TileFace = when {
  */
 class QuickTileService : TileService() {
 
+    // The tile's text in Latin digits like the app's (AppLocale.kt).
+    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(newBase.withLatinDigits())
+
     override fun onTileAdded() {
         super.onTileAdded()
         setAdded(this, true)
@@ -103,19 +106,25 @@ class QuickTileService : TileService() {
         super.onClick()
         // Read again: the run may have stopped since the tile was drawn.
         val dest = currentFace(this).dest
-        if (isLocked) unlockAndRun { open(dest) } else open(dest)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // System UI starts the PendingIntent itself and asks for the PIN on the lock
+            // screen (startPendingIntentDismissingKeyguard). An unlockAndRun around it asks
+            // twice: the launch arrives while the keyguard goes away and is dropped.
+            startActivityAndCollapse(openPendingIntent(this, dest))
+        } else if (isLocked) {
+            // Below 34 the service starts the Intent itself, which would stay under the keyguard.
+            unlockAndRun { openBelow34(dest) }
+        } else {
+            openBelow34(dest)
+        }
     }
 
-    // API 34+ only accepts the PendingIntent overload (the Intent one throws for
-    // apps targeting 34+); it does not exist before 34.
+    // The Intent overload; API 34+ only accepts the PendingIntent one (this one throws
+    // for apps targeting 34+).
     @SuppressLint("StartActivityAndCollapseDeprecated")
-    private fun open(dest: OpenDest) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startActivityAndCollapse(openPendingIntent(this, dest))
-        } else {
-            @Suppress("DEPRECATION")
-            startActivityAndCollapse(openIntent(this, dest))
-        }
+    private fun openBelow34(dest: OpenDest) {
+        @Suppress("DEPRECATION")
+        startActivityAndCollapse(openIntent(this, dest))
     }
 
     companion object {

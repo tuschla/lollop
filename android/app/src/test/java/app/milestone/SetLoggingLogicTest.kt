@@ -92,6 +92,9 @@ class SetLoggingLogicTest {
         // Rounded up, so "0:01" shows until the rest is really over.
         assertEquals(RestFace.Counting(1), restFace(1_000_000, 1_180_000, null, 120, 1_179_500))
         assertEquals(RestFace.Over(20), restFace(1_000_000, 1_180_000, null, 120, 1_200_000))
+        // The 1 s ticker read the clock just before the set was logged: the full
+        // rest shows at once, not nothing until the next tick.
+        assertEquals(RestFace.Counting(180), restFace(1_000_000, 1_180_000, null, 120, 999_400))
         // Past the window the rest belongs to an earlier bout.
         assertNull(restFace(1_000_000, 1_180_000, null, 120, 1_000_000 + (RestReadoutWindowSec + 1) * 1000L))
         // No running rest: an exercise without a prescribed rest counts up from its last set.

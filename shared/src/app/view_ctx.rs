@@ -166,7 +166,7 @@ impl<'m> ViewCtx<'m> {
     /// The e1RM anchors per lift as of today ([`lift_anchors_now`]).
     pub(super) fn lift_anchors_now(&self) -> &crate::plan::Anchors {
         self.anchors_now
-            .get_or_init(|| lift_anchors_now(self.model, &self.set_index))
+            .get_or_init(|| lift_anchors_now(self.model, &self.set_index, &self.days))
     }
 
     /// The calisthenics ladder anchors over the whole history as of today, for

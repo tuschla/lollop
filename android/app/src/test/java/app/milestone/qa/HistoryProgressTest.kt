@@ -208,6 +208,8 @@ class HistoryProgressTest {
         rule.scrollToText("110 kg")
 
         // Only the session that beat the earlier e1RM is marked; a first set never is.
-        rule.onAllNodesWithText(str(R.string.history_new_best)).assertCountEquals(1)
+        // The chip is read as its description ("New best estimated max for …").
+        rule.onAllNodesWithText(str(R.string.history_new_best), useUnmergedTree = true).assertCountEquals(0)
+        rule.onAllNodes(hasContentDescription(str(R.string.history_new_best_cd, "").trim(), substring = true)).assertCountEquals(1)
     }
 }

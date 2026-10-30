@@ -214,6 +214,31 @@ fn novice_lifting_block_has_no_calendar_deload() {
     }
 }
 
+/// With no calendar deload nothing restarts a novice's %1RM ramp: a week's
+/// percentage never falls back to the band floor after five load weeks
+/// (STR-PCTPROG-001 adds load per successful week; KbGolden bug 3).
+#[test]
+fn novice_percent_ramp_never_restarts() {
+    let mut p = base_profile();
+    p.progression_cadence = ProgressionCadence::EverySession; // → Novice
+    let a = anchored("Back Squat", 120.0);
+    let pct = |w: u32| -> f32 {
+        lifts_with_claims(&synthesize(&p, &a, w).unwrap())
+            .iter()
+            .find_map(|(_, l, _)| match l.intensity {
+                LiftIntensity::PercentOneRm(x) if l.exercise == "Back Squat" => Some(x),
+                _ => None,
+            })
+            .expect("an anchored %1RM squat")
+    };
+    let weeks: Vec<f32> = (0..12).map(pct).collect();
+    assert!(
+        weeks.windows(2).all(|w| w[1] >= w[0]),
+        "novice %1RM by week: {weeks:?}"
+    );
+    assert_eq!(lift_block_position(&p, 7).week_in_block, 8);
+}
+
 #[test]
 fn a_full_cycle_repeats_the_first_week() {
     let mut p = base_profile();

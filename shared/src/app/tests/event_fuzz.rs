@@ -3083,3 +3083,92 @@ fn a_subnormal_run_distance_never_shows_infinite_percent() {
         "a non-finite percentage reached display text"
     );
 }
+
+/// Every view cache is `thread_local`, and the shell's JNI calls arrive on
+/// whichever JVM thread holds the `Core` monitor, so one model is viewed by
+/// threads whose memos hold states the others moved past. Each event of a
+/// case is applied and viewed on a random one of four long-lived workers
+/// (warm with every earlier case's caches, so a memo key that misses a field
+/// meets an old entry with the same key); a fresh thread then views the same
+/// model with cold caches, and the two must match byte for byte.
+#[test]
+fn views_from_many_warm_threads_equal_a_cold_thread_every_step() {
+    use std::sync::{Arc, Mutex, mpsc};
+    use std::time::Duration;
+    type Job = Box<dyn FnOnce() + Send>;
+    let workers: Vec<mpsc::Sender<Job>> = (0..4)
+        .map(|w| {
+            let (tx, rx) = mpsc::channel::<Job>();
+            std::thread::Builder::new()
+                .name(format!("jni-{w}"))
+                .stack_size(32 << 20)
+                .spawn(move || {
+                    for job in rx {
+                        job();
+                    }
+                })
+                .expect("spawn worker");
+            tx
+        })
+        .collect();
+    let on = |w: usize, job: Box<dyn FnOnce() -> String + Send>| -> Result<String, String> {
+        let (tx, rx) = mpsc::channel();
+        let run: Job = Box::new(move || {
+            let _ = tx.send(catch_unwind(AssertUnwindSafe(job)).map_err(|p| panic_text(&*p)));
+        });
+        match w {
+            usize::MAX => {
+                std::thread::Builder::new()
+                    .stack_size(32 << 20)
+                    .spawn(run)
+                    .map_err(|e| e.to_string())?;
+            }
+            w => workers[w].send(run).map_err(|e| e.to_string())?,
+        }
+        rx.recv_timeout(Duration::from_secs(120))
+            .map_err(|_| format!("thread {w} gave no view in 120 s"))?
+            .map_err(|p| format!("PANIC on thread {w}: {p}"))
+    };
+    for mode in [Mode::Shell, Mode::Boundary, Mode::Absurd] {
+        run_cases(
+            "views_from_many_warm_threads_equal_a_cold_thread_every_step",
+            0x5448_5245_4144_0008 ^ mode as u64,
+            12,
+            |seed| {
+                let mut g = Gen::new(seed, mode);
+                let len = g.rng.int(8, 45) as usize;
+                let events = g.sequence(len);
+                let model = Arc::new(Mutex::new(Model::default()));
+                for (i, e) in events.iter().enumerate() {
+                    let w = g.rng.below(4) as usize;
+                    let (m, ev) = (model.clone(), e.clone());
+                    let warm = on(
+                        w,
+                        Box::new(move || {
+                            let mut m = m.lock().unwrap_or_else(|p| p.into_inner());
+                            let _ = Engine.update(ev, &mut m);
+                            vm_json(&Engine.view(&m))
+                        }),
+                    )
+                    .map_err(|m| format!("event #{i} {}: {m}", short(e)))?;
+                    let m = model.clone();
+                    let cold = on(
+                        usize::MAX,
+                        Box::new(move || {
+                            vm_json(&Engine.view(&m.lock().unwrap_or_else(|p| p.into_inner())))
+                        }),
+                    )
+                    .map_err(|m| format!("cold view after event #{i}: {m}"))?;
+                    if warm != cold {
+                        return Err(format!(
+                            "after event #{i} {} on worker {w}: warm view != cold view: {}",
+                            short(e),
+                            json_diff(&warm, &cold)
+                        ));
+                    }
+                }
+                Ok(())
+            },
+        );
+    }
+}

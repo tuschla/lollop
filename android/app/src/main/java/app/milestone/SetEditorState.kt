@@ -13,10 +13,10 @@ private const val QuickPickFiltered = 8
 /**
  * Exercise quick-pick chips. The candidate order is today's open plan items, then
  * the user's own recent exercises (newest first), then the rest of the week's
- * plan, deduplicated case-insensitively, so a busy plan week can't crowd out the
+ * plan, deduplicated by [nameKey], so a busy plan week can't crowd out the
  * lifts the user actually logs. With nothing typed, or a name that already
  * matches a candidate, the first [QuickPickBase] show; otherwise every candidate
- * containing the typed text (case-insensitive) is offered, up to
+ * containing the typed text (by [nameKey]) is offered, up to
  * [QuickPickFiltered]. Modality-aware by construction: no hard-coded barbell
  * defaults. Pure.
  */
@@ -29,10 +29,10 @@ internal fun quickPickCandidates(
     val all = (todayOpen + recents + weekPlanned)
         .map { it.trim() }
         .filter { it.isNotEmpty() }
-        .distinctBy { it.lowercase(Locale.ROOT) }
-    val q = query.trim()
-    if (q.isEmpty() || all.any { it.equals(q, ignoreCase = true) }) return all.take(QuickPickBase)
-    return all.filter { it.contains(q, ignoreCase = true) }.take(QuickPickFiltered)
+        .distinctBy(::nameKey)
+    val q = nameKey(query)
+    if (q.isEmpty() || all.any { nameKey(it) == q }) return all.take(QuickPickBase)
+    return all.filter { q in nameKey(it) }.take(QuickPickFiltered)
 }
 
 /** A typed exercise name as it is saved: trimmed, inner runs of spaces collapsed,
@@ -100,8 +100,53 @@ internal fun todaySetsFor(
  *  negative). Pure. */
 internal fun repsLeft(rpe: Double): Double = (10.0 - rpe).coerceAtLeast(0.0)
 
-/** An exercise name as a match key: trimmed, lower case. Pure. */
-internal fun nameKey(name: String): String = name.trim().lowercase()
+/** An exercise name as a match key, the core's `names::exercise_key`: trimmed,
+ *  then each character folded on its own. A Latin letter with a diacritic, a
+ *  ligature or the Turkish İ/ı becomes its ASCII letters ([asciiFold]: "İncline"
+ *  → "incline", "Straße" → "strasse"); any other character is upper-cased, then
+ *  lower-cased, as `equals(ignoreCase = true)` compares. The quick-pick and
+ *  [sameExercise] both match on it; `shared/tests/fixtures/names/fold.tsv` pins
+ *  it to the core's. Pure. */
+internal fun nameKey(name: String): String {
+    val t = name.trim()
+    return buildString(t.length) {
+        for (c in t) {
+            val letters = asciiFold(c)
+            if (letters != null) append(letters) else append(c.uppercaseChar().lowercaseChar())
+        }
+    }
+}
+
+/** The lowercase ASCII spelling of a Latin-1 / Latin Extended-A letter with a
+ *  diacritic, a ligature, the capital sharp s or the Turkish dotted/dotless i;
+ *  null for any other character, ASCII included. The core's `names::ascii_fold`. */
+private fun asciiFold(c: Char): String? = when (c) {
+    in 'À'..'Å', in 'à'..'å', in 'Ā'..'ą' -> "a"
+    'Æ', 'æ' -> "ae"
+    'Ç', 'ç', in 'Ć'..'č' -> "c"
+    'Ð', 'ð', in 'Ď'..'đ' -> "d"
+    in 'È'..'Ë', in 'è'..'ë', in 'Ē'..'ě' -> "e"
+    in 'Ĝ'..'ģ' -> "g"
+    in 'Ĥ'..'ħ' -> "h"
+    in 'Ì'..'Ï', in 'ì'..'ï', in 'Ĩ'..'ı' -> "i"
+    'Ĳ', 'ĳ' -> "ij"
+    'Ĵ', 'ĵ' -> "j"
+    in 'Ķ'..'ĸ' -> "k"
+    in 'Ĺ'..'ł' -> "l"
+    'Ñ', 'ñ', in 'Ń'..'ŋ' -> "n"
+    in 'Ò'..'Ö', 'Ø', in 'ò'..'ö', 'ø', in 'Ō'..'ő' -> "o"
+    'Œ', 'œ' -> "oe"
+    in 'Ŕ'..'ř' -> "r"
+    in 'Ś'..'š', 'ſ', 'Ș', 'ș' -> "s"
+    'ß', 'ẞ' -> "ss"
+    in 'Ţ'..'ŧ', 'Ț', 'ț' -> "t"
+    'Þ', 'þ' -> "th"
+    in 'Ù'..'Ü', in 'ù'..'ü', in 'Ũ'..'ų' -> "u"
+    'Ŵ', 'ŵ' -> "w"
+    'Ý', 'ý', 'ÿ', in 'Ŷ'..'Ÿ' -> "y"
+    in 'Ź'..'ž' -> "z"
+    else -> null
+}
 
 /** Whether two exercise names name the same exercise ([nameKey] on both). Pure. */
 internal fun sameExercise(a: String, b: String): Boolean = nameKey(a) == nameKey(b)

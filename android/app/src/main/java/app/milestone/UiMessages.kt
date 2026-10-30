@@ -164,6 +164,7 @@ internal fun UiMessageHost(modifier: Modifier = Modifier) {
     shownDetails?.let { lines ->
         AlertDialog(
             onDismissRequest = { shownDetails = null },
+            modifier = Modifier.windowTraversalGroup(),
             shape = RoundedCornerShape(Space.Card.dp),
             title = shownDetailsTitle?.let { t -> @Composable { Text(t) } },
             text = {

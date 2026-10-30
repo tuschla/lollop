@@ -27,24 +27,40 @@ impl Layoff {
 
 /// Everything besides the sets and the reference day that shapes the anchors.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(super) struct AnchorCtx {
+pub(super) struct AnchorCtx<'a> {
     pub(super) layoff: Option<Layoff>,
     /// Calisthenics profile: ladder-rung sets never anchor a %1RM load.
     pub(super) calisthenics: bool,
     /// A session day the athlete marked as an off day (session review
     /// `bad_day`): a low e1RM that day does not cut the next load.
     pub(super) off_day: Option<i64>,
+    /// The planned lifting deload weeks: their prescribed light sets neither
+    /// anchor an e1RM nor become a lift's last working sets (the deload is
+    /// taken from the working weight and the next block resumes from it,
+    /// HYP-DELOAD-RX-001, 03-hypertrophy.md:395; HYP-DOUBLEPROG-001 carries the
+    /// working load, :361-362). They still count as training days.
+    pub(super) deloads: DeloadWeeks<'a>,
+    /// The profile weighs in pounds: the plan floors loads onto the lb plate
+    /// grid, which sets how far under its target a plan load can land.
+    pub(super) weight_lb: bool,
 }
 
-impl AnchorCtx {
+impl<'a> AnchorCtx<'a> {
     /// The context for `profile` (the one effective on the day being
     /// prescribed), with the off day taken from the current session review.
-    pub(super) fn for_profile(profile: Option<&Profile>, model: &Model, offset: i64) -> Self {
+    pub(super) fn for_profile(
+        profile: Option<&Profile>,
+        model: &Model,
+        offset: i64,
+        deloads: DeloadWeeks<'a>,
+    ) -> Self {
         AnchorCtx {
             layoff: profile.and_then(Layoff::of),
             calisthenics: profile
                 .is_some_and(|p| p.resistance_modality == ResistanceModality::Calisthenics),
             off_day: off_day(model, offset),
+            deloads,
+            weight_lb: profile.is_some_and(|p| p.weight_lb),
         }
     }
 }
@@ -61,7 +77,11 @@ pub(super) fn off_day(model: &Model, offset: i64) -> Option<i64> {
 /// The e1RM anchors per lift the plan synthesizes against
 /// (`build_plan_anchors`), taken as-of today, so an audit judges a logged load
 /// against the athlete's demonstrated 1RM rather than a rep-count guess.
-pub(super) fn lift_anchors_now(model: &Model, set_index: &SetIndex) -> crate::plan::Anchors {
+pub(super) fn lift_anchors_now(
+    model: &Model,
+    set_index: &SetIndex,
+    days: &LoggedDays,
+) -> crate::plan::Anchors {
     let offset = model.today_utc_offset_sec;
     let today = model.today_epoch_day.unwrap_or_else(|| {
         model
@@ -72,7 +92,12 @@ pub(super) fn lift_anchors_now(model: &Model, set_index: &SetIndex) -> crate::pl
             .max()
             .unwrap_or(0)
     });
-    let ctx = AnchorCtx::for_profile(model.profile(), model, offset);
+    let ctx = AnchorCtx::for_profile(
+        model.profile(),
+        model,
+        offset,
+        lift_deload_weeks(model, days),
+    );
     build_plan_anchors(set_index.with_facts(&model.sets), ctx, today, offset)
 }
 
@@ -90,7 +115,8 @@ const WINDOW_HORIZON_DAYS: i64 = 56;
 /// neither creates nor raises an anchor (STRENGTH-3).
 const SPEED_SET_FRAC: f64 = 0.70;
 /// AUTOREG-E1RM-GATE-001: a session e1RM more than 5 % under baseline cuts the
-/// next working load by about 5 %.
+/// next working load by about 5 %. A rated set is judged on its plate-grid
+/// credit (`Obs::e1_grid`).
 pub(super) const E1RM_DROP_GATE: f64 = 0.95;
 /// [`E1RM_DROP_GATE`] as the percentage drop the copy states.
 pub(super) const E1RM_DROP_PCT: f64 = (1.0 - E1RM_DROP_GATE) * 100.0;
@@ -104,6 +130,14 @@ struct Obs {
     /// RPE-extended e1RM for a rated set; the reps-as-performed Epley LOWER
     /// BOUND for an unrated one.
     e1: f64,
+    /// A rated set's e1RM one plate-grid step heavier (`load_grid_step_kg`)
+    /// at the same reps and RPE. The plan floors the load it asks for onto the
+    /// grid, so a set done as asked shows its baseline only within that step:
+    /// 85 % of a 55.5 kg overhead-press anchor is 47.2 kg, floored to 45 kg,
+    /// and 45 kg × 3 at ~2 reps left reads 52.5 kg (94.6 %). The e1RM-drop
+    /// gate compares at the RPE the set was done at (autoreg-022, e1RM "at
+    /// fixed RPE") and credits it this step.
+    e1_grid: f64,
     rated: bool,
 }
 
@@ -112,8 +146,9 @@ struct Obs {
 #[derive(Clone, Copy)]
 struct WindowResult {
     anchor: f64,
-    /// The latest session's rated e1RM fell ≥5 % under the baseline before it
-    /// (and that day was not marked an off day).
+    /// The latest session's best rated e1RM, credited one plate-grid step
+    /// (`Obs::e1_grid`), fell ≥5 % under the baseline before it (and that day
+    /// was not marked an off day).
     dropped: bool,
 }
 
@@ -228,7 +263,7 @@ fn score_sessions(
     work_frac: &dyn Fn(i64) -> f64,
 ) -> Option<WindowResult> {
     let mut list: Vec<(i64, f64)> = Vec::new();
-    // (real day, rated best, working baseline before it)
+    // (real day, best grid-credited rated e1RM, working baseline before it)
     let mut last: Option<(i64, f64, Option<f64>)> = None;
     let mut i = 0;
     while i < obs.len() {
@@ -239,11 +274,11 @@ fn score_sessions(
         let running = window_best(&list, aged);
         let mut j = i;
         let mut value: Option<f64> = None;
-        let mut rated_best: Option<f64> = None;
+        let mut rated_credit: Option<f64> = None;
         while j < obs.len() && day_key(obs[j].day) == day {
             let o = obs[j];
             let v = if o.rated {
-                rated_best = Some(rated_best.map_or(o.e1, |r: f64| r.max(o.e1)));
+                rated_credit = Some(rated_credit.map_or(o.e1_grid, |r: f64| r.max(o.e1_grid)));
                 Some(o.e1)
             } else {
                 match running {
@@ -262,7 +297,7 @@ fn score_sessions(
         }
         last = Some((
             day,
-            rated_best.unwrap_or(f64::NAN),
+            rated_credit.unwrap_or(f64::NAN),
             running.map(|a| a * frac),
         ));
         i = j;
@@ -294,8 +329,7 @@ pub(super) fn build_plan_anchors<'a>(
     offset: i64,
 ) -> crate::plan::Anchors {
     let sets: Vec<(&LoggedSet, NameFacts)> = sets.collect();
-    let (lift_days, movements) =
-        collect_movements(&sets, ctx.calisthenics, today_epoch_day, offset);
+    let (lift_days, movements) = collect_movements(&sets, &ctx, today_epoch_day, offset);
     // Dated training days of each movement, and movement → (eligible sets,
     // display name, latest observed_at).
     let mut trained_days: HashMap<Vec<String>, Vec<i64>> = HashMap::new();
@@ -308,7 +342,8 @@ pub(super) fn build_plan_anchors<'a>(
         if !m.days.is_empty() {
             trained_days.insert(key.clone(), m.days);
         }
-        if let Some((obs, latest)) = m.group {
+        // A movement logged only in a planned deload week has no observation.
+        if let Some((obs, latest)) = m.group.filter(|(obs, _)| !obs.is_empty()) {
             groups.insert(key, (obs, latest.exercise.clone(), latest.observed_at));
         }
     }
@@ -360,7 +395,7 @@ pub(super) fn build_plan_anchors<'a>(
         }
         out.push((name, anchor, latest_at));
     }
-    let last_working = build_last_working(&sets, ctx.calisthenics, today_epoch_day, offset);
+    let last_working = build_last_working(&sets, &ctx, today_epoch_day, offset);
     derates.extend(last_working_derates(
         &last_working,
         &mut trained_days,
@@ -394,10 +429,11 @@ struct Movement<'a> {
 
 /// One pass over `sets`: every dated lift day (any set; holds and ladder rungs
 /// are resistance training too), sorted and unique, and the movements indexed
-/// by id. A set dated after `today` is skipped.
+/// by id. A set dated after `today` is skipped; a planned deload week's set
+/// keeps its training day and its name but never anchors an e1RM.
 fn collect_movements<'a>(
     sets: &[(&'a LoggedSet, NameFacts)],
-    calisthenics: bool,
+    ctx: &AnchorCtx,
     today: i64,
     offset: i64,
 ) -> (Vec<i64>, Vec<Movement<'a>>) {
@@ -409,7 +445,7 @@ fn collect_movements<'a>(
             continue;
         }
         lift_days.extend(day);
-        if s.hold_sec.is_some() || (calisthenics && facts.calis_tier.is_some()) {
+        if s.hold_sec.is_some() || (ctx.calisthenics && facts.calis_tier.is_some()) {
             continue;
         }
         let id = facts.movement as usize;
@@ -427,6 +463,7 @@ fn collect_movements<'a>(
         {
             continue;
         }
+        let deload = day.is_some_and(|d| ctx.deloads.contains(d));
         // An open-ended rating ("4+ reps left") is a lower bound like an
         // unrated set (C11, `strength::rpe_is_exact`): it can raise or
         // re-confirm an anchor, never cut it.
@@ -445,11 +482,21 @@ fn collect_movements<'a>(
         if s.chrono_cmp(g.1).is_ge() {
             g.1 = s;
         }
+        if deload {
+            continue;
+        }
+        let e1_grid = if rated {
+            let step = load_grid_step_kg(s.weight_kg, ctx.weight_lb);
+            strength::e1rm_epley_rpe(s.weight_kg + step, s.reps, s.rpe)
+        } else {
+            e1
+        };
         g.0.push(Obs {
             day,
             observed_at: s.observed_at,
             weight: s.weight_kg,
             e1,
+            e1_grid,
             rated,
         });
     }
@@ -633,12 +680,16 @@ fn last_working_derates(
 /// every set logged at that load (lighter warm-ups / back-offs are not
 /// judged). A bodyweight movement keeps load 0 (rep progression only). Holds
 /// and, on a Calisthenics profile, ladder rungs are skipped (they have their
-/// own progression). A movement untrained for more than
+/// own progression), and so are a planned deload week's sets: the deload is
+/// cut from the working load and the next block resumes from it
+/// (HYP-DELOAD-RX-001, 03-hypertrophy.md:395; HYP-DOUBLEPROG-001, :361-362),
+/// so a deload session never becomes the load the next one is cut from or
+/// progresses from. A movement untrained for more than
 /// [`WINDOW_HORIZON_DAYS`] drops out, the horizon at which an untrained e1RM
 /// anchor is dropped (DETRAIN-STR-001).
 pub(super) fn build_last_working(
     sets: &[(&LoggedSet, NameFacts)],
-    calisthenics: bool,
+    ctx: &AnchorCtx,
     today_epoch_day: i64,
     offset: i64,
 ) -> Vec<crate::plan::LastWorking> {
@@ -651,7 +702,8 @@ pub(super) fn build_last_working(
         let day = local_day(s.observed_at, offset);
         if day > today_epoch_day
             || today_epoch_day.saturating_sub(day) > WINDOW_HORIZON_DAYS
-            || (calisthenics && facts.calis_tier.is_some())
+            || (ctx.calisthenics && facts.calis_tier.is_some())
+            || ctx.deloads.contains(day)
         {
             continue;
         }

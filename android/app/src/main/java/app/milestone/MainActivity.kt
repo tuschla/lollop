@@ -26,6 +26,10 @@ class MainActivity : ComponentActivity() {
     // boot has run, so a cold start waits for the model before it navigates.
     private val openRequest = MutableStateFlow<OpenDest?>(null)
 
+    // Counts, times and dates on every screen in Latin digits (AppLocale.kt). A
+    // language change recreates the Activity, so the base follows it.
+    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(newBase.withLatinDigits())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // AppSettings first: an explicit Light/Dark picks the splash theme before
         // installSplashScreen(). On API 31+ the system-drawn cold-start splash still
@@ -103,7 +107,7 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 }
-                Surface(modifier = Modifier.fillMaxSize(), color = BgTop) {
+                Surface(modifier = Modifier.fillMaxSize().windowTraversalGroup(), color = BgTop) {
                     CoachScreen(openRequest)
                 }
             }

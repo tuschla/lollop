@@ -45,6 +45,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -306,6 +307,7 @@ internal fun AppSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        modifier = Modifier.windowTraversalGroup(),
         sheetState = sheetState,
         sheetGesturesEnabled = sheetGesturesEnabled,
         containerColor = containerColor,
@@ -314,6 +316,15 @@ internal fun AppSheet(
         content()
     }
 }
+
+/**
+ * Marks a window's top container (the activity's content, a sheet, a dialog) as a
+ * traversal group. TalkBack's reading order sorts each group's rows by the group's
+ * own layout direction, and a Compose window's root node is always left to right
+ * (`AndroidComposeView` never sets its direction), so without this an RTL locale
+ * hears a row outside a lazy list (the bottom nav, a dialog's buttons) end to start.
+ */
+internal fun Modifier.windowTraversalGroup(): Modifier = semantics { isTraversalGroup = true }
 
 /** A sheet's scrolling body: full width, scrolled by [scroll], clear of the
  *  navigation bar, with the sheet's [sheetPadding]. */

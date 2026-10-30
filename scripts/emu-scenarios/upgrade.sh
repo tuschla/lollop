@@ -11,8 +11,8 @@
 #   3. NEW: install -r, then before and after the first launch: the event log
 #      keeps every old event, History lists the same sets and runs, the plan is
 #      the same (no new GeneratePlan), no guided setup, the pain report still
-#      adjusts today, the widget stays bound and shows today, the tile keeps its
-#      label, the reminder switch and its alarm survive.
+#      adjusts today, the widget stays bound and shows today, the tile stays on
+#      Quick Settings with today's face, the reminder switch and its alarm survive.
 #   4. Mid-run: a fresh OLD install records a GPS run, NEW is installed over it
 #      while recording; the next launch offers to resume the run from OLD's
 #      sidecar and saves it once.
@@ -25,7 +25,7 @@
 # Europe/Berlin (a run day for the seed). Exit 0 when no check FAILed.
 set -uo pipefail
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 REPO_ROOT="$(pwd)"
 HELP="$REPO_ROOT/scripts/emu-scenarios"
 APP_ID="app.milestone"
@@ -210,8 +210,8 @@ EV canon "$OUT/logs/new.ndjson" >"$OUT/logs/new.canon"
 # Every entry the old build logged is still there (boot compaction drops only
 # superseded lines).
 for k in LogSet LogRun LogRunTrack SubmitReadiness; do
-  b="$(EV count "$BEFORE" "$k")"; a="$(EV count "$OUT/logs/new.ndjson" "$k")"
-  expect $S "new build keeps every $k" "$b before, $a after" test "$a" -eq "$b"
+  was="$(EV count "$BEFORE" "$k")"; now="$(EV count "$OUT/logs/new.ndjson" "$k")"
+  expect $S "new build keeps every $k" "$was before, $now after" test "$now" -eq "$was"
 done
 # Compaction drops a SetProfile a later edit supersedes (log.rs rule 2) but never
 # the last one: that one must survive unchanged.
@@ -235,7 +235,15 @@ expect $S "widget snapshot keeps today's day kind" "kind $k0 → $k1" test -n "$
 W1="$(widget_texts new-04-widget)"; echo "$W1" >"$OUT/logs/new-widget.txt"
 expect $S "widget shows the same face after the update" "old $(tr '\n' '|' <<<"$OLD_WIDGET") / new $(tr '\n' '|' <<<"$W1")" test "$OLD_WIDGET" = "$W1"
 NEW_TILE="$(tile_label new-05-tile)"; adb_ shell cmd statusbar collapse
-expect $S "tile still on Quick Settings with its label" "'$OLD_TILE' → '$NEW_TILE'" test -n "$NEW_TILE" -a "$NEW_TILE" = "$OLD_TILE"
+# Today's face from the new snapshot (tileFace in QuickTileService.kt). The old
+# build's label is only reported: 4728546 and 901d239 can show the manifest label
+# ("Log") until their next redraw.
+WANT_TILE="$(python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+k='' if d.get('stale') else d.get('kind')
+print('Start run' if k=='Run' and d.get('trackable') else 'Log set' if k=='Lift' and not d.get('sessionDone') else 'Log')" "$OUT/logs/new-snapshot.json" 2>/dev/null)"
+expect $S "tile still on Quick Settings, with today's face" "old '$OLD_TILE' → new '$NEW_TILE' (today's face '$WANT_TILE')" test -n "$NEW_TILE" -a "$NEW_TILE" = "$WANT_TILE"
 if [[ -n "$MID" ]]; then
   launch; wait_text eq Today 20
   expect $S "Session reminder still on" "shots/new-06-reminder.png" reminder_is_on new-06-reminder

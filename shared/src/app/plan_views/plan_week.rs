@@ -154,7 +154,12 @@ impl<'a> PlanFrame<'a> {
         };
         let mut anchors = build_plan_anchors(
             dated_sets(),
-            AnchorCtx::for_profile(Some(day_profile), model, offset),
+            AnchorCtx::for_profile(
+                Some(day_profile),
+                model,
+                offset,
+                lift_deload_weeks(model, &cx.days),
+            ),
             through,
             offset,
         );

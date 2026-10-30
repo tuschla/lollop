@@ -38,7 +38,6 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -1199,7 +1198,7 @@ private fun ProfileKeypadEditor(
 @Composable
 private fun ProfileGroup(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-        Box(Modifier.semantics { heading() }) { SectionOverline(title) }
+        SectionOverline(title)
         PlainCard {
             Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) { content() }
         }
@@ -1285,7 +1284,7 @@ private fun ProfileRow(
                     // Clip before clickable so the ripple stays rounded (no square
                     // flash around the row).
                     .clip(RoundedCornerShape(Space.Md.dp))
-                    .clickable { onToggle() }
+                    .clickable(role = Role.Button) { onToggle() }
                     .semantics { stateDescription = state }
                     // Inside the clip so a multi-line caption's last line never
                     // touches the clip edge.

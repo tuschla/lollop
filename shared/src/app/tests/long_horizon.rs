@@ -918,7 +918,11 @@ impl Sim {
         self.reentry = Some(ReEntry {
             back_day: back,
             lift_gap: last_lift.map(|d| back - d),
-            run_gap: last_run.map(|d| back - d),
+            // An off-plan run of a lifter whose plan schedules no run leaves
+            // no running re-entry to judge.
+            run_gap: last_run
+                .filter(|_| self.profile.running_days_per_week > 0)
+                .map(|d| back - d),
             pre_lifts,
             pre_week_km: measured.max(self.profile.running_km_per_week),
             lift_hits: 0,
@@ -1696,6 +1700,28 @@ impl Sim {
                     // load it stood for may sit up to one step above it.
                     let pre = ratio * one_rir_load(pre_e, it.reps_low);
                     let allowed = (pre + 2.5) * frac * (e / pre_e).max(1.0) + 2.5 + lb_slack;
+                    // A load carried from the last working session (double
+                    // progression, the card's "Last: …" line) restarts from
+                    // THAT load: at most one ≤10 % step (STR-LOADPROG-001), then
+                    // the bracket's fraction (the ≤7-day one already is the
+                    // step). Its source is the heaviest set of the two weeks
+                    // before the break: a planned deload week's light sets
+                    // never carry, and the working week before it stays in.
+                    let carried = it
+                        .anchored_on_last
+                        .then(|| {
+                            let last = re.back_day - gap;
+                            self.sets
+                                .iter()
+                                .filter(|s| norm(&s.ex) == ex && s.hold.is_none())
+                                .filter(|s| (0..=14).contains(&(last - s.day)))
+                                .map(|s| s.kg)
+                                .fold(0.0, f64::max)
+                        })
+                        .filter(|kg| *kg > 0.0);
+                    let step = if gap > 7 { 1.10 } else { 1.0 };
+                    let allowed =
+                        carried.map_or(allowed, |kg| allowed.min(kg * step * frac + lb_slack));
                     for (what, l) in [
                         ("load", it.load_kg),
                         ("suggested load", it.suggested_load_kg),
@@ -1704,7 +1730,7 @@ impl Sim {
                         if l > allowed {
                             bad.push(format!(
                                 "{gap} days since the last lift: {what} {l} kg ({}) vs {pre:.1} kg before \
-                                 (e1RM {pre_e:.1} → {e:.1})",
+                                 (e1RM {pre_e:.1} → {e:.1}; carried from {carried:?} kg)",
                                 it.summary
                             ));
                         }

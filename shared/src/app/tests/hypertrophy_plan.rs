@@ -83,13 +83,13 @@ fn last_working_takes_the_top_load_sets_of_the_newest_session() {
     ];
     let index = SetIndex::new(&sets);
     let refs: Vec<(&LoggedSet, NameFacts)> = index.with_facts(&sets).collect();
-    let lw = build_last_working(&refs, false, 101, 0);
+    let lw = build_last_working(&refs, &AnchorCtx::default(), 101, 0);
     assert_eq!(lw.len(), 1);
     assert_eq!(lw[0].weight_kg, 12.0);
     assert_eq!(lw[0].sets, vec![(14, 8.0), (13, 8.0)]);
     assert_eq!(lw[0].age_days, 1);
     // Past the 56-day horizon it drops out.
-    assert!(build_last_working(&refs, false, 100 + 57, 0).is_empty());
+    assert!(build_last_working(&refs, &AnchorCtx::default(), 100 + 57, 0).is_empty());
 }
 
 #[test]

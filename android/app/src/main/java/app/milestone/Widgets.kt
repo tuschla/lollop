@@ -83,6 +83,7 @@ import androidx.compose.ui.semantics.collapse
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -786,10 +787,13 @@ fun RowScope.StatTile(value: String, unit: String?, label: String, glossaryKey: 
     // ExtraBold, tabular) with the unit inline muted, label below-left.
     // fillMaxHeight: in a `height(IntrinsicSize.Min)` row every tile takes the
     // tallest tile's height, so a glossary ⓘ never leaves a ragged bottom edge.
+    // A traversal group: TalkBack reads each tile's value and label together, tile
+    // by tile, even when a large font wraps one label to more lines than another.
     Column(
         modifier = Modifier
             .weight(1f)
             .fillMaxHeight()
+            .semantics { isTraversalGroup = true }
             .clip(RoundedCornerShape(12.dp))
             .background(BgElevated)
             .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp + Space.Xs.dp),
@@ -1058,14 +1062,15 @@ fun TileOverline(text: String, color: Color = OnBgFaint) {
     Text(text.uppercase(Locale.US), color = color, style = Type.Overline)
 }
 
-/** Section overline: the top-left accent UPPERCASE label over a screen section. */
+/** Section overline: the top-left accent UPPERCASE label over a screen section,
+ *  a TalkBack heading. */
 @Composable
 fun SectionOverline(text: String) {
     Text(
         text.uppercase(Locale.US),
         color = Accent,
         style = Type.Section,
-        modifier = Modifier.fillMaxWidth().padding(top = Space.Sm.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = Space.Sm.dp).semantics { heading() },
     )
 }
 
@@ -1314,7 +1319,8 @@ private fun RowScope.ThemeSwatchCard(theme: AppTheme, selected: Boolean, onClick
  * A one-line search field: a `BgSunken` well in a 1dp [ChoiceCellBorder] hairline
  * (1.5dp `Accent` while focused), a leading 18dp search glyph and a faint [hint]
  * placeholder. The field names itself with [hint], so it keeps an accessible name
- * once it holds text. The keyboard's [imeAction] key folds it.
+ * once it holds text; the placeholder is hidden from accessibility so the name is
+ * read once. The keyboard's [imeAction] key folds it.
  */
 @Composable
 internal fun SearchWell(
@@ -1366,7 +1372,7 @@ internal fun SearchWell(
                 },
             decorationBox = { inner ->
                 Box {
-                    if (value.isEmpty()) Text(hint, color = OnBgFaint, style = Type.Body)
+                    if (value.isEmpty()) Text(hint, color = OnBgFaint, style = Type.Body, modifier = Modifier.clearAndSetSemantics {})
                     inner()
                 }
             },

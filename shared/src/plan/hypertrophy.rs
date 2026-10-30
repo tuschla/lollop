@@ -411,7 +411,9 @@ fn plan_week(profile: &Profile, anchors: &Anchors, ta: TrainingAge, block: Block
 ///
 /// Whole-session cap (HYP-VOL-CAP-001): the targets come already fitted to
 /// the cap ([`hypertrophy_week_targets`]), and no day is filled past
-/// `day_cap` working sets (a full day accepts no further muscle).
+/// `day_cap` working sets (a full day accepts no further muscle). The days
+/// fill in muscle order, so a split whose days carry many muscles is then
+/// levelled up to each muscle's MEV floor ([`raise_to_mev`]).
 fn allocate_week(
     anchors: &Anchors,
     regions: &[DayRegion],
@@ -533,7 +535,149 @@ fn allocate_week(
             });
         }
     }
+    raise_to_mev(&mut items, &mut load, regions, targets, &logged, day_cap);
     items
+}
+
+/// Table 1 MEV floor (03-hypertrophy.md:520-529; MEV is the mesocycle start
+/// point, :534): every muscle with a weekly target that the week has an
+/// exercise for receives at least min(target, MEV) fractional sets. The days
+/// fill in [`MUSCLE_ORDER`], so on an upper/lower split the upper days can be
+/// full before the last upper muscle is sized (biceps after chest, back,
+/// delts and triceps). A missing set goes to an eligible day with room, else
+/// it is taken from that day's exercise with the most sets whose muscles all
+/// stay at or above their own floor and which keeps the per-exercise minimum:
+/// the 32-set day cap is spread so no muscle loses its work (HYP-VOL-CAP-001).
+/// A muscle the days cannot lift to its floor keeps what it has.
+fn raise_to_mev(
+    items: &mut Vec<Item>,
+    load: &mut [u32],
+    regions: &[DayRegion],
+    targets: &[MuscleWeekTarget],
+    logged: &[(String, Option<&'static str>)],
+    day_cap: u32,
+) {
+    const N: usize = MUSCLE_ORDER.len();
+    let credits_of = |name: &str| -> Vec<(usize, f32)> {
+        hypertrophy::muscle_credits(name)
+            .into_iter()
+            .filter_map(|(m, w)| MUSCLE_ORDER.iter().position(|k| *k == m).map(|i| (i, w)))
+            .collect()
+    };
+    let mut credits: Vec<Vec<(usize, f32)>> = items.iter().map(|it| credits_of(&it.name)).collect();
+    let delivered = |sets: &[u8], credits: &[Vec<(usize, f32)>]| -> [f32; N] {
+        let mut out = [0.0f32; N];
+        for (s, c) in sets.iter().zip(credits) {
+            for &(i, w) in c {
+                out[i] += w * f32::from(*s);
+            }
+        }
+        out
+    };
+    let mut options: Vec<Vec<String>> = Vec::with_capacity(N);
+    let mut floor = [0.0f32; N];
+    for (mi, muscle) in MUSCLE_ORDER.iter().enumerate() {
+        let opts = options_for(muscle, logged);
+        let target = targets
+            .iter()
+            .find(|t| t.muscle == *muscle)
+            .map_or(0, |t| t.target);
+        let mev = hypertrophy::landmarks_for(muscle).map_or(0, |l| l.mev);
+        if target > 0 && !opts.is_empty() {
+            floor[mi] = f32::from(target.min(mev));
+        }
+        options.push(opts);
+    }
+    let min_sets = hypertrophy::MIN_SETS_PER_EXERCISE;
+    let ceiling = hypertrophy::PER_SESSION_SET_CEILING;
+    for (mi, muscle) in MUSCLE_ORDER.iter().enumerate() {
+        if floor[mi] <= 0.0 {
+            continue;
+        }
+        let upper = UPPER_MUSCLES.contains(muscle);
+        let mut eligible: Vec<usize> = (0..regions.len())
+            .filter(|&s| {
+                if upper {
+                    regions[s].has_upper()
+                } else {
+                    regions[s].has_lower()
+                }
+            })
+            .collect();
+        if eligible.is_empty() {
+            eligible = (0..regions.len()).collect();
+        }
+        // Each placement adds at least one set of this muscle's own exercise
+        // (or a fresh one at the per-exercise minimum), so the floor is met
+        // within twice its size even at a ½-set credit.
+        for _ in 0..(2 * floor[mi].ceil() as usize + 2) {
+            let sets: Vec<u8> = items.iter().map(|it| it.sets).collect();
+            if delivered(&sets, &credits)[mi] + 1e-3 >= floor[mi] {
+                break;
+            }
+            // The day where the muscle has the fewest sets first (spreading it
+            // over its days, HYP-DEFAULT-PROG-001 2×/week), then the least
+            // loaded.
+            let mut days: Vec<(usize, Option<usize>)> = eligible
+                .iter()
+                .map(|&s| {
+                    (
+                        s,
+                        items.iter().position(|it| it.slot == s && it.order.1 == mi),
+                    )
+                })
+                .collect();
+            days.sort_by_key(|&(s, own)| (own.map_or(0, |i| items[i].sets), load[s], s));
+            let placement = days.into_iter().find_map(|(s, own)| {
+                let have = own.map_or(0, |i| items[i].sets);
+                if have >= ceiling {
+                    return None;
+                }
+                let add = u32::from(min_sets.saturating_sub(have).max(1));
+                let room = day_cap.saturating_sub(load[s]).min(add);
+                let mut trial = sets.clone();
+                for _ in room..add {
+                    let after = delivered(&trial, &credits);
+                    let donor = (0..items.len())
+                        .filter(|&j| {
+                            let it = &items[j];
+                            it.slot == s
+                                && it.order.1 < N
+                                && it.order.1 != mi
+                                && trial[j] > min_sets
+                                && credits[j]
+                                    .iter()
+                                    .all(|&(k, w)| after[k] - w + 1e-3 >= floor[k])
+                        })
+                        .max_by_key(|&j| (trial[j], j))?;
+                    trial[donor] -= 1;
+                }
+                Some((s, own, add, room, trial))
+            });
+            let Some((s, own, add, room, trial)) = placement else {
+                break;
+            };
+            for (it, t) in items.iter_mut().zip(&trial) {
+                it.sets = *t;
+            }
+            load[s] += room;
+            let add = add as u8;
+            match own {
+                Some(i) => items[i].sets += add,
+                None => {
+                    let k = items.iter().filter(|it| it.order.1 == mi).count();
+                    let name = options[mi][k % options[mi].len()].clone();
+                    credits.push(credits_of(&name));
+                    items.push(Item {
+                        slot: s,
+                        order: (class_rank(hypertrophy::classify(&name)), mi),
+                        name,
+                        sets: add,
+                    });
+                }
+            }
+        }
+    }
 }
 
 /// Add an exercise's secondary (½-set) credit to every OTHER Table 1 muscle it

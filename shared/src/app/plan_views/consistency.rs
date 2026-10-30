@@ -56,6 +56,9 @@ pub(super) struct PlanWeekRecord {
 pub(super) struct PlanWeeks {
     through_monday: i64,
     records: Vec<PlanWeekRecord>,
+    /// Mondays (ascending) of those weeks that were planned lifting deload
+    /// weeks at their block position ([`crate::plan::lift_deload_week`]).
+    lift_deloads: Vec<i64>,
 }
 
 impl PlanWeeks {
@@ -64,6 +67,29 @@ impl PlanWeeks {
     fn before(&self, week_monday: i64) -> &[PlanWeekRecord] {
         &self.records[..self.records.partition_point(|r| r.monday < week_monday)]
     }
+}
+
+/// The plan weeks through this one that were planned lifting deloads.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(in crate::app) struct DeloadWeeks<'a>(pub(in crate::app) &'a [i64]);
+
+impl DeloadWeeks<'_> {
+    /// Whether local `day` falls in a planned lifting deload week.
+    pub(in crate::app) fn contains(&self, day: i64) -> bool {
+        self.0.binary_search(&monday_of(day)).is_ok()
+    }
+}
+
+/// The planned lifting deload weeks of the active plan through this week (none
+/// without a plan). Their sets are prescribed light work, not performance: the
+/// e1RM anchors, the last working sets and the e1RM-decline gate leave them out
+/// (autoreg-022 compares e1RM at fixed RPE; HYP-DELOAD-RX-001 deloads from the
+/// working weight, which the next block resumes from, 03-hypertrophy.md:395).
+pub(in crate::app) fn lift_deload_weeks<'d>(
+    model: &Model,
+    days: &'d LoggedDays,
+) -> DeloadWeeks<'d> {
+    DeloadWeeks(plan_weeks(model, days).map_or(&[], |w| w.lift_deloads.as_slice()))
 }
 
 /// The view's [`PlanWeeks`], built once per view on `days`: the plan-week
@@ -76,9 +102,24 @@ fn plan_weeks<'d>(model: &Model, days: &'d LoggedDays) -> Option<&'d PlanWeeks> 
             let today = model.today_epoch_day.unwrap_or(req.start_epoch_day);
             let through_monday = monday_of(today).saturating_add(7);
             let records = plan_week_records(model, days, through_monday)?;
+            let profile = model.profile()?;
+            let mut advanced = 0u32;
+            let mut lift_deloads = Vec::new();
+            for r in &records {
+                let p = profile_for_day(model, r.monday);
+                if crate::plan::lift_deload_week(
+                    p.as_deref().unwrap_or(profile),
+                    advanced,
+                    r.monday,
+                ) {
+                    lift_deloads.push(r.monday);
+                }
+                advanced = advanced.saturating_add(u32::from(r.advanced));
+            }
             Some(PlanWeeks {
                 through_monday,
                 records,
+                lift_deloads,
             })
         })
         .as_ref()

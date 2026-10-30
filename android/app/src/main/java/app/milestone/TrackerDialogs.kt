@@ -18,6 +18,8 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -107,6 +109,7 @@ internal fun RunFinishPanel(
             stringResource(R.string.track_finish_title),
             color = OnBgBody,
             style = Type.Title.copy(fontWeight = FontWeight.ExtraBold),
+            modifier = Modifier.semantics { heading() },
         )
         // The summary and pickers scroll when they outgrow the height above the
         // pinned action row; any spare height sits above that row, never as a gap

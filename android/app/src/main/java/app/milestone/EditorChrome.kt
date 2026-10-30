@@ -53,6 +53,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -257,7 +259,7 @@ internal fun EditorTitleRow(title: String, onClose: () -> Unit) {
             title,
             color = OnBgBody,
             style = Type.Title,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).semantics { heading() },
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.size(ActionMinHeight))
@@ -423,6 +425,7 @@ fun ObservedAtRow(
         )
         AlertDialog(
             onDismissRequest = { showTime = false },
+            modifier = Modifier.windowTraversalGroup(),
             title = { Text(stringResource(R.string.log_logged_at)) },
             text = { TimePicker(tState) },
             confirmButton = {

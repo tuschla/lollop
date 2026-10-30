@@ -352,20 +352,21 @@ internal object RunImport {
                 .map { RunImportFailure(it.fileName, ImportFailure.Rejected) }
             val newest = appliedRuns.maxByOrNull { it.event.observedAt }?.event
             val skipped = plan.failures + rejected
+            val res = app.withLatinDigits().resources
             val summary = runImportSummary(
-                app.resources, appliedRuns.size, newest?.observedAt, plan.duplicates, skipped,
+                res, appliedRuns.size, newest?.observedAt, plan.duplicates, skipped,
             )
             val long = skipped.isNotEmpty()
             UiMessages.post(
                 when {
                     summary.details.isNotEmpty() -> UiMessage(
-                        summary.text, app.getString(R.string.main_details), details = summary.details,
-                        detailsTitle = app.resources.getQuantityString(
+                        summary.text, res.getString(R.string.main_details), details = summary.details,
+                        detailsTitle = res.getQuantityString(
                             R.plurals.import_details_title, skipped.size, skipped.size,
                         ),
                         long = long,
                     )
-                    newest != null -> UiMessage(summary.text, app.getString(R.string.import_view), long = long) {
+                    newest != null -> UiMessage(summary.text, res.getString(R.string.import_view), long = long) {
                         HistoryFocus.request(newest.entryId, newest.observedAt)
                     }
                     else -> UiMessage(summary.text, long = long)

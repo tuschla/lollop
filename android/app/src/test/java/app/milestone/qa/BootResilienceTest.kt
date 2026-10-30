@@ -173,7 +173,10 @@ class BootResilienceTest {
         // Save keeps what was recorded before the revoke.
         rule.waitForState { rule.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty() }
         rule.onNode(hasText(str(R.string.track_btn_save_run)) and hasClickAction()).performClick()
-        rule.waitForState { EventDispatcher.model.value?.runs?.size == 1 }
+        // The core publishes the saved run before the save's IO block clears the
+        // sidecar and resets the session (runSaveCriticalSection), so wait for the
+        // reset too: it releases the Save claim after clearing the resume flag.
+        rule.waitForState { EventDispatcher.model.value?.runs?.size == 1 && !RunSession.saving.value }
         assertEquals(1, logFile.readLines().count { "LogRunTrack" in it })
         assertFalse(RunSession.resumeAwaitingLocation.value)
     }

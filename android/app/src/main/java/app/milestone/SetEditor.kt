@@ -641,6 +641,7 @@ fun LogSetEditor(
             if (confirmDone) {
                 AlertDialog(
                     onDismissRequest = { confirmDone = false },
+                    modifier = Modifier.windowTraversalGroup(),
                     shape = RoundedCornerShape(Space.Card.dp),
                     title = { Text(stringResource(R.string.log_finish_unsaved_title)) },
                     text = { Text(stringResource(R.string.log_finish_unsaved_body)) },
@@ -856,7 +857,7 @@ fun LogSetEditor(
             Surface(
                 color = BgSunken,
                 shape = RoundedCornerShape(Space.Card.dp),
-                modifier = Modifier.fillMaxWidth().padding(Space.Md.dp),
+                modifier = Modifier.fillMaxWidth().padding(Space.Md.dp).windowTraversalGroup(),
             ) {
                 Column(Modifier.sheetPadding()) {
                     CompositionLocalProvider(LocalEditorPinnedActions provides true) {

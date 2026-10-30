@@ -69,12 +69,30 @@ pub(super) fn week_monday(w: i64) -> i64 {
 /// every caller passes its raw load (an f32-sourced one via [`f32_load_ceil`]).
 pub(crate) fn round_load_grid(kg: f64, weight_lb: bool) -> f64 {
     let floor_steps = |x: f64, step: f64| (x / step + LOAD_GRID_EPS).floor() * step;
+    let step = grid_step(kg, weight_lb);
     if weight_lb {
-        let lb = kg * LB_PER_KG;
-        let step = if lb < 50.0 { 2.5 } else { 5.0 };
-        floor_steps(lb, step) / LB_PER_KG
+        floor_steps(kg * LB_PER_KG, step) / LB_PER_KG
     } else {
-        floor_steps(kg, 2.5)
+        floor_steps(kg, step)
+    }
+}
+
+/// One step of the plate grid [`round_load_grid`] floors a load of `kg` onto,
+/// in kg. A plan load lands up to this much under the anchor × % it came
+/// from, so a set at `kg` may have been asked from a target as heavy as
+/// `kg` + this step.
+pub(crate) fn load_grid_step_kg(kg: f64, weight_lb: bool) -> f64 {
+    let step = grid_step(kg, weight_lb);
+    if weight_lb { step / LB_PER_KG } else { step }
+}
+
+/// The plate-grid step for a load of `kg`, in the display unit: 2.5 kg; 5 lb,
+/// or 2.5 lb below 50 lb.
+fn grid_step(kg: f64, weight_lb: bool) -> f64 {
+    if weight_lb && kg * LB_PER_KG >= 50.0 {
+        5.0
+    } else {
+        2.5
     }
 }
 

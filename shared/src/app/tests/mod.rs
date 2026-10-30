@@ -30,6 +30,7 @@ mod hypertrophy_plan;
 mod illness;
 mod illness_paths;
 mod ingest_sanitize;
+mod kb_golden;
 mod lift_audit;
 mod lift_cues;
 mod long_horizon;

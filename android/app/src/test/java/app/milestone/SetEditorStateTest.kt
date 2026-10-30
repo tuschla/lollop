@@ -2,6 +2,7 @@ package app.milestone
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** The set loop's pure field reducers ([SetEditorState]). */
@@ -62,5 +63,20 @@ class SetEditorStateTest {
         assertEquals("80", typed.withWorkingLoad(planned, holdMode = false, WeightUnit.Kg, noCue).weightText)
         val unloaded = PrescriptionView(exercise = "Bench", reps_low = 5, reps_high = 5)
         assertEquals(typed, typed.withWorkingLoad(unloaded, holdMode = false, WeightUnit.Kg, noCue))
+    }
+
+    /** [nameKey] keys every row of the fixture the core's `names::exercise_key`
+     *  test reads, so the shell and the core agree on which spellings are one
+     *  exercise (a Turkish keyboard's "İncline", "Straße" / "STRASSE"). */
+    @Test
+    fun nameKeyMatchesTheCoresExerciseKey() {
+        val rows = checkNotNull(javaClass.classLoader!!.getResourceAsStream("names/fold.tsv")) { "names/fold.tsv not on the test classpath" }
+            .bufferedReader().readLines()
+            .filter { it.isNotEmpty() && !it.startsWith("#") }
+        assertTrue("${rows.size} rows", rows.size >= 10)
+        for (row in rows) {
+            val (name, key) = row.split('\t', limit = 2)
+            assertEquals(name, key, nameKey(name))
+        }
     }
 }

@@ -612,7 +612,8 @@ fn lift_cycle(profile: &Profile) -> (u8, u8) {
 /// Where a plan week sits in the lifting block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockPosition {
-    /// 1-based week within the loading block.
+    /// 1-based week within the loading block (a linear novice's plan week:
+    /// no calendar deload restarts it).
     pub week_in_block: u8,
     /// Loading weeks in the block.
     pub block_weeks: u8,
@@ -623,14 +624,22 @@ pub struct BlockPosition {
 /// Where `week_index` sits in the lifting block. The single source for the
 /// lift builders and the program summary. A running-led hybrid holds week 1
 /// (maintenance dose, no set ramp: HYB-MAINT-001, and HYB-TENDON-001's
-/// "progress one side, hold the other").
+/// "progress one side, hold the other"). A novice on linear %1RM progression
+/// has no calendar deload, so nothing restarts the ramp: the week keeps
+/// counting and `strength::pct_for_week` holds its band/RIR cap (STR-PCTPROG-001
+/// adds load per successful week; indiv-007 linear progression runs 3–6
+/// months). Restarting at the band floor every block would be an unplanned
+/// deload on completed sessions.
 pub fn lift_block_position(profile: &Profile, week_index: u32) -> BlockPosition {
     let (block_weeks, cycle_len) = lift_cycle(profile);
     // `pos < cycle_len`, a `u8`.
     let pos = (week_index % u32::from(cycle_len)) as u8;
     let recovery = pos == block_weeks;
+    let linear = cycle_len == block_weeks && !uses_double_progression(profile);
     let week_in_block = if hybrid_lead(profile) == Some(HybridLead::Running) {
         1
+    } else if linear {
+        u8::try_from(week_index.saturating_add(1)).unwrap_or(u8::MAX)
     } else if recovery {
         block_weeks
     } else {
@@ -641,6 +650,35 @@ pub fn lift_block_position(profile: &Profile, week_index: u32) -> BlockPosition 
         block_weeks,
         recovery,
     }
+}
+
+/// Days from the week's Monday `week_start` to the meet when a barbell
+/// MaxStrength/Power meet taper (applied per session 0–20 days out) shapes the
+/// week; it replaces the calendar deload there. Other goals and calisthenics
+/// keep the deload: the taper rules are barbell-meet rules.
+fn meet_taper_offset(profile: &Profile, week_start: Option<i64>) -> Option<i64> {
+    let tapers = profile.weekly_sets > 0
+        && matches!(profile.lift_goal, LiftGoal::MaxStrength | LiftGoal::Power)
+        && !calisthenics_mode(profile);
+    match (profile.meet_epoch_day, week_start) {
+        (Some(meet), Some(ws)) if tapers => {
+            Some(meet.saturating_sub(ws)).filter(|d| (0..=20).contains(d))
+        }
+        _ => None,
+    }
+}
+
+/// Whether plan week `week_index` (Monday `week_monday`) is the planned lifting
+/// deload week `synthesize` lays out: the block's recovery week, unless a meet
+/// taper replaces it. Its light sets are prescribed, not a performance
+/// decrement, so the e1RM anchors, the last working sets and the e1RM-decline
+/// gate leave them out (autoreg-022 reads e1RM at fixed RPE; HYP-DELOAD-RX-001
+/// deloads from the working weight).
+pub fn lift_deload_week(profile: &Profile, week_index: u32, week_monday: i64) -> bool {
+    plan_withheld(profile).is_none()
+        && profile.weekly_sets > 0
+        && lift_block_position(profile, week_index).recovery
+        && meet_taper_offset(profile, Some(week_monday)).is_none()
 }
 
 /// The run-week request for this profile's week. Hybrid dosing:
@@ -823,7 +861,7 @@ fn build_lift_specs(
             } else if maintenance_emphasis {
                 k % 2
             } else {
-                k
+                region_exposure_index(&regions, k)
             };
             let heavy = runner_strength
                 || (!calisthenics
@@ -839,6 +877,24 @@ fn build_lift_specs(
             }
         })
         .collect()
+}
+
+/// How many earlier lift days of the week train the muscles of day `k`: its
+/// exposure index for the DUP rotation. DUP undulates each LIFT across its own
+/// sessions (File 02 strength-023), so an upper/lower week rotates per region:
+/// on U/L/U/L each region gets Heavy then HeavyVolume, and every main lift is
+/// lifted at ≥80 % 1RM in ≥2 sessions (STR-HEAVYFREQ-001; File 13 strpow-add-001:
+/// lighter days supplement, not replace, the heavy exposures). A full-body day
+/// takes the further-along of its two regions; an all-full-body week reads `k`.
+fn region_exposure_index(regions: &[DayRegion], k: usize) -> usize {
+    let before = &regions[..k];
+    let upper = before.iter().filter(|r| r.has_upper()).count();
+    let lower = before.iter().filter(|r| r.has_lower()).count();
+    match regions[k] {
+        DayRegion::Upper => upper,
+        DayRegion::Lower => lower,
+        DayRegion::Full => upper.max(lower),
+    }
 }
 
 /// The lift side of one plan week: what the lift-day builder and the week
@@ -964,15 +1020,8 @@ fn apply_lift_week_modifiers(
     }
 
     // A meet taper (barbell MaxStrength/Power, applied per session 0–14 days
-    // out) replaces the calendar deload in the weeks it touches. Other goals
-    // and calisthenics keep the deload: the taper rules are barbell-meet rules.
-    let meet_offset = match (profile.meet_epoch_day, week.anchors.week_start_epoch_day) {
-        (Some(meet), Some(ws)) if lifting => Some(meet.saturating_sub(ws)),
-        _ => None,
-    };
-    let tapers = matches!(profile.lift_goal, LiftGoal::MaxStrength | LiftGoal::Power)
-        && !calisthenics_mode(profile);
-    let taper_offset = meet_offset.filter(|d| tapers && (0..=20).contains(d));
+    // out) replaces the calendar deload in the weeks it touches.
+    let taper_offset = meet_taper_offset(profile, week.anchors.week_start_epoch_day);
     if let Some(days) = taper_offset {
         lift::apply_meet_taper(sessions, days);
     }

@@ -38,6 +38,8 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -949,7 +951,7 @@ internal fun e1rmTrend(model: ViewModel): E1rmTrend? {
     if (weighted.isEmpty()) return null
     val zone = java.time.ZoneId.systemDefault()
     fun build(exercise: String): E1rmTrend? {
-        val sets = weighted.filter { it.exercise.equals(exercise, ignoreCase = true) }
+        val sets = weighted.filter { sameExercise(it.exercise, exercise) }
         val byDay = sets.groupBy { localEpochDay(it.observed_at, zone) }.toSortedMap()
         if (byDay.size < 3) return null
         return E1rmTrend(
@@ -1142,7 +1144,7 @@ private fun NextSessionCard(
                     horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
                 ) {
                     Column(Modifier.weight(1f, fill = false)) {
-                        Text(ns.title, color = OnBgBody, style = Type.Title)
+                        Text(ns.title, color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
                         // Today is already marked in the week strip below; only a
                         // future-dated session keeps its date label.
                         if (!isToday) {
@@ -1404,6 +1406,7 @@ private fun SessionDoneCard(
                 done.title.ifBlank { stringResource(R.string.main_session_done_title) },
                 color = OnBgBody,
                 style = Type.Title,
+                modifier = Modifier.semantics { heading() },
             )
             done.items.forEach { row ->
                 val skipped = row.status in SkippedItemStatuses
@@ -1487,7 +1490,7 @@ private fun sessionDoneRunLine(row: SessionDoneItemView, unit: DistanceUnit): St
 @Composable
 private fun PromptCard(title: String, body: String, cta: String, onClick: () -> Unit) {
     PlainCard {
-        Text(title, color = OnBgBody, style = Type.Title)
+        Text(title, color = OnBgBody, style = Type.Title, modifier = Modifier.semantics { heading() })
         Text(body, color = OnBgMuted, style = Type.Body)
         PrimaryButton(cta, onClick, Modifier.fillMaxWidth())
     }

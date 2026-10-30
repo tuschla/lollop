@@ -485,7 +485,16 @@ pub(super) fn run_week_plan(
         }
     };
     let taper_cut = |k: u32, n: u32| running::taper_volume_cut(goal, k, n).map_or(0.5, |c| c.value);
-    let top_load_km = ramp(load_weeks.saturating_sub(1));
+    // The taper cuts from the last full load week as its run days hold it:
+    // the running-015 90-min easy-run ceiling can leave that week short of its
+    // ramp volume, and a cut from the ramp figure would then fall short of
+    // running-037/038's 41–60 %.
+    let top_ramp_km = ramp(load_weeks.saturating_sub(1));
+    let top_load_km = if cy.taper.is_some() {
+        held_load_week_km(profile, anchors, req, top_ramp_km)
+    } else {
+        top_ramp_km
+    };
     let weekly_km = if let Some((k, n)) = cy.taper {
         top_load_km * (1.0 - taper_cut(k, n))
     } else if cy.recovery {
@@ -722,7 +731,8 @@ fn accounting_easy_pace(vdot: Option<f64>) -> f64 {
 /// an easy day directly after a hard day or the long run becomes a Recovery run
 /// (running-014 vs running-015); the first easy days carry strides; easy days
 /// share what's left of the weekly km after the long run, the quality work and
-/// its warm-up/cool-down.
+/// its warm-up/cool-down, up to the running-015 90-min easy-run ceiling: a
+/// week whose easy days would run longer is re-sized to what its days hold.
 pub(super) fn run_week_sessions(
     plan: &RunWeekPlan,
     placed: &[(u16, RunSessionType)],
@@ -750,24 +760,9 @@ pub(super) fn run_week_sessions(
             .collect();
     }
 
-    // An easy day right after a hard day or the long run is a recovery run.
-    let hard: BTreeSet<u16> = days
-        .iter()
-        .filter(|(_, k)| is_quality(*k) || *k == RunSessionType::LongRun)
-        .map(|(d, _)| *d)
-        .collect();
-    for (d, k) in days.iter_mut() {
-        if *k == RunSessionType::Easy && *d > 0 && hard.contains(&(*d - 1)) {
-            *k = RunSessionType::Recovery;
-        }
-    }
-
-    let mut ctx = day_ctx(plan, profile, anchors, days.len());
-    ctx.long = days
-        .iter()
-        .any(|(_, k)| *k == RunSessionType::LongRun)
-        .then(|| long_run_decision(&ctx));
-    let (easy_km, rec_km) = soft_day_km(plan, &ctx, &days);
+    mark_recovery_days(&mut days);
+    let SizedWeek { ctx, soft } = size_week(plan, &days, profile, anchors);
+    let (easy_km, rec_km) = (soft.easy_km, soft.rec_km);
 
     // Strides on the first one or two easy days (running-020: 1–3×/week).
     let st = running::strides_rx().value;
@@ -803,6 +798,103 @@ pub(super) fn run_week_sessions(
             s
         })
         .collect()
+}
+
+/// An easy day right after a hard day or the long run is a recovery run
+/// (running-014 vs running-015). `days` is sorted by day.
+fn mark_recovery_days(days: &mut [(u16, RunSessionType)]) {
+    let hard: BTreeSet<u16> = days
+        .iter()
+        .filter(|(_, k)| is_quality(*k) || *k == RunSessionType::LongRun)
+        .map(|(d, _)| *d)
+        .collect();
+    for (d, k) in days.iter_mut() {
+        if *k == RunSessionType::Easy && *d > 0 && hard.contains(&(*d - 1)) {
+            *k = RunSessionType::Recovery;
+        }
+    }
+}
+
+/// A placed week sized: its day context (`weekly_km` = the week re-sized to
+/// the easy-run ceiling, `long` = the long-run decision) and its soft days.
+struct SizedWeek {
+    ctx: DayCtx,
+    soft: SoftDays,
+}
+
+/// Size the placed `days` (recovery days marked) of `plan`'s week. The long
+/// run is decided on the planned week. running-015: an easy run lasts at most
+/// 90 min, so a week whose easy days would run longer holds less than
+/// planned: the week shrinks by what the ceiling cut and its quality sessions
+/// and soft days are sized again, so the T/I/R/M caps are judged on the week
+/// the athlete runs. Every pass shrinks the week by at least 0.05 km, so the
+/// loop ends.
+fn size_week(
+    plan: &RunWeekPlan,
+    days: &[(u16, RunSessionType)],
+    profile: &Profile,
+    anchors: &Anchors,
+) -> SizedWeek {
+    let mut ctx = day_ctx(plan, profile, anchors, days.len());
+    ctx.long = days
+        .iter()
+        .any(|(_, k)| *k == RunSessionType::LongRun)
+        .then(|| long_run_decision(&ctx));
+    loop {
+        let soft = soft_day_km(plan, &ctx, days);
+        if soft.over_easy_ceiling_km < 0.05 {
+            return SizedWeek { ctx, soft };
+        }
+        ctx.weekly_km -= soft.over_easy_ceiling_km;
+    }
+}
+
+/// The last full load week (`top_km` planned) as its sessions add up: its
+/// kinds placed on the athlete's weekdays (lift days aside) and sized by
+/// [`size_week`]. A taper cuts from this week (running-037/038).
+fn held_load_week_km(
+    profile: &Profile,
+    anchors: &Anchors,
+    req: &RunWeekRequest,
+    top_km: f64,
+) -> f64 {
+    let goal = profile.goal_distance;
+    let load_weeks = super::run_load_weeks(profile);
+    let cy = CyclePos {
+        phase: running::race_phase(goal, running::taper_weeks(goal))
+            .map_or(MesoPhase::Build, |p| p.value),
+        recovery: false,
+        pos: load_weeks.saturating_sub(1),
+        cycle_offset: 0,
+        taper: None,
+        race_day: None,
+    };
+    let kinds = week_kinds(
+        profile,
+        req,
+        &cy,
+        req.n_run_days.max(1),
+        top_km,
+        anchors.run_vdot,
+    );
+    let placed =
+        super::schedule::place_week(super::available_weekdays(profile), &[], &kinds, None, None);
+    let plan = RunWeekPlan {
+        phase: cy.phase,
+        recovery: false,
+        cycle_len: load_weeks + 1,
+        weekly_km: top_km,
+        kinds,
+        race_day: None,
+        taper_week: None,
+        c25k_week: None,
+        strides: false,
+        race_week_easy_cap_km: None,
+    };
+    let mut days = placed.runs;
+    days.sort_by_key(|(d, _)| *d);
+    mark_recovery_days(&mut days);
+    size_week(&plan, &days, profile, anchors).soft.held_km
 }
 
 /// The day context of a placed week. After a break (RUN-REENTRY-001): 2+
@@ -863,10 +955,22 @@ fn day_ctx(plan: &RunWeekPlan, profile: &Profile, anchors: &Anchors, n_run_days:
     }
 }
 
-/// `(easy_km, recovery_km)`: the easy and recovery days' share of what's left
-/// of the week after the committed volume (long run + each quality session's
-/// main set and its warm-up/cool-down, RUN-WARMUP-001).
-fn soft_day_km(plan: &RunWeekPlan, ctx: &DayCtx, days: &[(u16, RunSessionType)]) -> (f64, f64) {
+/// The easy and recovery days' sizes (see [`soft_day_km`]).
+struct SoftDays {
+    easy_km: f64,
+    rec_km: f64,
+    /// The week's sessions added up: the committed volume plus every easy
+    /// and recovery day.
+    held_km: f64,
+    /// Week km the easy days could not hold under the running-015 90-min
+    /// easy-run ceiling (summed over the easy days).
+    over_easy_ceiling_km: f64,
+}
+
+/// The easy and recovery days' share of what's left of the week after the
+/// committed volume (long run + each quality session's main set and its
+/// warm-up/cool-down, RUN-WARMUP-001), each within its duration band.
+fn soft_day_km(plan: &RunWeekPlan, ctx: &DayCtx, days: &[(u16, RunSessionType)]) -> SoftDays {
     let km_of_min = |min: f64| min * 60.0 / ctx.easy_pace.max(1.0);
     let mut committed = ctx.long_km().unwrap_or(0.0);
     let wu = running::warmup_rx().value;
@@ -886,16 +990,19 @@ fn soft_day_km(plan: &RunWeekPlan, ctx: &DayCtx, days: &[(u16, RunSessionType)])
         .count();
     let resid = (ctx.weekly_km - committed).max(0.0);
     let per_soft = resid / (n_easy + n_rec).max(1) as f64;
-    // A recovery run stays inside its 20–40 min band (running-014); the rest
-    // of the residual moves to the easy days.
-    let rec_max_min = running::workout_rx(RunSessionType::Recovery)
-        .value
-        .duration_min
-        .1
-        .unwrap_or(40) as f64;
+    // A recovery run stays inside its 20–40 min band (running-014), an easy
+    // run inside its 30–90 min band (running-015); the rest of the residual
+    // moves to the easy days.
+    let ceiling_km = |kind: RunSessionType| {
+        running::workout_rx(kind)
+            .value
+            .duration_min
+            .1
+            .map_or(f64::INFINITY, |m| km_of_min(f64::from(m)))
+    };
     let rec_km = floor_km(
         per_soft
-            .min(km_of_min(rec_max_min))
+            .min(ceiling_km(RunSessionType::Recovery))
             .min(plan.race_week_easy_cap_km.unwrap_or(f64::INFINITY)),
     );
     let rec_counted = rec_km * n_rec as f64;
@@ -919,7 +1026,14 @@ fn soft_day_km(plan: &RunWeekPlan, ctx: &DayCtx, days: &[(u16, RunSessionType)])
         let fixed = committed + rec_counted;
         easy_km = easy_km.min(2.0 * fixed / (n - 2 * n_easy) as f64);
     }
-    (floor_km(easy_km), rec_km)
+    let easy_ceiling = ceiling_km(RunSessionType::Easy);
+    let held_easy_km = floor_km(easy_km.min(easy_ceiling));
+    SoftDays {
+        easy_km: held_easy_km,
+        rec_km,
+        held_km: committed + rec_counted + held_easy_km * n_easy as f64,
+        over_easy_ceiling_km: n_easy as f64 * (easy_km - easy_ceiling).max(0.0),
+    }
 }
 
 /// One C25K run (`run_of_week`-th of the week) from the NHS table.
@@ -1246,7 +1360,7 @@ impl LongRunBind {
 ///  - the weekly share, raised to the week's average run (`AverageRun`);
 ///  - the ≤2×-daily-average guardrail;
 ///  - demonstrated capacity (`ctx.capacity`) may raise it up to that
-///    guardrail, except in a recovery week;
+///    guardrail, except in a recovery week or a taper;
 ///  - the goal ceiling and, with a pace anchor, the 150-min cap at easy pace;
 ///  - the RUN-SPIKE-001 ceiling over `ctx.baseline`, a hard ceiling on all.
 pub(super) fn long_run_decision(ctx: &DayCtx) -> (f64, LongRunBind) {
@@ -1272,8 +1386,10 @@ pub(super) fn long_run_decision(ctx: &DayCtx) -> (f64, LongRunBind) {
     let baseline = ctx.baseline.filter(|b| *b > 0.0);
     // Demonstrated CAPACITY (a distance, ≥ MIN_DISTANCE_KM) may raise the run
     // above the share, bounded by the daily-average guardrail; never in a
-    // recovery week.
+    // recovery week or a taper, whose cut volume keeps the long run at its
+    // share (running-033; running-037/038: only volume drops).
     if !ctx.recovery
+        && !ctx.taper
         && let Some(b) = ctx.capacity.filter(|b| *b >= MIN_DISTANCE_KM)
     {
         let dem = floor_km(b);

@@ -59,7 +59,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.text.style.TextOverflow
@@ -379,7 +378,7 @@ private fun FullScreenRouteMap(
             Modifier
                 .fillMaxSize()
                 .background(if (tiles) BgTop else BgSunken)
-                .semantics { isTraversalGroup = true },
+                .windowTraversalGroup(),
         ) {
             if (topPx > 0 && bottomPx > 0) {
                 RouteLayer(
