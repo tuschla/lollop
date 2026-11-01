@@ -346,11 +346,12 @@ fn a_months_old_short_break_does_not_lower_the_stated_floor() {
 
 // ── More stated volume never prescribes a smaller week (RUN-LONGRUN-001) ──
 
-#[test]
-fn more_stated_volume_never_prescribes_a_smaller_week() {
+/// Every step up of the stated weekly km in `kms` keeps or grows both the
+/// long run and the week's shown run km.
+fn assert_more_volume_never_shrinks(kms: &[f64], profile: impl Fn(f64) -> Profile) {
     let mut prev: Option<(f64, f64, f64)> = None;
-    for km in [58.0, 60.0, 62.0, 63.0, 64.0, 66.0, 68.0] {
-        let (app, m) = setup(runner(3, km), MON);
+    for &km in kms {
+        let (app, m) = setup(profile(km), MON);
         let vm = app.view(&m);
         let rows = runs_after(&vm, MON - 1);
         let total: f64 = rows.iter().filter_map(|r| r.2).sum();
@@ -358,11 +359,260 @@ fn more_stated_volume_never_prescribes_a_smaller_week() {
         if let Some((pk, pl, pt)) = prev {
             assert!(
                 total >= pt && long >= pl,
-                "{pk} km/wk → long {pl} / week {pt}; {km} km/wk → long {long} / week {total}"
+                "{pk} km/wk → long {pl} / week {pt}; {km} km/wk → long {long} / week {total}: {rows:?}"
             );
         }
         prev = Some((km, long, total));
     }
+}
+
+#[test]
+fn more_stated_volume_never_prescribes_a_smaller_week() {
+    assert_more_volume_never_shrinks(&[58.0, 60.0, 62.0, 63.0, 64.0, 66.0, 68.0], |km| {
+        runner(3, km)
+    });
+}
+
+/// The same across the 64 km share split for a paced 2-day runner (10 km in
+/// 32 min). Under the running-015 90-min easy-run ceiling the 3-day weeks
+/// above are re-sized below 64 km before the share drops, so only a week
+/// whose first sizing pass sees ≥ 64 km reaches the average-run floor there
+/// (Mut5, FP08).
+#[test]
+fn more_stated_volume_never_prescribes_a_smaller_week_for_a_paced_two_day_runner() {
+    assert_more_volume_never_shrinks(&[56.0, 60.0, 63.0, 64.0, 66.0, 72.0, 80.0], |km| Profile {
+        recent_race: Some(RecentRace {
+            distance_km: 10.0,
+            time_sec: 32 * 60,
+            epoch_day: Some(MON - 7),
+        }),
+        ..runner(2, km)
+    });
+}
+
+/// A synthesized week of the sweep below: its prescribed km
+/// ([`crate::plan::prescribed_run_km`]: main sets, rep recoveries, warm-up and
+/// cool-down), its quality session count, the shortest quality session's km
+/// and the longest easy-paced day (easy, recovery or long run).
+struct SweepWeek {
+    km: f64,
+    runs: usize,
+    quality: usize,
+    shortest_quality_km: f64,
+    longest_easy_day_km: f64,
+}
+
+fn sweep_week(prog: &crate::schema::Program, anchors: &crate::plan::Anchors) -> SweepWeek {
+    use crate::schema::RunSessionType as K;
+    let session_km = |s: &crate::schema::Session| {
+        let mut one = prog.clone();
+        one.mesocycle.sessions = vec![s.clone()];
+        crate::plan::prescribed_run_km(&one, anchors)
+    };
+    let mut w = SweepWeek {
+        km: crate::plan::prescribed_run_km(prog, anchors),
+        runs: 0,
+        quality: 0,
+        shortest_quality_km: f64::INFINITY,
+        longest_easy_day_km: 0.0,
+    };
+    for s in &prog.mesocycle.sessions {
+        w.runs += usize::from(matches!(s.session_type, SessionType::Run(_)));
+        match s.session_type {
+            SessionType::Run(K::Tempo | K::Interval | K::Repetition | K::RacePace | K::Hills) => {
+                w.quality += 1;
+                w.shortest_quality_km = w.shortest_quality_km.min(session_km(s));
+            }
+            SessionType::Run(_) => w.longest_easy_day_km = w.longest_easy_day_km.max(session_km(s)),
+            _ => {}
+        }
+    }
+    w
+}
+
+/// More stated weekly km never prescribes a smaller week, for every goal at
+/// 2–7 days from 20 to 100 km/wk, without a pace anchor and with a 10 km race
+/// in 25, 32, 40 or 55 min, except at two known steps (BUGS.md 2026-11-01):
+/// - where a quality session joins (owner decision: 3-day runners keep their
+///   quality day). The drop is at most what each new session displaces: the
+///   longest easy-paced day of the week before less the session's own km
+///   (main set, warm-up and cool-down). A 3-day runner with 10 km in 32 min:
+///   58.5 km at 59 km/wk, 50.8 km at 60, where a 6 km tempo run (10.8 km
+///   with its warm-up and cool-down) takes a 19.5 km easy day's place;
+/// - where the long run's share drops from 30 % to 25 % (planned week
+///   ≥ 64 km, long-run-weekly-volume-share.md:16-17) and the 90-min easy-run
+///   ceiling then re-sizes the week below 64 km. The long run loses up to the
+///   share change, 5 % of the week before, and every easy-paced day is held
+///   to the long run, so the drop is at most 5 % of the week per easy-paced
+///   day: 4 days with 10 km in 32 min go from 62.3 km at 63 km/wk (long run
+///   18.5, easy days 16.5) to 58.8 km at 64 (long run and easy days 16).
+fn assert_week_shrinks_only_at_the_known_steps(weekly_sets: u8) {
+    use crate::running::GoalDistance as G;
+    let paces = [None, Some(25), Some(32), Some(40), Some(55)]
+        .map(|min| min.map(|m| crate::load::vdot(10_000.0, f64::from(m) * 60.0)));
+    let split = crate::running::LONG_RUN_SHARE_SPLIT_KM;
+    let share_change = crate::running::LONG_RUN_SHARE_MAX - crate::running::LONG_RUN_SHARE_MIN;
+    let mut bad = Vec::new();
+    for goal in [
+        G::General,
+        G::C25k,
+        G::FiveK,
+        G::TenK,
+        G::HalfMarathon,
+        G::Marathon,
+    ] {
+        for days in 2..=7u8 {
+            for vdot in paces {
+                let anchors = crate::plan::Anchors {
+                    run_vdot: vdot,
+                    week_start_epoch_day: Some(MON),
+                    plan_start_epoch_day: Some(MON),
+                    ..Default::default()
+                };
+                let mut prev: Option<(f64, SweepWeek)> = None;
+                for km in (20..=100).map(f64::from) {
+                    let p = Profile {
+                        goal_distance: goal,
+                        weekly_sets,
+                        ..runner(days, km)
+                    };
+                    let prog = crate::plan::synthesize(&p, &anchors, 0).expect("a run plan");
+                    let w = sweep_week(&prog, &anchors);
+                    if let Some((pk, pw)) = &prev
+                        && w.km < pw.km - 1e-9
+                    {
+                        let joined = w.quality.saturating_sub(pw.quality);
+                        let displaced =
+                            joined as f64 * (pw.longest_easy_day_km - w.shortest_quality_km);
+                        // The first sizing pass of a base week sees the stated
+                        // km scaled to the run days placed (`run_request`).
+                        let table_days = usize::from(days).min(usize::from(
+                            crate::running::goal_week_plan(goal, p.advanced)
+                                .value
+                                .sessions_per_week
+                                .1,
+                        ));
+                        let planned = km * (w.runs as f64 / table_days as f64).min(1.0);
+                        let crossed = planned >= split && pw.km < split;
+                        // The long run drops by the share change, and every
+                        // easy-paced day is held to the long run.
+                        let held_days = (pw.runs - pw.quality) as f64;
+                        let allowed = displaced
+                            + if crossed {
+                                share_change * pw.km * held_days
+                            } else {
+                                0.0
+                            };
+                        if pw.km - w.km > allowed + 0.1 {
+                            bad.push(format!(
+                                "{goal:?} {days} d, VDOT {vdot:?}: {pk} km/wk → {:.1}; {km} km/wk → {:.1} \
+                                 ({joined} quality joined, split crossed: {crossed}, allowed {allowed:.1})",
+                                pw.km, w.km
+                            ));
+                        }
+                    }
+                    prev = Some((km, w));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{} shrinks:\n{}", bad.len(), bad.join("\n"));
+}
+
+#[test]
+fn more_stated_volume_shrinks_the_week_only_at_a_quality_join_or_the_64_km_split() {
+    assert_week_shrinks_only_at_the_known_steps(runner(3, 0.0).weekly_sets);
+}
+
+#[test]
+fn more_stated_volume_shrinks_a_run_only_week_only_at_a_quality_join_or_the_64_km_split() {
+    assert_week_shrinks_only_at_the_known_steps(0);
+}
+
+/// The week's km as the plan view shows it, summed the way the plan counts a
+/// week: each run's distance or reps with their jog recoveries, plus its
+/// warm-up and cool-down minutes at the accounting easy pace (the middle of
+/// the E band with a pace anchor, else RUN-WARMUP-001's default).
+fn shown_rows_km(vm: &ViewModel, vdot: Option<f64>) -> f64 {
+    let pace = vdot
+        .and_then(|v| crate::load::vdot_band_pace_sec_per_km(v, crate::schema::VdotBand::Easy))
+        .map_or(
+            crate::running::warmup_rx()
+                .value
+                .accounting_easy_pace_sec_per_km,
+            |(fast, slow)| (fast + slow) / 2.0,
+        );
+    vm.week_plan
+        .iter()
+        .flat_map(|s| &s.items)
+        .filter(|i| i.is_run())
+        .map(|i| {
+            let st = i.run_structure.clone().unwrap_or_default();
+            let main = if st.reps > 0 {
+                f64::from(st.reps) * f64::from(st.rep_m + st.recovery_m) / 1000.0
+            } else {
+                i.run_head_km.unwrap_or(0.0)
+            };
+            main + f64::from(st.warmup_min + st.cooldown_min) * 60.0 / pace
+        })
+        .sum()
+}
+
+/// The week's run km the plan shows (`run_progress.planned_weekly_km`, the
+/// chart's "This week's plan" mark) is the week its days hold, never a stated
+/// figure they can't run: for every goal at 2–7 days, 20–100 km/wk in 10 km
+/// steps, unpaced and paced, it equals the km of the shown rows. A 3-day
+/// runner with 10 km in 32 min at 60 km/wk is shown 50.8 km.
+#[test]
+fn the_shown_weekly_target_is_the_week_the_days_hold() {
+    use crate::running::GoalDistance as G;
+    let mut bad = Vec::new();
+    for goal in [G::General, G::FiveK, G::TenK, G::HalfMarathon, G::Marathon] {
+        for days in 2..=7u8 {
+            for race_min in [None, Some(25), Some(32), Some(40), Some(55)] {
+                for km in (20..=100).step_by(10).map(f64::from) {
+                    let p = Profile {
+                        goal_distance: goal,
+                        recent_race: race_min.map(|m| RecentRace {
+                            distance_km: 10.0,
+                            time_sec: m * 60,
+                            epoch_day: Some(MON - 7),
+                        }),
+                        ..runner(days, km)
+                    };
+                    let vdot = race_min.map(|m| crate::load::vdot(10_000.0, f64::from(m * 60)));
+                    let (app, mut m) = setup(p, MON);
+                    // A logged run, so the progress card (and its plan mark) shows.
+                    run(&app, &mut m, (0.3 * km).floor(), MON - 2);
+                    let vm = app.view(&m);
+                    let shown = vm
+                        .run_progress
+                        .as_ref()
+                        .expect("progress")
+                        .planned_weekly_km;
+                    let rows = shown_rows_km(&vm, vdot);
+                    if (shown - rows).abs() > 0.15 {
+                        bad.push(format!(
+                            "{goal:?} {days} d, 10 km in {race_min:?} min, {km} km/wk: shown {shown}, rows {rows:.1}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{} weeks:\n{}", bad.len(), bad.join("\n"));
+    let p = Profile {
+        recent_race: Some(RecentRace {
+            distance_km: 10.0,
+            time_sec: 32 * 60,
+            epoch_day: Some(MON - 7),
+        }),
+        ..runner(3, 60.0)
+    };
+    let (app, mut m) = setup(p, MON);
+    run(&app, &mut m, 20.0, MON - 2);
+    let vm = app.view(&m);
+    assert_eq!(vm.run_progress.expect("progress").planned_weekly_km, 50.8);
 }
 
 // ── Stated rules of the run plan and the re-entry brackets ─────────────────
