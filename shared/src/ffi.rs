@@ -1,22 +1,34 @@
 //! JSON FFI bridge for native shells.
 //!
 //! Exposes the crux [`Engine`](crate::app::Engine) over a JSON-serialised
-//! [`Bridge`](crux_core::bridge::Bridge) so a native
-//! shell (Android/Kotlin via JNI) can drive the same side-effect-free core.
-//! The wire format is JSON: events in, effect-requests +
+//! [`Bridge`](crux_core::bridge::Bridge) so a native shell can drive the same
+//! side-effect-free core. The wire format is JSON: events in, effect-requests +
 //! view-model out. Reuses the existing `serde` derives, no Facet typegen
 //! required.
+//!
+//! This module is the ONE platform-neutral bridge API: [`process_event`],
+//! [`current_view`], [`parse_fit_json`], [`track_figures_json`],
+//! [`export_gpx`], [`compact_log_json`] and [`reset_bridge`]. Two thin bindings
+//! wrap it and add no logic of their own: the Android JNI exports
+//! (`Java_app_milestone_Core_*`, the `android` module below) and the C ABI
+//! (`lollop_*`, the `shared-c` crate, linked into the iOS app as a staticlib).
 //!
 //! Flow for the shell:
 //!   1. `update(eventJson)` → JSON array of effect requests (only `Render`).
 //!   2. `view()` → JSON `ViewModel` reflecting the new state.
 //!
-//! Panic firewall: these exports are called across a JNI `extern "system"`
-//! boundary, where a Rust unwind is undefined behaviour and, since Rust 1.81,
-//! aborts the whole process: an app crash the shell can never intercept. So
-//! every core call is wrapped such that no shell input (a poisoned lock, a
-//! malformed event, a core panic) unwinds across that boundary; it degrades to
-//! a dropped event or a structured error object instead.
+//! Panic firewall: these functions are called across an `extern "system"` /
+//! `extern "C"` boundary, where a Rust unwind is undefined behaviour and, since
+//! Rust 1.81, aborts the whole process: an app crash the shell can never
+//! intercept. So every core call is wrapped such that no shell input (a
+//! poisoned lock, a malformed event, a core panic) unwinds across that
+//! boundary; it degrades to a dropped event, an empty answer or a structured
+//! error object instead.
+//!
+//! Threading: every function is safe to call from any thread (the bridge sits
+//! behind a mutex), but the core's derived-view memos are thread-local, so a
+//! shell keeps its view-producing calls on one thread or each thread hop
+//! rebuilds them from scratch.
 
 // The firewall contract: nothing in this module may panic on its own, so
 // fallible calls are matched, never unwrapped.
@@ -55,7 +67,7 @@ fn lock_bridge() -> MutexGuard<'static, JsonBridge> {
 /// Replace the global bridge with a fresh `Engine` bridge, discarding a
 /// poisoned core (see [`catch_panic`]). Also the reset hook for host-side test
 /// isolation.
-fn reset_bridge() {
+pub fn reset_bridge() {
     *lock_bridge() = Bridge::new(Core::default());
 }
 
@@ -129,15 +141,16 @@ fn catch_panic(context: &str, reset: bool, f: impl FnOnce() -> Vec<u8>) -> Vec<u
 /// Process a JSON-encoded event, returning the JSON effect-request array.
 ///
 /// A malformed or unknown-variant event is dropped rather than propagated (see
-/// the module-level panic-firewall note). The realistic trigger is log replay:
-/// the shell re-feeds every persisted event on launch, so a line written by a
-/// future app version (a renamed/removed `Event` variant) must be skipped, not
-/// turned into an unrecoverable startup crash-loop. Core state is left
-/// unchanged and the shell renders the prior view.
+/// the module-level panic-firewall note): the answer is then empty. The
+/// realistic trigger is log replay: the shell re-feeds every persisted event on
+/// launch, so a line written by a future app version (a renamed/removed `Event`
+/// variant) must be skipped, not turned into an unrecoverable startup
+/// crash-loop. Core state is left unchanged and the shell renders the prior
+/// view.
 ///
 /// A *panic* inside the core (as opposed to a serde error) is caught by
 /// [`catch_panic`] and returned as a structured error object.
-fn process_event(event: &[u8]) -> Vec<u8> {
+pub fn process_event(event: &[u8]) -> Vec<u8> {
     catch_panic("update", true, || {
         let mut out = Vec::new();
         if lock_bridge().update(event, &mut out).is_err() {
@@ -149,7 +162,7 @@ fn process_event(event: &[u8]) -> Vec<u8> {
 
 /// Serialize the current view model as JSON. A panic or a serialization error
 /// returns the non-resetting `panic` error object (see [`catch_panic`]).
-fn current_view() -> Vec<u8> {
+pub fn current_view() -> Vec<u8> {
     catch_panic("view", false, || {
         let mut out = Vec::new();
         match lock_bridge().view(&mut out) {
@@ -165,7 +178,7 @@ fn current_view() -> Vec<u8> {
 /// Success: the [`crate::fit::FitTrack`] serialization. Failure: the
 /// [`ErrorEnvelope`] object filled from [`crate::fit::FitError`]. A parser panic
 /// returns the non-resetting `panic` object (see [`catch_panic`]).
-fn parse_fit_json(bytes: &[u8]) -> Vec<u8> {
+pub fn parse_fit_json(bytes: &[u8]) -> Vec<u8> {
     catch_panic("parse_fit", false, || {
         match crate::fit::parse_fit(bytes)
             .and_then(|track| crate::fit::import_gate(&track).map(|()| track))
@@ -184,7 +197,7 @@ fn parse_fit_json(bytes: &[u8]) -> Vec<u8> {
 /// Finish review shows exactly what History will list. Input is the event's
 /// own wire JSON, the bytes Save then sends; anything else (or a panic)
 /// returns the `{"error":…}` envelope. Pure: no bridge, model or log.
-fn track_figures_json(event: &[u8]) -> Vec<u8> {
+pub fn track_figures_json(event: &[u8]) -> Vec<u8> {
     #[derive(Serialize)]
     struct Figures {
         distance_km: f64,
@@ -213,6 +226,55 @@ fn track_figures_json(event: &[u8]) -> Vec<u8> {
     })
 }
 
+/// The GPX 1.1 document for ONE logged run, located by the same
+/// `(entry_id, observed_at)` identity the delete/amend matcher uses (a legacy
+/// `entry_id` of 0 is disambiguated by `observed_at`). The shell calls this only
+/// for the run it inspects (its `has_gpx` flag gates the map / share
+/// affordances). Empty for a hand-entered run, an unknown id, a track with no
+/// exportable route, or a caught panic.
+///
+/// Reads the registry the last [`current_view`] populated; the shell always
+/// renders the run list before it can tap a run to export.
+pub fn export_gpx(entry_id: u64, observed_at: i64) -> String {
+    std::panic::catch_unwind(|| crate::app::export_run_gpx(entry_id, observed_at))
+        .unwrap_or_default()
+}
+
+/// Compact the shell's event log ([`crate::log::compact_lines`]): `read_lines`
+/// yields one [`crate::log::LineFacts`] per log line (each parsed as it is
+/// read, so a multi-year GPS log is never held decoded), and the answer is the
+/// [`crate::log::Compaction`] verdict as JSON. `None` when a line can't be read
+/// or a panic escapes: the shell then keeps every line.
+pub fn compact_log_json<E>(
+    read_lines: impl FnOnce() -> Result<Vec<crate::log::LineFacts>, E>,
+) -> Option<String> {
+    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        read_lines().map(|facts| {
+            serde_json::to_string(&crate::log::compact_lines(&facts)).unwrap_or_default()
+        })
+    }));
+    match verdict {
+        Ok(Ok(json)) if !json.is_empty() => Some(json),
+        _ => None,
+    }
+}
+
+/// Test hook for a shell's bridge tests (feature `test-hooks`, never in an app
+/// build): run a core call that panics while holding the bridge lock, exactly
+/// the poison case [`catch_panic`] guards. `reset` selects the `update` path
+/// (`panic_reset`, bridge replaced) or the `view` path (`panic`, bridge kept).
+#[cfg(feature = "test-hooks")]
+pub fn panic_for_test(reset: bool) -> Vec<u8> {
+    let context = if reset { "update" } else { "view" };
+    catch_panic(context, reset, || {
+        let _guard = lock_bridge();
+        panic!("test-hooks panic");
+    })
+}
+
+#[cfg(any(feature = "c-abi", test))]
+pub mod c_abi;
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests;
@@ -228,9 +290,10 @@ mod android {
     //! [`super::catch_panic`] turns them into error payloads first.
 
     use super::{
-        FIT_FALLBACK_ERR, current_view, parse_fit_json, process_event, track_figures_json,
+        FIT_FALLBACK_ERR, compact_log_json, current_view, export_gpx, parse_fit_json,
+        process_event, track_figures_json,
     };
-    use crate::log::{LineFacts, compact_lines};
+    use crate::log::LineFacts;
     use jni::errors::LogErrorAndDefault;
     use jni::objects::{JByteArray, JClass, JObjectArray, JString};
     use jni::sys::jlong;
@@ -356,17 +419,9 @@ mod android {
         .resolve::<LogErrorAndDefault>()
     }
 
-    /// Build the GPX 1.1 document for ONE logged run on demand, located by
-    /// the same `(entry_id, observed_at)` identity the delete/amend matcher uses
-    /// (a legacy `entry_id` of 0 is disambiguated by `observed_at`). The shell
-    /// calls this only for the run it inspects (its `has_gpx` flag gates the
-    /// map / share affordances). Returns an empty string for a hand-entered run,
-    /// an unknown id, or a track with no exportable route.
-    ///
-    /// A core panic degrades to an empty string via the explicit `catch_unwind`
-    /// (`with_env`'s own catch would return null instead). The core query reads
-    /// the registry the last `view()` populated; the shell always renders the
-    /// run list (a `view()`) before it can tap a run to export.
+    /// The GPX 1.1 document for ONE logged run ([`export_gpx`]); an empty
+    /// string for a run with no exportable route or a caught core panic
+    /// (`with_env`'s own catch would return null instead).
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_app_milestone_Core_exportGpx<'local>(
         mut env: EnvUnowned<'local>,
@@ -378,10 +433,7 @@ mod android {
             // `entry_id`/`observed_at` arrive as the shell's Long fields; a
             // bit-cast to the core's u64/i64 identity is exact (ids are positive
             // epoch-millis).
-            let gpx = std::panic::catch_unwind(|| {
-                crate::app::export_run_gpx(entry_id as u64, observed_at)
-            })
-            .unwrap_or_default();
+            let gpx = export_gpx(entry_id as u64, observed_at);
             Ok(string_or_null(env, &gpx, ""))
         })
         .resolve::<LogErrorAndDefault>()
@@ -403,11 +455,10 @@ mod android {
         .resolve::<LogErrorAndDefault>()
     }
 
-    /// Compact the shell's event log ([`compact_lines`]): takes its lines,
+    /// Compact the shell's event log ([`compact_log_json`]): takes its lines,
     /// returns the [`crate::log::Compaction`] verdict as JSON. Each line is
-    /// parsed as it is read, so a multi-year GPS log is never held decoded.
-    /// Null when a line can't be read or a panic escapes: the shell then keeps
-    /// every line.
+    /// read and parsed in its own local frame. Null when a line can't be read
+    /// or a panic escapes: the shell then keeps every line.
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_app_milestone_Core_compactLog<'local>(
         mut env: EnvUnowned<'local>,
@@ -415,22 +466,20 @@ mod android {
         lines: JObjectArray<'local, JString<'local>>,
     ) -> JString<'local> {
         env.with_env(|env| -> jni::errors::Result<_> {
-            let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                || -> jni::errors::Result<String> {
-                    let n = lines.len(env)?;
-                    let mut facts = Vec::with_capacity(n);
-                    for i in 0..n {
-                        let line = env.with_local_frame(1, |env| -> jni::errors::Result<_> {
-                            lines.get_element(env, i)?.try_to_string(env)
-                        })?;
-                        facts.push(LineFacts::parse(&line));
-                    }
-                    Ok(serde_json::to_string(&compact_lines(&facts)).unwrap_or_default())
-                },
-            ));
+            let verdict = compact_log_json(|| -> jni::errors::Result<_> {
+                let n = lines.len(env)?;
+                let mut facts = Vec::with_capacity(n);
+                for i in 0..n {
+                    let line = env.with_local_frame(1, |env| -> jni::errors::Result<_> {
+                        lines.get_element(env, i)?.try_to_string(env)
+                    })?;
+                    facts.push(LineFacts::parse(&line));
+                }
+                Ok(facts)
+            });
             match verdict {
-                Ok(Ok(json)) if !json.is_empty() => Ok(string_or_null(env, &json, "")),
-                _ => {
+                Some(json) => Ok(string_or_null(env, &json, "")),
+                None => {
                     env.exception_clear();
                     Ok(JString::default())
                 }

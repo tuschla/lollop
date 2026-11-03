@@ -7,7 +7,10 @@ license.workspace = true
 
 [lib]
 # `cdylib` is the Android `libshared.so`; `lib` serves tests and the workspace.
-# No `staticlib` until an iOS shell exists to link it.
+# The iOS core is a `staticlib` built with `cargo rustc --crate-type staticlib
+# --features c-abi` (scripts/build-ios-core.sh), which replaces this list for
+# that one build: Cargo has no per-target crate types, and an Apple `cdylib`
+# needs Apple's linker, which a Linux host lacks.
 crate-type = ["cdylib", "lib"]
 
 [lints]
@@ -36,12 +39,21 @@ jni = { version = "0.22", default-features = false, optional = true }
 # this feature. The Android JSON FFI shell never needs it, so keep it
 # off by default; enable with `--features typegen` when generating shell types.
 typegen = ["crux_core/typegen"]
+# The platform-neutral bridge API (`shared::ffi`) on a non-Android host. Android
+# builds get it through the target cfg; `jni-host` and `c-abi` enable it.
+ffi = []
 # Compile the `Java_app_milestone_Core_*` JNI exports (shared/src/ffi.rs) on a
 # NON-Android host so `cargo build -p shared --features jni-host` yields a
 # target/debug/libshared.so the JVM QA tests load via System.loadLibrary. Off by
 # default: production android builds get the exports through the target cfg, not
 # this feature.
-jni-host = ["dep:jni"]
+jni-host = ["dep:jni", "ffi"]
+# The `lollop_*` C ABI (shared/src/ffi/c_abi.rs, header include/lollop.h) the
+# iOS app links from Kotlin/Native. Off for Android.
+c-abi = ["ffi"]
+# `lollop_reset_for_test` / `lollop_panic_for_test` for the Kotlin/Native bridge
+# tests (kmp/core-bridge). Never in an app build.
+test-hooks = ["c-abi"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.22", default-features = false }

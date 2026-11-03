@@ -5,6 +5,7 @@ recommendation shows its evidence grade and citation.
 
 - `shared/`: Rust core (crux). Deterministic: the same event log always gives the same view.
 - `android/`: Jetpack Compose shell, talks to the core over JNI (`shared/src/ffi.rs`).
+- `kmp/`, `ios/`: iOS port (Compose Multiplatform), so far the core's C ABI and its Kotlin/Native bridge. See `ios/README.md`.
 
 ## Build
 
@@ -26,6 +27,7 @@ cd android && ./gradlew testDebugUnitTest     # JVM + Robolectric UI tests on th
 cd android && ./gradlew verifyRoborazziDebug  # screenshots (baselines are local, not in git)
 scripts/emulator-scenarios.sh                 # on-device scenarios (AVD e34)
 scripts/emu-scenarios/surfaces.sh             # widget, QS tile, open intents, Live Updates, session reminder (AVD e37 / e34)
+cd kmp && ./gradlew :core-bridge:linuxX64Test  # Kotlin/Native bridge to the core's C ABI (iOS)
 ```
 
 ## Privacy

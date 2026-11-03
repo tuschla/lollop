@@ -68,10 +68,10 @@ pub(crate) use ingest::sanitize_entry_id;
 // `log.rs` compaction asks which store a legacy `SubmitReview` line replaces.
 pub(crate) use reviews::{submit_review_sets_session, submit_review_sets_weekly};
 
-// `ffi.rs` drives these across the JNI boundary as `crate::app::export_run_gpx`
+// `ffi.rs` drives these across the shell boundary as `crate::app::export_run_gpx`
 // / `crate::app::preview_track_figures`; like the ffi glue they feed, they are
-// compiled only where the exports exist.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
+// compiled only where the bridge exists (Android, or the `ffi` feature).
+#[cfg(any(target_os = "android", feature = "ffi", test))]
 pub(crate) use run_views::{export_run_gpx, preview_track_figures};
 
 #[effect(typegen)]
@@ -1256,7 +1256,7 @@ fn history_section(
     // Keep the on-demand GPX registry in step with the current run history
     // so `exportGpx(entry_id, observed_at)` can build any inspected run's GPX
     // without that ~0.5 MB string ever riding the ViewModel.
-    #[cfg(any(target_os = "android", feature = "jni-host", test))]
+    #[cfg(any(target_os = "android", feature = "ffi", test))]
     refresh_gpx_registry(&model.runs, &cx.runs);
     // Bound the per-run memos to the live history: a deleted run's entries
     // stop lingering past this view().

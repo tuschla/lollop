@@ -17,7 +17,7 @@ static CALC_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// field, but not a wholesale wipe landing mid-[update → view]. An RwLock
 /// lets the ordinary tests keep running in parallel (read) while the reset
 /// test runs alone (write).
-static BRIDGE_RESET: std::sync::RwLock<()> = std::sync::RwLock::new(());
+pub(super) static BRIDGE_RESET: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 #[test]
 fn json_event_updates_json_view() {

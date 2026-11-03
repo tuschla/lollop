@@ -1,7 +1,7 @@
 //! On-demand GPX export: `view()` keeps a registry of every exportable GPS
 //! run's QC'd route, and the `exportGpx` FFI query builds the ~0.5 MB document
 //! for the one run the shell inspects, so it never rides the `ViewModel`.
-//! Compiled only where the JNI exports exist.
+//! Compiled only where the bridge exists (Android, or the `ffi` feature).
 
 use super::*;
 use std::collections::{HashMap, HashSet};

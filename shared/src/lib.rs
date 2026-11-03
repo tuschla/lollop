@@ -32,7 +32,7 @@ pub mod autoreg;
 pub mod calisthenics;
 pub mod evidence;
 pub mod feedback;
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
+#[cfg(any(target_os = "android", feature = "ffi", test))]
 pub mod ffi;
 pub mod fit;
 pub mod hybrid;

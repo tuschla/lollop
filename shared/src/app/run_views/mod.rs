@@ -1,18 +1,18 @@
 use super::*;
 
 mod card;
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
+#[cfg(any(target_os = "android", feature = "ffi", test))]
 mod gpx;
 mod progress;
 mod qc;
 
 pub(super) use card::*;
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
+#[cfg(any(target_os = "android", feature = "ffi", test))]
 pub(crate) use gpx::export_run_gpx;
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
+#[cfg(any(target_os = "android", feature = "ffi", test))]
 pub(super) use gpx::refresh_gpx_registry;
 pub(super) use progress::*;
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
+#[cfg(any(target_os = "android", feature = "ffi", test))]
 pub(crate) use qc::preview_track_figures;
 pub(super) use qc::*;
 

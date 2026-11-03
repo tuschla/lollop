@@ -316,7 +316,7 @@ fn qc_figures(points: &[GpsPoint], segment_starts: &[u32]) -> QcTrack {
 /// figures the runner confirms are the ones History then lists. Same ingest
 /// sanitizing and [`qc_figures`] as a logged `LogRunTrack`, and the same
 /// "fewer than two usable fixes measures nothing" rule as its card.
-#[cfg(any(target_os = "android", feature = "jni-host", test))]
+#[cfg(any(target_os = "android", feature = "ffi", test))]
 pub(crate) fn preview_track_figures(points: Vec<GpsPoint>, segment_starts: &[u32]) -> (f64, f64) {
     let q = qc_figures(&crate::app::ingest::sanitize_track(points), segment_starts);
     if q.track.len() < 2 {

@@ -1,0 +1,118 @@
+name: iOS core
+
+# The core's C ABI for the iOS app (shared/src/ffi/c_abi.rs) and its
+# Kotlin/Native bridge (kmp/core-bridge). Path-filtered: only changes that can
+# affect the bridge run it. The repo is public, so the macOS job costs no
+# minutes.
+on:
+  push:
+    paths:
+      - "shared/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "kmp/**"
+      - "ios/**"
+      - "scripts/build-ios-core.sh"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "shared/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "kmp/**"
+      - "ios/**"
+      - "scripts/build-ios-core.sh"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bridge-linux:
+    name: iOS staticlibs + Kotlin/Native bridge tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: "1.90"
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: C header is current
+        run: |
+          cargo install cbindgen --locked --version 0.29.4
+          cbindgen --quiet --config shared/cbindgen.toml --crate shared --output shared/include/lollop.h --verify
+
+      - name: Build iOS staticlibs (no Apple SDK needed)
+        run: |
+          scripts/build-ios-core.sh aarch64-apple-ios aarch64-apple-ios-sim
+          ls -l target/aarch64-apple-ios/release/libshared.a target/aarch64-apple-ios-sim/release/libshared.a
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('kmp/core-bridge/build.gradle.kts') }}
+
+      - name: Bridge tests (linuxX64 against the host-built core)
+        working-directory: kmp
+        run: ./gradlew --no-daemon :core-bridge:linuxX64Test
+
+  bridge-macos:
+    name: iOS framework link + simulator bridge tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: "1.90"
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('kmp/core-bridge/build.gradle.kts') }}
+
+      - name: Pick an iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(d["udid"] for runtime, ds in devices.items() if "iOS" in runtime
+                     for d in ds if d["name"].startswith("iPhone")))')
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+
+      - name: Link the release framework (device) + run the bridge tests (simulator)
+        working-directory: kmp
+        run: >
+          ./gradlew --no-daemon
+          :core-bridge:linkReleaseFrameworkIosArm64
+          :core-bridge:iosSimulatorArm64Test
+          -Plollop.iosSimulator="$SIMULATOR_UDID"
