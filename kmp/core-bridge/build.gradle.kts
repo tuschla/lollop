@@ -104,7 +104,7 @@ kotlin {
         if (konanTarget.family == Family.IOS) {
             // Linking this framework proves the release core links into an iOS
             // binary; the app module will link the same way.
-            binaries.framework("LollopCore")
+            binaries.framework { baseName = "LollopCore" }
         }
     }
 
