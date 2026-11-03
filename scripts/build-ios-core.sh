@@ -12,22 +12,23 @@
 # this one build, so no Apple linker is needed and the Android cdylib build is
 # untouched. Works on Linux: a staticlib is an archive, not a link.
 # Needs `rustup target add <triple>` for each triple.
+# Runs under macOS's bash 3.2 too, where an empty array trips `set -u`: hence
+# a profile string instead of an array.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-profile=(--release)
+profile=release
 features=c-abi
 if [[ "${1:-}" == "--test-hooks" ]]; then
     shift
-    profile=()
+    profile=dev
     features=c-abi,test-hooks
 fi
-targets=("$@")
-if [[ ${#targets[@]} -eq 0 ]]; then
-    targets=(aarch64-apple-ios aarch64-apple-ios-sim)
+if [[ $# -eq 0 ]]; then
+    set -- aarch64-apple-ios aarch64-apple-ios-sim
 fi
 
-for target in "${targets[@]}"; do
-    cargo rustc -p shared --lib --locked "${profile[@]}" --target "$target" \
+for target in "$@"; do
+    cargo rustc -p shared --lib --locked --profile "$profile" --target "$target" \
         --features "$features" --crate-type staticlib
 done
