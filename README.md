@@ -17,17 +17,20 @@ scripts/build.sh --no-tests   # build only
 Needs Rust (edition 2024), cargo-ndk, Android NDK r30, JDK 21 and the Android SDK
 (platform 37). Set `MILESTONE_KEYSTORE`, `MILESTONE_KS_PASS` and `MILESTONE_KS_ALIAS`
 to sign a release; without them the release APK is signed with the debug key.
-The app id and package are still `app.milestone`.
+The app id and package are still `app.milestone`. `android/app` is the application
+shell; the app's code, resources and tests live in `android/lollop`, a Kotlin
+Multiplatform module that also compiles for iOS.
 
 ## Test
 
 ```sh
-cargo test                                    # core
-cd android && ./gradlew testDebugUnitTest     # JVM + Robolectric UI tests on the real core
-cd android && ./gradlew verifyRoborazziDebug  # screenshots (baselines are local, not in git)
-scripts/emulator-scenarios.sh                 # on-device scenarios (AVD e34)
-scripts/emu-scenarios/surfaces.sh             # widget, QS tile, open intents, Live Updates, session reminder (AVD e37 / e34)
-cd kmp && ./gradlew :core-bridge:linuxX64Test  # Kotlin/Native bridge to the core's C ABI (iOS)
+cargo test                                                    # core
+cd android && ./gradlew :lollop:testAndroidHostTest           # JVM + Robolectric UI tests on the real core
+cd android && ./gradlew :lollop:verifyRoborazziAndroidHostTest # screenshots (baselines are local, not in git)
+cd android && ./gradlew :lollop:compileKotlinIosArm64         # the shared module's iOS build (any host)
+scripts/emulator-scenarios.sh                                 # on-device scenarios (AVD e34)
+scripts/emu-scenarios/surfaces.sh                             # widget, QS tile, open intents, Live Updates, session reminder (AVD e37 / e34)
+cd kmp && ./gradlew :core-bridge:linuxX64Test                 # Kotlin/Native bridge to the core's C ABI (iOS)
 ```
 
 ## Privacy

@@ -1,6 +1,8 @@
 package app.milestone
 
 import androidx.compose.ui.graphics.Color
+import kotlin.math.cbrt
+import kotlin.math.pow
 
 /** How far [AccentTint] walks from the card ground toward the accent in OKLab
  *  lightness, and how much of the accent's own chroma it keeps. */
@@ -75,7 +77,7 @@ internal fun accentMix(accent: Color, ground: Color, t: Float, chroma: Float): C
     val rgb = oklabToLinearSrgb(l, ca * k, cb * k)
     fun encode(v: Double): Float {
         val c = v.coerceIn(0.0, 1.0)
-        return (if (c <= 0.0031308) 12.92 * c else 1.055 * Math.pow(c, 1 / 2.4) - 0.055).toFloat()
+        return (if (c <= 0.0031308) 12.92 * c else 1.055 * c.pow(1 / 2.4) - 0.055).toFloat()
     }
     return Color(encode(rgb[0]), encode(rgb[1]), encode(rgb[2]))
 }
@@ -84,14 +86,14 @@ internal fun accentMix(accent: Color, ground: Color, t: Float, chroma: Float): C
 private fun Color.toOklab(): DoubleArray {
     fun lin(ch: Float): Double {
         val s = ch.toDouble()
-        return if (s <= 0.04045) s / 12.92 else Math.pow((s + 0.055) / 1.055, 2.4)
+        return if (s <= 0.04045) s / 12.92 else ((s + 0.055) / 1.055).pow(2.4)
     }
     val r = lin(red)
     val g = lin(green)
     val b = lin(blue)
-    val l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
-    val m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
-    val s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+    val l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+    val m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+    val s = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
     return doubleArrayOf(
         0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
         1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
@@ -101,9 +103,9 @@ private fun Color.toOklab(): DoubleArray {
 
 /** OKLab → linear-light sRGB channels (unclamped; may fall outside 0..1). */
 private fun oklabToLinearSrgb(lightness: Double, a: Double, b: Double): DoubleArray {
-    val l = Math.pow(lightness + 0.3963377774 * a + 0.2158037573 * b, 3.0)
-    val m = Math.pow(lightness - 0.1055613458 * a - 0.0638541728 * b, 3.0)
-    val s = Math.pow(lightness - 0.0894841775 * a - 1.2914855480 * b, 3.0)
+    val l = (lightness + 0.3963377774 * a + 0.2158037573 * b).pow(3.0)
+    val m = (lightness - 0.1055613458 * a - 0.0638541728 * b).pow(3.0)
+    val s = (lightness - 0.0894841775 * a - 1.2914855480 * b).pow(3.0)
     return doubleArrayOf(
         4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
         -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
@@ -130,7 +132,7 @@ internal const val WCAG_AA_NORMAL = 4.5
 internal fun relativeLuminance(c: Color): Double {
     fun lin(ch: Float): Double {
         val s = ch.toDouble()
-        return if (s <= 0.03928) s / 12.92 else Math.pow((s + 0.055) / 1.055, 2.4)
+        return if (s <= 0.03928) s / 12.92 else ((s + 0.055) / 1.055).pow(2.4)
     }
     return 0.2126 * lin(c.red) + 0.7152 * lin(c.green) + 0.0722 * lin(c.blue)
 }

@@ -1,16 +1,14 @@
-import java.time.Duration
-
+// The application shell: packages :lollop (all code, resources and manifest
+// components) with the Rust core's jniLibs into the APK. Application id,
+// signing inputs, ABI filters, minification and versioning live here.
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("org.jetbrains.kotlin.plugin.serialization")
-    // Screenshot regression for the QA suite (recordRoborazziDebug /
-    // verifyRoborazziDebug). Runs on the same host-JVM Robolectric harness.
-    id("io.github.takahirom.roborazzi") version "1.76.0"
 }
 
 android {
-    namespace = "app.milestone"
+    // The library owns `app.milestone` (its R class and every FQCN); the shell
+    // only needs a namespace of its own.
+    namespace = "app.milestone.shell"
     compileSdk = 37
     buildToolsVersion = "36.1.0"
 
@@ -49,10 +47,9 @@ android {
             }
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro",
-            )
+            // The app's own keep rules ship with :lollop as consumer rules
+            // (lollop/consumer-rules.pro).
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
     }
 
@@ -64,34 +61,6 @@ android {
     // Any published build MUST be signed with a real keystore supplied through
     // MILESTONE_KEYSTORE (see scripts/build.sh); the debug-key fallback is for
     // local sideload/testing only and is not distributable.
-
-    buildFeatures {
-        compose = true
-        buildConfig = true
-    }
-
-    testOptions {
-        unitTests {
-            // The monotonic-clock run tracking calls android.os.SystemClock in
-            // RunSession.restore(); in plain JVM unit tests (no Robolectric) those
-            // framework stubs throw unless unmocked calls return defaults. The
-            // distance/segment assertions don't depend on the clock value, so a 0
-            // default is fine and keeps the suite runnable on the JVM.
-            isReturnDefaultValues = true
-            // Robolectric (the offline UI tests) needs the merged Android
-            // resources + manifest to inflate the real theme, strings, and the
-            // MainActivity Compose tree on the JVM.
-            isIncludeAndroidResources = true
-        }
-    }
-
-    sourceSets {
-        getByName("test") {
-            // The core's test fixtures (device FIT files) as test resources, so the
-            // JVM tests read them regardless of the runner's working directory.
-            resources.directories += "../../shared/tests/fixtures"
-        }
-    }
 
     compileOptions {
         // Core-library desugaring backports the java.time API (used at startup in
@@ -105,123 +74,9 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.19.1")
-    // Backported SplashScreen API: paints the theme-aware launch frame
-    // (white/dark logo in light, black/white logo in dark) before Compose.
-    implementation("androidx.core:core-splashscreen:1.2.0")
-    implementation("androidx.activity:activity-compose:1.13.0")
-    // collectAsStateWithLifecycle + LocalLifecycleOwner; declared rather than relied on
-    // transitively through activity-compose.
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
-    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.material3:material3")
-    // Window size classes (currentWindowAdaptiveInfoV2): the navigation rail, the
-    // two-pane layouts and the content width on landscape phones, foldables and
-    // tablets (Adaptive.kt).
-    implementation("androidx.compose.material3.adaptive:adaptive")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
-    implementation("org.osmdroid:osmdroid-android:6.1.20")
-    implementation("com.google.android.gms:play-services-location:21.4.0")
-    // Home screen widget (widget/TodayWidget.kt).
-    implementation("androidx.glance:glance-appwidget:1.2.0")
+    implementation(project(":lollop"))
 
     // Backports java.time (+ other Java 8 APIs) to minSdk 24 so the app doesn't
     // crash on API 24/25 launch. 2.1.x is compatible with AGP 9.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
-
-    // JVM unit tests (no device): compaction + event JSON wire shapes.
-    testImplementation("junit:junit:4.13.2")
-    // runTest + controllable dispatchers for the M1 run-save critical-section
-    // cancellation tests (drives real coroutine cancellation the UI can't).
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
-
-    // Offline UI/UX QA: Robolectric runs the REAL Compose UI and the
-    // REAL Rust core (host `libshared.so`, built from the shared crate's
-    // `jni-host` feature) on the plain JVM — no device, no emulator. They run
-    // under `testDebugUnitTest`.
-    testImplementation("org.robolectric:robolectric:4.17")
-    testImplementation("androidx.test:core-ktx:1.7.0")
-    testImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
-    testImplementation("androidx.compose.ui:ui-test-junit4")
-    // Roborazzi screenshot capture/verify for the key screens (light + dark).
-    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
-    // Glance widget content tests (runGlanceAppWidgetUnitTest), same version as the widget.
-    testImplementation("androidx.glance:glance-appwidget-testing:1.2.0")
-
-    // Declares the empty ComponentActivity that createComposeRule() launches; the
-    // debug manifest Robolectric reads must contain it.
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
-}
-
-// ---------------------------------------------------------------------------
-// QA host core: build libshared.so for the HOST JVM so the
-// Robolectric UI/UX tests drive the REAL Rust core over JNI instead of a mock.
-// `testDebugUnitTest` depends on this and puts the fresh .so on java.library.path.
-// The device build still gets its core from cargo-ndk (scripts/build.sh); this
-// task is host-only and never feeds the APK.
-// ---------------------------------------------------------------------------
-val repoRoot = rootDir.parentFile
-
-// Honor CARGO_TARGET_DIR (the QA sandbox points it at a shared target dir); the
-// cdylib always lands in <target>/debug/libshared.so on a `cargo build` (no
-// --release) of the jni-host feature.
-val cargoTargetDir: File =
-    System.getenv("CARGO_TARGET_DIR")?.let { file(it) } ?: File(repoRoot, "target")
-
-val qaJniDir: Provider<Directory> = layout.buildDirectory.dir("qa-jni")
-
-val buildHostCore = tasks.register<Exec>("buildHostCore") {
-    group = "verification"
-    description = "Build libshared.so (jni-host) for host-JVM UI/UX QA tests."
-    workingDir = repoRoot
-    commandLine("cargo", "build", "-p", "shared", "--features", "jni-host")
-    // Rebuild only when the core sources or its manifests change.
-    inputs.dir(File(repoRoot, "shared/src"))
-    inputs.file(File(repoRoot, "shared/Cargo.toml"))
-    inputs.file(File(repoRoot, "Cargo.toml"))
-    val outSo = qaJniDir.map { it.file("libshared.so") }
-    outputs.file(outSo)
-    doLast {
-        val built = File(cargoTargetDir, "debug/libshared.so")
-        if (!built.exists()) {
-            throw GradleException(
-                "host core not found at $built after cargo build " +
-                    "(CARGO_TARGET_DIR=${System.getenv("CARGO_TARGET_DIR") ?: "<unset>"})",
-            )
-        }
-        val dest = outSo.get().asFile
-        dest.parentFile.mkdirs()
-        built.copyTo(dest, overwrite = true)
-    }
-}
-
-tasks.withType<Test>().configureEach {
-    dependsOn(buildHostCore)
-    // Prepend the freshly-built host core so System.loadLibrary("shared") in
-    // Core's static init resolves it on the JVM (Robolectric loads it once for
-    // the whole test JVM).
-    val libDir = qaJniDir.get().asFile.absolutePath
-    val existing = System.getProperty("java.library.path") ?: ""
-    systemProperty("java.library.path", libDir + File.pathSeparator + existing)
-    // Roborazzi records real pixels; NATIVE graphics also makes Compose layout
-    // deterministic on the JVM.
-    systemProperty("robolectric.graphicsMode", "NATIVE")
-    // Native code in the Robolectric runtime logs straight to the terminal.
-    // android-base's logger reads ANDROID_LOG_TAGS and accepts only
-    // `*:<lowercase level>` (any other spec logs "unsupported ... in
-    // ANDROID_LOG_TAGS"), so this sets one floor for every native tag.
-    environment("ANDROID_LOG_TAGS", "*:w")
-    // Two test JVMs, each with headroom for the real core + Compose +
-    // Robolectric: 2 × 2 GB fits the 16 GB CI runner.
-    maxParallelForks = 2
-    maxHeapSize = "2g"
-    // Robolectric's Android 16 (SDK 36) sandbox reaches into jdk.internal.access to
-    // set up shared memory; without this export every @Config(sdk = [36]) test fails
-    // at setup with "Failed to interact with raw FileDescriptor internals".
-    jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
-    // A hang fails the task instead of holding CI until its job timeout: the full
-    // suite runs in well under this.
-    timeout.set(Duration.ofMinutes(30))
 }

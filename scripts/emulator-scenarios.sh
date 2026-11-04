@@ -716,7 +716,7 @@ gen_five_year() {
     >"$HOME/.cache/emuscenarios.init.gradle.kts"
   (cd "$REPO_ROOT/android" && EMU_SEED_OUT="$FIVE" JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}" \
     ./gradlew --init-script "$HOME/.cache/emuscenarios.init.gradle.kts" --max-workers=2 -q \
-    :app:testDebugUnitTest --tests app.milestone.qa.EmuSeedExportTest --rerun) >"$OUT/logs/seed-gradle.log" 2>&1
+    :lollop:testAndroidHostTest --tests app.milestone.qa.EmuSeedExportTest --rerun) >"$OUT/logs/seed-gradle.log" 2>&1
   [[ -s "$FIVE" ]]
 }
 # Background sampler: "Dalvik Heap" / "Native Heap" Heap-Alloc (KB) of the app's

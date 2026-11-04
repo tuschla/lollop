@@ -1,5 +1,6 @@
 /build
 /app/build
+/lollop/build
 /.gradle
 /local.properties
 /app/src/main/assets/web/

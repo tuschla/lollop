@@ -95,6 +95,9 @@ private fun round2(x: Double): Double = Math.round(x * 100.0) / 100.0
  */
 enum class WeightUnit { Kg, Lb }
 
+/** The display unit for every kg figure, from the profile's weight-unit flag. */
+internal fun ViewModel.weightUnit(): WeightUnit = if (profile?.weight_lb == true) WeightUnit.Lb else WeightUnit.Kg
+
 /** Pounds per kilogram (mirrors app/mod.rs `LB_PER_KG`). 1 kg = 2.2046226218 lb. */
 const val LB_PER_KG: Double = 2.2046226218
 

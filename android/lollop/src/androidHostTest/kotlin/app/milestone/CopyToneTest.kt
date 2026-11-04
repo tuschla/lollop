@@ -180,9 +180,9 @@ class CopyToneTest {
 
     // ── Resources ───────────────────────────────────────────────────────────
 
-    /** The unit-test working directory is the app module. */
+    /** The unit-test working directory is the lollop module. */
     private fun resources(): List<Res> {
-        val dir = File("src/main/res/values")
+        val dir = File("src/androidMain/res/values")
         val files = dir.listFiles { f -> f.name.startsWith("strings") && f.name.endsWith(".xml") }
             .orEmpty().sortedBy { it.name }
         assertTrue("no strings*.xml under ${dir.absolutePath}", files.isNotEmpty())

@@ -22,9 +22,9 @@ import org.robolectric.RobolectricTestRunner
  * Screenshot-regression baselines for the key screens in light + dark, captured
  * from the REAL app on the Robolectric host JVM.
  *
- *   ./gradlew :app:recordRoborazziDebug   # (re)record baselines after an
- *                                         # intentional UI change
- *   ./gradlew :app:verifyRoborazziDebug   # compare against the baselines
+ *   ./gradlew :lollop:recordRoborazziAndroidHostTest   # (re)record baselines after an
+ *                                                      # intentional UI change
+ *   ./gradlew :lollop:verifyRoborazziAndroidHostTest   # compare against the baselines
  *
  * Baselines live under src/test/screenshots/ (local, gitignored); diffs/actuals
  * land in build/outputs/roborazzi.

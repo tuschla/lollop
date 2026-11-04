@@ -12,7 +12,7 @@ import org.junit.Test
  * output file, so the normal unit suite never writes ~50 MiB.
  *
  *   EMU_SEED_OUT=/path/five-year.ndjson [EMU_SEED_DAYS=1825] [EMU_SEED_FIX_SEC=4] \
- *     ./gradlew :app:testDebugUnitTest --tests app.milestone.qa.EmuSeedExportTest
+ *     ./gradlew :lollop:testAndroidHostTest --tests app.milestone.qa.EmuSeedExportTest
  */
 class EmuSeedExportTest {
     @Test

@@ -3,7 +3,10 @@
 Status: the Rust core builds for iOS and is callable from Kotlin/Native. There
 is no iOS UI yet. The iOS app will be the Android app ported to Compose
 Multiplatform: the screens move to shared Kotlin, and only platform services
-(location, notifications, widgets, files) are written per platform.
+(location, notifications, widgets, files) are written per platform. The app's
+Kotlin already lives in the multiplatform module `android/lollop`, which builds
+for Android and iOS; its `commonMain` holds the platform-free parts so far (the
+core's wire types, view-model helpers, palette and colour maths).
 
 ## Architecture
 
@@ -19,7 +22,19 @@ kmp/ (Kotlin Multiplatform build)
        │              exportGpx, trackFigures, compactLog), same JSON wire
        ├─ nativeMain  NativeCore: CoreBridge over cinterop + lollop.h
        └─ nativeTest  bridge tests against the core's own golden fixtures
+android/ (Gradle build of the app)
+  ├─ app/        application shell: application id, signing, R8, jniLibs
+  └─ lollop/     the app as a Kotlin Multiplatform module (namespace app.milestone)
+       ├─ commonMain       platform-free Kotlin + generated CMP strings
+       ├─ androidMain      everything Android (Compose UI, services, widget, Core.kt)
+       ├─ iosMain          iOS actuals; static framework `Lollop`
+       └─ androidHostTest  JVM + Robolectric suite
 ```
+
+`:lollop` doesn't depend on the cinterop module: on iOS it will reach the core
+through a common Kotlin interface injected at startup, implemented by
+`kmp/core-bridge`. So its iOS klibs compile on Linux; only the final iOS
+framework/app link, which pulls in the cinterop module, needs macOS.
 
 Both bindings call the same Rust functions in `shared::ffi` (`process_event`,
 `current_view`, `parse_fit_json`, `track_figures_json`, `export_gpx`,
@@ -67,6 +82,7 @@ rustup target add aarch64-apple-ios aarch64-apple-ios-sim   # x86_64-apple-ios f
 scripts/build-ios-core.sh             # release libshared.a for device + arm64 simulator
 scripts/build-ios-core.sh x86_64-apple-ios
 cd kmp && ./gradlew :core-bridge:linuxX64Test   # bridge tests on the host core
+cd android && ./gradlew :lollop:compileKotlinIosArm64 :lollop:compileKotlinIosSimulatorArm64
 ```
 
 `build-ios-core.sh` runs `cargo rustc -p shared --lib --crate-type staticlib
@@ -87,11 +103,14 @@ cbindgen --quiet --config shared/cbindgen.toml --crate shared --output shared/in
 
 CI (`.github/workflows/ios.yml`) checks the header with `--verify`.
 
-Kotlin/Native compiles and links Apple targets only on a macOS host. On Linux
-the `iosArm64` / `iosSimulatorArm64` targets are skipped with a warning
-(`kotlin.native.ignoreDisabledTargets=true`). xtool (https://github.com/xtool-org/xtool)
-builds Swift packages for iOS on Linux, but it can't run the Kotlin/Native
-compiler for Apple targets, so it can't build this app.
+Kotlin/Native links Apple targets only on a macOS host; on Linux the link
+tasks are skipped (`kotlin.native.ignoreDisabledTargets=true`). Compiling iOS
+klibs works on Linux as long as the module has no cinterop: `:lollop`'s
+`compileKotlinIos*` run in CI (`lollop-ios` job in `ci.yml`), while
+`kmp/core-bridge`'s iOS compile is skipped on Linux because of its cinterop.
+xtool (https://github.com/xtool-org/xtool) builds Swift packages for iOS on
+Linux, but it can't run the Kotlin/Native compiler for Apple targets, so it
+can't build this app.
 
 ### On macOS
 
@@ -151,10 +170,10 @@ Apple offers no other API (extensions).
 
 ## Next steps
 
-1. Move `Core.kt`'s Kotlin-only logic (event types, replay, compaction, the
-   wire decoders) into `kmp` commonMain with an Android `actual` over the
-   existing JNI exports, then the Compose screens, after the current Android UX
-   work lands.
+1. Move `Core.kt`'s remaining Kotlin-only logic (event types, replay,
+   compaction) into `android/lollop` commonMain behind a common core interface
+   (Android: the existing JNI exports; iOS: `kmp/core-bridge`), then the Compose
+   screens. The wire decoders (`CoreTypes.kt`) are there already.
 2. Add the iOS app target (Compose `ComposeUIViewController` in a SwiftUI host)
    and the unsigned `.ipa` step to `bridge-macos`.
 3. The Swift extensions: widget, Live Activity, control.

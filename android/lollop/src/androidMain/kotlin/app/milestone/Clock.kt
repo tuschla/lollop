@@ -40,6 +40,17 @@ internal fun todayEpochDay(): Long =
  *  its Log buttons. Falls back to the device clock on an old core. */
 internal fun ViewModel.today(): Long = today_epoch_day ?: todayEpochDay()
 
+/** Today's session still to train: the hero dated today, with items, not blocked. */
+internal fun ViewModel.todaysPlan(): SessionPlanView? =
+    next_session?.takeIf { it.epoch_day == today() && it.items.isNotEmpty() && it.actionable }
+
+/** Today's lift session once something of it is logged. After Finish the core moves
+ *  next_session off today, so this is how the day is resumed. */
+internal fun ViewModel.resumableLiftDay(): SessionPlanView? = week_plan.firstOrNull {
+    it.epoch_day == today() && it.items.isNotEmpty() && sessionDiscipline(it.session_type) == "Lift" &&
+        it.items.any { i -> i.sets_done > 0 || i.logged_sets.isNotEmpty() }
+}
+
 /** The device's current UTC offset in SECONDS east of UTC, so the core can
  *  bucket a logged session's UTC `observed_at` into the correct local day. Uses
  *  the offset at "now" (DST-correct for the current instant). */

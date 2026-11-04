@@ -46,7 +46,7 @@ import org.robolectric.RuntimeEnvironment
  *
  * Tall screens are captured at the top and again scrolled (`-mid` / `-bottom`)
  * so every element appears in at least one image. Recorded with
- * `./gradlew :app:recordRoborazziDebug` like [ScreenshotTest].
+ * `./gradlew :lollop:recordRoborazziAndroidHostTest` like [ScreenshotTest].
  */
 @RunWith(RobolectricTestRunner::class)
 class ScreenshotSetupTest {

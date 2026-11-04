@@ -274,8 +274,9 @@ internal fun runImportSummary(
  */
 internal object RunImport {
 
-    /** This app's own FileProvider (its GPX shares), never an import source. */
-    private const val OWN_FILE_PROVIDER = "${BuildConfig.APPLICATION_ID}.fileprovider"
+    /** This app's own FileProvider (its GPX shares), never an import source. The
+     *  manifest declares it as `${applicationId}.fileprovider`. */
+    private const val OWN_FILE_PROVIDER = "app.milestone.fileprovider"
 
     /** The file URIs an incoming VIEW / SEND / SEND_MULTIPLE intent carries, or empty
      *  for any other intent (launcher, notification deep link). Only other apps'

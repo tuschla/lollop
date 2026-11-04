@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Direct "ignore battery optimizations" request so a long background run isn't
+         Dozed/frozen; falls back to the battery-optimization settings list if the OEM
+         rejects the direct dialog. A Play listing must declare this permission's use
+         case (fitness tracking is an accepted one). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Run-tracking haptic cues from the foreground service (recording started,
+         GPS signal lost) so they reach a runner whose screen is off. Normal
+         permission, granted at install. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Android 16+ Live Updates: lets the run and rest-timer notifications request
+         promotion (status-bar chip, top of the shade). Normal permission, granted at
+         install; the user can still turn Live Updates off per app. -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!-- The rest-done alert at the exact rest end (RestAlarm). New installs on
+         Android 14+ start without it; the set loop asks once. Without it the alarm
+         is inexact and may arrive late. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- The session reminder's alarm is cleared by a reboot; set it again after boot
+         (SessionReminderReceiver). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Milestone">
+        <!-- singleTask: an "Open with" from a file manager lands in the running app
+             (onNewIntent) instead of stacking a second MainActivity in the caller's
+             task. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- "Open with" / "Share to" run import (GPX / TCX / FIT from Garmin,
+                 Strava, Coros, file managers). Listed MIME types only, not */*, so
+                 the app doesn't offer itself for photos, PDFs, etc.; providers often
+                 label these files octet-stream or generic XML, which is why those
+                 are included. The format is still decided by CONTENT sniff in
+                 RunImport (non-run files are rejected with a plain message). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/gpx+xml" />
+                <data android:mimeType="application/gpx" />
+                <data android:mimeType="application/vnd.garmin.tcx+xml" />
+                <data android:mimeType="application/tcx+xml" />
+                <data android:mimeType="application/vnd.ant.fit" />
+                <data android:mimeType="application/fit" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="text/xml" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/gpx+xml" />
+                <data android:mimeType="application/gpx" />
+                <data android:mimeType="application/vnd.garmin.tcx+xml" />
+                <data android:mimeType="application/tcx+xml" />
+                <data android:mimeType="application/vnd.ant.fit" />
+                <data android:mimeType="application/fit" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="text/xml" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".RunTrackingService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <!-- The rest countdown's delete intent: a swiped-away countdown is not reposted. -->
+        <receiver
+            android:name=".RestDismissReceiver"
+            android:exported="false" />
+
+        <!-- The rest-end alarm: posts the rest-done alert, also in a process started
+             for it (RestAlarm). -->
+        <receiver
+            android:name=".RestEndReceiver"
+            android:exported="false" />
+
+        <!-- The daily session reminder (SessionReminder): its alarm, and boot, app
+             update, time zone and clock changes, after which the alarm is set again.
+             The system sends these to a non-exported receiver. -->
+        <receiver
+            android:name=".SessionReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Quick Settings tile: opens today's next action (QuickTileService).
+             An active tile: the app asks System UI to redraw it whenever its face
+             can change (requestTileRefresh). -->
+        <service
+            android:name=".QuickTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_mark"
+            android:label="@string/tile_log"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+        </service>
+
+        <!-- Home screen widget (widget/TodayWidget.kt). Exported for the widget host's
+             broadcasts; the time and time zone changes (exempt from the implicit
+             broadcast limits) mark a stored day stale, the locale change re-renders. -->
+        <receiver
+            android:name=".widget.TodayWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_overline_today">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/today_widget_info" />
+        </receiver>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+</manifest>

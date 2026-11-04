@@ -6,7 +6,6 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
 import androidx.glance.appwidget.GlanceAppWidgetManager
-import app.milestone.BuildConfig
 import app.milestone.AppSettings
 import app.milestone.EventDispatcher
 import app.milestone.resolveDistanceUnit
@@ -93,7 +92,9 @@ internal object WidgetSync {
     @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
     private fun launchPreviewSync(ctx: Context): Job =
         EventDispatcher.scope.launch {
-            combine(AppSettings.theme, AppSettings.darkMode, AppSettings.dynamicAccent) { t, d, a -> "${BuildConfig.VERSION_CODE}/$t/$d/$a" }
+            // The library module has no BuildConfig: the installed package's version.
+            val version = ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode
+            combine(AppSettings.theme, AppSettings.darkMode, AppSettings.dynamicAccent) { t, d, a -> "$version/$t/$d/$a" }
                 .distinctUntilChanged()
                 .collect { key ->
                     val prefs = ctx.getSharedPreferences(PREVIEW_PREFS, Context.MODE_PRIVATE)

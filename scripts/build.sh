@@ -48,11 +48,11 @@ echo "==> jniLibs: cargo-ndk release, arm64-v8a (all builds) + x86_64 (debug/emu
 cargo ndk -o android/app/src/main/jniLibs -t arm64-v8a -t x86_64 build -p shared --release
 
 echo "==> Android: $([[ $RUN_TESTS == 1 ]] && echo 'unit tests (incl. UI/UX QA) + ')debug + release APKs"
-GRADLE_TASKS=(assembleDebug assembleRelease)
-# testDebugUnitTest runs the offline UI/UX QA (Robolectric); verifyRoborazziDebug
-# compares against the local screenshot baselines (gitignored). Both build the
-# host core first.
-[[ $RUN_TESTS == 1 ]] && GRADLE_TASKS=(testDebugUnitTest verifyRoborazziDebug "${GRADLE_TASKS[@]}")
+GRADLE_TASKS=(:app:assembleDebug :app:assembleRelease)
+# :lollop:testAndroidHostTest runs the offline UI/UX QA (Robolectric) and the CMP
+# strings parity gate; verifyRoborazziAndroidHostTest compares against the local
+# screenshot baselines (gitignored). Both build the host core first.
+[[ $RUN_TESTS == 1 ]] && GRADLE_TASKS=(:lollop:testAndroidHostTest :lollop:verifyRoborazziAndroidHostTest "${GRADLE_TASKS[@]}")
 (cd android && ./gradlew -q "${GRADLE_TASKS[@]}")
 
 echo "==> Release R8 keep check"

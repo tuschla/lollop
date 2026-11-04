@@ -497,7 +497,7 @@ class RandomUiWalkTest : UiProbeTest() {
         val replay = "UIWALK_STATE=${start.name} UIWALK_SEED=$seed UIWALK_STEPS=$step"
         return ProbeFailure(
             "UIWALK [$start] seed=$seed step=$step font=$fontScale land=$landscape: $msg\n" +
-                "replay: $replay ./gradlew :app:testDebugUnitTest --tests 'app.milestone.qa.RandomUiWalkTest'\n" +
+                "replay: $replay ./gradlew :lollop:testAndroidHostTest --tests 'app.milestone.qa.RandomUiWalkTest'\n" +
                 "trace:\n" + trace.takeLast(200).joinToString("\n") + "\n" +
                 "screen:\n" + runCatching { screenDump() }.getOrElse { "<unavailable: $it>" },
         )
