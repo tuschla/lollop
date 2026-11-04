@@ -1,5 +1,10 @@
 package app.milestone
 
+import app.milestone.resources.Res
+import app.milestone.resources.track_gates_caption_both
+import app.milestone.resources.track_gates_caption_moving
+import app.milestone.resources.track_gates_caption_none
+import app.milestone.resources.track_gates_caption_precise
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -439,10 +444,10 @@ class RunTrackingUnitTest {
         assertEquals(listOf(5), trackSegments(pts, emptyList()).map { it.size })
         assertTrue(trackSegments(emptyList(), listOf(0)).isEmpty())
 
-        assertEquals(R.string.track_gates_caption_none, startGatesCaptionRes(precise = false, moving = false))
-        assertEquals(R.string.track_gates_caption_precise, startGatesCaptionRes(precise = true, moving = false))
-        assertEquals(R.string.track_gates_caption_moving, startGatesCaptionRes(precise = false, moving = true))
-        assertEquals(R.string.track_gates_caption_both, startGatesCaptionRes(precise = true, moving = true))
+        assertEquals(Res.string.track_gates_caption_none, startGatesCaptionRes(precise = false, moving = false))
+        assertEquals(Res.string.track_gates_caption_precise, startGatesCaptionRes(precise = true, moving = false))
+        assertEquals(Res.string.track_gates_caption_moving, startGatesCaptionRes(precise = false, moving = true))
+        assertEquals(Res.string.track_gates_caption_both, startGatesCaptionRes(precise = true, moving = true))
     }
 
     @Test

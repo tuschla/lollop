@@ -614,8 +614,10 @@ class LongHistoryUiTest {
         return Triple(restoreMs, views[1], last!!)
     }
 
+    /** The private Boolean [field] of [target], declared by its class or a superclass. */
     private fun privateBool(target: Any, field: String): Boolean {
-        val f = target.javaClass.getDeclaredField(field)
+        val f = generateSequence<Class<*>>(target.javaClass) { it.superclass }
+            .firstNotNullOf { runCatching { it.getDeclaredField(field) }.getOrNull() }
         f.isAccessible = true
         return f.getBoolean(target)
     }

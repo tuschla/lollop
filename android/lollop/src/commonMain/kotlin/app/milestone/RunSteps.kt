@@ -1,5 +1,20 @@
 package app.milestone
 
+import app.milestone.resources.Res
+import app.milestone.resources.track_step_all_done
+import app.milestone.resources.track_step_cooldown
+import app.milestone.resources.track_step_left
+import app.milestone.resources.track_step_line
+import app.milestone.resources.track_step_main
+import app.milestone.resources.track_step_metres
+import app.milestone.resources.track_step_open
+import app.milestone.resources.track_step_recovery
+import app.milestone.resources.track_step_rep
+import app.milestone.resources.track_step_run
+import app.milestone.resources.track_step_stride
+import app.milestone.resources.track_step_stride_recovery
+import app.milestone.resources.track_step_walk
+import app.milestone.resources.track_step_warmup
 import kotlin.math.ceil
 
 /**
@@ -177,3 +192,34 @@ internal class RunStepMachine(val steps: List<RunStep>, nowMs: Long, distanceM: 
         stepStartDistanceM = endDistanceM
     }
 }
+
+/** A step's title, e.g. "Rep 2 of 6", "Warm-up", "Walk 3 of 8". */
+internal fun runStepTitle(res: PlatformResources, step: RunStep): String = when (step.kind) {
+    RunStepKind.WarmUp -> res.getString(Res.string.track_step_warmup)
+    RunStepKind.Main -> res.getString(Res.string.track_step_main)
+    RunStepKind.Rep -> res.getString(Res.string.track_step_rep, step.number, step.count)
+    RunStepKind.Recovery -> res.getString(Res.string.track_step_recovery)
+    RunStepKind.CoolDown -> res.getString(Res.string.track_step_cooldown)
+    RunStepKind.Stride -> res.getString(Res.string.track_step_stride, step.number, step.count)
+    RunStepKind.StrideRecovery -> res.getString(Res.string.track_step_stride_recovery)
+    RunStepKind.Run -> res.getString(Res.string.track_step_run, step.number, step.count)
+    RunStepKind.Walk -> res.getString(Res.string.track_step_walk, step.number, step.count)
+}
+
+/** What is left of the current step: "2:41 left", "320 m left", or the open-step
+ *  hint. Empty once finished. */
+internal fun runStepRemaining(res: PlatformResources, p: StepProgress): String = when {
+    p.step == null -> ""
+    p.remainingSec != null -> res.getString(Res.string.track_step_left, formatElapsed(p.remainingSec.toLong()))
+    p.remainingM != null -> res.getString(Res.string.track_step_left, res.getString(Res.string.track_step_metres, p.remainingM))
+    else -> res.getString(Res.string.track_step_open)
+}
+
+/** The one-line guide shown in the notification and read by TalkBack:
+ *  "Rep 2 of 6 · 320 m left", or the all-done line. */
+internal fun runStepLine(res: PlatformResources, p: StepProgress): String =
+    if (p.step == null) {
+        res.getString(Res.string.track_step_all_done)
+    } else {
+        res.getString(Res.string.track_step_line, runStepTitle(res, p.step), runStepRemaining(res, p))
+    }

@@ -28,10 +28,44 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import app.milestone.resources.Res
+import app.milestone.resources.activity_chooser_sub
+import app.milestone.resources.activity_editor_title
+import app.milestone.resources.ic_content_checkin_calendar
+import app.milestone.resources.ic_content_readiness_heart
+import app.milestone.resources.ic_content_run
+import app.milestone.resources.ic_content_set_dumbbell
+import app.milestone.resources.ic_content_track_run
+import app.milestone.resources.ic_safety_warning_triangle
+import app.milestone.resources.log_chooser_calis_header
+import app.milestone.resources.log_chooser_more
+import app.milestone.resources.log_chooser_resume
+import app.milestone.resources.main_advanced_signal_sub
+import app.milestone.resources.main_advanced_signal_title
+import app.milestone.resources.main_import_run_sub
+import app.milestone.resources.main_import_run_title
+import app.milestone.resources.main_log_run_sub
+import app.milestone.resources.main_log_run_title
+import app.milestone.resources.main_log_set_sub
+import app.milestone.resources.main_log_set_title
+import app.milestone.resources.main_morning_checkin_done_sub
+import app.milestone.resources.main_morning_checkin_sub
+import app.milestone.resources.main_morning_checkin_title
+import app.milestone.resources.main_pain_report_saved
+import app.milestone.resources.main_report_pain
+import app.milestone.resources.main_report_pain_sub
+import app.milestone.resources.main_session_review_sub
+import app.milestone.resources.main_session_review_title
+import app.milestone.resources.main_todays_plan
+import app.milestone.resources.main_track_run_sub
+import app.milestone.resources.main_track_run_title
+import app.milestone.resources.main_weekly_checkin_sub
+import app.milestone.resources.main_weekly_checkin_title
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * Body of the Log [ModalBottomSheet] (05-log): the chooser list first, then the
@@ -140,10 +174,10 @@ internal fun LogSheetContent(
                     val nsDiscipline = sessionDiscipline(ns.session_type)
                     val item = firstOpenItem(ns.items) ?: ns.items.first()
                     LogOptionRow(
-                        stringResource(R.string.main_todays_plan, ns.title),
+                        stringResource(Res.string.main_todays_plan, ns.title),
                         // A run's distance reads in the profile's unit like every other surface.
                         glueFigures(if (nsDiscipline == "Run" && item.run_head.isNotBlank()) runHeadText(item, distanceUnit) else planRowSubtitle(item)),
-                        if (nsDiscipline == "Run") R.drawable.ic_content_run else R.drawable.ic_content_set_dumbbell,
+                        if (nsDiscipline == "Run") Res.drawable.ic_content_run else Res.drawable.ic_content_set_dumbbell,
                         LogRowTone.Plan,
                     ) {
                         if (nsDiscipline == "Run") {
@@ -161,9 +195,9 @@ internal fun LogSheetContent(
                     if (today != null && liftVisible && !model.train_blocked) {
                         val item = firstOpenItem(today.items) ?: today.items.last()
                         LogOptionRow(
-                            stringResource(R.string.log_chooser_resume, today.title),
+                            stringResource(Res.string.log_chooser_resume, today.title),
                             glueFigures(planRowSubtitle(item)),
-                            R.drawable.ic_content_set_dumbbell,
+                            Res.drawable.ic_content_set_dumbbell,
                             LogRowTone.Plan,
                         ) {
                             onPlanPrefill(item.exercise)
@@ -175,8 +209,8 @@ internal fun LogSheetContent(
                     // One of the most-used actions: first plain row, never below
                     // the fold. Location-pin icon tells it apart from Log run.
                     LogOptionRow(
-                        stringResource(R.string.main_track_run_title), stringResource(R.string.main_track_run_sub),
-                        R.drawable.ic_content_track_run,
+                        stringResource(Res.string.main_track_run_title), stringResource(Res.string.main_track_run_sub),
+                        Res.drawable.ic_content_track_run,
                     ) {
                         onTrackRun()
                         onDismiss()
@@ -184,8 +218,8 @@ internal fun LogSheetContent(
                 }
                 if (liftVisible) {
                     LogOptionRow(
-                        stringResource(R.string.main_log_set_title), stringResource(R.string.main_log_set_sub),
-                        R.drawable.ic_content_set_dumbbell,
+                        stringResource(Res.string.main_log_set_title), stringResource(Res.string.main_log_set_sub),
+                        Res.drawable.ic_content_set_dumbbell,
                     ) {
                         ladderPick = null
                         onMode(LogMode.Set)
@@ -193,51 +227,51 @@ internal fun LogSheetContent(
                 }
                 if (runVisible) {
                     LogOptionRow(
-                        stringResource(R.string.main_log_run_title), stringResource(R.string.main_log_run_sub),
-                        R.drawable.ic_content_run,
+                        stringResource(Res.string.main_log_run_title), stringResource(Res.string.main_log_run_sub),
+                        Res.drawable.ic_content_run,
                     ) { onMode(LogMode.Run) }
                 }
                 // Under 18: other active time for the weekly activity card.
                 if (model.youth_activity != null) {
                     LogOptionRow(
-                        stringResource(R.string.activity_editor_title), stringResource(R.string.activity_chooser_sub),
-                        R.drawable.ic_content_run,
+                        stringResource(Res.string.activity_editor_title), stringResource(Res.string.activity_chooser_sub),
+                        Res.drawable.ic_content_run,
                     ) { onMode(LogMode.Activity) }
                 }
                 // Morning check-in: the engine's main readiness input, in a fixed
                 // slot; once today's is in, its subline says so, so nobody
                 // double-submits or skips it by guesswork.
                 LogOptionRow(
-                    stringResource(R.string.main_morning_checkin_title),
+                    stringResource(Res.string.main_morning_checkin_title),
                     stringResource(
-                        if (model.checked_in_today) R.string.main_morning_checkin_done_sub
-                        else R.string.main_morning_checkin_sub,
+                        if (model.checked_in_today) Res.string.main_morning_checkin_done_sub
+                        else Res.string.main_morning_checkin_sub,
                     ),
-                    R.drawable.ic_content_readiness_heart,
+                    Res.drawable.ic_content_readiness_heart,
                 ) { onMode(LogMode.Checkin) }
                 // Report pain: danger-outlined and right after the everyday rows,
                 // so the safety path is on screen at sheet open without pushing
                 // Track run down. Opens the triage sheet; nothing is submitted
                 // until "Report pain" inside it, so an accidental tap is harmless.
                 LogOptionRow(
-                    stringResource(R.string.main_report_pain), stringResource(R.string.main_report_pain_sub),
-                    R.drawable.ic_safety_warning_triangle,
+                    stringResource(Res.string.main_report_pain), stringResource(Res.string.main_report_pain_sub),
+                    Res.drawable.ic_safety_warning_triangle,
                     LogRowTone.Danger,
                 ) { onMode(LogMode.Pain) }
                 LogOptionRow(
-                    stringResource(R.string.main_weekly_checkin_title), stringResource(R.string.main_weekly_checkin_sub),
-                    R.drawable.ic_content_checkin_calendar,
+                    stringResource(Res.string.main_weekly_checkin_title), stringResource(Res.string.main_weekly_checkin_sub),
+                    Res.drawable.ic_content_checkin_calendar,
                 ) { onMode(LogMode.WeeklyCheckin) }
                 // The rarer entries fold behind one quiet "More" row so the
                 // everyday list stays short: the session review, run import, the
                 // calisthenics movement list (today's plan row already starts the
                 // prescribed one) and the raw lab-signal editor.
-                ExpandRow(stringResource(R.string.log_chooser_more), moreOpen) { moreOpen = !moreOpen }
+                ExpandRow(stringResource(Res.string.log_chooser_more), moreOpen) { moreOpen = !moreOpen }
                 if (moreOpen) {
                     ChooserGroup {
                         ChooserTextRow(
-                            stringResource(R.string.main_session_review_title),
-                            stringResource(R.string.main_session_review_sub),
+                            stringResource(Res.string.main_session_review_title),
+                            stringResource(Res.string.main_session_review_sub),
                         ) { onMode(LogMode.Review) }
                         if (runVisible) {
                             // Run import: a run recorded on another device/app.
@@ -245,21 +279,21 @@ internal fun LogSheetContent(
                             // octet-stream; the content sniffer rejects anything else with a
                             // clear message.
                             ChooserTextRow(
-                                stringResource(R.string.main_import_run_title),
-                                stringResource(R.string.main_import_run_sub),
+                                stringResource(Res.string.main_import_run_title),
+                                stringResource(Res.string.main_import_run_sub),
                             ) { importGpx.launch("*/*") }
                         }
                         // Lab-data path: the raw-signal editor (enter a z-score /
                         // bpm delta directly). Secondary to the human check-in.
                         ChooserTextRow(
-                            stringResource(R.string.main_advanced_signal_title),
-                            stringResource(R.string.main_advanced_signal_sub),
+                            stringResource(Res.string.main_advanced_signal_title),
+                            stringResource(Res.string.main_advanced_signal_sub),
                         ) { onMode(LogMode.Readiness) }
                     }
                     // Ladders the kit limits say why, under the movements they replace.
                     val equipmentNotes = model.calisthenics_ladders.map { it.equipment_note }.filter { it.isNotBlank() }.distinct()
                     if (liftVisible && (ladderRows.isNotEmpty() || equipmentNotes.isNotEmpty())) {
-                        SectionOverline(stringResource(R.string.log_chooser_calis_header))
+                        SectionOverline(stringResource(Res.string.log_chooser_calis_header))
                         if (ladderRows.isNotEmpty()) {
                             ChooserGroup {
                                 ladderRows.forEach { (pattern, rung) ->
@@ -387,7 +421,7 @@ internal fun LogSheetContent(
             ) { checkin -> onEvent(checkin); onDismiss() }
             // Pain triage → full PainDetail, then the hold.
             LogMode.Pain -> {
-                val saved = stringResource(R.string.main_pain_report_saved)
+                val saved = stringResource(Res.string.main_pain_report_saved)
                 PainTriageSheet(
                     onClose = { onMode(LogMode.Chooser) },
                     onDirtyChange = onDirtyChange,
@@ -422,7 +456,7 @@ private enum class LogRowTone { Plain, Plan, Danger }
 private fun LogOptionRow(
     title: String,
     subtitle: String,
-    iconRes: Int,
+    iconRes: DrawableResource,
     tone: LogRowTone = LogRowTone.Plain,
     onClick: () -> Unit,
 ) {

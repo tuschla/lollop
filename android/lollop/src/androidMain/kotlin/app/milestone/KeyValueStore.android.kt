@@ -9,8 +9,6 @@ actual typealias PlatformContext = Context
 internal actual fun Context.keyValueStore(name: String): KeyValueStore =
     SharedPreferencesStore(getSharedPreferences(name, Context.MODE_PRIVATE))
 
-internal actual fun Context.hasEventLog(): Boolean = eventLogFile(filesDir).exists()
-
 /** [KeyValueStore] over [prefs]; [edit] is SharedPreferences' apply() (commit() when asked). */
 internal class SharedPreferencesStore(private val prefs: SharedPreferences) : KeyValueStore {
     override fun contains(key: String): Boolean = prefs.contains(key)

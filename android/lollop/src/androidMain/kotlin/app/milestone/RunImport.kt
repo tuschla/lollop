@@ -3,11 +3,32 @@ package app.milestone
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
-import android.content.res.Resources
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.content.IntentCompat
+import app.milestone.resources.Res
+import app.milestone.resources.import_reason_damaged
+import app.milestone.resources.import_reason_implausible_pace
+import app.milestone.resources.import_reason_no_timestamps
+import app.milestone.resources.import_reason_no_track
+import app.milestone.resources.import_reason_not_a_run
+import app.milestone.resources.import_reason_not_a_run_unknown
+import app.milestone.resources.import_reason_read_failed
+import app.milestone.resources.import_reason_rejected
+import app.milestone.resources.import_reason_too_large
+import app.milestone.resources.import_reason_too_short
+import app.milestone.resources.import_reason_unknown
+import app.milestone.resources.import_reason_wrong_type
+import app.milestone.resources.import_result_many
+import app.milestone.resources.import_result_none
+import app.milestone.resources.import_result_one
+import app.milestone.resources.import_result_skipped_count
+import app.milestone.resources.import_result_with_skipped
+import app.milestone.resources.import_result_with_skipped_count
+import app.milestone.resources.import_skip_item
+import app.milestone.resources.main_import_duplicate
+import app.milestone.resources.main_import_summary_duplicates
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import kotlin.time.Instant
@@ -196,28 +217,28 @@ private fun failureOf(fileName: String, e: Throwable?): RunImportFailure =
 
 /** The plain-language reason for one skipped file ("no GPS points", "a cycling
  *  activity, not a run"). */
-internal fun importFailureReason(res: Resources, failure: RunImportFailure): String = when (failure.reason) {
-    ImportFailure.ReadFailed -> res.getString(R.string.import_reason_read_failed)
-    ImportFailure.TooLarge -> res.getString(R.string.import_reason_too_large)
-    ImportFailure.WrongType -> res.getString(R.string.import_reason_wrong_type)
-    ImportFailure.NoTrack -> res.getString(R.string.import_reason_no_track)
+internal fun importFailureReason(res: PlatformResources, failure: RunImportFailure): String = when (failure.reason) {
+    ImportFailure.ReadFailed -> res.getString(Res.string.import_reason_read_failed)
+    ImportFailure.TooLarge -> res.getString(Res.string.import_reason_too_large)
+    ImportFailure.WrongType -> res.getString(Res.string.import_reason_wrong_type)
+    ImportFailure.NoTrack -> res.getString(Res.string.import_reason_no_track)
     ImportFailure.TooShort -> res.getString(
-        R.string.import_reason_too_short,
+        Res.string.import_reason_too_short,
         shortRunThresholdLabel(resolveDistanceUnit(AppSettings.distanceUnitOverride.value)),
     )
-    ImportFailure.NoTimestamps -> res.getString(R.string.import_reason_no_timestamps)
-    ImportFailure.Damaged -> res.getString(R.string.import_reason_damaged)
+    ImportFailure.NoTimestamps -> res.getString(Res.string.import_reason_no_timestamps)
+    ImportFailure.Damaged -> res.getString(Res.string.import_reason_damaged)
     ImportFailure.NotARun -> failure.detail
-        ?.let { res.getString(R.string.import_reason_not_a_run, it) }
-        ?: res.getString(R.string.import_reason_not_a_run_unknown)
-    ImportFailure.ImplausiblePace -> res.getString(R.string.import_reason_implausible_pace)
-    ImportFailure.Rejected -> res.getString(R.string.import_reason_rejected)
-    ImportFailure.Unknown -> res.getString(R.string.import_reason_unknown)
+        ?.let { res.getString(Res.string.import_reason_not_a_run, it) }
+        ?: res.getString(Res.string.import_reason_not_a_run_unknown)
+    ImportFailure.ImplausiblePace -> res.getString(Res.string.import_reason_implausible_pace)
+    ImportFailure.Rejected -> res.getString(Res.string.import_reason_rejected)
+    ImportFailure.Unknown -> res.getString(Res.string.import_reason_unknown)
 }
 
 /** "bike.fit (a cycling activity, not a run)": one skipped file, named, with why. */
-internal fun importFailureLine(res: Resources, failure: RunImportFailure): String =
-    res.getString(R.string.import_skip_item, failure.fileName, importFailureReason(res, failure))
+internal fun importFailureLine(res: PlatformResources, failure: RunImportFailure): String =
+    res.getString(Res.string.import_skip_item, failure.fileName, importFailureReason(res, failure))
 
 /** A run's local date for the import result ("Jun 12, 2017"), in the app's language. */
 internal fun importDateLabel(epochSec: Long, locale: PlatformLocale = appLocale(), zone: TimeZone = TimeZone.currentSystemDefault()): String =
@@ -235,33 +256,33 @@ internal data class RunImportSummary(val text: String, val details: List<String>
  * that only hit duplicates keeps the specific duplicate message.
  */
 internal fun runImportSummary(
-    res: Resources,
+    res: PlatformResources,
     imported: Int,
     newestImportedAt: Long?,
     duplicates: Int,
     failures: List<RunImportFailure>,
 ): RunImportSummary {
     if (imported == 0 && failures.isEmpty() && duplicates > 0) {
-        return RunImportSummary(res.getString(R.string.main_import_duplicate), emptyList())
+        return RunImportSummary(res.getString(Res.string.main_import_duplicate), emptyList())
     }
     val parts = ArrayList<String>(2)
     when {
         imported == 1 && newestImportedAt != null && newestImportedAt > 0L ->
-            parts += res.getString(R.string.import_result_one, importDateLabel(newestImportedAt))
-        imported >= 1 -> parts += res.getQuantityString(R.plurals.import_result_many, imported, imported)
-        else -> parts += res.getString(R.string.import_result_none)
+            parts += res.getString(Res.string.import_result_one, importDateLabel(newestImportedAt))
+        imported >= 1 -> parts += res.getQuantityString(Res.plurals.import_result_many, imported, imported)
+        else -> parts += res.getString(Res.string.import_result_none)
     }
     if (duplicates > 0) {
-        parts += res.getQuantityString(R.plurals.main_import_summary_duplicates, duplicates, duplicates)
+        parts += res.getQuantityString(Res.plurals.main_import_summary_duplicates, duplicates, duplicates)
     }
     val head = parts.joinToString(" · ")
     if (failures.isEmpty()) return RunImportSummary(head, emptyList())
     val lines = failures.map { importFailureLine(res, it) }
     return if (failures.size <= INLINE_SKIPPED_MAX) {
-        RunImportSummary(res.getString(R.string.import_result_with_skipped, head, lines.joinToString(", ")), emptyList())
+        RunImportSummary(res.getString(Res.string.import_result_with_skipped, head, lines.joinToString(", ")), emptyList())
     } else {
-        val skipped = res.getQuantityString(R.plurals.import_result_skipped_count, failures.size, failures.size)
-        RunImportSummary(res.getString(R.string.import_result_with_skipped_count, head, skipped), lines)
+        val skipped = res.getQuantityString(Res.plurals.import_result_skipped_count, failures.size, failures.size)
+        RunImportSummary(res.getString(Res.string.import_result_with_skipped_count, head, skipped), lines)
     }
 }
 

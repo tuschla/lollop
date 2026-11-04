@@ -28,10 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -42,12 +39,43 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.milestone.resources.Res
+import app.milestone.resources.history_effort_overline
+import app.milestone.resources.history_training_load_explain
+import app.milestone.resources.history_training_load_subject
+import app.milestone.resources.history_training_load_value
+import app.milestone.resources.history_workout_type
+import app.milestone.resources.ic_ui_delete
+import app.milestone.resources.ic_ui_share
+import app.milestone.resources.ic_ui_trim
+import app.milestone.resources.main_delete
+import app.milestone.resources.main_delete_run_title
+import app.milestone.resources.main_export_gpx
+import app.milestone.resources.main_export_gpx_failed
+import app.milestone.resources.main_run
+import app.milestone.resources.main_save
+import app.milestone.resources.run_delete_message
+import app.milestone.resources.run_delete_row
+import app.milestone.resources.run_details
+import app.milestone.resources.run_details_value
+import app.milestone.resources.run_effort_value
+import app.milestone.resources.run_rate_title
+import app.milestone.resources.run_start_caption
+import app.milestone.resources.run_stat_avg_pace
+import app.milestone.resources.run_stat_cd
+import app.milestone.resources.run_stat_distance
+import app.milestone.resources.run_stat_time
+import app.milestone.resources.run_trim_row
+import app.milestone.resources.run_type_unset
+import app.milestone.resources.run_your_log
 import kotlin.time.Instant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
 
 /** One headline stat column: overline [label], tabular [value], its [unit] (may be
  *  blank) and the merged [spoken] form ("Distance, 3.18 miles"). */
@@ -57,24 +85,24 @@ internal data class RunStat(val label: String, val value: String, val unit: Stri
 @Composable
 internal fun runStats(run: RunResultView, unit: DistanceUnit): List<RunStat> {
     val stats = ArrayList<RunStat>(3)
-    val res = LocalResources.current
+    val res = currentResources()
     if (run.distance_km > 0.0) {
         val dist = distanceFigure(run.distance_km, unit)
-        val label = stringResource(R.string.run_stat_distance)
+        val label = stringResource(Res.string.run_stat_distance)
         val spoken = spokenDistance(res, dist, unit)
-        stats += RunStat(label, dist, unit.distanceLabel, stringResource(R.string.run_stat_cd, label, spoken))
+        stats += RunStat(label, dist, unit.distanceLabel, stringResource(Res.string.run_stat_cd, label, spoken))
     }
     if (run.duration_min > 0.0) {
         val time = formatElapsed((run.duration_min * 60.0).roundOrZero())
-        val label = stringResource(R.string.run_stat_time)
-        stats += RunStat(label, time, "", stringResource(R.string.run_stat_cd, label, time))
+        val label = stringResource(Res.string.run_stat_time)
+        stats += RunStat(label, time, "", stringResource(Res.string.run_stat_cd, label, time))
     }
     if (run.distance_km > 0.0 && run.duration_min > 0.0) {
         val paceMinPerKm = run.duration_min / run.distance_km
         val pace = formatPaceMinutes(paceInUnit(paceMinPerKm, unit))
-        val label = stringResource(R.string.run_stat_avg_pace)
+        val label = stringResource(Res.string.run_stat_avg_pace)
         val spoken = spokenPace(res, paceMinPerKm, unit)
-        stats += RunStat(label, pace, unit.paceSuffix, stringResource(R.string.run_stat_cd, label, spoken))
+        stats += RunStat(label, pace, unit.paceSuffix, stringResource(Res.string.run_stat_cd, label, spoken))
     }
     return stats
 }
@@ -170,7 +198,7 @@ internal fun runStartCaption(startedAt: Long): String {
     if (startedAt <= 0L) return ""
     val clock = if (is24HourClock()) "Hm" else "hm"
     val at = Instant.fromEpochSeconds(startedAt).toLocalDateTime(TimeZone.currentSystemDefault())
-    return stringResource(R.string.run_start_caption, localizedDayFormatter("EEEdMMM").format(at), localizedDayFormatter(clock).format(at))
+    return stringResource(Res.string.run_start_caption, localizedDayFormatter("EEEdMMM").format(at), localizedDayFormatter(clock).format(at))
 }
 
 /** A run's route, shared by its detail and trim sheets: the core's GPX document (for
@@ -271,7 +299,7 @@ internal fun RunDetailContent(
             if (stats.isNotEmpty()) {
                 RunStatColumns(stats, compact = false)
             } else {
-                Text(run.summary.ifBlank { stringResource(R.string.main_run) }, color = OnBgBody, style = Type.Body)
+                Text(run.summary.ifBlank { stringResource(Res.string.main_run) }, color = OnBgBody, style = Type.Body)
             }
             RunHrRow(run, explain = true)
         }
@@ -324,16 +352,16 @@ private fun RunLogSection(
     val rpe = run.session_rpe
     val type = WorkoutType.fromWire(run.workout_type)
     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-        TileOverline(stringResource(R.string.run_your_log))
+        TileOverline(stringResource(Res.string.run_your_log))
         PlainCard(contentPadding = PaddingValues(0.dp), spacing = 0.dp) {
             LogRow(
-                label = stringResource(R.string.history_effort_overline),
-                value = if (rpe != null) stringResource(R.string.run_effort_value, rpe, effortWord(rpe)) else stringResource(R.string.run_rate_title),
+                label = stringResource(Res.string.history_effort_overline),
+                value = if (rpe != null) stringResource(Res.string.run_effort_value, rpe, effortWord(rpe)) else stringResource(Res.string.run_rate_title),
                 prompt = rpe == null,
                 tag = "run-log-effort",
                 onClick = onRate,
                 trailing = if (rpe != null) {
-                    { DisclosureButton(loadOpen, subject = stringResource(R.string.history_training_load_subject)) { loadOpen = !loadOpen } }
+                    { DisclosureButton(loadOpen, subject = stringResource(Res.string.history_training_load_subject)) { loadOpen = !loadOpen } }
                 } else {
                     null
                 },
@@ -347,12 +375,12 @@ private fun RunLogSection(
                 ) {
                     run.srpe_load_au?.let {
                         Text(
-                            stringResource(R.string.history_training_load_value, formatFixed(it, 0)),
+                            stringResource(Res.string.history_training_load_value, formatFixed(it, 0)),
                             color = OnBgBody,
                             style = Type.Body.merge(TabularFigures),
                         )
                     }
-                    Text(stringResource(R.string.history_training_load_explain), color = OnBgMuted, style = Type.Caption)
+                    Text(stringResource(Res.string.history_training_load_explain), color = OnBgMuted, style = Type.Caption)
                     srpeLoad?.let { sl ->
                         ClaimMarkers(
                             grades = listOfNotNull(sl.grade.takeIf { it.isNotBlank() }),
@@ -364,8 +392,8 @@ private fun RunLogSection(
             }
             HorizontalDivider(color = Hairline)
             LogRow(
-                label = stringResource(R.string.history_workout_type),
-                value = type?.label ?: stringResource(R.string.run_type_unset),
+                label = stringResource(Res.string.history_workout_type),
+                value = type?.label ?: stringResource(Res.string.run_type_unset),
                 prompt = type == null,
                 tag = "run-log-type",
                 onClick = onRate,
@@ -373,8 +401,8 @@ private fun RunLogSection(
             if (editable) {
                 HorizontalDivider(color = Hairline)
                 LogRow(
-                    label = stringResource(R.string.run_details),
-                    value = stringResource(R.string.run_details_value),
+                    label = stringResource(Res.string.run_details),
+                    value = stringResource(Res.string.run_details_value),
                     prompt = false,
                     bold = false,
                     tag = "run-log-details",
@@ -429,13 +457,13 @@ private fun LogRow(
 private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit, onDelete: (Event?) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val exportFailed = stringResource(R.string.main_export_gpx_failed)
+    val exportFailed = stringResource(Res.string.main_export_gpx_failed)
     val rows = buildList {
         if (run.has_gpx) {
             add(
                 ActionRowItem(
-                    label = stringResource(R.string.main_export_gpx),
-                    icon = painterResource(R.drawable.ic_ui_share),
+                    label = stringResource(Res.string.main_export_gpx),
+                    icon = painterResource(Res.drawable.ic_ui_share),
                     testTag = "run-export",
                     onClick = {
                         scope.launch {
@@ -457,8 +485,8 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
         if (route?.trimmable == true) {
             add(
                 ActionRowItem(
-                    label = stringResource(R.string.run_trim_row),
-                    icon = painterResource(R.drawable.ic_ui_trim),
+                    label = stringResource(Res.string.run_trim_row),
+                    icon = painterResource(Res.drawable.ic_ui_trim),
                     testTag = "run-trim",
                     onClick = onTrim,
                 ),
@@ -468,11 +496,11 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
     ActionRows(
         rows = rows,
         destructive = DestructiveAction(
-            label = stringResource(R.string.run_delete_row),
-            icon = painterResource(R.drawable.ic_ui_delete),
-            confirmTitle = stringResource(R.string.main_delete_run_title),
-            confirmMessage = stringResource(R.string.run_delete_message),
-            confirmLabel = stringResource(R.string.main_delete),
+            label = stringResource(Res.string.run_delete_row),
+            icon = painterResource(Res.drawable.ic_ui_delete),
+            confirmTitle = stringResource(Res.string.main_delete_run_title),
+            confirmMessage = stringResource(Res.string.run_delete_message),
+            confirmLabel = stringResource(Res.string.main_delete),
             testTag = "run-delete",
             onConfirm = { onDelete(restoreEventFor(HistoryEntry.Run(run), route?.segments.orEmpty())) },
         ),
@@ -493,11 +521,11 @@ private fun RateRunSheet(run: RunResultView, onDismiss: () -> Unit, onSave: (Int
             modifier = Modifier.sheetBody(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
         ) {
-            SheetTitle(stringResource(R.string.run_rate_title))
+            SheetTitle(stringResource(Res.string.run_rate_title))
             EffortScale(rpe, onSelect = { rpe = it })
             RunTypeChips(type, onSelect = { wt -> type = if (type == wt) null else wt })
             PrimaryButton(
-                stringResource(R.string.main_save),
+                stringResource(Res.string.main_save),
                 onClick = { onSave(rpe, type) },
                 modifier = Modifier.fillMaxWidth().testTag("run-rate-save"),
                 minHeight = LargeControlHeight,

@@ -17,6 +17,7 @@ import app.milestone.AppClock
 import app.milestone.AppSettings
 import app.milestone.Core
 import app.milestone.CoreFault
+import app.milestone.DurableCore
 import app.milestone.EventDispatcher
 import app.milestone.GpsPoint
 import app.milestone.R
@@ -256,7 +257,7 @@ class BootResilienceTest {
     fun aRotationDoesNotResendTheBootClock() {
         QaHarness.seedLog(ctx, seeded)
         rule.launchApp()
-        val lastSetToday = Core.javaClass.getDeclaredField("lastSetToday").apply { isAccessible = true }
+        val lastSetToday = DurableCore::class.java.getDeclaredField("lastSetToday").apply { isAccessible = true }
         assertTrue("boot sent the clock", lastSetToday.get(Core) != null)
         lastSetToday.set(Core, null)
 

@@ -41,19 +41,25 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import app.milestone.resources.Res
+import app.milestone.resources.ic_action_log_plus
+import app.milestone.resources.main_log
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
 
 /** The app's root: decides the window's [WindowLayout] once and hands it down. */
 @Composable
 internal fun CoachScaffold(session: CoachSession) {
-    CompositionLocalProvider(LocalWindowLayout provides rememberWindowLayout()) { CoachScaffoldBody(session) }
+    CompositionLocalProvider(
+        LocalWindowLayout provides rememberWindowLayout(),
+        LocalRestRunning provides RestAlarm.running,
+    ) { CoachScaffoldBody(session) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -369,7 +375,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
                 // padding lets its last row scroll clear of it. With the rail, Log is
                 // the rail's header instead.
                 if (selected == Dest.Today && !navRail) {
-                    val logLabel = stringResource(R.string.main_log)
+                    val logLabel = stringResource(Res.string.main_log)
                     ExtendedFloatingActionButton(
                         onClick = openLog,
                         // Extended ("+ Log") at the top of Today; icon-only once the list scrolls.
@@ -385,7 +391,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
                         text = { Text(logLabel, style = Type.Body.copy(fontWeight = FontWeight.ExtraBold)) },
                         icon = {
                             Icon(
-                                painterResource(R.drawable.ic_action_log_plus),
+                                painterResource(Res.drawable.ic_action_log_plus),
                                 contentDescription = null,
                                 modifier = Modifier.size(20.dp),
                             )
@@ -595,5 +601,3 @@ private val DestSaver = androidx.compose.runtime.saveable.Saver<Dest, String>(
     restore = { name -> Dest.entries.firstOrNull { it.name == name } ?: Dest.Today },
 )
 
-/** Which content the Log bottom sheet shows: the chooser, or one editor. */
-internal enum class LogMode { Chooser, Set, Run, Checkin, Readiness, Review, WeeklyCheckin, Pain, Activity }

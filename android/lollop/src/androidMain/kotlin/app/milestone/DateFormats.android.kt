@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalContext
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.time.format.TextStyle
+import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.datetime.DayOfWeek
@@ -69,3 +70,22 @@ internal actual fun relativeDayLabel(dayDelta: Long, locale: Locale): String {
 
 @Composable
 internal actual fun is24HourClock(): Boolean = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
+
+// java.util.Calendar, not kotlinx: a picked time inside a DST gap resolves the
+// way it always has (lenient, forward by the gap), so stored stamps don't move.
+internal actual fun localInstantSeconds(utcDayMillis: Long, hour: Int, minute: Int): Long {
+    val utc = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcDayMillis }
+    val local = Calendar.getInstance().apply {
+        clear()
+        set(
+            utc.get(Calendar.YEAR),
+            utc.get(Calendar.MONTH),
+            utc.get(Calendar.DAY_OF_MONTH),
+            hour,
+            minute,
+            0,
+        )
+    }
+    return local.timeInMillis / 1000L
+}
+

@@ -1,8 +1,9 @@
 package app.milestone.core
 
 /**
- * The Rust core's bridge calls, the same set and wire `Core.kt` makes over JNI
- * (`Java_app_milestone_Core_*`). Bytes and strings are the core's JSON, exactly
+ * The Rust core's bridge calls, the same set and wire the app's core engine
+ * (`DurableCore` in android/lollop) makes; Android's JNI exports are
+ * `Java_app_milestone_Core_*`. Bytes and strings are the core's JSON, exactly
  * as the JNI exports return them; the shell decodes them. Each call wraps one
  * `shared::ffi` function, which Android's JNI exports wrap too.
  *

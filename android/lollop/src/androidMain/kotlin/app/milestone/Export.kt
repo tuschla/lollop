@@ -321,7 +321,7 @@ internal fun swapLogFile(dir: File, lines: List<String>) {
     val dst = eventLogFile(dir)
     val tmp = File(dst.path + ".import")
     try {
-        writeLinesSynced(tmp, lines)
+        LogFiles.writeLinesSynced(tmp, lines)
         if (tmp.renameTo(dst)) return
         // Some filesystems refuse an atomic rename over an existing file. Move the live
         // log aside to a .bak before overwriting so a crash mid-swap can restore it,

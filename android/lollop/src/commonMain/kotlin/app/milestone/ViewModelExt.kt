@@ -1,5 +1,7 @@
 package app.milestone
 
+import kotlinx.datetime.LocalDate
+
 /** Modality derivation from the echoed profile: a side is "shown" when it carries
  *  volume. Callers OR in `profile == null` wherever a not-yet-set-up user should
  *  still see everything (the chooser, Profile's calculators, history segment). */
@@ -56,3 +58,21 @@ private fun gradeRank(grade: String): Int = when (grade) {
     "MarketingMyth" -> 0
     else -> -1
 }
+
+/** The core's guidance section of profile-context rows (shared/src/app/guidance.rs). */
+internal const val PROFILE_GUIDANCE_SECTION = "Profile"
+
+/** A plan day's short date in the app's language ([appLocale]: "Thu, Oct 15"). */
+internal fun planDateLabel(epochDay: Long): String =
+    localizedDayFormatter("EEEMMMd").format(LocalDate.fromEpochDays(epochDay))
+
+/** The post-illness "Return check" ([PrescriptionView.return_check]) shown as
+ *  its own card in a lifting session: neither a run to track nor sets to count;
+ *  any logged session today completes it. In a run session it stays a run. */
+internal fun isReturnCheckItem(item: PrescriptionView, sessionType: String): Boolean =
+    item.return_check && sessionDiscipline(sessionType) == "Lift"
+
+/** A plan item tracked or logged as a run: any item of a run session, or an
+ *  item with no exercise; never the return check. */
+internal fun isRunItem(item: PrescriptionView, sessionType: String): Boolean =
+    !isReturnCheckItem(item, sessionType) && (sessionDiscipline(sessionType) == "Run" || item.exercise.isEmpty())

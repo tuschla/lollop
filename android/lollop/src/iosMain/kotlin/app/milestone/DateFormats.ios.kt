@@ -2,6 +2,8 @@ package app.milestone
 
 import androidx.compose.runtime.Composable
 import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.time.Instant
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -9,7 +11,9 @@ import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atTime
 import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.number
 import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
 import platform.Foundation.NSCalendar
 import platform.Foundation.NSCalendarIdentifierGregorian
 import platform.Foundation.NSDate
@@ -30,8 +34,10 @@ import platform.Foundation.componentsFromLocaleIdentifier
 import platform.Foundation.countryCode
 import platform.Foundation.currentLocale
 import platform.Foundation.dateWithTimeIntervalSince1970
+import platform.Foundation.localTimeZone
 import platform.Foundation.localeIdentifierFromComponents
 import platform.Foundation.preferredLanguages
+import platform.Foundation.timeIntervalSince1970
 import platform.Foundation.timeZoneForSecondsFromGMT
 
 actual typealias PlatformLocale = NSLocale
@@ -126,3 +132,22 @@ internal actual fun relativeDayLabel(dayDelta: Long, locale: NSLocale): String {
 @Composable
 internal actual fun is24HourClock(): Boolean =
     NSDateFormatter.dateFormatFromTemplate("j", 0u, NSLocale.currentLocale)?.contains('a') != true
+
+/** NSCalendar resolves a time inside a DST gap forward by the gap, as
+ *  java.util.Calendar does on Android. */
+internal actual fun localInstantSeconds(utcDayMillis: Long, hour: Int, minute: Int): Long {
+    val day = Instant.fromEpochMilliseconds(utcDayMillis).toLocalDateTime(TimeZone.UTC).date
+    val components = NSDateComponents().apply {
+        year = day.year.toLong()
+        month = day.month.number.toLong()
+        this.day = day.day.toLong()
+        this.hour = hour.toLong()
+        this.minute = minute.toLong()
+        second = 0
+    }
+    val calendar = NSCalendar(calendarIdentifier = NSCalendarIdentifierGregorian)
+    calendar.timeZone = NSTimeZone.localTimeZone
+    val date = checkNotNull(calendar.dateFromComponents(components)) { "no date for $day $hour:$minute" }
+    return floor(date.timeIntervalSince1970).toLong()
+}
+

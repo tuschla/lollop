@@ -31,9 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.pluralStringResource
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.testTag
@@ -41,10 +38,33 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.CompositionLocalProvider
+import app.milestone.resources.Res
+import app.milestone.resources.history_import_runs_long
+import app.milestone.resources.history_last_7_days_empty
+import app.milestone.resources.history_lifts_empty
+import app.milestone.resources.history_log_set
+import app.milestone.resources.history_runs_empty
+import app.milestone.resources.history_stat_sessions
+import app.milestone.resources.history_track_run
+import app.milestone.resources.ic_ui_calendar
+import app.milestone.resources.main_jump_to_month
+import app.milestone.resources.main_overline_last_12_weeks
+import app.milestone.resources.main_overline_last_7_days
+import app.milestone.resources.main_segment_lifts
+import app.milestone.resources.main_segment_runs
+import app.milestone.resources.main_stat_running
+import app.milestone.resources.main_stat_tonnage
+import app.milestone.resources.main_unit_klb
+import app.milestone.resources.main_unit_t
+import app.milestone.resources.ui_cd_collapsed
+import app.milestone.resources.ui_cd_expanded
 import kotlin.time.Instant
 import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.pluralStringResource
+import org.jetbrains.compose.resources.stringResource
 
 /** Which logged type History shows: two options, no "All". */
 private enum class HistoryFilter { Lifts, Runs }
@@ -67,8 +87,6 @@ internal fun monthLabel(epochSec: Long, zone: TimeZone, fmt: DayFormatter): Stri
     return fmt.format(Instant.fromEpochSeconds(epochSec).toLocalDateTime(zone).date)
 }
 
-/** Epoch day of the Monday that starts [epochDay]'s week (epoch day 0 was a Thursday). */
-internal fun mondayOf(epochDay: Long): Long = epochDay - (epochDay + 3).mod(7L)
 
 /** The month headers and jump targets for a newest-first stream with one day stamp
  *  per card ([stamps]), after [base] non-month items. MIRRORS the stream's emission
@@ -288,7 +306,7 @@ internal fun HistoryDestination(
                 val sessionCount = weekLifts.map { localEpochDay(it.observed_at, zone) }.toSet().size + weekRuns.size
                 if (sessionCount == 0) {
                     // A quiet week is one line, never a row of zero tiles.
-                    Text(stringResource(R.string.history_last_7_days_empty), color = OnBgMuted, style = Type.Body)
+                    Text(stringResource(Res.string.history_last_7_days_empty), color = OnBgMuted, style = Type.Body)
                     return@item
                 }
                 // Tonnage honours the weight-unit choice: metric tonnes ("t") for kg,
@@ -300,33 +318,33 @@ internal fun HistoryDestination(
                 } else {
                     totalLiftKg / 1000.0
                 }
-                val tonnageUnit = if (weightUnit == WeightUnit.Lb) stringResource(R.string.main_unit_klb) else stringResource(R.string.main_unit_t)
+                val tonnageUnit = if (weightUnit == WeightUnit.Lb) stringResource(Res.string.main_unit_klb) else stringResource(Res.string.main_unit_t)
                 // Running distance in the user's distance unit (km or mi).
                 val runningKm = weekRuns.sumOf { it.distance_km }
                 val runningDistance = metersToDisplay(runningKm * 1000.0, distanceUnit)
                 // A modality's tile shows when it is programmed or has logged data
                 // (logged data is never hidden); a zero reads "—", never "0.0".
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-                    SectionOverline(stringResource(R.string.main_overline_last_7_days))
+                    SectionOverline(stringResource(Res.string.main_overline_last_7_days))
                     // Equal-height tiles: a glossary "?" in one label must not make that
                     // tile taller than its neighbours.
                     Row(
                         modifier = Modifier.height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(Space.Md.dp + Space.Xs.dp),
                     ) {
-                        StatTile("$sessionCount", null, pluralStringResource(R.plurals.history_stat_sessions, sessionCount))
+                        StatTile("$sessionCount", null, pluralStringResource(Res.plurals.history_stat_sessions, sessionCount))
                         if (showLifting || liftsPresent) {
                             if (totalLiftKg > 0.0) {
-                                StatTile(formatFixed(tonnageValue, 1), tonnageUnit, stringResource(R.string.main_stat_tonnage), glossaryKey = "tonnage")
+                                StatTile(formatFixed(tonnageValue, 1), tonnageUnit, stringResource(Res.string.main_stat_tonnage), glossaryKey = "tonnage")
                             } else {
-                                StatTile(EmptyValuePlaceholder, null, stringResource(R.string.main_stat_tonnage), glossaryKey = "tonnage")
+                                StatTile(EmptyValuePlaceholder, null, stringResource(Res.string.main_stat_tonnage), glossaryKey = "tonnage")
                             }
                         }
                         if (showRunning || runsPresent) {
                             if (runningKm > 0.0) {
-                                StatTile(formatFixed(runningDistance, 1), distanceUnit.distanceLabel, stringResource(R.string.main_stat_running))
+                                StatTile(formatFixed(runningDistance, 1), distanceUnit.distanceLabel, stringResource(Res.string.main_stat_running))
                             } else {
-                                StatTile(EmptyValuePlaceholder, null, stringResource(R.string.main_stat_running))
+                                StatTile(EmptyValuePlaceholder, null, stringResource(Res.string.main_stat_running))
                             }
                         }
                     }
@@ -338,7 +356,7 @@ internal fun HistoryDestination(
             // was done that day: its lift session, else its latest run.
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-                    SectionOverline(stringResource(R.string.main_overline_last_12_weeks))
+                    SectionOverline(stringResource(Res.string.main_overline_last_12_weeks))
                     val days = remember(model.lifts, model.runs, zone) {
                         historyActivityDays(model.lifts, model.runs, zone)
                     }
@@ -364,7 +382,7 @@ internal fun HistoryDestination(
         if (showSegment) {
             item {
                 TwoSegmentRow(
-                    stringResource(R.string.main_segment_lifts), stringResource(R.string.main_segment_runs),
+                    stringResource(Res.string.main_segment_lifts), stringResource(Res.string.main_segment_runs),
                     selectedIndex = if (filter == HistoryFilter.Lifts) 0 else 1,
                 ) { manualFilter = if (it == 0) HistoryFilter.Lifts else HistoryFilter.Runs }
             }
@@ -437,8 +455,8 @@ internal fun HistoryDestination(
         } else if (activeFilter == HistoryFilter.Lifts) {
             item(key = "lifts-empty") {
                 HistoryEmptyState(
-                    text = stringResource(R.string.history_lifts_empty),
-                    primaryLabel = stringResource(R.string.history_log_set),
+                    text = stringResource(Res.string.history_lifts_empty),
+                    primaryLabel = stringResource(Res.string.history_log_set),
                     onPrimary = onLogSet,
                 )
             }
@@ -460,10 +478,10 @@ internal fun HistoryDestination(
         } else if (activeFilter == HistoryFilter.Runs) {
             item(key = "runs-empty") {
                 HistoryEmptyState(
-                    text = stringResource(R.string.history_runs_empty),
-                    primaryLabel = stringResource(R.string.history_track_run),
+                    text = stringResource(Res.string.history_runs_empty),
+                    primaryLabel = stringResource(Res.string.history_track_run),
                     onPrimary = onTrackRun,
-                    secondaryLabel = stringResource(R.string.history_import_runs_long),
+                    secondaryLabel = stringResource(Res.string.history_import_runs_long),
                     onSecondary = launchImport,
                 )
             }
@@ -545,7 +563,7 @@ private fun MonthHeader(month: String, jumpMonths: List<String>?, onJump: (Strin
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.weight(1f)) { SectionOverline(month) }
-            val expandedState = stringResource(if (expanded) R.string.ui_cd_expanded else R.string.ui_cd_collapsed)
+            val expandedState = stringResource(if (expanded) Res.string.ui_cd_expanded else Res.string.ui_cd_collapsed)
             // End-aligned: the glyph (not its touch padding) meets the content edge.
             IconButton(
                 onClick = { expanded = !expanded },
@@ -556,8 +574,8 @@ private fun MonthHeader(month: String, jumpMonths: List<String>?, onJump: (Strin
                     .semantics { stateDescription = expandedState },
             ) {
                 Icon(
-                    painterResource(R.drawable.ic_ui_calendar),
-                    contentDescription = stringResource(R.string.main_jump_to_month),
+                    painterResource(Res.drawable.ic_ui_calendar),
+                    contentDescription = stringResource(Res.string.main_jump_to_month),
                     tint = OnBgMuted,
                     modifier = Modifier.size(IconSize),
                 )
@@ -579,11 +597,6 @@ private fun MonthHeader(month: String, jumpMonths: List<String>?, onJump: (Strin
 /** The jump-to-month glyph size (VDS icon size). */
 private val IconSize = 24.dp
 
-/** A tapped History entry, routed to the detail sheet. */
-internal sealed interface HistoryEntry {
-    data class Lift(val v: LiftResultView) : HistoryEntry
-    data class Run(val v: RunResultView) : HistoryEntry
-}
 
 /** The saveable selection key of a tapped entry, "<kind><entry_id>|<observed_at>";
  *  [resolveHistoryEntry] turns it back into the live entry (null once deleted). */

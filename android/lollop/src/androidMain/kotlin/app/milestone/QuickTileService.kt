@@ -3,7 +3,6 @@ package app.milestone
 import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
-import android.content.res.Resources
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
@@ -148,7 +147,7 @@ class QuickTileService : TileService() {
         /** The line under the tile's label for [today]'s snapshot: the widget's
          *  title (the session, "Rest day", "Training paused"), "Session done" once
          *  today's session is; nothing without a snapshot for today. */
-        internal fun tileSubtitle(today: WidgetSnapshot?, res: Resources): String? {
+        internal fun tileSubtitle(today: WidgetSnapshot?, res: PlatformResources): String? {
             val snapshot = today ?: return null
             val face = widgetFace(snapshot, snapshot.epochDay, res)
             return (if (snapshot.sessionDone) face.status else face.title)?.takeIf { it.isNotBlank() }

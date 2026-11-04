@@ -42,6 +42,3 @@ internal expect fun PlatformContext.keyValueStore(name: String): KeyValueStore
 /** The event log's file name, in the app's private files (Android `filesDir`,
  *  iOS Application Support). */
 internal const val EVENT_LOG_NAME = "event-log.ndjson"
-
-/** Whether this install has an event log yet, i.e. it is not a fresh install. */
-internal expect fun PlatformContext.hasEventLog(): Boolean

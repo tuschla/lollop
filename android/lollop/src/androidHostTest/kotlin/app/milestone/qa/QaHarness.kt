@@ -120,9 +120,10 @@ object QaHarness {
     }
 
     /**
-     * The native core's bridge and Core's private replay/caching state, as a new
-     * process starts them. Core has no setters for these fields; tests reset them
-     * by reflection here and nowhere else.
+     * The native core's bridge and the engine's private replay/caching state (fields
+     * of [app.milestone.DurableCore], Core's superclass), as a new process starts
+     * them. The engine has no setters for these fields; tests reset them by
+     * reflection here and nowhere else.
      */
     fun resetCore() {
         Core.resetForTest()
@@ -388,8 +389,10 @@ object QaHarness {
         RunSession.tracking.value = true
     }
 
+    /** Set the private [field] of [target], declared by its class or a superclass. */
     private fun setPrivate(target: Any, field: String, value: Any?) {
-        val f = target.javaClass.getDeclaredField(field)
+        val f = generateSequence<Class<*>>(target.javaClass) { it.superclass }
+            .firstNotNullOf { runCatching { it.getDeclaredField(field) }.getOrNull() }
         f.isAccessible = true
         f.set(target, value)
     }

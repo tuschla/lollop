@@ -99,3 +99,6 @@ internal fun formatLogDate(
 }
 
 private const val WEEK_MILLIS = 7 * 24 * 3_600_000L
+
+/** Epoch day of the Monday that starts [epochDay]'s week (epoch day 0 was a Thursday). */
+internal fun mondayOf(epochDay: Long): Long = epochDay - (epochDay + 3).mod(7L)

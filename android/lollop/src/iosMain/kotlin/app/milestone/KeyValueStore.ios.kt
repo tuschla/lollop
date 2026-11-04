@@ -1,10 +1,6 @@
 package app.milestone
 
-import kotlinx.cinterop.ExperimentalForeignApi
-import platform.Foundation.NSApplicationSupportDirectory
-import platform.Foundation.NSFileManager
 import platform.Foundation.NSUserDefaults
-import platform.Foundation.NSUserDomainMask
 
 actual abstract class PlatformContext private constructor() {
     /** The app process: iOS has no per-component context. */
@@ -13,19 +9,6 @@ actual abstract class PlatformContext private constructor() {
 
 internal actual fun PlatformContext.keyValueStore(name: String): KeyValueStore =
     UserDefaultsStore(NSUserDefaults(suiteName = name))
-
-@OptIn(ExperimentalForeignApi::class)
-internal actual fun PlatformContext.hasEventLog(): Boolean {
-    val dir = NSFileManager.defaultManager.URLForDirectory(
-        NSApplicationSupportDirectory,
-        NSUserDomainMask,
-        appropriateForURL = null,
-        create = false,
-        error = null,
-    ) ?: return false
-    val path = dir.URLByAppendingPathComponent(EVENT_LOG_NAME)?.path ?: return false
-    return NSFileManager.defaultManager.fileExistsAtPath(path)
-}
 
 /** [KeyValueStore] over one NSUserDefaults suite. Writes land in memory at once;
  *  [edit] with commit flushes them to disk before returning. */

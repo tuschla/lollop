@@ -1,0 +1,670 @@
+package app.milestone
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.milestone.resources.Res
+import app.milestone.resources.ic_track_pause
+import app.milestone.resources.ic_track_play
+import app.milestone.resources.ic_track_stop
+import app.milestone.resources.ic_ui_close
+import app.milestone.resources.main_cancel
+import app.milestone.resources.main_close
+import app.milestone.resources.track_action_pause
+import app.milestone.resources.track_action_resume
+import app.milestone.resources.track_btn_allow_location
+import app.milestone.resources.track_btn_continue
+import app.milestone.resources.track_btn_log_manually
+import app.milestone.resources.track_btn_save_run
+import app.milestone.resources.track_btn_start
+import app.milestone.resources.track_btn_start_now
+import app.milestone.resources.track_btn_stop
+import app.milestone.resources.track_cd_back
+import app.milestone.resources.track_cd_discard_run
+import app.milestone.resources.track_cd_pill_fresh_lock
+import app.milestone.resources.track_gate_moving
+import app.milestone.resources.track_gate_precise
+import app.milestone.resources.track_gates_caption_both
+import app.milestone.resources.track_gates_caption_moving
+import app.milestone.resources.track_gates_caption_none
+import app.milestone.resources.track_gates_caption_precise
+import app.milestone.resources.track_gates_overline
+import app.milestone.resources.track_location_off_caption
+import app.milestone.resources.track_notif_locate_title
+import app.milestone.resources.track_notif_signal_lost
+import app.milestone.resources.track_open_settings
+import app.milestone.resources.track_perm_blocked_caption
+import app.milestone.resources.track_perm_coarse_caption
+import app.milestone.resources.track_perm_denied_caption
+import app.milestone.resources.track_perm_rationale
+import app.milestone.resources.track_pill_armed_moving
+import app.milestone.resources.track_pill_armed_precise
+import app.milestone.resources.track_pill_armed_waiting
+import app.milestone.resources.track_pill_fresh_lock
+import app.milestone.resources.track_pill_location_off
+import app.milestone.resources.track_pill_permission_needed
+import app.milestone.resources.track_plan_follow
+import app.milestone.resources.track_plan_title
+import app.milestone.resources.track_resume_perm_blocked_caption
+import app.milestone.resources.track_resume_perm_caption
+import app.milestone.resources.track_state_paused
+import app.milestone.resources.track_state_recording
+import app.milestone.resources.track_step_all_done
+import app.milestone.resources.track_step_next
+import app.milestone.resources.track_step_skip
+import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
+
+/** Gap between the controls of one control row. */
+private val ControlGap = (Space.Md + Space.Sm).dp
+
+/** Least room between a [ControlPill]'s label and each of its rounded ends. */
+private val ControlPillLabelRoom = Space.Card.dp
+
+/** A [ControlPill]'s label style. */
+private val ControlPillLabel = Type.Body.copy(fontWeight = FontWeight.ExtraBold)
+
+/** Diameter of a status-pill dot. */
+private val StatusDotSize = 8.dp
+
+/** How often the status pill re-ages the last fix while its state can still change. */
+private const val PILL_TICK_MS = 1000L
+
+/** The stat sheet's control row: a circle, then the pill(s) sharing the rest. */
+@Composable
+internal fun ControlRow(content: @Composable RowScope.() -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(ControlGap),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+/**
+ * Width (px, at [density] and [measurer]'s font scale) a [ControlRow] of a circle, a
+ * [TextAction] labelled [secondary] and a weighted [ControlPill] labelled [primary]
+ * (the Finish review's Discard · Resume · Save run) needs with both labels whole on
+ * one line.
+ */
+internal fun circleTextPillRowMinWidthPx(measurer: TextMeasurer, density: Density, secondary: String, primary: String): Int {
+    val pillLabel = measurer.measure(primary, ControlPillLabel, maxLines = 1, softWrap = false).size.width
+    return with(density) {
+        LargeControlHeight.roundToPx() + ControlGap.roundToPx() * 2 +
+            textActionWidthPx(measurer, density, secondary) +
+            pillLabel + ControlPillLabelRoom.roundToPx() * 2
+    }
+}
+
+/**
+ * The control row under the live figures, one layout per recording state. A captured
+ * but unsaved run offers Discard + Save, NEVER Start, which would truncate the
+ * sidecar. While recording, Stop only opens the Finish review; Discard lives there,
+ * so one stray tap can't end a run. [stopping] (a save in flight) disables every
+ * action that could race it.
+ */
+@Composable
+internal fun TrackerControlRow(
+    unsavedCapture: Boolean,
+    armed: Boolean,
+    tracking: Boolean,
+    paused: Boolean,
+    stopping: Boolean,
+    onDiscardCapture: () -> Unit,
+    onSaveCapture: () -> Unit,
+    onLeave: () -> Unit,
+    onStartNow: () -> Unit,
+    onStart: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onStop: () -> Unit,
+) {
+    ControlRow {
+        when {
+            unsavedCapture -> {
+                DiscardRunCircle(enabled = !stopping, onClick = onDiscardCapture)
+                ControlPill(
+                    stringResource(Res.string.track_btn_save_run),
+                    onClick = onSaveCapture,
+                    modifier = Modifier.weight(1f),
+                    enabled = !stopping,
+                )
+            }
+            armed -> {
+                ControlCircle(Res.drawable.ic_ui_close, stringResource(Res.string.main_cancel), onClick = onLeave)
+                ControlPill(
+                    stringResource(Res.string.track_btn_start_now),
+                    onClick = onStartNow,
+                    modifier = Modifier.weight(1f),
+                    primary = false,
+                )
+            }
+            !tracking -> {
+                ControlCircle(Res.drawable.ic_ui_close, stringResource(Res.string.track_cd_back), onClick = onLeave)
+                ControlPill(
+                    stringResource(Res.string.track_btn_start),
+                    onClick = onStart,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            paused -> {
+                ControlCircle(
+                    Res.drawable.ic_track_stop,
+                    stringResource(Res.string.track_btn_stop),
+                    danger = true,
+                    enabled = !stopping,
+                    iconSize = 18.dp,
+                    onClick = onStop,
+                )
+                ControlPill(
+                    stringResource(Res.string.track_action_resume),
+                    onClick = onResume,
+                    modifier = Modifier.weight(1f),
+                    iconRes = Res.drawable.ic_track_play,
+                    state = stringResource(Res.string.track_state_paused),
+                )
+            }
+            else -> {
+                ControlCircle(
+                    Res.drawable.ic_track_pause,
+                    stringResource(Res.string.track_action_pause),
+                    state = stringResource(Res.string.track_state_recording),
+                    onClick = onPause,
+                )
+                ControlPill(
+                    stringResource(Res.string.track_btn_stop),
+                    onClick = onStop,
+                    modifier = Modifier.weight(1f),
+                    enabled = !stopping,
+                    iconRes = Res.drawable.ic_track_stop,
+                )
+            }
+        }
+    }
+}
+
+/** Circular secondary control on the stat sheet. [danger] tints the outline and
+ *  glyph red (discard, stop); [state] is spoken as the control's state. */
+@Composable
+internal fun ControlCircle(
+    iconRes: DrawableResource,
+    description: String,
+    danger: Boolean = false,
+    enabled: Boolean = true,
+    iconSize: Dp = 22.dp,
+    state: String? = null,
+    onClick: () -> Unit,
+) {
+    val status = LocalStatusColors.current
+    Box(
+        modifier = Modifier
+            .size(LargeControlHeight)
+            .clip(PillShape)
+            .background(BgElevated)
+            .border(
+                1.dp,
+                if (danger) status.danger.copy(alpha = 0.5f) else OnBgBody.copy(alpha = HairlineAlpha.Control),
+                PillShape,
+            )
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .then(if (state != null) Modifier.semantics { stateDescription = state } else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painterResource(iconRes),
+            contentDescription = description,
+            tint = if (danger) status.danger else OnBgBody,
+            modifier = Modifier.size(iconSize),
+        )
+    }
+}
+
+/** The red ✕ that discards a recorded run; callers confirm first. */
+@Composable
+internal fun DiscardRunCircle(enabled: Boolean = true, onClick: () -> Unit) {
+    ControlCircle(
+        Res.drawable.ic_ui_close,
+        stringResource(Res.string.track_cd_discard_run),
+        danger = true,
+        enabled = enabled,
+        iconSize = 20.dp,
+        onClick = onClick,
+    )
+}
+
+/** The wide pill on the control row: [primary] is the Accent-filled main action
+ *  (Start, Stop, Resume while paused, Save run); otherwise the outlined secondary.
+ *  The label keeps [ControlPillLabelRoom] from each rounded end. */
+@Composable
+internal fun ControlPill(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = true,
+    enabled: Boolean = true,
+    iconRes: DrawableResource? = null,
+    state: String? = null,
+) {
+    val content = if (primary) OnAccent else OnBgBody
+    Row(
+        modifier = modifier
+            .height(LargeControlHeight)
+            .clip(PillShape)
+            .then(
+                if (primary) {
+                    Modifier.background(Accent)
+                } else {
+                    Modifier.background(BgElevated).border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Control), PillShape)
+                },
+            )
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .then(if (state != null) Modifier.semantics { stateDescription = state } else Modifier)
+            .padding(horizontal = ControlPillLabelRoom),
+        horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (iconRes != null) {
+            Icon(painterResource(iconRes), contentDescription = null, tint = content, modifier = Modifier.size(18.dp))
+        }
+        Text(label, color = content, style = ControlPillLabel)
+    }
+}
+
+/** System location is off: the loud warn row, with "Open settings" as its fix. */
+@Composable
+internal fun LocationOffNotice(onOpenSettings: () -> Unit) {
+    val status = LocalStatusColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Space.Card.dp))
+            .background(status.warn)
+            .padding(Space.Card.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+    ) {
+        Text(
+            stringResource(Res.string.track_location_off_caption),
+            color = Color.White,
+            style = Type.Body,
+        )
+        Text(
+            stringResource(Res.string.track_open_settings),
+            color = Color.White,
+            style = Type.Body.copy(fontWeight = FontWeight.ExtraBold),
+            modifier = Modifier
+                .clip(PillShape)
+                .heightIn(min = ActionMinHeight)
+                .clickable(role = Role.Button, onClick = onOpenSettings)
+                .wrapContentHeight(Alignment.CenterVertically)
+                .padding(vertical = Space.Xs.dp),
+        )
+    }
+}
+
+@Composable
+private fun StatusDot(color: Color) {
+    Box(
+        Modifier
+            .size(StatusDotSize)
+            .clip(PillShape)
+            .background(color),
+    )
+}
+
+/**
+ * The map's status pill: a leaf, so the 1 Hz freshness ticker it owns recomposes
+ * only the pill. The ticker runs while the state can still change (a decaying lock,
+ * armed, locating, or a recording run aging toward signal loss). Screen readers get
+ * one polite live region carrying only the state. Before the system prompt was ever
+ * shown ([permissionAsked] false) a missing grant stays neutral.
+ */
+@Composable
+internal fun TrackerStatusPill(
+    hasPermission: Boolean,
+    locationOn: Boolean,
+    tracking: Boolean,
+    paused: Boolean,
+    armed: Boolean,
+    locating: Boolean,
+    requirePrecise: Boolean,
+    requireMoving: Boolean,
+    onRecheckPermission: () -> Unit,
+    permissionAsked: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val status = LocalStatusColors.current
+    val lastFix by RunSession.lastFix.collectAsStateWithLifecycle()
+    val lastFixElapsedMs by RunSession.lastFixElapsedMs.collectAsStateWithLifecycle()
+    var nowElapsed by remember { mutableLongStateOf(monotonicMillis()) }
+    LaunchedEffect(lastFixElapsedMs) { nowElapsed = monotonicMillis() }
+    val freshLock = isFreshLock(lastFix?.accuracyM, lastFixElapsedMs, nowElapsed)
+    val signalLost = tracking && signalLossDue(lastFixElapsedMs, nowElapsed)
+    val needsTick = freshLock || armed || locating || (tracking && !signalLost)
+    val recheckPermission by rememberUpdatedState(onRecheckPermission)
+    LaunchedEffect(needsTick) {
+        if (needsTick) while (true) {
+            // A mid-run revocation must read as PermissionNeeded, not a lost fix.
+            recheckPermission()
+            nowElapsed = monotonicMillis()
+            delay(PILL_TICK_MS)
+        }
+    }
+    val pill = pillState(hasPermission, locationOn, tracking, paused, armed, signalLost, freshLock, requirePrecise, requireMoving)
+    // Only states that block or break recording wear the warn fill; the benign
+    // waiting states (acquiring, armed) read as a neutral pill with a muted dot.
+    val pillWarn = when (pill) {
+        TrackerPill.PermissionNeeded -> permissionAsked
+        TrackerPill.LocationOff, TrackerPill.SignalLost -> true
+        else -> false
+    }
+    val dot = when (pill) {
+        TrackerPill.Recording, TrackerPill.FreshLock -> Accent
+        TrackerPill.Paused -> OnBgFaint
+        else -> OnBgMuted
+    }
+    // The spoken form is state-only: the fresh-lock accuracy figure changes on nearly
+    // every fix, which would make a live region chatter, so it reads a stable phrase.
+    val pillSpoken = if (pill == TrackerPill.FreshLock) stringResource(Res.string.track_cd_pill_fresh_lock) else null
+    Row(
+        modifier = modifier
+            .clip(PillShape)
+            .background(if (pillWarn) status.warn else BgElevated)
+            .then(if (pillWarn) Modifier else Modifier.border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Divider), PillShape))
+            .padding(horizontal = Space.Md.dp + Space.Xs.dp, vertical = Space.Sm.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp + Space.Xs.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (!pillWarn) StatusDot(dot)
+        val pillText = when (pill) {
+            TrackerPill.PermissionNeeded -> stringResource(Res.string.track_pill_permission_needed)
+            TrackerPill.LocationOff -> stringResource(Res.string.track_pill_location_off)
+            TrackerPill.SignalLost -> stringResource(Res.string.track_notif_signal_lost)
+            TrackerPill.Paused -> stringResource(Res.string.track_state_paused)
+            TrackerPill.Recording -> stringResource(Res.string.track_state_recording)
+            TrackerPill.ArmedMoving -> stringResource(Res.string.track_pill_armed_moving)
+            TrackerPill.ArmedPrecise -> stringResource(Res.string.track_pill_armed_precise)
+            TrackerPill.ArmedWaiting -> stringResource(Res.string.track_pill_armed_waiting)
+            TrackerPill.FreshLock -> stringResource(
+                Res.string.track_pill_fresh_lock,
+                lastFix?.accuracyM?.roundOrZero() ?: 0L,
+            )
+            TrackerPill.Acquiring -> stringResource(Res.string.track_notif_locate_title)
+        }
+        val figures = pill == TrackerPill.FreshLock
+        Text(
+            pillText,
+            color = if (pillWarn) Color.White else OnBgBody,
+            style = if (figures) Type.Caption.merge(TabularFigures) else Type.Caption,
+            modifier = Modifier.clearAndSetSemantics {
+                contentDescription = pillSpoken ?: pillText
+                liveRegion = LiveRegionMode.Polite
+            },
+        )
+    }
+}
+
+/**
+ * The locate-preview start options: "Follow today's plan" (a switch with the plan's
+ * targets under it, when [planItem] exists), then the two independent, stackable,
+ * persisted, default-off start gates as checkbox chips under their own overline,
+ * with one caption below them that explains only what is on ([startGatesCaptionRes]).
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun TrackerStartOptions(
+    planItem: PrescriptionView?,
+    followPlan: Boolean,
+    onFollowPlan: (Boolean) -> Unit,
+    unit: DistanceUnit,
+    preciseGate: Boolean,
+    onTogglePrecise: () -> Unit,
+    movingGate: Boolean,
+    onToggleMoving: () -> Unit,
+) {
+    if (planItem != null) {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+            LabeledSwitchRow(
+                label = stringResource(Res.string.track_plan_follow),
+                checked = followPlan,
+                onCheckedChange = onFollowPlan,
+            )
+            if (followPlan) RunPlanPreview(item = planItem, unit = unit)
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+        TileOverline(stringResource(Res.string.track_gates_overline))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(ChoiceChipGap),
+            verticalArrangement = Arrangement.spacedBy(ChoiceChipGap),
+        ) {
+            ChoiceChip(
+                stringResource(Res.string.track_gate_precise),
+                selected = preciseGate,
+                role = Role.Checkbox,
+                onClick = onTogglePrecise,
+            )
+            ChoiceChip(
+                stringResource(Res.string.track_gate_moving),
+                selected = movingGate,
+                role = Role.Checkbox,
+                onClick = onToggleMoving,
+            )
+        }
+        Text(stringResource(startGatesCaptionRes(preciseGate, movingGate)), color = OnBgMuted, style = Type.Caption)
+    }
+}
+
+/** The start-gates caption for what is on: one sentence, never both explainers. */
+internal fun startGatesCaptionRes(precise: Boolean, moving: Boolean): StringResource = when {
+    precise && moving -> Res.string.track_gates_caption_both
+    precise -> Res.string.track_gates_caption_precise
+    moving -> Res.string.track_gates_caption_moving
+    else -> Res.string.track_gates_caption_none
+}
+
+/** Before Start: the planned run the tracker will follow, with its targets. */
+@Composable
+private fun RunPlanPreview(item: PrescriptionView, unit: DistanceUnit) {
+    val res = currentResources()
+    val targets = remember(item.run_target, unit) { runTargetLines(res, item.run_target, unit) }
+    val headline = remember(item, unit) { runPlanHeadline(item, unit) }
+    PlanCard {
+        Text(
+            stringResource(Res.string.track_plan_title, headline),
+            color = OnBgBody,
+            style = Type.BodyBold,
+        )
+        targets.forEach { Text(it, color = OnBgMuted, style = Type.Caption.merge(TabularFigures)) }
+    }
+}
+
+/** The elevated card the plan preview and the live step guide share. */
+@Composable
+private fun PlanCard(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(BgElevated)
+            .padding(Space.Card.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+        content = content,
+    )
+}
+
+/**
+ * While recording a followed plan: the plan's targets folded into one muted line
+ * under the live figures ([runTargetSummary]), then, for a guided run, the current
+ * step (its name with Skip step on the same row, what is left of it, what comes
+ * next). The step title is a polite live region so TalkBack announces each new step;
+ * the per-second remaining figure is not, so it doesn't chatter. Renders nothing
+ * without steps or targets.
+ */
+@Composable
+internal fun RunGuideCard(item: PrescriptionView, progress: StepProgress?, unit: DistanceUnit, onSkip: () -> Unit) {
+    val res = currentResources()
+    val targets = remember(item.run_target, unit) { runTargetSummary(res, item.run_target, unit) }
+    if (progress == null && targets == null) return
+    Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+        targets?.let { Text(it, color = OnBgMuted, style = Type.Caption.merge(TabularFigures)) }
+        if (progress != null) RunStepCard(res, progress, onSkip)
+    }
+}
+
+/** The guided run's current step, what is left of it, and the step after it. */
+@Composable
+private fun RunStepCard(res: PlatformResources, progress: StepProgress, onSkip: () -> Unit) {
+    PlanCard {
+        val step = progress.step
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val title = if (step != null) runStepTitle(res, step) else stringResource(Res.string.track_step_all_done)
+            // The step name is the label; what is LEFT of it is the figure the
+            // runner watches mid-interval, so it carries the display size.
+            Text(
+                title,
+                color = OnBgBody,
+                style = Type.BodyBold,
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            if (!progress.finished) {
+                // End-aligned: the label (not its touch padding) meets the card edge.
+                TextAction(
+                    stringResource(Res.string.track_step_skip),
+                    onClick = onSkip,
+                    modifier = Modifier.offset(x = TextActionInset),
+                )
+            }
+        }
+        if (step != null) {
+            val counting = progress.remainingSec != null || progress.remainingM != null
+            Text(
+                runStepRemaining(res, progress),
+                color = if (counting) OnBgBody else OnBgMuted,
+                style = if (counting) Type.Countdown else Type.Caption,
+            )
+        }
+        progress.next?.let { next ->
+            Text(
+                stringResource(Res.string.track_step_next, runStepTitle(res, next)),
+                color = OnBgMuted,
+                style = Type.Caption,
+                modifier = Modifier.padding(top = Space.Xs.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The stat sheet while precise location is missing: a caption matching what the
+ * user allowed ([LocationPrompt]), ✕ beside Continue / Allow location, and "Log run
+ * by hand" once refused. [onSaveRun] non-null marks a crash-recovered run waiting on
+ * the grant ([RunSession.resumeAwaitingLocation]): ✕ then discards the run, so
+ * [onClose] must confirm first.
+ */
+@Composable
+internal fun LocationPermissionPanel(
+    prompt: LocationPrompt,
+    onAllow: () -> Unit,
+    onClose: () -> Unit,
+    onLogManually: () -> Unit,
+    onSaveRun: (() -> Unit)?,
+) {
+    val resuming = onSaveRun != null
+    Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+        Text(
+            stringResource(
+                when {
+                    resuming && prompt == LocationPrompt.Blocked -> Res.string.track_resume_perm_blocked_caption
+                    resuming -> Res.string.track_resume_perm_caption
+                    prompt == LocationPrompt.Rationale -> Res.string.track_perm_rationale
+                    prompt == LocationPrompt.Denied -> Res.string.track_perm_denied_caption
+                    prompt == LocationPrompt.CoarseOnly -> Res.string.track_perm_coarse_caption
+                    else -> Res.string.track_perm_blocked_caption
+                },
+            ),
+            color = if (prompt == LocationPrompt.Rationale || resuming) OnBgBody else OnBgMuted,
+            style = Type.Body,
+        )
+        if (onSaveRun != null) {
+            TextAction(
+                stringResource(Res.string.track_btn_save_run),
+                onClick = onSaveRun,
+                chevron = true,
+                modifier = Modifier.offset(x = -TextActionInset),
+            )
+        } else if (prompt != LocationPrompt.Rationale) {
+            // A text action, so no tonal slab sits over the primary below it.
+            TextAction(
+                stringResource(Res.string.track_btn_log_manually),
+                onClick = onLogManually,
+                chevron = true,
+                modifier = Modifier.offset(x = -TextActionInset),
+            )
+        }
+        ControlRow {
+            if (resuming) {
+                DiscardRunCircle(onClick = onClose)
+            } else {
+                ControlCircle(Res.drawable.ic_ui_close, stringResource(Res.string.main_close), onClick = onClose)
+            }
+            ControlPill(
+                stringResource(
+                    if (prompt == LocationPrompt.Rationale) Res.string.track_btn_continue else Res.string.track_btn_allow_location,
+                ),
+                onClick = onAllow,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}

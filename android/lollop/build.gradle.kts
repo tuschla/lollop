@@ -59,15 +59,11 @@ kotlin {
         }
     }
 
-    // iOS: the static framework the Xcode app links (`embedAndSignAppleFrameworkForXcode`).
-    // Kotlin compiles iOS klibs on any host (`compileKotlinIosArm64` runs on Linux CI);
-    // linking needs macOS and is skipped elsewhere (kotlin.native.ignoreDisabledTargets).
-    listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
-        target.binaries.framework {
-            baseName = "Lollop"
-            isStatic = true
-        }
-    }
+    // iOS klibs: Kotlin compiles them on any host (`compileKotlinIosArm64` runs on
+    // Linux CI). The framework the Xcode app links is :lollop-ios's, which adds the
+    // Rust core; this module's iOS code reaches the core only through CoreBridge.
+    iosArm64()
+    iosSimulatorArm64()
 
     compilerOptions {
         // expect/actual classes (JvmSerializable) are Beta; this acknowledges it.
@@ -79,7 +75,18 @@ kotlin {
             implementation("org.jetbrains.compose.runtime:runtime:$cmpVersion")
             implementation("org.jetbrains.compose.runtime:runtime-saveable:$cmpVersion")
             implementation("org.jetbrains.compose.ui:ui:$cmpVersion")
+            implementation("org.jetbrains.compose.foundation:foundation:$cmpVersion")
+            // The material3 version CMP 1.12.2 pairs with (ComposeBuildConfig
+            // composeMaterial3Version); on Android it resolves to androidx
+            // material3 1.4.0, the BOM's.
+            implementation("org.jetbrains.compose.material3:material3:1.9.0")
+            // Window size classes (currentWindowAdaptiveInfoV2, Adaptive.kt); on
+            // Android it resolves to androidx adaptive 1.3.0, the BOM's.
+            implementation("org.jetbrains.compose.material3.adaptive:adaptive:1.3.0")
             implementation("org.jetbrains.compose.components:components-resources:$cmpVersion")
+            // collectAsStateWithLifecycle, LocalLifecycleOwner; on Android it resolves
+            // to androidx lifecycle 2.10.0 (androidMain's), on iOS iosMain lifts it to 2.11.0.
+            implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
             // Dates and time zones in common code; on Android it wraps java.time
@@ -98,6 +105,8 @@ kotlin {
         // androidx klibs. iOS only: Android keeps its androidx 2.10.0.
         iosMain.dependencies {
             implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+            // BackHandler (PlatformUi.ios.kt): the UIKit back gesture.
+            implementation("org.jetbrains.compose.ui:ui-backhandler:$cmpVersion")
         }
         androidMain.dependencies {
             implementation("androidx.core:core-ktx:1.19.1")
@@ -157,11 +166,16 @@ dependencies {
 }
 
 // ---------------------------------------------------------------------------
-// Strings for Compose Multiplatform resources, generated from the Android ones.
-// `src/androidMain/res/values/strings*.xml` stays the only source; this writes
-// their CMP twin (`values/strings.xml` of the commonMain compose resources) into
-// the build directory. CmpResourceParityTest (host tests) checks every string,
-// plural and array reads the same through both.
+// Compose Multiplatform resources, generated from the Android ones.
+// `src/androidMain/res` stays the only source; this writes its CMP twin (the
+// commonMain compose resources) into the build directory:
+//   • `values/strings.xml` from `res/values/strings*.xml`. CmpResourceParityTest
+//     (host tests) checks every string, plural and array reads the same through both.
+//   • `drawable/` from the UI vectors in `res/drawable` (everything but the
+//     launcher, splash and notification icons, which only Android draws).
+//   • an androidMain Kotlin file mapping each resource key to its `R` id
+//     (`androidStringId` …), so text read outside composition on Android
+//     (`PlatformResources.getString`, Strings.kt) is Android's own getString.
 //
 // Android resolves escapes, quotes and whitespace when it compiles the XML and
 // runs String.format; CMP takes the text as written and substitutes only
@@ -176,19 +190,27 @@ dependencies {
 //     also on inline markup and on a literal backslash, which CMP can't carry.
 // `formatted="false"` strings are literal text: escapes resolved, no format step.
 // ---------------------------------------------------------------------------
-abstract class GenerateComposeStrings : DefaultTask() {
+abstract class GenerateComposeResources : DefaultTask() {
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.NAME_ONLY)
     abstract val sources: ConfigurableFileCollection
 
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract val drawables: ConfigurableFileCollection
+
     @get:OutputDirectory
     abstract val outputDir: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val idsDir: DirectoryProperty
 
     @TaskAction
     fun generate() {
         val out = StringBuilder("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n")
-            .append("<!-- Generated by :lollop:generateComposeStrings from res/values/strings*.xml. Do not edit. -->\n")
+            .append("<!-- Generated by :lollop:generateComposeResources from res/values/strings*.xml. Do not edit. -->\n")
             .append("<resources>\n")
+        val names = sortedMapOf("string" to sortedSetOf<String>(), "plurals" to sortedSetOf(), "string-array" to sortedSetOf())
         val errors = mutableListOf<String>()
         val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
         for (file in sources.files.sortedBy { it.name }) {
@@ -197,6 +219,7 @@ abstract class GenerateComposeStrings : DefaultTask() {
             for (i in 0 until nodes.length) {
                 val el = nodes.item(i) as? org.w3c.dom.Element ?: continue
                 val name = el.getAttribute("name")
+                names[el.tagName]?.add(name)
                 val literal = el.getAttribute("formatted") == "false"
                 fun convert(item: org.w3c.dom.Element, where: String): String? = try {
                     val text = flatten(item)
@@ -233,6 +256,27 @@ abstract class GenerateComposeStrings : DefaultTask() {
         val dir = outputDir.get().asFile
         dir.deleteRecursively()
         File(dir, "values").apply { mkdirs() }.resolve("strings.xml").writeText(out.toString())
+        val drawableDir = File(dir, "drawable").apply { mkdirs() }
+        for (file in drawables.files) file.copyTo(drawableDir.resolve(file.name))
+        writeIds(names)
+    }
+
+    private fun writeIds(names: Map<String, Set<String>>) {
+        val kt = StringBuilder("// Generated by :lollop:generateComposeResources from res/values/strings*.xml. Do not edit.\n")
+            .append("package app.milestone\n")
+        for ((tag, function, rClass) in listOf(
+            Triple("string", "androidStringId", "string"),
+            Triple("plurals", "androidPluralsId", "plurals"),
+            Triple("string-array", "androidArrayId", "array"),
+        )) {
+            kt.append("\n/** The `R.$rClass` id of the resource named [key]. */\n")
+                .append("internal fun $function(key: String): Int = when (key) {\n")
+            for (name in names.getValue(tag)) kt.append("    \"").append(name).append("\" -> R.").append(rClass).append('.').append(name).append('\n')
+            kt.append("    else -> throw IllegalArgumentException(\"no $tag resource \$key\")\n}\n")
+        }
+        val dir = idsDir.get().asFile
+        dir.deleteRecursively()
+        File(dir, "app/milestone").apply { mkdirs() }.resolve("AndroidResourceIds.kt").writeText(kt.toString())
     }
 
     /** The string aapt2 compiles [el]'s text to (ResourceUtils StringBuilder). */
@@ -319,22 +363,31 @@ abstract class GenerateComposeStrings : DefaultTask() {
     }
 }
 
-val generateComposeStrings = tasks.register<GenerateComposeStrings>("generateComposeStrings") {
+val generateComposeResources = tasks.register<GenerateComposeResources>("generateComposeResources") {
     group = "build"
-    description = "Generate the CMP strings resource from the Android res/values/strings*.xml."
+    description = "Generate the CMP resources (strings, UI vectors) and the R id map from the Android res."
     sources.from(fileTree("src/androidMain/res/values") { include("strings*.xml") })
-    outputDir.set(layout.buildDirectory.dir("generated/composeStrings"))
+    drawables.from(
+        fileTree("src/androidMain/res/drawable") {
+            include("ic_*.xml")
+            exclude("ic_launcher_*.xml", "ic_stat_mark.xml")
+        },
+    )
+    outputDir.set(layout.buildDirectory.dir("generated/composeResources"))
+    idsDir.set(layout.buildDirectory.dir("generated/androidResourceIds"))
 }
+
+kotlin.sourceSets.getByName("androidMain").kotlin.srcDir(generateComposeResources.flatMap { it.idsDir })
 
 compose.resources {
     packageOfResClass = "app.milestone.resources"
     publicResClass = false
     generateResClass = always
-    // The generated strings are commonMain's compose resources; the provider
+    // The generated resources are commonMain's compose resources; the provider
     // carries the task dependency into every resource task.
     customDirectory(
         sourceSetName = "commonMain",
-        directoryProvider = generateComposeStrings.flatMap { it.outputDir },
+        directoryProvider = generateComposeResources.flatMap { it.outputDir },
     )
 }
 

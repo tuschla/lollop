@@ -410,7 +410,7 @@ class CoreConcurrencyTest {
         val old = (0 until 10).map { Event.LogSet("Back squat", 80.0 + it, 5, 8.0, observedAt = at(30 + it), entryId = at(30 + it) * 1000) }
         QaHarness.seedLog(ctx, listOf(profile) + zones + old)
         ProcessDeath.kill(ctx)
-        val restoredFlag = Core::class.java.getDeclaredField("restored").apply { isAccessible = true }
+        val restoredFlag = DurableCore::class.java.getDeclaredField("restored").apply { isAccessible = true }
         val sent = ConcurrentHashMap.newKeySet<Long>()
         val booter = thread(name = "boot") { Core.restore(ctx) }
         runWorkers(4) { t ->

@@ -85,3 +85,12 @@ internal expect fun relativeDayLabel(dayDelta: Long, locale: PlatformLocale = ap
 /** Whether the device shows the time of day on a 24-hour clock. */
 @Composable
 internal expect fun is24HourClock(): Boolean
+
+/**
+ * Combine a DatePicker day (UTC-midnight millis: its Y/M/D are the *picked*
+ * calendar date) with a local wall-clock time into local unix seconds, in the
+ * device zone; a time inside a DST gap resolves as the platform calendar does
+ * (forward by the gap). UNCLAMPED: the caller ([ObservedAtRow]) clamps to now
+ * and surfaces when it had to, so a future stamp can never be logged silently.
+ */
+internal expect fun localInstantSeconds(utcDayMillis: Long, hour: Int, minute: Int): Long

@@ -40,11 +40,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -60,8 +58,57 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.milestone.resources.Res
+import app.milestone.resources.log_add_exercise
+import app.milestone.resources.log_change_exercise
+import app.milestone.resources.log_change_exercise_cd
+import app.milestone.resources.log_cue_use_load
+import app.milestone.resources.log_discard_confirm
+import app.milestone.resources.log_effort_cd
+import app.milestone.resources.log_effort_cd_1
+import app.milestone.resources.log_effort_cd_4plus
+import app.milestone.resources.log_exact_alarm_allow
+import app.milestone.resources.log_exact_alarm_caption
+import app.milestone.resources.log_exact_alarm_dismiss
+import app.milestone.resources.log_exercise_search_hint
+import app.milestone.resources.log_field_added_load
+import app.milestone.resources.log_field_exercise
+import app.milestone.resources.log_field_hold
+import app.milestone.resources.log_field_reps
+import app.milestone.resources.log_field_rpe
+import app.milestone.resources.log_field_weight
+import app.milestone.resources.log_finish_log_it
+import app.milestone.resources.log_finish_unsaved_body
+import app.milestone.resources.log_finish_unsaved_title
+import app.milestone.resources.log_hint_enter_weight
+import app.milestone.resources.log_hint_first_weight
+import app.milestone.resources.log_keep_editing
+import app.milestone.resources.log_last_time
+import app.milestone.resources.log_optional
+import app.milestone.resources.log_plates_per_side
+import app.milestone.resources.log_primary_extra_set
+import app.milestone.resources.log_primary_finish_session
+import app.milestone.resources.log_primary_next
+import app.milestone.resources.log_primary_set_n
+import app.milestone.resources.log_primary_set_n_of_n
+import app.milestone.resources.log_rpe_target_hint
+import app.milestone.resources.log_set_title_edit
+import app.milestone.resources.log_set_title_new
+import app.milestone.resources.log_undo
+import app.milestone.resources.log_undo_cd
+import app.milestone.resources.log_undo_logged
+import app.milestone.resources.log_warmup_bar
+import app.milestone.resources.log_warmup_cd
+import app.milestone.resources.log_warmup_done_state
+import app.milestone.resources.log_warmup_hint
+import app.milestone.resources.log_warmup_label
+import app.milestone.resources.log_warmup_logged
 import kotlinx.coroutines.delay
 import kotlin.math.abs
+import org.jetbrains.compose.resources.stringResource
 
 /** How long the "Logged … · Undo" row stays after a loop save. */
 private const val UndoWindowMs = 8_000L
@@ -96,7 +143,7 @@ private fun UndoRow(text: String, undoDescription: String, onUndo: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                stringResource(R.string.log_undo),
+                stringResource(Res.string.log_undo),
                 color = BgTop,
                 style = Type.Body.copy(fontWeight = FontWeight.ExtraBold),
             )
@@ -185,7 +232,7 @@ fun LogSetEditor(
     onSave: (Event) -> Unit,
 ) {
     val ctx = LocalContext.current
-    val res = LocalResources.current
+    val res = currentResources()
     val haptic = LocalHapticFeedback.current
     val focusManager = LocalFocusManager.current
     // Cue loads are applied in today's loop: a past day's entry never reads them.
@@ -467,13 +514,13 @@ fun LogSetEditor(
     val primaryLabel = when (primary) {
         LoopPrimary.Save -> null
         LoopPrimary.LogPlannedSet -> liveItem?.let {
-            stringResource(R.string.log_primary_set_n_of_n, nextSetNumber(it), plannedSetCount(it))
+            stringResource(Res.string.log_primary_set_n_of_n, nextSetNumber(it), plannedSetCount(it))
         }
-        LoopPrimary.LogExtraSet -> stringResource(R.string.log_primary_extra_set)
-        LoopPrimary.Next -> stringResource(R.string.log_primary_next, nextItem?.exercise.orEmpty())
-        LoopPrimary.FinishSession -> stringResource(R.string.log_primary_finish_session)
-        LoopPrimary.LogOffPlanSet -> stringResource(R.string.log_primary_set_n, todaySets.size + 1)
-        LoopPrimary.LogBlank -> stringResource(R.string.log_set_title_new)
+        LoopPrimary.LogExtraSet -> stringResource(Res.string.log_primary_extra_set)
+        LoopPrimary.Next -> stringResource(Res.string.log_primary_next, nextItem?.exercise.orEmpty())
+        LoopPrimary.FinishSession -> stringResource(Res.string.log_primary_finish_session)
+        LoopPrimary.LogOffPlanSet -> stringResource(Res.string.log_primary_set_n, todaySets.size + 1)
+        LoopPrimary.LogBlank -> stringResource(Res.string.log_set_title_new)
     }
     val movesOn = primary == LoopPrimary.Next || primary == LoopPrimary.FinishSession
     // Leaving the loop ("Done for now", "Finish session") ends a running rest and
@@ -505,7 +552,7 @@ fun LogSetEditor(
     }
     // "Use 140 kg": its label and the action that puts the load in the field.
     val cueLoad: Pair<String, () -> Unit>? = cueLoadKg?.let { kg ->
-        stringResource(R.string.log_cue_use_load, "${loadFigure(kg, weightUnit)}\u00A0${weightSuffix(weightUnit)}") to {
+        stringResource(Res.string.log_cue_use_load, "${loadFigure(kg, weightUnit)}\u00A0${weightSuffix(weightUnit)}") to {
             fields = fields.copy(weightText = loadFigure(kg, weightUnit), weightVerbatim = kg, weightFresh = true)
             keypadOpen = false
             liveItem?.let { AppliedCueLoads.record(it, kg) }
@@ -525,7 +572,7 @@ fun LogSetEditor(
     val warmUpsDoneKg = liveItem?.logged_sets.orEmpty().filter { !it.qualifies }.map { it.weight_kg }
 
     EditorScaffold(
-        title = if (initial == null) stringResource(R.string.log_set_title_new) else stringResource(R.string.log_set_title_edit),
+        title = if (initial == null) stringResource(Res.string.log_set_title_new) else stringResource(Res.string.log_set_title_edit),
         dirty = dirty,
         saveEnabled = movesOn || saveEnabled,
         onClose = if (plannedLoop) onDone else onClose,
@@ -543,8 +590,8 @@ fun LogSetEditor(
             val id = undoEntryId
             if (loop && id != null && !searchFocused) {
                 UndoRow(
-                    stringResource(if (undoIsWarmUp) R.string.log_warmup_logged else R.string.log_undo_logged, undoLine),
-                    stringResource(R.string.log_undo_cd, undoLine),
+                    stringResource(if (undoIsWarmUp) Res.string.log_warmup_logged else Res.string.log_undo_logged, undoLine),
+                    stringResource(Res.string.log_undo_cd, undoLine),
                 ) {
                     onSave(Event.DeleteEntry(Event.EntryKind.Set, id))
                     if (undoRestScheduled) RestAlarm.cancel(ctx)
@@ -564,13 +611,13 @@ fun LogSetEditor(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f)) {
                         FieldLabel(
-                            stringResource(R.string.log_field_rpe),
+                            stringResource(Res.string.log_field_rpe),
                             when {
                                 // An older half-point effort matches no cell: say it.
                                 picked != null && picked !in RepsLeftValues -> repsLeftText(res, picked)
-                                targetRpe != null -> stringResource(R.string.log_rpe_target_hint, repsLeftText(res, targetRpe))
+                                targetRpe != null -> stringResource(Res.string.log_rpe_target_hint, repsLeftText(res, targetRpe))
                                 picked != null -> null
-                                else -> stringResource(R.string.log_optional)
+                                else -> stringResource(Res.string.log_optional)
                             },
                         )
                     }
@@ -629,38 +676,38 @@ fun LogSetEditor(
             val askExactAlarms by RestAlarm.exactAlarmPrompt.collectAsState()
             if (askExactAlarms && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 InlineNotice(
-                    stringResource(R.string.log_exact_alarm_caption),
+                    stringResource(Res.string.log_exact_alarm_caption),
                     modifier = Modifier.testTag("exact-alarm-notice"),
-                    actionLabel = stringResource(R.string.log_exact_alarm_allow),
+                    actionLabel = stringResource(Res.string.log_exact_alarm_allow),
                     onAction = {
                         RestAlarm.dismissExactAlarmPrompt(ctx)
                         openExactAlarmSettings(ctx)
                     },
-                    dismissLabel = stringResource(R.string.log_exact_alarm_dismiss),
+                    dismissLabel = stringResource(Res.string.log_exact_alarm_dismiss),
                     onDismiss = { RestAlarm.dismissExactAlarmPrompt(ctx) },
                 )
             }
             if (confirmDone) {
                 AppDialog(
                     onDismiss = { confirmDone = false },
-                    title = { Text(stringResource(R.string.log_finish_unsaved_title)) },
-                    text = { Text(stringResource(R.string.log_finish_unsaved_body)) },
+                    title = { Text(stringResource(Res.string.log_finish_unsaved_title)) },
+                    text = { Text(stringResource(Res.string.log_finish_unsaved_body)) },
                     confirmButton = {
                         if (saveEnabled) {
                             TextButton(onClick = {
                                 confirmDone = false
                                 if (commitSet()) finishLoop()
-                            }) { Text(stringResource(R.string.log_finish_log_it)) }
+                            }) { Text(stringResource(Res.string.log_finish_log_it)) }
                         }
                     },
                     dismissButton = {
                         Row {
                             TextButton(onClick = { confirmDone = false }) {
-                                Text(stringResource(R.string.log_keep_editing))
+                                Text(stringResource(Res.string.log_keep_editing))
                             }
                             TextButton(onClick = { confirmDone = false; finishLoop() }) {
                                 Text(
-                                    stringResource(R.string.log_discard_confirm),
+                                    stringResource(Res.string.log_discard_confirm),
                                     color = DangerText,
                                 )
                             }
@@ -670,7 +717,7 @@ fun LogSetEditor(
             }
         }
         FormCard {
-            FieldLabel(stringResource(R.string.log_field_exercise))
+            FieldLabel(stringResource(Res.string.log_field_exercise))
             val pickedName = liveItem?.exercise?.takeIf { loop } ?: fields.exercise.takeIf { initial != null && it.isNotBlank() }
             if (pickedName != null && !pickerOpen) {
                 // In today's planned loop the plan sets the exercise, and an edited
@@ -688,9 +735,9 @@ fun LogSetEditor(
                         modifier = Modifier.weight(1f).testTag("loop-exercise"),
                     )
                     TextAction(
-                        stringResource(R.string.log_change_exercise),
+                        stringResource(Res.string.log_change_exercise),
                         { pickerOpen = true },
-                        description = stringResource(R.string.log_change_exercise_cd, pickedName),
+                        description = stringResource(Res.string.log_change_exercise_cd, pickedName),
                     )
                 }
             } else {
@@ -707,7 +754,7 @@ fun LogSetEditor(
                         keypadOpen = false
                         dirty = true
                     },
-                    hint = stringResource(R.string.log_exercise_search_hint),
+                    hint = stringResource(Res.string.log_exercise_search_hint),
                     testTag = "exercise-search",
                     imeAction = ImeAction.Done,
                     verticalPadding = Space.Card.dp,
@@ -728,7 +775,7 @@ fun LogSetEditor(
                 // the form it will be saved in.
                 newExerciseToAdd(fields.exercise, knownNames)?.takeIf { it != addedName }?.let { name ->
                     TextAction(
-                        stringResource(R.string.log_add_exercise, name),
+                        stringResource(Res.string.log_add_exercise, name),
                         {
                             fields = fields.copy(exercise = name)
                             addedName = name
@@ -747,7 +794,7 @@ fun LogSetEditor(
                 verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
             ) {
                 if (warmUps.isNotEmpty()) {
-                    FieldLabel(stringResource(R.string.log_warmup_label), stringResource(R.string.log_warmup_hint))
+                    FieldLabel(stringResource(Res.string.log_warmup_label), stringResource(Res.string.log_warmup_hint))
                     WarmUpRow(warmUps, warmUpsDoneKg, weightUnit) { logWarmUp(it) }
                 }
                 // The weight value sits right under the exercise with its one-tap ±
@@ -783,9 +830,9 @@ fun LogSetEditor(
                     Box(Modifier.padding(bottom = if (notes.isEmpty()) 0.dp else Space.Md.dp)) {
                         KeypadValueField(
                             if (holdMode || currentItem?.calis != null) {
-                                stringResource(R.string.log_field_added_load)
+                                stringResource(Res.string.log_field_added_load)
                             } else {
-                                stringResource(R.string.log_field_weight)
+                                stringResource(Res.string.log_field_weight)
                             },
                             weightSuffix(weightUnit), fields.weightText,
                             active = keypadOpen,
@@ -815,7 +862,7 @@ fun LogSetEditor(
                 // reps tap-scale up to [SetRepsScaleMax]. Picking reps or effort hands
                 // focus away from the weight, so the keypad folds.
                 if (holdMode) {
-                    val holdLabel = stringResource(R.string.log_field_hold)
+                    val holdLabel = stringResource(Res.string.log_field_hold)
                     FieldLabel(holdLabel)
                     ScrollableScaleRow(HoldScale, fields.holdSec, { "$it" }, label = holdLabel) {
                         fields = fields.copy(holdSec = it); keypadOpen = false; focusManager.clearFocus(); dirty = true
@@ -824,7 +871,7 @@ fun LogSetEditor(
                     // The picked cell is the readout; only a logged count past the tap
                     // scale (which no cell can show) is spelled out. With no count yet
                     // the row opens centred on the common 8–10 band, nothing picked.
-                    val repsLabel = stringResource(R.string.log_field_reps)
+                    val repsLabel = stringResource(Res.string.log_field_reps)
                     FieldLabel(repsLabel, fields.reps?.takeIf { it > SetRepsScaleMax }?.let { "$it" })
                     Box(Modifier.testTag("reps-scale")) {
                         ScrollableScaleRow(RepsScale, fields.reps, { "$it" }, label = repsLabel, initialCenter = UnsetRepsCentre) {
@@ -915,9 +962,9 @@ private fun EffortScaleRow(current: Double?, onPick: (Double?) -> Unit) {
         RepsLeftValues.forEach { v ->
             val selected = current == v
             val cd = when (v) {
-                6.0 -> stringResource(R.string.log_effort_cd_4plus)
-                9.0 -> stringResource(R.string.log_effort_cd_1)
-                else -> stringResource(R.string.log_effort_cd, repsLeftFigure(v))
+                6.0 -> stringResource(Res.string.log_effort_cd_4plus)
+                9.0 -> stringResource(Res.string.log_effort_cd_1)
+                else -> stringResource(Res.string.log_effort_cd, repsLeftFigure(v))
             }
             Box(
                 modifier = Modifier
@@ -960,12 +1007,12 @@ private fun weightNoteLines(
     listOfNotNull(
         when {
             !enterHint -> null
-            firstWeightTimes != null -> stringResource(R.string.log_hint_first_weight, firstWeightTimes)
-            else -> stringResource(R.string.log_hint_enter_weight)
+            firstWeightTimes != null -> stringResource(Res.string.log_hint_first_weight, firstWeightTimes)
+            else -> stringResource(Res.string.log_hint_enter_weight)
         },
-        lastTime?.let { stringResource(R.string.log_last_time, it) },
+        lastTime?.let { stringResource(Res.string.log_last_time, it) },
         plates?.let { p ->
-            stringResource(R.string.log_plates_per_side, p.joinToString(" · ") { plateFigure(it) }, weightSuffix(weightUnit))
+            stringResource(Res.string.log_plates_per_side, p.joinToString(" · ") { plateFigure(it) }, weightSuffix(weightUnit))
         },
     )
 
@@ -977,8 +1024,8 @@ private fun weightNoteLines(
  *  quarter-width cell holds "62.5" but not "✓ 62.5". */
 @Composable
 private fun WarmUpRow(steps: List<WarmUpStep>, doneKg: List<Double>, weightUnit: WeightUnit, onLog: (WarmUpStep) -> Unit) {
-    val barLabel = stringResource(R.string.log_warmup_bar)
-    val doneState = stringResource(R.string.log_warmup_done_state)
+    val barLabel = stringResource(Res.string.log_warmup_bar)
+    val doneState = stringResource(Res.string.log_warmup_done_state)
     Row(
         modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min).testTag("warmup-row"),
         horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
@@ -986,7 +1033,7 @@ private fun WarmUpRow(steps: List<WarmUpStep>, doneKg: List<Double>, weightUnit:
         steps.forEach { step ->
             val done = doneKg.any { abs(it - step.kg) < 1e-3 }
             val load = "${loadFigure(step.kg, weightUnit)}\u00A0${weightSuffix(weightUnit)}"
-            val cd = stringResource(R.string.log_warmup_cd, "$load × ${step.reps}")
+            val cd = stringResource(Res.string.log_warmup_cd, "$load × ${step.reps}")
             val figure = if (step.bar) barLabel else loadFigure(step.kg, weightUnit)
             Column(
                 modifier = Modifier
@@ -1031,3 +1078,33 @@ private val HoldScale = HoldSecRange.toList()
 
 /** Where an unset reps scale opens: the common 8–10 band in view. */
 private const val UnsetRepsCentre = 9
+
+/** Tells [RestAlarm] the set loop is on a resumed screen, so its own rest cue
+ *  covers the rest end and no notification is posted. Lives for the whole loop
+ *  sheet, not one exercise's readout: switching exercise mid-rest never hands
+ *  the countdown to a notification while the app is open. Each resume also
+ *  re-checks the exact-alarm grant (the user may be back from the system screen
+ *  the loop's notice opens). */
+@Composable
+internal fun RestAlarmInAppScope() {
+    val ctx = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    RestAlarm.setInAppVisible(ctx, true)
+                    RestAlarm.recheckExactAlarms(ctx)
+                }
+                Lifecycle.Event.ON_PAUSE -> RestAlarm.setInAppVisible(ctx, false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            RestAlarm.setInAppVisible(ctx, false)
+        }
+    }
+}
+

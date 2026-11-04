@@ -33,16 +33,6 @@ import java.util.Locale
 // `<trk><extensions><lollop:logged_at>` stamp. Each `<trk>` is one run. Everything
 // else (waypoints, routes, metadata) is ignored.
 
-/** [accuracyM]: the fix's horizontal accuracy in metres from the file (FIT
- *  `gps_accuracy`, GPX `<hdop>` via [hdopToAccuracyM]); null when the file names
- *  none, see [IMPORT_UNKNOWN_ACCURACY_M]. */
-data class GpxFix(
-    val lat: Double,
-    val lon: Double,
-    val timeSec: Long,
-    val hrBpm: Int?,
-    val accuracyM: Double? = null,
-)
 
 /** Nominal 1-sigma GNSS range error (m) for `accuracy ≈ hdop × UERE`: a coarse
  *  estimate that only feeds the core's 30 m QC gate. */
@@ -269,13 +259,6 @@ internal fun parseImportTimeSec(raw: String): Long {
         .getOrDefault(0L)
 }
 
-/**
- * Accuracy (m) given to an imported fix whose file names none (TCX; GPX without
- * `<hdop>`; FIT without `gps_accuracy`). A sentinel, not a measurement: it sits at
- * the core's 30 m QC gate (`running::MAX_GPS_ACCURACY_M`), so the fix passes QC as
- * the least-trusted acceptable one. If the core tightens that gate, this must follow.
- */
-internal const val IMPORT_UNKNOWN_ACCURACY_M = 30.0
 
 /** Why one imported file (or one activity inside it) produced no run. The shell
  *  maps each to plain-language copy beside the file's name. */

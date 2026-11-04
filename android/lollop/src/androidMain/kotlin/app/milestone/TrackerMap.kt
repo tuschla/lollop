@@ -25,10 +25,14 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import app.milestone.resources.Res
+import app.milestone.resources.ic_track_recenter
+import app.milestone.resources.track_cd_recenter
+import app.milestone.resources.track_map_attribution
 import kotlinx.coroutines.flow.combine
+import org.jetbrains.compose.resources.stringResource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
@@ -296,7 +300,7 @@ internal fun TrackerMapFrame(
             // actually render; its ink follows the map's own ground (dark under the dark
             // tile filter and placeholder), not the screen chrome.
             Text(
-                stringResource(R.string.track_map_attribution),
+                stringResource(Res.string.track_map_attribution),
                 color = (if (LocalPalette.current.isDark) Color.White else Color.Black).copy(alpha = ATTRIBUTION_ALPHA),
                 style = Type.Caption,
                 modifier = Modifier
@@ -307,8 +311,8 @@ internal fun TrackerMapFrame(
             // position to centre on.
             if (canRecenter) {
                 MapOverlayButton(
-                    R.drawable.ic_track_recenter,
-                    stringResource(R.string.track_cd_recenter),
+                    Res.drawable.ic_track_recenter,
+                    stringResource(Res.string.track_cd_recenter),
                     size = ActionMinHeight,
                     glyph = 20.dp,
                     alpha = 1f,

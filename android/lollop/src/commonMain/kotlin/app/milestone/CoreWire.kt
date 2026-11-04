@@ -4,8 +4,8 @@ import kotlinx.serialization.json.Json
 
 // The core's JSON wire as the shell reads it: the ViewModel decoder, the
 // panic-firewall envelopes, the replay with reset recovery, and what one send
-// reports. Platform-free; the engine that drives the native core (Core.kt on
-// Android) builds on it.
+// reports. Platform-free; the engine that drives the native core ([DurableCore])
+// builds on it.
 
 /** The production ViewModel decoder (decode only). Top-level so the JVM wire tests
  *  decode with exactly this configuration without loading the native library. */

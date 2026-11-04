@@ -21,4 +21,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "lollop"
-include(":app", ":lollop")
+include(":app", ":lollop", ":lollop-ios")
+// The Rust core's Kotlin/Native bridge; kmp/ builds it on its own as well.
+include(":core-bridge")
+project(":core-bridge").projectDir = file("../kmp/core-bridge")

@@ -53,10 +53,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -71,7 +68,23 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.milestone.resources.Res
+import app.milestone.resources.ic_ui_close
+import app.milestone.resources.ic_ui_expand
+import app.milestone.resources.ic_ui_fit_bounds
+import app.milestone.resources.runmap_cd
+import app.milestone.resources.runmap_cd_loop
+import app.milestone.resources.runmap_close
+import app.milestone.resources.runmap_finish
+import app.milestone.resources.runmap_fit_route
+import app.milestone.resources.runmap_open_full
+import app.milestone.resources.runmap_open_full_action
+import app.milestone.resources.runmap_start
+import app.milestone.resources.runmap_start_finish
 import kotlin.math.roundToInt
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
@@ -182,9 +195,9 @@ private fun rememberRouteRenderer(): RouteRenderer {
     val ctx = LocalContext.current
     val density = LocalDensity.current
     val textPx = with(density) { Type.Chip.fontSize.toPx() }
-    val start = stringResource(R.string.runmap_start)
-    val finish = stringResource(R.string.runmap_finish)
-    val loop = stringResource(R.string.runmap_start_finish)
+    val start = stringResource(Res.string.runmap_start)
+    val finish = stringResource(Res.string.runmap_finish)
+    val loop = stringResource(Res.string.runmap_start_finish)
     return remember(palette, density.density, textPx, start, finish, loop) {
         val flag = ContextCompat.getDrawable(ctx, R.drawable.ic_route_finish_flag)!!.mutate()
         flag.setTint(palette.bgTop.toArgb())
@@ -214,11 +227,11 @@ private const val TrimCutAlpha = 0.6f
 @Composable
 private fun routeDescription(track: RouteTrack, recordKm: Double, unit: DistanceUnit): String {
     val km = if (recordKm > 0.0) recordKm else track.totalM / 1000.0
-    val distance = spokenDistance(LocalResources.current, distanceFigure(km, unit), unit)
+    val distance = spokenDistance(currentResources(), distanceFigure(km, unit), unit)
     val first = track.segs.first().first()
     val last = track.segs.last().last()
     val loop = haversineM(first.lat, first.lon, last.lat, last.lon) <= LoopCoincidenceM
-    return stringResource(if (loop) R.string.runmap_cd_loop else R.string.runmap_cd, distance)
+    return stringResource(if (loop) Res.string.runmap_cd_loop else Res.string.runmap_cd, distance)
 }
 
 /**
@@ -252,7 +265,7 @@ internal fun RouteMapCard(
         )
     }
     val description = routeDescription(track, recordKm, unit)
-    val openAction = stringResource(R.string.runmap_open_full_action)
+    val openAction = stringResource(Res.string.runmap_open_full_action)
     var open by rememberSaveable(entryId) { mutableStateOf(false) }
     val appear = remember(track) { Animatable(0f) }
     LaunchedEffect(track) { appear.animateTo(1f, tween(MotionMedium)) }
@@ -323,8 +336,8 @@ private fun ExpandButton(modifier: Modifier, onClick: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                painterResource(R.drawable.ic_ui_expand),
-                contentDescription = stringResource(R.string.runmap_open_full),
+                painterResource(Res.drawable.ic_ui_expand),
+                contentDescription = stringResource(Res.string.runmap_open_full),
                 tint = OnBgBody,
                 modifier = Modifier.size(ExpandGlyph),
             )
@@ -410,8 +423,8 @@ private fun FullScreenRouteMap(
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            painterResource(R.drawable.ic_ui_close),
-                            contentDescription = stringResource(R.string.runmap_close),
+                            painterResource(Res.drawable.ic_ui_close),
+                            contentDescription = stringResource(Res.string.runmap_close),
                             tint = OnBgBody,
                             modifier = Modifier.size(FitGlyph),
                         )
@@ -445,8 +458,8 @@ private fun FullScreenRouteMap(
                     contentAlignment = Alignment.CenterEnd,
                 ) {
                     MapOverlayButton(
-                        R.drawable.ic_ui_fit_bounds,
-                        stringResource(R.string.runmap_fit_route),
+                        Res.drawable.ic_ui_fit_bounds,
+                        stringResource(Res.string.runmap_fit_route),
                         size = LargeControlHeight,
                         glyph = FitGlyph,
                         alpha = MapChromeAlpha,
@@ -689,7 +702,7 @@ fun TrimRouteMap(
  *  48dp Recenter (opaque ground). */
 @Composable
 internal fun MapOverlayButton(
-    icon: Int,
+    icon: DrawableResource,
     description: String,
     size: Dp,
     glyph: Dp,

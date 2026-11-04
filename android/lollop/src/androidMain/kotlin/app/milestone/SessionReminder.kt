@@ -10,7 +10,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.res.Resources
 import android.os.Bundle
 import android.os.Build
 import android.text.format.DateFormat
@@ -39,6 +38,13 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import app.milestone.resources.Res
+import app.milestone.resources.reminder_action_log_first_set
+import app.milestone.resources.reminder_action_log_next_set
+import app.milestone.resources.reminder_action_start_run
+import app.milestone.resources.reminder_line_exercises
+import app.milestone.resources.reminder_line_progress
+import app.milestone.resources.reminder_line_single
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
 import app.milestone.widget.WidgetMidnight
@@ -352,7 +358,7 @@ internal fun reminderOf(stored: WidgetSnapshot?, today: Long, zone: String): Rem
  * started, what is left ("1 of 4 done · Bench press next"). Null when there is
  * nothing to say. Pure.
  */
-internal fun reminderLine(res: Resources, reminder: Reminder): String? {
+internal fun reminderLine(res: PlatformResources, reminder: Reminder): String? {
     if (reminder.kind == WidgetDayKind.Run) {
         val run = reminder.items.firstOrNull { it.kind == WidgetItemKind.Run && !it.done } ?: return null
         return listOf(run.detail, run.pace).filter { it.isNotBlank() }.joinToString(" \u00b7 ").ifBlank { null }
@@ -361,19 +367,19 @@ internal fun reminderLine(res: Resources, reminder: Reminder): String? {
     val open = lifts.firstOrNull { !it.done } ?: return null
     val done = lifts.count { it.done }
     return when {
-        lifts.size == 1 -> if (open.detail.isBlank()) open.name else res.getString(R.string.reminder_line_single, open.name, open.detail)
-        done == 0 -> res.getQuantityString(R.plurals.reminder_line_exercises, lifts.size, lifts.size, open.name)
-        else -> res.getString(R.string.reminder_line_progress, done, lifts.size, open.name)
+        lifts.size == 1 -> if (open.detail.isBlank()) open.name else res.getString(Res.string.reminder_line_single, open.name, open.detail)
+        done == 0 -> res.getQuantityString(Res.plurals.reminder_line_exercises, lifts.size, lifts.size, open.name)
+        else -> res.getString(Res.string.reminder_line_progress, done, lifts.size, open.name)
     }
 }
 
 /** The action's label, what one tap does: "Start run", "Log first set", or "Log
  *  next set" once a set of today's lift session is in. Pure. */
-internal fun reminderActionLabel(res: Resources, reminder: Reminder): String = res.getString(
+internal fun reminderActionLabel(res: PlatformResources, reminder: Reminder): String = res.getString(
     when {
-        reminder.kind == WidgetDayKind.Run -> R.string.reminder_action_start_run
-        reminder.items.any { it.kind == WidgetItemKind.Lift && it.done } -> R.string.reminder_action_log_next_set
-        else -> R.string.reminder_action_log_first_set
+        reminder.kind == WidgetDayKind.Run -> Res.string.reminder_action_start_run
+        reminder.items.any { it.kind == WidgetItemKind.Lift && it.done } -> Res.string.reminder_action_log_next_set
+        else -> Res.string.reminder_action_log_first_set
     },
 )
 

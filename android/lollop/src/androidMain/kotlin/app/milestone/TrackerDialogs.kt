@@ -1,6 +1,5 @@
 package app.milestone
 
-import android.content.res.Resources
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,9 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -33,6 +30,19 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.milestone.resources.Res
+import app.milestone.resources.log_discard_confirm
+import app.milestone.resources.run_stat_avg_pace
+import app.milestone.resources.run_stat_distance
+import app.milestone.resources.track_action_resume
+import app.milestone.resources.track_btn_save_run
+import app.milestone.resources.track_discard_body
+import app.milestone.resources.track_discard_title
+import app.milestone.resources.track_finish_summary
+import app.milestone.resources.track_finish_title
+import app.milestone.resources.track_short_run_note
+import app.milestone.resources.track_stat_elapsed
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * Confirm before deleting a recorded run (no undo, nothing logged). Each button maps
@@ -42,9 +52,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 @Composable
 internal fun DiscardRunDialog(enabled: Boolean, onCancel: () -> Unit, onConfirm: () -> Unit) {
     ConfirmDialog(
-        title = stringResource(R.string.track_discard_title),
-        body = stringResource(R.string.track_discard_body),
-        confirmLabel = stringResource(R.string.log_discard_confirm),
+        title = stringResource(Res.string.track_discard_title),
+        body = stringResource(Res.string.track_discard_body),
+        confirmLabel = stringResource(Res.string.log_discard_confirm),
         onDismiss = onCancel,
         onConfirm = onConfirm,
         confirmColor = DangerText,
@@ -116,20 +126,20 @@ internal fun RunFinishPanel(
         trackSegments(RunSession.decimatedTrackForCore(), RunSession.decimatedSegmentStarts())
     }
     val avgPace = averagePaceMinPerKm(elapsedSec, km)
-    val spoken = finishSummarySpoken(LocalResources.current, km, elapsedSec, unit)
+    val spoken = finishSummarySpoken(currentResources(), km, elapsedSec, unit)
     val routeShown = route.sumOf { it.size } >= 2
     val sideControls = LocalWindowLayout.current.sideControls
     val distance = distanceFigure(km, unit)
     val elapsed = formatElapsed(elapsedSec)
     val pace = paceFigure(avgPace, unit)
-    val resumeLabel = stringResource(R.string.track_action_resume)
-    val saveLabel = stringResource(R.string.track_btn_save_run)
+    val resumeLabel = stringResource(Res.string.track_action_resume)
+    val saveLabel = stringResource(Res.string.track_btn_save_run)
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val routeAbove = routeShown && !sideControls
     val review: @Composable ColumnScope.() -> Unit = {
         Text(
-            stringResource(R.string.track_finish_title),
+            stringResource(Res.string.track_finish_title),
             color = OnBgBody,
             style = Type.Title.copy(fontWeight = FontWeight.ExtraBold),
             modifier = Modifier.semantics { heading() },
@@ -155,7 +165,7 @@ internal fun RunFinishPanel(
                         horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
                     ) {
                         LiveFigure(
-                            label = stringResource(R.string.run_stat_distance),
+                            label = stringResource(Res.string.run_stat_distance),
                             value = distance,
                             suffix = unit.distanceLabel,
                             known = km > 0.0,
@@ -163,7 +173,7 @@ internal fun RunFinishPanel(
                             modifier = Modifier.weight(1f),
                         )
                         LiveFigure(
-                            label = stringResource(R.string.track_stat_elapsed),
+                            label = stringResource(Res.string.track_stat_elapsed),
                             value = elapsed,
                             suffix = null,
                             known = true,
@@ -171,7 +181,7 @@ internal fun RunFinishPanel(
                             modifier = Modifier.weight(1f),
                         )
                         LiveFigure(
-                            label = stringResource(R.string.run_stat_avg_pace),
+                            label = stringResource(Res.string.run_stat_avg_pace),
                             value = pace,
                             suffix = unit.paceSuffix,
                             known = avgPace.isFinite(),
@@ -185,7 +195,7 @@ internal fun RunFinishPanel(
                     if (isShortRun(km, elapsedSec)) {
                         InlineNotice(
                             stringResource(
-                                R.string.track_short_run_note,
+                                Res.string.track_short_run_note,
                                 runDistLabel(km, unit),
                                 shortRunThresholdLabel(unit),
                             ),
@@ -269,9 +279,9 @@ private val FinishRouteHeight = 160.dp
 /** The Finish review's figures read aloud with units spelled out, e.g. "0.60
  *  kilometers · 3 minutes 20 seconds moving · 5 minutes 33 seconds per kilometer
  *  average". */
-internal fun finishSummarySpoken(res: Resources, km: Double, elapsedSec: Long, unit: DistanceUnit): String =
+internal fun finishSummarySpoken(res: PlatformResources, km: Double, elapsedSec: Long, unit: DistanceUnit): String =
     res.getString(
-        R.string.track_finish_summary,
+        Res.string.track_finish_summary,
         spokenRunDistance(res, km, unit),
         spokenDuration(res, elapsedSec),
         spokenPace(res, averagePaceMinPerKm(elapsedSec, km), unit),

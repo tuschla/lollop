@@ -9,7 +9,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.res.Resources
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
@@ -17,6 +16,13 @@ import android.provider.Settings
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.content.edit
+import app.milestone.resources.Res
+import app.milestone.resources.log_band_reps
+import app.milestone.resources.log_rest_notif_extra_set
+import app.milestone.resources.log_rest_notif_join
+import app.milestone.resources.log_rest_notif_next
+import app.milestone.resources.log_set_header_n
+import app.milestone.resources.log_set_header_n_of_n
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,10 +64,6 @@ internal object RestAlarm {
     private const val KEY_NEXT_EXERCISE = "next_exercise"
     // The exact-alarm notice was dismissed or its action used: not shown again.
     private const val KEY_EXACT_PROMPT_DONE = "exact_alarm_prompt_done"
-
-    /** A rest the loop scheduled ([AppClock] millis). Kept after the end (the
-     *  overtime readout) until cancelled or replaced. */
-    data class RestRun(val startMillis: Long, val endAtMillis: Long, val exercise: String)
 
     /** The set the loop logs next, as the countdown names it: its exercise and
      *  "Set 3 of 4 · 100 kg × 5" (null when the loop shows no set line). */
@@ -314,14 +316,14 @@ internal object RestAlarm {
 /** The countdown's body line: "Next: Set 3 of 4 · 100 kg × 5" for another set of
  *  the rested [exercise], "Next: Bench press · Set 1 of 3" when the loop moves on.
  *  Null when the loop shows no next set. Pure. */
-internal fun countdownText(res: Resources, exercise: String, next: RestAlarm.NextSet?): String? {
+internal fun countdownText(res: PlatformResources, exercise: String, next: RestAlarm.NextSet?): String? {
     next ?: return null
     val what = when {
         sameExercise(next.exercise, exercise) -> next.detail ?: return null
         next.detail == null -> next.exercise
-        else -> res.getString(R.string.log_rest_notif_join, next.exercise, next.detail)
+        else -> res.getString(Res.string.log_rest_notif_join, next.exercise, next.detail)
     }
-    return res.getString(R.string.log_rest_notif_next, what)
+    return res.getString(Res.string.log_rest_notif_next, what)
 }
 
 /**
@@ -332,7 +334,7 @@ internal fun countdownText(res: Resources, exercise: String, next: RestAlarm.Nex
  * when the action logs no set (finish, a blank editor, an edit). Pure.
  */
 internal fun restNextSet(
-    res: Resources,
+    res: PlatformResources,
     primary: LoopPrimary,
     exercise: String,
     liveItem: PrescriptionView?,
@@ -340,17 +342,17 @@ internal fun restNextSet(
     offPlanSetNumber: Int,
     load: String?,
 ): RestAlarm.NextSet? {
-    fun joined(set: String) = load?.let { res.getString(R.string.log_rest_notif_join, set, it) } ?: set
+    fun joined(set: String) = load?.let { res.getString(Res.string.log_rest_notif_join, set, it) } ?: set
     return when (primary) {
         LoopPrimary.LogPlannedSet -> liveItem?.let {
-            RestAlarm.NextSet(it.exercise, joined(res.getString(R.string.log_set_header_n_of_n, nextSetNumber(it), plannedSetCount(it))))
+            RestAlarm.NextSet(it.exercise, joined(res.getString(Res.string.log_set_header_n_of_n, nextSetNumber(it), plannedSetCount(it))))
         }
         LoopPrimary.LogOffPlanSet ->
-            RestAlarm.NextSet(exercise, joined(res.getString(R.string.log_set_header_n, offPlanSetNumber)))
+            RestAlarm.NextSet(exercise, joined(res.getString(Res.string.log_set_header_n, offPlanSetNumber)))
         LoopPrimary.LogExtraSet ->
-            RestAlarm.NextSet(exercise, joined(res.getString(R.string.log_rest_notif_extra_set)))
+            RestAlarm.NextSet(exercise, joined(res.getString(Res.string.log_rest_notif_extra_set)))
         LoopPrimary.Next -> nextItem?.let {
-            RestAlarm.NextSet(it.exercise, res.getString(R.string.log_set_header_n_of_n, nextSetNumber(it), plannedSetCount(it)))
+            RestAlarm.NextSet(it.exercise, res.getString(Res.string.log_set_header_n_of_n, nextSetNumber(it), plannedSetCount(it)))
         }
         LoopPrimary.Save, LoopPrimary.LogBlank, LoopPrimary.FinishSession -> null
     }
@@ -360,7 +362,7 @@ internal fun restNextSet(
  *  "30 s hold", "12 reps" for a bodyweight rung. Null while the load or reps are
  *  not entered. Pure. */
 internal fun restNextLoad(
-    res: Resources,
+    res: PlatformResources,
     holdSec: Int?,
     weightKg: Double?,
     reps: Int?,
@@ -369,7 +371,7 @@ internal fun restNextLoad(
 ): String? = when {
     holdSec != null -> liftSetLine(res, holdSec, weightKg ?: 0.0, 1, 0.0, false, weightUnit)
     reps == null -> null
-    bodyweight -> res.getQuantityString(R.plurals.log_band_reps, reps, reps)
+    bodyweight -> res.getQuantityString(Res.plurals.log_band_reps, reps, reps)
     weightKg == null -> null
     else -> liftSetLine(res, null, weightKg, reps, 0.0, false, weightUnit)
 }

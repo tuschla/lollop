@@ -1,0 +1,1379 @@
+package app.milestone
+
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.layout.AlignmentLine
+import androidx.compose.ui.layout.FirstBaseline
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.expand
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Constraints
+import app.milestone.resources.Res
+import app.milestone.resources.history_workout_type
+import app.milestone.resources.history_workout_type_cd
+import app.milestone.resources.ic_ui_check
+import app.milestone.resources.ic_ui_chevron_right
+import app.milestone.resources.ic_ui_search
+import app.milestone.resources.ui_cd_collapsed
+import app.milestone.resources.ui_cd_expanded
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
+
+// --- Selectable-control vocabulary (one look for every "pick one" control) ---
+// Scale cells and choice chips ([ChoiceChip]) share: a Space.Md
+// (8dp) corner; unselected = a 4% OnBgBody tint inside a 1dp OnBgFaint @30%
+// hairline with OnBgBody text, so the target has visible bounds on ANY ground
+// (sheet, card, screen) in light and dark; selected = solid Accent with OnAccent
+// text, never an outline ring. Scale cells are 48dp tall; text chips are 40dp
+// visual with a ≥48dp touch target. Segmented controls ([SegmentedEnumRow],
+// [TwoSegmentRow]) are one borderless track ([SegmentTrack]) with the same solid
+// Accent selected segment.
+
+/** Corner shape of every selectable cell / chip / segment. */
+val ChoiceCellShape = RoundedCornerShape(Space.Md.dp)
+
+/** Visual height of a text choice chip (touch target stays ≥48dp). */
+val ChipVisualHeight = 40.dp
+
+/** Opacity of the OnBgBody wash inside an unselected cell (ThemeContrastTest). */
+internal const val ChoiceCellFillAlpha = 0.04f
+
+/** Tint inside an unselected cell (and a disabled action): a 4% OnBgBody wash. */
+val ChoiceCellFill: Color @Composable get() = OnBgBody.copy(alpha = ChoiceCellFillAlpha)
+
+/** Hairline that bounds an unselected cell, an idle input field and a disabled action. */
+val ChoiceCellBorder: Color @Composable get() = HairlineStrong
+
+/** Clip + fill (+ hairline when unselected) for one selectable cell. Chain the
+ *  caller's `.selectable(...)` and inner padding after it. */
+@Composable
+fun Modifier.choiceCell(selected: Boolean): Modifier {
+    val clipped = clip(ChoiceCellShape)
+    return if (selected) {
+        clipped.background(Accent)
+    } else {
+        clipped.background(ChoiceCellFill).border(1.dp, ChoiceCellBorder, ChoiceCellShape)
+    }
+}
+
+/** Text/icon tone on a [choiceCell] or [choiceCard]: OnAccent on the accent fill,
+ *  OnBgBody otherwise (OnBgMuted on the 4% tint dips under AA on the light grounds). */
+@Composable
+fun choiceCellContent(selected: Boolean): Color = if (selected) OnAccent else OnBgBody
+
+/** Secondary line (a subtitle / consequence) on a [choiceCard]: OnAccent on the
+ *  accent fill (a muted tone would fail AA there), OnBgMuted on the card ground. */
+@Composable
+fun choiceCellSecondaryContent(selected: Boolean): Color = if (selected) OnAccent else OnBgMuted
+
+/** Corner shape of a selectable card ([choiceCard]). */
+val ChoiceCardShape = RoundedCornerShape(Space.Card.dp)
+
+/**
+ * Clip + fill for a selectable CARD (a multi-line option such as a setup goal or a
+ * theme swatch): the same selected look as every chip, cell and segment, solid
+ * `Accent` with no outline ring; unselected = the `BgElevated` card ground inside a
+ * 1dp [ChoiceCellBorder] hairline. Chain `.selectable(...)` and inner padding after
+ * it; colour the title with [choiceCellContent] and any second line with
+ * [choiceCellSecondaryContent].
+ */
+@Composable
+fun Modifier.choiceCard(selected: Boolean): Modifier {
+    val clipped = clip(ChoiceCardShape)
+    return if (selected) {
+        clipped.background(Accent)
+    } else {
+        clipped.background(BgElevated).border(1.dp, ChoiceCellBorder, ChoiceCardShape)
+    }
+}
+
+/** Shown in place of an empty numeric value: a faint dash, never a "0" that reads
+ *  as an entry. */
+const val EmptyValuePlaceholder = "—"
+
+/** Width of the edge fade on a horizontally scrolling row. */
+private val EdgeFadeWidth = 16.dp
+
+/**
+ * Fades the clipped edge(s) of a horizontally scrolling row to transparent, so a
+ * cut-off cell reads as "more this way" rather than a cropped layout. An alpha
+ * mask, not a gradient to a guessed surface colour, so it works on any ground.
+ * Apply BEFORE `horizontalScroll` (it masks the viewport, not the content).
+ */
+fun Modifier.horizontalEdgeFade(state: ScrollState): Modifier =
+    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val fade = EdgeFadeWidth.toPx().coerceAtMost(size.width / 2f)
+            if (state.value > 0) {
+                drawRect(
+                    brush = Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = 0f, endX = fade),
+                    size = Size(fade, size.height),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+            if (state.value < state.maxValue) {
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        listOf(Color.Black, Color.Transparent),
+                        startX = size.width - fade,
+                        endX = size.width,
+                    ),
+                    topLeft = Offset(size.width - fade, 0f),
+                    size = Size(fade, size.height),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+        }
+
+/**
+ * Full-width list of exclusive options, one ≥48dp row each, announced as one
+ * radio group, in the list-selection look shared with [SegmentedEnumRow]'s list
+ * fallback. [display] is the on-screen text only. [divideBefore] draws a divider
+ * above the first option it returns true for (the readiness picker fences its
+ * red-flag signals).
+ */
+@Composable
+fun <T> OptionList(
+    options: List<T>,
+    current: T,
+    display: (T) -> String,
+    divideBefore: (T) -> Boolean = { false },
+    onSelect: (T) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Space.Md.dp))
+            .background(BgTop)
+            .selectableGroup(),
+    ) {
+        options.forEachIndexed { i, value ->
+            // A subgroup fence (divideBefore) is the stronger OnBgFaint @30% rule;
+            // every other row boundary gets a faint hairline so an unanswered list
+            // reads as separate choices, not one grey paragraph.
+            if (divideBefore(value)) {
+                HorizontalDivider(color = HairlineStrong)
+            } else if (i > 0) {
+                HorizontalDivider(color = Hairline)
+            }
+            val selected = value == current
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = ActionMinHeight)
+                    .background(if (selected) AccentTint else Color.Transparent)
+                    .selectable(selected = selected, role = Role.RadioButton, onClick = { onSelect(value) })
+                    .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // OnBgBody, not Accent: Accent text on its own tint dips under AA
+                // on the light grounds; the check carries the hue.
+                Text(
+                    display(value),
+                    color = OnBgBody,
+                    style = if (selected) Type.BodyBold else Type.Body,
+                    modifier = Modifier.weight(1f),
+                )
+                if (selected) {
+                    // The row's radio semantics already announce "selected".
+                    Icon(
+                        painterResource(Res.drawable.ic_ui_check),
+                        contentDescription = null,
+                        tint = Accent,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Label + enum picker as a tap-row that expands into a full-width [OptionList].
+ * The header row (label left, current value + chevron right) is a ≥48dp
+ * whole-row tap target; opening it reveals every option at once with the same
+ * generous targets, and picking one collapses the list. Callers serialize only
+ * the value's `.name`.
+ */
+@Composable
+fun <T : Enum<T>> EnumRow(
+    label: String,
+    values: List<T>,
+    current: T,
+    display: (T) -> String = { it.name },
+    divideBefore: (T) -> Boolean = { false },
+    onSelect: (T) -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = ActionMinHeight)
+                .clip(RoundedCornerShape(Space.Md.dp))
+                .clickable(role = Role.Button) { expanded = !expanded }
+                .semantics {
+                    if (expanded) collapse { expanded = false; true } else expand { expanded = true; true }
+                },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, color = OnBgBody, style = Type.Body)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(display(current), color = Accent, style = Type.Body)
+                RowChevron(expanded)
+            }
+        }
+        if (expanded) {
+            OptionList(values, current, display, divideBefore) {
+                onSelect(it)
+                expanded = false
+            }
+        }
+    }
+}
+
+/**
+ * Label + equal-width segments for a short exclusive enum (2–5 options; use
+ * [OptionList] for more or for a subgroup divider). When a label measured at the
+ * current font scale would not fit its segment, the options render as a
+ * full-width radio list instead, so no text is clipped (WCAG 1.4.4). [display] is
+ * the on-screen text only; [label] may be null when the caller renders it.
+ */
+@Composable
+fun <T> SegmentedEnumRow(
+    label: String?,
+    values: List<T>,
+    current: T,
+    display: (T) -> String = { it.toString() },
+    onSelect: (T) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+    ) {
+        // Null = the caller labels the row itself (e.g. a FieldLabel above it).
+        if (label != null) Text(label, color = OnBgBody, style = Type.Body)
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val measurer = rememberTextMeasurer()
+            val density = LocalDensity.current
+            // Measured in the exact style the segment renders (Type.Chip) against
+            // the room a SegmentTrack segment leaves for its label.
+            val labelRoomPx = with(density) { segmentLabelRoom(maxWidth, values.size).toPx() }
+            val fits = values.all { v ->
+                measurer.measure(display(v), style = Type.Chip, maxLines = 1, softWrap = false).size.width <= labelRoomPx
+            }
+            if (fits) {
+                // The same borderless track as TwoSegmentRow: one segmented look app-wide.
+                SegmentTrack(
+                    labels = values.map(display),
+                    selectedIndex = values.indexOf(current),
+                    role = Role.RadioButton,
+                    onSelect = { onSelect(values[it]) },
+                )
+            } else {
+                // Same rows and selection look as every other option list.
+                OptionList(values, current, display, onSelect = onSelect)
+            }
+        }
+    }
+}
+
+// --- Entry primitives: no dropdowns, no −/+ steppers ---
+// Recognition over recall for the logging forms: every choice is visible and one
+// tap picks it. These carry no coaching logic: they only gather the raw inputs the
+// core derives e1RM / RIR / zone from.
+
+/**
+ * The one field / sub-question label: sentence case, `Type.Body` Bold, `OnBgMuted`.
+ * A [trailing] hint sits on the label's first baseline while the whole label fits
+ * beside it on one line; a label that fits its own line but not beside the hint
+ * keeps that line and the hint goes below (no "Effort: reps / left" break at a
+ * large font); a label that wraps anyway keeps the hint beside it while its
+ * longest word still fits there. [heading] marks a setup
+ * sub-question for TalkBack's heading navigation; [onTrailing] makes the hint an
+ * in-place action spoken as [trailingDescription], with a 48dp target. Forms
+ * only: a read-only section header uses [TileOverline].
+ */
+@Composable
+fun FieldLabel(
+    label: String,
+    trailing: String? = null,
+    heading: Boolean = false,
+    onTrailing: (() -> Unit)? = null,
+    trailingDescription: String? = null,
+) {
+    val labelText: @Composable () -> Unit = {
+        Text(
+            label,
+            color = OnBgMuted,
+            style = Type.BodyBold,
+            modifier = if (heading) Modifier.semantics { heading() } else Modifier,
+        )
+    }
+    val hint: @Composable () -> Unit = {
+        if (trailing != null && onTrailing != null) {
+            // Padded (and shifted back by the same amount, so the label stays flush
+            // right) so the target is at least ~48dp wide; the overlay adds the
+            // 48dp height without growing the label row.
+            Box(Modifier.offset(x = Space.Sm.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    trailing,
+                    color = Accent,
+                    style = Type.Caption.copy(fontWeight = FontWeight.Bold).merge(TabularFigures),
+                    // The overlay below carries the role and the spoken label.
+                    modifier = Modifier
+                        .clearAndSetSemantics {}
+                        .padding(horizontal = Space.Sm.dp),
+                )
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .requiredHeight(ActionMinHeight)
+                        .clip(RoundedCornerShape(Space.Md.dp))
+                        .clickable(role = Role.Button, onClick = onTrailing)
+                        .semantics { contentDescription = trailingDescription ?: trailing },
+                )
+            }
+        } else if (trailing != null) {
+            Text(trailing, color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
+        }
+    }
+    Layout(contents = listOf(labelText, hint), modifier = Modifier.fillMaxWidth()) { (labelM, hintM), constraints ->
+        val width = constraints.maxWidth
+        val gap = Space.Md.dp.roundToPx()
+        val loose = Constraints(maxWidth = width)
+        val labelMeasurable = labelM.single()
+        val hintMeasurable = hintM.singleOrNull()
+        val hintWidth = hintMeasurable?.maxIntrinsicWidth(Constraints.Infinity) ?: 0
+        // Side by side while the whole label fits beside the whole hint; a label too
+        // long for one line anyway wraps beside it while its longest word fits (a
+        // narrower column would break the label inside a word). A label that fits
+        // its own line but not beside the hint keeps it: the hint goes below.
+        val besideRoom = width - gap - hintWidth
+        val beside = hintMeasurable != null && run {
+            val whole = labelMeasurable.maxIntrinsicWidth(Constraints.Infinity)
+            whole <= besideRoom || (whole > width && labelMeasurable.minIntrinsicWidth(Constraints.Infinity) <= besideRoom)
+        }
+        if (hintMeasurable == null) {
+            val l = labelMeasurable.measure(loose)
+            layout(width, l.height) { l.placeRelative(0, 0) }
+        } else if (beside) {
+            val h = hintMeasurable.measure(loose)
+            val l = labelMeasurable.measure(Constraints(maxWidth = width - gap - h.width))
+            // Both on the label's first baseline.
+            val lBase = l[FirstBaseline].takeIf { it != AlignmentLine.Unspecified } ?: 0
+            val hBase = h[FirstBaseline].takeIf { it != AlignmentLine.Unspecified } ?: 0
+            val base = maxOf(lBase, hBase)
+            val lY = base - lBase
+            val hY = base - hBase
+            // placeRelative: the label at the start, the hint at the end (mirrored in RTL).
+            layout(width, maxOf(lY + l.height, hY + h.height)) {
+                l.placeRelative(0, lY)
+                h.placeRelative(width - h.width, hY)
+            }
+        } else {
+            val l = labelMeasurable.measure(loose)
+            val h = hintMeasurable.measure(loose)
+            layout(width, l.height + h.height) {
+                l.placeRelative(0, 0)
+                h.placeRelative(width - h.width, l.height)
+            }
+        }
+    }
+}
+
+/** The 1dp hairline between grouped rows inside a card (04-profile §1). */
+@Composable
+internal fun RowHairline(modifier: Modifier = Modifier) {
+    HorizontalDivider(modifier = modifier, thickness = 1.dp, color = OnBgBody.copy(alpha = HairlineAlpha.Row))
+}
+
+/**
+ * A toggle whose WHOLE row is the switch: one ≥48dp touch target, and TalkBack
+ * reads the label with the state ("Show route maps, switch, on"). The inner
+ * [Switch] only draws the state, so it never surfaces as an unnamed control.
+ * [subtitle] is an optional caption under the label.
+ */
+@Composable
+fun LabeledSwitchRow(
+    label: String,
+    checked: Boolean,
+    subtitle: String? = null,
+    subtitleColor: Color = OnBgMuted,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = ActionMinHeight)
+            .clip(RoundedCornerShape(Space.Md.dp))
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            // Vertical inset inside the row's clip: the last caption line never
+            // sits on the clipped edge, so its descenders can't be cut.
+            modifier = Modifier.weight(1f).padding(end = Space.Md.dp).padding(vertical = Space.Sm.dp),
+            verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+        ) {
+            Text(label, color = OnBgBody, style = Type.Body)
+            if (subtitle != null) Text(subtitle, color = subtitleColor, style = Type.Caption)
+        }
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+/**
+ * Width-filling grid of discrete choices, every option visible, one tap to pick,
+ * the selection filled with the accent. For small fixed sets (RPE, HR%, 0–7
+ * counts). Use [ScrollableScaleRow] when the set is longer. [label] names the
+ * field for TalkBack: each cell reads "label, value" instead of a bare number,
+ * and the row is one radio group.
+ *
+ * Cells share ONE column width: all on one row when each gets ≥48dp, otherwise
+ * balanced rows (0–7 → 4 + 4, nine values → 5 + 4) so a wrapped cell keeps its
+ * column width and left edge instead of stretching into an orphan.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun <T> ChoiceScaleRow(
+    options: List<T>,
+    current: T,
+    render: (T) -> String,
+    label: String? = null,
+    onSelect: (T) -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val gapPx = with(density) { Space.Sm.dp.roundToPx() }
+        val minCellPx = with(density) { ActionMinHeight.roundToPx() }
+        val n = options.size.coerceAtLeast(1)
+        val widthPx = if (constraints.hasBoundedWidth) constraints.maxWidth else minCellPx * n + gapPx * (n - 1)
+        val perRow = ((widthPx + gapPx) / (minCellPx + gapPx)).coerceIn(1, n)
+        val rows = (n + perRow - 1) / perRow
+        val cols = (n + rows - 1) / rows
+        // Floored to whole px so `cols` cells + gaps never overflow the row and
+        // wrap one early.
+        val cellWidth = with(density) { ((widthPx - gapPx * (cols - 1)) / cols).toDp() }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+            verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+            maxItemsInEachRow = cols,
+        ) {
+            options.forEach { opt ->
+                ScaleCell(
+                    render(opt), opt == current, label, Modifier.width(cellWidth),
+                    PaddingValues(vertical = Space.Md.dp),
+                ) { onSelect(opt) }
+            }
+        }
+    }
+}
+
+/**
+ * Horizontally-scrollable scale of discrete choices for a longer bounded set
+ * (e.g. reps): every value is reachable by scroll + one tap, no stepper
+ * cycling, the current value filled with the accent. [label] names the field for
+ * TalkBack, as in [ChoiceScaleRow]. [initialCenter] is the cell to open centred
+ * on while nothing is picked (the common range of an unset field).
+ */
+@Composable
+fun <T> ScrollableScaleRow(
+    options: List<T>,
+    current: T?,
+    render: (T) -> String,
+    label: String? = null,
+    initialCenter: T? = null,
+    onSelect: (T) -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    // Open with the current value (else [initialCenter]) in view, roughly centred,
+    // instead of pinned to the left edge, so a long scale (bodyweight = 111
+    // options, running km/wk = 150) doesn't hide the selection off-screen.
+    // Layout-measured, not an item-width guess: the anchor cell reports its own
+    // centre and the row reports its viewport, so the target is exact. Runs once
+    // (guarded) so it never fights the user's manual scroll, and seeded
+    // already-done when there is no anchor in the list, so the first pick never
+    // scrolls the row under the finger.
+    val anchor = current?.takeIf { it in options } ?: initialCenter?.takeIf { it in options }
+    var didInitialScroll by rememberSaveable { mutableStateOf(anchor == null) }
+    var viewportWidth by remember { mutableIntStateOf(0) }
+    var anchorCenter by remember { mutableIntStateOf(-1) }
+    LaunchedEffect(anchorCenter, viewportWidth, scrollState.maxValue) {
+        if (!didInitialScroll && anchorCenter >= 0 && viewportWidth > 0) {
+            scrollState.scrollTo((anchorCenter - viewportWidth / 2).coerceIn(0, scrollState.maxValue))
+            didInitialScroll = true
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onSizeChanged { viewportWidth = it.width }
+            .horizontalEdgeFade(scrollState)
+            .horizontalScroll(scrollState)
+            // End inset inside the scroll content: the last cell clears the fade
+            // and the card edge when scrolled fully right.
+            .padding(end = Space.Card.dp)
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+    ) {
+        options.forEach { opt ->
+            ScaleCell(
+                render(opt),
+                opt == current,
+                label,
+                Modifier
+                    .widthIn(min = ActionMinHeight)
+                    .then(
+                        // Record the anchor cell's content-space centre. Scroll is 0
+                        // on the first layout pass, so positionInParent is the intrinsic
+                        // position we scroll toward.
+                        if (opt == anchor) {
+                            Modifier.onGloballyPositioned {
+                                anchorCenter = (it.positionInParent().x + it.size.width / 2f).toInt()
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
+                PaddingValues(Space.Md.dp),
+            ) { onSelect(opt) }
+        }
+    }
+}
+
+/** One cell of a scale row: the [choiceCell] look, sized by [modifier] and padded
+ *  by [padding]. Selectable (not bare clickable) so TalkBack reads the picked state
+ *  and radio role, with [label] spoken before the value. */
+@Composable
+private fun ScaleCell(
+    text: String,
+    selected: Boolean,
+    label: String?,
+    modifier: Modifier,
+    padding: PaddingValues,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .heightIn(min = ActionMinHeight)
+            .choiceCell(selected)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .then(scaleCellDescription(label, text))
+            .padding(padding),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = choiceCellContent(selected), style = Type.Body.merge(TabularFigures), maxLines = 1)
+    }
+}
+
+/** "label, value" spoken for one scale cell; no-op when the row has no label. */
+private fun scaleCellDescription(label: String?, value: String): Modifier =
+    if (label == null) Modifier else Modifier.semantics { contentDescription = "$label, $value" }
+
+/** Row and column gap between [ChoiceChip]s in a wrapping (FlowRow) group. */
+val ChoiceChipGap = Space.Sm.dp
+
+/**
+ * The ONE text choice chip (workout type, run type, start gates, pain areas): the
+ * shared [choiceCell] look, 40dp visual inside a ≥48dp touch target, `Type.Chip`
+ * label. [role] RadioButton = one option of a pick-one group (`selectable`);
+ * Checkbox = an independent toggle (`toggleable`) that also shows a leading
+ * check when on, so two gates side by side never read as an unpicked radio
+ * pair. [description] replaces the spoken label when the visible one is terse.
+ * Lay several out in a FlowRow spaced by [ChoiceChipGap].
+ */
+@Composable
+fun ChoiceChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    role: Role = Role.RadioButton,
+    description: String? = null,
+) {
+    val content = choiceCellContent(selected)
+    Row(
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .heightIn(min = ChipVisualHeight)
+            .widthIn(min = ActionMinHeight)
+            .choiceCell(selected)
+            .then(
+                if (role == Role.Checkbox) {
+                    Modifier.toggleable(value = selected, role = role, onValueChange = { onClick() })
+                } else {
+                    Modifier.selectable(selected = selected, role = role, onClick = onClick)
+                },
+            )
+            .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier)
+            .padding(horizontal = Space.Card.dp, vertical = Space.Sm.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp, Alignment.CenterHorizontally),
+    ) {
+        if (selected && role == Role.Checkbox) {
+            Icon(
+                painterResource(Res.drawable.ic_ui_check),
+                contentDescription = null,
+                tint = content,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        // Wraps rather than ellipsizing at a large font scale: a chip grows a line
+        // taller instead of cutting its option text.
+        Text(label, color = content, style = Type.Chip)
+    }
+}
+
+/** Run types in the order a runner thinks of them, easiest first. */
+private val RunTypeOrder = listOf(
+    WorkoutType.Easy,
+    WorkoutType.Recovery,
+    WorkoutType.Steady,
+    WorkoutType.LongRun,
+    WorkoutType.Tempo,
+    WorkoutType.Interval,
+)
+
+/**
+ * The run's type as a single-select [ChoiceChip] FlowRow under its [FieldLabel]:
+ * Easy, Recovery, Steady, Long run, Tempo, Interval. USER DATA only; [onSelect]
+ * gets the tapped type, and the caller toggles a re-tapped type off.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun RunTypeChips(selected: WorkoutType?, onSelect: (WorkoutType) -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+        FieldLabel(stringResource(Res.string.history_workout_type))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(ChoiceChipGap),
+            verticalArrangement = Arrangement.spacedBy(ChoiceChipGap),
+        ) {
+            RunTypeOrder.forEach { wt ->
+                ChoiceChip(
+                    label = wt.label,
+                    selected = wt == selected,
+                    description = stringResource(Res.string.history_workout_type_cd, wt.label),
+                    onClick = { onSelect(wt) },
+                    modifier = Modifier.testTag("run-type-${wt.name}"),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * One compact stat cell for a horizontal summary strip (History week header),
+ * using the app-wide tile anatomy: big tabular value (with optional small unit)
+ * over its label. A [RowScope] extension so callers place several across a row
+ * with `weight`. A [value] of [EmptyValuePlaceholder] ("nothing logged") renders
+ * as the faint dash with no unit, never a "0.0 t" that reads as a measurement.
+ */
+@Composable
+fun RowScope.StatTile(value: String, unit: String?, label: String, glossaryKey: String? = null) {
+    // History week-strip anatomy (spec 03-history §1): value ABOVE (19sp
+    // ExtraBold, tabular) with the unit inline muted, label below-left.
+    // fillMaxHeight: in a `height(IntrinsicSize.Min)` row every tile takes the
+    // tallest tile's height, so a glossary ⓘ never leaves a ragged bottom edge.
+    // A traversal group: TalkBack reads each tile's value and label together, tile
+    // by tile, even when a large font wraps one label to more lines than another.
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .traversalGroup()
+            .clip(RoundedCornerShape(12.dp))
+            .background(BgElevated)
+            .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp + Space.Xs.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+    ) {
+        val empty = value == EmptyValuePlaceholder
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                value,
+                color = if (empty) OnBgFaint else OnBgBody,
+                style = Type.StatValue,
+                maxLines = 1,
+            )
+            if (unit != null && !empty) {
+                Text(" $unit", color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
+            }
+        }
+        // Label, with an optional glossary affordance for jargon tiles.
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+            Text(label, color = OnBgFaint, style = Type.Caption)
+            glossaryKey?.let { GlossaryInfo(it) }
+        }
+    }
+}
+
+/** Row-disclosure chevron (`ui-chevron-right`, 16dp, `OnBgFaint`), pointing to the
+ *  end edge; turned to point down when the row is expanded. One shared affordance
+ *  for every tappable row; a [TextAction] that opens something tints it with its
+ *  label tone. */
+@Composable
+fun RowChevron(expanded: Boolean = false, tint: Color = OnBgFaint) {
+    // The drawable mirrors under RTL ("‹"), so it turns the other way to point down.
+    val turn = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -90f else 90f
+    Icon(
+        painterResource(Res.drawable.ic_ui_chevron_right),
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier
+            .size(16.dp)
+            .rotate(if (expanded) turn else 0f),
+    )
+}
+
+/** A whole-row ≥48dp button: [content] stacked at the start, the [RowChevron]
+ *  at the end (none without [chevron]). [modifier] is the row's surface (clip,
+ *  ground, border) under the click; [contentPadding] sits inside it. With
+ *  [expanded] the row folds a section open: the chevron turns and TalkBack
+ *  hears "Expanded" / "Collapsed". */
+@Composable
+internal fun ChevronRow(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    expanded: Boolean? = null,
+    chevron: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(),
+    spacing: Dp = Space.Card.dp,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val state = expanded?.let { stringResource(if (it) Res.string.ui_cd_expanded else Res.string.ui_cd_collapsed) }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = ActionMinHeight)
+            .clickable(role = Role.Button, onClick = onClick)
+            .then(if (state != null) Modifier.semantics { stateDescription = state } else Modifier)
+            .padding(contentPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp), content = content)
+        if (chevron) RowChevron(expanded == true)
+    }
+}
+
+/** A [ChevronRow] reading a bold [title] over a faint one-line [subtitle]. */
+@Composable
+internal fun TitleSubtitleRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    expanded: Boolean? = null,
+    contentPadding: PaddingValues = PaddingValues(),
+) = ChevronRow(onClick, modifier, expanded, contentPadding = contentPadding) {
+    Text(title, color = OnBgBody, style = Type.BodyBold)
+    Text(subtitle, color = OnBgFaint, style = Type.Caption)
+}
+
+/** [lead] at the start and [trail] at the end of one row, each centred on the
+ *  row's height, while [fitsBeside] (the lead, the trail's width, the row's
+ *  width) says the lead fits; otherwise [trail] goes under [lead], at the end,
+ *  and the lead may take the row's width less [stackedEndInset]. Start and end
+ *  mirror under RTL. */
+@Composable
+internal fun BesideOrStacked(
+    lead: @Composable () -> Unit,
+    trail: @Composable () -> Unit,
+    modifier: Modifier,
+    stackedEndInset: Dp = 0.dp,
+    fitsBeside: (lead: Measurable, trailWidth: Int, width: Int) -> Boolean,
+) {
+    Layout(contents = listOf(lead, trail), modifier = modifier) { (leadM, trailM), constraints ->
+        val width = constraints.maxWidth
+        val leadMeasurable = leadM.single()
+        val t = trailM.single().measure(Constraints(maxWidth = width))
+        if (fitsBeside(leadMeasurable, t.width, width)) {
+            val l = leadMeasurable.measure(Constraints(maxWidth = (width - t.width).coerceAtLeast(0)))
+            val h = maxOf(l.height, t.height)
+            layout(width, h) {
+                l.placeRelative(0, (h - l.height) / 2)
+                t.placeRelative(width - t.width, (h - t.height) / 2)
+            }
+        } else {
+            val l = leadMeasurable.measure(Constraints(maxWidth = (width - stackedEndInset.roundToPx()).coerceAtLeast(0)))
+            layout(width, l.height + t.height) {
+                l.placeRelative(0, 0)
+                t.placeRelative(width - t.width, l.height)
+            }
+        }
+    }
+}
+
+// --- Action buttons: ONE system, three tiers ---
+// * PrimaryButton: the one "do this next" of a screen or card. Solid Accent fill,
+//   ExtraBold OnAccent label.
+// * SecondaryButton: any other button-weight action (Edit, Export GPX, Trim run,
+//   Back, Cancel). Tonal AccentTint fill, no border, Bold OnBgBody label (Accent
+//   text on the tint dips under AA on Meadow-light).
+// * TextAction: a quiet in-place or navigating action (Change, Skip exercise,
+//   Finish, Move session ›, Delete). Bold Accent label (DangerText when it destroys
+//   something), a trailing chevron only when it opens something, no fill.
+// Both buttons share [ActionShape] and a ≥48dp height; a disabled button keeps its
+// pill ([ChoiceCellFill] inside a [ChoiceCellBorder] hairline, never the plain
+// ground, which vanishes on a light sheet) with an OnBgMuted label: an inactive
+// control is exempt from WCAG 1.4.3.
+// Every tier keeps a ≥48dp touch target. Outlined buttons are NOT part of the
+// system: an outline reads as an input field or a selected chip, and a danger
+// outline weighs as much as the primary beside it.
+
+/** Corner shape of every [PrimaryButton] / [SecondaryButton]. */
+val ActionShape = RoundedCornerShape(Space.Card.dp)
+
+/**
+ * The primary action: solid `Accent` fill, ExtraBold `OnAccent` label, [ActionShape],
+ * ≥[minHeight] (a pinned editor action passes 56dp). Width is the caller's
+ * (`Modifier.fillMaxWidth()` or a `weight` in a row). The label wraps rather than
+ * clipping at a large font scale. [description] replaces the spoken label when the
+ * same label repeats on one screen ("Log set 1 of 4: Back Squat"). [danger] fills
+ * it with the danger red for a safety commit ("Report pain").
+ */
+@Composable
+fun PrimaryButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    description: String? = null,
+    minHeight: Dp = ActionMinHeight,
+    danger: Boolean = false,
+) {
+    val (fill, labelColor) = if (danger) LocalStatusColors.current.danger to DangerLabel else Accent to OnAccent
+    ActionButton(label, onClick, modifier, enabled, description, minHeight, fill, labelColor, FontWeight.ExtraBold)
+}
+
+/** The secondary action: tonal [AccentTint] fill, no border, Bold `OnBgBody`
+ *  label; otherwise identical to [PrimaryButton]. */
+@Composable
+fun SecondaryButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    description: String? = null,
+) {
+    ActionButton(
+        label, onClick, modifier, true, description, ActionMinHeight,
+        AccentTint, OnBgBody, FontWeight.Bold,
+    )
+}
+
+@Composable
+private fun ActionButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    enabled: Boolean,
+    description: String?,
+    minHeight: Dp,
+    fill: Color,
+    labelColor: Color,
+    weight: FontWeight,
+) {
+    Box(
+        modifier = modifier
+            .heightIn(min = minHeight)
+            .clip(ActionShape)
+            .then(
+                if (enabled) {
+                    Modifier.background(fill)
+                } else {
+                    Modifier.background(ChoiceCellFill).border(1.dp, ChoiceCellBorder, ActionShape)
+                },
+            )
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { if (description != null) contentDescription = description }
+            .padding(horizontal = Space.Card.dp, vertical = Space.Sm.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = if (enabled) labelColor else OnBgMuted,
+            style = Type.Body.copy(fontWeight = weight),
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * The tertiary (text) action: a Bold `Accent` label ([DangerText] when [danger])
+ * with no fill, inside a ≥48dp touch target, so it reads as a control and never as
+ * a second section label. [chevron] adds a trailing chevron in the label tone when
+ * the action opens something (a picker, a sheet, another screen); in-place actions
+ * (Edit, Finish, Undo, Delete) go without. [tint] recolours the SAME action for a
+ * non-default surface only (white on the danger SafetyBanner, where Accent fails);
+ * style and behaviour never vary per call site. See [TextActionInset] for start
+ * alignment.
+ */
+@Composable
+fun TextAction(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    description: String? = null,
+    danger: Boolean = false,
+    chevron: Boolean = false,
+    enabled: Boolean = true,
+    tint: Color? = null,
+) {
+    val tone = when {
+        !enabled -> OnBgMuted
+        tint != null -> tint
+        danger -> DangerText
+        else -> Accent
+    }
+    Row(
+        modifier = modifier
+            .heightIn(min = ActionMinHeight)
+            .widthIn(min = ActionMinHeight)
+            .clip(RoundedCornerShape(Space.Md.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { if (description != null) contentDescription = description }
+            .padding(horizontal = TextActionInset),
+        horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Weighted (not filling): a label that fills the line wraps, and the
+        // chevron keeps its room instead of being squeezed out at a large font.
+        Text(label, color = tone, style = Type.BodyBold, modifier = Modifier.weight(1f, fill = false))
+        if (chevron) RowChevron(tint = tone)
+    }
+}
+
+/** Width (px, at [density] and [measurer]'s font scale) a chevron-less [TextAction]
+ *  labelled [label] takes with the label on one line. */
+internal fun textActionWidthPx(measurer: TextMeasurer, density: Density, label: String): Int = with(density) {
+    val text = measurer.measure(label, Type.BodyBold, maxLines = 1, softWrap = false).size.width
+    maxOf(ActionMinHeight.roundToPx(), text + TextActionInset.roundToPx() * 2)
+}
+
+/** The ONE tile/card overline (chrome §3): 12sp Bold UPPERCASE, `OnBgFaint`,
+ *  top-left. Every data tile and card label goes through this. */
+@Composable
+fun TileOverline(text: String, color: Color = OnBgFaint) {
+    Text(text.uppercase(), color = color, style = Type.Overline)
+}
+
+/** Section overline: the top-left accent UPPERCASE label over a screen section,
+ *  a TalkBack heading. */
+@Composable
+fun SectionOverline(text: String) {
+    Text(
+        text.uppercase(),
+        color = Accent,
+        style = Type.Section,
+        modifier = Modifier.fillMaxWidth().padding(top = Space.Sm.dp).semantics { heading() },
+    )
+}
+
+/** A sheet, dialog or card title: [Type.Title] in `OnBgBody`, a TalkBack heading. */
+@Composable
+fun SheetTitle(text: String, modifier: Modifier = Modifier, textAlign: TextAlign? = null) {
+    Text(text, color = OnBgBody, style = Type.Title, modifier = modifier.semantics { heading() }, textAlign = textAlign)
+}
+
+/** A rounded icon ground ([size], 36dp by default) holding a tinted 20dp symbol:
+ *  the leading tile of a chooser or activity row. */
+@Composable
+fun IconTile(painter: Painter, tint: Color, ground: Color, size: Dp = 36.dp) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(10.dp))
+            .background(ground),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painter, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+    }
+}
+
+/**
+ * Two-option segmented control (spec 03-history §2, INVARIANT 4): exactly two
+ * segments, drawn as the app's one [SegmentTrack]. Tab role (it switches a view).
+ * No third option, no counts in the labels. [compact] is for a secondary toggle
+ * that refines a section rather than switching the page (a chart's range on its
+ * overline row): same solid Accent selection, but the track wraps its labels and
+ * draws 32dp tall (touch targets stay ≥48dp), so it never weighs as much as a
+ * full-width page filter above it.
+ */
+@Composable
+fun TwoSegmentRow(left: String, right: String, selectedIndex: Int, compact: Boolean = false, onSelect: (Int) -> Unit) {
+    SegmentTrack(listOf(left, right), selectedIndex, Role.Tab, compact, onSelect)
+}
+
+/**
+ * The ONE segmented-control look, shared by [TwoSegmentRow] and [SegmentedEnumRow]:
+ * a borderless track in the [ChoiceCellFill] wash (40dp visual, so it reads on any
+ * ground; each segment keeps a ≥48dp touch target). Selected = a solid `Accent`
+ * segment with bold `OnAccent` text and no outline ring; unselected = plain
+ * `OnBgBody` text on the track (`OnBgMuted` on the wash dips under AA on the light
+ * grounds). No check glyph: the fill is the selection. [compact]: the track wraps
+ * its content and draws 32dp tall inside the same 48dp touch row.
+ */
+@Composable
+private fun SegmentTrack(
+    labels: List<String>,
+    selectedIndex: Int,
+    role: Role,
+    compact: Boolean = false,
+    onSelect: (Int) -> Unit,
+) {
+    val trackFill = ChoiceCellFill
+    // The visible track is inset top and bottom inside the 48dp touch row, so the
+    // control reads 40dp (compact: 32dp) tall while each segment's tap target spans
+    // the full 48dp.
+    val touchInset = if (compact) CompactSegmentTouchInset else SegmentTouchInset
+    Row(
+        modifier = Modifier
+            .then(if (compact) Modifier else Modifier.fillMaxWidth())
+            .selectableGroup()
+            .segmentTrackGround(trackFill, touchInset)
+            .padding(horizontal = SegmentTrackPadding),
+        horizontalArrangement = Arrangement.spacedBy(SegmentTrackPadding),
+    ) {
+        labels.forEachIndexed { i, label ->
+            val selected = i == selectedIndex
+            Box(
+                modifier = Modifier
+                    .then(if (compact) Modifier.widthIn(min = ActionMinHeight) else Modifier.weight(1f))
+                    .heightIn(min = ActionMinHeight)
+                    // Selectable so TalkBack announces the selected state (and
+                    // "1 of N") instead of a bare, stateless click target.
+                    .selectable(
+                        selected = selected,
+                        role = role,
+                        onClick = { onSelect(i) },
+                    )
+                    // Track inset + its 2dp inner gap.
+                    .padding(vertical = touchInset + SegmentTrackPadding),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .then(if (compact) Modifier.widthIn(min = 44.dp) else Modifier.fillMaxWidth())
+                        .heightIn(min = if (compact) 28.dp else 36.dp)
+                        .clip(SegmentShape)
+                        .then(if (selected) Modifier.background(Accent) else Modifier)
+                        .padding(horizontal = if (compact) Space.Md.dp else SegmentLabelInset),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        color = if (selected) OnAccent else OnBgBody,
+                        style = if (selected) Type.Chip else Type.ChipMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Vertical gap between a 48dp touch row and a compact track's 32dp visual. */
+private val CompactSegmentTouchInset = 8.dp
+
+/** Vertical gap between a 48dp touch row and its 40dp visible track. */
+internal val SegmentTouchInset = 4.dp
+
+/** Track inner padding and the gap between segments. */
+internal val SegmentTrackPadding = Space.Xs.dp
+
+/** Corner shape of a selected segment inside its track, and of a [Chip]. */
+internal val SegmentShape = RoundedCornerShape(Space.Md.dp - Space.Xs.dp)
+
+/** The segmented track's ground: a [fill] round rect inset [inset] top and bottom
+ *  inside the 48dp touch row, shared by [SegmentTrack] and [RatingScale]. */
+internal fun Modifier.segmentTrackGround(fill: Color, inset: Dp): Modifier = drawBehind {
+    val px = inset.toPx()
+    drawRoundRect(
+        fill,
+        topLeft = Offset(0f, px),
+        size = Size(size.width, size.height - px * 2f),
+        cornerRadius = CornerRadius(Space.Md.dp.toPx()),
+    )
+}
+
+/** Horizontal padding between a segment's edge and its label. */
+private val SegmentLabelInset = Space.Sm.dp
+
+/** Width one segment's label may take inside a [SegmentTrack] of [count] segments
+ *  spanning [trackWidth]: track padding, inter-segment gaps and label insets come
+ *  off, floored by 1dp so a label that "just fits" never clips. */
+private fun segmentLabelRoom(trackWidth: Dp, count: Int): Dp =
+    (trackWidth - SegmentTrackPadding * 2 - SegmentTrackPadding * (count - 1)) / count -
+        SegmentLabelInset * 2 - 1.dp
+
+/** Small date badge for history cards: `OnBgFaint` on `BgTop`, chip radius. */
+@Composable
+fun DateBadge(text: String) {
+    if (text.isEmpty()) return
+    Text(
+        text,
+        color = OnBgFaint,
+        style = Type.Chip,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(BgTop)
+            .padding(horizontal = Space.Md.dp, vertical = Space.Sm.dp),
+    )
+}
+
+/** Gap between theme swatch cards, across a row and between grid rows. */
+private val ThemeSwatchGap = Space.Md.dp
+
+/** Side padding inside a theme swatch card (also the label's measured room). */
+private val ThemeSwatchInset = Space.Md.dp
+
+/**
+ * The theme picker: one [ThemeSwatchCard] per [AppTheme], in enum order. Four
+ * across while every name fits on one line in its card at the current font
+ * scale (measured in the exact style the card renders, like [SegmentedEnumRow]);
+ * otherwise a 2×2 grid, so a name never breaks mid-word at 130 % / 200 % type.
+ * A radio group to TalkBack.
+ */
+@Composable
+fun ThemeSwatchPicker(current: AppTheme, onSelect: (AppTheme) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val measurer = rememberTextMeasurer()
+        val density = LocalDensity.current
+        val themes = AppTheme.entries
+        val labelRoomPx = with(density) {
+            ((maxWidth - ThemeSwatchGap * (themes.size - 1)) / themes.size - ThemeSwatchInset * 2).toPx()
+        }
+        val fits = themes.all {
+            measurer.measure(it.name, style = Type.Chip, maxLines = 1, softWrap = false).size.width <= labelRoomPx
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().selectableGroup(),
+            verticalArrangement = Arrangement.spacedBy(ThemeSwatchGap),
+        ) {
+            themes.chunked(if (fits) themes.size else 2).forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(ThemeSwatchGap),
+                ) {
+                    row.forEach { t -> ThemeSwatchCard(t, selected = t == current) { onSelect(t) } }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A theme choice as a swatch card: a mini preview of the theme's LIGHT face (its
+ * ground with an elevated-card bar and its accent dot) over its name, drawn as a
+ * [choiceCard] (selected = solid Accent, no outline, like every other selection).
+ * The light face is each theme's most recognisable one (rose blush, mint, butter
+ * cream, white paper) and it reads the theme's own [AppTheme.light] palette, so
+ * every card previews itself regardless of the active theme or dark mode. The
+ * preview plate keeps a 1dp hairline so a white ground (Paper) never melts into a
+ * light card, and an OnAccent hairline on the selected accent fill.
+ */
+@Composable
+private fun RowScope.ThemeSwatchCard(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
+    val pal = theme.light
+    val plateShape = RoundedCornerShape(Space.Md.dp)
+    val barShape = RoundedCornerShape(Space.Sm.dp)
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .choiceCard(selected)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = Space.Card.dp, horizontal = ThemeSwatchInset),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(plateShape)
+                .background(pal.bgTop)
+                .border(1.dp, if (selected) OnAccent.copy(alpha = 0.4f) else ChoiceCellBorder, plateShape)
+                .padding(Space.Sm.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(16.dp).clip(CircleShape).background(pal.accent))
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(16.dp)
+                    .clip(barShape)
+                    .background(pal.bgElevated)
+                    .border(1.dp, pal.onBgFaint.copy(alpha = HairlineAlpha.Strong), barShape),
+            )
+        }
+        // Wraps rather than clipping if a name still outgrows its card.
+        Text(
+            theme.name,
+            color = choiceCellContent(selected),
+            style = Type.Chip,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * A one-line search field: a `BgSunken` well in a 1dp [ChoiceCellBorder] hairline
+ * (1.5dp `Accent` while focused), a leading 18dp search glyph and a faint [hint]
+ * placeholder. The field names itself with [hint], so it keeps an accessible name
+ * once it holds text; the placeholder is hidden from accessibility so the name is
+ * read once. The keyboard's [imeAction] key folds it.
+ */
+@Composable
+internal fun SearchWell(
+    value: String,
+    onChange: (String) -> Unit,
+    hint: String,
+    testTag: String,
+    imeAction: ImeAction,
+    verticalPadding: Dp,
+    bold: Boolean = false,
+    capitalization: KeyboardCapitalization = KeyboardCapitalization.None,
+    onFocusChange: (Boolean) -> Unit = {},
+) {
+    val focusManager = LocalFocusManager.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(Space.Card.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = ActionMinHeight)
+            .clip(shape)
+            .background(BgSunken)
+            .border(if (focused) 1.5.dp else 1.dp, if (focused) Accent else ChoiceCellBorder, shape)
+            .padding(horizontal = Space.Card.dp, vertical = verticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+    ) {
+        Icon(
+            painterResource(Res.drawable.ic_ui_search),
+            contentDescription = null,
+            tint = OnBgFaint,
+            modifier = Modifier.size(18.dp),
+        )
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            singleLine = true,
+            textStyle = Type.Body.copy(fontWeight = if (bold) FontWeight.Bold else null, color = OnBgBody),
+            cursorBrush = SolidColor(Accent),
+            keyboardOptions = KeyboardOptions(capitalization = capitalization, imeAction = imeAction),
+            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }, onSearch = { focusManager.clearFocus() }),
+            modifier = Modifier
+                .weight(1f)
+                .testTag(testTag)
+                .semantics { contentDescription = hint }
+                .onFocusChanged {
+                    focused = it.isFocused
+                    onFocusChange(it.isFocused)
+                },
+            decorationBox = { inner ->
+                Box {
+                    if (value.isEmpty()) Text(hint, color = OnBgFaint, style = Type.Body, modifier = Modifier.clearAndSetSemantics {})
+                    inner()
+                }
+            },
+        )
+    }
+}

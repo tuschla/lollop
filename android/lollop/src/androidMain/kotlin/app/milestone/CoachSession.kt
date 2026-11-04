@@ -29,17 +29,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import app.milestone.resources.Res
+import app.milestone.resources.main_core_unavailable_message
+import app.milestone.resources.main_core_unavailable_title
+import app.milestone.resources.main_data_unreadable
+import app.milestone.resources.main_discard
+import app.milestone.resources.main_restored_entries
+import app.milestone.resources.main_restoring_data
+import app.milestone.resources.main_resume_run_message
+import app.milestone.resources.main_resume_run_title
+import app.milestone.resources.main_save_failed
+import app.milestone.resources.profile_export_data
+import app.milestone.resources.track_action_resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.stringResource
 
 // How old a crash-recovery sidecar's newest fix may be and still be offered
 // for resume. Beyond this the app was gone long enough that the run is almost
@@ -95,7 +106,7 @@ internal class CoachSession(
 @Composable
 private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): CoachSession {
     val ctx = LocalContext.current
-    val res = LocalResources.current
+    val res = currentResources()
     // Seed from the process-level EventDispatcher.model so a rotation renders the
     // last content instantly; a cold start (flow still null) shows the splash while
     // the boot effect below restores the log off the main thread and hydrates.
@@ -114,10 +125,10 @@ private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): Coac
     LaunchedEffect(Unit) {
         EventDispatcher.notices.collect { notice ->
             val text = when (notice) {
-                CoreNotice.NotSaved -> R.string.main_save_failed
-                CoreNotice.Unreadable -> R.string.main_data_unreadable
+                CoreNotice.NotSaved -> Res.string.main_save_failed
+                CoreNotice.Unreadable -> Res.string.main_data_unreadable
             }
-            Toast.makeText(ctx, text, Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, res.getString(text), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -266,7 +277,7 @@ private fun rememberCoachSession(openRequest: MutableStateFlow<OpenDest?>): Coac
             if (restoredEntries >= 0) {
                 setupPrefs.edit { remove(KEY_RESTORED_ENTRIES) }
                 UiMessages.post(
-                    UiMessage(res.getQuantityString(R.plurals.main_restored_entries, restoredEntries, restoredEntries)),
+                    UiMessage(res.getQuantityString(Res.plurals.main_restored_entries, restoredEntries, restoredEntries)),
                 )
             }
             // An interrupted run's sidecar is offered, never auto-resumed; skipped when
@@ -341,8 +352,8 @@ internal fun ResumeRunDialog(session: CoachSession) {
     val liveRun = { RunSession.tracking.value || RunSession.armed.value }
     AppDialog(
         onDismiss = { /* deliberate choice required */ },
-        title = { Text(stringResource(R.string.main_resume_run_title)) },
-        text = { Text(stringResource(R.string.main_resume_run_message)) },
+        title = { Text(stringResource(Res.string.main_resume_run_title)) },
+        text = { Text(stringResource(Res.string.main_resume_run_message)) },
         confirmButton = {
             TextButton(onClick = {
                 session.showResumePrompt = false
@@ -373,14 +384,14 @@ internal fun ResumeRunDialog(session: CoachSession) {
                         ActiveRunStore.clear()
                     }
                 }
-            }) { Text(stringResource(R.string.track_action_resume)) }
+            }) { Text(stringResource(Res.string.track_action_resume)) }
         },
         dismissButton = {
             TextButton(onClick = {
                 session.showResumePrompt = false
                 EventDispatcher.recoveredSidecar = null
                 if (!liveRun()) ActiveRunStore.clear()
-            }) { Text(stringResource(R.string.main_discard), color = DangerText) }
+            }) { Text(stringResource(Res.string.main_discard), color = DangerText) }
         },
     )
 }
@@ -407,7 +418,7 @@ internal fun CoachScreen(openRequest: MutableStateFlow<OpenDest?>) {
                 verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
             ) {
                 CircularProgressIndicator(color = Accent)
-                if (restoring) Text(stringResource(R.string.main_restoring_data), color = OnBgMuted, style = Type.Body)
+                if (restoring) Text(stringResource(Res.string.main_restoring_data), color = OnBgMuted, style = Type.Body)
             }
         }
         return
@@ -431,9 +442,9 @@ internal fun CoreUnavailableScreen() {
         contentAlignment = Alignment.Center,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Card.dp)) {
-            SheetTitle(stringResource(R.string.main_core_unavailable_title))
-            Text(stringResource(R.string.main_core_unavailable_message), color = OnBgBody, style = Type.Body)
-            PrimaryButton(stringResource(R.string.profile_export_data), onClick = exportData, modifier = Modifier.fillMaxWidth())
+            SheetTitle(stringResource(Res.string.main_core_unavailable_title))
+            Text(stringResource(Res.string.main_core_unavailable_message), color = OnBgBody, style = Type.Body)
+            PrimaryButton(stringResource(Res.string.profile_export_data), onClick = exportData, modifier = Modifier.fillMaxWidth())
         }
     }
 }

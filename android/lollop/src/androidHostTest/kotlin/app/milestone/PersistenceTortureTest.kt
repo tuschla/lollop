@@ -131,8 +131,9 @@ class PersistenceTortureTest {
 
     private fun entryIdCount(id: Long) = countLines { "\"entry_id\":$id" in it }
 
+    /** Set the engine's private [name] field (declared by [DurableCore], Core's superclass). */
     private fun setField(name: String, value: Any?) {
-        Core.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(Core, value)
+        DurableCore::class.java.getDeclaredField(name).apply { isAccessible = true }.set(Core, value)
     }
 
     // ── 1. Crash at every byte of an append ─────────────────────────────────────
@@ -187,7 +188,7 @@ class PersistenceTortureTest {
             assertTrue("cut at $k: read() must not rewrite", bytes.contentEquals(logFile.readBytes()))
             val loaded = EventLog.load(logFile)
             assertEquals("cut at $k: load == read", read.lines, loaded.lines)
-            assertTrue("cut at $k: the healed log ends in a newline", EventLog.endsWithNewline(logFile))
+            assertTrue("cut at $k: the healed log ends in a newline", LogFiles.endsWithNewline(logFile))
             assertEquals("cut at $k: a second load is a fixed point", loaded.lines, EventLog.load(logFile).lines)
         }
     }
@@ -447,7 +448,7 @@ class PersistenceTortureTest {
         val original = compactableLog()
         logFile.writeText(original.joinToString("") { "$it\n" } + "{\"Lo")
         ProcessDeath.kill(ctx)
-        val restoredFlag = Core.javaClass.getDeclaredField("restored").apply { isAccessible = true }
+        val restoredFlag = DurableCore::class.java.getDeclaredField("restored").apply { isAccessible = true }
         val booter = thread(name = "boot") { Core.restore(ctx) }
         // Send the moment restore has begun (it marks `restored` before reading the
         // log): the send must wait for the rewrite, then append to the new file.

@@ -21,73 +21,30 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import app.milestone.resources.Res
+import app.milestone.resources.history_delete_set
+import app.milestone.resources.history_delete_set_message
+import app.milestone.resources.history_detail_with_date
+import app.milestone.resources.history_e1rm_range
+import app.milestone.resources.history_edit_set
+import app.milestone.resources.history_pct_e1rm
+import app.milestone.resources.history_run_deleted
+import app.milestone.resources.history_run_updated
+import app.milestone.resources.history_set_deleted
+import app.milestone.resources.history_set_e1rm_label
+import app.milestone.resources.history_set_load_label
+import app.milestone.resources.history_set_updated
+import app.milestone.resources.ic_ui_delete
+import app.milestone.resources.ic_ui_edit
+import app.milestone.resources.log_undo
+import app.milestone.resources.log_value_with_unit
+import app.milestone.resources.main_delete
+import app.milestone.resources.main_delete_set_title
+import app.milestone.resources.main_set
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
 
-/** The [Event.DeleteEntry] for a logged entry: by entry_id, with observed_at as
- *  the legacy fallback the core uses when the id is 0. */
-internal fun deleteEventFor(entry: HistoryEntry): Event = when (entry) {
-    is HistoryEntry.Lift -> Event.DeleteEntry(
-        Event.EntryKind.Set, entry.v.entry_id, observedAtFallback = entry.v.observed_at,
-    )
-    is HistoryEntry.Run -> Event.DeleteEntry(
-        Event.EntryKind.Run, entry.v.entry_id, observedAtFallback = entry.v.observed_at,
-    )
-}
-
-/**
- * The event that logs a deleted entry again, for "Undo": the same entry_id,
- * observed_at and figures the view shows (the core re-derives everything else:
- * a typed bpm's %HRmax against the profile in force on the run's day, the spike
- * baseline from the runs around it). A GPS run is rebuilt from its [segments]
- * (parsed from the core's own GPX: the route, or for a run QC left unmeasurable
- * its recorded fixes), so it is null for a GPS run whose fixes haven't loaded;
- * the caller then confirms the delete instead of offering Undo.
- */
-internal fun restoreEventFor(entry: HistoryEntry, segments: List<List<GpxFix>>): Event? = when (entry) {
-    is HistoryEntry.Lift -> entry.v.let { v ->
-        Event.LogSet(
-            exercise = v.exercise, weightKg = v.weight_kg, reps = v.reps, rpe = v.rpe,
-            observedAt = v.observed_at, entryId = v.entry_id, holdSec = v.hold_sec,
-        )
-    }
-    is HistoryEntry.Run -> entry.v.let { v ->
-        if (!v.has_gpx && !v.gps_unmeasurable) {
-            Event.LogRun(
-                distanceKm = v.distance_km, durationMin = v.duration_min, hrPctMax = loggedHrPctMax(v),
-                observedAt = v.observed_at, entryId = v.entry_id,
-                workoutType = WorkoutType.fromWire(v.workout_type), sessionRpe = v.session_rpe,
-                avgHrBpm = v.avg_hr_bpm, utcOffsetSec = v.utc_offset_sec,
-            )
-        } else {
-            val points = ArrayList<GpsPoint>()
-            val starts = ArrayList<Int>()
-            for (seg in segments) {
-                if (seg.isEmpty()) continue
-                if (points.isNotEmpty()) starts += points.size
-                // A fix without a recorded accuracy takes the import sentinel, which
-                // passes QC like the unknown accuracy the core exported it from.
-                seg.mapTo(points) { GpsPoint(it.lat, it.lon, it.timeSec, it.accuracyM ?: IMPORT_UNKNOWN_ACCURACY_M) }
-            }
-            if (points.size < 2) {
-                null
-            } else {
-                Event.LogRunTrack(
-                    points = points, hrPctMax = loggedHrPctMax(v),
-                    observedAt = v.observed_at, entryId = v.entry_id,
-                    workoutType = WorkoutType.fromWire(v.workout_type), segmentStarts = starts,
-                    sessionRpe = v.session_rpe, avgHrBpm = v.avg_hr_bpm, utcOffsetSec = v.utc_offset_sec,
-                )
-            }
-        }
-    }
-}
-
-/** The `hr_pct_max` a run was logged with: a bpm entry sends 0 and lets the core
- *  derive the percentage, so re-sending the derived figure would read as typed. */
-internal fun loggedHrPctMax(v: RunResultView): Double = if (v.avg_hr_bpm != null) 0.0 else v.hr_pct_max
 
 /**
  * The amend that puts an edited entry back as it was, for "Undo" after an edit
@@ -112,18 +69,6 @@ internal fun undoEditFor(entry: HistoryEntry, saved: Event): Event? = when {
     else -> null
 }
 
-/** "Run deleted · Undo" (or "Set updated · Undo"…): the confirmation for a change made
- *  in History; Undo re-sends [undo] in order through the process-scoped dispatcher.
- *  Nothing to undo → the plain confirmation. */
-internal fun postUndoable(text: String, undoLabel: String, undo: List<Event>) {
-    UiMessages.post(
-        if (undo.isEmpty()) {
-            UiMessage(text)
-        } else {
-            UiMessage(text, actionLabel = undoLabel, onAction = { undo.forEach(EventDispatcher::send) })
-        },
-    )
-}
 
 /**
  * The entry detail → edit/delete flow. Tapping a History card sets
@@ -152,7 +97,7 @@ internal fun EntryActionSheets(
     srpeLoad: SrpeLoadView?,
 ) {
     if (selected == null) return
-    val undoLabel = stringResource(R.string.log_undo)
+    val undoLabel = stringResource(Res.string.log_undo)
     // Saveable so a rotation mid-edit keeps the editor open (keyed on the
     // selected entry, so picking a different entry resets these).
     var editing by rememberSaveable(selected) { mutableStateOf(false) }
@@ -160,8 +105,8 @@ internal fun EntryActionSheets(
     // The run's route, loaded once for both its detail and its trim sheet.
     val route = (selected as? HistoryEntry.Run)?.let { rememberRunRoute(it.v) }
     val isRun = selected is HistoryEntry.Run
-    val deletedText = stringResource(if (isRun) R.string.history_run_deleted else R.string.history_set_deleted)
-    val updatedText = stringResource(if (isRun) R.string.history_run_updated else R.string.history_set_updated)
+    val deletedText = stringResource(if (isRun) Res.string.history_run_deleted else Res.string.history_set_deleted)
+    val updatedText = stringResource(if (isRun) Res.string.history_run_updated else Res.string.history_set_updated)
     val saveEdit: (Event) -> Unit = { ev ->
         onEvent(ev)
         onDismiss()
@@ -313,12 +258,12 @@ private fun EntryDetailContent(
     onDelete: (restore: Event?) -> Unit,
 ) {
     val v = entry.v
-    val res = LocalResources.current
+    val res = currentResources()
     Column(
         modifier = Modifier.sheetBody(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
     ) {
-        val exercise = v.exercise.ifBlank { stringResource(R.string.main_set) }
+        val exercise = v.exercise.ifBlank { stringResource(Res.string.main_set) }
         val date = formatLogDate(v.observed_at, nowMillis)
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -326,7 +271,7 @@ private fun EntryDetailContent(
             horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
         ) {
             Box(Modifier.weight(1f)) {
-                TileOverline(if (date.isBlank()) exercise else stringResource(R.string.history_detail_with_date, exercise, date))
+                TileOverline(if (date.isBlank()) exercise else stringResource(Res.string.history_detail_with_date, exercise, date))
             }
             if (v.e1rm_pr) NewBestChip(v.exercise)
         }
@@ -345,14 +290,14 @@ private fun EntryDetailContent(
         if (v.hold_sec == null && v.e1rm_kg > 0.0) {
             PlainCard(contentPadding = PaddingValues(horizontal = Space.Card.dp), spacing = 0.dp) {
                 KeyValueRow(
-                    stringResource(R.string.history_set_e1rm_label),
-                    stringResource(R.string.log_value_with_unit, weightFigure(v.e1rm_kg, weightUnit), weightSuffix(weightUnit)),
+                    stringResource(Res.string.history_set_e1rm_label),
+                    stringResource(Res.string.log_value_with_unit, weightFigure(v.e1rm_kg, weightUnit), weightSuffix(weightUnit)),
                 )
                 if (v.pct_1rm > 0.0) {
                     HorizontalDivider(color = Hairline)
                     KeyValueRow(
-                        stringResource(R.string.history_set_load_label),
-                        stringResource(R.string.history_pct_e1rm, v.pct_1rm.roundOrZero().toInt()),
+                        stringResource(Res.string.history_set_load_label),
+                        stringResource(Res.string.history_pct_e1rm, v.pct_1rm.roundOrZero().toInt()),
                     )
                 }
             }
@@ -367,7 +312,7 @@ private fun EntryDetailContent(
             val high = if (v.e1rm_kg > 0.0) maxOf(cc.high_kg, v.e1rm_kg) else cc.high_kg
             EvidenceCard(
                 stringResource(
-                    R.string.history_e1rm_range,
+                    Res.string.history_e1rm_range,
                     weightFigure(low, weightUnit), weightFigure(high, weightUnit),
                     weightSuffix(weightUnit), cc.formulas,
                 ),
@@ -380,18 +325,18 @@ private fun EntryDetailContent(
         ActionRows(
             rows = listOf(
                 ActionRowItem(
-                    stringResource(R.string.history_edit_set),
-                    painterResource(R.drawable.ic_ui_edit),
+                    stringResource(Res.string.history_edit_set),
+                    painterResource(Res.drawable.ic_ui_edit),
                     onClick = onEdit,
                     testTag = "set-detail-edit",
                 ),
             ),
             destructive = DestructiveAction(
-                label = stringResource(R.string.history_delete_set),
-                icon = painterResource(R.drawable.ic_ui_delete),
-                confirmTitle = stringResource(R.string.main_delete_set_title),
-                confirmMessage = stringResource(R.string.history_delete_set_message),
-                confirmLabel = stringResource(R.string.main_delete),
+                label = stringResource(Res.string.history_delete_set),
+                icon = painterResource(Res.drawable.ic_ui_delete),
+                confirmTitle = stringResource(Res.string.main_delete_set_title),
+                confirmMessage = stringResource(Res.string.history_delete_set_message),
+                confirmLabel = stringResource(Res.string.main_delete),
                 onConfirm = { onDelete(restoreEventFor(entry, emptyList())) },
                 testTag = "set-detail-delete",
             ),

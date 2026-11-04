@@ -1,9 +1,9 @@
 name: iOS core
 
-# The core's C ABI for the iOS app (shared/src/ffi/c_abi.rs) and its
-# Kotlin/Native bridge (kmp/core-bridge). Path-filtered: only changes that can
-# affect the bridge run it. The repo is public, so the macOS job costs no
-# minutes.
+# The core's C ABI for the iOS app (shared/src/ffi/c_abi.rs), its Kotlin/Native
+# bridge (kmp/core-bridge) and the app's iOS framework (android/lollop-ios over
+# android/lollop). Path-filtered: only changes that can affect them run it. The
+# repo is public, so the macOS job costs no minutes.
 on:
   push:
     paths:
@@ -12,6 +12,11 @@ on:
       - "Cargo.lock"
       - "kmp/**"
       - "ios/**"
+      - "android/lollop/**"
+      - "android/lollop-ios/**"
+      - "android/*.gradle.kts"
+      - "android/gradle.properties"
+      - "android/gradle/**"
       - "scripts/build-ios-core.sh"
       - ".github/workflows/ios.yml"
   pull_request:
@@ -21,6 +26,11 @@ on:
       - "Cargo.lock"
       - "kmp/**"
       - "ios/**"
+      - "android/lollop/**"
+      - "android/lollop-ios/**"
+      - "android/*.gradle.kts"
+      - "android/gradle.properties"
+      - "android/gradle/**"
       - "scripts/build-ios-core.sh"
       - ".github/workflows/ios.yml"
   workflow_dispatch:
@@ -74,7 +84,12 @@ jobs:
         run: ./gradlew --no-daemon :core-bridge:linuxX64Test
 
   bridge-macos:
-    name: iOS framework link + simulator bridge tests (macOS)
+    name: iOS framework link + simulator tests (macOS)
+    # Builds from android/, which includes kmp/core-bridge. Links the app's
+    # `Lollop` framework (:lollop-ios: the app's Kotlin + the release Rust core)
+    # for a device, then runs every iOS test suite in a simulator: the bridge
+    # (:core-bridge), the app's common tests (:lollop, among them the event-log
+    # engine on a scripted core) and the engine on the real core (:lollop-ios).
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -94,11 +109,15 @@ jobs:
           java-version: "21"
           cache: gradle
 
+      - name: Set up Android SDK
+        # Configuring the android/ build needs an SDK even for the iOS tasks.
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
       - name: Cache Kotlin/Native toolchain
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('kmp/core-bridge/build.gradle.kts') }}
+          key: konan-${{ runner.os }}-${{ hashFiles('kmp/core-bridge/build.gradle.kts', 'android/build.gradle.kts') }}
 
       - name: Pick an iPhone simulator
         run: |
@@ -109,10 +128,23 @@ jobs:
                      for d in ds if d["name"].startswith("iPhone")))')
           echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
 
-      - name: Link the release framework (device) + run the bridge tests (simulator)
-        working-directory: kmp
+      - name: Link the app framework (device) + run the iOS tests (simulator)
+        working-directory: android
+        # Linking Compose into a framework needs more heap than gradle.properties gives.
         run: >
-          ./gradlew --no-daemon
-          :core-bridge:linkReleaseFrameworkIosArm64
+          ./gradlew --no-daemon --continue "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8"
+          :lollop-ios:linkReleaseFrameworkIosArm64
           :core-bridge:iosSimulatorArm64Test
+          :lollop:iosSimulatorArm64Test
+          :lollop-ios:iosSimulatorArm64Test
           -Plollop.iosSimulator="$SIMULATOR_UDID"
+
+      - name: iOS test counts
+        if: always()
+        run: |
+          for f in android/lollop/build/test-results/iosSimulatorArm64Test/*.xml \
+                   android/lollop-ios/build/test-results/iosSimulatorArm64Test/*.xml \
+                   kmp/core-bridge/build/test-results/iosSimulatorArm64Test/*.xml; do
+            [ -e "$f" ] && grep -o '<testsuite name="[^"]*" tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' "$f"
+          done
+          true

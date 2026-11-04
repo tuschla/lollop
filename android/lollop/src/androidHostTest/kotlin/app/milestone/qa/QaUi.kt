@@ -26,10 +26,14 @@ import app.milestone.EventDispatcher
 import app.milestone.MainActivity
 import app.milestone.R
 import app.milestone.ViewModel
+import app.milestone.getQuantityString
+import app.milestone.getString
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import java.util.Timer
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.schedule
+import org.jetbrains.compose.resources.PluralStringResource
+import org.jetbrains.compose.resources.StringResource
 
 /** Shared UI drivers for the offline scenario suite. */
 
@@ -54,6 +58,15 @@ fun strPrefix(@StringRes id: Int, vararg args: Any): String {
 /** [str] for a plurals resource. */
 fun plural(@PluralsRes id: Int, count: Int, vararg args: Any): String =
     ApplicationProvider.getApplicationContext<Context>().resources.getQuantityString(id, count, *args)
+
+/** [str] for the common handle the app's code names a string by (`Res.string.x`):
+ *  the same Android resource, read as the app reads it outside composition. */
+fun str(resource: StringResource, vararg args: Any): String =
+    ApplicationProvider.getApplicationContext<Context>().resources.getString(resource, *args)
+
+/** [plural] for the common handle (`Res.plurals.x`). */
+fun plural(resource: PluralStringResource, count: Int, vararg args: Any): String =
+    ApplicationProvider.getApplicationContext<Context>().resources.getQuantityString(resource, count, *args)
 
 
 // The most recently launched Activity, closed by [QaHarness.teardown] so boot

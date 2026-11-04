@@ -29,13 +29,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import app.milestone.resources.Res
+import app.milestone.resources.main_cancel
+import app.milestone.resources.main_trim_confirm
+import app.milestone.resources.main_trim_confirm_message
+import app.milestone.resources.main_trim_confirm_title
+import app.milestone.resources.main_trim_keeps
+import app.milestone.resources.main_trim_run
+import app.milestone.resources.trim_end_thumb
+import app.milestone.resources.trim_hint
+import app.milestone.resources.trim_removed_state
+import app.milestone.resources.trim_removes
+import app.milestone.resources.trim_start_thumb
+import org.jetbrains.compose.resources.stringResource
 
 /** Saves a [RangeSlider] window as its two ends. */
 private val FloatRangeSaver = listSaver<ClosedFloatingPointRange<Float>, Float>(
@@ -79,7 +90,7 @@ internal fun TrimRunSheetContent(
         modifier = Modifier.sheetBody(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
     ) {
-        SheetTitle(stringResource(R.string.main_trim_run))
+        SheetTitle(stringResource(Res.string.main_trim_run))
 
         val firstFixSec = points.first().timeSec
         val lastFixSec = points.last().timeSec
@@ -123,11 +134,11 @@ internal fun TrimRunSheetContent(
 
         TrimRouteMap(route.segments, keepFromSec, keepUntilSec, run.distance_km)
 
-        val startDesc = stringResource(R.string.trim_start_thumb)
-        val endDesc = stringResource(R.string.trim_end_thumb)
-        val res = LocalResources.current
-        val startState = stringResource(R.string.trim_removed_state, spokenRunDistance(res, headKm, unit))
-        val endState = stringResource(R.string.trim_removed_state, spokenRunDistance(res, tailKm, unit))
+        val startDesc = stringResource(Res.string.trim_start_thumb)
+        val endDesc = stringResource(Res.string.trim_end_thumb)
+        val res = currentResources()
+        val startState = stringResource(Res.string.trim_removed_state, spokenRunDistance(res, headKm, unit))
+        val endState = stringResource(Res.string.trim_removed_state, spokenRunDistance(res, tailKm, unit))
         RangeSlider(
             value = range,
             onValueChange = { range = it },
@@ -146,12 +157,12 @@ internal fun TrimRunSheetContent(
         val canApply = keptCount >= 2 && !wholeTrack
         Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
             Text(
-                stringResource(R.string.main_trim_keeps, runDistLabel(keptKm, unit), keptTime),
+                stringResource(Res.string.main_trim_keeps, runDistLabel(keptKm, unit), keptTime),
                 color = OnBgBody,
                 style = Type.Title.merge(TabularFigures),
             )
             Text(
-                if (wholeTrack) stringResource(R.string.trim_hint) else stringResource(R.string.trim_removes, headLabel, tailLabel),
+                if (wholeTrack) stringResource(Res.string.trim_hint) else stringResource(Res.string.trim_removes, headLabel, tailLabel),
                 color = OnBgMuted,
                 style = Type.Caption.merge(TabularFigures),
             )
@@ -163,9 +174,9 @@ internal fun TrimRunSheetContent(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
         ) {
-            TextAction(stringResource(R.string.main_cancel), onClick = onCancel, modifier = Modifier.offset(x = -TextActionInset))
+            TextAction(stringResource(Res.string.main_cancel), onClick = onCancel, modifier = Modifier.offset(x = -TextActionInset))
             PrimaryButton(
-                stringResource(R.string.main_trim_confirm),
+                stringResource(Res.string.main_trim_confirm),
                 onClick = { confirm = true },
                 enabled = canApply,
                 modifier = Modifier.weight(1f),
@@ -175,9 +186,9 @@ internal fun TrimRunSheetContent(
 
         if (confirm) {
             ConfirmDialog(
-                title = stringResource(R.string.main_trim_confirm_title, runDistLabel(keptKm, unit), keptTime),
-                body = stringResource(R.string.main_trim_confirm_message, headLabel, tailLabel),
-                confirmLabel = stringResource(R.string.main_trim_confirm),
+                title = stringResource(Res.string.main_trim_confirm_title, runDistLabel(keptKm, unit), keptTime),
+                body = stringResource(Res.string.main_trim_confirm_message, headLabel, tailLabel),
+                confirmLabel = stringResource(Res.string.main_trim_confirm),
                 onDismiss = { confirm = false },
                 onConfirm = {
                     confirm = false

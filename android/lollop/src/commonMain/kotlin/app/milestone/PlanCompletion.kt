@@ -1,0 +1,1248 @@
+package app.milestone
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import app.milestone.resources.Res
+import app.milestone.resources.ic_ui_check
+import app.milestone.resources.log_band_effort
+import app.milestone.resources.log_band_hold
+import app.milestone.resources.log_band_hold_range
+import app.milestone.resources.log_band_reps
+import app.milestone.resources.log_band_reps_range
+import app.milestone.resources.log_cue_end_exercise
+import app.milestone.resources.log_edit
+import app.milestone.resources.log_edit_set_cd
+import app.milestone.resources.log_last_set
+import app.milestone.resources.log_primary_extra_set
+import app.milestone.resources.log_rest_left_cd
+import app.milestone.resources.log_set_done
+import app.milestone.resources.log_set_header_n
+import app.milestone.resources.log_set_header_n_of_n
+import app.milestone.resources.log_undo
+import app.milestone.resources.main_action_subject
+import app.milestone.resources.main_chip_safety
+import app.milestone.resources.main_minutes_fmt
+import app.milestone.resources.main_run
+import app.milestone.resources.plan_calis_chip_cd
+import app.milestone.resources.plan_calis_easier
+import app.milestone.resources.plan_calis_harder
+import app.milestone.resources.plan_calis_rate_effort
+import app.milestone.resources.plan_calis_unplaced
+import app.milestone.resources.plan_check_any_session
+import app.milestone.resources.plan_check_title
+import app.milestone.resources.plan_done_lighter
+import app.milestone.resources.plan_done_short
+import app.milestone.resources.plan_dur_min_sec
+import app.milestone.resources.plan_dur_sec
+import app.milestone.resources.plan_end_exercise
+import app.milestone.resources.plan_ended_early
+import app.milestone.resources.plan_ended_msg
+import app.milestone.resources.plan_face_effort
+import app.milestone.resources.plan_face_hr
+import app.milestone.resources.plan_face_last
+import app.milestone.resources.plan_face_pace_only
+import app.milestone.resources.plan_face_per_side
+import app.milestone.resources.plan_item_complete
+import app.milestone.resources.plan_log_set_n_of_n
+import app.milestone.resources.plan_next_exercise
+import app.milestone.resources.plan_reopen
+import app.milestone.resources.plan_rest_done_cd
+import app.milestone.resources.plan_rest_done_label
+import app.milestone.resources.plan_rest_left_label
+import app.milestone.resources.plan_run_cooldown
+import app.milestone.resources.plan_run_logged
+import app.milestone.resources.plan_run_logged_distance
+import app.milestone.resources.plan_run_plus
+import app.milestone.resources.plan_run_rec_equal
+import app.milestone.resources.plan_run_rec_jog_m
+import app.milestone.resources.plan_run_rec_jog_time
+import app.milestone.resources.plan_run_reps_m
+import app.milestone.resources.plan_run_reps_time
+import app.milestone.resources.plan_run_reps_with_rec
+import app.milestone.resources.plan_run_strides
+import app.milestone.resources.plan_run_walk_bout
+import app.milestone.resources.plan_run_walk_last
+import app.milestone.resources.plan_run_walk_repeat
+import app.milestone.resources.plan_run_warmup
+import app.milestone.resources.plan_set_not_counted
+import app.milestone.resources.plan_sets_done_cd
+import app.milestone.resources.plan_since_last_set_cd
+import app.milestone.resources.plan_since_last_set_label
+import app.milestone.resources.plan_skip_exercise
+import app.milestone.resources.plan_skipped
+import app.milestone.resources.plan_skipped_msg
+import app.milestone.resources.plan_skipped_pain
+import app.milestone.resources.plan_skipped_pain_area
+import app.milestone.resources.plan_stopped_area
+import app.milestone.resources.plan_stopped_pain
+import app.milestone.resources.ui_label_value
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.pluralStringResource
+import org.jetbrains.compose.resources.stringResource
+
+// Per-set completion chrome (Today's session card, the week-strip expander and the
+// set editor's gym-floor loop), plus the rest readout and its in-app alarm scope.
+
+/** Ends [item] on [epochDay] and confirms it: "Squat ended at 4/6 · Undo" (or
+ *  "Squat skipped · Undo" with nothing logged); Undo reopens it. */
+internal fun endExerciseWithUndo(res: PlatformResources, item: PrescriptionView, epochDay: Long, send: (Event) -> Unit) {
+    if (item.exercise.isBlank()) return
+    send(Event.SetExerciseEnded(item.exercise, epochDay, ended = true))
+    val text = if (item.logged_sets.isEmpty()) {
+        res.getString(Res.string.plan_skipped_msg, item.exercise)
+    } else {
+        res.getString(Res.string.plan_ended_msg, item.exercise, item.sets_done, plannedSetCount(item))
+    }
+    UiMessages.post(
+        UiMessage(
+            text,
+            actionLabel = res.getString(Res.string.log_undo),
+            onAction = { reopenExercise(item, epochDay, EventDispatcher::send) },
+        ),
+    )
+}
+
+/** Reopens [item]'s exercise on [epochDay]; a run or a check (no exercise) has nothing to reopen. */
+internal fun reopenExercise(item: PrescriptionView, epochDay: Long, send: (Event) -> Unit) {
+    if (item.exercise.isNotBlank()) send(Event.SetExerciseEnded(item.exercise, epochDay, ended = false))
+}
+
+/** The prescribed target band for a plan item's set-editor header: a hold band
+ *  ("20–45 s"), else a rep band + the effort as reps left ("5–8 reps · ~2 left"),
+ *  else the intensity label. Unit-testable outside composition. */
+internal fun setTargetBand(res: PlatformResources, item: PrescriptionView): String {
+    if (item.timed_hold) {
+        return if (item.hold_low_sec > 0) {
+            val hi = maxOf(item.hold_low_sec, item.hold_high_sec)
+            if (hi > item.hold_low_sec) {
+                res.getString(Res.string.log_band_hold_range, item.hold_low_sec, hi)
+            } else {
+                res.getString(Res.string.log_band_hold, item.hold_low_sec)
+            }
+        } else {
+            item.rep_volume
+        }
+    }
+    val reps = if (item.reps_low > 0) {
+        val hi = maxOf(item.reps_low, item.reps_high)
+        if (hi > item.reps_low) {
+            res.getString(Res.string.log_band_reps_range, item.reps_low, hi)
+        } else {
+            res.getQuantityString(Res.plurals.log_band_reps, item.reps_low, item.reps_low)
+        }
+    } else {
+        ""
+    }
+    // The effort reads in the face's one vocabulary, reps left ("3 reps · ~2
+    // left"); a %e1RM/prose label is its own clause ("3 reps · 85% e1RM").
+    val effort = item.target_rpe?.let { res.getString(Res.string.log_band_effort, repsLeftText(res, it)) } ?: item.intensity_label
+    return listOf(reps, effort).filter { it.isNotBlank() }.joinToString(" \u00b7 ")
+}
+
+/** Logged run totals for a run plan item in the user's distance unit ("4.1 km ·
+ *  27:00" / "0.43 mi · 3:42"); blank when nothing is logged yet. Under one unit the
+ *  distance keeps two decimals, as the run card and the Finish review show it. The
+ *  time is a clock like every other run duration (m:ss, h:mm:ss from an hour). The
+ *  prescribed target rides in the item summary. */
+internal fun runProgressText(res: PlatformResources, item: PrescriptionView, unit: DistanceUnit): String {
+    val parts = buildList {
+        if (item.run_logged_km > 0.0) {
+            val shown = metersToDisplay(item.run_logged_km * 1000.0, unit)
+            val figure = if (shown < 1.0) formatFixed(shown, 2) else trimDecimal(shown)
+            add(res.getString(Res.string.plan_run_logged_distance, figure, unit.distanceLabel))
+        }
+        if (item.run_logged_min > 0.0) add(formatElapsed((item.run_logged_min * 60.0).roundOrZero()))
+    }
+    return parts.joinToString(" \u00b7 ")
+}
+
+/** "m:ss" clock for a rest / elapsed readout. */
+internal fun fmtClock(totalSec: Int): String {
+    val s = totalSec.coerceAtLeast(0)
+    return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
+}
+
+/** How long after a rest starts the loop keeps its readout. Past this the rest
+ *  belongs to an earlier bout, not the one before the next set. */
+internal const val RestReadoutWindowSec = 30 * 60
+
+/** What the loop's rest readout shows. */
+internal sealed interface RestFace {
+    /** A prescribed rest still running: [leftSec] remain. */
+    data class Counting(val leftSec: Int) : RestFace
+    /** The prescribed rest ended [overSec] ago. */
+    data class Over(val overSec: Int) : RestFace
+    /** No prescribed rest: time since the newest set of this exercise. */
+    data class Since(val elapsedSec: Int) : RestFace
+}
+
+/** A rest the loop scheduled ([AppClock] millis). Kept after the end (the
+ *  overtime readout) until cancelled or replaced. */
+internal data class RestRun(val startMillis: Long, val endAtMillis: Long, val exercise: String)
+
+/** The rest the set loop is running, from the platform's rest timer (Android:
+ *  `RestAlarm.running`, provided at the activity root); none without one. */
+internal val LocalRestRunning = staticCompositionLocalOf<StateFlow<RestRun?>> { NoRestRunning }
+
+private val NoRestRunning: StateFlow<RestRun?> = MutableStateFlow(null)
+
+/**
+ * The rest readout at [nowMillis]. A rest the loop scheduled ([restStartMillis]
+ * → [restEndMillis], [AppClock] millis, from [LocalRestRunning]) wins whatever
+ * exercise is on screen, so the countdown carries into the next exercise. With
+ * none running, an exercise without a prescribed rest ([itemRestSec] 0) counts up
+ * from its newest set today ([lastSetSec], unix seconds). Null when nothing is in
+ * its [RestReadoutWindowSec] window. A [nowMillis] up to one 1 s tick before the
+ * rest's start (the ticker last read the clock just before the set was logged)
+ * reads as the start, so the full rest shows at once instead of nothing until
+ * the next tick; an earlier clock (set back mid-rest) shows nothing. Pure.
+ */
+internal fun restFace(
+    restStartMillis: Long?,
+    restEndMillis: Long?,
+    lastSetSec: Long?,
+    itemRestSec: Int,
+    nowMillis: Long,
+): RestFace? {
+    if (restStartMillis != null && restEndMillis != null) {
+        val at = if (restStartMillis - nowMillis in 1L..1_000L) restStartMillis else nowMillis
+        if (at - restStartMillis in 0L..RestReadoutWindowSec * 1000L) {
+            val leftMs = restEndMillis - at
+            return if (leftMs > 0) {
+                // Rounded up: "0:01" shows until the rest is really over.
+                RestFace.Counting(((leftMs + 999) / 1000).toInt())
+            } else {
+                RestFace.Over((-leftMs / 1000).toInt())
+            }
+        }
+    }
+    if (itemRestSec <= 0 && lastSetSec != null) {
+        val elapsed = nowMillis / 1000 - lastSetSec
+        if (elapsed in 0..RestReadoutWindowSec.toLong()) return RestFace.Since(elapsed.toInt())
+    }
+    return null
+}
+
+/** [AppClock] millis, re-emitted on every [periodMs] boundary, so every ticking
+ *  readout steps together and a second never skips or repeats. */
+@Composable
+internal fun rememberTicker(periodMs: Long): Long {
+    val now by produceState(AppClock.nowMillis(), periodMs) {
+        while (true) {
+            value = AppClock.nowMillis()
+            kotlinx.coroutines.delay(periodMs - AppClock.nowMillis().mod(periodMs))
+        }
+    }
+    return now
+}
+
+
+/**
+ * The loop's rest readout ([restFace]): the running rest's countdown (a "Rest
+ * left" caption over a bold "1:42"), flipping to "Rest done" / "+0:15" with one
+ * haptic tick; without a prescribed rest it counts up since the last set. The
+ * clock is the glanceable part. TalkBack reads the time left when it lands on
+ * the readout and hears one polite announcement when the rest ends, never
+ * per-tick chatter.
+ */
+@Composable
+internal fun RestReadout(lastSetSec: Long?, itemRestSec: Int) {
+    val run by LocalRestRunning.current.collectAsState()
+    val now = rememberTicker(1000L)
+    val face = restFace(run?.startMillis, run?.endAtMillis, lastSetSec, itemRestSec, now) ?: return
+    when (face) {
+        is RestFace.Counting, is RestFace.Over -> {
+            val done = face is RestFace.Over
+            val haptic = LocalHapticFeedback.current
+            // Seeded with the state at first show, so reopening the sheet after the
+            // rest already ended doesn't buzz; only the live transition does.
+            var wasDone by remember(run?.endAtMillis) { mutableStateOf(done) }
+            // The Profile "Rest timer alert" toggle silences the buzz too; the spoken
+            // live-region announcement stays (it is an accessibility cue, not an alert).
+            val alert by AppSettings.restAlert.collectAsState()
+            LaunchedEffect(done) {
+                if (done && !wasDone && alert) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                wasDone = done
+            }
+            val clock = if (face is RestFace.Counting) fmtClock(face.leftSec) else "+" + fmtClock((face as RestFace.Over).overSec)
+            // The countdown's description carries the time left (read on focus, not
+            // announced). Once over it is static and a live region, so the change
+            // to "done" is announced once and the overtime ticks stay silent.
+            val cd = if (done) {
+                stringResource(Res.string.plan_rest_done_cd)
+            } else {
+                stringResource(Res.string.log_rest_left_cd, clock)
+            }
+            RestClock(
+                label = if (done) stringResource(Res.string.plan_rest_done_label) else stringResource(Res.string.plan_rest_left_label),
+                clock = clock,
+                color = if (done) Accent else OnBgBody,
+                modifier = Modifier
+                    .testTag("rest-readout")
+                    .clearAndSetSemantics {
+                        contentDescription = cd
+                        if (done) liveRegion = LiveRegionMode.Polite
+                    },
+            )
+        }
+        is RestFace.Since -> {
+            val cd = stringResource(Res.string.plan_since_last_set_cd)
+            RestClock(
+                label = stringResource(Res.string.plan_since_last_set_label),
+                clock = fmtClock(face.elapsedSec),
+                color = OnBgMuted,
+                modifier = Modifier
+                    .testTag("rest-readout")
+                    .clearAndSetSemantics { contentDescription = cd },
+            )
+        }
+    }
+}
+
+/** The rest readout's face: a quiet caption word over the bold clock,
+ *  right-aligned so it closes the loop header's first row. */
+@Composable
+private fun RestClock(label: String, clock: String, color: Color, modifier: Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.End) {
+        Text(label, color = OnBgMuted, style = Type.Caption)
+        Text(
+            clock,
+            color = color,
+            style = Type.Title.merge(TabularFigures),
+            maxLines = 1,
+        )
+    }
+}
+
+/** What each planned slot shows: null = still open, "" = a full set (✓), else
+ *  what a short set that still counted reached: its reps ("4" of a 5-rep
+ *  target) or its hold seconds. A set is short when the core flags it (`short`)
+ *  or its reps sit under the rep target. Pure. */
+internal fun setSlotMarks(item: PrescriptionView): List<String?> {
+    val counted = item.logged_sets.filter { it.qualifies }
+    return (0 until plannedSetCount(item)).map { i ->
+        when {
+            i >= item.sets_done -> null
+            else -> counted.getOrNull(i)?.takeIf {
+                it.short || (item.reps_low > 0 && it.hold_sec == null && it.reps in 1 until item.reps_low)
+            }?.let { "${it.hold_sec ?: it.reps}" } ?: ""
+        }
+    }
+}
+
+/** The per-set slot row: one box per planned set, solid green with a white ✓
+ *  when a counted set is logged (the reps instead for a short set), hollow
+ *  otherwise. The solid fill keeps the mark legible on both themes' grounds; the
+ *  ✓ is a dp-sized icon (the non-colour done cue) that fits its box at any font
+ *  scale, and a box with reps grows with the text. TalkBack reads the row as ONE
+ *  node ("1 of 4 sets done") instead of a run of identical per-slot nodes. */
+@Composable
+internal fun SetSlotsRow(item: PrescriptionView) {
+    val status = LocalStatusColors.current
+    val marks = setSlotMarks(item)
+    val cd = pluralStringResource(Res.plurals.plan_sets_done_cd, marks.size, item.sets_done, marks.size)
+    Row(
+        modifier = Modifier
+            .testTag("set-slots:${item.exercise}")
+            .clearAndSetSemantics { contentDescription = cd },
+        horizontalArrangement = Arrangement.spacedBy(Space.Xs.dp + Space.Xs.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        marks.forEach { mark ->
+            Box(
+                modifier = Modifier
+                    .defaultMinSize(minWidth = SlotSize, minHeight = SlotSize)
+                    .clip(RoundedCornerShape(5.dp))
+                    .then(
+                        if (mark != null) {
+                            Modifier.background(status.evidenceStrong)
+                        } else {
+                            Modifier.border(1.5.dp, OnBgFaint, RoundedCornerShape(5.dp))
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    mark == null -> Unit
+                    mark.isEmpty() -> Icon(
+                        painterResource(Res.drawable.ic_ui_check),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(SlotCheckSize),
+                    )
+                    else -> Text(
+                        mark,
+                        color = Color.White,
+                        style = Type.Caption.merge(TabularFigures).copy(fontWeight = FontWeight.Bold),
+                        modifier = Modifier.padding(horizontal = Space.Xs.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private val SlotSize = 20.dp
+private val SlotCheckSize = 14.dp
+
+/** Completion detail INSIDE an open plan item's card: the set slots + "k/N"
+ *  progress (or a run's logged totals), the not-counted marks on non-qualifying
+ *  logged sets, and the "Skip exercise" / "End exercise" secondary action. A run
+ *  with nothing logged shows nothing here (its Track / Log run action already
+ *  says so); the caller drops the footer for it. */
+@Composable
+internal fun PlanItemCompletion(
+    item: PrescriptionView,
+    isRun: Boolean,
+    onEndExercise: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+        if (isRun) {
+            val logged = runProgressText(currentResources(), item, rememberDistanceUnit())
+            if (logged.isNotBlank()) {
+                Text(
+                    stringResource(Res.string.plan_run_logged, logged),
+                    color = OnBgMuted,
+                    style = Type.Caption.merge(TabularFigures),
+                )
+            }
+        } else {
+            // Slots + the secondary action share ONE row so the 48dp touch target
+            // absorbs the row height rather than adding a separate tall row. The
+            // slots alone carry progress (and speak "k of N sets done").
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+            ) {
+                SetSlotsRow(item)
+                Spacer(Modifier.weight(1f))
+                // Nothing logged yet: ending it means skipping it, so say so.
+                val label = if (item.logged_sets.isEmpty()) {
+                    stringResource(Res.string.plan_skip_exercise)
+                } else {
+                    stringResource(Res.string.plan_end_exercise)
+                }
+                // The label (not its touch padding) ends at the content edge.
+                TextAction(
+                    label,
+                    onEndExercise,
+                    modifier = Modifier.offset(x = TextActionInset),
+                    description = stringResource(Res.string.ui_label_value, label, item.exercise),
+                )
+            }
+            // Warm-ups / light sets stay listed but are marked, so a floor of
+            // empty-bar singles can never masquerade as the prescribed work.
+            item.logged_sets.filter { !it.qualifies }.forEach { set ->
+                Text(
+                    "${set.summary} \u00b7 ${stringResource(Res.string.plan_set_not_counted)}",
+                    color = OnBgMuted,
+                    style = Type.Caption,
+                )
+            }
+        }
+    }
+}
+
+/** The face head of a run item in the display [unit]: the core's volume head
+ *  ("6 × 800 m"), whose target and structure move into dedicated, unit-aware face
+ *  lines. Null when the item carries no run target or its summary leads with no
+ *  volume (then the full summary stays and no face lines are added, so nothing
+ *  renders twice). */
+internal fun runFaceHead(item: PrescriptionView, unit: DistanceUnit): String? =
+    if (item.run_target != null && item.run_head.isNotBlank()) runHeadText(item, unit) else null
+
+/** A run item's volume head in the display [unit], so the head and the pace line
+ *  under it never mix km with /mi: a distance head ("8 km") is restated from its
+ *  km figure; reps ("6 × 800 m"), minutes and bouts stay as the core wrote them. */
+internal fun runHeadText(item: PrescriptionView, unit: DistanceUnit): String {
+    val km = item.run_head_km
+    return if (km == null || unit == DistanceUnit.Km) {
+        item.run_head
+    } else {
+        "${trimDecimal(metersToDisplay(km * 1000.0, unit))} ${unit.distanceLabel}"
+    }
+}
+
+/** Why a safety cap shaped [item], in the display [unit]; null when none did. */
+internal fun safetyReasonText(item: PrescriptionView, unit: DistanceUnit): String? =
+    item.safety_reason.takeIf { it.isNotBlank() }
+        ?.let { if (unit == DistanceUnit.Mi) item.safety_reason_mi.ifBlank { it } else it }
+
+/** The feedback message in the display [unit]. */
+internal fun feedbackMessage(fb: FeedbackView, unit: DistanceUnit): String =
+    if (unit == DistanceUnit.Mi) fb.message_mi.ifBlank { fb.message } else fb.message
+
+/** A lift face line without its reps-left clause ("6×5 @ 275 lb · ~1 rep left"
+ *  → "6×5 @ 275 lb"; also "1–2 reps left" and "to your last good rep"), for an
+ *  item whose newcomer guide already states the effort. Pure. */
+internal fun withoutEffortClause(detail: String): String =
+    detail.split(" \u00b7 ")
+        .filterNot { c -> c.startsWith("~") || c.endsWith(" left") || c == "to your last good rep" }
+        .joinToString(" \u00b7 ")
+
+/** A whole-seconds duration as plain copy: "3 min", "45 s", "1:30 min". */
+@Composable
+private fun durationText(sec: Int): String = when {
+    sec % 60 == 0 -> stringResource(Res.string.main_minutes_fmt, sec / 60)
+    sec < 60 -> stringResource(Res.string.plan_dur_sec, sec)
+    else -> stringResource(Res.string.plan_dur_min_sec, sec / 60, (sec % 60).toString().padStart(2, '0'))
+}
+
+/** One compact line for a run's structure: "10 min warm-up · 6 × 800 m with
+ *  400 m jog · 10 min cool-down · 4 × 20 s strides", or the run/walk bouts of a
+ *  beginner session. A continuous run's head (its distance or time) is the main
+ *  block, so the extras around it read "Plus 10 min warm-up · 10 min cool-down".
+ *  Blank when the structure holds nothing to show. */
+@Composable
+private fun runStructureLine(s: RunStructureView): String {
+    val parts = mutableListOf<String>()
+    if (s.warmup_min > 0) parts += stringResource(Res.string.plan_run_warmup, s.warmup_min)
+    if (s.run_walk.isNotEmpty()) {
+        val first = s.run_walk.first()
+        // "Run 1 min, walk 1:30 min, × 8" when every bout repeats (the last bout
+        // may drop its walk); otherwise each bout in order.
+        val uniform = s.run_walk.size > 1 && first.walk_sec > 0 &&
+            s.run_walk.dropLast(1).all { it == first } &&
+            s.run_walk.last().run_sec == first.run_sec
+        parts += if (uniform) {
+            stringResource(
+                Res.string.plan_run_walk_repeat,
+                durationText(first.run_sec),
+                durationText(first.walk_sec),
+                s.run_walk.size,
+            )
+        } else {
+            s.run_walk.map { b ->
+                if (b.walk_sec > 0) {
+                    stringResource(Res.string.plan_run_walk_bout, durationText(b.run_sec), durationText(b.walk_sec))
+                } else {
+                    stringResource(Res.string.plan_run_walk_last, durationText(b.run_sec))
+                }
+            }.joinToString(", ")
+        }
+    }
+    if (s.reps > 0 && (s.rep_m > 0 || s.rep_sec > 0)) {
+        val reps = if (s.rep_m > 0) {
+            stringResource(Res.string.plan_run_reps_m, s.reps, s.rep_m)
+        } else {
+            stringResource(Res.string.plan_run_reps_time, s.reps, durationText(s.rep_sec))
+        }
+        val recovery = when {
+            s.recovery_m > 0 -> stringResource(Res.string.plan_run_rec_jog_m, s.recovery_m)
+            s.recovery_sec > 0 -> stringResource(Res.string.plan_run_rec_jog_time, durationText(s.recovery_sec))
+            s.recovery_equal_to_rep -> stringResource(Res.string.plan_run_rec_equal)
+            else -> null
+        }
+        parts += if (recovery != null) stringResource(Res.string.plan_run_reps_with_rec, reps, recovery) else reps
+    }
+    if (s.cooldown_min > 0) parts += stringResource(Res.string.plan_run_cooldown, s.cooldown_min)
+    if (s.strides_reps > 0 && s.strides_sec > 0) {
+        parts += stringResource(Res.string.plan_run_strides, s.strides_reps, s.strides_sec)
+    }
+    if (parts.isEmpty()) return ""
+    val continuous = s.run_walk.isEmpty() && !(s.reps > 0 && (s.rep_m > 0 || s.rep_sec > 0))
+    val line = parts.joinToString(" \u00b7 ")
+    return if (continuous) stringResource(Res.string.plan_run_plus, line) else line
+}
+
+/** One quiet face line under a plan item's summary. */
+@Composable
+private fun FaceLine(text: String, color: Color = OnBgMuted) {
+    Text(text, color = color, style = Type.Caption.merge(TabularFigures))
+}
+
+/**
+ * The do-this numbers on a plan item's face, directly under its summary: for a
+ * lift, the plates per side and what was lifted last time (the summary itself
+ * states sets × reps @ load and the effort); for a run, the pace in the user's
+ * distance unit, the heart-rate range, the effort cue and the session's
+ * structure. Every figure is a core wire field; nothing is computed here beyond
+ * formatting.
+ */
+@Composable
+private fun PlanItemFace(
+    item: PrescriptionView,
+    isRun: Boolean,
+    runHead: String?,
+    weightUnit: WeightUnit,
+    distanceUnit: DistanceUnit,
+    lastOnFace: String?,
+) {
+    val lines = buildList<String> {
+        if (isRun) {
+            val t = item.run_target
+            if (t != null && runHead != null) {
+                val pace = t.paceLabel(distanceUnit)
+                // The band key ("threshold") is engine vocabulary; the Effort line
+                // below already says how hard in plain words.
+                if (pace.isNotBlank()) add(stringResource(Res.string.plan_face_pace_only, pace))
+                if (t.hr_label.isNotBlank()) add(stringResource(Res.string.plan_face_hr, t.hr_label))
+                if (t.effort_detail.isNotBlank()) add(stringResource(Res.string.plan_face_effort, t.effort_detail))
+                item.run_structure?.let { s -> runStructureLine(s).takeIf { it.isNotBlank() }?.let { add(it) } }
+            }
+        } else {
+            if (item.plates_per_side.isNotEmpty()) {
+                add(stringResource(Res.string.plan_face_per_side, item.plates_per_side.joinToString(" \u00b7 ") { plateFigure(it) }, weightSuffix(weightUnit)))
+            }
+            lastOnFace?.let { add(it) }
+        }
+    }
+    if (lines.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+        lines.forEach { FaceLine(it) }
+    }
+}
+
+/** The "what you did last time" line for a lift face: the core's own "Last: …"
+ *  anchor when it is one, else the prior top set ("Last: 60 kg × 8"). Null when
+ *  the movement was never logged. */
+@Composable
+private fun lastLine(item: PrescriptionView): String? = when {
+    item.anchored_on_last -> item.anchored_on
+    item.last_set != null && item.last_set.summary.isNotBlank() ->
+        stringResource(Res.string.plan_face_last, item.last_set.summary)
+    else -> null
+}
+
+/** Calisthenics controls on an open item: the "Easier" / "Harder" rung chips
+ *  (each sends SetCalisthenicsRung via [onSetRung]), the effort-rating hint when
+ *  the rung waits only on a rating, and the first-time invite on a ladder the
+ *  athlete has not been placed on yet. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CalisControls(
+    calis: CalisItemView,
+    unplaced: Boolean,
+    onSetRung: ((CalisLadder, Int) -> Unit)?,
+) {
+    if (calis.needs_effort_rating) FaceLine(stringResource(Res.string.plan_calis_rate_effort))
+    val setRung = onSetRung ?: return
+    val chips = listOfNotNull(
+        calis.easier?.takeIf { it.available }?.let { Res.string.plan_calis_easier to it },
+        calis.harder?.takeIf { it.available }?.let { Res.string.plan_calis_harder to it },
+    )
+    if (unplaced && chips.any { it.first == Res.string.plan_calis_harder }) {
+        FaceLine(stringResource(Res.string.plan_calis_unplaced))
+    }
+    if (chips.isEmpty()) return
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+    ) {
+        chips.forEach { (labelRes, rung) ->
+            val label = stringResource(labelRes)
+            val cd = if (rung.target.isBlank()) {
+                stringResource(Res.string.ui_label_value, label, rung.name)
+            } else {
+                stringResource(Res.string.plan_calis_chip_cd, label, rung.name, rung.target)
+            }
+            Column(
+                modifier = Modifier
+                    .heightIn(min = ActionMinHeight)
+                    .clip(RoundedCornerShape(Space.Md.dp))
+                    .border(1.dp, Accent, RoundedCornerShape(Space.Md.dp))
+                    .clickable(role = Role.Button) { setRung(calis.ladder, rung.rung) }
+                    // The clickable merges the label + rung name; the description
+                    // reads the whole choice ("Harder: Decline push-up, 5–8 reps").
+                    .semantics { contentDescription = cd }
+                    .padding(horizontal = Space.Md.dp + Space.Xs.dp, vertical = Space.Sm.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(label, color = Accent, style = Type.Caption.copy(fontWeight = FontWeight.Bold))
+                Text(rung.name, color = OnBgMuted, style = Type.Caption)
+            }
+        }
+    }
+}
+
+/** The `plan-item:<exercise>` test tag (`plan-item:run`, `plan-item:check`). */
+private fun planItemTag(item: PrescriptionView, isRun: Boolean, isCheck: Boolean): String = when {
+    isCheck -> "plan-item:check"
+    isRun -> "plan-item:run"
+    else -> "plan-item:${item.exercise}"
+}
+
+/** What a plan item is called on its face and to a screen reader. */
+@Composable
+private fun planItemName(item: PrescriptionView, isRun: Boolean, isCheck: Boolean): String = when {
+    isCheck -> stringResource(Res.string.plan_check_title)
+    isRun -> stringResource(Res.string.main_run)
+    else -> item.exercise
+}
+
+/** The note a plan item states on its face rather than behind the session "?":
+ *  the return check's stop list and a target-less run's note are safety copy. */
+private fun noteOnFace(item: PrescriptionView, isRun: Boolean, isCheck: Boolean): String? =
+    item.adjusted_note.takeIf { it.isNotBlank() && (isCheck || (isRun && item.run_target == null)) }
+
+/** The label of the action that logs [item]: "Log set k of N" for a lift, the
+ *  caller's run label ("Track run" / "Log run") for a run, none for the return
+ *  check (any session logged today completes it). */
+@Composable
+internal fun planItemActionLabel(item: PrescriptionView, isRun: Boolean, isCheck: Boolean, runActionLabel: String): String? = when {
+    isCheck -> null
+    isRun -> runActionLabel
+    else -> stringResource(Res.string.plan_log_set_n_of_n, nextSetNumber(item), plannedSetCount(item))
+}
+
+/** The full-width filled "do this next" action of the current plan item. */
+@Composable
+private fun PlanActionPill(label: String, subject: String, onClick: () -> Unit) {
+    PrimaryButton(
+        label,
+        onClick,
+        modifier = Modifier.fillMaxWidth().testTag("plan-action-filled"),
+        description = stringResource(Res.string.main_action_subject, label, subject),
+    )
+}
+
+/** A session's plan items: open ones first, then settled ones as ✓ rows. When
+ *  [actionable], the first open item is the full [OpenPlanItemCard] and the
+ *  others are rows a tap logs; otherwise every open item is a read-only row. */
+@Composable
+internal fun SessionItemList(
+    items: List<PrescriptionView>,
+    isRun: (PrescriptionView) -> Boolean,
+    isCheck: (PrescriptionView) -> Boolean,
+    actionable: Boolean,
+    reopenable: Boolean,
+    runActionLabel: String,
+    weightUnit: WeightUnit,
+    painArea: String?,
+    onLog: (PrescriptionView) -> Unit,
+    onRun: () -> Unit,
+    onEndExercise: (PrescriptionView) -> Unit,
+    onReopen: (PrescriptionView) -> Unit,
+    // The hero's extras for its current card (see [OpenPlanItemCard]).
+    unplaced: (PrescriptionView) -> Boolean = { false },
+    onSetRung: ((CalisLadder, Int) -> Unit)? = null,
+    guide: @Composable (PrescriptionView) -> List<String> = { emptyList() },
+) {
+    val (openItems, doneItems) = items.partition { !it.done }
+    val current = if (actionable) openItems.firstOrNull() else null
+    openItems.forEach { item ->
+        if (item === current) {
+            OpenPlanItemCard(
+                item = item,
+                isRun = isRun(item),
+                onLog = { onLog(item) },
+                onTrack = onRun,
+                onEndExercise = { onEndExercise(item) },
+                runActionLabel = runActionLabel,
+                weightUnit = weightUnit,
+                isCheck = isCheck(item),
+                unplaced = unplaced(item),
+                onSetRung = onSetRung,
+                guide = guide(item),
+            )
+        } else {
+            PlanItemRow(
+                item = item,
+                isRun = isRun(item),
+                isCheck = isCheck(item),
+                actionLabel = if (actionable) planItemActionLabel(item, isRun(item), isCheck(item), runActionLabel) else null,
+                onClick = { if (isRun(item)) onRun() else onLog(item) },
+            )
+        }
+    }
+    doneItems.forEach { item ->
+        DonePlanItemRow(
+            item = item,
+            isRun = isRun(item),
+            reopenable = reopenable,
+            onReopen = { onReopen(item) },
+            isCheck = isCheck(item),
+            painArea = painArea,
+        )
+    }
+}
+
+/** The CURRENT plan item (the first open one of an actionable session): the
+ *  name over the prescription, the do-this numbers ([PlanItemFace]), the set
+ *  slots with "Skip/End exercise" and the one filled "Log set k of N" (or "Track
+ *  run") action. Its evidence sits in the session's "?" panel. The return check
+ *  ([isCheck]) has no Log action: any session logged today completes it. */
+@Composable
+internal fun OpenPlanItemCard(
+    item: PrescriptionView,
+    isRun: Boolean,
+    onLog: () -> Unit,
+    onTrack: () -> Unit,
+    onEndExercise: () -> Unit,
+    // The run action label: "Track run" (live GPS today) on the hero, "Log run"
+    // (manual entry) for a past day on the week strip.
+    runActionLabel: String,
+    // The profile's weight display unit (plates_per_side is already in it).
+    weightUnit: WeightUnit = WeightUnit.Kg,
+    isCheck: Boolean = false,
+    // Calisthenics: the athlete has no placement on this item's ladder yet.
+    unplaced: Boolean = false,
+    // Calisthenics Easier/Harder: null hides the chips (past days).
+    onSetRung: ((CalisLadder, Int) -> Unit)? = null,
+    // Plain-language lines for a newcomer (what the prescription means, how to
+    // pick a first weight), shown under the prescription. Empty once the athlete
+    // has a few sessions behind them.
+    guide: List<String> = emptyList(),
+) {
+    val status = LocalStatusColors.current
+    val distanceUnit = rememberDistanceUnit()
+    val runHead = if (isRun) runFaceHead(item, distanceUnit) else null
+    val summary = runHead ?: item.summary
+    // Lifts and calisthenics: a bold exercise line over a regular prescription
+    // line, so the name never shares a wrapping line with the numbers. A
+    // newcomer's guide spells the reps left out, so the line drops its own.
+    val split = if (isRun || isCheck) {
+        null
+    } else {
+        item.face_name.takeIf { it.isNotBlank() }?.let {
+            it to if (guide.isEmpty()) item.face_detail else withoutEffortClause(item.face_detail)
+        }
+    }
+    val lastOnFace = if (isRun || isCheck) null else lastLine(item)
+    val note = noteOnFace(item, isRun, isCheck)
+    val subject = planItemName(item, isRun, isCheck)
+    val actionLabel = planItemActionLabel(item, isRun, isCheck, runActionLabel)
+    // A run with nothing logged has no completion footer: no "Not logged yet"
+    // restating what its Track / Log run action already says.
+    val runUnlogged = isRun && runProgressText(currentResources(), item, distanceUnit).isBlank()
+    // A safety cap states its reason in place of a bare SAFETY badge.
+    val safetyReason = safetyReasonText(item, distanceUnit)
+    val shape = RoundedCornerShape(Space.Card.dp)
+    Box(modifier = Modifier.testTag(planItemTag(item, isRun, isCheck))) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(BgTop)
+                .then(
+                    if (item.safety_critical) Modifier.border(1.dp, status.danger.copy(alpha = 0.35f), shape) else Modifier,
+                )
+                .padding(Space.Card.dp),
+            verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
+        ) {
+            if (item.safety_critical && safetyReason == null) Chip(stringResource(Res.string.main_chip_safety), status.danger)
+            // The HRmax glossary term is linked from the session's "?" panel.
+            if (split != null) {
+                Column {
+                    Text(split.first, color = OnBgBody, style = Type.BodyBold)
+                    Text(split.second, color = OnBgBody, style = Type.Body.merge(TabularFigures))
+                }
+            } else {
+                Text(summary, color = OnBgBody, style = Type.BodyBold)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+                if (!isCheck) PlanItemFace(item, isRun, runHead, weightUnit, distanceUnit, lastOnFace)
+                safetyReason?.let { FaceLine(it, color = OnBgBody) }
+                note?.let { FaceLine(stripClaimIds(it)) }
+                guide.forEach { FaceLine(it) }
+                item.calis?.let { CalisControls(it, unplaced, onSetRung) }
+            }
+            when {
+                isCheck -> FaceLine(stringResource(Res.string.plan_check_any_session))
+                !runUnlogged -> PlanItemCompletion(item, isRun, onEndExercise)
+            }
+            if (actionLabel != null) {
+                PlanActionPill(actionLabel, subject, onClick = if (isRun) onTrack else onLog)
+            }
+        }
+    }
+}
+
+/**
+ * One plan item as a compact row: the name over its sets × reps @ load (a run's
+ * distance or time). With [actionLabel] the row is a filled tile that logs it on
+ * tap; without it a read-only preview that never looks tappable. Set slots show
+ * only once a set is logged.
+ */
+@Composable
+internal fun PlanItemRow(
+    item: PrescriptionView,
+    isRun: Boolean,
+    isCheck: Boolean,
+    actionLabel: String?,
+    onClick: () -> Unit,
+) {
+    val status = LocalStatusColors.current
+    val distanceUnit = rememberDistanceUnit()
+    val name = planItemName(item, isRun, isCheck)
+    val detail = when {
+        isCheck -> null
+        isRun -> runFaceHead(item, distanceUnit) ?: item.face_lead
+        else -> item.face_lead
+    }?.takeIf { it.isNotBlank() && it != name }
+    val note = noteOnFace(item, isRun, isCheck)?.let(::stripClaimIds)
+    val runLogged = if (isRun) runProgressText(currentResources(), item, distanceUnit) else ""
+    val safetyReason = safetyReasonText(item, distanceUnit)
+    val cd = actionLabel?.let { stringResource(Res.string.main_action_subject, it, name) }
+    val shape = RoundedCornerShape(Space.Card.dp)
+    Box(modifier = Modifier.testTag(planItemTag(item, isRun, isCheck))) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (cd != null) {
+                        Modifier
+                            .heightIn(min = ActionMinHeight)
+                            .clip(shape)
+                            .background(BgTop)
+                            .clickable(role = Role.Button, onClick = onClick)
+                            .semantics { contentDescription = cd }
+                            .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp)
+                    } else {
+                        Modifier.padding(vertical = Space.Xs.dp)
+                    },
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+                if (item.safety_critical && safetyReason == null) Chip(stringResource(Res.string.main_chip_safety), status.danger)
+                Text(name, color = OnBgBody, style = Type.BodyBold)
+                detail?.let { Text(it, color = OnBgMuted, style = Type.Caption.merge(TabularFigures)) }
+                safetyReason?.let { Text(it, color = OnBgBody, style = Type.Caption.merge(TabularFigures)) }
+                note?.let { Text(it, color = OnBgMuted, style = Type.Caption) }
+                if (runLogged.isNotBlank()) {
+                    Text(stringResource(Res.string.plan_run_logged, runLogged), color = OnBgMuted, style = Type.Caption.merge(TabularFigures))
+                }
+            }
+            if (!isRun && !isCheck && item.sets_done > 0) SetSlotsRow(item)
+            if (cd != null) RowChevron()
+        }
+    }
+}
+
+/** The per-item line of an evidence block (load anchor, adjustment note) the
+ *  item's face does not already state; null when there is none. */
+@Composable
+private fun itemEvidenceDetail(item: PrescriptionView, isRun: Boolean, isCheck: Boolean): String? {
+    val lastOnFace = if (isRun || isCheck) null else lastLine(item)
+    val note = noteOnFace(item, isRun, isCheck)
+    return listOfNotNull(
+        item.anchored_on.takeIf { it.isNotBlank() && it != lastOnFace },
+        item.adjusted_note.takeIf { it.isNotBlank() && note == null },
+    ).joinToString(" \u00b7 ").ifBlank { null }
+}
+
+/**
+ * A session's evidence panel (its one "?"): items resting on the same evidence
+ * source share ONE block. Each item gets one line with what is its own (basis
+ * sentences the others don't share, its load anchor); the block then states
+ * once what they share, with the confidence as a range when the items differ.
+ */
+@Composable
+internal fun SessionItemsEvidence(
+    items: List<PrescriptionView>,
+    isRun: (PrescriptionView) -> Boolean,
+    isCheck: (PrescriptionView) -> Boolean,
+) {
+    val groups = remember(items) {
+        items.groupBy {
+            listOf(it.grade, it.citation, it.why.grade_note, it.why.improves, it.contested, it.safety_critical)
+        }.values.toList()
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
+        groups.forEach { group ->
+            val first = group.first()
+            val shared = remember(group) { sharedBasisSentences(group.map { it.why.basis }) }
+            Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
+                group.forEach { item ->
+                    val name = planItemName(item, isRun(item), isCheck(item))
+                    val own = basisSentences(item.why.basis).filterNot { it in shared }.joinToString(" ")
+                    val line = listOfNotNull(
+                        own.ifBlank { null },
+                        itemEvidenceDetail(item, isRun(item), isCheck(item))?.let(::stripClaimIds),
+                    ).joinToString(" \u00b7 ")
+                    Text(
+                        if (line.isBlank()) name else stringResource(Res.string.ui_label_value, name, line),
+                        color = OnBgBody,
+                        style = Type.Caption,
+                    )
+                }
+                WhyDetail(
+                    why = WhyView(basis = shared.joinToString(" "), grade_note = first.why.grade_note, improves = first.why.improves),
+                    grade = first.grade,
+                    citation = first.citation,
+                    confidence = group.minOf { it.confidence },
+                    confidenceHigh = group.maxOf { it.confidence },
+                    contested = first.contested,
+                    showConfidence = !first.safety_critical,
+                    glossaryKeys = remember(group) { group.flatMap { glossaryKeysIn(it.summary) }.distinct() },
+                )
+            }
+        }
+    }
+}
+
+/** A why-basis split into its sentences ("6×5 at 83% … 275 lb.", "Aim to …").
+ *  A decimal point ("264.5") never splits. Pure. */
+internal fun basisSentences(basis: String): List<String> =
+    basis.trim().split(SentenceBreak).map { it.trim() }.filter { it.isNotEmpty() }
+
+private val SentenceBreak = Regex("""(?<=[.!?])\s+""")
+
+/** The basis sentences every one of [bases] states, in the first one's order:
+ *  what a shared evidence block says once. For a single item, all of them. Pure. */
+internal fun sharedBasisSentences(bases: List<String>): List<String> {
+    val split = bases.map(::basisSentences)
+    val head = split.firstOrNull() ?: return emptyList()
+    return head.filter { s -> split.all { s in it } }
+}
+
+/** A settled plan item collapsed to one row: "k/N" with a ✓, "Ended early k/N",
+ *  or its [settledLabel]; a skip or pain stop wears a neutral dash. An exercise
+ *  the user ended (skipped or early) offers "Reopen"; a run, the return check
+ *  and an item done by its sets have nothing to reopen. */
+@Composable
+internal fun DonePlanItemRow(
+    item: PrescriptionView,
+    isRun: Boolean,
+    reopenable: Boolean,
+    onReopen: () -> Unit,
+    isCheck: Boolean,
+    // The reported body area ("Left knee"), when known.
+    painArea: String?,
+) {
+    val tag = planItemTag(item, isRun, isCheck)
+    val stopped = !isCheck && item.status == "stopped_pain"
+    val skipped = !isCheck && item.status in SkippedItemStatuses
+    val progress = when {
+        isCheck -> ""
+        isRun -> runProgressText(currentResources(), item, rememberDistanceUnit())
+        else -> "${item.sets_done}/${plannedSetCount(item)}"
+    }
+    val label = when {
+        isCheck -> ""
+        !skipped && item.ended_early -> stringResource(Res.string.plan_ended_early, item.sets_done, plannedSetCount(item))
+        else -> settledLabel(item.status, progress, painArea)
+    }
+    val title = planItemName(item, isRun, isCheck)
+    Row(
+        modifier = Modifier
+            .testTag(tag)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Space.Card.dp))
+            .background(BgTop)
+            .padding(horizontal = Space.Card.dp, vertical = Space.Sm.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+    ) {
+        SettledMark(skipped)
+        Text(title, color = OnBgMuted, style = Type.Body, modifier = Modifier.weight(1f))
+        if (label.isNotBlank()) Text(label, color = OnBgFaint, style = Type.Caption.merge(TabularFigures))
+        if (reopenable && (item.ended_early || (skipped && !stopped)) && !isRun && !isCheck) {
+            Spacer(Modifier.size(Space.Xs.dp))
+            val reopen = stringResource(Res.string.plan_reopen)
+            TextAction(
+                reopen,
+                onReopen,
+                description = stringResource(Res.string.ui_label_value, reopen, item.exercise),
+            )
+        }
+    }
+}
+
+/** Item statuses that read as a skip (a neutral dash, never the done ✓). */
+internal val SkippedItemStatuses = setOf("stopped_pain", "skipped_pain", "skipped")
+
+/** What a settled item's [status] reads after its [progress] (sets "k/N", a
+ *  run's totals or a done row's summary): a skip or pain stop names the reported
+ *  [painArea]; a short or lighter result says so; anything else is [progress]. */
+@Composable
+internal fun settledLabel(status: String, progress: String, painArea: String?): String = when {
+    status == "stopped_pain" -> stoppedLabel(painArea)
+    status == "skipped_pain" -> painArea
+        ?.let { stringResource(Res.string.plan_skipped_pain_area, it.lowercase()) }
+        ?: stringResource(Res.string.plan_skipped_pain)
+    status == "skipped" -> stringResource(Res.string.plan_skipped)
+    progress.isBlank() -> progress
+    status == "done_short" -> stringResource(Res.string.plan_done_short, progress)
+    status == "done_lighter" -> stringResource(Res.string.plan_done_lighter, progress)
+    else -> progress
+}
+
+/** A settled item's mark: the green ✓ for work done, a neutral dash for a skip
+ *  (never a red failure mark). */
+@Composable
+internal fun SettledMark(skipped: Boolean) {
+    Text(
+        if (skipped) "\u2013" else "\u2713",
+        color = if (skipped) OnBgMuted else LocalStatusColors.current.done,
+        style = Type.BodyBold,
+    )
+}
+
+/** "Stopped · Left knee" for an exercise a pain report ended after some sets
+ *  ("Stopped · pain" when no area is known). */
+@Composable
+internal fun stoppedLabel(painArea: String?): String =
+    painArea?.let { stringResource(Res.string.plan_stopped_area, it) } ?: stringResource(Res.string.plan_stopped_pain)
+
+/** The gym-floor loop header inside the set editor: "Set 2 of 6 · 5 reps · ~1
+ *  rep left" (an off-plan exercise "Set k", a finished item "Exercise complete")
+ *  with the rest readout, the coach's in-session cue and its actions, the set
+ *  slots with "Log extra set" / "Done for now" ([showDone]: leaves the session in
+ *  progress), then the last set with Edit. [nextItem] is offered only while the
+ *  editor's primary action logs an extra set. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun SetLoopHeader(
+    item: PrescriptionView?,
+    // "Set k" for an off-plan exercise.
+    offPlanSetNumber: Int,
+    // Newest set logged today for this exercise (unix seconds) and its line.
+    lastSetSec: Long?,
+    lastSetLine: String?,
+    // The coach's in-session cue for this exercise (one line) and its load
+    // action's label and action; null hides each.
+    cueText: String?,
+    cueLoad: Pair<String, () -> Unit>?,
+    onEndExercise: (() -> Unit)?,
+    nextItem: PrescriptionView?,
+    onDone: () -> Unit,
+    onNext: (PrescriptionView) -> Unit,
+    onEditLast: (() -> Unit)?,
+    onLogExtra: (() -> Unit)?,
+    showDone: Boolean,
+) {
+    val done = item?.done == true
+    val shape = RoundedCornerShape(Space.Card.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(BgElevated)
+            .border(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Card), shape)
+            .padding(horizontal = Space.Card.dp, vertical = Space.Md.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.Xs.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val title = when {
+                // Never repeats the sheet title ("Log set").
+                item == null -> stringResource(Res.string.log_set_header_n, offPlanSetNumber)
+                done -> stringResource(Res.string.plan_item_complete)
+                else -> stringResource(Res.string.log_set_header_n_of_n, nextSetNumber(item), plannedSetCount(item))
+            }
+            // The rest length is not repeated here: the rest readout counts it.
+            val band = if (item != null && !done) setTargetBand(currentResources(), item) else ""
+            // The set count and the target share the line as two texts, so the
+            // count stays its own readable node. When the rest readout leaves too
+            // little room beside the count (a narrow phone at a large font), the
+            // target moves under it whole instead of breaking inside its words.
+            FlowRow(modifier = Modifier.weight(1f), itemVerticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = OnBgBody, style = Type.BodyBold)
+                if (band.isNotBlank()) {
+                    Text(" \u00b7 $band", color = OnBgMuted, style = Type.Body)
+                }
+            }
+            RestReadout(lastSetSec, item?.rest_sec ?: 0)
+        }
+        if (cueText != null) {
+            Text(
+                cueText,
+                color = OnBgBody,
+                style = Type.Caption,
+                modifier = Modifier
+                    .testTag("loop-cue")
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            if (cueLoad != null || onEndExercise != null) {
+                FlowRow(
+                    modifier = Modifier.offset(x = -TextActionInset),
+                    horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+                ) {
+                    cueLoad?.let { (label, use) -> TextAction(label, use) }
+                    if (onEndExercise != null) TextAction(stringResource(Res.string.log_cue_end_exercise), onEndExercise)
+                }
+            }
+        }
+        if ((item != null && !done) || onLogExtra != null || showDone) {
+            // Held at the touch-target height from the start, so the first log
+            // adding "Done for now" never pushes the warm-up chips down.
+            Row(Modifier.heightIn(min = ActionMinHeight), verticalAlignment = Alignment.CenterVertically) {
+                if (item != null && !done) SetSlotsRow(item)
+                Spacer(Modifier.weight(1f))
+                if (onLogExtra != null) TextAction(stringResource(Res.string.log_primary_extra_set), onLogExtra)
+                if (showDone) TextAction(stringResource(Res.string.log_set_done), onDone)
+            }
+        }
+        if (lastSetLine != null && onEditLast != null) {
+            val shown = stringResource(Res.string.log_last_set, lastSetLine)
+            val editCd = stringResource(Res.string.log_edit_set_cd, lastSetLine)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = ActionMinHeight)
+                    .clip(RoundedCornerShape(Space.Sm.dp))
+                    .clickable(role = Role.Button, onClick = onEditLast)
+                    .semantics { contentDescription = editCd },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+            ) {
+                // Wraps rather than clips: at 200 % font the whole set ("Last: 100 kg
+                // × 3 · 3 reps left") no longer fits one line beside "Edit".
+                Text(
+                    shown,
+                    color = OnBgMuted,
+                    style = Type.Caption.merge(TabularFigures),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    stringResource(Res.string.log_edit),
+                    color = Accent,
+                    style = Type.Caption.copy(fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+        if (done && nextItem != null) {
+            TextAction(
+                stringResource(Res.string.plan_next_exercise, nextItem.exercise),
+                { onNext(nextItem) },
+                modifier = Modifier.offset(x = -TextActionInset),
+            )
+        }
+    }
+}

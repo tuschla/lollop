@@ -3,8 +3,8 @@ package app.milestone
 import kotlinx.serialization.Serializable
 
 // The core's wire types, platform-free: the decoded view model and the enums
-// events carry. The Core object (JNI, event log) and the Event encoders stay in
-// androidMain's Core.kt.
+// events carry. The core engine (DurableCore.kt) and the Event encoders
+// (Events.kt) are next to it in commonMain.
 
 // ── View model (decode) ──────────────────────────────────────────────────────
 // Mirrors shared/src/app/view_types.rs (serde names). Unknown keys are ignored.

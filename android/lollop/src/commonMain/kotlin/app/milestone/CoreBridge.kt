@@ -6,7 +6,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.newSingleThreadContext
 
 /**
- * The Rust core's bridge calls, the set `Core.kt` makes. Bytes and strings are
+ * The Rust core's bridge calls, the set [DurableCore] makes. Bytes and strings are
  * the core's JSON; the shell decodes them. Android implements it over the JNI
  * exports (`Java_app_milestone_Core_*`, [Core]'s natives); the iOS app over the
  * `lollop_*` C ABI (`kmp/core-bridge`'s `NativeCore`, the same signatures).
@@ -68,7 +68,7 @@ interface CoreEngine {
     fun sendAll(events: List<Event>): SendResult
 }
 
-/** The platform's core engine: Android's JNI [Core]; on iOS the engine the app
- *  installs at startup. Read on [CoreDispatcher] (the Android engine loads its
+/** The platform's core engine: Android's JNI [Core]; on iOS the [BridgeCore] the
+ *  app installs at startup. Read on [CoreDispatcher] (the Android engine loads its
  *  library on first touch). */
-internal expect fun platformCoreEngine(): CoreEngine
+internal expect fun platformCoreEngine(): DurableCore

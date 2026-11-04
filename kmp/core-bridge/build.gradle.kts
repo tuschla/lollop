@@ -1,17 +1,20 @@
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBinary
 import org.jetbrains.kotlin.gradle.plugin.mpp.TestExecutable
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import org.jetbrains.kotlin.konan.target.Family
 import org.jetbrains.kotlin.konan.target.KonanTarget
 
 // The Rust core over its C ABI (shared/include/lollop.h) for Kotlin/Native:
-// `CoreBridge` in commonMain is the call set Core.kt makes over JNI, and
+// `CoreBridge` in commonMain is the call set the app's engine makes, and
 // nativeMain implements it with cinterop. linuxX64 exists only to run the
 // bridge tests on a Linux host; the iOS targets compile and link on macOS only
-// (CI job `ios-macos`). See ios/README.md.
+// (CI job `bridge-macos`). Two builds include this module: kmp/ (the bridge
+// alone) and android/ (with the app's iOS framework, :lollop-ios). See
+// ios/README.md.
 plugins {
-    kotlin("multiplatform") version "2.4.21"
-    kotlin("plugin.serialization") version "2.4.21"
+    kotlin("multiplatform")
+    kotlin("plugin.serialization")
 }
 
 val repoRoot: File = rootDir.parentFile
@@ -81,7 +84,6 @@ kotlin {
     iosSimulatorArm64()
 
     targets.withType<KotlinNativeTarget>().configureEach {
-        val triple = rustTriple(konanTarget)
         compilations.getByName("main").cinterops.create("lollop") {
             definitionFile.set(project.file("src/nativeInterop/cinterop/lollop.def"))
             includeDirs(File(repoRoot, "shared/include"))
@@ -89,23 +91,7 @@ kotlin {
             // them, and only those link the hook-enabled library.
             compilerOpts("-DLOLLOP_TEST_HOOKS")
         }
-        binaries.all {
-            val testHooks = this is TestExecutable
-            val cargo = cargoTask(triple, testHooks)
-            val rustLib = rustLibDir(triple, testHooks).resolve("libshared.a")
-            // The archive is a link input: a rebuilt core must relink the
-            // binary, not leave an up-to-date one with the old core.
-            linkTaskProvider.configure {
-                dependsOn(cargo)
-                inputs.file(rustLib)
-            }
-            linkerOpts(listOf(rustLib.path) + rustSystemLibs(konanTarget))
-        }
-        if (konanTarget.family == Family.IOS) {
-            // Linking this framework proves the release core links into an iOS
-            // binary; the app module will link the same way.
-            binaries.framework { baseName = "LollopCore" }
-        }
+        binaries.all { linkRustCore(this@configureEach, this) }
     }
 
     sourceSets {
@@ -118,6 +104,26 @@ kotlin {
         }
     }
 }
+
+/** Link the Rust core into [binary] of [target]: test binaries get the debug core
+ *  with the test hooks, every other binary the release core. A module that links
+ *  this one into its own binaries needs the same (the cinterop klib doesn't carry
+ *  the archive), so it is shared as `extra["linkRustCore"]` (android/lollop-ios). */
+fun linkRustCore(target: KotlinNativeTarget, binary: NativeBinary) {
+    val triple = rustTriple(target.konanTarget)
+    val testHooks = binary is TestExecutable
+    val cargo = cargoTask(triple, testHooks)
+    val rustLib = rustLibDir(triple, testHooks).resolve("libshared.a")
+    // The archive is a link input: a rebuilt core must relink the
+    // binary, not leave an up-to-date one with the old core.
+    binary.linkTaskProvider.configure {
+        dependsOn(cargo)
+        inputs.file(rustLib)
+    }
+    binary.linkerOpts(listOf(rustLib.path) + rustSystemLibs(target.konanTarget))
+}
+
+extra["linkRustCore"] = ::linkRustCore
 
 // `-Plollop.iosSimulator=<udid>` picks the simulator the iOS tests boot (CI
 // passes an iPhone the runner image has); unset keeps the plugin's default.

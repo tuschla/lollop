@@ -43,17 +43,82 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.pluralStringResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import app.milestone.resources.Res
+import app.milestone.resources.coach_export_action
+import app.milestone.resources.coach_export_action_sub
+import app.milestone.resources.live_updates_off_caption
+import app.milestone.resources.live_updates_open_settings
+import app.milestone.resources.log_unit_min
+import app.milestone.resources.main_appearance
+import app.milestone.resources.main_cancel
+import app.milestone.resources.main_caption_keep_screen_on
+import app.milestone.resources.main_caption_rest_alert
+import app.milestone.resources.main_caption_route_maps
+import app.milestone.resources.main_clear_all_confirm
+import app.milestone.resources.main_clear_all_data
+import app.milestone.resources.main_clear_all_message
+import app.milestone.resources.main_clear_all_title
+import app.milestone.resources.main_coach_reads_sub
+import app.milestone.resources.main_danger_zone_sub
+import app.milestone.resources.main_dark_mode_dark
+import app.milestone.resources.main_dark_mode_light
+import app.milestone.resources.main_dark_mode_pinned
+import app.milestone.resources.main_dark_mode_system
+import app.milestone.resources.main_distance_auto
+import app.milestone.resources.main_evidence_references_title
+import app.milestone.resources.main_evidence_row_sub
+import app.milestone.resources.main_export_failed
+import app.milestone.resources.main_export_first
+import app.milestone.resources.main_export_ok
+import app.milestone.resources.main_import_date_range
+import app.milestone.resources.main_import_failed_generic
+import app.milestone.resources.main_import_file_empty
+import app.milestone.resources.main_import_file_entries
+import app.milestone.resources.main_import_file_entries_undated
+import app.milestone.resources.main_import_invalid
+import app.milestone.resources.main_import_refused_run
+import app.milestone.resources.main_import_replace_body
+import app.milestone.resources.main_import_replace_confirm
+import app.milestone.resources.main_import_replace_title
+import app.milestone.resources.main_label_distance_units
+import app.milestone.resources.main_label_keep_screen_on
+import app.milestone.resources.main_label_rest_alert
+import app.milestone.resources.main_label_show_route_maps
+import app.milestone.resources.main_label_weight
+import app.milestone.resources.main_live_pace_split
+import app.milestone.resources.main_live_pace_split_sub
+import app.milestone.resources.main_overline_calculators
+import app.milestone.resources.main_overline_danger_zone
+import app.milestone.resources.main_overline_during_training
+import app.milestone.resources.main_overline_evidence
+import app.milestone.resources.main_overline_plan_answers
+import app.milestone.resources.main_overline_units
+import app.milestone.resources.main_overline_your_data
+import app.milestone.resources.main_plan_answers_sub
+import app.milestone.resources.main_plan_answers_title
+import app.milestone.resources.main_restoring_data
+import app.milestone.resources.main_section_how_coach_reads
+import app.milestone.resources.main_unit_km
+import app.milestone.resources.main_unit_mi
+import app.milestone.resources.main_use_system_accent
+import app.milestone.resources.main_use_system_accent_sub
+import app.milestone.resources.profile_export_data
+import app.milestone.resources.profile_export_data_sub
+import app.milestone.resources.profile_import_data
+import app.milestone.resources.profile_import_data_sub
+import app.milestone.resources.setup_export_first_done
+import app.milestone.resources.setup_export_first_done_cd
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.pluralStringResource
+import org.jetbrains.compose.resources.stringResource
 
 /** Profile (04-profile), everyday things first: Calculators, Units, Appearance ·
  *  Theme, During training, Your data, Evidence & references; then the guided-setup
@@ -187,10 +252,10 @@ private fun LazyListScope.PlanAnswersSection(
     }
     item(key = "plan_answers") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-            SectionOverline(stringResource(R.string.main_overline_plan_answers))
+            SectionOverline(stringResource(Res.string.main_overline_plan_answers))
             ProfileActionTile(
-                title = stringResource(R.string.main_plan_answers_title),
-                subtitle = stringResource(R.string.main_plan_answers_sub),
+                title = stringResource(Res.string.main_plan_answers_title),
+                subtitle = stringResource(Res.string.main_plan_answers_sub),
                 expanded = open,
             ) { onOpenChange(!open) }
             if (open) {
@@ -213,8 +278,8 @@ private fun LazyListScope.PlanAnswersSection(
                         // rules open in a sheet of their full EvidenceCards.
                         var coachReadsOpen by rememberSaveable { mutableStateOf(false) }
                         ProfileActionTile(
-                            title = stringResource(R.string.main_section_how_coach_reads),
-                            subtitle = pluralStringResource(R.plurals.main_coach_reads_sub, profileGuidance.size, profileGuidance.size),
+                            title = stringResource(Res.string.main_section_how_coach_reads),
+                            subtitle = pluralStringResource(Res.plurals.main_coach_reads_sub, profileGuidance.size, profileGuidance.size),
                         ) { coachReadsOpen = true }
                         if (coachReadsOpen) {
                             AppSheet(onDismiss = { coachReadsOpen = false }) {
@@ -222,7 +287,7 @@ private fun LazyListScope.PlanAnswersSection(
                                     modifier = Modifier.sheetBody(rememberScrollState()),
                                     verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
                                 ) {
-                                    SectionOverline(stringResource(R.string.main_section_how_coach_reads))
+                                    SectionOverline(stringResource(Res.string.main_section_how_coach_reads))
                                     profileGuidance.forEach {
                                         EvidenceCard(guidanceTitle(it), it.grade, it.citation, it.confidence, it.safety_critical, it.contested, why = it.why)
                                     }
@@ -236,15 +301,13 @@ private fun LazyListScope.PlanAnswersSection(
     }
 }
 
-/** The core's guidance section of profile-context rows (shared/src/app/guidance.rs). */
-internal const val PROFILE_GUIDANCE_SECTION = "Profile"
 
 /** Appearance: theme swatches, then one card with light/dark, the system accent
  *  (API 31+) and route maps. By default light/dark follows the OS. */
 private fun LazyListScope.AppearanceSection(ctx: Context) {
     item(key = "appearance") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-            SectionOverline(stringResource(R.string.main_appearance))
+            SectionOverline(stringResource(Res.string.main_appearance))
             val currentTheme by AppSettings.theme.collectAsState()
             ThemeSwatchPicker(currentTheme) { AppSettings.setTheme(ctx, it) }
 
@@ -253,15 +316,15 @@ private fun LazyListScope.AppearanceSection(ctx: Context) {
                 // Applies immediately, no Apply button (Profile changes apply at once).
                 val darkMode by AppSettings.darkMode.collectAsState()
                 SegmentedEnumRow(
-                    label = stringResource(R.string.main_dark_mode_pinned),
+                    label = stringResource(Res.string.main_dark_mode_pinned),
                     values = listOf(DarkMode.System, DarkMode.Light, DarkMode.Dark),
                     current = darkMode,
                     display = {
-                        ctx.getString(
+                        ctx.resources.getString(
                             when (it) {
-                                DarkMode.System -> R.string.main_dark_mode_system
-                                DarkMode.Light -> R.string.main_dark_mode_light
-                                DarkMode.Dark -> R.string.main_dark_mode_dark
+                                DarkMode.System -> Res.string.main_dark_mode_system
+                                DarkMode.Light -> Res.string.main_dark_mode_light
+                                DarkMode.Dark -> Res.string.main_dark_mode_dark
                             },
                         )
                     },
@@ -272,8 +335,8 @@ private fun LazyListScope.AppearanceSection(ctx: Context) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     val dynamicAccent by AppSettings.dynamicAccent.collectAsState()
                     LabeledSwitchRow(
-                        label = stringResource(R.string.main_use_system_accent),
-                        subtitle = stringResource(R.string.main_use_system_accent_sub),
+                        label = stringResource(Res.string.main_use_system_accent),
+                        subtitle = stringResource(Res.string.main_use_system_accent_sub),
                         subtitleColor = OnBgFaint,
                         checked = dynamicAccent,
                         onCheckedChange = { AppSettings.setDynamicAccent(ctx, it) },
@@ -281,8 +344,8 @@ private fun LazyListScope.AppearanceSection(ctx: Context) {
                 }
                 val showRouteMaps by AppSettings.showRouteMaps.collectAsState()
                 LabeledSwitchRow(
-                    label = stringResource(R.string.main_label_show_route_maps),
-                    subtitle = stringResource(R.string.main_caption_route_maps),
+                    label = stringResource(Res.string.main_label_show_route_maps),
+                    subtitle = stringResource(Res.string.main_caption_route_maps),
                     subtitleColor = OnBgFaint,
                     checked = showRouteMaps,
                     onCheckedChange = { AppSettings.setShowRouteMaps(ctx, it) },
@@ -297,7 +360,7 @@ private fun LazyListScope.AppearanceSection(ctx: Context) {
 private fun LazyListScope.UnitsSection(ctx: Context, model: ViewModel, onEvent: (Event) -> Unit) {
     item(key = "units") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-            SectionOverline(stringResource(R.string.main_overline_units))
+            SectionOverline(stringResource(Res.string.main_overline_units))
             PlainCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                     // Weight units live on the PROFILE (kg | lb): the toggle reads
@@ -309,7 +372,7 @@ private fun LazyListScope.UnitsSection(ctx: Context, model: ViewModel, onEvent: 
                     if (profile != null) {
                         val draft = Event.SetProfile.from(profile)
                         SegmentedEnumRow(
-                            label = stringResource(R.string.main_label_weight),
+                            label = stringResource(Res.string.main_label_weight),
                             values = listOf(WeightUnit.Kg, WeightUnit.Lb),
                             current = draft.weightUnit,
                             display = { weightSuffix(it) },
@@ -325,7 +388,7 @@ private fun LazyListScope.UnitsSection(ctx: Context, model: ViewModel, onEvent: 
                     // US/UK/Liberia/Myanmar, else km); Km/Mi pin it.
                     val unitOverride by AppSettings.distanceUnitOverride.collectAsState()
                     SegmentedEnumRow(
-                        label = stringResource(R.string.main_label_distance_units),
+                        label = stringResource(Res.string.main_label_distance_units),
                         values = listOf(
                             DistanceUnitOverride.System,
                             DistanceUnitOverride.Km,
@@ -334,9 +397,9 @@ private fun LazyListScope.UnitsSection(ctx: Context, model: ViewModel, onEvent: 
                         current = unitOverride,
                         display = {
                             when (it) {
-                                DistanceUnitOverride.System -> ctx.getString(R.string.main_distance_auto)
-                                DistanceUnitOverride.Km -> ctx.getString(R.string.main_unit_km)
-                                DistanceUnitOverride.Mi -> ctx.getString(R.string.main_unit_mi)
+                                DistanceUnitOverride.System -> ctx.resources.getString(Res.string.main_distance_auto)
+                                DistanceUnitOverride.Km -> ctx.resources.getString(Res.string.main_unit_km)
+                                DistanceUnitOverride.Mi -> ctx.resources.getString(Res.string.main_unit_mi)
                             }
                         },
                         onSelect = { AppSettings.setDistanceUnitOverride(ctx, it) },
@@ -346,9 +409,9 @@ private fun LazyListScope.UnitsSection(ctx: Context, model: ViewModel, onEvent: 
                     // segments with the unit on the label; a list when they don't fit.
                     val bucketMin by AppSettings.paceBucketMinutes.collectAsState()
                     Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-                        FieldLabel(stringResource(R.string.main_live_pace_split), trailing = stringResource(R.string.log_unit_min))
+                        FieldLabel(stringResource(Res.string.main_live_pace_split), trailing = stringResource(Res.string.log_unit_min))
                         Text(
-                            stringResource(R.string.main_live_pace_split_sub),
+                            stringResource(Res.string.main_live_pace_split_sub),
                             color = OnBgFaint,
                             style = Type.Caption,
                         )
@@ -381,14 +444,14 @@ private fun LazyListScope.TrainingAlertsSection(ctx: Context, model: ViewModel) 
     if (!showLifting && !showRunning) return
     item(key = "training_alerts") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-            SectionOverline(stringResource(R.string.main_overline_during_training))
+            SectionOverline(stringResource(Res.string.main_overline_during_training))
             PlainCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                     if (showLifting) {
                         val restAlert by AppSettings.restAlert.collectAsState()
                         LabeledSwitchRow(
-                            label = stringResource(R.string.main_label_rest_alert),
-                            subtitle = stringResource(R.string.main_caption_rest_alert),
+                            label = stringResource(Res.string.main_label_rest_alert),
+                            subtitle = stringResource(Res.string.main_caption_rest_alert),
                             subtitleColor = OnBgFaint,
                             checked = restAlert,
                             onCheckedChange = { AppSettings.setRestAlert(ctx, it) },
@@ -397,8 +460,8 @@ private fun LazyListScope.TrainingAlertsSection(ctx: Context, model: ViewModel) 
                     if (showRunning) {
                         val keepOn by AppSettings.keepScreenOn.collectAsState()
                         LabeledSwitchRow(
-                            label = stringResource(R.string.main_label_keep_screen_on),
-                            subtitle = stringResource(R.string.main_caption_keep_screen_on),
+                            label = stringResource(Res.string.main_label_keep_screen_on),
+                            subtitle = stringResource(Res.string.main_caption_keep_screen_on),
                             subtitleColor = OnBgFaint,
                             checked = keepOn,
                             onCheckedChange = { AppSettings.setKeepScreenOn(ctx, it) },
@@ -414,8 +477,8 @@ private fun LazyListScope.TrainingAlertsSection(ctx: Context, model: ViewModel) 
                     }
                     if (liveUpdatesOff) {
                         InlineNotice(
-                            stringResource(R.string.live_updates_off_caption),
-                            actionLabel = stringResource(R.string.live_updates_open_settings),
+                            stringResource(Res.string.live_updates_off_caption),
+                            actionLabel = stringResource(Res.string.live_updates_open_settings),
                             onAction = { openPromotedNotificationSettings(ctx) },
                         )
                     }
@@ -433,7 +496,7 @@ private fun LazyListScope.CalculatorsSection(model: ViewModel, onOpen: (CoachToo
     if (!model.hasCalculators()) return
     item(key = "calculators") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-            SectionOverline(stringResource(R.string.main_overline_calculators))
+            SectionOverline(stringResource(Res.string.main_overline_calculators))
             CalculatorsCard(model, onOpen)
         }
     }
@@ -444,12 +507,12 @@ private fun LazyListScope.CalculatorsSection(model: ViewModel, onOpen: (CoachToo
 private fun LazyListScope.EvidenceReferencesSection(onShowReferences: () -> Unit) {
     item(key = "evidence") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-            SectionOverline(stringResource(R.string.main_overline_evidence))
+            SectionOverline(stringResource(Res.string.main_overline_evidence))
             // No count badge: the number moves with the profile and nothing on the
             // row could say why.
             ProfileActionTile(
-                title = stringResource(R.string.main_evidence_references_title),
-                subtitle = stringResource(R.string.main_evidence_row_sub),
+                title = stringResource(Res.string.main_evidence_references_title),
+                subtitle = stringResource(Res.string.main_evidence_row_sub),
                 onClick = onShowReferences,
             )
         }
@@ -462,7 +525,7 @@ private fun LazyListScope.DangerZoneSection(onClearAll: () -> Unit) {
     item(key = "danger_zone") {
         val status = LocalStatusColors.current
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-            SectionOverline(stringResource(R.string.main_overline_danger_zone))
+            SectionOverline(stringResource(Res.string.main_overline_danger_zone))
             ChevronRow(
                 onClick = onClearAll,
                 modifier = Modifier
@@ -472,12 +535,12 @@ private fun LazyListScope.DangerZoneSection(onClearAll: () -> Unit) {
                 contentPadding = PaddingValues(Space.Card.dp),
             ) {
                 Text(
-                    stringResource(R.string.main_clear_all_data),
+                    stringResource(Res.string.main_clear_all_data),
                     color = DangerText,
                     style = Type.Body.copy(fontWeight = FontWeight.SemiBold),
                 )
                 Text(
-                    stringResource(R.string.main_danger_zone_sub),
+                    stringResource(Res.string.main_danger_zone_sub),
                     color = OnBgFaint,
                     style = Type.Caption,
                 )
@@ -521,7 +584,7 @@ private fun LazyListScope.DataSection(ctx: Context, model: ViewModel) {
                 }
                 ImportCheck.Invalid -> {
                     pendingUri = null
-                    Toast.makeText(ctx, R.string.main_import_invalid, Toast.LENGTH_LONG).show()
+                    Toast.makeText(ctx, ctx.resources.getString(Res.string.main_import_invalid), Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -532,11 +595,11 @@ private fun LazyListScope.DataSection(ctx: Context, model: ViewModel) {
                 pending = null
             }
             ExportFirstDialog(
-                title = stringResource(R.string.main_import_replace_title),
-                body = importSummaryText(p.summary) + " " + stringResource(R.string.main_import_replace_body),
+                title = stringResource(Res.string.main_import_replace_title),
+                body = importSummaryText(p.summary) + " " + stringResource(Res.string.main_import_replace_body),
                 exported = exportedBeforeImport,
                 onExport = exportData,
-                confirmLabel = stringResource(R.string.main_import_replace_confirm),
+                confirmLabel = stringResource(Res.string.main_import_replace_confirm),
                 onDismiss = dismiss,
             ) { restoreData(ctx.applicationContext, p.lines, p.summary.entries) }
         }
@@ -551,25 +614,25 @@ private fun LazyListScope.DataSection(ctx: Context, model: ViewModel) {
                         horizontalArrangement = Arrangement.spacedBy(Space.Card.dp),
                     ) {
                         CircularProgressIndicator(Modifier.size(24.dp), color = Accent)
-                        Text(stringResource(R.string.main_restoring_data))
+                        Text(stringResource(Res.string.main_restoring_data))
                     }
                 },
             )
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
-            SectionOverline(stringResource(R.string.main_overline_your_data))
+            SectionOverline(stringResource(Res.string.main_overline_your_data))
             ProfileActionTile(
-                title = stringResource(R.string.profile_export_data),
-                subtitle = stringResource(R.string.profile_export_data_sub),
+                title = stringResource(Res.string.profile_export_data),
+                subtitle = stringResource(Res.string.profile_export_data_sub),
             ) { exportData() }
             ProfileActionTile(
-                title = stringResource(R.string.profile_import_data),
-                subtitle = stringResource(R.string.profile_import_data_sub),
+                title = stringResource(Res.string.profile_import_data),
+                subtitle = stringResource(Res.string.profile_import_data_sub),
             ) { importLauncher.launch("*/*") }
             ProfileActionTile(
-                title = stringResource(R.string.coach_export_action),
-                subtitle = pluralStringResource(R.plurals.coach_export_action_sub, CoachSummaryWeeks, CoachSummaryWeeks),
+                title = stringResource(Res.string.coach_export_action),
+                subtitle = pluralStringResource(Res.plurals.coach_export_action_sub, CoachSummaryWeeks, CoachSummaryWeeks),
             ) { shareCoachSummary(ctx, model) }
         }
     }
@@ -586,7 +649,7 @@ private val dataRestoreRunning = MutableStateFlow(false)
  *  what the next boot confirms ("Restored N entries"). */
 private fun restoreData(app: Context, lines: List<String>, entries: Int) {
     if (RunSession.tracking.value || RunSession.armed.value) {
-        Toast.makeText(app, R.string.main_import_refused_run, Toast.LENGTH_LONG).show()
+        Toast.makeText(app, app.resources.getString(Res.string.main_import_refused_run), Toast.LENGTH_LONG).show()
         return
     }
     dataRestoreRunning.value = true
@@ -599,11 +662,11 @@ private fun restoreData(app: Context, lines: List<String>, entries: Int) {
             }
             DataImportResult.RunInProgress -> {
                 dataRestoreRunning.value = false
-                Toast.makeText(app, R.string.main_import_refused_run, Toast.LENGTH_LONG).show()
+                Toast.makeText(app, app.resources.getString(Res.string.main_import_refused_run), Toast.LENGTH_LONG).show()
             }
             DataImportResult.Failed -> {
                 dataRestoreRunning.value = false
-                Toast.makeText(app, R.string.main_import_failed_generic, Toast.LENGTH_LONG).show()
+                Toast.makeText(app, app.resources.getString(Res.string.main_import_failed_generic), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -612,19 +675,19 @@ private fun restoreData(app: Context, lines: List<String>, entries: Int) {
 /** "This file has 4 entries (Oct 2, 2026 – Oct 14, 2026)." for the replace dialog. */
 @Composable
 private fun importSummaryText(s: ImportSummary): String {
-    if (s.entries == 0) return stringResource(R.string.main_import_file_empty)
+    if (s.entries == 0) return stringResource(Res.string.main_import_file_empty)
     val first = s.firstDay
     val last = s.lastDay
     if (first == null || last == null) {
-        return pluralStringResource(R.plurals.main_import_file_entries_undated, s.entries, s.entries)
+        return pluralStringResource(Res.plurals.main_import_file_entries_undated, s.entries, s.entries)
     }
     val from = epochDayLabel(first)
     val range = if (first == last) {
         from
     } else {
-        stringResource(R.string.main_import_date_range, from, epochDayLabel(last))
+        stringResource(Res.string.main_import_date_range, from, epochDayLabel(last))
     }
-    return pluralStringResource(R.plurals.main_import_file_entries, s.entries, s.entries, range)
+    return pluralStringResource(Res.plurals.main_import_file_entries, s.entries, s.entries, range)
 }
 
 /** A "save as" picker that writes the full data export to the chosen file and
@@ -643,7 +706,7 @@ internal fun rememberDataExport(onExported: () -> Unit = {}): () -> Unit {
             if (ok) exported()
             Toast.makeText(
                 app,
-                if (ok) R.string.main_export_ok else R.string.main_export_failed,
+                app.resources.getString(if (ok) Res.string.main_export_ok else Res.string.main_export_failed),
                 Toast.LENGTH_LONG,
             ).show()
         }
@@ -662,11 +725,11 @@ internal fun ClearAllDataDialog(visible: Boolean, onDismiss: () -> Unit, onClear
     val exportData = rememberDataExport(onExported = { exported.value = true })
     if (!visible) return
     ExportFirstDialog(
-        title = stringResource(R.string.main_clear_all_title),
-        body = stringResource(R.string.main_clear_all_message),
+        title = stringResource(Res.string.main_clear_all_title),
+        body = stringResource(Res.string.main_clear_all_message),
         exported = exported.value,
         onExport = exportData,
-        confirmLabel = stringResource(R.string.main_clear_all_confirm),
+        confirmLabel = stringResource(Res.string.main_clear_all_confirm),
         onDismiss = onDismiss,
         onConfirm = onClear,
     )
@@ -694,16 +757,16 @@ private fun ExportFirstDialog(
                 onConfirm()
             }) { Text(confirmLabel, color = DangerText) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.main_cancel)) } },
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
                 Text(body)
                 TextAction(
-                    stringResource(if (exported) R.string.setup_export_first_done else R.string.main_export_first),
+                    stringResource(if (exported) Res.string.setup_export_first_done else Res.string.main_export_first),
                     onClick = onExport,
                     modifier = Modifier.offset(x = -TextActionInset),
-                    description = if (exported) stringResource(R.string.setup_export_first_done_cd) else null,
+                    description = if (exported) stringResource(Res.string.setup_export_first_done_cd) else null,
                 )
             }
         },
