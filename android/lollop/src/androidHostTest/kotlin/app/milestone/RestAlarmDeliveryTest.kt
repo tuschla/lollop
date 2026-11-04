@@ -110,7 +110,7 @@ class RestAlarmDeliveryTest {
         ShadowAlarmManager.setCanScheduleExactAlarms(true)
         AppSettings.setRestAlert(app, false)
         RestAlarm.schedule(app, 90, "Back squat")
-        RestAlarm.setNextSet(app, RestAlarm.NextSet("Bench press", "Set 1 of 3"))
+        RestAlarm.setNextSet(app, RestNextSet("Bench press", "Set 1 of 3"))
         assertEquals(resting, title(posted()))
         val fired = restEndBroadcast(app)
 

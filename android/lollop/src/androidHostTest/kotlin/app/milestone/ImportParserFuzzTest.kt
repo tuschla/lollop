@@ -418,6 +418,74 @@ class ImportParserFuzzTest {
         assertTrue("${bad.size} cuts were not reported damaged, e.g. ${bad.filter { "1 run" in it }.take(2) + bad.take(2)}", bad.isEmpty())
     }
 
+    // ═══ Reader parity: the platform's xmlpull parser vs xmlutil (iOS) ═════════
+
+    /** What [parseRunFileSegments] makes of [bytes] with the reader [xml]; any other
+     *  exception by its type. */
+    private fun parseWith(bytes: ByteArray, xml: (String) -> ImportXmlReader): Any = try {
+        Out.Runs(parseRunFileSegments(bytes, Core::parseFit, xml))
+    } catch (e: ImportException) {
+        Out.Failed(e.reason, e.detail)
+    } catch (e: Exception) {
+        e::class.java.name
+    }
+
+    /**
+     * The XML fuzz corpus (these tests' seeds, mutants and cuts) through both readers.
+     * The seeds and every cut read alike. A mutant is malformed XML, and the two
+     * parsers draw the line of tolerance a little differently there (xmlpull refuses a
+     * `<` inside an attribute value, xmlutil a stray character in a tag name or a
+     * second root): such a mutant may be a run for one and damaged for the other, but
+     * never anything else apart, and only rarely.
+     */
+    @Test
+    fun theXmlutilReaderReadsTheFuzzCorpusAsThePlatformParserDoes() {
+        val r = run(400)
+        val a = run(300, seed = 2)
+        val b = run(200, t0 = 1_750_100_000L, seed = 3)
+        // The XML fuzz tests' seeds and case numbers, so this is their corpus.
+        val seeds = listOf(
+            Triple("gpx", gpx(listOf(r.take(200), r.drop(200).map { it.copy(t = it.t + 120) })), 0x6000_0000L),
+            Triple("core gpx", coreGpx(run(300).map { it.point() }, starts = listOf(150)), 0x6100_0000L),
+            Triple("tcx", tcx(listOf("Running" to listOf(a.take(150), a.drop(150)), "Running" to listOf(b))), 0x6200_0000L),
+        )
+        var compared = 0
+        var mutants = 0
+        val tolerated = mutableListOf<String>()
+        val diffs = mutableListOf<String>()
+        fun brief(out: Any) = if (out is Out.Runs) "${out.runs.size} run(s), ${out.runs.sumOf { r -> r.segments.sumOf { it.size } }} fixes" else "$out"
+        fun why(bytes: ByteArray, xml: (String) -> ImportXmlReader) =
+            runCatching { parseRunFileSegments(bytes, Core::parseFit, xml) }.exceptionOrNull()?.let { it.cause?.message ?: it.message }
+        fun compare(what: String, bytes: ByteArray, mutant: Boolean) {
+            val platform = bounded(what) { parseWith(bytes, ::importXmlReader) }
+            val xmlutil = bounded("$what (xmlutil)") { parseWith(bytes, ::XmlUtilImportReader) }
+            compared++
+            if (mutant) mutants++
+            if (platform == xmlutil) return
+            val line = "$what: platform ${brief(platform)} (${why(bytes, ::importXmlReader)}), " +
+                "xmlutil ${brief(xmlutil)} (${why(bytes, ::XmlUtilImportReader)})"
+            val damaged = Out.Failed(ImportFailure.Damaged, null)
+            val oneSideDamaged = (platform == damaged && xmlutil is Out.Runs) || (xmlutil == damaged && platform is Out.Runs)
+            if (mutant && oneSideDamaged) tolerated += line else diffs += line
+        }
+        for ((name, seed, base) in seeds) {
+            compare("$name seed", seed.toByteArray(), mutant = false)
+            for (i in 0 until iters) {
+                val case = base + i
+                if (onlyCase != null && onlyCase != case) continue
+                val rnd = Random(case)
+                val bytes = if (rnd.nextBoolean()) mutateXml(rnd, seed).toByteArray() else mutateBytes(rnd, seed.toByteArray())
+                compare("$name case $case (IMPORT_FUZZ_SEED=$case)", bytes, mutant = true)
+            }
+            val doc = seed.toByteArray()
+            for (cut in truncationCuts(doc)) compare("$name cut at $cut", doc.copyOf(cut), mutant = false)
+        }
+        println("reader parity: $compared fuzz inputs, ${diffs.size} differ, ${tolerated.size} malformed mutants damaged for one reader only")
+        tolerated.forEach(::println)
+        assertTrue("${diffs.size} of $compared inputs differ:\n${diffs.take(20).joinToString("\n")}", diffs.isEmpty())
+        assertTrue("${tolerated.size} of $mutants mutants are damaged for one reader only", tolerated.size * 50 <= mutants)
+    }
+
     // ═══ Entities: XXE and billion laughs ══════════════════════════════════════
 
     private val secretLat = "47.123456"

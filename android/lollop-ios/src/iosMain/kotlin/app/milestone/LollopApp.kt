@@ -2,8 +2,8 @@ package app.milestone
 
 import app.milestone.core.rustCore
 
-/** The iOS app's entry point. The Swift app calls `LollopApp.shared.start()`
- *  once at launch, before any UI touches the core. */
+/** The iOS app's entry point. [MainViewController] calls `start()` before the
+ *  UI composes, so the engine is installed before anything touches the core. */
 object LollopApp {
     /** Install the core engine over the Rust core's C ABI. A second call keeps
      *  the engine already installed. */
@@ -25,4 +25,9 @@ internal object RustCoreBridge : CoreBridge {
     override fun trackFigures(event: ByteArray): String? = rustCore.trackFigures(event)
 
     override fun compactLog(lines: Array<String>): String? = rustCore.compactLog(lines)
+
+    override fun reset(): Boolean {
+        rustCore.reset()
+        return true
+    }
 }

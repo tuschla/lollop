@@ -41,6 +41,11 @@ interface CoreBridge {
     /** The event log's lines in; the compaction verdict JSON out, or null when
      *  the core can't answer (keep every line). */
     fun compactLog(lines: Array<String>): String?
+
+    /** Replace the core with an empty one, as a fresh process starts; false where
+     *  the bridge can't (Android's JNI exports: a data import restarts the process
+     *  there instead, [DurableCore.resetForReboot]). */
+    fun reset(): Boolean = false
 }
 
 /**

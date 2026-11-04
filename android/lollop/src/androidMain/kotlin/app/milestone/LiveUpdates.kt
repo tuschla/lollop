@@ -19,8 +19,8 @@ import androidx.core.app.NotificationManagerCompat
 // ignored extra, so the same notification posts as an ordinary ongoing one.
 
 /** True only where Live Updates exist (API 36+) and the user turned them off for
- *  this app: the one case worth explaining in Profile. */
-internal fun liveUpdatesTurnedOff(ctx: Context): Boolean =
+ *  this app: the one case worth explaining in Profile (the ProfilePlatform.kt seam). */
+internal actual fun liveUpdatesTurnedOff(ctx: Context): Boolean =
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA &&
         !NotificationManagerCompat.from(ctx).canPostPromotedNotifications()
 
@@ -48,7 +48,7 @@ internal fun appDetailsIntent(ctx: Context): Intent =
 /** Open [promotedNotificationSettingsIntent]. The platform documents that the
  *  promotion screen may be missing on some builds, so that case falls back to the
  *  app's notification settings. */
-internal fun openPromotedNotificationSettings(ctx: Context) =
+internal actual fun openPromotedNotificationSettings(ctx: Context) =
     ctx.openFirst(promotedNotificationSettingsIntent(ctx), appNotificationSettingsIntent(ctx))
 
 /** Start the first of [intents] that opens; none does: nothing happens (a device

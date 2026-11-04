@@ -74,3 +74,15 @@ fn pure_helpers_answer_errors_and_empties() {
     assert!(figures.starts_with(b"{\"error\""));
     assert!(take(lollop_export_gpx(42, 1_700_000_000)).is_empty());
 }
+
+#[test]
+fn reset_empties_the_core_as_a_fresh_process_has_it() {
+    let _bridge = BRIDGE_RESET.write().unwrap_or_else(|e| e.into_inner());
+    // Other tests leave their events in the shared core: start from a reset one.
+    lollop_reset();
+    let empty = take(lollop_view());
+    update(PROFILE);
+    assert_ne!(take(lollop_view()), empty, "the profile reached the core");
+    lollop_reset();
+    assert_eq!(take(lollop_view()), empty, "reset leaves the empty core");
+}

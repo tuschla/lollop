@@ -36,6 +36,10 @@ interface CoreBridge {
     /** The event log's lines in; the compaction verdict JSON out, or null when
      *  the core can't answer (keep every line). */
     fun compactLog(lines: Array<String>): String?
+
+    /** Replace the core with an empty one, as a fresh process starts: the app
+     *  then replays an imported event log in process. */
+    fun reset()
 }
 
 /** The platform's core: the C ABI on Kotlin/Native (iOS). */

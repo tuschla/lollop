@@ -8,6 +8,7 @@ import app.milestone.core.cinterop.lollop_bytes_free
 import app.milestone.core.cinterop.lollop_compact_log
 import app.milestone.core.cinterop.lollop_export_gpx
 import app.milestone.core.cinterop.lollop_parse_fit
+import app.milestone.core.cinterop.lollop_reset
 import app.milestone.core.cinterop.lollop_track_figures
 import app.milestone.core.cinterop.lollop_update
 import app.milestone.core.cinterop.lollop_view
@@ -54,6 +55,8 @@ internal object NativeCore : CoreBridge {
         }
         lollop_compact_log(slices, lines.size.convert()).take()
     }.takeIf { it.isNotEmpty() }?.decodeToString()
+
+    override fun reset() = lollop_reset()
 }
 
 /** Call [f] with a pointer to [bytes] (null for an empty array), pinned for the call. */

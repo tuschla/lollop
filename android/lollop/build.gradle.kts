@@ -95,9 +95,14 @@ kotlin {
             // SynchronizedObject + synchronized(): a real lock on Kotlin/Native, where
             // @Synchronized does nothing; on the JVM it is the object's monitor.
             implementation("org.jetbrains.kotlinx:atomicfu:0.33.0")
+            // Pure-Kotlin XML pull reader (KtXmlReader) for GPX/TCX run import on iOS
+            // (ImportXml.kt); Android reads with the platform's xmlpull parser.
+            implementation("io.github.pdvrieze.xmlutil:core:1.0.2")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
+            // runTest for the boot sequence's suspend turns (AppBootTest).
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
         }
         // On iOS, CMP 1.12.2's ui depends on androidx lifecycle 2.11.0 and on
         // JetBrains' lifecycle port 2.9.6: the KLIB loader found every lifecycle

@@ -45,7 +45,7 @@ class LiveRestNotificationTest {
 
     private fun posted() = postedRest(app)
 
-    private fun squatNext() = RestAlarm.NextSet("Back squat", "Set 3 of 4 · 100\u00A0kg × 5")
+    private fun squatNext() = RestNextSet("Back squat", "Set 3 of 4 · 100\u00A0kg × 5")
 
     @Test
     @Config(sdk = [36])
@@ -161,7 +161,7 @@ class LiveRestNotificationTest {
         assertEquals("100\u00A0kg × 5", load)
         val next = restNextSet(res, LoopPrimary.LogPlannedSet, "Back squat", squat, null, 3, load)
         val detail = res.getString(R.string.log_rest_notif_join, res.getString(R.string.log_set_header_n_of_n, 3, 4), load)
-        assertEquals(RestAlarm.NextSet("Back squat", detail), next)
+        assertEquals(RestNextSet("Back squat", detail), next)
         assertEquals(res.getString(R.string.log_rest_notif_next, detail), countdownText(res, "Back squat", next))
     }
 
@@ -171,7 +171,7 @@ class LiveRestNotificationTest {
         val bench = PrescriptionView(exercise = "Bench press", sets = 3)
         val next = restNextSet(res, LoopPrimary.Next, "Back squat", squat, bench, 4, "100\u00A0kg × 5")
         val firstSet = res.getString(R.string.log_set_header_n_of_n, 1, 3)
-        assertEquals(RestAlarm.NextSet("Bench press", firstSet), next)
+        assertEquals(RestNextSet("Bench press", firstSet), next)
         assertEquals(
             res.getString(R.string.log_rest_notif_next, res.getString(R.string.log_rest_notif_join, "Bench press", firstSet)),
             countdownText(res, "Back squat", next),
@@ -181,11 +181,11 @@ class LiveRestNotificationTest {
     @Test
     fun offPlanExtraAndFinishLines() {
         assertEquals(
-            RestAlarm.NextSet("Curl", res.getString(R.string.log_rest_notif_join, res.getString(R.string.log_set_header_n, 2), "12\u00A0kg × 10")),
+            RestNextSet("Curl", res.getString(R.string.log_rest_notif_join, res.getString(R.string.log_set_header_n, 2), "12\u00A0kg × 10")),
             restNextSet(res, LoopPrimary.LogOffPlanSet, "Curl", null, null, 2, "12\u00A0kg × 10"),
         )
         assertEquals(
-            RestAlarm.NextSet("Curl", res.getString(R.string.log_rest_notif_extra_set)),
+            RestNextSet("Curl", res.getString(R.string.log_rest_notif_extra_set)),
             restNextSet(res, LoopPrimary.LogExtraSet, "Curl", null, null, 2, null),
         )
         assertNull(restNextSet(res, LoopPrimary.FinishSession, "Curl", null, null, 2, null))

@@ -226,7 +226,7 @@ class LiveUpdateStateMachineTest {
                 }
                 w < 36 -> { inApp = !inApp; RestAlarm.setInAppVisible(app, inApp); "in-app visible=$inApp" }
                 w < 42 -> {
-                    val next = if (rng.nextBoolean()) RestAlarm.NextSet(exercises[rng.nextInt(3)], "Set ${rng.nextInt(1, 5)} of 4") else null
+                    val next = if (rng.nextBoolean()) RestNextSet(exercises[rng.nextInt(3)], "Set ${rng.nextInt(1, 5)} of 4") else null
                     RestAlarm.setNextSet(app, next)
                     "next set $next"
                 }

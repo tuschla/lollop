@@ -3,7 +3,6 @@
 package app.milestone.core
 
 import app.milestone.core.cinterop.lollop_panic_for_test
-import app.milestone.core.cinterop.lollop_reset_for_test
 import kotlin.native.concurrent.ObsoleteWorkersApi
 import kotlin.native.concurrent.TransferMode
 import kotlin.native.concurrent.Worker
@@ -58,7 +57,7 @@ class BridgeTest {
     private val core = rustCore
 
     @BeforeTest
-    fun freshCore() = lollop_reset_for_test()
+    fun freshCore() = core.reset()
 
     private fun replay(lines: List<String>) = lines.forEach { line ->
         assertTrue(accepted(core.update(line.encodeToByteArray())), "replayed line accepted: ${line.take(80)}")
@@ -69,7 +68,7 @@ class BridgeTest {
         val cases = listRepoDir(VIEW_FIXTURES).mapNotNull { it.removeSuffix(".events.ndjson").takeIf { c -> c != it } }
         assertTrue(cases.isNotEmpty(), "view snapshot fixtures found")
         for (case in cases) {
-            lollop_reset_for_test()
+            core.reset()
             replay(readLogLines("$VIEW_FIXTURES/$case.events.ndjson"))
             val golden = json(readRepoFile("$VIEW_FIXTURES/$case.view.json"))
             assertEquals(golden, json(core.view()), "view of $case matches the core's snapshot")
@@ -81,7 +80,7 @@ class BridgeTest {
         val log = readLogLines("$VIEW_FIXTURES/hybrid.events.ndjson")
         replay(log)
         val first = core.view()!!
-        lollop_reset_for_test()
+        core.reset()
         assertNotEquals(json(first), json(core.view()), "reset empties the core")
         replay(log)
         assertContentEquals(first, core.view(), "a replayed log renders byte-identical JSON")

@@ -172,10 +172,12 @@ pub unsafe extern "C" fn lollop_bytes_free(bytes: LollopBytes) {
     drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(bytes.data, bytes.len)) });
 }
 
-/// Replace the core with an empty one, so each bridge test starts clean.
-#[cfg(feature = "test-hooks")]
+/// Replace the core with an empty one (`Core::default()`), as a fresh process
+/// starts. The iOS app calls it before replaying an imported event log in
+/// process (Android restarts its process instead); the bridge tests call it so
+/// each starts clean.
 #[unsafe(no_mangle)]
-pub extern "C" fn lollop_reset_for_test() {
+pub extern "C" fn lollop_reset() {
     ffi::reset_bridge();
 }
 

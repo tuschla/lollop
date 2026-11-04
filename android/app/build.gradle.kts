@@ -63,10 +63,11 @@ android {
     // local sideload/testing only and is not distributable.
 
     compileOptions {
-        // Core-library desugaring backports the java.time API (used at startup in
-        // MainActivity + in Export.kt) to the minSdk-24 range. Without it, an
-        // Android 7 (API 24/25) device hits NoClassDefFoundError on the first
-        // frame: java.time.* only exists natively from API 26.
+        // Core-library desugaring backports the java.time API (kotlinx-datetime
+        // wraps it on Android: every date in the UI, the export file names, the
+        // import time stamps) to the minSdk-24 range. Without it, an Android 7
+        // (API 24/25) device hits NoClassDefFoundError on the first frame:
+        // java.time.* only exists natively from API 26.
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

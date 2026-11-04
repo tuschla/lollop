@@ -94,6 +94,18 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
         return runCatching { coreJson.decodeFromString(TrackFigures.serializer(), json) }.getOrNull()
     }
 
+    /** The core's stateless FIT parse of a `.fit` file's [bytes] (fitparser): the
+     *  tracker-import JSON or an `{"error":…}` object; null when the answer couldn't
+     *  be allocated (callers treat it like the error envelope). Touches no model or log. */
+    fun parseFitFile(bytes: ByteArray): String? = bridge.parseFit(bytes)
+
+    /** The GPX 1.1 document of ONE logged run, by the same (entry_id, observed_at)
+     *  identity as delete/amend: "" for a hand-entered run or an unknown id, null only
+     *  when the string couldn't be allocated (treat it like ""). Reads the registry the
+     *  last view filled, so call it after the run list rendered; heavy, so off the
+     *  main thread. */
+    fun runGpx(entryId: Long, observedAt: Long): String? = bridge.exportGpx(entryId, observedAt)
+
     /** The core's compaction verdict on the event-log [lines] (log.rs), or null when
      *  the core can't answer (the library didn't load, it is [unavailable] or under
      *  [faultForTest], or the call failed): the caller then keeps every line. */
@@ -193,6 +205,26 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
     /** Undo [detachLog] after a failed swap: the original log is still in place. */
     fun reattachLog(file: LogPath?) = synchronized(this) {
         log = file
+    }
+
+    /**
+     * Put this engine back where a new process starts it: the native core emptied
+     * ([CoreBridge.reset]) and the replayed log forgotten, so the next [restore]
+     * replays the event log file afresh. The iOS data import, which can't restart
+     * its process, calls this after replacing the log and then re-runs the boot.
+     * False, with nothing changed, where the bridge can't reset (Android).
+     */
+    fun resetForReboot(): Boolean = synchronized(this) {
+        if (!bridge.reset()) return false
+        restored = false
+        log = null
+        restoredPlanRemoved = false
+        lastGoodView = null
+        appendTornGuard = false
+        lastSetToday = null
+        viewStale = false
+        logDegraded = false
+        true
     }
 
     // The last ViewModel that decoded cleanly. If a later core call comes back as

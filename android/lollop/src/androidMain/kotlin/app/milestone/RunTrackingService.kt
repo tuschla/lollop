@@ -62,35 +62,20 @@ class RunTrackingService : Service() {
 
     private lateinit var engine: LocationEngine
 
-    // Locate-only vs recording. Opening the tracker starts the
-    // engine to preview fix quality, but records NOTHING until the user taps
-    // Start; no route point, no crash-durable sidecar line. `recording` flips
-    // true on START, or at the armed trigger ([beginRecording]).
-    private var recording = false
+    // Everything here runs on the main looper: the location callbacks, the recorder's
+    // timers and every notification write, so no state needs a lock.
+    private val mainHandler = Handler(Looper.getMainLooper())
 
-    // This instance ran startTracking; distinguishes a live locate/armed/recording
-    // session from an instance created BY a stray Pause/Resume intent (whose
-    // onCreate registered the screen receiver + paused collector with nothing to
-    // ever stop them). Set true at the top of startTracking, checked in onStartCommand.
-    private var started = false
+    // The recording state machine shared with iOS: locate preview, armed start,
+    // recording, pause, the signal-loss watchdog and the step ticker ([RunRecorder]).
+    // This service is its host: the foreground notification, the location engine,
+    // the vibration/tone cues and the screen-off-safe timers ([Host]).
+    private val recorder = RunRecorder(Host())
 
-    // Armed: Start was tapped before a lock. The service is acquiring GPS (like
-    // LOCATE) but will flip to recording AUTOMATICALLY at the first fix that clears
-    // [armTrigger]'s gates. `armed` mirrors RunSession.armed for the notification
-    // copy; both are cleared the instant recording begins (beginRecording) or on any
-    // teardown ([clearArmState]).
-    private var armed = false
-    private var armTrigger: ArmTrigger? = null
-
-    // Set once the service is tearing down (stopTracking / onDestroy). A location
-    // result already queued on the main looper can still fire onFix AFTER
-    // stopForeground; without this guard it would re-post the ongoing notification
-    // that nothing then cancels, leaving a stuck "Finding GPS…".
-    @Volatile private var stopped = false
-
-    // The [RunSession.generation] this stream started under; onFix stands down once
-    // it differs (see [RunSession.generation]).
-    private var sessionGeneration = 0L
+    // The recorder's state as the notification copy reads it.
+    private val recording get() = recorder.recording
+    private val armed get() = recorder.armed
+    private val signalLost get() = recorder.signalLost
 
     // Main-thread scope observing RunSession.paused so an in-app Pause toggle
     // re-posts the ongoing notification (updated title/content + the Pause↔Resume
@@ -129,22 +114,100 @@ class RunTrackingService : Service() {
     @Volatile private var screenOff = false
     private var screenReceiver: BroadcastReceiver? = null
 
-    // Screen-off signal-loss watchdog. The in-app pill only ages the last fix while
-    // the tracker is composed (visible), so a phone-in-pocket runner would never feel a
-    // GPS drop; the service owns this check instead. Re-armed on every accepted
-    // recording fix; when [SIGNAL_LOSS_MS] passes with no fix it vibrates once and
-    // re-posts the notification with the signal-lost line. [signalLost] latches the
-    // episode so it buzzes once, and clears on the next accepted fix. Timed by a
-    // [WakeTimer] (a plain Handler post stalls while the CPU sleeps with the screen
-    // off); everything runs on the main looper, serialized with onFix, so no lock.
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private var signalLost = false
-    private val signalWake = WakeTimer("lollop:signal-watchdog") { checkSignal() }
-
     // The startId of the newest delivered start command. Every self-stop passes it to
     // stopSelf(startId), so a start queued after it (a new LOCATE/ARM racing a stop)
     // keeps the service alive instead of being torn down before its startForeground.
     private var lastStartId = 0
+
+    // The step-change beep, created on the first cue and released on teardown.
+    private var toneGenerator: ToneGenerator? = null
+
+    /** [RunRecorder]'s platform side: the foreground notification, the location
+     *  engine, the vibration/tone cues and the main-looper timers. */
+    private inner class Host : RecorderHost {
+        override fun nowNanos(): Long = SystemClock.elapsedRealtimeNanos()
+
+        override fun nowMs(): Long = SystemClock.elapsedRealtime()
+
+        /** Every caller used startForegroundService, so startForeground runs first
+         *  (its ~5 s deadline kills the process otherwise), then the fine-location
+         *  re-check, then the engine. */
+        @SuppressLint("MissingPermission")
+        override fun startStream(): Boolean {
+            try {
+                startLocationForeground()
+            } catch (_: SecurityException) {
+                // API 34+: a location FGS without a location grant is rejected here.
+                return false
+            }
+            // Fine location may have been revoked between the UI's check and here.
+            if (!hasFineLocation(this@RunTrackingService)) return false
+            return try {
+                // onError covers an async start failure (the fused client's Task) that
+                // throws nothing here.
+                engine.start(::onFix) { recorder.onStreamFailed() }
+                engine.setBackground(screenOff)
+                true
+            } catch (_: SecurityException) {
+                // Permission raced away between the check above and engine.start.
+                false
+            } catch (_: IllegalArgumentException) {
+                // The platform engine found no GPS provider (no Play Services, no GPS).
+                false
+            }
+        }
+
+        override fun stopStream() = engine.stop()
+
+        override fun openSidecar() = ActiveRunStore.begin(this@RunTrackingService)
+
+        override fun reassertSurface() {
+            try {
+                startLocationForeground()
+            } catch (_: SecurityException) {
+                // Already foregrounded as a recording run; the deadline is moot.
+            }
+        }
+
+        override fun refresh() = notifyIfChanged()
+
+        override fun invalidateSurface() {
+            lastNotifiedFrame = null
+        }
+
+        override fun cue(cue: RecorderCue) = when (cue) {
+            RecorderCue.RecordingStarted -> vibrate(RECORDING_STARTED_WAVEFORM)
+            RecorderCue.SignalLost -> vibrate(SIGNAL_LOST_WAVEFORM)
+            RecorderCue.StepChange -> {
+                vibrate(STEP_CHANGE_WAVEFORM)
+                playStepTone()
+            }
+        }
+
+        override fun releaseCues() {
+            toneGenerator?.let { runCatching { it.release() } }
+            toneGenerator = null
+        }
+
+        override fun finished(userStop: Boolean) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            // A stop cancels too, in case a re-post slipped in before `stopped`.
+            if (userStop) getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
+            stopSelf(lastStartId)
+        }
+
+        override fun wakeTimer(tag: String, action: () -> Unit): RecorderTimer = WakeTimer(tag, action)
+
+        override fun ticker(action: () -> Unit): RecorderTimer = object : RecorderTimer {
+            private val runnable = Runnable { action() }
+
+            override fun schedule(delayMs: Long) {
+                mainHandler.postDelayed(runnable, delayMs)
+            }
+
+            override fun cancel() = mainHandler.removeCallbacks(runnable)
+        }
+    }
 
     /**
      * One deadline that fires on time with the screen off: a main-looper post (exact
@@ -154,7 +217,7 @@ class RunTrackingService : Service() {
      * no-op: the earlier one fires and [action] re-arms for the remainder, so the
      * per-fix re-arm costs no alarm traffic. An earlier request replaces it.
      */
-    private inner class WakeTimer(private val tag: String, private val action: () -> Unit) {
+    private inner class WakeTimer(private val tag: String, private val action: () -> Unit) : RecorderTimer {
         private var dueAt = 0L
         private val listener = AlarmManager.OnAlarmListener { fire() }
         private val runnable = Runnable { fire() }
@@ -164,7 +227,7 @@ class RunTrackingService : Service() {
             action()
         }
 
-        fun schedule(delayMs: Long) {
+        override fun schedule(delayMs: Long) {
             val at = SystemClock.elapsedRealtime() + delayMs.coerceAtLeast(0L)
             if (dueAt != 0L && dueAt <= at) return
             cancel()
@@ -178,7 +241,7 @@ class RunTrackingService : Service() {
             }
         }
 
-        fun cancel() {
+        override fun cancel() {
             if (dueAt == 0L) return
             dueAt = 0L
             mainHandler.removeCallbacks(runnable)
@@ -233,95 +296,6 @@ class RunTrackingService : Service() {
         )
     }
 
-    /** (Re)schedule the signal-loss check for [SIGNAL_LOSS_MS] after the latest
-     *  accepted fix. Cancels once stopped or when not recording (locate/armed previews
-     *  have no run to lose). */
-    private fun armSignalWatchdog() {
-        if (stopped || !recording) {
-            signalWake.cancel()
-            return
-        }
-        val last = RunSession.lastFixElapsedMs.value
-        val delayMs = if (last <= 0L) {
-            SIGNAL_LOSS_MS
-        } else {
-            (last + SIGNAL_LOSS_MS + 1L - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
-        }
-        signalWake.schedule(delayMs + SIGNAL_CHECK_SLACK_MS)
-    }
-
-    /** Watchdog body: on a due loss while recording+unpaused, vibrate once and show
-     *  the signal-lost notification line. A paused run is not buzzed (no fixes are
-     *  expected to matter), but is re-checked so a resume into a dead signal still
-     *  warns. Not yet due (a fix landed in between) → re-arm for the remainder. */
-    private fun checkSignal() {
-        if (stopped || !recording) return
-        if (!signalLossDue(RunSession.lastFixElapsedMs.value, SystemClock.elapsedRealtime())) {
-            armSignalWatchdog()
-            return
-        }
-        if (RunSession.paused.value) {
-            signalWake.schedule(SIGNAL_LOSS_MS)
-            return
-        }
-        if (!signalLost) {
-            signalLost = true
-            vibrate(SIGNAL_LOST_WAVEFORM)
-            notifyIfChanged()
-        }
-    }
-
-    /** An accepted fix while recording: end any signal-loss episode (re-posting the
-     *  normal progress line) and push the watchdog out again. */
-    private fun onSignalFix() {
-        if (signalLost) {
-            signalLost = false
-            lastNotifiedFrame = null
-        }
-        armSignalWatchdog()
-    }
-
-    /** Stop the watchdog and forget any loss episode (every teardown path). */
-    private fun clearSignalWatchdog() {
-        signalWake.cancel()
-        signalLost = false
-    }
-
-    // Guided-run step ticker: once a second while recording a planned,
-    // structured run, advance [RunSession]'s step machine on the monotonic clock and
-    // cue each step change with a buzz + tone from the SERVICE, so a pocketed phone
-    // with the screen off still says "rep 3 starts now". The 1 s main-looper tick
-    // refreshes the countdown; a [WakeTimer] at the timed step's end wakes the CPU so
-    // the change cue is on time with the screen off. Main looper, serialized with
-    // onFix and the screen's Skip step.
-    private val stepTicker = Runnable { tickSteps() }
-    private val stepWake = WakeTimer("lollop:step-guide") { tickSteps() }
-    private var toneGenerator: ToneGenerator? = null
-
-    private fun tickSteps() {
-        mainHandler.removeCallbacks(stepTicker)
-        if (stopped || !recording || RunSession.stepProgress.value == null) {
-            stepWake.cancel()
-            return
-        }
-        if (RunSession.tickSteps(SystemClock.elapsedRealtime())) {
-            // The pending deadline belonged to the step that just ended.
-            stepWake.cancel()
-            vibrate(STEP_CHANGE_WAVEFORM)
-            playStepTone()
-        }
-        notifyIfChanged()
-        val progress = RunSession.stepProgress.value
-        if (progress != null && !progress.finished) {
-            mainHandler.postDelayed(stepTicker, STEP_TICK_MS)
-            // Distance steps advance on fixes, which wake the CPU anyway.
-            val remainingSec = progress.remainingSec
-            if (remainingSec != null) stepWake.schedule((remainingSec * 1000L).coerceAtLeast(STEP_TICK_MS)) else stepWake.cancel()
-        } else {
-            stepWake.cancel()
-        }
-    }
-
     /** A short beep on the notification stream for a step change. Best-effort: a
      *  device without a tone generator, or one that refuses it, stays silent (the
      *  buzz still fires). */
@@ -330,14 +304,6 @@ class RunTrackingService : Service() {
             val tone = toneGenerator ?: ToneGenerator(AudioManager.STREAM_NOTIFICATION, STEP_TONE_VOLUME).also { toneGenerator = it }
             tone.startTone(ToneGenerator.TONE_PROP_BEEP2, STEP_TONE_MS)
         }
-    }
-
-    /** Stop the step ticker and free the tone generator (every teardown path). */
-    private fun clearStepTicker() {
-        mainHandler.removeCallbacks(stepTicker)
-        stepWake.cancel()
-        toneGenerator?.let { runCatching { it.release() } }
-        toneGenerator = null
     }
 
     /** One haptic cue from the SERVICE (works screen-off / backgrounded, unlike the
@@ -361,118 +327,29 @@ class RunTrackingService : Service() {
         }
     }
 
-    /** Clear all armed state (the service flag, the trigger, and the observed flow).
-     *  Called from beginRecording (armed → recording) and every teardown path so a
-     *  crash/stop while merely armed never leaves the UI stuck armed. */
-    private fun clearArmState() {
-        armed = false
-        armTrigger = null
-        RunSession.armed.value = false
-    }
-
     /** Re-post the ongoing notification only when what it shows actually changed.
-     *  No-op once [stopped] so a late queued fix can't resurrect it, and after the
-     *  user dismissed it ([notifDismissed]). */
+     *  No-op once the recorder stopped so a late queued fix can't resurrect it, and
+     *  after the user dismissed it ([notifDismissed]). */
     private fun notifyIfChanged() {
-        if (stopped || notifDismissed) return
+        if (recorder.stopped || notifDismissed) return
         val frame = currentNotifFrame()
         if (frame == lastNotifiedFrame) return
         lastNotifiedFrame = frame
         getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(frame))
     }
 
-    /** One fix → preview state always; a route point + sidecar line only while
-     *  recording. Shared by both engines. */
-    private fun onFix(loc: Location, batchSize: Int) {
-        // Post-stop queued fix: do nothing, and never re-post the notification.
-        if (stopped) return
-        // Stale session (see [RunSession.generation]): self-stop without touching
-        // any state, not even the preview lastFix the reset just cleared.
-        if (RunSession.generation != sessionGeneration) {
-            unwindLocationFailure(failed = false)
-            return
-        }
-        // Gate implausible fixes for the live display + map ([armedFixPassesAgeGate],
-        // [MAX_GPS_ACCURACY_M]); the core's QC still gates the of-record figures.
-        if (!isPlausibleLiveFix(loc, recording = recording, batchSize = batchSize)) return
-        val point = GpsPoint(
+    /** One engine fix, handed to the recorder ([RunRecorder.onFix]). Shared by both
+     *  engines. */
+    private fun onFix(loc: Location, batchSize: Int) = recorder.onFix(
+        LiveFix(
             lat = loc.latitude,
             lon = loc.longitude,
-            observedAt = loc.time / 1000,
-            accuracyM = loc.accuracy.toDouble(),
-        )
-        // Preview: drives the "GPS lock · ±N m" readout, the self-location dot
-        // before Start, and the fresh-lock/signal-loss pill. Set on EVERY accepted
-        // fix (recording, armed, or locate-only). Uses the fix's OWN monotonic stamp
-        // (elapsedRealtimeNanos), the SAME timebase [isFreshLock] ages against — a
-        // ~10 s-old batched fix must not read "fresh lock" for ~20 s, as the delivery
-        // time (SystemClock.elapsedRealtime) would have made it.
-        RunSession.lastFix.value = point
-        RunSession.lastFixElapsedMs.value = loc.elapsedRealtimeNanos / 1_000_000
-        if (recording) {
-            // A fix arrived: any signal-loss episode is over; push the watchdog out.
-            onSignalFix()
-            // Paused: drop the fix so the paused span records no route; the service
-            // stays foregrounded. [RunSession.setPaused] already marked the boundary.
-            if (RunSession.paused.value) return
-            if (RunSession.add(point, loc.elapsedRealtimeNanos)) {
-                // Persist to the crash-durable sidecar the instant the fix is accepted, so
-                // a process/service kill mid-run is recoverable (off the main thread). A fix
-                // RunSession dropped as non-monotonic is not mirrored to the sidecar.
-                ActiveRunStore.append(point)
-            }
-            // Refresh the ongoing notification so a glance at the lockscreen confirms
-            // GPS is still capturing. Re-notify with the same NOTIF_ID updates the
-            // existing notification in place; the channel's missing sound and
-            // setOnlyAlertOnce keep it silent every fix.
-            // Throttled to only re-post when the displayed line (elapsed + distance)
-            // actually changed; a paused/standing-still stretch costs nothing.
-            notifyIfChanged()
-            return
-        }
-        // Armed: feed the fix to the trigger. A non-null seed means the gates are
-        // satisfied, begin recording FROM that seed (moving-start run-up kept);
-        // otherwise stay armed (static notification, at most one re-post).
-        if (armed) {
-            val seed = armTrigger?.offer(point, loc.elapsedRealtimeNanos)
-            if (seed != null) {
-                beginRecording(seed)
-            } else {
-                notifyIfChanged()
-            }
-            return
-        }
-        // Locate-only: nothing is recorded until the user taps Start. The preview
-        // notification is static, so [notifyIfChanged] re-posts it at most once.
-        notifyIfChanged()
-    }
-
-    /** Armed → recording: the trigger's gates are satisfied. Clears the arm state,
-     *  flips to recording, and flushes the [seed] run-up fixes through the session +
-     *  sidecar so a moving-start's approach distance is kept. [ActiveRunStore.begin]
-     *  runs HERE, not on Start: a crash while merely armed leaves no sidecar (no false
-     *  recovery prompt), and the sidecar exists from the first REAL recorded fix. */
-    private fun beginRecording(seed: List<Pair<GpsPoint, Long>>) {
-        clearArmState()
-        recording = true
-        RunSession.tracking.value = true
-        // Open the crash-durable sidecar now that a real run has begun.
-        ActiveRunStore.begin(this)
-        for ((pt, nanos) in seed) {
-            if (RunSession.add(pt, nanos)) ActiveRunStore.append(pt)
-        }
-        // A planned, structured run starts its step guide with the recording (the
-        // run-up seed counts as already covered, so the first step starts here).
-        RunSession.startSteps(SystemClock.elapsedRealtime())
-        tickSteps()
-        // Force a re-post: the title/copy switch from armed to "Tracking run".
-        lastNotifiedFrame = null
-        notifyIfChanged()
-        // Armed → recording happens hands-free (often phone already pocketed), so
-        // confirm it with a buzz from the service, which works screen-off.
-        vibrate(RECORDING_STARTED_WAVEFORM)
-        armSignalWatchdog()
-    }
+            wallMs = loc.time,
+            monoNanos = loc.elapsedRealtimeNanos,
+            accuracyM = if (loc.hasAccuracy()) loc.accuracy.toDouble() else null,
+        ),
+        batchSize,
+    )
 
     override fun onCreate() {
         super.onCreate()
@@ -521,7 +398,7 @@ class RunTrackingService : Service() {
         // component): the GPS callback must not outlive the service, and
         // stopForeground may not have run, so cancel the notification too.
         serviceScope.cancel()
-        haltStream()
+        recorder.haltStream()
         screenReceiver?.let { runCatching { unregisterReceiver(it) } }
         screenReceiver = null
         getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
@@ -538,20 +415,9 @@ class RunTrackingService : Service() {
             // Locate-only preview with no run in progress: the user swiped the app away
             // without recording, so stop the service rather than leave the GPS radio on
             // indefinitely.
-            stopTracking()
+            recorder.stop()
         }
         super.onTaskRemoved(rootIntent)
-    }
-
-    /** Whether a fix may reach the live display: accuracy within [MAX_GPS_ACCURACY_M]
-     *  (the core's of-record bound) and, unless [recording], fresh enough per
-     *  [armedFixPassesAgeGate]. */
-    private fun isPlausibleLiveFix(loc: Location, recording: Boolean, batchSize: Int): Boolean {
-        if (!recording) {
-            val ageMs = (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000
-            if (!armedFixPassesAgeGate(ageMs, batchSize)) return false
-        }
-        return loc.hasAccuracy() && loc.accuracy <= MAX_GPS_ACCURACY_M
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -560,24 +426,28 @@ class RunTrackingService : Service() {
         // Only a start or stop may run on an instance that never started a stream: any
         // other intent that created it (a late Pause tap, Start now, a dismissal) would
         // leak it, so it stops itself.
-        if (!started && action !in setOf(ACTION_LOCATE, ACTION_START, ACTION_ARM, ACTION_STOP)) {
+        if (!recorder.started && action !in setOf(ACTION_LOCATE, ACTION_START, ACTION_ARM, ACTION_STOP)) {
             stopSelf(startId)
             return START_NOT_STICKY
         }
         when (action) {
-            ACTION_LOCATE -> startTracking(record = false)
-            ACTION_START -> startTracking(record = true)
-            ACTION_ARM -> startTracking(record = false, arming = true, intent = intent)
-            ACTION_STOP -> stopTracking()
+            ACTION_LOCATE -> recorder.start(record = false)
+            ACTION_START -> recorder.start(record = true)
+            ACTION_ARM -> recorder.start(
+                record = false,
+                arming = true,
+                requirePrecise = intent?.getBooleanExtra(EXTRA_REQUIRE_PRECISE, false) ?: false,
+                requireMoving = intent?.getBooleanExtra(EXTRA_REQUIRE_MOVING, false) ?: false,
+            )
+            ACTION_STOP -> recorder.stop()
             // Notification Pause/Resume. Only a live recording may toggle: on a
             // locate/armed instance the paused-flow collector would post a
             // notification with no foreground service behind it.
-            ACTION_PAUSE -> if (recording) RunSession.setPaused(true)
-            ACTION_RESUME -> if (recording) RunSession.setPaused(false)
+            ACTION_PAUSE -> recorder.setPaused(true)
+            ACTION_RESUME -> recorder.setPaused(false)
             // "Start now" while armed: begin recording at once, skipping the start
             // gates. Only the live armed stream of the current session may begin.
-            ACTION_START_NOW ->
-                if (armed && !recording && !stopped && RunSession.generation == sessionGeneration) beginRecording(emptyList())
+            ACTION_START_NOW -> recorder.startNow()
             // The user dismissed the notification: stop re-posting until the next
             // explicit start.
             ACTION_NOTIF_DISMISSED -> notifDismissed = true
@@ -587,108 +457,6 @@ class RunTrackingService : Service() {
         // process on API 26+. A killed run simply ends rather than silently
         // resurrecting without UI/permission context.
         return START_NOT_STICKY
-    }
-
-    /**
-     * Start a LOCATE preview, a recording (START), or an ARM preview that begins
-     * recording at the first fix clearing [ArmTrigger]. Every caller used
-     * startForegroundService, so startForeground runs first (its ~5 s deadline kills
-     * the process otherwise), then the fine-location re-check, then the engine. Every
-     * failure goes through [unwindLocationFailure], which also clears the shell's
-     * optimistic armed flag. An ARM reaching a live recording only re-asserts the
-     * notification, so it can't demote the run and merge two runs in one sidecar.
-     */
-    @SuppressLint("MissingPermission")
-    private fun startTracking(record: Boolean, arming: Boolean = false, intent: Intent? = null) {
-        if (arming && recording) {
-            RunSession.armed.value = false
-            try {
-                startLocationForeground()
-            } catch (_: SecurityException) {
-                // Already foregrounded as a recording run; the deadline is moot.
-            }
-            return
-        }
-        started = true
-        recording = record
-        // A reused instance clears its teardown guard so onFix can post again.
-        stopped = false
-        sessionGeneration = RunSession.generation
-        // Publish the arm state before foregrounding, so the notification copy and the
-        // screen agree from the first frame.
-        if (arming) {
-            armTrigger = ArmTrigger(
-                requirePrecise = intent?.getBooleanExtra(EXTRA_REQUIRE_PRECISE, false) ?: false,
-                requireMoving = intent?.getBooleanExtra(EXTRA_REQUIRE_MOVING, false) ?: false,
-            )
-            armed = true
-            RunSession.armed.value = true
-        } else {
-            clearArmState()
-        }
-        try {
-            startLocationForeground()
-        } catch (_: SecurityException) {
-            // API 34+: a location FGS without a location grant is rejected here.
-            unwindLocationFailure()
-            return
-        }
-        // Fine location may have been revoked between the UI's check and here.
-        if (!hasFineLocation(this)) {
-            unwindLocationFailure()
-            return
-        }
-        try {
-            // onError covers an async start failure (the fused client's Task) that
-            // throws nothing here.
-            engine.start(::onFix) { unwindLocationFailure() }
-            engine.setBackground(screenOff)
-            RunSession.locating.value = true
-            // Only recording flips `tracking`; a locate keeps Start on screen.
-            RunSession.tracking.value = record
-            // A direct recording start (crash-resume) watches for signal loss too.
-            if (record) armSignalWatchdog()
-        } catch (_: SecurityException) {
-            // Permission raced away between the check above and engine.start.
-            unwindLocationFailure()
-        } catch (_: IllegalArgumentException) {
-            // The platform engine found no GPS provider (no Play Services, no GPS).
-            unwindLocationFailure()
-        }
-    }
-
-    /** Stop the stream and clear every engine-state flag. Marks [stopped] first, so a
-     *  fix already queued on the main looper returns without re-posting the
-     *  notification. Shared by every teardown path. */
-    private fun haltStream() {
-        stopped = true
-        engine.stop()
-        recording = false
-        clearArmState()
-        clearSignalWatchdog()
-        clearStepTicker()
-        RunSession.markStopped()
-    }
-
-    /** Unwind a failed location start (a SecurityException, no GPS provider, the
-     *  fused client's async failure) or a stale session, so the service never lingers
-     *  foregrounded without fixes. [failed] publishes [RunSession.locationFailed] so
-     *  the screen stops re-launching the preview; false for the stale-session
-     *  stand-down. Idempotent once [stopped]. */
-    private fun unwindLocationFailure(failed: Boolean = true) {
-        if (stopped) return
-        haltStream()
-        if (failed) RunSession.locationFailed.value = true
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf(lastStartId)
-    }
-
-    private fun stopTracking() {
-        haltStream()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        // Cancel too, in case a re-post slipped in before `stopped`.
-        getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
-        stopSelf(lastStartId)
     }
 
     /** Foreground as a `location`-typed service. API 34+ requires the typed
@@ -837,14 +605,9 @@ class RunTrackingService : Service() {
         private val RECORDING_STARTED_WAVEFORM = longArrayOf(0L, 300L)
         private val SIGNAL_LOST_WAVEFORM = longArrayOf(0L, 250L, 150L, 250L)
 
-        // Small margin past the loss deadline so the watchdog never fires a hair early
-        // and has to re-arm.
-        private const val SIGNAL_CHECK_SLACK_MS = 250L
-
         // Guided-run step change: three quick pulses (distinct from the start buzz and
-        // the two-pulse signal-loss warning), re-checked once a second.
+        // the two-pulse signal-loss warning).
         private val STEP_CHANGE_WAVEFORM = longArrayOf(0L, 150L, 100L, 150L, 100L, 150L)
-        private const val STEP_TICK_MS = 1000L
 
         // Step-change beep: volume (percent of the notification stream's max) and
         // duration (ms) of one short cue.
@@ -916,15 +679,15 @@ class RunTrackingService : Service() {
         fun stop(ctx: Context) {
             // startService throws IllegalStateException when the app may not start
             // services right now (in the background, API 26+). A service that already
-            // self-stopped is no problem: it is recreated and runs stopTracking().
+            // self-stopped is no problem: it is recreated and runs ACTION_STOP.
             try {
                 ctx.startService(
                     Intent(ctx, RunTrackingService::class.java).setAction(ACTION_STOP),
                 )
             } catch (_: IllegalStateException) {
-                // ACTION_STOP couldn't be delivered, so stopTracking() won't reset the
-                // observable state machine. Do it here directly, mirroring
-                // stopTracking()'s resets — clearing ONLY `tracking` would leave
+                // ACTION_STOP couldn't be delivered, so the recorder's stop won't reset
+                // the observable state machine. Do it here directly, mirroring its
+                // resets — clearing ONLY `tracking` would leave
                 // `locating`/`armed` latched, sticking the tracker on "Finding GPS…"
                 // with no engine behind it.
                 RunSession.markStopped()

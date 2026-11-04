@@ -61,7 +61,7 @@ class MutationGuardsTest {
      * Kotlin M06a. A log rewritten by an older build lost the final `ClearPlan`
      * with the plan it cleared, so only the device's "plan removed" marker
      * remembers the removal. The backup must still end with a `ClearPlan`
-     * (Export.kt exportDataTo doc), else restoring it generates a plan the
+     * (Export.kt readDataExport doc), else restoring it generates a plan the
      * user had removed (BUGS.md 2026-10-23: "a backup of a removed plan
      * restored a generated plan"). The standing ImportExportRoundtripTest case
      * seeds a log that still holds its `ClearPlan`, where the append is moot.

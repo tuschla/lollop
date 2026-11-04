@@ -79,6 +79,14 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
 
+      - name: Cache Robolectric Android runtimes
+        # Robolectric downloads its android-all jars from Maven at test time; a
+        # Maven hiccup then fails every Robolectric class before any test runs.
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('android/lollop/build.gradle.kts', 'android/lollop/src/androidHostTest/resources/robolectric.properties') }}
+
       - name: Unit tests + offline UI/UX QA
         # :lollop:testAndroidHostTest runs the JVM wire-shape tests AND the
         # Robolectric UI/UX QA suite (plus the CMP strings parity gate); its gradle

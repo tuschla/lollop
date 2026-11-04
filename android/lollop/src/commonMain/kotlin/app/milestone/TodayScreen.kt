@@ -123,6 +123,7 @@ import kotlin.math.abs
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -143,6 +144,9 @@ internal fun TodayDestination(
     onLogPastItem: (PrescriptionView, Long) -> Unit,
     onLogPastRun: (Long) -> Unit,
     onTrackRun: () -> Unit,
+    // The label of a planned run's action: "Track run" where [onTrackRun] opens the
+    // tracker; where the platform has none it opens the run editor instead.
+    runActionLabel: StringResource = Res.string.main_plan_item_track,
     // Opens the Log sheet on one editor (today's check-in, the session review).
     onOpenSheet: (LogMode) -> Unit,
     // The pain report as last entered (its area, and the Undo after removing it).
@@ -254,6 +258,7 @@ internal fun TodayDestination(
                     onStartSetup = onStartSetup,
                     onLogItem = onLogPlanItem,
                     onTrackRun = onTrackRun,
+                    runActionLabel = runActionLabel,
                     onOpenSheet = onOpenSheet,
                     onMove = moveSession,
                     lastPain = lastPain,
@@ -571,6 +576,7 @@ private fun TodayHeroCard(
     onStartSetup: () -> Unit,
     onLogItem: (PrescriptionView) -> Unit,
     onTrackRun: () -> Unit,
+    runActionLabel: StringResource,
     onOpenSheet: (LogMode) -> Unit,
     // Moves a session (posts "Moved to … · Undo").
     onMove: (from: Long, to: Long) -> Unit,
@@ -813,6 +819,7 @@ private fun TodayHeroCard(
                 liftDaysLogged = remember(model.lifts) { loggedLiftDays(model.lifts) },
                 onLogItem = onLogItem,
                 onTrackRun = onTrackRun,
+                runActionLabel = runActionLabel,
                 onEndExercise = { endExerciseWithUndo(res, it, today, onEvent) },
                 onReopen = { reopenExercise(it, today, onEvent) },
                 onSetRung = { ladder, rung -> onEvent(Event.SetCalisthenicsRung(ladder, rung, AppClock.nowSec())) },
@@ -1197,6 +1204,7 @@ private fun NextSessionCard(
     liftDaysLogged: Int,
     onLogItem: (PrescriptionView) -> Unit,
     onTrackRun: () -> Unit,
+    runActionLabel: StringResource,
     onEndExercise: (PrescriptionView) -> Unit,
     onReopen: (PrescriptionView) -> Unit,
     onSetRung: (CalisLadder, Int) -> Unit,
@@ -1328,7 +1336,7 @@ private fun NextSessionCard(
                 isCheck = isCheck,
                 actionable = actionable,
                 reopenable = actionable,
-                runActionLabel = stringResource(Res.string.main_plan_item_track),
+                runActionLabel = stringResource(runActionLabel),
                 weightUnit = weightUnit,
                 painArea = painArea,
                 onLog = onLogItem,

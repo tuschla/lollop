@@ -6,10 +6,11 @@ import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
- * In-memory holder the foreground [RunTrackingService] writes and the UI
- * observes. Living here rather than inside the Composable is what lets a run
- * keep recording while the screen is off or the app is backgrounded: the
- * service owns the location stream, the screen just renders this state.
+ * In-memory holder the platform's recorder ([RunRecorder]: Android's foreground
+ * RunTrackingService, iOS's CoreLocation tracker) writes and the UI observes.
+ * Living here rather than inside the Composable is what lets a run keep recording
+ * while the screen is off or the app is backgrounded: the recorder owns the
+ * location stream, the screen just renders this state.
  */
 object RunSession : SynchronizedObject() {
     // Append-only backing store for the captured track. Fixes are only ever

@@ -72,10 +72,11 @@ struct LollopBytes lollop_compact_log(const struct LollopSlice *lines, size_t co
 // freed before.
 void lollop_bytes_free(struct LollopBytes bytes);
 
-#if defined(LOLLOP_TEST_HOOKS)
-// Replace the core with an empty one, so each bridge test starts clean.
-void lollop_reset_for_test(void);
-#endif
+// Replace the core with an empty one (`Core::default()`), as a fresh process
+// starts. The iOS app calls it before replaying an imported event log in
+// process (Android restarts its process instead); the bridge tests call it so
+// each starts clean.
+void lollop_reset(void);
 
 #if defined(LOLLOP_TEST_HOOKS)
 // Run a core call that panics while holding the core lock and return the

@@ -540,7 +540,7 @@ class ImportExportRoundtripTest {
         val check = onAppScope { readImportCandidate(ctx, Uri.fromFile(file)) }
         assertTrue("the backup validates", check is ImportCheck.Valid)
         val lines = (check as ImportCheck.Valid).lines
-        val summary = summarizeImport(lines, java.time.ZoneId.systemDefault())
+        val summary = summarizeImport(lines, kotlinx.datetime.TimeZone.currentSystemDefault())
         assertEquals(DataImportResult.Replaced, onAppScope { replaceEventLog(ctx, lines) })
         ctx.setupPrefs().edit().putInt(KEY_RESTORED_ENTRIES, summary.entries).commit()
         ProcessDeath.kill(ctx)

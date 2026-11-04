@@ -1,0 +1,64 @@
+# XcodeGen spec of the iOS app. The .xcodeproj is generated, not committed:
+#   brew install xcodegen && xcodegen generate --spec iosApp/project.yml
+# The app is a SwiftUI host (iosApp/LollopIosApp.swift) around the Kotlin
+# framework `Lollop` (android/lollop-ios: the app's Compose UI, the core engine
+# and the Rust core). A build phase runs Gradle, which builds the framework for
+# the configuration and SDK being built and embeds it in the app.
+name: lollop
+options:
+  bundleIdPrefix: app.milestone
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    # android/app/build.gradle.kts versionName / versionCode.
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_LANGUAGE: en
+targets:
+  lollop:
+    type: application
+    platform: iOS
+    # A shared scheme, so `xcodebuild -scheme lollop` works on a fresh checkout.
+    scheme: {}
+    sources:
+      - path: iosApp
+    settings:
+      base:
+        PRODUCT_NAME: lollop
+        PRODUCT_BUNDLE_IDENTIFIER: app.milestone.lollop
+        INFOPLIST_FILE: iosApp/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        # The build phase below writes Lollop.framework here.
+        FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/../android/lollop-ios/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+        OTHER_LDFLAGS: "$(inherited) -framework Lollop"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+        # Gradle reads and writes outside the build sandbox.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    preBuildScripts:
+      - name: Kotlin framework (Gradle)
+        # Gradle tracks its own inputs; let it run on every build.
+        basedOnDependencyAnalysis: false
+        shell: /bin/sh
+        script: |
+          set -e
+          if [ "YES" = "$OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED" ]; then
+            echo "Skipping Gradle: OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED"
+            exit 0
+          fi
+          # The framework links the Rust core, which Gradle builds with cargo.
+          # Xcode puts its toolchain's clang first on PATH and exports SDKROOT
+          # (the iOS SDK); cargo's host build scripts would link with that clang
+          # against no or the wrong SDK. /usr/bin's cc is the xcrun shim, which
+          # picks the macOS SDK; the iOS objects get their SDK from cc-rs, and
+          # Kotlin/Native finds its own through xcrun.
+          export PATH="$HOME/.cargo/bin:/usr/bin:$PATH"
+          unset SDKROOT
+          cd "$SRCROOT/../android"
+          # Linking Compose into a framework needs more heap than gradle.properties gives.
+          ./gradlew "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8" \
+            :lollop-ios:embedAndSignAppleFrameworkForXcode

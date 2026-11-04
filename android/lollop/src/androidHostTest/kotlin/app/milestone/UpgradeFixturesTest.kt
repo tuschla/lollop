@@ -10,8 +10,8 @@ import app.milestone.qa.QaHarness.onAppScope
 import app.milestone.qa.launchApp
 import java.io.ByteArrayInputStream
 import java.io.File
-import java.time.ZoneId
 import kotlin.math.abs
+import kotlinx.datetime.TimeZone
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -186,7 +186,7 @@ class UpgradeFixturesTest {
         check(result is ImportCheck.Valid) { "the 4728546 backup is refused: $result" }
         val lines = result.lines
         assertEquals("every backup line is read", backup.decodeToString().lines().count { it.isNotBlank() }, lines.size)
-        val summary = summarizeImport(lines, ZoneId.of("Europe/Berlin"))
+        val summary = summarizeImport(lines, TimeZone.of("Europe/Berlin"))
         val e = expected("4728546")
         // Sets, runs and the activity, plus the 32 check-ins and the 3 readiness
         // reports (a dated RemoveReadiness keeps its submit line: log.rs rule 0).

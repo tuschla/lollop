@@ -51,8 +51,8 @@ jni-host = ["dep:jni", "ffi"]
 # The `lollop_*` C ABI (shared/src/ffi/c_abi.rs, header include/lollop.h) the
 # iOS app links from Kotlin/Native. Off for Android.
 c-abi = ["ffi"]
-# `lollop_reset_for_test` / `lollop_panic_for_test` for the Kotlin/Native bridge
-# tests (kmp/core-bridge). Never in an app build.
+# `lollop_panic_for_test` for the Kotlin/Native bridge tests (kmp/core-bridge).
+# Never in an app build.
 test-hooks = ["c-abi"]
 
 [target.'cfg(target_os = "android")'.dependencies]

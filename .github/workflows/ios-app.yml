@@ -1,0 +1,190 @@
+name: iOS app
+
+# The iOS app (iosApp/, a SwiftUI host around android/lollop-ios's `Lollop`
+# framework): an unsigned .ipa to sideload (ios/README.md), and a launch smoke
+# test in a simulator. Runs on pushes to main that can change the app, and by
+# hand. The repo is public, so the macOS jobs cost no minutes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "iosApp/**"
+      - "android/lollop/**"
+      - "android/lollop-ios/**"
+      - "android/*.gradle.kts"
+      - "android/gradle.properties"
+      - "android/gradle/**"
+      - "kmp/**"
+      - "shared/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "scripts/build-ios-core.sh"
+      - ".github/workflows/ios-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-app-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ipa:
+    name: Unsigned .ipa (device, Release)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: "1.90"
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Set up Android SDK
+        # Configuring the android/ build needs an SDK even for the iOS tasks.
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('kmp/core-bridge/build.gradle.kts', 'android/build.gradle.kts') }}
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec iosApp/project.yml
+
+      - name: Build for devices without signing
+        # SideStore signs the app with the owner's Apple ID when it installs it.
+        run: >
+          xcodebuild build
+          -project iosApp/lollop.xcodeproj -scheme lollop -configuration Release
+          -sdk iphoneos -destination generic/platform=iOS
+          -derivedDataPath build/ios-device
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Package lollop-unsigned.ipa
+        run: |
+          app=build/ios-device/Build/Products/Release-iphoneos/lollop.app
+          test -x "$app/lollop"
+          test -d "$app/Frameworks/Lollop.framework"
+          mkdir -p build/ipa/Payload
+          cp -R "$app" build/ipa/Payload/
+          (cd build/ipa && zip -qry ../lollop-unsigned.ipa Payload)
+          ls -l build/lollop-unsigned.ipa
+          du -sh "$app" "$app/Frameworks/Lollop.framework"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lollop-unsigned-ipa
+          path: build/lollop-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error
+
+  simulator:
+    name: Launch smoke test (simulator, Debug)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: "1.90"
+          targets: aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('kmp/core-bridge/build.gradle.kts', 'android/build.gradle.kts') }}
+
+      - name: Pick an iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(d["udid"] for runtime, ds in sorted(devices.items(), reverse=True) if "iOS" in runtime
+                     for d in ds if d["name"].startswith("iPhone")))')
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec iosApp/project.yml
+
+      - name: Build for the simulator
+        run: >
+          xcodebuild build
+          -project iosApp/lollop.xcodeproj -scheme lollop -configuration Debug
+          -destination "id=$SIMULATOR_UDID"
+          -derivedDataPath build/ios-sim
+
+      - name: Launch and keep running
+        # The app must boot (restore the event log, SetToday) and draw Today
+        # without dying; an uncaught Kotlin exception prints to stderr and
+        # aborts the process, which leaves a crash report.
+        run: |
+          xcrun simctl bootstatus "$SIMULATOR_UDID" -b
+          xcrun simctl install "$SIMULATOR_UDID" build/ios-sim/Build/Products/Debug-iphonesimulator/lollop.app
+          out="$PWD/build/smoke"
+          mkdir -p "$out"
+          xcrun simctl spawn "$SIMULATOR_UDID" log stream --level info --style compact \
+            --predicate 'process == "lollop"' > "$out/app.log" 2>&1 &
+          trap "kill $! 2>/dev/null || true" EXIT
+          touch "$out/.launched"
+          launched=$(xcrun simctl launch --stdout="$out/stdout.txt" --stderr="$out/stderr.txt" \
+            "$SIMULATOR_UDID" app.milestone.lollop)
+          echo "$launched"
+          pid=${launched##*: }
+          sleep 30
+          xcrun simctl io "$SIMULATOR_UDID" screenshot "$out/launch.png"
+          alive=yes
+          kill -0 "$pid" 2>/dev/null || alive=no
+          # ReportCrash may still be writing; give it a moment when the app died.
+          [ "$alive" = yes ] || sleep 10
+          crashes=$(find ~/Library/Logs/DiagnosticReports -name 'lollop*' -newer "$out/.launched" 2>/dev/null || true)
+          if [ -n "$crashes" ] || [ "$alive" = no ]; then
+            echo "::error::lollop (pid $pid) crashed or exited within 30 s of launch"
+            echo "--- stderr"; cat "$out/stderr.txt" || true
+            for c in $crashes; do cp "$c" "$out/"; echo "--- $c"; head -c 30000 "$c"; echo; done
+            exit 1
+          fi
+          echo "lollop is running (pid $pid)"
+
+      - name: Upload screenshot and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: simulator-smoke
+          path: build/smoke/
+          retention-days: 30
+          if-no-files-found: ignore

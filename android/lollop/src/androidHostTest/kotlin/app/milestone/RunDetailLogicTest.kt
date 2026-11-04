@@ -1,6 +1,7 @@
 package app.milestone
 
 import java.time.ZoneId
+import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -64,7 +65,7 @@ class RunDetailLogicTest {
     fun gpxFileName_usesTheRunsLocalStart() {
         // 2026-10-14 07:42 in Berlin (UTC+2).
         val start = java.time.ZonedDateTime.of(2026, 10, 14, 7, 42, 30, 0, ZoneId.of("Europe/Berlin")).toEpochSecond()
-        assertEquals("run-2026-10-14-0742.gpx", gpxFileName(start, ZoneId.of("Europe/Berlin")))
+        assertEquals("run-2026-10-14-0742.gpx", gpxFileName(start, TimeZone.of("Europe/Berlin")))
     }
 
     @Test

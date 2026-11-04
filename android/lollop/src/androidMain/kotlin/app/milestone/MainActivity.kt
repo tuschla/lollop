@@ -22,9 +22,10 @@ import org.osmdroid.config.Configuration
 
 class MainActivity : ComponentActivity() {
     // The latest [ACTION_OPEN] destination (widget, Quick Settings tile, a run or
-    // rest notification) not yet applied. CoachScaffold applies and clears it once
-    // boot has run, so a cold start waits for the model before it navigates.
-    private val openRequest = MutableStateFlow<OpenDest?>(null)
+    // rest notification) not yet applied: the app's [OpenRequests]. CoachScaffold
+    // applies and clears it once boot has run, so a cold start waits for the model
+    // before it navigates.
+    private val openRequest: OpenRequests = MutableStateFlow(null)
 
     // Counts, times and dates on every screen in Latin digits (AppLocale.kt). A
     // language change recreates the Activity, so the base follows it.
@@ -108,7 +109,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 Surface(modifier = Modifier.fillMaxSize().traversalGroup(), color = BgTop) {
-                    CoachScreen(openRequest)
+                    LollopApp(openRequest)
                 }
             }
         }

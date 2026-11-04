@@ -137,7 +137,7 @@ class LocaleNumberTest {
 
     @Test
     fun exportFileNames_areLocaleIndependent() = eachLocale { l ->
-        assertEquals("$l", "run-2026-03-04-0506.gpx", gpxFileName(1_772_600_760L, ZoneOffset.UTC))
+        assertEquals("$l", "run-2026-03-04-0506.gpx", gpxFileName(1_772_600_760L, TimeZone.UTC))
         val data = dataExportFilename()
         assertTrue("$l: $data", Regex("""lollop-\d{4}-\d{2}-\d{2}\.ndjson""").matches(data) && foreignDigits(data).isEmpty())
     }

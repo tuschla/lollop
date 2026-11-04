@@ -13,6 +13,8 @@ internal fun eventLogFile(dir: File) = File(dir, EVENT_LOG_NAME)
 
 internal actual fun Context.eventLogPath(): LogPath = eventLogFile(filesDir)
 
+internal actual fun Context.appFile(name: String): LogPath = File(applicationContext.filesDir, name)
+
 internal actual fun Context.isDebuggable(): Boolean = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
 internal actual object LogFiles {
@@ -38,6 +40,33 @@ internal actual object LogFiles {
         }
 
     actual fun append(file: File, text: String) = file.appendText(text)
+
+    actual fun writeText(file: File, text: String) = file.writeText(text)
+
+    actual fun dropTornTail(file: File) {
+        RandomAccessFile(file, "rw").use { raf ->
+            val len = raf.length()
+            if (len == 0L) return
+            raf.seek(len - 1)
+            if (raf.read() == '\n'.code) return
+            val chunk = ByteArray(4096)
+            var end = len
+            while (end > 0) {
+                val start = maxOf(0L, end - chunk.size)
+                val n = (end - start).toInt()
+                raf.seek(start)
+                raf.readFully(chunk, 0, n)
+                for (i in n - 1 downTo 0) {
+                    if (chunk[i] == '\n'.code.toByte()) {
+                        raf.setLength(start + i + 1)
+                        return
+                    }
+                }
+                end = start
+            }
+            raf.setLength(0)
+        }
+    }
 
     actual fun writeLinesSynced(file: File, lines: List<String>) {
         FileOutputStream(file).use { out ->

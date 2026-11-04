@@ -352,7 +352,7 @@ class EventLogTest {
         val dir = java.nio.file.Files.createTempDirectory("swap").toFile()
         try {
             File(dir, "event-log.ndjson").writeText(set("old") + "\n")
-            swapLogFile(dir, listOf(set("a"), run(5.0)))
+            swapLogFile(eventLogFile(dir), listOf(set("a"), run(5.0)))
             assertEquals(listOf(set("a"), run(5.0)).joinToString("\n", postfix = "\n"), File(dir, "event-log.ndjson").readText())
             assertFalse(File(dir, "event-log.ndjson.import").exists())
         } finally {

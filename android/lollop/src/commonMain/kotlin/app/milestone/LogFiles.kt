@@ -1,7 +1,7 @@
 package app.milestone
 
-/** A path the event log and its temporaries live at: `java.io.File` on Android, a
- *  POSIX path on iOS. */
+/** A path the event log, the active-run file and their temporaries live at:
+ *  `java.io.File` on Android, a POSIX path on iOS. */
 expect class LogPath
 
 /**
@@ -39,6 +39,14 @@ internal expect object LogFiles {
      *  mid-append leaves a torn tail that [EventLog.load] heals. */
     fun append(file: LogPath, text: String)
 
+    /** Replace [file]'s content with [text], creating it when missing. No fsync. */
+    fun writeText(file: LogPath, text: String)
+
+    /** Cut a torn tail off [file]: every byte after its last `\n` (the whole file
+     *  when it has none), creating it empty when missing. A file that ends with
+     *  `\n` is left alone after a one-byte read. */
+    fun dropTornTail(file: LogPath)
+
     /** Write [lines] to [file], one per line, replacing its content, and fsync
      *  before returning: a rename over the log can reach the disk before the
      *  data, and a power loss then truncates the whole log. Streamed line by
@@ -49,6 +57,10 @@ internal expect object LogFiles {
 /** This install's event log: [EVENT_LOG_NAME] in the app's private files
  *  (Android `filesDir`, iOS Application Support). */
 internal expect fun PlatformContext.eventLogPath(): LogPath
+
+/** The file [name] in the app's private files (Android `filesDir`, iOS
+ *  Application Support). */
+internal expect fun PlatformContext.appFile(name: String): LogPath
 
 /** Whether the app is a debuggable build: error envelopes are then logged in full. */
 internal expect fun PlatformContext.isDebuggable(): Boolean

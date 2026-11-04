@@ -1,18 +1,19 @@
 # lollop on iOS
 
-Status: the Rust core builds for iOS and is callable from Kotlin/Native, and the
-app's core engine (event log, replay, compaction) runs on iOS over it. Most of
-the Compose UI is shared Kotlin now, but there is no iOS app target that shows
-it yet. The iOS app is the Android app ported to Compose Multiplatform: the
-screens live in shared Kotlin, and only platform services (location,
-notifications, widgets, files) are written per platform. The app's Kotlin lives
-in the multiplatform module `android/lollop`, which builds for Android and iOS.
-Its `commonMain` holds the core engine and event log, the core's wire types and
-events, the serial event queue (`EventDispatcher`), run tracking state
-(`RunSession`, `RunSteps`), units, settings, the theme, and the Compose UI: the
-design system, cards and charts, the log editors, guided setup and the profile
-editor, Today and the tracker's controls and stats. They reach the platform
-through `expect` seams with Android and iOS actuals (see below).
+Status: the iOS app (`iosApp/`) is the Android app ported to Compose
+Multiplatform: a SwiftUI host around the shared Compose UI, the core engine
+(event log, replay, compaction) over the Rust core's C ABI. CI builds it as an
+unsigned `.ipa` to sideload and launches it in a simulator. The app's Kotlin
+lives in the multiplatform module `android/lollop`, which builds for Android
+and iOS. Its `commonMain` holds the app root and boot, every screen (Today,
+History, the Log sheet and its editors, Profile, guided setup, the tracker, run
+detail and trim, the maps), the core engine and event log, the core's wire
+types and events, the serial event queue (`EventDispatcher`), run tracking
+(`RunSession`, `RunRecorder`, the active-run store), GPX/TCX parsing, units,
+settings and the theme. They reach the platform through `expect` seams with
+Android and iOS actuals (see below). Android-only so far: the home screen
+widget, the Quick Settings tile and the Live Update notifications; their iOS
+counterparts are Swift extensions (Next steps).
 
 ## Architecture
 
@@ -25,23 +26,34 @@ shared/ (Rust core, pure update/view)
 kmp/ (Gradle build of the bridge alone)
   └─ core-bridge/
        ├─ commonMain  CoreBridge: the calls the core engine makes (update, view,
-       │              parseFit, exportGpx, trackFigures, compactLog), same JSON wire
+       │              parseFit, exportGpx, trackFigures, compactLog, reset), same JSON wire
        ├─ nativeMain  NativeCore: CoreBridge over cinterop + lollop.h
        └─ nativeTest  bridge tests against the core's own golden fixtures
 android/ (Gradle build of the app; includes kmp/core-bridge as :core-bridge)
   ├─ app/        application shell: application id, signing, R8, jniLibs
   ├─ lollop/     the app as a Kotlin Multiplatform module (namespace app.milestone)
-  │    ├─ commonMain       Kotlin + Compose UI for both platforms, generated CMP
-  │    │                   resources; the core engine DurableCore, EventLog,
-  │    │                   the LogFiles seam
-  │    ├─ androidMain      everything Android (the activity root, file pickers,
-  │    │                   the map, run tracking service, rest timer, widget, Core.kt)
-  │    ├─ iosMain          iOS actuals (POSIX event-log files, NSLog, …)
-  │    ├─ commonTest       engine, formatting and date tests: JVM and iOS simulator
+  │    ├─ commonMain       the app for both platforms: root, screens, core engine
+  │    │                   (DurableCore, EventLog), run tracking, generated CMP
+  │    │                   resources
+  │    ├─ androidMain      Android actuals and what has no iOS twin yet (the
+  │    │                   activity, osmdroid, location service, widget, tile,
+  │    │                   Live Updates, Core.kt)
+  │    ├─ iosMain          iOS actuals (LollopIosRoot, POSIX files, MapKit,
+  │    │                   CoreLocation, UserNotifications, document pickers, …)
+  │    ├─ commonTest       engine, formatting, date, map and run recorder tests:
+  │    │                   JVM and iOS simulator
   │    └─ androidHostTest  JVM + Robolectric suite
   └─ lollop-ios/ the iOS framework `Lollop`: :lollop + :core-bridge + the
-                 entry point LollopApp.start(); iosTest runs the engine on the
-                 real core
+                 entry points LollopApp.start() and MainViewController();
+                 iosTest runs the engine on the real core
+iosApp/ (the iOS app: XcodeGen spec, SwiftUI host, Info.plist, assets)
+  ├─ project.yml            target `lollop`, bundle id app.milestone.lollop; a
+  │                         build phase runs :lollop-ios:embedAndSignAppleFrameworkForXcode
+  ├─ iosApp/LollopIosApp.swift  @main SwiftUI app showing MainViewController()
+  ├─ iosApp/Info.plist      document types (GPX/TCX/FIT), lollop:// URLs, location
+  │                         When In Use + background mode, launch screen, orientations
+  ├─ iosApp/Assets.xcassets app icon (light/dark/tinted) and launch logo
+  └─ make-assets.py         renders those PNGs from the Android vector drawables
 ```
 
 `DurableCore` (commonMain) is the engine both platforms run: it sends events
@@ -80,11 +92,14 @@ The other seams (`expect` in commonMain, actual per platform):
 | `currentAppLocale`, `screenHeightDp`, `currentPlatformContext` | `appLocale(LocalConfiguration.locales)`, `Configuration.screenHeightDp`, `LocalContext` | `appLocale()`, the Compose view's height, the process context |
 | `localInstantSeconds` | `java.util.Calendar` (lenient across a DST gap) | `NSCalendar` (same rule) |
 | `shareCoachSummary` | `ACTION_SEND` chooser | `UIActivityViewController` (popover on iPad) |
+| `RouteLayer`, `FullScreenMapDialog` (RunMap.kt); `LiveMapSurface` via `newLiveMapSurface` (TrackerMap.kt) | osmdroid `MapView` with the android.graphics route renderer (RouteRenderer.android.kt); the full-screen map's dialog window with transparent bars | MKMapView in a `UIKitView`: OSM tiles through `OsmTileOverlay`/`OsmTileRenderer` (User-Agent = bundle identifier, 2 connections, a 128 MB disk cache that honours the server's cache headers, dark themes desaturate + invert each tile with Android's colour matrix, "© OpenStreetMap" caption); the route drawn in Compose over a passive map (`ComposeRoutePainter`, same `RouteLayout` as Android, the app owns the camera so tiles and route never part); the tracker's route as MKPolyline casing + accent lines, blip and start ring as annotations |
 
 `commonTest` pins the formatting and date output to Android's (`FormattingTest`,
 `DateFormatsTest`) and drives the engine on a scripted core and a real log file
 (`DurableCoreTest`: replay, append, torn tail, compaction, panic reset,
-degraded log, stale view). It runs in the host tests and, in the `bridge-macos`
+degraded log, stale view), and the maps' route framing, layout and dark tile
+filter (`RouteGeometryTest`, `MapTilesTest`, `FrameLongitudesTest`). It runs
+in the host tests and, in the `bridge-macos`
 CI job, in an iOS simulator, where the engine runs on the POSIX file seam.
 `:lollop-ios`'s `CoreEngineTest` runs the engine on the real Rust core in the
 simulator (restart replay, torn tail, the core's compaction, a real
@@ -108,7 +123,8 @@ The C ABI:
 | `lollop_export_gpx(entry_id, observed_at)` | `Core.exportGpx` | GPX text, empty when the run has no route |
 | `lollop_compact_log(lines, count)` | `Core.compactLog` | compaction verdict JSON, empty when the core can't answer |
 | `lollop_bytes_free(bytes)` | (JVM GC) | releases any buffer above |
-| `lollop_reset_for_test()`, `lollop_panic_for_test(reset)` | `Core.resetForTest` | test builds only (feature `test-hooks`) |
+| `lollop_reset()` | (process restart) | empties the core for the in-process data import |
+| `lollop_panic_for_test(reset)` | — | test builds only (feature `test-hooks`) |
 
 Every answer is a `LollopBytes {data, len}` the caller owns and frees once;
 `{NULL, 0}` is the empty answer. All calls are safe from any thread. The core's
@@ -174,35 +190,89 @@ can't build this app.
 cd android
 ./gradlew :lollop-ios:linkReleaseFrameworkIosArm64   # Lollop.framework, device
 ./gradlew :core-bridge:iosSimulatorArm64Test :lollop:iosSimulatorArm64Test :lollop-ios:iosSimulatorArm64Test
+cd .. && brew install xcodegen && xcodegen generate --spec iosApp/project.yml
+open iosApp/lollop.xcodeproj                         # run the `lollop` scheme
 ```
 
 The Gradle build calls `scripts/build-ios-core.sh` itself: test binaries link a
 debug core with the test hooks, frameworks link the release core without them
 (`linkRustCore` in `kmp/core-bridge/build.gradle.kts`, which `:lollop-ios`
 reuses). `-Plollop.iosSimulator=<udid>` picks the simulator. `Lollop.framework`
-is dynamic and contains the Rust core; the Swift app calls
-`LollopApp.shared.start()` at launch.
+is dynamic and contains the Rust core.
+
+The Xcode project is generated from `iosApp/project.yml` and not committed. Its
+build phase runs `./gradlew :lollop-ios:embedAndSignAppleFrameworkForXcode`,
+which builds `Lollop.framework` for the configuration and SDK Xcode is building
+(Debug/Release, device/simulator) and copies it into the app. The Swift host
+(`iosApp/iosApp/LollopIosApp.swift`) shows `MainViewController()`, which installs
+the core engine (`LollopApp.start()`) and composes the app's root
+(`LollopIosRoot()`, which restores the event log and sends SetToday), and hands
+URLs the app is opened with (a GPX, TCX or FIT file from Files or the share
+sheet) to `openUrl` (`LollopIosOpen`). The icon and launch logo PNGs are
+rendered from the Android launcher icon and splash marks by
+`iosApp/make-assets.py` (rsvg-convert + Pillow, runs on Linux); rerun it after
+changing those drawables.
 
 ### Without a Mac: CI build + sideloading
 
-1. The `bridge-macos` job in `.github/workflows/ios.yml` runs on a GitHub macOS
-   runner (free for this public repo) and links `Lollop.framework`. Once the
-   Xcode app exists, the same job builds it with `xcodebuild -sdk iphoneos
-   CODE_SIGNING_ALLOWED=NO`, zips `Payload/lollop.app` into an unsigned `.ipa`
-   and uploads it as an artifact.
-2. Install SideStore (or AltStore) on the iPhone once, signed in with a free
-   Apple ID.
-3. Open the `.ipa` in SideStore; it signs it with the free Apple ID and
-   installs it.
-4. A free Apple ID signature expires after 7 days. SideStore refreshes it on
-   the phone; otherwise reinstall. A refresh re-signs the installed app, so
-   its data should stay (not tested yet).
+`.github/workflows/ios-app.yml` runs on GitHub macOS runners (free for this
+public repo) on every push to `main` that touches the app, and by hand
+(`gh workflow run ios-app.yml`). Two jobs:
 
-Free Apple IDs limit how many app IDs one account can register per week, and
-each app extension (widget, Live Activity, control) needs its own. Check
-SideStore's current limits before adding extensions. App Groups, which the
-widget needs to read the app's snapshot, also depend on what SideStore's
-signing supports. Not tested yet.
+- **Unsigned .ipa**: `xcodegen generate`, `xcodebuild -configuration Release
+  -sdk iphoneos CODE_SIGNING_ALLOWED=NO`, then `Payload/lollop.app` zipped into
+  `lollop-unsigned.ipa`, uploaded as the artifact `lollop-unsigned-ipa` (kept
+  30 days).
+- **Launch smoke test**: a Debug build for an iPhone simulator, installed and
+  launched; the job fails if the app writes a crash report or isn't running
+  30 s after launch. The artifact `simulator-smoke` holds a screenshot and the
+  app's log.
+
+Installing on an iPhone with SideStore and a free Apple Account (the
+"Install" page of https://docs.sidestore.io has the current steps):
+
+1. Once, on a computer (Linux works): install [iloader](https://github.com/nab138/iloader),
+   connect the iPhone by USB, sign in with the Apple Account (it doesn't have
+   to be the one on the phone; a separate one is fine), select the phone and
+   "Install SideStore (Stable)". On the phone: Settings → General → VPN &
+   Device Management → trust the Apple Account; Settings → Privacy & Security
+   → Developer Mode on (iOS 16+; the phone restarts). Install LocalDevVPN from
+   the App Store and connect it, open SideStore, sign in, and in My Apps tap
+   the "7 DAYS" counter next to SideStore to finish its setup.
+2. Download the app: on the phone, open the latest successful "iOS app" run
+   under the repo's Actions tab (signed in to GitHub: artifact downloads need
+   an account even on a public repo) and download `lollop-unsigned-ipa`. Files
+   unzips it to `lollop-unsigned.ipa` when tapped. From a computer:
+   `gh run download --repo tuschla/lollop -n lollop-unsigned-ipa`, then copy
+   the `.ipa` to the phone (or install it with iloader).
+3. With LocalDevVPN connected and on Wi-Fi, SideStore → My Apps → `+` → pick
+   `lollop-unsigned.ipa`. SideStore signs it with the Apple Account and installs
+   it. Installing a newer `.ipa` the same way updates the app in place.
+4. A free account's signature expires after 7 days; an expired app doesn't
+   open until it is refreshed. SideStore refreshes in the background, or tap
+   the app's day counter in My Apps (LocalDevVPN connected, Wi-Fi). A refresh
+   re-signs the installed app in place, which keeps its data (not checked on
+   this app yet). If refreshing stops working
+   after an iOS update or reset, the pairing file has expired: connect to the
+   computer and run iloader again.
+
+Limits of a free Apple Account:
+
+- 3 sideloaded apps installed at once, SideStore included: lollop leaves one
+  slot free.
+- 10 app IDs per 7 days. The app and each of its extensions register an app
+  ID of their own, so a later widget extension (it can hold the widget, the
+  Live Activity and the control) makes every fresh install cost two. When an
+  `.ipa` has extensions, SideStore asks whether to keep them.
+- App Groups (the widget reading the app's snapshot) need SideStore to
+  register a group for the account; check that before building the widget.
+
+Info.plist asks for location "When In Use" only
+(`NSLocationWhenInUseUsageDescription`, plus
+`NSLocationTemporaryUsageDescriptionDictionary` → `RunTracking` for precise
+location when the user granted approximate), and declares the `location`
+background mode so a run keeps recording with the screen locked. No "Always"
+permission: the run is active while it records.
 
 ## What the iOS app has to implement
 
@@ -214,30 +284,24 @@ Apple offers no other API (extensions).
 |---|---|
 | JNI core, `Core.kt` on the `core-jni` thread | `BridgeCore` over `kmp/core-bridge`'s `NativeCore`, installed by `LollopApp.start()`, on one dedicated thread |
 | Event log `filesDir/event-log.ndjson`, replay on boot, compaction (`EventLog.kt`, `DurableCore.restore`) | Done: the same NDJSON file in Application Support through the same commonMain code, so an exported log can be imported on either platform |
-| Crash-safe active run file (`ActiveRunStore.kt`) | Same file format in Application Support |
-| GPS run tracking, foreground service with a location type (`RunTrackingService.kt`) | CoreLocation with the `location` background mode: `CLLocationUpdate.liveUpdates` + `CLBackgroundActivitySession` (iOS 17+) or `CLLocationManager.allowsBackgroundLocationUpdates`. "Always" permission is not needed while the run is active. |
+| Crash-safe active run file (`ActiveRunStore.kt`) | Done: the same commonMain store and NDJSON format in Application Support, over the `LogFiles` seam (POSIX) |
+| GPS run tracking, foreground service with a location type (`RunTrackingService.kt`) | Done: `RunTracker.ios.kt`, a `CLLocationManager` (best accuracy, fitness activity, no distance filter, no auto-pause, `allowsBackgroundLocationUpdates` with the blue indicator) feeding the common `RunRecorder` (the same fix QC, armed start, pause, signal-loss watchdog and step ticker as Android's service) and the sidecar file; When In Use plus a one-off precise-location prompt; a run resumes after a relaunch from the sidecar. The Live Activity hook (`RunActivity`: sink + `setPaused`) is in iosMain, not yet exported by `:lollop-ios`. |
 | Live Update notifications for run and rest (`LiveUpdates.kt`, promoted notifications) | Live Activities (ActivityKit, Swift widget extension), Dynamic Island |
-| Rest-done alert, exact alarm (`RestAlarm.kt`) | AlarmKit (iOS 26) for an alert that sounds in silent mode; else a time-interval local notification |
-| Session reminder, boot receiver (`SessionReminder.kt`) | Calendar-trigger local notification (UserNotifications); iOS keeps it across reboots, no boot hook |
+| Rest-done alert, exact alarm (`RestAlarm.kt`) | Done: a time-interval local notification (`UNTimeIntervalNotificationTrigger`) and the in-app countdown; no exact-alarm notice. AlarmKit (iOS 26) would sound in silent mode. |
+| Session reminder, boot receiver (`SessionReminder.kt`) | Done: a dated calendar-trigger local notification (`UNCalendarNotificationTrigger`) per upcoming session day; iOS keeps them across reboots, no boot hook |
 | Home screen widget (`widget/`, Glance) | WidgetKit extension (SwiftUI) reading a snapshot the app writes to an App Group container (Android: `WidgetSnapshot.kt`) |
 | Quick Settings tile (`QuickTileService.kt`) | Control Center control (`ControlWidget`, iOS 18) in the widget extension |
 | Deep links `OpenDest` (`OpenIntents.kt`): today, log, track, log_set | URL scheme `lollop://open/<dest>` or App Intents (`OpenIntent`) from widgets, controls and Live Activities |
-| Open/share GPX, TCX, FIT into the app (`RunImport.kt`, VIEW/SEND intent filters) | Document types (`CFBundleDocumentTypes` + UTTypes for GPX/TCX/FIT) so Files and "Open in" work; a share extension for the Share sheet |
-| Import a log, export a log/GPX/coach summary (`ProfileScreen.kt`, `Export.kt`, `CoachExport.kt`) | `UIDocumentPickerViewController` (import, export) and `UIActivityViewController` (share; the coach summary's is done, `CoachExport.ios.kt`) |
+| Open/share GPX, TCX, FIT into the app (`RunImport.kt`, VIEW/SEND intent filters) | Done: document types in `iosApp/iosApp/Info.plist` (`CFBundleDocumentTypes` + imported UTTypes `com.topografix.gpx`, `com.garmin.tcx`, `com.garmin.fit`), so Files' "Open in" and the share sheet's app row copy the file into the app, whose `onOpenURL` hands it to `LollopIosOpen` |
+| Import a log, export a log/GPX/coach summary (`ProfileScreen.kt`, `Export.kt`, `CoachExport.kt`) | Done: the backup NDJSON (`lollop-YYYY-MM-DD.ndjson`) is written to the temp dir and shared with `UIActivityViewController` (Save to Files, AirDrop; "Exported" only when the sheet completes); import picks one file with `UIDocumentPickerViewController` (streamed validation, 256 MiB cap) → confirm → log swap → in-process reboot (`DurableCore.resetForReboot` over `lollop_reset`); a run's GPX is shared as `run-YYYY-MM-DD-HHmm.gpx` (`Export.ios.kt`); the coach summary through `CoachExport.ios.kt` |
 | Battery optimisation exemption prompt | None needed |
-| Paper theme with the system (Material You) accent | iOS has no wallpaper palette: Paper uses its own accent (`platformAccent` is null); hiding the accent switch on iOS is an owner decision |
+| Paper theme with the system (Material You) accent | iOS has no wallpaper palette: Paper uses its own accent (`platformAccent` is null) and Profile hides the "Use system accent" row (`platformHasDynamicAccent` = false, `ProfilePlatform.kt`), as on Android < 12. Profile's Live Updates notice is hidden too. |
 | Per-app language (`AppLocale.kt`) | Per-app language in iOS Settings (`CFBundleLocalizations`) |
 
 ## Next steps
 
-1. Move the remaining screens to commonMain, each behind a real iOS
-   implementation of what keeps it on Android: the activity root
-   (`AppScaffold`, `CoachSession`, step 7 of the port), the rest timer
-   (`RestAlarm`: `SetEditor`'s set loop), file pickers and SAF
-   (`HistoryScreen`, `LogSheet`, `ProfileScreen`), the osmdroid map (`RunMap`,
-   `TrackerMap` and the screens that show it: `RunDetailSheet`, `HistoryDetail`,
-   `TrimRunSheet`, `TrackerDialogs`) and location permission + the tracking
-   service (`RunTracking`).
-2. Add the iOS app target (Compose `ComposeUIViewController` in a SwiftUI host)
-   and the unsigned `.ipa` step to `bridge-macos`.
-3. The Swift extensions: widget, Live Activity, control.
+1. The Swift extensions (one widget extension): the home screen widget
+   (WidgetKit, reading a snapshot the app writes to an App Group container),
+   the Live Activity for run and rest (ActivityKit; the app side needs
+   `RunActivity` exported from `:lollop-ios`), and the Control Center control.
+   Each costs a free Apple Account an app ID (see the sideloading limits).

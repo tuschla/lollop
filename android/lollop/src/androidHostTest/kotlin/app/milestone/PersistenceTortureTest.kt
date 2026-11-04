@@ -878,8 +878,8 @@ object ImportProbe {
                 println("the backup does not validate")
                 exitProcess(4)
             }
-            val summary = summarizeImport(lines, java.time.ZoneOffset.UTC)
-            swapLogFile(File(args[1]), lines)
+            val summary = summarizeImport(lines, kotlinx.datetime.TimeZone.UTC)
+            swapLogFile(eventLogFile(File(args[1])), lines)
             println("lines=${lines.size} entries=${summary.entries} ms=${(System.nanoTime() - t0) / 1_000_000}")
         } catch (e: OutOfMemoryError) {
             println("OOM after ${(System.nanoTime() - t0) / 1_000_000} ms: $e\n${e.stackTrace.take(8).joinToString("\n") { "  at $it" }}")

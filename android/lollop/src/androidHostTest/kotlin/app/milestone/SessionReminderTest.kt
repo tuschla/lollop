@@ -130,7 +130,7 @@ class SessionReminderTest {
     @Test
     fun offByDefaultWithNoAlarm() {
         app.getSharedPreferences("session_reminder", 0).edit().clear().commit()
-        assertEquals(SessionReminder.Setting(false, 7 * 60 + 30), SessionReminder.setting(app))
+        assertEquals(SessionReminderSetting(false, 7 * 60 + 30), SessionReminder.setting(app))
         SessionReminder.reschedule(app)
         assertTrue(alarms().isEmpty())
     }

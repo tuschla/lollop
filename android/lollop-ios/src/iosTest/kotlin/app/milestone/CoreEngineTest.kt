@@ -5,7 +5,7 @@ package app.milestone
 import app.milestone.core.cinterop.LollopBytes
 import app.milestone.core.cinterop.lollop_bytes_free
 import app.milestone.core.cinterop.lollop_panic_for_test
-import app.milestone.core.cinterop.lollop_reset_for_test
+import app.milestone.core.cinterop.lollop_reset
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -61,7 +61,7 @@ class CoreEngineTest {
     }
 
     private fun boot(bridge: CoreBridge = RustCoreBridge): BridgeCore {
-        lollop_reset_for_test()
+        lollop_reset()
         return BridgeCore(bridge).also { it.restoreFrom(LogPath(path)) }
     }
 

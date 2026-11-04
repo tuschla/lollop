@@ -20,7 +20,7 @@ import kotlinx.coroutines.withContext
 // CoreDispatcher, and its ViewModel is published to [model] in enqueue order.
 // That serial order is the whole ordering guarantee: the core's log and state are
 // order-sensitive.
-internal object EventDispatcher {
+internal object EventDispatcher : BootLedger {
     private sealed interface Msg
     private class Ev(val e: Event) : Msg
     private class Batch(val events: List<Event>) : Msg
@@ -58,12 +58,14 @@ internal object EventDispatcher {
     // The once-per-process boot gate (guided-setup decision + run recovery).
     // Survives rotation so the boot effect doesn't clobber mid-setup answers, and
     // resets on process death, when the ActiveRunStore recovery check must re-run.
-    var bootHandled = false
+    override var bootHandled = false
 
     // The (local epoch-day, utc-offset-sec) the core was last told is "today"; null
     // until boot sends it. Process-scoped, so a rotation's boot re-run can tell the
     // core already has this clock and skip the resend.
-    @Volatile var lastToday: Pair<Long, Int>? = null
+    @Volatile override var lastToday: Pair<Long, Int>? = null
+
+    override val published: ViewModel? get() = model.value
 
     // The crash-recovery sidecar fixes read ONCE at boot when a resume prompt is
     // offered, so the Resume action reuses them instead of re-reading the sidecar
@@ -143,7 +145,7 @@ internal object EventDispatcher {
      *  saved (rejected, or accepted but the log append failed) and, once per stale
      *  run, a view that is a stand-in or missing saved data. The queue paths call
      *  this themselves; an [exclusive] body calls it for each [SendResult] it gets. */
-    fun report(r: SendResult) {
+    override fun report(r: SendResult) {
         if (!r.accepted || !r.persisted) noticeChannel.trySend(CoreNotice.NotSaved)
         if (r.stale && !staleReported) noticeChannel.trySend(CoreNotice.Unreadable)
         staleReported = r.stale
