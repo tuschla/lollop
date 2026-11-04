@@ -116,6 +116,10 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
+    // Window size classes (currentWindowAdaptiveInfoV2): the navigation rail, the
+    // two-pane layouts and the content width on landscape phones, foldables and
+    // tablets (Adaptive.kt).
+    implementation("androidx.compose.material3.adaptive:adaptive")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")

@@ -4,7 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -13,6 +17,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.NavigationRailDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetValue
@@ -45,9 +50,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** The app's root: decides the window's [WindowLayout] once and hands it down. */
 @Composable
 internal fun CoachScaffold(session: CoachSession) {
+    CompositionLocalProvider(LocalWindowLayout provides rememberWindowLayout()) { CoachScaffoldBody(session) }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CoachScaffoldBody(session: CoachSession) {
     val ctx = LocalContext.current
     // Live tracking state drives the "run in progress" reentry chip below.
     val liveTracking by RunSession.tracking.collectAsState()
@@ -146,10 +157,11 @@ internal fun CoachScaffold(session: CoachSession) {
         // profile empty and drops into the normal empty Today. Either way the
         // onboarding flag is set so it never re-prompts.
         // GuidedSetup is a full-screen replacement (outside the Scaffold that
-        // owns the status-bar inset), so under edge-to-edge its header would sit
-        // under the status bar. The inset belongs on the full-screen container,
-        // which lives here at the call site, not inside GuidedSetup's own content.
-        Box(Modifier.fillMaxSize().background(BgTop).statusBarsPadding().navigationBarsPadding()) {
+        // owns the system-bar insets), so under edge-to-edge its header would sit
+        // under the status bar and, in landscape, its edge under the camera
+        // cutout. The insets belong on the full-screen container, which lives
+        // here at the call site, not inside GuidedSetup's own content.
+        Box(Modifier.fillMaxSize().background(BgTop).statusBarsPadding().navigationBarsPadding().displayCutoutPadding()) {
             // A re-run (setupInitial != null) must NOT touch the onboarding pref -
             // it's a returning user reviewing their answers, not first-run onboarding.
             val firstRun = session.setupInitial == null
@@ -279,15 +291,28 @@ internal fun CoachScaffold(session: CoachSession) {
     // The chrome gives way to the pinned safety banner, never the reverse: when the
     // bottom nav and the Log button no longer fit under the banner (a landscape
     // phone under a hold), a side rail carries the destinations and Log, beside the
-    // banner instead of over it.
-    var navRail by remember { mutableStateOf(false) }
+    // banner instead of over it. A wide or a short window always takes the rail
+    // (visual-design-system §5 "Adaptive layout").
+    var bannerRail by remember { mutableStateOf(false) }
+    val windowLayout = LocalWindowLayout.current
+    val navRail = bannerRail || windowLayout.navRail
     val logRoomPx = with(LocalDensity.current) { LogButtonRoom.roundToPx() }
     Row(Modifier.fillMaxSize().background(BgTop)) {
         if (navRail) {
-            MilestoneNavRail(selected, onSelect = { selected = it }, onLog = if (selected == Dest.Today) openLog else null)
+            MilestoneNavRail(
+                selected,
+                onSelect = { selected = it },
+                onLog = if (selected == Dest.Today) openLog else null,
+                showBrand = windowLayout.shortHeight,
+            )
         }
         Scaffold(
-            modifier = Modifier.weight(1f),
+            // Beside the rail the scaffold no longer touches the start edge: the
+            // rail took the start inset (a landscape camera cutout, a side
+            // navigation bar), so the content does not pad for it a second time.
+            modifier = Modifier.weight(1f).then(
+                if (navRail) Modifier.consumeWindowInsets(NavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start)) else Modifier,
+            ),
             containerColor = BgTop,
             // M3 lays the snackbar above the FAB on Today and above the nav bar elsewhere.
             snackbarHost = { UiMessageHost() },
@@ -302,7 +327,7 @@ internal fun CoachScaffold(session: CoachSession) {
                     bottomBarPx = bottomBarPx,
                     navBarPx = navBarPx,
                     logRoomPx = logRoomPx,
-                    onNeedsRail = { if (navRail != it) navRail = it },
+                    onNeedsRail = { if (bannerRail != it) bannerRail = it },
                     banner = {
                         SafetyBannerHost(
                             session.model,
@@ -319,7 +344,9 @@ internal fun CoachScaffold(session: CoachSession) {
                     // secondary title string anywhere in content. No overflow menu:
                     // "Clear all data" lives only in Profile's Danger zone, since a
                     // destructive action a tap away on every screen is too easy to hit.
-                    appBar = { BrandTopBar() },
+                    // A short window gives the bar's height to the content; the
+                    // route mark tops the rail instead.
+                    appBar = { if (!windowLayout.shortHeight) BrandTopBar() },
                 )
             },
             bottomBar = {

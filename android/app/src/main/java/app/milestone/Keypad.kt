@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,6 +25,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
@@ -248,20 +252,49 @@ internal fun Modifier.keypadWell(invalid: Boolean, active: Boolean, description:
  * carries no numeric logic at all. [allowDecimal] = false (whole-number and
  * digit-only fields: age, heart rate, days, a race time) leaves the decimal
  * cell empty, so no key is drawn that does nothing. [onDone] adds a full-width
- * "Done" key under the grid that folds the keypad away.
+ * "Done" key under the grid that folds the keypad away ([doneLabel] /
+ * [doneDescription] name it otherwise, e.g. the setup's "Next"). Docked beside the
+ * form ([LocalKeypadBeside], a landscape editor) the keypad keeps four rows:
+ * backspace and a tall Done stand in a fourth column and 0 takes two cells, so the
+ * column with Save under it fits a phone's height in landscape.
  */
 @Composable
-fun NumericKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit, allowDecimal: Boolean = true, onDone: (() -> Unit)? = null) {
-    Column(
-        modifier = Modifier
-            .testTag("numeric-keypad")
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(Space.Card.dp))
-            // The palette's recessed ground, so it follows the resolved theme.
-            .background(BgSunken)
-            .padding(Space.Sm.dp),
-        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
-    ) {
+fun NumericKeypad(
+    onKey: (Char) -> Unit,
+    onBackspace: () -> Unit,
+    allowDecimal: Boolean = true,
+    onDone: (() -> Unit)? = null,
+    doneLabel: String = stringResource(R.string.log_keypad_done),
+    doneDescription: String? = null,
+) {
+    val frame = Modifier
+        .testTag("numeric-keypad")
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(Space.Card.dp))
+        // The palette's recessed ground, so it follows the resolved theme.
+        .background(BgSunken)
+        .padding(Space.Sm.dp)
+    if (onDone != null && LocalKeypadBeside.current) {
+        Row(frame.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+            Column(Modifier.weight(3f), verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+                listOf("123", "456", "789").forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+                        row.forEach { key -> KeypadKey(key, onKey, onBackspace, Modifier.weight(1f)) }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+                    if (allowDecimal) KeypadKey('.', onKey, onBackspace, Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
+                    KeypadKey('0', onKey, onBackspace, Modifier.weight(2f))
+                }
+            }
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+                KeypadKey('⌫', onKey, onBackspace, Modifier.fillMaxWidth())
+                DoneKey(onDone, doneLabel, doneDescription, Modifier.fillMaxWidth().weight(1f))
+            }
+        }
+        return
+    }
+    Column(modifier = frame, verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
         val rows = listOf("123", "456", "789", ".0⌫")
         rows.forEach { row ->
             Row(
@@ -278,20 +311,25 @@ fun NumericKeypad(onKey: (Char) -> Unit, onBackspace: () -> Unit, allowDecimal: 
                 }
             }
         }
-        if (onDone != null) {
-            Box(
-                modifier = Modifier.fillMaxWidth().keypadKey(onDone),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    stringResource(R.string.log_keypad_done),
-                    color = Accent,
-                    style = Type.BodyBold,
-                )
-            }
-        }
+        if (onDone != null) DoneKey(onDone, doneLabel, doneDescription, Modifier.fillMaxWidth())
     }
 }
+
+/** The keypad's "Done" key ([label]; TalkBack hears [description] when given):
+ *  [onDone] folds the keypad away or moves on. */
+@Composable
+private fun DoneKey(onDone: () -> Unit, label: String, description: String?, modifier: Modifier) {
+    Box(
+        modifier = modifier.keypadKey(onDone).then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = Accent, style = Type.BodyBold)
+    }
+}
+
+/** True where [NumericKeypad] stands docked beside its form ([KeypadPanel] under
+ *  [LocalKeypadDock]): it then lays out four rows with Done in a fourth column. */
+internal val LocalKeypadBeside = staticCompositionLocalOf { false }
 
 /** [NumericKeypad] editing the buffer [text]: each key or backspace reports the
  *  new buffer to [onBuffer]; [fresh] makes the first key replace the old value. */
@@ -311,7 +349,9 @@ fun NumericKeypad(
 
 /** Shows [content] (a keypad) while [open] and scrolls it into view when it
  *  opens, then [alsoReveal] (the field it types into), so a short window never
- *  leaves the keypad below the fold. */
+ *  leaves the keypad below the fold. Under a side-by-side editor
+ *  ([LocalKeypadDock]) the keypad stands in the controls column beside the form
+ *  instead, and only the field is revealed. */
 @Composable
 fun KeypadPanel(
     open: Boolean,
@@ -320,10 +360,18 @@ fun KeypadPanel(
 ) {
     if (!open) return
     val requester = remember { BringIntoViewRequester() }
+    val dock = LocalKeypadDock.current
     LaunchedEffect(Unit) {
         withFrameNanos { }
         requester.bringIntoView()
         alsoReveal?.bringIntoView()
+    }
+    if (dock != null) {
+        // Docked beside the form: what stays here is an empty marker right under
+        // the field, scrolled into view so the field being typed is on screen.
+        Docked(dock) { CompositionLocalProvider(LocalKeypadBeside provides true, content = content) }
+        Box(Modifier.fillMaxWidth().bringIntoViewRequester(requester))
+        return
     }
     Box(Modifier.bringIntoViewRequester(requester)) { content() }
 }

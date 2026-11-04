@@ -8,8 +8,10 @@ argv: mode [text] [anchor]
   rid ID           same, matching the node's resource-id suffix (after ':id/' or exact).
   ridtext ID       print the text of that node.
   texts            print every label as "<key>=<value>" in document order.
-  on TEXT          exit 0 when the node labelled exactly TEXT (or its parent/children)
-                   is checked/selected, 1 when not, 2 when absent.
+  on TEXT          exit 0 when the node labelled exactly TEXT (or its parent,
+                   grandparent or children) is checked/selected, 1 when not, 2 when
+                   absent. The grandparent: a navigation rail item (landscape) wraps
+                   its label one level deeper than a bottom-bar item.
   overflow         print labels whose text node's bounds exceed the screen width or
                    have zero/negative width (clipped/off-screen text), one per line.
   rtl              print "<n_left> <n_right>" counts of labelled nodes whose centre
@@ -52,7 +54,7 @@ if mode == "on":
     on = lambda n: n.get("checked") == "true" or n.get("selected") == "true"
     for n in root.iter("node"):
         if want in (n.get("text"), n.get("content-desc")):
-            near = [n, parent.get(n)] + list(n)
+            near = [n, parent.get(n), parent.get(parent.get(n))] + list(n)
             sys.exit(0 if any(m is not None and on(m) for m in near) else 1)
     sys.exit(2)
 

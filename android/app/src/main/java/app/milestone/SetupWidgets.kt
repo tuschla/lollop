@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -264,11 +265,19 @@ internal fun equipmentText(e: CalisEquipment): String =
  *  where it helps answer, one short line under it. */
 @Composable
 internal fun StepHeader(question: String, subtitle: String? = null) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
-        SheetTitle(question)
-        if (subtitle != null) Text(subtitle, color = OnBgMuted, style = Type.Body)
+    val header: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.Sm.dp)) {
+            SheetTitle(question)
+            if (subtitle != null) Text(subtitle, color = OnBgMuted, style = Type.Body)
+        }
     }
+    // Side by side (a landscape window), the question stands in the start pane.
+    val dock = LocalStepHeaderDock.current
+    if (dock != null) Docked(dock, header) else header()
 }
+
+/** The setup's question pane on a landscape window; null under one column. */
+internal val LocalStepHeaderDock = staticCompositionLocalOf<SlotDock?> { null }
 
 /** A secondary question inside a step (e.g. "How do you train strength?"): the
  *  app's one field-label style, announced as a heading. */

@@ -409,6 +409,30 @@ class ReviewShellComponentTest {
         assertTrue("LTR hint $hint at the right edge", hint.right >= right - 1f)
     }
 
+    /** Bug (e37, landscape, 130 % font): a label that fits its own line but not
+     *  beside its hint broke at a word ("Effort: reps / left") because only its
+     *  longest word had to fit. It keeps its line; the hint goes below. A label
+     *  too long for one line anyway still wraps beside a short hint. */
+    @Test
+    fun fieldLabel_aLabelThatFitsItsLine_keepsItAndTheHintGoesBelow() {
+        rule.setContent {
+            MilestoneTheme {
+                androidx.compose.foundation.layout.Column {
+                    Box(Modifier.width(200.dp)) { FieldLabel("Effort: reps left", "target ~3 reps left") }
+                    Box(Modifier.width(200.dp)) { FieldLabel("How many days a week do you run right now", "optional") }
+                }
+            }
+        }
+        val label = rule.onNodeWithText("Effort: reps left").fetchSemanticsNode()
+        val hint = rule.onNodeWithText("target ~3 reps left").fetchSemanticsNode()
+        assertTrue("label lines: ${label.textLayout()?.lineCount}", label.textLayout()?.lineCount == 1)
+        assertTrue("hint ${hint.boundsInRoot} below the label ${label.boundsInRoot}", hint.boundsInRoot.top >= label.boundsInRoot.bottom - 1f)
+        val long = rule.onNodeWithText("How many days a week do you run right now").fetchSemanticsNode()
+        val shortHint = rule.onNodeWithText("optional").fetchSemanticsNode()
+        assertTrue("a long label wraps: ${long.textLayout()?.lineCount}", (long.textLayout()?.lineCount ?: 0) > 1)
+        assertTrue("its hint ${shortHint.boundsInRoot} beside it ${long.boundsInRoot}", shortHint.boundsInRoot.top < long.boundsInRoot.bottom - 1f)
+    }
+
     /**
      * Claim check (passes = VERIFIED): SmallScreenLargeFontTest's text walker CAN
      * see the run-stat value and label nodes in the unmerged tree despite the

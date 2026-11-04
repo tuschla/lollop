@@ -374,12 +374,23 @@ class RandomUiWalkTest : UiProbeTest() {
 
     /** The History list's item count equals what the core's entries need: the fixed
      *  rows above the stream, then one card per lift SESSION (local day) or run, a
-     *  month header per month, or the empty state. */
+     *  month header per month, or the empty state. On a two-pane window (History's
+     *  `history-list-pane`) the list holds only the segment and the stream, and the
+     *  overview pane beside it (unless an opened entry took the end pane) the 7-day
+     *  strip, the heatmap and, on Runs, the run progress and records; both panes
+     *  must match the SAME filter. */
     private fun checkHistoryRows(m: ViewModel) {
-        val count = historyItemCount() ?: return
+        val lists = flatten(roots().first()).filter { it.config.getOrNull(SemanticsActions.ScrollToIndex) != null && it.isVisible() }
+        fun tagged(tag: String) = lists.firstOrNull { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+        val listPane = tagged("history-list-pane")
+        val overviewPane = tagged("history-overview-pane")
+        if (listPane == null && overviewPane != null) fail("History shows its overview pane without the list pane")
+        val count = historyItemCount(listPane ?: lists.maxByOrNull { it.boundsInRoot.height } ?: return) ?: return
+        val overviewCount = overviewPane?.let { historyItemCount(it) ?: return }
         val zone = ZoneId.systemDefault()
         val lifts = groupLiftSessions(m.lifts, zone)
         val hasAny = m.lifts.isNotEmpty() || m.runs.isNotEmpty()
+        if (listPane != null && !hasAny) fail("History splits into two panes with nothing logged")
         val showSegment = (m.showLifting() || m.lifts.isNotEmpty()) && (m.showRunning() || m.runs.isNotEmpty())
         val records = m.run_progress?.let { it.longest_run_km > 0.0 || it.best_efforts.isNotEmpty() } == true
         fun months(stamps: List<Long>): Int {
@@ -392,29 +403,45 @@ class RandomUiWalkTest : UiProbeTest() {
             }
             return n
         }
-        fun expected(runsFilter: Boolean): Int {
-            var n = (if (hasAny) 2 else 0) + (if (showSegment) 1 else 0)
+        // The overview rows: 7-day strip + heatmap, then on Runs the progress chart and records.
+        fun overview(runsFilter: Boolean): Int {
+            var n = if (hasAny) 2 else 0
             if (runsFilter) {
                 if (m.runs.isNotEmpty()) n++
                 if (records) n++
-                n += if (m.runs.isEmpty()) 1 else m.runs.size + months(m.runs.asReversed().map { it.observed_at })
-            } else {
-                n += if (lifts.isEmpty()) 1 else lifts.size + months(lifts.map { it.firstObservedAt })
             }
             return n
         }
-        val ok = listOf(expected(false), expected(true))
-        if (count !in ok) {
-            fail("History lists $count rows for ${m.lifts.size} sets on ${lifts.size} days and ${m.runs.size} runs (expected one of $ok)")
+        // The segment row, then the stream (cards + month headers) or the empty state.
+        fun stream(runsFilter: Boolean): Int {
+            var n = if (showSegment) 1 else 0
+            n += if (runsFilter) {
+                if (m.runs.isEmpty()) 1 else m.runs.size + months(m.runs.asReversed().map { it.observed_at })
+            } else {
+                if (lifts.isEmpty()) 1 else lifts.size + months(lifts.map { it.firstObservedAt })
+            }
+            return n
+        }
+        val what = "${m.lifts.size} sets on ${lifts.size} days and ${m.runs.size} runs"
+        if (listPane == null) {
+            val ok = listOf(false, true).map { overview(it) + stream(it) }
+            if (count !in ok) fail("History lists $count rows for $what (expected one of $ok)")
+            return
+        }
+        val ok = listOf(false, true).map { stream(it) to overview(it) }
+        val matches = ok.any { (list, over) -> count == list && (overviewCount == null || overviewCount == over) }
+        if (!matches) {
+            fail(
+                "History (two-pane) lists $count rows and its overview ${overviewCount ?: "-"} for $what " +
+                    "(expected one of ${ok.map { (l, o) -> "$l + $o" }})",
+            )
         }
     }
 
-    /** The History LazyColumn's item count, read from its scroll-to-index bound;
-     *  null when there is no list, or when it moved or left in the frame the
-     *  lookup waited for (`node` matches id AND bounds): the next step counts. */
-    private fun historyItemCount(): Int? {
-        val lists = flatten(roots().first()).filter { it.config.getOrNull(SemanticsActions.ScrollToIndex) != null && it.isVisible() }
-        val list = lists.maxByOrNull { it.boundsInRoot.height } ?: return null
+    /** [list]'s LazyColumn item count, read from its scroll-to-index bound; null
+     *  when it moved or left in the frame the lookup waited for (`node` matches id
+     *  AND bounds): the next step counts. */
+    private fun historyItemCount(list: SemanticsNode): Int? {
         val target = node(list)
         return try {
             target.performSemanticsAction(SemanticsActions.ScrollToIndex) { it(Int.MAX_VALUE) }

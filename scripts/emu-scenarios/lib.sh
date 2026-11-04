@@ -48,11 +48,18 @@ dump_ui() {
 find_node() { dump_ui | python3 "$HELP/node.py" "$@"; }
 ui_texts() { dump_ui | python3 "$HELP/node.py" texts; }
 has_text() { find_node "$@" >/dev/null 2>&1; } # has_text MODE TEXT
-# wait_text MODE TEXT [seconds]
+# wait_text MODE TEXT [seconds]. A system "<app> isn't responding" dialog (System UI
+# or the launcher on a loaded host, the first minutes after boot) covers the window
+# being waited for: it is answered with Wait.
 wait_text() {
-  local i
+  local i x w
   for i in $(seq 1 "${3:-15}"); do
-    has_text "$1" "$2" && return 0
+    x="$(dump_ui)"
+    python3 "$HELP/node.py" "$1" "$2" <<<"$x" >/dev/null 2>&1 && return 0
+    if python3 "$HELP/node.py" re ".+ isn't responding$" <<<"$x" >/dev/null 2>&1 &&
+      w="$(python3 "$HELP/node.py" eq Wait <<<"$x")"; then
+      log "system ANR dialog answered with Wait"; tap_xy ${w%% *} $(cut -d' ' -f2 <<<"$w")
+    fi
     sleep 1
   done
   return 1
@@ -239,25 +246,35 @@ rem_alarm() {
 TILE="$APP_ID/.QuickTileService"
 # Open Quick Settings and dump it as ui/NAME.xml; echo the tile's label and leave
 # the panel open (collapse it with `cmd statusbar collapse`). The QS tile node
-# carries the label as its text (content-desc adds the state). The panel binds
+# carries the label as its text, or (API 37's icon-only tile) as its
+# content-desc, "<label>, <subtitle>" when the tile has a subtitle (the widget's
+# title for today); the subtitle is written to ui/NAME.subtitle. The panel binds
 # the tile when it opens (onStartListening), so the label is read again 2 s after
 # it first shows to get the settled state.
+TILE_RE='^(Log|Log set|Start run|Run · recording)(, .+)?$'
 tile_label() {
-  local i l re='^(Log|Log set|Start run|Run · recording)$'
+  local i l
   adb_ shell cmd statusbar expand-settings; sleep 3
   for i in 1 2 3; do
     wdump "$1" || continue
-    l="$(wfind "$1" re "$re" | cut -d' ' -f7-)"
+    l="$(wfind "$1" re "$TILE_RE" | cut -d' ' -f7-)"
     if [[ -n "$l" ]]; then
       sleep 2
-      wdump "$1" && l="$(wfind "$1" re "$re" | cut -d' ' -f7-)"
-      [[ -n "$l" ]] && { echo "$l"; return 0; }
+      wdump "$1" && l="$(wfind "$1" re "$TILE_RE" | cut -d' ' -f7-)"
+      if [[ -n "$l" ]]; then
+        python3 "$HELP/node.py" texts <"$OUT/ui/$1.xml" | sed -n 's/^[a-z-]*=//p' | grep -E "$TILE_RE" |
+          grep -m1 ', ' | sed 's/^[^,]*, //' >"$OUT/ui/$1.subtitle"
+        echo "${l%%, *}"; return 0
+      fi
     fi
     # The added tile lands on the last QS page.
     adb_ shell input swipe 900 700 150 700 300; sleep 2
   done
   return 1
 }
+# tile_node DUMP LABEL: "cx cy ..." of the tile labelled LABEL (with or without
+# its subtitle) in ui/DUMP.xml.
+tile_node() { wfind "$1" re "^$(printf '%s' "$2" | sed 's/[][\.*^$()+?{}|]/\\&/g')(, .+)?\$"; }
 # add_tile: `cmd statusbar add-tile`, then wait (max ~40 s) until the tile shows
 # on the QS panel (it takes a while to bind on API 34).
 add_tile() {
@@ -322,6 +339,14 @@ widget_texts() {
   home; sleep 2
   evidence "$1"
   python3 "$HELP/node.py" texts <"$OUT/ui/$1.xml" | sed -n '/content-desc=Open Today in lollop/,$p' | head -12
+}
+# widget_dp NAME: the size the launcher gave the widget, "W H" in whole dp, from
+# its root node ("Open Today in lollop") in the dump saved under NAME.
+widget_dp() {
+  local d b
+  d="$(sh_ wm density | sed -n 's/.*: //p' | tail -1)"
+  b="$(python3 "$HELP/node.py" eq "Open Today in lollop" <"$OUT/ui/$1.xml")" || return 1
+  awk -v d="$d" '{ printf "%d %d\n", ($5 - $3) * 160 / d, ($6 - $4) * 160 / d }' <<<"$b"
 }
 
 # ── Emulator lifecycle ───────────────────────────────────────────────────────

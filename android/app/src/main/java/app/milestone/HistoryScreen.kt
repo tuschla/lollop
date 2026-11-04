@@ -38,6 +38,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.runtime.CompositionLocalProvider
 import java.util.Locale
 import kotlinx.coroutines.launch
 
@@ -191,6 +194,12 @@ internal fun HistoryDestination(
     ) { uris -> if (uris.isNotEmpty()) RunImport.importRuns(ctx, uris) }
     val launchImport = { importRuns.launch("*/*") }
     val todayLocalDay = localEpochDay(nowMillis / 1000, zone)
+    // On a two-pane window the list stands at the start and the overview (7-day
+    // strip, heatmap, run progress, records) at the end; an opened entry takes the
+    // end pane in place of the overview instead of a sheet ([DetailSheet]).
+    val twoPane = LocalWindowLayout.current.twoPane && hasAny
+    val detailDock = remember { SlotDock() }
+    CompositionLocalProvider(LocalDetailDock provides detailDock.takeIf { twoPane }) {
     EntryActionSheets(
         selected = selected,
         // Memoized on model.lifts so the full-history scan isn't recomputed on
@@ -229,6 +238,7 @@ internal fun HistoryDestination(
             onEvent = onEvent,
         )
     }
+    }
     // The list state is hoisted so the jump control can scroll it.
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -242,7 +252,7 @@ internal fun HistoryDestination(
     // The Runs stream, newest first by START (a run belongs to the day it started,
     // the day its title and date chip name), shared by the month headers and the cards.
     val runStream = remember(model.runs) { historyRunStream(model.runs) }
-    val monthNav = remember(activeFilter, liftSessions, runStream, showSegment, showRunProgress, showRunRecords, zone) {
+    val monthNav = remember(activeFilter, liftSessions, runStream, showSegment, showRunProgress, showRunRecords, zone, twoPane) {
         // One stamp per stream card: a lift SESSION (its first set) or a run's start.
         val stamps: List<Long> = when (activeFilter) {
             HistoryFilter.Runs -> runStream.map(::runDaySec)
@@ -253,18 +263,15 @@ internal fun HistoryDestination(
         // progress chart and the records grid (Runs). The jump control rides on the
         // first month header, so it adds no slot of its own.
         var base = 0
-        if (hasAny) base += 2                          // 7-day strip + 12-week heatmap
+        if (hasAny && !twoPane) base += 2              // 7-day strip + 12-week heatmap
         if (showSegment) base++                        // Lifts | Runs segment
-        if (showRunProgress) base++                    // run progress chart
-        if (showRunRecords) base++                     // run records
+        if (showRunProgress && !twoPane) base++        // run progress chart
+        if (showRunRecords && !twoPane) base++         // run records
         buildMonthNav(stamps, base, zone, monthFmt)
     }
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(Space.Screen.dp),
-        verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
-    ) {
+    // The screen's parts, in one-column order: the overview's top (7-day strip,
+    // heatmap), the segment, the run overview (progress, records), the entries.
+    val overviewTop: LazyListScope.() -> Unit = {
         // 1. Stat strip over the rolling last 7 days (now − 7 days) of ALL activity,
         // so it sits above the Lifts | Runs filter. Nothing logged: only the empty line below.
         if (hasAny) {
@@ -347,6 +354,8 @@ internal fun HistoryDestination(
                 }
             }
         }
+    }
+    val segmentItem: LazyListScope.() -> Unit = {
         // 3. Filter: two-option segmented Lifts | Runs, no "All", no counts.
         // Hidden when only one modality is relevant: the single available
         // list renders on its own.
@@ -358,6 +367,8 @@ internal fun HistoryDestination(
                 ) { manualFilter = if (it == 0) HistoryFilter.Lifts else HistoryFilter.Runs }
             }
         }
+    }
+    val runOverview: LazyListScope.() -> Unit = {
         // 2b. Runs: progress at the top (visualizations first). ONE compact distance
         // chart (16-week weekly vs the plan, or the last 14 days), then the records
         // grid (longest run + best efforts); a record opens its run.
@@ -386,7 +397,8 @@ internal fun HistoryDestination(
                 )
             }
         }
-
+    }
+    val entryItems: LazyListScope.() -> Unit = {
         // Jump to month rides on the FIRST month header (a calendar icon button that
         // opens a whole-row option list, never an anchored dropdown) when the active
         // stream spans >=2 months; a pick animate-scrolls to that month's header (item
@@ -414,6 +426,8 @@ internal fun HistoryDestination(
                         nowMillis = nowMillis,
                         todayLocalDay = todayLocalDay,
                         weightUnit = weightUnit,
+                        // Beside the detail pane the open session's card is marked.
+                        selected = twoPane && s.key == selectedSessionKey,
                         onClick = { selectedSessionKey = s.key },
                     )
                 }
@@ -437,7 +451,8 @@ internal fun HistoryDestination(
                 // Legacy rows share entry_id 0; suffix the index so two in the same
                 // second can't collide.
                 item(key = if (r.entry_id != 0L) "${r.entry_id}|${r.observed_at}" else "legacy-run-$i|${r.observed_at}") {
-                    RunCard(r, nowMillis, onClick = { selectedKey = historyEntryKey(HistoryEntry.Run(r)) })
+                    val key = historyEntryKey(HistoryEntry.Run(r))
+                    RunCard(r, nowMillis, selected = twoPane && key == selectedKey, onClick = { selectedKey = key })
                 }
             }
         } else if (activeFilter == HistoryFilter.Runs) {
@@ -449,6 +464,55 @@ internal fun HistoryDestination(
                     secondaryLabel = stringResource(R.string.history_import_runs_long),
                     onSecondary = launchImport,
                 )
+            }
+        }
+    }
+    val spacing = Arrangement.spacedBy(Space.Card.dp)
+    if (twoPane) {
+        val overviewState = rememberLazyListState()
+        TwoPaneRow(
+            first = {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f).fillMaxSize().testTag("history-list-pane"),
+                    contentPadding = PaddingValues(start = Space.Screen.dp, end = Space.Md.dp, top = Space.Screen.dp, bottom = Space.Screen.dp),
+                    verticalArrangement = spacing,
+                ) {
+                    segmentItem()
+                    entryItems()
+                }
+            },
+            second = {
+                Box(Modifier.weight(1f).fillMaxSize().padding(start = Space.Md.dp, end = Space.Screen.dp, top = Space.Screen.dp)) {
+                    val detail = detailDock.content
+                    if (detail != null) {
+                        detail()
+                    } else {
+                        LazyColumn(
+                            state = overviewState,
+                            modifier = Modifier.fillMaxSize().testTag("history-overview-pane"),
+                            contentPadding = PaddingValues(bottom = Space.Screen.dp),
+                            verticalArrangement = spacing,
+                        ) {
+                            overviewTop()
+                            runOverview()
+                        }
+                    }
+                }
+            },
+        )
+    } else {
+        ReadableWidth { gutter ->
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = gutter, vertical = Space.Screen.dp),
+                verticalArrangement = spacing,
+            ) {
+                overviewTop()
+                segmentItem()
+                runOverview()
+                entryItems()
             }
         }
     }

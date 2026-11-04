@@ -85,11 +85,13 @@ import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -370,8 +372,11 @@ fun <T> SegmentedEnumRow(
 
 /**
  * The one field / sub-question label: sentence case, `Type.Body` Bold, `OnBgMuted`.
- * A [trailing] hint sits on the label's first baseline while the label's longest
- * word still fits beside it, else on its own line below. [heading] marks a setup
+ * A [trailing] hint sits on the label's first baseline while the whole label fits
+ * beside it on one line; a label that fits its own line but not beside the hint
+ * keeps that line and the hint goes below (no "Effort: reps / left" break at a
+ * large font); a label that wraps anyway keeps the hint beside it while its
+ * longest word still fits there. [heading] marks a setup
  * sub-question for TalkBack's heading navigation; [onTrailing] makes the hint an
  * in-place action spoken as [trailingDescription], with a 48dp target. Forms
  * only: a read-only section header uses [TileOverline].
@@ -427,10 +432,15 @@ fun FieldLabel(
         val labelMeasurable = labelM.single()
         val hintMeasurable = hintM.singleOrNull()
         val hintWidth = hintMeasurable?.maxIntrinsicWidth(Constraints.Infinity) ?: 0
-        // Side by side only while the label's longest word still fits beside the
-        // whole hint; a narrower column would break the label inside a word.
-        val beside = hintMeasurable != null &&
-            labelMeasurable.minIntrinsicWidth(Constraints.Infinity) + gap + hintWidth <= width
+        // Side by side while the whole label fits beside the whole hint; a label too
+        // long for one line anyway wraps beside it while its longest word fits (a
+        // narrower column would break the label inside a word). A label that fits
+        // its own line but not beside the hint keeps it: the hint goes below.
+        val besideRoom = width - gap - hintWidth
+        val beside = hintMeasurable != null && run {
+            val whole = labelMeasurable.maxIntrinsicWidth(Constraints.Infinity)
+            whole <= besideRoom || (whole > width && labelMeasurable.minIntrinsicWidth(Constraints.Infinity) <= besideRoom)
+        }
         if (hintMeasurable == null) {
             val l = labelMeasurable.measure(loose)
             layout(width, l.height) { l.placeRelative(0, 0) }
@@ -1021,6 +1031,13 @@ fun TextAction(
         Text(label, color = tone, style = Type.BodyBold, modifier = Modifier.weight(1f, fill = false))
         if (chevron) RowChevron(tint = tone)
     }
+}
+
+/** Width (px, at [density] and [measurer]'s font scale) a chevron-less [TextAction]
+ *  labelled [label] takes with the label on one line. */
+internal fun textActionWidthPx(measurer: TextMeasurer, density: Density, label: String): Int = with(density) {
+    val text = measurer.measure(label, Type.BodyBold, maxLines = 1, softWrap = false).size.width
+    maxOf(ActionMinHeight.roundToPx(), text + TextActionInset.roundToPx() * 2)
 }
 
 /** The ONE tile/card overline (chrome §3): 12sp Bold UPPERCASE, `OnBgFaint`,

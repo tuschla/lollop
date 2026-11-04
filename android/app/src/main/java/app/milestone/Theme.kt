@@ -468,11 +468,31 @@ val RouteMapHeight = 220.dp
 /** Top-corner radius of the tracker's floating stat sheet. */
 val SheetCornerRadius = 26.dp
 
+/** Widest a single column of cards or a form grows on a wide window (a tablet,
+ *  a landscape phone): centred beyond it, so lines stay readable. The same width
+ *  as Material's bottom-sheet cap, so a sheet lines up with the page under it. */
+val ContentMaxWidth = 640.dp
+
+/** Widest one pane of a two-pane layout grows; the pair centres beyond it. */
+val PaneMaxWidth = 560.dp
+
+/** Width of the tracker's side panel (stats and controls) beside the map on a
+ *  landscape window: a portrait phone's stat sheet; at most half the window. */
+val TrackerPanelWidth = 400.dp
+
+/** Width of the typed date picker in a short window's date dialog, Cancel/OK
+ *  beside it: Material's date picker dialog width. */
+val DateFieldDialogWidth = 360.dp
+
 /** Fully rounded ends: pills, discs, round touch targets. */
 internal val PillShape = RoundedCornerShape(100)
 
 /** Outline of a [StatusCard]: the ring that carries its tone. */
 val StatusRingWidth = 1.5.dp
+
+/** Accent bar along the start edge of a list card whose entry is open in the
+ *  detail pane beside the list ([PlainCard] `selected`). */
+val SelectedBarWidth = Space.Sm.dp
 
 /** Opacity of the `BgTop` ground behind the full-screen map's top bar and stat sheet. */
 const val MapChromeAlpha = 0.94f

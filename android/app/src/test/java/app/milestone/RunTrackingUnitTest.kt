@@ -210,11 +210,12 @@ class RunTrackingUnitTest {
     @Test
     fun notifContentSpecPinsStateToResourceIdOrProgress() {
         // The content spec (pure): recording+unpaused shows the raw progress line plus
-        // the current pace (resolved via track_notif_progress_pace); paused selects the
-        // parameterized "Paused · %1$s" resource with the progress as its arg (also the
-        // notifyIfChanged throttle key, so a pause toggle re-posts); a lost signal while
-        // recording shows the signal-lost line; armed/locate pin their fixed resources.
-        // Asserting the real R.string ids pins the wiring itself, not just the branch logic.
+        // the current pace (resolved via track_notif_progress_pace); paused keeps the
+        // "Moving …" line without the pace (track_notif_progress with the progress as
+        // its arg): the title "Run paused" and the chip say the pause, the line does not
+        // repeat it; a lost signal while recording shows the signal-lost line;
+        // armed/locate pin their fixed resources. Asserting the real R.string ids pins
+        // the wiring itself, not just the branch logic.
         val progress = "2:00 · 1.00 km"
         val pace = "5:45 /km"
         fun spec(recording: Boolean, armed: Boolean, paused: Boolean, signalLost: Boolean = false, progress: String? = "2:00 · 1.00 km", paceNow: String? = pace) =
@@ -229,7 +230,7 @@ class RunTrackingUnitTest {
             spec(recording = true, armed = false, paused = false, paceNow = null),
         )
         assertEquals(
-            NotifContentSpec.PausedProgress(R.string.track_notif_paused_content, progress),
+            NotifContentSpec.PausedProgress(R.string.track_notif_progress, progress),
             spec(recording = true, armed = false, paused = true),
         )
         // A lost GPS signal while actively recording replaces the progress line, so the
@@ -239,7 +240,7 @@ class RunTrackingUnitTest {
             spec(recording = true, armed = false, paused = false, signalLost = true),
         )
         assertEquals(
-            NotifContentSpec.PausedProgress(R.string.track_notif_paused_content, progress),
+            NotifContentSpec.PausedProgress(R.string.track_notif_progress, progress),
             spec(recording = true, armed = false, paused = true, signalLost = true),
         )
         // Paused / signal loss only fold while recording; the armed/locate copy is fixed.

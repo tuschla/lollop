@@ -4,7 +4,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
@@ -190,10 +189,11 @@ class RunTrackingService : Service() {
     /** The notification's current content line: the recording progress (labelled
      *  "Moving", the biggest figure is MOVING time, not wall-clock elapsed, matching
      *  the tracker tile's overline so the two surfaces never disagree) plus the
-     *  current pace, a "Paused · " line while paused, the signal-lost line, the armed
-     *  "starts when ready" copy, or the static locate-preview text, resolved from
-     *  [trackingNotifContentSpec]. Part of the [notifyIfChanged] throttle key: because
-     *  the paused and signal-lost states fold into the line, toggling either re-posts. */
+     *  current pace, the same line without the pace while paused (the title says
+     *  "Run paused"), the signal-lost line, the armed "starts when ready" copy, or the
+     *  static locate-preview text, resolved from [trackingNotifContentSpec]. Part of
+     *  the [notifyIfChanged] throttle key with the chip, so a pause or a lost signal
+     *  re-posts. */
     private fun currentNotifContent(): String {
         val spec = trackingNotifContentSpec(
             recording = recording,
@@ -423,7 +423,8 @@ class RunTrackingService : Service() {
             }
             // Refresh the ongoing notification so a glance at the lockscreen confirms
             // GPS is still capturing. Re-notify with the same NOTIF_ID updates the
-            // existing notification in place; IMPORTANCE_LOW keeps it silent every fix.
+            // existing notification in place; the channel's missing sound and
+            // setOnlyAlertOnce keep it silent every fix.
             // Throttled to only re-post when the displayed line (elapsed + distance)
             // actually changed; a paused/standing-still stretch costs nothing.
             notifyIfChanged()
@@ -480,15 +481,7 @@ class RunTrackingService : Service() {
         // shown "Start run" reminder goes.
         RecordingWatch.start(this)
         engine = if (hasPlayServices(this)) FusedEngine(this) else PlatformEngine(this)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL,
-                    getString(R.string.track_notif_channel_name),
-                    NotificationManager.IMPORTANCE_LOW,
-                )
-            )
-        }
+        ensureLiveChannel(this, CHANNEL, getString(R.string.track_notif_channel_name), RETIRED_CHANNEL)
         // Screen on/off drives the GPS cadence: while the screen is off the
         // engine drops to a coarser interval to cut idle battery drain.
         // SCREEN_ON/OFF are protected system broadcasts (dynamic registration only,
@@ -833,7 +826,10 @@ class RunTrackingService : Service() {
         private const val ACTION_NOTIF_DISMISSED = "app.milestone.action.NOTIF_DISMISSED"
         private const val EXTRA_REQUIRE_PRECISE = "app.milestone.extra.REQUIRE_PRECISE"
         private const val EXTRA_REQUIRE_MOVING = "app.milestone.extra.REQUIRE_MOVING"
-        private const val CHANNEL = "run_tracking"
+        internal const val CHANNEL = "run_live"
+
+        /** The run's channel before it moved to [ensureLiveChannel] (IMPORTANCE_LOW). */
+        private const val RETIRED_CHANNEL = "run_tracking"
         internal const val NOTIF_ID = 1
 
         // Service-side haptic cues (VIBRATE permission). Recording started: one firm
@@ -952,18 +948,20 @@ internal fun trackingNotifTitleRes(recording: Boolean, armed: Boolean, paused: B
 
 /** The ongoing-notification content for a tracking state: a fixed string ([Literal]),
  *  the "elapsed · dist" line plus the current pace ([Progress], resolved through
- *  `track_notif_progress(_pace)`), or the "Paused · %1$s" line ([PausedProgress]). */
+ *  `track_notif_progress(_pace)`), or the paused line ([PausedProgress]: the same
+ *  "Moving 23:41 · 4.12 km" without a pace). */
 internal sealed class NotifContentSpec {
     data class Literal(@StringRes val res: Int) : NotifContentSpec()
     data class Progress(val text: String, val paceNow: String?) : NotifContentSpec()
     data class PausedProgress(@StringRes val res: Int, val progress: String) : NotifContentSpec()
 }
 
-/** See [NotifContentSpec]. A paused recording folds [progress] into the parameterized
- *  paused line so a glance at the lockscreen shows the pause, and so the throttle key
- *  ([RunTrackingService.currentNotifContent]) changes on a pause/resume toggle and
- *  re-posts. A lost GPS signal while actively recording replaces the progress line
- *  with the signal-lost warning (the figures are frozen anyway); a pause outranks it. */
+/** See [NotifContentSpec]. A paused recording keeps its figures in the recording
+ *  line's words ("Moving 0:49 · 0.10 mi") without the pace, which stands still; the
+ *  title ("Run paused") and the chip ("Paused") carry the pause, so the line does
+ *  not say it a third time. A lost GPS signal while actively recording replaces the
+ *  progress line with the signal-lost warning (the figures are frozen anyway); a
+ *  pause outranks it. */
 internal fun trackingNotifContentSpec(
     recording: Boolean,
     armed: Boolean,
@@ -972,7 +970,7 @@ internal fun trackingNotifContentSpec(
     progress: String?,
     paceNow: String?,
 ): NotifContentSpec = when {
-    recording && paused -> if (progress != null) NotifContentSpec.PausedProgress(R.string.track_notif_paused_content, progress) else NotifContentSpec.Literal(R.string.track_state_paused)
+    recording && paused -> if (progress != null) NotifContentSpec.PausedProgress(R.string.track_notif_progress, progress) else NotifContentSpec.Literal(R.string.track_state_paused)
     recording && signalLost -> NotifContentSpec.Literal(R.string.track_notif_signal_lost)
     recording -> if (progress != null) NotifContentSpec.Progress(progress, paceNow) else NotifContentSpec.Literal(R.string.track_notif_recording_hint)
     armed -> NotifContentSpec.Literal(R.string.track_notif_armed_text)
@@ -1036,7 +1034,7 @@ internal data class RunNotifFrame(val content: String, val chip: String, val ste
  * the actions. It requests promotion to a Live Update (Android 16+; an ignored extra
  * below, where it posts as an ordinary ongoing notification) and meets the
  * documented criteria: ongoing, a title, no custom views, not a group summary, not
- * colorized, on an IMPORTANCE_LOW channel. [dismiss] reports a user swipe so the
+ * colorized, on a channel above IMPORTANCE_MIN ([ensureLiveChannel]). [dismiss] reports a user swipe so the
  * service stops re-posting.
  */
 internal fun runNotificationBuilder(
@@ -1050,6 +1048,9 @@ internal fun runNotificationBuilder(
     // 1-color white route mark, silhouette only (icons README table). Also the
     // chip's icon.
     .setSmallIcon(R.drawable.ic_stat_mark)
+    // The theme accent on the icon and app name, as every lollop notification.
+    .setColor(notificationAccent(ctx))
+    .setCategory(NotificationCompat.CATEGORY_WORKOUT)
     .setOngoing(true)
     .setRequestPromotedOngoing(true)
     .setContentIntent(tap)

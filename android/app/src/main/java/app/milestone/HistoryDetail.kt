@@ -258,8 +258,8 @@ internal fun EntryActionSheets(
         }
     } else if (selected !is HistoryEntry.Run || !selected.v.has_gpx || route != null) {
         // A GPS run's sheet opens once its route has loaded (map, Trim), so its body
-        // is final in its first frame.
-        AppSheet(onDismiss = onDismiss, containerColor = if (selected is HistoryEntry.Run) BgSunken else BgElevated) {
+        // is final in its first frame. Beside the list on a two-pane window.
+        DetailSheet(onDismiss = onDismiss) {
             val onDelete: (Event?) -> Unit = { restore ->
                 onEvent(deleteEventFor(selected))
                 onDismiss()

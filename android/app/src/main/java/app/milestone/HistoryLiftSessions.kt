@@ -261,8 +261,9 @@ private fun sessionVolume(sets: List<LiftResultView>, weightUnit: WeightUnit): S
     return groupedFigure(Math.round(shown))
 }
 
-/** The hairline that keeps a non-safety card readable as a card on a BgElevated sheet
- *  (a safety card keeps its danger border). */
+/** The hairline that keeps a non-safety evidence card readable as a card on the
+ *  sheet ground, where the `bgSunken` → `bgElevated` step is slight on the light
+ *  palettes (a safety card keeps its danger border). */
 internal val SheetCardBorder: Color @Composable get() = OnBgFaint.copy(alpha = 0.25f)
 
 /** An exercise's name in bold (or "Set" when blank), with "New best" when a set
@@ -288,7 +289,8 @@ private fun ExerciseNameRow(name: String, sets: List<LiftResultView>, endAligned
  * History "Lifts" card for one session (a local day): date header, then one row
  * per exercise with its folded set line and best e1RM. The card face carries no
  * trend line (an axis-less sparkline on a face reads as decoration); the e1RM trend
- * per exercise lives in [LiftSessionSheet]. Tapping opens that sheet.
+ * per exercise lives in [LiftSessionSheet]. Tapping opens that sheet. [selected]:
+ * see [PlainCard] (History's list beside the detail pane).
  */
 @Composable
 internal fun LiftSessionCard(
@@ -297,9 +299,10 @@ internal fun LiftSessionCard(
     // The screen's local day, bucketed in the same zone as the sessions.
     todayLocalDay: Long,
     weightUnit: WeightUnit,
+    selected: Boolean = false,
     onClick: () -> Unit,
 ) {
-    PlainCard(onClick = onClick) {
+    PlainCard(onClick = onClick, selected = selected) {
         LiftSessionHeader(session, nowMillis, todayLocalDay)
         val glossaryAt = session.firstE1rmIndex()
         session.exercises.forEachIndexed { i, (name, sets) ->
@@ -346,8 +349,10 @@ internal fun LiftSessionSheet(
     val deletedText = stringResource(R.string.history_session_deleted)
     val undoLabel = stringResource(R.string.log_undo)
     // Full height: the message host below the list ("Set updated · Undo") must be
-    // on screen when the sheet returns from the set editor.
-    AppSheet(onDismiss = onDismiss, containerColor = BgElevated) {
+    // on screen when the sheet returns from the set editor. Beside the list on a
+    // two-pane window, where the screen's own message host is in view.
+    val inPane = LocalDetailDock.current != null
+    DetailSheet(onDismiss = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -422,7 +427,7 @@ internal fun LiftSessionSheet(
         // The sheet is its own window: a set edited or deleted from it confirms here
         // ("Set updated · Undo"), where the user can still reach Undo. Its inset padding
         // also clears the navigation bar below the scrolling content.
-        UiMessageHost(Modifier.fillMaxWidth().navigationBarsPadding())
+        if (!inPane) UiMessageHost(Modifier.fillMaxWidth().navigationBarsPadding())
     }
 }
 

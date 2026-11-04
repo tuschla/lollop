@@ -6,8 +6,10 @@
 #   tile    Quick Settings tile added with `cmd statusbar add-tile`: label per
 #           day state (lift / run / rest / hold / stale) and a real tap on it
 #           opening the right screen
-#   widget  Today widget placed through the launcher's widget picker: run day,
-#           lift day, hold, a date change (stale text), and its three tap targets
+#   widget  Today widget placed through the launcher's widget picker at its
+#           default size, the checks following the size the launcher gave it:
+#           run day (Start run, + Log from three cells), lift day, hold, a date
+#           change (stale text), and its three tap targets
 #   run     run notification during a fed GPS run: GPS… / moving time / Paused /
 #           No GPS chip (status-bar chip read from the SystemUI window with the
 #           shade closed), promoted flag, tap → tracker, tile "Run · recording"
@@ -240,12 +242,13 @@ finish_run() {
 # ── Tile helpers (tile_label, add_tile in lib.sh) ────────────────────────────
 tap_tile() { # tap_tile DUMP LABEL (QS already open from tile_label)
   local r p
-  r="$(wfind "$1" eq "$2")" || return 1
+  r="$(tile_node "$1" "$2")" || return 1
   read -r -a p <<<"$r"; tap_xy "${p[0]}" "${p[1]}"; sleep 3
 }
-# tile_case NAME EXPECTED-LABEL EXPECTED-SCREEN: label check, then a real tap.
+# tile_case NAME EXPECTED-LABEL EXPECTED-SCREEN [EXPECTED-SUBTITLE]: label (and,
+# when given, the subtitle under it; "-" for none) check, then a real tap.
 tile_case() {
-  local S="${TILE_S:-tile}" l s
+  local S="${TILE_S:-tile}" l s sub
   adb_ shell cmd statusbar collapse; home
   l="$(tile_label "tile-$1")"
   shot "tile-$1-qs"
@@ -254,6 +257,10 @@ tile_case() {
   sh_ dumpsys activity services "$TILE" >"$OUT/logs/tile-$1-service.txt"
   sh_ dumpsys activity service com.android.systemui | grep -i -B2 -A8 "$APP_ID" >"$OUT/logs/tile-$1-sysui.txt"
   expect $S "$1: tile label" "label '$l' (want '$2'); ui/tile-$1.xml shots/tile-$1-qs.png" test "$l" = "$2"
+  if [[ -n "${4:-}" && -n "$l" ]]; then
+    sub="$(cat "$OUT/ui/tile-$1.subtitle" 2>/dev/null)"
+    expect $S "$1: tile subtitle" "subtitle '$sub' (want '${4/#-/}'); ui/tile-$1.xml" test "$sub" = "${4/#-/}"
+  fi
   if [[ -n "$l" ]] && tap_tile "tile-$1" "$l"; then
     wait_screen "$3" 10; s="$(screen)"
     evidence "tile-$1-tap"
@@ -303,18 +310,18 @@ sc_tile() {
   fresh_app "$LIFT_DAY" seed_basic "$SEED_DAY" 2 || { check FAIL $S "seeded boot" "Today never rendered"; return; }
   add_tile || check FAIL $S "tile added to Quick Settings" "not on the QS panel ~40 s after add-tile; ui/tile-added.xml"
   home
-  tile_case lift-day "Log set" log_set
+  tile_case lift-day "Log set" log_set "$(snap_field title)"
   reseed "$RUN_DAY" seed_basic "$SEED_DAY" 2; home
-  tile_case run-day "Start run" track
+  tile_case run-day "Start run" track "$(snap_field title)"
   reseed "$REST_DAY" seed_basic "$SEED_DAY" 2; home
-  tile_case rest-day "Log" log
+  tile_case rest-day "Log" log "Rest day"
   reseed "$RUN_DAY" seed_hold "$RUN_DAY"; home
   expect $S "hold seed pauses training" "snapshot kind '$(snap_field kind)'" test "$(snap_field kind)" = Paused
-  tile_case hold "Log" log
+  tile_case hold "Log" log "Training paused"
   # The stored day is Mon; the clock moves to Wed with the app in the background.
   reseed "$RUN_DAY" seed_basic "$SEED_DAY" 2; home
   pin_clock "$LIFT_DAY"; sleep 4
-  tile_case stale-day "Log" log
+  tile_case stale-day "Log" log -
 }
 
 # The stale-day and recording tile cases with no force-stop or `pm clear` once
@@ -367,7 +374,7 @@ tilelock_case() {
   adb_ shell input keyevent 26; sleep 2; adb_ shell input keyevent 224; sleep 2
   adb_ shell cmd statusbar expand-settings; sleep 3
   wdump "$d"; shot "$d"
-  r="$(wfind "$d" eq "$2")" || r="$(ocr_find "$d" "${2%% *}")" || r=""
+  r="$(tile_node "$d" "$2")" || r="$(ocr_find "$d" "${2%% *}")" || r=""
   if [[ -n "$r" ]]; then
     read -r -a p <<<"$r"; tap_xy "${p[0]}" "${p[1]}"; sleep 3
     sh_ dumpsys window >"$OUT/logs/$d-bouncer-window.txt"
@@ -424,16 +431,29 @@ sc_widget() {
   fi
   check PASS $S "widget placed on the home screen" "dumpsys appwidget lists TodayWidgetReceiver; shots/widget-picker.png"
   t="$(widget_texts widget-run-day)"
-  expect $S "run day: title, run line, Track run + Log" "$t; shots/widget-run-day.png" \
-    eval 'grep -qx "text=Easy run" <<<"$t" && grep -q "^text=Run · " <<<"$t" && grep -qx "text=Track run" <<<"$t" && grep -qx "text=Log" <<<"$t"'
-  widget_tap run-track "Track run" track
-  widget_tap run-log "Log" log
+  # What the widget shows follows the size the launcher gave it (TodayWidget.kt
+  # WidgetSizes; visual-design-system § 10): Log beside the primary from three
+  # cells (200 dp wide), the date line from two rows (184 dp tall).
+  local ww=0 wh=0 wide=0 dated=0
+  read -r ww wh <<<"$(widget_dp widget-run-day)"
+  (( ww >= 200 )) && wide=1
+  (( wh >= 184 )) && dated=1
+  check INFO $S "widget size" "${ww} × ${wh} dp: Log beside the primary $( ((wide)) && echo yes || echo no), date line $( ((dated)) && echo yes || echo no); shots/widget-run-day.png"
+  # The run line: "Run · 8 km · 5:40–6:00 /km", or on a card with room the run's
+  # volume as the hero; a detail that is only a figure ("3.4 mi") is the hero
+  # alone (visual-design-system § 10, Home screen widget, Hero).
+  local fig tn; fig="$(snapshot | python3 -c "import json,sys;print(next(i['detail'] for i in json.load(sys.stdin)['items'] if i['kind']=='Run'))" 2>/dev/null)"
+  tn="${t//$'\xc2\xa0'/ }" # the widget keeps a figure and its unit together with a no-break space
+  expect $S "run day: title, run line (or its figure as the hero), Start run (+ Log at ${ww} dp)" "run detail '$fig'; $t; shots/widget-run-day.png" \
+    eval 'grep -qx "text=Easy run" <<<"$t" && { grep -q "^text=Run · " <<<"$tn" || { [[ -n "$fig" ]] && grep -qxF "text=$fig" <<<"$tn"; }; } && grep -qx "text=Start run" <<<"$t" && { ((!wide)) || grep -qx "content-desc=Log" <<<"$t"; }'
+  widget_tap run-track "Start run" track
+  if ((wide)); then widget_tap run-log "Log" log; else check INFO $S "tap 'Log'" "no Log beside the primary at ${ww} dp wide"; fi
   widget_tap run-body "Open Today in lollop" today
 
   reseed "$LIFT_DAY" seed_basic "$SEED_DAY" 2; home
   t="$(widget_texts widget-lift-day)"
-  expect $S "lift day: lift title and items, Log only" "snapshot title '$(snap_field title)'; $t; shots/widget-lift-day.png" \
-    eval 'grep -qx "text=$(snap_field title)" <<<"$t" && grep -qx "text=Log" <<<"$t" && ! grep -qx "text=Track run" <<<"$t"'
+  expect $S "lift day: lift title and items, Log set (+ Log at ${ww} dp)" "snapshot title '$(snap_field title)'; $t; shots/widget-lift-day.png" \
+    eval 'grep -qx "text=$(snap_field title)" <<<"$t" && grep -qx "text=Log set" <<<"$t" && { ((!wide)) || grep -qx "content-desc=Log" <<<"$t"; } && ! grep -qx "text=Start run" <<<"$t"'
 
   reseed "$RUN_DAY" seed_hold "$RUN_DAY"; home
   t="$(widget_texts widget-hold)"
@@ -450,8 +470,9 @@ sc_widget() {
     eval 'grep -qx "text=Open lollop to update" <<<"$t" && grep -qx "text=Log" <<<"$t"'
   launch; wait_screen today 20; home
   t="$(widget_texts widget-after-open)"
+  # The new day: its date in the overline (from two rows), else its title.
   expect $S "opening the app refreshes it to the new day" "$t; shots/widget-after-open.png" \
-    eval '! grep -qx "text=Open lollop to update" <<<"$t" && grep -q "Tue, Sep 22" <<<"$t"'
+    eval '! grep -qx "text=Open lollop to update" <<<"$t" && if ((dated)); then grep -qi "Tue, Sep 22" <<<"$t"; else grep -qx "text=Rest day" <<<"$t"; fi'
 }
 
 # ── Run notification ─────────────────────────────────────────────────────────

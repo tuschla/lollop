@@ -72,12 +72,13 @@ internal fun rememberDistanceUnit(): DistanceUnit =
  * + date badge; distance · pace · duration line; "Effort 7/10" once rated; the HR
  * zone row with a three-segment zone legend ONLY when HR was measured; then only the
  * findings that ask for a change or are SAFETY (with their one "?") and the run's
- * top record. No type icon: the Runs list holds nothing but runs.
+ * top record. No type icon: the Runs list holds nothing but runs. [selected]: see
+ * [PlainCard] (History's list beside the detail pane).
  */
 @Composable
-internal fun RunCard(r: RunResultView, nowMillis: Long, onClick: () -> Unit) {
+internal fun RunCard(r: RunResultView, nowMillis: Long, selected: Boolean = false, onClick: () -> Unit) {
     val unit = rememberDistanceUnit()
-    PlainCard(onClick = onClick) {
+    PlainCard(onClick = onClick, selected = selected) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,

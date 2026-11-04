@@ -15,7 +15,6 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
@@ -208,15 +207,21 @@ fun ComposeTestRule.selectHistoryFilter(label: String) {
 /** Pick [value] on the [app.milestone.RatingScale] tagged [tag] (`effort-scale`,
  *  `pain-severity`, `checkin-sleep` …). The track is ONE adjustable node, so the
  *  segment "$tag-$value" lives in the unmerged tree; clicking it taps the track
- *  over that segment, as a finger would. */
+ *  over that segment, as a finger would. When the digits do not fit (large font
+ *  in a narrow column) the scale is the [app.milestone.ChoiceScaleRow] fallback
+ *  instead: no segments, one selectable cell per value, and the cell is tapped.
+ *  Either is scrolled into view first when it sits in a scroll container. */
 fun ComposeTestRule.pickRating(tag: String, value: Int) {
-    val segment = "$tag-$value"
+    val segment = androidx.compose.ui.test.hasTestTag("$tag-$value")
+    val cell = androidx.compose.ui.test.isSelectable() and hasText("$value") and
+        androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasTestTag(tag))
+    val onTrack = onAllNodes(segment, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+    val target = if (onTrack) segment else cell
     val inScroll = onAllNodes(
-        androidx.compose.ui.test.hasTestTag(segment) and
-            androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasScrollAction()),
-        useUnmergedTree = true,
+        target and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasScrollAction()),
+        useUnmergedTree = onTrack,
     ).fetchSemanticsNodes().isNotEmpty()
-    val node = onNodeWithTag(segment, useUnmergedTree = true)
+    val node = onNode(target, useUnmergedTree = onTrack)
     if (inScroll) node.performScrollTo()
     node.performClick()
     waitForIdle()

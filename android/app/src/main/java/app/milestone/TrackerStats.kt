@@ -15,12 +15,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -186,26 +190,16 @@ internal fun LiveFigure(
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val measurer = rememberTextMeasurer()
             val faint = OnBgFaint
-            val text = remember(value, suffix, faint) {
-                buildAnnotatedString {
-                    append(value)
-                    if (suffix != null) {
-                        withStyle(SpanStyle(fontSize = LIVE_FIGURE_SUFFIX_SP.sp, fontWeight = FontWeight.Normal, color = faint)) {
-                            append(" $suffix")
-                        }
-                    }
-                }
-            }
+            val text = remember(value, suffix, faint) { liveFigureText(value, suffix, faint) }
             val maxPx = constraints.maxWidth
             val style = remember(text, maxPx, measurer, maxSp) {
-                val base = Type.Display.copy(fontWeight = FontWeight.ExtraBold).merge(TabularFigures)
                 var sp = maxSp
-                var s = base.copy(fontSize = sp.sp, lineHeight = (sp + LIVE_FIGURE_LEADING_SP).sp)
+                var s = liveFigureStyle(sp)
                 while (sp > LIVE_FIGURE_MIN_SP &&
                     measurer.measure(text, s, maxLines = 1, softWrap = false).size.width > maxPx
                 ) {
                     sp -= LIVE_FIGURE_STEP_SP
-                    s = base.copy(fontSize = sp.sp, lineHeight = (sp + LIVE_FIGURE_LEADING_SP).sp)
+                    s = liveFigureStyle(sp)
                 }
                 s
             }
@@ -226,6 +220,25 @@ internal fun LiveFigure(
         }
     }
 }
+
+/** A [LiveFigure]'s value with its small faint unit. */
+private fun liveFigureText(value: String, suffix: String?, faint: Color): AnnotatedString = buildAnnotatedString {
+    append(value)
+    if (suffix != null) {
+        withStyle(SpanStyle(fontSize = LIVE_FIGURE_SUFFIX_SP.sp, fontWeight = FontWeight.Normal, color = faint)) {
+            append(" $suffix")
+        }
+    }
+}
+
+/** A [LiveFigure]'s value style at [sp]. */
+private fun liveFigureStyle(sp: Int): TextStyle =
+    Type.Display.copy(fontWeight = FontWeight.ExtraBold, fontSize = sp.sp, lineHeight = (sp + LIVE_FIGURE_LEADING_SP).sp).merge(TabularFigures)
+
+/** Width (px, at [measurer]'s density and font scale) a [LiveFigure] needs to show
+ *  [value] and [suffix] whole on one line at its smallest size. */
+internal fun liveFigureMinWidthPx(measurer: TextMeasurer, value: String, suffix: String?): Int =
+    measurer.measure(liveFigureText(value, suffix, Color.Unspecified), liveFigureStyle(LIVE_FIGURE_MIN_SP), maxLines = 1, softWrap = false).size.width
 
 /**
  * What to do about the live pace against the followed plan's range: "Speed up" /

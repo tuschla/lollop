@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -27,6 +28,7 @@ import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -99,6 +101,11 @@ fun EditorScaffold(
     // blocked (HARD RULE 3); the latch still swallows re-taps.
     danger: Boolean = false,
     bottomExtra: @Composable ColumnScope.() -> Unit = {},
+    // An editor with an in-form keypad (set, run): on a landscape window
+    // ([WindowLayout.sideControls]) its keypad, [bottomExtra] and the primary
+    // action stand in a column beside the form instead of under it, so a short
+    // window never scrolls the keypad or Save away.
+    controlsBeside: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
@@ -140,7 +147,9 @@ fun EditorScaffold(
     // discard confirm opens OVER the editor and "Keep editing" really keeps it.
     // A host that scrolls the editor itself keeps its own Back while clean.
     BackHandler(enabled = LocalEditorPinnedActions.current || dirty) { requestClose() }
-    if (LocalEditorPinnedActions.current) {
+    if (LocalEditorPinnedActions.current && controlsBeside && LocalWindowLayout.current.sideControls) {
+        SideControlsEditor(title, requestClose, bottomExtra, primary, content)
+    } else if (LocalEditorPinnedActions.current) {
         Column(modifier = Modifier.fillMaxWidth()) {
             EditorTitleRow(title, requestClose)
             val scroll = rememberScrollState()
@@ -194,6 +203,61 @@ fun EditorScaffold(
         DiscardEntryDialog(onKeepEditing = { confirmDiscard = false }) {
             confirmDiscard = false
             onClose()
+        }
+    }
+}
+
+/**
+ * [EditorScaffold] on a landscape window: the close · title row and the form
+ * scroll in the start column; the end column holds the keypad the form opens
+ * ([KeypadPanel] docks it there through [LocalKeypadDock]), [bottomExtra] and
+ * the primary action, bottom-aligned in thumb reach. A short window (a phone in
+ * landscape) has the height for the keypad and Save or for the extras and Save,
+ * not all three: there the extras give way while a keypad is open, and the
+ * keypad's Done brings them back. TalkBack reads the form first, then the
+ * controls.
+ */
+@Composable
+private fun SideControlsEditor(
+    title: String,
+    requestClose: () -> Unit,
+    bottomExtra: @Composable ColumnScope.() -> Unit,
+    primary: @Composable () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val dock = remember { SlotDock() }
+    Row(
+        modifier = Modifier.fillMaxWidth().fillMaxHeight().testTag("editor-side-by-side"),
+        horizontalArrangement = Arrangement.spacedBy(Space.Lg.dp),
+    ) {
+        Column(Modifier.weight(1f).fillMaxHeight().traversalGroup()) {
+            EditorTitleRow(title, requestClose)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = Space.Sm.dp, bottom = Space.Lg.dp),
+                verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
+            ) {
+                CompositionLocalProvider(LocalKeypadDock provides dock) { content() }
+            }
+        }
+        Column(
+            modifier = Modifier.weight(1f).fillMaxHeight().padding(top = Space.Md.dp).traversalGroup(),
+            verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
+        ) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.BottomCenter) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
+                ) {
+                    val keypad = dock.content
+                    keypad?.invoke()
+                    if (keypad == null || !LocalWindowLayout.current.shortHeight) bottomExtra()
+                }
+            }
+            primary()
         }
     }
 }

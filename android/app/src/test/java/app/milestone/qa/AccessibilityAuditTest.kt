@@ -78,8 +78,8 @@ import kotlin.math.min
 @RunWith(RobolectricTestRunner::class)
 class AccessibilityAuditTest : UiProbeTest() {
 
-    data class Config(val font: Float, val dark: Boolean, val rtl: Boolean) {
-        override fun toString() = "font=$font ${if (dark) "dark" else "light"} ${if (rtl) "rtl" else "ltr"}"
+    data class Config(val font: Float, val dark: Boolean, val rtl: Boolean, val land: Boolean = false) {
+        override fun toString() = "font=$font ${if (dark) "dark" else "light"} ${if (rtl) "rtl" else "ltr"}${if (land) " landscape" else ""}"
     }
 
     data class Finding(val kind: String, val detail: String, val where: String, val config: String) {
@@ -94,6 +94,11 @@ class AccessibilityAuditTest : UiProbeTest() {
 
     @Test
     fun hybridAthlete_font2_dark_rtl() = audit(Start.Hybrid, Config(2f, dark = true, rtl = true), depth = 1)
+
+    /** A phone in landscape: the rail, Today's and History's two panes and the
+     *  side-by-side editors, read rail first, then start pane, then end pane. */
+    @Test
+    fun hybridAthlete_landscape_font2_rtl() = audit(Start.Hybrid, Config(2f, dark = false, rtl = true, land = true), depth = 1)
 
     @Test
     fun hybridAthlete_font1_light_ltr() {
@@ -456,6 +461,7 @@ class AccessibilityAuditTest : UiProbeTest() {
         // RTL comes from an Arabic locale (the app has no Arabic strings, so the copy
         // stays English, as on such a phone): a bare `ldrtl` qualifier does not
         // survive setFontScale's configuration update and the activity lays out LTR.
+        if (c.land) RuntimeEnvironment.setQualifiers("w891dp-h411dp-land-xxhdpi")
         if (c.rtl) RuntimeEnvironment.setQualifiers("+ar-rEG")
         RuntimeEnvironment.setFontScale(c.font)
         AppSettings.darkMode.value = if (c.dark) DarkMode.Dark else DarkMode.Light

@@ -19,6 +19,7 @@ import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
@@ -358,7 +359,10 @@ class LayoutRegressionTest : UiProbeTest() {
         // A day other than the hero's shows its "Move" once picked in the week strip.
         if (session.epoch_day != vm.next_session?.epoch_day) {
             val weekday = LocalDate.ofEpochDay(session.epoch_day).dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
-            rule.onAllNodes(hasScrollToNodeAction())[0].performScrollToNode(hasTestTag("this-week"))
+            // Today's list on a phone; its week pane beside the session in landscape.
+            val weekPane = rule.onAllNodes(hasTestTag("today-week-pane")).fetchSemanticsNodes().isNotEmpty()
+            (if (weekPane) rule.onNodeWithTag("today-week-pane") else rule.onAllNodes(hasScrollToNodeAction())[0])
+                .performScrollToNode(hasTestTag("this-week"))
             settle()
             rule.onNode(hasClickAction() and hasContentDescription("$weekday, ", substring = true)).performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
             settle()

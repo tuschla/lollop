@@ -63,7 +63,15 @@ internal const val TRACKER_MAP_FRAME_TAG = "tracker-map-frame"
  * (0,0) default position. Retained across recompositions by [rememberTrackerMap].
  */
 internal class TrackerMap(ctx: Context, palette: Palette) {
-    val view: MapView = newOsmMapView(ctx).apply { controller.setZoom(TRACK_ZOOM) }
+    // Destroy mode off: osmdroid's default tears the overlays down (Polyline
+    // outline nulled) whenever the view leaves the window, and the tracker moves
+    // this one view between layouts (beside the stats, then above the Finish
+    // review); the next track update would write into the dead overlays. [detach]
+    // releases it when the screen goes.
+    val view: MapView = newOsmMapView(ctx).apply {
+        controller.setZoom(TRACK_ZOOM)
+        setDestroyMode(false)
+    }
     private val density = ctx.resources.displayMetrics.density
     private val casing = routeLine(palette.bgTop.toArgb(), CASING_WIDTH_DP * density)
     private val track = routeLine(palette.accent.toArgb(), TRACK_WIDTH_DP * density)

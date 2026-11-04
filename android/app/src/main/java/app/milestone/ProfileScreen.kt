@@ -118,29 +118,32 @@ internal fun ProfileDestination(
     // Last laid-out top edge (NaN before the first layout); read only in the layout
     // callback, so a plain holder, not snapshot state.
     val viewportTop = remember { floatArrayOf(Float.NaN) }
+    // One column on every window: centred at a readable width on a wide one.
     CompositionLocalProvider(LocalRevealViewport provides revealViewport) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .onGloballyPositioned { coords ->
-                    revealViewport.height = coords.size.height
-                    val top = coords.positionInWindow().y
-                    val shift = if (viewportTop[0].isNaN()) 0f else top - viewportTop[0]
-                    viewportTop[0] = top
-                    if (shift != 0f) scope.launch { listState.scrollBy(shift) }
-                },
-            contentPadding = PaddingValues(Space.Screen.dp),
-            verticalArrangement = Arrangement.spacedBy(Space.Screen.dp),
-        ) {
-            CalculatorsSection(model, onOpen = { activeTool = it })
-            UnitsSection(ctx, model, onEvent)
-            AppearanceSection(ctx)
-            TrainingAlertsSection(ctx, model)
-            DataSection(ctx, model)
-            EvidenceReferencesSection(onShowReferences = { showReferences = true })
-            PlanAnswersSection(model, onEvent, onRerunSetup, planAnswersOpen, onPlanAnswersOpenChange, focusRow, onFocusHandled)
-            DangerZoneSection(onClearAll)
+        ReadableWidth { gutter ->
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onGloballyPositioned { coords ->
+                        revealViewport.height = coords.size.height
+                        val top = coords.positionInWindow().y
+                        val shift = if (viewportTop[0].isNaN()) 0f else top - viewportTop[0]
+                        viewportTop[0] = top
+                        if (shift != 0f) scope.launch { listState.scrollBy(shift) }
+                    },
+                contentPadding = PaddingValues(horizontal = gutter, vertical = Space.Screen.dp),
+                verticalArrangement = Arrangement.spacedBy(Space.Screen.dp),
+            ) {
+                CalculatorsSection(model, onOpen = { activeTool = it })
+                UnitsSection(ctx, model, onEvent)
+                AppearanceSection(ctx)
+                TrainingAlertsSection(ctx, model)
+                DataSection(ctx, model)
+                EvidenceReferencesSection(onShowReferences = { showReferences = true })
+                PlanAnswersSection(model, onEvent, onRerunSetup, planAnswersOpen, onPlanAnswersOpenChange, focusRow, onFocusHandled)
+                DangerZoneSection(onClearAll)
+            }
         }
     }
 }

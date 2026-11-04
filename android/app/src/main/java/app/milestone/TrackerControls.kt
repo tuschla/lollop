@@ -44,7 +44,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -52,6 +54,12 @@ import kotlinx.coroutines.delay
 
 /** Gap between the controls of one control row. */
 private val ControlGap = (Space.Md + Space.Sm).dp
+
+/** Least room between a [ControlPill]'s label and each of its rounded ends. */
+private val ControlPillLabelRoom = Space.Card.dp
+
+/** A [ControlPill]'s label style. */
+private val ControlPillLabel = Type.Body.copy(fontWeight = FontWeight.ExtraBold)
 
 /** Diameter of a status-pill dot. */
 private val StatusDotSize = 8.dp
@@ -68,6 +76,21 @@ internal fun ControlRow(content: @Composable RowScope.() -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         content = content,
     )
+}
+
+/**
+ * Width (px, at [density] and [measurer]'s font scale) a [ControlRow] of a circle, a
+ * [TextAction] labelled [secondary] and a weighted [ControlPill] labelled [primary]
+ * (the Finish review's Discard · Resume · Save run) needs with both labels whole on
+ * one line.
+ */
+internal fun circleTextPillRowMinWidthPx(measurer: TextMeasurer, density: Density, secondary: String, primary: String): Int {
+    val pillLabel = measurer.measure(primary, ControlPillLabel, maxLines = 1, softWrap = false).size.width
+    return with(density) {
+        LargeControlHeight.roundToPx() + ControlGap.roundToPx() * 2 +
+            textActionWidthPx(measurer, density, secondary) +
+            pillLabel + ControlPillLabelRoom.roundToPx() * 2
+    }
 }
 
 /**
@@ -207,7 +230,8 @@ internal fun DiscardRunCircle(enabled: Boolean = true, onClick: () -> Unit) {
 }
 
 /** The wide pill on the control row: [primary] is the Accent-filled main action
- *  (Start, Stop, Resume while paused, Save run); otherwise the outlined secondary. */
+ *  (Start, Stop, Resume while paused, Save run); otherwise the outlined secondary.
+ *  The label keeps [ControlPillLabelRoom] from each rounded end. */
 @Composable
 internal fun ControlPill(
     label: String,
@@ -231,14 +255,15 @@ internal fun ControlPill(
                 },
             )
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .then(if (state != null) Modifier.semantics { stateDescription = state } else Modifier),
+            .then(if (state != null) Modifier.semantics { stateDescription = state } else Modifier)
+            .padding(horizontal = ControlPillLabelRoom),
         horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (iconRes != null) {
             Icon(painterResource(iconRes), contentDescription = null, tint = content, modifier = Modifier.size(18.dp))
         }
-        Text(label, color = content, style = Type.Body.copy(fontWeight = FontWeight.ExtraBold))
+        Text(label, color = content, style = ControlPillLabel)
     }
 }
 

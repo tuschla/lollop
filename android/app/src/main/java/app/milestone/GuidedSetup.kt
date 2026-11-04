@@ -6,14 +6,18 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -37,9 +42,11 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -218,6 +225,8 @@ internal fun GuidedSetup(
     val scroll = rememberScrollState()
     val topFadePx = with(LocalDensity.current) { Space.Screen.dp.toPx() }
     val topFade = Brush.verticalGradient(listOf(BgTop, BgTop.copy(alpha = 0f)), endY = topFadePx)
+    val bottomFadePx = with(LocalDensity.current) { Space.Lg.dp.toPx() }
+    val bottomFade = Brush.verticalGradient(listOf(BgTop.copy(alpha = 0f), BgTop), endY = bottomFadePx)
     // One requester per number field, so the field being typed (or the next one
     // on the keypad's Next) can be scrolled clear of the pinned keypad.
     val fieldRequesters = remember { KeyField.entries.associateWith { BringIntoViewRequester() } }
@@ -268,40 +277,37 @@ internal fun GuidedSetup(
         answers = answers.withUnits(weight, distance, shownDistance = answers.distanceChoice ?: systemDistanceUnit)
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BgTop),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = Space.Screen.dp)
-                .padding(top = Space.Lg.dp, bottom = Space.Lg.dp),
+    // The step's parts. One column on a phone; on a landscape window the question
+    // (with progress, Back and Next) stands at the start and the answers (with the
+    // keypad) beside it, so neither scrolls the other away
+    // (visual-design-system §5 "Adaptive layout").
+    val sideBySide = LocalWindowLayout.current.sideControls
+    val headerDock = remember { SlotDock() }
+    val headerRow: @Composable () -> Unit = {
+        // Header: step progress + Skip. The step question below is the
+        // screen's one title. The review has only Back and Finish to choose
+        // from, so Skip is gone there; the row keeps its height so the page
+        // never jumps.
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = ActionMinHeight),
+            horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Header: step progress + Skip. The step question below is the
-            // screen's one title. The review has only Back and Finish to choose
-            // from, so Skip is gone there; the row keeps its height so the page
-            // never jumps.
-            Row(
-                modifier = Modifier.fillMaxWidth().heightIn(min = ActionMinHeight),
-                horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StepProgress(
-                    stepNumber = stepIndex + 1,
-                    stepCount = steps.size,
-                    fraction = setupProgress(steps, stepIndex, a.modality),
-                    modifier = Modifier.weight(1f),
-                )
-                if (current != SetupStep.Review) {
-                    // Skip routes through the same confirm-before-discard guard as a
-                    // step-0 system-back.
-                    TextAction(stringResource(R.string.setup_skip), onClick = { if (dirty) confirmLeave = true else onSkip() })
-                }
+            StepProgress(
+                stepNumber = stepIndex + 1,
+                stepCount = steps.size,
+                fraction = setupProgress(steps, stepIndex, a.modality),
+                modifier = Modifier.weight(1f),
+            )
+            if (current != SetupStep.Review) {
+                // Skip routes through the same confirm-before-discard guard as a
+                // step-0 system-back.
+                TextAction(stringResource(R.string.setup_skip), onClick = { if (dirty) confirmLeave = true else onSkip() })
             }
-            Spacer(Modifier.size(Space.Lg.dp))
-
+        }
+        Spacer(Modifier.size(Space.Lg.dp))
+    }
+    val answersColumn: @Composable ColumnScope.() -> Unit = {
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -311,7 +317,10 @@ internal fun GuidedSetup(
                         if (keypadStep) detectTapGestures { keypadOpen = false }
                     }
                     // Content scrolled up under the top edge fades out instead of
-                    // showing a clipped sliver of its last line.
+                    // showing a clipped sliver of its last line. Beside the question
+                    // no bar sits under the answers, so while more lies below they
+                    // fade into the ground there too (the editors' end column),
+                    // inside the column, where a seam would run past the cards.
                     .drawWithContent {
                         drawContent()
                         if (scroll.canScrollBackward) {
@@ -320,7 +329,12 @@ internal fun GuidedSetup(
                                 size = Size(size.width, topFadePx),
                             )
                         }
+                        if (sideBySide && !showKeypad && scroll.canScrollForward) {
+                            val top = size.height - bottomFadePx
+                            translate(top = top) { drawRect(bottomFade, size = Size(size.width, bottomFadePx)) }
+                        }
                     }
+                    .testTag("setup-answers")
                     .verticalScroll(scroll),
                 verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
             ) {
@@ -397,18 +411,20 @@ internal fun GuidedSetup(
                     // that would do nothing.
                     allowDecimal = activeField == KeyField.Bodyweight ||
                         activeField == KeyField.WeeklyRun || activeField == KeyField.LongestRun,
+                    beside = sideBySide,
                 )
-            } else {
-                // Steps without the keypad band get the same full-bleed seam while
-                // more content sits below the fold, so the cut edge reads as
-                // "scroll for more" (always composed: the bar never shifts).
+            } else if (!sideBySide) {
+                // Steps without the keypad band get the same full-bleed seam over
+                // the button bar while more content sits below the fold, so the cut
+                // edge reads as "scroll for more" (always composed: the bar never shifts).
                 HorizontalDivider(
                     modifier = Modifier.fullBleed(Space.Screen.dp),
                     thickness = 1.dp,
                     color = if (scroll.canScrollForward) HairlineStrong else Color.Transparent,
                 )
             }
-
+    }
+    val footer: @Composable () -> Unit = {
             Spacer(Modifier.size(Space.Md.dp))
             if (blockedHint != null) {
                 Text(
@@ -486,6 +502,48 @@ internal fun GuidedSetup(
                     modifier = Modifier.weight(1f),
                     enabled = canAdvance,
                 )
+            }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BgTop),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        // A short landscape window keeps its height for the answers and the keypad.
+        val shortSide = sideBySide && LocalWindowLayout.current.shortHeight
+        val frameV = if (shortSide) Space.Md.dp else Space.Lg.dp
+        val frame = Modifier
+            .fillMaxSize()
+            .padding(horizontal = Space.Screen.dp)
+            .padding(top = frameV, bottom = frameV)
+        if (sideBySide) {
+            Row(
+                modifier = Modifier.widthIn(max = PaneMaxWidth * 2 + Space.Lg.dp * 3).then(frame),
+                horizontalArrangement = Arrangement.spacedBy(Space.Lg.dp),
+            ) {
+                Column(Modifier.weight(1f).fillMaxHeight().traversalGroup()) {
+                    headerRow()
+                    // The step's question, handed here by its StepHeader.
+                    Box(Modifier.fillMaxWidth().weight(1f).testTag("setup-question-pane")) {
+                        headerDock.content?.invoke()
+                    }
+                    footer()
+                }
+                Column(Modifier.weight(1f).fillMaxHeight().traversalGroup()) {
+                    // The answers start level with the question, under the progress
+                    // row; on a short window they (and a number step's keypad) take
+                    // the column's full height.
+                    if (!shortSide) Spacer(Modifier.height(ActionMinHeight + Space.Lg.dp))
+                    CompositionLocalProvider(LocalStepHeaderDock provides headerDock) { answersColumn() }
+                }
+            }
+        } else {
+            Column(modifier = Modifier.widthIn(max = ContentMaxWidth + Space.Screen.dp * 2).then(frame)) {
+                headerRow()
+                answersColumn()
+                footer()
             }
         }
 
@@ -974,7 +1032,10 @@ private fun reviewEntries(a: SetupAnswers, m: Modality, draft: Event.SetProfile,
  *  it never scrolls away while typing (no IME popup), on its own full-bleed raised
  *  band with a hairline seam, so the scroll area visibly ends above it instead of
  *  slicing content mid-glyph. Its Next moves to [nextField]; Done (last field)
- *  closes the keypad (there is no IME to dismiss). */
+ *  closes the keypad (there is no IME to dismiss). [beside] (the answers beside
+ *  the question, a landscape window): Next/Done is the keypad's tall fourth-column
+ *  key instead of a row above it ([LocalKeypadBeside]), so the fields keep their
+ *  height on a phone's landscape screen. */
 @Composable
 private fun KeypadBand(
     nextField: KeyField?,
@@ -982,30 +1043,44 @@ private fun KeypadBand(
     onKey: (Char) -> Unit,
     onBackspace: () -> Unit,
     allowDecimal: Boolean,
+    beside: Boolean,
 ) {
+    val advanceLabel = stringResource(if (nextField != null) R.string.setup_keypad_next else R.string.setup_keypad_done)
+    val nextFieldName = when (nextField) {
+        KeyField.RestingHr -> stringResource(R.string.setup_row_resting_hr)
+        KeyField.LongestRun -> stringResource(R.string.setup_runnow_longest_label)
+        else -> null
+    }
+    val advanceDescription = nextFieldName?.let { stringResource(R.string.setup_keypad_next_cd, it) }
     Column(
         modifier = Modifier
             .fullBleed(Space.Screen.dp)
             .background(BgElevated),
     ) {
         HorizontalDivider(thickness = 1.dp, color = HairlineStrong)
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = Space.Screen.dp),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            val nextFieldName = when (nextField) {
-                KeyField.RestingHr -> stringResource(R.string.setup_row_resting_hr)
-                KeyField.LongestRun -> stringResource(R.string.setup_runnow_longest_label)
-                else -> null
+        if (beside) {
+            Box(Modifier.padding(horizontal = Space.Screen.dp, vertical = Space.Md.dp)) {
+                CompositionLocalProvider(LocalKeypadBeside provides true) {
+                    NumericKeypad(
+                        onKey = onKey,
+                        onBackspace = onBackspace,
+                        allowDecimal = allowDecimal,
+                        onDone = onAdvance,
+                        doneLabel = advanceLabel,
+                        doneDescription = advanceDescription,
+                    )
+                }
             }
-            TextAction(
-                stringResource(if (nextField != null) R.string.setup_keypad_next else R.string.setup_keypad_done),
-                onClick = onAdvance,
-                description = nextFieldName?.let { stringResource(R.string.setup_keypad_next_cd, it) },
-            )
-        }
-        Box(Modifier.padding(start = Space.Screen.dp, end = Space.Screen.dp, bottom = Space.Md.dp)) {
-            NumericKeypad(onKey = onKey, onBackspace = onBackspace, allowDecimal = allowDecimal)
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = Space.Screen.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextAction(advanceLabel, onClick = onAdvance, description = advanceDescription)
+            }
+            Box(Modifier.padding(start = Space.Screen.dp, end = Space.Screen.dp, bottom = Space.Md.dp)) {
+                NumericKeypad(onKey = onKey, onBackspace = onBackspace, allowDecimal = allowDecimal)
+            }
         }
     }
 }

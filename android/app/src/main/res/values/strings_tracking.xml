@@ -12,7 +12,6 @@
     <string name="track_notif_armed_text">Recording will start on its own.</string>
     <string name="track_notif_recording_title">Tracking run</string>
     <string name="track_notif_paused_title">Run paused</string>
-    <string name="track_notif_paused_content">Paused · %1$s</string>
     <string name="track_notif_recording_hint">Recording your route…</string>
     <!-- Recording progress line (lock screen): %1$s = "23:41 · 4.12 km". -->
     <string name="track_notif_progress">Moving %1$s</string>

@@ -22,17 +22,26 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -46,9 +55,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -640,56 +653,70 @@ fun RunTrackingScreen(
         // pushing them off screen. With route maps off the frame wraps just the status
         // pill and the stat sheet rises to take the freed height (the Profile toggle is
         // the one place that says maps are off).
-        val mapFrame = when {
-            reviewing -> Modifier.height(0.dp)
-            showRouteMaps -> Modifier.weight(1f)
-            else -> Modifier
-        }
-        // The map carries ONE human status a runner can act on; every other notice
-        // sits in the sheet.
-        TrackerMapFrame(
-            map = map,
-            showMap = showRouteMaps,
-            showOverlays = !reviewing,
-            located = hasPoints || hasPreviewFix,
-            canRecenter = hasPermission && (hasPoints || hasPreviewFix),
-            onRecenter = {
-                follow = true
-                map.recenter()
-            },
-            modifier = mapFrame,
-        ) { pillModifier ->
-            TrackerStatusPill(
-                hasPermission = hasPermission,
-                locationOn = locationOn,
-                tracking = tracking,
-                paused = paused,
-                armed = armed,
-                locating = locating,
-                requirePrecise = preciseGate,
-                requireMoving = movingGate,
-                onRecheckPermission = { hasPermission = hasFineLocation(ctx) },
-                permissionAsked = permAsked,
-                modifier = pillModifier,
-            )
+        // On a landscape window the map takes the start and the stat sheet stands
+        // beside it as a full-height panel, so the map keeps a usable height
+        // (visual-design-system §5 "Adaptive layout").
+        val besideMap = LocalWindowLayout.current.sideControls && showRouteMaps && !reviewing
+        val mapFrame: @Composable (Modifier) -> Unit = { frameModifier ->
+            // The map carries ONE human status a runner can act on; every other notice
+            // sits in the sheet.
+            TrackerMapFrame(
+                map = map,
+                showMap = showRouteMaps,
+                showOverlays = !reviewing,
+                located = hasPoints || hasPreviewFix,
+                canRecenter = hasPermission && (hasPoints || hasPreviewFix),
+                onRecenter = {
+                    follow = true
+                    map.recenter()
+                },
+                modifier = frameModifier,
+            ) { pillModifier ->
+                TrackerStatusPill(
+                    hasPermission = hasPermission,
+                    locationOn = locationOn,
+                    tracking = tracking,
+                    paused = paused,
+                    armed = armed,
+                    locating = locating,
+                    requirePrecise = preciseGate,
+                    requireMoving = movingGate,
+                    onRecheckPermission = { hasPermission = hasFineLocation(ctx) },
+                    permissionAsked = permAsked,
+                    modifier = pillModifier,
+                )
+            }
         }
         // Stat sheet, pinned bottom, BgTop, rounded top corners. navigationBarsPadding
         // keeps the control row clear of the system gesture strip (edge-to-edge window).
         // It takes the leftover height whenever the map frame doesn't (Finish review,
-        // route maps off); the control row then sits at its bottom edge.
-        val sheetFills = reviewing || !showRouteMaps
-        val sheetShape = RoundedCornerShape(topStart = SheetCornerRadius, topEnd = SheetCornerRadius)
-        Column(
-            modifier = (if (sheetFills) Modifier.weight(1f) else Modifier)
-                .fillMaxWidth()
+        // route maps off); the control row then sits at its bottom edge. Beside the
+        // map it is a full-height panel with rounded start corners.
+        val sheetFills = reviewing || !showRouteMaps || besideMap
+        val sheetShape = if (besideMap) {
+            RoundedCornerShape(topStart = SheetCornerRadius, bottomStart = SheetCornerRadius)
+        } else {
+            RoundedCornerShape(topStart = SheetCornerRadius, topEnd = SheetCornerRadius)
+        }
+        // [gutter]: the sheet's side padding; the Finish review on a wide window
+        // centres its route + review pair ([FinishPairMaxWidth]) instead of
+        // stretching the chips and the Save row across a landscape screen. A
+        // landscape camera cutout stays clear of the sheet's content (the map may
+        // run under it); beside the map only the end edge can meet one.
+        val cutoutSides = if (besideMap) WindowInsetsSides.End else WindowInsetsSides.Horizontal
+        val statSheet: @Composable (Modifier, Dp) -> Unit = { sheetModifier, gutter -> Column(
+            modifier = sheetModifier
                 .shadow(SheetElevation, sheetShape)
                 .background(BgTop, sheetShape)
                 .navigationBarsPadding()
-                .padding(horizontal = Space.Sheet.dp)
+                .windowInsetsPadding(WindowInsets.displayCutout.only(cutoutSides))
+                .padding(horizontal = gutter)
                 .padding(top = Space.Md.dp, bottom = SheetBottomPadding),
             verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
         ) {
-            DragHandle()
+            // A short window (a phone in landscape) gives the handle's height to
+            // the content, as [AppSheet] does.
+            if (!besideMap && !LocalWindowLayout.current.shortHeight) DragHandle()
             if (!hasPermission) {
                 val prompt = locationPrompt(permAsked, permaDenied, hasCoarseLocation(ctx))
                 LocationPermissionPanel(
@@ -706,87 +733,113 @@ fun RunTrackingScreen(
                     onSaveRun = if (resumeWaiting && unsavedCapture) ({ logCaptured() }) else null,
                 )
             } else {
-                // With the sheet filling the frame (route maps off), its content sits
-                // on the control row in thumb reach, not stacked under the handle
-                // above a half-empty screen.
-                if (sheetFills && !reviewing) Spacer(Modifier.weight(1f))
-                // Battery reliability (pre-recording only), at the top of the sheet. It
-                // clears itself (ON_RESUME re-check) once the exemption is granted.
-                if (!batteryUnrestricted && !tracking && !unsavedCapture) {
-                    InlineNotice(
-                        stringResource(R.string.track_battery_caption),
-                        actionLabel = stringResource(R.string.track_battery_allow),
-                        onAction = { requestIgnoreBatteryOptimizations(ctx) },
-                    )
-                }
-                // Live stat readouts (MOVING · DISTANCE · PACE NOW, then Avg + last
-                // slice), a leaf so the per-fix elapsed/distance/pace updates recompose
-                // only those tiles, not the whole tracking screen. Only once there is
-                // something to show: before recording (locate/armed) the figures would
-                // be a frozen row of zeros and dashes. The Finish review carries its own
-                // distance · time · pace summary, so the live tiles step aside while it
-                // is open. Without a map they are the screen's hero, so they may grow.
-                if (!reviewing && (tracking || unsavedCapture)) {
-                    TrackerStats(
-                        unit = unit,
-                        paceBucketN = paceBucketN,
-                        paused = paused,
-                        large = !showRouteMaps,
-                        paceTarget = if (tracking) paceTarget else null,
-                        planKm = if (tracking) planKm else null,
-                    )
-                }
-                // Following today's plan: the targets and the current step (with
-                // Skip step) sit right under the live figures for the whole run.
-                if (tracking && !reviewing) {
-                    plannedRun?.let { item ->
-                        RunGuideCard(
-                            item = item,
-                            progress = stepProgress,
+                // Everything above the control row. With the sheet filling the frame
+                // (route maps off, the landscape side panel) it sits on the control row
+                // in thumb reach, not stacked under the handle above a half-empty
+                // screen, and scrolls when it is taller than the frame (a plan card
+                // and the start options in a landscape window), so ✕ / Start stay on
+                // screen; the `EditorScaffold` end-column pattern.
+                val aboveControls: @Composable () -> Unit = {
+                    // Battery reliability (pre-recording only), at the top of the sheet.
+                    // It clears itself (ON_RESUME re-check) once the exemption is granted.
+                    if (!batteryUnrestricted && !tracking && !unsavedCapture) {
+                        InlineNotice(
+                            stringResource(R.string.track_battery_caption),
+                            actionLabel = stringResource(R.string.track_battery_allow),
+                            onAction = { requestIgnoreBatteryOptimizations(ctx) },
+                        )
+                    }
+                    // Live stat readouts (MOVING · DISTANCE · PACE NOW, then Avg + last
+                    // slice), a leaf so the per-fix elapsed/distance/pace updates
+                    // recompose only those tiles, not the whole tracking screen. Only
+                    // once there is something to show: before recording (locate/armed)
+                    // the figures would be a frozen row of zeros and dashes. The Finish
+                    // review carries its own distance · time · pace summary, so the live
+                    // tiles step aside while it is open. Without a map they are the
+                    // screen's hero, so they may grow.
+                    if (!reviewing && (tracking || unsavedCapture)) {
+                        TrackerStats(
                             unit = unit,
-                            onSkip = { RunSession.skipStep(SystemClock.elapsedRealtime()) },
+                            paceBucketN = paceBucketN,
+                            paused = paused,
+                            large = !showRouteMaps || besideMap,
+                            paceTarget = if (tracking) paceTarget else null,
+                            planKm = if (tracking) planKm else null,
+                        )
+                    }
+                    // Following today's plan: the targets and the current step (with
+                    // Skip step) sit right under the live figures for the whole run.
+                    if (tracking && !reviewing) {
+                        plannedRun?.let { item ->
+                            RunGuideCard(
+                                item = item,
+                                progress = stepProgress,
+                                unit = unit,
+                                onSkip = { RunSession.skipStep(SystemClock.elapsedRealtime()) },
+                            )
+                        }
+                    }
+                    // Degraded-state surfacing: location off = loud warn row; a GPS
+                    // start failure / denied notifications = an inline notice. Each
+                    // carries an inline action so the state is actionable, not a dead end.
+                    if (!locationOn) LocationOffNotice(onOpenSettings = { ctx.openFirst(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) })
+                    if (locateFailed && locationOn && !tracking && !armed && (!unsavedCapture || resumeWaiting)) {
+                        InlineNotice(
+                            stringResource(R.string.track_location_failed_caption),
+                            actionLabel = stringResource(R.string.track_btn_try_again),
+                            onAction = { RunSession.locationFailed.value = false },
+                        )
+                    }
+                    // Only once a run is armed or recording: notifications are asked at
+                    // Start, so before it there is nothing to warn about.
+                    if (!notifGranted && (tracking || armed)) {
+                        InlineNotice(
+                            stringResource(R.string.track_notifications_off_caption),
+                            actionLabel = stringResource(R.string.track_open_settings),
+                            onAction = { ctx.openFirst(appNotificationSettingsIntent(ctx)) },
+                        )
+                    }
+                    // Today's plan + optional start gates, ONLY in the locate-preview
+                    // state (not while armed/recording or with an unsaved capture).
+                    if (!tracking && !armed && !unsavedCapture) {
+                        TrackerStartOptions(
+                            planItem = planItem,
+                            followPlan = followPlan,
+                            onFollowPlan = { followPlan = it },
+                            unit = unit,
+                            preciseGate = preciseGate,
+                            onTogglePrecise = {
+                                preciseGate = !preciseGate
+                                setupPrefs.edit { putBoolean(KEY_START_PRECISE, preciseGate) }
+                            },
+                            movingGate = movingGate,
+                            onToggleMoving = {
+                                movingGate = !movingGate
+                                setupPrefs.edit { putBoolean(KEY_START_MOVING, movingGate) }
+                            },
                         )
                     }
                 }
-                // Degraded-state surfacing: location off = loud warn row; a GPS
-                // start failure / denied notifications = an inline notice. Each carries
-                // an inline action so the state is actionable, not a dead end.
-                if (!locationOn) LocationOffNotice(onOpenSettings = { ctx.openFirst(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) })
-                if (locateFailed && locationOn && !tracking && !armed && (!unsavedCapture || resumeWaiting)) {
-                    InlineNotice(
-                        stringResource(R.string.track_location_failed_caption),
-                        actionLabel = stringResource(R.string.track_btn_try_again),
-                        onAction = { RunSession.locationFailed.value = false },
-                    )
-                }
-                // Only once a run is armed or recording: notifications are asked at
-                // Start, so before it there is nothing to warn about.
-                if (!notifGranted && (tracking || armed)) {
-                    InlineNotice(
-                        stringResource(R.string.track_notifications_off_caption),
-                        actionLabel = stringResource(R.string.track_open_settings),
-                        onAction = { ctx.openFirst(appNotificationSettingsIntent(ctx)) },
-                    )
-                }
-                // Today's plan + optional start gates, ONLY in the locate-preview state
-                // (not while armed/recording or with an unsaved capture).
-                if (!tracking && !armed && !unsavedCapture) {
-                    TrackerStartOptions(
-                        planItem = planItem,
-                        followPlan = followPlan,
-                        onFollowPlan = { followPlan = it },
-                        unit = unit,
-                        preciseGate = preciseGate,
-                        onTogglePrecise = {
-                            preciseGate = !preciseGate
-                            setupPrefs.edit { putBoolean(KEY_START_PRECISE, preciseGate) }
-                        },
-                        movingGate = movingGate,
-                        onToggleMoving = {
-                            movingGate = !movingGate
-                            setupPrefs.edit { putBoolean(KEY_START_MOVING, movingGate) }
-                        },
-                    )
+                if (sheetFills && !reviewing) {
+                    val scroll = rememberScrollState()
+                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.BottomCenter) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().verticalScroll(scroll).testTag("tracker-sheet-scroll"),
+                            verticalArrangement = Arrangement.spacedBy(Space.Card.dp),
+                        ) { aboveControls() }
+                        // While more lies below, it fades into the sheet ground above
+                        // the control row instead of being cut hard (as in the editors).
+                        if (scroll.canScrollForward) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(Space.Lg.dp)
+                                    .background(Brush.verticalGradient(listOf(Color.Transparent, BgTop))),
+                            )
+                        }
+                    }
+                } else {
+                    aboveControls()
                 }
                 // Finish review (Stop was tapped; recording is paused underneath):
                 // replaces the control row until the runner resumes, saves or
@@ -824,6 +877,30 @@ fun RunTrackingScreen(
                         onStop = { onFinishAction(FinishAction.Stop) },
                     )
                 }
+            }
+        } }
+        if (besideMap) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                val panelWidth = minOf(TrackerPanelWidth, maxWidth / 2)
+                Row(Modifier.fillMaxSize()) {
+                    mapFrame(Modifier.weight(1f).fillMaxHeight())
+                    statSheet(Modifier.width(panelWidth).fillMaxHeight().testTag("tracker-side-panel"), Space.Sheet.dp)
+                }
+            }
+        } else {
+            mapFrame(
+                when {
+                    reviewing -> Modifier.height(0.dp)
+                    showRouteMaps -> Modifier.weight(1f)
+                    else -> Modifier
+                },
+            )
+            if (reviewing) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                    statSheet(Modifier.fillMaxSize().testTag("tracker-finish-review"), centringGutter(maxWidth, min = Space.Sheet.dp, max = FinishPairMaxWidth))
+                }
+            } else {
+                statSheet((if (sheetFills) Modifier.weight(1f) else Modifier).fillMaxWidth(), Space.Sheet.dp)
             }
         }
     }

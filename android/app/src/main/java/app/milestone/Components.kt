@@ -1,47 +1,69 @@
 package app.milestone
 
+import android.view.WindowManager
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DatePickerState
+import androidx.compose.material3.DisplayMode
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 
 /** The elevated content card (hairline outline, no shadow); with [onClick] the
  *  whole card is one tappable surface, a button to TalkBack. [contentPadding] and
  *  [spacing] default to the card recipe; edge-to-edge row lists ([ActionRows], a
- *  hairline grid) pass zero and draw their own row padding. */
+ *  hairline grid) pass zero and draw their own row padding. [selected] (a list
+ *  card whose entry is open in the detail pane beside the list) draws a
+ *  [SelectedBarWidth] `Accent` bar along the start edge and is spoken as
+ *  selected; the other cards carry no selection state, so TalkBack does not
+ *  read "not selected" on each. The card's ground and text stay as they are, so
+ *  every tone keeps its contrast. */
 @Composable
 internal fun PlainCard(
     onClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(Space.Card.dp),
     spacing: Dp = Space.Md.dp,
+    selected: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val border = BorderStroke(1.dp, OnBgBody.copy(alpha = HairlineAlpha.Card))
@@ -49,10 +71,22 @@ internal fun PlainCard(
     val colors = CardDefaults.cardColors(containerColor = BgElevated)
     val elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     val body: @Composable () -> Unit = {
-        Column(
-            Modifier.padding(contentPadding),
-            verticalArrangement = Arrangement.spacedBy(spacing),
-        ) { content() }
+        Box(Modifier.fillMaxWidth()) {
+            Column(
+                Modifier.padding(contentPadding),
+                verticalArrangement = Arrangement.spacedBy(spacing),
+            ) { content() }
+            // The card's surface clips the bar to its rounded start corners.
+            if (selected) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .wrapContentWidth(Alignment.Start)
+                        .width(SelectedBarWidth)
+                        .background(Accent),
+                )
+            }
+        }
     }
     // Clickable variant uses the Material 3 `Card(onClick=…)` overload so the tap ripple
     // is clipped by the card's own rounded surface at any height (no soft-edge
@@ -65,7 +99,10 @@ internal fun PlainCard(
             shape = shape,
             border = border,
             // Material's clickable Card sets no role.
-            modifier = Modifier.fillMaxWidth().semantics { role = Role.Button },
+            modifier = Modifier.fillMaxWidth().semantics {
+                role = Role.Button
+                if (selected) this.selected = true
+            },
         ) { body() }
     } else {
         Card(
@@ -146,7 +183,8 @@ internal fun AppDialog(
 }
 
 /** A [DatePicker] on [state] in an [AppDialog]-styled window: OK (enabled while
- *  [confirmEnabled]) runs [onConfirm], Cancel runs [onDismiss]. */
+ *  [confirmEnabled]) runs [onConfirm], Cancel runs [onDismiss]. On a short window
+ *  (a phone in landscape, [WindowLayout.shortHeight]) see [ShortDatePickerDialog]. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppDatePickerDialog(
@@ -155,15 +193,73 @@ internal fun AppDatePickerDialog(
     onConfirm: () -> Unit,
     confirmEnabled: Boolean = true,
 ) {
+    val confirm = @Composable {
+        TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(stringResource(R.string.log_ok)) }
+    }
+    val dismiss = @Composable { TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) } }
+    if (LocalWindowLayout.current.shortHeight) {
+        ShortDatePickerDialog(state, onDismiss, confirm, dismiss)
+        return
+    }
     DatePickerDialog(
         onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(stringResource(R.string.log_ok)) }
-        },
+        confirmButton = confirm,
         modifier = Modifier.traversalGroup(),
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) } },
+        dismissButton = dismiss,
         shape = RoundedCornerShape(Space.Card.dp),
-    ) { DatePicker(state) }
+    ) {
+        DatePicker(state)
+    }
+}
+
+/**
+ * [AppDatePickerDialog] on a short window. The month grid is taller than the
+ * window and ran under Cancel/OK, so the picker is the typed date field alone:
+ * no calendar toggle, no title and no headline (the field shows the date). Its
+ * keyboard leaves ~130dp of a landscape phone: the dialog window resizes for it
+ * (the platform panned it, OK under the keyboard) and Cancel/OK stand beside the
+ * field, as a landscape editor's controls do, so the height is the field's:
+ * label, entry box and error line. Under the buttons and the headline ~70dp were
+ * left: the error line, which says why OK is off, sat under the window (e37
+ * emulator). The field still scrolls at a large font.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ShortDatePickerDialog(
+    state: DatePickerState,
+    onDismiss: () -> Unit,
+    confirm: @Composable () -> Unit,
+    dismiss: @Composable () -> Unit,
+) {
+    // Before the picker reads it, so a short window never draws the grid (also
+    // after a rotation with the dialog open).
+    if (state.displayMode != DisplayMode.Input) state.displayMode = DisplayMode.Input
+    BasicAlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.traversalGroup(),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect { window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE) }
+        Surface(
+            shape = RoundedCornerShape(Space.Card.dp),
+            color = DatePickerDefaults.colors().containerColor,
+            tonalElevation = DatePickerDefaults.TonalElevation,
+        ) {
+            Row {
+                Column(Modifier.width(DateFieldDialogWidth).verticalScroll(rememberScrollState()).testTag("date-picker-scroll")) {
+                    DatePicker(state, title = null, headline = null, showModeToggle = false)
+                }
+                Column(
+                    Modifier.align(Alignment.Bottom).padding(end = Space.Md.dp, bottom = Space.Md.dp),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    dismiss()
+                    confirm()
+                }
+            }
+        }
+    }
 }
 
 /** A [TimePicker] titled [title] in an [AppDialog]: OK closes through

@@ -3,6 +3,7 @@ package app.milestone
 import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
+import android.content.res.Resources
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
@@ -13,6 +14,9 @@ import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetMidnight
 import app.milestone.widget.WidgetSnapshot
 import app.milestone.widget.WidgetSnapshotStore
+import app.milestone.widget.widgetFace
+import app.milestone.widget.TodayWidget
+import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.flow.withIndex
 import kotlinx.coroutines.launch
 
@@ -91,9 +95,15 @@ class QuickTileService : TileService() {
 
     private fun draw() {
         val tile = qsTile ?: return
-        val face = currentFace(this)
-        tile.label = getString(face.label)
-        tile.contentDescription = getString(face.label)
+        val snapshot = WidgetSnapshotStore.today(this)
+        val face = faceFor(snapshot)
+        val label = getString(face.label)
+        val subtitle = tileSubtitle(snapshot, latinDigitResources())
+        tile.label = label
+        tile.contentDescription = listOfNotNull(label, subtitle).joinToString(", ")
+        // The widget's title under the label (Android 10+), so tile and widget say
+        // the same; without one System UI writes the state ("On", "Off") there.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) tile.subtitle = subtitle
         tile.icon = Icon.createWithResource(this, face.icon)
         tile.state = if (face.active) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.updateTile()
@@ -132,6 +142,18 @@ class QuickTileService : TileService() {
         internal fun currentFace(context: Context): TileFace =
             if (RunSession.tracking.value) TileFace.Recording else tileFace(WidgetSnapshotStore.today(context))
 
+        private fun faceFor(today: WidgetSnapshot?): TileFace =
+            if (RunSession.tracking.value) TileFace.Recording else tileFace(today)
+
+        /** The line under the tile's label for [today]'s snapshot: the widget's
+         *  title (the session, "Rest day", "Training paused"), "Session done" once
+         *  today's session is; nothing without a snapshot for today. */
+        internal fun tileSubtitle(today: WidgetSnapshot?, res: Resources): String? {
+            val snapshot = today ?: return null
+            val face = widgetFace(snapshot, snapshot.epochDay, res)
+            return (if (snapshot.sessionDone) face.status else face.title)?.takeIf { it.isNotBlank() }
+        }
+
         /** Whether the tile is on the user's Quick Settings panel (it then needs the midnight tick). */
         internal fun isAdded(context: Context): Boolean =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ADDED, false)
@@ -158,11 +180,12 @@ internal fun requestTileRefresh(ctx: Context) {
 }
 
 /**
- * Follows [RunSession.tracking], whoever changes it: redraws the tile on every
- * change ([TileFace.Recording]) and takes a shown run reminder down when a run
- * starts recording ([SessionReminder.onRecording]). Process-scoped, started from
- * MainActivity and [RunTrackingService]; a later call only replaces the context
- * (Robolectric gives each test a new Application under the same collector).
+ * Follows [RunSession.tracking], whoever changes it: redraws the tile and a placed
+ * widget on every change ([TileFace.Recording]) and takes a shown run reminder down
+ * when a run starts recording ([SessionReminder.onRecording]). Process-scoped,
+ * started from MainActivity and [RunTrackingService]; a later call only replaces
+ * the context (Robolectric gives each test a new Application under the same
+ * collector).
  */
 internal object RecordingWatch {
     @Volatile private var started = false
@@ -175,7 +198,11 @@ internal object RecordingWatch {
         EventDispatcher.scope.launch {
             RunSession.tracking.withIndex().collect { (i, recording) ->
                 val app = app ?: return@collect
-                if (i > 0) requestTileRefresh(app)
+                if (i > 0) {
+                    requestTileRefresh(app)
+                    runCatching { if (WidgetMidnight.hasWidgets(app)) TodayWidget().updateAll(app) }
+                        .onFailure { Log.w("QuickTile", "widget not updated", it) }
+                }
                 if (recording) SessionReminder.onRecording(app)
             }
         }

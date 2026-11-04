@@ -121,7 +121,45 @@ internal data class WidgetSnapshot(
     /** The time zone the snapshot was written in ([ZoneId] id); empty in a file
      *  written before it was recorded. */
     val zone: String = "",
+    /** This plan week day by day, for the widget's week strip; empty while paused,
+     *  without a plan, and in a file written before it was recorded. */
+    val week: List<WidgetWeekDay> = emptyList(),
 )
+
+/** How one day of the plan week reads on the widget's week strip, the app's
+ *  Today week strip in short ([app.milestone.ThisWeekCard]). */
+@Serializable
+internal enum class WidgetWeekMark {
+    /** Trained (done, or done lighter). */
+    Done,
+
+    /** The plan's next session (adjusted or not). */
+    Next,
+
+    /** A session still to come. */
+    Planned,
+
+    /** A past session not logged, or only partly done. */
+    Missed,
+
+    /** A plan rest day. */
+    Rest,
+
+    /** Before the plan started. */
+    None,
+}
+
+@Serializable
+internal data class WidgetWeekDay(val epochDay: Long, val mark: WidgetWeekMark)
+
+private fun weekMarkOf(s: SessionPlanView): WidgetWeekMark = when {
+    s.isDone -> WidgetWeekMark.Done
+    s.status == "next" || s.status == "adjusted" -> WidgetWeekMark.Next
+    s.status == "missed" || s.status == "partial" -> WidgetWeekMark.Missed
+    s.status == "rest" -> WidgetWeekMark.Rest
+    s.status == "before_plan" -> WidgetWeekMark.None
+    else -> WidgetWeekMark.Planned
+}
 
 /**
  * The snapshot of [model] for its own day ([ViewModel.today], the day the core
@@ -142,9 +180,10 @@ internal fun widgetSnapshotOf(
         weekDone = consistency?.this_week_done ?: 0,
         weekPlanned = consistency?.this_week_planned ?: 0,
         zone = zone,
+        week = if (consistency == null) emptyList() else model.week_plan.map { WidgetWeekDay(it.epoch_day, weekMarkOf(it)) },
     )
     if (model.train_blocked) {
-        return base.copy(kind = WidgetDayKind.Paused, holdReason = model.hold_reason, weekDone = 0, weekPlanned = 0)
+        return base.copy(kind = WidgetDayKind.Paused, holdReason = model.hold_reason, weekDone = 0, weekPlanned = 0, week = emptyList())
     }
     val ns = model.next_session
     if (ns == null) {

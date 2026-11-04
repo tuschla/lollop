@@ -162,12 +162,17 @@ class DeepLinkPropertyTest {
             val at = "#$i $s"
             val shownToday = !s.stale && s.epochDay == day
 
-            // Widget: Track only for today's trackable session; Log on every face but setup.
+            // Widget: the tile's action first (Track only for today's trackable run,
+            // the set editor only for today's open lift session), Log on every face
+            // but setup.
             val face = widgetFace(s, day, res)
             val dests = face.actions.map { it.dest }
             if (OpenDest.Track in dests) assertTrue("$at: Track offered", shownToday && s.trackable)
-            if (shownToday && s.kind != WidgetDayKind.Setup) assertTrue("$at: Log offered", OpenDest.Log in dests)
-            assertFalse("$at: the widget never offers log_set", OpenDest.LogSet in dests)
+            if (OpenDest.LogSet in dests) assertTrue("$at: Log set offered", shownToday && s.kind == WidgetDayKind.Lift && !s.sessionDone)
+            if (shownToday && s.kind != WidgetDayKind.Setup) {
+                assertTrue("$at: Log offered", OpenDest.Log in dests)
+                assertEquals("$at: same first action as the tile", tileFace(s).dest, dests.first())
+            }
         }
     }
 }

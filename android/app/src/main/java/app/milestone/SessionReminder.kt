@@ -259,6 +259,7 @@ internal object SessionReminder {
         val now = AppClock.nowMillis()
         val b = NotificationCompat.Builder(app, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_mark)
+            .setColor(notificationAccent(app))
             .setContentTitle(reminder.title.ifBlank { res.getString(R.string.reminder_title_fallback) })
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -384,6 +385,8 @@ internal fun reminderActionLabel(res: Resources, reminder: Reminder): String = r
  */
 class SessionReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // A process started for the alarm has not read the theme the reminder's colour follows.
+        AppSettings.load(context)
         when (intent.action) {
             SessionReminder.ACTION_FIRE -> SessionReminder.onAlarm(context)
             Intent.ACTION_BOOT_COMPLETED,

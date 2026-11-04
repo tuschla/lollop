@@ -36,7 +36,7 @@ class WidgetSnapshotTest {
     private val day = 20_389L // Tue 2025-10-28
 
     private fun str(id: Int, vararg args: Any): String = res.getString(id, *args)
-    private fun item(name: String, detail: String) = str(R.string.widget_item_line, name, detail)
+    private fun item(name: String, detail: String) = keepUnits(str(R.string.widget_item_line, name, detail))
     private fun weekDone(done: Int, planned: Int) = res.getQuantityString(R.plurals.main_week_done_count, planned, done, planned)
 
     @Before
@@ -164,7 +164,7 @@ class WidgetSnapshotTest {
     // ── Content per state ────────────────────────────────────────────────────
 
     @Test
-    fun liftDayShowsTitleItemsWeekAndLog() {
+    fun liftDayShowsTitleItemsWeekAndTheTilesLogSet() {
         val ns = SessionPlanView(
             day, "Lower body", "Lift(MaxEffort)", "next",
             listOf(lift("Squat", "3 × 5 @ 100 kg", done = true), lift("Romanian deadlift", "3 × 8 @ 80 kg")),
@@ -179,7 +179,41 @@ class WidgetSnapshotTest {
         // Open items first, settled ones after.
         assertEquals(listOf(item("Romanian deadlift", "3 × 8 @ 80 kg"), item("Squat", str(R.string.widget_item_done))), f.items)
         assertEquals(weekDone(2, 4), f.week)
-        assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
+        assertEquals(listOf(OpenDest.LogSet, OpenDest.Log), f.actions.map { it.dest })
+        assertEquals(str(R.string.tile_log_set), f.actions.first().label)
+        // The one line of the smallest size: what the next set is.
+        assertEquals(str(R.string.reminder_line_progress, 1, 2, "Romanian deadlift"), f.status)
+        assertEquals("Romanian deadlift", f.brief)
+    }
+
+    @Test
+    fun weekStripCarriesEachPlanDayAndGoesWithAHold() {
+        val ns = SessionPlanView(day, "Lower body", "Lift(MaxEffort)", "next", listOf(lift("Squat", "3 × 5 @ 100 kg")))
+        val week = listOf(
+            SessionPlanView(day - 3, "", "Lift(MaxEffort)", "before_plan"),
+            SessionPlanView(day - 2, "Run", "Run(Easy)", "missed"),
+            SessionPlanView(day - 1, "Upper", "Lift(Hypertrophy)", "done_lighter"),
+            ns,
+            SessionPlanView(day + 1, "", "Rest", "rest"),
+            SessionPlanView(day + 2, "Run", "Run(Easy)", "planned"),
+            SessionPlanView(day + 3, "Upper", "Lift(Hypertrophy)", "adjusted"),
+        )
+        val snap = widgetSnapshotOf(model(ns, week = week), DistanceUnit.Km)
+        assertEquals(
+            listOf(
+                WidgetWeekMark.None, WidgetWeekMark.Missed, WidgetWeekMark.Done, WidgetWeekMark.Next,
+                WidgetWeekMark.Rest, WidgetWeekMark.Planned, WidgetWeekMark.Next,
+            ),
+            snap.week.map { it.mark },
+        )
+        assertEquals(week.map { it.epoch_day }, snap.week.map { it.epochDay })
+        assertEquals(snap.week, widgetFace(snap, day, res).days)
+        // A hold shows no week: it carries no plan.
+        assertTrue(widgetSnapshotOf(model(ns, week = week).copy(hold_reason = "pain", safety_tier = "Pain"), DistanceUnit.Km).week.isEmpty())
+        // A file written before the week was recorded still reads, without a strip.
+        val f = File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME)
+        f.writeText("""{"version":$WIDGET_SNAPSHOT_VERSION,"epochDay":$day,"kind":"Rest"}""")
+        assertEquals(emptyList<WidgetWeekDay>(), WidgetSnapshotStore.read(ctx)!!.week)
     }
 
     @Test
@@ -199,10 +233,11 @@ class WidgetSnapshotTest {
         assertEquals(listOf(str(R.string.widget_session_done), str(R.string.widget_next, "Upper body", planDateLabel(day + 2))), f.lead)
         assertEquals(listOf(item("Squat", str(R.string.widget_item_done))), f.items)
         assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
+        assertEquals(str(R.string.widget_session_done), f.status)
     }
 
     @Test
-    fun runDayOffersTrackRun() {
+    fun runDayOffersStartRunLikeTheTile() {
         val ns = SessionPlanView(day, "Easy run", "Run(Easy)", "next", listOf(PrescriptionView(face_lead = "8 km easy")))
         val snap = widgetSnapshotOf(model(ns), DistanceUnit.Km)
         assertEquals(WidgetDayKind.Run, snap.kind)
@@ -211,7 +246,16 @@ class WidgetSnapshotTest {
         assertEquals("Easy run", f.title)
         assertEquals(listOf(item(str(R.string.main_run), "8 km easy")), f.items)
         assertEquals(listOf(OpenDest.Track, OpenDest.Log), f.actions.map { it.dest })
-        assertEquals(str(R.string.main_plan_item_track), f.actions.first().label)
+        assertEquals(str(R.string.tile_start_run), f.actions.first().label)
+        assertEquals(keepUnits("8 km easy"), f.status)
+        assertEquals(keepUnits("8 km easy"), f.brief)
+        // A full run summary ("8 km easy") is a line, not a hero figure; a detail
+        // that is only a figure is one, with or without a pace.
+        assertNull(f.hero)
+        assertTrue(isFigure("3.4 mi") && isFigure("45 min") && isFigure("6 × 800 m"))
+        assertFalse(isFigure("8 km easy") || isFigure("Easy run") || isFigure(""))
+        // A recording run in this process: the tile's Recording action.
+        assertEquals(str(R.string.tile_run_recording), widgetFace(snap, day, res, recording = true).actions.first().label)
         // Once the run is logged, no Track run.
         val logged = widgetSnapshotOf(model(ns.copy(items = listOf(PrescriptionView(face_lead = "8 km easy", done = true)))), DistanceUnit.Km)
         assertFalse(logged.trackable)
@@ -232,8 +276,13 @@ class WidgetSnapshotTest {
         val f = widgetFace(snap, day, res)
         assertEquals(str(R.string.widget_rest_day), f.title)
         assertEquals(listOf(str(R.string.widget_next, "Upper body", planDateLabel(day + 1))), f.lead)
+        assertEquals(f.lead.single(), f.status)
+        // "Next: Wed" within the week, the date further out.
+        assertEquals(str(R.string.widget_next_day, java.time.LocalDate.ofEpochDay(day + 1).dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.US)), f.brief)
         assertEquals(weekDone(2, 4), f.week)
         assertEquals(listOf(OpenDest.Log), f.actions.map { it.dest })
+        // A tall card's hero: the next session by name over its date.
+        assertEquals(WidgetHero("Upper body", str(R.string.widget_next_day, planDateLabel(day + 1)), figure = false), f.hero)
         // No plan day today at all (before the plan starts) reads as no session.
         val none = widgetSnapshotOf(model(next, week = listOf(next)), DistanceUnit.Km)
         assertEquals(str(R.string.widget_no_session), widgetFace(none, day, res).title)
@@ -301,6 +350,9 @@ class WidgetSnapshotTest {
         assertEquals(listOf("lead", "a", "b", "c", "d"), visibleLines(f, 5, res))
         assertEquals(listOf("lead", "a", "b", "c", "d"), visibleLines(f, 6, res))
         // A count never stands in for a single item: that slot shows the item.
-        assertEquals(listOf("lead", res.getQuantityString(R.plurals.widget_more_items, 2, 2)), visibleLines(f.copy(items = listOf("a", "b")), 2, res))
+        assertEquals(listOf("lead", "a", "b"), visibleLines(f.copy(items = listOf("a", "b")), 3, res))
+        // Nor for every item: one slot left shows the first item, not "N more items".
+        assertEquals(listOf("lead", "a"), visibleLines(f.copy(items = listOf("a", "b")), 2, res))
+        assertEquals(listOf("a"), visibleLines(f.copy(lead = emptyList()), 1, res))
     }
 }

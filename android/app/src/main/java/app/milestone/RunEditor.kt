@@ -194,6 +194,7 @@ fun LogRunEditor(
         dirty = dirty,
         saveEnabled = distValid && durValid && positive && hrValid,
         onClose = onClose,
+        controlsBeside = true,
         onSave = {
             if (distParsed != null && durParsed != null) {
                 val ev = runEditEvent(

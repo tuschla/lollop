@@ -63,7 +63,7 @@ class LiveRunNotificationTest {
         PendingIntent.getActivity(ctx, code, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
 
     private fun build(frame: RunNotifFrame): Notification = buildRunNotification(
-        runNotificationBuilder(ctx, "run_tracking", "Tracking run", pending(0), pending(1)),
+        runNotificationBuilder(ctx, RunTrackingService.CHANNEL, "Tracking run", pending(0), pending(1)),
         frame,
     )
 

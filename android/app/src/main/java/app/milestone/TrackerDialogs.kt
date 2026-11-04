@@ -3,9 +3,13 @@ package app.milestone
 import android.content.res.Resources
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -13,14 +17,20 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -71,7 +81,14 @@ internal fun TrackerReadinessSheet(model: ViewModel, onEvent: (Event) -> Unit, o
  * the core's distance · moving time · average pace for the very track Save sends (so
  * History repeats these figures), then effort and run type above a pinned Discard ·
  * Resume · Save run row. Discard only opens the confirm ([finishTransition]).
- * [enabled] gates the actions while a save is in flight.
+ * [enabled] gates the actions while a save is in flight. One column of at most
+ * [ContentMaxWidth]; on a landscape window ([WindowLayout.sideControls]) the route
+ * takes the start column at full height and the review the end column, so the
+ * figures sit whole above Save on a phone's short landscape height. That end
+ * column must fit the figures with their units and the action row with "Save run"
+ * on one line at the current font scale (measured); when it does not, the review
+ * takes the full width and the route is left out, as a route above the figures
+ * would push them out of a short landscape window.
  */
 @Composable
 internal fun RunFinishPanel(
@@ -100,10 +117,17 @@ internal fun RunFinishPanel(
     }
     val avgPace = averagePaceMinPerKm(elapsedSec, km)
     val spoken = finishSummarySpoken(LocalResources.current, km, elapsedSec, unit)
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
-    ) {
+    val routeShown = route.sumOf { it.size } >= 2
+    val sideControls = LocalWindowLayout.current.sideControls
+    val distance = distanceFigure(km, unit)
+    val elapsed = formatElapsed(elapsedSec)
+    val pace = paceFigure(avgPace, unit)
+    val resumeLabel = stringResource(R.string.track_action_resume)
+    val saveLabel = stringResource(R.string.track_btn_save_run)
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val routeAbove = routeShown && !sideControls
+    val review: @Composable ColumnScope.() -> Unit = {
         Text(
             stringResource(R.string.track_finish_title),
             color = OnBgBody,
@@ -120,7 +144,7 @@ internal fun RunFinishPanel(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(Space.Lg.dp),
             ) {
-                if (route.sumOf { it.size } >= 2) {
+                if (routeAbove) {
                     RouteMapCard(route, entryId = 0L, height = FinishRouteHeight, distanceMarkers = false, recordKm = km)
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
@@ -132,7 +156,7 @@ internal fun RunFinishPanel(
                     ) {
                         LiveFigure(
                             label = stringResource(R.string.run_stat_distance),
-                            value = distanceFigure(km, unit),
+                            value = distance,
                             suffix = unit.distanceLabel,
                             known = km > 0.0,
                             maxSp = LIVE_FIGURE_MAX_SP,
@@ -140,7 +164,7 @@ internal fun RunFinishPanel(
                         )
                         LiveFigure(
                             label = stringResource(R.string.track_stat_elapsed),
-                            value = formatElapsed(elapsedSec),
+                            value = elapsed,
                             suffix = null,
                             known = true,
                             maxSp = LIVE_FIGURE_MAX_SP,
@@ -148,7 +172,7 @@ internal fun RunFinishPanel(
                         )
                         LiveFigure(
                             label = stringResource(R.string.run_stat_avg_pace),
-                            value = paceFigure(avgPace, unit),
+                            value = pace,
                             suffix = unit.paceSuffix,
                             known = avgPace.isFinite(),
                             maxSp = LIVE_FIGURE_MAX_SP,
@@ -178,19 +202,66 @@ internal fun RunFinishPanel(
         ControlRow {
             DiscardRunCircle(enabled = enabled, onClick = onDiscard)
             TextAction(
-                stringResource(R.string.track_action_resume),
+                resumeLabel,
                 onClick = onResume,
                 enabled = enabled,
             )
             ControlPill(
-                stringResource(R.string.track_btn_save_run),
+                saveLabel,
                 onClick = onSave,
                 modifier = Modifier.weight(1f),
                 enabled = enabled,
             )
         }
     }
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val columnPx = (constraints.maxWidth - with(density) { Space.Lg.dp.roundToPx() }) / 2
+        val columnFits = remember(columnPx, distance, elapsed, pace, unit, resumeLabel, saveLabel, measurer, density) {
+            val figures = listOf(distance to unit.distanceLabel, elapsed to null, pace to unit.paceSuffix)
+            finishColumnFits(measurer, density, columnPx, figures, resumeLabel, saveLabel)
+        }
+        if (routeShown && sideControls && columnFits) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.Lg.dp)) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().testTag("finish-route")) {
+                    RouteMapCard(route, entryId = 0L, height = maxHeight, distanceMarkers = false, recordKm = km)
+                }
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
+                    content = review,
+                )
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                Column(
+                    modifier = Modifier.widthIn(max = ContentMaxWidth).fillMaxWidth().fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(Space.Md.dp),
+                    content = review,
+                )
+            }
+        }
+    }
 }
+
+/** The Finish review's end column, [columnPx] wide, fits each of the three
+ *  [figures] (value, unit) whole in its third of the figures row and the Discard ·
+ *  [resume] · [save] row with both labels on one line. */
+private fun finishColumnFits(
+    measurer: TextMeasurer,
+    density: Density,
+    columnPx: Int,
+    figures: List<Pair<String, String?>>,
+    resume: String,
+    save: String,
+): Boolean {
+    val thirdPx = (columnPx - with(density) { Space.Md.dp.roundToPx() } * (figures.size - 1)) / figures.size
+    return figures.all { (value, suffix) -> liveFigureMinWidthPx(measurer, value, suffix) <= thirdPx } &&
+        circleTextPillRowMinWidthPx(measurer, density, resume, save) <= columnPx
+}
+
+/** Widest the Finish review's route + review pair grows on a landscape window;
+ *  the pair centres beyond it, like [TwoPaneRow]. */
+internal val FinishPairMaxWidth = PaneMaxWidth * 2 + Space.Lg.dp
 
 /** Height of the Finish review's route thumbnail. */
 private val FinishRouteHeight = 160.dp

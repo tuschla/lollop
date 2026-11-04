@@ -110,17 +110,17 @@ internal fun TodayDestination(
     // "Stopped · <area>" in the hero and the week strip alike.
     val painArea = painAreaLabel(lastPain?.location, model.readiness_summary.firstOrNull { it.signal == "Pain" }?.detail)
 
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = Space.Screen.dp, end = Space.Screen.dp,
-            top = Space.Screen.dp, bottom = TodayFabClearance,
-        ),
-        verticalArrangement = Arrangement.spacedBy(Space.Screen.dp),
-    ) {
-        if (model.train_blocked) {
-            val youthPause = holdAction(model.hold_reason, model.safety_tier) == HoldAction.CheckAge
+    // The session column (hero, or the hold while training is blocked) and the
+    // week column (this week, progress). One list on a phone; side by side on a
+    // wide window (visual-design-system §5 "Adaptive layout").
+    val blocked = model.train_blocked
+    val youthPause = blocked && holdAction(model.hold_reason, model.safety_tier) == HoldAction.CheckAge
+    val hasWeek = model.week_plan.isNotEmpty() || model.program != null
+    val nextSession = model.next_session
+    val showWeek = if (blocked) hasWeek else nextSession != null && hasWeek
+    val showProgress = !blocked && trend != null && showLifting
+    val sessionItems: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
+        if (blocked) {
             // Under 18 the pause is no pinned DO-NOT-TRAIN banner but this calm
             // card, the list's first item, so it scrolls with the page.
             if (youthPause) {
@@ -161,58 +161,37 @@ internal fun TodayDestination(
                     YouthActivityCard(activity, onLog = { onOpenSheet(LogMode.Activity) }, onEvent = onEvent)
                 }
             }
-            // The week stays in view, read-only (held days read "paused").
-            if (model.week_plan.isNotEmpty() || model.program != null) {
-                item { SectionOverline(stringResource(R.string.main_overline_this_week)) }
-                item {
-                    ThisWeekCard(
-                        consistency = model.consistency,
-                        week = model.week_plan,
-                        today = model.today(),
-                        weightUnit = weightUnit,
-                        program = model.program,
-                        footnote = null,
-                        painArea = painArea,
-                        onRemovePlan = { confirmRemovePlan = true },
-                        actions = null,
-                        heroDay = -1L,
-                        selectedDay = weekSelectedDay,
-                        onSelectDay = { weekSelectedDay = it },
-                    )
-                }
+        } else {
+            // The readiness strip mounts only with a pill or a baseline caption to show:
+            // passive per-signal states, no ring, no 0–100 number (INVARIANT 1).
+            val hasReadinessPills = model.stripReadinessRows().isNotEmpty() || model.baseline_status.isNotEmpty()
+            item {
+                TodayHeroCard(
+                    model = model,
+                    hasSignal = hasAnything,
+                    onEvent = onEvent,
+                    onStartSetup = onStartSetup,
+                    onLogItem = onLogPlanItem,
+                    onTrackRun = onTrackRun,
+                    onOpenSheet = onOpenSheet,
+                    onMove = moveSession,
+                    lastPain = lastPain,
+                    painArea = painArea,
+                    onOpenProfile = onOpenProfile,
+                    onRerunSetup = onRerunSetup,
+                    readinessStrip = if (hasReadinessPills) {
+                        { ReadinessStrip(model, onEvent, onCheckin = { onOpenSheet(LogMode.Checkin) }) }
+                    } else {
+                        null
+                    },
+                )
             }
-            return@LazyColumn
         }
-
-        // The readiness strip mounts only with a pill or a baseline caption to show:
-        // passive per-signal states, no ring, no 0–100 number (INVARIANT 1).
-        val hasReadinessPills = model.stripReadinessRows().isNotEmpty() || model.baseline_status.isNotEmpty()
-        item {
-            TodayHeroCard(
-                model = model,
-                hasSignal = hasAnything,
-                onEvent = onEvent,
-                onStartSetup = onStartSetup,
-                onLogItem = onLogPlanItem,
-                onTrackRun = onTrackRun,
-                onOpenSheet = onOpenSheet,
-                onMove = moveSession,
-                lastPain = lastPain,
-                painArea = painArea,
-                onOpenProfile = onOpenProfile,
-                onRerunSetup = onRerunSetup,
-                readinessStrip = if (hasReadinessPills) {
-                    { ReadinessStrip(model, onEvent, onCheckin = { onOpenSheet(LogMode.Checkin) }) }
-                } else {
-                    null
-                },
-            )
-        }
-
+    }
+    val weekItems: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
         // This week: the count, the strip and the plan footer as one card, only
-        // when a plan exists.
-        val nextSession = model.next_session
-        val showWeek = nextSession != null && (model.week_plan.isNotEmpty() || model.program != null)
+        // when a plan exists. While training is blocked the week stays in view,
+        // read-only (held days read "paused").
         if (showWeek) {
             item { SectionOverline(stringResource(R.string.main_overline_this_week)) }
             item {
@@ -223,25 +202,30 @@ internal fun TodayDestination(
                     weightUnit = weightUnit,
                     program = model.program,
                     // Nothing logged yet: the week card's last line.
-                    footnote = if (!hasAnything) stringResource(R.string.main_today_empty) else null,
+                    footnote = if (!blocked && !hasAnything) stringResource(R.string.main_today_empty) else null,
                     painArea = painArea,
                     onRemovePlan = { confirmRemovePlan = true },
-                    actions = WeekActions(
-                        onLogItem = onLogPastItem,
-                        onLogRun = onLogPastRun,
-                        onEndExercise = { item, day -> endExerciseWithUndo(res, item, day, onEvent) },
-                        onReopen = { item, day -> reopenExercise(item, day, onEvent) },
-                        onMove = moveSession,
-                    ),
-                    heroDay = nextSession.epoch_day,
+                    actions = if (blocked) {
+                        null
+                    } else {
+                        WeekActions(
+                            onLogItem = onLogPastItem,
+                            onLogRun = onLogPastRun,
+                            onEndExercise = { item, day -> endExerciseWithUndo(res, item, day, onEvent) },
+                            onReopen = { item, day -> reopenExercise(item, day, onEvent) },
+                            onMove = moveSession,
+                        )
+                    },
+                    heroDay = if (blocked) -1L else nextSession?.epoch_day ?: -1L,
                     selectedDay = weekSelectedDay,
                     onSelectDay = { weekSelectedDay = it },
                 )
             }
         }
-
-        // Nothing yet and no week card to carry the hint.
-        if (!hasAnything && !showWeek) {
+    }
+    // Nothing yet and no week card to carry the hint.
+    val emptyHint: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
+        if (!blocked && !hasAnything && !showWeek) {
             item {
                 Text(
                     stringResource(R.string.main_today_empty),
@@ -250,11 +234,56 @@ internal fun TodayDestination(
                 )
             }
         }
-
-        // Progress: the e1RM trend of the plan's main lift, the last section.
-        if (trend != null && showLifting) {
+    }
+    // Progress: the e1RM trend of the plan's main lift, the last section.
+    val progressItems: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
+        if (showProgress && trend != null) {
             item { SectionOverline(stringResource(R.string.main_overline_progress)) }
             item { E1rmTrendCard(trend, weightUnit) }
+        }
+    }
+
+    val layout = LocalWindowLayout.current
+    // The Log FAB floats over a phone's list; with the side rail Log is the rail's.
+    val bottomClearance = if (layout.navRail) Space.Lg.dp else TodayFabClearance
+    val listSpacing = Arrangement.spacedBy(Space.Screen.dp)
+    if (layout.twoPane && (showWeek || showProgress)) {
+        TwoPaneRow(
+            first = {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f).fillMaxSize().testTag("today-session-pane"),
+                    contentPadding = PaddingValues(start = Space.Screen.dp, end = Space.Md.dp, top = Space.Screen.dp, bottom = bottomClearance),
+                    verticalArrangement = listSpacing,
+                ) {
+                    sessionItems()
+                    emptyHint()
+                }
+            },
+            second = {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxSize().testTag("today-week-pane"),
+                    contentPadding = PaddingValues(start = Space.Md.dp, end = Space.Screen.dp, top = Space.Screen.dp, bottom = bottomClearance),
+                    verticalArrangement = listSpacing,
+                ) {
+                    weekItems()
+                    progressItems()
+                }
+            },
+        )
+    } else {
+        ReadableWidth { gutter ->
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = gutter, end = gutter, top = Space.Screen.dp, bottom = bottomClearance),
+                verticalArrangement = listSpacing,
+            ) {
+                sessionItems()
+                weekItems()
+                emptyHint()
+                progressItems()
+            }
         }
     }
 

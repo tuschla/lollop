@@ -530,6 +530,7 @@ fun LogSetEditor(
         onClose = if (plannedLoop) onDone else onClose,
         keepOpenAfterSave = loop,
         actionLabel = primaryLabel,
+        controlsBeside = true,
         onSave = {
             when (primary) {
                 LoopPrimary.Next -> nextItem?.let { reseedTo(it.exercise, markDirty = false) }

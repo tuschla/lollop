@@ -31,7 +31,10 @@ import kotlinx.coroutines.flow.asStateFlow
  * (always below Android 12), else inexact: the system may deliver it late.
  */
 internal object RestAlarm {
-    private const val CHANNEL_COUNTDOWN = "rest_countdown"
+    internal const val CHANNEL_COUNTDOWN = "rest_live"
+
+    /** The countdown's channel before it moved to [ensureLiveChannel] (IMPORTANCE_LOW). */
+    private const val RETIRED_CHANNEL_COUNTDOWN = "rest_countdown"
     private const val CHANNEL_DONE = "rest_done"
     // The countdown and the rest-done alert have their own ids: the countdown's
     // timeout (the rest end) can fire just after the alert is posted, and the
@@ -208,6 +211,7 @@ internal object RestAlarm {
         ensureChannels(app)
         val b = NotificationCompat.Builder(app, CHANNEL_DONE)
             .setSmallIcon(R.drawable.ic_stat_mark)
+            .setColor(notificationAccent(app))
             .setContentTitle(app.getString(R.string.log_rest_notif_done_title))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
@@ -234,6 +238,8 @@ internal object RestAlarm {
         val text = countdownText(res, run.exercise, nextSet)
         val b = NotificationCompat.Builder(app, CHANNEL_COUNTDOWN)
             .setSmallIcon(R.drawable.ic_stat_mark)
+            .setColor(notificationAccent(app))
+            .setCategory(NotificationCompat.CATEGORY_WORKOUT)
             .setContentTitle(res.getString(R.string.log_rest_notif_title, run.exercise))
             // A live countdown chronometer to the rest end (system wall time);
             // a promoted Live Update shows it in the status-bar chip. System UI
@@ -289,17 +295,12 @@ internal object RestAlarm {
         _exactAlarmPrompt.value = false
     }
 
-    // Both channels stay above IMPORTANCE_MIN, which a Live Update can't use.
+    // The countdown's channel shows on the lock screen without a sound
+    // ([ensureLiveChannel]); the rest-done alert's is the one that alerts.
     private fun ensureChannels(app: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = app.getSystemService(NotificationManager::class.java) ?: return
-        nm.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_COUNTDOWN,
-                app.getString(R.string.log_rest_channel_countdown),
-                NotificationManager.IMPORTANCE_LOW,
-            ),
-        )
+        ensureLiveChannel(app, CHANNEL_COUNTDOWN, app.getString(R.string.log_rest_channel_countdown), RETIRED_CHANNEL_COUNTDOWN)
         nm.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_DONE,

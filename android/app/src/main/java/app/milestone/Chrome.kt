@@ -1,6 +1,7 @@
 package app.milestone
 
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,24 +11,33 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailDefaults
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.SheetState
@@ -35,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -179,30 +190,53 @@ fun MilestoneNavBar(selected: Dest, onSelect: (Dest) -> Unit) {
 /**
  * Side navigation rail: [MilestoneNavBar]'s three destinations (same icons,
  * labels and colours) down the start edge, with Log ([onLog], Today only, as the
- * FAB is) at its top. Used instead of the bottom bar and the Log FAB when they
- * would be laid over the pinned safety banner (a landscape phone under a hold):
- * beside the banner, never over it.
+ * FAB is) at its top. Used instead of the bottom bar and the Log FAB on a wide or
+ * a short window, and whenever they would be laid over the pinned safety banner
+ * (a landscape phone under a hold): beside the banner, never over it. With
+ * [showBrand] (a short window, where the wordmark bar is left out) the route mark
+ * tops the rail.
  */
 @Composable
-fun MilestoneNavRail(selected: Dest, onSelect: (Dest) -> Unit, onLog: (() -> Unit)?) {
+fun MilestoneNavRail(selected: Dest, onSelect: (Dest) -> Unit, onLog: (() -> Unit)?, showBrand: Boolean = false) {
     val logLabel = stringResource(R.string.main_log)
-    NavigationRail(
-        modifier = Modifier.testTag("nav-rail"),
-        containerColor = BgTop,
-        header = onLog?.let { log ->
-            {
-                FloatingActionButton(
-                    onClick = log,
-                    modifier = Modifier.testTag("log-fab").semantics { contentDescription = logLabel },
-                    containerColor = Accent,
-                    contentColor = OnAccent,
-                    shape = RoundedCornerShape(Space.Card.dp),
-                ) {
-                    Icon(painterResource(R.drawable.ic_action_log_plus), contentDescription = null, modifier = Modifier.size(20.dp))
-                }
-            }
-        },
+    // Material's NavigationRail puts its header inside the destinations' pick-one
+    // group, so TalkBack read Log as a fourth tab; Log and the mark sit above the
+    // group instead.
+    Column(
+        modifier = Modifier
+            .testTag("nav-rail")
+            .fillMaxHeight()
+            .background(BgTop)
+            .windowInsetsPadding(NavigationRailDefaults.windowInsets)
+            .widthIn(min = RailWidth)
+            .padding(vertical = Space.Sm.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
+        if (showBrand) {
+            Icon(
+                painterResource(R.drawable.ic_brand_mark),
+                contentDescription = null,
+                tint = Accent,
+                modifier = Modifier.padding(vertical = Space.Md.dp).size(BrandMarkSize).testTag("rail-brand"),
+            )
+        }
+        onLog?.let { log ->
+            FloatingActionButton(
+                onClick = log,
+                modifier = Modifier.padding(bottom = Space.Md.dp).testTag("log-fab").semantics { contentDescription = logLabel },
+                containerColor = Accent,
+                contentColor = OnAccent,
+                shape = RoundedCornerShape(Space.Card.dp),
+            ) {
+                Icon(painterResource(R.drawable.ic_action_log_plus), contentDescription = null, modifier = Modifier.size(20.dp))
+            }
+        }
+        Column(
+            modifier = Modifier.selectableGroup(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Space.Sm.dp),
+        ) {
         Dest.entries.forEach { dest ->
             val active = dest == selected
             NavigationRailItem(
@@ -230,8 +264,12 @@ fun MilestoneNavRail(selected: Dest, onSelect: (Dest) -> Unit, onLog: (() -> Uni
                 ),
             )
         }
+        }
     }
 }
+
+/** Width of [MilestoneNavRail] (Material's rail). */
+private val RailWidth = 80.dp
 
 /**
  * Run-in-progress chip (chrome §4): pinned just above the nav bar on every
@@ -295,7 +333,10 @@ private fun SheetNavBarScrim() {
  * The app's bottom sheet: fully expanded by default, so Back and a swipe close it
  * in one step (a half-height detent made Back collapse it first), on the sheet
  * ground [BgSunken] unless [containerColor] says otherwise, with
- * [SheetNavBarScrim] applied.
+ * [SheetNavBarScrim] applied. A short window (a phone in landscape) leaves the
+ * drag handle out and gives its 48dp to the content: the set logger's keypad
+ * column, Done and Save need it there. The sheet still drags by its body, and
+ * the scrim and Back close it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -306,15 +347,66 @@ internal fun AppSheet(
     sheetGesturesEnabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val shortHeight = LocalWindowLayout.current.shortHeight
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         modifier = Modifier.traversalGroup(),
         sheetState = sheetState,
         sheetGesturesEnabled = sheetGesturesEnabled,
         containerColor = containerColor,
+        dragHandle = if (shortHeight) null else ({ BottomSheetDefaults.DragHandle() }),
     ) {
         SheetNavBarScrim()
+        if (shortHeight) Spacer(Modifier.height(Space.Md.dp))
         content()
+    }
+}
+
+/** The pane a two-pane screen (History) offers its detail; null under one column. */
+internal val LocalDetailDock = staticCompositionLocalOf<SlotDock?> { null }
+
+/**
+ * An entry's detail: an [AppSheet] on one column; on a two-pane screen
+ * ([LocalDetailDock]) the same body stands in the detail pane beside the list,
+ * on the sheet ground [BgSunken] (every entry kind alike) with a close row on
+ * top. Back and the close button both call [onDismiss], as the sheet's swipe and
+ * scrim do.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun DetailSheet(
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val dock = LocalDetailDock.current
+    if (dock == null) {
+        AppSheet(onDismiss = onDismiss, content = content)
+        return
+    }
+    Docked(dock) {
+        BackHandler(onBack = onDismiss)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(topStart = Space.Card.dp, topEnd = Space.Card.dp))
+                .background(BgSunken)
+                .testTag("detail-pane")
+                .traversalGroup(),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = Space.Sm.dp, vertical = Space.Sm.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                IconButton(onClick = onDismiss, modifier = Modifier.testTag("detail-pane-close")) {
+                    Icon(
+                        painterResource(R.drawable.ic_ui_close),
+                        contentDescription = stringResource(R.string.main_close),
+                        tint = OnBgMuted,
+                    )
+                }
+            }
+            content()
+        }
     }
 }
 
