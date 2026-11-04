@@ -283,7 +283,7 @@ suspend fun replaceEventLog(ctx: Context, lines: List<String>): DataImportResult
     if (RunSession.tracking.value || RunSession.armed.value) return DataImportResult.RunInProgress
     return try {
         EventDispatcher.exclusive {
-            withContext(CoreJniDispatcher + NonCancellable) {
+            withContext(CoreDispatcher + NonCancellable) {
                 val previous = Core.detachLog()
                 try {
                     swapLogFile(ctx.filesDir, lines)

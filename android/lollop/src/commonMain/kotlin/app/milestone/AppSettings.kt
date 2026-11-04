@@ -1,8 +1,5 @@
 package app.milestone
 
-import android.content.Context
-import android.content.SharedPreferences
-import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /** Default live-tracking pace bucket, in minutes (AppSettings and RunSession). */
@@ -24,7 +21,8 @@ enum class DarkMode {
  * Shell preferences persisted outside the core: appearance (theme, dark mode,
  * dynamic accent), units, route maps, the tracker's pace bucket and keep-screen-on,
  * and the rest alert. They are shell chrome, not coaching state, so they do not
- * belong in the event log. Backed by SharedPreferences; each one is exposed as a
+ * belong in the event log. Backed by a [KeyValueStore] (SharedPreferences on
+ * Android, NSUserDefaults on iOS); each one is exposed as a
  * flow so composables recompose when the user flips it.
  */
 object AppSettings {
@@ -70,7 +68,7 @@ object AppSettings {
     // notification plays the channel's sound/vibration. Off = a silent cue only.
     val restAlert = MutableStateFlow(true)
 
-    fun load(ctx: Context) {
+    fun load(ctx: PlatformContext) {
         val prefs = prefs(ctx)
         if (!prefs.contains(KEY_THEME)) pinFirstTheme(ctx)
         dynamicAccent.value = prefs.getBoolean(KEY_DYNAMIC, false)
@@ -93,9 +91,9 @@ object AppSettings {
      * from before Paper became the default, that never saved a theme, keeps what
      * it rendered: Rose with its saved (or the old default-off) accent.
      */
-    private fun pinFirstTheme(ctx: Context) {
+    private fun pinFirstTheme(ctx: PlatformContext) {
         val prefs = prefs(ctx)
-        val existingInstall = eventLogFile(ctx.filesDir).exists()
+        val existingInstall = ctx.hasEventLog()
         prefs.edit {
             putString(KEY_THEME, (if (existingInstall) AppTheme.Rose else AppTheme.Paper).name)
             putBoolean(KEY_DYNAMIC, prefs.getBoolean(KEY_DYNAMIC, !existingInstall))
@@ -103,12 +101,12 @@ object AppSettings {
     }
 
     /** Set [flow] to [value] and persist it with [write]. */
-    private fun <T> set(ctx: Context, flow: MutableStateFlow<T>, value: T, write: SharedPreferences.Editor.() -> Unit) {
+    private fun <T> set(ctx: PlatformContext, flow: MutableStateFlow<T>, value: T, write: KeyValueStore.Editor.() -> Unit) {
         flow.value = value
-        prefs(ctx).edit(action = write)
+        prefs(ctx).edit(block = write)
     }
 
-    fun setDynamicAccent(ctx: Context, enabled: Boolean) =
+    fun setDynamicAccent(ctx: PlatformContext, enabled: Boolean) =
         set(ctx, dynamicAccent, enabled) { putBoolean(KEY_DYNAMIC, enabled) }
 
     /**
@@ -118,7 +116,7 @@ object AppSettings {
      * user can still flip the toggle afterwards; re-picking the current theme
      * leaves it alone.
      */
-    fun setTheme(ctx: Context, selected: AppTheme) {
+    fun setTheme(ctx: PlatformContext, selected: AppTheme) {
         val prefs = prefs(ctx)
         val changed = prefs.getString(KEY_THEME, null) != selected.name
         val dynamic = selected == AppTheme.Paper
@@ -130,23 +128,23 @@ object AppSettings {
         }
     }
 
-    fun setDarkMode(ctx: Context, mode: DarkMode) =
+    fun setDarkMode(ctx: PlatformContext, mode: DarkMode) =
         set(ctx, darkMode, mode) { putString(KEY_DARKMODE, mode.name) }
 
-    fun setPaceBucketMinutes(ctx: Context, n: Int) =
+    fun setPaceBucketMinutes(ctx: PlatformContext, n: Int) =
         set(ctx, paceBucketMinutes, n) { putInt(KEY_PACE_BUCKET, n) }
 
-    fun setDistanceUnitOverride(ctx: Context, override: DistanceUnitOverride) =
+    fun setDistanceUnitOverride(ctx: PlatformContext, override: DistanceUnitOverride) =
         set(ctx, distanceUnitOverride, override) { putString(KEY_DISTANCE_UNIT, override.name) }
 
-    fun setShowRouteMaps(ctx: Context, enabled: Boolean) =
+    fun setShowRouteMaps(ctx: PlatformContext, enabled: Boolean) =
         set(ctx, showRouteMaps, enabled) { putBoolean(KEY_SHOW_MAPS, enabled) }
 
-    fun setKeepScreenOn(ctx: Context, enabled: Boolean) =
+    fun setKeepScreenOn(ctx: PlatformContext, enabled: Boolean) =
         set(ctx, keepScreenOn, enabled) { putBoolean(KEY_KEEP_SCREEN_ON, enabled) }
 
-    fun setRestAlert(ctx: Context, enabled: Boolean) =
+    fun setRestAlert(ctx: PlatformContext, enabled: Boolean) =
         set(ctx, restAlert, enabled) { putBoolean(KEY_REST_ALERT, enabled) }
 
-    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun prefs(ctx: PlatformContext) = ctx.keyValueStore(PREFS)
 }

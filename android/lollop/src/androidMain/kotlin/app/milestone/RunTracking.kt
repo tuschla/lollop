@@ -13,7 +13,6 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
-import android.os.SystemClock
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -460,10 +459,10 @@ fun RunTrackingScreen(
                 send = {
                     // Route the persist through the serial consumer as ONE exclusive
                     // turn (no queued event interleaves with it); the JNI itself still
-                    // runs on CoreJniDispatcher. runSaveCriticalSection's NonCancellable
+                    // runs on CoreDispatcher. runSaveCriticalSection's NonCancellable
                     // wrapper protects the await, so a rotation can't cancel the save.
                     EventDispatcher.exclusive {
-                        withContext(CoreJniDispatcher) {
+                        withContext(CoreDispatcher) {
                             // The run type and whole-session effort the runner picked on
                             // the Finish review (both optional, null = not given; never
                             // fabricated). A tracked run also derives its measured
@@ -775,7 +774,7 @@ fun RunTrackingScreen(
                                 item = item,
                                 progress = stepProgress,
                                 unit = unit,
-                                onSkip = { RunSession.skipStep(SystemClock.elapsedRealtime()) },
+                                onSkip = { RunSession.skipStep(monotonicMillis()) },
                             )
                         }
                     }
@@ -934,12 +933,6 @@ private fun requestIgnoreBatteryOptimizations(ctx: Context) = ctx.openFirst(
     Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).setData(Uri.fromParts("package", ctx.packageName, null)),
     Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
 )
-
-/** The "Precise start" gate's accuracy bound (m): recording only begins on a fix at
- *  or under this. Typical post-lock consumer GPS is 5–15 m open sky, so 20 m is a
- *  trustworthy start anchor without being unachievable under light tree/building
- *  cover. Consumed by [ArmTrigger]'s precise gate (RunSession.kt). */
-internal const val GPS_PRECISE_ACCURACY_M = 20.0
 
 /** SharedPreferences keys (the [SETUP_PREFS] prefs, [KEY_PLAN_CLEARED] idiom) for
  *  the two optional, stackable start gates, both default false. */
@@ -1134,7 +1127,7 @@ internal fun singleStepPlanKm(item: PrescriptionView): Double? {
 internal fun runPlanHeadline(item: PrescriptionView, unit: DistanceUnit): String {
     val km = item.run_head_km
     val leadShown = if (km != null) {
-        "${trimDecimal(Math.round(metersToDisplay(km * 1000.0, unit) * 10.0) / 10.0)} ${unit.distanceLabel}"
+        "${trimDecimal((metersToDisplay(km * 1000.0, unit) * 10.0).roundOrZero() / 10.0)} ${unit.distanceLabel}"
     } else {
         item.face_lead
     }
@@ -1220,11 +1213,6 @@ internal fun trackSegments(points: List<GpsPoint>, segmentStarts: Collection<Int
     if (seg.isNotEmpty()) out += seg
     return out
 }
-
-/** Great-circle distance between two consecutive fixes, km ([haversineM]), for the
- *  live accumulator ([RunSession.add]), recovery ([RunSession.restore]), the pace
- *  slices and the start-on-move gate. */
-internal fun segmentKm(a: GpsPoint, b: GpsPoint): Double = haversineM(a.lat, a.lon, b.lat, b.lon) / 1000.0
 
 /** True when the system-wide location toggle is on. A fine-location grant alone
  *  delivers no fixes while location services are disabled, so the tracking UI

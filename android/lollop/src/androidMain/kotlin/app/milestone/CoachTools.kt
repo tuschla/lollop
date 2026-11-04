@@ -46,8 +46,8 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.math.abs
 
 /** The four on-demand Coach calculators, launched from the Profile calculator rows. */
 internal enum class CoachTool(@StringRes val titleRes: Int) {
@@ -303,7 +303,7 @@ internal fun CoachToolSheet(
                 val profileBw = model.profile?.bodyweight_kg
                 val formBw = model.protein_input?.bodyweight_kg
                 val divergence = if (profileBw != null && formBw != null &&
-                    Math.abs(formBw - profileBw) >= 0.05
+                    abs(formBw - profileBw) >= 0.05
                 ) {
                     stringResource(R.string.main_differs_from_profile, weightFigure(profileBw, weightUnit), weightSuffix(weightUnit))
                 } else {
@@ -559,7 +559,7 @@ private const val HrZonesRhrSeedBpm = 60
  * echo like 22:59.7 rehydrates as 23:00 instead of an invalid "60"-second buffer.
  */
 internal fun raceTimeSeed(recentTimeSec: Double): Pair<String, String> {
-    val total = Math.round(recentTimeSec)
+    val total = recentTimeSec.roundOrZero()
     return (total / 60).toString() to (total % 60).toString()
 }
 
@@ -600,7 +600,7 @@ fun RacePredictorForm(
     // in the display unit, canonical km on the wire (converted at save via miToKmWire).
     val unit = rememberDistanceUnit()
     val seedKm = initial?.let {
-        String.format(Locale.US, "%.0f", if (unit == DistanceUnit.Mi) kmToMi(it.weekly_km) else it.weekly_km)
+        formatFixed(if (unit == DistanceUnit.Mi) kmToMi(it.weekly_km) else it.weekly_km, 0)
     } ?: (if (unit == DistanceUnit.Mi) WeeklyVolumeSeedMi else WeeklyVolumeSeedKm)
     var minText by rememberSaveable { mutableStateOf(seedMin) }
     var secText by rememberSaveable { mutableStateOf(seedSec) }
@@ -643,7 +643,7 @@ fun RacePredictorForm(
             stringResource(R.string.log_field_recent_min), stringResource(R.string.log_unit_min), minText,
             active = keypadOpen && active == RaceField.Minutes,
             invalid = !minValid,
-            min = RaceMinutesRange.start, max = RaceMinutesRange.endInclusive, format = "%.0f",
+            min = RaceMinutesRange.start, max = RaceMinutesRange.endInclusive, decimals = 0,
             adjustments = listOf(-1.0, 1.0, 5.0),
             onActivate = { active = RaceField.Minutes; fresh = true; onKeypad(true) },
             onText = { minText = it; fresh = false; onKeypad(false) },
@@ -652,7 +652,7 @@ fun RacePredictorForm(
             stringResource(R.string.log_field_recent_sec), stringResource(R.string.log_unit_sec), secText,
             active = keypadOpen && active == RaceField.Seconds,
             invalid = !secValid,
-            min = 0.0, max = 59.0, format = "%.0f",
+            min = 0.0, max = 59.0, decimals = 0,
             adjustments = listOf(-5.0, 5.0),
             onActivate = { active = RaceField.Seconds; fresh = true; onKeypad(true) },
             onText = { secText = it; fresh = false; onKeypad(false) },
@@ -665,7 +665,7 @@ fun RacePredictorForm(
             stringResource(R.string.log_field_weekly_volume), unit.distanceLabel, kmText,
             active = keypadOpen && active == RaceField.Volume,
             invalid = !kmValid,
-            min = 0.0, max = kmMax, format = "%.0f",
+            min = 0.0, max = kmMax, decimals = 0,
             adjustments = listOf(-5.0, 5.0),
             onActivate = { active = RaceField.Volume; fresh = true; onKeypad(true) },
             onText = { kmText = it; fresh = false; onKeypad(false) },
@@ -884,7 +884,7 @@ fun ProteinForm(
             // An empty field is an invitation, not an error: the hint asks for
             // the weight and Compute stays off until one is typed.
             invalid = bwText.isNotBlank() && !bwValid,
-            min = bwBounds.start, max = bwBounds.endInclusive, format = "%.1f",
+            min = bwBounds.start, max = bwBounds.endInclusive, decimals = 1,
             adjustments = plateSteps(weightUnit),
             onActivate = { fresh = true; onKeypad(true) },
             onText = { bwText = it; fresh = false; untouchedSinceOpen = false; onKeypad(false) },
@@ -948,7 +948,7 @@ fun HrZonesForm(
     // age, then the plain default; enter your age once on Profile, prefilled here.
     var ageText by rememberSaveable {
         val seed = initial?.age_years ?: profileAgeYears
-        mutableStateOf(seed?.let { String.format(Locale.US, "%.0f", it) } ?: HrZonesAgeSeed)
+        mutableStateOf(seed?.let { formatFixed(it, 0) } ?: HrZonesAgeSeed)
     }
     var fresh by rememberSaveable { mutableStateOf(true) }
     // Optional resting HR. Seeded from the echoed query, then the profile.
@@ -966,7 +966,7 @@ fun HrZonesForm(
             stringResource(R.string.log_field_age), stringResource(R.string.log_unit_years), ageText,
             active = keypadOpen,
             invalid = !ageValid,
-            min = TanakaAgeRange.start, max = TanakaAgeRange.endInclusive, format = "%.0f",
+            min = TanakaAgeRange.start, max = TanakaAgeRange.endInclusive, decimals = 0,
             adjustments = listOf(-1.0, 1.0),
             onActivate = { fresh = true; onKeypad(true) },
             onText = { ageText = it; fresh = false; onKeypad(false) },

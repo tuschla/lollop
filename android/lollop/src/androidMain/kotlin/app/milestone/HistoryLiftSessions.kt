@@ -35,14 +35,10 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import java.time.Instant
-import java.time.ZoneId
+import kotlin.math.abs
+import kotlinx.datetime.TimeZone
 
 // ── Lift sessions (History "Lifts" stream) ─────────────────────────────────
-
-/** Local calendar day (days since the epoch in [zone]) of a unix-seconds stamp. */
-internal fun localEpochDay(epochSec: Long, zone: ZoneId): Long =
-    Instant.ofEpochSecond(epochSec).atZone(zone).toLocalDate().toEpochDay()
 
 /**
  * One lifting session in History: every set logged on one local calendar day.
@@ -68,7 +64,7 @@ internal data class LiftSession(val epochDay: Long?, val sets: List<LiftResultVi
  * sets form one trailing group. Bucketing uses the device [zone] (shell-side, so
  * the core stays clock- and zone-free), so a DST shift never splits one day.
  */
-internal fun groupLiftSessions(lifts: List<LiftResultView>, zone: ZoneId): List<LiftSession> {
+internal fun groupLiftSessions(lifts: List<LiftResultView>, zone: TimeZone): List<LiftSession> {
     val byDay = HashMap<Long, MutableList<LiftResultView>>()
     val undated = ArrayList<LiftResultView>()
     for (l in lifts) {
@@ -92,7 +88,7 @@ internal fun groupLiftSessions(lifts: List<LiftResultView>, zone: ZoneId): List<
 internal fun historyActivityDays(
     lifts: List<LiftResultView>,
     runs: List<RunResultView>,
-    zone: ZoneId,
+    zone: TimeZone,
 ): Map<Long, DayActivity> {
     val days = HashMap<Long, DayActivity>()
     for (l in lifts) {
@@ -240,7 +236,7 @@ private fun LiftSession.firstE1rmIndex(): Int = exercises.indexOfFirst { bestE1r
 @Composable
 private fun e1rmChangeLabels(deltaKg: Double, sessions: Int, weightUnit: WeightUnit): Pair<String, String> {
     val shown = if (weightUnit == WeightUnit.Lb) kgToLb(deltaKg) else deltaKg
-    val rounded = Math.round(Math.abs(shown) * 10.0) / 10.0
+    val rounded = (abs(shown) * 10.0).roundOrZero() / 10.0
     if (rounded == 0.0) {
         return pluralStringResource(R.plurals.history_e1rm_flat_pill, sessions, sessions) to
             pluralStringResource(R.plurals.history_e1rm_flat, sessions, sessions)
@@ -258,7 +254,7 @@ private fun sessionVolume(sets: List<LiftResultView>, weightUnit: WeightUnit): S
     val kg = sets.sumOf { it.tonnage_kg }
     if (kg <= 0.0) return null
     val shown = if (weightUnit == WeightUnit.Lb) kgToLb(kg) else kg
-    return groupedFigure(Math.round(shown))
+    return groupedFigure(shown.roundOrZero())
 }
 
 /** The hairline that keeps a non-safety evidence card readable as a card on the

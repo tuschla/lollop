@@ -30,8 +30,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
-import java.time.Instant
-import java.time.ZoneId
+import kotlin.time.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 // ── Run cards (History "Runs" stream) ───────────────────────────────────────
 
@@ -54,8 +55,11 @@ internal fun runTitle(r: RunResultView): String {
     }
     if (tagged != null) return stringResource(tagged)
     if (r.started_at <= 0L) return stringResource(R.string.main_run)
-    val weekday = Instant.ofEpochSecond(r.started_at).atZone(ZoneId.systemDefault()).dayOfWeek
-        .getDisplayName(java.time.format.TextStyle.FULL, appLocale(LocalConfiguration.current.locales))
+    val weekday = weekdayName(
+        Instant.fromEpochSeconds(r.started_at).toLocalDateTime(TimeZone.currentSystemDefault()).dayOfWeek,
+        WeekdayWidth.Full,
+        appLocale(LocalConfiguration.current.locales),
+    )
     return stringResource(R.string.history_run_weekday, weekday)
 }
 
@@ -75,7 +79,7 @@ internal fun runDateChip(r: RunResultView, nowMillis: Long): String = formatLogD
 internal fun runDaySec(r: RunResultView): Long = r.started_at.takeIf { it > 0L } ?: r.observed_at
 
 /** The local calendar day a run belongs to ([runDaySec] in [zone]); null when undated. */
-internal fun runLocalDay(r: RunResultView, zone: ZoneId): Long? =
+internal fun runLocalDay(r: RunResultView, zone: TimeZone): Long? =
     runDaySec(r).takeIf { it > 0L }?.let { localEpochDay(it, zone) }
 
 /** History's run stream, newest first by [runDaySec] (the core lists runs by their
@@ -86,12 +90,12 @@ internal fun historyRunStream(runs: List<RunResultView>): List<RunResultView> =
     runs.asReversed().sortedByDescending { runDaySec(it) }
 
 /** The latest-logged run that started on local [day] (a heatmap cell opens it), or null. */
-internal fun latestRunOnDay(runs: List<RunResultView>, day: Long, zone: ZoneId): RunResultView? =
+internal fun latestRunOnDay(runs: List<RunResultView>, day: Long, zone: TimeZone): RunResultView? =
     runs.lastOrNull { runLocalDay(it, zone) == day }
 
 /** Total distance per local day the runs started on (undated and zero-distance rows
  *  left out): History's daily distance chart. */
-internal fun runKmByDay(runs: List<RunResultView>, zone: ZoneId): Map<Long, Double> {
+internal fun runKmByDay(runs: List<RunResultView>, zone: TimeZone): Map<Long, Double> {
     val m = HashMap<Long, Double>()
     for (r in runs) {
         if (r.distance_km <= 0.0) continue
@@ -111,7 +115,7 @@ internal fun recordRun(runs: List<RunResultView>, entryId: Long?, observedAt: Lo
 @Composable
 internal fun runFaceLine(r: RunResultView, unit: DistanceUnit): String {
     val base = "${runDistLabel(r.distance_km, unit)} · ${runPaceLabel(r.distance_km, r.duration_min, unit)}"
-    return if (r.duration_min > 0.0) "$base · ${formatElapsed(Math.round(r.duration_min * 60.0))}" else base
+    return if (r.duration_min > 0.0) "$base · ${formatElapsed((r.duration_min * 60.0).roundOrZero())}" else base
 }
 
 // ── Records, run rating and run progress ────────────────────────────────────

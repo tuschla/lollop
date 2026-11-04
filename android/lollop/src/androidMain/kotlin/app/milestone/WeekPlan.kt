@@ -45,31 +45,31 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import java.util.Locale
+import kotlinx.datetime.DayOfWeek
+import kotlinx.datetime.LocalDate
 
 /** A plan day's short date in the app's language ([appLocale]: "Thu, Oct 15"). */
 internal fun planDateLabel(epochDay: Long): String =
-    java.time.LocalDate.ofEpochDay(epochDay).format(localizedDayFormatter("EEEMMMd"))
+    localizedDayFormatter("EEEMMMd").format(LocalDate.fromEpochDays(epochDay))
 
 /** Two-letter weekday for the week strip (Mo Tu We Th Fr Sa Su), unambiguous
  *  where a single narrow initial collides (M/T/T, S/S). */
 private fun weekdayShort(epochDay: Long): String = when (
-    java.time.LocalDate.ofEpochDay(epochDay).dayOfWeek
+    LocalDate.fromEpochDays(epochDay).dayOfWeek
 ) {
-    java.time.DayOfWeek.MONDAY -> "Mo"
-    java.time.DayOfWeek.TUESDAY -> "Tu"
-    java.time.DayOfWeek.WEDNESDAY -> "We"
-    java.time.DayOfWeek.THURSDAY -> "Th"
-    java.time.DayOfWeek.FRIDAY -> "Fr"
-    java.time.DayOfWeek.SATURDAY -> "Sa"
-    java.time.DayOfWeek.SUNDAY -> "Su"
+    DayOfWeek.MONDAY -> "Mo"
+    DayOfWeek.TUESDAY -> "Tu"
+    DayOfWeek.WEDNESDAY -> "We"
+    DayOfWeek.THURSDAY -> "Th"
+    DayOfWeek.FRIDAY -> "Fr"
+    DayOfWeek.SATURDAY -> "Sa"
+    DayOfWeek.SUNDAY -> "Su"
 }
 
 /** Weekday name (e.g. "Monday") for the week-strip accessibility description, in
  *  the app's language ([appLocale]) like the rest of the spoken phrase. */
 private fun weekdayFull(epochDay: Long): String =
-    java.time.LocalDate.ofEpochDay(epochDay).dayOfWeek
-        .getDisplayName(java.time.format.TextStyle.FULL, appLocale())
+    weekdayName(LocalDate.fromEpochDays(epochDay).dayOfWeek, WeekdayWidth.Full, appLocale())
 
 /** Plain-language week-strip day status for the accessibility description. */
 // l10n: needs context plumbing (pure display helper, no Context; multi-branch copy)
@@ -372,7 +372,7 @@ internal fun ThisWeekCard(
 private fun MuscleVolumeSection(prog: ProgramSummaryView) {
     var expanded by rememberSaveable(prog.name) { mutableStateOf(false) }
     // Whole sets on the face: fractional counting stays the core's arithmetic.
-    val sets = { m: MuscleVolumeView -> Math.round(m.delivered_sets) }
+    val sets = { m: MuscleVolumeView -> m.delivered_sets.roundOrZero() }
     // target_sets 0 = no direct target: never "short", shown as the bare count.
     val isShort = { m: MuscleVolumeView -> m.target_sets > 0 && sets(m) < m.target_sets }
     val short = prog.muscle_volume.filter(isShort)
@@ -381,7 +381,7 @@ private fun MuscleVolumeSection(prog: ProgramSummaryView) {
     } else {
         stringResource(
             R.string.main_muscle_volume_short,
-            short.joinToString(", ") { it.muscle.replaceFirstChar { c -> c.lowercase(Locale.US) } },
+            short.joinToString(", ") { it.muscle.replaceFirstChar { c -> c.lowercase() } },
         )
     }
     ChevronRow(
@@ -441,7 +441,7 @@ private fun planPlainLabel(prog: ProgramSummaryView): String {
         "Peak" -> "hardest weeks"
         "Taper" -> "easing off"
         "Deload" -> "lighter week"
-        else -> prog.phase.lowercase(Locale.US)
+        else -> prog.phase.lowercase()
     }
     return "${prog.name} · $phaseWord · week ${prog.week} of ${prog.weeks_total}"
 }
@@ -706,15 +706,4 @@ private fun WeekStripDay(
             }
         }
     }
-}
-
-/** Compact day-type token for the week strip, from the core's debug session_type
- *  ("Lift(MaxEffort)" / "Run(LongRun)" / "Rest"). Discipline-level so it fits a
- *  7-column strip; the full session title shows in the expanded day card. */
-// l10n: output doubles as a comparison key (== "Run"/"Lift"); localizing it would
-// break call-site logic. Needs decoupling of display from key before extraction.
-internal fun sessionDiscipline(sessionType: String): String = when {
-    sessionType.startsWith("Lift") -> "Lift"
-    sessionType.startsWith("Run") -> "Run"
-    else -> "Rest"
 }

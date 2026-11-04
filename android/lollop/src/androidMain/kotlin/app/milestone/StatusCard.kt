@@ -31,7 +31,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastMap
-import java.util.Locale
 
 /** The tone of a [StatusCard] (ui-sweep §0.3): which ring, mark tile and overline colour it wears. */
 enum class StatusTone { Info, Adjusted, Danger }
@@ -133,7 +132,7 @@ internal fun StatusCard(
                 Icon(icon, contentDescription = null, tint = colors.glyph, modifier = Modifier.size(StatusGlyphSize))
             }
             Text(
-                overline.uppercase(Locale.US),
+                overline.uppercase(),
                 color = colors.text,
                 style = Type.Overline,
                 modifier = Modifier.weight(1f),

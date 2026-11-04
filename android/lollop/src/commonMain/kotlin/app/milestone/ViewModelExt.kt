@@ -12,6 +12,17 @@ internal val SessionPlanView.actionable: Boolean get() = status == "next" || sta
 /** A finished session: every item done, or done lighter (`SessionStatus::is_done`). */
 internal val SessionPlanView.isDone: Boolean get() = status == "done" || status == "done_lighter"
 
+/** Compact day-type token for the week strip, from the core's debug session_type
+ *  ("Lift(MaxEffort)" / "Run(LongRun)" / "Rest"). Discipline-level so it fits a
+ *  7-column strip; the full session title shows in the expanded day card. */
+// l10n: output doubles as a comparison key (== "Run"/"Lift"); localizing it would
+// break call-site logic. Needs decoupling of display from key before extraction.
+internal fun sessionDiscipline(sessionType: String): String = when {
+    sessionType.startsWith("Lift") -> "Lift"
+    sessionType.startsWith("Run") -> "Run"
+    else -> "Rest"
+}
+
 /**
  * Priority sort for adjustments: safety-critical first, then strongest grade,
  * then confidence descending. Applied within one list (adjustments or review

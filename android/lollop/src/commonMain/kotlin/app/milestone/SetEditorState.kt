@@ -1,6 +1,5 @@
 package app.milestone
 
-import android.content.res.Resources
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 
@@ -107,11 +106,18 @@ internal fun nameKey(name: String): String {
     return buildString(t.length) {
         var i = 0
         while (i < t.length) {
-            val c = t.codePointAt(i)
-            i += Character.charCount(c)
-            val low = Character.toLowerCase(Character.toUpperCase(c))
-            val folded = asciiFold(c) ?: asciiFold(low)
-            if (folded != null) append(folded) else appendCodePoint(low)
+            val ch = t[i]
+            if (ch.isHighSurrogate() && i + 1 < t.length && t[i + 1].isLowSurrogate()) {
+                // A supplementary code point: no [asciiFold] spelling, and no case
+                // mapping of one expands, so the string round trip is its simple mapping.
+                append(t.substring(i, i + 2).uppercase().lowercase())
+                i += 2
+                continue
+            }
+            i++
+            val low = ch.uppercaseChar().lowercaseChar()
+            val folded = asciiFold(ch.code) ?: asciiFold(low.code)
+            if (folded != null) append(folded) else append(low)
         }
     }
 }
@@ -153,22 +159,6 @@ private fun asciiFold(c: Int): String? = if (c > 0xFFFF) null else when (c.toCha
 
 /** Whether two exercise names name the same exercise ([nameKey] on both). Pure. */
 internal fun sameExercise(a: String, b: String): Boolean = nameKey(a) == nameKey(b)
-
-/** Plain "reps left" for an RPE on the RIR-based scale: 10 → "0 reps left",
- *  9 → "1 rep left", 8 → "2 reps left", 6 or below → "4+ reps left", a half
- *  point → a range ("1–2 reps left"). Always says "reps", so it never reads as
- *  sets. The one wording for effort in the editor, the loop and History; [short]
- *  is History's set-table column ("2 left"), beside a load that already says what
- *  is counted. */
-internal fun repsLeftText(res: Resources, rpe: Double, short: Boolean = false): String {
-    val rir = repsLeft(rpe)
-    val n = rir.toInt()
-    return when {
-        rir >= 4.0 -> res.getString(if (short) R.string.history_set_left_4plus else R.string.log_reps_left_4plus)
-        rir % 1.0 == 0.0 -> res.getQuantityString(if (short) R.plurals.history_set_left else R.plurals.log_reps_left, n, n)
-        else -> res.getString(if (short) R.string.history_set_left_range else R.string.log_reps_left_range, n, n + 1)
-    }
-}
 
 /** What the set loop's pinned primary action does. */
 internal enum class LoopPrimary { Save, LogPlannedSet, LogOffPlanSet, LogBlank, LogExtraSet, Next, FinishSession }
@@ -254,14 +244,14 @@ internal fun warmUpSteps(workKg: Double, unit: WeightUnit, exercise: String): Li
     }
     if (workKg <= firstKg + 1e-6) return emptyList()
     val ramp = WarmUpRamp.map { (f, reps) ->
-        val kg = if (lb) lbToKgWire(Math.round(kgToLb(workKg * f) / 5.0) * 5.0) else Math.round(workKg * f / 2.5) * 2.5
+        val kg = if (lb) lbToKgWire((kgToLb(workKg * f) / 5.0).roundOrZero() * 5.0) else (workKg * f / 2.5).roundOrZero() * 2.5
         WarmUpStep(kg, reps)
     }.filter { it.kg > firstKg + 1e-6 && it.kg < workKg - 1e-6 }.distinctBy { it.kg }
     return listOf(WarmUpStep(firstKg, 5, bar = !floor)) + ramp
 }
 
 /** [kg] in lb rounded to the nearest half pound, without trailing zeros. */
-private fun halfPoundFigure(kg: Double): String = fmtLosslessPrefill(Math.round(kgToLb(kg) * 2.0) / 2.0)
+private fun halfPoundFigure(kg: Double): String = fmtLosslessPrefill((kgToLb(kg) * 2.0).roundOrZero() / 2.0)
 
 /** A load figure for the weight field, set lines and snackbars: lb in whole or
  *  half pounds, kg to at most two decimals, never a trailing ".0" ("135",
@@ -269,6 +259,15 @@ private fun halfPoundFigure(kg: Double): String = fmtLosslessPrefill(Math.round(
  *  from pounds (`230.0 / LB_PER_KG`) reads "104.33", never every digit. Pure. */
 internal fun loadFigure(kg: Double, unit: WeightUnit): String =
     if (unit == WeightUnit.Lb) halfPoundFigure(kg) else plateFigure(kg)
+
+/** A plate / load figure with up to two decimals and no trailing zeros
+ *  ("20", "2.5", "1.25"). Pure. */
+internal fun plateFigure(v: Double): String =
+    if (v % 1.0 == 0.0) "${v.toLong()}"
+    else formatFixed(v, 2).trimEnd('0').trimEnd('.')
+
+/** A keypad buffer as a number; null while it is empty or incomplete. */
+internal fun parseKeypadNumber(text: String): Double? = text.toDoubleOrNull()
 
 /** A ± chip's fixed-decimal result without trailing zeros ("295.0" → "295",
  *  "103.80" → "103.8"). Pure. */
@@ -350,9 +349,9 @@ internal fun prescriptionPrefill(p: PrescriptionView, weightUnit: WeightUnit, ap
         weightText = text,
         weightKgVerbatim = kg,
         // Band midpoints.
-        reps = if (p.reps_low > 0) Math.round((p.reps_low + maxOf(p.reps_low, p.reps_high)) / 2.0).toInt() else UnbandedRepsSeed,
+        reps = if (p.reps_low > 0) ((p.reps_low + maxOf(p.reps_low, p.reps_high)) / 2.0).roundOrZero().toInt() else UnbandedRepsSeed,
         holdSec = if (p.hold_low_sec > 0) {
-            Math.round((p.hold_low_sec + maxOf(p.hold_low_sec, p.hold_high_sec)) / 2.0).toInt()
+            ((p.hold_low_sec + maxOf(p.hold_low_sec, p.hold_high_sec)) / 2.0).roundOrZero().toInt()
                 .coerceIn(HoldSecRange.first, HoldSecRange.last)
         } else {
             UnbandedHoldSeed
@@ -547,7 +546,7 @@ internal fun nextOpenItem(items: List<PrescriptionView>, exercise: String): Pres
 /** Whether [kg] sits on the 0.01 kg wire grid every typed load is saved on
  *  ([lbToKgWire] for lb, the kg field's two decimals). A load off it was never
  *  entered by a lifter: the core's exact lb divisions (`230.0 / LB_PER_KG`). */
-private fun onKgWireGrid(kg: Double): Boolean = Math.round(kg * 100.0) / 100.0 == kg
+private fun onKgWireGrid(kg: Double): Boolean = (kg * 100.0).roundOrZero() / 100.0 == kg
 
 /** The wire kg an editor Save emits: 0 for a bodyweight rung; the seeded
  *  verbatim kg while the weight buffer is untouched ([weightFresh]) and that kg
@@ -568,33 +567,6 @@ internal fun resolveSaveWeightKg(
     weightFresh && weightVerbatim != null && onKgWireGrid(weightVerbatim) -> weightVerbatim
     else -> parseKeypadNumber(weightText)
         ?.let { if (weightUnit == WeightUnit.Lb) lbToKgWire(it) else it }
-}
-
-/** The primary History/line summary for a logged set. A timed hold renders its
- *  seconds ("30 s hold", "30 s hold · +10 kg" when loaded); a reps×load set
- *  renders "100 kg × 5", with " · 2 reps left" appended ONLY when an effort was
- *  recorded. A number and its unit never break across lines. Never fabricates
- *  an effort or a "0 kg × 1" hold. */
-internal fun liftSetLine(
-    res: Resources,
-    holdSec: Int?,
-    weightKg: Double,
-    reps: Int,
-    rpe: Double,
-    rpeRecorded: Boolean,
-    weightUnit: WeightUnit,
-): String {
-    val load = res.getString(R.string.log_value_with_unit, loadFigure(weightKg, weightUnit), weightSuffix(weightUnit))
-    return if (holdSec != null) {
-        if (weightKg > 0.0) {
-            res.getString(R.string.log_set_line_hold_loaded, holdSec, load)
-        } else {
-            res.getString(R.string.log_set_line_hold, holdSec)
-        }
-    } else {
-        val base = res.getString(R.string.log_set_line_reps, load, reps)
-        if (rpeRecorded) res.getString(R.string.log_set_line_effort, base, repsLeftText(res, rpe)) else base
-    }
 }
 
 /** Build the set event for the editor: a fresh [Event.LogSet] when adding, or an

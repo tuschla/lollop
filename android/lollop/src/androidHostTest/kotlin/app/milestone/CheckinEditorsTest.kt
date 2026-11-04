@@ -8,7 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.ZoneId
+import kotlinx.datetime.TimeZone
 
 /**
  * The check-in editors never submit an answer the user didn't give: an earlier
@@ -17,7 +17,7 @@ import java.time.ZoneId
  */
 class CheckinEditorsTest {
 
-    private val utc = ZoneId.of("UTC")
+    private val utc = TimeZone.UTC
     private val day = 86_400L
 
     @Test

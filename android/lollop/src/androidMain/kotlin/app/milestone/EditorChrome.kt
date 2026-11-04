@@ -1,6 +1,5 @@
 package app.milestone
 
-import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,7 +41,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -52,7 +50,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.util.Calendar
-import java.util.TimeZone
+import kotlin.time.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.offsetAt
+import kotlinx.datetime.toLocalDateTime
 
 /** True under a host that pins the editors' primary action to a bottom bar and
  *  lets the editor scroll its own body (the Log sheet). A host that scrolls the
@@ -284,9 +286,6 @@ internal fun ReportDirty(dirty: Boolean, onDirtyChange: (Boolean) -> Unit) {
     LaunchedEffect(dirty) { onDirtyChange(dirty) }
 }
 
-/** A keypad buffer as a number; null while it is empty or incomplete. */
-internal fun parseKeypadNumber(text: String): Double? = text.toDoubleOrNull()
-
 /** An editor's top row: `ui-close` (a 48dp target) and the centered title. The
  *  primary action lives at the bottom, so the right side only balances the
  *  close box. */
@@ -315,30 +314,6 @@ internal fun EditorTitleRow(title: String, onClose: () -> Unit) {
     }
 }
 
-/** Unix second of the local midnight that starts the day containing [epochSec]. */
-internal fun localDayStartSec(epochSec: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Long =
-    java.time.Instant.ofEpochSecond(epochSec).atZone(zone).toLocalDate().atStartOfDay(zone).toEpochSecond()
-
-/**
- * Lossless prefill for the weight/distance keypad buffers: the exact stored
- * double without trailing zeros (100.0 → "100", 42.195 → "42.195", 12.50 →
- * "12.5"), never a fixed-decimal rounding, so an untouched Save re-encodes the
- * stored value. BigDecimal.valueOf uses the canonical `Double.toString`, so no
- * binary-fraction noise leaks in; toPlainString avoids scientific notation the
- * keypad can't parse.
- */
-internal fun fmtLosslessPrefill(v: Double): String =
-    java.math.BigDecimal.valueOf(v).stripTrailingZeros().toPlainString()
-
-/** Local noon (device zone) of [epochDay], the seed stamp for logging a PAST
- *  prescribed session from the week strip: noon avoids DST/midnight edge
- *  cases and lands the entry squarely on that calendar day. */
-internal fun planDayObservedAt(epochDay: Long): Long =
-    java.time.LocalDate.ofEpochDay(epochDay)
-        .atTime(12, 0)
-        .atZone(java.time.ZoneId.systemDefault())
-        .toEpochSecond()
-
 /**
  * Backdating chip for every log editor ("Today · 14:32"), defaulting to now: a
  * date picker (no future dates), then a time picker with [withTime]; the result
@@ -357,7 +332,7 @@ fun ObservedAtRow(
 ) {
     // Device 12/24-hour preference (needs a Context) drives both the chip's rendered
     // time and the Material 3 time picker below, so the input and the label always agree.
-    val use24h = DateFormat.is24HourFormat(LocalContext.current)
+    val use24h = is24HourClock()
     var showDate by rememberSaveable { mutableStateOf(false) }
     var showTime by rememberSaveable { mutableStateOf(false) }
     var pendingDayUtcMillis by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -428,7 +403,7 @@ fun ObservedAtRow(
             // value lands on the previous UTC day and highlights the wrong cell.
             // Shift by the local offset so the highlighted day matches local time.
             initialSelectedDateMillis = (epochSec * 1000L).let {
-                it + TimeZone.getDefault().getOffset(it)
+                it + TimeZone.currentSystemDefault().offsetAt(Instant.fromEpochMilliseconds(it)).totalSeconds * 1000L
             },
             selectableDates = object : SelectableDates {
                 // Future dates blocked: DatePicker days are UTC-midnight stamps of
@@ -438,7 +413,7 @@ fun ObservedAtRow(
                     utcTimeMillis <= latestSelectableDayUtcMillis(AppClock.nowMillis())
 
                 override fun isSelectableYear(year: Int): Boolean =
-                    year <= Calendar.getInstance().apply { timeInMillis = AppClock.nowMillis() }.get(Calendar.YEAR)
+                    year <= Instant.fromEpochMilliseconds(AppClock.nowMillis()).toLocalDateTime(TimeZone.currentSystemDefault()).year
             },
         )
         AppDatePickerDialog(state, onDismiss = { showDate = false }, onConfirm = {
@@ -450,19 +425,19 @@ fun ObservedAtRow(
                     showTime = true
                 } else {
                     // Keep the entry's current local time-of-day.
-                    val cur = Calendar.getInstance().apply { timeInMillis = epochSec * 1000L }
-                    commit(sel, cur.get(Calendar.HOUR_OF_DAY), cur.get(Calendar.MINUTE))
+                    val cur = Instant.fromEpochSeconds(epochSec).toLocalDateTime(TimeZone.currentSystemDefault())
+                    commit(sel, cur.hour, cur.minute)
                 }
             }
         })
     }
 
     if (showTime) {
-        val cur = Calendar.getInstance().apply { timeInMillis = epochSec * 1000L }
+        val cur = Instant.fromEpochSeconds(epochSec).toLocalDateTime(TimeZone.currentSystemDefault())
         AppTimePickerDialog(
             title = stringResource(R.string.log_logged_at),
-            initialHour = cur.get(Calendar.HOUR_OF_DAY),
-            initialMinute = cur.get(Calendar.MINUTE),
+            initialHour = cur.hour,
+            initialMinute = cur.minute,
             is24Hour = use24h,
             onDismiss = { showTime = false },
         ) { hour, minute -> pendingDayUtcMillis?.let { day -> commit(day, hour, minute) } }
@@ -476,7 +451,7 @@ fun ObservedAtRow(
  * so a future stamp can never be logged silently.
  */
 private fun localInstantSeconds(utcDayMillis: Long, hour: Int, minute: Int): Long {
-    val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcDayMillis }
+    val utc = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcDayMillis }
     val local = Calendar.getInstance().apply {
         clear()
         set(
@@ -493,20 +468,20 @@ private fun localInstantSeconds(utcDayMillis: Long, hour: Int, minute: Int): Lon
 
 /** The DatePicker stamp (UTC midnight) of today's LOCAL calendar date at
  *  [nowMillis]: the latest day a log may be dated. Pure for a given [zone]. */
-internal fun latestSelectableDayUtcMillis(nowMillis: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Long =
-    java.time.Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
-        .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+internal fun latestSelectableDayUtcMillis(nowMillis: Long, zone: TimeZone = TimeZone.currentSystemDefault()): Long =
+    Instant.fromEpochMilliseconds(nowMillis).toLocalDateTime(zone).date
+        .atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
 
 /** "Today · 14:32" / "15 Jul · 09:10" / date-only variants for the chip. The date
  *  uses the locale's day/month order ([localizedDayFormatter]) and the time the
  *  device 12/24-hour setting ([use24h], resolved from the Context by the caller). */
 private fun formatObservedAt(epochSec: Long, withTime: Boolean, use24h: Boolean, todayLabel: String): String {
-    val zone = java.time.ZoneId.systemDefault()
-    val then = java.time.Instant.ofEpochSecond(epochSec).atZone(zone)
-    val today = java.time.Instant.ofEpochMilli(AppClock.nowMillis()).atZone(zone).toLocalDate()
-    val day = if (then.toLocalDate() == today) todayLabel else then.format(localizedDayFormatter("MMMd"))
+    val zone = TimeZone.currentSystemDefault()
+    val then = Instant.fromEpochSeconds(epochSec).toLocalDateTime(zone)
+    val today = Instant.fromEpochMilliseconds(AppClock.nowMillis()).toLocalDateTime(zone).date
+    val day = if (then.date == today) todayLabel else localizedDayFormatter("MMMd").format(then)
     if (!withTime) return day
-    return "$day · ${then.format(localizedDayFormatter(if (use24h) "Hmm" else "hmm"))}"
+    return "$day · ${localizedDayFormatter(if (use24h) "Hmm" else "hmm").format(then)}"
 }
 
 /** A quiet disclosure row ("More", "More details"): an Accent label with the

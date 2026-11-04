@@ -732,13 +732,13 @@ private fun SetupKeypad.NumberField(
     text: String,
     invalid: Boolean,
     range: ClosedFloatingPointRange<Double>,
-    format: String,
+    decimals: Int,
 ) {
     KeypadValueField(
         label, unit, text,
         active = active == field,
         invalid = invalid,
-        min = range.start, max = range.endInclusive, format = format,
+        min = range.start, max = range.endInclusive, decimals = decimals,
         // The pinned keypad is the one input; no ±1 steppers.
         adjustments = emptyList(),
         onActivate = { activate(field) },
@@ -757,7 +757,7 @@ private fun RunNowFields(a: SetupAnswers, v: SetupValues, distanceUnit: Distance
         keypad.NumberField(
             KeyField.WeeklyRun,
             stringResource(R.string.setup_runnow_weekly_label), stringResource(R.string.setup_unit_per_week, unit), a.weeklyText,
-            invalid = v.weeklyInvalid, range = v.weeklyBounds, format = "%.0f",
+            invalid = v.weeklyInvalid, range = v.weeklyBounds, decimals = 0,
         )
         // A real answer (0), unlike leaving the field blank.
         AnswerChip(stringResource(R.string.setup_runnow_none), selected = v.weeklyRunKm == 0.0) {
@@ -769,7 +769,7 @@ private fun RunNowFields(a: SetupAnswers, v: SetupValues, distanceUnit: Distance
         keypad.NumberField(
             KeyField.LongestRun,
             stringResource(R.string.setup_runnow_longest_label), unit, a.longestText,
-            invalid = v.longestInvalid, range = v.longestBounds, format = "%.1f",
+            invalid = v.longestInvalid, range = v.longestBounds, decimals = 1,
         )
     }
 }
@@ -823,14 +823,14 @@ private fun AboutStep(
         keypad.NumberField(
             KeyField.Bodyweight,
             stringResource(R.string.setup_row_bodyweight), weightSuffix(a.weightUnit), a.bwText,
-            invalid = v.bodyweightInvalid, range = v.bodyweightRange, format = "%.1f",
+            invalid = v.bodyweightInvalid, range = v.bodyweightRange, decimals = 1,
         )
     }
     Box(keypad.slot(KeyField.RestingHr)) {
         keypad.NumberField(
             KeyField.RestingHr,
             stringResource(R.string.setup_row_resting_hr), stringResource(R.string.setup_unit_bpm), a.rhrText,
-            invalid = v.restingHrInvalid, range = RESTING_HR_RANGE, format = "%.0f",
+            invalid = v.restingHrInvalid, range = RESTING_HR_RANGE, decimals = 0,
         )
     }
 }

@@ -10,14 +10,14 @@ import android.util.Log
 import androidx.core.content.IntentCompat
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.time.Instant
-import java.time.ZoneId
-import java.util.Locale
+import kotlin.time.Instant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import org.xmlpull.v1.XmlPullParserException
 
 /** Read cap for any import file: real GPX/TCX exports are well under it, and it keeps a
@@ -220,8 +220,8 @@ internal fun importFailureLine(res: Resources, failure: RunImportFailure): Strin
     res.getString(R.string.import_skip_item, failure.fileName, importFailureReason(res, failure))
 
 /** A run's local date for the import result ("Jun 12, 2017"), in the app's language. */
-internal fun importDateLabel(epochSec: Long, locale: Locale = appLocale(), zone: ZoneId = ZoneId.systemDefault()): String =
-    Instant.ofEpochSecond(epochSec).atZone(zone).format(localizedDayFormatter("yMMMd", locale))
+internal fun importDateLabel(epochSec: Long, locale: PlatformLocale = appLocale(), zone: TimeZone = TimeZone.currentSystemDefault()): String =
+    localizedDayFormatter("yMMMd", locale).format(Instant.fromEpochSeconds(epochSec).toLocalDateTime(zone))
 
 /** The import result: one line, plus every skipped file when there are too many to
  *  name inline (shown behind "Details"). */
@@ -342,7 +342,7 @@ internal object RunImport {
             if (plan.runs.isNotEmpty()) {
                 val vm = runCatching {
                     EventDispatcher.exclusive {
-                        withContext(CoreJniDispatcher) { Core.sendAll(plan.runs.map { it.event }).view }
+                        withContext(CoreDispatcher) { Core.sendAll(plan.runs.map { it.event }).view }
                     }
                 }.getOrNull()
                 val logged = vm?.runs?.mapTo(HashSet()) { it.observed_at }.orEmpty()

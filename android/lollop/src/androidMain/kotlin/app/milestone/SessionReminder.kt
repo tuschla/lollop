@@ -50,6 +50,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlin.math.abs
+import kotlinx.datetime.LocalDateTime
 
 /**
  * The daily session reminder (Profile › During training, off by default). At the
@@ -434,7 +435,7 @@ internal fun SessionReminderRows(ctx: Context) {
     )
     if (!setting.enabled) return
     var picking by rememberSaveable { mutableStateOf(false) }
-    val use24h = DateFormat.is24HourFormat(ctx)
+    val use24h = is24HourClock()
     val time = remember(setting.minuteOfDay, use24h) { reminderTimeText(ctx, setting.minuteOfDay) }
     Row(
         modifier = Modifier
@@ -478,5 +479,5 @@ internal fun SessionReminderRows(ctx: Context) {
 /** [minuteOfDay] in the phone's 12- or 24-hour format ("07:30", "7:30 AM"), in the
  *  app's language. */
 internal fun reminderTimeText(ctx: Context, minuteOfDay: Int): String =
-    LocalTime.of(minuteOfDay / 60, minuteOfDay % 60)
-        .format(localizedDayFormatter(if (DateFormat.is24HourFormat(ctx)) "HHmm" else "hmm"))
+    localizedDayFormatter(if (DateFormat.is24HourFormat(ctx)) "HHmm" else "hmm")
+        .format(LocalDateTime(1970, 1, 1, minuteOfDay / 60, minuteOfDay % 60))

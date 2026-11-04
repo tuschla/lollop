@@ -37,11 +37,11 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import java.util.Locale
+import kotlin.math.abs
 
 /** A display-unit length to two decimals ("0.18"), the one figure format every
  *  run distance and split length uses, so a sheet never mixes decimal marks. */
-internal fun displayFigure(displayValue: Double): String = String.format(Locale.US, "%.2f", displayValue)
+internal fun displayFigure(displayValue: Double): String = formatFixed(displayValue, 2)
 
 /** A distance figure without its unit ("3.21"), in the user's unit. */
 internal fun distanceFigure(km: Double, unit: DistanceUnit): String = displayFigure(metersToDisplay(km * 1000.0, unit))
@@ -291,7 +291,7 @@ internal fun splitBars(splits: List<RunSplitView>): List<SplitBar> {
             full.size < 3 || s === fastest -> SplitTone.Accent
             else -> SplitTone.Faint
         }
-        val delta = if (s.partial || sec <= 0 || full.isEmpty()) null else Math.round(sec - avg).toInt()
+        val delta = if (s.partial || sec <= 0 || full.isEmpty()) null else (sec - avg).roundOrZero().toInt()
         val tag = when {
             !tagged -> null
             s === fastest -> SplitTag.Fastest
@@ -309,8 +309,8 @@ internal fun splitDeltaLabel(deltaSec: Int): String {
         deltaSec > 0 -> "+"
         else -> "±"
     }
-    val a = Math.abs(deltaSec)
-    return "$sign${a / 60}:${String.format(Locale.US, "%02d", a % 60)}"
+    val a = abs(deltaSec)
+    return "$sign${a / 60}:${zeroPad(a % 60)}"
 }
 
 /** The partial split's length in [unit]: its end minus the previous split's end. */
@@ -320,7 +320,7 @@ private fun partialLength(splits: List<RunSplitView>, i: Int, unit: DistanceUnit
 }
 
 /** The partial split's index: "¼", "½" or "¾" when it rounds to a quarter, else "0.18". */
-internal fun partialIndexLabel(length: Double): String = when (Math.round(length * 4).toInt()) {
+internal fun partialIndexLabel(length: Double): String = when ((length * 4).roundOrZero().toInt()) {
     1 -> "¼"
     2 -> "½"
     3 -> "¾"
@@ -472,7 +472,7 @@ private fun splitSpoken(res: Resources, s: RunSplitView, bar: SplitBar, distance
     val delta = when {
         d == null -> ""
         d == 0 -> res.getString(R.string.run_split_even)
-        else -> res.getString(if (d < 0) R.string.run_split_faster else R.string.run_split_slower, spokenDuration(res, Math.abs(d).toLong()))
+        else -> res.getString(if (d < 0) R.string.run_split_faster else R.string.run_split_slower, spokenDuration(res, abs(d).toLong()))
     }
     val row = res.getString(R.string.run_split_cd, "${s.index}", pace, delta).trimEnd(',', ' ')
     return when (bar.tag) {

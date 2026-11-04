@@ -11,6 +11,7 @@ import app.milestone.MilestoneTheme
 import app.milestone.ViewModel
 import app.milestone.WeightUnit
 import app.milestone.buildCoachSummary
+import app.milestone.DayFormatter
 import app.milestone.buildMonthNav
 import app.milestone.formatLogDate
 import app.milestone.historyActivityDays
@@ -56,7 +57,7 @@ class RunDayGroupingTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val utc: ZoneId = ZoneOffset.UTC
+    private val utc = kotlinx.datetime.TimeZone.UTC
     private val savedZone = TimeZone.getDefault()
     private val savedLocale = Locale.getDefault()
 
@@ -113,7 +114,7 @@ class RunDayGroupingTest {
         // "November 2026".
         val stream = historyRunStream(runs)
         assertEquals(listOf(acrossMonth, acrossMidnight), stream)
-        val fmt = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
+        val fmt = DayFormatter(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US))
         val nav = buildMonthNav(stream.map(::runDaySec), base = 0, zone = utc, fmt = fmt)
         assertEquals(mapOf(0 to "October 2026"), nav.headerBefore)
 
@@ -205,7 +206,7 @@ class RunDayGroupingTest {
         )
         val stream = historyRunStream(listOf(inside, long, later))
         assertEquals(listOf(later, inside, long), stream)
-        val fmt = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
+        val fmt = DayFormatter(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US))
         val nav = buildMonthNav(stream.map(::runDaySec), base = 0, zone = utc, fmt = fmt)
         assertEquals(mapOf(0 to "November 2026", 2 to "October 2026"), nav.headerBefore)
     }

@@ -25,8 +25,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
-import java.time.LocalDate
-import java.time.ZoneId
+import kotlinx.datetime.TimeZone
 
 /** Height of the weekly-minutes bar on the activity card. */
 private val ActivityBarHeight = 6.dp
@@ -110,7 +109,7 @@ internal fun YouthActivityCard(view: YouthActivityView, onLog: () -> Unit, onEve
 @Composable
 private fun WeekActivityList(entries: List<ActivityResultView>, onEvent: (Event) -> Unit) {
     val res = LocalResources.current
-    val zone = ZoneId.systemDefault()
+    val zone = TimeZone.currentSystemDefault()
     Column(verticalArrangement = Arrangement.spacedBy(Space.Xs.dp)) {
         TileOverline(stringResource(R.string.activity_logged_this_week))
         entries.forEach { a ->
@@ -132,10 +131,10 @@ private fun WeekActivityList(entries: List<ActivityResultView>, onEvent: (Event)
 
 /** "Mon · Sport or PE · 45 min · vigorous · strengthening" for one logged
  *  activity; the last part only when it counted as muscle- or bone-strengthening. */
-internal fun activityEntryLine(res: android.content.res.Resources, a: ActivityResultView, zone: ZoneId): String {
-    val day = LocalDate.ofEpochDay(localEpochDay(a.observed_at, zone)).format(localizedDayFormatter("EEE"))
+internal fun activityEntryLine(res: android.content.res.Resources, a: ActivityResultView, zone: TimeZone): String {
+    val day = localizedDayFormatter("EEE").formatEpochDay(localEpochDay(a.observed_at, zone))
     val effort = res.getString(if (a.vigorous) R.string.activity_effort_vigorous_short else R.string.activity_effort_moderate_short)
-    val line = res.getString(R.string.activity_entry_line, day, res.getString(a.kind.labelRes), Math.round(a.minutes).toInt(), effort)
+    val line = res.getString(R.string.activity_entry_line, day, res.getString(a.kind.labelRes), a.minutes.roundOrZero().toInt(), effort)
     return if (a.strengthening) res.getString(R.string.activity_entry_line_strengthening, line) else line
 }
 
@@ -203,7 +202,7 @@ fun LogActivityEditor(
                 stringResource(R.string.activity_field_minutes), stringResource(R.string.log_unit_min), minutesText,
                 active = keypadOpen,
                 invalid = minutesText.isNotEmpty() && !minutesValid,
-                min = ActivityMinutesMin, max = ActivityMinutesMax, format = "%.0f",
+                min = ActivityMinutesMin, max = ActivityMinutesMax, decimals = 0,
                 adjustments = listOf(-5.0, 5.0, 15.0),
                 onActivate = { fresh = true; keypadOpen = true },
                 onText = { minutesText = it; fresh = false; dirty = true },

@@ -16,8 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.unit.dp
-import java.time.ZoneId
-import java.util.Locale
+import kotlinx.datetime.TimeZone
 
 /** The tap scales, built once: 0–30 % in 0.5 steps (drift, second-half
  *  slowdown), 0–100 % in 5-point steps (time above the easy band) and 0–7
@@ -130,13 +129,13 @@ fun SessionReviewSheet(
 @Composable
 private fun HalfPercentField(@StringRes label: Int, value: Double, onPick: (Double) -> Unit) {
     val text = stringResource(label)
-    FieldLabel(text, stringResource(R.string.log_value_pct, String.format(Locale.US, "%.1f", value)))
-    ScrollableScaleRow(HalfPercentScale, value, { String.format(Locale.US, "%.1f", it) }, label = text, onSelect = onPick)
+    FieldLabel(text, stringResource(R.string.log_value_pct, formatFixed(value, 1)))
+    ScrollableScaleRow(HalfPercentScale, value, { formatFixed(it, 1) }, label = text, onSelect = onPick)
 }
 
 /** Whether today's session review asks the run details: today's plan has a run,
  *  or a run is logged today. Pure. */
-internal fun reviewAsksRun(model: ViewModel, zone: ZoneId = ZoneId.systemDefault()): Boolean {
+internal fun reviewAsksRun(model: ViewModel, zone: TimeZone = TimeZone.currentSystemDefault()): Boolean {
     val today = model.today()
     val plannedRun = model.week_plan.firstOrNull { it.epoch_day == today }?.let { s ->
         sessionDiscipline(s.session_type) == "Run" ||
@@ -304,7 +303,7 @@ fun WeeklyCheckinSheet(
                     invalid = !velocityValid,
                     min = VelocityDropRange.start,
                     max = VelocityDropRange.endInclusive,
-                    format = "%.2f",
+                    decimals = 2,
                     adjustments = listOf(-0.01, 0.01),
                     onActivate = { velocityFresh = true; velocityKeypad = true },
                     onText = { velocityText = it; velocityFresh = false },

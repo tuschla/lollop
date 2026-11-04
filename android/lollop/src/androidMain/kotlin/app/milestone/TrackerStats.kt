@@ -293,7 +293,7 @@ internal fun spokenRunDistance(res: Resources, km: Double, unit: DistanceUnit): 
  *  seconds per kilometer", or "not available yet" when unknown. */
 internal fun spokenPace(res: Resources, minPerKm: Double, unit: DistanceUnit): String {
     if (!minPerKm.isFinite() || minPerKm <= 0.0) return res.getString(R.string.track_cd_not_available)
-    val secPerUnit = Math.round(paceInUnit(minPerKm, unit) * 60.0)
+    val secPerUnit = (paceInUnit(minPerKm, unit) * 60.0).roundOrZero()
     return res.getString(
         if (unit == DistanceUnit.Mi) R.string.track_cd_pace_mi else R.string.track_cd_pace_km,
         spokenDuration(res, secPerUnit),

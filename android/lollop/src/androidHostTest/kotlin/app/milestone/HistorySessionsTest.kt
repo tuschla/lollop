@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import java.time.LocalDateTime
 import java.time.ZoneId
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toJavaZoneId
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -19,9 +21,9 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class HistorySessionsTest {
 
-    private val berlin = ZoneId.of("Europe/Berlin")
+    private val berlin = TimeZone.of("Europe/Berlin")
 
-    private fun at(local: String, zone: ZoneId = berlin): Long =
+    private fun at(local: String, zone: ZoneId = berlin.toJavaZoneId()): Long =
         LocalDateTime.parse(local).atZone(zone).toEpochSecond()
 
     private fun set(exercise: String, observedAt: Long, kg: Double = 100.0, reps: Int = 5) =

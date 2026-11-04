@@ -50,7 +50,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import java.util.Locale
 
 /** The single unified disclosure affordance: a small circular "?" that toggles a
  *  card's evidence panel (grade badge, confidence, citation, why) on every card
@@ -445,8 +444,8 @@ internal fun WhyDetail(
                 gradeLabel(grade)?.let { stringResource(R.string.main_evidence_grade, it) } ?: ""
             }
             if (gradeLine.isNotBlank()) {
-                val low = Math.round(confidence * 100)
-                val high = confidenceHigh?.let { Math.round(it * 100) } ?: low
+                val low = (confidence * 100).roundOrZero()
+                val high = confidenceHigh?.let { (it * 100).roundOrZero() } ?: low
                 val gradeLineFull = when {
                     !showConfidence -> gradeLine
                     high != low -> stringResource(R.string.main_grade_line_confidence_range, gradeLine, low, high)
@@ -466,7 +465,7 @@ internal fun WhyDetail(
             gradeLabel(grade)?.let { label ->
                 Text(
                     if (showConfidence) {
-                        stringResource(R.string.main_evidence_confidence, label, Math.round(confidence * 100))
+                        stringResource(R.string.main_evidence_confidence, label, (confidence * 100).roundOrZero())
                     } else {
                         stringResource(R.string.main_evidence_label, label)
                     },
@@ -518,7 +517,7 @@ val LocalEvidenceLegend = staticCompositionLocalOf<() -> Unit> { {} }
 internal fun GradeChip(grade: String) {
     // Unmapped/future grades have no human label; hide the whole badge rather
     // than leak a raw Debug string.
-    val label = gradeLabel(grade)?.uppercase(Locale.US) ?: return
+    val label = gradeLabel(grade)?.uppercase() ?: return
     val status = LocalStatusColors.current
     val openLegend = LocalEvidenceLegend.current
     val legendDesc = stringResource(R.string.main_evidence_legend_title)
@@ -599,7 +598,7 @@ internal fun EvidenceLegendSheet(definitions: List<GradeDefView>) {
                 LegendRow(
                     label,
                     status.gradeColor(d.grade),
-                    d.definition + stringResource(R.string.main_confidence_paren, Math.round(d.confidence * 100)),
+                    d.definition + stringResource(R.string.main_confidence_paren, (d.confidence * 100).roundOrZero()),
                 )
             }
         }
@@ -819,7 +818,7 @@ private fun LegendRow(label: String, chipColor: Color, body: String) {
         horizontalArrangement = Arrangement.spacedBy(Space.Md.dp),
     ) {
         Box(modifier = Modifier.width(96.dp)) {
-            Chip(label.uppercase(Locale.US), chipColor)
+            Chip(label.uppercase(), chipColor)
         }
         Text(body, color = OnBgMuted, style = Type.Caption, modifier = Modifier.weight(1f))
     }

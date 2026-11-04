@@ -52,7 +52,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import java.util.Locale
 
 // Per-set completion chrome (Today's session card, the week-strip expander and the
 // set editor's gym-floor loop), plus the rest readout and its in-app alarm scope.
@@ -122,10 +121,10 @@ internal fun runProgressText(res: Resources, item: PrescriptionView, unit: Dista
     val parts = buildList {
         if (item.run_logged_km > 0.0) {
             val shown = metersToDisplay(item.run_logged_km * 1000.0, unit)
-            val figure = if (shown < 1.0) String.format(Locale.US, "%.2f", shown) else trimDecimal(shown)
+            val figure = if (shown < 1.0) formatFixed(shown, 2) else trimDecimal(shown)
             add(res.getString(R.string.plan_run_logged_distance, figure, unit.distanceLabel))
         }
-        if (item.run_logged_min > 0.0) add(formatElapsed(Math.round(item.run_logged_min * 60.0)))
+        if (item.run_logged_min > 0.0) add(formatElapsed((item.run_logged_min * 60.0).roundOrZero()))
     }
     return parts.joinToString(" \u00b7 ")
 }
@@ -194,7 +193,7 @@ internal fun rememberTicker(periodMs: Long): Long {
     val now by produceState(AppClock.nowMillis(), periodMs) {
         while (true) {
             value = AppClock.nowMillis()
-            kotlinx.coroutines.delay(periodMs - Math.floorMod(AppClock.nowMillis(), periodMs))
+            kotlinx.coroutines.delay(periodMs - AppClock.nowMillis().mod(periodMs))
         }
     }
     return now
@@ -464,12 +463,6 @@ internal fun safetyReasonText(item: PrescriptionView, unit: DistanceUnit): Strin
 /** The feedback message in the display [unit]. */
 internal fun feedbackMessage(fb: FeedbackView, unit: DistanceUnit): String =
     if (unit == DistanceUnit.Mi) fb.message_mi.ifBlank { fb.message } else fb.message
-
-/** A plate / load figure with up to two decimals and no trailing zeros
- *  ("20", "2.5", "1.25"). Pure. */
-internal fun plateFigure(v: Double): String =
-    if (v % 1.0 == 0.0) "${v.toLong()}"
-    else String.format(Locale.US, "%.2f", v).trimEnd('0').trimEnd('.')
 
 /** A lift face line without its reps-left clause ("6×5 @ 275 lb · ~1 rep left"
  *  → "6×5 @ 275 lb"; also "1–2 reps left" and "to your last good rep"), for an
@@ -1050,7 +1043,7 @@ internal val SkippedItemStatuses = setOf("stopped_pain", "skipped_pain", "skippe
 internal fun settledLabel(status: String, progress: String, painArea: String?): String = when {
     status == "stopped_pain" -> stoppedLabel(painArea)
     status == "skipped_pain" -> painArea
-        ?.let { stringResource(R.string.plan_skipped_pain_area, it.lowercase(appLocale())) }
+        ?.let { stringResource(R.string.plan_skipped_pain_area, it.lowercase()) }
         ?: stringResource(R.string.plan_skipped_pain)
     status == "skipped" -> stringResource(R.string.plan_skipped)
     progress.isBlank() -> progress

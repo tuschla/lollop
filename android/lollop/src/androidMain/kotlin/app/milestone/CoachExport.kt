@@ -3,10 +3,7 @@ package app.milestone
 import android.content.Context
 import android.content.Intent
 import android.content.res.Resources
-import java.time.DayOfWeek
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.temporal.TemporalAdjusters
+import kotlinx.datetime.TimeZone
 
 /** How many local Mon–Sun weeks the coach summary covers, the current one included. */
 internal const val CoachSummaryWeeks = 4
@@ -25,12 +22,12 @@ internal fun buildCoachSummary(
     res: Resources,
     model: ViewModel,
     today: Long,
-    zone: ZoneId,
+    zone: TimeZone,
     weightUnit: WeightUnit,
     distanceUnit: DistanceUnit,
     weeks: Int = CoachSummaryWeeks,
 ): String {
-    val lastMonday = LocalDate.ofEpochDay(today).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toEpochDay()
+    val lastMonday = mondayOf(today)
     val firstMonday = lastMonday - 7L * (weeks.coerceAtLeast(1) - 1)
     val window = firstMonday..today
     fun dayOf(at: Long): Long? = at.takeIf { it > 0L }?.let { localEpochDay(it, zone) }?.takeIf { it in window }
@@ -90,7 +87,7 @@ private fun weekTotals(
     val weekActivities = days.flatMap { activities[it].orEmpty() }
     val runMin = weekRuns.sumOf { it.duration_min }
     val otherMin = weekActivities.sumOf { it.minutes }
-    val activeMin = Math.round(runMin + otherMin).toInt()
+    val activeMin = (runMin + otherMin).roundOrZero().toInt()
     val activeRes = when {
         otherMin <= 0.0 -> R.plurals.coach_export_active_minutes_runs
         runMin <= 0.0 -> R.plurals.coach_export_active_minutes_other
@@ -125,7 +122,7 @@ private fun runLine(res: Resources, r: RunResultView, unit: DistanceUnit): Strin
 
 private fun activityLine(res: Resources, a: ActivityResultView): String {
     val effort = res.getString(if (a.vigorous) R.string.activity_effort_vigorous_short else R.string.activity_effort_moderate_short)
-    val line = res.getString(R.string.coach_export_activity, res.getString(a.kind.labelRes), Math.round(a.minutes).toInt(), effort)
+    val line = res.getString(R.string.coach_export_activity, res.getString(a.kind.labelRes), a.minutes.roundOrZero().toInt(), effort)
     return if (a.strengthening) "$line · ${res.getString(R.string.coach_export_strengthening)}" else line
 }
 
@@ -148,7 +145,7 @@ internal fun shareCoachSummary(ctx: Context, model: ViewModel) {
         ctx.latinDigitResources(),
         model,
         today = model.today(),
-        zone = ZoneId.systemDefault(),
+        zone = TimeZone.currentSystemDefault(),
         weightUnit = model.weightUnit(),
         distanceUnit = resolveDistanceUnit(AppSettings.distanceUnitOverride.value),
     )

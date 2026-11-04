@@ -18,10 +18,10 @@ import app.milestone.SessionPlanView
 import app.milestone.SessionReminder
 import app.milestone.requestTileRefresh
 import java.io.File
-import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.datetime.TimeZone
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -118,7 +118,7 @@ internal data class WidgetSnapshot(
      *  next week's plan and the next session), for the session reminder when the
      *  app has not run since; empty while paused, without a plan or a profile. */
     val ahead: List<WidgetAheadDay> = emptyList(),
-    /** The time zone the snapshot was written in ([ZoneId] id); empty in a file
+    /** The time zone the snapshot was written in ([TimeZone] id); empty in a file
      *  written before it was recorded. */
     val zone: String = "",
     /** This plan week day by day, for the widget's week strip; empty while paused,
@@ -170,7 +170,7 @@ private fun weekMarkOf(s: SessionPlanView): WidgetWeekMark = when {
 internal fun widgetSnapshotOf(
     model: ViewModel,
     distanceUnit: DistanceUnit,
-    zone: String = ZoneId.systemDefault().id,
+    zone: String = TimeZone.currentSystemDefault().id,
 ): WidgetSnapshot {
     val today = model.today()
     val consistency = model.consistency?.takeIf { model.week_plan.isNotEmpty() && it.this_week_planned > 0 }

@@ -1,0 +1,87 @@
+package app.milestone
+
+import androidx.compose.runtime.Composable
+import kotlinx.datetime.DayOfWeek
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+
+// Every date, weekday and time the shell formats outside the string resources
+// goes through these, in the app's language with Latin digits ([appLocale]).
+// Android: java.time + ICU, exactly as before the multiplatform split; iOS:
+// NSDateFormatter / NSRelativeDateTimeFormatter with the same CLDR data. File
+// names and exported data keep their fixed ISO patterns and don't use these.
+
+/** A locale: `java.util.Locale` on Android, `NSLocale` on iOS. */
+expect class PlatformLocale
+
+/**
+ * The app's language with Latin digits. The app ships English only, so this is
+ * the first English locale in the device's list ("15 Jul" for en-GB), else
+ * English with the primary locale's region (en-DE on a German phone), with the
+ * `latn` numbering system ("٣" never appears in a date).
+ */
+internal expect fun appLocale(): PlatformLocale
+
+/** The device's primary locale (distance and weight unit defaults read its region). */
+internal expect fun deviceLocale(): PlatformLocale
+
+/** [this] locale's ISO 3166 region ("US", "GB"); empty when it has none. */
+internal expect val PlatformLocale.region: String
+
+/** A date/time formatter for one CLDR skeleton in one locale ([localizedDayFormatter]). */
+internal expect class DayFormatter {
+    fun format(date: LocalDate): String
+
+    fun format(dateTime: LocalDateTime): String
+}
+
+/** A date formatter for [skeleton] in the app's language and the device region's
+ *  order, the platform's best pattern for it ("MMMd" → "Sep 21" / "21 Sept"). */
+internal expect fun localizedDayFormatter(skeleton: String, locale: PlatformLocale = appLocale()): DayFormatter
+
+/** [localizedDayFormatter] for a local-day index (days since the epoch). */
+internal fun DayFormatter.formatEpochDay(epochDay: Long): String = format(LocalDate.fromEpochDays(epochDay))
+
+/** How long a weekday name is ([weekdayName]); the CLDR widths. */
+internal enum class WeekdayWidth {
+    /** "Monday" */
+    Full,
+
+    /** "Mon" */
+    Short,
+
+    /** "Mon" on its own (no surrounding date): the stand-alone form. */
+    ShortStandalone,
+
+    /** "M" */
+    Narrow,
+}
+
+/** [day]'s name in [locale] at [width]. */
+internal expect fun weekdayName(day: DayOfWeek, width: WeekdayWidth, locale: PlatformLocale = appLocale()): String
+
+/** A local epoch day as a medium date in the app's language ("Oct 6, 2026"). */
+internal fun epochDayLabel(day: Long, locale: PlatformLocale = appLocale()): String =
+    formatMediumDate(LocalDate.fromEpochDays(day), locale)
+
+/** [day] as a short localized date, dropping the year when it is [today]'s year
+ *  ("Sep 11"; "Dec 30, 2025" otherwise), for values that must fit a row. */
+internal fun epochDayShortLabel(day: Long, today: Long, locale: PlatformLocale = appLocale()): String {
+    val date = LocalDate.fromEpochDays(day)
+    if (date.year != LocalDate.fromEpochDays(today).year) return epochDayLabel(day, locale)
+    return localizedDayFormatter("MMMd", locale).format(date)
+}
+
+/** [date] in the locale's medium date style ("Oct 6, 2026"). */
+internal expect fun formatMediumDate(date: LocalDate, locale: PlatformLocale = appLocale()): String
+
+/**
+ * A day relative to today, capitalised for the start of a sentence: "Today",
+ * "Yesterday", "Tomorrow", "3 days ago", "In 3 days". [dayDelta] is the day
+ * minus today (negative = past).
+ */
+internal expect fun relativeDayLabel(dayDelta: Long, locale: PlatformLocale = appLocale()): String
+
+/** Whether the device shows the time of day on a 24-hour clock. */
+@Composable
+internal expect fun is24HourClock(): Boolean

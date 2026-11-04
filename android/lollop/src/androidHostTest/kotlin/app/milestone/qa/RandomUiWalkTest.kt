@@ -35,7 +35,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
-import java.time.ZoneId
 
 /**
  * Seeded, model-based random UI exploration ("monkey with an oracle") over the
@@ -387,7 +386,7 @@ class RandomUiWalkTest : UiProbeTest() {
         if (listPane == null && overviewPane != null) fail("History shows its overview pane without the list pane")
         val count = historyItemCount(listPane ?: lists.maxByOrNull { it.boundsInRoot.height } ?: return) ?: return
         val overviewCount = overviewPane?.let { historyItemCount(it) ?: return }
-        val zone = ZoneId.systemDefault()
+        val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
         val lifts = groupLiftSessions(m.lifts, zone)
         val hasAny = m.lifts.isNotEmpty() || m.runs.isNotEmpty()
         if (listPane != null && !hasAny) fail("History splits into two panes with nothing logged")
@@ -397,7 +396,7 @@ class RandomUiWalkTest : UiProbeTest() {
             var prev: String? = null
             var n = 0
             stamps.forEach { s ->
-                val mo = if (s <= 0L) "" else java.time.Instant.ofEpochSecond(s).atZone(zone).let { "${it.year}-${it.monthValue}" }
+                val mo = if (s <= 0L) "" else java.time.Instant.ofEpochSecond(s).atZone(java.time.ZoneId.systemDefault()).let { "${it.year}-${it.monthValue}" }
                 if (mo.isNotBlank() && mo != prev) n++
                 prev = mo
             }

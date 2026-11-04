@@ -77,9 +77,20 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation("org.jetbrains.compose.runtime:runtime:$cmpVersion")
+            implementation("org.jetbrains.compose.runtime:runtime-saveable:$cmpVersion")
             implementation("org.jetbrains.compose.ui:ui:$cmpVersion")
             implementation("org.jetbrains.compose.components:components-resources:$cmpVersion")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+            // Dates and time zones in common code; on Android it wraps java.time
+            // (desugared below API 26), so dates read exactly as before.
+            implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
+            // SynchronizedObject + synchronized(): a real lock on Kotlin/Native, where
+            // @Synchronized does nothing; on the JVM it is the object's monitor.
+            implementation("org.jetbrains.kotlinx:atomicfu:0.33.0")
+        }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
         }
         // On iOS, CMP 1.12.2's ui depends on androidx lifecycle 2.11.0 and on
         // JetBrains' lifecycle port 2.9.6: the KLIB loader found every lifecycle

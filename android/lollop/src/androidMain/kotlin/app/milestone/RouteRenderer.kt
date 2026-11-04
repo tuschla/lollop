@@ -8,7 +8,6 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import kotlin.math.PI
-import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
@@ -25,10 +24,6 @@ import kotlin.math.tan
 // full-screen map, trim preview, finish review): one renderer onto an
 // android.graphics.Canvas behind a [RouteProjector], so the osmdroid overlay and the
 // tile-less Compose canvas draw identical routes, markers and labels.
-
-/** Mean Earth radius (m), matching the core's EARTH_RADIUS_M = 6_371_000 (running.rs)
- *  so live, route and of-record distances agree. */
-private const val EarthRadiusM = 6_371_000.0
 
 /** Start and finish closer than this (metres) are one spot: a loop. */
 internal const val LoopCoincidenceM = 30.0
@@ -57,19 +52,6 @@ private const val PillPadXDp = 8f
 private const val PillPadYDp = 4f
 /** Gap between the loop marker's finish disc and the start ring around it. */
 private const val LoopRingGapDp = 2f
-
-/** Great-circle metres between two fixes (haversine on the core's radius): the one
- *  place the segment maths lives, shared by the route renderer, the trim preview
- *  ([timedTrackFromSegments]) and the live tracker ([segmentKm]). */
-internal fun haversineM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    val dLat = Math.toRadians(lat2 - lat1)
-    val dLon = Math.toRadians(lon2 - lon1)
-    val a = sin(dLat / 2).let { it * it } +
-        cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).let { it * it }
-    // Clamp asin's input to [0,1]: it can drift a hair past 1.0 on a near-antipodal
-    // leg through FP rounding → asin(NaN).
-    return 2 * EarthRadiusM * asin(sqrt(a.coerceIn(0.0, 1.0)))
-}
 
 /**
  * A run's route ready to draw: the segments with ≥2 fixes, the cumulative distance

@@ -3,7 +3,7 @@ package app.milestone
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import java.time.LocalDate
-import java.time.ZoneOffset
+import kotlinx.datetime.TimeZone
 import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -58,7 +58,7 @@ class CoachSummaryTest {
     )
 
     private fun summary(weeks: Int = 2) =
-        buildCoachSummary(res, model, today, ZoneOffset.UTC, WeightUnit.Lb, DistanceUnit.Mi, weeks)
+        buildCoachSummary(res, model, today, TimeZone.UTC, WeightUnit.Lb, DistanceUnit.Mi, weeks)
 
     @Test
     fun headerStatesTheWindowAndEveryWeekIsListed() {
@@ -90,7 +90,7 @@ class CoachSummaryTest {
                     LiftResultView(exercise = "Plank", weight_kg = 10.0, reps = 1, hold_sec = 30, observed_at = at(monday, 1)),
                 ),
             ),
-            today, ZoneOffset.UTC, WeightUnit.Kg, DistanceUnit.Km, weeks = 1,
+            today, TimeZone.UTC, WeightUnit.Kg, DistanceUnit.Km, weeks = 1,
         )
         assertTrue(text, text.contains("- Bench: 1 × 5 @ 101.25 kg"))
         assertTrue(text, text.contains("- Plank: 1 × 30 s hold · +10 kg"))
@@ -116,7 +116,7 @@ class CoachSummaryTest {
                     entry_id = 2, observed_at = at(monday, 30), kind = ActivityKind.Walking, minutes = 20.0,
                 ),
             ),
-            today, ZoneOffset.UTC, WeightUnit.Lb, DistanceUnit.Mi, weeks = 1,
+            today, TimeZone.UTC, WeightUnit.Lb, DistanceUnit.Mi, weeks = 1,
         )
         assertTrue(both, both.contains("60 active minutes from runs and other activity"))
     }

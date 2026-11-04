@@ -42,12 +42,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.time.Instant
-import java.time.ZoneId
-import java.util.Locale
+import kotlin.time.Instant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /** One headline stat column: overline [label], tabular [value], its [unit] (may be
  *  blank) and the merged [spoken] form ("Distance, 3.18 miles"). */
@@ -65,7 +65,7 @@ internal fun runStats(run: RunResultView, unit: DistanceUnit): List<RunStat> {
         stats += RunStat(label, dist, unit.distanceLabel, stringResource(R.string.run_stat_cd, label, spoken))
     }
     if (run.duration_min > 0.0) {
-        val time = formatElapsed(Math.round(run.duration_min * 60.0))
+        val time = formatElapsed((run.duration_min * 60.0).roundOrZero())
         val label = stringResource(R.string.run_stat_time)
         stats += RunStat(label, time, "", stringResource(R.string.run_stat_cd, label, time))
     }
@@ -124,7 +124,7 @@ internal fun RunStatColumns(stats: List<RunStat>, compact: Boolean) {
             }
             return sizes.map { valueStyle.copy(fontSize = it.sp) }.firstOrNull { lineWidth(stat.value, it) + unitPx <= roomPx }
         }
-        val labelsFit = stats.all { s -> s.label.uppercase(Locale.US).split(' ').all { lineWidth(it, Type.Overline) <= columnPx } }
+        val labelsFit = stats.all { s -> s.label.uppercase().split(' ').all { lineWidth(it, Type.Overline) <= columnPx } }
         val columnStyles = if (labelsFit) stats.map { fittingStyle(it, columnPx) } else emptyList()
         if (labelsFit && columnStyles.all { it != null }) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.Md.dp)) {
@@ -168,9 +168,9 @@ private fun RunStatColumn(stat: RunStat, valueStyle: TextStyle, modifier: Modifi
 @Composable
 internal fun runStartCaption(startedAt: Long): String {
     if (startedAt <= 0L) return ""
-    val clock = if (android.text.format.DateFormat.is24HourFormat(LocalContext.current)) "Hm" else "hm"
-    val at = Instant.ofEpochSecond(startedAt).atZone(ZoneId.systemDefault())
-    return stringResource(R.string.run_start_caption, at.format(localizedDayFormatter("EEEdMMM")), at.format(localizedDayFormatter(clock)))
+    val clock = if (is24HourClock()) "Hm" else "hm"
+    val at = Instant.fromEpochSeconds(startedAt).toLocalDateTime(TimeZone.currentSystemDefault())
+    return stringResource(R.string.run_start_caption, localizedDayFormatter("EEEdMMM").format(at), localizedDayFormatter(clock).format(at))
 }
 
 /** A run's route, shared by its detail and trim sheets: the core's GPX document (for
@@ -347,7 +347,7 @@ private fun RunLogSection(
                 ) {
                     run.srpe_load_au?.let {
                         Text(
-                            stringResource(R.string.history_training_load_value, String.format(Locale.US, "%.0f", it)),
+                            stringResource(R.string.history_training_load_value, formatFixed(it, 0)),
                             color = OnBgBody,
                             style = Type.Body.merge(TabularFigures),
                         )

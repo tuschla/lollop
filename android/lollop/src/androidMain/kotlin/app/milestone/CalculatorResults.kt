@@ -37,7 +37,6 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import java.util.Locale
 
 /** One headline answer of a [CalculatorResultCard]: the figure, what it is, and
  *  an optional basis line ("1.8–2.7 g/kg × 81.7 kg · for weight loss"). */
@@ -157,8 +156,8 @@ private fun ClearResultAction(overline: String, onClear: () -> Unit) {
 
 /** "65–79" for a range, "100" when both ends round to the same figure. */
 internal fun wholeRange(low: Double, high: Double): String {
-    val lo = Math.round(low)
-    val hi = Math.round(high)
+    val lo = low.roundOrZero()
+    val hi = high.roundOrZero()
     return if (lo == hi) "$lo" else "$lo–$hi"
 }
 
@@ -214,9 +213,9 @@ internal fun ProteinResult(model: ViewModel, onClear: () -> Unit) {
                 basis = bwKg?.let {
                     stringResource(
                         R.string.main_calc_protein_basis,
-                        String.format(Locale.US, "%.1f", f.low_g_per_kg),
-                        String.format(Locale.US, "%.1f", f.high_g_per_kg),
-                        trimDecimal(Math.round(it * 10) / 10.0),
+                        formatFixed(f.low_g_per_kg, 1),
+                        formatFixed(f.high_g_per_kg, 1),
+                        trimDecimal((it * 10).roundOrZero() / 10.0),
                         context,
                     )
                 } ?: context,

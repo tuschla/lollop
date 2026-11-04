@@ -41,8 +41,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.CompositionLocalProvider
-import java.util.Locale
+import kotlin.time.Instant
 import kotlinx.coroutines.launch
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /** Which logged type History shows: two options, no "All". */
 private enum class HistoryFilter { Lifts, Runs }
@@ -60,13 +62,13 @@ internal data class MonthNav(
  *  card's day stamp (a lift session's first set, a run's start: [runDaySec]),
  *  bucketed in the device zone (the shell owns the wall clock; the core stays
  *  clock-free). Blank for an undated entry so no header is emitted. */
-internal fun monthLabel(epochSec: Long, zone: java.time.ZoneId, fmt: java.time.format.DateTimeFormatter): String {
+internal fun monthLabel(epochSec: Long, zone: TimeZone, fmt: DayFormatter): String {
     if (epochSec <= 0L) return ""
-    return java.time.Instant.ofEpochSecond(epochSec).atZone(zone).toLocalDate().format(fmt)
+    return fmt.format(Instant.fromEpochSeconds(epochSec).toLocalDateTime(zone).date)
 }
 
 /** Epoch day of the Monday that starts [epochDay]'s week (epoch day 0 was a Thursday). */
-internal fun mondayOf(epochDay: Long): Long = epochDay - Math.floorMod(epochDay + 3, 7L)
+internal fun mondayOf(epochDay: Long): Long = epochDay - (epochDay + 3).mod(7L)
 
 /** The month headers and jump targets for a newest-first stream with one day stamp
  *  per card ([stamps]), after [base] non-month items. MIRRORS the stream's emission
@@ -75,8 +77,8 @@ internal fun mondayOf(epochDay: Long): Long = epochDay - Math.floorMod(epochDay 
 internal fun buildMonthNav(
     stamps: List<Long>,
     base: Int,
-    zone: java.time.ZoneId,
-    fmt: java.time.format.DateTimeFormatter,
+    zone: TimeZone,
+    fmt: DayFormatter,
 ): MonthNav {
     val headerBefore = HashMap<Int, String>()
     val labels = ArrayList<Pair<String, Int>>()
@@ -164,7 +166,7 @@ internal fun HistoryDestination(
     // clock-free. The zone is re-read on every composition (the minute ticker
     // recomposes), so a time-zone change rebuckets everything together. The open
     // session sheet is keyed by its day (a saveable string).
-    val zone = java.time.ZoneId.systemDefault()
+    val zone = TimeZone.currentSystemDefault()
     val liftSessions = remember(model.lifts, zone) { groupLiftSessions(model.lifts, zone) }
     // Per-exercise best-e1RM-per-session series for the session sheet's trend lines.
     val e1rmSeries = remember(liftSessions) { bestE1rmByExerciseDay(liftSessions) }
@@ -315,14 +317,14 @@ internal fun HistoryDestination(
                         StatTile("$sessionCount", null, pluralStringResource(R.plurals.history_stat_sessions, sessionCount))
                         if (showLifting || liftsPresent) {
                             if (totalLiftKg > 0.0) {
-                                StatTile(String.format(Locale.US, "%.1f", tonnageValue), tonnageUnit, stringResource(R.string.main_stat_tonnage), glossaryKey = "tonnage")
+                                StatTile(formatFixed(tonnageValue, 1), tonnageUnit, stringResource(R.string.main_stat_tonnage), glossaryKey = "tonnage")
                             } else {
                                 StatTile(EmptyValuePlaceholder, null, stringResource(R.string.main_stat_tonnage), glossaryKey = "tonnage")
                             }
                         }
                         if (showRunning || runsPresent) {
                             if (runningKm > 0.0) {
-                                StatTile(String.format(Locale.US, "%.1f", runningDistance), distanceUnit.distanceLabel, stringResource(R.string.main_stat_running))
+                                StatTile(formatFixed(runningDistance, 1), distanceUnit.distanceLabel, stringResource(R.string.main_stat_running))
                             } else {
                                 StatTile(EmptyValuePlaceholder, null, stringResource(R.string.main_stat_running))
                             }

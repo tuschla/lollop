@@ -45,7 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.util.Locale
+import kotlin.math.abs
 
 /** Corner shape of a raised keypad key (and the Done key under the grid). */
 private val KeypadKeyShape = RoundedCornerShape(10.dp)
@@ -95,7 +95,7 @@ fun KeypadValueField(
     invalid: Boolean,
     min: Double,
     max: Double,
-    format: String,
+    decimals: Int,
     adjustments: List<Double>,
     onActivate: () -> Unit,
     onText: (String) -> Unit,
@@ -154,7 +154,7 @@ fun KeypadValueField(
                 // Spoken as the action with its unit ("Add 2.5 kg"), not a bare "+2.5".
                 val adjDesc = stringResource(
                     if (adj < 0) R.string.ui_cd_adjust_sub else R.string.ui_cd_adjust_add,
-                    fmtLosslessPrefill(Math.abs(adj)),
+                    fmtLosslessPrefill(abs(adj)),
                     unit,
                 )
                 // The clickable node itself spans ≥48×48dp (not a smaller chip with
@@ -169,11 +169,7 @@ fun KeypadValueField(
                             if (base == null) return@clickable
                             onActivate()
                             onText(
-                                String.format(
-                                    Locale.US,
-                                    format,
-                                    (base + adj).coerceIn(min, max),
-                                ),
+                                formatFixed((base + adj).coerceIn(min, max), decimals),
                             )
                         },
                     contentAlignment = Alignment.Center,
@@ -209,8 +205,8 @@ fun KeypadValueField(
             when {
                 invalid -> stringResource(
                     R.string.ui_keypad_range_hint,
-                    String.format(Locale.US, format, min),
-                    String.format(Locale.US, format, max),
+                    formatFixed(min, decimals),
+                    formatFixed(max, decimals),
                     unit,
                 )
                 else -> hint.orEmpty()
@@ -436,4 +432,4 @@ fun editNumericBuffer(text: String, key: Char, replaceAll: Boolean): String {
 
 /** `+2.5` / `−5` / `+0.01` label for a relative-adjust chip, at the step's own
  *  precision ([trimDecimal] would print a 0.01 m/s step as "0"). */
-private fun adjLabel(a: Double): String = (if (a < 0) "−" else "+") + fmtLosslessPrefill(Math.abs(a))
+private fun adjLabel(a: Double): String = (if (a < 0) "−" else "+") + fmtLosslessPrefill(abs(a))

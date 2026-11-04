@@ -1,7 +1,6 @@
 package app.milestone
 
 import android.content.res.Resources
-import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -332,8 +331,8 @@ internal fun TrackerStatusPill(
     val status = LocalStatusColors.current
     val lastFix by RunSession.lastFix.collectAsStateWithLifecycle()
     val lastFixElapsedMs by RunSession.lastFixElapsedMs.collectAsStateWithLifecycle()
-    var nowElapsed by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    LaunchedEffect(lastFixElapsedMs) { nowElapsed = SystemClock.elapsedRealtime() }
+    var nowElapsed by remember { mutableLongStateOf(monotonicMillis()) }
+    LaunchedEffect(lastFixElapsedMs) { nowElapsed = monotonicMillis() }
     val freshLock = isFreshLock(lastFix?.accuracyM, lastFixElapsedMs, nowElapsed)
     val signalLost = tracking && signalLossDue(lastFixElapsedMs, nowElapsed)
     val needsTick = freshLock || armed || locating || (tracking && !signalLost)
@@ -342,7 +341,7 @@ internal fun TrackerStatusPill(
         if (needsTick) while (true) {
             // A mid-run revocation must read as PermissionNeeded, not a lost fix.
             recheckPermission()
-            nowElapsed = SystemClock.elapsedRealtime()
+            nowElapsed = monotonicMillis()
             delay(PILL_TICK_MS)
         }
     }
@@ -383,7 +382,7 @@ internal fun TrackerStatusPill(
             TrackerPill.ArmedWaiting -> stringResource(R.string.track_pill_armed_waiting)
             TrackerPill.FreshLock -> stringResource(
                 R.string.track_pill_fresh_lock,
-                lastFix?.accuracyM?.let { Math.round(it) } ?: 0L,
+                lastFix?.accuracyM?.roundOrZero() ?: 0L,
             )
             TrackerPill.Acquiring -> stringResource(R.string.track_notif_locate_title)
         }

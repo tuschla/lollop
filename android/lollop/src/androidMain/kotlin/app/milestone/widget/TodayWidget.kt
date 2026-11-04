@@ -60,16 +60,17 @@ import app.milestone.RunSession
 import app.milestone.Space
 import app.milestone.StatusColors
 import app.milestone.Type
+import app.milestone.WeekdayWidth
 import app.milestone.accentTint
 import app.milestone.appLocale
 import app.milestone.latinDigitResources
 import app.milestone.openIntent
 import app.milestone.planDateLabel
 import app.milestone.todayEpochDay
+import app.milestone.weekdayName
 import app.milestone.withDynamicAccent
-import java.time.LocalDate
-import java.util.Locale
 import kotlin.math.ceil
+import kotlinx.datetime.LocalDate
 import androidx.compose.ui.text.TextStyle as ComposeTextStyle
 import androidx.compose.ui.text.font.FontWeight as ComposeFontWeight
 import androidx.glance.color.ColorProvider as DayNightColorProvider
@@ -211,7 +212,7 @@ private val PreviewSessionDays = setOf(0, 2, 4, 5)
 /** The picker preview's sample day: [today] is its lift day, in a plan week of
  *  Monday, Wednesday, Friday and Saturday sessions (and today). */
 internal fun previewSnapshot(res: Resources, today: Long): WidgetSnapshot {
-    val monday = today - LocalDate.ofEpochDay(today).dayOfWeek.ordinal
+    val monday = today - LocalDate.fromEpochDays(today).dayOfWeek.ordinal
     val week = (0 until 7).map { i ->
         val day = monday + i
         val mark = when {
@@ -337,7 +338,7 @@ internal fun widgetLayout(size: DpSize, fontScale: Float, face: WidgetFace): Wid
     val overlineH = Type.Overline.height(1, fontScale) + Space.Sm.dp
     val overline = avail - overlineH >= caption
     if (overline) avail -= overlineH
-    val todayOverline = wide && wrappedLines(face.overline.uppercase(Locale.US), Type.Overline, textWidth, fontScale) == 1
+    val todayOverline = wide && wrappedLines(face.overline.uppercase(), Type.Overline, textWidth, fontScale) == 1
     // The hero: a figure on one line in Display, or a session name, then its note.
     val heroH = face.hero?.let { h ->
         val main = if (h.figure) {
@@ -634,7 +635,7 @@ private fun StackLayout(face: WidgetFace, colors: WidgetColors, layout: WidgetLa
                 val date = face.day?.let { planDateLabel(it) }
                 // Narrow (or the full line would not fit): the date alone; it is the day the content is for.
                 val text = if (layout.todayOverline || date == null) face.overline else date
-                Text(text.uppercase(Locale.US), style = Type.Overline.glance(colors.accent), maxLines = 1)
+                Text(text.uppercase(), style = Type.Overline.glance(colors.accent), maxLines = 1)
                 Spacer(GlanceModifier.height(Space.Sm.dp))
             }
             if (!poster) title()
@@ -731,7 +732,7 @@ private fun RowScope.Actions(face: WidgetFace, colors: WidgetColors, layout: Wid
 
 /** Two-letter weekday ("Mo", "Tu"), as the app's week strip. */
 private fun weekdayShort(epochDay: Long): String =
-    LocalDate.ofEpochDay(epochDay).dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT_STANDALONE, appLocale()).take(2)
+    weekdayName(LocalDate.fromEpochDays(epochDay).dayOfWeek, WeekdayWidth.ShortStandalone, appLocale()).take(2)
 
 /**
  * The week block: the week count ("1 of 4 sessions done"), then, where the layout

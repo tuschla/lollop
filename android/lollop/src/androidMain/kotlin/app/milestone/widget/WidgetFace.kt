@@ -6,12 +6,12 @@ import app.milestone.OpenDest
 import app.milestone.R
 import app.milestone.Reminder
 import app.milestone.TileFace
+import app.milestone.WeekdayWidth
 import app.milestone.appLocale
 import app.milestone.planDateLabel
 import app.milestone.reminderLine
 import app.milestone.tileFace
-import java.time.LocalDate
-import java.time.format.TextStyle
+import kotlinx.datetime.LocalDate
 
 /** How the widget colours its title. */
 internal enum class WidgetTone {
@@ -191,7 +191,7 @@ internal fun isFigure(text: String): Boolean =
 
 /** The short weekday ("Thu") in the app's language. */
 private fun weekdayName(epochDay: Long): String =
-    LocalDate.ofEpochDay(epochDay).dayOfWeek.getDisplayName(TextStyle.SHORT, appLocale())
+    app.milestone.weekdayName(LocalDate.fromEpochDays(epochDay).dayOfWeek, WeekdayWidth.Short, appLocale())
 
 private fun itemLine(item: WidgetItem, res: Resources): String {
     val name = when (item.kind) {

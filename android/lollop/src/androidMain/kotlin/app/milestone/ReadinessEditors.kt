@@ -18,7 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import java.util.Locale
+import kotlinx.datetime.TimeZone
 
 /** The run length the decoupling reading opens on: past the core's 20-minute
  *  validity floor, so an untouched reading counts. */
@@ -118,11 +118,11 @@ fun ReadinessEditor(
                 spec != null -> {
                     // The whole value grid is visible and one tap picks any point,
                     // negatives (z-scores, deltas) included, which the keypad can't type.
-                    FieldLabel(stringResource(R.string.log_field_value), String.format(Locale.US, spec.format, value))
+                    FieldLabel(stringResource(R.string.log_field_value), formatFixed(value, spec.decimals))
                     ScrollableScaleRow(
                         spec.gridOptions(),
                         value,
-                        { String.format(Locale.US, spec.format, it) },
+                        { formatFixed(it, spec.decimals) },
                         label = stringResource(signal.labelRes),
                     ) {
                         value = it
@@ -186,7 +186,7 @@ private val ScaleHighBad = (5 downTo 1).toList()
 /** Whether a check-in echo stamped [echoObservedAt] is today's own answer
  *  (rehydrated for editing) rather than an earlier day's (shown only as a
  *  "Last time" hint), in the device's local calendar. Pure. */
-internal fun checkinEchoIsToday(echoObservedAt: Long, nowSec: Long, zone: java.time.ZoneId): Boolean =
+internal fun checkinEchoIsToday(echoObservedAt: Long, nowSec: Long, zone: TimeZone): Boolean =
     localEpochDay(echoObservedAt, zone) == localEpochDay(nowSec, zone)
 
 /**
@@ -213,7 +213,7 @@ fun MorningCheckinSheet(
     // time: 4"): saved as today's they would skew the baseline the coach compares
     // against, so every item needs a fresh tap. Every item is optional (the core
     // averages only what was answered), so Save opens with the first answer.
-    val todayEcho = echo?.takeIf { checkinEchoIsToday(it.observed_at, AppClock.nowSec(), java.time.ZoneId.systemDefault()) }
+    val todayEcho = echo?.takeIf { checkinEchoIsToday(it.observed_at, AppClock.nowSec(), TimeZone.currentSystemDefault()) }
     val pastEcho = if (todayEcho == null) echo else null
     var sleep by rememberSaveable { mutableStateOf(todayEcho?.sleep_quality) }
     var soreness by rememberSaveable { mutableStateOf(todayEcho?.soreness) }
@@ -237,10 +237,10 @@ fun MorningCheckinSheet(
     var hasRhr by rememberSaveable { mutableStateOf(echo?.resting_hr_bpm != null) }
     var hasHrv by rememberSaveable { mutableStateOf(echo?.hrv_rmssd_ms != null) }
     var rhrText by rememberSaveable {
-        mutableStateOf(todayEcho?.resting_hr_bpm?.let { String.format(Locale.US, "%.0f", it) } ?: "")
+        mutableStateOf(todayEcho?.resting_hr_bpm?.let { formatFixed(it, 0) } ?: "")
     }
     var hrvText by rememberSaveable {
-        mutableStateOf(todayEcho?.hrv_rmssd_ms?.let { String.format(Locale.US, "%.0f", it) } ?: "")
+        mutableStateOf(todayEcho?.hrv_rmssd_ms?.let { formatFixed(it, 0) } ?: "")
     }
     var active by rememberSaveable { mutableStateOf(CheckinField.RestingHr) }
     var fresh by rememberSaveable { mutableStateOf(true) }
@@ -465,11 +465,11 @@ private fun WatchNumberRow(
         label, unit, text,
         active = keypadOpen,
         invalid = text.isNotEmpty() && invalid,
-        min = range.start, max = range.endInclusive, format = "%.0f",
+        min = range.start, max = range.endInclusive, decimals = 0,
         adjustments = adjustments,
         onActivate = onActivate,
         onText = onChip,
-        hint = lastValue?.let { stringResource(R.string.log_checkin_last_unit, String.format(Locale.US, "%.0f", it), unit) },
+        hint = lastValue?.let { stringResource(R.string.log_checkin_last_unit, formatFixed(it, 0), unit) },
     )
     // Resting HR and rMSSD are whole numbers.
     KeypadPanel(keypadOpen) { NumericKeypad(text, fresh, onBuffer, allowDecimal = false, onDone = onDone) }
@@ -527,7 +527,7 @@ private data class ValueSpec(
     val default: Double,
     // Unit + threshold caption.
     @StringRes val hint: Int,
-    val format: String = "%.1f",
+    val decimals: Int = 1,
 )
 
 /**
@@ -538,8 +538,8 @@ private data class ValueSpec(
  * option by equality.
  */
 private fun ValueSpec.gridOptions(): List<Double> {
-    val n = Math.round((max - min) / step).toInt()
-    return (0..n).map { String.format(Locale.US, format, min + it * step).toDouble() }
+    val n = ((max - min) / step).roundOrZero().toInt()
+    return (0..n).map { formatFixed(min + it * step, decimals).toDouble() }
 }
 
 /**
@@ -565,17 +565,17 @@ private val SignalUis: Map<ReadinessSignal, SignalUi> = ReadinessSignal.entries.
         // e1RM today ÷ baseline; <0.90/<0.95/>1.05 gate deload/cap/add-load.
         ReadinessSignal.EstimatedOneRm -> SignalUi(
             R.string.log_signal_e1rm, R.string.log_signal_e1rm_explainer,
-            ValueSpec(0.70, 1.15, 0.01, 1.0, R.string.log_spec_e1rm, "%.2f"),
+            ValueSpec(0.70, 1.15, 0.01, 1.0, R.string.log_spec_e1rm, 2),
         )
         // Mean concentric velocity, m/s (dormant, no autoreg gate yet).
         ReadinessSignal.BarVelocity -> SignalUi(
             R.string.log_signal_bar_velocity, R.string.log_signal_bar_velocity_explainer,
-            ValueSpec(0.0, 2.0, 0.05, 0.5, R.string.log_spec_bar_velocity, "%.2f"),
+            ValueSpec(0.0, 2.0, 0.05, 0.5, R.string.log_spec_bar_velocity, 2),
         )
         // Within-set velocity-loss %; ≥20 terminates the set.
         ReadinessSignal.VelocityLoss -> SignalUi(
             R.string.log_signal_velocity_loss, R.string.log_signal_velocity_loss_explainer,
-            ValueSpec(0.0, 50.0, 5.0, 0.0, R.string.log_spec_velocity_loss, "%.0f"),
+            ValueSpec(0.0, 50.0, 5.0, 0.0, R.string.log_spec_velocity_loss, 0),
         )
         // Composite wellness z-score; ≤ −1.5 downgrades.
         ReadinessSignal.WellnessZ -> SignalUi(
@@ -595,19 +595,19 @@ private val SignalUis: Map<ReadinessSignal, SignalUi> = ReadinessSignal.entries.
         // Aerobic-decoupling drift %; >10 keeps the run easy.
         ReadinessSignal.AerobicDecoupling -> SignalUi(
             R.string.log_signal_decoupling, R.string.log_signal_decoupling_explainer,
-            ValueSpec(0.0, 30.0, 1.0, 0.0, R.string.log_spec_decoupling, "%.0f"),
+            ValueSpec(0.0, 30.0, 1.0, 0.0, R.string.log_spec_decoupling, 0),
         )
         // RHR delta vs baseline, bpm; 5–9 downgrades, ≥10 stops. The label says
         // "vs normal": this field submits a delta, not the absolute bpm the
         // morning check-in takes.
         ReadinessSignal.RestingHr -> SignalUi(
             R.string.log_signal_rhr, R.string.log_signal_rhr_explainer,
-            ValueSpec(-5.0, 20.0, 1.0, 0.0, R.string.log_spec_rhr, "%.0f"),
+            ValueSpec(-5.0, 20.0, 1.0, 0.0, R.string.log_spec_rhr, 0),
         )
         // Soreness on the 1–7 Hooper scale; ≥6 downgrades intensity one level.
         ReadinessSignal.Soreness -> SignalUi(
             R.string.log_signal_soreness, R.string.log_signal_soreness_explainer,
-            ValueSpec(1.0, 7.0, 1.0, 3.0, R.string.log_spec_soreness, "%.0f"),
+            ValueSpec(1.0, 7.0, 1.0, 3.0, R.string.log_spec_soreness, 0),
         )
         ReadinessSignal.Pain -> SignalUi(R.string.log_signal_pain, R.string.log_signal_pain_explainer)
         ReadinessSignal.Illness -> SignalUi(R.string.log_signal_illness, R.string.log_signal_illness_explainer)

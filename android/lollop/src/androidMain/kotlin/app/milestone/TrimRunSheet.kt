@@ -92,9 +92,9 @@ internal fun TrimRunSheetContent(
         var range by rememberSaveable(firstFixSec, lastFixSec, stateSaver = FloatRangeSaver) {
             mutableStateOf(0f..spanF)
         }
-        val keepFromSec = (firstFixSec + Math.round(range.start).toLong())
+        val keepFromSec = (firstFixSec + range.start.roundOrZero().toLong())
             .coerceIn(firstFixSec, lastFixSec)
-        val keepUntilSec = (firstFixSec + Math.round(range.endInclusive).toLong())
+        val keepUntilSec = (firstFixSec + range.endInclusive.roundOrZero().toLong())
             .coerceIn(firstFixSec, lastFixSec)
 
         // Fixes inside the window are contiguous (points are time-ordered), so a
@@ -258,7 +258,7 @@ internal fun trimPreviewShare(window: Double, track: Double, record: Double): Do
 internal fun trimKeptMovingSec(points: List<TimedTrackPoint>, firstKept: Int, lastKept: Int, recordSec: Double): Int {
     if (firstKept < 0 || lastKept - firstKept < 1) return 0
     val window = points[lastKept].movingSec - points[firstKept].movingSec
-    return Math.round(trimPreviewShare(window, points.last().movingSec, recordSec)).toInt()
+    return trimPreviewShare(window, points.last().movingSec, recordSec).roundOrZero().toInt()
 }
 
 /**

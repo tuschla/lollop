@@ -499,7 +499,7 @@ class ReviewShellComponentTest {
     /**
      * [EventDispatcher.resetForTest] must settle the [EventDispatcher.exclusive]
      * blocks still waiting in the old queue. When the in-flight unit ignores
-     * cancellation (as Export.kt's `withContext(CoreJniDispatcher + NonCancellable)`
+     * cancellation (as Export.kt's `withContext(CoreDispatcher + NonCancellable)`
      * restore body does), the cancelled consumer can't drain them, and a dropped
      * block's awaiter would hang forever. The in-flight send that finishes after the
      * reset publishes nothing into the fresh process.

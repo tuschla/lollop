@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.Locale
+import kotlinx.datetime.TimeZone
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
@@ -25,9 +26,9 @@ class AppLocaleTest {
     fun restoreLocale() = Locale.setDefault(savedLocale)
 
     private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
-    private val zone = ZoneOffset.UTC
+    private val zone = TimeZone.UTC
     private val arabic = Locale.forLanguageTag("ar-EG")
-    private val now = LocalDate.of(2026, 10, 30).atTime(12, 0).toInstant(zone).toEpochMilli()
+    private val now = LocalDate.of(2026, 10, 30).atTime(12, 0).toInstant(ZoneOffset.UTC).toEpochMilli()
 
     private fun daysAgo(n: Long) = now / 1000L - n * 86_400L
 

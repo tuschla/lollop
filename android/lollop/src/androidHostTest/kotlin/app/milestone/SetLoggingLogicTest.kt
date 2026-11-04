@@ -195,7 +195,7 @@ class SetLoggingLogicTest {
         // 23:30 local on Oct 16 is already Oct 17 in UTC; tomorrow must stay unselectable.
         val now = java.time.ZonedDateTime.of(2026, 10, 16, 23, 30, 0, 0, zone).toInstant().toEpochMilli()
         val oct16 = java.time.LocalDate.of(2026, 10, 16).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
-        assertEquals(oct16, latestSelectableDayUtcMillis(now, zone))
+        assertEquals(oct16, latestSelectableDayUtcMillis(now, kotlinx.datetime.TimeZone.of("America/New_York")))
     }
 
     @Test

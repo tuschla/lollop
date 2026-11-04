@@ -25,6 +25,9 @@ internal fun Locale.withLatinDigits(): Locale =
 
 private fun LocaleList.withLatinDigits(): LocaleList = LocaleList(*Array(size()) { get(it).withLatinDigits() })
 
+/** The app's language with Latin digits for the device's current locales. */
+internal actual fun appLocale(): Locale = appLocale(LocaleList.getDefault())
+
 /**
  * The app's language with Latin digits, for every date, weekday and time the
  * shell formats outside the string resources ([formatLogDate],
@@ -33,7 +36,7 @@ private fun LocaleList.withLatinDigits(): LocaleList = LocaleList(*Array(size())
  * en-GB), else English with the primary locale's region (en-DE on a German
  * phone). File names and exported data keep their fixed ISO patterns.
  */
-internal fun appLocale(locales: LocaleList = LocaleList.getDefault()): Locale {
+internal fun appLocale(locales: LocaleList): Locale {
     appLocaleCache?.let { (key, locale) -> if (key == locales) return locale }
     val english = (0 until locales.size()).map(locales::get).firstOrNull { it.language == "en" }
         ?: Locale.Builder().setLanguage("en").setRegion(locales[0].country).build()

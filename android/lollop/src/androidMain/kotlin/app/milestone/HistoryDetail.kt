@@ -352,7 +352,7 @@ private fun EntryDetailContent(
                     HorizontalDivider(color = Hairline)
                     KeyValueRow(
                         stringResource(R.string.history_set_load_label),
-                        stringResource(R.string.history_pct_e1rm, Math.round(v.pct_1rm).toInt()),
+                        stringResource(R.string.history_pct_e1rm, v.pct_1rm.roundOrZero().toInt()),
                     )
                 }
             }

@@ -1,12 +1,12 @@
 package app.milestone
 
-import java.time.DayOfWeek
-import java.time.LocalDate
-import java.time.Period
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
-import java.time.format.TextStyle
-import java.util.Locale
+import kotlin.math.abs
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.DayOfWeek
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
+import kotlinx.datetime.yearsUntil
 
 // Pure guided-setup logic: the answer vocabulary, the screen path, the answers →
 // profile mapping and the seed a re-run or Profile Focus switch opens with. No Compose.
@@ -147,7 +147,7 @@ internal val ResistanceModality.setupConsequenceRes: Int
 
 /** The kg|lb the bodyweight field opens in: a re-run keeps the profile's choice; a
  *  first run follows the phone's region (lb in the US/LR/MM). */
-internal fun seedWeightUnit(initial: Event.SetProfile?, locale: Locale = Locale.getDefault()): WeightUnit =
+internal fun seedWeightUnit(initial: Event.SetProfile?, locale: PlatformLocale = deviceLocale()): WeightUnit =
     initial?.weightUnit ?: localeWeightUnit(locale)
 
 /** Age at which the core's pediatric hold (SAFE-PEDS-001) stops applying. */
@@ -161,15 +161,15 @@ internal fun isMinor(ageYears: Double?): Boolean = ageYears != null && ageYears 
  *  completes its year on 1 March in common years). Display only before the core
  *  echoes the profile; a future birthday reads 0. */
 internal fun ageOnDay(birthEpochDay: Long, today: Long): Int =
-    Period.between(LocalDate.ofEpochDay(birthEpochDay), LocalDate.ofEpochDay(today)).years.coerceAtLeast(0)
+    LocalDate.fromEpochDays(birthEpochDay).yearsUntil(LocalDate.fromEpochDays(today)).coerceAtLeast(0)
 
 /** The birthdays whose age on [today] lies inside [AGE_RANGE] (14–100), oldest
  *  first: the picker's selectable days, so no future date can be picked. */
 internal fun birthdayRange(today: Long): LongRange {
-    val t = LocalDate.ofEpochDay(today)
-    val oldest = t.minusYears(AGE_RANGE.endInclusive.toLong() + 1).plusDays(1)
-    val youngest = t.minusYears(AGE_RANGE.start.toLong())
-    return oldest.toEpochDay()..youngest.toEpochDay()
+    val t = LocalDate.fromEpochDays(today)
+    val oldest = t.minus(AGE_RANGE.endInclusive.toLong() + 1, DateTimeUnit.YEAR).plus(1, DateTimeUnit.DAY)
+    val youngest = t.minus(AGE_RANGE.start.toLong(), DateTimeUnit.YEAR)
+    return oldest.toEpochDays()..youngest.toEpochDays()
 }
 
 /** The day the birthday calendar opens on: the birthday itself, else the same
@@ -177,7 +177,7 @@ internal fun birthdayRange(today: Long): LongRange {
  *  nearer than the youngest selectable year), kept inside [birthdayRange]. */
 internal fun birthdayPickerStart(birthDay: Long?, today: Long): Long {
     val range = birthdayRange(today)
-    return (birthDay ?: LocalDate.ofEpochDay(today).minusYears(PICKER_START_YEARS_BACK).toEpochDay())
+    return (birthDay ?: LocalDate.fromEpochDays(today).minus(PICKER_START_YEARS_BACK, DateTimeUnit.YEAR).toEpochDays())
         .coerceIn(range.first, range.last)
 }
 
@@ -248,7 +248,7 @@ internal fun setupProgress(steps: List<SetupStep>, index: Int, modality: Modalit
 /** The path the answers had when an edit started from the review (or when a
  *  Profile Focus switch opened the setup): Next walks only what the edit
  *  changed, then returns to the review. */
-internal data class ReviewReturn(val modality: Modality?, val calisthenics: Boolean, val raceGoal: Boolean) : java.io.Serializable {
+internal data class ReviewReturn(val modality: Modality?, val calisthenics: Boolean, val raceGoal: Boolean) : JvmSerializable {
     val steps: List<SetupStep> get() = setupSteps(modality, calisthenics, raceGoal)
 }
 
@@ -300,11 +300,11 @@ internal fun toggleWeekday(mask: Int?, day: Int): Int? =
 internal fun weekdaysCover(mask: Int?, days: Int): Boolean = mask == null || weekdayCount(mask) >= days
 
 /** Short weekday name, Monday = 0, in the app's language. */
-internal fun weekdayShortName(day: Int, locale: Locale = appLocale()): String =
-    DayOfWeek.of(day + 1).getDisplayName(TextStyle.SHORT, locale)
+internal fun weekdayShortName(day: Int, locale: PlatformLocale = appLocale()): String =
+    weekdayName(DayOfWeek(day + 1), WeekdayWidth.Short, locale)
 
 /** "Sat, Sun" for a mask (Monday first). */
-internal fun weekdaysLabel(mask: Int, locale: Locale = appLocale()): String =
+internal fun weekdaysLabel(mask: Int, locale: PlatformLocale = appLocale()): String =
     (0 until WEEK_DAYS).filter { mask and (1 shl it) != 0 }.joinToString(", ") { weekdayShortName(it, locale) }
 
 /** Lifting days a pure lifting plan can hold (app::Profile lift_days_per_week). */
@@ -401,7 +401,7 @@ internal enum class RaceDistance(val km: Double, val labelRes: Int) {
     ;
 
     companion object {
-        fun of(km: Double): RaceDistance? = entries.firstOrNull { Math.abs(it.km - km) < RACE_DISTANCE_MATCH_KM }
+        fun of(km: Double): RaceDistance? = entries.firstOrNull { abs(it.km - km) < RACE_DISTANCE_MATCH_KM }
     }
 }
 
@@ -513,20 +513,6 @@ internal enum class CalisPiece(val labelRes: Int) {
 /** Something to hang and pull from: every pull-up rung needs one (the core's
  *  calisthenics rung_available, Kit::hang). */
 internal val CalisEquipment.canHang: Boolean get() = pull_up_bar || rings
-
-// ── Dates ───────────────────────────────────────────────────────────────────
-
-/** A local epoch day as a medium date in the app's language ("Oct 6, 2026"). */
-internal fun epochDayLabel(day: Long, locale: Locale = appLocale()): String =
-    LocalDate.ofEpochDay(day).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale))
-
-/** [day] as a short localized date, dropping the year when it is [today]'s year
- *  ("Sep 11"; "Dec 30, 2025" otherwise), for values that must fit a row. */
-internal fun epochDayShortLabel(day: Long, today: Long, locale: Locale = appLocale()): String {
-    val date = LocalDate.ofEpochDay(day)
-    if (date.year != LocalDate.ofEpochDay(today).year) return epochDayLabel(day, locale)
-    return date.format(localizedDayFormatter("MMMd", locale))
-}
 
 // ── Answers → profile ───────────────────────────────────────────────────────
 
@@ -756,7 +742,7 @@ internal data class SetupAnswers(
     val restingHrTouched: Boolean = false,
     val weeklyTouched: Boolean = false,
     val longestTouched: Boolean = false,
-) : java.io.Serializable {
+) : JvmSerializable {
     /** Calisthenics placement applies: lifting is trained, on bodyweight. */
     val calisthenics: Boolean
         get() = modality != Modality.Run && resistanceModality == ResistanceModality.Calisthenics

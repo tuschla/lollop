@@ -13,7 +13,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import java.util.Locale
 
 /** Run analog of [setEditEvent]: fresh [Event.LogRun] or an [Event.AmendRun]. */
 private fun runEditEvent(
@@ -46,7 +45,7 @@ private const val RunDistanceMaxKm = 100.0
  *  0.01 mi grid (62.14 mi, which saves as 100.00 km), so a ± chip or a prefill at
  *  the ceiling stays valid. */
 internal fun runDistanceMax(unit: DistanceUnit): Double =
-    if (unit == DistanceUnit.Mi) Math.round(kmToMi(RunDistanceMaxKm) * 100.0) / 100.0 else RunDistanceMaxKm
+    if (unit == DistanceUnit.Mi) (kmToMi(RunDistanceMaxKm) * 100.0).roundOrZero() / 100.0 else RunDistanceMaxKm
 
 /** The run editor's duration ceiling, minutes (10 h). */
 private const val RunDurationMaxMin = 600.0
@@ -100,7 +99,7 @@ fun LogRunEditor(
         // buffer (a fresh entry with nothing to seed) stays empty.
         mutableStateOf(
             initial?.let {
-                if (unit == DistanceUnit.Mi) String.format(Locale.US, "%.2f", kmToMi(it.distance_km))
+                if (unit == DistanceUnit.Mi) formatFixed(kmToMi(it.distance_km), 2)
                 else fmtLosslessPrefill(it.distance_km)
             } ?: ""
         )
@@ -250,7 +249,7 @@ fun LogRunEditor(
                     stringResource(R.string.log_field_distance), unit.distanceLabel, distText,
                     active = keypadOpen && active == RunField.Distance,
                     invalid = !distEmpty && !distValid,
-                    min = 0.0, max = distMax, format = "%.2f",
+                    min = 0.0, max = distMax, decimals = 2,
                     adjustments = listOf(-0.5, 0.5, 1.0),
                     onActivate = { active = RunField.Distance; fresh = true; keypadOpen = true },
                     onText = { distText = it; fresh = false; distFresh = false; dirty = true },
@@ -266,7 +265,7 @@ fun LogRunEditor(
                     hmsDisplay(durDigits),
                     active = keypadOpen && active == RunField.Duration,
                     invalid = false,
-                    min = 0.0, max = RunDurationMaxMin, format = "%.0f",
+                    min = 0.0, max = RunDurationMaxMin, decimals = 0,
                     adjustments = emptyList(),
                     onActivate = { active = RunField.Duration; fresh = true; keypadOpen = true },
                     onText = {},
@@ -287,7 +286,7 @@ fun LogRunEditor(
                     hrText,
                     active = keypadOpen && active == RunField.HeartRate,
                     invalid = hrText.isNotBlank() && !hrValid,
-                    min = RunHrMin, max = hrMax, format = "%.0f",
+                    min = RunHrMin, max = hrMax, decimals = 0,
                     adjustments = listOf(-5.0, 5.0),
                     onActivate = { active = RunField.HeartRate; fresh = true; keypadOpen = true },
                     onText = { hrText = it; fresh = false; dirty = true },
@@ -348,7 +347,7 @@ internal fun durationDigitsToMin(digits: String): Double? {
 /** A stored duration (minutes) as a timer digit buffer, rounded to the second
  *  ("105.5" → "14530"); "" for zero. Pure. */
 internal fun minutesToDurationDigits(min: Double): String =
-    secondsToHmsDigits(Math.round(min * 60.0).coerceIn(0L, 359_999L).toInt())
+    secondsToHmsDigits((min * 60.0).roundOrZero().coerceIn(0L, 359_999L).toInt())
 
 /** Apply one keypad key to a duration digit buffer: digits append (no leading
  *  zero, at most hhmmss), the decimal point is ignored. [replaceAll] starts a

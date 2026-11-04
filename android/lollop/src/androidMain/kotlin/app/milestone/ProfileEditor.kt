@@ -1182,7 +1182,7 @@ private fun ProfileKeypadEditor(
                 label, unit, text,
                 active = true,
                 invalid = touched && text.isNotEmpty() && !valid,
-                min = range.start, max = range.endInclusive, format = if (allowDecimal) "%.1f" else "%.0f",
+                min = range.start, max = range.endInclusive, decimals = if (allowDecimal) 1 else 0,
                 // The keypad below is the one input; no ±1 steppers beside it.
                 adjustments = emptyList(),
                 onActivate = { fresh = true },

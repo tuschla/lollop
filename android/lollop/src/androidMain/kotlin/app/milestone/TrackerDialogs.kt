@@ -111,7 +111,7 @@ internal fun RunFinishPanel(
         Core.savedFigures(RunSession.trackEventForCore(entryId = 0L, workoutType = null, sessionRpe = null))
     }
     val km = figures?.distance_km ?: 0.0
-    val elapsedSec = figures?.let { Math.round(it.duration_min * 60.0) } ?: 0L
+    val elapsedSec = figures?.let { (it.duration_min * 60.0).roundOrZero() } ?: 0L
     val route = remember(points) {
         trackSegments(RunSession.decimatedTrackForCore(), RunSession.decimatedSegmentStarts())
     }

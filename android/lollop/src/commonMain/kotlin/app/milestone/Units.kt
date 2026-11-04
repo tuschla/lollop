@@ -1,13 +1,11 @@
 package app.milestone
 
-import java.util.Locale
-
 /**
  * Distance/pace units. The core (crux) is unit-agnostic: it stores and reasons in
  * SI (meters, min/km). Unit choice is pure shell chrome, resolved here and applied
  * only at the display edge. Everything in this file is a pure function of its inputs
- * (the locale defaults [localeDistanceUnit] and [localeWeightUnit] read the JVM
- * default locale) so the math is unit-testable without an Android context.
+ * (the locale defaults [localeDistanceUnit] and [localeWeightUnit] read the device
+ * locale) so the math is unit-testable without an Android context.
  */
 enum class DistanceUnit(
     /** Short distance label, e.g. "5.2 km" / "3.2 mi". */
@@ -34,19 +32,19 @@ private val MILE_COUNTRIES = setOf("US", "GB", "LR", "MM")
 
 /**
  * Locale-derived default unit: miles for US/GB/LR/MM, kilometers everywhere else.
- * Reads [Locale.getDefault] by default. Kept separate from
+ * Reads the device locale ([deviceLocale]) by default. Kept separate from
  * the pure math so tests can drive [resolveDistanceUnit] with an explicit locale.
  */
-fun localeDistanceUnit(locale: Locale = Locale.getDefault()): DistanceUnit =
-    if (locale.country.uppercase(Locale.ROOT) in MILE_COUNTRIES) DistanceUnit.Mi else DistanceUnit.Km
+fun localeDistanceUnit(locale: PlatformLocale = deviceLocale()): DistanceUnit =
+    if (locale.region.uppercase() in MILE_COUNTRIES) DistanceUnit.Mi else DistanceUnit.Km
 
 /**
  * Resolve the effective unit: an explicit [DistanceUnitOverride] wins; [System] falls
- * back to the locale. Pure given [locale] (default = JVM default).
+ * back to the locale. Pure given [locale] (default = the device locale).
  */
 fun resolveDistanceUnit(
     override: DistanceUnitOverride,
-    locale: Locale = Locale.getDefault(),
+    locale: PlatformLocale = deviceLocale(),
 ): DistanceUnit = when (override) {
     DistanceUnitOverride.Km -> DistanceUnit.Km
     DistanceUnitOverride.Mi -> DistanceUnit.Mi
@@ -84,7 +82,7 @@ fun miToKm(mi: Double): Double = mi * (METERS_PER_MILE / 1000.0)
  *  verbatim. Use only at the mi→km save boundary; km-native paths stay exact. */
 internal fun miToKmWire(mi: Double): Double = round2(miToKm(mi))
 
-private fun round2(x: Double): Double = Math.round(x * 100.0) / 100.0
+private fun round2(x: Double): Double = (x * 100.0).roundOrZero() / 100.0
 
 /**
  * Weight units. As with distance, the core (crux) reasons in SI (kilograms) and its
@@ -126,15 +124,15 @@ private val POUND_COUNTRIES = setOf("US", "LR", "MM")
  * Seeds the guided setup's kg|lb choice on a first run (a re-run keeps the
  * profile's stored preference). Pure given [locale].
  */
-fun localeWeightUnit(locale: Locale = Locale.getDefault()): WeightUnit =
-    if (locale.country.uppercase(Locale.ROOT) in POUND_COUNTRIES) WeightUnit.Lb else WeightUnit.Kg
+fun localeWeightUnit(locale: PlatformLocale = deviceLocale()): WeightUnit =
+    if (locale.region.uppercase() in POUND_COUNTRIES) WeightUnit.Lb else WeightUnit.Kg
 
 /** Plausible adult bodyweight span the keypad accepts, in canonical kg. */
 const val BODYWEIGHT_MIN_KG: Double = 30.0
 const val BODYWEIGHT_MAX_KG: Double = 250.0
 
 /** Round to one decimal, the display precision of every bodyweight and distance field. */
-private fun roundTenth(v: Double): Double = Math.round(v * 10.0) / 10.0
+private fun roundTenth(v: Double): Double = (v * 10.0).roundOrZero() / 10.0
 
 /**
  * Bodyweight keypad conversion: the core stores canonical kg, the field shows the
@@ -179,13 +177,13 @@ const val WEEKLY_VOLUME_MAX_KM: Double = 150.0
 
 fun weeklyVolumeScaleOptions(unit: DistanceUnit): List<Int> =
     if (unit == DistanceUnit.Mi) {
-        (1..Math.round(kmToMi(WEEKLY_VOLUME_MAX_KM)).toInt()).toList()
+        (1..kmToMi(WEEKLY_VOLUME_MAX_KM).roundOrZero().toInt()).toList()
     } else {
         (1..WEEKLY_VOLUME_MAX_KM.toInt()).toList()
     }
 
 fun weeklyVolumeScaleValue(km: Double, unit: DistanceUnit): Int =
-    Math.round(if (unit == DistanceUnit.Mi) kmToMi(km) else km).toInt()
+    (if (unit == DistanceUnit.Mi) kmToMi(km) else km).roundOrZero().toInt()
 
 fun weeklyVolumeScaleToKm(value: Int, unit: DistanceUnit): Double =
     if (unit == DistanceUnit.Mi) miToKmWire(value.toDouble()) else value.toDouble()
@@ -196,7 +194,7 @@ fun weeklyVolumeScaleToKm(value: Int, unit: DistanceUnit): Double =
  */
 fun formatPaceMinutes(minutes: Double): String {
     if (!minutes.isFinite() || minutes < 0.0) return "-:-"
-    val totalSeconds = Math.round(minutes * 60.0).toInt()
+    val totalSeconds = (minutes * 60.0).roundOrZero().toInt()
     val mins = totalSeconds / 60
     val secs = totalSeconds % 60
     return "$mins:${secs.toString().padStart(2, '0')}"
@@ -211,7 +209,7 @@ fun formatPaceMinutes(minutes: Double): String {
  */
 internal fun trimDecimal(v: Double): String {
     if (!v.isFinite()) return "-"
-    val oneDecimal = String.format(Locale.US, "%.1f", v)
+    val oneDecimal = formatFixed(v, 1)
     val trimmed = if (oneDecimal.endsWith(".0")) oneDecimal.dropLast(2) else oneDecimal
     return if (trimmed == "-0") "0" else trimmed
 }
@@ -223,7 +221,7 @@ internal fun weightFigure(kg: Double, unit: WeightUnit): String =
 /** [n] with its thousands split by a narrow no-break space ("4 690"): neither ','
  *  nor '.', so no locale reads the mark as a decimal point. Every grouped figure
  *  goes through it. Pure. */
-internal fun groupedFigure(n: Long): String = String.format(Locale.US, "%,d", n).replace(',', '\u202F')
+internal fun groupedFigure(n: Long): String = groupThousands(n, '\u202F')
 
 /** Longest timer-style digit buffer: hhmmss. */
 internal const val HMS_DIGITS_MAX = 6
@@ -253,6 +251,6 @@ internal fun secondsToHmsDigits(sec: Int): String {
     val h = sec / 3600
     val m = sec % 3600 / 60
     val s = sec % 60
-    val raw = if (h > 0) String.format(Locale.US, "%d%02d%02d", h, m, s) else String.format(Locale.US, "%d%02d", m, s)
+    val raw = if (h > 0) "$h${zeroPad(m)}${zeroPad(s)}" else "$m${zeroPad(s)}"
     return raw.trimStart('0')
 }

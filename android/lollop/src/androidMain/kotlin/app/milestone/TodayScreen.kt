@@ -44,6 +44,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
 
 /**
  * Today: the status cards, the readiness strip, the hero (the next session, else
@@ -832,7 +835,7 @@ internal fun coachingPerExercise(headlineExercise: String?, candidates: List<Adj
 
 /** Distinct local days with at least one logged (dated) lift set. */
 private fun loggedLiftDays(lifts: List<LiftResultView>): Int {
-    val zone = java.time.ZoneId.systemDefault()
+    val zone = TimeZone.currentSystemDefault()
     return lifts.asSequence()
         .filter { it.observed_at > 0L }
         .map { localEpochDay(it.observed_at, zone) }
@@ -965,7 +968,7 @@ private fun SignalPill(label: String, state: String, safetyCritical: Boolean) {
 internal class E1rmTrend(
     val exercise: String,
     val series: List<Double>,
-    val firstDay: java.time.LocalDate,
+    val firstDay: LocalDate,
 )
 
 /** The e1RM trend for the plan's main lift (the first lift of the next session,
@@ -976,15 +979,15 @@ internal class E1rmTrend(
 internal fun e1rmTrend(model: ViewModel): E1rmTrend? {
     val weighted = model.lifts.filter { it.hold_sec == null && it.e1rm_kg > 0.0 && it.observed_at > 0L }
     if (weighted.isEmpty()) return null
-    val zone = java.time.ZoneId.systemDefault()
+    val zone = TimeZone.currentSystemDefault()
     fun build(exercise: String): E1rmTrend? {
         val sets = weighted.filter { sameExercise(it.exercise, exercise) }
-        val byDay = sets.groupBy { localEpochDay(it.observed_at, zone) }.toSortedMap()
+        val byDay = sets.groupBy { localEpochDay(it.observed_at, zone) }.entries.sortedBy { it.key }
         if (byDay.size < 3) return null
         return E1rmTrend(
             exercise = exercise,
-            series = byDay.values.map { day -> day.maxOf { it.e1rm_kg } },
-            firstDay = java.time.LocalDate.ofEpochDay(byDay.firstKey()),
+            series = byDay.map { (_, day) -> day.maxOf { it.e1rm_kg } },
+            firstDay = LocalDate.fromEpochDays(byDay.first().key),
         )
     }
     val planLifts = (listOfNotNull(model.next_session) + model.week_plan)
@@ -1006,7 +1009,7 @@ internal fun e1rmTrend(model: ViewModel): E1rmTrend? {
 private fun E1rmTrendCard(trend: E1rmTrend, weightUnit: WeightUnit) {
     val latest = trend.series.last()
     val unit = weightSuffix(weightUnit)
-    val since = remember(trend.firstDay) { trend.firstDay.format(localizedDayFormatter("MMMd")) }
+    val since = remember(trend.firstDay) { localizedDayFormatter("MMMd").format(trend.firstDay) }
     val chartDesc = stringResource(
         R.string.main_e1rm_trend_cd,
         trend.exercise,
@@ -1017,7 +1020,7 @@ private fun E1rmTrendCard(trend: E1rmTrend, weightUnit: WeightUnit) {
     )
     // Rounded once, in the display unit, from the two plotted points.
     val shownDelta = (if (weightUnit == WeightUnit.Lb) kgToLb(latest) - kgToLb(trend.series.first()) else latest - trend.series.first())
-        .let { Math.round(it * 10.0) / 10.0 }
+        .let { (it * 10.0).roundOrZero() / 10.0 }
     var badgeWhy by rememberSaveable(trend.exercise) { mutableStateOf(false) }
     PlainCard {
         Row(
@@ -1042,7 +1045,7 @@ private fun E1rmTrendCard(trend: E1rmTrend, weightUnit: WeightUnit) {
                 Text(
                     stringResource(
                         R.string.main_e1rm_change_since,
-                        (if (shownDelta > 0) "+" else "−") + trimDecimal(Math.abs(shownDelta)),
+                        (if (shownDelta > 0) "+" else "−") + trimDecimal(abs(shownDelta)),
                         unit,
                         since,
                     ),
@@ -1464,11 +1467,11 @@ private fun SessionDoneCard(
 @Composable
 private fun sessionDoneRunLine(row: SessionDoneItemView, unit: DistanceUnit): String? {
     if (row.run_km == null && row.run_min == null) return null
-    val tenth = { km: Double -> Math.round(metersToDisplay(km * 1000.0, unit) * 10.0) / 10.0 }
+    val tenth = { km: Double -> (metersToDisplay(km * 1000.0, unit) * 10.0).roundOrZero() / 10.0 }
     val dist = row.run_km?.let(tenth)
     val plannedDist = row.run_planned_km?.let(tenth)
-    val min = row.run_min?.let { Math.round(it).toInt() }
-    val plannedMin = row.run_planned_min?.let { Math.round(it).toInt() }
+    val min = row.run_min?.let { it.roundOrZero().toInt() }
+    val plannedMin = row.run_planned_min?.let { it.roundOrZero().toInt() }
     val distText = dist?.let { d ->
         val shown = "${trimDecimal(d)}\u00A0${unit.distanceLabel}"
         if (plannedDist != null && d < plannedDist) {

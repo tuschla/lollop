@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 /** How long the "Logged … · Undo" row stays after a loop save. */
 private const val UndoWindowMs = 8_000L
@@ -500,7 +501,7 @@ fun LogSetEditor(
     }
     // The load action hides once the field already holds that load.
     val cueLoadKg = cue?.suggested_load_kg?.takeIf { s ->
-        !(fields.weightFresh && fields.weightVerbatim?.let { Math.abs(it - s) < 1e-6 } == true)
+        !(fields.weightFresh && fields.weightVerbatim?.let { abs(it - s) < 1e-6 } == true)
     }
     // "Use 140 kg": its label and the action that puts the load in the field.
     val cueLoad: Pair<String, () -> Unit>? = cueLoadKg?.let { kg ->
@@ -772,7 +773,7 @@ fun LogSetEditor(
                             val v = fields.weightVerbatim
                             item.plates_per_side.takeIf {
                                 it.isNotEmpty() && basis != null && fields.weightFresh && v != null &&
-                                    Math.abs(v - basis) < 1e-6
+                                    abs(v - basis) < 1e-6
                             }
                         },
                         weightUnit = weightUnit,
@@ -790,7 +791,7 @@ fun LogSetEditor(
                             active = keypadOpen,
                             invalid = !weightEmpty && !weightValid,
                             // kg keeps a two-decimal load (101.25) through a chip; lb is a half-pound grid.
-                            min = 0.0, max = weightMax, format = if (weightUnit == WeightUnit.Lb) "%.1f" else "%.2f",
+                            min = 0.0, max = weightMax, decimals = if (weightUnit == WeightUnit.Lb) 1 else 2,
                             adjustments = plateSteps(weightUnit),
                             onActivate = { focusManager.clearFocus(); keypadOpen = true },
                             // Only the ± chips report a whole new value (keys go through the
@@ -983,7 +984,7 @@ private fun WarmUpRow(steps: List<WarmUpStep>, doneKg: List<Double>, weightUnit:
         horizontalArrangement = Arrangement.spacedBy(Space.Sm.dp),
     ) {
         steps.forEach { step ->
-            val done = doneKg.any { Math.abs(it - step.kg) < 1e-3 }
+            val done = doneKg.any { abs(it - step.kg) < 1e-3 }
             val load = "${loadFigure(step.kg, weightUnit)}\u00A0${weightSuffix(weightUnit)}"
             val cd = stringResource(R.string.log_warmup_cd, "$load × ${step.reps}")
             val figure = if (step.bar) barLabel else loadFigure(step.kg, weightUnit)

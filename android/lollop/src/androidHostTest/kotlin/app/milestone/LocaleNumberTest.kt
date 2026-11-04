@@ -17,6 +17,7 @@ import app.milestone.qa.str
 import androidx.test.core.app.ApplicationProvider
 import java.time.LocalDate
 import java.time.ZoneOffset
+import kotlinx.datetime.TimeZone
 import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -128,7 +129,7 @@ class LocaleNumberTest {
         assertEquals("$l", "45:30", hmsDisplay("4530"))
         // Dates are the device's words and order, never its digits.
         val day = LocalDate.of(2026, 3, 4).toEpochDay()
-        listOf(planDateLabel(day), epochDayLabel(day, l), epochDayShortLabel(day, day, l), importDateLabel(1_772_600_000L, l, ZoneOffset.UTC))
+        listOf(planDateLabel(day), epochDayLabel(day, l), epochDayShortLabel(day, day, l), importDateLabel(1_772_600_000L, l, TimeZone.UTC))
             .forEach { assertEquals("$l: $it", "", foreignDigits(it)) }
     }
 
@@ -250,7 +251,7 @@ class LocaleNumberTest {
         )
         val bad = Locales.mapNotNull { l ->
             Locale.setDefault(l)
-            val text = buildCoachSummary(resIn(l), model, today, ZoneOffset.UTC, WeightUnit.Kg, DistanceUnit.Km, weeks = 1)
+            val text = buildCoachSummary(resIn(l), model, today, TimeZone.UTC, WeightUnit.Kg, DistanceUnit.Km, weeks = 1)
             "$l → ${text.lines().filter { foreignDigits(it).isNotEmpty() }}".takeIf { foreignDigits(text).isNotEmpty() }
         }
         assertEquals("coach summary lines with non-ASCII digits", emptyList<String>(), bad)

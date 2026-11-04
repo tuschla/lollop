@@ -58,6 +58,7 @@ import org.robolectric.RobolectricTestRunner
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
+import kotlinx.datetime.toKotlinLocalDate
 
 /**
  * UI sweep §0.4 / §8 / §9: every 0–N rating is ONE segmented track in one row
@@ -294,8 +295,8 @@ class RatingScaleTest {
                 ObservedAtRow(epochSec, withTime = false) {}
             }
         }
-        val expected = day.format(localizedDayFormatter("MMMd", Locale.Builder().setLanguage("en").setRegion("DE").build()))
-        val german = day.format(localizedDayFormatter("MMMd", Locale.GERMANY))
+        val expected = localizedDayFormatter("MMMd", Locale.Builder().setLanguage("en").setRegion("DE").build()).format(day.toKotlinLocalDate())
+        val german = localizedDayFormatter("MMMd", Locale.GERMANY).format(day.toKotlinLocalDate())
         assertTrue("\"$expected\" is not the German \"$german\"", expected != german)
         val found = rule.onAllNodes(hasText(expected), useUnmergedTree = true).fetchSemanticsNodes()
         assertTrue("date chip reads \"$expected\"", found.isNotEmpty())

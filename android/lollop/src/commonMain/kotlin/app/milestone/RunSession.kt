@@ -1,8 +1,8 @@
 package app.milestone
 
-import android.os.SystemClock
-import java.util.Locale
-import java.util.TreeSet
+import kotlin.concurrent.Volatile
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
  * keep recording while the screen is off or the app is backgrounded: the
  * service owns the location stream, the screen just renders this state.
  */
-object RunSession {
+object RunSession : SynchronizedObject() {
     // Append-only backing store for the captured track. Fixes are only ever
     // APPENDED (never mutated or removed in place; reset/restore allocate a FRESH
     // array), so a [TrackSnapshot] published over the prefix [0, pointCount) stays
@@ -19,7 +19,7 @@ object RunSession {
     // publish a new `points` value in O(1) amortised (a growable array + O(1)
     // snapshot) rather than copying the whole list on every fix, which would be
     // O(n²) over a multi-hour 1 Hz run, on the main looper. Single writer (the
-    // GPS callback, always under @Synchronized) + lock-free main-thread readers is
+    // GPS callback, always under the RunSession lock) + lock-free main-thread readers is
     // safe by construction: every published prefix is frozen, and each grow
     // allocates a NEW array so already-published snapshots keep their own backing.
     // Readers NEVER touch these two fields, only the published [TrackSnapshot].
@@ -192,7 +192,7 @@ object RunSession {
     // a pause or a long fix gap. The leg into such a fix is a pause bridge (the
     // runner may have relocated), so it counts neither live nor in the saved run.
     // Index 0 has no preceding leg and is never stored. Accessed under the lock.
-    private val segmentStarts = TreeSet<Int>()
+    private val segmentStarts = HashSet<Int>()
 
     // Set when the run pauses: the next accepted fix opens a new segment, so its
     // bridge leg back to the last pre-pause fix is dropped. Cleared by [add].
@@ -215,13 +215,12 @@ object RunSession {
         return dtMs > MAX_FIX_GAP_SEC * 1000L
     }
 
-    // Synchronized so the read-modify-write of points + distance is atomic.
+    // Locked so the read-modify-write of points + distance is atomic.
     // [fixElapsedRealtimeNanos] is the fix's own monotonic timestamp
     // (Location.getElapsedRealtimeNanos), the clock behind moving time and each
     // leg's dt, immune to wall-clock steps. Returns true iff the fix was appended,
     // so the crash sidecar mirrors only accepted fixes.
-    @Synchronized
-    fun add(p: GpsPoint, fixElapsedRealtimeNanos: Long): Boolean {
+    fun add(p: GpsPoint, fixElapsedRealtimeNanos: Long): Boolean = synchronized(this) {
         val last = if (pointCount > 0) pointArr[pointCount - 1] else null
         val fixMs = fixElapsedRealtimeNanos / 1_000_000
         val dtMs = fixMs - lastElapsedMs
@@ -335,8 +334,7 @@ object RunSession {
      *  rebuilds the incremental accumulator from the backing store so the exposed
      *  [paceBucketsFlow] matches the new size. Called from the live sheet whenever
      *  the user's `paceBucketMinutes` preference changes. */
-    @Synchronized
-    fun setPaceBucketMinutes(minutes: Int) {
+    fun setPaceBucketMinutes(minutes: Int): Unit = synchronized(this) {
         val n = minutes.coerceAtLeast(1)
         if (n == bucketMin) return
         bucketMin = n
@@ -346,9 +344,9 @@ object RunSession {
     /** Whether [p], just accepted by [add], opened a new recording segment (a
      *  Pause/Resume or a long fix gap), so the crash sidecar can record the
      *  boundary ([ActiveRunStore.append]). False when [p] is not the newest fix. */
-    @Synchronized
-    fun isSegmentStart(p: GpsPoint): Boolean =
+    fun isSegmentStart(p: GpsPoint): Boolean = synchronized(this) {
         pointCount > 0 && pointArr[pointCount - 1] == p && segmentStarts.contains(pointCount - 1)
+    }
 
     /** [restore] a run read back from [ActiveRunStore], breaking it at the segment
      *  boundaries the live run recorded. */
@@ -362,8 +360,7 @@ object RunSession {
      * sums used live (a single O(n) pass, not per-fix), so a recovered run never
      * shows more than it had before the crash.
      */
-    @Synchronized
-    fun restore(recovered: List<GpsPoint>, recordedStarts: Collection<Int> = emptyList()) {
+    fun restore(recovered: List<GpsPoint>, recordedStarts: Collection<Int> = emptyList()): Unit = synchronized(this) {
         segmentStarts.clear()
         // The splice from the last recovered fix to the first live fix is a segment
         // boundary: the app may have been dead for hours while the runner moved, yet
@@ -399,7 +396,7 @@ object RunSession {
         // clock) and let subsequent live fixes advance it monotonically from here: a
         // clock step after recovery still can't move it.
         movingMs = (movingSec * 1000.0).toLong().coerceAtLeast(0L)
-        lastElapsedMs = SystemClock.elapsedRealtime()
+        lastElapsedMs = monotonicMillis()
         elapsedSec.value = (movingMs / 1000L).coerceAtLeast(0L)
         // The resume splice opens a new segment, so no recovered leg is "now".
         rollingPace.clear()
@@ -421,17 +418,16 @@ object RunSession {
      * endpoints and every segment start are kept). [decimatedSegmentStarts] with the
      * same cap gives the matching boundaries. Below the cap the track is whole.
      */
-    @Synchronized
-    fun decimatedTrackForCore(maxPoints: Int = TRACK_DECIMATION_CAP): List<GpsPoint> {
+    fun decimatedTrackForCore(maxPoints: Int = TRACK_DECIMATION_CAP): List<GpsPoint> = synchronized(this) {
         val full = points.value
         return decimationKeep(full.size, maxPoints, segmentStarts).map { full[it] }
     }
 
     /** [segmentStarts] remapped to positions in [decimatedTrackForCore] (same
      *  [maxPoints]); sent as `LogRunTrack.segment_starts`. Empty for an unpaused run. */
-    @Synchronized
-    fun decimatedSegmentStarts(maxPoints: Int = TRACK_DECIMATION_CAP): List<Int> =
+    fun decimatedSegmentStarts(maxPoints: Int = TRACK_DECIMATION_CAP): List<Int> = synchronized(this) {
         remapStarts(decimationKeep(points.value.size, maxPoints, segmentStarts), segmentStarts)
+    }
 
     /**
      * The `LogRunTrack` that saves this run, built under ONE lock so its points and
@@ -441,8 +437,7 @@ object RunSession {
      * the GPX import). Falls back to now only for an empty track. The Finish review
      * previews this same event's figures ([Core.savedFigures]).
      */
-    @Synchronized
-    fun trackEventForCore(entryId: Long, workoutType: WorkoutType?, sessionRpe: Int?): Event.LogRunTrack =
+    fun trackEventForCore(entryId: Long, workoutType: WorkoutType?, sessionRpe: Int?): Event.LogRunTrack = synchronized(this) {
         Event.LogRunTrack(
             points = decimatedTrackForCore(),
             hrPctMax = 0.0,
@@ -452,6 +447,7 @@ object RunSession {
             segmentStarts = decimatedSegmentStarts(),
             sessionRpe = sessionRpe,
         )
+    }
 
     /** Reset only the engine-state flags ([tracking], [locating], [armed]) to stopped,
      *  keeping the captured track and the save/pause bookkeeping (unlike [reset]).
@@ -463,8 +459,7 @@ object RunSession {
         armed.value = false
     }
 
-    @Synchronized
-    fun reset() {
+    fun reset(): Unit = synchronized(this) {
         // Bump the session token FIRST so a location result already queued on the main
         // looper (from the service that is about to receive ACTION_STOP) observes a
         // newer generation and refuses to record into this now-cleared session, instead
@@ -813,12 +808,12 @@ const val TRACK_DECIMATION_CAP = 5400
  */
 internal fun decimationKeep(n: Int, maxPoints: Int, starts: Collection<Int>): List<Int> {
     if (n <= maxPoints || maxPoints < 2) return (0 until n).toList()
-    val keep = TreeSet<Int>()
+    val keep = BooleanArray(n)
     val stride = (n + maxPoints - 1) / maxPoints
-    for (i in 0 until n step stride) keep.add(i)
-    keep.add(n - 1)
-    for (s in starts) if (s in 1 until n) keep.add(s)
-    return keep.toList()
+    for (i in 0 until n step stride) keep[i] = true
+    keep[n - 1] = true
+    for (s in starts) if (s in 1 until n) keep[s] = true
+    return (0 until n).filter { keep[it] }
 }
 
 /** The positions in [kept] (original indices, ascending) of the segment [starts]. */
@@ -838,8 +833,8 @@ private const val INITIAL_TRACK_CAP = 256
 fun formatElapsed(seconds: Long): String {
     val s = seconds.coerceAtLeast(0L)
     return if (s >= 3600) {
-        "%d:%02d:%02d".format(Locale.US, s / 3600, (s % 3600) / 60, s % 60)
+        "${s / 3600}:${zeroPad((s % 3600) / 60)}:${zeroPad(s % 60)}"
     } else {
-        "%d:%02d".format(Locale.US, s / 60, s % 60)
+        "${s / 60}:${zeroPad(s % 60)}"
     }
 }

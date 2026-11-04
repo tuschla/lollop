@@ -5,8 +5,11 @@ is no iOS UI yet. The iOS app will be the Android app ported to Compose
 Multiplatform: the screens move to shared Kotlin, and only platform services
 (location, notifications, widgets, files) are written per platform. The app's
 Kotlin already lives in the multiplatform module `android/lollop`, which builds
-for Android and iOS; its `commonMain` holds the platform-free parts so far (the
-core's wire types, view-model helpers, palette and colour maths).
+for Android and iOS. Its `commonMain` holds the platform-free parts so far: the
+core's wire types and events, the event log replay rules, the serial event queue
+(`EventDispatcher`), run tracking state (`RunSession`, `RunSteps`), the set
+editor state, units, settings, palettes and colour maths. They reach the
+platform through `expect` seams with Android and iOS actuals (see below).
 
 ## Architecture
 
@@ -31,10 +34,31 @@ android/ (Gradle build of the app)
        └─ androidHostTest  JVM + Robolectric suite
 ```
 
-`:lollop` doesn't depend on the cinterop module: on iOS it will reach the core
-through a common Kotlin interface injected at startup, implemented by
-`kmp/core-bridge`. So its iOS klibs compile on Linux; only the final iOS
-framework/app link, which pulls in the cinterop module, needs macOS.
+`:lollop` doesn't depend on the cinterop module. Its commonMain declares
+`CoreBridge` with the same calls as `kmp/core-bridge`'s, and the event queue
+sends to a `CoreEngine` on `CoreDispatcher` (one dedicated thread,
+`newSingleThreadContext`). On Android the engine is `Core.kt` over the JNI
+natives; on iOS the app installs its engine at startup (`installCoreEngine`,
+iosMain), built on `kmp/core-bridge`'s `NativeCore`. So `:lollop`'s iOS klibs
+compile on Linux; only the final iOS framework/app link, which pulls in the
+cinterop module, needs macOS.
+
+The other seams (`expect` in commonMain, actual per platform):
+
+| Seam | Android | iOS |
+|---|---|---|
+| `PlatformLog` | `android.util.Log` | `NSLog` |
+| `wallClockMillis`, `monotonicMillis` | `System.currentTimeMillis`, `SystemClock.elapsedRealtime` | `NSDate`, `clock_gettime_nsec_np(CLOCK_MONOTONIC)` (counts during sleep) |
+| `formatFixed` (`%.Nf`) | `String.format(Locale.US, …)` | `halfUpFixed`, a Kotlin port of Java's half-up rounding of the shortest digits, held to `String.format` by the host tests |
+| `appLocale`, `localizedDayFormatter`, `weekdayName`, `formatMediumDate`, `relativeDayLabel` | java.time + ICU best patterns, ICU `RelativeDateTimeFormatter` | `NSDateFormatter` (`dateFormatFromTemplate`, Gregorian, UTC wall clock), `NSRelativeDateTimeFormatter`; app locale = first English preferred language, else English + device region, `@numbers=latn` |
+| `is24HourClock` | `DateFormat.is24HourFormat` | the locale's `j` hour pattern has no `a` |
+| `KeyValueStore`, `PlatformContext` | `SharedPreferences`, `Context` | `NSUserDefaults(suiteName)`, one process-wide context |
+| `toRadians` | `Math.toRadians` | multiply by π/180 |
+| `platformCoreEngine` | `Core` | the engine passed to `installCoreEngine` |
+
+`commonTest` pins the formatting and date output to Android's (`FormattingTest`,
+`DateFormatsTest`); it runs in the host tests now and on iOS once a macOS job
+runs `iosSimulatorArm64Test`.
 
 Both bindings call the same Rust functions in `shared::ffi` (`process_event`,
 `current_view`, `parse_fit_json`, `track_figures_json`, `export_gpx`,
@@ -170,10 +194,10 @@ Apple offers no other API (extensions).
 
 ## Next steps
 
-1. Move `Core.kt`'s remaining Kotlin-only logic (event types, replay,
-   compaction) into `android/lollop` commonMain behind a common core interface
-   (Android: the existing JNI exports; iOS: `kmp/core-bridge`), then the Compose
-   screens. The wire decoders (`CoreTypes.kt`) are there already.
+1. Move `Core.kt`'s engine (log persistence, restore, compaction calls) into
+   commonMain on the `CoreBridge` interface, with the event log file behind an
+   okio/kotlinx-io seam, then the Compose screens. The wire decoders, events,
+   replay rules, event queue and the platform seams are there already.
 2. Add the iOS app target (Compose `ComposeUIViewController` in a SwiftUI host)
    and the unsigned `.ipa` step to `bridge-macos`.
 3. The Swift extensions: widget, Live Activity, control.

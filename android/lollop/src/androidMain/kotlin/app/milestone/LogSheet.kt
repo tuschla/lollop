@@ -339,7 +339,7 @@ internal fun LogSheetContent(
                 // The run type of the planned run this entry logs (today's, or the
                 // past plan day's), by the Finish review's rule.
                 plannedType = remember(model.week_plan, planObservedAt) {
-                    val day = planObservedAt?.let { localEpochDay(it, java.time.ZoneId.systemDefault()) } ?: model.today()
+                    val day = planObservedAt?.let { localEpochDay(it) } ?: model.today()
                     model.week_plan.firstOrNull {
                         it.epoch_day == day && sessionDiscipline(it.session_type) == "Run" &&
                             !it.isDone && it.status != "blocked"

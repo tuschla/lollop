@@ -191,7 +191,7 @@ class TodayLogicTest {
     @Test
     fun reviewAsksRun_onlyOnADayWithARun() {
         val day = 20_000L
-        val zone = java.time.ZoneOffset.UTC
+        val zone = kotlinx.datetime.TimeZone.UTC
         val lifts = SessionPlanView(epoch_day = day, session_type = "Lift(Strength)", items = listOf(PrescriptionView(exercise = "Back Squat")))
         val liftDay = ViewModel(today_epoch_day = day, week_plan = listOf(lifts))
         assertFalse("a lift-only day skips the run questions", reviewAsksRun(liftDay, zone))
@@ -221,7 +221,7 @@ class TodayLogicTest {
             ViewModel(lifts = listOf(squat(null, 90.0), squat(d, 95.0), squat(d.plusDays(2), 100.0), squat(d.plusDays(4), 102.0))),
         )!!
         assertEquals(listOf(95.0, 100.0, 102.0), trend.series)
-        assertEquals(d, trend.firstDay)
+        assertEquals(kotlinx.datetime.LocalDate(2026, 10, 1), trend.firstDay)
     }
 
     @Test

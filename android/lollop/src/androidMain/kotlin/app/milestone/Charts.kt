@@ -49,11 +49,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import java.time.DayOfWeek
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.time.format.TextStyle
-import java.util.Locale
+import kotlinx.datetime.DayOfWeek
 
 /**
  * A minimal accent line chart over an ordered numeric series with an end dot, no
@@ -105,14 +101,6 @@ internal data class DayActivity(val lifted: Boolean, val runs: Int) {
     val sessions: Int get() = (if (lifted) 1 else 0) + runs
 }
 
-/** A date formatter for [skeleton] in the app's language and the device region's
- *  order ([appLocale]: "MMMd" → "Sep 21" / "21 Sept"). */
-internal fun localizedDayFormatter(skeleton: String, locale: Locale = appLocale()): DateTimeFormatter =
-    DateTimeFormatter.ofPattern(android.text.format.DateFormat.getBestDateTimePattern(locale, skeleton), locale)
-
-/** [localizedDayFormatter] for a local-day index (days since the epoch). */
-internal fun DateTimeFormatter.formatEpochDay(epochDay: Long): String = LocalDate.ofEpochDay(epochDay).format(this)
-
 /**
  * GitHub-style activity heatmap over the last [weeks] weeks (columns = weeks, Monday
  * top), tinted by discipline per local day in [days]; future cells are blank. A
@@ -158,7 +146,7 @@ internal fun ContributionHeatmap(
     // Axis labels: localized narrow weekday initials down the left gutter (Mon top),
     // month ticks along the bottom at each column where the month first changes.
     val locale = appLocale(LocalConfiguration.current.locales)
-    val weekdayInitials = remember(locale) { (0..6).map { DayOfWeek.of(it + 1).getDisplayName(TextStyle.NARROW, locale) } }
+    val weekdayInitials = remember(locale) { (0..6).map { weekdayName(DayOfWeek(it + 1), WeekdayWidth.Narrow, locale) } }
     val monthFmt = remember(locale) { localizedDayFormatter("MMM", locale) }
     val cellDateFmt = remember(locale) { localizedDayFormatter("EEEEMMMMd", locale) }
     // First column of each distinct month → its label (blank elsewhere).

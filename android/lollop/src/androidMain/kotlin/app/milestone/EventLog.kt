@@ -26,7 +26,7 @@ data class RestoredLog(
 )
 
 /** The app's event log in [dir] (the app's `filesDir`). */
-internal fun eventLogFile(dir: File) = File(dir, "event-log.ndjson")
+internal fun eventLogFile(dir: File) = File(dir, EVENT_LOG_NAME)
 
 /** The core's compaction verdict on a log's lines (log.rs `Compaction`), by line
  *  index: the lines compaction drops, the lines that are not JSON (a tail torn by

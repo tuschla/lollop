@@ -57,7 +57,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 // The guided setup's widgets and copy, shared with the Profile editor (health
 // rows, answer chips, date and race-time answers): one chip set for both screens.
@@ -496,7 +496,7 @@ private const val DAY_MS = 86_400_000L
 
 /** The picked day as a local epoch day. */
 @OptIn(ExperimentalMaterial3Api::class)
-private fun DatePickerState.pickedDay(): Long? = selectedDateMillis?.let { Math.floorDiv(it, DAY_MS) }
+private fun DatePickerState.pickedDay(): Long? = selectedDateMillis?.let { it.floorDiv(DAY_MS) }
 
 /** The date picker dialog of a date answer: OK (enabled once [pick] is set) sends
  *  it to [onPick]; either button closes through [onDismiss]. */
@@ -533,12 +533,12 @@ internal fun DateAnswerRow(value: Long?, today: Long, future: Boolean, onChange:
         ) { picking = true }
     }
     if (picking) {
-        val todayYear = LocalDate.ofEpochDay(today).year
+        val todayYear = LocalDate.fromEpochDays(today).year
         val state = rememberDatePickerState(
             initialSelectedDateMillis = (value ?: today.takeIf { !future })?.let { it * DAY_MS },
             selectableDates = object : SelectableDates {
                 override fun isSelectableDate(utcTimeMillis: Long): Boolean {
-                    val day = Math.floorDiv(utcTimeMillis, DAY_MS)
+                    val day = utcTimeMillis.floorDiv(DAY_MS)
                     return if (future) day > today else day <= today
                 }
 
@@ -592,14 +592,14 @@ internal fun BirthdayAnswer(
     }
     if (picking) {
         val range = birthdayRange(today)
-        val years = LocalDate.ofEpochDay(range.first).year..LocalDate.ofEpochDay(range.last).year
+        val years = LocalDate.fromEpochDays(range.first).year..LocalDate.fromEpochDays(range.last).year
         val state = rememberDatePickerState(
             initialSelectedDateMillis = birthDay?.let { it * DAY_MS },
             initialDisplayedMonthMillis = birthdayPickerStart(birthDay, today) * DAY_MS,
             yearRange = years,
             initialDisplayMode = DisplayMode.Input,
             selectableDates = object : SelectableDates {
-                override fun isSelectableDate(utcTimeMillis: Long): Boolean = Math.floorDiv(utcTimeMillis, DAY_MS) in range
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis.floorDiv(DAY_MS) in range
 
                 override fun isSelectableYear(year: Int): Boolean = year in years
             },

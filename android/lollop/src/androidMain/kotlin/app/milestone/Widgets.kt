@@ -96,7 +96,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Constraints
-import java.util.Locale
 
 // --- Selectable-control vocabulary (one look for every "pick one" control) ---
 // Scale cells and choice chips ([ChoiceChip]) share: a Space.Md
@@ -1044,7 +1043,7 @@ internal fun textActionWidthPx(measurer: TextMeasurer, density: Density, label: 
  *  top-left. Every data tile and card label goes through this. */
 @Composable
 fun TileOverline(text: String, color: Color = OnBgFaint) {
-    Text(text.uppercase(Locale.US), color = color, style = Type.Overline)
+    Text(text.uppercase(), color = color, style = Type.Overline)
 }
 
 /** Section overline: the top-left accent UPPERCASE label over a screen section,
@@ -1052,7 +1051,7 @@ fun TileOverline(text: String, color: Color = OnBgFaint) {
 @Composable
 fun SectionOverline(text: String) {
     Text(
-        text.uppercase(Locale.US),
+        text.uppercase(),
         color = Accent,
         style = Type.Section,
         modifier = Modifier.fillMaxWidth().padding(top = Space.Sm.dp).semantics { heading() },
