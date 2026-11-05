@@ -7,6 +7,9 @@ import SwiftUI
 enum WidgetType {
     /// `Type.Display` (32 sp bold, tabular figures).
     static let display = Font.system(.largeTitle).weight(.bold).monospacedDigit()
+    /// A small card's hero figure: one size down from `display`, so the title, the
+    /// figure, its pace and the button fit a small widget's height.
+    static let displaySmall = Font.system(.title).weight(.bold).monospacedDigit()
     /// `Type.Title` (20 sp bold).
     static let title = Font.system(.title3).weight(.bold)
     /// `Type.Body` (16 sp).
@@ -28,9 +31,15 @@ enum WidgetSpace {
     static let sm: CGFloat = 4
     static let md: CGFloat = 8
     static let screen: CGFloat = 16
-    /// A round button and a labelled button's height (Android: 48 dp `ActionMinHeight`,
-    /// here the 44 pt touch target, which fits a small widget's height).
-    static let action: CGFloat = 44
+
+    /// A card's padding: `Space.Screen`, a little less on a small widget, which is
+    /// shorter than Android's two rows.
+    static func edge(wide: Bool) -> CGFloat { wide ? screen : 14 }
+
+    /// A round button's and a labelled button's height (Android: 48 dp
+    /// `ActionMinHeight`): the 44 pt touch target, 36 pt on a small widget, which is
+    /// one tap target (iOS 16) or one button.
+    static func action(wide: Bool) -> CGFloat { wide ? 44 : 36 }
 }
 
 /// The extension's own bundle: its asset catalog (also compiled into the tests).

@@ -25,59 +25,59 @@ enum CardButtons {
 struct CardLayout: Hashable {
     enum Week: Int, Hashable { case hidden = 0, count = 1, strip = 2 }
 
+    /// How the hero shows: not at all, beside the buttons (a wide card's last row:
+    /// the figure and its pace to the left of Log and the primary), or stacked
+    /// between the title and the week block.
+    enum Hero: Int, Hashable { case hidden = 0, beside = 1, stacked = 2 }
+
     var overline: Bool
-    var hero: Bool
+    var hero: Hero
     var week: Week
     /// Body line slots ([visibleLines]).
     var lines: Int
     /// Body lines in `Type.Body` rather than `Type.Caption`.
     var large: Bool
-    /// The one body line cut to a single line (Android's last resort for a list).
-    var cut: Bool
-    var titleLines: Int
     /// A statement's title in the display type, where it fits on one line.
     var bigTitle: Bool
 
-    /// Android spends a card's height in this order (TodayWidget.kt `widgetLayout`):
-    /// a line under the title (or the hero), a wrapped title's second line, the
-    /// overline, the hero, the week block, then more lines, a statement's large
-    /// title last. Ranking the candidates by the same order and taking the first
-    /// that fits gives the layout Android's greedy pass gives.
+    /// The order a card spends its height in, after Android's (TodayWidget.kt
+    /// `widgetLayout`): a line under the title (or the hero), the hero (a run's
+    /// distance, the next session), the overline, the week block, then more lines,
+    /// a statement's large title last. The hero comes before the overline: an iOS
+    /// card is shorter than Android's two rows, and the hero is the day's key fact.
+    /// Ranking the candidates in this order and taking the first that fits gives
+    /// what Android's greedy pass gives.
     var rank: Int {
         var r = 0
-        if lines >= 1 || hero { r |= 1 << 20 }
-        if titleLines == 2 { r |= 1 << 19 }
-        if overline { r |= 1 << 18 }
-        if hero { r |= 1 << 17 }
+        if lines >= 1 || hero != .hidden { r |= 1 << 20 }
+        r |= hero.rawValue << 18
+        if overline { r |= 1 << 17 }
         r |= week.rawValue << 15
-        r |= (lines * 4 + (large ? 2 : 0) + (cut ? 0 : 1)) << 1
+        r |= (lines * 2 + (large ? 1 : 0)) << 1
         if bigTitle { r |= 1 }
         return r
     }
 
     /// The candidates for [face], richest first. [wide]: a medium or large widget,
-    /// where the week strip fits (never on a small one, like Android's two cells).
+    /// where the week strip fits (never on a small one, like Android's two cells)
+    /// and the hero can stand beside the buttons.
     static func candidates(for face: Face, wide: Bool) -> [CardLayout] {
         let weeks: [Week] = face.week == nil ? [.hidden] : (wide && face.days.count == 7 ? [.strip, .count, .hidden] : [.count, .hidden])
+        let heroes: [Hero] = face.hero == nil ? [.hidden] : (wide ? [.stacked, .beside, .hidden] : [.stacked, .hidden])
         let plain = face.lead.count + face.items.count
         let heroLines = face.heroLead.count + face.heroItems.count
         var out: [CardLayout] = []
-        for titleLines in [2, 1] {
-            for overline in [true, false] {
-                for hero in face.hero == nil ? [false] : [true, false] {
-                    for week in weeks {
-                        // A hero keeps its lead lines ("Session done"); the week
-                        // block keeps the hero or two lines.
-                        let total = hero ? heroLines : plain
-                        let least = hero ? face.heroLead.count : (week == .hidden ? 0 : min(2, plain))
-                        let statement = !hero && week == .hidden && face.items.isEmpty
-                        for (lines, large, cut) in lineOptions(total: total, least: least, list: !hero) {
-                            for bigTitle in statement ? [true, false] : [false] {
-                                out.append(CardLayout(
-                                    overline: overline, hero: hero, week: week, lines: lines, large: large,
-                                    cut: cut, titleLines: titleLines, bigTitle: bigTitle
-                                ))
-                            }
+        for overline in [true, false] {
+            for hero in heroes {
+                for week in weeks {
+                    // A hero keeps its lead lines ("Session done"); the week block
+                    // keeps the hero or two lines.
+                    let total = hero != .hidden ? heroLines : plain
+                    let least = hero != .hidden ? face.heroLead.count : (week == .hidden ? 0 : min(2, plain))
+                    let statement = hero == .hidden && week == .hidden && face.items.isEmpty
+                    for (lines, large) in lineOptions(total: total, least: least) {
+                        for bigTitle in statement ? [true, false] : [false] {
+                            out.append(CardLayout(overline: overline, hero: hero, week: week, lines: lines, large: large, bigTitle: bigTitle))
                         }
                     }
                 }
@@ -87,18 +87,17 @@ struct CardLayout: Hashable {
     }
 
     /// Every line in the larger type where at most six are shown, then fewer and
-    /// fewer caption lines down to [least]; a list's first line cut to one line;
-    /// no lines where none are needed.
-    private static func lineOptions(total: Int, least: Int, list: Bool) -> [(Int, Bool, Bool)] {
-        var out: [(Int, Bool, Bool)] = []
-        if total >= 1 && total <= 6 { out.append((total, true, false)) }
+    /// fewer caption lines down to [least], none where none are needed. A line
+    /// shows whole or not at all.
+    private static func lineOptions(total: Int, least: Int) -> [(Int, Bool)] {
+        var out: [(Int, Bool)] = []
+        if total >= 1 && total <= 6 { out.append((total, true)) }
         var n = min(total, 6)
         while n >= max(least, 1) {
-            out.append((n, false, false))
+            out.append((n, false))
             n -= 1
         }
-        if list && total >= 1 && least <= 1 { out.append((1, false, true)) }
-        if least == 0 { out.append((0, false, false)) }
+        if least == 0 { out.append((0, false)) }
         return out
     }
 }
@@ -137,13 +136,13 @@ struct TodayCard: View {
 
     var body: some View {
         GeometryReader { geo in
-            let shown = Self.shortLead(face, textWidth: geo.size.width - 2 * WidgetSpace.screen)
+            let shown = Self.shortLead(face, textWidth: geo.size.width - 2 * WidgetSpace.edge(wide: wide))
             ViewThatFits(in: .vertical) {
                 ForEach(CardLayout.candidates(for: shown, wide: wide), id: \.self) { layout in
                     CardContent(face: shown, layout: layout, colors: colors, moreItems: moreItems, wide: wide, buttons: buttons)
                 }
             }
-            .padding(WidgetSpace.screen)
+            .padding(WidgetSpace.edge(wide: wide))
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
     }
@@ -161,8 +160,10 @@ struct TodayCard: View {
 }
 
 /// One card candidate, composed for what it holds (TodayWidget.kt `StackLayout`):
-/// a list from the title down, a hero centred between the title and the week
-/// block, or a statement (a title and its line) set on the actions.
+/// a list from the title down with the week block under it, a hero centred
+/// between the title and the week block (or beside the buttons), or a statement
+/// (a title and its line) set on the actions. Every text shows whole: a part that
+/// would be cut makes the candidate too tall, and a sparser one is drawn.
 struct CardContent: View {
     let face: Face
     let layout: CardLayout
@@ -171,17 +172,19 @@ struct CardContent: View {
     let wide: Bool
     let buttons: CardButtons
 
-    private var statement: Bool { !layout.hero && layout.week == .hidden && face.items.isEmpty }
+    private var hasHero: Bool { layout.hero != .hidden && face.hero != nil }
+
+    private var statement: Bool { !hasHero && layout.week == .hidden && face.items.isEmpty }
 
     private var lines: [String] {
-        layout.hero
+        hasHero
             ? visibleLines(lead: face.heroLead, items: face.heroItems, maxLines: layout.lines, moreItems: moreItems)
             : visibleLines(lead: face.lead, items: face.items, maxLines: layout.lines, moreItems: moreItems)
     }
 
     /// The first lines are lead lines (muted), the rest items.
     private var leadCount: Int {
-        min(layout.hero ? face.heroLead.count : face.lead.count, lines.count)
+        min(hasHero ? face.heroLead.count : face.lead.count, lines.count)
     }
 
     var body: some View {
@@ -193,42 +196,77 @@ struct CardContent: View {
             if statement {
                 Spacer(minLength: 0)
                 if layout.bigTitle {
-                    StatementTitle(text: face.title, color: colors.title(tone: face.tone), lines: layout.titleLines)
+                    StatementTitle(text: face.title, color: colors.title(tone: face.tone))
                 } else {
-                    Text(face.title)
-                        .font(WidgetType.title)
-                        .foregroundColor(colors.title(tone: face.tone))
-                        .lineLimit(layout.titleLines)
+                    title
                 }
                 Spacer().frame(height: WidgetSpace.sm)
                 bodyLines(lines, leadCount: lines.count)
-            } else {
-                Text(face.title)
-                    .font(WidgetType.title)
-                    .foregroundColor(colors.title(tone: face.tone))
-                    .lineLimit(layout.titleLines)
+                actions(top: WidgetSpace.md)
+            } else if hasHero, let hero = face.hero {
+                title
                 Spacer().frame(height: WidgetSpace.sm)
-                if layout.hero, let hero = face.hero {
+                if layout.hero == .stacked {
                     Spacer(minLength: 0)
-                    bodyLines(Array(lines.prefix(leadCount)), leadCount: leadCount)
-                    HeroBlock(hero: hero, colors: colors)
-                    bodyLines(Array(lines.dropFirst(leadCount)), leadCount: 0)
+                    heroColumn(hero)
                     Spacer(minLength: 0)
+                    week
+                    actions(top: WidgetSpace.md)
                 } else {
-                    bodyLines(lines, leadCount: leadCount)
                     Spacer(minLength: 0)
+                    week
+                    if layout.week != .hidden { Spacer().frame(height: WidgetSpace.md) }
+                    // The hero to the left of the buttons, both on the card's last row.
+                    HStack(alignment: .bottom, spacing: WidgetSpace.md) {
+                        heroColumn(hero).frame(maxWidth: .infinity, alignment: .leading)
+                        ActionRow(actions: face.actions, colors: colors, wide: wide, buttons: buttons)
+                            .fixedSize()
+                    }
                 }
-            }
-            if layout.week != .hidden, let week = face.week {
-                Spacer().frame(height: WidgetSpace.md)
-                WeekBlock(week: week, days: layout.week == .strip ? face.days : [], colors: colors)
-            }
-            if !face.actions.isEmpty {
-                Spacer().frame(height: WidgetSpace.md)
-                ActionRow(actions: face.actions, colors: colors, wide: wide, buttons: buttons)
+            } else {
+                // A list: the lines from the title down, the week block under them,
+                // the room left above the buttons.
+                title
+                Spacer().frame(height: WidgetSpace.sm)
+                bodyLines(lines, leadCount: leadCount)
+                if layout.week != .hidden { Spacer().frame(height: WidgetSpace.md) }
+                week
+                Spacer(minLength: 0)
+                actions(top: WidgetSpace.md)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var title: some View {
+        Text(face.title)
+            .font(WidgetType.title)
+            .foregroundColor(colors.title(tone: face.tone))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var week: some View {
+        if layout.week != .hidden, let week = face.week {
+            WeekBlock(week: week, days: layout.week == .strip ? face.days : [], colors: colors)
+        }
+    }
+
+    @ViewBuilder
+    private func actions(top: CGFloat) -> some View {
+        if !face.actions.isEmpty {
+            Spacer().frame(height: top)
+            ActionRow(actions: face.actions, colors: colors, wide: wide, buttons: buttons)
+        }
+    }
+
+    /// The hero's lead lines ("Session done"), the hero, then its items.
+    private func heroColumn(_ hero: Face.Hero) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            bodyLines(Array(lines.prefix(leadCount)), leadCount: leadCount)
+            HeroBlock(hero: hero, colors: colors, compact: !wide)
+            bodyLines(Array(lines.dropFirst(leadCount)), leadCount: 0)
+        }
     }
 
     @ViewBuilder
@@ -237,7 +275,6 @@ struct CardContent: View {
             Text(line)
                 .font(layout.large ? WidgetType.body : WidgetType.caption)
                 .foregroundColor(i < leadCount ? colors.muted : colors.body)
-                .lineLimit(layout.cut ? 1 : 2)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -270,30 +307,39 @@ struct OverlineText: View {
 struct StatementTitle: View {
     let text: String
     let color: Color
-    let lines: Int
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
             Text(text).font(WidgetType.display).foregroundColor(color).lineLimit(1).fixedSize()
-            Text(text).font(WidgetType.title).foregroundColor(color).lineLimit(lines)
+            Text(text).font(WidgetType.title).foregroundColor(color).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
 /// A run's figure over its pace, or the next session's name over its date.
+/// [compact]: a small card's figure, one size down, so it fits with the title and
+/// the button.
 struct HeroBlock: View {
     let hero: Face.Hero
     let colors: WidgetColors
+    var compact = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(hero.text)
-                .font(hero.figure ? WidgetType.display : WidgetType.bodyBold)
-                .foregroundColor(colors.body)
-                .lineLimit(hero.figure ? 1 : 2)
-                .minimumScaleFactor(hero.figure ? 0.7 : 1)
+            if hero.figure {
+                // A figure on one line, whole.
+                Text(hero.text)
+                    .font(compact ? WidgetType.displaySmall : WidgetType.display)
+                    .foregroundColor(colors.body)
+                    .fixedSize()
+            } else {
+                Text(hero.text)
+                    .font(WidgetType.bodyBold)
+                    .foregroundColor(colors.body)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let note = hero.note {
-                Text(note).font(WidgetType.caption).foregroundColor(colors.muted).lineLimit(2)
+                Text(note).font(WidgetType.caption).foregroundColor(colors.muted).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -411,7 +457,7 @@ struct ActionRow: View {
             .fixedSize(horizontal: fixed, vertical: false)
             .foregroundColor(colors.onAccent)
             .padding(.horizontal, WidgetSpace.screen)
-            .frame(minHeight: WidgetSpace.action)
+            .frame(minHeight: WidgetSpace.action(wide: wide))
             .frame(maxWidth: wide ? nil : .infinity)
             .background(Capsule().fill(colors.accent))
         }
@@ -424,7 +470,7 @@ struct ActionRow: View {
                 .scaledToFit()
                 .frame(width: 20, height: 20)
                 .foregroundColor(colors.accent)
-                .frame(width: WidgetSpace.action, height: WidgetSpace.action)
+                .frame(width: WidgetSpace.action(wide: wide), height: WidgetSpace.action(wide: wide))
                 .background(Circle().fill(colors.accentTint))
                 .accessibilityLabel(action.label)
         }
@@ -458,20 +504,21 @@ struct RectangularView: View {
     var body: some View {
         ViewThatFits(in: .vertical) {
             if let status = face.status {
-                block(status, lines: 2)
+                block(status)
             }
             if let brief = face.brief {
-                block(brief, lines: 1)
+                block(brief)
             }
-            Text(face.title).font(.headline).lineLimit(2).widgetAccentable()
+            Text(face.title).font(.headline).fixedSize(horizontal: false, vertical: true).widgetAccentable()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func block(_ line: String, lines: Int) -> some View {
+    /// The title over a line, each whole (a candidate that would cut either is too tall).
+    private func block(_ line: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(face.title).font(.headline).lineLimit(1).widgetAccentable()
-            Text(line).font(.subheadline).lineLimit(lines)
+            Text(face.title).font(.headline).fixedSize(horizontal: false, vertical: true).widgetAccentable()
+            Text(line).font(.subheadline).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

@@ -184,19 +184,26 @@ final class LollopWidgetsTests: XCTestCase {
         XCTAssertEqual(Set(wide).count, wide.count, "no candidate twice")
         XCTAssertEqual(
             wide.first,
-            CardLayout(overline: true, hero: true, week: .strip, lines: 0, large: false, cut: false, titleLines: 2, bigTitle: false)
+            CardLayout(overline: true, hero: .stacked, week: .strip, lines: 0, large: false, bigTitle: false)
         )
         XCTAssertEqual(wide.map(\.rank), wide.map(\.rank).sorted(by: >))
         // A lone lead line that would wrap to more than two lines gives way to the short one.
         let rest = try XCTUnwrap(Self.faces["rest"])
         XCTAssertEqual(TodayCard.shortLead(rest, textWidth: 80).lead, ["Next: Thu"])
         XCTAssertEqual(TodayCard.shortLead(rest, textWidth: 306).lead, rest.lead)
-        XCTAssertEqual(wide.last?.titleLines, 1)
+        // The hero ranks above the overline; a wide card can set it beside the buttons.
+        XCTAssertEqual(wide.first(where: { $0.hero == .beside })?.overline, true)
+        XCTAssertFalse(CardLayout.candidates(for: run, wide: false).contains { $0.hero == .beside })
+        let small = CardLayout.candidates(for: run, wide: false)
+        XCTAssertLessThan(
+            try XCTUnwrap(small.firstIndex { $0.hero == .stacked && !$0.overline }),
+            try XCTUnwrap(small.firstIndex { $0.hero == .hidden && $0.overline })
+        )
         // A small card never draws the week strip (Android: never two cells wide).
         XCTAssertFalse(CardLayout.candidates(for: run, wide: false).contains { $0.week == .strip })
         // A statement has only its lines to give up.
         let hold = try XCTUnwrap(Self.faces["hold"])
-        XCTAssertTrue(CardLayout.candidates(for: hold, wide: true).allSatisfy { !$0.hero && $0.week == .hidden })
+        XCTAssertTrue(CardLayout.candidates(for: hold, wide: true).allSatisfy { $0.hero == .hidden && $0.week == .hidden })
     }
 
     // MARK: App Group
@@ -345,11 +352,12 @@ final class LollopWidgetsTests: XCTestCase {
                         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 )
             case "rectangular":
-                view = AnyView(RectangularView(face: face).frame(width: size.width, height: size.height).foregroundColor(.white).background(Color.gray))
+                // The lock screen draws these in white on the wallpaper (vibrant rendering).
+                view = AnyView(RectangularView(face: face).frame(width: size.width, height: size.height).foregroundColor(.white).background(Color.black))
             case "circular":
-                view = AnyView(CircularView(face: face, week: (done: 1, planned: 4)).frame(width: size.width, height: size.height).foregroundColor(.white).background(Color.gray))
+                view = AnyView(CircularView(face: face, week: (done: 1, planned: 4)).frame(width: size.width, height: size.height).foregroundColor(.white).background(Color.black))
             default:
-                view = AnyView(InlineView(face: face).frame(width: size.width, height: size.height).foregroundColor(.white).background(Color.gray))
+                view = AnyView(InlineView(face: face).frame(width: size.width, height: size.height).foregroundColor(.white).background(Color.black))
             }
             render("widget-\(name)-\(family)-\(s)", view, width: size.width + 16, scheme: scheme)
         }
