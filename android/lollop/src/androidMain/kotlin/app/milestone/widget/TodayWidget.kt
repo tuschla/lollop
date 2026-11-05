@@ -62,6 +62,7 @@ import app.milestone.StatusColors
 import app.milestone.Type
 import app.milestone.WeekdayWidth
 import app.milestone.accentTint
+import app.milestone.icon
 import app.milestone.appLocale
 import app.milestone.latinDigitResources
 import app.milestone.openIntent
@@ -683,6 +684,9 @@ private fun StackLayout(face: WidgetFace, colors: WidgetColors, layout: WidgetLa
         }
     }
 }
+
+/** The button's icon: its tile face's. */
+private val WidgetAction.icon: Int get() = face.icon
 
 /**
  * The action(s): the secondary one (Log) as a tinted round icon button, the

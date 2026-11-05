@@ -1,9 +1,10 @@
 name: iOS app
 
 # The iOS app (iosApp/, a SwiftUI host around android/lollop-ios's `Lollop`
-# framework): an unsigned .ipa to sideload (ios/README.md), and a launch smoke
-# test in a simulator. Runs on pushes to main that can change the app, and by
-# hand. The repo is public, so the macOS jobs cost no minutes.
+# framework, and its widget extension LollopWidgets): an .ipa to sideload
+# (ios/README.md), the extension's tests in a simulator, and a launch smoke test
+# in a simulator. Runs on pushes to main that can change the app, and by hand.
+# The repo is public, so the macOS jobs cost no minutes.
 on:
   push:
     branches: [main]
@@ -78,16 +79,32 @@ jobs:
           -derivedDataPath build/ios-device
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
-      - name: Package lollop-unsigned.ipa
+      - name: Check the extension and package lollop-unsigned.ipa
         run: |
           app=build/ios-device/Build/Products/Release-iphoneos/lollop.app
+          appex="$app/PlugIns/LollopWidgets.appex"
           test -x "$app/lollop"
           test -d "$app/Frameworks/Lollop.framework"
+          test -x "$appex/LollopWidgets"
+          plutil -lint "$app/Info.plist" "$appex/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$appex/Info.plist")" = com.apple.widgetkit-extension
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$appex/Info.plist")" = app.milestone.lollop.widgets
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSSupportsLiveActivities' "$app/Info.plist")" = true
+          # Ad-hoc signatures that carry the App Group entitlement, inside out:
+          # SideStore reads an app's groups from the signed binaries and registers
+          # them for the Apple Account; an unsigned binary has none, and the widget
+          # could not read the app's payload.
+          for f in "$app"/Frameworks/*.framework; do codesign --force --sign - --timestamp=none "$f"; done
+          codesign --force --sign - --timestamp=none --entitlements iosApp/Entitlements/LollopWidgets.entitlements "$appex"
+          codesign --force --sign - --timestamp=none --entitlements iosApp/Entitlements/lollop.entitlements "$app"
+          for b in "$appex" "$app"; do
+            codesign -d --entitlements - "$b" 2>/dev/null | grep -q group.app.milestone.lollop || { echo "::error::$b has no App Group entitlement"; exit 1; }
+          done
           mkdir -p build/ipa/Payload
           cp -R "$app" build/ipa/Payload/
           (cd build/ipa && zip -qry ../lollop-unsigned.ipa Payload)
           ls -l build/lollop-unsigned.ipa
-          du -sh "$app" "$app/Frameworks/Lollop.framework"
+          du -sh "$app" "$app/Frameworks/Lollop.framework" "$appex"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -95,6 +112,46 @@ jobs:
           path: build/lollop-unsigned.ipa
           retention-days: 30
           if-no-files-found: error
+
+  widgets:
+    name: Widget extension tests (simulator)
+    # The extension's model and views without the Kotlin framework: the day rule,
+    # the line fitting, the App Group lookup, the activity content, and renders of
+    # every widget family, state and activity (artifact `widget-renders`).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Pick an iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(d["udid"] for runtime, ds in sorted(devices.items(), reverse=True) if "iOS" in runtime
+                     for d in ds if d["name"].startswith("iPhone")))')
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec iosApp/project.yml
+
+      - name: Test the extension
+        run: |
+          mkdir -p build/widget-renders
+          TEST_RUNNER_LOLLOP_RENDER_DIR="$PWD/build/widget-renders" xcodebuild test \
+            -project iosApp/lollop.xcodeproj -scheme LollopWidgetsTests \
+            -destination "id=$SIMULATOR_UDID" -derivedDataPath build/ios-widgets
+          ls build/widget-renders | wc -l
+
+      - name: Upload the renders
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: widget-renders
+          path: build/widget-renders/
+          retention-days: 30
+          if-no-files-found: ignore
 
   simulator:
     name: Launch smoke test (simulator, Debug)
@@ -148,6 +205,15 @@ jobs:
           -destination "id=$SIMULATOR_UDID"
           -derivedDataPath build/ios-sim
 
+      - name: The app embeds the widget extension
+        run: |
+          app=build/ios-sim/Build/Products/Debug-iphonesimulator/lollop.app
+          appex="$app/PlugIns/LollopWidgets.appex"
+          test -x "$appex/LollopWidgets"
+          plutil -lint "$appex/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$appex/Info.plist")" = com.apple.widgetkit-extension
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSSupportsLiveActivities' "$app/Info.plist")" = true
+
       - name: Launch and keep running
         # The app must boot (restore the event log, SetToday) and draw Today
         # without dying; an uncaught Kotlin exception prints to stderr and
@@ -179,6 +245,23 @@ jobs:
             exit 1
           fi
           echo "lollop is running (pid $pid)"
+
+      - name: The app wrote the widget payload, and the extension reads it
+        # Boot publishes a model; the app writes the widget payload into the App
+        # Group container. The extension's code (LollopWidgetsTests) reads that file:
+        # it decodes, describes today, and every family draws it.
+        run: |
+          out="$PWD/build/smoke"
+          group=$(xcrun simctl get_app_container "$SIMULATOR_UDID" app.milestone.lollop group.app.milestone.lollop)
+          test -s "$group/widget-today.json" || { echo "::error::no widget payload in $group"; ls -la "$group"; exit 1; }
+          cp "$group/widget-today.json" "$out/"
+          python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["snapshot"]["kind"], "|", d["face"]["title"], "|", d["control"]["label"])' "$out/widget-today.json"
+          mkdir -p "$out/widget-renders"
+          TEST_RUNNER_LOLLOP_WIDGET_PAYLOAD="$out/widget-today.json" TEST_RUNNER_LOLLOP_RENDER_DIR="$out/widget-renders" \
+            xcodebuild test -project iosApp/lollop.xcodeproj -scheme LollopWidgetsTests \
+            -destination "id=$SIMULATOR_UDID" -derivedDataPath build/ios-widgets \
+            -only-testing:LollopWidgetsTests/LollopWidgetsTests/testThePayloadTheAppWroteReads
+          ls "$out/widget-renders"
 
       - name: Upload screenshot and logs
         if: always()

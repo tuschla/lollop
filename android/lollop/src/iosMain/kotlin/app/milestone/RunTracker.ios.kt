@@ -328,6 +328,8 @@ internal class IosRunRecording(private val ctx: PlatformContext, private val str
             distanceKm = RunSession.distanceKm.value,
             paceMinPerKm = RunSession.currentPaceMinPerKm.value,
             miles = resolveDistanceUnit(AppSettings.distanceUnitOverride.value) == DistanceUnit.Mi,
+            hasTrack = RunSession.points.value.size >= 2,
+            step = if (recorder.recording) RunSession.stepProgress.value else null,
         )
         if (frame == lastFrame) return
         lastFrame = frame

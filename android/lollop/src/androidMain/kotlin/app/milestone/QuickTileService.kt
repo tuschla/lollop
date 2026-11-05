@@ -9,43 +9,21 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
 import androidx.core.content.edit
-import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetMidnight
 import app.milestone.widget.WidgetSnapshot
 import app.milestone.widget.WidgetSnapshotStore
-import app.milestone.widget.widgetFace
 import app.milestone.widget.TodayWidget
 import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.flow.withIndex
 import kotlinx.coroutines.launch
 
-/** What the tile shows and opens. */
-internal enum class TileFace(val label: Int, val icon: Int, val dest: OpenDest, val active: Boolean) {
-    /** A GPS run is recording: the tile is lit and reopens the tracker. */
-    Recording(R.string.tile_run_recording, R.drawable.ic_content_track_run, OpenDest.Track, true),
-
-    /** Today's open session is a run: the tracker's pre-start screen. */
-    StartRun(R.string.tile_start_run, R.drawable.ic_content_track_run, OpenDest.Track, false),
-
-    /** Today's open session is a lift: the set editor at the next plan item. */
-    LogSet(R.string.tile_log_set, R.drawable.ic_content_set_dumbbell, OpenDest.LogSet, false),
-
-    /** Anything else (rest day, session done, hold, no plan, no snapshot): the Log chooser. */
-    Log(R.string.tile_log, R.drawable.ic_action_log_plus, OpenDest.Log, false),
-}
-
-/**
- * The tile for today's widget [snapshot] (null when there is none for today, or
- * it is stale). Start run needs an open run item today ([WidgetSnapshot.trackable]);
- * Log set needs today's lift session still open. A finished session, a hold
- * ([WidgetDayKind.Paused]), a rest day and no plan all fall back to Log.
- */
-internal fun tileFace(snapshot: WidgetSnapshot?): TileFace = when {
-    snapshot == null -> TileFace.Log
-    snapshot.kind == WidgetDayKind.Run && snapshot.trackable -> TileFace.StartRun
-    snapshot.kind == WidgetDayKind.Lift && !snapshot.sessionDone -> TileFace.LogSet
-    else -> TileFace.Log
-}
+/** The tile's icon for this face (`ic_stat_mark` names the tile in the picker). */
+internal val TileFace.icon: Int
+    get() = when (this) {
+        TileFace.Recording, TileFace.StartRun -> R.drawable.ic_content_track_run
+        TileFace.LogSet -> R.drawable.ic_content_set_dumbbell
+        TileFace.Log -> R.drawable.ic_action_log_plus
+    }
 
 /**
  * Quick Settings tile: one tap to today's next action. It reads only the widget's
@@ -96,7 +74,7 @@ class QuickTileService : TileService() {
         val tile = qsTile ?: return
         val snapshot = WidgetSnapshotStore.today(this)
         val face = faceFor(snapshot)
-        val label = getString(face.label)
+        val label = resources.getString(face.label)
         val subtitle = tileSubtitle(snapshot, latinDigitResources())
         tile.label = label
         tile.contentDescription = listOfNotNull(label, subtitle).joinToString(", ")
@@ -143,15 +121,6 @@ class QuickTileService : TileService() {
 
         private fun faceFor(today: WidgetSnapshot?): TileFace =
             if (RunSession.tracking.value) TileFace.Recording else tileFace(today)
-
-        /** The line under the tile's label for [today]'s snapshot: the widget's
-         *  title (the session, "Rest day", "Training paused"), "Session done" once
-         *  today's session is; nothing without a snapshot for today. */
-        internal fun tileSubtitle(today: WidgetSnapshot?, res: PlatformResources): String? {
-            val snapshot = today ?: return null
-            val face = widgetFace(snapshot, snapshot.epochDay, res)
-            return (if (snapshot.sessionDone) face.status else face.title)?.takeIf { it.isNotBlank() }
-        }
 
         /** Whether the tile is on the user's Quick Settings panel (it then needs the midnight tick). */
         internal fun isAdded(context: Context): Boolean =

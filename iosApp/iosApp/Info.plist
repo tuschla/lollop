@@ -70,8 +70,12 @@
 	<array>
 		<string>location</string>
 	</array>
-	<!-- lollop://open/<today|log|track|log_set>: Android's OpenDest deep links
-	     (onOpenURL → LollopIosOpen). -->
+	<!-- The run's and the rest's Live Activities (Surfaces.swift; drawn by the
+	     LollopWidgets extension), updated from the app, no push. -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<!-- lollop://open/<today|log|track|log_set>: Android's OpenDest deep links, from
+	     the widgets and the Live Activities (onOpenURL → LollopIosOpen). -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

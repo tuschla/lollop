@@ -2,18 +2,22 @@
 
 Status: the iOS app (`iosApp/`) is the Android app ported to Compose
 Multiplatform: a SwiftUI host around the shared Compose UI, the core engine
-(event log, replay, compaction) over the Rust core's C ABI. CI builds it as an
-unsigned `.ipa` to sideload and launches it in a simulator. The app's Kotlin
+(event log, replay, compaction) over the Rust core's C ABI, and one Swift
+extension with the home and lock screen widget, the Live Activities of a run
+and a rest, and the Control Center control. CI builds it as an `.ipa` to
+sideload and launches it in a simulator. The app's Kotlin
 lives in the multiplatform module `android/lollop`, which builds for Android
 and iOS. Its `commonMain` holds the app root and boot, every screen (Today,
 History, the Log sheet and its editors, Profile, guided setup, the tracker, run
 detail and trim, the maps), the core engine and event log, the core's wire
 types and events, the serial event queue (`EventDispatcher`), run tracking
 (`RunSession`, `RunRecorder`, the active-run store), GPX/TCX parsing, units,
-settings and the theme. They reach the platform through `expect` seams with
-Android and iOS actuals (see below). Android-only so far: the home screen
-widget, the Quick Settings tile and the Live Update notifications; their iOS
-counterparts are Swift extensions (Next steps).
+settings, the theme, and what the widget and the tile show (`WidgetSnapshot`,
+`widgetFace`, `TileFace`). They reach the platform through `expect` seams with
+Android and iOS actuals (see below). The surfaces outside the app are drawn by
+each platform (Glance and Android notifications; WidgetKit and ActivityKit in
+Swift) from text the shared code resolves (see "Widgets, control and Live
+Activities").
 
 ## Architecture
 
@@ -35,25 +39,39 @@ android/ (Gradle build of the app; includes kmp/core-bridge as :core-bridge)
   │    ├─ commonMain       the app for both platforms: root, screens, core engine
   │    │                   (DurableCore, EventLog), run tracking, generated CMP
   │    │                   resources
-  │    ├─ androidMain      Android actuals and what has no iOS twin yet (the
-  │    │                   activity, osmdroid, location service, widget, tile,
-  │    │                   Live Updates, Core.kt)
+  │    ├─ androidMain      Android actuals and what has no iOS twin (the
+  │    │                   activity, osmdroid, location service, Glance widget,
+  │    │                   tile service, Live Updates, Core.kt)
   │    ├─ iosMain          iOS actuals (LollopIosRoot, POSIX files, MapKit,
   │    │                   CoreLocation, UserNotifications, document pickers, …)
+  │    │                   and IosSurfaces.kt: the widget payload and the Live
+  │    │                   Activity content as JSON for the Swift side
   │    ├─ commonTest       engine, formatting, date, map and run recorder tests:
   │    │                   JVM and iOS simulator
+  │    ├─ iosTest          the iOS tracker and the surface payloads (simulator)
   │    └─ androidHostTest  JVM + Robolectric suite
   └─ lollop-ios/ the iOS framework `Lollop`: :lollop + :core-bridge + the
-                 entry points LollopApp.start() and MainViewController();
+                 entry points LollopApp.start(), MainViewController() and
+                 LollopSurfaces (the Swift host of the widgets and activities);
                  iosTest runs the engine on the real core
-iosApp/ (the iOS app: XcodeGen spec, SwiftUI host, Info.plist, assets)
-  ├─ project.yml            target `lollop`, bundle id app.milestone.lollop; a
-  │                         build phase runs :lollop-ios:embedAndSignAppleFrameworkForXcode
+iosApp/ (the iOS app: XcodeGen spec, SwiftUI host, extension, Info.plists, assets)
+  ├─ project.yml            targets `lollop` (bundle id app.milestone.lollop; a build
+  │                         phase runs :lollop-ios:embedAndSignAppleFrameworkForXcode),
+  │                         `LollopWidgets` (the extension, app.milestone.lollop.widgets,
+  │                         embedded in PlugIns/) and `LollopWidgetsTests`
   ├─ iosApp/LollopIosApp.swift  @main SwiftUI app showing MainViewController()
+  ├─ iosApp/Surfaces.swift  writes the widget payload, runs the Live Activities
   ├─ iosApp/Info.plist      document types (GPX/TCX/FIT), lollop:// URLs, location
-  │                         When In Use + background mode, launch screen, orientations
+  │                         When In Use + background mode, Live Activities,
+  │                         launch screen, orientations
   ├─ iosApp/Assets.xcassets app icon (light/dark/tinted) and launch logo
-  └─ make-assets.py         renders those PNGs from the Android vector drawables
+  ├─ LollopWidgets/         the widget extension (Swift only): widget, Live
+  │                         Activities, control, icons (Assets.xcassets)
+  ├─ LollopWidgetsTests/    the extension's tests and renders (simulator)
+  ├─ Shared/                compiled into the app and the extension: the App Group
+  │                         lookup, the activity content, the App Intents
+  ├─ Entitlements/          the App Group of the app and the extension
+  └─ make-assets.py         renders the PNGs from the Android vector drawables
 ```
 
 `DurableCore` (commonMain) is the engine both platforms run: it sends events
@@ -208,8 +226,9 @@ which builds `Lollop.framework` for the configuration and SDK Xcode is building
 the core engine (`LollopApp.start()`) and composes the app's root
 (`LollopIosRoot()`, which restores the event log and sends SetToday), and hands
 URLs the app is opened with (a GPX, TCX or FIT file from Files or the share
-sheet) to `openUrl` (`LollopIosOpen`). The icon and launch logo PNGs are
-rendered from the Android launcher icon and splash marks by
+sheet) to `openUrl` (`LollopIosOpen`). Before that it hands the widgets and
+activities to `Surfaces.swift` (`LollopSurfaces.install`). The icon, launch logo
+and widget icon PNGs are rendered from the Android drawables by
 `iosApp/make-assets.py` (rsvg-convert + Pillow, runs on Linux); rerun it after
 changing those drawables.
 
@@ -217,16 +236,28 @@ changing those drawables.
 
 `.github/workflows/ios-app.yml` runs on GitHub macOS runners (free for this
 public repo) on every push to `main` that touches the app, and by hand
-(`gh workflow run ios-app.yml`). Two jobs:
+(`gh workflow run ios-app.yml`). Three jobs:
 
-- **Unsigned .ipa**: `xcodegen generate`, `xcodebuild -configuration Release
-  -sdk iphoneos CODE_SIGNING_ALLOWED=NO`, then `Payload/lollop.app` zipped into
+- **.ipa**: `xcodegen generate`, `xcodebuild -configuration Release
+  -sdk iphoneos CODE_SIGNING_ALLOWED=NO`, checks that `PlugIns/LollopWidgets.appex`
+  is embedded with a widget extension Info.plist, signs the framework, the
+  extension and the app ad hoc (`codesign -s -`) with the App Group entitlement
+  (`iosApp/Entitlements/`), then `Payload/lollop.app` zipped into
   `lollop-unsigned.ipa`, uploaded as the artifact `lollop-unsigned-ipa` (kept
-  30 days).
+  30 days). The ad-hoc signature only carries the entitlement: SideStore reads an
+  app's App Groups from the signed binaries and re-signs everything with the
+  Apple Account (see below).
+- **Widget extension tests**: `LollopWidgetsTests` in an iPhone simulator,
+  without the Kotlin framework: the day rule and the midnight roll-over, the
+  line fitting, the App Group lookup, the activity content, and renders of every
+  widget family and state and of the activities (artifact `widget-renders`).
 - **Launch smoke test**: a Debug build for an iPhone simulator, installed and
   launched; the job fails if the app writes a crash report or isn't running
-  30 s after launch. The artifact `simulator-smoke` holds a screenshot and the
-  app's log.
+  30 s after launch, if the extension isn't embedded, or if the app didn't write
+  the widget payload to its App Group container. The extension's code then
+  reads that payload (`testThePayloadTheAppWroteReads`) and draws it in every
+  family. The artifact `simulator-smoke` holds a screenshot, the app's log, the
+  payload and its renders.
 
 Installing on an iPhone with SideStore and a free Apple Account (the
 "Install" page of https://docs.sidestore.io has the current steps):
@@ -246,8 +277,12 @@ Installing on an iPhone with SideStore and a free Apple Account (the
    `gh run download --repo tuschla/lollop -n lollop-unsigned-ipa`, then copy
    the `.ipa` to the phone (or install it with iloader).
 3. With LocalDevVPN connected and on Wi-Fi, SideStore → My Apps → `+` → pick
-   `lollop-unsigned.ipa`. SideStore signs it with the Apple Account and installs
-   it. Installing a newer `.ipa` the same way updates the app in place.
+   `lollop-unsigned.ipa`. SideStore asks what to do with the app extension:
+   pick "Keep App Extensions (Register App ID for Each Extension)" (without the
+   extension there are no widgets, no Live Activities and no control; "Use Main
+   Profile" signs the extension with the app's profile, which WidgetKit may
+   refuse). SideStore signs it with the Apple Account and installs it.
+   Installing a newer `.ipa` the same way updates the app in place.
 4. A free account's signature expires after 7 days; an expired app doesn't
    open until it is refreshed. SideStore refreshes in the background, or tap
    the app's day counter in My Apps (LocalDevVPN connected, Wi-Fi). A refresh
@@ -260,12 +295,25 @@ Limits of a free Apple Account:
 
 - 3 sideloaded apps installed at once, SideStore included: lollop leaves one
   slot free.
-- 10 app IDs per 7 days. The app and each of its extensions register an app
-  ID of their own, so a later widget extension (it can hold the widget, the
-  Live Activity and the control) makes every fresh install cost two. When an
-  `.ipa` has extensions, SideStore asks whether to keep them.
-- App Groups (the widget reading the app's snapshot) need SideStore to
-  register a group for the account; check that before building the widget.
+- 10 app IDs per 7 days. The app and its extension each register one
+  (SideStore asks per extension; the prompt names the 10-per-week limit), so
+  every fresh install of lollop costs two. One extension holds the widget, the
+  Live Activities and the control, so they cost one app ID together.
+- App Groups work on a free account: SideStore registers the groups the signed
+  binaries ask for (SideSign `Feature.freeFeatures` = App Groups and Inter-App
+  Audio,
+  https://github.com/SideStore/SideSign/blob/752d1ef602aa792a432ffa1e71646dc1ecf7363c/Sources/Models/Feature.swift#L78-L81;
+  groups read from the Mach-O signature, none from an unsigned binary,
+  https://github.com/SideStore/SideStore/blob/6032424a0e56c1c319762e786099bdd9186a238b/SideStore/Core/Operations/PipelineOperations/FetchProvisioningProfilesOperation.swift#L297-L301).
+  It renames them for the account: `group.app.milestone.lollop` becomes
+  `group.app.milestone.lollop.<TEAMID>` (same file, L428), and the bundle ids
+  become `app.milestone.lollop.<TEAMID>` and `app.milestone.lollop.<TEAMID>.widgets`
+  (L143-L150). The app and the extension find the group at runtime
+  (`Shared/SharedContainer.swift`): `ALTAppGroups` in Info.plist (SideStore 0.6
+  and 0.7 releases write it), else the groups in `embedded.mobileprovision`
+  (every version, nightly included), else the declared group. SideStore's own
+  widget extension shares its data the same way. Push notifications are not
+  available to a free account, so the Live Activities are updated by the app only.
 
 Info.plist asks for location "When In Use" only
 (`NSLocationWhenInUseUsageDescription`, plus
@@ -273,6 +321,40 @@ Info.plist asks for location "When In Use" only
 location when the user granted approximate), and declares the `location`
 background mode so a run keeps recording with the screen locked. No "Always"
 permission: the run is active while it records.
+
+## Widgets, control and Live Activities
+
+One extension, `iosApp/LollopWidgets` (Swift, no Kotlin), draws what the app
+hands it; the text and the decisions come from the same common Kotlin as
+Android's (`widgetSnapshotOf`, `widgetFace`, `tileFace`, `tileSubtitle`,
+`countdownText`, the notification strings).
+
+- **Data**: `IosWidgetSync` (iosMain, IosSurfaces.kt) turns every published
+  model, distance unit, theme, dark mode and recording change into a payload:
+  the common `WidgetSnapshot` JSON, the widget faces for its day and for any
+  other day ("Open lollop to update"), the control's faces, "N more items" per
+  count, and the theme's colours light and dark. `Surfaces.swift` writes it to
+  `widget-today.json` in the App Group container and reloads the widgets and
+  controls (`WidgetCenter`, `ControlCenter`). Without a group container (the
+  extension dropped at install) the widgets read "Open lollop to update".
+- **Day rule**: as Android's. The timeline shows the snapshot's face and, from
+  the next local midnight, the stale face; a snapshot marked stale, from another
+  day or written in another time zone shows the stale face. The app writes a new
+  one when it publishes a model for the new day.
+
+| Surface | Families / parts | Taps |
+|---|---|---|
+| Home screen widget (Android's widget) | small (Android's 2×2: date overline, full-width primary), medium and large (Android's 4×2 and 4×3: "Today · date", week strip, Log beside the primary); the richest layout whose parts fit at the reader's text size, in Android's order (`ViewThatFits` over `CardLayout.candidates`); the theme's palette, light/dark per the app's dark mode | the widget opens Today, a button its screen (`Link`; a small widget's button runs `OpenLollopIntent` from iOS 17, before that the small widget opens the primary's screen) |
+| Lock screen widgets | rectangular: the title over the status line (Android's one-row widget without buttons); circular: the week's sessions done of planned, else the primary's icon; inline: title · short line | Today |
+| Control Center control (iOS 18, the Quick Settings tile) | the tile's face and the widget's title under it (`ControlValueProvider` reads the payload); SF Symbols, as controls show symbols only | `OpenLollopIntent` (an `OpenIntent`, run in the app) opens the tile's screen |
+| Run Live Activity (the run Live Update) | lock screen: title, chip word, moving time (a timer text from the moving time's anchor while recording), distance, pace now, or Android's fixed line; a guided run's step; Pause/Resume and Stop. Dynamic Island: route mark + moving time or chip (compact, minimal), the figures and buttons (expanded) | the tracker; Pause/Resume runs `SetRunPausedIntent` (a `LiveActivityIntent`, iOS 17+, in the app) → `RunActivity.setPaused`; Stop opens the tracker |
+| Rest Live Activity (the rest countdown) | "Resting · <exercise>", the next set, the countdown to the end; ended at the rest end while the app runs, else it reads "Rest done" from its stale date and ends when the app comes to the front | the set editor |
+
+The activities start while the app is in front (the tracker, the set loop; the
+system hides an activity of the app in front) and are updated by the app only:
+a run's frames come from `RunActivity` (the tracker), a rest's from `RestAlarm`.
+An update is sent only for what the timer text can't show. Live Activities need
+iOS 16.2 and the user's Live Activities setting; widgets work from iOS 16.
 
 ## What the iOS app has to implement
 
@@ -285,13 +367,13 @@ Apple offers no other API (extensions).
 | JNI core, `Core.kt` on the `core-jni` thread | `BridgeCore` over `kmp/core-bridge`'s `NativeCore`, installed by `LollopApp.start()`, on one dedicated thread |
 | Event log `filesDir/event-log.ndjson`, replay on boot, compaction (`EventLog.kt`, `DurableCore.restore`) | Done: the same NDJSON file in Application Support through the same commonMain code, so an exported log can be imported on either platform |
 | Crash-safe active run file (`ActiveRunStore.kt`) | Done: the same commonMain store and NDJSON format in Application Support, over the `LogFiles` seam (POSIX) |
-| GPS run tracking, foreground service with a location type (`RunTrackingService.kt`) | Done: `RunTracker.ios.kt`, a `CLLocationManager` (best accuracy, fitness activity, no distance filter, no auto-pause, `allowsBackgroundLocationUpdates` with the blue indicator) feeding the common `RunRecorder` (the same fix QC, armed start, pause, signal-loss watchdog and step ticker as Android's service) and the sidecar file; When In Use plus a one-off precise-location prompt; a run resumes after a relaunch from the sidecar. The Live Activity hook (`RunActivity`: sink + `setPaused`) is in iosMain, not yet exported by `:lollop-ios`. |
-| Live Update notifications for run and rest (`LiveUpdates.kt`, promoted notifications) | Live Activities (ActivityKit, Swift widget extension), Dynamic Island |
+| GPS run tracking, foreground service with a location type (`RunTrackingService.kt`) | Done: `RunTracker.ios.kt`, a `CLLocationManager` (best accuracy, fitness activity, no distance filter, no auto-pause, `allowsBackgroundLocationUpdates` with the blue indicator) feeding the common `RunRecorder` (the same fix QC, armed start, pause, signal-loss watchdog and step ticker as Android's service) and the sidecar file; When In Use plus a one-off precise-location prompt; a run resumes after a relaunch from the sidecar. Its frames go to the run's Live Activity (`RunActivity`). |
+| Live Update notifications for run and rest (`LiveUpdates.kt`, promoted notifications) | Done: Live Activities with the Dynamic Island (see above) |
 | Rest-done alert, exact alarm (`RestAlarm.kt`) | Done: a time-interval local notification (`UNTimeIntervalNotificationTrigger`) and the in-app countdown; no exact-alarm notice. AlarmKit (iOS 26) would sound in silent mode. |
 | Session reminder, boot receiver (`SessionReminder.kt`) | Done: a dated calendar-trigger local notification (`UNCalendarNotificationTrigger`) per upcoming session day; iOS keeps them across reboots, no boot hook |
-| Home screen widget (`widget/`, Glance) | WidgetKit extension (SwiftUI) reading a snapshot the app writes to an App Group container (Android: `WidgetSnapshot.kt`) |
-| Quick Settings tile (`QuickTileService.kt`) | Control Center control (`ControlWidget`, iOS 18) in the widget extension |
-| Deep links `OpenDest` (`OpenIntents.kt`): today, log, track, log_set | URL scheme `lollop://open/<dest>` or App Intents (`OpenIntent`) from widgets, controls and Live Activities |
+| Home screen widget (`widget/`, Glance) | Done: WidgetKit widget, home and lock screen (see above) |
+| Quick Settings tile (`QuickTileService.kt`) | Done: Control Center control (`ControlWidget`, iOS 18) in the widget extension |
+| Deep links `OpenDest` (`OpenIntents.kt`): today, log, track, log_set | Done: URL scheme `lollop://open/<dest>` (widget links, activities) and `OpenLollopIntent` (control, small widget's button) |
 | Open/share GPX, TCX, FIT into the app (`RunImport.kt`, VIEW/SEND intent filters) | Done: document types in `iosApp/iosApp/Info.plist` (`CFBundleDocumentTypes` + imported UTTypes `com.topografix.gpx`, `com.garmin.tcx`, `com.garmin.fit`), so Files' "Open in" and the share sheet's app row copy the file into the app, whose `onOpenURL` hands it to `LollopIosOpen` |
 | Import a log, export a log/GPX/coach summary (`ProfileScreen.kt`, `Export.kt`, `CoachExport.kt`) | Done: the backup NDJSON (`lollop-YYYY-MM-DD.ndjson`) is written to the temp dir and shared with `UIActivityViewController` (Save to Files, AirDrop; "Exported" only when the sheet completes); import picks one file with `UIDocumentPickerViewController` (streamed validation, 256 MiB cap) → confirm → log swap → in-process reboot (`DurableCore.resetForReboot` over `lollop_reset`); a run's GPX is shared as `run-YYYY-MM-DD-HHmm.gpx` (`Export.ios.kt`); the coach summary through `CoachExport.ios.kt` |
 | Battery optimisation exemption prompt | None needed |
@@ -300,8 +382,7 @@ Apple offers no other API (extensions).
 
 ## Next steps
 
-1. The Swift extensions (one widget extension): the home screen widget
-   (WidgetKit, reading a snapshot the app writes to an App Group container),
-   the Live Activity for run and rest (ActivityKit; the app side needs
-   `RunActivity` exported from `:lollop-ios`), and the Control Center control.
-   Each costs a free Apple Account an app ID (see the sideloading limits).
+1. On a phone: the widgets, the control and the Live Activities under a
+   SideStore free-account signature (the simulator tests cover the app's
+   payload and the extension's code; adding a widget, the control and a Live
+   Activity needs a device). See "Widgets, control and Live Activities".

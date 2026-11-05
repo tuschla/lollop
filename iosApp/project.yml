@@ -24,6 +24,12 @@ targets:
     scheme: {}
     sources:
       - path: iosApp
+      # The App Group lookup, the activity content and the App Intents, shared
+      # with the extension.
+      - path: Shared
+    dependencies:
+      # Embedded in PlugIns/: the widgets, the Live Activities and the control.
+      - target: LollopWidgets
     settings:
       base:
         PRODUCT_NAME: lollop
@@ -39,6 +45,8 @@ targets:
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
         # Gradle reads and writes outside the build sandbox.
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # The App Group the widget extension reads the widget payload from.
+        CODE_SIGN_ENTITLEMENTS: Entitlements/lollop.entitlements
     preBuildScripts:
       - name: Kotlin framework (Gradle)
         # Gradle tracks its own inputs; let it run on every build.
@@ -62,3 +70,53 @@ targets:
           # Linking Compose into a framework needs more heap than gradle.properties gives.
           ./gradlew "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8" \
             :lollop-ios:embedAndSignAppleFrameworkForXcode
+  # The app's one extension (each extension costs a free Apple Account an app ID):
+  # the home and lock screen widget, the run's and the rest's Live Activities and
+  # the Control Center control. Swift only; it reads what the app writes and
+  # never links the Kotlin framework.
+  LollopWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: LollopWidgets
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_NAME: LollopWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: app.milestone.lollop.widgets
+        INFOPLIST_FILE: LollopWidgets/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Entitlements/LollopWidgets.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        # Shared/ compiles its calls into the Kotlin app only outside the extension.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) LOLLOP_WIDGET_EXTENSION"
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+  # The extension's model and views in a simulator: the payload the app wrote
+  # (LOLLOP_WIDGET_PAYLOAD), the timeline's midnight roll-over, and renders of
+  # every family, state and activity (LOLLOP_RENDER_DIR). No host app.
+  LollopWidgetsTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: LollopWidgets
+        excludes:
+          - LollopWidgetsBundle.swift
+          - Info.plist
+      - path: Shared
+      - path: LollopWidgetsTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.milestone.lollop.widgets-tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) LOLLOP_WIDGET_EXTENSION"
+schemes:
+  LollopWidgetsTests:
+    build:
+      targets:
+        LollopWidgetsTests: [test]
+    test:
+      targets:
+        - LollopWidgetsTests

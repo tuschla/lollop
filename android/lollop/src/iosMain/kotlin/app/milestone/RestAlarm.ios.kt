@@ -20,8 +20,11 @@ import platform.UserNotifications.UNTimeIntervalNotificationTrigger
  * the Profile "Rest timer alert" is on, silent otherwise. A new rest replaces it,
  * cancel removes it. While the loop's readout is on screen the in-app cue covers
  * the rest end: the delegate ([startIosReminders]) does not show it then.
- * iOS has no ongoing countdown notification (that would be a Live Activity) and
- * no exact-alarm permission: the notice never shows.
+ * Android's ongoing countdown notification is the rest's Live Activity
+ * ([IosSurfaces.showRest]: lock screen and Dynamic Island, counting down to the
+ * end; the system hides it while the app is in front, where the readout is). It
+ * shows from the start of a rest to its end, or until the rest is cancelled or
+ * replaced. iOS has no exact-alarm permission: the notice never shows.
  */
 internal actual object RestAlarm {
     /** The rest-done notification's identifier: one at a time, replaced by a new rest. */
@@ -40,12 +43,15 @@ internal actual object RestAlarm {
     // set (then the rested exercise), "" when it reported none.
     private var nextExercise: String? = null
 
+    // The set the loop logs next, which the rest's Live Activity names.
+    private var nextSet: RestNextSet? = null
+
     // Asked once per process; the system prompts only while undetermined.
     private var authorizationAsked = false
 
     actual fun schedule(ctx: PlatformContext, restSec: Int, exerciseName: String) {
         if (restSec <= 0) return
-        cancel(ctx)
+        clear()
         val now = AppClock.nowMillis()
         _running.value = RestRun(now, now + restSec * 1000L, exerciseName)
         if (!authorizationAsked) {
@@ -53,22 +59,42 @@ internal actual object RestAlarm {
             requestNotificationAuthorization()
         }
         postDone()
+        // A new rest replaces the shown one in place.
+        resendActivity()
     }
 
     actual fun cancel(ctx: PlatformContext) {
+        clear()
+        IosSurfaces.endRest()
+    }
+
+    private fun clear() {
         nextExercise = null
+        nextSet = null
         _running.value = null
         notificationCenter.removePendingNotificationRequestsWithIdentifiers(listOf(REST_DONE_ID))
         notificationCenter.removeDeliveredNotificationsWithIdentifiers(listOf(REST_DONE_ID))
     }
 
     actual fun setNextSet(ctx: PlatformContext, next: RestNextSet?) {
+        if (_running.value == null) return
+        if (next != nextSet) {
+            nextSet = next
+            resendActivity()
+        }
         val exercise = next?.exercise.orEmpty()
-        if (_running.value == null || exercise == nextExercise) return
+        if (exercise == nextExercise) return
         nextExercise = exercise
         // The pending alert is replaced with the new line; once the rest is over
         // the alert (if any) already came.
         postDone()
+    }
+
+    /** Show the running rest in its Live Activity (Android's countdown
+     *  notification): the title, the countdown to its end and the next set. */
+    internal fun resendActivity() {
+        val run = _running.value ?: return
+        IosSurfaces.showRest(run, nextSet)
     }
 
     actual fun setInAppVisible(ctx: PlatformContext, visible: Boolean) {

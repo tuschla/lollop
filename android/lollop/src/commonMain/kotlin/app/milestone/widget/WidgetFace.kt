@@ -1,15 +1,39 @@
 package app.milestone.widget
 
-import android.content.res.Resources
-import androidx.annotation.DrawableRes
 import app.milestone.OpenDest
-import app.milestone.R
+import app.milestone.PlatformResources
 import app.milestone.Reminder
 import app.milestone.TileFace
 import app.milestone.WeekdayWidth
 import app.milestone.appLocale
+import app.milestone.getQuantityString
+import app.milestone.getString
 import app.milestone.planDateLabel
 import app.milestone.reminderLine
+import app.milestone.resources.Res
+import app.milestone.resources.main_plan_withheld_empty_title
+import app.milestone.resources.main_plan_withheld_health_body
+import app.milestone.resources.main_plan_withheld_health_title
+import app.milestone.resources.main_run
+import app.milestone.resources.main_status_on_hold
+import app.milestone.resources.main_week_done_count
+import app.milestone.resources.plan_check_title
+import app.milestone.resources.widget_item_done
+import app.milestone.resources.widget_item_line
+import app.milestone.resources.widget_more_items
+import app.milestone.resources.widget_next
+import app.milestone.resources.widget_next_day
+import app.milestone.resources.widget_no_plan
+import app.milestone.resources.widget_no_plan_body
+import app.milestone.resources.widget_no_session
+import app.milestone.resources.widget_open_to_update
+import app.milestone.resources.widget_overline_day
+import app.milestone.resources.widget_overline_today
+import app.milestone.resources.widget_paused_body
+import app.milestone.resources.widget_rest_day
+import app.milestone.resources.widget_session_done
+import app.milestone.resources.widget_setup_body
+import app.milestone.resources.widget_setup_title
 import app.milestone.tileFace
 import kotlinx.datetime.LocalDate
 
@@ -25,8 +49,9 @@ internal enum class WidgetTone {
     Muted,
 }
 
-/** One button on the widget: its label, icon and the screen it opens. */
-internal data class WidgetAction(val label: String, val dest: OpenDest, @DrawableRes val icon: Int)
+/** One button on the widget: its label, the screen it opens, and the tile [face]
+ *  it shows (the platform draws that face's icon). */
+internal data class WidgetAction(val label: String, val dest: OpenDest, val face: TileFace)
 
 /**
  * A tall card's featured block: a figure ([figure], a run's distance or time, set
@@ -67,31 +92,31 @@ internal data class WidgetFace(
 )
 
 /** The widget button for the tile's [face]: the same label, icon and destination. */
-internal fun widgetAction(face: TileFace, res: Resources) = WidgetAction(res.getString(face.label), face.dest, face.icon)
+internal fun widgetAction(face: TileFace, res: PlatformResources) = WidgetAction(res.getString(face.label), face.dest, face)
 
 /**
  * The face for [snapshot] on local day [today], [recording] while a GPS run
  * records in this process. A missing or stale snapshot, or one written for another
  * day, reads "Open lollop to update" and never shows that day's session as today's.
  */
-internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: Resources, recording: Boolean = false): WidgetFace {
-    val todayLabel = res.getString(R.string.widget_overline_today)
+internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformResources, recording: Boolean = false): WidgetFace {
+    val todayLabel = res.getString(Res.string.widget_overline_today)
     val current = snapshot?.takeIf { !it.stale && it.epochDay == today }
     val primary = widgetAction(if (recording) TileFace.Recording else tileFace(current), res)
     val actions = listOf(primary) + listOfNotNull(widgetAction(TileFace.Log, res).takeIf { primary.dest != OpenDest.Log })
     if (current == null) {
-        return WidgetFace(todayLabel, res.getString(R.string.widget_open_to_update), WidgetTone.Muted, actions = actions)
+        return WidgetFace(todayLabel, res.getString(Res.string.widget_open_to_update), WidgetTone.Muted, actions = actions)
     }
     val week = current.weekPlanned.takeIf { it > 0 }?.let {
-        res.getQuantityString(R.plurals.main_week_done_count, it, current.weekDone, it)
+        res.getQuantityString(Res.plurals.main_week_done_count, it, current.weekDone, it)
     }
     // The overline names the day the snapshot describes, so a frame the host keeps
     // past midnight (before the midnight tick lands) still reads true.
-    val overline = res.getString(R.string.widget_overline_day, todayLabel, planDateLabel(current.epochDay))
-    val next = current.next?.let { res.getString(R.string.widget_next, it.title, planDateLabel(it.epochDay)) }
+    val overline = res.getString(Res.string.widget_overline_day, todayLabel, planDateLabel(current.epochDay))
+    val next = current.next?.let { res.getString(Res.string.widget_next, it.title, planDateLabel(it.epochDay)) }
     // The next session as a tall card's hero: its name, its date, then its open items.
     val nextHero = current.next?.takeIf { it.title.isNotBlank() }?.let { n ->
-        WidgetHero(n.title, res.getString(R.string.widget_next_day, planDateLabel(n.epochDay)), figure = false)
+        WidgetHero(n.title, res.getString(Res.string.widget_next_day, planDateLabel(n.epochDay)), figure = false)
     }
     val nextItems = current.next?.let { n -> current.ahead.firstOrNull { it.epochDay == n.epochDay } }
         ?.items.orEmpty().filter { !it.done }.map { itemLine(it, res) }
@@ -99,33 +124,33 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: Resources, 
     return when (current.kind) {
         // A home screen is seen by anyone near the phone: the hold's reason stays in
         // the app. The under-18 pause keeps the calm (non-danger) colour.
-        WidgetDayKind.Paused -> res.getString(R.string.widget_paused_body).let { body ->
+        WidgetDayKind.Paused -> res.getString(Res.string.widget_paused_body).let { body ->
             base.copy(
-                title = res.getString(R.string.main_status_on_hold),
+                title = res.getString(Res.string.main_status_on_hold),
                 tone = if (current.holdReason == "youth") WidgetTone.Normal else WidgetTone.Paused,
                 status = body,
                 brief = body,
                 lead = listOf(body),
             )
         }
-        WidgetDayKind.Setup -> res.getString(R.string.widget_setup_body).let { body ->
-            base.copy(title = res.getString(R.string.widget_setup_title), status = body, brief = body, lead = listOf(body), actions = emptyList())
+        WidgetDayKind.Setup -> res.getString(Res.string.widget_setup_body).let { body ->
+            base.copy(title = res.getString(Res.string.widget_setup_title), status = body, brief = body, lead = listOf(body), actions = emptyList())
         }
         WidgetDayKind.NoPlan -> {
             val (title, body) = when (current.planWithheld) {
-                "health_hold" -> R.string.main_plan_withheld_health_title to R.string.main_plan_withheld_health_body
-                "nothing_to_plan" -> R.string.main_plan_withheld_empty_title to R.string.widget_setup_body
-                else -> R.string.widget_no_plan to R.string.widget_no_plan_body
+                "health_hold" -> Res.string.main_plan_withheld_health_title to Res.string.main_plan_withheld_health_body
+                "nothing_to_plan" -> Res.string.main_plan_withheld_empty_title to Res.string.widget_setup_body
+                else -> Res.string.widget_no_plan to Res.string.widget_no_plan_body
             }
             res.getString(body).let { b -> base.copy(title = res.getString(title), status = b, brief = b, lead = listOf(b)) }
         }
         WidgetDayKind.Rest -> base.copy(
-            title = res.getString(if (current.restDay) R.string.widget_rest_day else R.string.widget_no_session),
+            title = res.getString(if (current.restDay) Res.string.widget_rest_day else Res.string.widget_no_session),
             status = next,
             // "Next: Thu" within the week, the date further out.
             brief = current.next?.let {
                 val day = if (it.epochDay - current.epochDay < 7) weekdayName(it.epochDay) else planDateLabel(it.epochDay)
-                res.getString(R.string.widget_next_day, day)
+                res.getString(Res.string.widget_next_day, day)
             },
             lead = listOfNotNull(next),
             hero = nextHero,
@@ -134,7 +159,7 @@ internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: Resources, 
         WidgetDayKind.Lift, WidgetDayKind.Run -> {
             val (open, done) = current.items.partition { !it.done }
             val lines = (open + done).map { itemLine(it, res) }
-            val sessionDone = res.getString(R.string.widget_session_done)
+            val sessionDone = res.getString(Res.string.widget_session_done)
             val firstLift = open.firstOrNull { it.kind == WidgetItemKind.Lift }
             val firstRun = open.firstOrNull { it.kind == WidgetItemKind.Run }
             // A run day's hero is the run's figure: its volume head ("8 km") over its
@@ -193,19 +218,19 @@ internal fun isFigure(text: String): Boolean =
 private fun weekdayName(epochDay: Long): String =
     app.milestone.weekdayName(LocalDate.fromEpochDays(epochDay).dayOfWeek, WeekdayWidth.Short, appLocale())
 
-private fun itemLine(item: WidgetItem, res: Resources): String {
+private fun itemLine(item: WidgetItem, res: PlatformResources): String {
     val name = when (item.kind) {
-        WidgetItemKind.Run -> res.getString(R.string.main_run)
-        WidgetItemKind.Check -> res.getString(R.string.plan_check_title)
+        WidgetItemKind.Run -> res.getString(Res.string.main_run)
+        WidgetItemKind.Check -> res.getString(Res.string.plan_check_title)
         WidgetItemKind.Lift -> item.name
     }
     val detail = if (item.done) {
-        res.getString(R.string.widget_item_done)
+        res.getString(Res.string.widget_item_done)
     } else {
         // A run's volume head with its pace range ("8 km · 5:40–6:00 /km"), as the reminder.
         listOf(item.detail.takeIf { it != name }.orEmpty(), item.pace).filter { it.isNotBlank() }.joinToString(" \u00b7 ").ifBlank { null }
     }
-    return keepUnits(detail?.let { res.getString(R.string.widget_item_line, name, it) } ?: name)
+    return keepUnits(detail?.let { res.getString(Res.string.widget_item_line, name, it) } ?: name)
 }
 
 /**
@@ -213,12 +238,12 @@ private fun itemLine(item: WidgetItem, res: Resources): String {
  * items are cut, the last slot reads "N more items" instead, unless it is the
  * only item slot: that one shows the first item, never a count of everything.
  */
-internal fun visibleLines(face: WidgetFace, maxLines: Int, res: Resources): List<String> {
+internal fun visibleLines(face: WidgetFace, maxLines: Int, res: PlatformResources): List<String> {
     val lead = face.lead.take(maxLines)
     val room = maxLines - lead.size
     if (room <= 0 || face.items.isEmpty()) return lead
     if (face.items.size <= room || room == 1) return lead + face.items.take(room)
     val shown = face.items.take(room - 1)
     val cut = face.items.size - shown.size
-    return lead + shown + res.getQuantityString(R.plurals.widget_more_items, cut, cut)
+    return lead + shown + res.getQuantityString(Res.plurals.widget_more_items, cut, cut)
 }

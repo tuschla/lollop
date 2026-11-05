@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Render the iOS app icon and launch logo from the Android vector drawables.
+"""Render the iOS app icon, launch logo and widget icons from the Android vector drawables.
 
     iosApp/make-assets.py        # rewrites iosApp/iosApp/Assets.xcassets/{AppIcon,LaunchLogo}
+                                 # and iosApp/LollopWidgets/Assets.xcassets/Icon*
 
 Sources (android/lollop/src/androidMain/res):
   mipmap/ic_launcher.xml           the full-square launcher icon (white ground,
@@ -11,6 +12,12 @@ Sources (android/lollop/src/androidMain/res):
   drawable/splash_logo_{light,dark}.xml
                                    the splash marks: the launch screen logo for
                                    the light and dark appearance
+  drawable/ic_content_track_run.xml, ic_content_set_dumbbell.xml,
+  ic_action_log_plus.xml, ic_stat_mark.xml, ic_track_{pause,play,stop}.xml
+                                   the widget buttons (the Quick Settings tile's
+                                   faces), the notifications' route mark and the
+                                   tracker's buttons: template images of the
+                                   widget extension, tinted by the views
 
 One 1024 px icon per appearance is all Xcode 14+ needs; actool derives the
 smaller sizes at build time. Needs rsvg-convert (librsvg) and Pillow. The
@@ -27,6 +34,17 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent
 RES = ROOT / "android/lollop/src/androidMain/res"
 ASSETS = ROOT / "iosApp/iosApp/Assets.xcassets"
+WIDGET_ASSETS = ROOT / "iosApp/LollopWidgets/Assets.xcassets"
+# Widget extension image set → Android drawable (24 dp each).
+WIDGET_ICONS = {
+    "IconTrackRun": "ic_content_track_run",
+    "IconLogSet": "ic_content_set_dumbbell",
+    "IconLog": "ic_action_log_plus",
+    "IconMark": "ic_stat_mark",
+    "IconPause": "ic_track_pause",
+    "IconPlay": "ic_track_play",
+    "IconStop": "ic_track_stop",
+}
 A = "{http://schemas.android.com/apk/res/android}"
 
 
@@ -66,11 +84,12 @@ def to_svg(node, recolor):
             fill, fill_a = svg_color(child.get(A + "fillColor", "#00000000"), recolor)
             stroke, stroke_a = svg_color(child.get(A + "strokeColor", "#00000000"), recolor)
             cap = child.get(A + "strokeLineCap", "butt")
+            join = child.get(A + "strokeLineJoin", "miter")
             width = child.get(A + "strokeWidth", "0")
             out.append(
                 f'<path d="{child.get(A + "pathData")}" fill="{fill}" fill-opacity="{fill_a}" '
                 f'stroke="{stroke}" stroke-opacity="{stroke_a}" stroke-width="{width}" '
-                f'stroke-linecap="{cap}"/>'
+                f'stroke-linecap="{cap}" stroke-linejoin="{join}"/>'
             )
     return "".join(out)
 
@@ -86,14 +105,33 @@ def render(drawable, px, recolor=None):
     return Image.open(BytesIO(png)).convert("RGBA")
 
 
-def write_set(dirname, contents, images):
-    d = ASSETS / dirname
+def write_set(dirname, contents, images, assets=ASSETS):
+    d = assets / dirname
     d.mkdir(parents=True, exist_ok=True)
     for old in d.glob("*.png"):
         old.unlink()
     for name, image in images.items():
         image.save(d / name, optimize=True)
     (d / "Contents.json").write_text(json.dumps(contents, indent=2) + "\n")
+
+
+def write_widget_icons():
+    """The widget extension's icons: template image sets at 2x and 3x of 24 pt."""
+    WIDGET_ASSETS.mkdir(parents=True, exist_ok=True)
+    (WIDGET_ASSETS / "Contents.json").write_text(json.dumps({"info": {"author": "xcode", "version": 1}}, indent=2) + "\n")
+    for name, drawable in WIDGET_ICONS.items():
+        images, entries = {}, []
+        for scale in (2, 3):
+            filename = f"{drawable}@{scale}x.png"
+            images[filename] = render(f"drawable/{drawable}.xml", 24 * scale)
+            entries.append({"filename": filename, "idiom": "universal", "scale": f"{scale}x"})
+        write_set(
+            f"{name}.imageset",
+            {"images": entries, "info": {"author": "xcode", "version": 1},
+             "properties": {"template-rendering-intent": "template"}},
+            images,
+            assets=WIDGET_ASSETS,
+        )
 
 
 def main():
@@ -140,6 +178,8 @@ def main():
     (d / "Contents.json").write_text(json.dumps(
         {"colors": [color("1.000"), color("0.000", "dark")], "info": {"author": "xcode", "version": 1}},
         indent=2) + "\n")
+
+    write_widget_icons()
 
 
 if __name__ == "__main__":
