@@ -20,24 +20,19 @@ plugins {
     id("io.github.takahirom.roborazzi")
 }
 
-// Compose Multiplatform 1.12.2 is built on Jetpack Compose 1.12.1, the version the
-// BOM below pins: on Android both resolve to the same Google artifacts.
-val cmpVersion = "1.12.2"
-val composeBom = "androidx.compose:compose-bom:2026.09.00"
-
 kotlin {
     android {
         namespace = "app.milestone"
-        compileSdk = 37
-        buildToolsVersion = "36.1.0"
-        minSdk = 24
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        buildToolsVersion = libs.versions.android.buildTools.get()
+        minSdk = libs.versions.android.minSdk.get().toInt()
         // java.time on API 24/25: :app desugars; this tells lint and the library's
         // D8 that the APIs are backported.
         enableCoreLibraryDesugaring = true
 
         androidResources { enable = true }
 
-        compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+        compilerOptions { jvmTarget.set(JvmTarget.fromTarget(libs.versions.jvm.target.get())) }
 
         // The R8 keep rules ship to :app's release build as consumer rules.
         optimization {
@@ -72,93 +67,77 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation("org.jetbrains.compose.runtime:runtime:$cmpVersion")
-            implementation("org.jetbrains.compose.runtime:runtime-saveable:$cmpVersion")
-            implementation("org.jetbrains.compose.ui:ui:$cmpVersion")
-            implementation("org.jetbrains.compose.foundation:foundation:$cmpVersion")
-            // The material3 version CMP 1.12.2 pairs with (ComposeBuildConfig
-            // composeMaterial3Version); on Android it resolves to androidx
-            // material3 1.4.0, the BOM's.
-            implementation("org.jetbrains.compose.material3:material3:1.9.0")
-            // Window size classes (currentWindowAdaptiveInfoV2, Adaptive.kt); on
-            // Android it resolves to androidx adaptive 1.3.0, the BOM's.
-            implementation("org.jetbrains.compose.material3.adaptive:adaptive:1.3.0")
-            implementation("org.jetbrains.compose.components:components-resources:$cmpVersion")
-            // collectAsStateWithLifecycle, LocalLifecycleOwner; on Android it resolves
-            // to androidx lifecycle 2.10.0 (androidMain's), on iOS iosMain lifts it to 2.11.0.
-            implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.runtime.saveable)
+            implementation(libs.compose.ui)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.material3)
+            // Window size classes (currentWindowAdaptiveInfoV2, Adaptive.kt).
+            implementation(libs.compose.material3.adaptive)
+            implementation(libs.compose.components.resources)
+            // collectAsStateWithLifecycle, LocalLifecycleOwner.
+            implementation(libs.jetbrains.lifecycle.runtime.compose)
+            implementation(libs.kotlinx.serialization.json)
+            implementation(libs.kotlinx.coroutines.core)
             // Dates and time zones in common code; on Android it wraps java.time
             // (desugared below API 26), so dates read exactly as before.
-            implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
+            implementation(libs.kotlinx.datetime)
             // SynchronizedObject + synchronized(): a real lock on Kotlin/Native, where
             // @Synchronized does nothing; on the JVM it is the object's monitor.
-            implementation("org.jetbrains.kotlinx:atomicfu:0.33.0")
+            implementation(libs.atomicfu)
             // Pure-Kotlin XML pull reader (KtXmlReader) for GPX/TCX run import on iOS
             // (ImportXml.kt); Android reads with the platform's xmlpull parser.
-            implementation("io.github.pdvrieze.xmlutil:core:1.0.2")
+            implementation(libs.xmlutil.core)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             // runTest for the boot sequence's suspend turns (AppBootTest).
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+            implementation(libs.kotlinx.coroutines.test)
         }
-        // On iOS, CMP 1.12.2's ui depends on androidx lifecycle 2.11.0 and on
-        // JetBrains' lifecycle port 2.9.6: the KLIB loader found every lifecycle
-        // module twice ("same unique_name"). JetBrains' 2.11.0 redirects to the
-        // androidx klibs. iOS only: Android keeps its androidx 2.10.0.
         iosMain.dependencies {
-            implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+            implementation(libs.jetbrains.lifecycle.runtime.compose.ios)
             // BackHandler (PlatformUi.ios.kt): the UIKit back gesture.
-            implementation("org.jetbrains.compose.ui:ui-backhandler:$cmpVersion")
+            implementation(libs.compose.ui.backhandler)
         }
         androidMain.dependencies {
-            implementation("androidx.core:core-ktx:1.19.1")
+            implementation(libs.androidx.core.ktx)
             // Backported SplashScreen API: paints the theme-aware launch frame
             // (white/dark logo in light, black/white logo in dark) before Compose.
-            implementation("androidx.core:core-splashscreen:1.2.0")
-            implementation("androidx.activity:activity-compose:1.13.0")
-            // collectAsStateWithLifecycle + LocalLifecycleOwner; declared rather than relied on
-            // transitively through activity-compose.
-            implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
-            implementation(project.dependencies.platform(composeBom))
-            implementation("androidx.compose.ui:ui")
-            implementation("androidx.compose.material3:material3")
-            // Window size classes (currentWindowAdaptiveInfoV2): the navigation rail, the
-            // two-pane layouts and the content width on landscape phones, foldables and
-            // tablets (Adaptive.kt).
-            implementation("androidx.compose.material3.adaptive:adaptive")
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
-            implementation("org.osmdroid:osmdroid-android:6.1.20")
-            implementation("com.google.android.gms:play-services-location:21.4.0")
-            // Home screen widget (widget/TodayWidget.kt).
-            implementation("androidx.glance:glance-appwidget:1.2.0")
+            implementation(libs.androidx.core.splashscreen)
+            implementation(libs.androidx.activity.compose)
+            // Declared rather than relied on transitively through activity-compose.
+            implementation(libs.androidx.lifecycle.runtime.compose)
+            implementation(project.dependencies.platform(libs.androidx.compose.bom))
+            implementation(libs.androidx.compose.ui)
+            implementation(libs.androidx.compose.material3)
+            implementation(libs.androidx.compose.material3.adaptive)
+            implementation(libs.kotlinx.coroutines.android)
+            implementation(libs.osmdroid.android)
+            implementation(libs.play.services.location)
+            implementation(libs.androidx.glance.appwidget)
         }
         getByName("androidHostTest") {
             // The core's test fixtures (device FIT files) as test resources, so the
             // JVM tests read them regardless of the runner's working directory.
             resources.srcDir("../../shared/tests/fixtures")
             dependencies {
-                // JVM unit tests (no device): compaction + event JSON wire shapes.
-                implementation("junit:junit:4.13.2")
+                implementation(libs.junit)
                 // runTest + controllable dispatchers for the M1 run-save critical-section
                 // cancellation tests (drives real coroutine cancellation the UI can't).
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+                implementation(libs.kotlinx.coroutines.test)
                 // Offline UI/UX QA: Robolectric runs the REAL Compose UI and the
                 // REAL Rust core (host `libshared.so`, built from the shared crate's
                 // `jni-host` feature) on the plain JVM — no device, no emulator.
-                implementation("org.robolectric:robolectric:4.17")
-                implementation("androidx.test:core-ktx:1.7.0")
-                implementation(project.dependencies.platform(composeBom))
-                implementation("androidx.compose.ui:ui-test-junit4")
+                implementation(libs.robolectric)
+                implementation(libs.androidx.test.core.ktx)
+                implementation(project.dependencies.platform(libs.androidx.compose.bom))
+                implementation(libs.androidx.compose.ui.test.junit4)
                 // Declares the empty ComponentActivity that createComposeRule() launches;
                 // the test manifest Robolectric reads must contain it.
-                implementation("androidx.compose.ui:ui-test-manifest")
-                // Roborazzi screenshot capture/verify for the key screens (light + dark).
-                implementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
-                // Glance widget content tests (runGlanceAppWidgetUnitTest), same version as the widget.
-                implementation("androidx.glance:glance-appwidget-testing:1.2.0")
+                implementation(libs.androidx.compose.ui.test.manifest)
+                implementation(libs.roborazzi)
+                // Glance widget content tests (runGlanceAppWidgetUnitTest).
+                implementation(libs.androidx.glance.appwidget.testing)
             }
         }
     }
@@ -167,7 +146,7 @@ kotlin {
 // enableCoreLibraryDesugaring needs the library on this module's configuration
 // too (AGP checks it when writing the AAR metadata).
 dependencies {
-    "coreLibraryDesugaring"("com.android.tools:desugar_jdk_libs:2.1.5")
+    "coreLibraryDesugaring"(libs.desugar.jdk.libs)
 }
 
 // ---------------------------------------------------------------------------
@@ -396,47 +375,11 @@ compose.resources {
     )
 }
 
-// ---------------------------------------------------------------------------
-// QA host core: build libshared.so for the HOST JVM so the
-// Robolectric UI/UX tests drive the REAL Rust core over JNI instead of a mock.
-// `testAndroidHostTest` depends on this and puts the fresh .so on java.library.path.
-// The device build still gets its core from cargo-ndk (scripts/build.sh, into
-// :app's jniLibs); this task is host-only and never feeds the APK.
-// ---------------------------------------------------------------------------
-val repoRoot: File = rootDir.parentFile
-
-// Honor CARGO_TARGET_DIR (the QA sandbox points it at a shared target dir); the
-// cdylib always lands in <target>/debug/libshared.so on a `cargo build` (no
-// --release) of the jni-host feature.
-val cargoTargetDir: File =
-    System.getenv("CARGO_TARGET_DIR")?.let { file(it) } ?: File(repoRoot, "target")
-
+// The Robolectric UI/UX tests drive the real Rust core over JNI: the test JVM
+// loads the host build of the core's JNI exports (the APK's core is :app's).
 val qaJniDir: Provider<Directory> = layout.buildDirectory.dir("qa-jni")
 
-val buildHostCore = tasks.register<Exec>("buildHostCore") {
-    group = "verification"
-    description = "Build libshared.so (jni-host) for host-JVM UI/UX QA tests."
-    workingDir = repoRoot
-    commandLine("cargo", "build", "-p", "shared", "--features", "jni-host")
-    // Rebuild only when the core sources or its manifests change.
-    inputs.dir(File(repoRoot, "shared/src"))
-    inputs.file(File(repoRoot, "shared/Cargo.toml"))
-    inputs.file(File(repoRoot, "Cargo.toml"))
-    val outSo = qaJniDir.map { it.file("libshared.so") }
-    outputs.file(outSo)
-    doLast {
-        val built = File(cargoTargetDir, "debug/libshared.so")
-        if (!built.exists()) {
-            throw GradleException(
-                "host core not found at $built after cargo build " +
-                    "(CARGO_TARGET_DIR=${System.getenv("CARGO_TARGET_DIR") ?: "<unset>"})",
-            )
-        }
-        val dest = outSo.get().asFile
-        dest.parentFile.mkdirs()
-        built.copyTo(dest, overwrite = true)
-    }
-}
+val buildHostCore = rustCore.hostJniLibrary(project, "buildHostCore", qaJniDir)
 
 tasks.withType<Test>().configureEach {
     dependsOn(buildHostCore)

@@ -7,7 +7,7 @@ import kotlin.concurrent.Volatile
 @Volatile private var installedEngine: DurableCore? = null
 
 /**
- * Install the core engine over [bridge] (the C ABI, `kmp/core-bridge`'s
+ * Install the core engine over [bridge] (the C ABI, `android/core-bridge`'s
  * `NativeCore`) for the event queue and the event log. Call once at startup,
  * before the first event; a later call keeps the engine already installed, which
  * holds the process's replayed state.

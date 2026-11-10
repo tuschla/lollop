@@ -1,0 +1,52 @@
+name: Set up the build
+description: >
+  The toolchains a job needs, at the versions the repo pins: the JDK from
+  .java-version, the Android SDK, Rust from rust-toolchain.toml (its targets and
+  components included), cargo-ndk, and the Kotlin/Native toolchain cache.
+inputs:
+  java:
+    description: JDK + Gradle cache
+    default: "true"
+  android:
+    description: Android SDK (configuring android/ needs it, even for iOS tasks)
+    default: "true"
+  rust:
+    description: Rust toolchain + cargo cache
+    default: "false"
+  cargo-ndk:
+    description: cargo-ndk, for Gradle's Android builds of the core (implies rust)
+    default: "false"
+  konan:
+    description: Kotlin/Native toolchain cache (~/.konan)
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - if: inputs.java == 'true'
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      with:
+        distribution: temurin
+        java-version-file: .java-version
+        cache: gradle
+
+    - if: inputs.android == 'true'
+      uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
+    - if: inputs.rust == 'true' || inputs.cargo-ndk == 'true'
+      name: Install the Rust toolchain of rust-toolchain.toml
+      shell: bash
+      run: rustup toolchain install
+
+    - if: inputs.rust == 'true' || inputs.cargo-ndk == 'true'
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+    - if: inputs.cargo-ndk == 'true'
+      name: Install cargo-ndk
+      shell: bash
+      run: cargo install cargo-ndk --locked
+
+    - if: inputs.konan == 'true'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/.konan
+        key: konan-${{ runner.os }}-${{ hashFiles('android/gradle/libs.versions.toml') }}

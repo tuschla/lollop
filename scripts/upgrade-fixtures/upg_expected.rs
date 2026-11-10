@@ -79,8 +79,7 @@ fn history_only(view: &Value) -> Value {
 
 #[test]
 fn dump_expected_history() {
-    let wt = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-    let tag = wt.file_name().unwrap().to_str().unwrap().trim_start_matches("upg-").to_string();
+    let tag = std::env::var("UPG_SHA").expect("UPG_SHA unset: run scripts/upgrade-fixtures/generate.sh");
     let gen_dir = std::env::var("UPG_GEN_DIR").expect("UPG_GEN_DIR unset: run scripts/upgrade-fixtures/generate.sh");
     let dir = PathBuf::from(gen_dir).join(&tag);
     let raw = view_of(&fs::read_to_string(dir.join("raw.ndjson")).unwrap(), "raw");

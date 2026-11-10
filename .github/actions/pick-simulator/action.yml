@@ -1,0 +1,22 @@
+name: Pick an iPhone simulator
+description: >
+  Sets SIMULATOR_UDID to an available iPhone on the newest iOS runtime the
+  runner image has.
+inputs:
+  boot:
+    description: Boot it too
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        BOOT: ${{ inputs.boot }}
+      run: |
+        udid=$(xcrun simctl list devices available -j | python3 -c '
+        import json, sys
+        devices = json.load(sys.stdin)["devices"]
+        print(next(d["udid"] for runtime, ds in sorted(devices.items(), reverse=True) if "iOS" in runtime
+                   for d in ds if d["name"].startswith("iPhone")))')
+        echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+        if [ "$BOOT" = true ]; then xcrun simctl boot "$udid"; fi

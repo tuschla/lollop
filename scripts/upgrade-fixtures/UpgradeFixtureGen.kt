@@ -216,7 +216,7 @@ class UpgradeFixtureGen {
 
     @Test
     fun generate() {
-        val tag = File(".").canonicalPath.substringAfter("upg-").substringBefore('/')
+        val tag = System.getenv("UPG_SHA") ?: error("UPG_SHA unset: run scripts/upgrade-fixtures/generate.sh")
         val genDir = System.getenv("UPG_GEN_DIR") ?: error("UPG_GEN_DIR unset: run scripts/upgrade-fixtures/generate.sh")
         val out = File(genDir, tag).apply { mkdirs() }
         val lines = scenario().mapNotNull {

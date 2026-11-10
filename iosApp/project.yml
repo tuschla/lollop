@@ -10,11 +10,12 @@ options:
   deploymentTarget:
     iOS: "16.0"
   createIntermediateGroups: true
+# MARKETING_VERSION and CURRENT_PROJECT_VERSION, shared with the Android app.
+configFiles:
+  Debug: ../app-version.xcconfig
+  Release: ../app-version.xcconfig
 settings:
   base:
-    # android/app/build.gradle.kts versionName / versionCode.
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_LANGUAGE: en
 targets:
   lollop:

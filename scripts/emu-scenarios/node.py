@@ -14,8 +14,6 @@ argv: mode [text] [anchor]
                    its label one level deeper than a bottom-bar item.
   overflow         print labels whose text node's bounds exceed the screen width or
                    have zero/negative width (clipped/off-screen text), one per line.
-  rtl              print "<n_left> <n_right>" counts of labelled nodes whose centre
-                   lies in the left / right third of the root (layout mirroring probe).
   scroll           print "x1 y1 x2 y2" of the largest vertically scrollable node.
   expand TEXT      print "cx cy ..." of the collapsed-notification Expand button
                    (`expand_button`, content-desc "Expand") in the notification row
@@ -82,20 +80,6 @@ if mode == "scroll":
     print(*best)
     sys.exit(0)
 
-
-if mode == "rtl":
-    left = right = 0
-    for n in nodes:
-        if not n.get("text"):
-            continue
-        x1, _, x2, _ = bounds(n)
-        if x2 - x1 > W * 0.6:
-            continue  # full-width rows say nothing about alignment
-        c = (x1 + x2) / 2
-        left += c < W / 3
-        right += c > 2 * W / 3
-    print(left, right)
-    sys.exit(0)
 
 if mode == "expand":
     parent = {c: p for p in root.iter() for c in p}

@@ -1,136 +1,153 @@
 # shellcheck shell=bash
-# Device helpers for scripts/emulator-scenarios.sh, scripts/emu-scenarios/
-# surfaces.sh, scripts/emu-scenarios/upgrade.sh, scripts/qa-emulator.sh and
-# scripts/soak-emulator.sh (sourced; also usable from an interactive shell:
-# `source scripts/emu-scenarios/lib.sh`).
-#   Needs: SERIAL, APP_ID, OUT (an existing dir), TZ0; the Android SDK from sdk.dir
-#   in android/local.properties, else $ANDROID_HOME / $ANDROID_SDK_ROOT.
+# Variables here (dates, AVD, FINISH, ...) are read by the scripts that source it.
+# shellcheck disable=SC2034
+# The device-test library of scripts/emulator-scenarios.sh, qa-emulator.sh,
+# soak-emulator.sh, monkey-gate.sh and scripts/emu-scenarios/{surfaces,upgrade}.sh
+# (also usable from an interactive shell: `source scripts/emu-scenarios/lib.sh`).
+# The app's ids, file names, notification ids, actions and strings come from its
+# sources through contract.py (APP_ID, COMP, STR, RX, DEST, EVENT_LOG_FILE, ...).
+# Device functions need SERIAL; logging and evidence need OUT (out_init).
 
-: "${APP_ID:=app.milestone}"
-: "${SERIAL:=emulator-5580}"
-: "${HELP:=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-: "${OUT:=$HOME/.cache/emu-scenarios}"
-: "${TZ0:=Europe/Berlin}"
+HELP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../lib/env.sh
+source "$HELP/../lib/env.sh"
+_contract="$(python3 "$HELP/contract.py")" || { echo "contract.py: the app contract could not be read" >&2; exit 1; }
+eval "$_contract"
+unset _contract
+ADB="$ANDROID_HOME/platform-tools/adb"
+EMULATOR="$ANDROID_HOME/emulator/emulator"
+APP_FILES="/data/data/$APP_ID/files"
 
+# The scripted week (Europe/Berlin): seed_basic logs on the Sunday, and its
+# first boot on the Monday starts the plan there (run Mon, rest Tue, lift Wed).
+TZ0="Europe/Berlin"
+SEED_DAY="2026-09-20"
+RUN_DAY="2026-09-21"
+REST_DAY="2026-09-22"
+LIFT_DAY="2026-09-23"
+# The AVD and console port the scripts boot unless told otherwise (a dedicated
+# port, so a run never talks to an emulator open on the default 5554).
+AVD="e34"
+PORT=5580
+KEEP_EMU=0
+# Scenario phase markers: mark() writes them to the device log (scan_logcat.py
+# attributes logcat lines by them) and to $OUT/.phase (current_phase).
+PHASE_TAG="EMUSCN"
+
+# ── Output ───────────────────────────────────────────────────────────────────
+# out_init DIR: OUT=DIR with its shots/, ui/, logs/ and an empty checks.tsv.
+out_init() {
+  OUT="$1"
+  mkdir -p "$OUT"/{shots,ui,logs}
+  : >"$OUT/checks.tsv"
+}
 log() { printf '[%s] ==> %s\n' "$(date +%T)" "$*" | tee -a "$OUT/run.log" >&2; }
 die() { log "ERROR: $*"; exit 1; }
-
-SDK="$(sed -n 's/^sdk\.dir=//p' "$HELP/../../android/local.properties" 2>/dev/null | tail -1)"
-SDK="${SDK:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}}"
-[[ -n "$SDK" ]] || die "no Android SDK: set sdk.dir in android/local.properties or \$ANDROID_HOME"
-: "${ADB:=$SDK/platform-tools/adb}"
-EMULATOR="$SDK/emulator/emulator"
-
-adb_() { "$ADB" -s "$SERIAL" "$@"; }
-sh_() { adb_ shell "$@" 2>/dev/null | tr -d '\r'; }
-
-# check PASS|FAIL|INFO SCENARIO NAME DETAIL — one TSV row, echoed to the log.
+# check PASS|FAIL|INFO SCENARIO NAME DETAIL: one checks.tsv row, echoed to the log.
 check() {
   local d="${4//$'\t'/ }"; d="${d//$'\n'/ ⏎ }"
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$d" >>"$OUT/checks.tsv"
   log "[$1] $2 · $3: $d"
 }
-# expect SCENARIO NAME DETAIL CMD... — PASS when CMD succeeds, else FAIL.
+# expect SCENARIO NAME DETAIL CMD...: PASS when CMD succeeds, else FAIL.
 expect() {
   local sc="$1" nm="$2" de="$3"; shift 3
   if "$@"; then check PASS "$sc" "$nm" "$de"; else check FAIL "$sc" "$nm" "$de"; fi
 }
+measure() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$OUT/measurements.tsv"; log "measure $1 · $2 = $3"; }
+# config KEY VALUE: one "key: value" line of config.txt (the report's header).
+config() { printf '%-10s %s\n' "$1:" "$2" >>"$OUT/config.txt"; }
+config_run() {
+  config date "$(date -Is)"
+  config serial "$SERIAL"
+  config git "$(git -C "$REPO_ROOT" rev-parse --short HEAD)$(git -C "$REPO_ROOT" diff --quiet || echo ' (dirty tree)')"
+}
+mark() {
+  echo "$1" >"$OUT/.phase"
+  adb_ shell log -t "$PHASE_TAG" "phase $1" || log "phase marker '$1' not written to the device log"
+  log "── $1"
+}
+current_phase() { cat "$OUT/.phase"; }
 
+# wait_for SECONDS CMD...: run CMD until it succeeds, at most SECONDS (1 s apart).
+wait_for() {
+  local end=$((SECONDS + $1)); shift
+  until "$@"; do
+    ((SECONDS < end)) || return 1
+    sleep 1
+  done
+}
+# settled CMD...: CMD's output once two runs 1 s apart agree (at most 10 runs).
+settled() {
+  local a b i
+  a="$("$@")"
+  for i in 1 2 3 4 5 6 7 8 9; do
+    sleep 1; b="$("$@")"
+    [[ "$a" == "$b" ]] && break
+    a="$b"
+  done
+  printf '%s\n' "$a"
+}
+# python3 node.py over stdin: q MODE [TEXT [ANCHOR]] (node.py's modes).
+q() { python3 "$HELP/node.py" "$@"; }
+# A string resource with its %N$s / %N$d arguments filled: fmt KEY ARG...
+fmt() {
+  local s="${STR[$1]}" i=1 a; shift
+  for a in "$@"; do s="${s//"%$i\$s"/$a}"; s="${s//"%$i\$d"/$a}"; i=$((i + 1)); done
+  printf '%s' "${s//%%/%}"
+}
+
+# ── Device ───────────────────────────────────────────────────────────────────
+adb_() { "$ADB" -s "$SERIAL" "$@"; }
+sh_() { adb_ shell "$@" 2>/dev/null | tr -d '\r'; }
+dev_now() { sh_ date +%s; }
+# "W H" of the display in pixels.
+screen_size() { sh_ wm size | sed -n 's/.*: *\([0-9]*\)x\([0-9]*\).*/\1 \2/p' | tail -1; }
+# epoch_day DAY: days since 1970-01-01 of the date DAY.
+epoch_day() { echo $(( $(TZ=UTC date -d "$1" +%s) / 86400 )); }
+
+# ── UI tree ──────────────────────────────────────────────────────────────────
+# The app window's UI tree (uiautomator dump, which first waits for the UI to go
+# idle; a dump that fails is retried 1 s later, up to 4 times).
 dump_ui() {
   local x i
   for i in 1 2 3 4; do
-    x="$(adb_ exec-out uiautomator dump /dev/tty 2>/dev/null || true)"
+    x="$(adb_ exec-out uiautomator dump /dev/tty 2>/dev/null)"
     [[ "$x" == *"</hierarchy>"* ]] && { printf '%s' "${x%%UI hierchary dumped*}"; return 0; }
     sleep 1
   done
   return 1
 }
-find_node() { dump_ui | python3 "$HELP/node.py" "$@"; }
-ui_texts() { dump_ui | python3 "$HELP/node.py" texts; }
+find_node() { dump_ui | q "$@"; }
+ui_texts() { dump_ui | q texts; }
 has_text() { find_node "$@" >/dev/null 2>&1; } # has_text MODE TEXT
+lacks_text() { ! has_text "$@"; }
 # wait_text MODE TEXT [seconds]. A system "<app> isn't responding" dialog (System UI
 # or the launcher on a loaded host, the first minutes after boot) covers the window
 # being waited for: it is answered with Wait.
 wait_text() {
-  local i x w
-  for i in $(seq 1 "${3:-15}"); do
+  local end=$((SECONDS + ${3:-15})) x w
+  while :; do
     x="$(dump_ui)"
-    python3 "$HELP/node.py" "$1" "$2" <<<"$x" >/dev/null 2>&1 && return 0
-    if python3 "$HELP/node.py" re ".+ isn't responding$" <<<"$x" >/dev/null 2>&1 &&
-      w="$(python3 "$HELP/node.py" eq Wait <<<"$x")"; then
-      log "system ANR dialog answered with Wait"; tap_xy ${w%% *} $(cut -d' ' -f2 <<<"$w")
+    q "$1" "$2" <<<"$x" >/dev/null 2>&1 && return 0
+    if q re ".+ isn't responding$" <<<"$x" >/dev/null 2>&1 && w="$(q eq Wait <<<"$x")"; then
+      log "system ANR dialog answered with Wait"; tap_xy "${w%% *}" "$(cut -d' ' -f2 <<<"$w")"
     fi
-    sleep 1
+    ((SECONDS < end)) || return 1
   done
-  return 1
 }
+# wait_gone MODE TEXT [seconds]
+wait_gone() { wait_for "${3:-10}" lacks_text "$1" "$2"; }
 tap_xy() { adb_ shell input tap "$1" "$2"; }
-# tap_node MODE TEXT [retries]
+# tap_node MODE TEXT [seconds]: tap the node once it is on screen (default 4 s).
 tap_node() {
-  local r p i
-  for i in $(seq 1 "${3:-4}"); do
-    if r="$(find_node "$1" "$2")"; then
-      read -r -a p <<<"$r"
-      tap_xy "${p[0]}" "${p[1]}"
-      return 0
-    fi
-    sleep 1
+  local r p end=$((SECONDS + ${3:-4}))
+  until r="$(find_node "$1" "$2")"; do
+    ((SECONDS < end)) || { log "no on-screen node ($1) '$2'"; return 1; }
   done
-  log "no on-screen node ($1) '$2'"
-  return 1
-}
-# Bottom-nav item by label: tap the icon above the label (the label's lower edge
-# can sit under the system navigation bar's touch region).
-tap_nav() {
-  local r p
-  r="$(find_node eq "$1")" || { log "no nav item '$1'"; return 1; }
   read -r -a p <<<"$r"
-  tap_xy "${p[0]}" $(( p[3] - 60 > p[1] - 40 ? p[1] - 40 : p[3] - 60 ))
+  tap_xy "${p[0]}" "${p[1]}"
 }
-# Scroll down until MODE TEXT is on screen (max N swipes); then tap it when $4 = tap.
-scroll_to() {
-  local i
-  for i in $(seq 1 "${3:-8}"); do
-    has_text "$1" "$2" && return 0
-    adb_ shell input swipe 540 1450 540 650 350
-    sleep 1
-  done
-  has_text "$1" "$2"
-}
-scroll_top() { local i; for i in 1 2 3 4 5 6; do adb_ shell input swipe 540 500 540 1500 150; done; sleep 1; }
-shot() { adb_ exec-out screencap -p >"$OUT/shots/$1.png" 2>/dev/null || true; }
-# Save the UI tree + a screenshot under NAME (evidence for a check).
-evidence() { shot "$1"; dump_ui >"$OUT/ui/$1.xml" 2>/dev/null || true; }
-focus() { sh_ dumpsys window | sed -n 's/.*mCurrentFocus=Window{[^ ]* [^ ]* \([^ }]*\)}.*/\1/p' | head -1; }
-launch() { adb_ shell am start -n "$APP_ID/.MainActivity" >/dev/null 2>&1 || true; }
-app_pid() { sh_ pidof "$APP_ID" || true; }
-# The app process is alive and its activity holds window focus.
-app_up() { [[ -n "$(app_pid)" && "$(focus)" == "$APP_ID"* ]]; }
-# $OUT/.phase holds the current phase (the soak sampler reads it).
-mark() { echo "$1" >"$OUT/.phase"; adb_ shell log -t EMUSCN "phase $1" >/dev/null 2>&1 || true; log "── $1"; }
-grant_perms() {
-  local p
-  for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION POST_NOTIFICATIONS; do
-    adb_ shell pm grant "$APP_ID" "android.permission.$p" >/dev/null 2>&1 || true
-  done
-}
-wake() { adb_ shell input keyevent 224; sleep 1; adb_ shell wm dismiss-keyguard >/dev/null 2>&1 || true; sleep 1; }
-svc_fg() { sh_ dumpsys activity services "$APP_ID/.RunTrackingService" | grep -q 'isForeground=true'; }
-# App files through the root shell (works for the non-debuggable release APK too;
-# the script runs `adb root` first).
-APP_FILES="/data/data/$APP_ID/files"
-pull_log() { adb_ exec-out cat "$APP_FILES/event-log.ndjson" >"$1" 2>/dev/null || true; }
-push_log() {
-  local uid
-  adb_ push "$1" /data/local/tmp/emu-event-log.ndjson >/dev/null || return 1
-  uid="$(sh_ stat -c %u "/data/data/$APP_ID")"
-  adb_ shell "mkdir -p $APP_FILES && cp /data/local/tmp/emu-event-log.ndjson $APP_FILES/event-log.ndjson \
-    && chown -R $uid:$uid $APP_FILES && chmod 600 $APP_FILES/event-log.ndjson && restorecon -R $APP_FILES \
-    && rm /data/local/tmp/emu-event-log.ndjson"
-}
-# Fixes in the crash-durable run sidecar (0 when absent).
-sidecar_points() { adb_ exec-out cat "$APP_FILES/active-run.ndjson" 2>/dev/null | grep -c '"lat"' || true; }
-pull_sidecar() { adb_ exec-out cat "$APP_FILES/active-run.ndjson" >"$1" 2>/dev/null || true; }
 # Tap near the TOP edge of a node: a bottom-anchored button can sit partly under
 # the navigation bar's touch region.
 tap_top() {
@@ -139,24 +156,95 @@ tap_top() {
   read -r -a p <<<"$r"
   tap_xy "${p[0]}" $(( p[3] + 20 ))
 }
+# Bottom-nav item by label: tap the icon above the label (the label's lower edge
+# can sit under the system navigation bar's touch region).
+tap_nav() {
+  local r p
+  r="$(find_node eq "$1")" || { log "no nav item '$1'"; return 1; }
+  read -r -a p <<<"$r"
+  tap_xy "${p[0]}" $(( p[3] - 60 > p[1] - 40 ? p[1] - 40 : p[3] - 60 ))
+  wait_for 5 selected "$1"
+}
+# selected TEXT: the node labelled TEXT (or its parent, grandparent, a child) is
+# checked or selected.
+selected() { dump_ui | q on "$1" >/dev/null; }
+_discard_or_closed() {
+  local x; x="$(dump_ui)"
+  q eq "${STR[log_discard_confirm]}" <<<"$x" >/dev/null || ! q eq "${STR[log_field_exercise]}" <<<"$x" >/dev/null
+}
 # The label (last field) of the first node matching MODE TEXT, or empty.
 node_label() { find_node "$1" "$2" 2>/dev/null | cut -d' ' -f7-; }
-# Last "Displayed app.milestone/..." launch time in ms from the logcat buffer.
-displayed_ms() {
-  sh_ logcat -d -s ActivityTaskManager:I | grep "Displayed $APP_ID/" | tail -1 \
-    | python3 -c "import re,sys;m=re.search(r'\+(?:(\d+)s)?(\d+)ms',sys.stdin.read());print(int(m.group(1) or 0)*1000+int(m.group(2)) if m else '')"
+# swipe_content: one upward swipe inside the largest vertically scrollable node
+# (else the whole screen), from 3/4 to 1/4 of its height: reveals what is below.
+swipe_content() {
+  local b
+  b="$(find_node scroll)" || b="0 0 $(screen_size)"
+  read -r -a b <<<"$b"
+  adb_ shell input swipe $(( (b[0] + b[2]) / 2 )) $(( b[1] + (b[3] - b[1]) * 3 / 4 )) \
+    $(( (b[0] + b[2]) / 2 )) $(( b[1] + (b[3] - b[1]) / 4 )) 350
 }
-# Echo "pss java native" KB from dumpsys meminfo.
-meminfo_kb() {
-  local m
-  m="$(sh_ dumpsys meminfo "$APP_ID")"
-  printf '%s %s %s\n' \
-    "$(sed -n 's/^ *TOTAL PSS: *\([0-9]*\).*/\1/p' <<<"$m" | head -1)" \
-    "$(sed -n 's/^ *Java Heap: *\([0-9]*\).*/\1/p' <<<"$m" | head -1)" \
-    "$(sed -n 's/^ *Native Heap: *\([0-9]*\).*/\1/p' <<<"$m" | head -1)"
+# scroll_to MODE TEXT [swipes]: swipe until MODE TEXT is on screen (default 8 swipes).
+scroll_to() {
+  local i
+  for ((i = 0; i < ${3:-8}; i++)); do
+    has_text "$1" "$2" && return 0
+    swipe_content
+  done
+  has_text "$1" "$2"
 }
-# Count of event-log lines on device.
-log_lines() { adb_ exec-out cat "$APP_FILES/event-log.ndjson" 2>/dev/null | grep -c . || true; }
+shot() { adb_ exec-out screencap -p >"$OUT/shots/$1.png" || log "screencap $1 failed"; }
+evidence() { shot "$1"; dump_ui >"$OUT/ui/$1.xml" || log "UI dump $1 failed"; }
+
+# ── App ──────────────────────────────────────────────────────────────────────
+focus() { sh_ dumpsys window | sed -n 's/.*mCurrentFocus=Window{[^ ]* [^ ]* \([^ }]*\)}.*/\1/p' | head -1; }
+_am_start() {
+  local r; r="$(sh_ am start "$@")"
+  [[ "$r" != *Error* ]] || { log "am start $*: $r"; return 1; }
+}
+launch() { _am_start -n "${COMP[MainActivity]}"; }
+# open_dest DEST: the app's open intent (DEST: a DEST[...] wire value or any other).
+open_dest() { _am_start -a "$ACTION_OPEN" -n "${COMP[MainActivity]}" --es "$EXTRA_DEST" "$1"; }
+app_pid() { sh_ pidof "$APP_ID"; return 0; }
+app_up() { [[ -n "$(app_pid)" && "$(focus)" == "$APP_ID"* ]]; }
+app_gone() { [[ -z "$(app_pid)" ]]; }
+grant_perms() {
+  local p
+  for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION POST_NOTIFICATIONS; do
+    adb_ shell pm grant "$APP_ID" "android.permission.$p" || log "pm grant $p failed"
+  done
+}
+# Predicates over device output use `grep >/dev/null`, not `grep -q`: an early
+# exit would break the pipe and pipefail would turn a match into a failure.
+svc_fg() { sh_ dumpsys activity services "${COMP[RunTrackingService]}" | grep 'isForeground=true' >/dev/null; }
+# App files through the root shell (works for the non-debuggable release APK too;
+# boot_emulator runs `adb root`).
+# app_file NAME: the app's file NAME on stdout; 1 when it is absent.
+app_file() { adb_ shell "[ -f $APP_FILES/$1 ]" && adb_ exec-out cat "$APP_FILES/$1"; }
+pull_log() { app_file "$EVENT_LOG_FILE" >"$1" || log "no $EVENT_LOG_FILE on the device"; }
+# push_log FILE: FILE as the app's event log (owner, mode and SELinux label set).
+push_log() {
+  local uid r
+  r="$(adb_ push "$1" /data/local/tmp/emu-event-log.ndjson 2>&1)" || { log "push_log: $r"; return 1; }
+  uid="$(sh_ stat -c %u "/data/data/$APP_ID")"
+  r="$(adb_ shell "mkdir -p $APP_FILES && cp /data/local/tmp/emu-event-log.ndjson $APP_FILES/$EVENT_LOG_FILE \
+    && chown -R $uid:$uid $APP_FILES && chmod 600 $APP_FILES/$EVENT_LOG_FILE && restorecon -R $APP_FILES \
+    && rm /data/local/tmp/emu-event-log.ndjson" 2>&1)" || { log "push_log: $r"; return 1; }
+}
+log_lines() { app_file "$EVENT_LOG_FILE" | grep -c .; return 0; }
+sidecar_points() { app_file "$ACTIVE_RUN_FILE" | grep -c '"lat"'; return 0; }
+pull_sidecar() { app_file "$ACTIVE_RUN_FILE" >"$1" || log "no $ACTIVE_RUN_FILE on the device"; }
+snapshot() { app_file "$SNAPSHOT_FILE"; }
+# jfield PATH: a dotted path ("items.0.name") of the JSON on stdin; empty when absent.
+jfield() {
+  python3 -c "import json,sys
+v=json.load(sys.stdin)
+for k in sys.argv[1].split('.'): v=v[int(k)] if isinstance(v,list) else v[k]
+print(v)" "$1" 2>/dev/null
+}
+snap_field() { snapshot | jfield "$1"; }
+# The app wrote its widget snapshot for DAY, not marked stale: it replayed its
+# log and rendered that day.
+snapshot_for() { [[ "$(snap_field epochDay)" == "$(epoch_day "$1")" && "$(snap_field stale)" == False ]]; }
 EV() { python3 "$HELP/events.py" "$@"; }
 # install_apk APK [pm install flags, e.g. -r]: `adb install`, else a pushed
 # `pm install` (on some API 37 images `adb install` fails with "Broken pipe").
@@ -171,255 +259,48 @@ install_apk() {
   echo "$r"
   [[ "$r" == Success ]]
 }
-# logcat_checks: stop the logcat capture ($LOGCAT_PID), scan $OUT/logcat.txt
-# (scan_logcat.py) and add its crash / ANR / OOM / FGS / StrictMode rows to
-# checks.tsv. A scan that fails is a FAIL row, never a silent gap.
-logcat_checks() {
-  kill "$LOGCAT_PID" 2>/dev/null; wait "$LOGCAT_PID" 2>/dev/null
-  python3 "$HELP/scan_logcat.py" "$OUT/logcat.txt" "$OUT/logcat-scan.json" >/dev/null ||
-    { check FAIL logcat "logcat scan" "scan_logcat.py failed on $OUT/logcat.txt"; return 0; }
-  python3 - "$OUT/logcat-scan.json" "$OUT/checks.tsv" <<'PY'
-import json, sys
-s = json.load(open(sys.argv[1]))
-out = open(sys.argv[2], "a")
-for k, label in (("fatal", "Java FATAL EXCEPTION (not induced)"), ("native", "native crash"), ("anr", "ANR"),
-                 ("oom", "OutOfMemoryError"), ("fgs", "foreground-service failure")):
-    out.write(f"{'PASS' if s[k] == 0 else 'FAIL'}\tlogcat\t{label}\t{s[k]} occurrence(s) {json.dumps(s['by_phase'].get(k, {}))}\n")
-out.write(f"{'PASS' if s['strictmode'] == 0 else 'INFO'}\tlogcat\tStrictMode\t{s['strictmode']} line(s)\n")
-if s["induced"]:
-    out.write(f"INFO\tlogcat\tinduced crashes (am crash)\t{s['induced']}\n")
-PY
-}
+# Launch time (ms) of the last "Displayed <app>/..." line in the logcat buffer.
+displayed_ms() { sh_ logcat -d -s ActivityTaskManager:I | grep "Displayed $APP_ID/" | python3 "$HELP/parse.py" displayed; }
+# meminfo FIELD...: parse.py meminfo's FIELDs (KB) of the app's `dumpsys meminfo`.
+meminfo() { sh_ dumpsys meminfo "$APP_ID" | python3 "$HELP/parse.py" meminfo "$@"; }
+# duration TEXT: seconds of the first duration in TEXT, -1 when none (parse.py).
+duration() { python3 "$HELP/parse.py" duration "$1"; }
 
-# ── Set editor ───────────────────────────────────────────────────────────────
-open_set_editor() {
-  tap_node eq Log || return 1; sleep 2
-  tap_node eq "Log set" || return 1
-  wait_text eq "Exercise" 8 || return 1
-  # No exercise chosen yet: the search field shows its placeholder.
-  if has_text eq "Search exercises"; then tap_node eq "Back Squat" || return 1; sleep 2; fi
-  return 0
+# ── App state ────────────────────────────────────────────────────────────────
+# wipe_app: no app data, the device baseline, permissions granted.
+wipe_app() {
+  stop_feeder
+  adb_ shell am force-stop "$APP_ID"
+  adb_ shell pm clear "$APP_ID" >/dev/null
+  baseline_device
+  grant_perms
 }
-# Tap MODE TEXT inside the editor, scrolling its content up to reveal it (large
-# fonts / display sizes push the weight and reps rows below the pinned footer).
-tap_scroll() {
-  local i b
-  for i in 1 2 3 4 5 6; do
-    tap_node "$1" "$2" 1 2>/dev/null && return 0
-    b="$(find_node scroll)" || b="0 450 1080 1050"
-    read -r -a b <<<"$b"
-    adb_ shell input swipe 540 $(( b[3] - 40 )) 540 $(( b[1] + (b[3] - b[1]) / 4 )) 400; sleep 1
-  done
-  return 1
+# seed_app FILE: start the app once (its data directory), stop it and put FILE in
+# place as its event log.
+seed_app() {
+  if ! { launch && wait_for 20 app_up; }; then log "first launch before the seed: app not up ($(focus))"; fi
+  adb_ shell am force-stop "$APP_ID"
+  push_log "$1"
 }
-close_editor() {
-  if has_text eq "Done for now"; then tap_node eq "Done for now"
-  else tap_node eq Close; fi
-  sleep 2
-  has_text eq Discard && { tap_node eq Discard; sleep 1; }
-  # An editor opened from the Log sheet returns to it: dismiss that too.
-  has_text eq "Exercise, weight, reps" && { adb_ shell input keyevent 4; sleep 2; }
-  return 0
+# boot_day DAY: relaunch the app with the clock on DAY; succeeds once it shows
+# Today and wrote its snapshot for DAY.
+boot_day() {
+  adb_ shell am force-stop "$APP_ID"
+  pin_clock "$1"
+  launch && wait_text eq "${STR[main_dest_today]}" 40 && wait_for 15 snapshot_for "$1"
 }
-
-# ── System UI: home screen, Quick Settings tile, Today widget ────────────────
-home() { adb_ shell input keyevent 3; sleep 2; }
-# Every window (status bar, shade, launcher, app) into ui/NAME.xml.
-wdump() {
-  local i
-  for i in 1 2 3; do
-    adb_ shell uiautomator dump --windows /sdcard/emu-wdump.xml >/dev/null 2>&1 &&
-      adb_ exec-out cat /sdcard/emu-wdump.xml >"$OUT/ui/$1.xml" 2>/dev/null &&
-      grep -q '</displays>' "$OUT/ui/$1.xml" && return 0
-    sleep 1
-  done
-  return 1
+# boot_week DAY: boot_day RUN_DAY (a first boot starts the plan that day), then
+# boot_day DAY.
+boot_week() {
+  boot_day "$RUN_DAY" || return 1
+  [[ "$1" == "$RUN_DAY" ]] || boot_day "$1"
 }
-wfind() { python3 "$HELP/node.py" "$2" "$3" <"$OUT/ui/$1.xml"; } # wfind DUMP MODE TEXT
-snapshot() { adb_ exec-out cat "$APP_FILES/widget-today.json" 2>/dev/null; }
-# The reminder alarm's next time ("YYYY-MM-DD HH:MM:SS", device local); empty
-# when none is set.
-rem_alarm() {
-  sh_ dumpsys alarm | grep -A3 'walarm\*:app.milestone.action.SESSION_REMINDER' |
-    sed -n 's/.*origWhen=\([0-9-]* [0-9:]*\).*/\1/p' | head -1
-}
-TILE="$APP_ID/.QuickTileService"
-# Open Quick Settings and dump it as ui/NAME.xml; echo the tile's label and leave
-# the panel open (collapse it with `cmd statusbar collapse`). The QS tile node
-# carries the label as its text, or (API 37's icon-only tile) as its
-# content-desc, "<label>, <subtitle>" when the tile has a subtitle (the widget's
-# title for today); the subtitle is written to ui/NAME.subtitle. The panel binds
-# the tile when it opens (onStartListening), so the label is read again 2 s after
-# it first shows to get the settled state.
-TILE_RE='^(Log|Log set|Start run|Run · recording)(, .+)?$'
-tile_label() {
-  local i l
-  adb_ shell cmd statusbar expand-settings; sleep 3
-  for i in 1 2 3; do
-    wdump "$1" || continue
-    l="$(wfind "$1" re "$TILE_RE" | cut -d' ' -f7-)"
-    if [[ -n "$l" ]]; then
-      sleep 2
-      wdump "$1" && l="$(wfind "$1" re "$TILE_RE" | cut -d' ' -f7-)"
-      if [[ -n "$l" ]]; then
-        python3 "$HELP/node.py" texts <"$OUT/ui/$1.xml" | sed -n 's/^[a-z-]*=//p' | grep -E "$TILE_RE" |
-          grep -m1 ', ' | sed 's/^[^,]*, //' >"$OUT/ui/$1.subtitle"
-        echo "${l%%, *}"; return 0
-      fi
-    fi
-    # The added tile lands on the last QS page.
-    adb_ shell input swipe 900 700 150 700 300; sleep 2
-  done
-  return 1
-}
-# tile_node DUMP LABEL: "cx cy ..." of the tile labelled LABEL (with or without
-# its subtitle) in ui/DUMP.xml.
-tile_node() { wfind "$1" re "^$(printf '%s' "$2" | sed 's/[][\.*^$()+?{}|]/\\&/g')(, .+)?\$"; }
-# add_tile: `cmd statusbar add-tile`, then wait (max ~40 s) until the tile shows
-# on the QS panel (it takes a while to bind on API 34).
-add_tile() {
-  local i
-  sh_ cmd statusbar add-tile "$TILE" >/dev/null
-  for i in 1 2 3 4 5 6; do
-    sleep 3
-    tile_label tile-added >/dev/null && { adb_ shell cmd statusbar collapse; return 0; }
-    adb_ shell cmd statusbar collapse
-  done
-  log "tile $TILE not on the QS panel after add-tile"
-  return 1
-}
-LAUNCHER="com.google.android.apps.nexuslauncher"
-# drag X1 Y1 X2 Y2: a long-press drag as raw motion events (the launcher's
-# widget-picker preview starts a drag only after a held touch; `input
-# draganddrop` does not hold long enough on API 34).
-drag() {
-  local i
-  adb_ shell input motionevent DOWN "$1" "$2"; sleep 2
-  for i in 1 2 3 4 5 6 7 8; do
-    adb_ shell input motionevent MOVE $(( $1 + ($3 - $1) * i / 8 )) $(( $2 + ($4 - $2) * i / 8 ))
-  done
-  sleep 1
-  adb_ shell input motionevent UP "$3" "$4"
-}
-widget_bound() { sh_ dumpsys appwidget | grep -q "cmp:ComponentInfo{$APP_ID/$APP_ID.widget.TodayWidgetReceiver}"; }
-# Place the Today widget through the launcher's picker on a reset home screen
-# (launcher data cleared, so a long-press lands on empty grid): long-press home →
-# Widgets → search "lollop" → Today → tap the preview → "Add Today widget"
-# (API 35+), else (API 34: no Add button) drag the preview image
-# (`widget_preview_container`) onto the home grid.
-place_widget() {
-  local r p preview='^[0-9]+ wide by [0-9]+ high$'
-  adb_ shell pm clear "$LAUNCHER" >/dev/null 2>&1; sleep 3
-  home; home; sleep 3
-  evidence widget-home-clean
-  adb_ shell input swipe 540 1300 540 1300 1500; sleep 2
-  tap_node eq Widgets || return 1; sleep 3
-  if tap_node eq Search 2; then sleep 1; adb_ shell input text lollop; sleep 3; fi
-  scroll_to eq lollop 6 || return 1
-  has_text re "$preview" || { tap_node eq lollop; sleep 2; }
-  has_text re "$preview" || { tap_node eq Today 2; sleep 2; }
-  evidence widget-picker
-  has_text eq "Add Today widget" || { tap_node re "$preview" 2; sleep 2; }
-  evidence widget-picker-preview
-  if has_text eq "Add Today widget"; then
-    tap_node eq "Add Today widget"; sleep 4
-  else
-    r="$(find_node rid widget_preview_container)" || r="$(find_node rid widget_preview)" || return 1
-    read -r -a p <<<"$r"
-    drag "${p[0]}" "${p[1]}" 540 800; sleep 4
-  fi
-  # The launcher leaves the new widget in resize mode (no idle UI state for
-  # uiautomator until it is dismissed).
-  home
-  evidence widget-placed
-  widget_bound && wait_text eq "Open Today in lollop" 15
-}
-# widget_texts NAME: the widget's labels (home screen dump) one per line.
-widget_texts() {
-  home; sleep 2
-  evidence "$1"
-  python3 "$HELP/node.py" texts <"$OUT/ui/$1.xml" | sed -n '/content-desc=Open Today in lollop/,$p' | head -12
-}
-# widget_dp NAME: the size the launcher gave the widget, "W H" in whole dp, from
-# its root node ("Open Today in lollop") in the dump saved under NAME.
-widget_dp() {
-  local d b
-  d="$(sh_ wm density | sed -n 's/.*: //p' | tail -1)"
-  b="$(python3 "$HELP/node.py" eq "Open Today in lollop" <"$OUT/ui/$1.xml")" || return 1
-  awk -v d="$d" '{ printf "%d %d\n", ($5 - $3) * 160 / d, ($6 - $4) * 160 / d }' <<<"$b"
-}
-
-# ── Emulator lifecycle ───────────────────────────────────────────────────────
-EMU_PID=""
-KEEP_EMU="${KEEP_EMU:-0}"
-# boot_emulator AVD LOG [MEMORY_MB]: use $SERIAL when it is already online, else
-# boot AVD headless on the serial's port (output to LOG). Then wait for the boot
-# and restart adbd as root (ignored on images without root).
-boot_emulator() {
-  local avd="$1" logf="$2" mem="${3:-}" tries=0
-  if adb_ get-state >/dev/null 2>&1; then
-    log "$SERIAL already online — using it"
-  else
-    [[ -x "$EMULATOR" ]] || die "emulator not found at $EMULATOR"
-    "$EMULATOR" -list-avds | grep -qx "$avd" || die "AVD '$avd' not found (create it with avdmanager)"
-    [[ -e /dev/kvm ]] || log "WARNING: /dev/kvm missing — the emulator will be very slow"
-    log "booting AVD $avd on port ${SERIAL#emulator-}"
-    # The emulator finds the AVD's system image through ANDROID_SDK_ROOT, not its
-    # own install path; a stale environment value would point it at another SDK.
-    ANDROID_SDK_ROOT="$SDK" ANDROID_HOME="$SDK" "$EMULATOR" -avd "$avd" -port "${SERIAL#emulator-}" \
-      -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -read-only \
-      ${mem:+-memory "$mem"} >"$logf" 2>&1 &
-    EMU_PID=$!
-  fi
-  until [[ "$(sh_ getprop sys.boot_completed)" == "1" ]]; do
-    [[ -z "$EMU_PID" ]] || kill -0 "$EMU_PID" 2>/dev/null || die "emulator exited during boot (see $logf)"
-    tries=$((tries + 1)); [[ $tries -lt 150 ]] || die "emulator boot timed out"
-    sleep 2
-  done
-  adb_ root >/dev/null 2>&1 || true
-  sleep 2; adb_ wait-for-device
-  until [[ "$(sh_ getprop sys.boot_completed)" == "1" ]]; do sleep 2; done
-}
-# Stop the emulator boot_emulator started, unless KEEP_EMU=1. One that was
-# already running is left alone.
-stop_emulator() {
-  [[ -n "$EMU_PID" && "$KEEP_EMU" -ne 1 ]] || return 0
-  log "stopping emulator $SERIAL"
-  adb_ emu kill >/dev/null 2>&1 || true
-  # The console kill is not implemented on every emulator build; then signal the
-  # process boot_emulator started, never anything else.
-  local i
-  for i in $(seq 1 15); do
-    kill -0 "$EMU_PID" 2>/dev/null || break
-    sleep 1
-  done
-  kill "$EMU_PID" 2>/dev/null || true
-  wait "$EMU_PID" 2>/dev/null || true
-}
-
-# ── Device state ─────────────────────────────────────────────────────────────
-# pin_clock DAY [HH:MM] [TZ]: the device clock and zone (default 08:00, $TZ0).
-pin_clock() {
-  local tz="${3:-$TZ0}"
-  sh_ cmd alarm set-timezone "$tz" >/dev/null
-  sh_ cmd alarm set-time "$(TZ="$tz" date -d "$1 ${2:-08:00}" +%s)000" >/dev/null
-}
-# The same device state before every scenario.
-baseline_device() {
-  adb_ shell settings put global auto_time 0
-  adb_ shell settings put global auto_time_zone 0
-  adb_ shell settings put system time_12_24 12
-  adb_ shell settings put system font_scale 1.0
-  adb_ shell settings put system screen_off_timeout 1800000
-  adb_ shell wm density reset >/dev/null
-  adb_ shell cmd uimode night no >/dev/null
-  adb_ shell settings put global low_power 0
-  adb_ shell dumpsys battery reset >/dev/null
-  sh_ cmd location set-location-enabled true >/dev/null
-  adb_ shell cmd statusbar collapse >/dev/null 2>&1 || true
-  sh_ cmd locale set-app-locales "$APP_ID" >/dev/null
-  wake
-  adb_ shell input keyevent 82 >/dev/null 2>&1 || true
+# fresh_app DAY SEED-FILE: wipe the app, seed it and boot_week DAY.
+fresh_app() {
+  wipe_app
+  pin_clock "$RUN_DAY"
+  seed_app "$2" || return 1
+  boot_week "$1"
 }
 # seed_basic DAY RUN_DAYS: a set-up lifter (12 weekly sets) with RUN_DAYS run days
 # (20 km a week when RUN_DAYS > 0), a Back Squat at DAY 09:00 and a 5 km run at
@@ -435,19 +316,532 @@ seed_basic() {
 EOF
 }
 
+# ── Set editor ───────────────────────────────────────────────────────────────
+open_set_editor() {
+  tap_node eq "${STR[main_log]}" || return 1
+  tap_node eq "${STR[main_log_set_title]}" || return 1
+  wait_text eq "${STR[log_field_exercise]}" 8 || return 1
+  # An editor with no exercise chosen has no weight row: choose Back Squat.
+  has_text pre "${STR[log_field_weight]}, " && return 0
+  tap_node eq "Back Squat" || return 1
+  wait_text pre "${STR[log_field_weight]}, " 5
+}
+# tap_scroll MODE TEXT: tap MODE TEXT inside the editor, scrolling its content to
+# reveal it (large fonts / display sizes push the weight and reps rows below the
+# pinned footer).
+tap_scroll() {
+  local i
+  for i in 1 2 3 4 5 6; do
+    tap_node "$1" "$2" 1 2>/dev/null && return 0
+    swipe_content
+  done
+  return 1
+}
+REPS5="${STR[log_field_reps]}, 5"
+LEFT2="$(fmt log_effort_cd 2)"
+# editor_fill: on the Back Squat editor, +2.5 kg, 5 reps, 2 reps left.
+editor_fill() {
+  tap_scroll eq "$(fmt ui_cd_adjust_add 2.5 kg)" || return 1
+  tap_scroll eq "$REPS5" || return 1
+  tap_scroll eq "$LEFT2"
+}
+# editor_has_values WEIGHT: the editor shows WEIGHT kg with editor_fill's reps
+# and reps left selected.
+editor_has_values() {
+  local x
+  x="$(dump_ui)" || return 1
+  q eq "${STR[log_field_weight]}, $1 kg" <<<"$x" >/dev/null && q on "$REPS5" <<<"$x" && q on "$LEFT2" <<<"$x"
+}
+close_editor() {
+  if has_text eq "${STR[log_set_done]}"; then tap_node eq "${STR[log_set_done]}"
+  else tap_node eq "${STR[main_close]}"; fi
+  dismiss_editor
+}
+# dismiss_editor: after a tap on the editor's Close or Done, confirm Discard when
+# asked; an editor opened from the Log sheet returns to it: dismiss that too.
+dismiss_editor() {
+  wait_for 5 _discard_or_closed
+  if has_text eq "${STR[log_discard_confirm]}"; then
+    tap_node eq "${STR[log_discard_confirm]}"; wait_gone eq "${STR[log_discard_confirm]}" 5
+  fi
+  if has_text eq "${STR[main_log_set_sub]}"; then
+    adb_ shell input keyevent 4; wait_gone eq "${STR[main_log_set_sub]}" 5
+  fi
+  return 0
+}
+set_count() { app_file "$EVENT_LOG_FILE" | EV count /dev/stdin LogSet; }
+sets_above() { [[ "$(set_count)" -gt "$1" ]]; }
+# The editor's primary: "Log set N" or "Log set N of M".
+LOG_SET_RX="${RX[log_primary_set_n]}|${RX[log_primary_set_n_of_n]}"
+# tap_log_set: tap the editor's primary near its top edge; succeeds once the
+# event log holds one more LogSet.
+tap_log_set() {
+  local n0; n0="$(set_count)"
+  tap_top re "$LOG_SET_RX" || return 1
+  wait_for 10 sets_above "$n0"
+}
+
+# ── Run tracker ──────────────────────────────────────────────────────────────
+# Log › Track run (GPS): the tracker's pre-start screen.
+open_tracker() {
+  tap_node eq "${STR[main_log]}" || return 1
+  tap_node eq "${STR[main_track_run_title]}" || return 1
+  wait_text eq "${STR[track_btn_start]}" 20
+}
+# open_tracker, then Start once the locate preview has its first fix.
+start_run() {
+  open_tracker || return 1
+  wait_text re "${RX[track_pill_fresh_lock]}|^${STR[track_cd_pill_fresh_lock]}\$" 20 || log "start_run: no GPS lock shown"
+  tap_node eq "${STR[track_btn_start]}" || return 1
+  wait_text eq "${STR[track_btn_stop]}" 20
+}
+# finish_run: Stop (bringing the tracker to the front first when needed) → the
+# Finish sheet → Save run. FINISH: the sheet's spoken summary ("3.21 kilometers ·
+# 23 minutes 41 seconds moving · … average"). Succeeds when the sheet is gone; a
+# Log sheet the tracker returns to is dismissed.
+FINISH=""
+finish_run() {
+  local x
+  FINISH=""
+  app_up || launch
+  if ! has_text eq "${STR[track_btn_save_run]}"; then
+    has_text eq "${STR[track_btn_stop]}" || tap_node pre "${STR[track_state_recording]}" 2
+    tap_node eq "${STR[track_btn_stop]}" 4 || return 1
+    wait_text eq "${STR[track_btn_save_run]}" 15 || return 1
+  fi
+  FINISH="$(node_label re "${RX[track_finish_summary]}")"
+  tap_node eq "${STR[track_btn_save_run]}" || return 1
+  wait_gone eq "${STR[track_btn_save_run]}" 10 || return 1
+  x="$(dump_ui)"
+  if q eq "${STR[main_log_set_sub]}" <<<"$x" >/dev/null; then
+    adb_ shell input keyevent 4; wait_gone eq "${STR[main_log_set_sub]}" 5
+  fi
+  return 0
+}
+
 # ── GPS feed ─────────────────────────────────────────────────────────────────
-# start_feeder NAME: feeder.py's 1 Hz route until stop_feeder (log $OUT/logs/feed-NAME.log).
+# start_feeder NAME [TIMELINE T0]: feeder.py (its ellipse, or TIMELINE from host
+# time T0) until stop_feeder; log FEED_LOG=$OUT/logs/feed-NAME.log. Returns once
+# the first fix is fed.
 FEEDER_PID=""
+FEED_LOG=""
 start_feeder() {
   stop_feeder
   rm -f "$OUT/feed.stop"
-  python3 "$HELP/feeder.py" "$ADB" "$SERIAL" "$OUT/logs/feed-$1.log" "$OUT/feed.stop" &
+  FEED_LOG="$OUT/logs/feed-$1.log"
+  python3 "$HELP/feeder.py" "$ADB" "$SERIAL" "$FEED_LOG" "$OUT/feed.stop" "${@:2}" &
   FEEDER_PID=$!
-  sleep 3
+  [[ $# -gt 1 ]] || wait_for 10 grep -qs $'\tok$' "$FEED_LOG" || log "feeder: no fix accepted (see $FEED_LOG)"
 }
 stop_feeder() {
   [[ -n "$FEEDER_PID" ]] || return 0
   touch "$OUT/feed.stop"
-  wait "$FEEDER_PID" 2>/dev/null || true
+  wait "$FEEDER_PID"
   FEEDER_PID=""
+}
+
+# ── System UI: home screen, notifications, Quick Settings tile, Today widget ─
+launcher() { sh_ cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1 | cut -d/ -f1; }
+launcher_up() { [[ "$(focus)" == "$(launcher)"* ]]; }
+# None of the app's activities is resumed, paused or between states: it is in
+# the background (stopped, its state saved) or has no activity.
+app_stopped() {
+  ! sh_ dumpsys activity activities | sed -n "/Hist .*ActivityRecord{[^}]* $APP_ID\//,/state=/p" |
+    grep -E 'state=(INITIALIZING|STARTED|RESUMED|PAUSING|PAUSED|STOPPING)' >/dev/null
+}
+# home: the launcher in front, the app in the background.
+home() {
+  adb_ shell input keyevent 3
+  wait_for 5 launcher_up || log "home: launcher not in front ($(focus))"
+  wait_for 10 app_stopped || log "home: the app's activity not stopped"
+}
+# wdump NAME: every window (status bar, shade, launcher, app) into ui/NAME.xml.
+wdump() {
+  local i
+  for i in 1 2 3; do
+    adb_ shell uiautomator dump --windows /sdcard/emu-wdump.xml >/dev/null 2>&1 &&
+      adb_ exec-out cat /sdcard/emu-wdump.xml >"$OUT/ui/$1.xml" &&
+      grep -q '</displays>' "$OUT/ui/$1.xml" && return 0
+  done
+  return 1
+}
+wfind() { q "$2" "$3" <"$OUT/ui/$1.xml"; } # wfind DUMP MODE TEXT
+# notif NAME [ID]: the app's posted notifications (notif.py; the one with ID, `null`
+# when it is not posted), saved as logs/NAME-notif.{txt,json} and printed.
+notif() {
+  sh_ dumpsys notification --noredact | tee "$OUT/logs/$1-notif.txt" |
+    python3 "$HELP/notif.py" "$APP_ID" "${2:-}" >"$OUT/logs/$1-notif.json"
+  cat "$OUT/logs/$1-notif.json"
+}
+# nfield NAME EXPR: EXPR (python, the notif() record bound to r) of logs/NAME-notif.json.
+nfield() { python3 -c "import json,sys;r=json.load(open(sys.argv[1]));print(eval(sys.argv[2]) if r else '')" "$OUT/logs/$1-notif.json" "$2" 2>/dev/null; }
+promoted() { nfield "$1" "'PROMOTED_ONGOING' in r['flags']"; }
+# ocr_find SHOT WORD: "cx cy" of the first word OCR'd as exactly WORD on
+# shots/SHOT.png (tesseract; any installed Latin-script language data).
+ocr_find() {
+  local lang
+  lang="$(tesseract --list-langs 2>/dev/null | grep -m1 -xE 'eng|afr|deu|fra')" || return 1
+  tesseract "$OUT/shots/$1.png" - --psm 11 -l "$lang" tsv 2>/dev/null |
+    awk -F'\t' -v w="$2" '$12 == w { print int($7 + $9 / 2), int($8 + $10 / 2); found = 1; exit } END { exit !found }'
+}
+# shade_open NAME: expand the notification shade and dump every window as
+# ui/NAME.xml once it is open.
+shade_open() {
+  adb_ shell cmd statusbar expand-notifications
+  wait_for 5 shade_expanded && wdump "$1"
+}
+shade_expanded() { [[ "$(focus)" == NotificationShade* ]]; }
+_shade_find() { wdump "$1" && wfind "$1" "$2" "$3" >/dev/null; }
+# tap_shade NAME MODE TEXT [ROW]: open the notification shade and tap a node in it
+# (the expand command is retried: it is sometimes dropped right after a dump).
+# ROW: when the node is missing, expand the collapsed notification whose title
+# starts with ROW first (below API 36 an ongoing notification sits collapsed
+# under others, actions hidden). Last resort: OCR the first word of TEXT on the
+# shade screenshot (shots/NAME.png) — on API 37 a counting-down chronometer in
+# the shade keeps the UI from going idle, and uiautomator then leaves the shade
+# window out of the dump.
+tap_shade() {
+  local r="" p e i w
+  for i in 1 2 3; do
+    shade_open "$1" || continue
+    r="$(wfind "$1" "$2" "$3")" && break
+    r=""
+    if [[ -n "${4:-}" ]] && e="$(wfind "$1" expand "$4")"; then
+      read -r -a p <<<"$e"; tap_xy "${p[0]}" "${p[1]}"
+      wait_for 5 _shade_find "$1" "$2" "$3" && r="$(wfind "$1" "$2" "$3")" && break
+      r=""
+    fi
+  done
+  if [[ -z "$r" ]]; then
+    shot "$1"
+    w="${3#^}"; w="${w%% *}"
+    r="$(ocr_find "$1" "$w")" && log "tap_shade: '$w' not in ui/$1.xml; located by OCR at $r on shots/$1.png"
+  fi
+  [[ -n "$r" ]] || { adb_ shell cmd statusbar collapse; return 1; }
+  read -r -a p <<<"$r"; tap_xy "${p[0]}" "${p[1]}"
+}
+# The status-bar chip text (SystemUI `ongoing_activity_chip_content`), dumped as ui/NAME.xml.
+chip() { wdump "$1" && wfind "$1" ridtext ongoing_activity_chip_content 2>/dev/null; }
+# sb_shot NAME: shots/NAME.png and its status bar (bounds from ui/NAME.xml) as
+# shots/NAME-statusbar.png.
+sb_shot() {
+  local b
+  shot "$1"
+  b="$(wfind "$1" rid status_bar 2>/dev/null | cut -d' ' -f3-6)" || b=""
+  [[ -n "$b" ]] || { log "sb_shot $1: no status_bar node in ui/$1.xml"; return 0; }
+  read -r -a b <<<"$b"
+  python3 -c "import sys;from PIL import Image;Image.open(sys.argv[1]).crop(tuple(map(int,sys.argv[3:7]))).save(sys.argv[2])" \
+    "$OUT/shots/$1.png" "$OUT/shots/$1-statusbar.png" "${b[@]}"
+}
+# The reminder alarm's next time ("YYYY-MM-DD HH:MM:SS", device local); empty
+# when none is set.
+rem_alarm() {
+  sh_ dumpsys alarm | grep -A3 "walarm\*:$ACTION_REMINDER" |
+    sed -n 's/.*origWhen=\([0-9-]* [0-9:]*\).*/\1/p' | head -1
+}
+alarm_set() { [[ -n "$(rem_alarm)" ]]; }
+# A tile label as Quick Settings shows it: the label, or (API 37's icon-only
+# tile, content-desc) "<label>, <subtitle>" when the tile has a subtitle.
+TILE_RE="^(${STR[tile_log]}|${STR[tile_log_set]}|${STR[tile_start_run]}|${STR[tile_run_recording]})(, .+)?\$"
+_tile_read() { wdump "$1" && wfind "$1" re "$TILE_RE" | cut -d' ' -f7-; }
+_tile_seen() { [[ -n "$(_tile_read "$1")" ]]; }
+# tile_label NAME: open Quick Settings and dump it as ui/NAME.xml; echo the
+# tile's label and leave the panel open (collapse it with `cmd statusbar
+# collapse`). The subtitle (the widget's title for today) is written to
+# ui/NAME.subtitle. The panel binds the tile when it opens (onStartListening),
+# so the label is read until two reads agree.
+tile_label() {
+  local i l w h
+  adb_ shell cmd statusbar expand-settings
+  read -r w h <<<"$(screen_size)"
+  for i in 1 2 3; do
+    if wait_for 5 _tile_seen "$1"; then
+      l="$(settled _tile_read "$1")"
+      if [[ -n "$l" ]]; then
+        q texts <"$OUT/ui/$1.xml" | sed -n 's/^[a-z-]*=//p' | grep -E "$TILE_RE" |
+          grep -m1 ', ' | sed 's/^[^,]*, //' >"$OUT/ui/$1.subtitle"
+        echo "${l%%, *}"; return 0
+      fi
+    fi
+    # The added tile lands on the last QS page.
+    adb_ shell input swipe $((w * 5 / 6)) $((h * 3 / 10)) $((w / 7)) $((h * 3 / 10)) 300
+  done
+  return 1
+}
+# tile_node DUMP LABEL: "cx cy ..." of the tile labelled LABEL (with or without
+# its subtitle) in ui/DUMP.xml.
+# shellcheck disable=SC2016
+tile_node() { wfind "$1" re "^$(printf '%s' "$2" | sed 's/[][\.*^$()+?{}|]/\\&/g')(, .+)?\$"; }
+_tile_shown() { tile_label tile-added >/dev/null; local r=$?; adb_ shell cmd statusbar collapse; return $r; }
+# add_tile: `cmd statusbar add-tile`, then wait (max ~40 s) until the tile shows
+# on the QS panel (it takes a while to bind on API 34).
+add_tile() {
+  sh_ cmd statusbar add-tile "${COMP[QuickTileService]}" >/dev/null
+  wait_for 40 _tile_shown || { log "tile ${COMP[QuickTileService]} not on the QS panel after add-tile"; return 1; }
+}
+# drag X1 Y1 X2 Y2: a long-press drag as raw motion events (the launcher's
+# widget-picker preview starts a drag only after a held touch; `input
+# draganddrop` does not hold long enough on API 34): 2 s held, 8 moves, 1 s at
+# the target.
+drag() {
+  local i
+  adb_ shell input motionevent DOWN "$1" "$2"; sleep 2
+  for i in 1 2 3 4 5 6 7 8; do
+    adb_ shell input motionevent MOVE $(( $1 + ($3 - $1) * i / 8 )) $(( $2 + ($4 - $2) * i / 8 ))
+  done
+  sleep 1
+  adb_ shell input motionevent UP "$3" "$4"
+}
+widget_bound() { sh_ dumpsys appwidget | grep "cmp:ComponentInfo{${COMP[TodayWidgetReceiver]}}" >/dev/null; }
+# "cx cy" of the home screen's empty grid (the launcher's workspace node; else
+# the middle of the screen).
+home_grid() {
+  local r w h
+  if r="$(find_node rid workspace)"; then cut -d' ' -f1-2 <<<"$r"
+  else read -r w h <<<"$(screen_size)"; echo "$((w / 2)) $((h * 55 / 100))"; fi
+}
+# Place the Today widget through the launcher's picker on a reset home screen
+# (launcher data cleared, so a long-press lands on empty grid): long-press home →
+# Widgets → search the app → its widget → tap the preview → "Add <widget> widget"
+# (API 35+), else (API 34: no Add button) drag the preview image
+# (`widget_preview_container`) onto the home grid.
+place_widget() {
+  local r p g preview='^[0-9]+ wide by [0-9]+ high$' name="${STR[app_name]}" label="${STR[widget_overline_today]}"
+  adb_ shell pm clear "$(launcher)" >/dev/null
+  home
+  evidence widget-home-clean
+  read -r -a g <<<"$(home_grid)"
+  adb_ shell input swipe "${g[0]}" "${g[1]}" "${g[0]}" "${g[1]}" 1500
+  tap_node eq Widgets 5 || return 1
+  if wait_text eq Search 5 && tap_node eq Search 2; then
+    adb_ shell input text "$name"
+  fi
+  scroll_to eq "$name" 6 || return 1
+  wait_text re "$preview" 2 || { tap_node eq "$name"; wait_text re "$preview" 5; } ||
+    { tap_node eq "$label" 2; wait_text re "$preview" 5; }
+  evidence widget-picker
+  has_text eq "Add $label widget" || { tap_node re "$preview" 2; wait_text eq "Add $label widget" 5; }
+  evidence widget-picker-preview
+  if has_text eq "Add $label widget"; then
+    tap_node eq "Add $label widget"
+  else
+    r="$(find_node rid widget_preview_container)" || r="$(find_node rid widget_preview)" || return 1
+    read -r -a p <<<"$r"
+    drag "${p[0]}" "${p[1]}" "${g[0]}" "${g[1]}"
+  fi
+  wait_for 10 widget_bound || return 1
+  # The launcher leaves the new widget in resize mode (no idle UI state for
+  # uiautomator until it is dismissed).
+  home
+  evidence widget-placed
+  wait_text eq "${STR[widget_open_today_cd]}" 15
+}
+_widget_texts() { dump_ui | q texts | sed -n "/content-desc=${STR[widget_open_today_cd]}/,\$p" | head -12; }
+# widget_texts NAME: the widget's labels (home screen dump) one per line, once
+# they stop changing.
+widget_texts() {
+  home
+  settled _widget_texts
+  evidence "$1"
+}
+# widget_dp NAME: the size the launcher gave the widget, "W H" in whole dp, from
+# its root node in the dump saved under NAME.
+widget_dp() {
+  local d b
+  d="$(sh_ wm density | sed -n 's/.*: //p' | tail -1)"
+  b="$(q eq "${STR[widget_open_today_cd]}" <"$OUT/ui/$1.xml")" || return 1
+  awk -v d="$d" '{ printf "%d %d\n", ($5 - $3) * 160 / d, ($6 - $4) * 160 / d }' <<<"$b"
+}
+
+# ── Monkey ───────────────────────────────────────────────────────────────────
+MONKEY_ACTIVE=0
+# monkey_run DIR SEED EVENTS THROTTLE CHUNK: a seeded monkey pass restricted to
+# the app, CHUNK events per monkey call (chunk N seeded SEED*1000+N), with System
+# UI expansion, Home and Recents disabled; a chunk that leaves the app is
+# followed by Back and a relaunch. Output: DIR/chunk-N.txt, DIR/escapes.txt and
+# MONKEY="injected crashes anrs escapes finished-chunks chunks".
+MONKEY=""
+monkey_run() {
+  local dir="$1" seed="$2" events="$3" throttle="$4" chunk="$5" chunks i n f injected=0 crashes=0 anrs=0 escapes=0 fin=0
+  mkdir -p "$dir"
+  chunks=$(( (events + chunk - 1) / chunk ))
+  adb_ shell cmd statusbar send-disable-flag statusbar-expansion home recents || log "monkey: System UI flags not set"
+  MONKEY_ACTIVE=1
+  for ((i = 0; i < chunks; i++)); do
+    n=$chunk; [[ $(( (i + 1) * chunk )) -le $events ]] || n=$(( events - i * chunk ))
+    timeout 1200 "$ADB" -s "$SERIAL" shell monkey -p "$APP_ID" -s $(( seed * 1000 + i )) \
+      --throttle "$throttle" --pct-syskeys 2 --pct-appswitch 1 --pct-anyevent 0 \
+      --ignore-crashes --ignore-timeouts --ignore-security-exceptions --monitor-native-crashes \
+      -v "$n" >"$dir/chunk-$i.txt" 2>&1 || log "monkey chunk $i exited $? (see $dir/chunk-$i.txt)"
+    injected=$(( injected + $(sed -n 's/.*Events injected: \([0-9]*\).*/\1/p' "$dir/chunk-$i.txt" | tail -1 | grep . || echo 0) ))
+    crashes=$(( crashes + $(grep -c "// CRASH: $APP_ID" "$dir/chunk-$i.txt") ))
+    anrs=$(( anrs + $(grep -c "// NOT RESPONDING: $APP_ID" "$dir/chunk-$i.txt") ))
+    # Monkey prints this last line (with -v) only after injecting every event; a
+    # chunk that aborted early (no activity, wrong package, adb error) has none.
+    grep -q '// Monkey finished' "$dir/chunk-$i.txt" && fin=$((fin + 1))
+    f="$(focus)"
+    if [[ "$f" != "$APP_ID"* ]]; then
+      escapes=$((escapes + 1)); echo "chunk $i: focus=$f" >>"$dir/escapes.txt"
+      adb_ shell input keyevent 4
+      launch; wait_for 10 app_up
+    fi
+  done
+  monkey_restore
+  MONKEY="$injected $crashes $anrs $escapes $fin $chunks"
+}
+monkey_restore() {
+  adb_ shell cmd statusbar send-disable-flag none || log "monkey: System UI flags not cleared"
+  adb_ shell cmd statusbar collapse
+  MONKEY_ACTIVE=0
+}
+# monkey_checks SCENARIO NAME DIR: checks.tsv rows of the last monkey_run.
+monkey_checks() {
+  local injected crashes anrs escapes fin chunks
+  read -r injected crashes anrs escapes fin chunks <<<"$MONKEY"
+  expect "$1" "$2: no crash or ANR reported by monkey" "$crashes crash(es), $anrs ANR(s) in $injected events; $3" \
+    test "$crashes" -eq 0 -a "$anrs" -eq 0
+  expect "$1" "$2: every chunk ran to the end" "$fin of $chunks chunks finished; $3" test "$fin" -eq "$chunks"
+  [[ $escapes -eq 0 ]] || check INFO "$1" "$2: left the app" "$escapes chunk(s); relaunched ($3/escapes.txt)"
+}
+
+# ── Session ──────────────────────────────────────────────────────────────────
+EMU_PID=""
+LOGCAT_PID=""
+API=0
+# boot_emulator AVD LOG [MEMORY_MB]: use $SERIAL when it is already online, else
+# boot AVD headless on the serial's port (output to LOG). Then wait for the boot
+# and restart adbd as root (where the image allows it).
+boot_emulator() {
+  local avd="$1" logf="$2" mem="${3:-}"
+  if adb_ get-state >/dev/null 2>&1; then
+    log "$SERIAL already online — using it"
+  else
+    [[ -x "$EMULATOR" ]] || die "emulator not found at $EMULATOR"
+    "$EMULATOR" -list-avds | grep -qx "$avd" || die "AVD '$avd' not found (create it with avdmanager)"
+    # An AVD created by cmdline-tools < 20 has `target=android-0`: the emulator
+    # then skips its GL feature setup and surfaceflinger aborts in a loop
+    # ("hasReadColorBufferDma"), which breaks screencap and restarts system_server.
+    ! grep -qx 'target=android-0' "$HOME/.android/avd/$avd.ini" ||
+      die "$HOME/.android/avd/$avd.ini has target=android-0: set it to the image's API (e.g. target=android-37.0)"
+    [[ -e /dev/kvm ]] || log "WARNING: /dev/kvm missing — the emulator will be very slow"
+    log "booting AVD $avd on port ${SERIAL#emulator-}"
+    # The emulator finds the AVD's system image through ANDROID_SDK_ROOT, not its
+    # own install path; a stale environment value would point it at another SDK.
+    ANDROID_SDK_ROOT="$ANDROID_HOME" "$EMULATOR" -avd "$avd" -port "${SERIAL#emulator-}" \
+      -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -read-only \
+      ${mem:+-memory "$mem"} >"$logf" 2>&1 &
+    EMU_PID=$!
+  fi
+  wait_for 300 _booted || die "emulator boot timed out (see $logf)"
+  root_adbd
+}
+# root_adbd: restart adbd as root (where the image allows it) and wait until the
+# device is back.
+root_adbd() {
+  local r; r="$(adb_ root 2>&1)"
+  case "$r" in
+    *"cannot run as root"*) log "adb root: $r" ;;
+    *) wait_for 60 _root_booted || die "adbd did not come back as root: $r" ;;
+  esac
+}
+_booted() {
+  [[ -z "$EMU_PID" ]] || kill -0 "$EMU_PID" 2>/dev/null || die "emulator exited during boot"
+  [[ "$(sh_ getprop sys.boot_completed)" == 1 ]]
+}
+_root_booted() { [[ "$(sh_ id -u)" == 0 ]] && _booted; }
+_emu_gone() { ! kill -0 "$EMU_PID" 2>/dev/null; }
+# Stop the emulator boot_emulator started, unless KEEP_EMU=1. One that was
+# already running is left alone.
+stop_emulator() {
+  [[ -n "$EMU_PID" && "$KEEP_EMU" -ne 1 ]] || return 0
+  log "stopping emulator $SERIAL"
+  adb_ emu kill >/dev/null || log "console kill refused"
+  # The console kill is not implemented on every emulator build; then signal the
+  # process boot_emulator started, never anything else.
+  wait_for 15 _emu_gone || kill "$EMU_PID"
+  wait "$EMU_PID"
+}
+# logcat_capture: append the device log to $OUT/logcat.txt in the background.
+logcat_capture() {
+  adb_ logcat -v threadtime -b main,system,crash,events >>"$OUT/logcat.txt" 2>&1 &
+  LOGCAT_PID=$!
+}
+# session_start AVD [MEMORY_MB]: boot (or reuse) the emulator, record the device
+# in config.txt (API), clear the device log and start its capture. The caller
+# installs `trap session_cleanup EXIT` first.
+session_start() {
+  config avd "$1"
+  boot_emulator "$1" "$OUT/logs/emulator.log" "${2:-}"
+  API="$(sh_ getprop ro.build.version.sdk)"
+  config device "$(sh_ getprop ro.product.model), API $API ($(sh_ getprop ro.build.version.release)), heapgrowthlimit $(sh_ getprop dalvik.vm.heapgrowthlimit)"
+  adb_ logcat -c
+  adb_ logcat -G 16M || log "logcat buffer size not set"
+  logcat_capture
+}
+session_cleanup() {
+  stop_feeder
+  [[ -z "$LOGCAT_PID" ]] || kill "$LOGCAT_PID" 2>/dev/null
+  [[ "$MONKEY_ACTIVE" -eq 0 ]] || monkey_restore
+  stop_emulator
+}
+# logcat_checks: stop the logcat capture once it holds the last phase marker,
+# scan $OUT/logcat.txt (scan_logcat.py) and add its crash / ANR / OOM / FGS /
+# StrictMode rows to checks.tsv. A scan that fails is a FAIL row.
+logcat_checks() {
+  mark logcat-end
+  wait_for 10 grep -q "$PHASE_TAG.*phase logcat-end" "$OUT/logcat.txt" || log "logcat capture lags: scanning what it has"
+  kill "$LOGCAT_PID"; wait "$LOGCAT_PID"; LOGCAT_PID=""
+  python3 "$HELP/scan_logcat.py" "$APP_ID" "$PHASE_TAG" "$OUT/logcat.txt" "$OUT/logcat-scan.json" >/dev/null ||
+    { check FAIL logcat "logcat scan" "scan_logcat.py failed on $OUT/logcat.txt"; return 0; }
+  python3 - "$OUT/logcat-scan.json" "$OUT/checks.tsv" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))
+out = open(sys.argv[2], "a")
+for k, label in (("fatal", "Java FATAL EXCEPTION (not induced)"), ("native", "native crash"), ("anr", "ANR"),
+                 ("oom", "OutOfMemoryError"), ("fgs", "foreground-service failure"), ("strictmode", "StrictMode")):
+    out.write(f"{'PASS' if s[k] == 0 else 'FAIL'}\tlogcat\t{label}\t{s[k]} occurrence(s) {json.dumps(s['by_phase'].get(k, {}))}\n")
+if s["induced"]:
+    out.write(f"INFO\tlogcat\tinduced crashes (am crash)\t{s['induced']}\n")
+PY
+}
+# session_end TITLE: logcat_checks, REPORT.md titled TITLE; succeeds when no
+# check FAILed.
+session_end() {
+  logcat_checks
+  python3 "$HELP/report.py" "$1" "$OUT"
+  log "report: $OUT/REPORT.md"
+  ! grep -q '^FAIL' "$OUT/checks.tsv"
+}
+
+# ── Device state ─────────────────────────────────────────────────────────────
+# pin_clock DAY [HH:MM[:SS]] [TZ]: the device clock and zone (default 08:00, $TZ0).
+pin_clock() {
+  local tz="${3:-$TZ0}"
+  sh_ cmd alarm set-timezone "$tz" >/dev/null
+  sh_ cmd alarm set-time "$(TZ="$tz" date -d "$1 ${2:-08:00}" +%s)000" >/dev/null
+}
+screen_on() { sh_ dumpsys power | grep 'mWakefulness=Awake' >/dev/null; }
+keyguard_showing() { sh_ dumpsys window | grep -E '(isKeyguardShowing|mKeyguardShowing)=true' >/dev/null; }
+_unlocked() { ! keyguard_showing; }
+wake() {
+  adb_ shell input keyevent 224
+  wait_for 5 screen_on || log "wake: screen still off"
+  adb_ shell wm dismiss-keyguard
+  wait_for 5 _unlocked || log "wake: keyguard still showing"
+}
+baseline_device() {
+  adb_ shell settings put global auto_time 0
+  adb_ shell settings put global auto_time_zone 0
+  adb_ shell settings put system time_12_24 12
+  adb_ shell settings put system font_scale 1.0
+  adb_ shell settings put system screen_off_timeout 1800000
+  adb_ shell wm density reset
+  adb_ shell cmd uimode night no >/dev/null
+  adb_ shell settings put global low_power 0
+  adb_ shell dumpsys battery reset
+  sh_ cmd location set-location-enabled true >/dev/null
+  adb_ shell cmd statusbar collapse
+  sh_ cmd locale set-app-locales "$APP_ID" >/dev/null
+  wake
+  adb_ shell input keyevent 82
 }

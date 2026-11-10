@@ -410,7 +410,7 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
 }
 
 /** A [DurableCore] over any [CoreBridge]: iOS's engine over the C ABI
- *  (`kmp/core-bridge`'s `NativeCore`), and the tests' scripted cores. */
+ *  (`android/core-bridge`'s `NativeCore`), and the tests' scripted cores. */
 class BridgeCore(override val bridge: CoreBridge) : DurableCore()
 
 /** Whether [this] is the JVM's `LinkageError` (a native library or symbol that

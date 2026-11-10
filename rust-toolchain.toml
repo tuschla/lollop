@@ -1,0 +1,10 @@
+[toolchain]
+# crux's MSRV, Cargo.toml's rust-version.
+channel = "1.90"
+components = ["rustfmt", "clippy"]
+targets = [
+    "aarch64-linux-android",
+    "x86_64-linux-android",
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+]

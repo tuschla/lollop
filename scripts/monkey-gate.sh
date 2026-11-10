@@ -1,37 +1,27 @@
 #!/usr/bin/env bash
-# Seeded monkey stress pass against the installed app that FAILS on a Java crash,
-# a native abort (the Rust core runs in-process over JNI) or an ANR in this app.
-# Crashes of other processes are ignored.
+# Seeded monkey stress pass (500 events, seed 42) against the installed app that
+# FAILS on a Java crash, a native abort (the Rust core runs in-process over JNI)
+# or an ANR in this app — reported by monkey or found in the logcat scan — or on
+# a monkey run that ends early. Crashes of other processes are ignored.
 #
 #   scripts/monkey-gate.sh [adb-serial]
 #
-# Env: ADB (default `adb`), QA_OUT (default `.`) for monkey.txt / monkey-logcat.txt.
-set -euo pipefail
+# The device: the given serial, else the one device adb sees. Outputs in $QA_OUT
+# (default android/app/build/monkey-gate): REPORT.md, checks.tsv, monkey/,
+# logcat.txt, logcat-scan.json.
+set -uo pipefail
 
-APP_ID="app.milestone"
-ADB="${ADB:-adb}"
-OUT="${QA_OUT:-.}"
-SERIAL_ARGS=()
-[[ -n "${1:-}" ]] && SERIAL_ARGS=(-s "$1")
-adb_() { "$ADB" "${SERIAL_ARGS[@]}" "$@"; }
+# shellcheck source-path=SCRIPTDIR source=emu-scenarios/lib.sh
+source "$(dirname "$0")/emu-scenarios/lib.sh"
+out_init "${QA_OUT:-$REPO_ROOT/android/app/build/monkey-gate}"
+SERIAL="${1:-$("$ADB" get-serialno)}"
+[[ -n "$SERIAL" ]] || die "no device"
 
-mkdir -p "$OUT"
-echo "==> running a seeded monkey pass (500 events)"
+trap session_cleanup EXIT
+config_run
 adb_ logcat -c
-adb_ shell monkey -p "$APP_ID" -s 42 --throttle 150 --pct-syskeys 0 --ignore-timeouts -v 500 \
-  >"$OUT/monkey.txt" 2>&1 || true
-adb_ logcat -d >"$OUT/monkey-logcat.txt"
-
-# `Process: <app>` heads a Java FATAL EXCEPTION, `>>> <app> <<<` a native
-# tombstone (JNI abort, SIGSEGV/SIGABRT in libshared.so); monkey itself reports
-# `// CRASH:` / `// NOT RESPONDING:` for the package it drives.
-if grep -E "// (CRASH|NOT RESPONDING): $APP_ID" "$OUT/monkey.txt" \
-  || grep -E "Process: $APP_ID|>>> $APP_ID <<<|ANR in $APP_ID" "$OUT/monkey-logcat.txt"; then
-  echo "ERROR: monkey found a crash/ANR in $APP_ID (see $OUT/monkey.txt, $OUT/monkey-logcat.txt)" >&2
-  exit 1
-fi
-# Monkey prints this last line (with -v) only after injecting every event; a run
-# that aborted early (no activity, wrong package, adb error) has none.
-grep -q '// Monkey finished' "$OUT/monkey.txt" \
-  || { echo "ERROR: monkey did not finish (see $OUT/monkey.txt)" >&2; exit 1; }
-echo "==> monkey pass clean"
+logcat_capture
+mark monkey
+monkey_run "$OUT/monkey" 42 500 150 500
+monkey_checks monkey "seed 42" "$OUT/monkey"
+session_end "Monkey gate"

@@ -11,17 +11,16 @@
 #      203ab56 and 4728546, an interrupted run's sidecar (active-run.ndjson);
 #   3. upg_expected.rs runs in that worktree's core: it replays the old log and
 #      writes what the old app showed (history.json; the whole view for 4728546).
-# The generators write to $UPG_GEN_DIR/<sha>/ (default ~/.cache/upgrade-fixtures/gen).
+# The generators write to $UPG_GEN_DIR/$UPG_SHA/ (default ~/.cache/upgrade-fixtures/gen).
 set -euo pipefail
-cd "$(dirname "$0")/../.."
-REPO="$(pwd)"
-HERE="$REPO/scripts/upgrade-fixtures"
-DEST="$REPO/shared/tests/fixtures/upgrade"
+# shellcheck source-path=SCRIPTDIR source=../lib/env.sh
+source "$(dirname "$0")/../lib/env.sh"
+cd "$REPO_ROOT"
+HERE="$REPO_ROOT/scripts/upgrade-fixtures"
+DEST="$REPO_ROOT/shared/tests/fixtures/upgrade"
 export UPG_GEN_DIR="${UPG_GEN_DIR:-$HOME/.cache/upgrade-fixtures/gen}"
 GEN="$UPG_GEN_DIR"
-export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
 
-# generator SHA: the Kotlin generator source for that build.
 generator() {
   if [[ -f "$HERE/UpgradeFixtureGen-$1.kt" ]]; then
     cat "$HERE/UpgradeFixtureGen-$1.kt"
@@ -37,7 +36,7 @@ for sha in 203ab56 4728546 901d239; do
   wt="$HOME/.cache/upg-$sha"
   [[ -d "$wt" ]] || git worktree add --detach "$wt" "$sha"
   # The SDK can also come from $ANDROID_HOME.
-  if [[ -f "$REPO/android/local.properties" ]]; then cp "$REPO/android/local.properties" "$wt/android/"; fi
+  if [[ -f "$REPO_ROOT/android/local.properties" ]]; then cp "$REPO_ROOT/android/local.properties" "$wt/android/"; fi
   generator "$sha" >"$wt/android/app/src/test/java/app/milestone/UpgradeFixtureGen.kt"
   cp "$HERE/upg_expected.rs" "$wt/shared/tests/"
   # 901d239 compacts through the core over JNI: its JVM test needs the host core.
@@ -45,10 +44,10 @@ for sha in 203ab56 4728546 901d239; do
     4728546) skip=(-x buildHostCore) ;;
     *) skip=() ;; # 203ab56 has no host core task
   esac
-  (cd "$wt/android" && CARGO_TARGET_DIR="$HOME/.cache/upg-target-$sha" \
-    ./gradlew -q --max-workers=2 testDebugUnitTest --tests app.milestone.UpgradeFixtureGen "${skip[@]}")
+  (cd "$wt/android" && UPG_SHA="$sha" CARGO_TARGET_DIR="$HOME/.cache/upg-target-$sha" \
+    ./gradlew -q --max-workers="$GRADLE_MAX_WORKERS" testDebugUnitTest --tests app.milestone.UpgradeFixtureGen "${skip[@]}")
   full=(); [[ $sha == 4728546 ]] && full=(UPG_FULL_VIEW=1)
-  (cd "$wt" && env "${full[@]}" CARGO_TARGET_DIR="$HOME/.cache/upg-target-$sha" cargo test -q -p shared --test upg_expected)
+  (cd "$wt" && env "${full[@]}" UPG_SHA="$sha" CARGO_TARGET_DIR="$HOME/.cache/upg-target-$sha" cargo test -q -p shared --test upg_expected)
   cp "$GEN/$sha/log.ndjson" "$DEST/$sha.log.ndjson"
   cp "$GEN/$sha/history.json" "$DEST/$sha.history.json"
 done

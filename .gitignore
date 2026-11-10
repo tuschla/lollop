@@ -1,8 +1,5 @@
 /target
 
-# Built native libs, produced by `cargo ndk`, not source.
-/android/app/src/main/jniLibs/
-
 # Local, uncommitted working notes / scratch design references.
 *.local.md
 

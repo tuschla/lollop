@@ -1,14 +1,15 @@
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
-    id("com.android.application") version "9.3.3" apply false
-    id("com.android.kotlin.multiplatform.library") version "9.3.3" apply false
-    id("com.android.lint") version "9.3.3" apply false
-    id("org.jetbrains.kotlin.multiplatform") version "2.4.21" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.4.21" apply false
-    id("org.jetbrains.kotlin.plugin.serialization") version "2.4.21" apply false
-    id("org.jetbrains.compose") version "1.12.2" apply false
-    id("io.github.takahirom.roborazzi") version "1.76.0" apply false
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.android.kotlin.multiplatform.library) apply false
+    alias(libs.plugins.android.lint) apply false
+    alias(libs.plugins.kotlin.multiplatform) apply false
+    alias(libs.plugins.kotlin.compose) apply false
+    alias(libs.plugins.kotlin.serialization) apply false
+    alias(libs.plugins.compose.multiplatform) apply false
+    alias(libs.plugins.roborazzi) apply false
+    id("lollop.rust-core")
 }
 
 // `-Plollop.iosSimulator=<udid>` picks the simulator every module's iOS tests

@@ -1,32 +1,34 @@
 """Scan a threadtime logcat for app crashes / ANRs / StrictMode / native aborts.
 
-argv: logcat.txt out.json
-Lines are attributed to the scenario phase active when they were logged (the
-script writes `EMUSCN: phase <name>` markers). A FATAL EXCEPTION the script
-induced on purpose (`am crash` → CrashedByAdbException / "shell-induced") is
-counted as `induced`, never as a failure.
+argv: app_id phase_tag logcat.txt out.json
+The app's processes are the pids of its `Start proc` / `am_proc_start` lines.
+Lines are attributed to the phase active when they were logged (the scripts log
+`<phase_tag>: phase <name>` markers). A FATAL EXCEPTION the script induced on
+purpose (`am crash` → CrashedByAdbException / "shell-induced") is counted as
+`induced`, never as a failure. Prints the counts; out.json also holds the
+counts by phase, the app pids, the top app E/F lines and excerpts.
 """
 import collections
 import json
 import re
 import sys
 
-APP = "app.milestone"
-path, outp = sys.argv[1:3]
+APP, TAG, path, outp = sys.argv[1:5]
 lines = open(path, errors="replace").read().splitlines()
 rx = re.compile(r"^\S+ \S+\s+(\d+)\s+(\d+) ([VDIWEF]) (.*?)\s*: (.*)$")
 pids = set()
 for l in lines:
-    m = re.search(r"Start proc (\d+):" + re.escape(APP) + r"[/ ]", l)
+    m = re.search(r"Start proc (\d+):" + re.escape(APP) + r"[/ ]", l) or \
+        re.search(r"am_proc_start: \[\d+,(\d+),\d+," + re.escape(APP) + r",", l)
     if m:
         pids.add(m.group(1))
-cats = {k: [] for k in ("fatal", "induced", "native", "anr", "strictmode", "oom", "fgs", "app_errors")}
+cats = {k: [] for k in ("fatal", "induced", "native", "anr", "strictmode", "oom", "fgs", "jank", "mentions")}
 errs = collections.Counter()
 phase = "init"
 for i, l in enumerate(lines):
     m = rx.match(l)
     pid, lvl, tag, msg = (m.group(1), m.group(3), m.group(4), m.group(5)) if m else ("", "", "", l)
-    if tag == "EMUSCN" and msg.startswith("phase "):
+    if tag == TAG and msg.startswith("phase "):
         phase = msg[6:]
         continue
     ctx = lambda n=25: "\n".join(lines[i:i + n])
@@ -42,11 +44,15 @@ for i, l in enumerate(lines):
         cats["strictmode"].append((phase, ctx(12)))
     elif pid in pids and re.search(r"OutOfMemoryError|Throwing OutOfMemory", l):
         cats["oom"].append((phase, ctx(20)))
-    elif re.search(r"ForegroundServiceDidNotStart|ForegroundServiceStartNotAllowed|"
+    elif re.search(r"ForegroundServiceDidNotStart|ForegroundServiceStartNotAllowed|RemoteServiceException|"
                    r"startForegroundService\(\) did not then call", l) and APP in "\n".join(lines[i:i + 5]):
         cats["fgs"].append((phase, ctx(15)))
     if pid in pids and lvl in ("E", "F"):
         errs[tag + ": " + re.sub(r"\d+", "N", msg)[:160]] += 1
+    elif pid not in pids and lvl in ("E", "F") and APP in l:
+        cats["mentions"].append((phase, l))
+    if pid in pids and (re.search(r"Skipped \d+ frames", msg) or msg.startswith("Davey!")):
+        cats["jank"].append((phase, l))
 res = {k: len(v) for k, v in cats.items()}
 res["by_phase"] = {k: dict(collections.Counter(p for p, _ in v)) for k, v in cats.items() if v}
 res["app_pids"] = sorted(pids)

@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # Full build for the lollop app, the ONE entry point for building anything.
 #
-#   scripts/build.sh            # everything: core tests → jniLibs → Android tests → debug + release APKs
+#   scripts/build.sh            # everything: core tests → Android tests → debug + release APKs
 #   scripts/build.sh --no-tests # same, skipping cargo test + gradle unit tests (quick rebuild)
 #   scripts/build.sh --qa       # after the normal build, run the on-device
 #                               # emulator UI/UX smoke (scripts/qa-emulator.sh)
 #
-# The gradle unit-test step ALSO runs the offline UI/UX QA suite (Robolectric +
-# Roborazzi driving the real Compose UI over the real Rust core). Its gradle task
-# builds the host `libshared.so` (shared crate `jni-host` feature) automatically
-# before the tests, so the UI tests always have a real core to load.
+# The gradle unit-test step also runs the offline UI/UX QA suite (Robolectric +
+# Roborazzi driving the real Compose UI over the real Rust core).
 # Outputs:
 #   android/app/build/outputs/apk/debug/app-debug.apk                        (debug-signed, installable)
 #   android/app/build/outputs/apk/release/lollop-release.apk                 (minified arm64-v8a APK,
@@ -18,13 +16,11 @@
 #   android/app/build/outputs/apk/release/lollop-release-debugsigned.apk     (same APK signed with the
 #       DEBUG key when no keystore is set: sideload/testing only, never distributable)
 #
-# Toolchain expectations: Arch system rust (no rustup),
-# cargo-ndk, NDK r30, JDK 21 at /usr/lib/jvm/java-21-openjdk, Android SDK at
-# /opt/android-sdk. The Rust core MUST be rebuilt via cargo-ndk before gradle -
-# gradle only packages whatever .so files already sit in jniLibs/, so skipping
-# that step ships a stale core silently.
+# Needs rustup (rust-toolchain.toml), cargo-ndk, the NDK, the JDK and the Android
+# SDK (scripts/lib/env.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib/env.sh
 
 RUN_TESTS=1
 RUN_QA=0
@@ -36,28 +32,22 @@ for arg in "$@"; do
   esac
 done
 
-export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
-SDK="${ANDROID_HOME:-/opt/android-sdk}"
-APKSIGNER="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)/apksigner"
+APKSIGNER="$(build_tool apksigner)"
 
-echo "==> Rust core: build$([[ $RUN_TESTS == 1 ]] && echo ' + test')"
-cargo build
-[[ $RUN_TESTS == 1 ]] && cargo test
-
-echo "==> jniLibs: cargo-ndk release, arm64-v8a (all builds) + x86_64 (debug/emulator only)"
-cargo ndk -o android/app/src/main/jniLibs -t arm64-v8a -t x86_64 build -p shared --release
+if [[ $RUN_TESTS == 1 ]]; then
+  echo "==> Rust core: test"
+  cargo test --locked
+fi
 
 echo "==> Android: $([[ $RUN_TESTS == 1 ]] && echo 'unit tests (incl. UI/UX QA) + ')debug + release APKs"
 GRADLE_TASKS=(:app:assembleDebug :app:assembleRelease)
-# :lollop:testAndroidHostTest runs the offline UI/UX QA (Robolectric) and the CMP
-# strings parity gate; verifyRoborazziAndroidHostTest compares against the local
-# screenshot baselines (gitignored). Both build the host core first.
+# verifyRoborazziAndroidHostTest compares against the local screenshot
+# baselines (gitignored).
 [[ $RUN_TESTS == 1 ]] && GRADLE_TASKS=(:lollop:testAndroidHostTest :lollop:verifyRoborazziAndroidHostTest "${GRADLE_TASKS[@]}")
 (cd android && ./gradlew -q "${GRADLE_TASKS[@]}")
 
 echo "==> Release R8 keep check"
-# assembleRelease ran minifyReleaseWithR8; check its dex keeps what is reached by name.
-scripts/check-release-r8.sh --no-build
+scripts/check-release-r8.sh
 
 echo "==> Signing release APK"
 REL_DIR=android/app/build/outputs/apk/release

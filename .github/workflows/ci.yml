@@ -18,19 +18,16 @@ env:
 
 jobs:
   core:
-    name: Rust core (fmt / clippy / build / test / cross)
+    name: Rust core (fmt / clippy / build / test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+      - uses: ./.github/actions/setup
         with:
-          # crux MSRV; matches rust-version in Cargo.toml.
-          toolchain: "1.90"
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+          java: "false"
+          android: "false"
+          rust: "true"
 
       - name: Format check
         run: cargo fmt --all -- --check
@@ -44,40 +41,15 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-      - name: Add Android target
-        run: rustup target add aarch64-linux-android
-
-      - name: Set up Android SDK/NDK
-        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
-
-      - name: Cross-build core for arm64
-        run: cargo ndk -t arm64-v8a build -p shared --locked
-
   android:
     name: Android unit + UI/UX QA
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: ./.github/actions/setup
         with:
-          distribution: temurin
-          java-version: "21"
-          cache: gradle
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: "1.90"
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+          rust: "true"
 
       - name: Cache Robolectric Android runtimes
         # Robolectric downloads its android-all jars from Maven at test time; a
@@ -85,12 +57,11 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.m2/repository/org/robolectric
-          key: robolectric-${{ runner.os }}-${{ hashFiles('android/lollop/build.gradle.kts', 'android/lollop/src/androidHostTest/resources/robolectric.properties') }}
+          key: robolectric-${{ runner.os }}-${{ hashFiles('android/gradle/libs.versions.toml', 'android/lollop/src/androidHostTest/resources/robolectric.properties') }}
 
       - name: Unit tests + offline UI/UX QA
         # :lollop:testAndroidHostTest runs the JVM wire-shape tests AND the
-        # Robolectric UI/UX QA suite (plus the CMP strings parity gate); its gradle
-        # task builds the host libshared.so (jni-host) so the UI tests drive the
+        # Robolectric UI/UX QA suite (plus the CMP strings parity gate) over the
         # real Rust core. Screenshot baselines are local-only (not in git) and no
         # roborazzi task runs here, so the screenshot tests run their UI and
         # assertions and skip the captures.
@@ -106,50 +77,33 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: ./.github/actions/setup
         with:
-          distribution: temurin
-          java-version: "21"
-          cache: gradle
-
-      - name: Set up Android SDK
-        # Configuring the android/ build needs an SDK even for the iOS tasks.
-        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
-
-      - name: Cache Kotlin/Native toolchain
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('android/build.gradle.kts') }}
+          konan: "true"
 
       - name: Compile :lollop for iosArm64 + iosSimulatorArm64
         working-directory: android
         run: ./gradlew --no-daemon :lollop:compileKotlinIosArm64 :lollop:compileKotlinIosSimulatorArm64
 
   release-r8:
-    name: Release R8 keep check
-    # Its own job so it runs beside the unit tests. minifyReleaseWithR8 builds no
-    # Rust (the APK's core comes from cargo-ndk jniLibs), so no Rust steps.
+    name: Release APK + R8 keep check
+    # Builds the release APK (the core for its ABIs through cargo-ndk) and checks
+    # its R8 output: classes created by name at run time (JNI Core, manifest
+    # components, startup initializers, Room/WorkManager reflection) must survive
+    # minification; a miss only crashes the release APK.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: ./.github/actions/setup
         with:
-          distribution: temurin
-          java-version: "21"
-          cache: gradle
+          cargo-ndk: "true"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - name: Release APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleRelease
 
       - name: Release R8 keep check
-        # Classes created by name at run time (JNI Core, manifest components,
-        # startup initializers, Room/WorkManager reflection) must survive
-        # minification; a miss only crashes the release APK. Builds
-        # :app:minifyReleaseWithR8 and checks its dex.
         run: scripts/check-release-r8.sh
 
   android-lint:
@@ -159,15 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: gradle
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - uses: ./.github/actions/setup
 
       - name: Lint (library + app shell)
         working-directory: android
@@ -181,31 +127,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: ./.github/actions/setup
         with:
-          distribution: temurin
-          java-version: "21"
-          cache: gradle
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: "1.90"
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
-      - name: Add Android target
-        run: rustup target add x86_64-linux-android
-
-      - name: Set up Android SDK/NDK
-        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
-
-      - name: Build jniLibs (x86_64 for the emulator)
-        run: cargo ndk -o android/app/src/main/jniLibs -t x86_64 build -p shared --release
+          cargo-ndk: "true"
 
       - name: Enable KVM
         run: |

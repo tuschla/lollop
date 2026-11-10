@@ -1,10 +1,8 @@
-/build
-/app/build
-/lollop/build
-/.gradle
+build/
+.gradle/
+.kotlin/
 /local.properties
 /app/src/main/assets/web/
 /captures
 *.iml
 .idea/
-/.kotlin

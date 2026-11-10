@@ -9,7 +9,7 @@ import kotlinx.coroutines.newSingleThreadContext
  * The Rust core's bridge calls, the set [DurableCore] makes. Bytes and strings are
  * the core's JSON; the shell decodes them. Android implements it over the JNI
  * exports (`Java_app_milestone_Core_*`, [Core]'s natives); the iOS app over the
- * `lollop_*` C ABI (`kmp/core-bridge`'s `NativeCore`, the same signatures).
+ * `lollop_*` C ABI (`android/core-bridge`'s `NativeCore`, the same signatures).
  * Each call wraps one `shared::ffi` function.
  *
  * Threading: every call is safe from any thread, but the core keeps its

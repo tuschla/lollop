@@ -5,46 +5,46 @@ plugins {
     id("com.android.application")
 }
 
+val appVersion: Map<String, String> =
+    rootDir.resolve("../app-version.xcconfig").readLines()
+        .mapNotNull { Regex("""^(\w+)\s*=\s*(.+)$""").find(it.trim())?.destructured }
+        .associate { (key, value) -> key to value.trim() }
+
+// The ABIs per build type: the Rust core is built for these and the APK keeps
+// only these. Without a filter androidx transitive .so's would add
+// armeabi-v7a/x86 slices that install on those devices and crash at the first
+// JNI call. Release ships phones only (arm64-v8a, ~3 MB smaller); debug adds
+// x86_64 so it runs on the emulator.
+// QA only: `-PqaX86Release` (or `=true`) adds x86_64 to release so the minified
+// APK runs on the x86_64 emulator (scripts/emulator-scenarios.sh --apk); `=false`
+// leaves it out.
+val abis: Map<String, List<String>> = mapOf(
+    "debug" to listOf("arm64-v8a", "x86_64"),
+    "release" to listOf("arm64-v8a") +
+        if (providers.gradleProperty("qaX86Release").map { it != "false" }.getOrElse(false)) listOf("x86_64") else emptyList(),
+)
+
 android {
     // The library owns `app.milestone` (its R class and every FQCN); the shell
     // only needs a namespace of its own.
     namespace = "app.milestone.shell"
-    compileSdk = 37
-    buildToolsVersion = "36.1.0"
+    compileSdk = libs.versions.android.compileSdk.get().toInt()
+    buildToolsVersion = libs.versions.android.buildTools.get()
 
     defaultConfig {
         applicationId = "app.milestone"
-        minSdk = 24
-        targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
-
-        // Only ABIs the Rust core (libshared.so) is built for; without a filter
-        // androidx transitive .so's would add armeabi-v7a/x86 slices that install
-        // on those devices and crash at the first JNI call.
-        // Release ships phones only (arm64-v8a, ~3 MB smaller); debug adds x86_64
-        // so it runs on the emulator.
-        ndk {
-            abiFilters += listOf("arm64-v8a")
-        }
+        minSdk = libs.versions.android.minSdk.get().toInt()
+        targetSdk = libs.versions.android.targetSdk.get().toInt()
+        versionCode = appVersion.getValue("CURRENT_PROJECT_VERSION").toInt()
+        versionName = appVersion.getValue("MARKETING_VERSION")
     }
 
     buildTypes {
         debug {
-            ndk {
-                abiFilters += listOf("x86_64")
-            }
+            ndk { abiFilters += abis.getValue("debug") }
         }
         release {
-            // QA only: `-PqaX86Release` (or `=true`) adds the x86_64 core so the
-            // minified release APK runs on the x86_64 emulator
-            // (scripts/emulator-scenarios.sh --apk); `=false` leaves it out. The
-            // shipped default stays arm64-v8a alone.
-            if (providers.gradleProperty("qaX86Release").map { it != "false" }.getOrElse(false)) {
-                ndk {
-                    abiFilters += listOf("x86_64")
-                }
-            }
+            ndk { abiFilters += abis.getValue("release") }
             isMinifyEnabled = true
             isShrinkResources = true
             // The app's own keep rules ship with :lollop as consumer rules
@@ -69,15 +69,23 @@ android {
         // (API 24/25) device hits NoClassDefFoundError on the first frame:
         // java.time.* only exists natively from API 26.
         isCoreLibraryDesugaringEnabled = true
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.toVersion(libs.versions.jvm.target.get())
+        targetCompatibility = JavaVersion.toVersion(libs.versions.jvm.target.get())
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        val jniLibs = rustCore.androidJniLibs(
+            project,
+            "rustJniLibs" + variant.name.replaceFirstChar(Char::uppercase),
+            abis.getValue(variant.buildType!!),
+        )
+        variant.sources.jniLibs?.addGeneratedSourceDirectory(jniLibs, CargoNdk::outputDir)
     }
 }
 
 dependencies {
     implementation(project(":lollop"))
-
-    // Backports java.time (+ other Java 8 APIs) to minSdk 24 so the app doesn't
-    // crash on API 24/25 launch. 2.1.x is compatible with AGP 9.
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
 }

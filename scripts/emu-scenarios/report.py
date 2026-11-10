@@ -1,17 +1,22 @@
-"""Assemble REPORT.md for scripts/emulator-scenarios.sh. argv: out_dir"""
+"""Assemble OUT/REPORT.md from a device-script run. argv: title out_dir
+
+Reads config.txt, checks.tsv (status, scenario, check, evidence), measurements.tsv
+(scenario, metric, value), the script's own sections (sections/*.md, in name
+order) and logcat-scan.json; lists every file under out_dir.
+"""
 import json
 import os
 import sys
 
-out = sys.argv[1]
+title, out = sys.argv[1:3]
 L = []
 w = L.append
-w("# Emulator scenarios report\n")
+w(f"# {title}\n")
 if os.path.exists(f"{out}/config.txt"):
     w("```\n" + open(f"{out}/config.txt").read().rstrip() + "\n```\n")
 rows = [l.rstrip("\n").split("\t") for l in open(f"{out}/checks.tsv") if l.strip()]
 tally = {k: sum(r[0] == k for r in rows) for k in ("PASS", "FAIL", "INFO")}
-w(f"**{tally['PASS']} PASS · {tally['FAIL']} FAIL · {tally['INFO']} INFO**\n")
+w(f"**{'FAIL' if tally['FAIL'] else 'PASS'}: {tally['PASS']} PASS · {tally['FAIL']} FAIL · {tally['INFO']} INFO**\n")
 fails = [r for r in rows if r[0] == "FAIL"]
 if fails:
     w("## Failures\n")
@@ -30,19 +35,23 @@ for sc in order:
             w(f"| {r[0]} | {r[2]} | {r[3].replace('|', '/')} |")
     w("")
 mp = f"{out}/measurements.tsv"
-if os.path.exists(mp):
+if os.path.exists(mp) and os.path.getsize(mp):
     w("## Measurements\n\n| scenario | metric | value |\n|---|---|---|")
     for l in open(mp):
         p = l.rstrip("\n").split("\t")
-        if len(p) == 3:
-            w(f"| {p[0]} | {p[1]} | {p[2]} |")
+        w(f"| {p[0]} | {p[1]} | {p[2]} |")
     w("")
+sd = f"{out}/sections"
+if os.path.isdir(sd):
+    for f in sorted(os.listdir(sd)):
+        w(open(os.path.join(sd, f)).read().rstrip() + "\n")
 lp = f"{out}/logcat-scan.json"
 if os.path.exists(lp):
     s = json.load(open(lp))
     w("## Logcat scan\n")
-    w(" · ".join(f"{k}: {s[k]}" for k in ("fatal", "induced", "native", "anr", "strictmode", "oom", "fgs")))
+    w(" · ".join(f"{k}: {v}" for k, v in s.items() if isinstance(v, int)))
     w("\nBy phase: `" + json.dumps(s.get("by_phase", {})) + "`\n")
+    w("App pids: " + ", ".join(s.get("app_pids", [])) + "\n")
     if s.get("top_app_errors"):
         w("Top app-process E/F lines (digits normalised):\n\n```")
         for k, n in s["top_app_errors"]:
@@ -54,8 +63,6 @@ if os.path.exists(lp):
         w(f"\n### {k} excerpts\n\n```\n" + "\n---\n".join(ex)[:6000] + "\n```")
 w("\n## Artifacts\n")
 for root, _, files in sorted(os.walk(out)):
-    if "/seed" in root or "/probe" in root:
-        continue
     for f in sorted(files):
         w(f"- `{os.path.relpath(os.path.join(root, f), out)}`")
 open(f"{out}/REPORT.md", "w").write("\n".join(L) + "\n")

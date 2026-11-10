@@ -10,7 +10,7 @@ object LollopApp {
     fun start() = installCoreEngine(RustCoreBridge)
 }
 
-/** [CoreBridge] over `kmp/core-bridge`'s C ABI binding ([rustCore], `NativeCore`):
+/** [CoreBridge] over `android/core-bridge`'s C ABI binding ([rustCore], `NativeCore`):
  *  the same calls with the same bytes. :lollop declares its own copy of the
  *  interface so its iOS code compiles without the cinterop module. */
 internal object RustCoreBridge : CoreBridge {

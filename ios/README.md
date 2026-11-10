@@ -27,14 +27,15 @@ shared/ (Rust core, pure update/view)
        ├─ android module          JNI exports Java_app_milestone_Core_*  → libshared.so (Android)
        └─ ffi/c_abi.rs            C ABI lollop_*  (feature c-abi)        → libshared.a  (iOS)
                                     header: shared/include/lollop.h (cbindgen)
-kmp/ (Gradle build of the bridge alone)
-  └─ core-bridge/
-       ├─ commonMain  CoreBridge: the calls the core engine makes (update, view,
-       │              parseFit, exportGpx, trackFigures, compactLog, reset), same JSON wire
-       ├─ nativeMain  NativeCore: CoreBridge over cinterop + lollop.h
-       └─ nativeTest  bridge tests against the core's own golden fixtures
-android/ (Gradle build of the app; includes kmp/core-bridge as :core-bridge)
-  ├─ app/        application shell: application id, signing, R8, jniLibs
+android/ (the Gradle build of the app, both platforms)
+  ├─ core-bridge/
+  │    ├─ commonMain  CoreBridge: the calls the core engine makes (update, view,
+  │    │              parseFit, exportGpx, trackFigures, compactLog, reset), same JSON wire
+  │    ├─ nativeMain  NativeCore: CoreBridge over cinterop + lollop.h
+  │    └─ nativeTest  bridge tests against the core's own golden fixtures (linuxX64 + iOS)
+  ├─ build-logic/ RustCore: every cargo build of the core (profiles and triples
+  │               from scripts/lib/rust-core.env)
+  ├─ app/        application shell: application id, signing, R8, the core's jniLibs
   ├─ lollop/     the app as a Kotlin Multiplatform module (namespace app.milestone)
   │    ├─ commonMain       the app for both platforms: root, screens, core engine
   │    │                   (DurableCore, EventLog), run tracking, generated CMP
@@ -79,12 +80,12 @@ through a `CoreBridge`, appends the accepted ones to the event log, replays the
 log at boot (`restore`, with compaction and torn-tail repair in `EventLog`),
 rebuilds the core after a `panic_reset`, and keeps the last good view when a
 view fails. Android's engine is `object Core : DurableCore` with the JNI
-natives; iOS's is a `BridgeCore` over `kmp/core-bridge`'s `NativeCore`, which
+natives; iOS's is a `BridgeCore` over `android/core-bridge`'s `NativeCore`, which
 `LollopApp.start()` installs (`installCoreEngine`). The event queue sends to
 it on `CoreDispatcher` (one dedicated thread, `newSingleThreadContext`).
 
 `:lollop` doesn't depend on the cinterop module. Its commonMain declares
-`CoreBridge` with the same calls as `kmp/core-bridge`'s, and `:lollop-ios`
+`CoreBridge` with the same calls as `android/core-bridge`'s, and `:lollop-ios`
 adapts one to the other. So `:lollop`'s iOS klibs compile on Linux; only
 `:lollop-ios`, which pulls in the cinterop module, needs macOS.
 
@@ -166,10 +167,8 @@ thread, as Android does with its `core-jni` dispatcher.
 ### On Linux (no Apple SDK)
 
 ```sh
-rustup target add aarch64-apple-ios aarch64-apple-ios-sim   # x86_64-apple-ios for Intel simulators
 scripts/build-ios-core.sh             # release libshared.a for device + arm64 simulator
-scripts/build-ios-core.sh x86_64-apple-ios
-cd kmp && ./gradlew :core-bridge:linuxX64Test   # bridge tests on the host core
+cd android && ./gradlew :core-bridge:linuxX64Test   # bridge tests on the host core
 cd android && ./gradlew :lollop:compileKotlinIosArm64 :lollop:compileKotlinIosSimulatorArm64
 ```
 
@@ -212,11 +211,14 @@ cd .. && brew install xcodegen && xcodegen generate --spec iosApp/project.yml
 open iosApp/lollop.xcodeproj                         # run the `lollop` scheme
 ```
 
+rustup installs the toolchain and the iOS targets from `rust-toolchain.toml`.
 The Gradle build calls `scripts/build-ios-core.sh` itself: test binaries link a
 debug core with the test hooks, frameworks link the release core without them
-(`linkRustCore` in `kmp/core-bridge/build.gradle.kts`, which `:lollop-ios`
-reuses). `-Plollop.iosSimulator=<udid>` picks the simulator. `Lollop.framework`
-is dynamic and contains the Rust core.
+(`RustCore.link` in `android/build-logic`, used by `:core-bridge` and
+`:lollop-ios`). `-Plollop.iosSimulator=<udid>` picks the simulator.
+`Lollop.framework` is dynamic and contains the Rust core. The app version
+(`MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`) comes from
+`app-version.xcconfig`, which the Android build reads too.
 
 The Xcode project is generated from `iosApp/project.yml` and not committed. Its
 build phase runs `./gradlew :lollop-ios:embedAndSignAppleFrameworkForXcode`,
@@ -364,7 +366,7 @@ Apple offers no other API (extensions).
 
 | Android (file) | iOS |
 |---|---|
-| JNI core, `Core.kt` on the `core-jni` thread | `BridgeCore` over `kmp/core-bridge`'s `NativeCore`, installed by `LollopApp.start()`, on one dedicated thread |
+| JNI core, `Core.kt` on the `core-jni` thread | `BridgeCore` over `android/core-bridge`'s `NativeCore`, installed by `LollopApp.start()`, on one dedicated thread |
 | Event log `filesDir/event-log.ndjson`, replay on boot, compaction (`EventLog.kt`, `DurableCore.restore`) | Done: the same NDJSON file in Application Support through the same commonMain code, so an exported log can be imported on either platform |
 | Crash-safe active run file (`ActiveRunStore.kt`) | Done: the same commonMain store and NDJSON format in Application Support, over the `LogFiles` seam (POSIX) |
 | GPS run tracking, foreground service with a location type (`RunTrackingService.kt`) | Done: `RunTracker.ios.kt`, a `CLLocationManager` (best accuracy, fitness activity, no distance filter, no auto-pause, `allowsBackgroundLocationUpdates` with the blue indicator) feeding the common `RunRecorder` (the same fix QC, armed start, pause, signal-loss watchdog and step ticker as Android's service) and the sidecar file; When In Use plus a one-off precise-location prompt; a run resumes after a relaunch from the sidecar. Its frames go to the run's Live Activity (`RunActivity`). |

@@ -19,68 +19,26 @@
 #              ListenableWorker its (Context, WorkerParameters) one: WorkManager
 #              creates both from the class name stored with the work request
 #              (Glance renders the widget in a SessionWorker)
-# A selected group that finds nothing to check (no Room database, merger or
-# worker, say, because R8 merged or renamed a base class) fails.
+# A group that finds nothing to check (no Room database, merger or worker, say,
+# because R8 merged or renamed a base class) fails.
 #
-#   scripts/check-release-r8.sh [--build-dir DIR] [--no-build] [--init-script FILE]
-#                               [--only "jni manifest room work"]
+#   scripts/check-release-r8.sh
 #
-# --build-dir   the app module's build directory (default android/app/build);
-#               required with --init-script
-# --no-build    check the existing R8 output instead of running
-#               `gradlew :app:minifyReleaseWithR8`
-# --init-script passed to gradle (-I), e.g. one that moves the build directory
-# --only        run only these check groups (default: all); an unknown group
-#               exits 2
-# Exit 0 when every check passes. Needs the Android SDK (build-tools dexdump),
-# python3 and the JDK gradle needs. CI runs it in the release-r8 job
-# (.github/workflows/ci.yml).
+# Checks the output of the last `gradlew :app:assembleRelease` (or
+# :app:minifyReleaseWithR8); scripts/build.sh and CI's release job run it after
+# that build. Exit 0 when every check passes. Needs the Android SDK
+# (build-tools dexdump) and python3.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-REPO_ROOT="$(pwd)"
+. "$(dirname "$0")/lib/env.sh"
 BUILD_DIR="$REPO_ROOT/android/app/build"
-BUILD=1
-ONLY="jni manifest room work"
-GRADLE_ARGS=()
-BUILD_DIR_SET=0
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --build-dir) BUILD_DIR="$2"; BUILD_DIR_SET=1; shift 2 ;;
-    --no-build) BUILD=0; shift ;;
-    --init-script) GRADLE_ARGS+=(-I "$2"); shift 2 ;;
-    --only) ONLY="$2"; shift 2 ;;
-    -h|--help) awk 'NR>1&&/^#/{print;next}NR>1{exit}' "$0"; exit 0 ;;
-    *) echo "unknown option: $1" >&2; exit 2 ;;
-  esac
-done
-[[ -n "${ONLY// }" ]] || { echo "--only needs at least one group: jni manifest room work" >&2; exit 2; }
-for g in $ONLY; do
-  case "$g" in
-    jni|manifest|room|work) ;;
-    *) echo "unknown check group: $g (groups: jni manifest room work)" >&2; exit 2 ;;
-  esac
-done
-# An init script may move the build directory; the check must read the same one.
-[[ ${#GRADLE_ARGS[@]} -eq 0 || $BUILD_DIR_SET -eq 1 ]] \
-  || { echo "--init-script needs --build-dir (the app build directory it sets)" >&2; exit 2; }
+case "${1:-}" in
+  "") ;;
+  -h|--help) awk 'NR>1&&/^#/{print;next}NR>1{exit}' "$0"; exit 0 ;;
+  *) echo "unknown option: $1" >&2; exit 2 ;;
+esac
 
-SDK=""
-[[ -f android/local.properties ]] && SDK="$(sed -n 's/^sdk\.dir=//p' android/local.properties | tail -1)"
-SDK="${SDK:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}}"
-[[ -n "$SDK" ]] || { echo "no Android SDK: set sdk.dir in android/local.properties or \$ANDROID_HOME" >&2; exit 2; }
-# Newest build-tools that ships dexdump (a preview or partial install may not).
-DEXDUMP=""
-for d in $(ls -d "$SDK"/build-tools/* 2>/dev/null | sort -V -r); do
-  [[ -x "$d/dexdump" ]] && { DEXDUMP="$d/dexdump"; break; }
-done
-[[ -n "$DEXDUMP" ]] || { echo "dexdump not found under $SDK/build-tools: $(ls "$SDK"/build-tools 2>/dev/null | tr '\n' ' ')" >&2; exit 2; }
-
-if [[ $BUILD -eq 1 ]]; then
-  echo "==> gradle :app:minifyReleaseWithR8"
-  (cd android && JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}" \
-    ./gradlew -q "${GRADLE_ARGS[@]}" --max-workers=2 :app:minifyReleaseWithR8)
-fi
+DEXDUMP="$(build_tool dexdump)" || exit 2
 
 shopt -s nullglob
 DEX=("$BUILD_DIR"/intermediates/dex/release/minifyReleaseWithR8/*.dex)
@@ -96,12 +54,11 @@ mkdir -p "$OUT"
 "$DEXDUMP" "${DEX[@]}" >"$OUT/dexdump.txt" 2>/dev/null
 echo "==> checking ${#DEX[@]} dex file(s) against $MANIFEST"
 
-python3 - "$OUT/dexdump.txt" "$MANIFEST" "$REPO_ROOT/shared/src/ffi.rs" "$MAPPING" "$ONLY" <<'PY'
+python3 - "$OUT/dexdump.txt" "$MANIFEST" "$REPO_ROOT/shared/src/ffi.rs" "$MAPPING" <<'PY'
 import re, sys
 import xml.etree.ElementTree as ET
 
-dump, manifest, ffi, mapping, only = sys.argv[1:6]
-groups = set(only.split())
+dump, manifest, ffi, mapping = sys.argv[1:5]
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 # R8 renames a superclass nothing keeps (androidx.room.RoomDatabase itself): the
@@ -160,8 +117,6 @@ failures = []
 passes = 0
 def check(ok, what):
     global passes
-    if what.split(":")[0] not in groups:
-        return
     if ok:
         passes += 1
     else:
