@@ -70,7 +70,7 @@ class LatinDigitSurfacesTest {
         // The JVM default follows the device language, as it does on a phone.
         Locale.setDefault(Locale.forLanguageTag("ar-EG"))
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
-        File(app.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(app.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
     }
 
     @After
@@ -79,7 +79,7 @@ class LatinDigitSurfacesTest {
         RunSession.reset()
         Locale.setDefault(savedLocale)
         TimeZone.setDefault(savedZone)
-        AppClock.offsetMillis = 0L
+        TestClock.offsetMillis = 0L
     }
 
     /** The Arabic-Indic and Extended Arabic-Indic digits in [text]. */
@@ -109,8 +109,8 @@ class LatinDigitSurfacesTest {
             app,
             WidgetSnapshot(epochDay = todayEpochDay(), kind = WidgetDayKind.Lift, title = "Upper body", items = items, zone = ZoneId.systemDefault().id),
         )
-        SessionReminderReceiver().onReceive(app, Intent(SessionReminder.ACTION_FIRE))
-        val n = checkNotNull(nm.getNotification(SessionReminder.NOTIF_ID)) { "no reminder posted" }
+        SessionReminderReceiver().onReceive(app, Intent(AndroidReminder.ACTION_FIRE))
+        val n = checkNotNull(nm.getNotification(AndroidIds.REMINDER_NOTIFICATION)) { "no reminder posted" }
         val text = n.extras.getCharSequence(Notification.EXTRA_TEXT).toString()
         assertTrue(text, text.startsWith("3 "))
         assertLatinDigits("reminder line", text)
@@ -139,7 +139,8 @@ class LatinDigitSurfacesTest {
     fun runImportSummaryUsesLatinDigits() {
         QaHarness.seedLog(app, listOf(QaHarness.strengthProfile()))
         // Boot hydration, which the import waits for.
-        EventDispatcher.model.value = QaHarness.reboot(app).view
+        val booted = QaHarness.reboot(app).view
+        EventDispatcher.model.value = booted
         var posted: UiMessage? = null
         val collector = CoroutineScope(Dispatchers.Unconfined)
         collector.launch { posted = UiMessages.messages.first() }
@@ -211,7 +212,7 @@ class LatinDigitSurfacesTest {
         shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         val lm = app.getSystemService(LocationManager::class.java)
         shadowOf(lm).setProviderEnabled(LocationManager.GPS_PROVIDER, true)
-        RunSession.plannedRun.value = PrescriptionView(run_structure = RunStructureView(reps = 6, rep_m = 400, recovery_sec = 90))
+        RunSession.followPlan(PrescriptionView(run_structure = RunStructureView(reps = 6, rep_m = 400, recovery_sec = 90)))
         fun intent(action: String) = Intent(app, RunTrackingService::class.java).setAction("app.milestone.action.$action")
         val controller = Robolectric.buildService(RunTrackingService::class.java, intent("ARM")).create().startCommand(0, 1)
         controller.withIntent(intent("START_NOW")).startCommand(0, 2)
@@ -229,7 +230,7 @@ class LatinDigitSurfacesTest {
             )
             shadowOf(Looper.getMainLooper()).idle()
         }
-        val text = nm.getNotification(RunTrackingService.NOTIF_ID).extras.getCharSequence(Notification.EXTRA_TEXT).toString()
+        val text = nm.getNotification(AndroidIds.RUN_NOTIFICATION).extras.getCharSequence(Notification.EXTRA_TEXT).toString()
         controller.withIntent(intent("STOP")).startCommand(0, 3)
         controller.destroy()
         assertTrue(text, text.startsWith("Rep 1 of 6"))

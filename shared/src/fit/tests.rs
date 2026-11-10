@@ -34,8 +34,7 @@ fn the_import_gate_refuses_a_fragment_and_keeps_a_real_run() {
         ],
     };
     assert_eq!(import_gate(&split), Ok(()));
-    let err = FitError::TooShort;
-    assert_eq!((err.kind(), err.context()), ("no_track", "too_short"));
+    assert_eq!(FitError::TooShort.context(), "too_short");
 }
 
 #[test]
@@ -148,7 +147,6 @@ fn a_real_bike_ride_is_reported_as_not_a_run() {
     let bytes = fixture("garmin-fenix-5-bike.fit");
     let err = parse_fit(&bytes).expect_err("cycling is not a run");
     assert_eq!(err, FitError::NotARun("cycling".to_string()));
-    assert_eq!(err.kind(), "not_a_run");
     assert_eq!(err.context(), "cycling");
 }
 

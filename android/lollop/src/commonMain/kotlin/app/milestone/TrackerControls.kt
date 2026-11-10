@@ -380,8 +380,8 @@ internal fun TrackerStatusPill(
     val status = LocalStatusColors.current
     val lastFix by RunSession.lastFix.collectAsStateWithLifecycle()
     val lastFixElapsedMs by RunSession.lastFixElapsedMs.collectAsStateWithLifecycle()
-    var nowElapsed by remember { mutableLongStateOf(monotonicMillis()) }
-    LaunchedEffect(lastFixElapsedMs) { nowElapsed = monotonicMillis() }
+    var nowElapsed by remember { mutableLongStateOf(AppClock.monotonicMillis()) }
+    LaunchedEffect(lastFixElapsedMs) { nowElapsed = AppClock.monotonicMillis() }
     val freshLock = isFreshLock(lastFix?.accuracyM, lastFixElapsedMs, nowElapsed)
     val signalLost = tracking && signalLossDue(lastFixElapsedMs, nowElapsed)
     val needsTick = freshLock || armed || locating || (tracking && !signalLost)
@@ -390,7 +390,7 @@ internal fun TrackerStatusPill(
         if (needsTick) while (true) {
             // A mid-run revocation must read as PermissionNeeded, not a lost fix.
             recheckPermission()
-            nowElapsed = monotonicMillis()
+            nowElapsed = AppClock.monotonicMillis()
             delay(PILL_TICK_MS)
         }
     }

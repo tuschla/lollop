@@ -16,7 +16,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppSettings
+import app.milestone.AppFileNames
 import app.milestone.AppTheme
 import app.milestone.EventDispatcher
 import app.milestone.R
@@ -98,7 +98,7 @@ class OwnerThemeJourneyTest {
     @Test
     fun freshInstall_startsOnPaperWithSystemAccent_andThemeChoiceCouplesTheAccent() {
         // A true first run: no event log, no saved theme, guided setup on screen.
-        assertFalse(File(ctx.filesDir, "event-log.ndjson").exists())
+        assertFalse(File(ctx.filesDir, AppFileNames.EVENT_LOG).exists())
         rule.launchAppExpectingSetup()
         GuidedSetupWalk.walk(rule)
         rule.onNode(hasText(str(R.string.setup_btn_finish)) and hasClickAction()).performClick()
@@ -144,9 +144,7 @@ class OwnerThemeJourneyTest {
 
         // And across a relaunch: the in-memory flows are knocked back to the
         // fresh-install values, so only the saved preferences can restore the choice.
-        QaHarness.teardown()
-        AppSettings.theme.value = AppTheme.Paper
-        AppSettings.dynamicAccent.value = false
+        QaHarness.killProcess()
         rule.launchApp()
         openProfile()
         assertAppearance(AppTheme.Rose, accentOn = true)

@@ -185,8 +185,8 @@ fn planner_ramp_equals_plan_ramp() {
     assert!(rir.summary.ends_with('1'), "{}", rir.summary);
 }
 
-fn range_rx(reps: u8, load_kg: f32) -> Recommended<Prescription> {
-    Recommended::new(
+fn range_rx(reps: u8, load_kg: f32) -> Rx {
+    RxBasis::Workout.rx(
         Prescription::Lift(crate::schema::LiftPrescription {
             exercise: "Lateral raise".into(),
             sets: 3,
@@ -265,7 +265,7 @@ fn an_e1rm_drop_cut_on_a_rep_range_also_leaves_one_more_rep() {
         },
         ..Default::default()
     };
-    let rx = Recommended::new(
+    let rx = RxBasis::Workout.rx(
         Prescription::Lift(crate::schema::LiftPrescription {
             exercise: "Bench Press".into(),
             sets: 3,

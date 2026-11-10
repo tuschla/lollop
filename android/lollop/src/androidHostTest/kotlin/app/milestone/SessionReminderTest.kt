@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.QaHarness
+import app.milestone.widget.AndroidWidgets
 import app.milestone.widget.WidgetAheadDay
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
@@ -23,6 +24,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.TimeZone
+import kotlinx.datetime.toKotlinTimeZone
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -58,20 +60,21 @@ class SessionReminderTest {
 
     @Before
     fun setUp() {
+        AppRuntime.resetForTest(clock = TestClock)
         TimeZone.setDefault(TimeZone.getTimeZone("Europe/Berlin"))
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
-        File(app.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(app.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
         SessionReminder.setEnabled(app, false)
         SessionReminder.setMinuteOfDay(app, SessionReminder.DEFAULT_MINUTE_OF_DAY)
-        RunSession.tracking.value = false
+        RunSession.markStopped()
     }
 
     @After
     fun tearDown() {
         SessionReminder.setEnabled(app, false)
         TimeZone.setDefault(savedZone)
-        AppClock.offsetMillis = 0L
-        RunSession.tracking.value = false
+        TestClock.offsetMillis = 0L
+        RunSession.markStopped()
     }
 
     // ── Fixtures ─────────────────────────────────────────────────────────────
@@ -91,35 +94,35 @@ class SessionReminderTest {
         WidgetSnapshot(epochDay = day, kind = WidgetDayKind.Run, title = "Easy run 8 km", items = runItems, trackable = true, zone = zone)
 
     private fun store(s: WidgetSnapshot) {
-        WidgetSnapshotStore.write(app, s)
+        AndroidWidgets.store(app, s)
     }
 
-    private fun posted(): Notification? = shadowOf(nm).getNotification(SessionReminder.NOTIF_ID)
+    private fun posted(): Notification? = shadowOf(nm).getNotification(AndroidIds.REMINDER_NOTIFICATION)
     private fun title(n: Notification?) = n?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
     private fun text(n: Notification?) = n?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()
     private fun destOf(pi: PendingIntent): String? = shadowOf(pi).savedIntent.getStringExtra(EXTRA_DEST)
     private fun alarms(): List<ShadowAlarmManager.ScheduledAlarm> = shadowOf(am).scheduledAlarms
-    private fun fire() = SessionReminderReceiver().onReceive(app, Intent(SessionReminder.ACTION_FIRE))
+    private fun fire() = SessionReminderReceiver().onReceive(app, Intent(AndroidReminder.ACTION_FIRE))
     private fun millis(at: String, z: String) = LocalDateTime.parse(at).atZone(ZoneId.of(z)).toInstant().toEpochMilli()
 
     /** Forget the days already reminded (one reminder per local day), so a test
      *  can fire again on the same date. */
     private fun forgetRemindedDays() {
-        app.getSharedPreferences("session_reminder", 0).edit().remove("reminded_epoch_days").commit()
+        app.getSharedPreferences(AppFileNames.REMINDER_STORE, 0).edit().remove(AndroidReminder.KEY_REMINDED_DAYS).commit()
     }
 
     // ── Next time ────────────────────────────────────────────────────────────
 
     @Test
     fun nextFireIsTheNextLocalTimeInTheZone() {
-        val berlin = ZoneId.of("Europe/Berlin")
+        val berlin = ZoneId.of("Europe/Berlin").toKotlinTimeZone()
         val m = 7 * 60 + 30
         assertEquals(millis("2026-10-29T07:30", "Europe/Berlin"), SessionReminder.nextFireMillis(millis("2026-10-29T06:00", "Europe/Berlin"), m, berlin))
         // At or after the time: tomorrow.
         assertEquals(millis("2026-10-30T07:30", "Europe/Berlin"), SessionReminder.nextFireMillis(millis("2026-10-29T07:30", "Europe/Berlin"), m, berlin))
         assertEquals(millis("2026-10-30T07:30", "Europe/Berlin"), SessionReminder.nextFireMillis(millis("2026-10-29T21:00", "Europe/Berlin"), m, berlin))
         // The same instant in another zone: that zone's 07:30.
-        val ny = ZoneId.of("America/New_York")
+        val ny = ZoneId.of("America/New_York").toKotlinTimeZone()
         assertEquals(millis("2026-10-29T07:30", "America/New_York"), SessionReminder.nextFireMillis(millis("2026-10-29T06:00", "Europe/Berlin"), m, ny))
         // A time the spring-forward jump skips moves forward by the gap.
         assertEquals(millis("2026-03-29T03:30", "Europe/Berlin"), SessionReminder.nextFireMillis(millis("2026-03-29T01:00", "Europe/Berlin"), 2 * 60 + 30, berlin))
@@ -129,7 +132,7 @@ class SessionReminderTest {
 
     @Test
     fun offByDefaultWithNoAlarm() {
-        app.getSharedPreferences("session_reminder", 0).edit().clear().commit()
+        app.getSharedPreferences(AppFileNames.REMINDER_STORE, 0).edit().clear().commit()
         assertEquals(SessionReminderSetting(false, 7 * 60 + 30), SessionReminder.setting(app))
         SessionReminder.reschedule(app)
         assertTrue(alarms().isEmpty())
@@ -143,21 +146,21 @@ class SessionReminderTest {
         assertEquals(AlarmManager.RTC_WAKEUP, a.type)
         assertTrue("allowed while idle", a.isAllowWhileIdle)
         val expected = setOf(
-            SessionReminder.nextFireMillis(before, 7 * 60 + 30, ZoneId.systemDefault()),
-            SessionReminder.nextFireMillis(AppClock.nowMillis(), 7 * 60 + 30, ZoneId.systemDefault()),
+            SessionReminder.nextFireMillis(before, 7 * 60 + 30, ZoneId.systemDefault().toKotlinTimeZone()),
+            SessionReminder.nextFireMillis(AppClock.nowMillis(), 7 * 60 + 30, ZoneId.systemDefault().toKotlinTimeZone()),
         )
         assertTrue("trigger ${a.triggerAtTime} is the next 07:30", a.triggerAtTime in expected)
         val op = shadowOf(a.operation)
         assertTrue(op.isBroadcastIntent)
         assertTrue("immutable", op.flags and PendingIntent.FLAG_IMMUTABLE != 0)
         assertEquals(SessionReminderReceiver::class.java.name, op.savedIntent.component?.className)
-        assertEquals(SessionReminder.ACTION_FIRE, op.savedIntent.action)
+        assertEquals(AndroidReminder.ACTION_FIRE, op.savedIntent.action)
 
         // A new time replaces the alarm.
         SessionReminder.setMinuteOfDay(app, 18 * 60 + 15)
         val b = alarms().single()
         val now = AppClock.nowMillis()
-        assertEquals(SessionReminder.nextFireMillis(now, 18 * 60 + 15, ZoneId.systemDefault()), b.triggerAtTime)
+        assertEquals(SessionReminder.nextFireMillis(now, 18 * 60 + 15, ZoneId.systemDefault().toKotlinTimeZone()), b.triggerAtTime)
         assertEquals(18 * 60 + 15, SessionReminder.setting(app).minuteOfDay)
 
         SessionReminder.setEnabled(app, false)
@@ -172,7 +175,7 @@ class SessionReminderTest {
         SessionReminder.setEnabled(app, true)
         val berlin = alarms().single().triggerAtTime
         TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
-        SessionReminderReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
+        TimeChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
         val ny = alarms().single().triggerAtTime
         assertNotEquals(berlin, ny)
         val at = Instant.ofEpochMilli(ny).atZone(ZoneId.of("America/New_York"))
@@ -218,7 +221,7 @@ class SessionReminderTest {
         val n = posted()!!
         assertEquals("Upper body", title(n))
         assertEquals("3 exercises · Back squat first", text(n))
-        assertEquals(SessionReminder.CHANNEL, n.channelId)
+        assertEquals(AndroidReminder.CHANNEL, n.channelId)
         assertTrue("auto-cancel", n.flags and Notification.FLAG_AUTO_CANCEL != 0)
         assertEquals(Notification.CATEGORY_REMINDER, n.category)
         assertEquals(1, n.actions.size)
@@ -226,7 +229,7 @@ class SessionReminderTest {
         assertTrue(shadowOf(n.actions[0].actionIntent).isActivityIntent)
         assertEquals(OpenDest.LogSet.wire, destOf(n.actions[0].actionIntent))
         assertEquals(OpenDest.Today.wire, destOf(n.contentIntent))
-        val channel = nm.getNotificationChannel(SessionReminder.CHANNEL)
+        val channel = nm.getNotificationChannel(AndroidReminder.CHANNEL)
         assertEquals(NotificationManager.IMPORTANCE_DEFAULT, channel.importance)
         assertEquals("Session reminders", channel.name.toString())
     }
@@ -273,7 +276,7 @@ class SessionReminderTest {
             fire()
             assertNull(name, posted())
         }
-        File(app.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(app.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
         fire()
         assertNull("no snapshot", posted())
     }
@@ -299,7 +302,7 @@ class SessionReminderTest {
     fun noRunReminderWhileARunRecords() {
         SessionReminder.setEnabled(app, true)
         store(runDay())
-        assertFalse(SessionReminder.post(app, recording = true))
+        assertFalse(AndroidReminder.post(app, recording = true))
         assertNull(posted())
     }
 
@@ -451,12 +454,12 @@ class SessionReminderTest {
         store(liftDay())
         fire()
         val n = posted()!!
-        SessionReminder.onOpenIntent(app, shadowOf(n.contentIntent).savedIntent)
-        SessionReminder.onOpenIntent(app, openIntent(app, OpenDest.LogSet))
+        AndroidReminder.onOpenIntent(app, shadowOf(n.contentIntent).savedIntent)
+        AndroidReminder.onOpenIntent(app, openIntent(app, OpenDest.LogSet))
         assertNotNull("the content intent and other surfaces leave it up", posted())
         val action = shadowOf(n.actions.single().actionIntent).savedIntent
         assertEquals(OpenDest.LogSet, openDestOf(action))
-        SessionReminder.onOpenIntent(app, action)
+        AndroidReminder.onOpenIntent(app, action)
         assertNull("the action tap takes it down", posted())
     }
 
@@ -465,22 +468,22 @@ class SessionReminderTest {
      *  not remind about the same day a second time. */
     @Test
     fun atMostOneReminderPerLocalDayAcrossATimeZoneChange() {
-        AppClock.offsetMillis = millis("2026-10-29T07:30:30", "Europe/Berlin") - System.currentTimeMillis()
+        TestClock.offsetMillis = millis("2026-10-29T07:30:30", "Europe/Berlin") - System.currentTimeMillis()
         val day = today
         SessionReminder.setEnabled(app, true)
         store(liftDay())
         fire()
         assertEquals("Upper body", title(posted()))
         // Opened from the shade: auto-cancel takes it down.
-        nm.cancel(SessionReminder.NOTIF_ID)
+        nm.cancel(AndroidIds.REMINDER_NOTIFICATION)
 
         TimeZone.setDefault(TimeZone.getTimeZone("Europe/London"))
-        SessionReminderReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
+        TimeChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
         // The app is open: the snapshot is rewritten in the new zone, same day.
         store(liftDay())
         assertEquals(day, today)
         val next = alarms().single().triggerAtTime
-        AppClock.offsetMillis = next + 30_000 - System.currentTimeMillis()
+        TestClock.offsetMillis = next + 30_000 - System.currentTimeMillis()
         assertEquals("07:30 London is still ${LocalDate.ofEpochDay(day)}", day, today)
         fire()
         assertNull("a second reminder for the same day", posted())
@@ -492,18 +495,18 @@ class SessionReminderTest {
     fun aClockSetBackADayDoesNotRemindThatDayAgain() {
         SessionReminder.setEnabled(app, true)
         for (at in listOf("2026-10-29T07:30:30", "2026-10-30T07:30:30")) {
-            AppClock.offsetMillis = millis(at, "Europe/Berlin") - System.currentTimeMillis()
+            TestClock.offsetMillis = millis(at, "Europe/Berlin") - System.currentTimeMillis()
             store(liftDay())
             fire()
             assertEquals(at, "Upper body", title(posted()))
-            nm.cancel(SessionReminder.NOTIF_ID)
+            nm.cancel(AndroidIds.REMINDER_NOTIFICATION)
         }
-        AppClock.offsetMillis = millis("2026-10-29T06:00:00", "Europe/Berlin") - System.currentTimeMillis()
-        SessionReminderReceiver().onReceive(app, Intent(Intent.ACTION_TIME_CHANGED))
+        TestClock.offsetMillis = millis("2026-10-29T06:00:00", "Europe/Berlin") - System.currentTimeMillis()
+        TimeChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIME_CHANGED))
         store(liftDay())
         val next = alarms().single().triggerAtTime
         assertEquals(millis("2026-10-29T07:30", "Europe/Berlin"), next)
-        AppClock.offsetMillis = next + 30_000 - System.currentTimeMillis()
+        TestClock.offsetMillis = next + 30_000 - System.currentTimeMillis()
         fire()
         assertNull("a second reminder for Thursday", posted())
     }
@@ -516,7 +519,7 @@ class SessionReminderTest {
     fun aTimeZoneChangePastMidnightTakesYesterdaysReminderDown() {
         TimeZone.setDefault(TimeZone.getTimeZone("America/Chicago"))
         val postedAt = millis("2026-10-29T20:00:30", "America/Chicago")
-        AppClock.offsetMillis = postedAt - System.currentTimeMillis()
+        TestClock.offsetMillis = postedAt - System.currentTimeMillis()
         SessionReminder.setMinuteOfDay(app, 20 * 60)
         SessionReminder.setEnabled(app, true)
         store(liftDay())
@@ -525,11 +528,9 @@ class SessionReminderTest {
         assertEquals("Upper body", title(n))
 
         val crossing = millis("2026-10-29T23:30:00", "America/Chicago")
-        AppClock.offsetMillis = crossing - System.currentTimeMillis()
+        TestClock.offsetMillis = crossing - System.currentTimeMillis()
         TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
-        // Both receivers get the broadcast.
-        SessionReminderReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
-        WidgetSnapshotStore.markStale(app, force = true, today = todayEpochDay())
+        TimeChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
         assertEquals("it is Friday in New York", LocalDate.parse("2026-10-30").toEpochDay(), today)
         assertTrue("the system timeout has not run out yet", n.timeoutAfter > crossing - postedAt)
         assertNull("yesterday's reminder still shows", posted())
@@ -541,16 +542,16 @@ class SessionReminderTest {
     @Test
     fun theMidnightTickTakesYesterdaysReminderDown() {
         val postedAt = millis("2026-10-29T07:30:30", "Europe/Berlin")
-        AppClock.offsetMillis = postedAt - System.currentTimeMillis()
+        TestClock.offsetMillis = postedAt - System.currentTimeMillis()
         SessionReminder.setEnabled(app, true)
         store(liftDay())
         fire()
         assertNotNull(posted())
-        AppClock.offsetMillis = millis("2026-10-29T23:59:00", "Europe/Berlin") - System.currentTimeMillis()
-        WidgetSnapshotStore.markStale(app, force = false, today = todayEpochDay())
+        TestClock.offsetMillis = millis("2026-10-29T23:59:00", "Europe/Berlin") - System.currentTimeMillis()
+        AndroidWidgets.onMidnight(app, today = todayEpochDay())
         assertNotNull("still the same day", posted())
-        AppClock.offsetMillis = millis("2026-10-30T00:00:05", "Europe/Berlin") - System.currentTimeMillis()
-        WidgetSnapshotStore.markStale(app, force = false, today = todayEpochDay())
+        TestClock.offsetMillis = millis("2026-10-30T00:00:05", "Europe/Berlin") - System.currentTimeMillis()
+        AndroidWidgets.onMidnight(app, today = todayEpochDay())
         assertNull("Thursday's reminder on Friday", posted())
     }
 
@@ -561,7 +562,7 @@ class SessionReminderTest {
     @Test
     fun aSecondZoneChangePastMidnightTakesYesterdaysReminderDown() {
         TimeZone.setDefault(TimeZone.getTimeZone("America/Chicago"))
-        AppClock.offsetMillis = millis("2026-10-29T20:00:30", "America/Chicago") - System.currentTimeMillis()
+        TestClock.offsetMillis = millis("2026-10-29T20:00:30", "America/Chicago") - System.currentTimeMillis()
         SessionReminder.setMinuteOfDay(app, 20 * 60)
         SessionReminder.setEnabled(app, true)
         store(liftDay())
@@ -569,10 +570,9 @@ class SessionReminderTest {
         assertNotNull(posted())
 
         fun crossInto(at: String, zone: String) {
-            AppClock.offsetMillis = millis(at, "America/Chicago") - System.currentTimeMillis()
+            TestClock.offsetMillis = millis(at, "America/Chicago") - System.currentTimeMillis()
             TimeZone.setDefault(TimeZone.getTimeZone(zone))
-            SessionReminderReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
-            WidgetSnapshotStore.markStale(app, force = true, today = todayEpochDay())
+            TimeChangeReceiver().onReceive(app, Intent(Intent.ACTION_TIMEZONE_CHANGED))
         }
         crossInto("2026-10-29T21:00:00", "America/Denver")
         assertTrue("the snapshot is stale", WidgetSnapshotStore.read(app)!!.stale)
@@ -587,12 +587,12 @@ class SessionReminderTest {
      *  none itself (mutant KH05, `mutate_kt.py`). */
     @Test
     fun aSnapshotForTheNextDayTakesYesterdaysReminderDown() {
-        AppClock.offsetMillis = millis("2026-10-29T07:30:30", "Europe/Berlin") - System.currentTimeMillis()
+        TestClock.offsetMillis = millis("2026-10-29T07:30:30", "Europe/Berlin") - System.currentTimeMillis()
         SessionReminder.setEnabled(app, true)
         store(liftDay())
         fire()
         assertNotNull(posted())
-        AppClock.offsetMillis = millis("2026-10-30T08:00:00", "Europe/Berlin") - System.currentTimeMillis()
+        TestClock.offsetMillis = millis("2026-10-30T08:00:00", "Europe/Berlin") - System.currentTimeMillis()
         store(liftDay())
         assertNull("Thursday's reminder on Friday", posted())
     }
@@ -602,7 +602,7 @@ class SessionReminderTest {
     /** Fire the reminder at 07:30:30 UTC on [day] from [snapshot], the one the app last wrote. */
     private fun fireOn(day: Long, snapshot: WidgetSnapshot) {
         TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
-        AppClock.offsetMillis = day * 86_400_000L + (7 * 60 + 30) * 60_000L + 30_000L - System.currentTimeMillis()
+        TestClock.offsetMillis = day * 86_400_000L + (7 * 60 + 30) * 60_000L + 30_000L - System.currentTimeMillis()
         SessionReminder.setEnabled(app, true)
         store(snapshot)
         fire()

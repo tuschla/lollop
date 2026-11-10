@@ -84,10 +84,10 @@ struct LollopActivityAttributes: ActivityAttributes {
 
 extension RunLive {
     /// The deep link of a tap on the run's activity: the tracker, as Android's notification.
-    static let openURL = URL(string: "lollop://open/track")!
+    static let openURL = LollopScreen.track.url
 }
 
 extension RestLive {
     /// The deep link of a tap on the rest's activity: the set editor, as Android's notification.
-    static let openURL = URL(string: "lollop://open/log_set")!
+    static let openURL = LollopScreen.logSet.url
 }

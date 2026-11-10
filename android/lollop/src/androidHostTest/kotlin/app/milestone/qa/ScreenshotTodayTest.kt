@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppClock
+import app.milestone.AppFileNames
 import app.milestone.ConcurrentGoal
 import app.milestone.DarkMode
 import app.milestone.Event
@@ -32,6 +33,7 @@ import app.milestone.ProgressionCadence
 import app.milestone.R
 import app.milestone.ReadinessSignal
 import app.milestone.SessionPlanView
+import app.milestone.TestClock
 import java.io.File
 import java.time.Duration
 import java.util.Locale
@@ -300,12 +302,12 @@ class ScreenshotTodayTest {
             ?: runDays.firstOrNull { d -> d.items.any { (it.run_structure?.strides_reps ?: 0) > 0 } }
             ?: runDays.first()
         if (pick.epoch_day != today) {
-            val log = File(ctx.filesDir, "event-log.ndjson").readText()
+            val log = File(ctx.filesDir, AppFileNames.EVENT_LOG).readText()
             QaHarness.teardown()
             QaHarness.reset(ctx)
             useDarkMode(mode)
-            File(ctx.filesDir, "event-log.ndjson").writeText(log)
-            AppClock.offsetMillis += (pick.epoch_day - today) * 86_400_000L
+            File(ctx.filesDir, AppFileNames.EVENT_LOG).writeText(log)
+            TestClock.offsetMillis += (pick.epoch_day - today) * 86_400_000L
             rule.launchApp()
         }
         waitForText(str(R.string.main_todays_session).uppercase(Locale.US))
@@ -412,7 +414,7 @@ class ScreenshotTodayTest {
             ?: (todaysSets(SQUAT).maxOf { it.observed_at } * 1_000L)
         rule.mainClock.autoAdvance = false
         try {
-            AppClock.offsetMillis = startMillis + secondsAfterSet * 1_000L - System.currentTimeMillis()
+            TestClock.offsetMillis = startMillis + secondsAfterSet * 1_000L - System.currentTimeMillis()
             rule.mainClock.advanceTimeBy(1_000L)
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
         } finally {

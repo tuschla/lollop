@@ -47,7 +47,7 @@ internal actual fun rememberDataExport(onExported: () -> Unit): () -> Unit {
     val exported by rememberUpdatedState(onExported)
     return remember {
         {
-            EventDispatcher.scope.launch {
+            AppRuntime.scope.launch {
                 val ctx = PlatformContext.INSTANCE
                 val res = systemResources()
                 val file = readDataExport(ctx)?.let { lines -> withContext(Dispatchers.IO) { writeBackupFile(lines) } }
@@ -67,11 +67,11 @@ internal actual fun rememberDataExport(onExported: () -> Unit): () -> Unit {
     }
 }
 
-/** Write [lines] to the backup's temporary file, streamed ([LogFiles.writeLinesSynced]);
+/** Write [lines] to the backup's temporary file, streamed ([AppFiles.writeLinesSynced]);
  *  its URL, or null when the write failed. */
 private fun writeBackupFile(lines: List<String>): NSURL? = runCatching {
     val path = NSTemporaryDirectory() + dataExportFilename()
-    LogFiles.writeLinesSynced(LogPath(path), lines)
+    AppFiles.writeLinesSynced(AppPath(path), lines)
     NSURL.fileURLWithPath(path)
 }.onFailure { PlatformLog.e("Export", "couldn't write the backup file", it) }.getOrNull()
 
@@ -101,7 +101,7 @@ internal actual suspend fun readPickedBackup(ctx: PlatformContext, file: String)
         } finally {
             close(fd)
         }
-    }.getOrDefault(ImportCheck.Invalid)
+    }.onFailure { PlatformLog.w("Export", "picked backup unreadable", it) }.getOrDefault(ImportCheck.Invalid)
 }
 
 /** Fill [buf]'s start from [fd]: the count read, or -1 at the end of the file. */
@@ -118,7 +118,7 @@ private fun readChunk(fd: Int, buf: ByteArray): Int {
 internal actual fun Throwable.isFatalToVm(): Boolean = false
 
 internal actual suspend fun restartForImport(ctx: PlatformContext) {
-    requestReboot(beforeRestore = {
-        check(platformCoreEngine().resetForReboot()) { "the core bridge can't reset for the import" }
+    AppRuntime.requestReboot(beforeRestore = {
+        check(AppRuntime.engine.resetForReboot()) { "the core bridge can't reset for the import" }
     })
 }

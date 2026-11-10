@@ -3,8 +3,6 @@ package app.milestone.widget
 import android.content.Context
 import android.content.res.Resources
 import android.os.Build
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,6 +47,7 @@ import androidx.glance.text.TextAlign
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import app.milestone.ActionMinHeight
+import app.milestone.AppRuntime
 import app.milestone.AppSettings
 import app.milestone.AppTheme
 import app.milestone.DarkMode
@@ -67,9 +66,9 @@ import app.milestone.appLocale
 import app.milestone.latinDigitResources
 import app.milestone.openIntent
 import app.milestone.planDateLabel
+import app.milestone.resolveSurfaceAccent
 import app.milestone.todayEpochDay
 import app.milestone.weekdayName
-import app.milestone.withDynamicAccent
 import kotlin.math.ceil
 import kotlinx.datetime.LocalDate
 import androidx.compose.ui.text.TextStyle as ComposeTextStyle
@@ -166,7 +165,7 @@ internal val WidgetSizes: Set<DpSize> = buildSet {
 /**
  * The home screen widget: today's session and its items, the rest day and the
  * next session, or the pause, with the Quick Settings tile's action (and Log) as
- * its buttons. It reads [WidgetSnapshotStore], never the Rust core; [WidgetSync]
+ * its buttons. It reads [WidgetSnapshotStore], never the Rust core; [AndroidWidgets]
  * writes the snapshot and updates the widget whenever the app publishes a model.
  */
 internal class TodayWidget : GlanceAppWidget() {
@@ -174,9 +173,8 @@ internal class TodayWidget : GlanceAppWidget() {
     override val previewSizeMode = SizeMode.Responsive(WidgetSizes)
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        // A widget update can start the process without MainActivity: the theme
-        // choice lives in AppSettings' preferences.
-        AppSettings.load(context)
+        // A widget update can start the process without MainActivity.
+        AppRuntime.start(context)
         provideContent {
             val ctx = LocalContext.current
             // The face's counts in Latin digits like the app's (AppLocale.kt),
@@ -197,10 +195,10 @@ internal class TodayWidget : GlanceAppWidget() {
         }
     }
 
-    /** The widget picker's preview (Android 15+, published by [WidgetSync]): a
+    /** The widget picker's preview (Android 15+, published by [AndroidWidgets]): a
      *  sample lift day in the app's current theme. */
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
-        AppSettings.load(context)
+        AppRuntime.start(context)
         val res = context.latinDigitResources()
         val face = widgetFace(previewSnapshot(res, todayEpochDay()), todayEpochDay(), res)
         val colors = widgetColors(context, AppSettings.theme.value, AppSettings.darkMode.value, AppSettings.dynamicAccent.value)
@@ -507,15 +505,13 @@ internal data class WidgetColors(
 
 /**
  * [theme]'s palette, light and dark like the app: following the system mode
- * (day/night colour providers) unless [darkMode] forces one. With the system
- * accent on (Android 12+), the accent is the wallpaper colour through the same
- * contrast guard as [app.milestone.MilestoneTheme]; grounds, text and the done
- * mark stay the theme's.
+ * (day/night colour providers) unless [darkMode] forces one. The accent as
+ * [resolveSurfaceAccent] gives it ([dynamic]: the system accent); the done mark
+ * stays the theme's.
  */
 internal fun widgetColors(ctx: Context, theme: AppTheme, darkMode: DarkMode, dynamic: Boolean): WidgetColors {
-    val useDynamic = dynamic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-    val light = if (useDynamic) theme.light.withDynamicAccent(dynamicLightColorScheme(ctx).primary) else theme.light
-    val dark = if (useDynamic) theme.dark.withDynamicAccent(dynamicDarkColorScheme(ctx).primary) else theme.dark
+    val light = resolveSurfaceAccent(ctx, theme.light, night = false, dynamic = dynamic)
+    val dark = resolveSurfaceAccent(ctx, theme.dark, night = true, dynamic = dynamic)
     fun pick(role: (Palette) -> Color): ColorProvider = when (darkMode) {
         DarkMode.System -> DayNightColorProvider(role(light), role(dark))
         DarkMode.Light -> ColorProvider(role(light))

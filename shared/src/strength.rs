@@ -238,7 +238,16 @@ pub fn prilepin_volume_ok(pct_1rm: f64, total_reps: u16) -> Recommended<bool> {
 // ---------------------------------------------------------------------------
 
 /// The training quality a loading prescription targets (File 02 §1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    crate::sanitize::Sanitize,
+)]
 pub enum LiftGoal {
     MaxStrength,
     Power,

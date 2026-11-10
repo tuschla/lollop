@@ -34,11 +34,12 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import app.milestone.ActiveRunStore
 import app.milestone.AppClock
+import app.milestone.AppFileNames
+import app.milestone.AppRuntime
 import app.milestone.AppSettings
 import app.milestone.AppTheme
 import app.milestone.ConcurrentGoal
 import app.milestone.Core
-import app.milestone.DarkMode
 import app.milestone.DistanceUnit
 import app.milestone.DistanceUnitOverride
 import app.milestone.Event
@@ -55,7 +56,7 @@ import app.milestone.R
 import app.milestone.RecentRace
 import app.milestone.RunSession
 import app.milestone.TRACK_DECIMATION_CAP
-import app.milestone.UiMessages
+import app.milestone.TestClock
 import app.milestone.runDistLabel
 import app.milestone.openIntent
 import app.milestone.segmentKm
@@ -100,22 +101,9 @@ internal object ProcessDeath {
 
     /** Close any Activity and drop every process-scoped singleton, keeping disk. */
     fun kill(ctx: Context) {
-        QaHarness.teardown()
         restored?.let { c -> runCatching { c.pause().stop().destroy() } }
         restored = null
-        // The sidecar's queued appends belong to the dying process's last instants.
-        ActiveRunStore.flush()
-        QaHarness.resetCore()
-        EventDispatcher.resetForTest()
-        RunSession.reset()
-        UiMessages.clear()
-        HistoryFocus.consume()
-        // In-memory settings fall back to their initializers; onCreate reloads prefs.
-        AppSettings.theme.value = AppTheme.Paper
-        AppSettings.dynamicAccent.value = true
-        AppSettings.darkMode.value = DarkMode.System
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-        AppSettings.showRouteMaps.value = true
+        QaHarness.killProcess()
     }
 
     /** The current Activity's saved-instance state as the OS keeps it for a killed
@@ -142,7 +130,7 @@ internal object ProcessDeath {
     fun relaunchWithState(rule: ComposeTestRule, state: Bundle) {
         restored = launchWithSplashWatchdog { Robolectric.buildActivity(MainActivity::class.java).setup(state) }
         rule.waitUntil(30_000) {
-            rule.onAllNodes(isRoot()).fetchSemanticsNodes().isNotEmpty() && EventDispatcher.bootHandled
+            rule.onAllNodes(isRoot()).fetchSemanticsNodes().isNotEmpty() && AppRuntime.bootHandled
         }
         rule.waitForIdle()
     }
@@ -195,10 +183,7 @@ class RestoreRoundtripTest {
         ProcessDeath.teardown()
         RunSession.reset()
         QaHarness.clearSidecar(ctx)
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-        AppSettings.showRouteMaps.value = true
-        AppSettings.theme.value = AppTheme.Paper
-        AppSettings.darkMode.value = DarkMode.System
+        QaHarness.freshProcess()
     }
 
     // ── Shared drivers ──────────────────────────────────────────────────────────
@@ -332,7 +317,7 @@ class RestoreRoundtripTest {
         rule.mainClock.autoAdvance = false
         try {
             rule.onNodeWithText(str(R.string.track_btn_save_run)).performClick()
-            RunSession.tracking.value = false
+            RunSession.markStopped()
         } finally {
             rule.mainClock.autoAdvance = true
         }
@@ -518,7 +503,7 @@ class RestoreRoundtripTest {
         ProcessDeath.kill(ctx)
         ProcessDeath.relaunchWithState(rule, state)
         rule.waitUntil(15_000) { onSetupScreen("level") }
-        assertFalse("no profile was written mid-setup", File(ctx.filesDir, "event-log.ndjson").exists())
+        assertFalse("no profile was written mid-setup", File(ctx.filesDir, AppFileNames.EVENT_LOG).exists())
         next()
         for (screen in GuidedSetupWalk.bothPath.dropWhile { it.name != "run-now" }) {
             if (screen.name == "review") break
@@ -551,7 +536,7 @@ class RestoreRoundtripTest {
         ProcessDeath.kill(ctx)
         rule.launchAppExpectingSetup()
         assertTrue("back on the first question", onSetupScreen("train"))
-        assertFalse(File(ctx.filesDir, "event-log.ndjson").exists())
+        assertFalse(File(ctx.filesDir, AppFileNames.EVENT_LOG).exists())
         assertEquals(null, EventDispatcher.model.value?.profile)
     }
 
@@ -731,7 +716,7 @@ class RestoreRoundtripTest {
                 RunSession.setPaused(false)
             }
             val nanos = (baseElapsedMs + (p.observedAt - t0) * 1000L) * 1_000_000L
-            if (RunSession.add(p, nanos)) ActiveRunStore.append(p)
+            if (RunSession.add(p, nanos)) ActiveRunStore.append(p, RunSession.isSegmentStart(p))
         }
     }
 
@@ -748,7 +733,7 @@ class RestoreRoundtripTest {
     private fun dieAndRecover(): List<GpsPoint> {
         ActiveRunStore.flush()
         RunSession.reset()
-        val recovered = ActiveRunStore.recover(ctx)
+        val recovered = ActiveRunStore.recover()
         RunSession.restore(recovered)
         return recovered
     }
@@ -757,7 +742,7 @@ class RestoreRoundtripTest {
     fun aRecoveredRunKeepsEveryFixItsDistanceAndItsMovingTime() {
         val t0 = AppClock.nowSec() - 3600
         val pts = synthRun(seed = 31, startSec = t0, n = 1200)
-        ActiveRunStore.begin(ctx)
+        ActiveRunStore.begin()
         feedLive(pts, t0, baseElapsedMs = 5_000)
         val live = liveSnapshot()
         val livePace = RunSession.paceBucketsFlow.value
@@ -777,7 +762,7 @@ class RestoreRoundtripTest {
     fun aResumedRunCountsOnlyLegsRunAfterTheResumeAndASecondCrashRecoversItAllOnce() {
         val t0 = AppClock.nowSec() - 7200
         val before = synthRun(seed = 32, startSec = t0, n = 600)
-        ActiveRunStore.begin(ctx)
+        ActiveRunStore.begin()
         feedLive(before, t0, baseElapsedMs = 5_000)
         val atCrash = liveSnapshot()
         dieAndRecover()
@@ -822,7 +807,7 @@ class RestoreRoundtripTest {
         val pts = legs.mapIndexed { i, p ->
             if (i < 200) p else p.copy(lat = p.lat + 30.0 / metresPerDegLat, observedAt = p.observedAt + 17)
         }
-        ActiveRunStore.begin(ctx)
+        ActiveRunStore.begin()
         feedLive(pts, t0, baseElapsedMs = 5_000, pauseBefore = setOf(200))
         val live = liveSnapshot()
         assertEquals(listOf(200), live.starts)
@@ -840,7 +825,7 @@ class RestoreRoundtripTest {
         // 2 h 30 at 1 Hz: 9000 fixes, past the recovery cap.
         val t0 = AppClock.nowSec() - 10_000
         val pts = synthRun(seed = 35, startSec = t0, n = 9000, dtSec = 1)
-        ActiveRunStore.begin(ctx)
+        ActiveRunStore.begin()
         feedLive(pts, t0, baseElapsedMs = 5_000)
         val live = liveSnapshot()
         val recovered = dieAndRecover()
@@ -857,10 +842,10 @@ class RestoreRoundtripTest {
     fun aTornLastSidecarLineLosesOnlyThatFix() {
         val t0 = AppClock.nowSec() - 3600
         val pts = synthRun(seed = 36, startSec = t0, n = 300)
-        ActiveRunStore.begin(ctx)
+        ActiveRunStore.begin()
         feedLive(pts, t0, baseElapsedMs = 5_000)
         ActiveRunStore.flush()
-        val f = File(ctx.filesDir, "active-run.ndjson")
+        val f = File(ctx.filesDir, AppFileNames.ACTIVE_RUN)
         f.appendText("{\"lat\":52.5,\"lon\":13.4,\"observed_at\":")
         val recovered = dieAndRecover()
         assertEquals(pts, recovered)
@@ -872,14 +857,14 @@ class RestoreRoundtripTest {
     @Test
     fun aRunInterruptedByProcessDeathIsOfferedResumedWithEveryFixAndSavedOnce() {
         // The resume gate ages the sidecar against the wall clock, so run on it.
-        AppClock.offsetMillis = 0
+        TestClock.offsetMillis = 0
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         val now = System.currentTimeMillis() / 1000
         val pts = synthRun(seed = 37, startSec = now - 900, n = 290)
-        ActiveRunStore.begin(ctx)
+        ActiveRunStore.begin()
         feedLive(pts, pts.first().observedAt, baseElapsedMs = 5_000)
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         val live = liveSnapshot()
 
         ProcessDeath.kill(ctx)
@@ -905,7 +890,7 @@ class RestoreRoundtripTest {
         assertTrue("saved ${saved.distance_km} km vs live ${live.km} km", abs(saved.distance_km - live.km) <= 0.02 * live.km + 0.01)
         assertEquals(pts.last().observedAt, saved.observed_at)
         ActiveRunStore.flush()
-        assertFalse("the sidecar of a saved run is gone", File(ctx.filesDir, "active-run.ndjson").exists())
+        assertFalse("the sidecar of a saved run is gone", File(ctx.filesDir, AppFileNames.ACTIVE_RUN).exists())
 
         ProcessDeath.kill(ctx)
         rule.launchApp()
@@ -918,9 +903,9 @@ class RestoreRoundtripTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         val t0 = AppClock.nowSec() - 600
         val pts = synthRun(seed = 38, startSec = t0, n = 150)
-        ActiveRunStore.begin(ctx)
+        ActiveRunStore.begin()
         feedLive(pts, t0, baseElapsedMs = 5_000)
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         val live = liveSnapshot()
         launchOnTracker()
         repeat(2) {
@@ -935,29 +920,30 @@ class RestoreRoundtripTest {
 
     @Test
     fun aStaleOrOneFixSidecarIsDroppedWithoutAPromptOrARun() {
-        AppClock.offsetMillis = 0
+        TestClock.offsetMillis = 0
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         val now = System.currentTimeMillis() / 1000
         // Four hours old: past the 3 h resume window.
         val stale = synthRun(seed = 39, startSec = now - 4 * 3600 - 900, n = 200)
-        ActiveRunStore.begin(ctx)
-        stale.forEach { ActiveRunStore.append(it) }
+        ActiveRunStore.begin()
+        stale.forEach { ActiveRunStore.append(it, segmentStart = false) }
         ActiveRunStore.flush()
         rule.launchApp()
         ActiveRunStore.flush()
         assertEquals(0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
-        assertFalse(File(ctx.filesDir, "active-run.ndjson").exists())
+        assertFalse(File(ctx.filesDir, AppFileNames.ACTIVE_RUN).exists())
         assertEquals(0, model.runs.size)
 
         // A crash before the second fix: nothing to resume.
         ProcessDeath.kill(ctx)
-        ActiveRunStore.begin(ctx)
-        ActiveRunStore.append(GpsPoint(52.5, 13.4, now - 5, 5.0))
+        ActiveRunStore.start(ctx)
+        ActiveRunStore.begin()
+        ActiveRunStore.append(GpsPoint(52.5, 13.4, now - 5, 5.0), segmentStart = false)
         ActiveRunStore.flush()
         rule.launchApp()
         ActiveRunStore.flush()
         assertEquals(0, rule.countOf(hasText(str(R.string.main_resume_run_title))))
-        assertFalse(File(ctx.filesDir, "active-run.ndjson").exists())
+        assertFalse(File(ctx.filesDir, AppFileNames.ACTIVE_RUN).exists())
     }
 
     /** The save path after a recovery sends the same run the core would have got
@@ -966,7 +952,7 @@ class RestoreRoundtripTest {
     fun aRunSavedAfterRecoveryLogsTheSameDistanceAsWithoutTheCrash() {
         val t0 = AppClock.nowSec() - 3600
         val pts = synthRun(seed = 40, startSec = t0, n = 800)
-        ActiveRunStore.begin(ctx)
+        ActiveRunStore.begin()
         feedLive(pts, t0, baseElapsedMs = 5_000)
         val uninterrupted = Event.LogRunTrack(
             points = RunSession.decimatedTrackForCore(), hrPctMax = 0.0,

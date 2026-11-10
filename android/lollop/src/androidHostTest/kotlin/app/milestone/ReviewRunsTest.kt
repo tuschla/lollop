@@ -162,8 +162,8 @@ class ReviewRunsTest {
     fun anOldSidecarWithoutSegmentMarkersStillRecoversByGapRule() {
         // A sidecar from an older app carries no "seg" keys. It still recovers
         // every fix, with boundaries re-derived from fix-time gaps only.
-        val f = File(ctx.filesDir, "active-run.ndjson")
-        QaHarness.resetActiveRunStore(ctx)
+        val f = File(ctx.filesDir, AppFileNames.ACTIVE_RUN)
+        ActiveRunStore.start(ctx)
         val lines = buildList {
             add("{\"run\":\"active\"}")
             for (t in 0 until 20) add("{\"lat\":0.0,\"lon\":${t * 3e-5},\"observed_at\":${1_790_000_000 + t},\"accuracy_m\":5.0}")
@@ -172,7 +172,7 @@ class ReviewRunsTest {
             add("{\"lat\":0.0,\"lon\":0.1,\"obse") // torn final line
         }
         f.writeText(lines.joinToString("\n"))
-        val recovered = ActiveRunStore.recover(ctx)
+        val recovered = ActiveRunStore.recover()
         assertEquals(30, recovered.size)
         assertEquals(emptyList<Int>(), recovered.segmentStarts)
         RunSession.reset()

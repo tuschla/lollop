@@ -24,7 +24,7 @@ internal fun openIntent(ctx: Context, dest: OpenDest): Intent =
 internal fun openPendingIntent(ctx: Context, dest: OpenDest): PendingIntent =
     PendingIntent.getActivity(
         ctx,
-        OPEN_REQUEST_BASE + dest.ordinal,
+        AndroidIds.OPEN_REQUEST_BASE + dest.ordinal,
         openIntent(ctx, dest),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
@@ -32,6 +32,3 @@ internal fun openPendingIntent(ctx: Context, dest: OpenDest): PendingIntent =
 /** The destination an incoming intent asks for, or null when it isn't an open intent. */
 internal fun openDestOf(intent: Intent?): OpenDest? =
     if (intent?.action == ACTION_OPEN) OpenDest.fromWire(intent.getStringExtra(EXTRA_DEST)) else null
-
-// Request codes 0x4F50_0000.. (no other getActivity caller in the app uses this range).
-private const val OPEN_REQUEST_BASE = 0x4F500000

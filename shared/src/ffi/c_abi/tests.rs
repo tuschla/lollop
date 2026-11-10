@@ -1,10 +1,13 @@
 //! The C ABI wraps `ffi` without changing its answers: these drive the
 //! `extern "C"` functions exactly as a C caller would (raw pointers in, owned
-//! buffers out, one free each). They share the one global bridge with the
-//! `ffi` tests, so the bridge-touching ones hold its reset lock.
+//! buffers out, one free each).
 
 use super::*;
-use crate::ffi::tests::BRIDGE_RESET;
+
+/// The `lollop_*` functions drive the one process-wide core, which only these
+/// tests touch. The reset test empties it, so it runs alone (write) while the
+/// others share it (read).
+static GLOBAL_CORE: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 /// Copy a returned buffer out and free it, as a shell does.
 fn take(bytes: LollopBytes) -> Vec<u8> {
@@ -25,7 +28,7 @@ const PROFILE: &str = r#"{"SetProfile":{"progression_cadence":"EverySession","li
 
 #[test]
 fn update_and_view_answer_over_the_c_abi() {
-    let _bridge = BRIDGE_RESET.read().unwrap_or_else(|e| e.into_inner());
+    let _bridge = GLOBAL_CORE.read().unwrap_or_else(|e| e.into_inner());
     let requests = update(PROFILE);
     assert_eq!(requests.first(), Some(&b'['), "an effect-request array");
     let view: serde_json::Value = serde_json::from_slice(&take(lollop_view())).unwrap();
@@ -34,7 +37,7 @@ fn update_and_view_answer_over_the_c_abi() {
 
 #[test]
 fn a_dropped_or_null_event_is_the_empty_answer() {
-    let _bridge = BRIDGE_RESET.read().unwrap_or_else(|e| e.into_inner());
+    let _bridge = GLOBAL_CORE.read().unwrap_or_else(|e| e.into_inner());
     let dropped = unsafe { lollop_update(b"{\"NoSuchEvent\":1}".as_ptr(), 17) };
     assert!(dropped.data.is_null() && dropped.len == 0);
     let null = unsafe { lollop_update(std::ptr::null(), 0) };
@@ -77,7 +80,7 @@ fn pure_helpers_answer_errors_and_empties() {
 
 #[test]
 fn reset_empties_the_core_as_a_fresh_process_has_it() {
-    let _bridge = BRIDGE_RESET.write().unwrap_or_else(|e| e.into_inner());
+    let _bridge = GLOBAL_CORE.write().unwrap_or_else(|e| e.into_inner());
     // Other tests leave their events in the shared core: start from a reset one.
     lollop_reset();
     let empty = take(lollop_view());

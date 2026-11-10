@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppRuntime
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.FieldLabel
@@ -43,6 +44,8 @@ import app.milestone.MilestoneTheme
 import app.milestone.R
 import app.milestone.ReadinessSignal
 import app.milestone.SendResult
+import app.milestone.TestClock
+import app.milestone.TestSink
 import app.milestone.ViewModel
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -497,7 +500,7 @@ class ReviewShellComponentTest {
     @Test fun runStats_328dp_font130() = runStatsWhole(1.3f, 328)
 
     /**
-     * [EventDispatcher.resetForTest] must settle the [EventDispatcher.exclusive]
+     * A fresh process ([AppRuntime.resetForTest]) must settle the [EventDispatcher.exclusive]
      * blocks still waiting in the old queue. When the in-flight unit ignores
      * cancellation (as Export.kt's `withContext(CoreDispatcher + NonCancellable)`
      * restore body does), the cancelled consumer can't drain them, and a dropped
@@ -506,24 +509,24 @@ class ReviewShellComponentTest {
      */
     @Test
     fun resetForTest_completesOrFailsQueuedExclusiveAwaiters() {
-        val real = EventDispatcher.sender
+        val real = TestSink.sender
         val gate = CompletableDeferred<Unit>()
         val late = ViewModel(input_count = 777)
         try {
-            EventDispatcher.resetForTest()
+            QaHarness.freshProcess()
             // Hold the consumer on one non-cancellable in-flight send so the next unit waits in the queue.
-            EventDispatcher.sender = { _ ->
+            TestSink.sender = { _ ->
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gate.await() }
                 SendResult(late, accepted = true, persisted = true, stale = false)
             }
             EventDispatcher.send(Event.SetToday(1L, 0))
             var settled = false
-            val awaiter = EventDispatcher.scope.launch {
+            val awaiter = AppRuntime.scope.launch {
                 runCatching { EventDispatcher.exclusive { null } }
                 settled = true
             }
             shadowOf(Looper.getMainLooper()).idle()
-            EventDispatcher.resetForTest()
+            QaHarness.freshProcess()
             gate.complete(Unit) // the in-flight unit finishes after the reset
             shadowOf(Looper.getMainLooper()).idleFor(5, TimeUnit.SECONDS)
             assertTrue("the queued exclusive() awaiter settled after resetForTest (still active: ${awaiter.isActive})", settled)
@@ -531,8 +534,8 @@ class ReviewShellComponentTest {
             awaiter.cancel()
         } finally {
             gate.complete(Unit)
-            EventDispatcher.sender = real
-            EventDispatcher.resetForTest()
+            TestSink.sender = real
+            QaHarness.freshProcess()
         }
     }
 
@@ -544,21 +547,23 @@ class ReviewShellComponentTest {
         val gate = CompletableDeferred<Unit>()
         val late = ViewModel(input_count = 778)
         try {
-            EventDispatcher.resetForTest()
+            QaHarness.freshProcess()
+            // Awaiters outside the app's process scope, which the reset cancels.
+            val callers = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
             var got: ViewModel? = null
-            val first = EventDispatcher.scope.launch {
+            val first = callers.launch {
                 got = EventDispatcher.exclusive {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gate.await() }
                     late
                 }
             }
             var queuedSettled = false
-            val queued = EventDispatcher.scope.launch {
+            val queued = callers.launch {
                 runCatching { EventDispatcher.exclusive { null } }
                 queuedSettled = true
             }
             shadowOf(Looper.getMainLooper()).idle()
-            EventDispatcher.resetForTest()
+            QaHarness.freshProcess()
             gate.complete(Unit)
             shadowOf(Looper.getMainLooper()).idleFor(5, TimeUnit.SECONDS)
             assertTrue("the in-flight body's awaiter got its result (got $got)", got === late)
@@ -568,7 +573,7 @@ class ReviewShellComponentTest {
             queued.cancel()
         } finally {
             gate.complete(Unit)
-            EventDispatcher.resetForTest()
+            QaHarness.freshProcess()
         }
     }
 
@@ -579,15 +584,15 @@ class ReviewShellComponentTest {
      */
     @Test
     fun resetForTest_cancelledConsumerRunsNothingMore() {
-        val real = EventDispatcher.sender
+        val real = TestSink.sender
         val gate = CompletableDeferred<Unit>()
         val ranAfterCancel = mutableListOf<Event>()
         var published: ViewModel? = null
         val second = ViewModel(input_count = 4242)
         try {
-            EventDispatcher.resetForTest()
+            QaHarness.freshProcess()
             var calls = 0
-            EventDispatcher.sender = { e ->
+            TestSink.sender = { e ->
                 if (calls++ == 0) {
                     gate.await()
                     SendResult(ViewModel(), accepted = true)
@@ -596,11 +601,11 @@ class ReviewShellComponentTest {
                     SendResult(second, accepted = true)
                 }
             }
-            val watcher = EventDispatcher.scope.launch { EventDispatcher.model.collect { if (it === second) published = it } }
+            val watcher = AppRuntime.scope.launch { EventDispatcher.model.collect { if (it === second) published = it } }
             EventDispatcher.send(Event.SetToday(1L, 0))
             EventDispatcher.send(Event.SetToday(2L, 0))
             shadowOf(Looper.getMainLooper()).idle()
-            EventDispatcher.resetForTest()
+            QaHarness.freshProcess()
             shadowOf(Looper.getMainLooper()).idleFor(5, TimeUnit.SECONDS)
             watcher.cancel()
             assertTrue(
@@ -609,8 +614,8 @@ class ReviewShellComponentTest {
             )
         } finally {
             gate.complete(Unit)
-            EventDispatcher.sender = real
-            EventDispatcher.resetForTest()
+            TestSink.sender = real
+            QaHarness.freshProcess()
         }
     }
 
@@ -619,20 +624,20 @@ class ReviewShellComponentTest {
      *  nor a fake send path it installed. */
     @Test
     fun resetForTest_dropsBufferedNoticesAndFakeSendPaths() {
-        EventDispatcher.resetForTest()
+        QaHarness.freshProcess()
         // A previous test's rejected entry, with no Activity collecting.
         EventDispatcher.report(SendResult(ViewModel(), accepted = false))
         val fake: suspend (Event) -> SendResult = { _ -> SendResult(ViewModel(), accepted = true) }
         val fakeBatch: suspend (List<Event>) -> SendResult = { _ -> SendResult(ViewModel(), accepted = true) }
-        EventDispatcher.sender = fake
-        EventDispatcher.batchSender = fakeBatch
-        EventDispatcher.resetForTest()
+        TestSink.sender = fake
+        TestSink.batchSender = fakeBatch
+        QaHarness.freshProcess()
         var leaked: app.milestone.CoreNotice? = null
-        val job = EventDispatcher.scope.launch { EventDispatcher.notices.collect { leaked = it } }
+        val job = AppRuntime.scope.launch { EventDispatcher.notices.collect { leaked = it } }
         shadowOf(Looper.getMainLooper()).idle()
         job.cancel()
         assertTrue("a fresh process has no pending notice, got $leaked", leaked == null)
-        assertTrue("a fresh process sends to the core", EventDispatcher.sender !== fake && EventDispatcher.batchSender !== fakeBatch)
+        assertTrue("a fresh process sends to the core", TestSink.sender !== fake && TestSink.batchSender !== fakeBatch)
     }
 
     /** Open the sheet's date picker, pick the day whose label contains [day] (or
@@ -650,11 +655,11 @@ class ReviewShellComponentTest {
      *  clock has and a date-only pick drops, so "same day" can't pass as "same instant". */
     private fun pinnedClock(body: () -> Unit) {
         java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
-        app.milestone.AppClock.offsetMillis = QaHarness.PINNED_NOW_MILLIS + 37_000L - System.currentTimeMillis()
+        TestClock.offsetMillis = QaHarness.PINNED_NOW_MILLIS + 37_000L - System.currentTimeMillis()
         try {
             body()
         } finally {
-            app.milestone.AppClock.offsetMillis = 0L
+            TestClock.offsetMillis = 0L
         }
     }
 
@@ -702,17 +707,17 @@ class ReviewShellComponentTest {
      *  and published by the new consumer. */
     @Test
     fun resetForTest_newConsumerPublishes() {
-        val real = EventDispatcher.sender
+        val real = TestSink.sender
         try {
-            EventDispatcher.resetForTest()
+            QaHarness.freshProcess()
             val vm = ViewModel()
-            EventDispatcher.sender = { _ -> SendResult(vm, accepted = true, persisted = true, stale = false) }
+            TestSink.sender = { _ -> SendResult(vm, accepted = true, persisted = true, stale = false) }
             EventDispatcher.send(Event.SetToday(1L, 0))
             shadowOf(Looper.getMainLooper()).idle()
             assertTrue("published", EventDispatcher.model.value === vm)
         } finally {
-            EventDispatcher.sender = real
-            EventDispatcher.resetForTest()
+            TestSink.sender = real
+            QaHarness.freshProcess()
         }
     }
 }

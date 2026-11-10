@@ -19,7 +19,7 @@ fn racer_profile(today: i64) -> Profile {
 
 fn flatten_with_targets(
     kind: RunSessionType,
-    rx: Recommended<Prescription>,
+    rx: Rx,
     anchors: &crate::plan::Anchors,
     model: &Model,
     day: i64,
@@ -56,7 +56,7 @@ fn threshold_run_renders_pace_range_from_a_recent_10k() {
         run_vdot: Some(vdot),
         ..Default::default()
     };
-    let rx = Recommended::new(
+    let rx = RxBasis::Workout.rx(
         Prescription::Run(crate::schema::RunPrescription::new(
             crate::schema::RunVolume::DistanceKm(5.0),
             crate::schema::RunIntensity::HrPercentMax {

@@ -3,12 +3,11 @@
 
 use crate::app::format::{fmt_weight_num, round_tenths, weight_num, weight_suffix};
 use crate::app::guidance::push_guidance;
-use crate::app::memo::{Memo, VIEW_LIST_CACHE_CAP, memoized};
 use crate::app::model::{LoggedSet, Model};
-use crate::app::readiness::end_of_local_today_sec;
 use crate::app::view_ctx::ViewCtx;
 use crate::app::view_types::{E1rmRangeView, EvidenceTagView, GuidanceView, LiftResultView};
-use crate::day::{DAY_SEC, is_undated, local_day};
+use crate::day::{DAY_SEC, UpToToday, local_day};
+use crate::memo::{MemoId, memoized};
 use crate::profile::Profile;
 use crate::{hypertrophy, strength};
 
@@ -60,18 +59,18 @@ pub(super) fn build_lift_audit(cx: &ViewCtx) -> Vec<GuidanceView> {
     };
     // Anchor on the most recent dated lifting day AT/BEFORE local today, so a
     // backdated future-timestamped set never pulls the audit onto a day that
-    // has not happened (matching the sibling audits' `end_of_local_today_sec`).
-    let today_end = end_of_local_today_sec(model);
+    // has not happened.
+    let so_far = model.up_to_today();
     if let Some(last_day) = model
         .sets
         .iter()
-        .filter(|s| !is_undated(s.observed_at) && today_end.is_none_or(|end| s.observed_at <= end))
+        .filter(|s| so_far.admits(s.observed_at))
         .map(|s| local_day(s.observed_at, model.today_utc_offset_sec))
         .max()
     {
         push_day_audit_rows(&mut rows, cx, last_day, &include);
     }
-    push_depth_jump_row(&mut rows, model, today_end, &include);
+    push_depth_jump_row(&mut rows, model, so_far, &include);
     rows
 }
 
@@ -231,7 +230,7 @@ fn push_day_audit_rows(
 fn push_depth_jump_row(
     rows: &mut Vec<GuidanceView>,
     model: &Model,
-    today_end: Option<i64>,
+    so_far: UpToToday,
     include: &impl Fn(&LoggedSet) -> bool,
 ) {
     let Some(bw) = model
@@ -241,12 +240,12 @@ fn push_depth_jump_row(
     else {
         return;
     };
-    let within_today = |t: i64| today_end.is_none_or(|end| t <= end);
     // Only a reliable, recent barbell back squat (`exercise::is_back_squat`, the
     // plan's own depth-jump gate) anchors the 1.5×BW gate; high-rep (>10)
     // sets do not estimate a trustworthy 1RM (strength-006/033).
-    let recent_cutoff =
-        today_end.map(|end| end.saturating_sub(SQUAT_ANCHOR_RECENCY_DAYS * DAY_SEC));
+    let recent_cutoff = so_far
+        .end_sec()
+        .map(|end| end.saturating_sub(SQUAT_ANCHOR_RECENCY_DAYS * DAY_SEC));
     // The name test is a pure function of the name: run it once per
     // distinct name, and only on sets inside the recency window.
     let mut back_squat: std::collections::HashMap<&str, bool> = Default::default();
@@ -259,7 +258,7 @@ fn push_depth_jump_row(
         .sets
         .iter()
         .filter(|s| {
-            within_today(s.observed_at)
+            so_far.not_future(s.observed_at)
                 && recent_cutoff.is_none_or(|c| s.observed_at >= c)
                 && strength::e1rm_reliable(strength::effective_reps(s.reps, s.rpe), false).value
                 && include(s)
@@ -287,21 +286,14 @@ fn push_depth_jump_row(
     }
 }
 
-thread_local! {
-    /// The finished lift list keyed by the sets' content fingerprint and the
-    /// display unit: `model.sets` changes only on a log/amend/delete, so an
-    /// unchanged model skips the sort and per-set e1RM math.
-    static LIFT_VIEWS_CACHE: std::cell::RefCell<Memo<(u64, bool), Vec<LiftResultView>>> =
-        std::cell::RefCell::new(Memo::new(VIEW_LIST_CACHE_CAP));
-}
-
 /// Every logged set in log order. `e1rm_pr` marks a set whose e1RM beats
 /// every earlier e1RM of its name chain (see the chain comment in
-/// [`lift_views_uncached`]). Memoized on `sets_fp` ([`sets_fingerprint`] of
-/// `sets`) and the display unit, so a kg↔lb toggle misses rather than serving
-/// a stale-unit summary.
+/// [`lift_views_uncached`]). Memoized ([`MemoId::LiftViews`]) on `sets_fp`
+/// ([`crate::memo::fingerprint`] of `sets`; `model.sets` changes only on a
+/// log/amend/delete) and the display unit, so a kg↔lb toggle misses rather
+/// than serving a stale-unit summary.
 pub(super) fn lift_views(sets: &[LoggedSet], sets_fp: u64, weight_lb: bool) -> Vec<LiftResultView> {
-    memoized(&LIFT_VIEWS_CACHE, (sets_fp, weight_lb), || {
+    memoized(MemoId::LiftViews, &(sets_fp, weight_lb), || {
         lift_views_uncached(sets, weight_lb)
     })
 }

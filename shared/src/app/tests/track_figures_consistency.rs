@@ -148,3 +148,16 @@ fn a_runs_start_is_its_first_fix_or_its_logged_stamp_minus_its_duration() {
     assert_eq!(by_id(2).started_at, end + 3600 - 30 * 60);
     assert_eq!(by_id(3).started_at, 0);
 }
+
+#[test]
+fn a_negative_stamped_run_starts_undated() {
+    // A non-positive stamp names no real day (`crate::day::is_undated`): the
+    // card's start reads undated (0), as every day bucket treats the run,
+    // never a start before the epoch.
+    let app = Engine;
+    let mut model = Model::default();
+    let _ = app.update(log_run(5.0, 30.0, 0.0, 0.0, -3_600, 1), &mut model);
+    let vm = app.view(&model);
+    assert_eq!(vm.runs.len(), 1);
+    assert_eq!(vm.runs[0].started_at, 0);
+}

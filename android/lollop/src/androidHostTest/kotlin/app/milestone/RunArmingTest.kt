@@ -217,15 +217,15 @@ class RunArmingTest {
     }
 
     // ── markStopped: a dead-service stop resets the WHOLE state machine ──────
-    // RunTrackingService.stop()'s dead-service catch calls RunSession.markStopped(),
-    // mirroring stopTracking(): clearing only `tracking` would leave `locating` /
-    // `armed` latched and the tracker stuck on "Acquiring GPS" with no engine.
+    // A stop that can't reach the service ([RunRecorder.stopUndelivered]) and every
+    // recorder teardown call RunSession.markStopped(): clearing only `tracking` would
+    // leave `locating` / `armed` latched and the tracker stuck on "Acquiring GPS" with
+    // no engine.
 
     @Test
     fun markStoppedClearsLocatingAndArmedNotJustTracking() {
-        RunSession.tracking.value = true
-        RunSession.locating.value = true
-        RunSession.armed.value = true
+        RunSession.streamStarted(recording = true)
+        RunRecorder.armRequested()
         RunSession.markStopped()
         assertFalse(RunSession.tracking.value)
         assertFalse("locating cleared: no stuck 'Acquiring GPS'", RunSession.locating.value)

@@ -3,13 +3,15 @@ package app.milestone.qa
 import android.content.Context
 import android.os.Looper
 import app.milestone.AppClock
+import app.milestone.AppFileNames
+import app.milestone.AppRuntime
 import app.milestone.ConcurrentGoal
 import app.milestone.Core
+import app.milestone.DurableCore
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GoalDistance
 import app.milestone.GpsPoint
-import app.milestone.HistoryFocus
 import app.milestone.LiftGoal
 import app.milestone.PrescriptionView
 import app.milestone.ProgressionCadence
@@ -17,13 +19,14 @@ import app.milestone.ResistanceModality
 import app.milestone.RunSession
 import app.milestone.RecentRace
 import app.milestone.SendResult
+import app.milestone.TestClock
+import app.milestone.TestSink
 import app.milestone.ViewModel
 import app.milestone.isReturnCheckItem
 import app.milestone.isRunItem
 import app.milestone.setupPrefs
 import app.milestone.todayEpochDay
 import app.milestone.utcOffsetSec
-import app.milestone.UiMessages
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -45,7 +48,7 @@ import java.util.Locale
  */
 object QaHarness {
 
-    internal fun logFile(ctx: Context) = File(ctx.filesDir, "event-log.ndjson")
+    internal fun logFile(ctx: Context) = File(ctx.filesDir, AppFileNames.EVENT_LOG)
 
     /** The durable log's non-blank lines. */
     fun logLines(ctx: Context): List<String> = logFile(ctx).readLines().filter { it.isNotBlank() }
@@ -53,87 +56,63 @@ object QaHarness {
     /** Process death, then the boot sequence: restore (compaction + replay) and the
      *  boot SetToday. */
     fun reboot(ctx: Context): SendResult {
-        ProcessDeath.kill(ctx)
-        Core.restore(ctx)
-        return Core.send(Event.SetToday(todayEpochDay(), utcOffsetSec()))
+        killProcess()
+        AppRuntime.engine.restore(ctx)
+        return AppRuntime.engine.send(Event.SetToday(todayEpochDay(), utcOffsetSec()))
     }
 
     /**
-     * Reset every process-scoped bit of state the app singletons hold so the next
-     * launched Activity boots as if the process were fresh: the JVM default locale
-     * (US), the native core's bridge, Core's replay guard + cached view, the
-     * EventDispatcher queue, consumer, boot gate and model flow, the setup
-     * SharedPreferences, and the on-disk event log.
-     *
-     * Robolectric shares one sandbox classloader across the whole suite, so these
-     * statics survive between tests; without this reset a prior scenario's core
-     * state and "already booted" flags would leak into the next.
+     * A fresh install in a fresh process, as each scenario starts: the app's process
+     * ([freshProcess]) on the [TestClock] pinned to [PINNED_NOW_MILLIS] in UTC, the
+     * JVM locale US, the default font scale, and no setup or theme preferences, no
+     * event log and no rest left from an earlier scenario. Robolectric runs the
+     * whole suite in one JVM, so without this a prior scenario's state would leak.
      */
     fun reset(ctx: Context) {
         Locale.setDefault(Locale.US)
         // A prior test may have bumped the font scale (the 1.3 clipping check);
-        // it is process-global under Robolectric, so restore the default here or
-        // it leaks into every later scenario's layout.
+        // it is process-global under Robolectric.
         org.robolectric.RuntimeEnvironment.setFontScale(1.0f)
 
-        // Snackbar queue and History focus are process-scoped: a message posted by
-        // a prior scenario must not surface in this one's screenshots.
-        UiMessages.clear()
-        HistoryFocus.consume()
-
-        // Pin the zone and the app clock to a fixed Monday morning so every
-        // scenario sees the same week: Monday is a lift day in every seeded plan,
-        // so "today's session" exists no matter which weekday the suite runs on,
-        // and screenshots carry stable dates.
+        // A fixed Monday morning: Monday is a lift day in every seeded plan, so
+        // "today's session" exists whichever weekday the suite runs on, and
+        // screenshots carry stable dates.
         java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
-        AppClock.offsetMillis = PINNED_NOW_MILLIS - System.currentTimeMillis()
-
-        resetCore()
-
-        // Process-scoped session singletons (internal, same module → direct). The
-        // dispatcher gets a fresh queue and consumer: a prior test's unit still in
-        // flight when Robolectric recycled the main looper would otherwise have left
-        // a consumer that never resumes, so this boot would wait on it forever (the
-        // splash cancelling every frame, ActivityScenario.launch spinning).
-        EventDispatcher.resetForTest()
+        TestClock.offsetMillis = PINNED_NOW_MILLIS - System.currentTimeMillis()
+        freshProcess(engine = null)
         injectCoreLatency()
-        // The run tracker's process singleton (live run, plan guide, save latch): a
-        // scenario that left a run recording must not reopen the tracker in the next.
-        app.milestone.RunSession.reset()
-        // The set loop's running rest drives its readout; a prior scenario's rest
-        // (or its exact-alarm notice) must not show in the next loop.
-        app.milestone.RestAlarm.cancel(ctx)
-        app.milestone.RestAlarm.resetProcessState()
-        // The widget snapshot sync started by an earlier test's Activity is bound
-        // to that test's Application (and files dir); the next launch starts it
-        // again for this one.
-        app.milestone.widget.WidgetSync.resetForTest()
 
-        // Onboarding / plan-cleared markers live here; a stale onboarding_done
-        // would suppress the fresh-install guided setup.
+        // The rest's alarm, notifications and saved rest outlive a process.
+        app.milestone.RestAlarm.cancel(ctx)
         ctx.setupPrefs().edit().clear().commit()
-        ctx.getSharedPreferences("theme", Context.MODE_PRIVATE).edit().clear().commit()
+        ctx.getSharedPreferences(AppFileNames.SETTINGS_STORE, Context.MODE_PRIVATE).edit().clear().commit()
 
         logFile(ctx).delete()
-        File(ctx.filesDir, "event-log.ndjson.bak").delete()
-        File(ctx.filesDir, "event-log.ndjson.tmp").delete()
+        for (suffix in AppFileNames.LOG_SUFFIXES) File(ctx.filesDir, AppFileNames.EVENT_LOG + suffix).delete()
     }
 
-    /**
-     * The native core's bridge and the engine's private replay/caching state (fields
-     * of [app.milestone.DurableCore], Core's superclass), as a new process starts
-     * them. The engine has no setters for these fields; tests reset them by
-     * reflection here and nowhere else.
-     */
-    fun resetCore() {
-        Core.resetForTest()
-        setPrivate(Core, "restored", false)
-        setPrivate(Core, "log", null)
-        setPrivate(Core, "lastGoodView", null)
-        setPrivate(Core, "appendTornGuard", false)
-        setPrivate(Core, "lastSetToday", null)
-        setPrivate(Core, "viewStale", false)
-        setPrivate(Core, "logDegraded", false)
+    /** Process death: the launched Activity closed, the run sidecar's queued
+     *  appends written (the dying process's last instants), then [freshProcess];
+     *  every file and preference stays. */
+    fun killProcess() {
+        teardown()
+        app.milestone.ActiveRunStore.flush()
+        freshProcess()
+    }
+
+    // The engine a test runs the app on instead of the platform's; a process death
+    // keeps it, [reset] drops it.
+    private var engine: DurableCore? = null
+
+    /** A new process on the same disk ([AppRuntime.resetForTest]), on the test
+     *  clock and the real send path ([TestSink]), and on [engine] when a test runs
+     *  its own. */
+    fun freshProcess(engine: DurableCore? = this.engine) {
+        this.engine = engine
+        TestSink.reset()
+        AppRuntime.resetForTest(engine, TestSink, TestClock)
+        // Scenarios drive the platform engine directly too, outside the process.
+        Core.forgetProcess()
     }
 
     /**
@@ -148,10 +127,10 @@ object QaHarness {
      */
     private fun injectCoreLatency() {
         val ms = System.getenv("QA_CORE_LATENCY_MS")?.toLongOrNull()?.takeIf { it > 0 } ?: return
-        val send = EventDispatcher.sender
-        val sendAll = EventDispatcher.batchSender
-        EventDispatcher.sender = { e -> send(e).also { lag(ms) } }
-        EventDispatcher.batchSender = { es -> sendAll(es).also { lag(ms) } }
+        val send = TestSink.sender
+        val sendAll = TestSink.batchSender
+        TestSink.sender = { e -> send(e).also { lag(ms) } }
+        TestSink.batchSender = { es -> sendAll(es).also { lag(ms) } }
     }
 
     private suspend fun lag(ms: Long) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Thread.sleep(ms) }
@@ -174,19 +153,11 @@ object QaHarness {
         f.writeText(events.joinToString("") { it.toJson().toString() + "\n" })
     }
 
-    /** Point [app.milestone.ActiveRunStore] at [ctx]'s files dir. The store caches
-     *  its file from the first init in this JVM, which may be another test's (now
-     *  gone) files dir. */
-    fun resetActiveRunStore(ctx: Context) {
-        setPrivate(app.milestone.ActiveRunStore, "file", null)
-        app.milestone.ActiveRunStore.init(ctx)
-    }
-
     /** Point the run sidecar store at [ctx]'s files dir and empty it. */
     fun clearSidecar(ctx: Context) {
-        resetActiveRunStore(ctx)
+        app.milestone.ActiveRunStore.start(ctx)
         app.milestone.ActiveRunStore.clearSync()
-        File(ctx.filesDir, "active-run.ndjson").delete()
+        File(ctx.filesDir, AppFileNames.ACTIVE_RUN).delete()
     }
 
     /** Idle the paused main looper until [done] holds (the core's replies and every
@@ -205,7 +176,7 @@ object QaHarness {
      *  resume there, so a plain runBlocking on this thread would deadlock. */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun <T> onAppScope(timeoutMs: Long = 30_000, block: suspend () -> T): T {
-        val job = EventDispatcher.scope.async { block() }
+        val job = AppRuntime.scope.async { block() }
         pumpMainUntil("app-scope work", timeoutMs) { job.isCompleted }
         return job.getCompleted()
     }
@@ -386,15 +357,7 @@ object QaHarness {
         for (i in 0..20) {
             RunSession.add(GpsPoint(52.5200 + i * 0.00027, 13.4050, t0 + i * 10L, 5.0), (1_000L + i * 10L) * 1_000_000_000L)
         }
-        RunSession.tracking.value = true
-    }
-
-    /** Set the private [field] of [target], declared by its class or a superclass. */
-    private fun setPrivate(target: Any, field: String, value: Any?) {
-        val f = generateSequence<Class<*>>(target.javaClass) { it.superclass }
-            .firstNotNullOf { runCatching { it.getDeclaredField(field) }.getOrNull() }
-        f.isAccessible = true
-        f.set(target, value)
+        RunSession.recordingStarted()
     }
 }
 
@@ -407,6 +370,6 @@ internal fun ComposeTestRule.countOf(matcher: SemanticsMatcher): Int = onAllNode
 
 /** Wait until the launched app has booted (the boot effect ran and a model is published). */
 internal fun ComposeTestRule.waitForBoot() {
-    waitUntil(30_000) { EventDispatcher.bootHandled && EventDispatcher.model.value != null }
+    waitUntil(30_000) { AppRuntime.bootHandled && EventDispatcher.model.value != null }
     waitForIdle()
 }

@@ -2,7 +2,7 @@
 //! source rows, the Today headline, baseline echoes, and the readiness signal
 //! groups.
 
-use crate::app::evidence_views::{is_illness_claim, is_pain_claim, to_view, to_view_with};
+use crate::app::evidence_views::{to_view, to_view_with};
 use crate::app::format::monday_of;
 use crate::app::logged_days::{DeloadDays, LoggedDays, lift_deload_days, plan_week_index};
 use crate::app::model::{LoggedSet, Model};
@@ -13,13 +13,12 @@ use crate::app::view_types::{
     TodayHeadlineView,
 };
 use crate::autoreg;
-use crate::day::{DAY_SEC, is_undated, local_day};
-use crate::evidence::claims;
+use crate::day::{is_undated, local_day};
 use crate::feedback::{self, FeedbackCategory};
 use crate::profile::Profile;
 use crate::schema::{
-    Adjustment, CheckinInput, HealthScreen, ReadinessInput, ReadinessSignal, Recommended,
-    SafetyTier,
+    Adjustment, AdjustmentCall, AdjustmentKind, CheckinInput, HealthScreen, ReadinessInput,
+    ReadinessSignal, Recommended, SafetyTier, ScreenGate,
 };
 use crate::strength::LiftGoal;
 
@@ -48,20 +47,6 @@ pub(super) fn to_baseline_status_view(s: &autoreg::BaselineStatus) -> BaselineSt
 /// increase-driving signals expire (see [`is_expirable_perf_signal`]); protective
 /// signals never do (HARD RULE 3).
 pub(super) const PERF_SIGNAL_EXPIRY_DAYS: i64 = 14;
-
-/// End-of-local-today boundary, unix seconds: a row with `observed_at`
-/// beyond it is FUTURE-dated (a mis-imported 2030 GPX) and must not anchor
-/// "current" windows (weekly-report cur-week, CTL/ATL last day). Same local-day
-/// boundary the run anchors / `session_logged` use. `None` when the shell has not
-/// supplied "today" (no clock in the core) → no guard.
-pub(super) fn end_of_local_today_sec(model: &Model) -> Option<i64> {
-    model.today_epoch_day.map(|d| {
-        d.saturating_add(1)
-            .saturating_mul(DAY_SEC)
-            .saturating_sub(model.today_utc_offset_sec)
-            .saturating_sub(1)
-    })
-}
 
 /// Whether a reading drives a load increase (RPE below target, e1RM ratio > 1,
 /// bar velocity). Only those expire; protective readings never do (HARD RULE 3).
@@ -186,7 +171,7 @@ pub(super) fn build_autoreg_source(
 /// training is blocked outright. An increase row must not displace the
 /// prescription while this holds (the readiness↔review reconciliation and the
 /// review's own increase rows share this predicate).
-pub(super) fn suppression_active(recs: &[Recommended<Adjustment>], train_blocked: bool) -> bool {
+pub(super) fn suppression_active(recs: &[AdjustmentCall], train_blocked: bool) -> bool {
     train_blocked
         || recs.iter().any(|r| {
             matches!(
@@ -213,7 +198,7 @@ pub(super) fn suppression_active(recs: &[Recommended<Adjustment>], train_blocked
 pub(super) const REDS_SCREEN_WINDOW_DAYS: i64 = 28;
 
 /// Whether an adjustment takes training off today (stop, rest day, deferral).
-pub(super) fn blocks_training(r: &Recommended<Adjustment>) -> bool {
+pub(super) fn blocks_training(r: &AdjustmentCall) -> bool {
     matches!(
         r.value,
         Adjustment::Stop | Adjustment::RestDay | Adjustment::Defer { .. }
@@ -224,7 +209,7 @@ pub(super) fn blocks_training(r: &Recommended<Adjustment>) -> bool {
 /// profile health gate (it stops the plan itself), else the reason of the
 /// blocking call itself (`SafetyState::hold`). `None` without a hold.
 pub(super) fn hold_reason(
-    hold: Option<&Recommended<Adjustment>>,
+    hold: Option<&AdjustmentCall>,
     health: Option<&HealthScreen>,
 ) -> Option<HoldReason> {
     let hold = hold?;
@@ -245,35 +230,14 @@ pub(super) fn hold_reason(
             HoldReason::AcuteIllnessProfile
         });
     }
-    let claim = hold.claim_id();
-    Some(if claim == claims::SAFE_REDS_001 {
-        HoldReason::Reds
-    } else if is_pain_claim(claim) {
-        HoldReason::Pain
-    } else if is_illness_claim(claim) || matches!(hold.value, Adjustment::RestDay) {
-        HoldReason::Illness
-    } else {
-        HoldReason::MedicalSignal
+    Some(match hold.kind() {
+        AdjustmentKind::RedsReferral | AdjustmentKind::Screen(ScreenGate::Reds) => HoldReason::Reds,
+        kind => match kind.tier() {
+            SafetyTier::Pain => HoldReason::Pain,
+            SafetyTier::Illness => HoldReason::Illness,
+            _ => HoldReason::MedicalSignal,
+        },
     })
-}
-
-/// Content fingerprint of the check-in history (every field the derivation
-/// reads), so a memo over derived readiness misses when any check-in changes.
-pub(super) fn checkins_fingerprint(checkins: &[CheckinInput]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    checkins.len().hash(&mut h);
-    for c in checkins {
-        c.observed_at.hash(&mut h);
-        c.sleep_quality.hash(&mut h);
-        c.soreness.hash(&mut h);
-        c.mood.hash(&mut h);
-        c.fatigue.hash(&mut h);
-        c.stress.hash(&mut h);
-        c.resting_hr_bpm.map(f64::to_bits).hash(&mut h);
-        c.hrv_rmssd_ms.map(f64::to_bits).hash(&mut h);
-    }
-    h.finish()
 }
 
 /// The check-in history the derivation reads: HRV readings logged before a
@@ -297,18 +261,39 @@ pub(super) fn checkins_for_derivation(model: &Model) -> std::borrow::Cow<'_, [Ch
     }
 }
 
+/// A rendered adjustment row and what the Today headline ranks it on.
+pub(in crate::app) struct RankedRow {
+    pub(in crate::app) view: AdjustmentView,
+    /// The call's §5 safety-ladder rung; `None` for an untiered row.
+    pub(in crate::app) tier: Option<SafetyTier>,
+    /// A graded "no change" verdict carrying no real `Adjustment`: it renders
+    /// but never headlines.
+    pub(in crate::app) neutral: bool,
+}
+
+impl RankedRow {
+    /// An untiered row that may headline.
+    pub(in crate::app) fn plain(view: AdjustmentView) -> Self {
+        RankedRow {
+            view,
+            tier: None,
+            neutral: false,
+        }
+    }
+}
+
 /// Every source the Today headline ranks, consulted in priority order by
 /// [`build_headline`].
 pub(super) struct HeadlineInputs<'a> {
     pub(super) train_blocked: bool,
     /// Onboarding safety gates (medical referral).
-    pub(super) gates: &'a [Recommended<Adjustment>],
+    pub(super) gates: &'a [AdjustmentCall],
     /// Readiness recommendations.
-    pub(super) recommended: &'a [Recommended<Adjustment>],
+    pub(super) recommended: &'a [AdjustmentCall],
     /// Post-session review recommendations.
-    pub(super) review_recs: &'a [Recommended<Adjustment>],
-    pub(super) adjustments: &'a [AdjustmentView],
-    pub(super) review_adjustments: &'a [AdjustmentView],
+    pub(super) review_recs: &'a [AdjustmentCall],
+    pub(super) adjustments: &'a [RankedRow],
+    pub(super) review_adjustments: &'a [RankedRow],
     pub(super) feedback: Option<&'a FeedbackView>,
     /// The next planned session (the prescription rung).
     pub(super) prescription: Option<&'a SessionPlanView>,
@@ -350,7 +335,7 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
         why: fb.why.clone(),
     };
     if train_blocked {
-        let blocks = |r: &&Recommended<Adjustment>| blocks_training(r);
+        let blocks = |r: &&AdjustmentCall| blocks_training(r);
         // Same dominance order view() uses for the tier: onboarding gates
         // (medical referral), then readiness stops, then review deferrals.
         if let Some(stop) = gates
@@ -382,7 +367,13 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
     // The best adjustment ranks on the §5 ladder first (HARD RULE 3), then
     // safety-critical, grade and confidence; the FIRST of equals wins, so the
     // rule layer's own ordering (pain responses lead) decides ties.
-    let rank = |v: &AdjustmentView| (v.tier, v.evidence.safety_critical, v.evidence.grade);
+    let rank = |v: &RankedRow| {
+        (
+            v.tier,
+            v.view.evidence.safety_critical,
+            v.view.evidence.grade,
+        )
+    };
     let best = adjustments
         .iter()
         .chain(review_adjustments.iter())
@@ -390,11 +381,16 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
         // Adjustment); a stale review must not headline "hold planned loads"
         // over the prescription.
         .filter(|v| !v.neutral)
-        .fold(None::<&AdjustmentView>, |best, v| match best {
+        .fold(None::<&RankedRow>, |best, v| match best {
             Some(b)
                 if rank(v)
                     .cmp(&rank(b))
-                    .then(v.evidence.confidence.total_cmp(&b.evidence.confidence))
+                    .then(
+                        v.view
+                            .evidence
+                            .confidence
+                            .total_cmp(&b.view.evidence.confidence),
+                    )
                     .is_le() =>
             {
                 Some(b)
@@ -410,7 +406,7 @@ pub(super) fn build_headline(inputs: &HeadlineInputs<'_>) -> TodayHeadlineView {
         {
             return from_feedback(fb);
         }
-        return from_adjustment(HeadlineKind::Adjustment, v);
+        return from_adjustment(HeadlineKind::Adjustment, &v.view);
     }
     if let Some(fb) = critical_feedback {
         return from_feedback(fb);
@@ -571,9 +567,20 @@ impl ReadinessPicture {
             .any(|b| b.signal == ReadinessSignal::WellnessZ)
     }
 
-    /// The highest §5 safety tier the readiness inputs raise.
+    /// The highest §5 safety tier the readiness calls raise (the return step
+    /// after a resolved hold raises none).
     pub(super) fn safety_tier(&self) -> Option<SafetyTier> {
-        autoreg::resolve_safety_in(&self.inputs, &self.rule_ctx(), self.lift_goal)
+        autoreg::safety_tier_of(&self.readiness_calls())
+    }
+
+    /// The readiness rules' calls on these inputs.
+    fn readiness_calls(&self) -> Vec<AdjustmentCall> {
+        autoreg::adjustments_in(
+            &self.inputs,
+            &self.rule_ctx(),
+            self.lift_goal,
+            self.high_load_block,
+        )
     }
 
     /// Whether auto load-adds are withheld (autoreg-044 / autoreg-029).
@@ -626,17 +633,8 @@ impl ReadinessPicture {
     /// The rules' adjustments plus, with a clock, the first session after a
     /// resolved pain or illness hold (the easy session or the return check);
     /// `days` dates each logged run by its start.
-    pub(super) fn adjustments(
-        &self,
-        model: &Model,
-        days: &LoggedDays,
-    ) -> Vec<Recommended<Adjustment>> {
-        let mut recs = autoreg::adjustments_in(
-            &self.inputs,
-            &self.rule_ctx(),
-            self.lift_goal,
-            self.high_load_block,
-        );
+    pub(super) fn adjustments(&self, model: &Model, days: &LoggedDays) -> Vec<AdjustmentCall> {
+        let mut recs = self.readiness_calls();
         if let Some(day) = self.as_of {
             recs.extend(return_step_on(model, days, day, self.offset));
         }
@@ -656,8 +654,9 @@ pub(super) fn readiness_picture(
     let offset = model.today_utc_offset_sec;
     let lift_goal = profile.map(|p| p.lift_goal);
     // autoreg-029 guard: the manual "hard block" flag, or auto-armed in the
-    // block's peak accumulation week.
-    let high_load_block = match (profile, as_of) {
+    // block's peak accumulation week. No `as_of` (no shell today yet): the plan
+    // start, the week the plan views show.
+    let high_load_block = match (profile, as_of.or_else(|| model.today_or_plan_start())) {
         (Some(p), Some(day)) => effective_high_load_block(model, days, p, day),
         (Some(p), None) => p.high_load_block,
         (None, _) => false,
@@ -722,7 +721,7 @@ pub(super) fn return_step_on(
     days: &LoggedDays,
     day: i64,
     offset: i64,
-) -> Option<Recommended<Adjustment>> {
+) -> Option<AdjustmentCall> {
     let dated_by = |at: i64| dated_through(at, day, offset);
     let timeline: Vec<autoreg::TimedInput> = model
         .inputs

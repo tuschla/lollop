@@ -22,12 +22,15 @@ use serde::{Deserialize, Serialize};
 /// (HARD RULE 2), so no code path can point a recommendation at a myth.
 /// `value` is the payload plan rewrites edit in place; grade, citation,
 /// confidence and contested question are read off the claim's registry row,
-/// so a recommendation costs no allocation beyond its value.
+/// so a recommendation costs no allocation beyond its value. `kind` is the
+/// typed meaning consumers branch on (an adjustment's rule, see
+/// [`AdjustmentCall`]); the claim is only its citation.
 #[must_use]
 #[derive(Debug, Clone, PartialEq)]
-pub struct Recommended<T> {
+pub struct Recommended<T, K = ()> {
     pub value: T,
     claim: ClaimId,
+    kind: K,
 }
 
 impl<T> Recommended<T> {
@@ -38,14 +41,33 @@ impl<T> Recommended<T> {
     /// [`EvidenceGrade::MarketingMyth`]: myth claims are hard-blocked and must
     /// never be surfaced as advice (HARD RULE 2).
     pub fn new(value: T, claim: ClaimId) -> Self {
-        assert!(
-            !claim.entry().is_blocked(),
-            "MarketingMyth claim {} must never back a recommendation (HARD RULE 2)",
-            claim.entry().claim_id,
-        );
-        Recommended { value, claim }
+        assert_not_myth(claim);
+        Recommended {
+            value,
+            claim,
+            kind: (),
+        }
     }
 
+    /// The same recommendation tagged with its typed kind.
+    pub fn with_kind<K>(self, kind: K) -> Recommended<T, K> {
+        Recommended {
+            value: self.value,
+            claim: self.claim,
+            kind,
+        }
+    }
+}
+
+fn assert_not_myth(claim: ClaimId) {
+    assert!(
+        !claim.entry().is_blocked(),
+        "MarketingMyth claim {} must never back a recommendation (HARD RULE 2)",
+        claim.entry().claim_id,
+    );
+}
+
+impl<T, K> Recommended<T, K> {
     /// The claim backing this recommendation.
     pub fn claim_id(&self) -> ClaimId {
         self.claim
@@ -80,20 +102,46 @@ impl<T> Recommended<T> {
         self.evidence().contested
     }
 
-    /// The same claim backing a value derived from this one.
-    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Recommended<U> {
+    /// The same claim and kind backing a value derived from this one.
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Recommended<U, K> {
         Recommended {
             value: f(self.value),
             claim: self.claim,
+            kind: self.kind,
         }
     }
 
-    /// The same claim backing another value.
-    pub fn with_value<U>(&self, value: U) -> Recommended<U> {
+    /// The same claim and kind backing another value.
+    pub fn with_value<U>(&self, value: U) -> Recommended<U, K>
+    where
+        K: Clone,
+    {
         Recommended {
             value,
             claim: self.claim,
+            kind: self.kind.clone(),
         }
+    }
+
+    /// The same value and kind cited to another claim: a call applied on a
+    /// side another rule covers (a lifting hold's easy run).
+    pub fn cited_to(&self, claim: ClaimId) -> Self
+    where
+        T: Clone,
+        K: Clone,
+    {
+        assert_not_myth(claim);
+        Recommended {
+            value: self.value.clone(),
+            claim,
+            kind: self.kind.clone(),
+        }
+    }
+}
+
+impl<T, K: Copy> Recommended<T, K> {
+    pub fn kind(&self) -> K {
+        self.kind
     }
 }
 
@@ -271,7 +319,7 @@ pub struct Session {
     /// Day offset within the mesocycle, 0-based.
     pub day: u16,
     /// Every prescription carries evidence + confidence by construction.
-    pub prescriptions: Vec<Recommended<Prescription>>,
+    pub prescriptions: Vec<Rx>,
     /// The DUP day a lift session undulates to (File 02 strength-023), so two
     /// heavy days of one week read apart. `None` for any other session.
     pub dup_day: Option<DupDay>,
@@ -404,10 +452,6 @@ pub struct RunPrescription {
     pub segments: Vec<RunSegment>,
     /// Strides to finish an easy run with; `None` = no strides.
     pub strides: Option<StridesAddOn>,
-    /// A long run set to the week's average run because the 25–30 % share
-    /// would be shorter than the other runs (RUN-LONGRUN-001's low-mileage
-    /// guardrail): the card states that rule, not the share.
-    pub long_run_avg_floor: bool,
 }
 
 impl RunPrescription {
@@ -427,7 +471,6 @@ impl RunPrescription {
             cooldown_min: None,
             segments: Vec::new(),
             strides: None,
-            long_run_avg_floor: false,
         }
     }
 }
@@ -447,7 +490,7 @@ pub enum RepRecovery {
 /// Identifies one calisthenics leverage ladder (see `crate::calisthenics`
 /// `LADDERS`). A plain data enum: `schema` owns the shared wire types so it need
 /// not depend on `evidence`/`calisthenics`; `calisthenics.rs` re-exports this.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, crate::sanitize::Sanitize)]
 pub enum LadderId {
     // dynamic resistance ladders (calis-progression.md §3.1-3.8)
     HorizontalPush,
@@ -552,12 +595,55 @@ pub enum Prescription {
     Calisthenics(CalisthenicsPrescription),
 }
 
+/// An evidence-cited prescription: what to do (`value`) and the rule that set
+/// its numbers (`kind()`), its claim being the citation.
+pub type Rx = Recommended<Prescription, RxBasis>;
+
+/// The rule that set a prescription's numbers, so the plan views state it
+/// without reading the claim id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RxBasis {
+    /// The workout's own rule: its claim statement is the basis.
+    #[default]
+    Workout,
+    /// A strength deload week: half the sets, load kept (STR-DELOAD-VOL-001).
+    StrengthDeload,
+    /// A hypertrophy or calisthenics deload week (HYP-DELOAD-RX-001).
+    HypertrophyDeload,
+    /// The maintenance lifting dose of a running-led or endurance-led hybrid
+    /// week (RUN-STRENGTH-001 / HYB-MAINT-001).
+    Maintenance,
+    /// A run held within the spike ceiling over the 30-day longest logged run
+    /// (RUN-SPIKE-001).
+    SpikeCeiling,
+    /// A run held within the spike ceiling over the longest recent run the
+    /// athlete entered (RUN-START-001).
+    StatedCeiling,
+    /// A long run at the most the goal distance needs (RUN-LONGRUN-TARGET-001).
+    LongRunTarget,
+    /// A taper-week run (RUN-TAPER-001).
+    Taper,
+    /// A long run whose anchoring run is older than the spike window, its
+    /// credit tapering (DETRAIN-001).
+    Detrained,
+    /// A long run set to the week's average run because the 25–30 % share would
+    /// be shorter than the other runs (RUN-LONGRUN-001's low-mileage guardrail).
+    AverageRun,
+}
+
+impl RxBasis {
+    /// `value` sized by this rule, cited to `claim`.
+    pub fn rx(self, value: Prescription, claim: ClaimId) -> Rx {
+        Recommended::new(value, claim).with_kind(self)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Autoregulation hooks: readiness inputs → adjustments (File 06)
 // ---------------------------------------------------------------------------
 
 /// Normalized readiness signals the engine consumes (File 06 §2).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, crate::sanitize::Sanitize)]
 pub enum ReadinessSignal {
     /// Session RPE vs. target.
     Rpe,
@@ -602,7 +688,7 @@ pub enum ReadinessSignal {
 }
 
 /// One observed readiness data point.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, crate::sanitize::Sanitize)]
 pub struct ReadinessInput {
     pub signal: ReadinessSignal,
     pub value: f64,
@@ -643,7 +729,7 @@ pub struct ReadinessInput {
 /// is deliberately 1–5 (not the Hooper 1–7 index) to match the check-in UI's
 /// identical scale rows. Additive on the wire: every field is `#[serde(default)]`
 /// so a check-in written by any app version replays byte-for-byte.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, crate::sanitize::Sanitize)]
 pub struct CheckinInput {
     /// Unix seconds, shell-supplied (the core holds no clock). Day-buckets the
     /// rolling baseline; `<= 0` readings are ignored by the derivation.
@@ -681,7 +767,7 @@ pub struct CheckinInput {
 }
 
 /// Pain character/context per File 08 Table 4.1 (Silbernagel monitoring model).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, crate::sanitize::Sanitize)]
 pub enum PainKind {
     /// Sharp, localized, or joint-line pain; alters movement/gait; or occurs
     /// with swelling → possible structural injury (safety-038). Hard stop.
@@ -697,7 +783,7 @@ pub enum PainKind {
 }
 
 /// Week-to-week / post-session pain trajectory (File 08 Table 4.1).
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, crate::sanitize::Sanitize)]
 pub enum PainTrend {
     /// Stable during & 24 h after; returns to baseline next morning.
     Stable,
@@ -709,7 +795,7 @@ pub enum PainTrend {
 }
 
 /// A characterized pain report attached to a `Pain` readiness input.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, crate::sanitize::Sanitize)]
 pub struct PainDetail {
     pub kind: PainKind,
     /// 0–10 numeric rating scale. Tendon tolerable band ≤5/10 (safety-039).
@@ -772,7 +858,9 @@ impl IllnessSeverity {
 /// "child/adolescent" (safety-011) and no week-window for "recent surgery"
 /// (safety-044/048), hence plain flags, no thresholds. The seven PAR-Q+ items
 /// themselves come from File 12 (onboard-051/052; [`HealthScreen::parq_yes`]).
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, crate::sanitize::Sanitize,
+)]
 pub struct HealthScreen {
     /// Child/adolescent user (File 08 safety-011). No autonomous maximal
     /// loading or 1RM testing; qualified supervision, technique-first.
@@ -912,8 +1000,10 @@ pub enum SafetyTier {
 }
 
 /// Adjustments the autoregulation layer can emit (File 06 §4).
-/// Always shipped as `Recommended<Adjustment>`, evidence attached.
-#[derive(Debug, Clone, PartialEq)]
+/// Always shipped as `AdjustmentCall`, evidence attached.
+// `Serialize` derives the guidance-cache fingerprint (`memo::fingerprint`);
+// the wire carries `AdjustmentView`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Adjustment {
     /// Reduce load for remaining sets by this % (e.g. RPE ≥ target + 2).
     ReduceLoadPct(f32),
@@ -984,6 +1074,142 @@ impl Adjustment {
     }
 }
 
+/// An evidence-cited adjustment: what changes (`value`) and the rule that
+/// raised it (`kind()`), its claim being the citation.
+pub type AdjustmentCall = Recommended<Adjustment, AdjustmentKind>;
+
+/// The rule that raised an adjustment. It fixes the call's rung on the File 06
+/// §5 ladder, the hold reason, how the plan applies it and its copy, so no
+/// consumer reads that meaning off the claim id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AdjustmentKind {
+    /// A Stage-0 onboarding screen answer (File 08 onboard-050).
+    Screen(ScreenGate),
+    /// Cardiovascular red-flag symptom (safety-043).
+    CardiacReferral,
+    /// Bone-stress-injury signs (safety-040), as a readiness signal or a
+    /// weekly answer.
+    BoneStressReferral,
+    /// RED-S / low energy availability (safety-049), any channel.
+    RedsReferral,
+    /// A ≥2-week unexplained decline that survived a deload (safety-042).
+    OvertrainingReferral,
+    /// The non-functional overreaching cluster (autoreg-042).
+    NforReferral,
+    /// Pain that stops the whole day: a bare report, uncharacterized pain, or
+    /// sharp/joint pain at no mappable body part (autoreg-043, safety-038).
+    PainStop,
+    /// Pain that isn't going away: training paused and referred
+    /// (safety-038/039).
+    PainDefer,
+    /// Sharp/joint pain at one body region: only the movements that load it
+    /// stop (safety-038 "STOP that exercise").
+    PainScoped(PainRegion),
+    /// Reactive tendon pain: an easier session (safety-039).
+    TendonReduce,
+    /// Tolerable, stable tendon pain: modify and monitor, scoped to its body
+    /// region when the location names one (safety-039).
+    TendonModify(Option<PainRegion>),
+    /// Fever or below-neck symptoms: no training (autoreg-046).
+    IllnessStop,
+    /// Above-neck symptoms only: short and easy (autoreg-045,
+    /// ILLNESS-COLD-RUN-001).
+    HeadCold,
+    /// The first session after a fever or chest illness (ready-upd-003).
+    ReturnCheck,
+    /// The first session back after any other hold (ready-upd-004).
+    ReturnHold,
+    /// Resting HR at the stop level on ≥2 mornings or with symptoms
+    /// (ready-upd-002): a rest day.
+    RhrRest,
+    /// One stop-level resting-HR morning without symptoms (ready-upd-002).
+    RhrSpike,
+    /// A corroborated ≥2-day resting-HR elevation: progression held.
+    RhrHold,
+    /// HRV trending down: the 7-day mean suppressed ≥3 days (autoreg-034), or
+    /// one low morning on a ≥2-day downtrend (autoreg-028).
+    HrvLower,
+    /// The HRV 7-day mean below its band: progression held (ready-upd-001).
+    HrvHold,
+    /// Check-ins well below normal for ≥3 days (§5 tier 4).
+    WellnessLower,
+    /// A low check-in: progression held (autoreg-030, ready-upd-001).
+    WellnessHold,
+    /// A soreness item ≥6/7 (autoreg-030).
+    Soreness,
+    /// The session's first-set RPE against its target
+    /// (autoreg-001/002/004/005).
+    RpeLoad,
+    /// One item's logged first work set against its target
+    /// (autoreg-001/002/004/005).
+    FirstSet,
+    /// A later set of one item reached failure early (autoreg-013).
+    FailedSet,
+    /// Today's e1RM against baseline (autoreg-006/007).
+    E1rm,
+    /// e1RM down >10 % for ≥2 sessions (autoreg-022).
+    E1rmDeload,
+    /// Within-set velocity loss past the goal's threshold (autoreg-010).
+    VelocityLoss,
+    /// Aerobic decoupling ≥10 % on a steady run (autoreg-037).
+    Decoupling,
+    /// A weekly check-in's week-level deload.
+    WeeklyDeload(DeloadTrigger),
+}
+
+/// The onboarding screen answer behind a Stage-0 deferral (File 08
+/// onboard-050).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScreenGate {
+    PregnancyWarning,
+    Symptoms,
+    AcuteIllness,
+    Parq,
+    Pregnancy,
+    Injury,
+    Youth,
+    Reds,
+}
+
+impl AdjustmentKind {
+    /// `value` raised by this rule, cited to `claim`.
+    pub fn call(self, value: Adjustment, claim: ClaimId) -> AdjustmentCall {
+        Recommended::new(value, claim).with_kind(self)
+    }
+}
+
+/// What fired a weekly check-in's week-level deload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeloadTrigger {
+    /// Planned effort only reached well below the planned weight (autoreg-023).
+    RpeLoadGap,
+    /// Bar speed at the same weight down across the week (autoreg-026).
+    VelocityDrop,
+    /// Hard sessions left unfinished (autoreg-036): load-neutral, defers hard
+    /// work.
+    FailedSessions,
+    /// The at/above-MRV sign cluster (autoreg-025).
+    MrvSigns,
+    /// Sessions harder at the same weights with low check-ins (autoreg-024).
+    RpeCreep,
+    /// Sustained overtraining signs: the recovery week (HYB-DELOAD-001,
+    /// running-034), which also defers hard running.
+    RecoveryWeek,
+}
+
+/// The body region a reported pain location maps to, for scoping a pain
+/// response to the movements that load it (safety-038 "STOP that exercise",
+/// autoreg-043 "stop or substitute the movement").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PainRegion {
+    /// Hip, thigh, knee, shin, calf, ankle, Achilles, foot.
+    LowerLimb,
+    /// Neck, shoulder, arm, elbow, forearm, wrist, hand, fingers.
+    UpperLimb,
+    /// Lower / upper back, spine.
+    Back,
+}
+
 /// A user-declared factual label for a logged run's intent (steady, easy,
 /// interval, tempo, long, recovery). This is **USER DATA**, like an exercise name: it is
 /// NOT a knowledge-base claim and carries NO [`ClaimId`]. It is deliberately
@@ -995,7 +1221,9 @@ impl Adjustment {
 ///
 /// Serializes to its bare variant name (external form), so the Kotlin shell can
 /// mirror the strings by `WorkoutType.name`; renaming a variant is a wire break.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, crate::sanitize::Sanitize,
+)]
 pub enum WorkoutType {
     /// Continuous even-effort run.
     Steady,

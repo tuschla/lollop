@@ -7,20 +7,20 @@ use super::rules::*;
 use super::*;
 use crate::evidence::claims;
 use crate::schema::{
-    Adjustment, CheckinInput, PainDetail, PainKind, PainTrend, ReadinessInput, ReadinessSignal,
-    Recommended, SafetyTier,
+    Adjustment, AdjustmentCall, CheckinInput, PainDetail, PainKind, PainRegion, PainTrend,
+    ReadinessInput, ReadinessSignal, SafetyTier,
 };
 use crate::strength::LiftGoal;
 
 /// The rules with no context beyond the inputs. `pub(crate)` for the app tests.
-pub(crate) fn adjustments(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
+pub(crate) fn adjustments(inputs: &[ReadinessInput]) -> Vec<AdjustmentCall> {
     adjustments_for_goal(inputs, None)
 }
 
 fn adjustments_for_goal(
     inputs: &[ReadinessInput],
     lift_goal: Option<LiftGoal>,
-) -> Vec<Recommended<Adjustment>> {
+) -> Vec<AdjustmentCall> {
     adjustments_with_context(inputs, lift_goal, false)
 }
 
@@ -30,7 +30,7 @@ fn adjustments_with_context(
     inputs: &[ReadinessInput],
     lift_goal: Option<LiftGoal>,
     high_load_block: bool,
-) -> Vec<Recommended<Adjustment>> {
+) -> Vec<AdjustmentCall> {
     adjustments_in(inputs, &RuleContext::default(), lift_goal, high_load_block)
 }
 
@@ -39,7 +39,12 @@ pub(crate) fn resolve_safety_for_goal(
     inputs: &[ReadinessInput],
     lift_goal: Option<LiftGoal>,
 ) -> Option<SafetyTier> {
-    resolve_safety_in(inputs, &RuleContext::default(), lift_goal)
+    safety_tier_of(&adjustments_in(
+        inputs,
+        &RuleContext::default(),
+        lift_goal,
+        false,
+    ))
 }
 
 /// [`signal_states_in`] with goal and block context only.
@@ -66,12 +71,12 @@ fn rhr_stop(inputs: &[ReadinessInput]) -> bool {
 }
 
 /// [`wellness_downgrade_in`] without a clock.
-fn wellness_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
+fn wellness_downgrade(inputs: &[ReadinessInput]) -> Option<AdjustmentCall> {
     wellness_downgrade_in(inputs, &RuleContext::default())
 }
 
 /// [`rhr_downgrade_in`] with the fixed KB bands (no individual SD).
-fn rhr_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
+fn rhr_downgrade(inputs: &[ReadinessInput]) -> Option<AdjustmentCall> {
     rhr_downgrade_in(inputs, &RuleContext::default())
 }
 
@@ -712,6 +717,56 @@ fn safety_dominates_concurrent_performance_trigger() {
     let adj = adjustments(&inputs);
     assert_eq!(adj.len(), 1);
     assert_eq!(adj[0].value, Adjustment::Stop);
+}
+
+#[test]
+fn the_day_tier_steps_down_the_ladder_as_each_higher_signal_clears() {
+    // HARD RULE 3 / File 06 §5: medical referral > pain > illness > objective
+    // performance > subjective multi-day > HRV trend > single-day markers.
+    // Every rung fires at once; dropping the top signal exposes the next rung.
+    let rungs = [
+        (
+            input(ReadinessSignal::BoneStress, 1.0),
+            SafetyTier::MedicalReferral,
+        ),
+        (input(ReadinessSignal::Pain, 1.0), SafetyTier::Pain),
+        (input(ReadinessSignal::Illness, 1.0), SafetyTier::Illness),
+        (
+            input(ReadinessSignal::EstimatedOneRm, 0.85),
+            SafetyTier::ObjectivePerformance,
+        ),
+        (
+            input_streak(ReadinessSignal::WellnessZ, -1.2, 3),
+            SafetyTier::SubjectiveMultiDay,
+        ),
+        (
+            input(ReadinessSignal::HrvLnRmssd, -1.0),
+            SafetyTier::HrvTrend,
+        ),
+        (
+            input_streak(ReadinessSignal::RestingHr, 7.0, 2),
+            SafetyTier::SingleDayMarker,
+        ),
+    ];
+    // Single-day subjective calls rank on the ladder but raise no day tier.
+    let below = [
+        input(ReadinessSignal::Soreness, 6.0),
+        input(ReadinessSignal::Rpe, 2.0),
+    ];
+    for top in 0..rungs.len() {
+        let inputs: Vec<_> = rungs[top..]
+            .iter()
+            .map(|(i, _)| i.clone())
+            .chain(below.iter().cloned())
+            .collect();
+        assert_eq!(
+            resolve_safety_for_goal(&inputs, None),
+            Some(rungs[top].1),
+            "top rung {:?}",
+            rungs[top].0.signal
+        );
+    }
+    assert_eq!(resolve_safety_for_goal(&below, None), None);
 }
 
 // --- autoreg-044: never auto-increase load into suppressed recovery ---

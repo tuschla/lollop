@@ -768,7 +768,6 @@ fn band_paces_match_vo2_inverse_and_mp_relative_oracles() {
 fn run_target_band(kind: RunSessionType) -> TargetBand {
     band_for(
         Some(kind),
-        claims::RUN_VDOT_001,
         &RunIntensity::HrPercentMax {
             lo: None,
             hi: Some(76.0),
@@ -821,7 +820,7 @@ fn run_target_labels_match_the_clock_oracle_in_km_and_miles() {
             VdotBand::Threshold,
             VdotBand::Interval,
         ] {
-            let tb = band_for(None, claims::RUN_VDOT_001, &RunIntensity::Vdot(band)).unwrap();
+            let tb = band_for(None, &RunIntensity::Vdot(band)).unwrap();
             let t = resolve_target(
                 tb,
                 &RunIntensity::Vdot(band),
@@ -861,7 +860,7 @@ fn run_target_heart_rate_matches_pct_hrmax_oracle() {
             rest_bpm: 0.0,
         };
         for band in [VdotBand::Easy, VdotBand::Marathon, VdotBand::Threshold] {
-            let tb = band_for(None, claims::RUN_VDOT_001, &RunIntensity::Vdot(band)).unwrap();
+            let tb = band_for(None, &RunIntensity::Vdot(band)).unwrap();
             let t = resolve_target(tb, &RunIntensity::Vdot(band), None, hr);
             let (lo, hi) = oracle::band_row(band).2.unwrap();
             let (lo_bpm, hi_bpm) = t
@@ -880,7 +879,7 @@ fn run_target_heart_rate_matches_pct_hrmax_oracle() {
             );
         }
         for band in [VdotBand::Interval, VdotBand::Repetition] {
-            let tb = band_for(None, claims::RUN_VDOT_001, &RunIntensity::Vdot(band)).unwrap();
+            let tb = band_for(None, &RunIntensity::Vdot(band)).unwrap();
             let t = resolve_target(tb, &RunIntensity::Vdot(band), None, hr);
             assert!(t.hr_label.is_empty(), "{band:?} is pace-governed");
         }
@@ -1214,7 +1213,7 @@ fn pound_loads_already_on_the_plate_grid_stay_put() {
     }
     // End to end through the plan-item flattener: a 300 lb Back Squat e1RM
     // and an 80 %1RM prescription is a 240 lb load.
-    let rx = Recommended::new(
+    let rx = RxBasis::Workout.rx(
         Prescription::Lift(crate::schema::LiftPrescription {
             exercise: "Back Squat".into(),
             sets: 3,

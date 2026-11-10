@@ -215,7 +215,7 @@ expect $S "widget snapshot keeps today's day kind" "kind $k0 → $k1" test -n "$
 W1="$(widget_texts new-04-widget)"; echo "$W1" >"$OUT/logs/new-widget.txt"
 expect $S "widget shows the same face after the update" "old $(tr '\n' '|' <<<"$OLD_WIDGET") / new $(tr '\n' '|' <<<"$W1")" test "$OLD_WIDGET" = "$W1"
 NEW_TILE="$(tile_label new-05-tile)"; adb_ shell cmd statusbar collapse
-# Today's face from the new snapshot (tileFace in TileFace.kt reads
+# Today's face from the new snapshot (tileFace in widget/TileFace.kt reads
 # WidgetSnapshotStore.today(): not stale and dated the device's today). The old
 # build's label is only reported: 4728546 and 901d239 can show the manifest label
 # ("Log") until their next redraw.

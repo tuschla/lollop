@@ -8,26 +8,21 @@ import app.milestone.resources.Res
 import app.milestone.resources.reminder_title_fallback
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItemKind
+import app.milestone.widget.widgetInputs
 import app.milestone.widget.widgetSnapshotOf
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.LocalDate
-import kotlinx.datetime.LocalDateTime
-import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.number
-import kotlinx.datetime.toInstant
 import platform.Foundation.NSDateComponents
-import platform.Foundation.NSDateFormatter
-import platform.Foundation.NSLocale
 import platform.Foundation.NSURL
-import platform.Foundation.currentLocale
 import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationOpenNotificationSettingsURLString
 import platform.UserNotifications.UNCalendarNotificationTrigger
@@ -37,90 +32,73 @@ import platform.UserNotifications.UNNotificationRequest
 import platform.UserNotifications.UNNotificationSound
 
 /**
- * The session reminder on iOS. iOS runs no app code when a notification fires, so
- * the reminders are scheduled ahead: one dated notification per day of the next
- * [DAYS_SCHEDULED] with an open session at the chosen time ([reminderOf] over the
- * model's snapshot, [widgetSnapshotOf], as Android's reminder reads the widget
- * snapshot), with Android's title, line and action. They are set again on every
- * published model, a distance unit change, a run starting or stopping and a change
- * of the setting; none while it is off. At most one reminder per local day: once
- * today's has fired a later time today does not remind again. A shown reminder
- * goes once its day has passed or, today, once there is nothing left to remind
- * about (the session done, a run recording).
+ * The session reminder on iOS ([SessionReminder]). iOS runs no app code when a
+ * notification fires, so the reminders are scheduled ahead: one dated notification
+ * per day of the next [DAYS_SCHEDULED] with an open session at the chosen time
+ * ([SessionReminder.due] over the model's snapshot, [widgetSnapshotOf], as
+ * Android's reminder reads the widget snapshot), with Android's title, line and
+ * action. They are set again on every change of the snapshot inputs
+ * ([widgetInputs]: the published model, the distance unit, a run starting or
+ * stopping, a time change) and of the setting; none while it is off. At most one
+ * reminder per local day: once today's has fired a later time today does not
+ * remind again. A shown reminder goes once its day has passed or, today, once
+ * there is nothing left to remind about (the session done, a run recording).
  */
-internal actual object SessionReminder {
-    actual const val DEFAULT_MINUTE_OF_DAY = 7 * 60 + 30
-
-    actual const val AHEAD_MAX_DAYS = 7L
-
+internal object IosReminder : SessionReminderPort {
     /** The days ahead, today included, that get a reminder scheduled. */
     private const val DAYS_SCHEDULED = 7
 
-    private const val MINUTES_PER_DAY = 24 * 60
-
-    // The same store and keys as Android's.
-    private const val PREFS = "session_reminder"
-    private const val KEY_ENABLED = "enabled"
-    private const val KEY_MINUTE = "minute_of_day"
-    // Today's scheduled reminder: its local day and fire time (epoch millis). Once
-    // that time has passed, today has been reminded.
+    // Today's scheduled reminder in [SessionReminder.store]: its local day and fire
+    // time (epoch millis). Once that time has passed, today has been reminded.
     private const val KEY_SCHEDULED_DAY = "scheduled_epoch_day"
     private const val KEY_SCHEDULED_AT = "scheduled_at_millis"
 
     /** A reminder's identifier: this prefix and its local epoch day. */
     private const val ID_PREFIX = "session_reminder_"
 
-    private val lock = Mutex()
+    private class State {
+        val lock = Mutex()
 
-    // Authorization as last asked ([checkCanNotify]).
-    private var allowed = false
-
-    actual fun setting(ctx: PlatformContext): SessionReminderSetting {
-        val p = ctx.keyValueStore(PREFS)
-        return SessionReminderSetting(
-            enabled = p.getBoolean(KEY_ENABLED, false),
-            minuteOfDay = p.getInt(KEY_MINUTE, DEFAULT_MINUTE_OF_DAY).coerceIn(0, MINUTES_PER_DAY - 1),
-        )
+        // Authorization as last asked ([checkCanNotify]).
+        var allowed = false
     }
 
-    actual fun setEnabled(ctx: PlatformContext, enabled: Boolean) {
-        ctx.keyValueStore(PREFS).edit { putBoolean(KEY_ENABLED, enabled) }
-        reschedule(ctx)
-    }
+    private val state by ProcessLocal { State() }
 
-    actual fun setMinuteOfDay(ctx: PlatformContext, minuteOfDay: Int) {
-        require(minuteOfDay in 0 until MINUTES_PER_DAY) { "minute of day $minuteOfDay" }
-        ctx.keyValueStore(PREFS).edit { putInt(KEY_MINUTE, minuteOfDay) }
-        reschedule(ctx)
-    }
-
-    actual fun canNotify(ctx: PlatformContext): Boolean = allowed
-
-    actual fun checkCanNotify(ctx: PlatformContext, onResult: (Boolean) -> Unit) =
-        checkNotificationAuthorization { ok ->
-            allowed = ok
-            onResult(ok)
-        }
-
-    /** Keep the reminders in step with every published model, the distance unit
-     *  and a recording run ([startIosReminders]). */
-    internal fun start(ctx: PlatformContext) {
+    /** Install the notification delegate and the reminder's actions, then keep
+     *  the reminders in step with the snapshot inputs. */
+    override fun start(ctx: PlatformContext) {
+        installNotificationDelegate()
         checkCanNotify(ctx) {}
         // Off the main thread: the text is read from the resources, blocking.
-        EventDispatcher.scope.launch(Dispatchers.Default) {
-            combine(EventDispatcher.model, AppSettings.distanceUnitOverride, RunSession.tracking) { _, _, _ -> }
+        AppRuntime.scope.launch(Dispatchers.Default) {
+            widgetInputs()
+                .distinctUntilChanged { a, b -> a.model == b.model && a.unit == b.unit && a.recording == b.recording && a.ticks == b.ticks }
                 .conflate()
                 .collect { sync(ctx) }
         }
     }
 
-    /** Set the reminders again from the current model and setting. */
-    internal fun reschedule(ctx: PlatformContext) {
-        EventDispatcher.scope.launch(Dispatchers.Default) { sync(ctx) }
+    override fun reschedule(ctx: PlatformContext) {
+        AppRuntime.scope.launch(Dispatchers.Default) { sync(ctx) }
     }
 
-    private suspend fun sync(ctx: PlatformContext) = lock.withLock {
-        val s = setting(ctx)
+    // The rescheduling sync takes down what was delivered once the setting is off.
+    override fun takeDown(ctx: PlatformContext) {}
+
+    // The snapshot inputs tick on every time change, which sets the reminders again.
+    override fun onTimeChanged(ctx: PlatformContext) {}
+
+    override fun canNotify(ctx: PlatformContext): Boolean = state.allowed
+
+    override fun checkCanNotify(ctx: PlatformContext, onResult: (Boolean) -> Unit) =
+        checkNotificationAuthorization { ok ->
+            state.allowed = ok
+            onResult(ok)
+        }
+
+    private suspend fun sync(ctx: PlatformContext) = state.lock.withLock {
+        val s = SessionReminder.setting(ctx)
         val model = EventDispatcher.model.value
         // Before the first model there is nothing to tell; what is scheduled stands.
         if (s.enabled && model == null) return@withLock
@@ -128,24 +106,22 @@ internal actual object SessionReminder {
         val zone = TimeZone.currentSystemDefault()
         val now = AppClock.nowMillis()
         val today = localEpochDayAtMillis(now, zone)
-        val prefs = ctx.keyValueStore(PREFS)
+        val prefs = SessionReminder.store(ctx)
         val remindedToday = prefs.getLong(KEY_SCHEDULED_DAY, Long.MIN_VALUE) == today &&
             prefs.getLong(KEY_SCHEDULED_AT, Long.MAX_VALUE) <= now
         val snapshot = model?.let { widgetSnapshotOf(it, resolveDistanceUnit(AppSettings.distanceUnitOverride.value), zone.id) }
-        fun open(day: Long): Reminder? = reminderOf(snapshot, day, zone.id)
-            ?.takeUnless { day == today && recording && it.kind == WidgetDayKind.Run }
+        fun open(day: Long): Reminder? = SessionReminder.due(snapshot, day, today, zone.id, recording)
         val res = systemResources()
         val wanted = mutableMapOf<String, UNNotificationRequest>()
         var todayAt: Long? = null
         if (s.enabled) {
             for (day in today until today + DAYS_SCHEDULED) {
                 if (day == today && remindedToday) continue
-                val date = LocalDate.fromEpochDays(day.toInt())
-                val at = LocalDateTime(date, LocalTime(s.minuteOfDay / 60, s.minuteOfDay % 60)).toInstant(zone).toEpochMilliseconds()
+                val at = SessionReminder.fireMillis(day, s.minuteOfDay, zone)
                 if (at <= now) continue
                 val reminder = open(day) ?: continue
                 if (day == today) todayAt = at
-                wanted[idOf(day)] = request(res, reminder, day, date, s.minuteOfDay)
+                wanted[idOf(day)] = request(res, reminder, day, s.minuteOfDay)
             }
         }
         if (!remindedToday) {
@@ -182,9 +158,9 @@ internal actual object SessionReminder {
 
     private fun idOf(day: Long) = "$ID_PREFIX$day"
 
-    /** [reminder] for local [date] at [minuteOfDay]: a tap opens Today, its action
-     *  starts the session ([Reminder.dest]). */
-    private fun request(res: PlatformResources, reminder: Reminder, day: Long, date: LocalDate, minuteOfDay: Int): UNNotificationRequest {
+    /** [reminder] for local epoch [day] at [minuteOfDay]: a tap opens Today, its
+     *  action starts the session ([Reminder.dest]). */
+    private fun request(res: PlatformResources, reminder: Reminder, day: Long, minuteOfDay: Int): UNNotificationRequest {
         val content = UNMutableNotificationContent().apply {
             setTitle(reminder.title.ifBlank { res.getString(Res.string.reminder_title_fallback) })
             reminderLine(res, reminder)?.let { setBody(it) }
@@ -198,6 +174,7 @@ internal actual object SessionReminder {
             )
             setUserInfo(mapOf<Any?, Any?>(NOTIF_KEY_DEST to OpenDest.Today.wire, NOTIF_KEY_ACTION_DEST to reminder.dest.wire))
         }
+        val date = LocalDate.fromEpochDays(day.toInt())
         val components = NSDateComponents().apply {
             year = date.year.toLong()
             month = date.month.number.toLong()
@@ -209,6 +186,8 @@ internal actual object SessionReminder {
         return UNNotificationRequest.requestWithIdentifier(idOf(day), content, trigger)
     }
 }
+
+internal actual val sessionReminderPort: SessionReminderPort get() = IosReminder
 
 /** iOS: the alert and sound authorization (the system asks only once); the
  *  reminders are set again once answered. */
@@ -230,8 +209,3 @@ internal actual fun openNotificationSettings(ctx: PlatformContext) {
     val url = NSURL.URLWithString(UIApplicationOpenNotificationSettingsURLString) ?: return openAppSettings(ctx)
     UIApplication.sharedApplication.openURL(url, options = emptyMap<Any?, Any?>(), completionHandler = null)
 }
-
-// The 24-hour setting shows in the device locale's hour pattern ("j"), as
-// [is24HourClock] reads it.
-internal actual fun uses24HourClock(ctx: PlatformContext): Boolean =
-    NSDateFormatter.dateFormatFromTemplate("j", 0u, NSLocale.currentLocale)?.contains('a') != true

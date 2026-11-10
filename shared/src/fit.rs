@@ -58,16 +58,6 @@ pub const MIN_IMPORT_M: f64 = 500.0;
 pub const MIN_IMPORT_SEC: i64 = 180;
 
 impl FitError {
-    /// Stable machine-readable kind for the shell's error envelope.
-    pub fn kind(&self) -> &'static str {
-        match self {
-            FitError::NotFit => "not_fit",
-            FitError::Damaged => "damaged",
-            FitError::NoTrack | FitError::TooShort => "no_track",
-            FitError::NotARun(_) => "not_a_run",
-        }
-    }
-
     /// Detail for the kind: the sport for [`FitError::NotARun`], `"too_short"`
     /// for [`FitError::TooShort`], else empty.
     pub fn context(&self) -> &str {

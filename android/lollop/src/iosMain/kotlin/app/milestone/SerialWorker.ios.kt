@@ -29,4 +29,7 @@ internal actual class SerialWorker actual constructor() {
             throw IllegalStateException("queued tasks still running after $timeoutMs ms")
         }
     }
+
+    // The queue runs what it holds and is released with the worker.
+    actual fun close() {}
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Looper
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppFileNames
 import app.milestone.EventDispatcher
 import app.milestone.qa.QaHarness
 import app.milestone.qa.lastScenario
@@ -23,7 +24,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
-/** [WidgetSync] with the real app running: what replaces a stale snapshot. */
+/** [WidgetSurfaces] with the real app running: what replaces a stale snapshot. */
 @RunWith(RobolectricTestRunner::class)
 class WidgetSyncTest {
 
@@ -37,7 +38,7 @@ class WidgetSyncTest {
     @Before
     fun setUp() {
         QaHarness.reset(ctx)
-        File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
     }
 
     @After

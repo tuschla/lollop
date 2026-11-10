@@ -8,10 +8,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.launch
 import platform.AudioToolbox.AudioServicesPlaySystemSound
 import platform.AudioToolbox.kSystemSoundID_Vibrate
 import platform.CoreLocation.CLAccuracyAuthorization
@@ -34,8 +30,6 @@ import platform.darwin.NSObject
 import platform.darwin.dispatch_after
 import platform.darwin.dispatch_get_main_queue
 import platform.darwin.dispatch_time
-import platform.posix.CLOCK_MONOTONIC
-import platform.posix.clock_gettime_nsec_np
 
 internal actual fun platformRunTracker(): RunTracker? = IosRunTracker
 
@@ -45,16 +39,25 @@ internal actual fun platformRunTracker(): RunTracker? = IosRunTracker
  * stream that keeps running in the background (`UIBackgroundModes` `location`, the
  * blue indicator), the shared [RunRecorder] state machine and the common
  * [ActiveRunStore] sidecar. iOS has no ongoing notification and no battery
- * exemption, so neither is asked for; the run's system surface is the
- * [RunActivity] hook. Main thread only.
+ * exemption ([serviceGrants]); the run's system surface is the [RunActivity] hook.
+ * Main thread only.
  */
 internal object IosRunTracker : RunTracker {
-    /** The recording stream, made by the first locate / arm / start. */
-    var recording: IosRunRecording? = null
-        private set
+    // The recording stream, made by the first locate / arm / start.
+    private var recording: IosRunRecording? = null
 
     private fun recording(): IosRunRecording =
-        recording ?: IosRunRecording(PlatformContext.INSTANCE, CoreLocationStream()).also { recording = it }
+        recording ?: IosRunRecording(CoreLocationStream()).also { recording = it }
+
+    /** Pause or resume the recording run; a no-op unless one records. */
+    fun setPaused(paused: Boolean) {
+        recording?.recorder?.setPaused(paused)
+    }
+
+    /** Hand the current frame to a new [RunActivity.sink]. */
+    fun resendSurface() {
+        recording?.resendSurface()
+    }
 
     // The manager the grant, the prompts and the last-known fix go through; its
     // delegate reports every grant or location-services change. Made with the
@@ -72,25 +75,16 @@ internal object IosRunTracker : RunTracker {
     override fun locationPromptBlocked(ctx: PlatformContext): Boolean =
         auth.authorizationStatus.let { it == AUTH_DENIED || it == AUTH_RESTRICTED }
 
-    /** The run posts no notification on iOS (no ongoing notification; the Live
-     *  Activity needs no notification grant), so there is nothing to ask for. */
-    override fun canPostNotifications(ctx: PlatformContext): Boolean = true
-
     override fun isLocationEnabled(ctx: PlatformContext): Boolean = CLLocationManager.locationServicesEnabled()
-
-    /** iOS has no per-app battery restriction that stops a foreground-started
-     *  background location stream; Low Power Mode doesn't stop it either. */
-    override fun isBatteryUnrestricted(ctx: PlatformContext): Boolean = true
-
-    /** Never offered ([isBatteryUnrestricted] is always true); the app's settings
-     *  page is the nearest place should a caller ask. */
-    override fun requestBatteryUnrestricted(ctx: PlatformContext) = openAppSettings(ctx)
 
     /** iOS doesn't let an app open the Location Services switch; the app's page in
      *  Settings has its location row. */
     override fun openLocationSettings(ctx: PlatformContext) = openAppSettings(ctx)
 
-    override fun openNotificationSettings(ctx: PlatformContext) = openAppSettings(ctx)
+    /** The Live Activity needs no notification grant, and iOS has no per-app battery
+     *  restriction that stops a foreground-started background location stream (Low
+     *  Power Mode doesn't stop it either). */
+    override val serviceGrants: RunServiceGrants? = null
 
     /** CoreLocation reports a grant change and a location-services toggle the same
      *  way: the manager's authorization callback. */
@@ -101,19 +95,9 @@ internal object IosRunTracker : RunTracker {
     }
 
     @Composable
-    override fun rememberPermissionPrompts(
-        onLocationResult: (preciseGranted: Boolean) -> Unit,
-        onNotificationResult: () -> Unit,
-    ): PermissionPrompts {
-        val onLocation by rememberUpdatedState(onLocationResult)
-        return remember {
-            object : PermissionPrompts {
-                override fun requestLocation() = askLocation { onLocation(it) }
-
-                // Nothing to ask ([canPostNotifications]).
-                override fun requestNotifications() = Unit
-            }
-        }
+    override fun rememberLocationPrompt(onResult: (preciseGranted: Boolean) -> Unit): () -> Unit {
+        val onLocation by rememberUpdatedState(onResult)
+        return remember { { askLocation { onLocation(it) } } }
     }
 
     /**
@@ -162,14 +146,6 @@ internal object IosRunTracker : RunTracker {
     override fun startRecording(ctx: PlatformContext) = recording().recorder.start(record = true)
 
     override fun stop(ctx: PlatformContext) = recording().recorder.stop()
-
-    override fun hasInterruptedRun(ctx: PlatformContext): Boolean = ActiveRunStore.hasActiveRun(ctx)
-
-    override fun recoverInterruptedRun(ctx: PlatformContext): RecoveredTrack = ActiveRunStore.recover(ctx)
-
-    override fun discardInterruptedRun() = ActiveRunStore.clear()
-
-    override fun discardInterruptedRunSync() = ActiveRunStore.clearSync()
 }
 
 /** The Info.plist key under `NSLocationTemporaryUsageDescriptionDictionary` whose
@@ -246,8 +222,8 @@ private class CoreLocationStream : LocationStream {
     }
 }
 
-/** Now on the [monotonicMillis] clock, in nanoseconds. */
-private fun monotonicNanos(): Long = clock_gettime_nsec_np(CLOCK_MONOTONIC.toUInt()).toLong()
+/** Now on the [AppClock.monotonicMillis] clock, in nanoseconds. */
+private fun monotonicNowNanos(): Long = AppClock.monotonicMillis() * 1_000_000L
 
 /**
  * [fix] as the recorder takes it. CoreLocation stamps a fix with the wall clock
@@ -274,8 +250,8 @@ internal fun liveFixOf(fix: CLLocation, nowWallMs: Long, nowMonoNanos: Long): Li
  * CoreLocation delegate that feeds it ([delegate]), main-queue timers, vibration
  * cues and the [RunActivity] surface. Process-wide; lives as long as the app.
  */
-internal class IosRunRecording(private val ctx: PlatformContext, private val stream: LocationStream) {
-    private var lastFrame: RunActivityState? = null
+internal class IosRunRecording(private val stream: LocationStream) {
+    private var lastFrame: RunSurfaceState? = null
 
     val recorder = RunRecorder(Host())
 
@@ -284,23 +260,15 @@ internal class IosRunRecording(private val ctx: PlatformContext, private val str
 
     init {
         // A swipe away from the app switcher while the app runs in the background
-        // ends the process: like Android's onTaskRemoved, a live or armed run
-        // flushes its sidecar and keeps it for the resume offer, a locate-only
-        // preview just stops.
+        // ends the process, Android's onTaskRemoved.
         NSNotificationCenter.defaultCenter.addObserverForName(
             UIApplicationWillTerminateNotification,
             `object` = null,
             queue = NSOperationQueue.mainQueue,
         ) { _ ->
-            if (recorder.recording || recorder.armed) ActiveRunStore.flush() else recorder.stop()
+            recorder.onAppRemoved()
         }
-        // An in-app Pause/Resume refreshes the surface, as Android's paused-flow
-        // collector re-posts the notification; drop(1) skips the current value.
-        // Main.immediate (as Android's) subscribes now, on the creating main thread,
-        // so no pause after this is missed.
-        MainScope().launch(Dispatchers.Main.immediate) {
-            RunSession.paused.drop(1).collect { pushFrame() }
-        }
+        refreshSurfaceOnPause(AppRuntime.scope, ::pushFrame)
     }
 
     /** The next refresh pushes a frame even when it looks unchanged. */
@@ -316,21 +284,7 @@ internal class IosRunRecording(private val ctx: PlatformContext, private val str
 
     private fun pushFrame() {
         if (recorder.stopped) return
-        val frame = RunActivityState(
-            phase = when {
-                recorder.recording && RunSession.paused.value -> RunActivityPhase.Paused
-                recorder.recording && recorder.signalLost -> RunActivityPhase.SignalLost
-                recorder.recording -> RunActivityPhase.Recording
-                recorder.armed -> RunActivityPhase.Armed
-                else -> RunActivityPhase.Locating
-            },
-            movingSec = RunSession.elapsedSec.value,
-            distanceKm = RunSession.distanceKm.value,
-            paceMinPerKm = RunSession.currentPaceMinPerKm.value,
-            miles = resolveDistanceUnit(AppSettings.distanceUnitOverride.value) == DistanceUnit.Mi,
-            hasTrack = RunSession.points.value.size >= 2,
-            step = if (recorder.recording) RunSession.stepProgress.value else null,
-        )
+        val frame = recorder.surfaceState()
         if (frame == lastFrame) return
         lastFrame = frame
         RunActivity.sink?.update(frame)
@@ -338,7 +292,7 @@ internal class IosRunRecording(private val ctx: PlatformContext, private val str
 
     private fun onLocations(locations: List<CLLocation>) {
         val nowWallMs = wallClockMillis()
-        val nowMono = monotonicNanos()
+        val nowMono = monotonicNowNanos()
         // A delivery can hold several fixes (deferred while the app was busy): oldest
         // first, so the route can't zigzag backwards.
         val batch = locations.sortedBy { it.timestamp.timeIntervalSince1970 }
@@ -365,9 +319,9 @@ internal class IosRunRecording(private val ctx: PlatformContext, private val str
     }
 
     private inner class Host : RecorderHost {
-        override fun nowNanos(): Long = monotonicNanos()
+        override fun nowNanos(): Long = monotonicNowNanos()
 
-        override fun nowMs(): Long = monotonicMillis()
+        override fun nowMs(): Long = AppClock.monotonicMillis()
 
         override fun startStream(): Boolean {
             if (!stream.preciseGranted()) return false
@@ -379,7 +333,7 @@ internal class IosRunRecording(private val ctx: PlatformContext, private val str
 
         override fun stopStream() = stream.stop()
 
-        override fun openSidecar() = ActiveRunStore.begin(ctx)
+        override fun openSidecar() = ActiveRunStore.begin()
 
         override fun reassertSurface() = resendSurface()
 
@@ -387,17 +341,12 @@ internal class IosRunRecording(private val ctx: PlatformContext, private val str
 
         override fun invalidateSurface() = this@IosRunRecording.invalidateSurface()
 
-        /** Vibration only: iOS gives an app one fixed buzz, so the cues differ by
-         *  count (one, two, three) like Android's pulse patterns, and a step change
-         *  adds the system beep. */
+        /** iOS gives an app one fixed buzz, so a cue plays its pattern's pulse count,
+         *  [PULSE_GAP_MS] apart, and its beep as the system's. */
         override fun cue(cue: RecorderCue) {
-            val pulses = when (cue) {
-                RecorderCue.RecordingStarted -> 1
-                RecorderCue.SignalLost -> 2
-                RecorderCue.StepChange -> 3
-            }
-            repeat(pulses) { i -> afterMs(i * PULSE_GAP_MS) { AudioServicesPlaySystemSound(kSystemSoundID_Vibrate) } }
-            if (cue == RecorderCue.StepChange) AudioServicesPlaySystemSound(STEP_BEEP_SOUND)
+            val pattern = cue.pattern
+            repeat(pattern.pulseMs.size) { i -> afterMs(i * PULSE_GAP_MS) { AudioServicesPlaySystemSound(kSystemSoundID_Vibrate) } }
+            if (pattern.beep) AudioServicesPlaySystemSound(STEP_BEEP_SOUND)
         }
 
         /** System sounds hold nothing to free. */
@@ -408,9 +357,9 @@ internal class IosRunRecording(private val ctx: PlatformContext, private val str
             RunActivity.sink?.end()
         }
 
-        override fun wakeTimer(tag: String, action: () -> Unit): RecorderTimer = MainQueueTimer(earliestWins = true, action)
+        override fun wakeTimer(tag: String, action: () -> Unit): RecorderTimer = MainQueueWakeTimer(action)
 
-        override fun ticker(action: () -> Unit): RecorderTimer = MainQueueTimer(earliestWins = false, action)
+        override fun ticker(action: () -> Unit): RecorderTimer = MainQueueTicker(action)
     }
 }
 
@@ -425,34 +374,42 @@ private fun afterMs(delayMs: Long, action: () -> Unit) {
 }
 
 /**
- * A [RecorderTimer] on the main queue. The app keeps running while its location
+ * [EarliestWinsTimer] on the main queue. The app keeps running while its location
  * stream is up in the background, so a main-queue deadline fires on time with the
- * screen off. [earliestWins]: while one is pending, a request for the same or a
- * later moment keeps it (Android's WakeTimer); otherwise each request replaces it.
+ * screen off.
  */
-private class MainQueueTimer(private val earliestWins: Boolean, private val action: () -> Unit) : RecorderTimer {
-    private var dueAt = 0L
+private class MainQueueWakeTimer(action: () -> Unit) : EarliestWinsTimer(action) {
+    // Bumped by every disarm: a block whose token is stale was cancelled.
+    private var token = 0L
 
-    // Bumped by every cancel and schedule: a block whose token is stale was cancelled.
+    override fun arm(delayMs: Long) {
+        val mine = token
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delayMs * 1_000_000), dispatch_get_main_queue()) {
+            if (mine == token) fire()
+        }
+    }
+
+    override fun disarm() {
+        token++
+    }
+}
+
+/** A main-queue post for the step tick; each request replaces the pending one. */
+private class MainQueueTicker(private val action: () -> Unit) : RecorderTimer {
+    // Bumped by every schedule and cancel: a block whose token is stale was replaced.
     private var token = 0L
 
     override fun schedule(delayMs: Long) {
-        val delay = delayMs.coerceAtLeast(0L)
-        val at = monotonicMillis() + delay
-        if (earliestWins && dueAt != 0L && dueAt <= at) return
-        cancel()
-        dueAt = at
-        val mine = token
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay * 1_000_000), dispatch_get_main_queue()) {
+        val mine = ++token
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delayMs.coerceAtLeast(0L) * 1_000_000), dispatch_get_main_queue()) {
             if (mine == token) {
-                cancel()
+                token++
                 action()
             }
         }
     }
 
     override fun cancel() {
-        dueAt = 0L
         token++
     }
 }

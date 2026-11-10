@@ -1,9 +1,8 @@
 use crate::app::format::round_tenths;
 use crate::app::model::Model;
-use crate::app::readiness::end_of_local_today_sec;
 use crate::app::run_metrics::{MAX_LOAD_DAYS, RunFacts};
 use crate::app::view_types::{EvidenceTagView, RunProgressView, SrpeLoadView, TrainingLoadView};
-use crate::day::{is_undated, local_day};
+use crate::day::local_day;
 use crate::evidence::claims;
 use crate::schema::Recommended;
 use crate::{load, running};
@@ -30,15 +29,11 @@ pub(in crate::app) fn build_training_load(
     // A future-dated run (mis-imported 2030 GPX) would set the chain's `last`
     // day into the future, sliding the whole MAX_LOAD_DAYS window off the real
     // history so CTL/ATL/TSB reflect only that phantom run. Drop it here.
-    let cutoff = end_of_local_today_sec(model);
+    let so_far = model.up_to_today();
     // Chronological (`RunFacts::chrono`): a day's TRIMP is a float sum.
     for &i in &facts.chrono {
         let (r, minutes) = (&model.runs[i], facts.minutes[i]);
-        if is_undated(r.observed_at)
-            || r.hr_pct_max <= 0.0
-            || minutes <= 0.0
-            || cutoff.is_some_and(|c| r.observed_at > c)
-        {
+        if !so_far.admits(r.observed_at) || r.hr_pct_max <= 0.0 || minutes <= 0.0 {
             skipped += 1;
             continue;
         }

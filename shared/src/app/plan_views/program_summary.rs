@@ -5,10 +5,9 @@ use std::fmt::Write as _;
 use crate::app::evidence_views::why_from;
 use crate::app::format::{capitalize_first, fmt_rounded, human_goal, round_tenths};
 use crate::app::view_types::{EvidenceTagView, MuscleVolumeView, ProgramSummaryView};
-use crate::evidence::claims;
 use crate::profile::{PlanProfile, Profile};
 use crate::running::GoalDistance;
-use crate::schema::{Mesocycle, Prescription, Program, Recommended, SessionType};
+use crate::schema::{Mesocycle, Prescription, Program, Recommended, RxBasis, SessionType};
 use crate::strength::LiftGoal;
 
 /// The program summary card, graded with the plan's representative claim.
@@ -105,12 +104,7 @@ fn muscle_volume_rows(
         .iter()
         .flat_map(|s| s.prescriptions.iter())
         .filter(|rx| matches!(rx.value, Prescription::Lift(_)))
-        .any(|rx| {
-            matches!(
-                rx.claim_id(),
-                claims::HYB_MAINT_001 | claims::RUN_STRENGTH_001
-            )
-        });
+        .any(|rx| rx.kind() == RxBasis::Maintenance);
     let no_targets = recovery || maintenance;
     let indirect = |muscle: &str| -> f32 {
         items

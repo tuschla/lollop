@@ -92,8 +92,7 @@ class LongHistoryUiTest {
     @After
     fun tearDown() {
         QaHarness.teardown()
-        AppSettings.showRouteMaps.value = true
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
+        QaHarness.freshProcess()
     }
 
     // ── 1. Replay + core view: complete, consistent, sane numbers, linear cost ─

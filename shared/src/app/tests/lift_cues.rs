@@ -195,13 +195,13 @@ fn stacked_holds_apply_once_and_read_as_one_call() {
     // Two lift-holding signals add one rep in reserve, not two, and their
     // rows merge into one call naming both.
     let recs = vec![
-        Recommended::new(
+        AdjustmentKind::HrvHold.call(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::HrvLnRmssd,
             },
             claims::AUTOREG_HRV_LIFT_001,
         ),
-        Recommended::new(
+        AdjustmentKind::WellnessHold.call(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::WellnessZ,
             },
@@ -216,10 +216,13 @@ fn stacked_holds_apply_once_and_read_as_one_call() {
         "no weight added, stop 1 rep earlier"
     );
 
-    let mut rows: Vec<AdjustmentView> = recs.iter().map(to_view).collect();
-    let drop = merge_hold_rows(&recs, &mut rows);
-    assert_eq!(drop, vec![false, true]);
-    let s = &rows[0].summary;
+    let rows = crate::app::evidence_views::call_rows(
+        &recs,
+        &crate::app::evidence_views::CallCtx::default(),
+    );
+    assert_eq!(rows.len(), 1, "the second hold merges into the first row");
+    assert!(std::ptr::eq(rows[0].0, &recs[0]));
+    let s = &rows[0].1.summary;
     assert!(
         s.starts_with("HRV has been below your normal range this week and your check-in"),
         "{s}"
@@ -237,7 +240,7 @@ fn a_held_lift_goes_no_heavier_than_already_lifted_for_its_reps() {
     let mut it = lift_item("Back squat", 100.0);
     it.hold_load_cap_kg = Some(95.0);
     let mut ns = session(vec![it]);
-    let hold = Recommended::new(
+    let hold = AdjustmentKind::HrvHold.call(
         Adjustment::CapTopEnd {
             trigger: ReadinessSignal::HrvLnRmssd,
         },
@@ -249,7 +252,7 @@ fn a_held_lift_goes_no_heavier_than_already_lifted_for_its_reps() {
     let mut bench = lift_item("Bench press", 80.0);
     bench.hold_load_cap_kg = Some(77.5);
     let mut ns = session(vec![bench]);
-    let knee = Recommended::new(
+    let knee = AdjustmentKind::PainScoped(PainRegion::LowerLimb).call(
         Adjustment::StopItems {
             location: "Left knee".into(),
         },
@@ -318,7 +321,7 @@ fn short_reps_read_short_and_a_pain_stop_reads_stopped() {
     let mut it = lift_item("Back squat", 100.0);
     it.logged_sets = vec![full(5, 1)];
     it.sets_done = 1;
-    let knee = Recommended::new(
+    let knee = AdjustmentKind::PainScoped(PainRegion::LowerLimb).call(
         Adjustment::StopItems {
             location: "Left knee".into(),
         },
@@ -453,10 +456,7 @@ fn a_row_with_no_bar_or_rings_says_to_use_a_table() {
     let mut ns = session(vec![view.clone()]);
     crate::app::plan_views::apply_adjustments_to_session(
         &mut ns,
-        &[Recommended::new(
-            Adjustment::CapRpe(1),
-            claims::AUTOREG_E1RM_GATE_001,
-        )],
+        &[AdjustmentKind::E1rm.call(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
         false,
     );
     let eased = &ns.items[0];
@@ -723,35 +723,32 @@ fn a_later_failed_set_gets_a_stop_or_drop_cue() {
     );
 }
 
-#[test]
-fn a_lift_finished_at_the_cue_load_reads_done() {
-    // A hard first set cuts the remaining sets; the rest done
-    // at the cue load completes the lift, also once the session is finished
-    // and no longer the hero.
-    let (app, mut model) = planned_strength_model(true);
-    let it = loaded_item(&app, &model);
+/// Monday's session with its first lift's first set logged hard and the rest
+/// of it at the cue load, every other item as shown. Returns the cut lift.
+fn finish_at_the_cue_load(app: &Engine, model: &mut Model) -> PrescriptionView {
+    let it = loaded_item(app, model);
     let load = it.load_kg.unwrap();
     let reps = u32::from(it.reps_low.max(1));
     log(
-        &app,
-        &mut model,
+        app,
+        model,
         &it.exercise,
         set(load, reps, 10.0, MON * DAY_SEC + 3_600),
     );
-    let cue = rows_for(&app.view(&model), &it.exercise)
+    let cue = rows_for(&app.view(model), &it.exercise)
         .iter()
         .find_map(|a| a.suggested_load_kg)
         .expect("the cut carries its load");
     assert!(cue < load - 1.0, "{cue} vs {load}");
     let mut at = MON * DAY_SEC + 3_900;
     for _ in 1..it.sets {
-        log(&app, &mut model, &it.exercise, set(cue, reps, 8.0, at));
+        log(app, model, &it.exercise, set(cue, reps, 8.0, at));
         at += 300;
     }
-    let others = app.view(&model).next_session.expect("still today").items;
+    let others = app.view(model).next_session.expect("still today").items;
     for other in others.iter().filter(|o| o.exercise != it.exercise) {
         if other.is_run() {
-            app.update(log_run_at(30.0, 180.0, 70.0, at), &mut model)
+            app.update(log_run_at(30.0, 180.0, 70.0, at), model)
                 .expect_only_render();
             at += 300;
             continue;
@@ -759,14 +756,24 @@ fn a_lift_finished_at_the_cue_load_reads_done() {
         let kg = other.load_kg.unwrap_or(50.0);
         for _ in 0..other.sets.max(1) {
             log(
-                &app,
-                &mut model,
+                app,
+                model,
                 &other.exercise,
                 set(kg, u32::from(other.reps_low.max(1)), 8.0, at),
             );
             at += 300;
         }
     }
+    it
+}
+
+#[test]
+fn a_lift_finished_at_the_cue_load_reads_done() {
+    // A hard first set cuts the remaining sets; the rest done
+    // at the cue load completes the lift, also once the session is finished
+    // and no longer the hero.
+    let (app, mut model) = planned_strength_model(true);
+    let it = finish_at_the_cue_load(&app, &mut model);
     let vm = app.view(&model);
     let row = vm
         .week_plan
@@ -789,6 +796,54 @@ fn a_lift_finished_at_the_cue_load_reads_done() {
 }
 
 #[test]
+fn an_adjusted_today_reads_the_same_in_the_hero_and_its_strip_row() {
+    // A readiness-adjusted day whose lift is logged above its target: the
+    // first-set re-judge eases the lift on the hero, and today's strip row
+    // is that same session, not the row before the re-judge.
+    let (app, mut model) = planned_strength_model(true);
+    app.update(
+        Event::SubmitReadiness(ReadinessInput {
+            observed_at: MON * DAY_SEC + 60,
+            ..input(ReadinessSignal::Rpe, 2.0)
+        }),
+        &mut model,
+    )
+    .expect_only_render();
+    let it = loaded_item(&app, &model);
+    let rpe = it.target_rpe.expect("a target") + 1.0;
+    let mut at = MON * DAY_SEC + 3_600;
+    for _ in 0..it.sets {
+        log(
+            &app,
+            &mut model,
+            &it.exercise,
+            set(it.load_kg.unwrap(), u32::from(it.reps_low.max(1)), rpe, at),
+        );
+        at += 240;
+    }
+    let vm = app.view(&model);
+    let hero = vm.next_session.as_ref().expect("today's session");
+    assert_eq!(hero.epoch_day, MON);
+    assert_eq!(hero.status, SessionStatus::Adjusted);
+    let row = vm
+        .week_plan
+        .iter()
+        .find(|s| s.epoch_day == MON)
+        .expect("Monday");
+    let face = |s: &SessionPlanView| {
+        s.items
+            .iter()
+            .find(|i| i.exercise == it.exercise)
+            .map(|i| (i.target_rpe, i.face_detail.clone()))
+    };
+    assert_eq!(face(row), face(hero));
+    assert_eq!(
+        serde_json::to_string(row).unwrap(),
+        serde_json::to_string(hero).unwrap()
+    );
+}
+
+#[test]
 fn a_held_lift_restates_its_load_in_the_why_basis() {
     // The session `?` panel reads the held load, not the
     // planned one.
@@ -801,7 +856,7 @@ fn a_held_lift_restates_its_load_in_the_why_basis() {
         rir: Some(2),
     });
     let mut ns = session(vec![it]);
-    let hold = Recommended::new(
+    let hold = AdjustmentKind::HrvHold.call(
         Adjustment::CapTopEnd {
             trigger: ReadinessSignal::HrvLnRmssd,
         },
@@ -828,7 +883,7 @@ fn a_lighter_week_restates_sets_and_reps_left_in_the_why_basis() {
         rir: Some(2),
     });
     let mut ns = session(vec![it]);
-    let deload = Recommended::new(
+    let deload = AdjustmentKind::WeeklyDeload(DeloadTrigger::MrvSigns).call(
         Adjustment::Deload {
             volume_reduction_pct: 50.0,
             load_reduction_pct: 10.0,
@@ -836,7 +891,7 @@ fn a_lighter_week_restates_sets_and_reps_left_in_the_why_basis() {
         },
         claims::RUN_DELOAD_001,
     );
-    let hold = Recommended::new(
+    let hold = AdjustmentKind::HrvHold.call(
         Adjustment::CapTopEnd {
             trigger: ReadinessSignal::HrvLnRmssd,
         },

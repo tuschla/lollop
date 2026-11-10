@@ -7,7 +7,7 @@
 
 use super::inputs::latest_input;
 use crate::evidence::claims;
-use crate::schema::{Adjustment, ReadinessInput, ReadinessSignal, Recommended};
+use crate::schema::{Adjustment, AdjustmentCall, AdjustmentKind, ReadinessInput, ReadinessSignal};
 use crate::strength;
 
 /// AUTOREG-E1RM-GATE-001 noise band (autoreg-006/007, Helms 2018): an e1RM
@@ -193,16 +193,15 @@ pub fn derive_performance(
 /// the 1-week deload (AUTOREG-DELOAD-001); a lift scored TODAY below 95 % →
 /// that lift's remaining sets −5 % and one more rep in reserve; above 105 % →
 /// an item-scoped +3.5 % suggestion (stripped under suppression, autoreg-044).
-pub(super) fn perf_adjustments(perf: &[MovementPerf]) -> Vec<Recommended<Adjustment>> {
+pub(super) fn perf_adjustments(perf: &[MovementPerf]) -> Vec<AdjustmentCall> {
     let mut out = Vec::new();
     if perf
         .iter()
         .any(|p| !p.today && e1rm_ratio_outcome(p.ratio, p.decline_streak) == E1rmOutcome::Deload)
     {
-        out.push(Recommended::new(
-            e1rm_decline_deload(),
-            claims::AUTOREG_DELOAD_001,
-        ));
+        out.push(
+            AdjustmentKind::E1rmDeload.call(e1rm_decline_deload(), claims::AUTOREG_DELOAD_001),
+        );
     }
     for p in perf.iter().filter(|p| p.today) {
         let item = |a: Adjustment| Adjustment::ForItem {
@@ -228,15 +227,14 @@ pub(super) fn perf_adjustments(perf: &[MovementPerf]) -> Vec<Recommended<Adjustm
 /// autoreg-007: e1RM > baseline + 5% (ratio > 1.05) → add load ~2.5–5% (uses
 /// 3.5%). Same Helms 2018 e1RM-gate source as its mirror autoreg-006, so it
 /// cites AUTOREG-E1RM-GATE-001.
-pub(super) fn e1rm_gate(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
+pub(super) fn e1rm_gate(inputs: &[ReadinessInput]) -> Vec<AdjustmentCall> {
     let Some(input) = latest_input(inputs, ReadinessSignal::EstimatedOneRm) else {
         return Vec::new();
     };
     match e1rm_ratio_outcome(input.value, input.streak) {
-        E1rmOutcome::Deload => vec![Recommended::new(
-            e1rm_decline_deload(),
-            claims::AUTOREG_DELOAD_001,
-        )],
+        E1rmOutcome::Deload => {
+            vec![AdjustmentKind::E1rmDeload.call(e1rm_decline_deload(), claims::AUTOREG_DELOAD_001)]
+        }
         outcome => e1rm_session_recs(outcome, |a| a),
     }
 }
@@ -249,8 +247,8 @@ pub(super) fn e1rm_gate(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment
 pub(super) fn e1rm_session_recs(
     outcome: E1rmOutcome,
     wrap: impl Fn(Adjustment) -> Adjustment,
-) -> Vec<Recommended<Adjustment>> {
-    let gate = |a| Recommended::new(wrap(a), claims::AUTOREG_E1RM_GATE_001);
+) -> Vec<AdjustmentCall> {
+    let gate = |a| AdjustmentKind::E1rm.call(wrap(a), claims::AUTOREG_E1RM_GATE_001);
     match outcome {
         E1rmOutcome::Reduce => vec![
             gate(Adjustment::ReduceLoadPct(E1RM_REDUCE_LOAD_PCT)),

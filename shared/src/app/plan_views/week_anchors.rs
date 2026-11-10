@@ -1,7 +1,7 @@
 //! The plan anchors of one plan week: the history through a day assembled into
 //! the [`crate::plan::Anchors`] that week is synthesized against.
 
-use crate::app::anchors::{AnchorCtx, build_plan_anchors, build_run_break};
+use crate::app::anchors::{AnchorCtx, build_plan_anchors, build_run_break, off_day_through};
 use crate::app::calis_anchors::{build_calisthenics_anchors, calis_placements_through};
 use crate::app::logged_days::lift_deload_days;
 use crate::app::model::stated_since;
@@ -55,8 +55,7 @@ pub(super) fn plan_week_anchors(
             dated_sets(),
             AnchorCtx::for_profile(
                 Some(day_profile),
-                model,
-                offset,
+                off_day_through(model, through, offset),
                 lift_deload_days(model, &cx.days),
             ),
             through,

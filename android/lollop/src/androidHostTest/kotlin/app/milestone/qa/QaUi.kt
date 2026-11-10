@@ -20,6 +20,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppRuntime
 import app.milestone.AppSettings
 import app.milestone.DarkMode
 import app.milestone.EventDispatcher
@@ -119,7 +120,7 @@ fun ComposeTestRule.launchApp() {
     lastScenario = launchMain()
     waitUntil(30_000) {
         onAllNodesWithText(str(R.string.main_dest_history)).fetchSemanticsNodes().isNotEmpty() &&
-            EventDispatcher.bootHandled
+            AppRuntime.bootHandled
     }
     waitForIdle()
 }

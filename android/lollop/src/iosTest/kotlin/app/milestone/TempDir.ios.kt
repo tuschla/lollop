@@ -6,10 +6,10 @@ import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.NSUUID
 
 @OptIn(ExperimentalForeignApi::class)
-actual fun newTempDir(): LogPath {
+actual fun newTempDir(): AppPath {
     val path = NSTemporaryDirectory() + "lollop-log-" + NSUUID().UUIDString
     check(NSFileManager.defaultManager.createDirectoryAtPath(path, withIntermediateDirectories = true, attributes = null, error = null)) {
         "couldn't create $path"
     }
-    return LogPath(path)
+    return AppPath(path)
 }

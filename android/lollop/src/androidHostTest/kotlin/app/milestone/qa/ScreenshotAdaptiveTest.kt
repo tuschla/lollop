@@ -23,10 +23,10 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppRuntime
 import app.milestone.AppSettings
 import app.milestone.ConcurrentGoal
 import app.milestone.DarkMode
-import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GoalDistance
@@ -113,8 +113,7 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
     fun tearDown() {
         QaHarness.teardown()
         RunSession.reset()
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-        AppSettings.showRouteMaps.value = true
+        QaHarness.freshProcess()
     }
 
     private fun shot(scene: String) =
@@ -371,7 +370,7 @@ class ScreenshotAdaptiveTest(private val window: Window, private val variant: Va
         QaHarness.seedRecordingRun()
         lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
         rule.waitUntil(30_000) {
-            rule.onAllNodesWithText(str(R.string.track_btn_stop)).fetchSemanticsNodes().isNotEmpty() && EventDispatcher.bootHandled
+            rule.onAllNodesWithText(str(R.string.track_btn_stop)).fetchSemanticsNodes().isNotEmpty() && AppRuntime.bootHandled
         }
         rule.waitForIdle()
     }

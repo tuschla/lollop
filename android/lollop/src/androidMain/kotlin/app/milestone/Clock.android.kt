@@ -4,4 +4,4 @@ import android.os.SystemClock
 
 internal actual fun wallClockMillis(): Long = System.currentTimeMillis()
 
-internal actual fun monotonicMillis(): Long = SystemClock.elapsedRealtime()
+internal actual fun deviceMonotonicMillis(): Long = SystemClock.elapsedRealtime()

@@ -10,19 +10,16 @@ use crate::evidence::{ClaimId, claims};
 use crate::exercise::{MovementPattern, competition_lift, movement_key, movement_pattern};
 use crate::hybrid;
 use crate::hypertrophy;
-use crate::schema::{LiftIntensity, Prescription, Recommended, Session, SessionType};
+use crate::schema::{LiftIntensity, Prescription, Recommended, Rx, RxBasis, Session, SessionType};
 use crate::strength::{self, LiftGoal};
 
 /// Rewrite every prescription of the week through `f`, re-grading each row it
-/// returns to the claim it names; `None` leaves the row and its grade as built.
-fn regrade_each(
-    sessions: &mut [Session],
-    mut f: impl FnMut(&Prescription) -> Option<(Prescription, ClaimId)>,
-) {
+/// returns to the rule it names; `None` leaves the row and its grade as built.
+fn regrade_each(sessions: &mut [Session], mut f: impl FnMut(&Prescription) -> Option<Rx>) {
     for s in sessions.iter_mut() {
         for rx in &mut s.prescriptions {
-            if let Some((value, claim)) = f(&rx.value) {
-                *rx = Recommended::new(value, claim);
+            if let Some(new) = f(&rx.value) {
+                *rx = new;
             }
         }
     }
@@ -60,7 +57,7 @@ pub(super) fn conserve_weekly_sets(sessions: &mut [Session], targets: &BTreeMap<
             {
                 let mut l = l.clone();
                 l.sets = sets;
-                *rx = Recommended::new(Prescription::Lift(l), claims::LIFT_DAYS_001);
+                *rx = RxBasis::Workout.rx(Prescription::Lift(l), claims::LIFT_DAYS_001);
             }
         }
     }
@@ -74,12 +71,12 @@ pub(super) fn apply_maintenance_dose(sessions: &mut [Session], claim: ClaimId) {
         Prescription::Lift(l) => {
             let mut l = l.clone();
             l.sets = hybrid::maintenance_sets_per_exercise(l.sets).value;
-            Some((Prescription::Lift(l), claim))
+            Some(RxBasis::Maintenance.rx(Prescription::Lift(l), claim))
         }
         Prescription::Calisthenics(c) => {
             let mut c = c.clone();
             c.sets = hybrid::maintenance_sets_per_exercise(c.sets).value;
-            Some((Prescription::Calisthenics(c), claim))
+            Some(RxBasis::Maintenance.rx(Prescription::Calisthenics(c), claim))
         }
         Prescription::Run(_) => None,
     });
@@ -90,13 +87,13 @@ pub(super) fn apply_maintenance_dose(sessions: &mut [Session], claim: ClaimId) {
 /// exercise carrying the most sets, never below one set per exercise
 /// (HYB-MAINT-002: one set at the same load holds strength).
 pub(super) fn apply_lower_cap(sessions: &mut [Session], cap: &Recommended<hybrid::LowerLiftCap>) {
-    let is_lower = |rx: &Recommended<Prescription>| match &rx.value {
+    let is_lower = |rx: &Rx| match &rx.value {
         Prescription::Lift(l) => {
             movement_pattern(&l.exercise).is_some_and(MovementPattern::is_lower)
         }
         _ => false,
     };
-    let sets_of = |rx: &Recommended<Prescription>| match &rx.value {
+    let sets_of = |rx: &Rx| match &rx.value {
         Prescription::Lift(l) => l.sets as u32,
         _ => 0,
     };
@@ -139,7 +136,7 @@ pub(super) fn apply_lower_cap(sessions: &mut [Session], cap: &Recommended<hybrid
     }
     for (si, pi) in changed {
         let rx = &mut sessions[si].prescriptions[pi];
-        *rx = cap.with_value(rx.value.clone());
+        *rx = cap.with_value(rx.value.clone()).with_kind(RxBasis::Workout);
     }
 }
 
@@ -164,10 +161,18 @@ pub(super) fn apply_deload_week(sessions: &mut [Session], goal: LiftGoal) {
     let d = hypertrophy::deload_rx().value;
     let hyp_load_frac = ((d.load_frac_of_working.0 + d.load_frac_of_working.1) / 2.0) as f32;
     let strength_goal = matches!(goal, LiftGoal::MaxStrength | LiftGoal::Power);
-    let (load_frac, lift_claim) = if strength_goal {
-        (STRENGTH_DELOAD_LOAD_FRAC, claims::STR_DELOAD_VOL_001)
+    let (load_frac, lift_basis, lift_claim) = if strength_goal {
+        (
+            STRENGTH_DELOAD_LOAD_FRAC,
+            RxBasis::StrengthDeload,
+            claims::STR_DELOAD_VOL_001,
+        )
     } else {
-        (hyp_load_frac, claims::HYP_DELOAD_RX_001)
+        (
+            hyp_load_frac,
+            RxBasis::HypertrophyDeload,
+            claims::HYP_DELOAD_RX_001,
+        )
     };
     let halve = |sets: u8| ((sets as f64 * d.sets_fraction).ceil() as u8).max(1);
     regrade_each(sessions, |rx| match rx {
@@ -181,13 +186,16 @@ pub(super) fn apply_deload_week(sessions: &mut [Session], goal: LiftGoal) {
                 LiftIntensity::MaxIntent => LiftIntensity::MaxIntent,
             };
             l.load_kg = l.load_kg.map(|kg| kg * load_frac);
-            Some((Prescription::Lift(l), lift_claim))
+            Some(lift_basis.rx(Prescription::Lift(l), lift_claim))
         }
         Prescription::Calisthenics(c) => {
             let mut c = c.clone();
             c.sets = halve(c.sets);
             c.rir = d.rir;
-            Some((Prescription::Calisthenics(c), claims::HYP_DELOAD_RX_001))
+            Some(
+                RxBasis::HypertrophyDeload
+                    .rx(Prescription::Calisthenics(c), claims::HYP_DELOAD_RX_001),
+            )
         }
         Prescription::Run(_) => None,
     });
@@ -225,7 +233,7 @@ pub(super) fn apply_run_recovery_effort_floor(sessions: &mut [Session]) {
             }
             _ => return None,
         };
-        Some((value, claims::HYP_DELOAD_CADENCE_001))
+        Some(RxBasis::Workout.rx(value, claims::HYP_DELOAD_CADENCE_001))
     });
 }
 
@@ -290,7 +298,7 @@ pub(super) fn apply_meet_taper(sessions: &mut [Session], days_to_meet_from_week_
             if let Prescription::Lift(l) = &rx.value {
                 let mut l = l.clone();
                 l.sets = ((l.sets as f64 * (1.0 - cut)).round() as u8).max(1);
-                *rx = Recommended::new(Prescription::Lift(l), claims::TAPER_001);
+                *rx = RxBasis::Workout.rx(Prescription::Lift(l), claims::TAPER_001);
             }
         }
         if s.prescriptions.is_empty() {

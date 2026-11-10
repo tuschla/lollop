@@ -31,10 +31,11 @@ pub mod app;
 pub mod autoreg;
 pub mod calisthenics;
 pub(crate) mod day;
+pub mod event;
 pub mod evidence;
 pub mod exercise;
 pub mod feedback;
-#[cfg(any(target_os = "android", feature = "ffi", test))]
+#[cfg(any(ffi_surface, test))]
 pub mod ffi;
 pub mod fit;
 pub mod gps;
@@ -43,23 +44,25 @@ pub mod hypertrophy;
 pub mod individualization;
 pub mod load;
 pub mod log;
+pub(crate) mod memo;
 pub(crate) mod names;
 pub mod plan;
 pub(crate) mod plates;
 pub mod profile;
 pub mod running;
+pub(crate) mod sanitize;
 pub mod schema;
 pub mod strength;
 
 pub use app::{
-    ActivityKind, ActivityResultView, AdjustmentView, BaselineStatusView, Decouple, E1rmRangeView,
-    Effect, Engine, EntryKind, Event, FeedbackView, GradeDefView, GuidanceView, HrMaxView,
-    HrZoneInputView, HypertrophyInputView, IntervalExec, IntervalVerdictView, LiftExec,
-    LiftResultView, Model, PrescriptionView, ProgramSummaryView, ProteinFigureView,
-    ProteinInputView, RacePredictionView, ReadinessSignalView, RunResultView, RunSplitView,
-    SessionPlanView, SessionReview, SignalGroupView, SplitVerdictView, TodayHeadlineView,
+    ActivityResultView, AdjustmentView, BaselineStatusView, E1rmRangeView, Effect, Engine,
+    FeedbackView, GradeDefView, GuidanceView, HrMaxView, HrZoneInputView, HypertrophyInputView,
+    IntervalVerdictView, LiftResultView, Model, PrescriptionView, ProgramSummaryView,
+    ProteinFigureView, ProteinInputView, RacePredictionView, ReadinessSignalView, RunResultView,
+    RunSplitView, SessionPlanView, SignalGroupView, SplitVerdictView, TodayHeadlineView,
     TrainingLoadView, ViewModel, WhyView, YouthActivityView,
 };
 pub use crux_core::Core;
+pub use event::{ActivityKind, Decouple, EntryKind, Event, IntervalExec, LiftExec, SessionReview};
 pub use log::compact_event_log;
 pub use profile::{Profile, ResistanceModality};

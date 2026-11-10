@@ -1,6 +1,5 @@
 package app.milestone
 
-import kotlin.concurrent.Volatile
 import kotlin.math.abs
 import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
@@ -16,23 +15,7 @@ internal expect fun wallClockMillis(): Long
 
 /** Milliseconds on a clock that never jumps and keeps counting in deep sleep
  *  (Android `SystemClock.elapsedRealtime`): for durations, never for dates. */
-internal expect fun monotonicMillis(): Long
-
-/**
- * The shell's wall clock: every "now" the app stamps or shows (today's epoch-day,
- * new-entry timestamps, relative dates, rest readouts) reads it, so shifting it
- * moves all of them together. [offsetMillis] is 0 in production; the offline UI
- * suite pins the clock to a fixed training day so its scenarios are independent
- * of the weekday they run on. Sensor time (GPS fixes) and entry-id uniqueness
- * keep reading the system clock.
- */
-internal object AppClock {
-    @Volatile var offsetMillis: Long = 0L
-
-    fun nowMillis(): Long = wallClockMillis() + offsetMillis
-
-    fun nowSec(): Long = nowMillis() / 1000L
-}
+internal expect fun deviceMonotonicMillis(): Long
 
 /** The local epoch-day (days since 1970-01-01) of the instant [epochMillis] in [zone]. */
 internal fun localEpochDayAtMillis(epochMillis: Long, zone: TimeZone = TimeZone.currentSystemDefault()): Long =
@@ -49,6 +32,11 @@ internal fun localEpochDay(epochSec: Long, zone: TimeZone = TimeZone.currentSyst
  *  (the first moment of the day when a DST change skips midnight). */
 internal fun localDayStartSec(epochSec: Long, zone: TimeZone = TimeZone.currentSystemDefault()): Long =
     Instant.fromEpochSeconds(epochSec).toLocalDateTime(zone).date.atStartOfDayIn(zone).epochSeconds
+
+/** The start of the local day after the one containing [nowMillis] in [zone], in
+ *  epoch millis (the first moment of that day when a DST change skips midnight). */
+internal fun nextLocalMidnightMillis(nowMillis: Long, zone: TimeZone = TimeZone.currentSystemDefault()): Long =
+    LocalDate.fromEpochDays(localEpochDayAtMillis(nowMillis, zone) + 1).atStartOfDayIn(zone).toEpochMilliseconds()
 
 /** Local noon of [epochDay] in [zone] as a unix second: the seed stamp for logging
  *  a PAST prescribed session from the week strip. Noon avoids DST/midnight edge

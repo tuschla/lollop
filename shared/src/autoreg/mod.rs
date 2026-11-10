@@ -5,12 +5,15 @@
 //! definitions, the ~50 IF→THEN adjustment rules with verbatim thresholds, and
 //! the §5 six-tier safety ladder.
 //!
-//! Every emitted recommendation is a [`Recommended<Adjustment>`] whose
-//! [`ClaimId`](crate::evidence::ClaimId) resolves to its evidence row in the compile-time claim registry
-//! (`crate::evidence`). Safety-critical stops (pain, fever/illness, a
-//! corroborated resting-HR elevation) dominate all optimization triggers.
+//! Every emitted recommendation is an [`AdjustmentCall`] carrying the rule
+//! that raised it ([`AdjustmentKind`]) and a
+//! [`ClaimId`](crate::evidence::ClaimId) that resolves to its evidence row in
+//! the compile-time claim registry (`crate::evidence`). Safety-critical stops
+//! (pain, fever/illness, a corroborated resting-HR elevation) dominate all
+//! optimization triggers.
 //!
-//! [`Recommended<Adjustment>`]: crate::schema::Recommended
+//! [`AdjustmentCall`]: crate::schema::AdjustmentCall
+//! [`AdjustmentKind`]: crate::schema::AdjustmentKind
 
 mod derive;
 mod hold;
@@ -27,8 +30,8 @@ pub use derive::{BaselineKind, BaselineStatus, DerivedReadiness, derive_readines
 pub(crate) use derive::{HRV_ROLLING_DAYS, checkin_days_in_reach};
 pub use hold::{ReturnKind, TimedInput, last_hold_resolution, return_adjustment};
 pub use pain::{
-    PainRegion, item_spared_by_pain, pain_blocks_progression, pain_blocks_training,
-    pain_hold_active, pain_region, worst_active_pain,
+    item_spared_by_pain, pain_blocks_progression, pain_blocks_training, pain_hold_active,
+    pain_region, worst_active_pain,
 };
 pub(crate) use perf::{E1RM_NOISE_FRAC, E1RM_REDUCE_RATIO};
 pub use perf::{MovementPerf, PerfSet, derive_performance};
@@ -50,6 +53,6 @@ pub(crate) use rules::HRV_ESCALATE_STREAK;
 pub use rules::{
     RhrNoise, RuleContext, adjustments_in, bone_stress_referral, failed_set_stop,
     first_set_rpe_adjust, hrv_below_swc, illness_active, illness_plan_recs, illness_stop,
-    increase_hold, reds_defer, reds_referral, resolve_safety_in, rhr_neck_check_due,
+    increase_hold, reds_defer, reds_referral, rhr_neck_check_due, safety_tier_of,
 };
 pub use signals::{ALL_SIGNALS, SignalGroup, SignalState, signal_group, signal_states_in};

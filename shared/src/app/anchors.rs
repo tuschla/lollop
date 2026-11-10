@@ -9,6 +9,7 @@ use crate::app::model::{LoggedRun, LoggedSet, Model};
 use crate::app::run_metrics::RunFacts;
 use crate::app::set_index::{NameFacts, SetIndex};
 use crate::day::{is_undated, local_day};
+use crate::event::SessionReview;
 use crate::plan::{DerateCause, LiftDerate};
 use crate::profile::Profile;
 use crate::{autoreg, individualization, strength};
@@ -50,17 +51,17 @@ pub(super) struct AnchorCtx<'a> {
 
 impl<'a> AnchorCtx<'a> {
     /// The context for `profile` (the one effective on the day being
-    /// prescribed), with the off day taken from the current session review.
+    /// prescribed), with `off_day` from the session review in force that day
+    /// ([`off_day_through`]).
     pub(super) fn for_profile(
         profile: Option<&Profile>,
-        model: &Model,
-        offset: i64,
+        off_day: Option<i64>,
         deloads: DeloadDays<'a>,
     ) -> Self {
         AnchorCtx {
             layoff: profile.and_then(Layoff::of),
             calisthenics: profile.is_some_and(Profile::uses_calisthenics),
-            off_day: off_day(model, offset),
+            off_day,
             deloads,
         }
     }
@@ -71,8 +72,32 @@ pub(super) fn off_day(model: &Model, offset: i64) -> Option<i64> {
     model
         .review
         .as_ref()
-        .filter(|r| r.bad_day && !is_undated(r.observed_at))
-        .map(|r| local_day(r.observed_at, offset))
+        .and_then(|r| marked_off_day(r, offset))
+}
+
+fn marked_off_day(r: &SessionReview, offset: i64) -> Option<i64> {
+    (r.bad_day && !is_undated(r.observed_at)).then(|| local_day(r.observed_at, offset))
+}
+
+/// The off day the plan prescribing the day after local day `through` reads:
+/// from the session review in force then. Today's plan (and a later day's)
+/// reads the current review ([`off_day`]); a past day reads the latest review
+/// submitted on or before `through` ([`Model::review_history`]), so a later
+/// review or a `ClearReview` never re-judges that day's anchors. An undated
+/// review cannot be placed in time and marks no past day.
+pub(super) fn off_day_through(model: &Model, through: i64, offset: i64) -> Option<i64> {
+    if model
+        .today_or_plan_start()
+        .is_none_or(|today| through >= today)
+    {
+        return off_day(model, offset);
+    }
+    let in_force = model
+        .review_history
+        .iter()
+        .rev()
+        .find(|r| !is_undated(r.observed_at) && local_day(r.observed_at, offset) <= through)?;
+    marked_off_day(in_force, offset)
 }
 
 /// The e1RM anchors per lift the plan synthesizes against
@@ -95,8 +120,7 @@ pub(super) fn lift_anchors_now(
     });
     let ctx = AnchorCtx::for_profile(
         model.profile(),
-        model,
-        offset,
+        off_day(model, offset),
         lift_deload_days(model, days),
     );
     build_plan_anchors(set_index.with_facts(&model.sets), ctx, today, offset)
@@ -715,8 +739,7 @@ pub(super) fn build_last_working(
             (
                 crate::plan::LastWorking {
                     exercise: last.exercise.clone(),
-                    // A -0.0 kg set passes the ingest gate; `+ 0.0` reads it as 0.
-                    weight_kg: top + 0.0,
+                    weight_kg: top,
                     sets: working,
                     age_days: today_epoch_day - day,
                 },
@@ -794,13 +817,15 @@ pub(super) fn build_run_anchors(
     utc_offset_sec: i64,
 ) -> crate::plan::RunAnchors {
     // An in-window run counts at full credit, so an older, decayed run only
-    // wins when it was longer than every in-window run.
+    // wins when it was longer than every in-window run. An undated run
+    // (`run_started_at` 0) has no day to age from.
     let longest = longest_credited(
         facts
             .started
             .iter()
             .zip(&facts.km)
-            .map(|(&s, &km)| (crate::day::local_day(s, utc_offset_sec), km)),
+            .filter(|(s, _)| !is_undated(**s))
+            .map(|(&s, &km)| (local_day(s, utc_offset_sec), km)),
         today_epoch_day,
     );
     crate::plan::RunAnchors {
@@ -819,8 +844,12 @@ fn recent_weekly_km(facts: &RunFacts, day: i64, utc_offset_sec: i64) -> Option<f
     let mut total_km = 0.0;
     let mut first_run_day: Option<i64> = None;
     for &i in &facts.chrono {
+        let start = facts.started[i];
+        if is_undated(start) {
+            continue;
+        }
         let km = facts.km[i];
-        let d = crate::day::local_day(facts.started[i], utc_offset_sec);
+        let d = local_day(start, utc_offset_sec);
         if d <= day && day.saturating_sub(d) < WEEKLY_VOLUME_WINDOW_DAYS {
             total_km += km;
             first_run_day = Some(first_run_day.map_or(d, |f| f.min(d)));

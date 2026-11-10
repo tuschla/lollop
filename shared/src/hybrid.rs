@@ -17,7 +17,16 @@ use crate::schema::Recommended;
 // ---------------------------------------------------------------------------
 
 /// The co-primary goal governing a concurrent day's ordering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    crate::sanitize::Sanitize,
+)]
 pub enum ConcurrentGoal {
     Strength,
     Power,

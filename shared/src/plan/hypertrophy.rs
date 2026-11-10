@@ -21,7 +21,7 @@ use crate::hypertrophy::{self, DoubleProgression, VolumeRole};
 use crate::individualization::TrainingAge;
 use crate::profile::{PlanProfile, Profile};
 use crate::schema::{
-    LiftIntensity, LiftPrescription, LiftSessionType, Prescription, Recommended, Session,
+    LiftIntensity, LiftPrescription, LiftSessionType, Prescription, Recommended, RxBasis, Session,
     SessionType,
 };
 use crate::strength::{self, LiftGoal};
@@ -448,6 +448,7 @@ impl<'a> HypertrophyWeek<'a> {
                         self.week_in_block,
                         self.block_weeks,
                     )
+                    .with_kind(RxBasis::Workout)
                 })
                 .collect(),
             dup_day: None,

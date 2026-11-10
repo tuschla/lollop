@@ -11,17 +11,16 @@ use crate::{hybrid, hypertrophy, individualization, running, strength};
 pub(in crate::app) const DEFICIT_REFUSAL: &str = "Protein for eating less is not prescribed: your answers show signs of under-eating for your training (RED-S). Train lighter and see a doctor or registered dietitian before eating less.";
 
 /// Profile-independent evidence-cited reference defaults, surfaced always so a
-/// shell can show coaching rationale without a full profile set.
+/// shell can show coaching rationale without a full profile set. A constant
+/// per RED-S gate state, built once each.
 pub(in crate::app) fn build_reference(
     reds_present: bool,
 ) -> std::borrow::Cow<'static, [GuidanceView]> {
-    // Profile-independent except the RED-S gate: cache the common variant.
-    if reds_present {
-        return std::borrow::Cow::Owned(build_reference_impl(true));
-    }
-    static CACHE: std::sync::LazyLock<Vec<GuidanceView>> =
-        std::sync::LazyLock::new(|| build_reference_impl(false));
-    std::borrow::Cow::Borrowed(&CACHE)
+    static REFERENCE: [std::sync::LazyLock<Vec<GuidanceView>>; 2] = [
+        std::sync::LazyLock::new(|| build_reference_impl(false)),
+        std::sync::LazyLock::new(|| build_reference_impl(true)),
+    ];
+    std::borrow::Cow::Borrowed(&REFERENCE[usize::from(reds_present)])
 }
 
 fn build_reference_impl(reds_present: bool) -> Vec<GuidanceView> {

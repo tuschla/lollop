@@ -21,11 +21,7 @@ pub(super) use rows::{
 pub(super) use session_feedback::{
     FeedbackCtx, build_feedback, feedback_track_split, latest_run_spike,
 };
-pub(super) use split::{
-    merged_review, review_adjustment_expired, review_age_days, session_part, weekly_part,
-};
-// `log.rs` compaction reaches these through `crate::app`.
-pub(crate) use split::{submit_review_sets_session, submit_review_sets_weekly};
+pub(super) use split::{merged_review, review_adjustment_expired, review_age_days};
 pub(super) use trend::build_trend;
 
 #[cfg(test)]

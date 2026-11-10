@@ -11,12 +11,14 @@ import android.os.Bundle
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.QaHarness
+import app.milestone.widget.TileFace
+import app.milestone.widget.AndroidWidgets
 import app.milestone.widget.TodayWidgetReceiver
 import app.milestone.widget.WidgetDayKind
-import app.milestone.widget.WidgetMidnight
 import app.milestone.widget.WidgetSnapshot
 import app.milestone.widget.WidgetSnapshotStore
 import app.milestone.widget.WidgetTone
+import app.milestone.widget.tileFace
 import app.milestone.widget.widgetFace
 import app.milestone.widget.widgetSnapshotOf
 import java.io.File
@@ -29,6 +31,7 @@ import java.time.ZoneId
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
+import kotlinx.datetime.toKotlinTimeZone
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -73,11 +76,12 @@ class SurfaceStateMachineTest {
     }
 
     private fun clean() {
-        AppClock.offsetMillis = 0L
+        TestClock.offsetMillis = 0L
+        AppRuntime.resetForTest(clock = TestClock)
         // A fresh install per walk: the reminder's setting and the day it last reminded.
-        app.getSharedPreferences("session_reminder", 0).edit().clear().commit()
+        app.getSharedPreferences(AppFileNames.REMINDER_STORE, 0).edit().clear().commit()
         RunSession.reset()
-        File(app.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(app.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
         nm.cancelAll()
         shadowOf(am).scheduledAlarms.toList().forEach { it.operation?.let(am::cancel) }
     }
@@ -108,9 +112,9 @@ class SurfaceStateMachineTest {
             repeat(3) { instants += rng.nextLong(Instant.parse("2025-01-01T00:00:00Z").toEpochMilli(), end.toEpochMilli()) }
             for (now in instants) {
                 for (m in minutes) {
-                    assertEquals("$id now=${Instant.ofEpochMilli(now)} minute=$m", oracleNextFire(now, m, zone), SessionReminder.nextFireMillis(now, m, zone))
+                    assertEquals("$id now=${Instant.ofEpochMilli(now)} minute=$m", oracleNextFire(now, m, zone), SessionReminder.nextFireMillis(now, m, zone.toKotlinTimeZone()))
                 }
-                assertEquals("$id midnight after ${Instant.ofEpochMilli(now)}", oracleNextMidnight(now, zone), WidgetMidnight.nextMidnightMillis(now, zone))
+                assertEquals("$id midnight after ${Instant.ofEpochMilli(now)}", oracleNextMidnight(now, zone), nextLocalMidnightMillis(now, zone.toKotlinTimeZone()))
             }
         }
     }
@@ -395,7 +399,7 @@ class SurfaceStateMachineTest {
         }
 
         private fun setNow(t: Long) {
-            AppClock.offsetMillis = t - System.currentTimeMillis()
+            TestClock.offsetMillis = t - System.currentTimeMillis()
             expire()
         }
 
@@ -444,7 +448,7 @@ class SurfaceStateMachineTest {
                 w < 75 -> { val m = pickMinute(); SessionReminder.setMinuteOfDay(app, m); "reminder minute=$m" }
                 w < 80 -> changeZone()
                 w < 82 -> changeClock()
-                w < 85 -> { nm.cancel(SessionReminder.NOTIF_ID); "dismiss reminder" }
+                w < 85 -> { nm.cancel(AndroidIds.REMINDER_NOTIFICATION); "dismiss reminder" }
                 w < 87 -> tapReminder(content = true)
                 w < 90 -> tapReminder(content = false)
                 w < 94 -> { processDeath(); "process death" }
@@ -496,7 +500,7 @@ class SurfaceStateMachineTest {
 
         private fun deliver(intent: Intent) {
             when (intent.action) {
-                SessionReminder.ACTION_FIRE -> {
+                AndroidReminder.ACTION_FIRE -> {
                     val expect = expectPost()
                     SessionReminderReceiver().onReceive(app, intent)
                     observe("reminder alarm", fromAlarm = true)
@@ -517,12 +521,18 @@ class SurfaceStateMachineTest {
             return open.takeIf { !(it.kind == K.Run && RunSession.tracking.value) }
         }
 
-        /** [TodayWidgetReceiver] gets a day-change broadcast. A stale mark that ticks
-         *  [WidgetSnapshotStore.staleMarks] makes [app.milestone.widget.WidgetSync]
-         *  derive the snapshot again from the model the process holds. */
-        private fun dayChanged(intent: Intent) {
+        /** [TodayWidgetReceiver] gets the midnight tick. */
+        private fun dayChanged(intent: Intent) = rederiving { receive(TodayWidgetReceiver(), intent) }
+
+        /** The system's clock or time zone change ([changed]) reaches every feature. */
+        private fun timeChanged(changed: Intent) = rederiving { TimeChangeReceiver().onReceive(app, changed) }
+
+        /** Run [mark]; a stale mark that ticks [WidgetSnapshotStore.staleMarks] makes
+         *  [app.milestone.widget.WidgetSurfaces] derive the snapshot again from the
+         *  model the process holds. */
+        private fun rederiving(mark: () -> Unit) {
             val marks = WidgetSnapshotStore.staleMarks.value
-            receive(TodayWidgetReceiver(), intent)
+            mark()
             if (WidgetSnapshotStore.staleMarks.value != marks && alive) writeHeld()
         }
 
@@ -541,13 +551,13 @@ class SurfaceStateMachineTest {
 
         private fun writeHeld() {
             val m = held ?: return
-            WidgetSnapshotStore.write(app, widgetSnapshotOf(m, DistanceUnit.Km, zone.id))
+            AndroidWidgets.store(app, widgetSnapshotOf(m, DistanceUnit.Km, zone.id))
             observe("snapshot write")
         }
 
         /** The app comes to the front: SetToday, then the model is published. */
         private fun publish() {
-            if (!alive) RecordingWatch.start(app)
+            if (!alive) AppRuntime.start(app)
             alive = true
             held = world.model(today)
             writeHeld()
@@ -563,14 +573,14 @@ class SurfaceStateMachineTest {
 
         private fun runStart(): String {
             publish()
-            RunSession.tracking.value = true
+            RunSession.recordingStarted()
             shadowOf(Looper.getMainLooper()).idle()
             return "run start"
         }
 
         private fun runStop(save: Boolean): String {
             if (!RunSession.tracking.value) return "run stop (none)"
-            RunSession.tracking.value = false
+            RunSession.markStopped()
             if (save && !world.blocked && world.session(today).kind == K.Run) world.done[today] = world.session(today).count
             publish()
             return "run stop save=$save"
@@ -601,9 +611,7 @@ class SurfaceStateMachineTest {
         private fun changeZone(): String {
             val to = ZONES[rng.nextInt(ZONES.size)]
             TimeZone.setDefault(TimeZone.getTimeZone(to))
-            val changed = Intent(Intent.ACTION_TIMEZONE_CHANGED)
-            SessionReminderReceiver().onReceive(app, changed)
-            dayChanged(changed)
+            timeChanged(Intent(Intent.ACTION_TIMEZONE_CHANGED))
             return "zone -> $to"
         }
 
@@ -614,9 +622,7 @@ class SurfaceStateMachineTest {
             } else {
                 setNow(now + jump)
             }
-            val changed = Intent(Intent.ACTION_TIME_CHANGED)
-            SessionReminderReceiver().onReceive(app, changed)
-            dayChanged(changed)
+            timeChanged(Intent(Intent.ACTION_TIME_CHANGED))
             return "clock ${jump / MINUTE} min"
         }
 
@@ -625,7 +631,7 @@ class SurfaceStateMachineTest {
             val pi = if (content) n.contentIntent else n.actions.single().actionIntent
             val dest = openDestOf(shadowOf(pi).savedIntent)
             // Auto-cancel covers a tap on the notification itself, not on its action.
-            if (content) nm.cancel(SessionReminder.NOTIF_ID)
+            if (content) nm.cancel(AndroidIds.REMINDER_NOTIFICATION)
             publish()
             return "tap reminder ${if (content) "content" else "action"} -> $dest"
         }
@@ -655,15 +661,15 @@ class SurfaceStateMachineTest {
 
         /** Remove a reminder whose timeout ran out (the system does this). */
         private fun expire() {
-            val n = shadowOf(nm).getNotification(SessionReminder.NOTIF_ID) ?: return
-            if (n === shown && n.timeoutAfter > 0 && now >= drawnAt + n.timeoutAfter) nm.cancel(SessionReminder.NOTIF_ID)
+            val n = shadowOf(nm).getNotification(AndroidIds.REMINDER_NOTIFICATION) ?: return
+            if (n === shown && n.timeoutAfter > 0 && now >= drawnAt + n.timeoutAfter) nm.cancel(AndroidIds.REMINDER_NOTIFICATION)
         }
 
         /** Note a posted or redrawn reminder. Only the alarm posts one: a post that
          *  is new for its local day (nothing shown, or yesterday's still shown) counts
          *  against that day. A redraw (a snapshot for today) makes it today's. */
         private fun observe(why: String, fromAlarm: Boolean = false) {
-            val n = shadowOf(nm).getNotification(SessionReminder.NOTIF_ID)
+            val n = shadowOf(nm).getNotification(AndroidIds.REMINDER_NOTIFICATION)
             if (n == null) {
                 shown = null
                 return
@@ -689,7 +695,7 @@ class SurfaceStateMachineTest {
             fun withAction(a: String) = alarms.filter { it.operation?.let { pi -> shadowOf(pi).savedIntent.action } == a }
 
             // The reminder alarm: only while on, at the next valid local time.
-            val reminderAlarms = withAction(SessionReminder.ACTION_FIRE)
+            val reminderAlarms = withAction(AndroidReminder.ACTION_FIRE)
             if (setting.enabled) {
                 val a = reminderAlarms.singleOrNull() ?: throw AssertionError("reminder on, alarms: ${reminderAlarms.size}")
                 assertEquals(

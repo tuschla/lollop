@@ -47,7 +47,7 @@ class MutationGuardsTest {
     }
 
     private fun logLines(): List<String> =
-        File(ctx.filesDir, "event-log.ndjson").readLines().filter { it.isNotBlank() }
+        File(ctx.filesDir, AppFileNames.EVENT_LOG).readLines().filter { it.isNotBlank() }
 
     private fun planCleared() = ctx.setupPrefs().getBoolean(KEY_PLAN_CLEARED, false)
 

@@ -3,7 +3,7 @@
 
 use crate::app::evidence_views::to_view_with;
 use crate::app::format::{MIN_RATIO_BASE_KG, fmt_weight};
-use crate::app::model::{Model, SessionReview};
+use crate::app::model::Model;
 use crate::app::reviews::mastery::pr_e1rm;
 use crate::app::reviews::session_feedback::RunSpike;
 use crate::app::reviews::split::{FEEDBACK_FRESH_DAYS, fresh_within};
@@ -11,6 +11,7 @@ use crate::app::set_index::SetIndex;
 use crate::app::view_types::AdjustmentView;
 use crate::autoreg::E1RM_NOISE_FRAC;
 use crate::day::{is_undated, local_day};
+use crate::event::SessionReview;
 use crate::evidence::claims;
 use crate::profile::Profile;
 use crate::schema::Recommended;

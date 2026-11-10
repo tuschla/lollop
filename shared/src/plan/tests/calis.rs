@@ -3,7 +3,7 @@
 use super::*;
 use crate::calisthenics::progression::CalisAnchor;
 use crate::profile::{CalisEquipment, ResistanceModality};
-use crate::schema::{CalisthenicsPrescription, LiftSessionType, TierTarget};
+use crate::schema::{CalisthenicsPrescription, LiftSessionType, Rx, TierTarget};
 
 fn calis_profile() -> Profile {
     Profile {
@@ -47,7 +47,7 @@ fn lift_days(prog: &Program) -> Vec<&Session> {
         .collect()
 }
 
-fn calis(rx: &Recommended<Prescription>) -> &CalisthenicsPrescription {
+fn calis(rx: &Rx) -> &CalisthenicsPrescription {
     match &rx.value {
         Prescription::Calisthenics(c) => c,
         other => panic!("expected a calisthenics item, got {other:?}"),
@@ -55,7 +55,7 @@ fn calis(rx: &Recommended<Prescription>) -> &CalisthenicsPrescription {
 }
 
 /// The first prescribed item on `ladder` anywhere in the week.
-fn item(prog: &Program, ladder: LadderId) -> Option<&Recommended<Prescription>> {
+fn item(prog: &Program, ladder: LadderId) -> Option<&Rx> {
     lift_days(prog)
         .into_iter()
         .flat_map(|s| s.prescriptions.iter())

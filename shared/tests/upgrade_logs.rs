@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 
 use crux_core::App;
 use serde_json::Value;
+use shared::event::RETIRED_TAGS;
 use shared::log::{LineFacts, compact_lines};
 use shared::{Engine, Event};
 
@@ -38,14 +39,6 @@ mod common;
 const TODAY: i64 = 20725;
 const OFF: i64 = 7200;
 const VERSIONS: [&str; 3] = ["203ab56", "4728546", "901d239"];
-const RETIRED: [&str; 6] = [
-    "ComputeCooper",
-    "ClearCooper",
-    "ComputeCriticalSpeed",
-    "ClearCriticalSpeed",
-    "ComputeApre",
-    "ClearApre",
-];
 
 fn dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/upgrade")
@@ -175,7 +168,7 @@ fn old_logs_replay_every_line_but_the_retired_calculators() {
         let (_, rejected) = replay(&lines);
         let unexpected: Vec<String> = rejected
             .iter()
-            .filter(|&&i| !RETIRED.contains(&tag(&lines[i]).as_str()))
+            .filter(|&&i| !RETIRED_TAGS.contains(&tag(&lines[i]).as_str()))
             .map(|&i| format!("#{i} {}", &lines[i][..lines[i].len().min(120)]))
             .collect();
         assert!(

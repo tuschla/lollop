@@ -465,10 +465,7 @@ fn a_downgrade_on_a_calisthenics_hold_shows_no_zero_reps_or_rir_advice() {
         items: vec![hold, dynamic],
         ..Default::default()
     };
-    let recs = vec![Recommended::new(
-        Adjustment::DowngradeSession,
-        claims::HRV_001,
-    )];
+    let recs = vec![AdjustmentKind::HrvLower.call(Adjustment::DowngradeSession, claims::HRV_001)];
     apply_adjustments_to_session(&mut ns, &recs, false);
     let h = &ns.items[0];
     assert!(!h.summary.contains("×0"), "no ×0 on a hold: {}", h.summary);
@@ -615,10 +612,7 @@ fn cap_rpe_caps_a_calisthenics_rir_band() {
     };
     apply_adjustments_to_session(
         &mut ns,
-        &[Recommended::new(
-            Adjustment::CapRpe(1),
-            claims::AUTOREG_E1RM_GATE_001,
-        )],
+        &[AdjustmentKind::E1rm.call(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
         false,
     );
     assert_eq!(
@@ -661,10 +655,7 @@ fn cap_rpe_over_a_holds_only_session_does_not_mark_adjusted() {
     };
     apply_adjustments_to_session(
         &mut ns,
-        &[Recommended::new(
-            Adjustment::CapRpe(1),
-            claims::AUTOREG_E1RM_GATE_001,
-        )],
+        &[AdjustmentKind::E1rm.call(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
         false,
     );
     assert_ne!(

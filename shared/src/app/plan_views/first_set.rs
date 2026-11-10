@@ -12,7 +12,7 @@ use crate::app::plan_views::item_render::{resync_intensity, round_load_or_drop};
 use crate::app::view_types::{
     AdjustmentView, PlanIntensity, PrescriptionView, SessionPlanView, SessionStatus,
 };
-use crate::schema::{Adjustment, Recommended};
+use crate::schema::{Adjustment, AdjustmentCall, AdjustmentKind};
 
 /// Per-item performance autoregulation on TODAY's session, from the item's own
 /// logged sets (the Strong-graded backbone, AUTOREG-RIR-001):
@@ -30,20 +30,20 @@ use crate::schema::{Adjustment, Recommended};
 /// the plate-grid load for the remaining sets when the cue moves the load.
 pub(in crate::app) fn apply_first_set_autoreg(
     ns: &mut SessionPlanView,
-    recommended: &[Recommended<Adjustment>],
-    review_recs: &[Recommended<Adjustment>],
+    recommended: &[AdjustmentCall],
+    review_recs: &[AdjustmentCall],
     hold: bool,
     weight_lb: bool,
 ) -> Vec<ItemCue> {
-    let mut all: Vec<Recommended<Adjustment>> = recommended.to_vec();
+    let mut all: Vec<AdjustmentCall> = recommended.to_vec();
     all.extend(review_recs.iter().cloned());
     let session_cut = fold_completion_adjustments(&all).load_frac;
     // A safety easy day (tendon pain, head cold, first session back) is already
     // load-less and easy: no first-set rule on top of it. A tendon modify day
     // scoped to a body region eases only the lifts that load it; the rest are
     // held lifts like any other.
-    let pain_modify = all.iter().find_map(|r| match &r.value {
-        Adjustment::ModifyAndMonitor { location } => Some(crate::autoreg::pain_region(location)),
+    let pain_modify = all.iter().find_map(|r| match r.kind() {
+        AdjustmentKind::TendonModify(region) => Some(region),
         _ => None,
     });
     let safety_day = matches!(pain_modify, Some(None))
@@ -86,7 +86,7 @@ pub(in crate::app) fn apply_first_set_autoreg(
 
 /// What [`apply_first_set_autoreg`] judges every item with.
 struct FirstSetCtx<'a> {
-    recommended: &'a [Recommended<Adjustment>],
+    recommended: &'a [AdjustmentCall],
     hold: bool,
     weight_lb: bool,
     /// The session-wide load cut already folded into every item.
@@ -146,7 +146,7 @@ fn item_cues(it: &mut PrescriptionView, cx: &FirstSetCtx) -> Vec<ItemCue> {
     // once a later set is logged (the add taken, declined, or overtaken by
     // a harder set) it is spent.
     let later_logged = first_at.is_some_and(|t0| it.logged_sets.iter().any(|s| s.observed_at > t0));
-    let mut item_recs: Vec<Recommended<Adjustment>> = recommended
+    let mut item_recs: Vec<AdjustmentCall> = recommended
         .iter()
         .filter(|r| {
             matches!(&r.value, Adjustment::ForItem { exercise, .. }
@@ -154,8 +154,6 @@ fn item_cues(it: &mut PrescriptionView, cx: &FirstSetCtx) -> Vec<ItemCue> {
         })
         .cloned()
         .collect();
-    // The recs already in `recommended`; the ones pushed below are fresh.
-    let matched = item_recs.len();
     if let (Some(t), Some(s)) = (target, first)
         && let Some(rec) = crate::autoreg::first_set_rpe_adjust(&it.exercise, s.rpe - t)
     {
@@ -258,26 +256,30 @@ fn item_cues(it: &mut PrescriptionView, cx: &FirstSetCtx) -> Vec<ItemCue> {
     };
     item_recs
         .into_iter()
-        .enumerate()
-        .map(|(k, rec)| {
+        .map(|rec| {
             let load_kg = match rec.value.base() {
                 Adjustment::ReduceLoadPct(_) | Adjustment::IncreaseLoadPct(_) => cue_load,
                 _ => None,
             };
-            ItemCue {
-                rec,
-                fresh: k >= matched,
-                load_kg,
-            }
+            ItemCue { rec, load_kg }
         })
         .collect()
 }
 
 /// One item-scoped in-session cue from [`apply_first_set_autoreg`].
 pub(in crate::app) struct ItemCue {
-    pub(in crate::app) rec: Recommended<Adjustment>,
-    /// A new first-set call (not already among the readiness recommendations).
-    pub(in crate::app) fresh: bool,
+    pub(in crate::app) rec: AdjustmentCall,
     /// Plate-grid load (kg) for the remaining sets when the cue moves the load.
     pub(in crate::app) load_kg: Option<f64>,
+}
+
+impl ItemCue {
+    /// A new in-session call from the item's own sets, not one of the
+    /// readiness recommendations.
+    pub(in crate::app) fn fresh(&self) -> bool {
+        matches!(
+            self.rec.kind(),
+            AdjustmentKind::FirstSet | AdjustmentKind::FailedSet
+        )
+    }
 }

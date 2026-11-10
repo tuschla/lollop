@@ -2,4 +2,4 @@ package app.milestone
 
 import java.nio.file.Files
 
-actual fun newTempDir(): LogPath = Files.createTempDirectory("lollop-log").toFile()
+actual fun newTempDir(): AppPath = Files.createTempDirectory("lollop-log").toFile()

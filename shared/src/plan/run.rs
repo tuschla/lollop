@@ -2,21 +2,22 @@
 //! race-date Base → Build → Peak → Taper sequence, or a rolling Base/Build
 //! cycle), whether it is a planned recovery week, its weekly volume (cycle
 //! ramp, cross-cycle carry from what the athlete actually ran, taper cut) and
-//! the session kinds (long run + the goal/phase quality mix + easy fill).
-//! `schedule::place_week` places those kinds on days, then
-//! `run_week_sessions` prescribes each placed day: sized within the KB volume
-//! caps, the long-run decision and the RUN-SPIKE-001 distance ceilings, with
-//! warm-up/cool-down and rep/recovery structure the tracker can step through.
+//! the session kinds (long run + the goal/phase quality mix + easy fill), or
+//! the C25K programme week. `schedule::place_week` places those kinds on days,
+//! then `run_week_sessions` prescribes each placed day: sized within the KB
+//! volume caps (one [`QualityRule`] per quality kind), the long-run decision
+//! and the RUN-SPIKE-001 distance ceilings, with warm-up/cool-down and
+//! rep/recovery structure the tracker can step through.
 
 use std::collections::BTreeSet;
 
-use crate::evidence::claims;
+use crate::evidence::{ClaimId, claims};
 use crate::individualization::training_age_years;
 use crate::profile::{PlanProfile, Profile};
 use crate::running::{self, GoalDistance, RunWorkoutRx, daily_avg_run_km};
 use crate::schema::{
-    MesoPhase, Prescription, Recommended, RepRecovery, RunIntensity, RunPrescription,
-    RunSessionType, RunVolume, Session, SessionType, StridesAddOn, VdotBand,
+    MesoPhase, Prescription, RepRecovery, RunIntensity, RunPrescription, RunSessionType, RunVolume,
+    RxBasis, Session, SessionType, StridesAddOn, VdotBand,
 };
 
 use super::anchors::{Anchors, RunBreak};
@@ -233,15 +234,122 @@ fn race_pace_km(weekly_km: f64, vdot: Option<f64>) -> Option<f64> {
     (km >= lo).then_some(km)
 }
 
-/// Whether a quality kind is supported by this week's volume; an unsupported
-/// slot becomes an easy run rather than a cap-violating session.
-fn quality_supported(kind: RunSessionType, weekly_km: f64, vdot: Option<f64>) -> bool {
-    match kind {
-        RunSessionType::Tempo => tempo_supported(weekly_km, vdot),
-        RunSessionType::Interval => supported_rep_distance_m(weekly_km, vdot).is_some(),
-        RunSessionType::Repetition => repetition_plan(weekly_km).is_some(),
-        RunSessionType::RacePace => race_pace_km(weekly_km, vdot).is_some(),
-        _ => true,
+/// A quality session's main set.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum QualitySet {
+    /// One continuous block, km.
+    Block(f64),
+    /// `reps × rep_m` with the recovery between reps.
+    Reps {
+        reps: u8,
+        rep_m: u16,
+        recovery: RepRecovery,
+    },
+}
+
+impl QualitySet {
+    /// Run km of the main set: the reps with their jog-distance recoveries (a
+    /// timed recovery is not distance).
+    fn km(self) -> f64 {
+        match self {
+            QualitySet::Block(km) => km,
+            QualitySet::Reps {
+                reps,
+                rep_m,
+                recovery,
+            } => {
+                let jog_m = match recovery {
+                    RepRecovery::Metres(m) => m,
+                    _ => 0,
+                };
+                f64::from(reps) * f64::from(u32::from(rep_m) + u32::from(jog_m)) / 1000.0
+            }
+        }
+    }
+}
+
+/// One quality kind as the planner sizes it. `weekly_km` and the pace anchor
+/// (`vdot`) are the inputs of every rule.
+struct QualityRule {
+    /// The week's volume carries the session; an unsupported slot is planned
+    /// as an easy run rather than a cap-violating session.
+    supported: fn(f64, Option<f64>) -> bool,
+    /// The session the week's volume sizes, within the kind's weekly cap;
+    /// `None` when no size fits.
+    sized: fn(f64, Option<f64>) -> Option<QualitySet>,
+    /// The smallest session: a taper never runs less (running-037/038: only
+    /// volume drops), and a taper week over its cut runs exactly this.
+    floor: fn(Option<f64>) -> QualitySet,
+    /// The rule the session cites.
+    claim: ClaimId,
+}
+
+/// The planner's quality kinds; `None` for every other run kind.
+fn quality_rule(kind: RunSessionType) -> Option<QualityRule> {
+    let rule = match kind {
+        // Threshold (RUN-TEMPO-001): ≤10 % of the week; the taper floor is the
+        // 20-minute run rounded up to the 0.1 km step, so a taper shortens the
+        // session instead of dropping it.
+        RunSessionType::Tempo => QualityRule {
+            supported: tempo_supported,
+            sized: |weekly_km, _| Some(QualitySet::Block(tempo_km_cap(weekly_km))),
+            floor: |vdot| QualitySet::Block((tempo_floor_km(vdot) * 10.0).ceil() / 10.0),
+            claim: running::workout_rx(kind).claim_id(),
+        },
+        // VO2max intervals (RUN-INTERVAL-001); the taper floor is 3 × 800 m.
+        RunSessionType::Interval => QualityRule {
+            supported: |weekly_km, vdot| supported_rep_distance_m(weekly_km, vdot).is_some(),
+            sized: |weekly_km, vdot| {
+                supported_rep_distance_m(weekly_km, vdot)
+                    .map(|rep_m| interval_set(interval_reps(weekly_km, rep_m), rep_m, vdot))
+            },
+            floor: |vdot| interval_set(SHORTEST_INTERVAL_SET.0, SHORTEST_INTERVAL_SET.1, vdot),
+            claim: running::workout_rx(kind).claim_id(),
+        },
+        // Repetitions (running-051, RUN-REPETITION-002); the taper floor is
+        // 4 × 200 m.
+        RunSessionType::Repetition => QualityRule {
+            supported: |weekly_km, _| repetition_plan(weekly_km).is_some(),
+            sized: |weekly_km, _| repetition_plan(weekly_km).map(repetition_set),
+            floor: |_| repetition_set(shortest_repetition_set()),
+            claim: running::repetition_rx().claim_id(),
+        },
+        // Marathon-pace block (running-017/053); the taper floor is the 8 km
+        // "MP touch" minimum.
+        RunSessionType::RacePace => QualityRule {
+            supported: |weekly_km, vdot| race_pace_km(weekly_km, vdot).is_some(),
+            sized: |weekly_km, vdot| race_pace_km(weekly_km, vdot).map(QualitySet::Block),
+            floor: |_| QualitySet::Block(race_pace_band_km().0),
+            claim: running::workout_rx(kind).claim_id(),
+        },
+        _ => return None,
+    };
+    Some(rule)
+}
+
+/// A VO2max set: recovery ≈ the rep's own time (ratio ceiling 1.0,
+/// running-019), in seconds when a pace anchor turns the rep into time, else
+/// "jog as long as the rep took".
+fn interval_set(reps: u8, rep_m: u16, vdot: Option<f64>) -> QualitySet {
+    let ratio = running::vo2max_interval_rx()
+        .value
+        .recovery_max_ratio_of_rep;
+    QualitySet::Reps {
+        reps,
+        rep_m,
+        recovery: match interval_rep_sec(rep_m, vdot) {
+            Some(sec) => RepRecovery::Seconds((sec * ratio).round().min(u16::MAX as f64) as u16),
+            None => RepRecovery::EqualToRep,
+        },
+    }
+}
+
+/// A repetition set: an easy jog as far as the rep (running-051).
+fn repetition_set((reps, rep_m): (u8, u16)) -> QualitySet {
+    QualitySet::Reps {
+        reps,
+        rep_m,
+        recovery: RepRecovery::Metres(rep_m),
     }
 }
 
@@ -289,14 +397,25 @@ pub(super) struct RunWeekPlan {
     pub(super) race_day: Option<u16>,
     /// `(k, n)`: this is taper week `k` of `n`.
     pub(super) taper_week: Option<(u32, u32)>,
-    /// C25K programme week (1-based), `None` for distance plans.
-    pub(super) c25k_week: Option<u8>,
-    /// Strides go on the week's first easy days (running-020, from a few weeks
-    /// into base).
-    pub(super) strides: bool,
-    /// Race week only: no easy day runs longer than the previous taper week's
-    /// daily average.
-    pub(super) race_week_easy_cap_km: Option<f64>,
+    /// How the placed days are prescribed.
+    pub(super) programme: RunProgramme,
+}
+
+/// The programme a run week belongs to.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum RunProgramme {
+    /// NHS Couch to 5K (running-025): programme week `week` (1-based) of the
+    /// run/walk table; no weekly km to size from.
+    C25k { week: u8 },
+    /// A distance plan: each day sized from the week's km.
+    Distance {
+        /// Strides go on the week's first easy days (running-020, from a few
+        /// weeks into base).
+        strides: bool,
+        /// Race week only: no easy day runs longer than the previous taper
+        /// week's daily average.
+        race_week_easy_cap_km: Option<f64>,
+    },
 }
 
 /// Where a week sits in the run cycle.
@@ -344,22 +463,20 @@ fn cycle_pos(profile: &Profile, anchors: &Anchors, week_index: u32, load_weeks: 
                 race_day,
             };
         }
-        // k = whole weeks until the taper starts (0 = the last pre-taper week).
-        let k = wtr - taper_n;
-        let r = k % cycle_len;
-        let (mut pos, mut recovery, offset) = if r < load_weeks {
-            let p = load_weeks - 1 - r;
-            (p, false, p)
+        // The week's slot in its cycle, counted back from the taper (r = 0:
+        // the last pre-taper week, the top load week): a load week's ramp
+        // position, or `None` for the recovery week.
+        let r = (wtr - taper_n) % cycle_len;
+        let load_slot = (r < load_weeks).then(|| load_weeks - 1 - r);
+        let offset = load_slot.unwrap_or(load_weeks);
+        // A plan opens on a load week and never above its own ramp.
+        let recovery = load_slot.is_none() && week_index > 0;
+        let mut pos = if recovery {
+            load_weeks
         } else {
-            (load_weeks, true, load_weeks)
+            offset.min(week_index)
         };
-        // A plan never opens on a recovery week or above its own ramp.
-        if week_index == 0 && recovery {
-            recovery = false;
-            pos = 0;
-        }
         if !recovery {
-            pos = pos.min(week_index);
             // running-032: progress one variable at a time. A week whose phase
             // steps intensity up (Base → Build → Peak) holds the previous
             // week's volume, so it and the rest of its cycle sit one ramp step
@@ -428,23 +545,7 @@ pub(super) fn run_week_plan(
     let goal = profile.goal_distance;
     let n_days = req.n_run_days.max(1);
     if goal == GoalDistance::C25k {
-        // NHS Couch to 5K: 3 run/walk sessions a week; the scheduler's
-        // completion-gated block index is the programme week, so a week with
-        // too few runs done repeats (RUN-C25K-002, ADH-PROGRESS-001).
-        let weeks = running::c25k_plan().value.weeks.0 as u32;
-        let runs = running::c25k_plan().value.runs_per_week as usize;
-        return RunWeekPlan {
-            phase: MesoPhase::Base,
-            recovery: false,
-            cycle_len: weeks,
-            weekly_km: 0.0,
-            kinds: vec![RunSessionType::Easy; n_days.min(runs)],
-            race_day: None,
-            taper_week: None,
-            c25k_week: Some(req.week_index.saturating_add(1).min(u8::MAX as u32) as u8),
-            strides: false,
-            race_week_easy_cap_km: None,
-        };
+        return c25k_week_plan(profile, req, n_days);
     }
 
     let load_weeks = pp.run_load_weeks();
@@ -519,9 +620,38 @@ pub(super) fn run_week_plan(
         kinds,
         race_day: cy.race_day,
         taper_week: cy.taper,
-        c25k_week: None,
-        strides,
-        race_week_easy_cap_km,
+        programme: RunProgramme::Distance {
+            strides,
+            race_week_easy_cap_km,
+        },
+    }
+}
+
+/// NHS Couch to 5K (running-025): three run/walk sessions a week; the
+/// scheduler's completion-gated block index is the programme week, so a week
+/// with too few runs done repeats (RUN-C25K-002, ADH-PROGRESS-001).
+fn c25k_week_plan(profile: &Profile, req: &RunWeekRequest, n_days: usize) -> RunWeekPlan {
+    let c25k = running::c25k_plan().value;
+    let cy = CyclePos {
+        phase: MesoPhase::Base,
+        recovery: false,
+        pos: 0,
+        cycle_offset: 0,
+        taper: None,
+        race_day: None,
+    };
+    let n = n_days.min(usize::from(c25k.runs_per_week));
+    RunWeekPlan {
+        phase: cy.phase,
+        recovery: cy.recovery,
+        cycle_len: u32::from(c25k.weeks.0),
+        weekly_km: 0.0,
+        kinds: week_kinds(profile, req, &cy, n, 0.0, None),
+        race_day: cy.race_day,
+        taper_week: cy.taper,
+        programme: RunProgramme::C25k {
+            week: req.week_index.saturating_add(1).min(u32::from(u8::MAX)) as u8,
+        },
     }
 }
 
@@ -563,9 +693,10 @@ fn base_weekly_km(
     effective.max(carry.unwrap_or(0.0))
 }
 
-/// The week's session kinds: long run (none in the race week) + the
-/// goal/phase quality mix, each kind kept only when `quality_basis_km`
-/// supports it, + easy fill up to `n` run days.
+/// The week's session kinds: long run (none in the race week, none when the
+/// goal table gives it no share: running-025's C25K) + the goal/phase quality
+/// mix, each kind kept only when `quality_basis_km` supports it, + easy fill
+/// up to `n` run days.
 fn week_kinds(
     profile: &Profile,
     req: &RunWeekRequest,
@@ -589,15 +720,12 @@ fn week_kinds(
     }
     let mix = running::quality_mix(profile.goal_distance, cy.phase).value;
     let mut kinds: Vec<RunSessionType> = Vec::with_capacity(n);
-    if !race_week && n > 0 {
+    if !race_week && n > 0 && gwp.long_run_share.1 > 0.0 {
         kinds.push(RunSessionType::LongRun);
     }
     for &k in mix.iter().take(q) {
-        kinds.push(if quality_supported(k, quality_basis_km, vdot) {
-            k
-        } else {
-            RunSessionType::Easy
-        });
+        let supported = quality_rule(k).is_none_or(|rule| (rule.supported)(quality_basis_km, vdot));
+        kinds.push(if supported { k } else { RunSessionType::Easy });
     }
     while kinds.len() < n {
         kinds.push(RunSessionType::Easy);
@@ -638,7 +766,7 @@ pub(super) struct DayCtx {
     pub(super) recovery: bool,
     pub(super) taper: bool,
     /// A taper week whose sessions outgrew its cut: every quality session at
-    /// its floor (see [`run_week_sessions`]).
+    /// its floor (see [`taper_steps`]).
     pub(super) quality_floor: bool,
     pub(super) goal: GoalDistance,
     pub(super) vdot: Option<f64>,
@@ -656,53 +784,52 @@ impl DayCtx {
         self.long.map(|(km, _)| km).filter(|km| *km > 0.0)
     }
 
-    /// Threshold distance: ≤10 % of the week; in a taper never below the
-    /// 20-minute floor (rounded up to the 0.1 km step), so the session is
-    /// shortened, not dropped. `quality_floor`: the floor itself.
-    fn tempo_km(&self) -> f64 {
-        let floor = (tempo_floor_km(self.vdot) * 10.0).ceil() / 10.0;
-        let cap = tempo_km_cap(self.weekly_km);
-        if self.quality_floor {
-            floor
-        } else if self.taper {
-            cap.max(floor)
+    /// The RUN-SPIKE-001 ceiling over a positive sub-1 km baseline leaves no
+    /// honest distance for any run.
+    fn no_distance(&self) -> bool {
+        cap_km_to_spike(MIN_DISTANCE_KM, self.baseline).is_none()
+    }
+
+    /// The quality slot `rule` sizes, as this day runs it: the session the
+    /// week's km sizes; in a taper never below its floor (`quality_floor`:
+    /// the floor itself); a block held under the RUN-SPIKE-001 ceiling.
+    fn quality_day(&self, rule: &QualityRule) -> QualityDay {
+        if self.no_distance() {
+            return QualityDay::NoDistance;
+        }
+        let sized = (rule.sized)(self.weekly_km, self.vdot);
+        let set = if self.taper {
+            let floor = (rule.floor)(self.vdot);
+            Some(match sized {
+                Some(s) if !self.quality_floor && s.km() >= floor.km() => s,
+                _ => floor,
+            })
         } else {
-            cap
+            sized
+        };
+        match set {
+            Some(QualitySet::Block(km)) => cap_km_to_spike(km, self.baseline)
+                .map_or(QualityDay::NoDistance, |km| {
+                    QualityDay::Session(QualitySet::Block(km))
+                }),
+            Some(set) => QualityDay::Session(set),
+            None => QualityDay::Unsized,
         }
     }
+}
 
-    /// `(reps, rep_m)` of the VO2max set; in a taper at least 3 × 800 m
-    /// (`quality_floor`: exactly that).
-    fn interval_set(&self) -> Option<(u8, u16)> {
-        let floor = self.taper.then_some(SHORTEST_INTERVAL_SET);
-        if self.quality_floor {
-            return floor;
-        }
-        supported_rep_distance_m(self.weekly_km, self.vdot)
-            .map(|rep_m| (interval_reps(self.weekly_km, rep_m), rep_m))
-            .or(floor)
-    }
-
-    /// `(reps, rep_m)` of the repetition set; in a taper at least the 4 × 200 m
-    /// minimum (`quality_floor`: exactly that).
-    fn repetition(&self) -> Option<(u8, u16)> {
-        let floor = self.taper.then(shortest_repetition_set);
-        if self.quality_floor {
-            return floor;
-        }
-        repetition_plan(self.weekly_km).or(floor)
-    }
-
-    /// Marathon-pace block; in a taper at least the 8 km "MP touch" minimum
-    /// (`quality_floor`: exactly that).
-    fn race_pace_km(&self) -> Option<f64> {
-        let (lo, _) = race_pace_band_km();
-        let floor = self.taper.then_some(lo);
-        if self.quality_floor {
-            return floor;
-        }
-        race_pace_km(self.weekly_km, self.vdot).or(floor)
-    }
+/// A quality slot as its day runs it. Without a session the day is an easy
+/// run at the Recovery band's duration floor ([`easy_fallback`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum QualityDay {
+    /// The session, warm-up and cool-down around it (RUN-WARMUP-001).
+    Session(QualitySet),
+    /// No size fits the week's km: the kind's rule cites the easy run, and
+    /// the session's warm-up and cool-down stay counted in the week.
+    Unsized,
+    /// The RUN-SPIKE-001 ceiling leaves no honest distance: that rule cites
+    /// the easy run, and the week counts none of it.
+    NoDistance,
 }
 
 /// Easy pace (s/km) for weekly accounting: the middle of the athlete's VDOT
@@ -714,20 +841,7 @@ fn accounting_easy_pace(vdot: Option<f64>) -> f64 {
 }
 
 /// Prescribe the scheduler's placement of this week's kinds: `placed` is
-/// `(day, kind)` in any order. The race day and anything after it are dropped;
-/// an easy day directly after a hard day or the long run becomes a Recovery run
-/// (running-014 vs running-015); the first easy days carry strides; easy days
-/// share what's left of the weekly km after the long run, the quality work and
-/// its warm-up/cool-down, up to the running-015 90-min easy-run ceiling: a
-/// week whose easy days would run longer is re-sized to what its days hold.
-///
-/// A taper week whose sessions add up to more than its cut (the session
-/// floors bind at low volume) sheds work in this order, every run day kept
-/// (running-037/038 hold frequency, 04-running.md:496, :501):
-///  1. a race-pace session becomes an easy run unless the goal's taper keeps
-///     MP touches: only the marathon's does (04-running.md:500); 5K/10K keep
-///     short sharp I/T sessions (:498), the half holds intensity (:499);
-///  2. every quality session drops to its floor (only volume drops, :501).
+/// `(day, kind)` in any order. The race day and anything after it are dropped.
 pub(super) fn run_week_sessions(
     plan: &RunWeekPlan,
     placed: &[(u16, RunSessionType)],
@@ -740,127 +854,219 @@ pub(super) fn run_week_sessions(
         .filter(|(d, _)| plan.race_day.is_none_or(|rd| *d < rd))
         .collect();
     days.sort_by_key(|(d, _)| *d);
-
-    if let Some(week) = plan.c25k_week {
-        // With fewer days than the programme's runs, the week keeps its LAST
-        // runs: weeks 5–6 end on the bridge to continuous running.
-        let runs = running::c25k_plan().value.runs_per_week as usize;
-        let skipped = runs.saturating_sub(days.len());
-        return days
-            .iter()
-            .enumerate()
-            .map(|(i, &(day, _))| {
-                c25k_session(week, (i + 1 + skipped).min(u8::MAX as usize) as u8, day)
-            })
-            .collect();
-    }
-
-    let mut sessions = prescribe_days(plan, &days, profile, anchors, false);
-    if plan.taper_week.is_none() {
-        return sessions;
-    }
-    let pace = accounting_easy_pace(anchors.run_vdot);
-    let over_cut = |s: &[Session]| sessions_km(s, pace) > plan.weekly_km;
-    let keeps_mp = running::distance_taper(profile.goal_distance)
-        .is_some_and(|t| t.value.keep_mp_touches_and_short_tempo);
-    if over_cut(&sessions) && !keeps_mp && days.iter().any(|(_, k)| *k == RunSessionType::RacePace)
-    {
-        for (_, k) in &mut days {
-            if *k == RunSessionType::RacePace {
-                *k = RunSessionType::Easy;
-            }
+    match plan.programme {
+        RunProgramme::C25k { week } => c25k_sessions(week, &days),
+        RunProgramme::Distance {
+            strides,
+            race_week_easy_cap_km,
+        } => {
+            let week = DistanceWeek {
+                plan,
+                race_week_easy_cap_km,
+                profile,
+                anchors,
+            };
+            distance_sessions(&week, &days, strides)
         }
-        sessions = prescribe_days(plan, &days, profile, anchors, false);
     }
-    if over_cut(&sessions) {
-        sessions = prescribe_days(plan, &days, profile, anchors, true);
-    }
-    sessions
 }
 
-/// One session per day of `days` (sorted, race day dropped): recovery days
-/// marked, the week sized, strides on the first easy days.
-fn prescribe_days(
-    plan: &RunWeekPlan,
+/// The C25K week from the NHS table. With fewer days than the programme's
+/// runs, the week keeps its LAST runs: weeks 5–6 end on the bridge to
+/// continuous running.
+fn c25k_sessions(week: u8, days: &[(u16, RunSessionType)]) -> Vec<Session> {
+    let runs = running::c25k_plan().value.runs_per_week as usize;
+    let skipped = runs.saturating_sub(days.len());
+    days.iter()
+        .enumerate()
+        .map(|(i, &(day, _))| {
+            c25k_session(week, (i + 1 + skipped).min(u8::MAX as usize) as u8, day)
+        })
+        .collect()
+}
+
+/// A distance plan's week and the athlete facts its days are sized from.
+struct DistanceWeek<'a> {
+    plan: &'a RunWeekPlan,
+    race_week_easy_cap_km: Option<f64>,
+    profile: &'a Profile,
+    anchors: &'a Anchors,
+}
+
+/// One run day sized: its prescription, the rule that sized it and the claim
+/// it cites.
+struct DayRun {
+    day: u16,
+    kind: RunSessionType,
+    run: RunPrescription,
+    basis: RxBasis,
+    claim: ClaimId,
+}
+
+/// A distance week's sessions: an easy day directly after a hard day or the
+/// long run becomes a Recovery run (running-014 vs running-015); easy days
+/// share what's left of the weekly km after the long run, the quality work and
+/// its warm-up/cool-down, up to the running-015 90-min easy-run ceiling
+/// ([`size_week`]); strides go on the first easy days. A taper week runs the
+/// first of its [`taper_steps`] whose sessions fit its cut.
+fn distance_sessions(
+    week: &DistanceWeek,
     days: &[(u16, RunSessionType)],
-    profile: &Profile,
-    anchors: &Anchors,
-    quality_floor: bool,
+    strides: bool,
 ) -> Vec<Session> {
-    let mut days = days.to_vec();
-    mark_recovery_days(&mut days);
-    let SizedWeek { ctx, soft } = size_week(plan, &days, profile, anchors, quality_floor);
-    let (easy_km, rec_km) = (soft.easy_km, soft.rec_km);
+    let steps = match week.plan.taper_week {
+        Some(_) => taper_steps(days, week.profile.goal_distance),
+        None => vec![(days.to_vec(), false)],
+    };
+    let pace = accounting_easy_pace(week.anchors.run_vdot);
+    let last = steps.len() - 1;
+    let mut runs = Vec::new();
+    for (i, (days, quality_floor)) in steps.into_iter().enumerate() {
+        runs = size_days(week, &days, quality_floor);
+        let km: f64 = runs.iter().map(|r| run_km(&r.run, pace)).sum();
+        if i == last || km <= week.plan.weekly_km {
+            break;
+        }
+    }
 
     // Strides on the first one or two easy days (running-020: 1–3×/week).
     let st = running::strides_rx().value;
-    let strides_days: BTreeSet<u16> = if plan.strides {
-        days.iter()
-            .filter(|(_, k)| *k == RunSessionType::Easy)
-            .map(|(d, _)| *d)
+    let strides_days: BTreeSet<u16> = if strides {
+        runs.iter()
+            .filter(|r| r.kind == RunSessionType::Easy)
+            .map(|r| r.day)
             .take(2.min(st.per_week.1 as usize))
             .collect()
     } else {
         BTreeSet::new()
     };
+    runs.into_iter()
+        .map(
+            |DayRun {
+                 day,
+                 kind,
+                 mut run,
+                 basis,
+                 claim,
+             }| {
+                if strides_days.contains(&day) {
+                    run.strides = Some(StridesAddOn {
+                        reps: ((u16::from(st.reps.0) + u16::from(st.reps.1)) / 2) as u8,
+                        // Band midpoints rounded down to a whole 5 s.
+                        rep_sec: (st.rep_sec.0 + st.rep_sec.1) / 2 / 5 * 5,
+                        recovery_sec: (st.recovery_sec.0 + st.recovery_sec.1) / 2 / 5 * 5,
+                    });
+                }
+                Session {
+                    session_type: SessionType::Run(kind),
+                    day,
+                    prescriptions: vec![basis.rx(Prescription::Run(run), claim)],
+                    dup_day: None,
+                }
+            },
+        )
+        .collect()
+}
 
+/// What a taper week over its cut (the session floors bind at low volume)
+/// sheds, in order, every run day kept (running-037/038 hold frequency,
+/// 04-running.md:496, :501). Each step is the week's `(days, every quality
+/// session at its floor)`:
+///  0. the week as planned;
+///  1. a race-pace session becomes an easy run unless the goal's taper keeps
+///     MP touches: only the marathon's does (04-running.md:500); 5K/10K keep
+///     short sharp I/T sessions (:498), the half holds intensity (:499);
+///  2. every quality session drops to its floor (only volume drops, :501).
+fn taper_steps(
+    days: &[(u16, RunSessionType)],
+    goal: GoalDistance,
+) -> Vec<(Vec<(u16, RunSessionType)>, bool)> {
+    let mut steps = vec![(days.to_vec(), false)];
+    let mut days = days.to_vec();
+    let keeps_mp =
+        running::distance_taper(goal).is_some_and(|t| t.value.keep_mp_touches_and_short_tempo);
+    if !keeps_mp && days.iter().any(|(_, k)| *k == RunSessionType::RacePace) {
+        for (_, k) in &mut days {
+            if *k == RunSessionType::RacePace {
+                *k = RunSessionType::Easy;
+            }
+        }
+        steps.push((days.clone(), false));
+    }
+    steps.push((days, true));
+    steps
+}
+
+/// One run per day of `days` (sorted, race day dropped), recovery days
+/// marked and the week sized once ([`size_week`]).
+fn size_days(
+    week: &DistanceWeek,
+    days: &[(u16, RunSessionType)],
+    quality_floor: bool,
+) -> Vec<DayRun> {
+    let mut days = days.to_vec();
+    mark_recovery_days(&mut days);
+    let SizedWeek { ctx, soft } = size_week(week, &days, quality_floor);
     days.iter()
         .map(|&(day, kind)| {
-            let soft_km = match kind {
-                RunSessionType::Easy => easy_km,
-                RunSessionType::Recovery => rec_km,
-                _ => 0.0,
+            let (run, basis, claim) = match quality_rule(kind) {
+                Some(rule) => quality_run(kind, &rule, &ctx),
+                None if kind == RunSessionType::LongRun => long_run(&ctx),
+                None => {
+                    let soft_km = match kind {
+                        RunSessionType::Easy => soft.easy_km,
+                        RunSessionType::Recovery => soft.rec_km,
+                        _ => 0.0,
+                    };
+                    soft_run(kind, &ctx, soft_km)
+                }
             };
-            let mut s = run_session(kind, day, &ctx, soft_km);
-            if strides_days.contains(&day)
-                && let Some(rx) = s.prescriptions.first_mut()
-                && let Prescription::Run(r) = &mut rx.value
-            {
-                r.strides = Some(StridesAddOn {
-                    reps: ((u16::from(st.reps.0) + u16::from(st.reps.1)) / 2) as u8,
-                    // Band midpoints rounded down to a whole 5 s.
-                    rep_sec: (st.rep_sec.0 + st.rep_sec.1) / 2 / 5 * 5,
-                    recovery_sec: (st.recovery_sec.0 + st.recovery_sec.1) / 2 / 5 * 5,
-                });
+            DayRun {
+                day,
+                kind,
+                run,
+                basis,
+                claim,
             }
-            s
         })
         .collect()
 }
 
-/// Run km of `sessions` as the plan counts a week: each run's main set (reps
-/// with their jog-distance recoveries, minutes at `easy_pace`) plus its
-/// warm-up and cool-down minutes at `easy_pace`.
+/// Run km of `sessions` as the plan counts a week ([`run_km`] per run).
 pub(super) fn sessions_km(sessions: &[Session], easy_pace: f64) -> f64 {
+    sessions
+        .iter()
+        .filter(|s| matches!(s.session_type, SessionType::Run(_)))
+        .flat_map(|s| &s.prescriptions)
+        .filter_map(|rx| match &rx.value {
+            Prescription::Run(r) => Some(run_km(r, easy_pace)),
+            _ => None,
+        })
+        .sum()
+}
+
+/// Run km of one run as the plan counts a week: its main set (reps with their
+/// jog-distance recoveries, minutes at `easy_pace`) plus its warm-up and
+/// cool-down minutes at `easy_pace`.
+fn run_km(r: &RunPrescription, easy_pace: f64) -> f64 {
     let km_of_min = |min: f64| min * 60.0 / easy_pace.max(1.0);
     let km = |v: RunVolume| match v {
         RunVolume::DistanceKm(k) => f64::from(k),
         RunVolume::DurationMin(m) => km_of_min(f64::from(m)),
         RunVolume::RunWalk { .. } => 0.0,
     };
-    sessions
-        .iter()
-        .filter(|s| matches!(s.session_type, SessionType::Run(_)))
-        .flat_map(|s| &s.prescriptions)
-        .filter_map(|rx| match &rx.value {
-            Prescription::Run(r) => Some(r),
-            _ => None,
-        })
-        .map(|r| {
-            let main = match r.repeats {
-                Some((n, rep)) => {
-                    let jog = match r.recovery {
-                        Some(RepRecovery::Metres(m)) => f64::from(m) / 1000.0,
-                        _ => 0.0,
-                    };
-                    f64::from(n) * (km(rep) + jog)
-                }
-                None => km(r.volume),
+    let main = match r.repeats {
+        Some((n, rep)) => {
+            let jog = match r.recovery {
+                Some(RepRecovery::Metres(m)) => f64::from(m) / 1000.0,
+                _ => 0.0,
             };
-            let wu = r.warmup_min.unwrap_or(0) + r.cooldown_min.unwrap_or(0);
-            main + km_of_min(f64::from(wu))
-        })
-        .sum()
+            f64::from(n) * (km(rep) + jog)
+        }
+        None => km(r.volume),
+    };
+    let wu = r.warmup_min.unwrap_or(0) + r.cooldown_min.unwrap_or(0);
+    main + km_of_min(f64::from(wu))
 }
 
 /// Run km a week's prescriptions add up to ([`sessions_km`] at the
@@ -891,26 +1097,24 @@ struct SizedWeek {
     soft: SoftDays,
 }
 
-/// Size the placed `days` (recovery days marked) of `plan`'s week.
+/// Size the placed `days` (recovery days marked) of a distance week.
 /// running-015: an easy run lasts at most 90 min, so a week whose easy days
 /// would run longer holds less than planned: the week shrinks by what the
 /// ceiling cut, and its long run, quality sessions and soft days are sized
 /// again, so the long-run share (RUN-LONGRUN-001) and the T/I/R/M caps are
-/// judged on the week the athlete runs. Every pass shrinks the week by at
-/// least 0.05 km, so the loop ends.
+/// judged on the week the athlete runs (the week's fixed point). Every pass
+/// shrinks the week by at least 0.05 km, so the loop ends.
 fn size_week(
-    plan: &RunWeekPlan,
+    week: &DistanceWeek,
     days: &[(u16, RunSessionType)],
-    profile: &Profile,
-    anchors: &Anchors,
     quality_floor: bool,
 ) -> SizedWeek {
-    let mut ctx = day_ctx(plan, profile, anchors, days.len());
+    let mut ctx = day_ctx(week.plan, week.profile, week.anchors, days.len());
     ctx.quality_floor = quality_floor;
     let has_long = days.iter().any(|(_, k)| *k == RunSessionType::LongRun);
     loop {
         ctx.long = has_long.then(|| long_run_decision(&ctx));
-        let soft = soft_day_km(plan, &ctx, days);
+        let soft = soft_day_km(week.race_week_easy_cap_km, &ctx, days);
         if soft.over_easy_ceiling_km < 0.05 {
             return SizedWeek { ctx, soft };
         }
@@ -992,14 +1196,22 @@ struct SoftDays {
 /// The easy and recovery days' share of what's left of the week after the
 /// committed volume (long run + each quality session's main set and its
 /// warm-up/cool-down, RUN-WARMUP-001), each within its duration band.
-fn soft_day_km(plan: &RunWeekPlan, ctx: &DayCtx, days: &[(u16, RunSessionType)]) -> SoftDays {
+fn soft_day_km(
+    race_week_easy_cap_km: Option<f64>,
+    ctx: &DayCtx,
+    days: &[(u16, RunSessionType)],
+) -> SoftDays {
     let km_of_min = |min: f64| min * 60.0 / ctx.easy_pace.max(1.0);
     let mut committed = ctx.long_km().unwrap_or(0.0);
     let wu = running::warmup_rx().value;
+    let wu_km = km_of_min((wu.warmup_min.0 + wu.cooldown_min) as f64);
     for (_, k) in days {
-        if running::is_quality_session(*k) && !spike_degrades_quality(*k, ctx) {
-            committed +=
-                quality_main_km(*k, ctx) + km_of_min((wu.warmup_min.0 + wu.cooldown_min) as f64);
+        if let Some(rule) = quality_rule(*k) {
+            committed += match ctx.quality_day(&rule) {
+                QualityDay::Session(set) => set.km() + wu_km,
+                QualityDay::Unsized => wu_km,
+                QualityDay::NoDistance => 0.0,
+            };
         }
     }
     let n_easy = days
@@ -1025,7 +1237,7 @@ fn soft_day_km(plan: &RunWeekPlan, ctx: &DayCtx, days: &[(u16, RunSessionType)])
     let rec_km = floor_km(
         per_soft
             .min(ceiling_km(RunSessionType::Recovery))
-            .min(plan.race_week_easy_cap_km.unwrap_or(f64::INFINITY)),
+            .min(race_week_easy_cap_km.unwrap_or(f64::INFINITY)),
     );
     let rec_counted = rec_km * n_rec as f64;
     let mut easy_km = if n_easy > 0 {
@@ -1037,7 +1249,7 @@ fn soft_day_km(plan: &RunWeekPlan, ctx: &DayCtx, days: &[(u16, RunSessionType)])
     if let Some(l) = ctx.long_km() {
         easy_km = easy_km.min(l);
     }
-    if let Some(c) = plan.race_week_easy_cap_km {
+    if let Some(c) = race_week_easy_cap_km {
         easy_km = easy_km.min(c);
     }
     // The weekly report judges every run against the EXECUTED week's daily
@@ -1070,101 +1282,137 @@ fn c25k_session(week: u8, run_of_week: u8, day: u16) -> Session {
     Session {
         session_type: SessionType::Run(RunSessionType::Easy),
         day,
-        prescriptions: vec![rx.with_value(Prescription::Run(pres))],
+        prescriptions: vec![RxBasis::Workout.rx(Prescription::Run(pres), rx.claim_id())],
         dup_day: None,
     }
 }
 
-/// Main-set km of a quality session (warm-up/cool-down excluded).
-fn quality_main_km(kind: RunSessionType, ctx: &DayCtx) -> f64 {
-    match kind {
-        RunSessionType::Tempo => cap_km_to_spike(ctx.tempo_km(), ctx.baseline).unwrap_or(0.0),
-        RunSessionType::Interval => ctx
-            .interval_set()
-            .map(|(reps, rep_m)| reps as f64 * rep_m as f64 / 1000.0)
-            .unwrap_or(0.0),
-        RunSessionType::Repetition => ctx
-            .repetition()
-            .map(|(reps, m)| reps as f64 * m as f64 / 1000.0 * 2.0) // + equal-distance jogs
-            .unwrap_or(0.0),
-        RunSessionType::RacePace => ctx
-            .race_pace_km()
-            .and_then(|k| cap_km_to_spike(k, ctx.baseline))
-            .unwrap_or(0.0),
-        _ => 0.0,
+/// A quality slot's prescription, basis and claim: the session with its
+/// warm-up and cool-down, or an easy run when it has none ([`QualityDay`]).
+fn quality_run(
+    kind: RunSessionType,
+    rule: &QualityRule,
+    ctx: &DayCtx,
+) -> (RunPrescription, RxBasis, ClaimId) {
+    let (run, basis, claim) = match ctx.quality_day(rule) {
+        QualityDay::Session(set) => (
+            with_warmup(quality_prescription(kind, set)),
+            RxBasis::Workout,
+            rule.claim,
+        ),
+        QualityDay::Unsized => (easy_fallback(ctx), RxBasis::Workout, rule.claim),
+        QualityDay::NoDistance => (
+            easy_fallback(ctx),
+            RxBasis::SpikeCeiling,
+            claims::RUN_SPIKE_001,
+        ),
+    };
+    // Every run in a recovery week is a reduced-volume, reduced-intensity
+    // session: cite the recovery-week depth rule.
+    if ctx.recovery {
+        (run, RxBasis::Workout, claims::RUN_DELOAD_DEPTH_001)
+    } else {
+        (run, basis, claim)
     }
 }
 
-/// One run day's evidence-cited prescription. `soft_km` is the sized
-/// easy/recovery distance (0 → nothing to size from; see [`soft_volume`]).
-fn run_session(kind: RunSessionType, day: u16, ctx: &DayCtx, soft_km: f64) -> Session {
-    // In a recovery week the long run keeps its slot at the easy (Recovery)
-    // intensity band and shrinks with the week (running-033 reduces both
-    // volume AND intensity; see `long_run_decision`).
-    let rx = if ctx.recovery && kind == RunSessionType::LongRun {
-        running::workout_rx(RunSessionType::Recovery)
-    } else {
-        running::workout_rx(kind)
-    };
-    let degraded = spike_degrades_quality(kind, ctx);
-    let mut run = translate_run(kind, &rx.value, ctx, soft_km);
-    let session = if kind == RunSessionType::LongRun
-        && !ctx.recovery
-        && let Some((_, bind)) = ctx.long
-    {
-        // Cite whichever rule actually BINDS the long-run distance: the
-        // capacity raise rests on `capacity`, the spike ceiling on `baseline`.
-        let (stated, detrained) = match bind {
-            LongRunBind::Demonstrated | LongRunBind::DailyAvgCap => {
-                (ctx.capacity_stated, ctx.capacity_detrained)
-            }
-            LongRunBind::SpikeCeiling => (ctx.baseline_stated, ctx.detrained),
-            _ => (false, false),
-        };
-        let average_run = bind == LongRunBind::AverageRun && !ctx.taper;
-        run.long_run_avg_floor = average_run;
-        let pres = Prescription::Run(run);
-        if detrained {
-            Recommended::new(pres, claims::DETRAIN_001)
-        } else if bind.cites_spike() && stated {
-            // The ceiling rests on the athlete's stated longest run.
-            Recommended::new(pres, claims::RUN_START_001)
-        } else if bind.cites_spike() {
-            Recommended::new(pres, claims::RUN_SPIKE_001)
-        } else if bind == LongRunBind::Target {
-            Recommended::new(pres, claims::RUN_LONGRUN_TARGET_001)
-        } else if ctx.taper {
-            Recommended::new(pres, claims::RUN_TAPER_001)
-        } else if average_run {
-            // The low-mileage guardrail set it, not the 25–30 % share.
-            Recommended::new(pres, claims::RUN_LONGRUN_001)
-        } else {
-            rx.with_value(pres)
+/// A quality session's main set as a run: a block as a DISTANCE in the kind's
+/// HR band, reps as per-rep structure at the kind's VDOT band with their
+/// recovery.
+fn quality_prescription(kind: RunSessionType, set: QualitySet) -> RunPrescription {
+    match set {
+        QualitySet::Block(km) => RunPrescription::new(
+            RunVolume::DistanceKm(km as f32),
+            conservative_intensity(kind, &running::workout_rx(kind).value),
+            None,
+        ),
+        QualitySet::Reps {
+            reps,
+            rep_m,
+            recovery,
+        } => {
+            let rep_km = rep_m as f32 / 1000.0;
+            let mut r = RunPrescription::new(
+                RunVolume::DistanceKm(rep_km * reps as f32),
+                RunIntensity::Vdot(vdot_band_for(kind)),
+                Some((reps, RunVolume::DistanceKm(rep_km))),
+            );
+            r.recovery = Some(recovery);
+            r
         }
+    }
+}
+
+/// The long run: the week's long-run decision as an easy-paced run (below
+/// 1 km, the minutes that distance takes), citing whichever rule BINDS its
+/// distance. In a recovery week it keeps its slot at the easy (Recovery)
+/// intensity band and shrinks with the week (running-033 reduces both volume
+/// AND intensity; see `long_run_decision`).
+fn long_run(ctx: &DayCtx) -> (RunPrescription, RxBasis, ClaimId) {
+    let rx = running::workout_rx(if ctx.recovery {
+        RunSessionType::Recovery
     } else {
-        let pres = Prescription::Run(run);
-        if ctx.recovery {
-            // Every run in a recovery week is a reduced-volume, reduced-intensity
-            // session: cite the recovery-week depth rule.
-            Recommended::new(pres, claims::RUN_DELOAD_DEPTH_001)
-        } else if degraded {
-            // A quality slot forced off distance by the spike ceiling is now an
-            // easy run; RUN-SPIKE-001 governs the substitution.
-            Recommended::new(pres, claims::RUN_SPIKE_001)
-        } else if ctx.taper && matches!(kind, RunSessionType::Easy | RunSessionType::Recovery) {
-            // Taper: the easy volume is what the taper cut (intensity held).
-            Recommended::new(pres, claims::RUN_TAPER_001)
-        } else if kind == RunSessionType::Repetition {
-            Recommended::new(pres, claims::RUN_REPETITION_002)
-        } else {
-            rx.with_value(pres)
-        }
+        RunSessionType::LongRun
+    });
+    let easy = running::workout_rx(RunSessionType::Easy).value;
+    let run = RunPrescription::new(
+        soft_volume(&easy, ctx, ctx.long.map_or(0.0, |(km, _)| km)),
+        conservative_intensity(RunSessionType::LongRun, &rx.value),
+        None,
+    );
+    let bind = match ctx.long {
+        _ if ctx.recovery => return (run, RxBasis::Workout, claims::RUN_DELOAD_DEPTH_001),
+        Some((_, bind)) => bind,
+        None => return (run, RxBasis::Workout, rx.claim_id()),
     };
-    Session {
-        session_type: SessionType::Run(kind),
-        day,
-        prescriptions: vec![session],
-        dup_day: None,
+    // The capacity raise rests on `capacity`, the spike ceiling on `baseline`.
+    let (stated, detrained) = match bind {
+        LongRunBind::Demonstrated | LongRunBind::DailyAvgCap => {
+            (ctx.capacity_stated, ctx.capacity_detrained)
+        }
+        LongRunBind::SpikeCeiling => (ctx.baseline_stated, ctx.detrained),
+        _ => (false, false),
+    };
+    let (basis, claim) = if detrained {
+        (RxBasis::Detrained, claims::DETRAIN_001)
+    } else if bind.cites_spike() && stated {
+        // The ceiling rests on the athlete's stated longest run.
+        (RxBasis::StatedCeiling, claims::RUN_START_001)
+    } else if bind.cites_spike() {
+        (RxBasis::SpikeCeiling, claims::RUN_SPIKE_001)
+    } else if bind == LongRunBind::Target {
+        (RxBasis::LongRunTarget, claims::RUN_LONGRUN_TARGET_001)
+    } else if ctx.taper {
+        (RxBasis::Taper, claims::RUN_TAPER_001)
+    } else if bind == LongRunBind::AverageRun {
+        // The low-mileage guardrail set it, not the 25–30 % share.
+        (RxBasis::AverageRun, claims::RUN_LONGRUN_001)
+    } else {
+        (RxBasis::Workout, rx.claim_id())
+    };
+    (run, basis, claim)
+}
+
+/// An easy or recovery day: its sized share of the week (`soft_km`; 0 →
+/// nothing to size from, see [`soft_volume`]).
+fn soft_run(
+    kind: RunSessionType,
+    ctx: &DayCtx,
+    soft_km: f64,
+) -> (RunPrescription, RxBasis, ClaimId) {
+    let rx = running::workout_rx(kind);
+    let run = RunPrescription::new(
+        soft_volume(&rx.value, ctx, soft_km),
+        conservative_intensity(kind, &rx.value),
+        None,
+    );
+    if ctx.recovery {
+        (run, RxBasis::Workout, claims::RUN_DELOAD_DEPTH_001)
+    } else if ctx.taper && matches!(kind, RunSessionType::Easy | RunSessionType::Recovery) {
+        // Taper: the easy volume is what the taper cut (intensity held).
+        (run, RxBasis::Taper, claims::RUN_TAPER_001)
+    } else {
+        (run, RxBasis::Workout, rx.claim_id())
     }
 }
 
@@ -1193,114 +1441,9 @@ fn with_warmup(mut r: RunPrescription) -> RunPrescription {
     r
 }
 
-/// Turn a `RunWorkoutRx` band into a concrete `RunPrescription`. Intervals and
-/// repetitions emit per-rep structure with their recovery, quality sessions
-/// carry a warm-up/cool-down, the long run follows the long-run decision, easy
-/// and recovery days take their sized share of the week, and a quality slot
-/// whose RUN-SPIKE-001 ceiling can't fit its minimum distance degrades to an
-/// easy run.
-fn translate_run(
-    kind: RunSessionType,
-    rx: &RunWorkoutRx,
-    ctx: &DayCtx,
-    soft_km: f64,
-) -> RunPrescription {
-    if spike_degrades_quality(kind, ctx) {
-        return easy_fallback(ctx);
-    }
-    match kind {
-        RunSessionType::Interval => match ctx.interval_set() {
-            Some(set) => with_warmup(interval_prescription(set, ctx.vdot)),
-            None => easy_fallback(ctx),
-        },
-        RunSessionType::Repetition => match ctx.repetition() {
-            Some((reps, rep_m)) => {
-                let rep_km = rep_m as f32 / 1000.0;
-                let mut r = RunPrescription::new(
-                    RunVolume::DistanceKm(rep_km * reps as f32),
-                    RunIntensity::Vdot(VdotBand::Repetition),
-                    Some((reps, RunVolume::DistanceKm(rep_km))),
-                );
-                // Jog as far as the rep (running-051).
-                r.recovery = Some(RepRecovery::Metres(rep_m));
-                with_warmup(r)
-            }
-            None => easy_fallback(ctx),
-        },
-        RunSessionType::LongRun => {
-            // Very low weekly volume or a sub-1 km baseline: below 1 km the
-            // run is the minutes that distance takes at easy pace.
-            let target_km = ctx.long.map_or(0.0, |(km, _)| km);
-            let easy = running::workout_rx(RunSessionType::Easy).value;
-            RunPrescription::new(
-                soft_volume(&easy, ctx, target_km),
-                conservative_intensity(kind, rx),
-                None,
-            )
-        }
-        RunSessionType::Tempo => {
-            // Threshold volume capped at ≤10% of weekly km (RUN-TEMPO-001),
-            // bounded by the spike ceiling, as a DISTANCE with the %HRmax band.
-            match cap_km_to_spike(ctx.tempo_km(), ctx.baseline) {
-                Some(km) => with_warmup(RunPrescription::new(
-                    RunVolume::DistanceKm(km as f32),
-                    conservative_intensity(kind, rx),
-                    None,
-                )),
-                None => easy_fallback(ctx),
-            }
-        }
-        RunSessionType::RacePace => match ctx
-            .race_pace_km()
-            .and_then(|k| cap_km_to_spike(k, ctx.baseline))
-        {
-            Some(km) => with_warmup(RunPrescription::new(
-                RunVolume::DistanceKm(km as f32),
-                conservative_intensity(kind, rx),
-                None,
-            )),
-            None => easy_fallback(ctx),
-        },
-        // Easy and recovery days; the planner places no other kind.
-        _ => RunPrescription::new(
-            soft_volume(rx, ctx, soft_km),
-            conservative_intensity(kind, rx),
-            None,
-        ),
-    }
-}
-
-/// The shortest VO2max rep (running-019: 800 m) and repetition rep
-/// (running-051: 200 m), km. Below the spike ceiling for even one rep, the
-/// slot has no honest distance.
-const SMALLEST_INTERVAL_REP_KM: f64 = SHORTEST_INTERVAL_SET.1 as f64 / 1000.0;
-fn smallest_repetition_rep_km() -> f64 {
-    f64::from(shortest_repetition_set().1) / 1000.0
-}
-
-/// Whether a quality slot must degrade to an easy run because the RUN-SPIKE-001
-/// ceiling over a positive sub-1 km baseline can't fit its minimum distance.
-/// Shared by `translate_run` (the prescription) and `run_session` (its
-/// evidence face) so the two never disagree.
-fn spike_degrades_quality(kind: RunSessionType, ctx: &DayCtx) -> bool {
-    match kind {
-        RunSessionType::Tempo => cap_km_to_spike(ctx.tempo_km(), ctx.baseline).is_none(),
-        RunSessionType::Interval => {
-            cap_km_to_spike(SMALLEST_INTERVAL_REP_KM, ctx.baseline).is_none()
-        }
-        RunSessionType::Repetition => {
-            cap_km_to_spike(smallest_repetition_rep_km(), ctx.baseline).is_none()
-        }
-        RunSessionType::RacePace => ctx
-            .race_pace_km()
-            .is_some_and(|k| cap_km_to_spike(k, ctx.baseline).is_none()),
-        _ => false,
-    }
-}
-
-/// A quality slot the RUN-SPIKE-001 ceiling forces off distance: a conservative
-/// easy run at the Recovery band, the band's duration floor held under the
-/// spike ceiling and the long run.
+/// A quality slot without a session: a conservative easy run at the Recovery
+/// band, the band's duration floor held under the spike ceiling and the long
+/// run.
 fn easy_fallback(ctx: &DayCtx) -> RunPrescription {
     let recovery_rx = running::workout_rx(RunSessionType::Recovery);
     RunPrescription::new(
@@ -1443,27 +1586,6 @@ pub(super) fn long_run_decision(ctx: &DayCtx) -> (f64, LongRunBind) {
         }
     }
     (target.max(0.0), bind)
-}
-
-/// VO2max intervals as per-rep structure: `reps × rep_m` from
-/// [`DayCtx::interval_set`]. Recovery ≈ the rep's own time (ratio ceiling 1.0,
-/// running-019): seconds when a pace anchor turns the rep into time, else "jog
-/// as long as the rep took".
-fn interval_prescription((reps, rep_m): (u8, u16), vdot: Option<f64>) -> RunPrescription {
-    let ratio = running::vo2max_interval_rx()
-        .value
-        .recovery_max_ratio_of_rep;
-    let rep_km = rep_m as f32 / 1000.0;
-    let mut r = RunPrescription::new(
-        RunVolume::DistanceKm(rep_km * reps as f32),
-        RunIntensity::Vdot(VdotBand::Interval),
-        Some((reps, RunVolume::DistanceKm(rep_km))),
-    );
-    r.recovery = Some(match interval_rep_sec(rep_m, vdot) {
-        Some(sec) => RepRecovery::Seconds((sec * ratio).round().min(u16::MAX as f64) as u16),
-        None => RepRecovery::EqualToRep,
-    });
-    r
 }
 
 /// A session type's Daniels VDOT band: the pace-governed intensity and the

@@ -5,11 +5,11 @@
 use std::fmt::Write as _;
 
 use crate::app::format::{fmt_km_or_mi, round_tenths};
-use crate::app::model::{Decouple, IntervalExec};
 use crate::app::view_types::{
     ItemSetView, ItemStatus, PlanIntensity, PrescriptionView, SessionDoneItemView, SessionDoneView,
     SessionPlanView,
 };
+use crate::event::{Decouple, IntervalExec};
 use crate::evidence::claims;
 use crate::feedback::FeedbackCategory;
 use crate::schema::Recommended;

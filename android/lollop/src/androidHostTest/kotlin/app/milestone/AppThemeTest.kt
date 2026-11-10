@@ -53,8 +53,8 @@ class AppThemeTest {
 @RunWith(RobolectricTestRunner::class)
 class AppSettingsThemeTest {
     private val ctx: Context = ApplicationProvider.getApplicationContext()
-    private val prefs get() = ctx.getSharedPreferences("theme", Context.MODE_PRIVATE)
-    private val log get() = File(ctx.filesDir, "event-log.ndjson")
+    private val prefs get() = ctx.getSharedPreferences(AppFileNames.SETTINGS_STORE, Context.MODE_PRIVATE)
+    private val log get() = File(ctx.filesDir, AppFileNames.EVENT_LOG)
 
     @Before
     fun reset() {

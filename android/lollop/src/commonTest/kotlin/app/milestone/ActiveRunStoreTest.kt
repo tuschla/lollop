@@ -9,26 +9,25 @@ import kotlin.test.assertTrue
 
 /**
  * The crash-safe active-run file ([ActiveRunStore]) over the platform file seam
- * ([LogFiles]): java.io on the JVM, POSIX on iOS. Recovery skips the marker and a
+ * ([AppFiles]): java.io on the JVM, POSIX on iOS. Recovery skips the marker and a
  * torn last line, keeps the segment marks, an append after a torn tail starts its
  * own line, and the post-save clear runs after every queued append.
  */
 class ActiveRunStoreTest {
     private val dir = newTempDir()
-    private val file = LogFiles.sibling(dir, "/active-run.ndjson")
+    private val file = AppFiles.sibling(dir, "/active-run.ndjson")
 
     @BeforeTest
     fun setUp() {
         RunSession.reset()
-        ActiveRunStore.useFile(file)
+        ActiveRunStore.open(file)
     }
 
     @AfterTest
     fun tearDown() {
         ActiveRunStore.flush()
-        ActiveRunStore.useFile(null)
-        LogFiles.delete(file)
-        LogFiles.delete(dir)
+        AppFiles.delete(file)
+        AppFiles.delete(dir)
         RunSession.reset()
     }
 
@@ -38,13 +37,13 @@ class ActiveRunStoreTest {
         "{\"lat\":${p.lat},\"lon\":${p.lon},\"observed_at\":${p.observedAt},\"accuracy_m\":${p.accuracyM}" +
             (if (seg) ",\"seg\":true" else "") + "}"
 
-    private fun lines(): List<String> = buildList { LogFiles.forEachLine(file) { add(it) } }
+    private fun lines(): List<String> = buildList { AppFiles.forEachLine(file) { add(it) } }
 
     @Test
     fun aRunWritesTheMarkerThenOneLinePerFix() {
         ActiveRunStore.begin()
         val fixes = (0 until 3).map(::fix)
-        fixes.forEach(ActiveRunStore::append)
+        fixes.forEach { ActiveRunStore.append(it, segmentStart = false) }
         ActiveRunStore.flush()
         assertEquals(listOf("{\"run\":\"active\"}") + fixes.map { line(it) }, lines())
         assertTrue(ActiveRunStore.hasActiveRun())
@@ -56,7 +55,7 @@ class ActiveRunStoreTest {
         val fixes = (0 until 5).map(::fix)
         val text = "{\"run\":\"active\"}\n" + fixes.mapIndexed { i, p -> line(p, seg = i == 3) + "\n" }.joinToString("") +
             line(fix(5)).take(25)
-        LogFiles.writeText(file, text)
+        AppFiles.writeText(file, text)
         val back = ActiveRunStore.recover()
         assertEquals(fixes, back.toList())
         assertEquals(listOf(3), back.segmentStarts)
@@ -65,11 +64,11 @@ class ActiveRunStoreTest {
     @Test
     fun anAppendAfterATornTailStartsItsOwnLine() {
         val fixes = (0 until 3).map(::fix)
-        LogFiles.writeText(file, "{\"run\":\"active\"}\n" + fixes.joinToString("") { line(it) + "\n" } + line(fix(3)).take(30))
-        ActiveRunStore.append(fix(9))
+        AppFiles.writeText(file, "{\"run\":\"active\"}\n" + fixes.joinToString("") { line(it) + "\n" } + line(fix(3)).take(30))
+        ActiveRunStore.append(fix(9), segmentStart = false)
         ActiveRunStore.flush()
         assertEquals(fixes + fix(9), ActiveRunStore.recover().toList())
-        assertTrue(LogFiles.endsWithNewline(file))
+        assertTrue(AppFiles.endsWithNewline(file))
     }
 
     @Test
@@ -81,7 +80,7 @@ class ActiveRunStoreTest {
         RunSession.setPaused(false)
         assertTrue(RunSession.add(fix(2), 3_000_000_000L))
         ActiveRunStore.begin()
-        RunSession.points.value.forEach(ActiveRunStore::append)
+        RunSession.points.value.forEach { ActiveRunStore.append(it, RunSession.isSegmentStart(it)) }
         ActiveRunStore.flush()
         assertEquals(line(fix(2), seg = true), lines().last())
         assertEquals(listOf(2), ActiveRunStore.recover().segmentStarts)
@@ -89,24 +88,24 @@ class ActiveRunStoreTest {
 
     @Test
     fun theTornTailCutKeepsWholeLinesOnly() {
-        LogFiles.writeText(file, "a\nb\n")
-        LogFiles.dropTornTail(file)
+        AppFiles.writeText(file, "a\nb\n")
+        AppFiles.dropTornTail(file)
         assertEquals(listOf("a", "b"), lines())
-        LogFiles.writeText(file, "a\nb")
-        LogFiles.dropTornTail(file)
+        AppFiles.writeText(file, "a\nb")
+        AppFiles.dropTornTail(file)
         assertEquals(listOf("a"), lines())
-        LogFiles.writeText(file, "x".repeat(10_000))
-        LogFiles.dropTornTail(file)
+        AppFiles.writeText(file, "x".repeat(10_000))
+        AppFiles.dropTornTail(file)
         assertEquals(emptyList<String>(), lines(), "no newline at all: nothing whole")
-        LogFiles.delete(file)
-        LogFiles.dropTornTail(file)
-        assertTrue(LogFiles.exists(file), "a missing file is created empty")
+        AppFiles.delete(file)
+        AppFiles.dropTornTail(file)
+        assertTrue(AppFiles.exists(file), "a missing file is created empty")
     }
 
     @Test
     fun theSaveClearRunsAfterEveryQueuedAppend() {
         ActiveRunStore.begin()
-        repeat(200) { ActiveRunStore.append(fix(it)) }
+        repeat(200) { ActiveRunStore.append(fix(it), segmentStart = false) }
         ActiveRunStore.clearSync()
         assertFalse(ActiveRunStore.hasActiveRun(), "no late append recreates it")
     }

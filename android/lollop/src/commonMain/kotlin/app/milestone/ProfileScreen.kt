@@ -460,19 +460,22 @@ private fun LazyListScope.TrainingAlertsSection(ctx: PlatformContext, model: Vie
                         )
                     }
                     SessionReminderRows(ctx)
-                    // Re-checked on every resume, so it clears once the user turns Live
-                    // Updates back on in the system screen it opens.
-                    var liveUpdatesOff by remember { mutableStateOf(liveUpdatesTurnedOff(ctx)) }
-                    LifecycleResumeEffect(Unit) {
-                        liveUpdatesOff = liveUpdatesTurnedOff(ctx)
-                        onPauseOrDispose {}
-                    }
-                    if (liveUpdatesOff) {
-                        InlineNotice(
-                            stringResource(Res.string.live_updates_off_caption),
-                            actionLabel = stringResource(Res.string.live_updates_open_settings),
-                            onAction = { openPromotedNotificationSettings(ctx) },
-                        )
+                    val liveUpdates = liveUpdatesSwitch
+                    if (liveUpdates != null) {
+                        // Re-checked on every resume, so it clears once the user turns Live
+                        // Updates back on in the system screen it opens.
+                        var liveUpdatesOff by remember { mutableStateOf(liveUpdates.isOff(ctx)) }
+                        LifecycleResumeEffect(Unit) {
+                            liveUpdatesOff = liveUpdates.isOff(ctx)
+                            onPauseOrDispose {}
+                        }
+                        if (liveUpdatesOff) {
+                            InlineNotice(
+                                stringResource(Res.string.live_updates_off_caption),
+                                actionLabel = stringResource(Res.string.live_updates_open_settings),
+                                onAction = { liveUpdates.open(ctx) },
+                            )
+                        }
                     }
                 }
             }
@@ -642,7 +645,7 @@ private fun restoreData(ctx: PlatformContext, res: PlatformResources, lines: Lis
         return
     }
     dataRestoreRunning.value = true
-    EventDispatcher.scope.launch {
+    AppRuntime.scope.launch {
         when (replaceEventLog(ctx, lines)) {
             DataImportResult.Replaced -> {
                 // commit, not apply: the process ends right after (Android).

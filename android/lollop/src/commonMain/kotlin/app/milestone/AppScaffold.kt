@@ -182,7 +182,8 @@ private fun CoachScaffoldBody(session: CoachSession) {
                 switchTo = setupSwitchTo,
                 calisLadders = session.model.calisthenics_ladders,
                 onComplete = { draft, rungs ->
-                    session.dispatch(draft.effectiveFrom(session.model.today()))
+                    val today = session.model.today()
+                    session.dispatch(draft.effectiveFrom(today))
                     // Calisthenics self-placement: each answered ladder starts at
                     // its rung (after the profile, before the plan is generated).
                     rungs.forEach { session.dispatch(it) }
@@ -190,7 +191,7 @@ private fun CoachScaffoldBody(session: CoachSession) {
                     // plan immediately so the user lands on Today's prescription in
                     // THIS session (not only after a relaunch). The core preserves
                     // this anchor on later boots.
-                    session.dispatch(Event.GeneratePlan(todayEpochDay()))
+                    session.dispatch(Event.GeneratePlan(today))
                     if (firstRun) session.markOnboardingDone()
                     session.showSetup = false
                     session.setupInitial = null

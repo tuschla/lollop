@@ -1,8 +1,5 @@
 package app.milestone
 
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
 // The app's boot sequence, the same on both platforms: probe the core, restore the
@@ -11,8 +8,8 @@ import kotlinx.coroutines.withContext
 // exclusive turn of the event queue, then makes the once-per-process decisions
 // below (guided setup, the import confirmation, the interrupted-run offer).
 
-/** The once-per-process boot facts the event queue keeps ([EventDispatcher] holds
- *  the app's; a test passes its own). */
+/** The once-per-process boot facts ([AppRuntime] holds the app's; a test passes
+ *  its own). */
 internal interface BootLedger {
     /** The first boot turn of this process has run (a rotation's re-run skips the
      *  probe and the one-time decisions). */
@@ -125,29 +122,3 @@ internal fun resumable(recovered: RecoveredTrack, nowSec: Long): Boolean {
     val newestSec = recovered.maxOfOrNull { it.observedAt } ?: 0L
     return nowSec - newestSec <= RESUME_STALE_SEC
 }
-
-private val generation = MutableStateFlow(0)
-
-/** Bumped by [requestReboot]; the session's boot effect runs once per value. */
-internal val bootGeneration: StateFlow<Int> = generation.asStateFlow()
-
-// The reboot's engine reset, run by the next boot turn just before its restore.
-private var pendingBeforeRestore: (() -> Unit)? = null
-
-/**
- * Boot again in this process, as a fresh process would: the next turn probes the
- * core, restores the log and makes the once-per-process decisions again. For a
- * platform without a process restart (iOS) after the event log was replaced.
- * [beforeRestore] (emptying the engine, so the restore replays the new log) runs on
- * [CoreDispatcher] inside that same exclusive turn, so no queued event lands
- * between it and the restore. Main thread only.
- */
-internal fun requestReboot(beforeRestore: () -> Unit = {}) {
-    pendingBeforeRestore = beforeRestore
-    EventDispatcher.bootHandled = false
-    EventDispatcher.lastToday = null
-    generation.value++
-}
-
-/** The pending reboot's engine reset, taken once (null on a plain boot). Main thread only. */
-internal fun takeBeforeRestore(): (() -> Unit)? = pendingBeforeRestore.also { pendingBeforeRestore = null }

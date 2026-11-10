@@ -25,26 +25,6 @@ internal fun Locale.withLatinDigits(): Locale =
 
 private fun LocaleList.withLatinDigits(): LocaleList = LocaleList(*Array(size()) { get(it).withLatinDigits() })
 
-/** The app's language with Latin digits for the device's current locales. */
-internal actual fun appLocale(): Locale = appLocale(LocaleList.getDefault())
-
-/**
- * The app's language with Latin digits, for every date, weekday and time the
- * shell formats outside the string resources ([formatLogDate],
- * [localizedDayFormatter] and the labels built on it). The app ships English only
- * (`res/values`), so this is the first English locale in [locales] ("15 Jul" for
- * en-GB), else English with the primary locale's region (en-DE on a German
- * phone). File names and exported data keep their fixed ISO patterns.
- */
-internal fun appLocale(locales: LocaleList): Locale {
-    appLocaleCache?.let { (key, locale) -> if (key == locales) return locale }
-    val english = (0 until locales.size()).map(locales::get).firstOrNull { it.language == "en" }
-        ?: Locale.Builder().setLanguage("en").setRegion(locales[0].country).build()
-    return english.withLatinDigits().also { appLocaleCache = locales to it }
-}
-
-@Volatile private var appLocaleCache: Pair<LocaleList, Locale>? = null
-
 @Volatile private var latinCache: Pair<Configuration, Resources>? = null
 
 /**
@@ -59,11 +39,13 @@ internal fun Context.latinDigitResources(): Resources {
     val latin = config.locales.withLatinDigits()
     if (latin == config.locales) return resources
     latinCache?.let { (key, res) -> if (key == config) return res }
-    // A delta that only sets the locales. fontScale 0 leaves the user's font
-    // scale: before API 26 `Configuration()` starts from the defaults (1.0).
-    val delta = Configuration().apply { fontScale = 0f; setLocales(latin) }
-    return createConfigurationContext(delta).resources.also { latinCache = Configuration(config) to it }
+    return createConfigurationContext(localesOnly(latin)).resources.also { latinCache = Configuration(config) to it }
 }
+
+/** A configuration delta that only sets [locales]. Its fontScale is 0 (leave the
+ *  user's font scale): before API 26 `Configuration()` starts from the defaults (1.0). */
+private fun localesOnly(locales: LocaleList): Configuration =
+    Configuration().apply { fontScale = 0f; setLocales(locales) }
 
 /** [this] context with [latinDigitResources], for MainActivity's base context: a
  *  language change recreates the Activity, so its base follows. */

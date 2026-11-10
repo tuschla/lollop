@@ -6,7 +6,7 @@ use crate::app::view_types::{
 };
 use crate::evidence::claims;
 use crate::profile::{PlanProfile, Profile};
-use crate::schema::{Adjustment, Recommended};
+use crate::schema::{AdjustmentCall, Recommended};
 use crate::{autoreg, hypertrophy, individualization};
 
 /// The hold that keeps the hypertrophy-plan calculator and the
@@ -18,9 +18,9 @@ use crate::{autoreg, hypertrophy, individualization};
 /// prescribing"; safety-045 none in pregnancy; safety-049 no volume or
 /// intensity increase under RED-S; autoreg-046 no training with a fever).
 pub(in crate::app) fn calculator_hold(
-    training_hold: Option<&Recommended<Adjustment>>,
+    training_hold: Option<&AdjustmentCall>,
     reds_present: bool,
-) -> Option<Recommended<Adjustment>> {
+) -> Option<AdjustmentCall> {
     training_hold
         .cloned()
         .or_else(|| reds_present.then(autoreg::reds_referral))
@@ -95,7 +95,7 @@ fn block_ramp(
 pub(in crate::app) fn build_hypertrophy_plan(
     q: &HypertrophyInputView,
     pp: Option<&PlanProfile>,
-    hold: Option<&Recommended<Adjustment>>,
+    hold: Option<&AdjustmentCall>,
 ) -> (Vec<GuidanceView>, Option<HypertrophyFiguresView>, Vec<u8>) {
     let mut rows = Vec::new();
     let section = q.muscle.clone();

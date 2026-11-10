@@ -11,6 +11,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 
+use crate::sanitize::{positive_zero, sum0};
+
 // ---------------------------------------------------------------------------
 // Limits (File 07 "Sanity / QC")
 // ---------------------------------------------------------------------------
@@ -71,7 +73,7 @@ fn accurate(p: &GpsPoint) -> bool {
 /// enters only as `observed_at` (unix seconds), never a live clock. Lat/lon in
 /// decimal degrees; `accuracy_m` is the shell provider's reported horizontal
 /// error, used to drop noisy fixes before summing distance.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, crate::sanitize::Sanitize)]
 pub struct GpsPoint {
     pub lat: f64,
     pub lon: f64,
@@ -171,14 +173,7 @@ fn usable_segments(points: &[GpsPoint], segment_starts: &[u32]) -> (Vec<GpsPoint
 /// stopped legs and pause bridges add nothing and jitter is capped. The
 /// displayed pace, variability index and splits share these gates.
 pub fn track_distance_km(points: &[GpsPoint], segment_starts: &[u32]) -> f64 {
-    moving_legs(points, segment_starts)
-        .iter()
-        .map(|(_, d)| d)
-        .sum::<f64>()
-        // `+ 0.0`: an empty f64 sum is -0.0, which a run with no moving leg
-        // would print as "-0.0 km".
-        / 1000.0
-        + 0.0
+    sum0(moving_legs(points, segment_starts).iter().map(|(_, d)| *d)) / 1000.0
 }
 
 /// Cumulative moving distance in metres to each usable fix (`out[0] == 0.0`):
@@ -239,9 +234,9 @@ pub fn track_positive_split_pct(points: &[GpsPoint], segment_starts: &[u32]) -> 
     }
     let pace1 = dur1 / dist1;
     let pace2 = dur2 / dist2;
-    // `+ 0.0` turns a slowdown that rounds to -0.0 into 0.0, so a dead-even
-    // run never reads "-0.0 %".
-    Some(((pace2 - pace1) / pace1 * 100.0 * 10.0).round() / 10.0 + 0.0)
+    Some(positive_zero(
+        ((pace2 - pace1) / pace1 * 100.0 * 10.0).round() / 10.0,
+    ))
 }
 
 /// One completed (or final partial) split of a run track. Purely descriptive -

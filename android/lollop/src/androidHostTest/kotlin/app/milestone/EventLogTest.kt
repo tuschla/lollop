@@ -28,8 +28,7 @@ class EventLogTest {
 
     @Before
     fun coreAnswers() {
-        Core.faultForTest = null
-        Core.clearUnavailableForTest()
+        AppRuntime.resetForTest()
         assertNotNull(
             "the host core does not answer (library load error: ${Core.loadError}); these tests need it to compact",
             Core.compaction(emptyList()),
@@ -53,7 +52,7 @@ class EventLogTest {
 
     @Test
     fun compactAppliesTheCoresRulesAndKeepsANonJsonLine() {
-        val out = EventLog.compact(listOf(torn, set("a"), line(Event.ClearSets), run(5.0)))
+        val out = EventLog.compact(listOf(torn, set("a"), line(Event.ClearSets), run(5.0)), Core)
         assertEquals(listOf(torn, run(5.0)), out)
     }
 
@@ -62,16 +61,16 @@ class EventLogTest {
         // The core-unavailable boot still exports the raw log.
         val file = tempLog()
         file.writeText(listOf(set("a"), line(Event.ClearSets), torn, run(5.0)).joinToString("\n", postfix = "\n"))
-        Core.faultForTest = object : CoreFault {
-            override fun update(event: ByteArray): ByteArray? = null
-            override fun view(): ByteArray? = null
-        }
-        try {
-            assertEquals(listOf(set("a"), line(Event.ClearSets), run(5.0)), EventLog.read(file).lines)
-            assertEquals(listOf(set("a"), line(Event.ClearSets)), EventLog.compact(listOf(set("a"), line(Event.ClearSets))))
-        } finally {
-            Core.faultForTest = null
-        }
+        val dead = BridgeCore(
+            FaultBridge(
+                object : CoreFault {
+                    override fun update(event: ByteArray): ByteArray? = null
+                    override fun view(): ByteArray? = null
+                },
+            ),
+        )
+        assertEquals(listOf(set("a"), line(Event.ClearSets), run(5.0)), EventLog.read(file, dead).lines)
+        assertEquals(listOf(set("a"), line(Event.ClearSets)), EventLog.compact(listOf(set("a"), line(Event.ClearSets)), dead))
     }
 
     @Test
@@ -114,7 +113,7 @@ class EventLogTest {
     @Test
     fun loadMissingFileIsFreshInstall() {
         val file = tempLog().also { it.delete() }
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         assertTrue(restored.freshInstall)
         assertTrue(restored.lines.isEmpty())
     }
@@ -130,7 +129,7 @@ class EventLogTest {
             listOf(set("a"), set("b"), line(Event.ClearSets))
                 .joinToString("\n", postfix = "\n")
         )
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         assertFalse(restored.freshInstall)
         assertTrue(restored.lines.isEmpty())
     }
@@ -141,7 +140,7 @@ class EventLogTest {
         // still exists, so this too is a returning user.
         val file = tempLog()
         file.writeText("\n")
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         assertFalse(restored.freshInstall)
         assertTrue(restored.lines.isEmpty())
     }
@@ -153,7 +152,7 @@ class EventLogTest {
             listOf(set("a"), line(Event.ClearSets), run(5.0))
                 .joinToString("\n", postfix = "\n")
         )
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         assertFalse(restored.freshInstall)
         assertEquals(listOf(run(5.0)), restored.lines)
         // The durable log was compacted in place (atomic rewrite).
@@ -171,7 +170,7 @@ class EventLogTest {
         file.writeText(
             (listOf(set("a"), torn, run(5.0)).joinToString("\n")) + "\n"
         )
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         assertFalse(restored.freshInstall)
         assertEquals(listOf(set("a"), run(5.0)), restored.lines)
         assertEquals(listOf(set("a"), run(5.0)), file.readLines().filter { it.isNotBlank() })
@@ -188,7 +187,7 @@ class EventLogTest {
         val unknownString = "\"FutureUnitEvent\""
         val original = listOf(set("a"), unknownObject, unknownString, run(5.0))
         file.writeText(original.joinToString("\n") + "\n")
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         assertFalse(restored.freshInstall)
         assertEquals(original, restored.lines)
         // Nothing dropped → the file is left exactly as-is (no rewrite needed).
@@ -203,7 +202,7 @@ class EventLogTest {
         val original = listOf(set("a"), run(5.0), checkin(0))
         val bytes = original.joinToString("\n") + "\n"
         file.writeText(bytes)
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         assertFalse(restored.freshInstall)
         assertEquals(original, restored.lines)
         assertEquals(bytes, file.readText())
@@ -225,7 +224,7 @@ class EventLogTest {
         val file = tempLog()
         file.writeText(original.joinToString("\n") + "\n")
 
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         // Compaction still drops the superseded SetTodays (and keeps the check-in)...
         assertFalse(restored.lines.contains(setToday(1)))
         assertFalse(restored.lines.contains(setToday(2)))
@@ -244,13 +243,13 @@ class EventLogTest {
         // torn bytes (which would lose that event on the next boot).
         val file = tempLog()
         file.writeText(set("a") + "\n" + torn) // valid first line, torn tail, NO trailing newline
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         assertFalse(restored.freshInstall)
         assertEquals(listOf(set("a")), restored.lines)
         assertEquals(listOf(set("a")).joinToString("\n", postfix = "\n"), file.readText())
         // A subsequent append lands on its own line → the whole log reparses.
         file.appendText(run(5.0) + "\n")
-        val reloaded = EventLog.load(file)
+        val reloaded = EventLog.load(file, Core)
         assertEquals(listOf(set("a"), run(5.0)), reloaded.lines)
     }
 
@@ -262,7 +261,7 @@ class EventLogTest {
         val file = tempLog()
         val original = listOf(set("a"), run(5.0))
         file.writeText(original.joinToString("\n")) // valid last line, NO trailing newline
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         assertFalse(restored.freshInstall)
         assertEquals(original, restored.lines)
         assertEquals(original.joinToString("\n", postfix = "\n"), file.readText())
@@ -278,11 +277,11 @@ class EventLogTest {
         val file = tempLog()
         val bytes = listOf(set("a"), line(Event.ClearSets), run(5.0)).joinToString("\n", postfix = "\n") + torn
         file.writeText(bytes)
-        val temps = listOf(".tmp", ".import", ".bak").map { File(file.parentFile, file.name + it) }
+        val temps = AppFileNames.LOG_SUFFIXES.map { File(file.parentFile, file.name + it) }
         try {
             temps.forEach { it.writeText("x") }
 
-            val read = EventLog.read(file)
+            val read = EventLog.read(file, Core)
 
             assertFalse(read.freshInstall)
             assertEquals(listOf(run(5.0)), read.lines)
@@ -297,9 +296,9 @@ class EventLogTest {
     fun readOfAMissingLogCreatesNothingAndRestoresNothing() {
         // load() would move a crash-left .bak back into place; read() must not.
         val file = tempLog().also { it.delete() }
-        val bak = File(file.parentFile, file.name + ".bak").apply { writeText(set("a") + "\n") }
+        val bak = File(file.parentFile, file.name + AppFileNames.BAK_SUFFIX).apply { writeText(set("a") + "\n") }
         try {
-            val read = EventLog.read(file)
+            val read = EventLog.read(file, Core)
             assertTrue(read.freshInstall)
             assertTrue(read.lines.isEmpty())
             assertFalse(file.exists())
@@ -322,7 +321,7 @@ class EventLogTest {
                 line(Event.LogRun(5.0, 25.0, 75.0, observedAt = 3, entryId = 12)),
             ).joinToString("\n", postfix = "\n")
         )
-        assertEquals(900L, EventLog.load(file).maxEntryId)
+        assertEquals(900L, EventLog.load(file, Core).maxEntryId)
     }
 
     @Test
@@ -330,7 +329,7 @@ class EventLogTest {
         val file = tempLog()
         val lines = listOf(line(Event.GeneratePlan(1)), line(Event.ClearPlan))
         file.writeText(lines.joinToString("\n", postfix = "\n"))
-        val restored = EventLog.load(file)
+        val restored = EventLog.load(file, Core)
         // The removed plan keeps its span (`Model::past_plans`): both lines stay.
         assertEquals(lines, restored.lines)
         assertTrue(restored.planRemoved)
@@ -351,10 +350,10 @@ class EventLogTest {
     fun swapLogFileReplacesTheLogAndLeavesNoTemporary() {
         val dir = java.nio.file.Files.createTempDirectory("swap").toFile()
         try {
-            File(dir, "event-log.ndjson").writeText(set("old") + "\n")
+            File(dir, AppFileNames.EVENT_LOG).writeText(set("old") + "\n")
             swapLogFile(eventLogFile(dir), listOf(set("a"), run(5.0)))
-            assertEquals(listOf(set("a"), run(5.0)).joinToString("\n", postfix = "\n"), File(dir, "event-log.ndjson").readText())
-            assertFalse(File(dir, "event-log.ndjson.import").exists())
+            assertEquals(listOf(set("a"), run(5.0)).joinToString("\n", postfix = "\n"), File(dir, AppFileNames.EVENT_LOG).readText())
+            assertFalse(File(dir, AppFileNames.EVENT_LOG + AppFileNames.IMPORT_SUFFIX).exists())
         } finally {
             dir.deleteRecursively()
         }

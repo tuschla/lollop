@@ -83,7 +83,16 @@ pub enum CorrectiveTrigger {
 /// The safety screens of a weekly check-in, the part of the review wire
 /// payload the safety gate reads (`SessionReview` flattens it, so these are
 /// top-level wire fields). A new safety screen is added here once.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Default,
+    crate::sanitize::Sanitize,
+)]
 pub struct SafetyScreen {
     /// Localized bone pain worsening through effort, night/rest pain, high-risk
     /// site, or mechanical joint symptoms (feedback-032/033/034).
@@ -132,7 +141,17 @@ impl SafetyScreen {
 /// HRV, sleep deterioration). When a check-in carries this, the signal count
 /// IS the number of signs ticked (it overrides the bare
 /// `overtraining_signal_count`), so "a sign" always means one of these four.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    crate::sanitize::Sanitize,
+)]
 #[serde(default)]
 pub struct OvertrainingSigns {
     pub worse_performance: bool,
@@ -454,7 +473,16 @@ pub fn verbosity_for_experience(advanced: bool) -> Recommended<FeedbackVerbosity
 /// Which way a measured change went: a rolling multi-week metric versus
 /// day-to-day noise, or one set's e1RM versus the previous (wire: lowercase).
 /// Any unknown wire value reads as `Flat`, the no-trend default.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    crate::sanitize::Sanitize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum TrendDirection {
     Up,

@@ -8,7 +8,8 @@
      The GPX export temp dir lives in cache/, which Auto Backup never includes, so it
      needs no rule here. The milestone_setup prefs (onboarding_done, plan_cleared)
      describe the excluded log, so restoring them without it would skip guided setup
-     and plan generation on an empty install. -->
+     and plan generation on an empty install. The names are AppFileNames' (Kotlin);
+     AppIdentifiersTest checks this list and data_extraction_rules.xml against it. -->
 <full-backup-content>
     <exclude domain="file" path="event-log.ndjson" />
     <exclude domain="file" path="event-log.ndjson.tmp" />

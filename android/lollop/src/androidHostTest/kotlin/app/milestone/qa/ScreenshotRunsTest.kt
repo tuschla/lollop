@@ -22,8 +22,8 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppRuntime
 import app.milestone.DarkMode
-import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.OpenDest
@@ -89,8 +89,7 @@ class ScreenshotRunsTest {
         // drop every tracker singleton so no run state reaches the next test.
         QaHarness.teardown()
         RunSession.reset()
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-        AppSettings.showRouteMaps.value = true
+        QaHarness.freshProcess()
     }
 
     // ── Waits / drivers (every wait fetches semantics, which idles the looper) ──
@@ -196,7 +195,7 @@ class ScreenshotRunsTest {
     /** Reopen the tracker onto a followed interval plan mid-run (rep 1 of 6). */
     private fun openRecordingWithPlan() {
         QaHarness.seedLog(ctx, listOf(QaHarness.fiveKRunnerProfile()))
-        RunSession.plannedRun.value = PrescriptionView(
+        RunSession.followPlan(PrescriptionView(
             exercise = "Intervals",
             summary = "6 × 800 m · 400 m jog between",
             run_head = "6 × 800 m",
@@ -212,12 +211,12 @@ class ScreenshotRunsTest {
                 effort_detail = "8–9 of 10",
             ),
             run_structure = RunStructureView(reps = 6, rep_m = 800, recovery_m = 400),
-        )
+        ))
         QaHarness.seedRecordingRun()
         RunSession.startSteps(android.os.SystemClock.elapsedRealtime())
         lastScenario = launchMain(openIntent(ctx, OpenDest.Track))
         rule.waitUntil(30_000) {
-            rule.onAllNodesWithText(str(R.string.track_step_skip)).fetchSemanticsNodes().isNotEmpty() && EventDispatcher.bootHandled
+            rule.onAllNodesWithText(str(R.string.track_step_skip)).fetchSemanticsNodes().isNotEmpty() && AppRuntime.bootHandled
         }
         rule.waitForIdle()
     }

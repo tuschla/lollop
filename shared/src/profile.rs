@@ -9,6 +9,7 @@ use crate::individualization::{
     Environment, ProgressionCadence, TrainingAge, conservative_deload, training_age_from_cadence,
 };
 use crate::running::{self, GoalDistance};
+use crate::sanitize::Sanitize;
 use crate::schema::{HealthScreen, Recommended};
 use crate::strength::LiftGoal;
 
@@ -16,7 +17,7 @@ use crate::strength::LiftGoal;
 /// bodyweight leverage (calisthenics). A calisthenics user's plan is built from
 /// leverage ladders instead of %1RM; they may still log arbitrary barbell sets
 /// (those stay plain logged lifts). Default `Weights`.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Sanitize)]
 pub enum ResistanceModality {
     #[default]
     Weights,
@@ -25,7 +26,7 @@ pub enum ResistanceModality {
 
 /// The athlete's programming profile: drives the evidence-cited guidance
 /// section. Shell-supplied; no logged data required.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Sanitize)]
 pub struct Profile {
     /// Cadence at which load can still be added → training age.
     pub progression_cadence: ProgressionCadence,
@@ -41,6 +42,7 @@ pub struct Profile {
     pub running_days_per_week: u8,
     /// Running km per week (hybrid lower-lift cap trigger). Always 0 when
     /// `running_km_per_week_set` is false.
+    #[sanitize_with = "crate::sanitize::non_negative"]
     pub running_km_per_week: f64,
     /// Whether the athlete actually answered the weekly-distance question.
     /// `false` = "not set": the core zeroes `running_km_per_week` and the plan
@@ -165,6 +167,19 @@ pub struct Profile {
 }
 
 impl Profile {
+    /// This edit's position in the profile history: its effective day
+    /// (`None` = −∞ as `i64::MIN`), then the instant it was made (`edited_at`;
+    /// `None`, or any undated edit, = the start of that day). The history is
+    /// kept ascending by this key: an edit supersedes every entry at or after
+    /// its own key (an undated one the whole history), so a later same-day edit
+    /// leaves the earlier one in force for the part of the day before it.
+    pub(crate) fn history_key(&self) -> (i64, i64) {
+        match self.effective_from_epoch_day {
+            Some(day) => (day, self.edited_at.unwrap_or(i64::MIN)),
+            None => (i64::MIN, i64::MIN),
+        }
+    }
+
     /// The declared layoff's return day: `None` without a layoff (`weeks_off`
     /// unset or 0), `Some(None)` when it cannot be dated, else the local epoch
     /// day training resumed (`layoff_returned_epoch_day`, else the day this
@@ -207,7 +222,7 @@ fn serde_true() -> bool {
 }
 
 /// A race result the athlete reports on their profile.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Sanitize)]
 pub struct RecentRace {
     /// Race distance, km.
     pub distance_km: f64,
@@ -218,7 +233,7 @@ pub struct RecentRace {
 }
 
 /// Calisthenics equipment the athlete has access to.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Sanitize)]
 pub struct CalisEquipment {
     pub pull_up_bar: bool,
     pub dip_bars: bool,

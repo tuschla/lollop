@@ -57,8 +57,8 @@ internal fun daySnapshot(kind: WidgetDayKind, sessionDone: Boolean = false, trac
 /** What the rest shows: the rest-done alert, else the countdown; never both. */
 internal fun postedRest(ctx: Context): Notification? {
     val nm = shadowOf(ctx.getSystemService(NotificationManager::class.java))
-    val done = nm.getNotification(RestAlarm.DONE_NOTIF_ID)
-    val countdown = nm.getNotification(RestAlarm.COUNTDOWN_NOTIF_ID)
+    val done = nm.getNotification(AndroidIds.REST_DONE_NOTIFICATION)
+    val countdown = nm.getNotification(AndroidIds.REST_COUNTDOWN_NOTIFICATION)
     assertTrue("countdown and rest-done alert both posted", done == null || countdown == null)
     return done ?: countdown
 }
@@ -71,9 +71,9 @@ internal fun restEndBroadcast(ctx: Context): Intent =
 /** The system delivers the rest-end alarm to [RestEndReceiver]. */
 internal fun fireRestEnd(ctx: Context) = RestEndReceiver().onReceive(ctx, restEndBroadcast(ctx))
 
-/** No rest running, posted or scheduled, and the rest-done alert on. */
+/** A fresh process on the [TestClock] ([AppRuntime.resetForTest]) with no rest
+ *  running, posted or scheduled. */
 internal fun resetRest(ctx: Context) {
+    AppRuntime.resetForTest(clock = TestClock)
     RestAlarm.cancel(ctx)
-    RestAlarm.resetProcessState()
-    AppSettings.restAlert.value = true
 }

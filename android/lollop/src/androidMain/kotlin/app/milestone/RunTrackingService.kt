@@ -27,7 +27,7 @@ import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import androidx.annotation.StringRes
+import org.jetbrains.compose.resources.StringResource
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -35,8 +35,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
@@ -72,16 +70,8 @@ class RunTrackingService : Service() {
     // the vibration/tone cues and the screen-off-safe timers ([Host]).
     private val recorder = RunRecorder(Host())
 
-    // The recorder's state as the notification copy reads it.
-    private val recording get() = recorder.recording
-    private val armed get() = recorder.armed
-    private val signalLost get() = recorder.signalLost
-
-    // Main-thread scope observing RunSession.paused so an in-app Pause toggle
-    // re-posts the ongoing notification (updated title/content + the Pause↔Resume
-    // action label). The notification's own Pause/Resume action writes the SAME
-    // flag, so both directions stay in sync off one source of truth. Cancelled in
-    // onDestroy. Dispatchers.Main.immediate keeps every notification write on the
+    // Main-thread scope for the paused-flow refresh ([refreshSurfaceOnPause]);
+    // cancelled in onDestroy. Main.immediate keeps every notification write on the
     // main thread, serialized with onFix's, so lastNotifiedFrame needs no lock.
     private val serviceScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
 
@@ -125,6 +115,7 @@ class RunTrackingService : Service() {
     /** [RunRecorder]'s platform side: the foreground notification, the location
      *  engine, the vibration/tone cues and the main-looper timers. */
     private inner class Host : RecorderHost {
+        // The fixes' timebase (Location.elapsedRealtimeNanos), so sensor time.
         override fun nowNanos(): Long = SystemClock.elapsedRealtimeNanos()
 
         override fun nowMs(): Long = SystemClock.elapsedRealtime()
@@ -159,13 +150,14 @@ class RunTrackingService : Service() {
 
         override fun stopStream() = engine.stop()
 
-        override fun openSidecar() = ActiveRunStore.begin(this@RunTrackingService)
+        override fun openSidecar() = ActiveRunStore.begin()
 
         override fun reassertSurface() {
             try {
                 startLocationForeground()
-            } catch (_: SecurityException) {
+            } catch (e: SecurityException) {
                 // Already foregrounded as a recording run; the deadline is moot.
+                PlatformLog.w(TAG, "foreground re-assert refused", e)
             }
         }
 
@@ -175,24 +167,23 @@ class RunTrackingService : Service() {
             lastNotifiedFrame = null
         }
 
-        override fun cue(cue: RecorderCue) = when (cue) {
-            RecorderCue.RecordingStarted -> vibrate(RECORDING_STARTED_WAVEFORM)
-            RecorderCue.SignalLost -> vibrate(SIGNAL_LOST_WAVEFORM)
-            RecorderCue.StepChange -> {
-                vibrate(STEP_CHANGE_WAVEFORM)
-                playStepTone()
-            }
+        override fun cue(cue: RecorderCue) {
+            val pattern = cue.pattern
+            vibrate(pattern.waveform())
+            if (pattern.beep) playStepTone()
         }
 
         override fun releaseCues() {
-            toneGenerator?.let { runCatching { it.release() } }
+            toneGenerator?.let { tone ->
+                runCatching { tone.release() }.onFailure { PlatformLog.w(TAG, "tone generator not released", it) }
+            }
             toneGenerator = null
         }
 
         override fun finished(userStop: Boolean) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             // A stop cancels too, in case a re-post slipped in before `stopped`.
-            if (userStop) getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
+            if (userStop) getSystemService(NotificationManager::class.java).cancel(AndroidIds.RUN_NOTIFICATION)
             stopSelf(lastStartId)
         }
 
@@ -210,90 +201,39 @@ class RunTrackingService : Service() {
     }
 
     /**
-     * One deadline that fires on time with the screen off: a main-looper post (exact
-     * while the CPU is awake) plus a listener-based exact alarm, which wakes the CPU
-     * and needs no exact-alarm permission. Whichever fires first runs [action] once.
-     * While a deadline is pending, a request for the same or a LATER moment is a
-     * no-op: the earlier one fires and [action] re-arms for the remainder, so the
-     * per-fix re-arm costs no alarm traffic. An earlier request replaces it.
+     * [EarliestWinsTimer] over a main-looper post (exact while the CPU is awake) plus
+     * a listener-based exact alarm, which wakes the CPU and needs no exact-alarm
+     * permission. Whichever fires first runs the action once.
      */
-    private inner class WakeTimer(private val tag: String, private val action: () -> Unit) : RecorderTimer {
-        private var dueAt = 0L
+    private inner class WakeTimer(private val tag: String, action: () -> Unit) : EarliestWinsTimer(action) {
         private val listener = AlarmManager.OnAlarmListener { fire() }
         private val runnable = Runnable { fire() }
 
-        private fun fire() {
-            cancel()
-            action()
-        }
-
-        override fun schedule(delayMs: Long) {
-            val at = SystemClock.elapsedRealtime() + delayMs.coerceAtLeast(0L)
-            if (dueAt != 0L && dueAt <= at) return
-            cancel()
-            dueAt = at
-            mainHandler.postDelayed(runnable, delayMs.coerceAtLeast(0L))
+        override fun arm(delayMs: Long) {
+            mainHandler.postDelayed(runnable, delayMs)
             // Best-effort: without the alarm the main-looper post still fires once
             // the CPU wakes (the next batched fix), just later.
             runCatching {
                 getSystemService(AlarmManager::class.java)
-                    ?.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, tag, listener, mainHandler)
-            }
+                    ?.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + delayMs, tag, listener, mainHandler)
+            }.onFailure { PlatformLog.w(TAG, "wake alarm $tag not set, the main-looper post stands", it) }
         }
 
-        override fun cancel() {
-            if (dueAt == 0L) return
-            dueAt = 0L
+        override fun disarm() {
             mainHandler.removeCallbacks(runnable)
             runCatching { getSystemService(AlarmManager::class.java)?.cancel(listener) }
+                .onFailure { PlatformLog.w(TAG, "wake alarm $tag not cancelled", it) }
         }
     }
 
-    /** The notification's current content line: the recording progress (labelled
-     *  "Moving", the biggest figure is MOVING time, not wall-clock elapsed, matching
-     *  the tracker tile's overline so the two surfaces never disagree) plus the
-     *  current pace, the same line without the pace while paused (the title says
-     *  "Run paused"), the signal-lost line, the armed "starts when ready" copy, or the
-     *  static locate-preview text, resolved from [trackingNotifContentSpec]. Part of
-     *  the [notifyIfChanged] throttle key with the chip, so a pause or a lost signal
-     *  re-posts. */
-    private fun currentNotifContent(): String {
-        val spec = trackingNotifContentSpec(
-            recording = recording,
-            armed = armed,
-            paused = RunSession.paused.value,
-            signalLost = signalLost,
-            progress = progressText(),
-            paceNow = paceNowText(),
-        )
-        return when (spec) {
-            is NotifContentSpec.Literal -> getString(spec.res)
-            is NotifContentSpec.Progress -> {
-                val base = if (spec.paceNow != null) {
-                    getString(R.string.track_notif_progress_pace, spec.text, spec.paceNow)
-                } else {
-                    getString(R.string.track_notif_progress, spec.text)
-                }
-                // A guided run leads with the current step ("Rep 2 of 6 · 320 m
-                // left"), so a glance at the lock screen says what to do now. Its
-                // counts in Latin digits (AppLocale.kt).
-                RunSession.stepProgress.value
-                    ?.let { getString(R.string.track_notif_step, runStepLine(latinDigitResources(), it), base) } ?: base
-            }
-            is NotifContentSpec.PausedProgress -> getString(spec.res, spec.progress)
-        }
-    }
-
-    /** Everything one refresh shows: the content line, the Live Update chip text
-     *  ([trackingChipRes], or the moving time while recording) and, for a guided run,
-     *  the step bar. Its equality is the [notifyIfChanged] throttle key. */
+    /** Everything one refresh shows ([runSurfaceText], counts in Latin digits as every
+     *  notification's, AppLocale.kt): the content line, the Live Update chip text and,
+     *  for a guided run, the step bar. Its equality is the [notifyIfChanged] throttle
+     *  key, so a pause or a lost signal re-posts. */
     private fun currentNotifFrame(): RunNotifFrame {
-        val chipRes = trackingChipRes(recording, armed, RunSession.paused.value, signalLost)
-        return RunNotifFrame(
-            content = currentNotifContent(),
-            chip = if (chipRes != null) getString(chipRes) else formatElapsed(RunSession.elapsedSec.value),
-            steps = if (recording) RunSession.stepProgress.value?.let(::stepBar) else null,
-        )
+        val state = recorder.surfaceState()
+        val text = runSurfaceText(state, latinDigitResources())
+        return RunNotifFrame(content = text.line, chip = text.chip, steps = state.step?.let(::stepBar))
     }
 
     /** A short beep on the notification stream for a step change. Best-effort: a
@@ -303,12 +243,12 @@ class RunTrackingService : Service() {
         runCatching {
             val tone = toneGenerator ?: ToneGenerator(AudioManager.STREAM_NOTIFICATION, STEP_TONE_VOLUME).also { toneGenerator = it }
             tone.startTone(ToneGenerator.TONE_PROP_BEEP2, STEP_TONE_MS)
-        }
+        }.onFailure { PlatformLog.w(TAG, "step tone not played", it) }
     }
 
     /** One haptic cue from the SERVICE (works screen-off / backgrounded, unlike the
-     *  Activity's View.performHapticFeedback). Best-effort: no vibrator, or a vendor
-     *  refusing it, is silently ignored. */
+     *  Activity's View.performHapticFeedback). Best-effort: no vibrator stays still,
+     *  a vendor refusing it is logged. */
     private fun vibrate(waveform: LongArray) {
         val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             getSystemService(VibratorManager::class.java)?.defaultVibrator
@@ -324,7 +264,7 @@ class RunTrackingService : Service() {
                 @Suppress("DEPRECATION")
                 vibrator.vibrate(waveform, NO_REPEAT)
             }
-        }
+        }.onFailure { PlatformLog.w(TAG, "cue vibration refused", it) }
     }
 
     /** Re-post the ongoing notification only when what it shows actually changed.
@@ -335,7 +275,7 @@ class RunTrackingService : Service() {
         val frame = currentNotifFrame()
         if (frame == lastNotifiedFrame) return
         lastNotifiedFrame = frame
-        getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(frame))
+        getSystemService(NotificationManager::class.java).notify(AndroidIds.RUN_NOTIFICATION, buildNotification(frame))
     }
 
     /** One engine fix, handed to the recorder ([RunRecorder.onFix]). Shared by both
@@ -353,10 +293,7 @@ class RunTrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        ActiveRunStore.init(this)
-        // The Quick Settings tile reads "Run · recording" while this records, and a
-        // shown "Start run" reminder goes.
-        RecordingWatch.start(this)
+        AppRuntime.start(this)
         engine = if (hasPlayServices(this)) FusedEngine(this) else PlatformEngine(this)
         ensureLiveChannel(this, CHANNEL, getString(R.string.track_notif_channel_name), RETIRED_CHANNEL)
         // Screen on/off drives the GPS cadence: while the screen is off the
@@ -379,16 +316,10 @@ class RunTrackingService : Service() {
                 addAction(Intent.ACTION_SCREEN_ON)
             },
         )
-        // Mirror the shared paused flag into the notification: toggling Pause in-app
-        // (or via the notification action, which sets the SAME flag) re-posts the
-        // ongoing notification so the lockscreen copy + Pause/Resume label match the
-        // in-app control. notifyIfChanged is a no-op unless the displayed line changed
-        // (and while not recording the paused state isn't shown at all), so a stray
-        // toggle costs nothing. drop(1) skips the StateFlow's initial replay so nothing
-        // posts before startForeground.
-        serviceScope.launch {
-            RunSession.paused.drop(1).collect { notifyIfChanged() }
-        }
+        // A pause toggled in-app (or by the notification's action) re-posts the
+        // notification so its copy and Pause/Resume label match; notifyIfChanged
+        // posts nothing before startForeground or when the shown line is unchanged.
+        refreshSurfaceOnPause(serviceScope, ::notifyIfChanged)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -399,37 +330,23 @@ class RunTrackingService : Service() {
         // stopForeground may not have run, so cancel the notification too.
         serviceScope.cancel()
         recorder.haltStream()
-        screenReceiver?.let { runCatching { unregisterReceiver(it) } }
+        screenReceiver?.let { r ->
+            runCatching { unregisterReceiver(r) }.onFailure { PlatformLog.w(TAG, "screen receiver already gone", it) }
+        }
         screenReceiver = null
-        getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
+        getSystemService(NotificationManager::class.java).cancel(AndroidIds.RUN_NOTIFICATION)
         super.onDestroy()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (recording || armed) {
-            // A live or armed run must survive a Recents swipe: flush queued sidecar
-            // writes so nothing already accepted is lost, and KEEP the sidecar so the
-            // run is recoverable if the OS then kills the process.
-            ActiveRunStore.flush()
-        } else {
-            // Locate-only preview with no run in progress: the user swiped the app away
-            // without recording, so stop the service rather than leave the GPS radio on
-            // indefinitely.
-            recorder.stop()
-        }
+        recorder.onAppRemoved()
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         lastStartId = startId
         val action = intent?.action
-        // Only a start or stop may run on an instance that never started a stream: any
-        // other intent that created it (a late Pause tap, Start now, a dismissal) would
-        // leak it, so it stops itself.
-        if (!recorder.started && action !in setOf(ACTION_LOCATE, ACTION_START, ACTION_ARM, ACTION_STOP)) {
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
+        if (stopIfStray(action, startId)) return START_NOT_STICKY
         when (action) {
             ACTION_LOCATE -> recorder.start(record = false)
             ACTION_START -> recorder.start(record = true)
@@ -459,6 +376,18 @@ class RunTrackingService : Service() {
         return START_NOT_STICKY
     }
 
+    /**
+     * Stop an instance that a stray intent created, true when it did. The system
+     * creates the service for any intent it is sent, but only a start or a stop may
+     * run on an instance that never started a stream: any other intent that created
+     * it (a late Pause tap, Start now, a dismissal) would leak it.
+     */
+    private fun stopIfStray(action: String?, startId: Int): Boolean {
+        if (recorder.started || action in STARTING_ACTIONS) return false
+        stopSelf(startId)
+        return true
+    }
+
     /** Foreground as a `location`-typed service. API 34+ requires the typed
      *  startForeground for a location FGS (the 2-arg overload throws); ServiceCompat
      *  picks the right form per API level. On API 34+ this throws [SecurityException]
@@ -470,7 +399,7 @@ class RunTrackingService : Service() {
         val frame = currentNotifFrame()
         ServiceCompat.startForeground(
             this,
-            NOTIF_ID,
+            AndroidIds.RUN_NOTIFICATION,
             buildNotification(frame),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
@@ -481,13 +410,14 @@ class RunTrackingService : Service() {
         lastNotifiedFrame = frame
     }
 
-    /** The notification "shape": the state fields that decide the title and which
-     *  actions show, so [buildNotification] can cache one builder per shape and reuse
-     *  it across every fix that keeps the same shape (only the per-frame fields change). */
-    private data class NotifShape(val recording: Boolean, val armed: Boolean, val paused: Boolean)
+    /** The notification "shape": what decides the title and which actions show, so
+     *  [buildNotification] can cache one builder per shape and reuse it across every
+     *  fix that keeps the same shape (only the per-frame fields change). */
+    private data class NotifShape(val title: StringResource, val canPause: Boolean, val paused: Boolean, val ownsRun: Boolean)
 
     private fun buildNotification(frame: RunNotifFrame): Notification {
-        val shape = NotifShape(recording, armed, RunSession.paused.value)
+        val phase = recorder.surfaceState().phase
+        val shape = NotifShape(phase.titleRes, phase.canPause, phase == RunSurfacePhase.Paused, phase != RunSurfacePhase.Locating)
         // Per-fix hot path: while steady recording the shape (title + which
         // actions show) never changes, so reuse the builder cached for it and only
         // re-set the per-frame fields + build(). A state change (pause toggle, armed →
@@ -504,20 +434,17 @@ class RunTrackingService : Service() {
      *  reused across every fix that keeps the same shape; the content text, chip and
      *  style are set per frame by [buildRunNotification], not here. */
     private fun buildBuilder(shape: NotifShape): NotificationCompat.Builder {
+        val res = latinDigitResources()
         val builder = runNotificationBuilder(
             this,
             CHANNEL,
-            getString(trackingNotifTitleRes(shape.recording, shape.armed, shape.paused)),
+            res.getString(shape.title),
             openTrackerPending,
             dismissPending,
         )
-        // Pause/Resume only while actually RECORDING. It drives the SAME
-        // RunSession.paused flag the in-app Pause button toggles (one source of
-        // truth), delivered as a service action (getService) handled in
-        // onStartCommand. Deliberately NOT shown while merely armed: pausing a
-        // not-yet-recording run would set the flag so its first real fixes get
-        // dropped the instant recording begins.
-        if (shape.recording) {
+        // Pause/Resume drives the SAME RunSession.paused flag the in-app Pause button
+        // toggles, delivered as a service action handled in onStartCommand.
+        if (shape.canPause) {
             builder.addAction(
                 0,
                 if (shape.paused) getString(R.string.track_action_resume) else getString(R.string.track_action_pause),
@@ -529,7 +456,7 @@ class RunTrackingService : Service() {
         // in-app flow (the Finish review with its short-run note + the Save/Discard
         // choice). An auto-save action would bypass those gates and could silently
         // log a drift/accidental run.
-        if (shape.recording || shape.armed) {
+        if (shape.ownsRun) {
             builder.addAction(0, getString(R.string.track_btn_stop), openTrackerPending)
         } else {
             // Locate-only preview: there is no captured run to route through the save
@@ -543,43 +470,10 @@ class RunTrackingService : Service() {
     /** A notification action delivered to this service's [onStartCommand]. The
      *  actions differ, so each is its own PendingIntent. */
     private fun servicePendingIntent(action: String): PendingIntent = PendingIntent.getService(
-        this, 0,
+        this, AndroidIds.RUN_ACTION_REQUEST,
         Intent(this, RunTrackingService::class.java).setAction(action),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
-
-    /**
-     * Elapsed time + live distance from the captured track (06-run-tracking
-     * §Behavior: "a notification shows elapsed + distance"), or null before a
-     * two-fix track exists (the caller substitutes a state-appropriate literal).
-     * The distance is the same factual shell-side haversine value the stat sheet
-     * shows while recording.
-     */
-    private fun progressText(): String? {
-        val pts = RunSession.points.value
-        if (pts.size < 2) return null
-        // Monotonic elapsed (RunSession.elapsedSec), immune to a wall-clock/NTP step
-        // mid-run; and the incrementally-accumulated distance (RunSession.distanceKm),
-        // so the notification never re-haversines the whole track on a refresh.
-        // Honour the user's distance unit (same as the tracking screen / history),
-        // so the notification doesn't contradict the rest of the app in km/mi.
-        val unit = resolveDistanceUnit(AppSettings.distanceUnitOverride.value)
-        return getString(
-            R.string.track_notif_progress_figures,
-            formatElapsed(RunSession.elapsedSec.value),
-            runDistLabel(RunSession.distanceKm.value, unit),
-        )
-    }
-
-    /** The current (rolling-window) pace in the user's unit, e.g. "5:45 /km", or null
-     *  while there isn't enough recent ground to say (start, standing still, a fresh
-     *  segment). Same figure as the tracker's "Pace now" readout. */
-    private fun paceNowText(): String? {
-        val pace = RunSession.currentPaceMinPerKm.value
-        if (!pace.isFinite()) return null
-        val unit = resolveDistanceUnit(AppSettings.distanceUnitOverride.value)
-        return "${formatPaceMinutes(paceInUnit(pace, unit))} ${unit.paceSuffix}"
-    }
 
     companion object {
         private const val ACTION_LOCATE = "app.milestone.action.LOCATE"
@@ -598,16 +492,9 @@ class RunTrackingService : Service() {
 
         /** The run's channel before it moved to [ensureLiveChannel] (IMPORTANCE_LOW). */
         private const val RETIRED_CHANNEL = "run_tracking"
-        internal const val NOTIF_ID = 1
 
-        // Service-side haptic cues (VIBRATE permission). Recording started: one firm
-        // pulse. Signal lost: two pulses, so the two can be told apart in a pocket.
-        private val RECORDING_STARTED_WAVEFORM = longArrayOf(0L, 300L)
-        private val SIGNAL_LOST_WAVEFORM = longArrayOf(0L, 250L, 150L, 250L)
-
-        // Guided-run step change: three quick pulses (distinct from the start buzz and
-        // the two-pulse signal-loss warning).
-        private val STEP_CHANGE_WAVEFORM = longArrayOf(0L, 150L, 100L, 150L, 100L, 150L)
+        /** The actions that may create the service ([stopIfStray]). */
+        private val STARTING_ACTIONS = setOf(ACTION_LOCATE, ACTION_START, ACTION_ARM, ACTION_STOP)
 
         // Step-change beep: volume (percent of the notification stream's max) and
         // duration (ms) of one short cue.
@@ -670,9 +557,10 @@ class RunTrackingService : Service() {
         fun startNow(ctx: Context) {
             try {
                 ctx.startService(Intent(ctx, RunTrackingService::class.java).setAction(ACTION_START_NOW))
-            } catch (_: IllegalStateException) {
+            } catch (e: IllegalStateException) {
                 // Background-start restriction (the tap comes from the visible tracker,
                 // so not expected): the run stays armed and still starts on its gates.
+                PlatformLog.w(TAG, "start now not delivered, the run stays armed", e)
             }
         }
 
@@ -684,77 +572,22 @@ class RunTrackingService : Service() {
                 ctx.startService(
                     Intent(ctx, RunTrackingService::class.java).setAction(ACTION_STOP),
                 )
-            } catch (_: IllegalStateException) {
-                // ACTION_STOP couldn't be delivered, so the recorder's stop won't reset
-                // the observable state machine. Do it here directly, mirroring its
-                // resets — clearing ONLY `tracking` would leave
-                // `locating`/`armed` latched, sticking the tracker on "Finding GPS…"
+            } catch (e: IllegalStateException) {
+                // The stop can't reach a service, so the recorder's own stop state is
+                // applied here; otherwise the tracker would stick on "Finding GPS…"
                 // with no engine behind it.
-                RunSession.markStopped()
+                PlatformLog.w(TAG, "stop not delivered, resetting the run state here", e)
+                RunRecorder.stopUndelivered()
             }
         }
     }
 }
 
-// Ongoing-notification copy. The state→R.string selection is a pure top-level function
-// the service only resolves, so it is unit-tested against the real ids and a swapped
-// id can't hide behind a caller's string literals.
+private const val TAG = "RunTracking"
 
-/** The ongoing-notification title for a tracking state; a paused recording gets the
- *  paused title. */
-internal fun trackingNotifTitleRes(recording: Boolean, armed: Boolean, paused: Boolean): Int = when {
-    recording && paused -> R.string.track_notif_paused_title
-    recording -> R.string.track_notif_recording_title
-    armed -> R.string.track_notif_armed_title
-    else -> R.string.track_notif_locate_title
-}
-
-/** The ongoing-notification content for a tracking state: a fixed string ([Literal]),
- *  the "elapsed · dist" line plus the current pace ([Progress], resolved through
- *  `track_notif_progress(_pace)`), or the paused line ([PausedProgress]: the same
- *  "Moving 23:41 · 4.12 km" without a pace). */
-internal sealed class NotifContentSpec {
-    data class Literal(@StringRes val res: Int) : NotifContentSpec()
-    data class Progress(val text: String, val paceNow: String?) : NotifContentSpec()
-    data class PausedProgress(@StringRes val res: Int, val progress: String) : NotifContentSpec()
-}
-
-/** See [NotifContentSpec]. A paused recording keeps its figures in the recording
- *  line's words ("Moving 0:49 · 0.10 mi") without the pace, which stands still; the
- *  title ("Run paused") and the chip ("Paused") carry the pause, so the line does
- *  not say it a third time. A lost GPS signal while actively recording replaces the
- *  progress line with the signal-lost warning (the figures are frozen anyway); a
- *  pause outranks it. */
-internal fun trackingNotifContentSpec(
-    recording: Boolean,
-    armed: Boolean,
-    paused: Boolean,
-    signalLost: Boolean,
-    progress: String?,
-    paceNow: String?,
-): NotifContentSpec = when {
-    recording && paused -> if (progress != null) NotifContentSpec.PausedProgress(R.string.track_notif_progress, progress) else NotifContentSpec.Literal(R.string.track_state_paused)
-    recording && signalLost -> NotifContentSpec.Literal(R.string.track_notif_signal_lost)
-    recording -> if (progress != null) NotifContentSpec.Progress(progress, paceNow) else NotifContentSpec.Literal(R.string.track_notif_recording_hint)
-    armed -> NotifContentSpec.Literal(R.string.track_notif_armed_text)
-    else -> NotifContentSpec.Literal(R.string.track_notif_locate_text)
-}
-
-/**
- * The Live Update status-bar chip text (Android 16+) per tracking state; null while
- * recording, where the caller shows the moving time ([formatElapsed]). The chip
- * shows text whole only up to 7 characters: moving time fits to 9:59:59, every
- * literal here fits (LiveRunNotificationTest). Not a chronometer: it would tick on
- * the wall clock while moving time stands still.
- */
-@StringRes
-internal fun trackingChipRes(recording: Boolean, armed: Boolean, paused: Boolean, signalLost: Boolean): Int? = when {
-    recording && paused -> R.string.live_chip_paused
-    recording && signalLost -> R.string.live_chip_no_gps
-    recording -> null
-    armed -> R.string.live_chip_waiting
-    else -> R.string.live_chip_locating
-}
+/** The vibrator waveform of [CuePattern]: off, then each pulse with the gap between. */
+private fun CuePattern.waveform(): LongArray =
+    LongArray(pulseMs.size * 2) { i -> if (i == 0) 0L else if (i % 2 == 1) pulseMs[i / 2] else gapMs }
 
 /** A guided run's step bar: one equal [STEP_BAR_UNITS] segment per step (one segment
  *  for the whole run past [STEP_BAR_MAX_SEGMENTS]) and the progress through them. */
@@ -940,7 +773,7 @@ private class FusedEngine(ctx: Context) : LocationEngine {
         // PROVIDERS_CHANGED receiver in RunTracking.kt covers a toggled location service
         // while the screen is composed, so a dropped re-request here is harmless.
         val cb = callback ?: return
-        runCatching { request(cb) }
+        runCatching { request(cb) }.onFailure { PlatformLog.w(TAG, "fused cadence not changed", it) }
     }
 
     @SuppressLint("MissingPermission")
@@ -1019,7 +852,7 @@ private class PlatformEngine(private val ctx: Context) : LocationEngine {
         runCatching {
             lm.removeUpdates(l)
             request(l)
-        }
+        }.onFailure { PlatformLog.w(TAG, "GPS cadence not changed", it) }
     }
 
     @SuppressLint("MissingPermission")

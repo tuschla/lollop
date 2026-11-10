@@ -26,6 +26,7 @@ import app.milestone.resources.main_details
 import app.milestone.resources.main_import_duplicate
 import app.milestone.resources.main_import_summary_duplicates
 import kotlin.time.Instant
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.filterNotNull
@@ -342,12 +343,12 @@ internal interface RunImportFile {
  */
 internal fun launchRunImport(files: List<RunImportFile>, resources: () -> PlatformResources) {
     if (files.isEmpty()) return
-    EventDispatcher.scope.launch {
+    AppRuntime.scope.launch {
         val parsed = withContext(Dispatchers.IO) {
             files.map { file ->
                 ParsedRunFile(
                     name = file.displayName(),
-                    runs = runCatching { parseRunFileSegments(file.readBytes(), platformCoreEngine()::parseFitFile) }
+                    runs = runCatching { parseRunFileSegments(file.readBytes(), AppRuntime.engine::parseFitFile) }
                         .onFailure { e ->
                             // A non-import exception is a shell bug or an IO error, not a
                             // bad file; leave a diagnostic trail while the batch carries on.
@@ -369,8 +370,11 @@ internal fun launchRunImport(files: List<RunImportFile>, resources: () -> Platfo
         if (plan.runs.isNotEmpty()) {
             val vm = runCatching {
                 EventDispatcher.exclusive {
-                    withContext(CoreDispatcher) { platformCoreEngine().sendAll(plan.runs.map { it.event }).view }
+                    withContext(CoreDispatcher) { AppRuntime.engine.sendAll(plan.runs.map { it.event }).view }
                 }
+            }.onFailure {
+                if (it is CancellationException) throw it
+                PlatformLog.w("lollop", "run import batch not applied", it)
             }.getOrNull()
             val logged = vm?.runs?.mapTo(HashSet()) { it.observed_at }.orEmpty()
             appliedRuns = plan.runs.filter { it.event.observedAt in logged }

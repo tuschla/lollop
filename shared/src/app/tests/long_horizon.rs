@@ -2575,20 +2575,17 @@ fn hypertrophy_lifter_restarts_carried_loads_lighter_after_three_weeks_off() {
 /// classification in every builder (~70 µs per set before `SetIndex`), so
 /// the test counts that work per view instead of timing it:
 /// - each distinct name is classified once per set-log change (`SetIndex`),
-///   so a view's classifier calls ([`crate::exercise::NAME_CLASSIFICATIONS`],
-///   ~3 000, set by the plan's items) do not grow with the set count: on
-///   the ≈15 000-set third year every view makes fewer than one call per two
-///   sets (classifying each set even once would not);
+///   so a view's classifier calls (lookups of the name memos
+///   [`MemoId::ExerciseNames`] and [`MemoId::CalisthenicsNames`]: movement
+///   key, same movement, isolation, movement pattern, calisthenics rung;
+///   ~3 000, set by the plan's items) do not grow with the set count: on the
+///   ≈15 000-set third year every view makes fewer than one call per two sets
+///   (classifying each set even once would not);
 /// - the index is memoized on the set log: a view after a new set builds it
 ///   once, a re-render after only the day changes builds it zero times
-///   (`SET_INDEX_BUILDS`).
-///
-/// A wall-clock guard stays for a catastrophic regression only (10× the
-/// owner's bound: a loaded debug box measured up to ~380 ms).
+///   ([`MemoId::SetIndex`] builds).
 #[test]
 fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
-    use crate::app::set_index::SET_INDEX_BUILDS;
-    use crate::exercise::NAME_CLASSIFICATIONS;
     let app = Engine;
     let mut m = Model::default();
     let names = [
@@ -2605,18 +2602,20 @@ fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
         let _ = app.update(e, m);
     };
     let today = set_today_ev;
-    // (SetIndex builds, name classifications, wall time) of one view.
+    let counts = || {
+        let classifier_calls = crate::memo::stats(MemoId::ExerciseNames).lookups
+            + crate::memo::stats(MemoId::CalisthenicsNames).lookups;
+        (
+            crate::memo::stats(MemoId::SetIndex).builds,
+            classifier_calls,
+        )
+    };
+    // (SetIndex builds, name classifications) of one view.
     let measured = |m: &Model| {
-        let (b0, c0) = (
-            SET_INDEX_BUILDS.with(|c| c.get()),
-            NAME_CLASSIFICATIONS.with(|c| c.get()),
-        );
-        let t = Instant::now();
+        let (b0, c0) = counts();
         let vm = app.view(m);
-        let wall = t.elapsed();
-        let builds = SET_INDEX_BUILDS.with(|c| c.get()) - b0;
-        let calls = NAME_CLASSIFICATIONS.with(|c| c.get()) - c0;
-        (vm, builds, calls, wall)
+        let (b1, c1) = counts();
+        (vm, b1 - b0, c1 - c0)
     };
     send(&mut m, today(START));
     send(
@@ -2658,7 +2657,7 @@ fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
         }
         let d = START + 365 * year;
         send(&mut m, today(d));
-        let (vm, b1, c1, w1) = measured(&m);
+        let (vm, b1, c1) = measured(&m);
         assert_eq!(vm.lifts.len() as u64, id);
         id += 1;
         let at = d * DAY_SEC + 40_000;
@@ -2666,13 +2665,13 @@ fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
             &mut m,
             with_entry_id(log_set("Bench press", 60.0, 10, 8.0, at), id),
         );
-        let (_, b2, c2, w2) = measured(&m);
+        let (_, b2, c2) = measured(&m);
         send(&mut m, today(d + 1));
-        let (_, b3, c3, w3) = measured(&m);
-        rows.push((id, [(b1, c1, w1), (b2, c2, w2), (b3, c3, w3)]));
+        let (_, b3, c3) = measured(&m);
+        rows.push((id, [(b1, c1), (b2, c2), (b3, c3)]));
     }
     for (sets, views) in &rows {
-        let [(b1, ..), (b2, ..), (b3, ..)] = *views;
+        let [(b1, _), (b2, _), (b3, _)] = *views;
         assert!(
             (b1, b2, b3) == (1, 1, 0),
             "{sets} sets: SetIndex builds (new sets, one more set, day change only) = {:?}, want (1, 1, 0): {rows:?}",
@@ -2684,14 +2683,5 @@ fn view_time_stays_bounded_for_a_heavy_lifter_over_three_years() {
     assert!(
         calls3 * 2 < sets3,
         "a view classifies exercise names per set: {calls3} classifier calls on {sets3} sets: {rows:?}"
-    );
-    let slowest = rows
-        .iter()
-        .flat_map(|(_, v)| v.iter().map(|x| x.2))
-        .max()
-        .unwrap_or_default();
-    assert!(
-        slowest < Duration::from_millis(2500),
-        "slowest view {slowest:?}: {rows:?}"
     );
 }

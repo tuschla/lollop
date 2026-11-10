@@ -9,7 +9,7 @@ use crate::app::plan_views::item_render::{
 use crate::app::view_types::{BasisRx, EvidenceTagView, PlanIntensity, PrescriptionView};
 use crate::evidence::{ClaimId, claims};
 use crate::plates::{f32_load_ceil, round_load_grid};
-use crate::schema::{LiftIntensity, Prescription, Recommended};
+use crate::schema::{LiftIntensity, Recommended, Rx, RxBasis};
 
 /// What one lift intensity arm resolves before the item is assembled.
 #[derive(Default)]
@@ -41,7 +41,7 @@ struct LiftArm {
 pub(super) fn flatten_lift_prescription(
     l: &crate::schema::LiftPrescription,
     anchors: &crate::plan::LiftAnchors,
-    rx: &Recommended<Prescription>,
+    rx: &Rx,
     weight_lb: bool,
 ) -> PrescriptionView {
     let LiftArm {
@@ -244,7 +244,7 @@ fn rir_arm(
     l: &crate::schema::LiftPrescription,
     n: u8,
     anchors: &crate::plan::LiftAnchors,
-    rx: &Recommended<Prescription>,
+    rx: &Rx,
     weight_lb: bool,
 ) -> LiftArm {
     let arm = match l.reps_max.filter(|top| *top >= l.reps) {
@@ -283,7 +283,7 @@ fn rep_range_arm(
     n: u8,
     top: u8,
     anchors: &crate::plan::LiftAnchors,
-    rx: &Recommended<Prescription>,
+    rx: &Rx,
     weight_lb: bool,
 ) -> LiftArm {
     let (bottom, _) =
@@ -338,7 +338,7 @@ fn rep_range_arm(
     );
     let reps_txt = range_text(l.reps, top);
     let step = crate::hypertrophy::SMALLEST_LOAD_STEP_KG;
-    let deload = rx.claim_id() == claims::HYP_DELOAD_RX_001;
+    let deload = rx.kind() == RxBasis::HypertrophyDeload;
     let effort = with_reps_left(i64::from(effort_rir));
     let basis = match (load, last) {
         _ if deload => format!(

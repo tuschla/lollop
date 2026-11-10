@@ -16,6 +16,7 @@ import app.milestone.AppClock
 import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.RestAlarm
+import app.milestone.TestClock
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -75,7 +76,7 @@ class ExactAlarmNoticeTest {
 
     private fun logSet(n: Int, of: Int) {
         // The lifter rests first (this also clears the loop's double-tap guard).
-        if (n > 1) AppClock.offsetMillis += 90_000L
+        if (n > 1) TestClock.offsetMillis += 90_000L
         rule.onNode(hasTestTag("editor-primary")).performClick()
         rule.waitUntil(10_000) {
             rule.onAllNodes(hasText(str(R.string.log_set_header_n_of_n, n + 1, of))).fetchSemanticsNodes().isNotEmpty()

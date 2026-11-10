@@ -13,7 +13,6 @@ import platform.CoreLocation.kCLErrorLocationUnknown
 import platform.Foundation.NSDate
 import platform.Foundation.NSError
 import platform.Foundation.NSRunLoop
-import platform.Foundation.NSThread
 import platform.Foundation.dateByAddingTimeInterval
 import platform.Foundation.dateWithTimeIntervalSinceNow
 import platform.Foundation.runUntilDate
@@ -35,16 +34,19 @@ import kotlin.test.assertTrue
  */
 class IosRunTrackerTest {
     private val dir = newTempDir()
-    private val sidecar = LogFiles.sibling(dir, "/active-run.ndjson")
+    private val sidecar = AppFiles.sibling(dir, "/active-run.ndjson")
     private val stream = FakeStream()
-    private val tracker = IosRunRecording(PlatformContext.INSTANCE, stream)
+    private val clock = ShiftedClock()
+    private lateinit var tracker: IosRunRecording
     private val manager = CLLocationManager()
     private val base = NSDate()
 
     @BeforeTest
     fun setUp() {
+        AppRuntime.resetForTest(clock = clock)
         RunSession.reset()
-        ActiveRunStore.useFile(sidecar)
+        ActiveRunStore.open(sidecar)
+        tracker = IosRunRecording(stream)
     }
 
     @AfterTest
@@ -52,10 +54,10 @@ class IosRunTrackerTest {
         RunActivity.sink = null
         tracker.recorder.stop()
         ActiveRunStore.flush()
-        ActiveRunStore.useFile(null)
-        LogFiles.delete(sidecar)
-        LogFiles.delete(dir)
+        AppFiles.delete(sidecar)
+        AppFiles.delete(dir)
         RunSession.reset()
+        AppRuntime.resetForTest()
     }
 
     /** Fix [i] of a straight run east along the equator (~3.3 m apart), stamped
@@ -158,7 +160,7 @@ class IosRunTrackerTest {
         // The run before the app was killed: five fixes in the sidecar.
         ActiveRunStore.begin()
         val before = (0..4).map { GpsPoint(0.0, it * 3e-5, 1_790_000_000L + it, 5.0) }
-        before.forEach(ActiveRunStore::append)
+        before.forEach { ActiveRunStore.append(it, segmentStart = false) }
         ActiveRunStore.flush()
         // The relaunch: recover, restore, start recording again (CoachSession's Resume).
         val recovered = ActiveRunStore.recover()
@@ -167,7 +169,7 @@ class IosRunTrackerTest {
         assertTrue(RunSession.tracking.value)
         // The first live fixes: stamped after the restore, as a fresh fix is. One
         // stamped before it would be dropped as out of order (Android alike).
-        NSThread.sleepForTimeInterval(1.2)
+        clock.shiftMs += 1200L
         val now = NSDate()
         deliver(locationAt(100, now.dateByAddingTimeInterval(-1.0)), locationAt(101, now))
         assertEquals(7, RunSession.points.value.size)
@@ -179,10 +181,10 @@ class IosRunTrackerTest {
 
     @Test
     fun theSurfaceGetsAFrameForEachPhase() {
-        val frames = mutableListOf<RunActivityPhase>()
+        val frames = mutableListOf<RunSurfacePhase>()
         var ended = 0
         RunActivity.sink = object : RunActivitySink {
-            override fun update(state: RunActivityState) {
+            override fun update(state: RunSurfaceState) {
                 frames += state.phase
             }
 
@@ -198,7 +200,7 @@ class IosRunTrackerTest {
         spin(0.2)
         deliver(location(2, ageSec = 0.0))
         tracker.recorder.stop()
-        assertEquals(listOf(RunActivityPhase.Armed, RunActivityPhase.Recording, RunActivityPhase.Paused), frames.distinct())
+        assertEquals(listOf(RunSurfacePhase.Armed, RunSurfacePhase.Recording, RunSurfacePhase.Paused), frames.distinct())
         assertEquals(1, ended)
     }
 
@@ -218,6 +220,16 @@ class IosRunTrackerTest {
 
 private fun assertEquals(expected: Long, actual: Long, absoluteTolerance: Long) =
     assertTrue(kotlin.math.abs(expected - actual) <= absoluteTolerance, "expected $expected ± $absoluteTolerance, was $actual")
+
+/** The device's clocks, the monotonic one moved ahead by [shiftMs]: time passing
+ *  without the test waiting for it. */
+private class ShiftedClock : WallClock {
+    var shiftMs = 0L
+
+    override fun nowMillis(): Long = wallClockMillis()
+
+    override fun monotonicMillis(): Long = deviceMonotonicMillis() + shiftMs
+}
 
 /** A [LocationStream] with a scripted grant; the test feeds the delegate itself. */
 private class FakeStream : LocationStream {

@@ -28,17 +28,6 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
      *  fail here (`System.loadLibrary`); the iOS core is linked into the app. */
     internal open val loadError: Throwable? get() = null
 
-    /** TEST-ONLY fault injection: when set, every core round trip ([coreUpdate]/
-     *  [coreView]) goes here instead of [bridge], so a test can boot the app on a
-     *  core that answers null (an emulated arm64 library under translation, a JNI
-     *  allocation failure) or throws [UnsatisfiedLinkError] (a library that never
-     *  loaded). Never set in the app. */
-    @Volatile internal var faultForTest: CoreFault? = null
-
-    private fun coreUpdate(event: ByteArray): ByteArray? = faultForTest.let { if (it != null) it.update(event) else bridge.update(event) }
-
-    private fun coreView(): ByteArray? = faultForTest.let { if (it != null) it.view() else bridge.view() }
-
     /** Latched for the process once boot found the core unusable ([probe] failed, or
      *  [markUnavailable] after the boot clock event was refused). While set, [apply]
      *  refuses every event and [restore] replays nothing, so a dead core can never
@@ -55,21 +44,27 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
      */
     fun probe(): Boolean = synchronized(this) {
         if (unavailable) return false
-        val ok = loadError == null && try {
-            val bytes = coreView()
-            bytes != null && bytes.decodeToString().let { text ->
-                !isCoreErrorEnvelope(text) &&
-                    runCatching { coreJson.decodeFromString(ViewModel.serializer(), text) }.isSuccess
+        val failure: Throwable? = loadError ?: try {
+            val text = bridge.view()?.decodeToString()
+            when {
+                text == null -> IllegalStateException("view() answered null")
+                isCoreErrorEnvelope(text) -> IllegalStateException("view() answered an error envelope")
+                else -> try {
+                    coreJson.decodeFromString(ViewModel.serializer(), text)
+                    null
+                } catch (e: SerializationException) {
+                    e
+                }
             }
         } catch (e: Throwable) {
             if (!e.isLinkageError()) throw e
-            false
+            e
         }
-        if (!ok) {
-            PlatformLog.e("Core", "native core unavailable at boot", loadError)
+        if (failure != null) {
+            PlatformLog.e("Core", "native core unavailable at boot", failure)
             unavailable = true
         }
-        ok
+        failure == null
     }
 
     /** Latch [unavailable] after boot: the core read a view but refused the boot
@@ -79,11 +74,6 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
         unavailable = true
     }
 
-    /** TEST-ONLY: undo [unavailable] (with [faultForTest] cleared) between scenarios. */
-    internal fun clearUnavailableForTest() = synchronized(this) {
-        unavailable = false
-    }
-
     /** The distance and moving time [track] will be SAVED with, from the core's own
      *  QC and derivation (the same as the saved run's card), so the Finish review
      *  shows what History will list. Null when the core can't answer (an error
@@ -91,7 +81,12 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
      *  a capped (decimated) track. */
     fun savedFigures(track: Event.LogRunTrack): TrackFigures? {
         val json = bridge.trackFigures(track.toJson().toString().encodeToByteArray()) ?: return null
-        return runCatching { coreJson.decodeFromString(TrackFigures.serializer(), json) }.getOrNull()
+        return try {
+            coreJson.decodeFromString(TrackFigures.serializer(), json)
+        } catch (e: SerializationException) {
+            PlatformLog.w("Core", "track figures unreadable", e)
+            null
+        }
     }
 
     /** The core's stateless FIT parse of a `.fit` file's [bytes] (fitparser): the
@@ -107,23 +102,28 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
     fun runGpx(entryId: Long, observedAt: Long): String? = bridge.exportGpx(entryId, observedAt)
 
     /** The core's compaction verdict on the event-log [lines] (log.rs), or null when
-     *  the core can't answer (the library didn't load, it is [unavailable] or under
-     *  [faultForTest], or the call failed): the caller then keeps every line. */
+     *  the core can't answer (the library didn't load, it is [unavailable], or the
+     *  call failed): the caller then keeps every line. */
     internal fun compaction(lines: List<String>): LogCompaction? {
-        if (loadError != null || unavailable || faultForTest != null) return null
+        if (loadError != null || unavailable) return null
         val json = try {
             bridge.compactLog(lines.toTypedArray())
         } catch (e: Throwable) {
             if (!e.isLinkageError()) throw e
             null
         } ?: return null
-        return runCatching { coreJson.decodeFromString(LogCompaction.serializer(), json) }.getOrNull()
+        return try {
+            coreJson.decodeFromString(LogCompaction.serializer(), json)
+        } catch (e: SerializationException) {
+            PlatformLog.w("Core", "compaction verdict unreadable, keeping every line", e)
+            null
+        }
     }
 
     // Append-only, newline-delimited event log. The crux core holds all state in
     // memory only, so we persist the event *stream* (not the derived model) and
     // rebuild by replaying it. Each line is one event's exact serde wire JSON.
-    private var log: LogPath? = null
+    private var log: AppPath? = null
 
     // The native core holds all state in memory for the whole process lifetime,
     // so replaying the log more than once (e.g. on Activity recreation across a
@@ -136,9 +136,6 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
      *  removed plan stays removed when the setup prefs' marker was lost. */
     var restoredPlanRemoved = false
         private set
-
-    /** The app's debuggable flag ([restore]): error envelopes are logged in full. */
-    @Volatile private var debuggable = false
 
     /**
      * Point the core at [ctx]'s event log and replay it to rebuild state. Safe to
@@ -155,7 +152,6 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
      * [SendResult.stale] on every later send.
      */
     fun restore(ctx: PlatformContext): Boolean = synchronized(this) {
-        debuggable = ctx.isDebuggable()
         // An unavailable core never gets the log: nothing is replayed into it and no
         // event it might accept can be appended (the boot shows the error state).
         if (unavailable) return false
@@ -163,12 +159,12 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
     }
 
     /** [restore] from the event log at [file]. */
-    fun restoreFrom(file: LogPath): Boolean = synchronized(this) {
+    fun restoreFrom(file: AppPath): Boolean = synchronized(this) {
         if (unavailable) return false
         // Already replayed this process (Activity recreation): the only way this
         // is still a fresh install is if nothing was ever persisted. [log] stays as
         // it is, so a recreation can't re-attach a log a data import detached.
-        if (restored) return !LogFiles.exists(file)
+        if (restored) return !AppFiles.exists(file)
         // Marked BEFORE replaying: the native core keeps whatever a partial replay
         // applied, so a second attempt in this process would double those events.
         restored = true
@@ -191,7 +187,12 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
         restoredPlanRemoved = loaded.planRemoved
         // A failed torn-tail repair (often disk full, the same cause as the tear)
         // leaves the durable tail newline-less: the next append must lead with one.
-        appendTornGuard = runCatching { LogFiles.exists(file) && !LogFiles.endsWithNewline(file) }.getOrDefault(true)
+        appendTornGuard = try {
+            AppFiles.exists(file) && !AppFiles.endsWithNewline(file)
+        } catch (e: Exception) {
+            PlatformLog.w("Core", "event log tail unreadable, the next append leads with a newline", e)
+            true
+        }
         if (replay(loaded.lines)) logDegraded = true
         loaded.freshInstall
     }
@@ -200,10 +201,10 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
      *  calls this inside an exclusive turn before replacing the log file, so nothing
      *  can append to the imported log before the process restarts. Returns the
      *  detached file for [reattachLog]. */
-    fun detachLog(): LogPath? = synchronized(this) { log.also { log = null } }
+    fun detachLog(): AppPath? = synchronized(this) { log.also { log = null } }
 
     /** Undo [detachLog] after a failed swap: the original log is still in place. */
-    fun reattachLog(file: LogPath?) = synchronized(this) {
+    fun reattachLog(file: AppPath?) = synchronized(this) {
         log = file
     }
 
@@ -216,6 +217,20 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
      */
     fun resetForReboot(): Boolean = synchronized(this) {
         if (!bridge.reset()) return false
+        forgetLog()
+        true
+    }
+
+    /** Start over as a new process starts the engine ([AppRuntime.resetForTest]):
+     *  the native core emptied where the bridge can, and everything this engine
+     *  learnt (the replayed log, the cached view, the [unavailable] latch) forgotten. */
+    internal fun forgetProcess() = synchronized(this) {
+        if (loadError == null) bridge.reset()
+        forgetLog()
+        unavailable = false
+    }
+
+    private fun forgetLog() {
         restored = false
         log = null
         restoredPlanRemoved = false
@@ -224,7 +239,6 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
         lastSetToday = null
         viewStale = false
         logDegraded = false
-        true
     }
 
     // The last ViewModel that decoded cleanly. If a later core call comes back as
@@ -261,7 +275,7 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
         // A core found unusable at boot refuses everything: nothing reaches the log.
         if (unavailable) return Applied.Rejected
         val wire = event.toJson().toString()
-        val response = coreUpdate(wire.encodeToByteArray())
+        val response = bridge.update(wire.encodeToByteArray())
         if (isPanicResetResponse(response)) {
             // The FFI caught a panic and swapped in a FRESH (empty) core bridge.
             // The offending event was never applied or persisted; rebuild the fresh
@@ -288,7 +302,7 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
             // Lead with a newline when a prior append tore off mid-write, so
             // this event can never glue onto a newline-less partial line.
             val prefix = if (appendTornGuard) "\n" else ""
-            LogFiles.append(file, prefix + wire + "\n")
+            AppFiles.append(file, prefix + wire + "\n")
             appendTornGuard = false
             Applied.Saved
         } catch (e: Exception) {
@@ -306,7 +320,7 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
      *  Returns true when the core ended up missing any line. Raw [CoreBridge.update],
      *  never [apply], so a reset during replay cannot recurse into [replayLogAfterReset]. */
     private fun replay(lines: List<String>): Boolean {
-        val outcome = replayLog(lines, MAX_REPLAY_RESETS) { coreUpdate(it.encodeToByteArray()) }
+        val outcome = replayLog(lines, MAX_REPLAY_RESETS) { bridge.update(it.encodeToByteArray()) }
         if (outcome.skipped.isEmpty() && outcome.complete) return false
         val which = outcome.skipped.joinToString { "#$it ${EventLog.variantOf(lines[it])}" }
         val gaveUp = if (outcome.complete) "" else "; gave up after $MAX_REPLAY_RESETS resets"
@@ -328,7 +342,7 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
             emptyList()
         }
         if (replay(lines)) logDegraded = true
-        lastSetToday?.let { coreUpdate(it.toJson().toString().encodeToByteArray()) }
+        lastSetToday?.let { bridge.update(it.toJson().toString().encodeToByteArray()) }
     }
 
     /** Dispatch one event via [apply], then return the fresh view model plus how
@@ -376,7 +390,7 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
     fun currentView(): ViewModel = synchronized(this) {
         // A null return is the byte-array alloc failure (ffi byte_array_or_null
         // exhausted its retries).
-        val bytes = coreView() ?: run {
+        val bytes = bridge.view() ?: run {
             PlatformLog.e("Core", "core view() returned null (alloc failure), keeping last good view")
             return staleView()
         }
@@ -388,7 +402,7 @@ abstract class DurableCore : SynchronizedObject(), CoreEngine {
         // ignoreUnknownKeys that would decode into an all-default ViewModel -
         // train_blocked=false, safety_tier=null, silently blanking safety state.
         if (isCoreErrorEnvelope(text)) {
-            val detail = if (debuggable) ": $text" else ""
+            val detail = if (AppRuntime.debuggable) ": $text" else ""
             PlatformLog.e("Core", "core returned error envelope, keeping last good view$detail")
             return staleView()
         }

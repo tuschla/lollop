@@ -12,8 +12,8 @@ use crate::hypertrophy;
 use crate::individualization::TrainingAge;
 use crate::profile::{PlanProfile, Profile};
 use crate::schema::{
-    DupDay, LiftIntensity, LiftPrescription, LiftSessionType, Prescription, Recommended, Session,
-    SessionType,
+    DupDay, LiftIntensity, LiftPrescription, LiftSessionType, Prescription, Recommended, RxBasis,
+    Session, SessionType,
 };
 use crate::strength::{self, LiftGoal, LoadingRx};
 
@@ -216,7 +216,7 @@ pub(super) fn lift_session(
     // power load is ~0 % 1RM, the end of the load spectrum barbell lifts can't
     // reach.
     if power_day {
-        prescriptions.push(ballistic_item(profile, anchors, ta));
+        prescriptions.push(ballistic_item(profile, anchors, ta).with_kind(RxBasis::Workout));
     }
     // DUP undulates the SAME lifts across the week (File 02 strength-023).
     // Accessories COVER the other core movement patterns on the same full-body
@@ -230,15 +230,8 @@ pub(super) fn lift_session(
         order.sort_by_key(|n| !is_olympic_derivative(n));
     }
     for name in order {
-        prescriptions.push(lift_prescription(
-            goal,
-            ta,
-            emphasis,
-            name,
-            anchors,
-            profile.weekly_sets,
-            day,
-        ));
+        let rx = lift_prescription(goal, ta, emphasis, name, anchors, profile.weekly_sets, day);
+        prescriptions.push(rx.with_kind(RxBasis::Workout));
     }
     // The title names what the day actually prescribes: the DUP
     // label only when the lead lift really undulates by %1RM; a novice linear

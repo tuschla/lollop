@@ -36,38 +36,111 @@ import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
 import app.milestone.widget.WidgetItemKind
 import app.milestone.widget.WidgetSnapshot
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import org.jetbrains.compose.resources.stringResource
 
 /**
  * The daily session reminder (Profile › During training, off by default): at the
  * chosen local time, a notification about the day's planned session while it is
- * still open ([reminderOf]). Android: an alarm that posts it from the widget
- * snapshot (SessionReminder.android.kt); iOS: dated notifications scheduled ahead
- * from the published model (SessionReminder.ios.kt).
+ * still open ([due]). The setting and the rules are here; the platform delivers
+ * it ([SessionReminderPort]): Android, an alarm that posts it from the widget
+ * snapshot; iOS, dated notifications scheduled ahead from the published model.
  */
-internal expect object SessionReminder {
+internal object SessionReminder : AppFeature {
     /** 07:30, the time a first switch-on uses. */
-    val DEFAULT_MINUTE_OF_DAY: Int
+    const val DEFAULT_MINUTE_OF_DAY = 7 * 60 + 30
 
     /** The oldest snapshot whose days ahead still stand in for today. */
-    val AHEAD_MAX_DAYS: Long
+    const val AHEAD_MAX_DAYS = 7L
 
-    fun setting(ctx: PlatformContext): SessionReminderSetting
+    const val MINUTES_PER_DAY = 24 * 60
+
+    private const val KEY_ENABLED = "enabled"
+    private const val KEY_MINUTE = "minute_of_day"
+
+    override fun start(ctx: PlatformContext) = sessionReminderPort.start(ctx)
+
+    override fun onTimeChanged(ctx: PlatformContext, zoneChanged: Boolean) = sessionReminderPort.onTimeChanged(ctx)
+
+    /** The reminder's store; the platform keeps its delivery records there too. */
+    fun store(ctx: PlatformContext): KeyValueStore = ctx.keyValueStore(AppFileNames.REMINDER_STORE)
+
+    fun setting(ctx: PlatformContext): SessionReminderSetting {
+        val p = store(ctx)
+        return SessionReminderSetting(
+            enabled = p.getBoolean(KEY_ENABLED, false),
+            minuteOfDay = p.getInt(KEY_MINUTE, DEFAULT_MINUTE_OF_DAY).coerceIn(0, MINUTES_PER_DAY - 1),
+        )
+    }
 
     /** Switch the reminder on or off; off also takes down what it posted. */
-    fun setEnabled(ctx: PlatformContext, enabled: Boolean)
+    fun setEnabled(ctx: PlatformContext, enabled: Boolean) {
+        store(ctx).edit { putBoolean(KEY_ENABLED, enabled) }
+        if (!enabled) sessionReminderPort.takeDown(ctx)
+        reschedule(ctx)
+    }
 
     /** The reminder's local time of day, in minutes after midnight. */
-    fun setMinuteOfDay(ctx: PlatformContext, minuteOfDay: Int)
+    fun setMinuteOfDay(ctx: PlatformContext, minuteOfDay: Int) {
+        require(minuteOfDay in 0 until MINUTES_PER_DAY) { "minute of day $minuteOfDay" }
+        store(ctx).edit { putInt(KEY_MINUTE, minuteOfDay) }
+        reschedule(ctx)
+    }
+
+    /** Schedule the reminder again from the current setting; none while it is off. */
+    fun reschedule(ctx: PlatformContext) = sessionReminderPort.reschedule(ctx)
 
     /** The app may show notifications, as last known. */
-    fun canNotify(ctx: PlatformContext): Boolean
+    fun canNotify(ctx: PlatformContext): Boolean = sessionReminderPort.canNotify(ctx)
 
     /** Ask the system whether the app may show notifications; [onResult] runs on
      *  the main thread (at once on Android). */
+    fun checkCanNotify(ctx: PlatformContext, onResult: (Boolean) -> Unit) = sessionReminderPort.checkCanNotify(ctx, onResult)
+
+    /** The reminder for local [day] from [stored] ([reminderOf]); none for
+     *  [today]'s run while a run records ([recording]): it is under way. */
+    fun due(stored: WidgetSnapshot?, day: Long, today: Long, zone: String, recording: Boolean): Reminder? =
+        reminderOf(stored, day, zone)?.takeUnless { day == today && recording && it.kind == WidgetDayKind.Run }
+
+    /** Local [minuteOfDay] of epoch day [day] in [zone]. A time that a
+     *  daylight-saving jump skips moves forward by the gap. */
+    fun fireMillis(day: Long, minuteOfDay: Int, zone: TimeZone): Long =
+        LocalDateTime(LocalDate.fromEpochDays(day.toInt()), LocalTime(minuteOfDay / 60, minuteOfDay % 60))
+            .toInstant(zone).toEpochMilliseconds()
+
+    /** The first local [minuteOfDay] strictly after [nowMillis] in [zone]. */
+    fun nextFireMillis(nowMillis: Long, minuteOfDay: Int, zone: TimeZone): Long {
+        val today = localEpochDayAtMillis(nowMillis, zone)
+        val at = fireMillis(today, minuteOfDay, zone)
+        return if (at > nowMillis) at else fireMillis(today + 1, minuteOfDay, zone)
+    }
+}
+
+/** How a platform delivers the [SessionReminder]. */
+internal interface SessionReminderPort {
+    /** The process started ([AppRuntime.start]). */
+    fun start(ctx: PlatformContext)
+
+    /** Schedule the reminder again from [SessionReminder.setting]. */
+    fun reschedule(ctx: PlatformContext)
+
+    /** The reminder was switched off: take down what it posted. */
+    fun takeDown(ctx: PlatformContext)
+
+    /** The wall clock was set or the time zone changed: the local day and the
+     *  reminder's instant may differ. */
+    fun onTimeChanged(ctx: PlatformContext)
+
+    fun canNotify(ctx: PlatformContext): Boolean
+
     fun checkCanNotify(ctx: PlatformContext, onResult: (Boolean) -> Unit)
 }
+
+internal expect val sessionReminderPort: SessionReminderPort
 
 /** The reminder's switch and its local time of day (minutes after midnight). */
 internal data class SessionReminderSetting(val enabled: Boolean, val minuteOfDay: Int)
@@ -80,9 +153,6 @@ internal expect fun rememberNotificationPermissionRequest(ctx: PlatformContext, 
 
 /** Open the system screen where the app's notifications are turned on. */
 internal expect fun openNotificationSettings(ctx: PlatformContext)
-
-/** The device clock shows 24-hour time (outside composition: [is24HourClock]). */
-internal expect fun uses24HourClock(ctx: PlatformContext): Boolean
 
 /** Today's session as the reminder shows it: a [WidgetDayKind.Lift] or
  *  [WidgetDayKind.Run] day, its title and items. */
@@ -186,7 +256,7 @@ internal fun SessionReminderRows(ctx: PlatformContext) {
     )
     if (!setting.enabled) return
     var picking by rememberSaveable { mutableStateOf(false) }
-    val use24h = is24HourClock()
+    val use24h = is24HourClock(ctx)
     val time = remember(setting.minuteOfDay, use24h) { reminderTimeText(ctx, setting.minuteOfDay) }
     Row(
         modifier = Modifier
@@ -225,5 +295,5 @@ internal fun SessionReminderRows(ctx: PlatformContext) {
 /** [minuteOfDay] in the phone's 12- or 24-hour format ("07:30", "7:30 AM"), in the
  *  app's language. */
 internal fun reminderTimeText(ctx: PlatformContext, minuteOfDay: Int): String =
-    localizedDayFormatter(if (uses24HourClock(ctx)) "HHmm" else "hmm")
+    localizedDayFormatter(if (is24HourClock(ctx)) "HHmm" else "hmm")
         .format(LocalDateTime(1970, 1, 1, minuteOfDay / 60, minuteOfDay % 60))

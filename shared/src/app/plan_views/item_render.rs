@@ -9,7 +9,7 @@ use crate::app::view_types::{
 };
 use crate::autoreg;
 use crate::plates::{plates_per_side, round_load_grid};
-use crate::schema::{Adjustment, Recommended, RunVolume};
+use crate::schema::{AdjustmentCall, RunVolume};
 
 /// Rebuild a lift item's one-line summary from its (possibly adjusted) fields.
 pub(super) fn refresh_lift_summary(it: &mut PrescriptionView, weight_lb: bool) {
@@ -383,11 +383,7 @@ pub(super) const EASY_RUN_LABEL: &str = "Easy: zone 1–2";
 /// hard intensity with an easy zone. An interval day keeps its numbers as one
 /// continuous easy run of the same total work ("6 × 4 min" → "24 min"; never a
 /// card with no duration).
-pub(super) fn cap_run_item_easy(
-    it: &mut PrescriptionView,
-    r: &Recommended<Adjustment>,
-    note: &str,
-) {
+pub(super) fn cap_run_item_easy(it: &mut PrescriptionView, r: &AdjustmentCall, note: &str) {
     // The rep structure is deferred, not prescribed: drop it (and any "N × …"
     // that would read as an interval on an easy card), carrying its total.
     let vol = if it.rep_count > 0 {
@@ -441,7 +437,7 @@ pub(super) fn set_easy_run_face(it: &mut PrescriptionView) {
 /// (`basis` overrides the claim's own).
 pub(super) fn repoint_evidence(
     it: &mut PrescriptionView,
-    r: &Recommended<Adjustment>,
+    r: &AdjustmentCall,
     basis: Option<String>,
 ) {
     it.evidence = EvidenceTagView::of(r);

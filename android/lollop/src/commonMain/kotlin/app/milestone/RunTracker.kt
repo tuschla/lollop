@@ -4,12 +4,12 @@ import androidx.compose.runtime.Composable
 
 /**
  * The platform side of GPS run recording: the location stream, the run's system
- * surface, the location / notification grants and the settings pages the tracker
- * sends the runner to. Fixes and the recording state machine are common
- * ([RunRecorder] into [RunSession], the crash-safe [ActiveRunStore] file); this
- * only drives the platform. Android: the RunTrackingService foreground service;
- * iOS: CoreLocation (RunTracker.ios.kt). [platformRunTracker] is null where the
- * platform has no tracker; every tracker entry is hidden then.
+ * surface, the location grant and the settings pages the tracker sends the runner
+ * to. Fixes and the recording state machine are common ([RunRecorder] into
+ * [RunSession], the crash-safe [ActiveRunStore] file); this only drives the
+ * platform. Android: the RunTrackingService foreground service; iOS: CoreLocation
+ * (RunTracker.ios.kt). [platformRunTracker] is null where the platform has no
+ * tracker; every tracker entry is hidden then.
  */
 internal interface RunTracker {
     /** A precise location grant. Coarse-only is not enough for GPS tracking. */
@@ -23,38 +23,27 @@ internal interface RunTracker {
      *  with whether the prompt was shown. */
     fun locationPromptBlocked(ctx: PlatformContext): Boolean
 
-    /** The app may post notifications (the run's ongoing notification). */
-    fun canPostNotifications(ctx: PlatformContext): Boolean
-
     /** The system-wide location toggle is on. A grant alone delivers no fixes while
      *  location services are off, so the tracker surfaces this state. */
     fun isLocationEnabled(ctx: PlatformContext): Boolean
 
-    /** The app is exempt from the system's battery optimisation, so a long background
-     *  run keeps its location stream alive. When false the tracker nudges. */
-    fun isBatteryUnrestricted(ctx: PlatformContext): Boolean
-
-    /** Ask the system to exempt the app from battery optimisation. */
-    fun requestBatteryUnrestricted(ctx: PlatformContext)
-
     /** Open the system's location settings (the location toggle). */
     fun openLocationSettings(ctx: PlatformContext)
-
-    /** Open the app's notification settings. */
-    fun openNotificationSettings(ctx: PlatformContext)
 
     /** Call [onChange] whenever the location toggle or grant may have changed, until
      *  the returned function is called. */
     fun observeLocationSettings(ctx: PlatformContext, onChange: () -> Unit): () -> Unit
 
-    /** The permission prompts, bound to the composition: [onLocationResult] gets
-     *  whether precise location was granted, [onNotificationResult] fires when the
-     *  notification prompt closes. */
+    /** The location prompt, bound to the composition and launched from a click:
+     *  asks for precise (and approximate) location; [onResult] gets whether precise
+     *  location was granted. */
     @Composable
-    fun rememberPermissionPrompts(
-        onLocationResult: (preciseGranted: Boolean) -> Unit,
-        onNotificationResult: () -> Unit,
-    ): PermissionPrompts
+    fun rememberLocationPrompt(onResult: (preciseGranted: Boolean) -> Unit): () -> Unit
+
+    /** What the run's foreground service needs beyond location, or null where a run
+     *  has no such service (iOS: no ongoing notification, no per-app battery
+     *  restriction on a foreground-started location stream). */
+    val serviceGrants: RunServiceGrants?
 
     /** Best-effort last-known position for centring the map before the first fix;
      *  needs the location grant, silently does nothing without a cached fix.
@@ -80,26 +69,44 @@ internal interface RunTracker {
     fun stop(ctx: PlatformContext)
 
     /** A run's crash-safe file exists: the app died while recording. */
-    fun hasInterruptedRun(ctx: PlatformContext): Boolean
+    fun hasInterruptedRun(ctx: PlatformContext): Boolean = ActiveRunStore.hasActiveRun()
 
     /** Read the interrupted run back. Blocking file I/O: call it off the main thread. */
-    fun recoverInterruptedRun(ctx: PlatformContext): RecoveredTrack
+    fun recoverInterruptedRun(ctx: PlatformContext): RecoveredTrack = ActiveRunStore.recover()
 
     /** Delete the run's crash-safe file (asynchronously). */
-    fun discardInterruptedRun()
+    fun discardInterruptedRun() {
+        ActiveRunStore.clear()
+    }
 
     /** Delete the run's crash-safe file before returning, ordered after the saved
      *  run's event-log append. */
-    fun discardInterruptedRunSync()
+    fun discardInterruptedRunSync() {
+        ActiveRunStore.clearSync()
+    }
 }
 
-/** The tracker's system permission prompts, launched from a click. */
-internal interface PermissionPrompts {
-    /** Ask for precise (and approximate) location. */
-    fun requestLocation()
+/** The grants a run's foreground service (Android) depends on beyond location: posting
+ *  its ongoing notification, and the battery-optimisation exemption that keeps a long
+ *  background run's location stream alive. */
+internal interface RunServiceGrants {
+    /** The app may post notifications (the run's ongoing notification). */
+    fun canPostNotifications(ctx: PlatformContext): Boolean
 
-    /** Ask to post notifications. */
-    fun requestNotifications()
+    /** Open the app's notification settings. */
+    fun openNotificationSettings(ctx: PlatformContext)
+
+    /** The notification prompt, bound to the composition and launched from a click;
+     *  [onResult] fires when it closes. */
+    @Composable
+    fun rememberNotificationPrompt(onResult: () -> Unit): () -> Unit
+
+    /** The app is exempt from the system's battery optimisation. When false the
+     *  tracker nudges. */
+    fun isBatteryUnrestricted(ctx: PlatformContext): Boolean
+
+    /** Ask the system to exempt the app from battery optimisation. */
+    fun requestBatteryUnrestricted(ctx: PlatformContext)
 }
 
 /** This platform's run tracker, or null where GPS run recording isn't available. */

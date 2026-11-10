@@ -4,38 +4,26 @@
 
 use crate::evidence::{self, claims};
 use crate::schema::{
-    Adjustment, PainDetail, PainKind, PainTrend, ReadinessInput, ReadinessSignal, Recommended,
+    Adjustment, AdjustmentCall, AdjustmentKind, PainDetail, PainKind, PainRegion, PainTrend,
+    ReadinessInput, ReadinessSignal, Recommended,
 };
 
 /// The graded pain verdict (File 08 Table 4.1; safety-038/039).
 pub(super) enum PainGate {
     /// Stop-or-defer level: dominates every other output (structural pattern,
     /// uncharacterized pain, or a persistence escalation to DEFER).
-    Block(Recommended<Adjustment>),
+    Block(AdjustmentCall),
     /// Localized structural pain at a body part the engine can map to the
     /// movements that load it (safety-038 "STOP that exercise"): only those
     /// plan items stop; the rest of the day goes ahead with no load added.
-    Scoped(Recommended<Adjustment>),
+    Scoped(AdjustmentCall),
     /// Non-blocking response: tolerable tendon pain → modify & monitor
     /// ("avoid complete rest"); reactive tendon pain → reduce/downgrade.
-    Adjust(Recommended<Adjustment>),
+    Adjust(AdjustmentCall),
     /// DOMS / normal training discomfort → continue (Table 4.1 row 1).
     Continue,
     /// No pain reported.
     None,
-}
-
-/// The body region a reported pain location maps to, for scoping a
-/// sharp/joint stop to the movements that load it (safety-038
-/// "STOP that exercise", autoreg-043 "stop or substitute the movement").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PainRegion {
-    /// Hip, thigh, knee, shin, calf, ankle, Achilles, foot.
-    LowerLimb,
-    /// Neck, shoulder, arm, elbow, forearm, wrist, hand, fingers.
-    UpperLimb,
-    /// Lower / upper back, spine.
-    Back,
 }
 
 /// Map a free-text pain location onto a [`PainRegion`], conservatively: only
@@ -307,7 +295,7 @@ pub(super) enum PainVerdict {
     StructuralDefer,
     /// Sharp/joint-line pain at a mappable body part: stop the movements that
     /// load it (safety-038 "STOP that exercise").
-    StructuralScoped,
+    StructuralScoped(PainRegion),
     /// Sharp/joint-line pain with no mappable location: whole-day stop.
     StructuralStop,
     /// Reactive tendon pain persisting despite reduced load: defer.
@@ -331,10 +319,10 @@ pub(super) fn classify_pain(input: &ReadinessInput) -> PainVerdict {
     };
     match detail.kind {
         PainKind::SharpJoint if detail.persists => PainVerdict::StructuralDefer,
-        PainKind::SharpJoint if pain_location(detail).is_some_and(|l| pain_region(l).is_some()) => {
-            PainVerdict::StructuralScoped
-        }
-        PainKind::SharpJoint => PainVerdict::StructuralStop,
+        PainKind::SharpJoint => match pain_location(detail).and_then(pain_region) {
+            Some(region) => PainVerdict::StructuralScoped(region),
+            None => PainVerdict::StructuralStop,
+        },
         PainKind::TendonLoadRelated if tendon_reactive(detail) && detail.persists => {
             PainVerdict::TendonDefer
         }
@@ -363,7 +351,10 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
             Some(d) => with_location(reason.into(), d),
             None => reason.into(),
         };
-        PainGate::Block(Recommended::new(Adjustment::Defer { reason }, claim))
+        PainGate::Block(
+            Recommended::new(Adjustment::Defer { reason }, claim)
+                .with_kind(AdjustmentKind::PainDefer),
+        )
     };
     let location = || {
         input
@@ -373,41 +364,48 @@ fn grade_pain(input: &ReadinessInput) -> PainGate {
             .unwrap_or_default()
             .to_string()
     };
+    let stop =
+        |claim| Recommended::new(Adjustment::Stop, claim).with_kind(AdjustmentKind::PainStop);
     match classify_pain(input) {
         PainVerdict::BareStop | PainVerdict::OtherStop => {
-            PainGate::Block(Recommended::new(Adjustment::Stop, claims::SAFE_PAIN_001))
+            PainGate::Block(stop(claims::SAFE_PAIN_001))
         }
         PainVerdict::StructuralDefer => defer(
             "Sharp or joint pain that isn't going away: training is paused. See a doctor or physio.",
             claims::SAFE_PAIN_STRUCT_001,
         ),
-        PainVerdict::StructuralScoped => PainGate::Scoped(Recommended::new(
-            Adjustment::StopItems {
-                location: location(),
-            },
-            claims::SAFE_PAIN_STRUCT_001,
-        )),
-        PainVerdict::StructuralStop => PainGate::Block(Recommended::new(
-            Adjustment::Stop,
-            claims::SAFE_PAIN_STRUCT_001,
-        )),
+        PainVerdict::StructuralScoped(region) => PainGate::Scoped(
+            Recommended::new(
+                Adjustment::StopItems {
+                    location: location(),
+                },
+                claims::SAFE_PAIN_STRUCT_001,
+            )
+            .with_kind(AdjustmentKind::PainScoped(region)),
+        ),
+        PainVerdict::StructuralStop => PainGate::Block(stop(claims::SAFE_PAIN_STRUCT_001)),
         PainVerdict::TendonDefer => defer(
             "Tendon pain that keeps flaring after you've eased off: training is paused. See a doctor or physio.",
             claims::SAFE_TENDON_001,
         ),
         // REDUCE load & compressive positions: an easier session, not a stop
         // (the KB states no reduction percentage).
-        PainVerdict::TendonReduce => PainGate::Adjust(Recommended::new(
-            Adjustment::DowngradeSession,
-            claims::SAFE_TENDON_001,
-        )),
+        PainVerdict::TendonReduce => PainGate::Adjust(
+            Recommended::new(Adjustment::DowngradeSession, claims::SAFE_TENDON_001)
+                .with_kind(AdjustmentKind::TendonReduce),
+        ),
         // Tolerable band: modify/continue with monitoring; avoid complete rest.
-        PainVerdict::TendonModify => PainGate::Adjust(Recommended::new(
-            Adjustment::ModifyAndMonitor {
-                location: location(),
-            },
-            claims::SAFE_TENDON_001,
-        )),
+        PainVerdict::TendonModify => {
+            let location = location();
+            let region = pain_region(&location);
+            PainGate::Adjust(
+                Recommended::new(
+                    Adjustment::ModifyAndMonitor { location },
+                    claims::SAFE_TENDON_001,
+                )
+                .with_kind(AdjustmentKind::TendonModify(region)),
+            )
+        }
         PainVerdict::Doms => PainGate::Continue,
         PainVerdict::OtherDefer => defer(
             "Pain that isn't going away: training is paused. Have a doctor or physio check it.",
@@ -426,7 +424,7 @@ fn verdict_rank(verdict: PainVerdict) -> u8 {
         | PainVerdict::StructuralStop
         | PainVerdict::TendonDefer
         | PainVerdict::OtherDefer => 4,
-        PainVerdict::StructuralScoped => 3,
+        PainVerdict::StructuralScoped(_) => 3,
         PainVerdict::TendonReduce | PainVerdict::TendonModify => 2,
         PainVerdict::Doms => 1,
     }
@@ -508,11 +506,11 @@ pub fn pain_blocks_training(inputs: &[ReadinessInput]) -> bool {
 /// movements; the worst-report selection alone would drop one), plus the
 /// strongest tendon modify/reduce response. Only consulted when no active report
 /// blocks (a Block dominates and returns alone).
-pub(super) fn active_pain_responses(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
+pub(super) fn active_pain_responses(inputs: &[ReadinessInput]) -> Vec<AdjustmentCall> {
     let mut active: Vec<&ReadinessInput> = active_pain_reports(inputs).collect();
     active.sort_by_key(|i| i.observed_at);
-    let mut out: Vec<Recommended<Adjustment>> = Vec::new();
-    let mut adjust: Option<Recommended<Adjustment>> = None;
+    let mut out: Vec<AdjustmentCall> = Vec::new();
+    let mut adjust: Option<AdjustmentCall> = None;
     for i in active.iter().rev() {
         match grade_pain(i) {
             PainGate::Scoped(r) => {

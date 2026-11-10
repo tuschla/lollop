@@ -30,14 +30,19 @@ object Core : DurableCore() {
         override fun exportGpx(entryId: Long, observedAt: Long): String? = this@Core.exportGpx(entryId, observedAt)
         override fun trackFigures(event: ByteArray): String? = this@Core.trackFigures(event)
         override fun compactLog(lines: Array<String>): String? = this@Core.compactLog(lines)
+
+        // Only the `jni-host` host build links the native reset; a device build
+        // restarts its process instead and never calls this.
+        override fun reset(): Boolean {
+            resetForTest()
+            return true
+        }
     }
 
-    /** TEST-ONLY bridge reset: drops the native core's global
-     *  bridge and rebuilds it empty so a host-JVM UI/UX QA scenario starts from
-     *  a clean core. Present only in the `jni-host` host build the QA gradle task
-     *  links (`Java_app_milestone_Core_resetForTest`); it is never compiled into a
-     *  device APK and never called on device, so the missing device symbol is
-     *  inert (JNI resolves natives lazily, at first call). */
+    /** The native core's reset alone (`Java_app_milestone_Core_resetForTest`), as
+     *  the FFI's panic firewall does; linked only in the `jni-host` host build. JNI
+     *  resolves natives lazily, so a device APK without the symbol is fine as long
+     *  as it never calls it. */
     external fun resetForTest()
 
     /** Pure FIT-file parse in the Rust core (fitparser), stateless, touches no

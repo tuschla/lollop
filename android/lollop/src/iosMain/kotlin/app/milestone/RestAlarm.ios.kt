@@ -3,131 +3,73 @@ package app.milestone
 import app.milestone.resources.Res
 import app.milestone.resources.log_rest_notif_done_body
 import app.milestone.resources.log_rest_notif_done_title
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import platform.UserNotifications.UNMutableNotificationContent
 import platform.UserNotifications.UNNotificationRequest
 import platform.UserNotifications.UNNotificationSound
 import platform.UserNotifications.UNTimeIntervalNotificationTrigger
 
 /**
- * The rest timer on iOS. The running rest is the in-app countdown's, as on
- * Android ([AppClock] end time, kept after the end for the overtime readout until
- * cancelled or replaced). At the rest end a "rest done" notification alerts
+ * The rest timer on iOS. At the rest end a "rest done" notification alerts
  * ([REST_DONE_ID], a time-interval trigger, so it comes with the app suspended):
  * the same title and "next set" line as Android's, with the default sound while
- * the Profile "Rest timer alert" is on, silent otherwise. A new rest replaces it,
- * cancel removes it. While the loop's readout is on screen the in-app cue covers
- * the rest end: the delegate ([startIosReminders]) does not show it then.
- * Android's ongoing countdown notification is the rest's Live Activity
- * ([IosSurfaces.showRest]: lock screen and Dynamic Island, counting down to the
- * end; the system hides it while the app is in front, where the readout is). It
- * shows from the start of a rest to its end, or until the rest is cancelled or
- * replaced. iOS has no exact-alarm permission: the notice never shows.
+ * the Profile "Rest timer alert" is on, silent otherwise. While the loop's readout
+ * is on screen the in-app cue covers the rest end: the delegate
+ * ([installNotificationDelegate]) does not show it then. The countdown is the
+ * rest's Live Activity ([IosSurfaces.showRest]: lock screen and Dynamic Island,
+ * counting down to the end; the system hides it while the app is in front). iOS
+ * has no exact-alarm permission: the notice never shows.
  */
-internal actual object RestAlarm {
+internal actual object RestAlarmPlatform {
     /** The rest-done notification's identifier: one at a time, replaced by a new rest. */
     internal const val REST_DONE_ID = "rest_done"
 
-    private val _running = MutableStateFlow<RestRun?>(null)
-    actual val running: StateFlow<RestRun?> = _running.asStateFlow()
+    actual val countdown = RestCountdown.WholeRest
 
-    actual val exactAlarmPrompt: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
+    actual val exactAlarms: ExactAlarms? = null
 
-    /** The loop's rest readout is on a resumed screen. */
-    internal var inAppVisible = false
-        private set
-
-    // The exercise the rest-done line names: null until the loop reports its next
-    // set (then the rested exercise), "" when it reported none.
-    private var nextExercise: String? = null
-
-    // The set the loop logs next, which the rest's Live Activity names.
-    private var nextSet: RestNextSet? = null
-
-    // Asked once per process; the system prompts only while undetermined.
-    private var authorizationAsked = false
-
-    actual fun schedule(ctx: PlatformContext, restSec: Int, exerciseName: String) {
-        if (restSec <= 0) return
-        clear()
-        val now = AppClock.nowMillis()
-        _running.value = RestRun(now, now + restSec * 1000L, exerciseName)
-        if (!authorizationAsked) {
-            authorizationAsked = true
-            requestNotificationAuthorization()
-        }
-        postDone()
-        // A new rest replaces the shown one in place.
-        resendActivity()
+    actual fun arm(ctx: PlatformContext, run: RestRun, delayMs: Long): Boolean {
+        // The system prompts only while the answer is undetermined.
+        requestNotificationAuthorization()
+        postDone(run.exercise, delayMs)
+        return false
     }
 
-    actual fun cancel(ctx: PlatformContext) {
-        clear()
-        IosSurfaces.endRest()
+    actual fun renameDone(ctx: PlatformContext, run: RestRun, exercise: String) {
+        // Once the rest is over the alert (if any) already came.
+        val leftMs = run.endAtMillis - AppClock.nowMillis()
+        if (leftMs > 0) postDone(exercise, leftMs)
     }
 
-    private fun clear() {
-        nextExercise = null
-        nextSet = null
-        _running.value = null
+    actual fun disarm(ctx: PlatformContext) {
         notificationCenter.removePendingNotificationRequestsWithIdentifiers(listOf(REST_DONE_ID))
+        withdrawDone(ctx)
+    }
+
+    actual fun withdrawDone(ctx: PlatformContext) {
         notificationCenter.removeDeliveredNotificationsWithIdentifiers(listOf(REST_DONE_ID))
     }
 
-    actual fun setNextSet(ctx: PlatformContext, next: RestNextSet?) {
-        if (_running.value == null) return
-        if (next != nextSet) {
-            nextSet = next
-            resendActivity()
-        }
-        val exercise = next?.exercise.orEmpty()
-        if (exercise == nextExercise) return
-        nextExercise = exercise
-        // The pending alert is replaced with the new line; once the rest is over
-        // the alert (if any) already came.
-        postDone()
-    }
+    actual fun showCountdown(ctx: PlatformContext, run: RestRun, next: RestNextSet?) = IosSurfaces.showRest(run, next)
 
-    /** Show the running rest in its Live Activity (Android's countdown
-     *  notification): the title, the countdown to its end and the next set. */
-    internal fun resendActivity() {
-        val run = _running.value ?: return
-        IosSurfaces.showRest(run, nextSet)
-    }
+    actual fun hideCountdown(ctx: PlatformContext) = IosSurfaces.endRest()
 
-    actual fun setInAppVisible(ctx: PlatformContext, visible: Boolean) {
-        inAppVisible = visible
-        if (visible) notificationCenter.removeDeliveredNotificationsWithIdentifiers(listOf(REST_DONE_ID))
-    }
-
-    /** No exact-alarm permission on iOS: nothing to recheck. */
-    actual fun recheckExactAlarms(ctx: PlatformContext) = Unit
-
-    /** The notice never shows on iOS ([exactAlarmPrompt]). */
-    actual fun dismissExactAlarmPrompt(ctx: PlatformContext) = Unit
-
-    /** No such system screen on iOS; the notice that links it never shows. */
-    actual fun openExactAlarmSettings(ctx: PlatformContext) = Unit
-
-    /** (Re)schedule the running rest's rest-done alert at its end. */
-    private fun postDone() {
-        val run = _running.value ?: return
-        val leftMs = run.endAtMillis - AppClock.nowMillis()
-        if (leftMs <= 0) return
+    /** (Re)schedule the rest-done alert [leftMs] from now, naming [exercise] ("" none). */
+    private fun postDone(exercise: String, leftMs: Long) {
         val res = systemResources()
-        val next = nextExercise ?: run.exercise
         val content = UNMutableNotificationContent().apply {
             setTitle(res.getString(Res.string.log_rest_notif_done_title))
-            if (next.isNotEmpty()) setBody(res.getString(Res.string.log_rest_notif_done_body, next))
+            if (exercise.isNotEmpty()) setBody(res.getString(Res.string.log_rest_notif_done_body, exercise))
             if (AppSettings.restAlert.value) setSound(UNNotificationSound.defaultSound())
             setUserInfo(mapOf<Any?, Any?>(NOTIF_KEY_DEST to OpenDest.LogSet.wire))
         }
         val trigger = UNTimeIntervalNotificationTrigger.triggerWithTimeInterval(leftMs / 1000.0, repeats = false)
         notificationCenter.addNotificationRequest(
             UNNotificationRequest.requestWithIdentifier(REST_DONE_ID, content, trigger),
-            withCompletionHandler = null,
-        )
+        ) { error ->
+            if (error != null) PlatformLog.w("RestAlarm", "rest-done alert not scheduled: ${error.localizedDescription}")
+        }
     }
 }
+
+/** Show the running rest's Live Activity again ([IosSurfaces] after its host attached). */
+internal fun RestAlarm.resendActivity() = showCountdownAgain(PlatformContext.INSTANCE)

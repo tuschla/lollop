@@ -15,4 +15,6 @@ internal actual class SerialWorker actual constructor() {
     actual fun drain(timeoutMs: Long) {
         io.submit(Runnable { }).get(timeoutMs, TimeUnit.MILLISECONDS)
     }
+
+    actual fun close() = io.shutdown()
 }

@@ -45,7 +45,7 @@ class NotificationStyleTest {
     fun setUp() {
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         resetRest(app)
-        File(app.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(app.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
         SessionReminder.setEnabled(app, false)
     }
 
@@ -86,8 +86,8 @@ class NotificationStyleTest {
                 zone = ZoneId.systemDefault().id,
             ),
         )
-        SessionReminderReceiver().onReceive(app, Intent(SessionReminder.ACTION_FIRE))
-        return shadowOf(nm).getNotification(SessionReminder.NOTIF_ID)!!
+        SessionReminderReceiver().onReceive(app, Intent(AndroidReminder.ACTION_FIRE))
+        return shadowOf(nm).getNotification(AndroidIds.REMINDER_NOTIFICATION)!!
     }
 
     private fun all() = listOf(
@@ -117,8 +117,8 @@ class NotificationStyleTest {
         }
         val service = Robolectric.buildService(RunTrackingService::class.java).create()
         try {
-            assertEquals(RestAlarm.CHANNEL_COUNTDOWN, restCountdown().channelId)
-            for (id in listOf(RunTrackingService.CHANNEL, RestAlarm.CHANNEL_COUNTDOWN)) {
+            assertEquals(RestAlarmPlatform.CHANNEL_COUNTDOWN, restCountdown().channelId)
+            for (id in listOf(RunTrackingService.CHANNEL, RestAlarmPlatform.CHANNEL_COUNTDOWN)) {
                 val ch = nm.getNotificationChannel(id)
                 assertEquals("$id: not a silent channel (shown on the lock screen)", NotificationManager.IMPORTANCE_DEFAULT, ch.importance)
                 assertNull("$id: no sound", ch.sound)

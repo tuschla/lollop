@@ -163,7 +163,7 @@ class RunStepMachineTest {
     @Test
     fun runSessionGuide_followsThePlannedRunAndResetClearsIt() {
         RunSession.reset()
-        RunSession.plannedRun.value = PrescriptionView(run_structure = RunStructureView(reps = 2, rep_sec = 60))
+        RunSession.followPlan(PrescriptionView(run_structure = RunStructureView(reps = 2, rep_sec = 60)))
         RunSession.startSteps(1_000L)
         assertEquals(RunStepKind.Rep, RunSession.stepProgress.value?.step?.kind)
         assertTrue(RunSession.tickSteps(61_000L))

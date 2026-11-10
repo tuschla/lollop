@@ -3,7 +3,6 @@ package app.milestone.widget
 import app.milestone.OpenDest
 import app.milestone.PlatformResources
 import app.milestone.Reminder
-import app.milestone.TileFace
 import app.milestone.WeekdayWidth
 import app.milestone.appLocale
 import app.milestone.getQuantityString
@@ -34,7 +33,6 @@ import app.milestone.resources.widget_rest_day
 import app.milestone.resources.widget_session_done
 import app.milestone.resources.widget_setup_body
 import app.milestone.resources.widget_setup_title
-import app.milestone.tileFace
 import kotlinx.datetime.LocalDate
 
 /** How the widget colours its title. */
@@ -102,7 +100,7 @@ internal fun widgetAction(face: TileFace, res: PlatformResources) = WidgetAction
 internal fun widgetFace(snapshot: WidgetSnapshot?, today: Long, res: PlatformResources, recording: Boolean = false): WidgetFace {
     val todayLabel = res.getString(Res.string.widget_overline_today)
     val current = snapshot?.takeIf { !it.stale && it.epochDay == today }
-    val primary = widgetAction(if (recording) TileFace.Recording else tileFace(current), res)
+    val primary = widgetAction(tileFace(current, recording), res)
     val actions = listOf(primary) + listOfNotNull(widgetAction(TileFace.Log, res).takeIf { primary.dest != OpenDest.Log })
     if (current == null) {
         return WidgetFace(todayLabel, res.getString(Res.string.widget_open_to_update), WidgetTone.Muted, actions = actions)

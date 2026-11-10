@@ -80,17 +80,22 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>app.milestone.lollop</string>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>lollop</string>
 			</array>
 		</dict>
 	</array>
+	<!-- The App Group shared with the widget extension (Shared/SharedContainer.swift),
+	     LOLLOP_APP_GROUP in iosApp/project.yml. -->
+	<key>LollopAppGroup</key>
+	<string>$(LOLLOP_APP_GROUP)</string>
 	<!-- Runs to import, as Android's VIEW/SEND intent filters: "Open in lollop"
 	     from Files and the share sheet. iOS copies the file into Documents/Inbox
 	     and hands the app its file URL (onOpenURL → LollopIosOpen). A log backup
-	     is restored from Profile's file picker, not by opening it. -->
+	     is restored from Profile's file picker, not by opening it. The types and
+	     their declarations below are Kotlin's RunFileType (AppIdentifiersTest). -->
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
 	<key>CFBundleDocumentTypes</key>

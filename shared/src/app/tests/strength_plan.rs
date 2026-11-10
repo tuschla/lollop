@@ -369,7 +369,8 @@ fn plan_views_are_memoized_across_unrelated_events() {
             .expect_only_render();
     }
     let first = app.view(&model);
-    let before = PLAN_SYNTH_BUILDS.with(|c| c.get());
+    let builds = || crate::memo::stats(MemoId::PlanSnapshots).builds;
+    let before = builds();
     app.update(
         Event::ComputeProtein {
             bodyweight_kg: 80.0,
@@ -380,7 +381,7 @@ fn plan_views_are_memoized_across_unrelated_events() {
     )
     .expect_only_render();
     let second = app.view(&model);
-    let after = PLAN_SYNTH_BUILDS.with(|c| c.get());
+    let after = builds();
     assert_eq!(
         after - before,
         0,
@@ -404,10 +405,7 @@ fn plan_views_are_memoized_across_unrelated_events() {
     )
     .expect_only_render();
     let _ = app.view(&model);
-    assert!(
-        PLAN_SYNTH_BUILDS.with(|c| c.get()) > after,
-        "new history must re-synthesize the week"
-    );
+    assert!(builds() > after, "new history must re-synthesize the week");
 }
 
 #[test]
@@ -632,7 +630,7 @@ fn a_sub_1_25kg_anchor_never_prescribes_at_0kg() {
         reps_max: None,
         load_kg: None,
     });
-    let rx = Recommended::new(pres, claims::STR_INTENT_001);
+    let rx = RxBasis::Workout.rx(pres, claims::STR_INTENT_001);
     let tiny = crate::plan::Anchors {
         lift: crate::plan::LiftAnchors {
             e1rm: vec![("Back Squat".into(), 1.0)],

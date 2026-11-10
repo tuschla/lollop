@@ -8,8 +8,8 @@ use crate::evidence::claims;
 use crate::individualization::TrainingAge;
 use crate::profile::{PlanProfile, Profile};
 use crate::schema::{
-    CalisthenicsPrescription, LadderId, LiftSessionType, Prescription, Recommended, Session,
-    SessionType, TempoBridge,
+    CalisthenicsPrescription, LadderId, LiftSessionType, Prescription, Recommended, Rx, RxBasis,
+    Session, SessionType, TempoBridge,
 };
 use crate::strength::LiftGoal;
 
@@ -102,13 +102,13 @@ pub(super) fn calisthenics_session(pp: &PlanProfile, anchors: &Anchors, day: &Li
     let upper_ordinal = day.days_before().iter().filter(|r| r.has_upper()).count();
     let n = day.n_exposures.max(1);
     let weekly = profile.weekly_sets;
-    let mut prescriptions: Vec<Recommended<Prescription>> = Vec::new();
+    let mut prescriptions: Vec<Rx> = Vec::new();
 
     // 1. Power: ballistic items first.
     if goal == LiftGoal::Power {
         for (id, on) in [(LadderId::Jump, lower), (LadderId::PlyoPush, upper)] {
             if on && let Some(p) = ladder_prescription(&ctx, id, Dose::Ballistic) {
-                prescriptions.push(p);
+                prescriptions.push(p.with_kind(RxBasis::Workout));
             }
         }
     }
@@ -126,7 +126,7 @@ pub(super) fn calisthenics_session(pp: &PlanProfile, anchors: &Anchors, day: &Li
         for j in 0..2.min(k) {
             let a = skill_anchors[(2 * upper_ordinal + j) % k];
             if let Some(p) = ladder_prescription(&ctx, a.ladder, Dose::Skill) {
-                prescriptions.push(p);
+                prescriptions.push(p.with_kind(RxBasis::Workout));
             }
         }
     }
@@ -169,7 +169,7 @@ pub(super) fn calisthenics_session(pp: &PlanProfile, anchors: &Anchors, day: &Li
     }
     for (id, dose) in ids {
         if let Some(p) = ladder_prescription(&ctx, id, dose) {
-            prescriptions.push(p);
+            prescriptions.push(p.with_kind(RxBasis::Workout));
         }
     }
 

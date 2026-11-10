@@ -1,20 +1,19 @@
-package app.milestone
+package app.milestone.widget
 
+import app.milestone.OpenDest
+import app.milestone.PlatformResources
 import app.milestone.resources.Res
 import app.milestone.resources.tile_log
 import app.milestone.resources.tile_log_set
 import app.milestone.resources.tile_run_recording
 import app.milestone.resources.tile_start_run
-import app.milestone.widget.WidgetDayKind
-import app.milestone.widget.WidgetSnapshot
-import app.milestone.widget.widgetFace
 import org.jetbrains.compose.resources.StringResource
 
 /**
  * What the one-tap system action shows and opens: Android's Quick Settings tile
  * and the widget's primary button, iOS's Control Center control and the widget's
  * button. Each platform draws its own icon for a face (Android: `TileFace.icon`,
- * QuickTileService.kt; iOS: the widget extension's symbols).
+ * QuickTileService.kt; iOS: the widget extension's symbols, named by [wire]).
  */
 internal enum class TileFace(val label: StringResource, val dest: OpenDest, val active: Boolean) {
     /** A GPS run is recording: the tile is lit and reopens the tracker. */
@@ -30,16 +29,28 @@ internal enum class TileFace(val label: StringResource, val dest: OpenDest, val 
     Log(Res.string.tile_log, OpenDest.Log, false),
 }
 
+/** The face's name in the iOS widget payload. */
+internal val TileFace.wire: String
+    get() = when (this) {
+        TileFace.Recording -> "recording"
+        TileFace.StartRun -> "start_run"
+        TileFace.LogSet -> "log_set"
+        TileFace.Log -> "log"
+    }
+
 /**
- * The tile for today's widget [snapshot] (null when there is none for today, or
- * it is stale). Start run needs an open run item today ([WidgetSnapshot.trackable]);
- * Log set needs today's lift session still open. A finished session, a hold
- * ([WidgetDayKind.Paused]), a rest day and no plan all fall back to Log.
+ * The tile for today's widget snapshot [today] (null when there is none for today,
+ * or it is stale) while a GPS run records in this process ([recording]) or not. A
+ * recording run wins. Start run needs an open run item today
+ * ([WidgetSnapshot.trackable]); Log set needs today's lift session still open. A
+ * finished session, a hold ([WidgetDayKind.Paused]), a rest day and no plan all
+ * fall back to Log.
  */
-internal fun tileFace(snapshot: WidgetSnapshot?): TileFace = when {
-    snapshot == null -> TileFace.Log
-    snapshot.kind == WidgetDayKind.Run && snapshot.trackable -> TileFace.StartRun
-    snapshot.kind == WidgetDayKind.Lift && !snapshot.sessionDone -> TileFace.LogSet
+internal fun tileFace(today: WidgetSnapshot?, recording: Boolean = false): TileFace = when {
+    recording -> TileFace.Recording
+    today == null -> TileFace.Log
+    today.kind == WidgetDayKind.Run && today.trackable -> TileFace.StartRun
+    today.kind == WidgetDayKind.Lift && !today.sessionDone -> TileFace.LogSet
     else -> TileFace.Log
 }
 

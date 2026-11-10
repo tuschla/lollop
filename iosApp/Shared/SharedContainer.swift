@@ -3,11 +3,11 @@ import Foundation
 /// The App Group container the app and its widget extension share: the app writes
 /// the widget payload there, the extension reads it. Compiled into both targets.
 ///
-/// Both entitlements files ask for `group.app.milestone.lollop`. Signed by Xcode
-/// that is the group; SideStore (free Apple Account) registers it as
-/// `group.app.milestone.lollop.<TEAMID>` and signs both bundles with that one
-/// (SideStore's FetchProvisioningProfilesOperation.swift appends the team ID), so
-/// the identifier is looked up at runtime, in this order:
+/// Both entitlements files ask for LOLLOP_APP_GROUP (iosApp/project.yml), which each
+/// bundle's Info.plist carries as `LollopAppGroup`. Signed by Xcode that is the group;
+/// SideStore (free Apple Account) registers it as `<group>.<TEAMID>` and signs both
+/// bundles with that one (SideStore's FetchProvisioningProfilesOperation.swift
+/// appends the team ID), so the identifier is looked up at runtime, in this order:
 /// 1. `ALTAppGroups` in Info.plist, which SideStore 0.6 and 0.7 releases write into
 ///    the app and each extension (ResignAppOperation.swift);
 /// 2. the application groups in the bundle's `embedded.mobileprovision`, which every
@@ -16,7 +16,16 @@ import Foundation
 /// 3. the group as declared.
 /// A candidate counts only when the system hands out its container.
 enum SharedContainer {
-    static let declaredGroup = "group.app.milestone.lollop"
+    /// The group as declared: `LollopAppGroup` in the Info.plist of the bundle this
+    /// file is compiled into (the app, the extension, or the extension's tests).
+    static let declaredGroup: String = {
+        guard let group = Bundle(for: BundleMarker.self).object(forInfoDictionaryKey: "LollopAppGroup") as? String,
+              !group.isEmpty
+        else { preconditionFailure("Info.plist lacks LollopAppGroup (LOLLOP_APP_GROUP in iosApp/project.yml)") }
+        return group
+    }()
+
+    private final class BundleMarker {}
 
     /// The widget payload's file name in the container.
     static let payloadFile = "widget-today.json"

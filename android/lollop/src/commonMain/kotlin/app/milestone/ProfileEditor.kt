@@ -149,7 +149,7 @@ import app.milestone.resources.ui_cd_collapsed
 import app.milestone.resources.ui_cd_expanded
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
@@ -356,9 +356,9 @@ internal fun Event.SetProfile.Companion.from(p: ProfileView) = Event.SetProfile(
     // Values are "Weights"|"Calisthenics", matching the enum names exactly.
     resistanceModality = enumOr(p.resistance_modality, SEED.resistanceModality),
     highLoadBlock = p.high_load_block,
-    // Bare Rust variant name → enum; an unknown/absent value falls back to
-    // unset (same drop-don't-crash stance as enumOr above).
-    environment = p.environment?.let { runCatching { enumValueOf<Environment>(it) }.getOrNull() },
+    // Bare Rust variant name → enum; absent stays unset, an unknown value falls
+    // back to unset (same drop-don't-crash stance as enumOr below).
+    environment = p.environment?.let { enumOrNull<Environment>(it) },
     envTempC = p.env_temp_c,
     envAltitudeM = p.env_altitude_m,
     weeksOff = p.weeks_off,
@@ -375,8 +375,37 @@ internal fun Event.SetProfile.Companion.from(p: ProfileView) = Event.SetProfile(
     birthEpochDay = p.birth_epoch_day,
 )
 
-private inline fun <reified T : Enum<T>> enumOr(name: String, default: T): T =
-    runCatching { enumValueOf<T>(name) }.getOrDefault(default)
+/** The [T] named [name], or null (logged) when the core sent a name this shell doesn't know. */
+private inline fun <reified T : Enum<T>> enumOrNull(name: String): T? =
+    enumValues<T>().firstOrNull { it.name == name }
+        ?: run {
+            PlatformLog.w("ProfileEditor", "unknown ${T::class.simpleName} \"$name\"")
+            null
+        }
+
+private inline fun <reified T : Enum<T>> enumOr(name: String, default: T): T = enumOrNull(name) ?: default
+
+/**
+ * Weekly running-volume SCALE in the user's distance unit (ProfileEditor
+ * "Running km/wk" / "Running mi/wk"). The core stores canonical km; the scale's
+ * options, highlight and row value are whole display units, and a pick converts
+ * back to km for the wire (km exact, mi via [miToKmWire]). Range 1–150 km, i.e.
+ * 1–93 mi. Pure.
+ */
+const val WEEKLY_VOLUME_MAX_KM: Double = 150.0
+
+fun weeklyVolumeScaleOptions(unit: DistanceUnit): List<Int> =
+    if (unit == DistanceUnit.Mi) {
+        (1..kmToMi(WEEKLY_VOLUME_MAX_KM).roundOrZero().toInt()).toList()
+    } else {
+        (1..WEEKLY_VOLUME_MAX_KM.toInt()).toList()
+    }
+
+fun weeklyVolumeScaleValue(km: Double, unit: DistanceUnit): Int =
+    (if (unit == DistanceUnit.Mi) kmToMi(km) else km).roundOrZero().toInt()
+
+fun weeklyVolumeScaleToKm(value: Int, unit: DistanceUnit): Double =
+    if (unit == DistanceUnit.Mi) miToKmWire(value.toDouble()) else value.toDouble()
 
 /**
  * Fallback starting point for the full editor only (rehydration when no
@@ -1481,15 +1510,23 @@ private suspend fun revealWhenSettled(
         } else {
             null
         }
-        for (r in requesters) {
-            try {
-                r.bringIntoView(band)
-            } catch (e: CancellationException) {
-                currentCoroutineContext().ensureActive()
-            }
-        }
+        for (r in requesters) r.bringIntoViewUnlessPreempted(band)
         withFrameNanos { }
         if (top.y == last) return
         last = top.y
+    }
+}
+
+/**
+ * [BringIntoViewRequester.bringIntoView] that a competing scroll ends without ending
+ * the caller: Compose cancels an in-flight request with a [CancellationException]
+ * when another scroll takes over the container (the list keeping a toggled row under
+ * the finger). The caller's own cancellation is rethrown.
+ */
+private suspend fun BringIntoViewRequester.bringIntoViewUnlessPreempted(band: Rect?) {
+    try {
+        bringIntoView(band)
+    } catch (e: CancellationException) {
+        if (!currentCoroutineContext().isActive) throw e
     }
 }

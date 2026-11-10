@@ -20,6 +20,7 @@ import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.PrescriptionView
 import app.milestone.R
+import app.milestone.TestClock
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonPrimitive
@@ -57,7 +58,7 @@ class OwnerRegressionJourneyTest {
     fun tearDown() = QaHarness.teardown()
 
     private fun rest(sec: Long = 90) {
-        AppClock.offsetMillis += sec * 1000L
+        TestClock.offsetMillis += sec * 1000L
     }
 
     private fun logSet() = rule.onNodeWithTag("editor-primary").performClick()

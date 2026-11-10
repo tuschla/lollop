@@ -83,7 +83,7 @@ private class NotificationDelegate : NSObject(), UNUserNotificationCenterDelegat
         willPresentNotification: UNNotification,
         withCompletionHandler: (UNNotificationPresentationOptions) -> Unit,
     ) {
-        val restDone = willPresentNotification.request.identifier == RestAlarm.REST_DONE_ID
+        val restDone = willPresentNotification.request.identifier == RestAlarmPlatform.REST_DONE_ID
         if (restDone && RestAlarm.inAppVisible) {
             withCompletionHandler(0uL)
         } else {
@@ -111,21 +111,16 @@ private class NotificationDelegate : NSObject(), UNUserNotificationCenterDelegat
     }
 }
 
-// UNUserNotificationCenter holds its delegate weakly.
-private var delegate: NotificationDelegate? = null
+// UNUserNotificationCenter holds its delegate weakly: the process keeps it.
+private val delegate by ProcessLocal { NotificationDelegate() }
 
 /**
- * Start the iOS notifications once at boot: install the delegate (a tap on a
- * notification opens its destination, [requestOpen]), register the reminder's
- * actions and keep the session reminders scheduled from every published model
- * ([SessionReminder.start]). A second call does nothing.
+ * Install the delegate (a tap on a notification opens its destination,
+ * [requestOpen]) and register the reminder's actions ([IosReminder.start]).
  */
-internal fun startIosReminders() {
-    if (delegate != null) return
-    val d = NotificationDelegate()
-    delegate = d
+internal fun installNotificationDelegate() {
     val center = notificationCenter
-    center.delegate = d
+    center.delegate = delegate
     val res = systemResources()
     fun category(id: String, label: String) = UNNotificationCategory.categoryWithIdentifier(
         id,
@@ -148,5 +143,4 @@ internal fun startIosReminders() {
             category(CATEGORY_REMINDER_NEXT_SET, res.getString(Res.string.reminder_action_log_next_set)),
         ),
     )
-    SessionReminder.start(PlatformContext.INSTANCE)
 }

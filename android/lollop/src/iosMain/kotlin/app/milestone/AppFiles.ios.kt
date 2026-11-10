@@ -38,7 +38,7 @@ import platform.posix.strerror
 import platform.posix.unlink
 import platform.posix.write
 
-actual class LogPath(val path: String) {
+actual class AppPath(val path: String) {
     override fun toString(): String = path
 }
 
@@ -51,7 +51,6 @@ private const val CHUNK = 64 * 1024
 private const val MODE = 0x1A4
 
 private const val LF = '\n'.code.toByte()
-private const val CR = '\r'.code.toByte()
 
 private fun fail(op: String, path: String): Nothing =
     throw LogFileException("$op $path: ${strerror(errno)?.toKString()}")
@@ -79,25 +78,37 @@ private fun readSome(fd: Int, buf: ByteArray, count: Int, path: String): Int {
     }
 }
 
-/** Read exactly [count] bytes into [buf]; a short file fails. */
-private fun readFully(fd: Int, buf: ByteArray, count: Int, path: String) {
-    var off = 0
-    while (off < count) {
-        val n = buf.usePinned { read(fd, it.addressOf(off), (count - off).convert()) }
-        if (n > 0) {
-            off += n.toInt()
-        } else if (n == 0L || errno != EINTR) {
-            fail("read", path)
+/** A POSIX fd under the shared line logic; closing a [written] one reports a
+ *  failed write ([closeWritten]). */
+private class PosixRawFile(private val fd: Int, private val path: String, private val written: Boolean) : RawFile {
+    override fun length(): Long {
+        val size = lseek(fd, 0, SEEK_END)
+        if (size < 0) fail("seek", path)
+        return size
+    }
+
+    override fun read(buf: ByteArray, count: Int): Int = readSome(fd, buf, count, path)
+
+    override fun readFully(at: Long, buf: ByteArray, count: Int) {
+        if (lseek(fd, at, SEEK_SET) < 0) fail("seek", path)
+        var off = 0
+        while (off < count) {
+            val n = buf.usePinned { platform.posix.read(fd, it.addressOf(off), (count - off).convert()) }
+            if (n > 0) {
+                off += n.toInt()
+            } else if (n == 0L || errno != EINTR) {
+                fail("read", path)
+            }
         }
     }
-}
 
-private fun seek(fd: Int, at: Long, path: String) {
-    if (lseek(fd, at, SEEK_SET) < 0) fail("seek", path)
-}
+    override fun truncate(len: Long) {
+        if (ftruncate(fd, len) != 0) fail("truncate", path)
+    }
 
-private fun truncate(fd: Int, len: Long, path: String) {
-    if (ftruncate(fd, len) != 0) fail("truncate", path)
+    override fun close() {
+        if (written) closeWritten(fd, path) else platform.posix.close(fd)
+    }
 }
 
 private fun writeFully(fd: Int, bytes: ByteArray, len: Int, path: String) {
@@ -112,16 +123,16 @@ private fun writeFully(fd: Int, bytes: ByteArray, len: Int, path: String) {
     }
 }
 
-internal actual object LogFiles {
-    actual fun sibling(file: LogPath, suffix: String): LogPath = LogPath(file.path + suffix)
+internal actual object AppFiles {
+    actual fun sibling(file: AppPath, suffix: String): AppPath = AppPath(file.path + suffix)
 
-    actual fun exists(file: LogPath): Boolean = access(file.path, F_OK) == 0
+    actual fun exists(file: AppPath): Boolean = access(file.path, F_OK) == 0
 
-    actual fun delete(file: LogPath): Boolean = unlink(file.path) == 0
+    actual fun delete(file: AppPath): Boolean = unlink(file.path) == 0
 
-    actual fun rename(from: LogPath, to: LogPath): Boolean = platform.posix.rename(from.path, to.path) == 0
+    actual fun rename(from: AppPath, to: AppPath): Boolean = platform.posix.rename(from.path, to.path) == 0
 
-    actual fun copy(from: LogPath, to: LogPath) {
+    actual fun copy(from: AppPath, to: AppPath) {
         val src = openFd(from.path, O_RDONLY)
         try {
             val dst = openFd(to.path, O_WRONLY or O_CREAT or O_EXCL)
@@ -140,54 +151,12 @@ internal actual object LogFiles {
         }
     }
 
-    actual fun forEachLine(file: LogPath, action: (String) -> Unit) {
-        val fd = openFd(file.path, O_RDONLY)
-        try {
-            val chunk = ByteArray(CHUNK)
-            var line = ByteArray(256)
-            var len = 0
-            // A '\r' ended the last line: a '\n' right after it belongs to it.
-            var afterCr = false
-            while (true) {
-                val n = readSome(fd, chunk, CHUNK, file.path)
-                if (n == 0) break
-                for (i in 0 until n) {
-                    val b = chunk[i]
-                    if (afterCr && b == LF) {
-                        afterCr = false
-                    } else if (b == LF || b == CR) {
-                        action(line.decodeToString(0, len))
-                        len = 0
-                        afterCr = b == CR
-                    } else {
-                        afterCr = false
-                        if (len == line.size) line = line.copyOf(line.size * 2)
-                        line[len++] = b
-                    }
-                }
-            }
-            if (len > 0) action(line.decodeToString(0, len))
-        } finally {
-            close(fd)
-        }
-    }
+    actual fun openRead(file: AppPath): RawFile = PosixRawFile(openFd(file.path, O_RDONLY), file.path, written = false)
 
-    actual fun endsWithNewline(file: LogPath): Boolean {
-        val fd = openFd(file.path, O_RDONLY)
-        try {
-            val size = lseek(fd, 0, SEEK_END)
-            if (size < 0) fail("seek", file.path)
-            if (size == 0L) return true
-            if (lseek(fd, size - 1, SEEK_SET) < 0) fail("seek", file.path)
-            val last = ByteArray(1)
-            if (readSome(fd, last, 1, file.path) != 1) fail("read", file.path)
-            return last[0] == LF
-        } finally {
-            close(fd)
-        }
-    }
+    actual fun openTruncatable(file: AppPath): RawFile =
+        PosixRawFile(openFd(file.path, O_RDWR or O_CREAT), file.path, written = true)
 
-    actual fun append(file: LogPath, text: String) {
+    actual fun append(file: AppPath, text: String) {
         val bytes = text.encodeToByteArray()
         val fd = openFd(file.path, O_WRONLY or O_APPEND or O_CREAT)
         try {
@@ -197,7 +166,7 @@ internal actual object LogFiles {
         }
     }
 
-    actual fun writeText(file: LogPath, text: String) {
+    actual fun writeText(file: AppPath, text: String) {
         val bytes = text.encodeToByteArray()
         val fd = openFd(file.path, O_WRONLY or O_CREAT or O_TRUNC)
         try {
@@ -207,37 +176,7 @@ internal actual object LogFiles {
         }
     }
 
-    actual fun dropTornTail(file: LogPath) {
-        val fd = openFd(file.path, O_RDWR or O_CREAT)
-        try {
-            val len = lseek(fd, 0, SEEK_END)
-            if (len < 0) fail("seek", file.path)
-            if (len == 0L) return
-            val chunk = ByteArray(4096)
-            seek(fd, len - 1, file.path)
-            readFully(fd, chunk, 1, file.path)
-            if (chunk[0] == LF) return
-            var end = len
-            while (end > 0) {
-                val start = maxOf(0L, end - chunk.size)
-                val n = (end - start).toInt()
-                seek(fd, start, file.path)
-                readFully(fd, chunk, n, file.path)
-                for (i in n - 1 downTo 0) {
-                    if (chunk[i] == LF) {
-                        truncate(fd, start + i + 1, file.path)
-                        return
-                    }
-                }
-                end = start
-            }
-            truncate(fd, 0, file.path)
-        } finally {
-            closeWritten(fd, file.path)
-        }
-    }
-
-    actual fun writeLinesSynced(file: LogPath, lines: List<String>) {
+    actual fun writeLinesSynced(file: AppPath, lines: List<String>) {
         val fd = openFd(file.path, O_WRONLY or O_CREAT or O_TRUNC)
         try {
             val buf = ByteArray(CHUNK)
@@ -270,9 +209,9 @@ internal actual object LogFiles {
     }
 }
 
-internal actual fun PlatformContext.eventLogPath(): LogPath = appFile(EVENT_LOG_NAME)
+internal actual fun PlatformContext.eventLogPath(): AppPath = appFile(AppFileNames.EVENT_LOG)
 
-internal actual fun PlatformContext.appFile(name: String): LogPath {
+internal actual fun PlatformContext.appFile(name: String): AppPath {
     val files = NSFileManager.defaultManager
     // Application Support isn't created for a new app; create = true makes it.
     val dir = files.URLForDirectory(
@@ -284,7 +223,7 @@ internal actual fun PlatformContext.appFile(name: String): LogPath {
     )?.path ?: (NSHomeDirectory() + "/Library/Application Support").also {
         files.createDirectoryAtPath(it, withIntermediateDirectories = true, attributes = null, error = null)
     }
-    return LogPath("$dir/$name")
+    return AppPath("$dir/$name")
 }
 
 @OptIn(ExperimentalNativeApi::class)

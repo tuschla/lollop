@@ -7,6 +7,7 @@ import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
 import app.milestone.widget.WidgetItemKind
 import app.milestone.widget.WidgetSnapshot
+import app.milestone.widget.tileFace
 import app.milestone.widget.widgetFace
 import kotlin.random.Random
 import org.junit.Assert.assertEquals

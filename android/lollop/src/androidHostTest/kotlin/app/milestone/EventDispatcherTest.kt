@@ -21,7 +21,7 @@ import org.junit.Test
  * must hear about through [EventDispatcher.notices] — including one raised while
  * no Activity is collecting.
  *
- * The [EventDispatcher.sender] / [EventDispatcher.batchSender] seams make this
+ * The [TestSink.sender] / [TestSink.batchSender] seams make this
  * testable off-device: the real send paths cross the JNI boundary (`Core.send`,
  * unavailable in a plain JVM unit test), so fakes stand in for them here.
  */
@@ -32,18 +32,19 @@ class EventDispatcherTest {
 
     @Before
     fun setUp() {
-        // The consumer runs on EventDispatcher.scope (Dispatchers.Main.immediate).
-        // Install the test Main BEFORE the object first initializes so its scope
-        // dispatches through it; runTest then shares this scheduler.
+        // The consumer runs on AppRuntime.scope (Dispatchers.Main.immediate).
+        // Install the test Main BEFORE the process starts so its scope dispatches
+        // through it; runTest then shares this scheduler.
         Dispatchers.setMain(StandardTestDispatcher())
-        realSender = EventDispatcher.sender
-        realBatchSender = EventDispatcher.batchSender
+        AppRuntime.resetForTest(sink = TestSink)
+        realSender = TestSink.sender
+        realBatchSender = TestSink.batchSender
     }
 
     @After
     fun tearDown() {
-        EventDispatcher.sender = realSender
-        EventDispatcher.batchSender = realBatchSender
+        TestSink.sender = realSender
+        TestSink.batchSender = realBatchSender
         Dispatchers.resetMain()
     }
 
@@ -54,7 +55,7 @@ class EventDispatcherTest {
         var calls = 0
         // First send throws (a malformed view / Core.send blow-up); the second
         // returns a recognizable accepted result.
-        EventDispatcher.sender = { _ ->
+        TestSink.sender = { _ ->
             calls++
             if (calls == 1) throw RuntimeException("first send blows up")
             good
@@ -75,7 +76,7 @@ class EventDispatcherTest {
         // The core did NOT accept the event (a serde-rejected event / panic
         // envelope): the consumer still publishes the view but must flag it.
         val rejectedView = ViewModel(input_count = 7)
-        EventDispatcher.sender = { _ -> SendResult(rejectedView, accepted = false) }
+        TestSink.sender = { _ -> SendResult(rejectedView, accepted = false) }
 
         val notices = mutableListOf<CoreNotice>()
         val job = launch { EventDispatcher.notices.collect { notices += it } }
@@ -93,7 +94,7 @@ class EventDispatcherTest {
     fun aNoticeRaisedWithNoCollectorReachesTheNextCollector() = runTest {
         // Activity recreation: the event lands while nothing collects. The notice
         // must wait for the next collector instead of being dropped.
-        EventDispatcher.sender = { _ -> SendResult(ViewModel(), accepted = false) }
+        TestSink.sender = { _ -> SendResult(ViewModel(), accepted = false) }
         EventDispatcher.send(Event.SetToday(0L, 0))
         advanceUntilIdle()
 
@@ -109,7 +110,7 @@ class EventDispatcherTest {
     fun anAcceptedButUnpersistedEventRaisesNotSaved() = runTest {
         // Disk full: the core applied the entry in memory, but the log append
         // failed, so it is gone after the next restart and must not look saved.
-        EventDispatcher.sender = { _ -> SendResult(ViewModel(), accepted = true, persisted = false) }
+        TestSink.sender = { _ -> SendResult(ViewModel(), accepted = true, persisted = false) }
         val notices = mutableListOf<CoreNotice>()
         val job = launch { EventDispatcher.notices.collect { notices += it } }
         runCurrent()
@@ -125,7 +126,7 @@ class EventDispatcherTest {
     fun aRunOfStaleResultsRaisesOneUnreadablePerRun() = runTest {
         val stale = listOf(false, true, true, true, false, true)
         var i = 0
-        EventDispatcher.sender = { _ -> SendResult(ViewModel(), accepted = true, stale = stale[i++]) }
+        TestSink.sender = { _ -> SendResult(ViewModel(), accepted = true, stale = stale[i++]) }
         val notices = mutableListOf<CoreNotice>()
         val job = launch { EventDispatcher.notices.collect { notices += it } }
         runCurrent()
@@ -143,7 +144,7 @@ class EventDispatcherTest {
         val batchView = ViewModel(input_count = 3)
         val batches = mutableListOf<List<Event>>()
         var published = 0
-        EventDispatcher.batchSender = { events ->
+        TestSink.batchSender = { events ->
             batches += events
             SendResult(batchView, accepted = true)
         }

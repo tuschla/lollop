@@ -2,6 +2,7 @@ package app.milestone.widget
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppFileNames
 import app.milestone.ConsistencyView
 import app.milestone.DistanceUnit
 import app.milestone.HealthScreen
@@ -14,10 +15,12 @@ import app.milestone.SessionDoneView
 import app.milestone.SessionPlanView
 import app.milestone.ViewModel
 import app.milestone.YouthActivityView
+import app.milestone.nextLocalMidnightMillis
 import app.milestone.planDateLabel
 import java.io.File
 import java.time.LocalDateTime
 import java.time.ZoneId
+import kotlinx.datetime.toKotlinTimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -41,7 +44,7 @@ class WidgetSnapshotTest {
 
     @Before
     fun clean() {
-        File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
     }
 
     private fun lift(name: String, lead: String, done: Boolean = false) =
@@ -78,14 +81,14 @@ class WidgetSnapshotTest {
         assertFalse(WidgetSnapshotStore.write(ctx, snap))
         assertEquals(before + 1, WidgetSnapshotStore.revision.value)
         // The file is versioned JSON.
-        val text = File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME).readText()
+        val text = File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).readText()
         assertTrue(text, text.contains("\"version\":$WIDGET_SNAPSHOT_VERSION"))
         assertTrue(text, text.contains("\"kind\":\"Lift\""))
     }
 
     @Test
     fun otherVersionOrBrokenFileReadsAsMissing() {
-        val f = File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME)
+        val f = File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT)
         f.writeText("""{"version":${WIDGET_SNAPSHOT_VERSION + 1},"epochDay":$day,"kind":"Lift"}""")
         assertNull(WidgetSnapshotStore.read(ctx))
         f.writeText("{not json")
@@ -138,7 +141,7 @@ class WidgetSnapshotTest {
 
     /** A zone change back across midnight (or a clock set forward and back) brings
      *  a stale snapshot's own day back: the mark ticks [WidgetSnapshotStore.staleMarks]
-     *  so WidgetSync derives it again from the model the process holds. */
+     *  so [WidgetSurfaces] derives it again from the model the process holds. */
     @Test
     fun aStaleSnapshotWhoseDayComesBackIsDerivedAgain() {
         WidgetSnapshotStore.write(ctx, widgetSnapshotOf(model(), DistanceUnit.Km))
@@ -156,9 +159,9 @@ class WidgetSnapshotTest {
         val zone = ZoneId.of("Europe/Berlin")
         val now = LocalDateTime.of(2026, 10, 24, 23, 59, 30).atZone(zone).toInstant().toEpochMilli()
         val expected = LocalDateTime.of(2026, 10, 25, 0, 0).atZone(zone).toInstant().toEpochMilli()
-        assertEquals(expected, WidgetMidnight.nextMidnightMillis(now, zone))
+        assertEquals(expected, nextLocalMidnightMillis(now, zone.toKotlinTimeZone()))
         // Exactly at midnight: the following one, never now.
-        assertEquals(expected + 24 * 3_600_000L + 3_600_000L, WidgetMidnight.nextMidnightMillis(expected, zone))
+        assertEquals(expected + 24 * 3_600_000L + 3_600_000L, nextLocalMidnightMillis(expected, zone.toKotlinTimeZone()))
     }
 
     // ── Content per state ────────────────────────────────────────────────────
@@ -211,7 +214,7 @@ class WidgetSnapshotTest {
         // A hold shows no week: it carries no plan.
         assertTrue(widgetSnapshotOf(model(ns, week = week).copy(hold_reason = "pain", safety_tier = "Pain"), DistanceUnit.Km).week.isEmpty())
         // A file written before the week was recorded still reads, without a strip.
-        val f = File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME)
+        val f = File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT)
         f.writeText("""{"version":$WIDGET_SNAPSHOT_VERSION,"epochDay":$day,"kind":"Rest"}""")
         assertEquals(emptyList<WidgetWeekDay>(), WidgetSnapshotStore.read(ctx)!!.week)
     }

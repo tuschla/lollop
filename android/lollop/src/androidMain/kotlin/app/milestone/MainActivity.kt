@@ -2,7 +2,7 @@ package app.milestone
 
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration as UiConfiguration
+import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -15,10 +15,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import app.milestone.widget.WidgetSync
-import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
-import org.osmdroid.config.Configuration
 
 class MainActivity : ComponentActivity() {
     // The latest [ACTION_OPEN] destination (widget, Quick Settings tile, a run or
@@ -32,17 +29,11 @@ class MainActivity : ComponentActivity() {
     override fun attachBaseContext(newBase: Context) = super.attachBaseContext(newBase.withLatinDigits())
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // AppSettings first: an explicit Light/Dark picks the splash theme before
-        // installSplashScreen(). On API 31+ the system-drawn cold-start splash still
-        // follows the system mode (UiModeManager.setApplicationNightMode would
-        // recreate the app on every toggle and has no "follow system" reset).
-        AppSettings.load(this)
-        // Home screen widget: every published model refreshes its snapshot; the
-        // Quick Settings tile and a shown "Start run" reminder follow the recording run.
-        WidgetSync.start(applicationContext)
-        RecordingWatch.start(applicationContext)
-        // A force stop clears the session reminder's alarm; any start sets it again.
-        SessionReminder.reschedule(applicationContext)
+        // The runtime (its settings) first: an explicit Light/Dark picks the splash
+        // theme before installSplashScreen(). On API 31+ the system-drawn cold-start
+        // splash still follows the system mode (UiModeManager.setApplicationNightMode
+        // would recreate the app on every toggle and has no "follow system" reset).
+        AppRuntime.start(applicationContext)
         when (AppSettings.darkMode.value) {
             DarkMode.Light -> setTheme(R.style.Theme_Milestone_Forced_Light)
             DarkMode.Dark -> setTheme(R.style.Theme_Milestone_Forced_Dark)
@@ -54,16 +45,11 @@ class MainActivity : ComponentActivity() {
         // splash, so it lets go at once for the "Restoring your data…" loading screen.
         // A core found unusable at boot never hydrates a model: let go for its error
         // screen instead of holding the splash forever.
-        val restoringImport = setupPrefs().getInt(KEY_RESTORED_ENTRIES, -1) >= 0
+        val restoringImport = restoringImport(setupStore())
         installSplashScreen().setKeepOnScreenCondition {
             !restoringImport && EventDispatcher.model.value == null && !EventDispatcher.coreUnavailable.value
         }
         super.onCreate(savedInstanceState)
-        // osmdroid needs a config + user agent set before any MapView inflates.
-        Configuration.getInstance().load(this, getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
-        Configuration.getInstance().osmdroidBasePath = File(cacheDir, "osmdroid")
-        Configuration.getInstance().osmdroidTileCache = File(cacheDir, "osmdroid/tiles")
-        Configuration.getInstance().userAgentValue = packageName
         // "Open with" / "Share to" run import (GPX/TCX/FIT) and an open intent
         // (widget, tile, notification) act only on a FRESH create that the intent
         // itself started: a rotation or process-restore re-delivers the same
@@ -73,12 +59,12 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && !fromRecents) {
             RunImport.importRuns(this, RunImport.urisFrom(intent))
             openDestOf(intent)?.let { openRequest.value = it }
-            SessionReminder.onOpenIntent(this, intent)
+            AndroidReminder.onOpenIntent(this, intent)
         }
         // The window ground under the first Compose frame (and the import restart's
         // "Restoring your data…" screen) is the resolved palette's, not the theme's
         // plain white/black windowBackground.
-        val systemNight = (resources.configuration.uiMode and UiConfiguration.UI_MODE_NIGHT_MASK) == UiConfiguration.UI_MODE_NIGHT_YES
+        val systemNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         val nightUi = AppSettings.darkMode.value.isDark(systemNight)
         val theme = AppSettings.theme.value
         window.setBackgroundDrawable(ColorDrawable((if (nightUi) theme.dark else theme.light).bgTop.toArgb()))
@@ -120,7 +106,7 @@ class MainActivity : ComponentActivity() {
         // A widget / tile / notification tap while the Activity is alive. It only
         // reaches here as a new intent, so a rotation never replays it.
         openDestOf(intent)?.let { openRequest.value = it }
-        SessionReminder.onOpenIntent(this, intent)
+        AndroidReminder.onOpenIntent(this, intent)
         // A share/open into an already-running Activity imports too.
         RunImport.importRuns(this, RunImport.urisFrom(intent))
     }

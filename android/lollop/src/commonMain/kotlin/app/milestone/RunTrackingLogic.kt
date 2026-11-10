@@ -59,6 +59,7 @@ internal suspend fun runSaveCriticalSection(
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
+        PlatformLog.w("RunSave", "run not saved, kept for a retry", e)
         onFailure()
     }
 }

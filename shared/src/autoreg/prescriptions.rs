@@ -6,7 +6,7 @@
 
 use super::rules::HRV_ESCALATE_STREAK;
 use crate::evidence::claims;
-use crate::schema::{Adjustment, Recommended};
+use crate::schema::{Adjustment, AdjustmentCall, AdjustmentKind, DeloadTrigger, Recommended};
 
 /// Reliability band of a reference-load mean concentric velocity, m/s
 /// (autoreg-008/009, AUTOREG-VBT-001; Weakley/Pearson 2020): a daily change
@@ -108,9 +108,9 @@ fn standard_deload() -> Adjustment {
 /// Deload when planned RPE is only hit at loads ≥`RPE_LOAD_GAP_DELOAD_PCT`
 /// below plan for ≥2 sessions (File 06 autoreg-023). `None` when the trigger
 /// has not fired.
-pub fn deload_from_rpe_load_gap(sessions_ge_7pct_below: u8) -> Option<Recommended<Adjustment>> {
+pub fn deload_from_rpe_load_gap(sessions_ge_7pct_below: u8) -> Option<AdjustmentCall> {
     (sessions_ge_7pct_below >= RPE_LOAD_GAP_DELOAD_SESSIONS)
-        .then(|| Recommended::new(standard_deload(), claims::AUTOREG_DELOAD_001))
+        .then(|| weekly_deload(DeloadTrigger::RpeLoadGap, claims::AUTOREG_DELOAD_001))
 }
 
 /// Days of wellness z ≤ −1 that, with an RPE creep, deload (autoreg-024 "≥3
@@ -122,16 +122,16 @@ pub(crate) const RPE_CREEP_WELLNESS_LOW_DAYS: u8 = 3;
 pub fn deload_from_rpe_creep_and_wellness(
     rpe_creep_plus_one: bool,
     wellness_z_le_neg1_days: u8,
-) -> Option<Recommended<Adjustment>> {
+) -> Option<AdjustmentCall> {
     (rpe_creep_plus_one && wellness_z_le_neg1_days >= RPE_CREEP_WELLNESS_LOW_DAYS)
-        .then(|| Recommended::new(standard_deload(), claims::AUTOREG_DELOAD_001))
+        .then(|| weekly_deload(DeloadTrigger::RpeCreep, claims::AUTOREG_DELOAD_001))
 }
 
 /// Deload when reference-load velocity is down more than
 /// `VBT_WEEKLY_DROP_DELOAD_M_S` across the week (File 06 autoreg-026).
-pub fn deload_from_velocity_drop(weekly_mcv_drop_m_s: f64) -> Option<Recommended<Adjustment>> {
+pub fn deload_from_velocity_drop(weekly_mcv_drop_m_s: f64) -> Option<AdjustmentCall> {
     (weekly_mcv_drop_m_s > VBT_WEEKLY_DROP_DELOAD_M_S)
-        .then(|| Recommended::new(standard_deload(), claims::AUTOREG_DELOAD_VBT_001))
+        .then(|| weekly_deload(DeloadTrigger::VelocityDrop, claims::AUTOREG_DELOAD_VBT_001))
 }
 
 /// Failed key sessions in a week that cut weekly volume (autoreg-036).
@@ -140,9 +140,9 @@ pub(crate) const FAILED_KEY_SESSIONS_DELOAD: u8 = 2;
 /// Reduce weekly volume 20–30% (defer hard work) after two failed key sessions
 /// in a week (File 06 autoreg-036). Encoded as a load-neutral volume deload
 /// (25% midpoint).
-pub fn deload_from_failed_sessions(failed_key_sessions: u8) -> Option<Recommended<Adjustment>> {
+pub fn deload_from_failed_sessions(failed_key_sessions: u8) -> Option<AdjustmentCall> {
     (failed_key_sessions >= FAILED_KEY_SESSIONS_DELOAD).then(|| {
-        Recommended::new(
+        AdjustmentKind::WeeklyDeload(DeloadTrigger::FailedSessions).call(
             Adjustment::Deload {
                 volume_reduction_pct: 25.0,
                 load_reduction_pct: 0.0,
@@ -258,12 +258,9 @@ pub fn wellness_rhr_multiday_easy(
 /// (or rest), even before the 7-day rolling average clears the SWC lower band
 /// (the first trigger, `hrv_downgrade` via the readiness vector). HRV-001
 /// (Moderate, Kiviniemi 2007; Javaloyes 2019).
-pub fn hrv_single_day_downgrade(
-    single_day_z: f64,
-    downtrend_days: u8,
-) -> Option<Recommended<Adjustment>> {
+pub fn hrv_single_day_downgrade(single_day_z: f64, downtrend_days: u8) -> Option<AdjustmentCall> {
     (single_day_z < -1.0 && downtrend_days >= 2)
-        .then(|| Recommended::new(Adjustment::DowngradeSession, claims::HRV_001))
+        .then(|| AdjustmentKind::HrvLower.call(Adjustment::DowngradeSession, claims::HRV_001))
 }
 
 /// autoreg-025: the at/above-MRV sign cluster (joint aches, performance stall,
@@ -272,8 +269,13 @@ pub fn hrv_single_day_downgrade(
 /// so the caller supplies the judgment that the cluster is present. Deload
 /// magnitude per the rule's RP-framework mapping: volume −50%, load −10%,
 /// 1 week. AUTOREG-MRV-001 (ExpertOpinion, Israetel et al. 2021).
-pub fn mrv_signs_deload(sign_cluster_present: bool) -> Option<Recommended<Adjustment>> {
-    sign_cluster_present.then(|| Recommended::new(standard_deload(), claims::AUTOREG_MRV_001))
+pub fn mrv_signs_deload(sign_cluster_present: bool) -> Option<AdjustmentCall> {
+    sign_cluster_present.then(|| weekly_deload(DeloadTrigger::MrvSigns, claims::AUTOREG_MRV_001))
+}
+
+/// The standard deload fired by a weekly `trigger`.
+fn weekly_deload(trigger: DeloadTrigger, claim: crate::evidence::ClaimId) -> AdjustmentCall {
+    AdjustmentKind::WeeklyDeload(trigger).call(standard_deload(), claim)
 }
 
 /// Weeks of improved pace at target HR that schedule a threshold re-test
@@ -304,9 +306,9 @@ pub fn unexplained_decline_rest_defer(
     decline_weeks: u8,
     wellness_disturbed: bool,
     despite_deload: bool,
-) -> Option<Recommended<Adjustment>> {
+) -> Option<AdjustmentCall> {
     (decline_weeks >= 2 && wellness_disturbed && despite_deload).then(|| {
-        Recommended::new(Adjustment::Defer {
+        AdjustmentKind::OvertrainingReferral.call(Adjustment::Defer {
             reason: "Performance down for 2+ weeks with no clear cause, plus tiredness, low mood or poor sleep, even after a lighter week. Rest, and see a doctor to rule out overtraining, under-eating (RED-S) or another medical cause."
                 .into(),
         },
@@ -322,9 +324,9 @@ pub fn unexplained_decline_rest_defer(
 pub fn nfor_cluster_defer(
     decrement_weeks: u8,
     suppressed_wellness_domains: u8,
-) -> Option<Recommended<Adjustment>> {
+) -> Option<AdjustmentCall> {
     (decrement_weeks >= 2 && suppressed_wellness_domains >= 2).then(|| {
-        Recommended::new(Adjustment::Defer {
+        AdjustmentKind::NforReferral.call(Adjustment::Defer {
             reason: "Possible overreaching: performance down for 2+ weeks with no clear cause, and 2+ check-in scores low. Take a recovery break; see a doctor if it doesn't improve."
                 .into(),
         },

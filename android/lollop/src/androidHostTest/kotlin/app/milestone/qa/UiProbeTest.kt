@@ -13,12 +13,8 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
-import app.milestone.AppSettings
-import app.milestone.AppTheme
 import app.milestone.ConcurrentGoal
 import app.milestone.Core
-import app.milestone.DarkMode
-import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GoalDistance
@@ -52,7 +48,6 @@ abstract class UiProbeTest {
     fun setUpProbe() {
         originalQualifiers = RuntimeEnvironment.getQualifiers()
         QaHarness.reset(ctx)
-        resetSettings()
     }
 
     @After
@@ -60,34 +55,16 @@ abstract class UiProbeTest {
         QaHarness.teardown()
         RuntimeEnvironment.setQualifiers(originalQualifiers)
         RuntimeEnvironment.setFontScale(1f)
-        resetSettings()
+        QaHarness.freshProcess()
     }
 
-    /** A fresh process within one test: the activity closed, the log reset, the
-     *  qualifiers, font scale and settings restored. */
+    /** A fresh install within one test: the activity closed, the qualifiers and
+     *  font scale restored, then [QaHarness.reset]. */
     protected fun freshProcess() {
         QaHarness.teardown()
         RuntimeEnvironment.setQualifiers(originalQualifiers)
         RuntimeEnvironment.setFontScale(1f)
         QaHarness.reset(ctx)
-        resetSettings()
-    }
-
-    protected fun resetSettings() {
-        AppSettings.theme.value = AppTheme.Paper
-        AppSettings.dynamicAccent.value = true
-        AppSettings.darkMode.value = DarkMode.System
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-        AppSettings.showRouteMaps.value = true
-        clearAppliedCueLoads()
-    }
-
-    /** A cue load applied in a loop is process-scoped (keyed by day and exercise;
-     *  QaHarness.reset does not clear it): it must not prefill the next walk's or
-     *  another test's loop, and a process death drops it. */
-    protected fun clearAppliedCueLoads() {
-        (app.milestone.AppliedCueLoads.javaClass.getDeclaredField("byItem").apply { isAccessible = true }
-            .get(app.milestone.AppliedCueLoads) as MutableMap<*, *>).clear()
     }
 
     /** Thrown by [fail]; [guard] passes it on. */

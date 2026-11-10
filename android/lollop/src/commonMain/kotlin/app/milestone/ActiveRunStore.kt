@@ -20,60 +20,73 @@ import kotlinx.serialization.json.put
  * Writes run on a single background thread ([SerialWorker]: FIFO, so fix order
  * is preserved and no file I/O touches the main / location-callback thread). A
  * kill can lose at most the last queued line: recovery tolerates a torn/short
- * final line. File access goes through the [LogFiles] seam (java.io / POSIX).
+ * final line. File access goes through the [AppFiles] seam (java.io / POSIX).
  *
  * A clean Stop & save (or an abandon) deletes the sidecar so no stale run is
  * ever offered for recovery.
+ *
+ * Started by [AppRuntime.start] (the file in the app's files); every other call
+ * needs that start, or [open] with a path.
  */
-object ActiveRunStore {
-    private const val FILE = "active-run.ndjson"
+internal object ActiveRunStore : AppFeature {
+    private const val TAG = "ActiveRunStore"
+
     // First line marks an active run even before the first fix arrives. Presence
     // of the file is the real "run in progress" signal; this makes it explicit.
     private const val HEADER = "{\"run\":\"active\"}"
 
-    private val io = SerialWorker()
+    // [flush] gives up after this: it runs on the main thread (onTaskRemoved), where
+    // a disk hiccup stalling the io thread must not become an ANR.
+    private const val FLUSH_TIMEOUT_MS = 2_000L
 
-    @Volatile private var file: LogPath? = null
+    private class Store : AutoCloseable {
+        val io = SerialWorker()
 
-    fun init(ctx: PlatformContext) {
-        if (file == null) file = ctx.appFile(FILE)
+        @Volatile var file: AppPath? = null
+
+        override fun close() = io.close()
     }
 
-    /** Keep the sidecar at [path] instead of the app's files (the common tests). */
-    internal fun useFile(path: LogPath?) {
-        file = path
+    private val store by ProcessLocal { Store() }
+
+    private val Store.path: AppPath
+        get() = checkNotNull(file) { "ActiveRunStore used before AppRuntime.start" }
+
+    override fun start(ctx: PlatformContext) = open(ctx.appFile(AppFileNames.ACTIVE_RUN))
+
+    /** Keep the sidecar at [path] (the app's files: [start]; the common tests: their own). */
+    internal fun open(path: AppPath) {
+        store.file = path
     }
 
     /** Start a fresh run's sidecar: truncate and write the active marker. */
-    fun begin(ctx: PlatformContext) {
-        init(ctx)
-        begin()
+    fun begin() {
+        val s = store
+        val f = s.path
+        s.io.post {
+            runCatching { AppFiles.writeText(f, HEADER + "\n") }
+                .onFailure { PlatformLog.w(TAG, "could not start the run's sidecar", it) }
+        }
     }
 
-    /** [begin] at the file already chosen by [init] or [useFile]. */
-    internal fun begin() {
-        val f = file ?: return
-        io.post { runCatching { LogFiles.writeText(f, HEADER + "\n") } }
-    }
-
-    /** Append one accepted fix, called right after [RunSession.add] accepted [p].
-     *  A fix that opened a new recording segment there (the first fix after a
-     *  Pause/Resume, or after a long fix gap) is marked `"seg":true`, so a
-     *  recovered run breaks at exactly the live run's boundaries: a short pause's
-     *  walk is then neither distance nor moving time after a crash either. Off the
-     *  main thread; failures are swallowed so a disk hiccup never crashes the
-     *  location callback. */
-    fun append(p: GpsPoint) {
-        val f = file ?: return
-        val opensSegment = RunSession.isSegmentStart(p)
-        io.post {
+    /** Append one fix [RunSession.add] accepted. [segmentStart]: it opened a new
+     *  recording segment there (the first fix after a Pause/Resume, or after a long
+     *  fix gap; [RunSession.isSegmentStart]), marked `"seg":true` so a recovered run
+     *  breaks at exactly the live run's boundaries: a short pause's walk is then
+     *  neither distance nor moving time after a crash either. Off the main thread; a
+     *  failure is logged, never thrown, so a disk hiccup never crashes the location
+     *  callback. */
+    fun append(p: GpsPoint, segmentStart: Boolean) {
+        val s = store
+        val f = s.path
+        s.io.post {
             runCatching {
                 val line = buildJsonObject {
                     put("lat", p.lat)
                     put("lon", p.lon)
                     put("observed_at", p.observedAt)
                     put("accuracy_m", p.accuracyM)
-                    if (opensSegment) put("seg", true)
+                    if (segmentStart) put("seg", true)
                 }.toString() + "\n"
                 // Cut a torn final line (a kill mid-append left bytes after the last
                 // '\n') first, so this fix starts its own line instead of gluing onto
@@ -83,20 +96,14 @@ object ActiveRunStore {
                 // unparseable on the next recovery. The torn bytes were never a
                 // recoverable fix ([recover] skips them), so nothing is lost. One
                 // one-byte read per append when the tail is whole.
-                LogFiles.dropTornTail(f)
-                LogFiles.append(f, line)
-            }
+                AppFiles.dropTornTail(f)
+                AppFiles.append(f, line)
+            }.onFailure { PlatformLog.w(TAG, "could not append a fix to the run's sidecar", it) }
         }
     }
 
     /** True if an interrupted run's sidecar is on disk (never cleanly stopped). */
-    fun hasActiveRun(ctx: PlatformContext): Boolean {
-        init(ctx)
-        return hasActiveRun()
-    }
-
-    /** [hasActiveRun] at the file already chosen. */
-    internal fun hasActiveRun(): Boolean = file?.let(LogFiles::exists) == true
+    fun hasActiveRun(): Boolean = AppFiles.exists(store.path)
 
     /**
      * Read every recorded fix back, tolerating a torn/partial last line (a line
@@ -104,19 +111,14 @@ object ActiveRunStore {
      * with the indices of the fixes that opened a segment. Blocking file read:
      * call off the main thread.
      */
-    fun recover(ctx: PlatformContext): RecoveredTrack {
-        init(ctx)
-        return recover()
-    }
-
-    /** [recover] from the file already chosen. */
-    internal fun recover(): RecoveredTrack {
-        val f = file ?: return RecoveredTrack(emptyList(), emptyList())
-        if (!LogFiles.exists(f)) return RecoveredTrack(emptyList(), emptyList())
+    fun recover(): RecoveredTrack {
+        val f = store.path
+        if (!AppFiles.exists(f)) return RecoveredTrack(emptyList(), emptyList())
         val out = ArrayList<GpsPoint>()
         val starts = ArrayList<Int>()
+        var unreadable = 0
         runCatching {
-            LogFiles.forEachLine(f) { line ->
+            AppFiles.forEachLine(f) { line ->
                 val t = line.trim()
                 if (t.isEmpty() || t.startsWith("{\"run\"")) return@forEachLine
                 runCatching {
@@ -129,9 +131,10 @@ object ActiveRunStore {
                     )
                     if (o["seg"]?.jsonPrimitive?.booleanOrNull == true) starts.add(out.size)
                     out.add(p)
-                }
+                }.onFailure { unreadable++ }
             }
-        }
+        }.onFailure { PlatformLog.w(TAG, "could not read the run's sidecar; recovering ${out.size} fixes", it) }
+        if (unreadable > 0) PlatformLog.w(TAG, "skipped $unreadable unreadable sidecar lines")
         // Thin to the save cap so RunSession's restored track holds what a save would
         // send (this list still peaks at every recorded fix while reading).
         return thinForRecovery(out, segmentStarts = starts)
@@ -141,8 +144,9 @@ object ActiveRunStore {
      *  fire-and-forget on the io thread, fine for the DISCARD/abandon paths, where
      *  nothing was persisted and ordering vs another event doesn't matter. */
     fun clear() {
-        val f = file ?: return
-        io.post { runCatching { LogFiles.delete(f) } }
+        val s = store
+        val f = s.path
+        s.io.post { delete(f) }
     }
 
     /**
@@ -158,19 +162,24 @@ object ActiveRunStore {
      * the file after a direct delete.
      */
     fun clearSync() {
-        val f = file ?: return
-        runCatching { io.runAndWait { runCatching { LogFiles.delete(f) } } }
+        val s = store
+        val f = s.path
+        runCatching { s.io.runAndWait { delete(f) } }
+            .onFailure { PlatformLog.w(TAG, "the run's sidecar delete did not complete", it) }
+    }
+
+    private fun delete(f: AppPath) {
+        runCatching { AppFiles.delete(f) }.onFailure { PlatformLog.w(TAG, "could not delete the run's sidecar", it) }
     }
 
     /** Best-effort: block until queued writes have flushed (onTaskRemoved), so a
-     *  subsequent OS kill loses nothing already accepted. BOUNDED wait, onTaskRemoved
-     *  runs on the main thread, so an unbounded get() risks an ANR if a disk hiccup
-     *  stalls the io thread. 2 s is ample for the small queued appends; on timeout we
-     *  give up gracefully rather than block the main thread (at most the last few
-     *  fixes are unflushed, and the sidecar's already-written lines still allow
-     *  recovery). */
+     *  subsequent OS kill loses nothing already accepted. Bounded by
+     *  [FLUSH_TIMEOUT_MS]; on timeout it gives up rather than block the main thread
+     *  (at most the last few fixes are unflushed, and the sidecar's already-written
+     *  lines still allow recovery). */
     fun flush() {
-        runCatching { io.drain(timeoutMs = 2_000) }
+        runCatching { store.io.drain(timeoutMs = FLUSH_TIMEOUT_MS) }
+            .onFailure { PlatformLog.w(TAG, "the run's sidecar writes did not flush", it) }
     }
 
     /**
@@ -191,19 +200,4 @@ object ActiveRunStore {
         val thinned = if (kept.size == pts.size) pts else kept.map(pts::get)
         return RecoveredTrack(thinned, remapStarts(kept, starts))
     }
-}
-
-/** One background thread running tasks in the order they were posted (Android: a
- *  single-thread executor; iOS: a serial dispatch queue). */
-internal expect class SerialWorker() {
-    /** Queue [task] behind every earlier one. */
-    fun post(task: () -> Unit)
-
-    /** Queue [task] and block until it (and so every earlier task) has run; its
-     *  exception is rethrown. Never call it from a task. */
-    fun runAndWait(task: () -> Unit)
-
-    /** Block until every task queued so far has run; throws when that takes longer
-     *  than [timeoutMs]. */
-    fun drain(timeoutMs: Long)
 }

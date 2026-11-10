@@ -7,10 +7,9 @@
 use crate::app::evidence_views::why_from;
 use crate::app::format::monday_of;
 use crate::app::model::{LoggedActivity, profile_for_day};
-use crate::app::readiness::end_of_local_today_sec;
 use crate::app::view_ctx::ViewCtx;
 use crate::app::view_types::{ActivityResultView, EvidenceTagView, YouthActivityView};
-use crate::day::{is_undated, local_day};
+use crate::day::local_day;
 use crate::individualization;
 
 /// Longest lift session span counted toward a day's minutes.
@@ -56,10 +55,10 @@ pub(super) fn build_youth_activity(cx: &ViewCtx) -> Option<YouthActivityView> {
     let offset = model.today_utc_offset_sec;
     // Saturating: a corrupt log's SetToday near i64::MIN/MAX must not overflow.
     let monday = monday_of(today);
-    let end_of_today = end_of_local_today_sec(model)?;
+    let so_far = model.up_to_today();
     // The local day of a dated entry inside this week up to today, as an index 0..7.
     let week_day = |observed_at: i64| {
-        if is_undated(observed_at) || observed_at > end_of_today {
+        if !so_far.admits(observed_at) {
             return None;
         }
         let d = local_day(observed_at, offset).saturating_sub(monday);

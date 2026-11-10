@@ -59,11 +59,9 @@ class LiveUpdateStateMachineTest {
     fun tearDown() = clean()
 
     private fun clean() {
-        RestAlarm.cancel(app)
-        RestAlarm.resetProcessState()
+        TestClock.offsetMillis = 0L
+        resetRest(app)
         RunSession.reset()
-        AppClock.offsetMillis = 0L
-        AppSettings.restAlert.value = true
         ShadowAlarmManager.setCanScheduleExactAlarms(true)
         nm.cancelAll()
     }
@@ -114,7 +112,7 @@ class LiveUpdateStateMachineTest {
         val appNow = { AppClock.nowMillis() }
 
         fun observe() {
-            val c = shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID)
+            val c = shadowOf(nm).getNotification(AndroidIds.REST_COUNTDOWN_NOTIFICATION)
             if (c != null && c !== countdown) {
                 assertFalse("a countdown re-posted after the user swiped it away", dismissed && ownsCurrent)
                 assertTrue("a countdown posted without the notification permission", canNotify())
@@ -125,20 +123,20 @@ class LiveUpdateStateMachineTest {
                 assertTrue("chip ${chipLeft} ms left, rest ${r.end - appNow()} ms", abs(chipLeft - (r.end - appNow())) < 2_000)
             }
             countdown = c
-            val d = shadowOf(nm).getNotification(RestAlarm.DONE_NOTIF_ID)
+            val d = shadowOf(nm).getNotification(AndroidIds.REST_DONE_NOTIFICATION)
             if (d != null && d !== done) doneAt = appNow()
             done = d
         }
 
         /** The system takes down a notification whose timeout ran out. */
         fun expire() {
-            countdown?.let { if (appNow() >= countdownAt + it.timeoutAfter) nm.cancel(RestAlarm.COUNTDOWN_NOTIF_ID) }
-            done?.let { if (it.timeoutAfter > 0 && appNow() >= doneAt + it.timeoutAfter) nm.cancel(RestAlarm.DONE_NOTIF_ID) }
+            countdown?.let { if (appNow() >= countdownAt + it.timeoutAfter) nm.cancel(AndroidIds.REST_COUNTDOWN_NOTIFICATION) }
+            done?.let { if (it.timeoutAfter > 0 && appNow() >= doneAt + it.timeoutAfter) nm.cancel(AndroidIds.REST_DONE_NOTIFICATION) }
             observe()
         }
 
         fun restAlarms() = shadowOf(am).scheduledAlarms.filter { a ->
-            a.operation?.let { shadowOf(it).savedIntent.action } == RestAlarm.ACTION_REST_END
+            a.operation?.let { shadowOf(it).savedIntent.action } == RestAlarmPlatform.ACTION_REST_END
         }
 
         fun deliverDue(force: Boolean) {
@@ -148,7 +146,7 @@ class LiveUpdateStateMachineTest {
             if (!force && a.windowLengthMs != ShadowAlarmManager.WINDOW_EXACT && rng.nextBoolean()) return
             val intent = Intent(shadowOf(a.operation).savedIntent)
             am.cancel(a.operation!!)
-            val start = intent.getLongExtra(RestAlarm.EXTRA_REST_START, -1L)
+            val start = intent.getLongExtra(RestAlarmPlatform.EXTRA_REST_START, -1L)
             RestEndReceiver().onReceive(app, intent)
             if (current?.start == start) {
                 ended = current
@@ -159,7 +157,7 @@ class LiveUpdateStateMachineTest {
         }
 
         fun advance(ms: Long) {
-            AppClock.offsetMillis += ms
+            TestClock.offsetMillis += ms
             ShadowSystemClock.advanceBy(Duration.ofMillis(ms))
             expire()
             deliverDue(force = false)
@@ -177,7 +175,7 @@ class LiveUpdateStateMachineTest {
                 assertTrue("countdown past the rest end", appNow() < r.end)
                 assertFalse("countdown while the loop shows the rest", inApp)
                 assertEquals(app.getString(R.string.log_rest_notif_title, r.exercise), c.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
-                assertEquals("the countdown's dismissal names its rest", r.start, shadowOf(c.deleteIntent).savedIntent.getLongExtra(RestAlarm.EXTRA_REST_START, -1))
+                assertEquals("the countdown's dismissal names its rest", r.start, shadowOf(c.deleteIntent).savedIntent.getLongExtra(RestAlarmPlatform.EXTRA_REST_START, -1))
                 assertTrue(c.extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN))
                 assertEquals(OpenDest.LogSet, openDestOf(shadowOf(c.contentIntent).savedIntent))
                 assertTrue(nm.getNotificationChannel(c.channelId).importance > NotificationManager.IMPORTANCE_MIN)
@@ -195,7 +193,7 @@ class LiveUpdateStateMachineTest {
             val alarms = restAlarms()
             if (current != null) {
                 assertEquals("rest-end alarms", 1, alarms.size)
-                assertEquals(current!!.start, shadowOf(alarms.single().operation).savedIntent.getLongExtra(RestAlarm.EXTRA_REST_START, -1))
+                assertEquals(current!!.start, shadowOf(alarms.single().operation).savedIntent.getLongExtra(RestAlarmPlatform.EXTRA_REST_START, -1))
             } else {
                 assertTrue("a rest-end alarm with no rest running", alarms.isEmpty())
             }
@@ -205,7 +203,7 @@ class LiveUpdateStateMachineTest {
             }
         }
 
-        AppClock.offsetMillis = rng.nextLong(-DAY, DAY)
+        TestClock.offsetMillis = rng.nextLong(-DAY, DAY)
         check("start")
         for (i in 0 until steps) {
             val w = rng.nextInt(100)
@@ -237,7 +235,7 @@ class LiveUpdateStateMachineTest {
                     if (c == null) {
                         "swipe (none)"
                     } else {
-                        nm.cancel(RestAlarm.COUNTDOWN_NOTIF_ID)
+                        nm.cancel(AndroidIds.REST_COUNTDOWN_NOTIFICATION)
                         RestDismissReceiver().onReceive(app, Intent(shadowOf(c.deleteIntent).savedIntent))
                         if (ownsCurrent) dismissed = true
                         // Half the time the loop then opens and closes again, the path that would re-post it.
@@ -252,14 +250,15 @@ class LiveUpdateStateMachineTest {
                 }
                 w < 80 -> {
                     // The rest-done alert's tap opens the set editor (auto-cancel); the loop shows the rest.
-                    if (done != null) nm.cancel(RestAlarm.DONE_NOTIF_ID)
+                    if (done != null) nm.cancel(AndroidIds.REST_DONE_NOTIFICATION)
                     inApp = true
                     RestAlarm.setInAppVisible(app, true)
                     "open set editor"
                 }
                 w < 86 -> { RestAlarm.cancel(app); current = null; ended = null; ownsCurrent = false; "undo / finish (cancel)" }
                 w < 91 -> {
-                    RestAlarm.resetProcessState()
+                    AppRuntime.resetForTest(clock = TestClock)
+                    AppRuntime.start(app)
                     inApp = false
                     ownsCurrent = false
                     "process death"
@@ -275,7 +274,7 @@ class LiveUpdateStateMachineTest {
                     RestAlarm.recheckExactAlarms(app)
                     "exact alarms=$exact"
                 }
-                else -> { val on = rng.nextBoolean(); AppSettings.restAlert.value = on; "rest alert=$on" }
+                else -> { val on = rng.nextBoolean(); AppSettings.setRestAlert(app, on); "rest alert=$on" }
             }
             note("#$i $op")
             check(op)
@@ -314,7 +313,7 @@ class LiveUpdateStateMachineTest {
         var wasLive = false
         var liveSince = 0L
 
-        fun notif(): Notification? = shadowOf(nm).getNotification(RunTrackingService.NOTIF_ID)
+        fun notif(): Notification? = shadowOf(nm).getNotification(AndroidIds.RUN_NOTIFICATION)
         fun idle() = shadowOf(Looper.getMainLooper()).idle()
 
         fun send(action: String): ServiceController<RunTrackingService> {
@@ -364,7 +363,7 @@ class LiveUpdateStateMachineTest {
             assertPromotableLiveUpdate(n)
             runNotifsSeen++
             if (recording && paused) pausedSeen++
-            assertEquals("title", app.getString(trackingNotifTitleRes(recording, armed, paused)), n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+            assertEquals("title", app.resources.getString(runSurfacePhase(recording, armed, paused, signalLost = false).titleRes), n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
             val chip = n.shortCriticalText?.toString()
             val sinceFix = SystemClock.elapsedRealtime() - RunSession.lastFixElapsedMs.value
             val lastFix = RunSession.lastFixElapsedMs.value
@@ -382,7 +381,7 @@ class LiveUpdateStateMachineTest {
                     assertFalse("no 'No GPS' after $quiet ms without a fix", op.startsWith("no fix") && lastFix > 0 && quiet > SIGNAL_LOSS_MS + 1_000)
                 }
             } else {
-                assertEquals("chip", trackingChipRes(recording, armed, paused, signalLost = false)?.let(app::getString), chip)
+                assertEquals("chip", runSurfacePhase(recording, armed, paused, signalLost = false).chipRes?.let { app.resources.getString(it) }, chip)
             }
             val labels = n.actions.orEmpty().map { it.title.toString() }
             val expected = listOfNotNull(
@@ -430,7 +429,7 @@ class LiveUpdateStateMachineTest {
                     if (n == null) {
                         "dismiss (none)"
                     } else {
-                        nm.cancel(RunTrackingService.NOTIF_ID)
+                        nm.cancel(AndroidIds.RUN_NOTIFICATION)
                         val c = svc
                         if (c != null) {
                             c.withIntent(Intent(shadowOf(n.deleteIntent).savedIntent)).startCommand(0, ++startId)

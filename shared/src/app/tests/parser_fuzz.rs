@@ -392,7 +392,7 @@ fn payload(out: &FitOutcome) -> serde_json::Value {
     match out {
         FitOutcome::Track(t) => serde_json::to_value(t).expect("a track serializes"),
         FitOutcome::Fail(e) => serde_json::json!({
-            "error": {"kind": e.kind(), "context": e.context(), "message": ""}
+            "error": {"kind": crate::ffi::ErrorKind::from(e), "context": e.context(), "message": ""}
         }),
     }
 }
@@ -565,7 +565,9 @@ fn every_seed_parses_to_its_known_outcome() {
             let out = check_fit(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
             let kind = match &out {
                 FitOutcome::Track(t) => format!("track {} segs", t.segments.len()),
-                FitOutcome::Fail(e) => format!("{} {}", e.kind(), e.context()),
+                FitOutcome::Fail(e) => {
+                    format!("{} {}", crate::ffi::ErrorKind::from(e), e.context())
+                }
             };
             (name, kind)
         })

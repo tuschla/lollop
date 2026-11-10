@@ -1099,7 +1099,7 @@ fn stacked_deloads_take_the_single_deepest_cut_not_compounded() {
         }],
         ..Default::default()
     };
-    let deload = Recommended::new(
+    let deload = AdjustmentKind::WeeklyDeload(DeloadTrigger::MrvSigns).call(
         Adjustment::Deload {
             volume_reduction_pct: 50.0,
             load_reduction_pct: 10.0,

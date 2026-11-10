@@ -20,6 +20,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- The App Group shared with the app (Shared/SharedContainer.swift),
+	     LOLLOP_APP_GROUP in iosApp/project.yml. -->
+	<key>LollopAppGroup</key>
+	<string>$(LOLLOP_APP_GROUP)</string>
 	<!-- A WidgetKit extension: the widget, the Live Activities and the control
 	     (LollopWidgetsBundle.swift, @main); no principal class. -->
 	<key>NSExtension</key>

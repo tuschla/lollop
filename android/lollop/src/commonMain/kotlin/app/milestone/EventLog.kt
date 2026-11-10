@@ -36,10 +36,9 @@ internal class LogCompaction(
 /**
  * Reads, repairs and compacts the persisted event log (one event's serde wire JSON
  * per line). The compaction rules live in the core (`shared/src/log.rs`, reached
- * through [DurableCore.compaction] of the `core` argument, the platform's engine
- * unless a caller names another). Without a working core the log is read as it
+ * through [DurableCore.compaction] of the `core` argument). Without a working core the log is read as it
  * is, minus torn lines, so the raw-log export still works. File access goes
- * through [LogFiles].
+ * through [AppFiles].
  */
 object EventLog {
     /** Event variants that serialize as a BARE JSON string (Rust unit variants). A
@@ -63,7 +62,7 @@ object EventLog {
 
     /** [lines] minus those [core]'s compaction drops (replay-equivalent, order
      *  kept); unchanged when the core can't answer. A line that is not JSON is kept. */
-    fun compact(lines: List<String>, core: DurableCore = platformCoreEngine()): List<String> {
+    fun compact(lines: List<String>, core: DurableCore): List<String> {
         val dropped = core.compaction(lines)?.dropped?.toHashSet() ?: return lines
         return lines.filterIndexed { i, _ -> i !in dropped }
     }
@@ -81,29 +80,29 @@ object EventLog {
      * Mutates the log directory, so it runs only at boot, before anything appends.
      * Anything reading the log while the core may be appending uses [read].
      */
-    fun load(file: LogPath, core: DurableCore = platformCoreEngine()): RestoredLog {
+    fun load(file: AppPath, core: DurableCore): RestoredLog {
         // A crash between the two renames of an import swap can leave the live log
         // set aside as .bak with the destination missing: put it back (a copy when
         // the rename fails) before deciding the install is fresh, and delete .bak
         // only once the log is in place. Leftover .tmp/.import files are stale the
         // moment no operation is in flight.
-        val bak = LogFiles.sibling(file, ".bak")
-        if (!LogFiles.exists(file) && LogFiles.exists(bak) && !LogFiles.rename(bak, file)) LogFiles.copy(bak, file)
-        LogFiles.delete(LogFiles.sibling(file, ".tmp"))
-        LogFiles.delete(LogFiles.sibling(file, ".import"))
-        if (LogFiles.exists(file)) LogFiles.delete(bak)
-        if (!LogFiles.exists(file)) return RestoredLog(emptyList(), freshInstall = true)
+        val bak = AppFiles.sibling(file, AppFileNames.BAK_SUFFIX)
+        if (!AppFiles.exists(file) && AppFiles.exists(bak) && !AppFiles.rename(bak, file)) AppFiles.copy(bak, file)
+        AppFiles.delete(AppFiles.sibling(file, AppFileNames.TMP_SUFFIX))
+        AppFiles.delete(AppFiles.sibling(file, AppFileNames.IMPORT_SUFFIX))
+        if (AppFiles.exists(file)) AppFiles.delete(bak)
+        if (!AppFiles.exists(file)) return RestoredLog(emptyList(), freshInstall = true)
         val parsed = parse(file, core)
         val kept = parsed.restored.lines
         // A launch that shaves a line or two replays the result in memory and leaves
         // the disk alone; a torn tail always forces the rewrite.
-        val torn = parsed.unparseable || !LogFiles.endsWithNewline(file)
+        val torn = parsed.unparseable || !AppFiles.endsWithNewline(file)
         if (torn || compactionWorthRewriting(parsed.total - kept.size, parsed.total)) {
-            val tmp = LogFiles.sibling(file, ".tmp")
+            val tmp = AppFiles.sibling(file, AppFileNames.TMP_SUFFIX)
             runCatching {
-                LogFiles.writeLinesSynced(tmp, kept.ifEmpty { listOf("") })
-                if (!LogFiles.rename(tmp, file)) LogFiles.delete(tmp)
-            }
+                AppFiles.writeLinesSynced(tmp, kept.ifEmpty { listOf("") })
+                if (!AppFiles.rename(tmp, file)) AppFiles.delete(tmp)
+            }.onFailure { PlatformLog.w("EventLog", "compacted log not rewritten, the old file stays", it) }
         }
         return parsed.restored
     }
@@ -126,8 +125,8 @@ object EventLog {
      * half-written tail line is torn and left out of the result). The data export
      * and the mid-session panic-reset replay read through this.
      */
-    fun read(file: LogPath, core: DurableCore = platformCoreEngine()): RestoredLog {
-        if (!LogFiles.exists(file)) return RestoredLog(emptyList(), freshInstall = true)
+    fun read(file: AppPath, core: DurableCore): RestoredLog {
+        if (!AppFiles.exists(file)) return RestoredLog(emptyList(), freshInstall = true)
         return parse(file, core).restored
     }
 
@@ -135,9 +134,9 @@ object EventLog {
      *  non-blank lines on disk and whether any of them was torn. */
     private class Parsed(val restored: RestoredLog, val total: Int, val unparseable: Boolean)
 
-    private fun parse(file: LogPath, core: DurableCore): Parsed {
+    private fun parse(file: AppPath, core: DurableCore): Parsed {
         val lines = ArrayList<String>()
-        LogFiles.forEachLine(file) { if (it.isNotBlank()) lines += it }
+        AppFiles.forEachLine(file) { if (it.isNotBlank()) lines += it }
         val verdict = core.compaction(lines)
             ?: LogCompaction(torn = lines.indices.filter { runCatching { coreJson.parseToJsonElement(lines[it]) }.isFailure })
         val skip = BooleanArray(lines.size)

@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppFileNames
 import app.milestone.OpenDest
 import app.milestone.openIntent
 import app.milestone.R
@@ -71,8 +72,7 @@ class RunFinishEffortTest {
         // drop every tracker singleton so no run state reaches the next test.
         QaHarness.teardown()
         RunSession.reset()
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-        AppSettings.showRouteMaps.value = true
+        QaHarness.freshProcess()
     }
 
     /**
@@ -87,11 +87,11 @@ class RunFinishEffortTest {
         rule.mainClock.autoAdvance = false
         try {
             rule.onNodeWithText(str(R.string.track_btn_save_run)).performClick()
-            RunSession.tracking.value = false
+            RunSession.markStopped()
         } finally {
             rule.mainClock.autoAdvance = true
         }
-        val log = File(ctx.filesDir, "event-log.ndjson")
+        val log = File(ctx.filesDir, AppFileNames.EVENT_LOG)
         rule.waitUntil(15_000) {
             // The semantics fetch idles the main looper, where the save's serial
             // consumer turn runs; a bare file check would never let it progress.
@@ -143,7 +143,7 @@ class RunFinishEffortTest {
     fun followedPlan_showsTargetsAndCurrentStep_andSkipAdvances() {
         AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Km)
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
-        RunSession.plannedRun.value = PrescriptionView(
+        RunSession.followPlan(PrescriptionView(
             exercise = "Intervals",
             summary = "6 × 800 m · 400 m jog between",
             run_head = "6 × 800 m",
@@ -158,7 +158,7 @@ class RunFinishEffortTest {
                 effort_detail = "8–9 of 10",
             ),
             run_structure = RunStructureView(reps = 6, rep_m = 800, recovery_m = 400),
-        )
+        ))
         QaHarness.seedRecordingRun()
         RunSession.startSteps(android.os.SystemClock.elapsedRealtime())
         lastScenario = launchMain(openIntent(ctx, OpenDest.Track))

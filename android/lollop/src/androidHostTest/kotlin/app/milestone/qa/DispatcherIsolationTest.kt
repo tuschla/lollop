@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.Event
 import app.milestone.EventDispatcher
+import app.milestone.TestSink
 import kotlinx.coroutines.awaitCancellation
 import org.junit.After
 import org.junit.Assert.assertTrue
@@ -45,7 +46,7 @@ class DispatcherIsolationTest {
     @Test
     fun aSendLeftInFlightDoesNotStallTheNextBoot() {
         var inFlight = false
-        EventDispatcher.sender = { _ ->
+        TestSink.sender = { _ ->
             inFlight = true
             awaitCancellation()
         }

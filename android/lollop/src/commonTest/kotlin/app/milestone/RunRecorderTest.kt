@@ -18,22 +18,21 @@ import kotlin.test.assertTrue
  */
 class RunRecorderTest {
     private val dir = newTempDir()
-    private val sidecar = LogFiles.sibling(dir, "/active-run.ndjson")
+    private val sidecar = AppFiles.sibling(dir, "/active-run.ndjson")
     private val host = ScriptedHost()
     private val recorder = RunRecorder(host)
 
     @BeforeTest
     fun setUp() {
         RunSession.reset()
-        ActiveRunStore.useFile(sidecar)
+        ActiveRunStore.open(sidecar)
     }
 
     @AfterTest
     fun tearDown() {
         ActiveRunStore.flush()
-        ActiveRunStore.useFile(null)
-        LogFiles.delete(sidecar)
-        LogFiles.delete(dir)
+        AppFiles.delete(sidecar)
+        AppFiles.delete(dir)
         RunSession.reset()
     }
 
@@ -169,7 +168,7 @@ class RunRecorderTest {
     @Test
     fun aFailedStartUnwinds() {
         host.grant = false
-        RunSession.armed.value = true // the screen's optimistic flag
+        RunRecorder.armRequested() // the screen's tap
         recorder.start(record = false, arming = true)
         assertTrue(RunSession.locationFailed.value)
         assertFalse(RunSession.armed.value)

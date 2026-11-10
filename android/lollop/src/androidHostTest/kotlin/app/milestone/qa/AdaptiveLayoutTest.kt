@@ -40,7 +40,6 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.window.core.layout.WindowSizeClass
 import app.milestone.AppSettings
 import app.milestone.ContentMaxWidth
-import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.GpsPoint
@@ -96,8 +95,7 @@ class AdaptiveLayoutTest {
         QaHarness.teardown()
         RunSession.reset()
         QaHarness.clearSidecar(ctx)
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-        AppSettings.showRouteMaps.value = true
+        QaHarness.freshProcess()
     }
 
     private companion object {
@@ -839,7 +837,7 @@ class AdaptiveLayoutTest {
         rule.waitForNode(hasText(str(R.string.track_finish_title)), 15_000)
         rule.onNode(hasText(str(R.string.track_btn_save_run)) and hasClickAction()).performClick()
         // The service's stop confirmation (no service runs under Robolectric).
-        RunSession.tracking.value = false
+        RunSession.markStopped()
         // The save publishes the run, then resets the session: the map's track
         // collector sees the emptied track.
         rule.waitForState { EventDispatcher.model.value?.runs?.size == 1 && !RunSession.saving.value && RunSession.points.value.isEmpty() }

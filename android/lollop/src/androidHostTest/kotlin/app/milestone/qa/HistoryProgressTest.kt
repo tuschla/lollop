@@ -18,6 +18,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppFileNames
 import app.milestone.DistanceUnitOverride
 import app.milestone.Event
 import app.milestone.R
@@ -55,8 +56,8 @@ class HistoryProgressTest {
 
     @After
     fun tearDown() {
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
         QaHarness.teardown()
+        QaHarness.freshProcess()
     }
 
     private fun violations(): List<UxInvariants.Violation> =
@@ -126,7 +127,7 @@ class HistoryProgressTest {
         // The card face reads the rating back from the core.
         rule.assertTextCountEventually(str(R.string.history_effort_value, 7), 1)
         // The rating is one durable in-place edit, the wire form the core replays.
-        val log = File(ctx.filesDir, "event-log.ndjson").readText()
+        val log = File(ctx.filesDir, AppFileNames.EVENT_LOG).readText()
         assertTrue(log, log.contains("\"AmendRunMeta\""))
         assertTrue(log, log.contains("\"session_rpe\":7"))
         // Rated, the Effort row states the rating with its CR-10 word.

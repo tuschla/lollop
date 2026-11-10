@@ -1,28 +1,83 @@
 //! Evidence presentation: `Recommended<T>` → `AdjustmentView`, the grade
 //! definitions, claim statements, the "why" sheet, and grade notes.
 
-use crate::app::view_types::{AdjustmentView, EvidenceTagView, GradeDefView, WhyView};
+use crate::app::view_types::{
+    AdjustmentView, EvidenceTagView, GradeDefView, PrescriptionView, WhyView,
+};
 use crate::autoreg;
 use crate::evidence::{ClaimId, EvidenceGrade, claims};
-use crate::schema::{Adjustment, ReadinessInput, ReadinessSignal, Recommended, SafetyTier};
+use crate::schema::{
+    Adjustment, AdjustmentCall, AdjustmentKind, ReadinessInput, ReadinessSignal, Recommended,
+};
+
+/// The facts a call's wording depends on beyond the call itself. The default
+/// renders a call on any day other than today.
+#[derive(Clone, Copy, Default)]
+pub(in crate::app) struct CallCtx<'a> {
+    /// The HRV hold rests on one low morning ([`hrv_single_morning`]).
+    pub(in crate::app) hrv_single_morning: bool,
+    /// The wellness baseline is still collecting: only the absolute floor
+    /// fires a check-in hold.
+    pub(in crate::app) wellness_collecting: bool,
+    /// A lift's work set is logged in today's session: the first-set clause
+    /// is spent.
+    pub(in crate::app) first_set_logged: bool,
+    /// The session the call applies to (a tendon modify call names the lifts
+    /// it eases in it).
+    pub(in crate::app) items: &'a [PrescriptionView],
+}
+
+/// Whether any lift in `items` has work logged.
+pub(in crate::app) fn lift_work_logged(items: &[PrescriptionView]) -> bool {
+    items.iter().any(|it| !it.is_run() && it.has_work())
+}
 
 /// Flatten one evidence-wrapped adjustment into a shell-facing row: the call,
 /// the exercise an item-scoped call names, its safety-ladder tier (for the
 /// headline ranking) and, for a progression hold, a why? basis that states the
 /// rule actually applied before the claim behind it.
-pub(super) fn to_view(r: &Recommended<Adjustment>) -> AdjustmentView {
-    let mut v = to_view_with(describe_rec(r), r);
-    if let Adjustment::ForItem {
-        exercise,
-        adjustment,
-    } = &r.value
-    {
+pub(super) fn to_view(r: &AdjustmentCall) -> AdjustmentView {
+    to_view_in(r, &CallCtx::default())
+}
+
+/// [`to_view`] worded against `ctx`.
+pub(in crate::app) fn to_view_in(r: &AdjustmentCall, ctx: &CallCtx) -> AdjustmentView {
+    call_view(describe_rec(r, ctx), r)
+}
+
+/// One row per call worded against `ctx`, each with the call it renders.
+/// Several lift-holding readiness calls firing together apply once (never
+/// stacked), so they read as one row naming every signal: the first hold's
+/// row, the others merged into it.
+pub(in crate::app) fn call_rows<'r>(
+    calls: &'r [AdjustmentCall],
+    ctx: &CallCtx,
+) -> Vec<(&'r AdjustmentCall, AdjustmentView)> {
+    let holds: Vec<(&AdjustmentCall, (&'static str, bool, bool))> = calls
+        .iter()
+        .filter_map(|r| lift_hold_reason(r, ctx).map(|h| (r, h)))
+        .collect();
+    let merged = holds.len() > 1;
+    calls
+        .iter()
+        .filter_map(|r| match holds.first() {
+            Some((first, _)) if merged && std::ptr::eq(*first, r) => {
+                let reasons: Vec<_> = holds.iter().map(|(_, h)| *h).collect();
+                Some((r, call_view(hold_summary(&reasons, ctx), r)))
+            }
+            _ if merged && holds.iter().any(|(h, _)| std::ptr::eq(*h, r)) => None,
+            _ => Some((r, to_view_in(r, ctx))),
+        })
+        .collect()
+}
+
+fn call_view(summary: String, r: &AdjustmentCall) -> AdjustmentView {
+    let mut v = to_view_with(summary, r);
+    if let Adjustment::ForItem { exercise, .. } = &r.value {
         v.exercise = Some(exercise.clone());
         // autoreg-013: a later set that failed ends the exercise in the loop.
-        v.suggests_end_exercise = matches!(**adjustment, Adjustment::DowngradeSession)
-            && r.claim_id() == claims::AUTOREG_RIR_001;
+        v.suggests_end_exercise = r.kind() == AdjustmentKind::FailedSet;
     }
-    v.tier = adjustment_tier(r);
     if let Some(applied) = applied_rule(r) {
         v.why.basis = format!("{applied} {}", v.why.basis);
     }
@@ -31,82 +86,30 @@ pub(super) fn to_view(r: &Recommended<Adjustment>) -> AdjustmentView {
 
 /// The plan change a hold-type call made today, in the words the plan shows,
 /// so the why? panel opens on the rule that was applied.
-fn applied_rule(r: &Recommended<Adjustment>) -> Option<&'static str> {
-    match (&r.value, r.claim_id()) {
-        (
-            Adjustment::CapTopEnd {
-                trigger: ReadinessSignal::Soreness,
-            },
-            _,
-        ) => Some(
+fn applied_rule(r: &AdjustmentCall) -> Option<&'static str> {
+    match r.kind() {
+        AdjustmentKind::Soreness => Some(
             "Applied today: no lift goes heavier than your best for the same reps, every lift stops 1 rep earlier, and runs stay as planned.",
         ),
-        (Adjustment::CapTopEnd { .. }, _) | (Adjustment::DowngradeSession, claims::HRV_001) => {
-            Some(
-                "Applied today: no lift goes heavier than your best for the same reps, every lift stops 1 rep earlier, and runs stay easy (zones 1–2).",
-            )
-        }
-        (Adjustment::DowngradeSession, claims::AUTOREG_VL_001) => Some(
+        AdjustmentKind::HrvHold
+        | AdjustmentKind::WellnessHold
+        | AdjustmentKind::RhrHold
+        | AdjustmentKind::HrvLower => Some(
+            "Applied today: no lift goes heavier than your best for the same reps, every lift stops 1 rep earlier, and runs stay easy (zones 1–2).",
+        ),
+        AdjustmentKind::VelocityLoss => Some(
             "Applied today: no lift goes heavier than your best for the same reps and every lift stops 1 rep earlier; runs stay as planned.",
         ),
-        (Adjustment::DowngradeSession, claims::RUN_DECOUPLE_001) => {
+        AdjustmentKind::Decoupling => {
             Some("Applied today: runs stay easy (zones 1–2); lifts as planned.")
         }
         _ => None,
     }
 }
 
-/// Claims behind a pain response (the File 08 pain ladder).
-pub(super) fn is_pain_claim(c: ClaimId) -> bool {
-    matches!(
-        c,
-        claims::SAFE_PAIN_001 | claims::SAFE_PAIN_STRUCT_001 | claims::SAFE_TENDON_001
-    )
-}
-
-/// Claims behind an illness response (neck check, return-to-training, head cold).
-pub(super) fn is_illness_claim(c: ClaimId) -> bool {
-    matches!(
-        c,
-        claims::ILLNESS_NECK_001 | claims::ILLNESS_RTT_001 | claims::ILLNESS_COLD_RUN_001
-    )
-}
-
-/// The File 06 §5 ladder tier a recommendation belongs to, for ranking the
-/// Today headline: the same ladder `autoreg::resolve_safety_in` raises, keyed
-/// by the rule that emitted the call. `None` for calls off the ladder (e.g. a
-/// load increase).
-pub(super) fn adjustment_tier(r: &Recommended<Adjustment>) -> Option<SafetyTier> {
-    let tier = match (r.value.base(), r.claim_id()) {
-        (Adjustment::Defer { .. }, _) => SafetyTier::MedicalReferral,
-        (_, c) if is_pain_claim(c) => SafetyTier::Pain,
-        (_, c) if is_illness_claim(c) || c == claims::RETURN_HOLD_001 => SafetyTier::Illness,
-        (Adjustment::RestDay, claims::AUTOREG_RHR_NOISE_001) => SafetyTier::Illness,
-        (Adjustment::IncreaseLoadPct(_), _) => return None,
-        (Adjustment::DowngradeSession, claims::WELLNESS_001) => SafetyTier::SubjectiveMultiDay,
-        (Adjustment::DowngradeSession, claims::HRV_001) => SafetyTier::HrvTrend,
-        (Adjustment::CapTopEnd { trigger }, _) if *trigger == ReadinessSignal::HrvLnRmssd => {
-            SafetyTier::HrvTrend
-        }
-        (Adjustment::CapTopEnd { .. }, _) => SafetyTier::SingleDayMarker,
-        (_, claims::AUTOREG_RHR_NOISE_001 | claims::AUTOREG_RHR_DOWN_001) => {
-            SafetyTier::SingleDayMarker
-        }
-        (
-            Adjustment::ReduceLoadPct(_)
-            | Adjustment::Deload { .. }
-            | Adjustment::CapRpe(_)
-            | Adjustment::DowngradeSession,
-            _,
-        ) => SafetyTier::ObjectivePerformance,
-        _ => return None,
-    };
-    Some(tier)
-}
-
 /// The "first set decides the rest" sentence a progression hold's call ends
 /// on; dropped once a work set is logged today.
-pub(super) const FIRST_SET_CLAUSE: &str =
+const FIRST_SET_CLAUSE: &str =
     " Log your first work set: if it feels as expected, the rest of the session stays as planned.";
 
 /// "1 rep" / "2 reps".
@@ -150,13 +153,6 @@ pub(super) fn return_check_headline() -> String {
 /// wording the call and its plan item share.
 pub(super) const RETURN_CHECK_STOP: &str = "Stop and see a doctor if you get chest pain, breathlessness, dizziness, a racing or pounding heartbeat, unusual tiredness, muscle or joint pain, or the work feels harder than usual.";
 
-/// The HRV hold's reason: it fires on the 7-day mean.
-const HRV_WEEK: &str = "HRV has been below your normal range this week";
-/// The same hold when only the latest reading is suppressed (the HRV
-/// channel's streak is 1): one low morning pulled the 7-day mean down. That
-/// morning may be an earlier one, so the reason names no day.
-const HRV_MORNING: &str = "HRV was below your normal range on your latest reading";
-
 /// Whether the HRV hold rests on one morning alone: the latest HRV input is
 /// below the SWC band and its suppressed-day streak is 1.
 pub(super) fn hrv_single_morning(inputs: &[ReadinessInput]) -> bool {
@@ -167,29 +163,6 @@ pub(super) fn hrv_single_morning(inputs: &[ReadinessInput]) -> bool {
         .is_some_and(|i| autoreg::hrv_below_swc(i.value) && i.streak == 1)
 }
 
-/// Name the latest reading rather than "this week" on an HRV hold row when
-/// the trend rests on one low morning ([`hrv_single_morning`]).
-pub(super) fn hrv_morning_wording(v: &mut AdjustmentView) {
-    if v.summary.contains(HRV_WEEK) {
-        v.summary = v.summary.replace(HRV_WEEK, HRV_MORNING);
-    }
-}
-
-/// The check-in hold's reason against a known personal normal.
-const CHECKIN_BELOW_NORMAL: &str = "check-in is well below your normal";
-/// The same hold before the wellness baseline exists: only the absolute floor
-/// fires it, so it names the reading, not a normal not yet known. The reading
-/// may be yesterday's (still in force), so it names no day.
-const CHECKIN_VERY_LOW: &str = "latest check-in is very low";
-
-/// Say "very low" rather than "below your normal" on a check-in hold row
-/// while the wellness baseline is still collecting.
-pub(super) fn checkin_floor_wording(v: &mut AdjustmentView) {
-    if v.summary.contains(CHECKIN_BELOW_NORMAL) {
-        v.summary = v.summary.replace(CHECKIN_BELOW_NORMAL, CHECKIN_VERY_LOW);
-    }
-}
-
 /// What a lift-holding readiness call says about the lifts.
 const HOLD_LIFTS: &str = "lifts add no weight and stop 1 rep earlier";
 
@@ -197,26 +170,39 @@ const HOLD_LIFTS: &str = "lifts add no weight and stop 1 rep earlier";
 /// the signal that fired as a sentence opener, whether runs go easy, and
 /// whether the first-set clause follows. A check-in signal stays in force for
 /// its recency window after the day it was given, so no opener says "today".
-fn lift_hold_reason(r: &Recommended<Adjustment>) -> Option<(&'static str, bool, bool)> {
-    match (&r.value, r.claim_id()) {
-        (Adjustment::CapTopEnd { trigger }, _) => Some(match trigger {
-            ReadinessSignal::HrvLnRmssd => (HRV_WEEK, true, true),
-            ReadinessSignal::RestingHr => ("Resting HR up 2 mornings in a row", true, true),
-            ReadinessSignal::Soreness => ("You reported being very sore", false, true),
-            _ => ("Your check-in is well below your normal", true, true),
-        }),
-        (Adjustment::DowngradeSession, claims::HRV_001) => Some((
+fn lift_hold_reason(r: &AdjustmentCall, ctx: &CallCtx) -> Option<(&'static str, bool, bool)> {
+    Some(match r.kind() {
+        // The hold fires on the 7-day mean; when only the latest reading is
+        // suppressed (the HRV channel's streak is 1), one low morning pulled
+        // the mean down. That morning may be an earlier one, so the reason
+        // names no day.
+        AdjustmentKind::HrvHold if ctx.hrv_single_morning => (
+            "HRV was below your normal range on your latest reading",
+            true,
+            true,
+        ),
+        AdjustmentKind::HrvHold => ("HRV has been below your normal range this week", true, true),
+        AdjustmentKind::RhrHold => ("Resting HR up 2 mornings in a row", true, true),
+        AdjustmentKind::Soreness => ("You reported being very sore", false, true),
+        // Before the wellness baseline exists only the absolute floor fires
+        // the hold, so it names the reading, not a normal not yet known. The
+        // reading may be yesterday's (still in force), so it names no day.
+        AdjustmentKind::WellnessHold if ctx.wellness_collecting => {
+            ("Your latest check-in is very low", true, true)
+        }
+        AdjustmentKind::WellnessHold => ("Your check-in is well below your normal", true, true),
+        AdjustmentKind::HrvLower => (
             "HRV has dropped below your normal range and is trending down",
             true,
             false,
-        )),
-        _ => None,
-    }
+        ),
+        _ => return None,
+    })
 }
 
 /// The one call for one or more lift-holding readiness signals firing
 /// together: they apply once (never stacked), so they read as one reason.
-fn hold_summary(reasons: &[(&'static str, bool, bool)]) -> String {
+fn hold_summary(reasons: &[(&'static str, bool, bool)], ctx: &CallCtx) -> String {
     let mut who = String::new();
     for (k, (reason, ..)) in reasons.iter().enumerate() {
         if k > 0 {
@@ -240,7 +226,7 @@ fn hold_summary(reasons: &[(&'static str, bool, bool)]) -> String {
         }
     }
     let runs_easy = reasons.iter().any(|(_, easy, _)| *easy);
-    let first_set = if reasons.iter().any(|(.., f)| *f) {
+    let first_set = if !ctx.first_set_logged && reasons.iter().any(|(.., f)| *f) {
         FIRST_SET_CLAUSE
     } else {
         ""
@@ -252,93 +238,77 @@ fn hold_summary(reasons: &[(&'static str, bool, bool)]) -> String {
     }
 }
 
-/// Merge the rows of several lift-holding readiness calls (`rows[k]` is
-/// `to_view(&recs[k])`) into the first one's, naming every signal. Returns the
-/// rows to drop (the merged-away ones).
-pub(super) fn merge_hold_rows(
-    recs: &[Recommended<Adjustment>],
-    rows: &mut [AdjustmentView],
-) -> Vec<bool> {
-    let mut drop = vec![false; recs.len()];
-    let holds: Vec<(usize, (&'static str, bool, bool))> = recs
-        .iter()
-        .enumerate()
-        .filter_map(|(k, r)| lift_hold_reason(r).map(|h| (k, h)))
-        .collect();
-    if let [(first, _), rest @ ..] = holds.as_slice()
-        && !rest.is_empty()
-    {
-        let reasons: Vec<_> = holds.iter().map(|(_, h)| *h).collect();
-        if let Some(row) = rows.get_mut(*first) {
-            row.summary = hold_summary(&reasons);
-        }
-        for (k, _) in rest {
-            drop[*k] = true;
-        }
-    }
-    drop
-}
-
 /// The one-line call for a readiness/safety adjustment, naming WHICH signal
 /// fired and what changes today, in plain language. Falls back
 /// to [`describe`] for calls that need no signal-specific wording.
-pub(super) fn describe_rec(r: &Recommended<Adjustment>) -> String {
-    if let Some(h) = lift_hold_reason(r) {
-        return hold_summary(&[h]);
+fn describe_rec(r: &AdjustmentCall, ctx: &CallCtx) -> String {
+    if let Some(h) = lift_hold_reason(r, ctx) {
+        return hold_summary(&[h], ctx);
     }
-    let claim = r.claim_id();
-    match (&r.value, claim) {
-        (Adjustment::DowngradeSession, claims::WELLNESS_001) => {
+    match (&r.value, r.kind()) {
+        (_, AdjustmentKind::WellnessLower) => {
             "Check-ins well below your normal for several days: today is one step easier (about 5% less weight, 1 rep earlier on every set, easy runs).".into()
         }
-        (Adjustment::DowngradeSession, claims::AUTOREG_VL_001) => {
+        (_, AdjustmentKind::VelocityLoss) => {
             "Bar speed dropped past your goal's limit within a set: stop 1 rep earlier and add no weight. Runs as planned.".into()
         }
-        (Adjustment::DowngradeSession, claims::RUN_DECOUPLE_001) => {
+        (_, AdjustmentKind::Decoupling) => {
             "Heart rate drifted up 10% or more on a steady run: easy runs only; lifts as planned.".into()
         }
-        (Adjustment::DowngradeSession, claims::AUTOREG_RHR_NOISE_001) => {
+        (_, AdjustmentKind::RhrSpike) => {
             "Your latest resting HR is well above your normal: an easier session today. If you feel ill, answer the illness question in your check-in.".into()
         }
-        (Adjustment::DowngradeSession, claims::ILLNESS_NECK_001) => {
+        (Adjustment::DowngradeSession, AdjustmentKind::HeadCold) => {
             "Until you've recovered: no long or hard sessions and no heavy weights.".into()
         }
-        (Adjustment::ReduceVolumePct(_), claims::ILLNESS_NECK_001) => {
+        (Adjustment::ReduceVolumePct(_), AdjustmentKind::HeadCold) => {
             "Head cold: short and easy only, or rest. Runs: 10–20 min easy. Lifts: half the sets, kept light.".into()
         }
-        (Adjustment::Stop, claims::ILLNESS_NECK_001) => {
+        (_, AdjustmentKind::IllnessStop) => {
             "Flu or fever: no training until you've recovered. Your first session back is a short, easy test.".into()
         }
-        (Adjustment::Stop, claims::SAFE_PAIN_001 | claims::SAFE_PAIN_STRUCT_001) => {
+        (_, AdjustmentKind::PainStop) => {
             "Pain reported: training is paused. Rest the painful area and check it before you train again.".into()
         }
-        (Adjustment::DowngradeSession, claims::RETURN_HOLD_001) => {
+        (_, AdjustmentKind::ReturnHold) => {
             "First session back is easy (3+ reps left on every set, easy runs), then the plan resumes.".into()
         }
-        (Adjustment::DowngradeSession, claims::SAFE_TENDON_001) => {
+        (_, AdjustmentKind::TendonReduce) => {
             "Tendon pain is flaring: an easy session today with lighter weights.".into()
         }
         (Adjustment::ReturnCheck, _) => format!("{}. {RETURN_CHECK_STOP}", return_check_headline()),
-        (Adjustment::RestDay, claims::AUTOREG_RHR_NOISE_001) => {
+        (_, AdjustmentKind::RhrRest) => {
             "Resting HR has been well above your normal 2 mornings in a row (or with illness symptoms): take a rest day and check whether you're getting ill.".into()
         }
         (Adjustment::StopItems { location }, _) => format!(
             "Pain ({location}): skip the exercises that load it today. The rest of the session goes ahead without adding weight."
         ),
+        (Adjustment::ModifyAndMonitor { location }, AdjustmentKind::TendonModify(region)) => {
+            let call = match region {
+                Some(_) => format!(
+                    "Tendon pain ({location}): keep the exercises that load it light and pain-free, and train the rest without adding weight. Avoid complete rest."
+                ),
+                None => describe(&r.value),
+            };
+            match eased_lifts(ctx.items, region) {
+                Some(list) => format!("{call} Today: {list}."),
+                None => call,
+            }
+        }
         (
             Adjustment::ForItem {
                 exercise,
                 adjustment,
             },
-            _,
-        ) => match (adjustment.as_ref(), claim) {
-            (Adjustment::ReduceLoadPct(p), claims::AUTOREG_RIR_001) => format!(
+            kind,
+        ) => match (adjustment.as_ref(), kind) {
+            (Adjustment::ReduceLoadPct(p), AdjustmentKind::FirstSet) => format!(
                 "{exercise}: your first set was harder than planned, so the remaining sets drop {p:.0}%."
             ),
-            (Adjustment::IncreaseLoadPct(p), claims::AUTOREG_RIR_001) => format!(
+            (Adjustment::IncreaseLoadPct(p), AdjustmentKind::FirstSet) => format!(
                 "{exercise}: your first set felt easier than planned. You can add about {p:.0}% for the remaining sets."
             ),
-            (Adjustment::DowngradeSession, claims::AUTOREG_RIR_001) => format!(
+            (_, AdjustmentKind::FailedSet) => format!(
                 "{exercise}: your last set went to failure before the planned sets were done. End the exercise here, or drop the weight so the remaining sets end with reps left."
             ),
             (Adjustment::ReduceLoadPct(p), _) => format!(
@@ -357,10 +327,29 @@ pub(super) fn describe_rec(r: &Recommended<Adjustment>) -> String {
     }
 }
 
+/// The lifts in `items` a tendon modify call eases ("Back squat and
+/// Deadlift"): those that load `region`, every lift when it maps to none.
+fn eased_lifts(
+    items: &[PrescriptionView],
+    region: Option<crate::schema::PainRegion>,
+) -> Option<String> {
+    let names: Vec<&str> = items
+        .iter()
+        .filter(|it| !it.is_run())
+        .filter(|it| region.is_none_or(|reg| !autoreg::item_spared_by_pain(reg, &it.exercise)))
+        .map(|it| it.exercise.as_str())
+        .collect();
+    match names.as_slice() {
+        [] => None,
+        [one] => Some((*one).to_string()),
+        [init @ .., last] => Some(format!("{} and {last}", init.join(", "))),
+    }
+}
+
 /// Flatten any evidence-wrapped value into an adjustment row with an explicit
 /// summary, for graded verdicts that are not `Adjustment`s (e.g. the
 /// autoreg-032 threshold re-test cue).
-pub(super) fn to_view_with<T>(summary: String, r: &Recommended<T>) -> AdjustmentView {
+pub(super) fn to_view_with<T, K>(summary: String, r: &Recommended<T, K>) -> AdjustmentView {
     AdjustmentView {
         summary,
         evidence: EvidenceTagView::of(r),
@@ -432,7 +421,7 @@ fn grade_words(g: EvidenceGrade) -> (&'static str, &'static str) {
 /// HR-zones card restating the user's age through the Tanaka formula). When no
 /// override is given, the basis is the backing claim's own registered
 /// statement, always KB-grounded (HARD RULE 1).
-pub(super) fn why_from<T>(basis_override: Option<String>, r: &Recommended<T>) -> WhyView {
+pub(super) fn why_from<T, K>(basis_override: Option<String>, r: &Recommended<T, K>) -> WhyView {
     WhyView {
         basis: basis_override.unwrap_or_else(|| r.evidence().statement.to_owned()),
         grade_note: grade_note_str(r.grade(), r.contested()),
@@ -553,20 +542,15 @@ pub(super) fn describe(a: &Adjustment) -> String {
             )
         }
         Adjustment::DowngradeSession => "An easier session today".into(),
-        Adjustment::ModifyAndMonitor { location } => {
-            if crate::autoreg::pain_region(location).is_some() {
-                format!(
-                    "Tendon pain ({location}): keep the exercises that load it light and pain-free, and train the rest without adding weight. Avoid complete rest."
-                )
-            } else if location.is_empty() {
-                "Tendon pain: keep every exercise light and pain-free today. Avoid complete rest."
-                    .into()
-            } else {
-                format!(
-                    "Tendon pain ({location}): keep every exercise light and pain-free today. Avoid complete rest."
-                )
-            }
+        // The region-scoped wording is the call's ([`describe_rec`]): only the
+        // rule knows the region.
+        Adjustment::ModifyAndMonitor { location } if location.is_empty() => {
+            "Tendon pain: keep every exercise light and pain-free today. Avoid complete rest."
+                .into()
         }
+        Adjustment::ModifyAndMonitor { location } => format!(
+            "Tendon pain ({location}): keep every exercise light and pain-free today. Avoid complete rest."
+        ),
         Adjustment::RestDay => "Take a full rest day".into(),
         Adjustment::Stop => "Stop: do not train".into(),
         Adjustment::Defer { reason } => reason.clone(),

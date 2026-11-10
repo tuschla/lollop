@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::app::model::{ActivityKind, HrZoneInputView, HypertrophyInputView, ProteinInputView};
+use crate::app::model::{HrZoneInputView, HypertrophyInputView, ProteinInputView};
+use crate::event::ActivityKind;
 use crate::evidence::EvidenceGrade;
 use crate::profile::{PlanWithheld, Profile};
 use crate::schema::{
@@ -30,7 +31,7 @@ pub struct EvidenceTagView {
 
 impl EvidenceTagView {
     /// The evidence chrome of `r`'s backing claim.
-    pub fn of<T>(r: &Recommended<T>) -> Self {
+    pub fn of<T, K>(r: &Recommended<T, K>) -> Self {
         EvidenceTagView {
             grade: Some(r.grade()),
             citation: r.reference().to_owned(),
@@ -119,11 +120,6 @@ pub struct AdjustmentView {
     /// improve it).
     #[serde(default)]
     pub why: WhyView,
-    /// True for a neutral "hold / no change" verdict row that carries no real
-    /// `Adjustment`. It renders in the readiness section but never wins the
-    /// Today headline (`build_headline`).
-    #[serde(skip)]
-    pub(crate) neutral: bool,
     /// For an item-scoped in-session cue (a first-set or top-set call on ONE
     /// lift): the plan item's exact exercise name. `None` for session-wide rows.
     pub exercise: Option<String>,
@@ -133,10 +129,6 @@ pub struct AdjustmentView {
     /// The cue says to stop this exercise now (tap End exercise).
     #[serde(default)]
     pub suggests_end_exercise: bool,
-    /// The §5 safety-ladder tier this call belongs to, for ranking the Today
-    /// headline. Core-internal: never on the wire.
-    #[serde(skip)]
-    pub(crate) tier: Option<SafetyTier>,
 }
 
 /// One logged set with its derived strength metrics, flattened for shells.

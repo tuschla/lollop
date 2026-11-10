@@ -51,7 +51,7 @@ pub(in crate::app) fn build_consistency(
     let req = model.plan_request?;
     let profile = model.profile()?;
     let start = req.start_epoch_day;
-    let today = model.today_epoch_day.unwrap_or(start);
+    let today = model.today_or_plan_start()?;
     let records = days.plan_weeks(model)?.before(monday_of(today));
     let planned_rows: Vec<&SessionPlanView> = week
         .iter()

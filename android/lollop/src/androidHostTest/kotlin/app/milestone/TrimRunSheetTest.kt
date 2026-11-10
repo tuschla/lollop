@@ -33,15 +33,12 @@ class TrimRunSheetTest {
 
     @Before
     fun kmWithoutTiles() {
-        AppSettings.showRouteMaps.value = false
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.Km
+        AppSettings.setShowRouteMaps(ctx, false)
+        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Km)
     }
 
     @After
-    fun restore() {
-        AppSettings.showRouteMaps.value = true
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-    }
+    fun restore() = AppRuntime.resetForTest()
 
     // 21 fixes 10 s apart, ~37 m each: a 200 s, ~0.745 km raw GPS track.
     private val segments = listOf((0..20).map { GpxFix(48.0, 11.0 + it * 0.0005, 1_700_000_000L + it * 10L, hrBpm = null) })

@@ -67,17 +67,17 @@ internal class ScriptedCore : CoreBridge {
 }
 
 /** A new, empty temporary directory. */
-expect fun newTempDir(): LogPath
+expect fun newTempDir(): AppPath
 
 /**
- * The engine both platforms run ([DurableCore] + [EventLog] over [LogFiles]) on a
+ * The engine both platforms run ([DurableCore] + [EventLog] over [AppFiles]) on a
  * scripted core and a real file: replay, append, a torn tail, compaction, a core
  * panic reset, a degraded log and a stale view. Runs on the JVM (host tests) and
  * on iOS (simulator), where it also exercises the POSIX file seam.
  */
 class DurableCoreTest {
     private val dir = newTempDir()
-    private val log = LogFiles.sibling(dir, "/$EVENT_LOG_NAME")
+    private val log = AppFiles.sibling(dir, "/${AppFileNames.EVENT_LOG}")
 
     private fun core(script: ScriptedCore = ScriptedCore()) = script to BridgeCore(script)
 
@@ -85,14 +85,14 @@ class DurableCoreTest {
 
     private fun wire(event: Event) = event.toJson().toString()
 
-    private fun lines(): List<String> = buildList { LogFiles.forEachLine(log) { add(it) } }
+    private fun lines(): List<String> = buildList { AppFiles.forEachLine(log) { add(it) } }
 
-    private fun write(lines: List<String>) = LogFiles.writeLinesSynced(log, lines)
+    private fun write(lines: List<String>) = AppFiles.writeLinesSynced(log, lines)
 
     @AfterTest
     fun removeLog() {
-        for (suffix in listOf("", ".tmp", ".bak", ".import")) LogFiles.delete(LogFiles.sibling(log, suffix))
-        LogFiles.delete(dir)
+        for (suffix in listOf("") + AppFileNames.LOG_SUFFIXES) AppFiles.delete(AppFiles.sibling(log, suffix))
+        AppFiles.delete(dir)
     }
 
     @Test
@@ -128,14 +128,14 @@ class DurableCoreTest {
     @Test
     fun aTornTailIsHealedAndTheNextAppendGetsItsOwnLine() {
         write(listOf(wire(set(1))))
-        LogFiles.append(log, wire(set(2)).take(17))
-        assertFalse(LogFiles.endsWithNewline(log))
+        AppFiles.append(log, wire(set(2)).take(17))
+        assertFalse(AppFiles.endsWithNewline(log))
 
         val (script, engine) = core()
         engine.restoreFrom(log)
         assertEquals(listOf(wire(set(1))), script.applied, "the torn line is not replayed")
         assertEquals(listOf(wire(set(1))), lines(), "boot rewrote the log without it")
-        assertTrue(LogFiles.endsWithNewline(log))
+        assertTrue(AppFiles.endsWithNewline(log))
 
         assertTrue(engine.send(set(3)).persisted)
         assertEquals(listOf(wire(set(1)), wire(set(3))), lines())
@@ -150,13 +150,13 @@ class DurableCoreTest {
         // A log path that can't be written (its directory is missing): the core
         // applied the event but it is reported not persisted.
         val live = checkNotNull(engine.detachLog())
-        engine.reattachLog(LogFiles.sibling(log, ".missing/dir/log"))
+        engine.reattachLog(AppFiles.sibling(log, ".missing/dir/log"))
         val lost = engine.send(set(2))
         assertTrue(lost.accepted)
         assertFalse(lost.persisted)
 
         // The failed write may have left a partial line; the next one starts fresh.
-        LogFiles.append(live, wire(set(2)).take(11))
+        AppFiles.append(live, wire(set(2)).take(11))
         engine.reattachLog(live)
         assertTrue(engine.send(set(3)).persisted)
         assertEquals(listOf(wire(set(1)), wire(set(2)).take(11), wire(set(3))), lines())
@@ -187,14 +187,14 @@ class DurableCoreTest {
 
     @Test
     fun anInterruptedImportSwapIsRolledBack() {
-        val bak = LogFiles.sibling(log, ".bak")
-        LogFiles.writeLinesSynced(bak, listOf(wire(set(1))))
-        LogFiles.writeLinesSynced(LogFiles.sibling(log, ".import"), listOf(wire(set(9))))
+        val bak = AppFiles.sibling(log, AppFileNames.BAK_SUFFIX)
+        AppFiles.writeLinesSynced(bak, listOf(wire(set(1))))
+        AppFiles.writeLinesSynced(AppFiles.sibling(log, AppFileNames.IMPORT_SUFFIX), listOf(wire(set(9))))
         val (script, engine) = core()
         assertFalse(engine.restoreFrom(log), "the set-aside log is put back: not a fresh install")
         assertEquals(listOf(wire(set(1))), script.applied)
-        assertFalse(LogFiles.exists(bak))
-        assertFalse(LogFiles.exists(LogFiles.sibling(log, ".import")))
+        assertFalse(AppFiles.exists(bak))
+        assertFalse(AppFiles.exists(AppFiles.sibling(log, AppFileNames.IMPORT_SUFFIX)))
     }
 
     @Test
@@ -269,11 +269,11 @@ class DurableCoreTest {
 
     @Test
     fun linesSplitLikeJavaReadLine() {
-        LogFiles.append(log, "a\r\nb\rc\n\nd")
+        AppFiles.append(log, "a\r\nb\rc\n\nd")
         assertEquals(listOf("a", "b", "c", "", "d"), lines())
-        LogFiles.delete(log)
-        LogFiles.append(log, "")
+        AppFiles.delete(log)
+        AppFiles.append(log, "")
         assertEquals(emptyList(), lines())
-        assertTrue(LogFiles.endsWithNewline(log), "an empty file counts as terminated")
+        assertTrue(AppFiles.endsWithNewline(log), "an empty file counts as terminated")
     }
 }

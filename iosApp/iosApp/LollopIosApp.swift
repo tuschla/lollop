@@ -11,8 +11,7 @@ struct LollopIosApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        // The core engine first (MainViewController starts it too; a second call
-        // keeps it), then the surfaces, which follow the engine's published model.
+        // The app first, then the surfaces, which follow its published model.
         LollopApp.shared.start()
         Surfaces.shared.install()
     }

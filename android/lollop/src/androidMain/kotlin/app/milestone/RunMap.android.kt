@@ -302,3 +302,15 @@ private fun TileRouteLayer(
         onRelease = { it.onDetach() },
     )
 }
+
+/** osmdroid's process-wide configuration: a user agent and a tile cache in the
+ *  app's cache dir, set before any MapView inflates. */
+internal object OsmdroidTiles : AppFeature {
+    override fun start(ctx: Context) {
+        val config = org.osmdroid.config.Configuration.getInstance()
+        config.load(ctx, ctx.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
+        config.osmdroidBasePath = java.io.File(ctx.cacheDir, "osmdroid")
+        config.osmdroidTileCache = java.io.File(ctx.cacheDir, "osmdroid/tiles")
+        config.userAgentValue = ctx.packageName
+    }
+}

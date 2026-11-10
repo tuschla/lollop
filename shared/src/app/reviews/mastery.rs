@@ -2,13 +2,12 @@
 
 use crate::app::format::MIN_RATIO_BASE_KG;
 use crate::app::model::{LoggedSet, Model};
-use crate::app::readiness::end_of_local_today_sec;
 use crate::app::reviews::split::FEEDBACK_FRESH_DAYS;
 use crate::app::run_metrics::{RunFacts, spike_baseline_km};
 use crate::app::set_index::{NameFacts, SetIndex};
 use crate::app::view_types::{SessionPlanView, SessionStatus};
 use crate::autoreg::E1RM_NOISE_FRAC;
-use crate::day::{is_undated, local_day};
+use crate::day::local_day;
 use crate::profile::Profile;
 use crate::{running, strength};
 
@@ -77,9 +76,9 @@ pub(in crate::app) fn detect_mastery(
     week: &[SessionPlanView],
 ) -> Option<Mastery> {
     let offset = model.today_utc_offset_sec;
-    let cutoff = end_of_local_today_sec(model);
+    let so_far = model.up_to_today();
     let today = model.today_epoch_day;
-    let dated = |t: i64| !is_undated(t) && cutoff.is_none_or(|c| t <= c);
+    let dated = |t: i64| so_far.admits(t);
     let calis = model.profile().is_some_and(Profile::uses_calisthenics);
     // A run's day is the local day it STARTED (`RunFacts::started`), the day
     // plan completion credits and its card names.

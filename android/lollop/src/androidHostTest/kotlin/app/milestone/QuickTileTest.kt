@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.service.quicksettings.Tile
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.widget.tileFace
+import app.milestone.widget.TileFace
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetSnapshotStore
 import java.io.File
@@ -31,13 +33,13 @@ class QuickTileTest {
     @Before
     fun setUp() {
         RunSession.reset()
-        File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
     }
 
     @After
     fun tearDown() {
         RunSession.reset()
-        File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
     }
 
     @Test
@@ -52,9 +54,9 @@ class QuickTileTest {
             assertEquals(kind.name, TileFace.Log, tileFace(daySnapshot(kind, trackable = true)))
         }
         // A recording run wins over any day.
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         for (s in listOf(null, daySnapshot(WidgetDayKind.Lift), daySnapshot(WidgetDayKind.Paused))) {
-            if (s == null) File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME).delete() else WidgetSnapshotStore.write(ctx, s)
+            if (s == null) File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete() else WidgetSnapshotStore.write(ctx, s)
             assertEquals(TileFace.Recording, QuickTileService.currentFace(ctx))
         }
         assertEquals(OpenDest.Track, TileFace.Recording.dest)
@@ -98,11 +100,11 @@ class QuickTileTest {
     @Test
     fun recordingRunLightsTheTile() {
         WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Lift))
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         val recording = listen()
         assertTile(recording, R.string.tile_run_recording, R.drawable.ic_content_track_run, Tile.STATE_ACTIVE)
         assertNull(recording.activityLaunchForClick)
-        RunSession.tracking.value = false
+        RunSession.markStopped()
         val lift = listen()
         assertTile(lift, R.string.tile_log_set, R.drawable.ic_content_set_dumbbell, Tile.STATE_INACTIVE)
         assertNull(lift.activityLaunchForClick)
@@ -117,7 +119,7 @@ class QuickTileTest {
         // The day moves on (the stored snapshot is now yesterday's); the tile is not redrawn.
         WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Run, trackable = true, day = todayEpochDay() - 1))
         assertOpens(clickTile(), OpenDest.Log)
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         assertOpens(clickTile(), OpenDest.Track)
     }
 
@@ -145,7 +147,7 @@ class QuickTileTest {
         assertOpensIntent(clickAndTake(), OpenDest.Log)
         WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Lift))
         assertOpensIntent(clickAndTake(), OpenDest.LogSet)
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         assertOpensIntent(clickAndTake(), OpenDest.Track)
         assertOpensIntent(clickAndTake(locked = true), OpenDest.Track)
         assertEquals(null, shadowOf(app).nextStartedService)
@@ -168,7 +170,7 @@ class QuickTileTest {
         assertOpens(clickTile(), OpenDest.LogSet)
         WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Run, trackable = true))
         assertOpens(clickTile(), OpenDest.Track)
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         assertOpens(clickTile(), OpenDest.Track)
         // Start run opens the tracker screen; the tile itself starts no service.
         assertEquals(null, shadowOf(ctx as android.app.Application).nextStartedService)

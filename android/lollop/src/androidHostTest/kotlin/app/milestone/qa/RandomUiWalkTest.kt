@@ -23,9 +23,7 @@ import app.milestone.Core
 import app.milestone.DarkMode
 import app.milestone.DistanceUnitOverride
 import app.milestone.EventDispatcher
-import app.milestone.HistoryFocus
 import app.milestone.R
-import app.milestone.UiMessages
 import app.milestone.ViewModel
 import app.milestone.groupLiftSessions
 import app.milestone.showLifting
@@ -249,14 +247,7 @@ class RandomUiWalkTest : UiProbeTest() {
      *  and prefs kept), relaunch, and require the same entries back. */
     private fun processDeath() {
         val beforeModel = EventDispatcher.model.value
-        QaHarness.teardown()
-        QaHarness.resetCore()
-        EventDispatcher.resetForTest()
-        app.milestone.RunSession.reset()
-        UiMessages.clear()
-        HistoryFocus.consume()
-        clearAppliedCueLoads()
-        AppSettings.load(ctx)
+        QaHarness.killProcess()
         lastScenario = launchMain()
         rule.waitUntil(30_000) { roots().isNotEmpty() && EventDispatcher.model.value != null }
         settle()

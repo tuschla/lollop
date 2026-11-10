@@ -3,8 +3,7 @@
 
 use crate::app::evidence_views::{reps_word, why_from};
 use crate::app::format::{fmt_km_or_mi, fmt_weight, is_ratio_base_km, weekday_name};
-use crate::app::model::{Model, SessionReview};
-use crate::app::readiness::end_of_local_today_sec;
+use crate::app::model::Model;
 use crate::app::reviews::exec::{
     DerivedExec, Exec, ExecInput, LiftEval, LiftOutcome, RunOutcome, Trigger, eval_of,
     lift_severity, run_done_message, session_execution,
@@ -16,6 +15,7 @@ use crate::app::run_views::to_run_view;
 use crate::app::view_ctx::ViewCtx;
 use crate::app::view_types::{EvidenceTagView, FeedbackView, SessionPlanView, WhyView};
 use crate::day::{is_undated, local_day};
+use crate::event::SessionReview;
 use crate::evidence::claims;
 use crate::feedback::FeedbackCategory;
 use crate::schema::{Recommended, WorkoutType};
@@ -51,12 +51,12 @@ pub(in crate::app) struct RunSpike {
 /// `longest_recent_km` (which a tracker's paired history can raise), so
 /// deleting the run that seeded it re-arms the gate on the next view.
 pub(in crate::app) fn latest_run_spike(model: &Model, facts: &RunFacts) -> Option<RunSpike> {
-    let cutoff = end_of_local_today_sec(model);
+    let so_far = model.up_to_today();
     let (idx, r) = model
         .runs
         .iter()
         .enumerate()
-        .filter(|(_, r)| cutoff.is_none_or(|c| r.observed_at <= c))
+        .filter(|(_, r)| so_far.not_future(r.observed_at))
         // A same-stamp tie goes to the later-logged run by its stable
         // `entry_id` (assigned at first log), not its storage slot, which an
         // Undo or amend moves to the tail.
@@ -137,17 +137,17 @@ pub(in crate::app) fn feedback_track_split(model: &Model, facts: &RunFacts) -> O
 }
 
 /// Index of the chronologically latest tracked run up to the end of today
-/// (`end_of_local_today_sec`; no clock, no cutoff), so neither a backdated nor
-/// a future-dated GPS import poses as the latest session. A same-stamp tie goes
-/// to the later-logged run by `entry_id`, not its storage slot.
+/// ([`Model::up_to_today`]), so neither a backdated nor a future-dated GPS
+/// import poses as the latest session. A same-stamp tie goes to the
+/// later-logged run by `entry_id`, not its storage slot.
 fn latest_tracked_run(model: &Model) -> Option<usize> {
-    let cutoff = end_of_local_today_sec(model);
+    let so_far = model.up_to_today();
     model
         .runs
         .iter()
         .enumerate()
         .filter(|(_, r)| !r.track.is_empty())
-        .filter(|(_, r)| cutoff.is_none_or(|c| r.observed_at <= c))
+        .filter(|(_, r)| so_far.not_future(r.observed_at))
         .max_by_key(|(i, r)| (r.observed_at, r.entry_id, *i))
         .map(|(i, _)| i)
 }
@@ -204,6 +204,9 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
     }
     let trigger = exec.as_ref().and_then(|e| e.trigger);
     let lift = exec.as_ref().and_then(|e| e.lift.clone());
+    // With no concern and no execution note the card is the default note: it
+    // states the absence of anything to act on, not a graded claim.
+    let default_note = concern.is_none() && exec.is_none();
     let resolved = feedback::resolve_feedback(concern, exec.map(|e| e.rec));
     // autoreg-044 / feedback-042: while today's plan is eased or held, praise
     // and a load-increase cue would contradict it; the card says to keep to the
@@ -213,9 +216,8 @@ pub(in crate::app) fn build_feedback(c: FeedbackCtx) -> Option<FeedbackView> {
             resolved.value,
             FeedbackCategory::PositiveMastery | FeedbackCategory::ProgressionNudge
         );
-    // A note that states the absence of anything to act on (nothing to adjust,
-    // or the plan already eased) is not a graded claim: no evidence tag.
-    let ungraded = held || resolved.claim_id() == claims::FEEDBACK_001;
+    // Neither the default note nor a held one carries an evidence tag.
+    let ungraded = held || default_note;
     let category = if held {
         FeedbackCategory::InformationalNeutral
     } else {

@@ -6,8 +6,7 @@ import android.icu.text.RelativeDateTimeFormatter.AbsoluteUnit
 import android.icu.text.RelativeDateTimeFormatter.Direction
 import android.icu.text.RelativeDateTimeFormatter.RelativeUnit
 import android.icu.util.ULocale
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import android.os.LocaleList
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.time.format.TextStyle
@@ -22,6 +21,22 @@ import kotlinx.datetime.toJavaLocalDate
 import kotlinx.datetime.toJavaLocalDateTime
 
 actual typealias PlatformLocale = Locale
+
+/** The app's language with Latin digits for the device's current locales. */
+internal actual fun appLocale(): Locale = appLocale(LocaleList.getDefault())
+
+/** [appLocaleOf] over [locales]; the English fallback takes the primary locale's region. */
+internal fun appLocale(locales: LocaleList): Locale {
+    appLocaleCache?.let { (key, locale) -> if (key == locales) return locale }
+    return appLocaleOf(
+        preferred = List(locales.size(), locales::get),
+        language = { it.language },
+        english = { Locale.Builder().setLanguage("en").setRegion(locales[0].country).build() },
+        withLatinDigits = { it.withLatinDigits() },
+    ).also { appLocaleCache = locales to it }
+}
+
+@Volatile private var appLocaleCache: Pair<LocaleList, Locale>? = null
 
 internal actual fun deviceLocale(): Locale = Locale.getDefault()
 
@@ -68,8 +83,7 @@ internal actual fun relativeDayLabel(dayDelta: Long, locale: Locale): String {
     }
 }
 
-@Composable
-internal actual fun is24HourClock(): Boolean = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
+internal actual fun is24HourClock(ctx: PlatformContext): Boolean = android.text.format.DateFormat.is24HourFormat(ctx)
 
 // java.util.Calendar, not kotlinx: a picked time inside a DST gap resolves the
 // way it always has (lenient, forward by the gap), so stored stamps don't move.

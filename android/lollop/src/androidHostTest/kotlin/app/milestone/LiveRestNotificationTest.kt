@@ -110,7 +110,7 @@ class LiveRestNotificationTest {
         assertTrue(delete.isBroadcastIntent)
         assertEquals(RestDismissReceiver::class.java.name, delete.savedIntent.component?.className)
         // The user swipes it away: the system cancels it and sends the delete intent.
-        nm.cancel(RestAlarm.COUNTDOWN_NOTIF_ID)
+        nm.cancel(AndroidIds.REST_COUNTDOWN_NOTIFICATION)
         RestDismissReceiver().onReceive(app, delete.savedIntent)
 
         RestAlarm.setInAppVisible(app, true)
@@ -130,8 +130,8 @@ class LiveRestNotificationTest {
         RestAlarm.schedule(app, 90, "Back squat")
         // A delete broadcast of the previous rest arriving after the next one started.
         val stale = Intent(app, RestDismissReceiver::class.java)
-            .putExtra(RestAlarm.EXTRA_REST_START, RestAlarm.running.value!!.startMillis)
-        AppClock.offsetMillis += 5_000L
+            .putExtra(RestAlarmPlatform.EXTRA_REST_START, RestAlarm.running.value!!.startMillis)
+        TestClock.offsetMillis += 5_000L
         try {
             RestAlarm.schedule(app, 90, "Back squat")
             RestDismissReceiver().onReceive(app, stale)
@@ -139,7 +139,7 @@ class LiveRestNotificationTest {
             RestAlarm.setInAppVisible(app, false)
             assertNotNull(posted())
         } finally {
-            AppClock.offsetMillis -= 5_000L
+            TestClock.offsetMillis -= 5_000L
         }
     }
 

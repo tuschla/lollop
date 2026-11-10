@@ -115,9 +115,9 @@ class AccessibilityAuditTest : UiProbeTest() {
         launch(Start.Hybrid, config)
         val palettes = AppTheme.entries.map { it to false } + (AppTheme.Paper to true)
         for ((theme, dynamic) in palettes) for (dark in listOf(false, true)) {
-            AppSettings.theme.value = theme
-            AppSettings.dynamicAccent.value = dynamic
-            AppSettings.darkMode.value = if (dark) DarkMode.Dark else DarkMode.Light
+            AppSettings.setTheme(ctx, theme)
+            AppSettings.setDynamicAccent(ctx, dynamic)
+            AppSettings.setDarkMode(ctx, if (dark) DarkMode.Dark else DarkMode.Light)
             config = config.copy(dark = dark)
             val label = "$theme${if (dynamic) "+system accent" else ""} ${if (dark) "dark" else "light"}"
             for (tab in TABS.map { str(it) }) {
@@ -464,7 +464,7 @@ class AccessibilityAuditTest : UiProbeTest() {
         if (c.land) RuntimeEnvironment.setQualifiers("w891dp-h411dp-land-xxhdpi")
         if (c.rtl) RuntimeEnvironment.setQualifiers("+ar-rEG")
         RuntimeEnvironment.setFontScale(c.font)
-        AppSettings.darkMode.value = if (c.dark) DarkMode.Dark else DarkMode.Light
+        AppSettings.setDarkMode(ctx, if (c.dark) DarkMode.Dark else DarkMode.Light)
         if (start == Start.MilesLb) AppSettings.setDistanceUnitOverride(ctx, app.milestone.DistanceUnitOverride.Mi)
         (seedEvents(start).orEmpty() + extra).takeIf { it.isNotEmpty() }?.let { QaHarness.seedLog(ctx, it) }
         this.start = start
@@ -545,9 +545,9 @@ class AccessibilityAuditTest : UiProbeTest() {
     private fun restoreSettings() {
         val (theme, dynamic, dark) = launchSettings ?: return
         if (AppSettings.theme.value == theme && AppSettings.dynamicAccent.value == dynamic && AppSettings.darkMode.value == dark) return
-        AppSettings.theme.value = theme
-        AppSettings.dynamicAccent.value = dynamic
-        AppSettings.darkMode.value = dark
+        AppSettings.setTheme(ctx, theme)
+        AppSettings.setDynamicAccent(ctx, dynamic)
+        AppSettings.setDarkMode(ctx, dark)
         settle()
     }
 

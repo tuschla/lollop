@@ -1,8 +1,9 @@
 //! A mis-imported future-dated run (e.g. a phantom ~2030 import) never poses as
 //! "the most recent session": the weekly report, training load and the two
 //! feedback fallbacks (`latest_run_spike`, `feedback_track_split`) all stop at
-//! `end_of_local_today_sec`, so it neither injects a bogus figure nor, with no
-//! real neighbours in its window, silently disarms a genuine spike/split cue.
+//! the end of local today (`Model::up_to_today`), so it neither injects a bogus
+//! figure nor, with no real neighbours in its window, silently disarms a
+//! genuine spike/split cue.
 
 use super::*;
 

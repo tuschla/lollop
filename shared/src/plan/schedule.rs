@@ -28,7 +28,7 @@ pub(super) struct LiftSpec {
 
 /// Where the week's sessions landed. `lifts` is in weekday order, so a lift's
 /// index in it is its `LiftDay::slot`.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct Placement {
     pub(super) lifts: Vec<(u16, LiftSpec)>,
     pub(super) runs: Vec<(u16, RunSessionType)>,
@@ -255,8 +255,9 @@ fn trim_kinds(kinds: &[RunSessionType], n: usize) -> Vec<RunSessionType> {
 /// plan's first day, so a new plan never opens on a rest day).
 ///
 /// Hard runs closer than RUN-QUALITY-001's 48 h (the week repeats, so Sunday
-/// and Monday are adjacent) cost a quality session: the last one in `runs`
-/// becomes an easy run and the week is placed again.
+/// and Monday are adjacent) cost a quality session: while the cheapest
+/// arrangement puts two hard runs that close, the last quality session left in
+/// `runs` becomes an easy run.
 pub(super) fn place_week(
     avail: [bool; 7],
     lifts: &[LiftSpec],
@@ -266,18 +267,18 @@ pub(super) fn place_week(
 ) -> Placement {
     let anchor = anchor.filter(|&a| avail.get(usize::from(a)).copied().unwrap_or(false));
     let mut runs = runs.to_vec();
-    loop {
-        let placement = match anchor {
-            Some(a) => search_week(avail, lifts, &runs, run_before, Some(a))
-                .or_else(|| search_week(avail, lifts, &runs, run_before, None)),
-            None => search_week(avail, lifts, &runs, run_before, None),
+    let mut placement = search_week(avail, lifts, &runs, run_before, anchor);
+    let quality: Vec<usize> = (0..runs.len())
+        .filter(|&i| running::is_quality_session(runs[i]))
+        .collect();
+    for i in quality.into_iter().rev() {
+        if !hard_runs_too_close(&placement.runs) {
+            break;
         }
-        .unwrap_or_default();
-        match runs.iter().rposition(|k| running::is_quality_session(*k)) {
-            Some(i) if hard_runs_too_close(&placement.runs) => runs[i] = RunSessionType::Easy,
-            _ => return placement,
-        }
+        runs[i] = RunSessionType::Easy;
+        placement = search_week(avail, lifts, &runs, run_before, anchor);
     }
+    placement
 }
 
 /// Two placed hard runs fall closer than RUN-QUALITY-001's minimum spacing.
@@ -296,15 +297,17 @@ fn hard_runs_too_close(runs: &[(u16, RunSessionType)]) -> bool {
     })
 }
 
-/// The cheapest arrangement for [`place_week`]; with `anchor`, only the
-/// arrangements that train on that weekday. `None` when none qualifies.
+/// The cheapest arrangement for [`place_week`]; with `anchor`, any arrangement
+/// that trains on that weekday beats every one that rests on it. Every week
+/// has an arrangement: the lift days and run kinds are trimmed to the free
+/// days.
 fn search_week(
     avail: [bool; 7],
     lifts: &[LiftSpec],
     runs: &[RunSessionType],
     run_before: Option<u16>,
     anchor: Option<u16>,
-) -> Option<Placement> {
+) -> Placement {
     let days: Vec<u16> = (0u16..7).filter(|&d| avail[d as usize]).collect();
     let n_lift = lifts.len().min(days.len());
     let lifts = &lifts[..n_lift];
@@ -318,7 +321,8 @@ fn search_week(
         }
     }
 
-    let mut best: Option<(i32, Placement)> = None;
+    // (rests on the anchor, cost): compared in that order.
+    let mut best: Option<((bool, i32), Placement)> = None;
     for lift_days in combinations(&days, n_lift) {
         for rot in &rotations {
             let mut loads = [DayLoad::Rest; 7];
@@ -330,7 +334,7 @@ fn search_week(
             }
             // Lift-only cost is a lower bound on any completion: prune.
             let lift_cost = week_cost(&loads, None);
-            if best.as_ref().is_some_and(|(c, _)| lift_cost >= *c) {
+            if best.as_ref().is_some_and(|(k, _)| (false, lift_cost) >= *k) {
                 continue;
             }
             let free: Vec<u16> = days
@@ -352,13 +356,13 @@ fn search_week(
                             long_day = Some(d);
                         }
                     }
-                    let c = week_cost(&l, long_day);
-                    if anchor.is_some_and(|a| l[usize::from(a)] == DayLoad::Rest) {
-                        continue;
-                    }
-                    if best.as_ref().is_none_or(|(bc, _)| c < *bc) {
+                    let key = (
+                        anchor.is_some_and(|a| l[usize::from(a)] == DayLoad::Rest),
+                        week_cost(&l, long_day),
+                    );
+                    if best.as_ref().is_none_or(|(bk, _)| key < *bk) {
                         best = Some((
-                            c,
+                            key,
                             Placement {
                                 lifts: lift_days.iter().copied().zip(rot.iter().copied()).collect(),
                                 runs: run_days
@@ -374,6 +378,7 @@ fn search_week(
         }
     }
     best.map(|(_, p)| p)
+        .expect("a week always has an arrangement: lift days and run kinds fit the free days")
 }
 
 /// Classify a synthesized session's load for the spacing rules: a lift day's

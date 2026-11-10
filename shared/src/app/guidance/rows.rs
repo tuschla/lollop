@@ -3,28 +3,28 @@ use crate::app::format::fmt_whole_km_or_mi;
 use crate::app::view_types::{EvidenceTagView, GuidanceView};
 use crate::evidence::EvidenceGrade;
 use crate::individualization;
-use crate::schema::{Adjustment, Recommended};
+use crate::schema::{AdjustmentCall, Recommended};
 use crate::strength::LiftGoal;
 
 /// Push one evidence-cited row, dropping `MarketingMyth`-graded claims (HARD
 /// RULE 2, myths are never programmed or surfaced).
-pub(in crate::app) fn push_guidance<T>(
+pub(in crate::app) fn push_guidance<T, K>(
     rows: &mut Vec<GuidanceView>,
     section: &str,
     summary: String,
-    r: &Recommended<T>,
+    r: &Recommended<T, K>,
 ) {
     push_guidance_basis(rows, section, summary, None, r);
 }
 
 /// Like [`push_guidance`], with the summary's miles twin (`summary_mi`) for a
 /// row that states a distance. Sets the twin only when the row was pushed.
-pub(in crate::app) fn push_guidance_mi<T>(
+pub(in crate::app) fn push_guidance_mi<T, K>(
     rows: &mut Vec<GuidanceView>,
     section: &str,
     summary: String,
     summary_mi: String,
-    r: &Recommended<T>,
+    r: &Recommended<T, K>,
 ) {
     let before = rows.len();
     push_guidance_basis(rows, section, summary, None, r);
@@ -39,12 +39,12 @@ pub(in crate::app) fn push_guidance_mi<T>(
 /// why? disclosure (a datum-rich restatement the generic claim statement can't
 /// carry, e.g. the HR-zones card echoing the user's age through Tanaka). When
 /// `basis` is `None`, the backing claim's registered statement is used.
-pub(in crate::app) fn push_guidance_basis<T>(
+pub(in crate::app) fn push_guidance_basis<T, K>(
     rows: &mut Vec<GuidanceView>,
     section: &str,
     summary: String,
     basis: Option<String>,
-    r: &Recommended<T>,
+    r: &Recommended<T, K>,
 ) {
     if r.grade() == EvidenceGrade::MarketingMyth {
         return;
@@ -64,7 +64,7 @@ pub(in crate::app) fn push_guidance_basis<T>(
 pub(in crate::app) fn push_hold_row(
     rows: &mut Vec<GuidanceView>,
     section: &str,
-    hold: &Recommended<Adjustment>,
+    hold: &AdjustmentCall,
 ) {
     push_guidance(
         rows,
@@ -76,7 +76,7 @@ pub(in crate::app) fn push_hold_row(
 }
 
 /// Where the weekly running volume the guidance reasons about came from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(in crate::app) enum WeeklyBasis {
     /// Measured from the athlete's logged runs.
     Logged,

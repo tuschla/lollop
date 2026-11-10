@@ -516,14 +516,15 @@ static NAME_INDEX: std::sync::LazyLock<std::collections::HashMap<String, (Ladder
 /// Match a logged exercise name to `(ladder, rung)`: a canonical rung name or
 /// an everyday alias ("Pull-ups" → Full pull-up), ignoring case, punctuation,
 /// spacing and a plural "s". Canonical names are unique across ALL ladders, so
-/// a hit is unambiguous.
+/// a hit is unambiguous. Memoized per name (`MemoId::CalisthenicsNames`).
 pub fn tier_by_name(name: &str) -> Option<(LadderId, u8)> {
-    crate::exercise::count_name_classification();
-    let key = name_key(name);
-    if key.is_empty() {
-        return None;
-    }
-    NAME_INDEX.get(&key).copied()
+    crate::memo::memoized(crate::memo::MemoId::CalisthenicsNames, name, || {
+        let key = name_key(name);
+        if key.is_empty() {
+            return None;
+        }
+        NAME_INDEX.get(&key).copied()
+    })
 }
 
 /// True when this rung takes added load: one of the ladder's

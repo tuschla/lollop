@@ -267,7 +267,7 @@ class RtlTextDirectionTest {
      *  between them on screen in both directions. */
     @Test
     fun trimTrack_keptWindowSitsBetweenTheThumbs_inBothDirections() {
-        AppSettings.showRouteMaps.value = false
+        AppSettings.setShowRouteMaps(androidx.test.core.app.ApplicationProvider.getApplicationContext(), false)
         try {
             val fixes = (0..20).map { GpxFix(48.0, 11.0 + it * 0.0005, 1_700_000_000L + it * 10L, hrBpm = null) }
             val segments = listOf(fixes)
@@ -303,7 +303,7 @@ class RtlTextDirectionTest {
             assertTrue("RTL mirrors the thumbs: the end thumb sits left of the start thumb", b.center.x < a.center.x)
             assertTrue("RTL: the kept window between the thumbs is Accent", midwayIsAccent())
         } finally {
-            AppSettings.showRouteMaps.value = true
+            AppSettings.setShowRouteMaps(androidx.test.core.app.ApplicationProvider.getApplicationContext(), true)
         }
     }
 }

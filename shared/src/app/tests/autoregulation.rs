@@ -6,10 +6,6 @@
 use super::*;
 use crate::schema::{PainDetail, PainKind, PainTrend};
 
-fn rec(a: Adjustment, claim: ClaimId) -> Recommended<Adjustment> {
-    Recommended::new(a, claim)
-}
-
 fn interval_item() -> PrescriptionView {
     PrescriptionView {
         summary: "6 × 4 min · Interval pace".into(),
@@ -121,7 +117,7 @@ fn readiness_downgrade_keeps_numbers_one_level_down() {
     let mut ns = session(vec![lift_item("Back squat", 100.0)]);
     apply_adjustments_to_session(
         &mut ns,
-        &[rec(Adjustment::DowngradeSession, claims::WELLNESS_001)],
+        &[AdjustmentKind::WellnessLower.call(Adjustment::DowngradeSession, claims::WELLNESS_001)],
         false,
     );
     let it = &ns.items[0];
@@ -305,7 +301,7 @@ fn a_sustained_hrv_drop_is_a_signal_not_an_artifact() {
 #[test]
 fn pain_scoping_keeps_only_movements_that_cannot_load_the_painful_part() {
     // Conservative allow-lists per region.
-    use crate::autoreg::{PainRegion, item_spared_by_pain};
+    use crate::autoreg::item_spared_by_pain;
     for lift in [
         "Back Squat",
         "Front Squat",

@@ -27,6 +27,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
+import app.milestone.AppFileNames
 import app.milestone.EventDispatcher
 import app.milestone.R
 import java.io.File
@@ -66,7 +67,7 @@ internal fun ComposeTestRule.waitUntilDisplayed(matcher: SemanticsMatcher, timeo
 
 /** The durable event log, one wire event per line, as [app.milestone.Core] wrote it. */
 internal fun journeyLog(): List<JsonElement> =
-    File(ApplicationProvider.getApplicationContext<Context>().filesDir, "event-log.ndjson")
+    File(ApplicationProvider.getApplicationContext<Context>().filesDir, AppFileNames.EVENT_LOG)
         .takeIf { it.exists() }?.readLines().orEmpty()
         .filter { it.isNotBlank() }
         .map { Json.parseToJsonElement(it) }

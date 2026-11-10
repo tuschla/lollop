@@ -72,10 +72,8 @@ fn cap_rpe_notes_only_the_items_it_relabels() {
         items: vec![lift, run],
         ..Default::default()
     };
-    let recs = vec![Recommended::new(
-        Adjustment::CapRpe(1),
-        claims::AUTOREG_E1RM_GATE_001,
-    )];
+    let recs =
+        vec![AdjustmentKind::E1rm.call(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)];
     apply_adjustments_to_session(&mut ns, &recs, false);
 
     assert_eq!(
@@ -127,7 +125,7 @@ fn a_load_cut_rewrites_the_percent_e1rm_label() {
         items: vec![lift, rir_lift],
         ..Default::default()
     };
-    let recs = vec![Recommended::new(
+    let recs = vec![AdjustmentKind::WeeklyDeload(DeloadTrigger::MrvSigns).call(
         Adjustment::Deload {
             volume_reduction_pct: 0.0,
             load_reduction_pct: 10.0,
@@ -360,10 +358,7 @@ fn readiness_adjustments_resync_the_prefill_rpe_target() {
     };
     apply_adjustments_to_session(
         &mut ns,
-        &[Recommended::new(
-            Adjustment::CapRpe(1),
-            claims::AUTOREG_E1RM_GATE_001,
-        )],
+        &[AdjustmentKind::E1rm.call(Adjustment::CapRpe(1), claims::AUTOREG_E1RM_GATE_001)],
         false,
     );
     assert_eq!(
@@ -391,10 +386,7 @@ fn readiness_adjustments_resync_the_prefill_rpe_target() {
     };
     apply_adjustments_to_session(
         &mut ns2,
-        &[Recommended::new(
-            Adjustment::DowngradeSession,
-            claims::HRV_001,
-        )],
+        &[AdjustmentKind::HrvLower.call(Adjustment::DowngradeSession, claims::HRV_001)],
         false,
     );
     assert!(
@@ -416,13 +408,13 @@ fn tolerable_knee_tendon_pain_eases_only_the_lifts_that_load_the_knee() {
         bench,
         lift_item("Cable row", 60.0),
     ]);
-    let modify = Recommended::new(
+    let modify = AdjustmentKind::TendonModify(Some(PainRegion::LowerLimb)).call(
         Adjustment::ModifyAndMonitor {
             location: "Right knee".into(),
         },
         claims::SAFE_TENDON_001,
     );
-    let hrv = Recommended::new(
+    let hrv = AdjustmentKind::HrvHold.call(
         Adjustment::CapTopEnd {
             trigger: ReadinessSignal::HrvLnRmssd,
         },
@@ -462,7 +454,7 @@ fn an_unlocated_tendon_report_still_eases_every_lift() {
         lift_item("Back squat", 120.0),
         lift_item("Bench press", 85.0),
     ]);
-    let modify = Recommended::new(
+    let modify = AdjustmentKind::TendonModify(None).call(
         Adjustment::ModifyAndMonitor {
             location: String::new(),
         },

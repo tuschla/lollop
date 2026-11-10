@@ -10,7 +10,8 @@ import Lollop
 // brings the app to the front; a LiveActivityIntent runs in the app). The calls
 // into the Kotlin app are compiled into the app only.
 
-/// A screen a system surface opens: Android's `OpenDest` (`lollop://open/<dest>`).
+/// A screen a system surface opens: Android's `OpenDest` (`lollop://open/<dest>`);
+/// android/lollop's AppIdentifiersTest checks the cases and the URL against it.
 enum LollopScreen: String, AppEnum {
     case today
     case log

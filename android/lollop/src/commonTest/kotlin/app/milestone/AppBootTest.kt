@@ -107,15 +107,15 @@ private class Ledger : BootLedger {
  */
 class AppBootTest {
     private val dir = newTempDir()
-    private val log = LogFiles.sibling(dir, "/$EVENT_LOG_NAME")
+    private val log = AppFiles.sibling(dir, "/${AppFileNames.EVENT_LOG}")
     private val store = MemoryStore()
     private val ledger = Ledger()
     private val day = 20_000L to 3_600
 
     @AfterTest
     fun removeLog() {
-        for (suffix in listOf("", ".tmp", ".bak", ".import")) LogFiles.delete(LogFiles.sibling(log, suffix))
-        LogFiles.delete(dir)
+        for (suffix in listOf("") + AppFileNames.LOG_SUFFIXES) AppFiles.delete(AppFiles.sibling(log, suffix))
+        AppFiles.delete(dir)
     }
 
     private suspend fun boot(core: BootCore, engine: DurableCore = BridgeCore(core), today: Pair<Long, Int> = day): BootTurn? =
@@ -136,7 +136,7 @@ class AppBootTest {
 
     @Test
     fun aReturningUserReplaysTheLogAndSkipsTheSetup() = runTest {
-        LogFiles.writeLinesSynced(log, listOf(Event.SetToday(19_000).toJson().toString()))
+        AppFiles.writeLinesSynced(log, listOf(Event.SetToday(19_000).toJson().toString()))
         val core = BootCore()
         val turn = assertNotNull(boot(core))
         assertFalse(turn.fresh)
@@ -171,7 +171,7 @@ class AppBootTest {
 
     @Test
     fun aLogEndingWithThePlanRemovedReArmsALostMarker() = runTest {
-        LogFiles.writeLinesSynced(log, listOf(Event.ClearPlan.toJson().toString()))
+        AppFiles.writeLinesSynced(log, listOf(Event.ClearPlan.toJson().toString()))
         val core = BootCore(profile = true, planRemoved = true)
         assertNull(assertNotNull(boot(core)).view.program, "no plan generated over the removal")
         assertTrue(store.getBoolean(KEY_PLAN_CLEARED, false))

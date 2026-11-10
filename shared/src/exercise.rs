@@ -4,6 +4,8 @@
 //! review and readiness rule matches names with. String folding itself lives
 //! in `crate::names`.
 
+use crate::memo::{MemoId, memoized};
+
 /// Table 4's earlier label of the Cable row, also matched as a seated row by
 /// the pain-region allow-list.
 pub const LEGACY_CABLE_ROW: &str = "Row (barbell/cable/machine)";
@@ -93,6 +95,10 @@ impl MovementPattern {
 /// singular needle). Anything ambiguous (most isolation work, curls, raises,
 /// calf work) is `None`; a logged unclassifiable lift is still scheduled.
 pub(crate) fn movement_pattern(name: &str) -> Option<MovementPattern> {
+    name_class(name).pattern
+}
+
+fn movement_pattern_uncached(name: &str) -> Option<MovementPattern> {
     with_name_tokens(name, |tokens| {
         let has = |kw: &str| has_phrase(tokens, kw);
         movement_pattern_of(&has)
@@ -174,20 +180,23 @@ fn movement_pattern_of(has: &dyn Fn(&str) -> bool) -> Option<MovementPattern> {
     None
 }
 
-#[cfg(test)]
-thread_local! {
-    /// Test-only: calls of the exercise-NAME classifiers ([`is_isolation_lift`],
-    /// [`same_movement`], [`movement_key`], `calisthenics::tier_by_name`), the
-    /// per-set work the app's `SetIndex` exists to avoid. A deterministic
-    /// proxy for view time (`view_time_stays_bounded…`).
-    pub(crate) static NAME_CLASSIFICATIONS: std::cell::Cell<u64> =
-        const { std::cell::Cell::new(0) };
+/// What an exercise NAME says, derived once per distinct name and memoized
+/// ([`MemoId::ExerciseNames`]): plan synthesis and the views ask about the
+/// same few names thousands of times.
+struct NameClass {
+    key: Vec<String>,
+    isolation: bool,
+    pattern: Option<MovementPattern>,
 }
 
-/// Counts one `NAME_CLASSIFICATIONS` call (test builds only; a no-op else).
-pub(crate) fn count_name_classification() {
-    #[cfg(test)]
-    NAME_CLASSIFICATIONS.with(|c| c.set(c.get() + 1));
+fn name_class(name: &str) -> std::rc::Rc<NameClass> {
+    memoized(MemoId::ExerciseNames, name, || {
+        std::rc::Rc::new(NameClass {
+            key: movement_key_uncached(name),
+            isolation: is_isolation_uncached(name),
+            pattern: movement_pattern_uncached(name),
+        })
+    })
 }
 
 /// Whether a lift is an isolation movement, whose estimated 1RM is unreliable
@@ -199,7 +208,10 @@ pub(crate) fn count_name_classification() {
 /// single-muscle fragment ([`isolation_muscle`]: "Skull crusher",
 /// "Face pull", "Crunch").
 pub(crate) fn is_isolation_lift(name: &str) -> bool {
-    count_name_classification();
+    name_class(name).isolation
+}
+
+fn is_isolation_uncached(name: &str) -> bool {
     if exercise_entry(name).is_some_and(|e| e.class == ExerciseClass::Isolation) {
         return true;
     }
@@ -226,15 +238,7 @@ const ISOLATION_NEEDLES_WEAK: &[&str] = &["raise", "extension"];
 /// "Deadlift" ≠ "Romanian deadlift". A bare "Squat" and "Back squat" stay two
 /// lifts: merging them would need a movement-synonym lexicon the KB lacks.
 pub(crate) fn same_movement(a: &str, b: &str) -> bool {
-    count_name_classification();
-    let (mut x, mut y) = (movement_tokens(a), movement_tokens(b));
-    loop {
-        match (x.next(), y.next()) {
-            (None, None) => return true,
-            (Some(p), Some(q)) if crate::names::fold_eq(p, q) => {}
-            _ => return false,
-        }
-    }
+    name_class(a).key == name_class(b).key
 }
 
 /// The normalized token sequence [`same_movement`] compares: two names are the
@@ -243,7 +247,10 @@ pub(crate) fn same_movement(a: &str, b: &str) -> bool {
 /// catalog label ("Hack squat / leg press") keys as its current display name
 /// ("Hack squat"), so history logged under the old label stays the same lift.
 pub(crate) fn movement_key(name: &str) -> Vec<String> {
-    count_name_classification();
+    name_class(name).key.clone()
+}
+
+fn movement_key_uncached(name: &str) -> Vec<String> {
     movement_tokens(name).map(crate::names::fold).collect()
 }
 
@@ -599,7 +606,12 @@ pub(crate) fn catalog_entry(name: &str) -> Option<&'static ExerciseEntry> {
 
 /// Each [`EXERCISES`] row's movement key, aligned by index, computed once.
 static CATALOG_MOVEMENT_KEYS: std::sync::LazyLock<Vec<Vec<String>>> =
-    std::sync::LazyLock::new(|| EXERCISES.iter().map(|e| movement_key(e.name)).collect());
+    std::sync::LazyLock::new(|| {
+        EXERCISES
+            .iter()
+            .map(|e| movement_key_uncached(e.name))
+            .collect()
+    });
 
 /// Name fragments of machine- or cable-guided compounds. Table 2 files
 /// "moderate compounds / machines" together, so a compound carrying one of

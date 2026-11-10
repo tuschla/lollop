@@ -23,8 +23,7 @@ import androidx.core.location.LocationManagerCompat
 
 internal actual fun platformRunTracker(): RunTracker? = ServiceRunTracker
 
-/** [RunTracker] over the [RunTrackingService] foreground service and the
- *  [ActiveRunStore] sidecar. */
+/** [RunTracker] over the [RunTrackingService] foreground service. */
 private object ServiceRunTracker : RunTracker {
     override fun hasLocationPermission(ctx: Context): Boolean = hasFineLocation(ctx)
 
@@ -37,31 +36,12 @@ private object ServiceRunTracker : RunTracker {
         return !ActivityCompat.shouldShowRequestPermissionRationale(act, Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
-    override fun canPostNotifications(ctx: Context): Boolean = app.milestone.canPostNotifications(ctx)
-
     override fun isLocationEnabled(ctx: Context): Boolean {
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         return LocationManagerCompat.isLocationEnabled(lm)
     }
 
-    override fun isBatteryUnrestricted(ctx: Context): Boolean {
-        val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
-        return pm.isIgnoringBatteryOptimizations(ctx.packageName)
-    }
-
-    /** The direct REQUEST_IGNORE_BATTERY_OPTIMIZATIONS dialog (needs the same-named
-     *  permission, declared in the manifest, fine for a sideloaded app) is preferred;
-     *  if the OEM rejects/omits it, fall back to the general battery-optimization
-     *  settings list. */
-    @SuppressLint("BatteryLife")
-    override fun requestBatteryUnrestricted(ctx: Context) = ctx.openFirst(
-        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).setData(Uri.fromParts("package", ctx.packageName, null)),
-        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
-    )
-
     override fun openLocationSettings(ctx: Context) = ctx.openFirst(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-
-    override fun openNotificationSettings(ctx: Context) = ctx.openFirst(appNotificationSettingsIntent(ctx))
 
     override fun observeLocationSettings(ctx: Context, onChange: () -> Unit): () -> Unit {
         val receiver = object : BroadcastReceiver() {
@@ -73,34 +53,23 @@ private object ServiceRunTracker : RunTracker {
             IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
-        return { runCatching { ctx.unregisterReceiver(receiver) } }
+        return {
+            runCatching { ctx.unregisterReceiver(receiver) }
+                .onFailure { PlatformLog.w("RunTracking", "location settings receiver already gone", it) }
+        }
     }
 
     @Composable
-    override fun rememberPermissionPrompts(
-        onLocationResult: (preciseGranted: Boolean) -> Unit,
-        onNotificationResult: () -> Unit,
-    ): PermissionPrompts {
-        val locationLauncher = rememberLauncherForActivityResult(
+    override fun rememberLocationPrompt(onResult: (preciseGranted: Boolean) -> Unit): () -> Unit {
+        val launcher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
-        ) { result -> onLocationResult(result[Manifest.permission.ACCESS_FINE_LOCATION] == true) }
-        val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-            onNotificationResult()
-        }
-        return remember(locationLauncher, notificationLauncher) {
-            object : PermissionPrompts {
-                override fun requestLocation() = locationLauncher.launch(
-                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
-                )
-
-                // Below API 33 posting needs no runtime grant, so there is nothing to ask.
-                override fun requestNotifications() {
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-                    notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-            }
+        ) { result -> onResult(result[Manifest.permission.ACCESS_FINE_LOCATION] == true) }
+        return remember(launcher) {
+            { launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }
         }
     }
+
+    override val serviceGrants: RunServiceGrants = ServiceGrants
 
     override fun lastKnownLocation(ctx: Context, onResult: (lat: Double, lon: Double) -> Unit) =
         RunTrackingService.lastKnownLocation(ctx, onResult)
@@ -120,12 +89,37 @@ private object ServiceRunTracker : RunTracker {
     }
 
     override fun stop(ctx: Context) = RunTrackingService.stop(ctx)
+}
 
-    override fun hasInterruptedRun(ctx: Context): Boolean = ActiveRunStore.hasActiveRun(ctx)
+/** The foreground service's notification grant and battery exemption. */
+private object ServiceGrants : RunServiceGrants {
+    override fun canPostNotifications(ctx: Context): Boolean = app.milestone.canPostNotifications(ctx)
 
-    override fun recoverInterruptedRun(ctx: Context): RecoveredTrack = ActiveRunStore.recover(ctx)
+    override fun openNotificationSettings(ctx: Context) = ctx.openFirst(appNotificationSettingsIntent(ctx))
 
-    override fun discardInterruptedRun() = ActiveRunStore.clear()
+    @Composable
+    override fun rememberNotificationPrompt(onResult: () -> Unit): () -> Unit {
+        val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { onResult() }
+        return remember(launcher) {
+            {
+                // Below API 33 posting needs no runtime grant, so there is nothing to ask.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
 
-    override fun discardInterruptedRunSync() = ActiveRunStore.clearSync()
+    override fun isBatteryUnrestricted(ctx: Context): Boolean {
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return pm.isIgnoringBatteryOptimizations(ctx.packageName)
+    }
+
+    /** The direct REQUEST_IGNORE_BATTERY_OPTIMIZATIONS dialog (needs the same-named
+     *  permission, declared in the manifest, fine for a sideloaded app) is preferred;
+     *  if the OEM rejects/omits it, fall back to the general battery-optimization
+     *  settings list. */
+    @SuppressLint("BatteryLife")
+    override fun requestBatteryUnrestricted(ctx: Context) = ctx.openFirst(
+        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).setData(Uri.fromParts("package", ctx.packageName, null)),
+        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+    )
 }

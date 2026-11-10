@@ -1,6 +1,5 @@
 package app.milestone
 
-import androidx.compose.runtime.Composable
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.time.Instant
@@ -42,9 +41,8 @@ import platform.Foundation.timeZoneForSecondsFromGMT
 
 actual typealias PlatformLocale = NSLocale
 
-// The app locale (AppLocale.kt's rule): the first English language the user
-// prefers, else English with the device's region, always with Latin digits.
-// Rebuilt only when the preferred languages or the region change.
+// [appLocaleOf] over the preferred languages, the English fallback taking the
+// device's region. Rebuilt only when the preferred languages or the region change.
 private var appLocaleCache: Pair<List<Any?>, NSLocale>? = null
 
 internal actual fun appLocale(): NSLocale {
@@ -52,17 +50,17 @@ internal actual fun appLocale(): NSLocale {
     val region = NSLocale.currentLocale.countryCode
     val key = preferred + region
     appLocaleCache?.let { (k, locale) -> if (k == key) return locale }
-    val english = preferred.firstOrNull { id ->
-        NSLocale.componentsFromLocaleIdentifier(id as String)[NSLocaleLanguageCode] == "en"
-    } as String?
-    val components: MutableMap<Any?, Any?> =
-        if (english != null) NSLocale.componentsFromLocaleIdentifier(english).toMutableMap()
-        else mutableMapOf<Any?, Any?>(NSLocaleLanguageCode to "en").apply {
-            if (!region.isNullOrEmpty()) put(NSLocaleCountryCode, region)
-        }
-    // The ICU `numbers` keyword: java's `-u-nu-latn`.
-    components["numbers"] = "latn"
-    val locale = NSLocale(NSLocale.localeIdentifierFromComponents(components))
+    val locale = appLocaleOf(
+        preferred = preferred.map { NSLocale.componentsFromLocaleIdentifier(it as String) },
+        language = { it[NSLocaleLanguageCode] as String? },
+        english = {
+            mutableMapOf<Any?, Any?>(NSLocaleLanguageCode to "en").apply {
+                if (!region.isNullOrEmpty()) put(NSLocaleCountryCode, region)
+            }
+        },
+        // The ICU `numbers` keyword: java's `-u-nu-latn`.
+        withLatinDigits = { NSLocale(NSLocale.localeIdentifierFromComponents(it + ("numbers" to "latn"))) },
+    )
     appLocaleCache = key to locale
     return locale
 }
@@ -129,8 +127,7 @@ internal actual fun relativeDayLabel(dayDelta: Long, locale: NSLocale): String {
 
 // The 24-hour setting shows in the device locale's hour pattern ("j"): a
 // 12-hour clock carries the am/pm marker ("a").
-@Composable
-internal actual fun is24HourClock(): Boolean =
+internal actual fun is24HourClock(ctx: PlatformContext): Boolean =
     NSDateFormatter.dateFormatFromTemplate("j", 0u, NSLocale.currentLocale)?.contains('a') != true
 
 /** NSCalendar resolves a time inside a DST gap forward by the gap, as

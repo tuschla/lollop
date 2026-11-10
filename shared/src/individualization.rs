@@ -11,7 +11,9 @@
 //! REENTRY-001).
 
 use crate::evidence::{ClaimId, claims};
-use crate::schema::{Adjustment, HealthScreen, Recommended};
+use crate::schema::{
+    Adjustment, AdjustmentCall, AdjustmentKind, HealthScreen, Recommended, ScreenGate,
+};
 
 // ---------------------------------------------------------------------------
 // 1. Training age (File 08 indiv-001; STR-TRAGE-001)
@@ -29,7 +31,16 @@ pub enum TrainingAge {
 }
 
 /// Observed cadence at which the lifter can still add load (indiv-001).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    crate::sanitize::Sanitize,
+)]
 pub enum ProgressionCadence {
     EverySession,
     WeekToWeek,
@@ -558,7 +569,16 @@ pub struct EnvironmentModifier {
 /// The training environment the session is performed in.
 /// Serde derives: crosses the JSON FFI as an optional profile field (bare
 /// variant name), so a shell can declare heat/altitude/cold context.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    crate::sanitize::Sanitize,
+)]
 pub enum Environment {
     Heat,
     /// Altitude above ~2,500 m (File 08 indiv-025).
@@ -647,11 +667,12 @@ pub fn pregnancy_precautions() -> Recommended<PregnancyPrecautions> {
 ///
 /// safety-000 global precedence: none of these deferrals may ever be
 /// overridden to satisfy a user's stated goal, safety > goals (HARD RULE 3).
-pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
-    let gates: [(bool, &str, ClaimId); 8] = [
+pub fn onboarding_gates(s: &HealthScreen) -> Vec<AdjustmentCall> {
+    let gates: [(bool, ScreenGate, &str, ClaimId); 8] = [
         // safety-046: warning signs → STOP and DEFER.
         (
             s.pregnancy_warning_sign,
+            ScreenGate::PregnancyWarning,
             "You reported a pregnancy warning sign. Stop exercising now and contact your doctor or midwife.",
             claims::SAFE_PREG_WARN_001,
         ),
@@ -660,6 +681,7 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
         // prior clearance answer does not cover a current symptom.
         (
             s.symptomatic_any(),
+            ScreenGate::Symptoms,
             "You reported chest pain, dizziness or fainting. See a doctor before you train, then update your health answers.",
             claims::SCREEN_ACSM_001,
         ),
@@ -667,6 +689,7 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
         // user reports it resolved.
         (
             s.acute_illness,
+            ScreenGate::AcuteIllness,
             "Training is paused until you have no fever and your symptoms are gone. Then tap I'm better.",
             claims::ILLNESS_NECK_001,
         ),
@@ -675,6 +698,7 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
         // covered by the clearance (a Yes added later gates again).
         (
             s.parq_followup_uncleared(),
+            ScreenGate::Parq,
             "Once a doctor has cleared you, turn on \"Cleared by a doctor\" in your health answers.",
             claims::SAFE_CVD_001,
         ),
@@ -683,12 +707,14 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
         // context, not an engine prescription.
         (
             s.pregnant,
+            ScreenGate::Pregnancy,
             "Guideline for an uncomplicated pregnancy: about 150 minutes of moderate activity a week, agreed with your doctor or midwife.",
             claims::SAFE_PREG_001,
         ),
         // safety-048: the engine never prescribes rehabilitation.
         (
             s.injury_any(),
+            ScreenGate::Injury,
             "You have an injury, recent surgery or ongoing rehab. lollop doesn't plan rehab. Follow your doctor or physio, and update your health answers once they clear you.",
             claims::SAFE_INJURY_001,
         ),
@@ -696,12 +722,14 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
         // loading or 1RM testing. No plan is built; the card carries the how-to.
         (
             s.youth,
+            ScreenGate::Youth,
             "Put technique ahead of weight, and skip near-max weights and 1-rep-max tests.",
             claims::SAFE_PEDS_001,
         ),
         // safety-049 absolute rule: never a programming variable.
         (
             s.reds_signal,
+            ScreenGate::Reds,
             "You reported a sign of under-eating, so training is paused. Talk to a doctor, a registered dietitian or a mental-health professional.",
             claims::SAFE_REDS_001,
         ),
@@ -709,8 +737,8 @@ pub fn onboarding_gates(s: &HealthScreen) -> Vec<Recommended<Adjustment>> {
     gates
         .into_iter()
         .filter(|(fires, ..)| *fires)
-        .map(|(_, reason, claim)| {
-            Recommended::new(
+        .map(|(_, gate, reason, claim)| {
+            AdjustmentKind::Screen(gate).call(
                 Adjustment::Defer {
                     reason: reason.into(),
                 },

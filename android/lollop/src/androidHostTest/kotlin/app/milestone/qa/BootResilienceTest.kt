@@ -14,15 +14,20 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.ActiveRunStore
 import app.milestone.AppClock
+import app.milestone.AppFileNames
+import app.milestone.AppRuntime
 import app.milestone.AppSettings
+import app.milestone.BridgeCore
 import app.milestone.Core
 import app.milestone.CoreFault
+import app.milestone.FaultBridge
 import app.milestone.DurableCore
 import app.milestone.EventDispatcher
 import app.milestone.GpsPoint
 import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.RunTrackingService
+import app.milestone.TestClock
 import app.milestone.exportDataTo
 import java.io.File
 import kotlinx.coroutines.launch
@@ -75,13 +80,11 @@ class BootResilienceTest {
 
     @After
     fun tearDown() {
-        Core.faultForTest = null
-        Core.clearUnavailableForTest()
         QaHarness.teardown()
         ProcessDeath.teardown()
         RunSession.reset()
         QaHarness.clearSidecar(ctx)
-        AppSettings.showRouteMaps.value = true
+        QaHarness.freshProcess()
         shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
     }
 
@@ -100,14 +103,14 @@ class BootResilienceTest {
      *  platform kills the process on revoke). */
     private fun interruptedRunWithLocationRevoked(): Int {
         // The resume gate ages the sidecar against the wall clock, so run on it.
-        AppClock.offsetMillis = 0
+        TestClock.offsetMillis = 0
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         val t0 = System.currentTimeMillis() / 1000 - 600
         val pts = (0 until 60).map { fix(3.0 * it, t0 + it) }
-        ActiveRunStore.begin(ctx)
-        pts.forEach { p -> if (RunSession.add(p, (5_000L + (p.observedAt - t0) * 1000L) * 1_000_000L)) ActiveRunStore.append(p) }
-        RunSession.tracking.value = true
+        ActiveRunStore.begin()
+        pts.forEach { p -> if (RunSession.add(p, (5_000L + (p.observedAt - t0) * 1000L) * 1_000_000L)) ActiveRunStore.append(p, RunSession.isSegmentStart(p)) }
+        RunSession.recordingStarted()
         ProcessDeath.kill(ctx)
         shadowOf(app).denyPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         return pts.size
@@ -156,7 +159,7 @@ class BootResilienceTest {
         rule.onNode(androidx.compose.ui.test.hasContentDescription(str(R.string.track_cd_discard_run)) and hasClickAction()).performClick()
         rule.waitForState { rule.onAllNodes(isDialog()).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(n, RunSession.points.value.size)
-        assertTrue("the sidecar survives the unconfirmed ✕", File(ctx.filesDir, "active-run.ndjson").length() > 0)
+        assertTrue("the sidecar survives the unconfirmed ✕", File(ctx.filesDir, AppFileNames.ACTIVE_RUN).length() > 0)
         rule.onNode(hasText(str(R.string.main_cancel)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
         // Save keeps what was recorded before the revoke.
         rule.waitForState { rule.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty() }
@@ -182,11 +185,13 @@ class BootResilienceTest {
     private fun bootsIntoCoreUnavailable(fault: CoreFault) {
         QaHarness.seedLog(ctx, seeded)
         val before = logFile.readBytes()
-        Core.faultForTest = fault
+        val bridge = FaultBridge(fault)
+        val engine = BridgeCore(bridge)
+        QaHarness.freshProcess(engine)
         lastScenario = launchMain()
         rule.waitForNode(hasText(str(R.string.main_core_unavailable_title), substring = true), 30_000)
         rule.waitForIdle()
-        assertTrue(Core.unavailable)
+        assertTrue(engine.unavailable)
         assertEquals(0, rule.countOf(hasText(str(R.string.setup_step_train_q), substring = true)))
         assertEquals(0, rule.countOf(hasText(str(R.string.main_dest_history), substring = true)))
         assertTrue(rule.countOf(hasText(str(R.string.profile_export_data), substring = true)) > 0)
@@ -195,12 +200,12 @@ class BootResilienceTest {
 
         // Even an event that reaches the dispatcher can't append: the core refuses
         // every event once it is unavailable, whatever the library would answer.
-        Core.faultForTest = object : CoreFault {
+        bridge.fault = object : CoreFault {
             override fun update(event: ByteArray): ByteArray = "[]".toByteArray()
             override fun view(): ByteArray? = null
         }
         EventDispatcher.send(QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(0)))
-        val r = Core.send(QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(0)))
+        val r = engine.send(QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(0)))
         assertFalse(r.accepted)
         rule.waitForIdle()
         assertArrayEquals("no write after boot either", before, logFile.readBytes())
@@ -210,7 +215,7 @@ class BootResilienceTest {
         // Off the test (main) thread's stack: the export's exclusive turn runs on the
         // main-dispatched consumer, so blocking main on it would deadlock.
         var exported: Boolean? = null
-        EventDispatcher.scope.launch { exported = exportDataTo(ctx, Uri.fromFile(out)) }
+        AppRuntime.scope.launch { exported = exportDataTo(ctx, Uri.fromFile(out)) }
         rule.waitForState(30_000) { exported != null }
         assertEquals("export works without the core", true, exported)
         assertEquals(seeded.map { it.toJson().toString() }, out.readLines().filter { it.isNotBlank() })
@@ -265,7 +270,7 @@ class BootResilienceTest {
         rule.waitForIdle()
         // The re-run's exclusive turn is queued by now; one queued after it settles last.
         var settled = false
-        EventDispatcher.scope.launch {
+        AppRuntime.scope.launch {
             EventDispatcher.exclusive { null }
             settled = true
         }

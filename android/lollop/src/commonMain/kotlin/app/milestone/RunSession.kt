@@ -4,6 +4,7 @@ import kotlin.concurrent.Volatile
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * In-memory holder the platform's recorder ([RunRecorder]: Android's foreground
@@ -11,55 +12,48 @@ import kotlinx.coroutines.flow.MutableStateFlow
  * Living here rather than inside the Composable is what lets a run keep recording
  * while the screen is off or the app is backgrounded: the recorder owns the
  * location stream, the screen just renders this state.
+ *
+ * Every flow is read-only; state changes only through the commands below. The
+ * recording-engine state (tracking, locating, armed, the preview fix, a failed
+ * stream) is [RunRecorder]'s alone; the tracker screen drives the run's plan, its
+ * save claim, pause and teardown. The state lives as long as the process
+ * ([ProcessLocal]).
  */
-object RunSession : SynchronizedObject() {
-    // Append-only backing store for the captured track. Fixes are only ever
-    // APPENDED (never mutated or removed in place; reset/restore allocate a FRESH
-    // array), so a [TrackSnapshot] published over the prefix [0, pointCount) stays
-    // immutable for its whole life even as later fixes land. That lets [add]
-    // publish a new `points` value in O(1) amortised (a growable array + O(1)
-    // snapshot) rather than copying the whole list on every fix, which would be
-    // O(n²) over a multi-hour 1 Hz run, on the main looper. Single writer (the
-    // GPS callback, always under the RunSession lock) + lock-free main-thread readers is
-    // safe by construction: every published prefix is frozen, and each grow
-    // allocates a NEW array so already-published snapshots keep their own backing.
-    // Readers NEVER touch these two fields, only the published [TrackSnapshot].
-    private var pointArr: Array<GpsPoint?> = arrayOfNulls(INITIAL_TRACK_CAP)
-    private var pointCount = 0
+object RunSession {
+    private val session by ProcessLocal { Session() }
 
-    /** The captured track. Its value is a [TrackSnapshot] (an O(1) immutable view
-     *  over the append-only backing), republished per accepted fix. Exposed as a
-     *  plain `List<GpsPoint>` so consumers (map draw, save, recovery, tests) need no
-     *  knowledge of the snapshot type. */
-    val points = MutableStateFlow<List<GpsPoint>>(TrackSnapshot(pointArr, 0))
+    /** The captured track. Its value is an O(1) immutable view over the append-only
+     *  backing, republished per accepted fix. A plain `List<GpsPoint>` so consumers
+     *  (map draw, save, recovery, tests) need no knowledge of the snapshot type. */
+    val points: StateFlow<List<GpsPoint>> get() = session.points
 
     /** Whether [points] is non-empty. Flips only on empty↔non-empty, so the screen
      *  observes it without recomposing per fix. */
-    val hasPoints = MutableStateFlow(false)
-    val tracking = MutableStateFlow(false)
+    val hasPoints: StateFlow<Boolean> get() = session.hasPoints
+    val tracking: StateFlow<Boolean> get() = session.tracking
 
     // Locate-only preview: the service is acquiring GPS but NOT
     // recording yet. `locating` is true from opening the tracker until Stop/Back;
     // `lastFix` is the latest accepted fix (recording or not); it drives the
     // "GPS lock · ±N m" readout, the self-location dot before Start, and enables
     // the Start button once a good fix lands.
-    val locating = MutableStateFlow(false)
-    val lastFix = MutableStateFlow<GpsPoint?>(null)
+    val locating: StateFlow<Boolean> get() = session.locating
+    val lastFix: StateFlow<GpsPoint?> get() = session.lastFix
 
     // Armed start: Start is tappable before any lock, and recording begins
-    // AUTOMATICALLY at the first qualifying fix. The service sets this true on entering
-    // ARM mode and clears it the instant recording begins (or on teardown). A process
-    // singleton so the transition survives rotation/backgrounding: the service owns it,
-    // the screen only observes. [restore] forces it false, a recovered run is already
-    // recording, never armed.
-    val armed = MutableStateFlow(false)
+    // AUTOMATICALLY at the first qualifying fix. [RunRecorder] sets this on the tap
+    // ([RunRecorder.armRequested]) and on entering ARM mode, and clears it the instant
+    // recording begins (or on teardown). A process singleton so the transition
+    // survives rotation/backgrounding. [restore] forces it false, a recovered run is
+    // already recording, never armed.
+    val armed: StateFlow<Boolean> get() = session.armed
 
     // The location stream could not be started or died on start (no GPS provider on
     // the device, the fused client's async failure, a permission race). Set by the
-    // service's failure unwind; the screen stops re-launching the locate preview while
+    // recorder's failure unwind; the screen stops re-launching the locate preview while
     // it is set (otherwise each failure would immediately restart the service in a
     // tight start/stop loop) and clears it on ON_RESUME, Try again or Start.
-    val locationFailed = MutableStateFlow(false)
+    val locationFailed: StateFlow<Boolean> get() = session.locationFailed
 
     // A crash-recovered run the user chose to Resume while precise location was not
     // granted (revoked in Settings, or an "Only this time" grant that lapsed with the
@@ -68,42 +62,40 @@ object RunSession : SynchronizedObject() {
     // granted, re-issues the recording start ([RunTrackingService.start]); until then
     // the run is a capture the runner can still save or discard. Cleared by [reset]
     // and by the tracker once it restarts recording.
-    val resumeAwaitingLocation = MutableStateFlow(false)
+    val resumeAwaitingLocation: StateFlow<Boolean> get() = session.resumeAwaitingLocation
 
-    // Monotonic (elapsedRealtime) stamp of the last ACCEPTED fix, set by the service on
+    // Monotonic (elapsedRealtime) stamp of the last ACCEPTED fix, set by the recorder on
     // every plausible fix (preview/armed fixes never reach [add], so it cannot live
     // there). Drives [isFreshLock]'s freshness gate and the signal-loss pill: a lock is
     // "fresh" only for [LOCK_FRESH_MS] after its fix, so a single stale fix cannot
     // latch Start/GPS-lock forever. 0 = no fix.
-    val lastFixElapsedMs = MutableStateFlow(0L)
+    val lastFixElapsedMs: StateFlow<Long> get() = session.lastFixElapsedMs
 
-    // Session token, bumped by [reset]. The service captures it when a stream starts
+    // Session token, bumped by [reset]. The recorder captures it when a stream starts
     // and stands down once it differs: Cancel/Back/discard runs `stop()` (async
     // ACTION_STOP) then `reset()`, and a fix already queued on the main looper must
-    // not record into the cleared session. @Volatile for the service's main-thread
-    // read; written only under reset()'s lock.
-    @Volatile
-    var generation: Long = 0L
-        private set
+    // not record into the cleared session.
+    val generation: Long get() = session.generation
 
     // Paused: the service keeps running (the run stays live/reentrant) but
     // incoming fixes are dropped, so the paused span records no route. The core's
     // of-record duration/pace/splits are MOVING time (legs below the auto-pause
     // floor are excluded), so a stop trims both the path and the pace clock, a
     // paused run is not penalised as if it were slow.
-    val paused = MutableStateFlow(false)
+    val paused: StateFlow<Boolean> get() = session.paused
 
     // A run save is in flight; gates Save/Discard/Stop. Process-scoped so a
     // rotation can neither resurrect it (double-save) nor orphan it true (stuck
-    // buttons after a failed save). Cleared by [reset] (inside the save critical
-    // section, after the persist landed) and by the save-failure path.
-    val saving = MutableStateFlow(false)
+    // buttons after a failed save). Claimed by [claimSaving]; released by [reset]
+    // (inside the save critical section, after the persist landed) and by the
+    // save-failure path ([releaseSaving]).
+    val saving: StateFlow<Boolean> get() = session.saving
 
     // Running path length (km), accumulated ONE segment at a time so neither the
     // notification nor the live sheet re-haversines the whole track every fix
     // (which would be O(n²) over a multi-hour run). Correctness is identical to a
     // full segment-aware haversine over `points`, just computed incrementally.
-    val distanceKm = MutableStateFlow(0.0)
+    val distanceKm: StateFlow<Double> get() = session.distanceKm
 
     // Live elapsed MOVING time (seconds): the accumulated duration of MOVING legs
     // only, pause-bridge legs AND sub-[MIN_MOVING_SPEED_MPS] standing-still legs are
@@ -113,31 +105,15 @@ object RunSession : SynchronizedObject() {
     // each fix's own MONOTONIC per-leg dt (elapsedRealtimeNanos), NOT wall-clock
     // `observedAt`, so a clock change / NTP correction can never make it jump or go
     // negative. The OF-RECORD duration is still core-derived from observedAt on save.
-    val elapsedSec = MutableStateFlow(0L)
-
-    // Monotonic bookkeeping (ms, elapsedRealtime timebase). [movingMs] accumulates the
-    // per-leg dt of MOVING legs only (the live moving-time clock behind [elapsedSec]);
-    // [lastElapsedMs] is the most recent fix's monotonic stamp, the base for each
-    // per-leg dt (segment-gap + speed jitter/stop-floor checks). Both monotonic, so
-    // neither depends on wall-clock timestamps that an NTP step could move.
-    private var movingMs: Long = 0L
-    private var lastElapsedMs: Long = 0L
+    val elapsedSec: StateFlow<Long> get() = session.elapsedSec
 
     /** Per-N-minute pace slices, accumulated INCREMENTALLY as fixes arrive and
      *  published here so the live sheet observes them directly; a full rescan of the
-     *  track on every fix would be O(n) per fix. The accumulator ([completedBuckets] +
-     *  the open [bucketCurSec]/[bucketCurKm] tail) is fed one leg at a time in [add];
-     *  [rebuildPaceBuckets] replays the stored track through the SAME [feedPaceLeg]
-     *  when the bucket size changes or a run is recovered. The unit tests hold a
-     *  from-scratch reference and assert this flow equals it after any sequence. */
-    val paceBucketsFlow = MutableStateFlow<List<PaceBucket>>(emptyList())
-    // The bucket size (minutes) the accumulator is currently built for. Changed
-    // only via [setPaceBucketMinutes], which rebuilds from the backing store, so
-    // the accumulator is always consistent with this size.
-    private var bucketMin = DEFAULT_PACE_BUCKET_MINUTES
-    private val completedBuckets = ArrayList<PaceBucket>()
-    private var bucketCurSec = 0.0
-    private var bucketCurKm = 0.0
+     *  track on every fix would be O(n) per fix. [setPaceBucketMinutes] rebuilds them
+     *  from the stored track for a new slice size, as [restore] does for a recovered
+     *  run. The unit tests hold a from-scratch reference and assert this flow equals
+     *  it after any sequence. */
+    val paceBucketsFlow: StateFlow<List<PaceBucket>> get() = session.paceBucketsFlow
 
     /** The CURRENT pace (canonical min/km) over the trailing [RollingPace] window
      *  (≥[ROLLING_PACE_MIN_SPAN_MS] and ≥[ROLLING_PACE_MIN_METERS] of recent legs,
@@ -147,207 +123,124 @@ object RunSession : SynchronizedObject() {
      *  segment) → rendered [EmptyValuePlaceholder]. Standing-still legs keep their time
      *  in the window, so stopping drives it to the placeholder rather than freezing
      *  the last running pace. */
-    val currentPaceMinPerKm = MutableStateFlow(Double.NaN)
-    private val rollingPace = RollingPace()
+    val currentPaceMinPerKm: StateFlow<Double> get() = session.currentPaceMinPerKm
 
-    /** Today's planned run item the tracker follows, set by the screen when
-     *  the runner taps Start with "Follow today's plan" on; null for a free run. Its
-     *  [PrescriptionView.run_target] drives the on-screen targets and its
+    /** Today's planned run item the tracker follows ([followPlan]); null for a free
+     *  run. Its [PrescriptionView.run_target] drives the on-screen targets and its
      *  [PrescriptionView.run_structure] the step guide. Cleared by [reset]. */
-    val plannedRun = MutableStateFlow<PrescriptionView?>(null)
+    val plannedRun: StateFlow<PrescriptionView?> get() = session.plannedRun
 
     /** The live step guide (null when the run has no structured steps). Driven on the
-     *  main thread (the service's tick + fix callbacks, the screen's Skip step);
-     *  [reset] clears it from the save's IO thread after the service stopped, hence
-     *  @Volatile on [stepMachine]. */
-    internal val stepProgress = MutableStateFlow<StepProgress?>(null)
-    @Volatile private var stepMachine: RunStepMachine? = null
+     *  main thread (the recorder's tick + fix callbacks, the screen's Skip step). */
+    internal val stepProgress: StateFlow<StepProgress?> get() = session.stepProgress
+
+    // ── Recorder commands: [RunRecorder] is their only caller in the app ─────────
+
+    /** The location stream is up: locating, and [tracking] iff it records. */
+    internal fun streamStarted(recording: Boolean) {
+        val s = session
+        s.locating.value = true
+        // Only recording flips `tracking`; a locate keeps Start on screen.
+        s.tracking.value = recording
+    }
+
+    /** An armed stream began recording. */
+    internal fun recordingStarted() {
+        session.tracking.value = true
+    }
+
+    internal fun setArmed(armed: Boolean) {
+        session.armed.value = armed
+    }
+
+    /** The latest accepted fix (recording, armed or locate-only) at its own
+     *  monotonic stamp [elapsedMs]. */
+    internal fun previewFix(fix: GpsPoint, elapsedMs: Long) {
+        val s = session
+        s.lastFix.value = fix
+        s.lastFixElapsedMs.value = elapsedMs
+    }
+
+    internal fun markLocationFailed() {
+        session.locationFailed.value = true
+    }
+
+    /** Reset only the engine-state flags ([tracking], [locating], [armed]) to stopped,
+     *  keeping the captured track and the save/pause bookkeeping (unlike [reset]), so
+     *  no stop leaves "Finding GPS…" latched with no engine behind it. */
+    fun markStopped() {
+        val s = session
+        s.tracking.value = false
+        s.locating.value = false
+        s.armed.value = false
+    }
+
+    // ── Tracker screen commands ──────────────────────────────────────────────────
+
+    /** The runner tapped Start with "Follow today's plan" on ([item]) or off (null). */
+    fun followPlan(item: PrescriptionView?) {
+        session.plannedRun.value = item
+    }
+
+    /** Back from settings, Try again or Start: a fresh locate attempt may run. */
+    fun clearLocationFailed() {
+        session.locationFailed.value = false
+    }
+
+    /** A recovered run is resuming without a precise-location grant: it shows as a
+     *  stopped capture until the grant lets recording restart. */
+    fun awaitLocationForResume() {
+        val s = session
+        s.tracking.value = false
+        s.resumeAwaitingLocation.value = true
+    }
+
+    /** Recording restarted for a recovered run. */
+    fun clearResumeAwaitingLocation() {
+        session.resumeAwaitingLocation.value = false
+    }
+
+    /** Take the save claim ([claimSaving]); false when another save holds it. */
+    fun claimSaving(ownsSaving: Boolean = false): Boolean = app.milestone.claimSaving(session.saving, ownsSaving)
+
+    /** A save failed or was abandoned before it persisted: Save/Discard work again. */
+    fun releaseSaving() {
+        session.saving.value = false
+    }
+
+    /** Pause or resume recording; the screen and the recorder both go through here.
+     *  Pausing marks the segment boundary at once, so the first fix after Resume
+     *  opens a new segment even when no fix was accepted while paused. */
+    fun setPaused(p: Boolean) = session.setPaused(p)
+
+    // ── The track ────────────────────────────────────────────────────────────────
 
     /** Start the step guide for [plannedRun] at the moment recording begins. A no-op
      *  without a structured plan or when a guide is already running. */
-    fun startSteps(nowMs: Long) {
-        if (stepMachine != null) return
-        val steps = plannedRun.value?.run_structure?.let { buildRunSteps(it) }.orEmpty()
-        if (steps.isEmpty()) return
-        val m = RunStepMachine(steps, nowMs, distanceKm.value * 1000.0)
-        stepMachine = m
-        stepProgress.value = m.progress()
-    }
+    fun startSteps(nowMs: Long) = session.startSteps(nowMs)
 
-    /** Advance the guide to [nowMs]; true when the step changed (the service cues). */
-    fun tickSteps(nowMs: Long): Boolean {
-        val m = stepMachine ?: return false
-        val changed = m.advance(nowMs, distanceKm.value * 1000.0, paused.value)
-        stepProgress.value = m.progress()
-        return changed
-    }
+    /** Advance the guide to [nowMs]; true when the step changed (the recorder cues). */
+    fun tickSteps(nowMs: Long): Boolean = session.tickSteps(nowMs)
 
     /** The runner's "Skip step". */
-    fun skipStep(nowMs: Long) {
-        val m = stepMachine ?: return
-        m.skip(nowMs, distanceKm.value * 1000.0, paused.value)
-        stepProgress.value = m.progress()
-    }
+    fun skipStep(nowMs: Long) = session.skipStep(nowMs)
 
-    // Indices into `points` that begin a new recording segment: the first fix after
-    // a pause or a long fix gap. The leg into such a fix is a pause bridge (the
-    // runner may have relocated), so it counts neither live nor in the saved run.
-    // Index 0 has no preceding leg and is never stored. Accessed under the lock.
-    private val segmentStarts = HashSet<Int>()
-
-    // Set when the run pauses: the next accepted fix opens a new segment, so its
-    // bridge leg back to the last pre-pause fix is dropped. Cleared by [add].
-    @Volatile private var pendingBreak = false
-
-    /** Pause or resume recording; the screen and the service both go through here.
-     *  Pausing marks the segment boundary at once, so the first fix after Resume
-     *  opens a new segment even when no fix was accepted while paused. */
-    fun setPaused(p: Boolean) {
-        if (p) pendingBreak = true
-        paused.value = p
-    }
-
-    /** True when a fix arriving [dtMs] (monotonic) after [prev] opens a new segment:
-     *  a pause boundary or a fix gap longer than [MAX_FIX_GAP_SEC]. [add] drops a
-     *  fix with dtMs < 0 before this check. */
-    private fun isBoundary(prev: GpsPoint?, dtMs: Long): Boolean {
-        if (prev == null) return false
-        if (pendingBreak) return true
-        return dtMs > MAX_FIX_GAP_SEC * 1000L
-    }
-
-    // Locked so the read-modify-write of points + distance is atomic.
-    // [fixElapsedRealtimeNanos] is the fix's own monotonic timestamp
-    // (Location.getElapsedRealtimeNanos), the clock behind moving time and each
-    // leg's dt, immune to wall-clock steps. Returns true iff the fix was appended,
-    // so the crash sidecar mirrors only accepted fixes.
-    fun add(p: GpsPoint, fixElapsedRealtimeNanos: Long): Boolean = synchronized(this) {
-        val last = if (pointCount > 0) pointArr[pointCount - 1] else null
-        val fixMs = fixElapsedRealtimeNanos / 1_000_000
-        val dtMs = fixMs - lastElapsedMs
-        // A fix older than the previous one (dt < 0) is dropped rather than appended
-        // out of order, which would split a leg or drag the line backwards. The first
-        // fix is exempt: its dt is the boot offset (lastElapsedMs starts at 0).
-        if (last != null && dtMs < 0L) return false
-        if (isBoundary(last, dtMs)) {
-            // New segment: the bridge leg adds no distance, moving time or pace
-            // slice, and the current-pace window restarts.
-            segmentStarts.add(pointCount)
-            rollingPace.clear()
-        } else if (last != null && dtMs > 0L) {
-            // The live figures apply the saved run's moving-leg rule; the core also
-            // drops fixes under 2.5 m apart (`qc_track`), so the saved distance can
-            // differ slightly. The Finish review shows the core's own figures.
-            val legKm = movingLegKm(segmentKm(last, p), dtMs / 1000.0)
-            if (legKm != null) {
-                movingMs += dtMs
-                distanceKm.value += legKm
-                rollingPace.add(dtMs, legKm * 1000.0)
-                feedPaceLeg(legKm, dtMs / 1000.0)
-            } else {
-                // Standing still: the time stays in the current-pace window with no
-                // distance, so "Pace now" decays to [EmptyValuePlaceholder].
-                rollingPace.add(dtMs, 0.0)
-            }
-        }
-        lastElapsedMs = fixMs
-        elapsedSec.value = (movingMs / 1000L).coerceAtLeast(0L)
-        currentPaceMinPerKm.value = rollingPace.paceMinPerKm()
-        pendingBreak = false
-        appendPoint(p)
-        emitPaceBuckets()
-        return true
-    }
-
-    /** Append one accepted fix to the growable backing store and publish a fresh
-     *  O(1) [TrackSnapshot]. Amortised O(1): the array doubles on overflow (total
-     *  O(n) over the run), and a grow allocates a NEW array so any already-published
-     *  snapshot keeps its own frozen backing (lock-free reader safety). */
-    private fun appendPoint(p: GpsPoint) {
-        if (pointCount == pointArr.size) {
-            pointArr = pointArr.copyOf(pointArr.size * 2)
-        }
-        pointArr[pointCount] = p
-        pointCount++
-        points.value = TrackSnapshot(pointArr, pointCount)
-        hasPoints.value = true
-    }
-
-    /** Fold one moving leg ([legKm], already capped by [movingLegKm], over [legSec])
-     *  into the pace-slice accumulator, splitting it by time across a slice edge.
-     *  Standing-still and pause-bridge legs never reach here. */
-    private fun feedPaceLeg(legKm: Double, legSec: Double) {
-        val n = bucketMin.coerceAtLeast(1)
-        val bucketSec = n * 60.0
-        var restSec = legSec
-        var restKm = legKm
-        while (bucketCurSec + restSec >= bucketSec) {
-            val take = bucketSec - bucketCurSec
-            val frac = if (restSec > 0.0) take / restSec else 0.0
-            val kmChunk = restKm * frac
-            bucketCurKm += kmChunk
-            completedBuckets.add(PaceBucket(paceMinPerKm = n / bucketCurKm, minutes = n.toDouble(), complete = true))
-            restSec -= take
-            restKm -= kmChunk
-            bucketCurSec = 0.0
-            bucketCurKm = 0.0
-        }
-        bucketCurSec += restSec
-        bucketCurKm += restKm
-    }
-
-    /** Publish the current accumulator: the completed slices plus, if the open slice
-     *  holds any moving time, an in-progress partial tail. A fresh list each call is
-     *  the publication barrier that hands the GPS-thread accumulator safely to the
-     *  main-thread observer. */
-    private fun emitPaceBuckets() {
-        val out = ArrayList<PaceBucket>(completedBuckets.size + 1)
-        out.addAll(completedBuckets)
-        if (bucketCurSec > 0.0) {
-            val minutes = bucketCurSec / 60.0
-            out.add(PaceBucket(paceMinPerKm = minutes / bucketCurKm, minutes = minutes, complete = false))
-        }
-        paceBucketsFlow.value = out
-    }
-
-    /** Rebuild the pace accumulator (and republish [paceBucketsFlow]) for the
-     *  current [bucketMin] from the whole backing store, one O(n) pass, used when
-     *  the user changes the bucket size mid-run ([setPaceBucketMinutes]) or a run is
-     *  recovered ([restore]). Pause-bridge legs are skipped exactly as [add] skips
-     *  them. */
-    private fun rebuildPaceBuckets() {
-        completedBuckets.clear()
-        bucketCurSec = 0.0
-        bucketCurKm = 0.0
-        for (i in 1 until pointCount) {
-            if (segmentStarts.contains(i)) continue
-            val a = pointArr[i - 1]!!
-            val b = pointArr[i]!!
-            // The stored fixes carry only wall-clock observedAt, so the leg dt comes
-            // from that rather than the monotonic clock the live path uses.
-            val dtSec = (b.observedAt - a.observedAt).toDouble()
-            movingLegKm(segmentKm(a, b), dtSec)?.let { feedPaceLeg(it, dtSec) }
-        }
-        emitPaceBuckets()
-    }
+    /** Append one fix. [fixElapsedRealtimeNanos] is the fix's own monotonic timestamp
+     *  (Location.getElapsedRealtimeNanos), the clock behind moving time and each leg's
+     *  dt, immune to wall-clock steps. Returns true iff the fix was appended, so the
+     *  crash sidecar mirrors only accepted fixes. */
+    fun add(p: GpsPoint, fixElapsedRealtimeNanos: Long): Boolean = session.add(p, fixElapsedRealtimeNanos)
 
     /** Set the live pace-bucket size (minutes). A no-op when unchanged; otherwise
      *  rebuilds the incremental accumulator from the backing store so the exposed
      *  [paceBucketsFlow] matches the new size. Called from the live sheet whenever
      *  the user's `paceBucketMinutes` preference changes. */
-    fun setPaceBucketMinutes(minutes: Int): Unit = synchronized(this) {
-        val n = minutes.coerceAtLeast(1)
-        if (n == bucketMin) return
-        bucketMin = n
-        rebuildPaceBuckets()
-    }
+    fun setPaceBucketMinutes(minutes: Int) = session.setPaceBucketMinutes(minutes)
 
     /** Whether [p], just accepted by [add], opened a new recording segment (a
      *  Pause/Resume or a long fix gap), so the crash sidecar can record the
      *  boundary ([ActiveRunStore.append]). False when [p] is not the newest fix. */
-    fun isSegmentStart(p: GpsPoint): Boolean = synchronized(this) {
-        pointCount > 0 && pointArr[pointCount - 1] == p && segmentStarts.contains(pointCount - 1)
-    }
+    fun isSegmentStart(p: GpsPoint): Boolean = session.isSegmentStart(p)
 
     /** [restore] a run read back from [ActiveRunStore], breaking it at the segment
      *  boundaries the live run recorded. */
@@ -361,57 +254,8 @@ object RunSession : SynchronizedObject() {
      * sums used live (a single O(n) pass, not per-fix), so a recovered run never
      * shows more than it had before the crash.
      */
-    fun restore(recovered: List<GpsPoint>, recordedStarts: Collection<Int> = emptyList()): Unit = synchronized(this) {
-        segmentStarts.clear()
-        // The splice from the last recovered fix to the first live fix is a segment
-        // boundary: the app may have been dead for hours while the runner moved, yet
-        // the monotonic gap [add] measures is only seconds, so [isBoundary]'s gap rule
-        // would not fire.
-        pendingBreak = true
-        // Refill the append-only backing store from the recovered fixes (a FRESH
-        // array so any snapshot published before recovery keeps its own backing).
-        pointArr = arrayOfNulls(maxOf(INITIAL_TRACK_CAP, recovered.size))
-        pointCount = 0
-        for (pt in recovered) pointArr[pointCount++] = pt
-        val recorded = recordedStarts as? Set<Int> ?: recordedStarts.toHashSet()
-        var dist = 0.0
-        var movingSec = 0.0
-        for (i in 1 until recovered.size) {
-            val dtSec = (recovered[i].observedAt - recovered[i - 1].observedAt).toDouble()
-            if (i in recorded || dtSec > MAX_FIX_GAP_SEC) {
-                segmentStarts.add(i)
-            } else {
-                val legKm = movingLegKm(segmentKm(recovered[i - 1], recovered[i]), dtSec)
-                if (legKm != null) {
-                    movingSec += dtSec
-                    dist += legKm
-                }
-            }
-        }
-        points.value = TrackSnapshot(pointArr, pointCount)
-        hasPoints.value = pointCount > 0
-        distanceKm.value = dist
-        // Recovered fixes carry only wall-clock stamps (the crash sidecar has no
-        // monotonic timebase), so seed the monotonic MOVING clock ONCE from the sum of
-        // the recovered run's accepted-leg dt (its moving-time span, matching the live
-        // clock) and let subsequent live fixes advance it monotonically from here: a
-        // clock step after recovery still can't move it.
-        movingMs = (movingSec * 1000.0).toLong().coerceAtLeast(0L)
-        lastElapsedMs = monotonicMillis()
-        elapsedSec.value = (movingMs / 1000L).coerceAtLeast(0L)
-        // The resume splice opens a new segment, so no recovered leg is "now".
-        rollingPace.clear()
-        currentPaceMinPerKm.value = Double.NaN
-        paused.value = false
-        tracking.value = true
-        // A recovered run is already recording, never armed: force the arm flag off so
-        // a crash while merely armed can't leave the resumed screen stuck armed.
-        armed.value = false
-        lastFixElapsedMs.value = 0L
-        // Rebuild the pace accumulator for the recovered track (same one O(n) pass
-        // as a bucket-size change) so the live sheet's slices resume correctly.
-        rebuildPaceBuckets()
-    }
+    fun restore(recovered: List<GpsPoint>, recordedStarts: Collection<Int> = emptyList()): Unit =
+        session.restore(recovered, recordedStarts)
 
     /**
      * The track the save sends the core: the true coordinates, thinned to ~[maxPoints]
@@ -419,16 +263,13 @@ object RunSession : SynchronizedObject() {
      * endpoints and every segment start are kept). [decimatedSegmentStarts] with the
      * same cap gives the matching boundaries. Below the cap the track is whole.
      */
-    fun decimatedTrackForCore(maxPoints: Int = TRACK_DECIMATION_CAP): List<GpsPoint> = synchronized(this) {
-        val full = points.value
-        return decimationKeep(full.size, maxPoints, segmentStarts).map { full[it] }
-    }
+    fun decimatedTrackForCore(maxPoints: Int = TRACK_DECIMATION_CAP): List<GpsPoint> =
+        session.decimatedTrackForCore(maxPoints)
 
-    /** [segmentStarts] remapped to positions in [decimatedTrackForCore] (same
+    /** The segment starts remapped to positions in [decimatedTrackForCore] (same
      *  [maxPoints]); sent as `LogRunTrack.segment_starts`. Empty for an unpaused run. */
-    fun decimatedSegmentStarts(maxPoints: Int = TRACK_DECIMATION_CAP): List<Int> = synchronized(this) {
-        remapStarts(decimationKeep(points.value.size, maxPoints, segmentStarts), segmentStarts)
-    }
+    fun decimatedSegmentStarts(maxPoints: Int = TRACK_DECIMATION_CAP): List<Int> =
+        session.decimatedSegmentStarts(maxPoints)
 
     /**
      * The `LogRunTrack` that saves this run, built under ONE lock so its points and
@@ -438,71 +279,371 @@ object RunSession : SynchronizedObject() {
      * the GPX import). Falls back to now only for an empty track. The Finish review
      * previews this same event's figures ([Core.savedFigures]).
      */
-    fun trackEventForCore(entryId: Long, workoutType: WorkoutType?, sessionRpe: Int?): Event.LogRunTrack = synchronized(this) {
-        Event.LogRunTrack(
-            points = decimatedTrackForCore(),
-            hrPctMax = 0.0,
-            observedAt = points.value.lastOrNull()?.observedAt ?: AppClock.nowSec(),
-            entryId = entryId,
-            workoutType = workoutType,
-            segmentStarts = decimatedSegmentStarts(),
-            sessionRpe = sessionRpe,
-        )
+    fun trackEventForCore(entryId: Long, workoutType: WorkoutType?, sessionRpe: Int?): Event.LogRunTrack =
+        session.trackEventForCore(entryId, workoutType, sessionRpe)
+
+    /** End the session: the track, every flag and the guide cleared, the
+     *  [generation] advanced. */
+    fun reset() = session.reset()
+
+    /** Live counters that disagree with the track (a live leg the core's QC drops):
+     *  the Finish review must show the core's figures instead. Tests only. */
+    internal fun overrideLiveFiguresForTest(distanceKm: Double, elapsedSec: Long) {
+        val s = session
+        s.distanceKm.value = distanceKm
+        s.elapsedSec.value = elapsedSec
     }
 
-    /** Reset only the engine-state flags ([tracking], [locating], [armed]) to stopped,
-     *  keeping the captured track and the save/pause bookkeeping (unlike [reset]).
-     *  The service's teardown and [RunTrackingService.stop]'s dead-service catch call
-     *  this, so no stop leaves "Finding GPS…" latched with no engine behind it. */
-    fun markStopped() {
-        tracking.value = false
-        locating.value = false
-        armed.value = false
-    }
+    private class Session : SynchronizedObject() {
+        // Append-only backing store for the captured track. Fixes are only ever
+        // APPENDED (never mutated or removed in place; reset/restore allocate a FRESH
+        // array), so a [TrackSnapshot] published over the prefix [0, pointCount) stays
+        // immutable for its whole life even as later fixes land. That lets [add]
+        // publish a new `points` value in O(1) amortised (a growable array + O(1)
+        // snapshot) rather than copying the whole list on every fix, which would be
+        // O(n²) over a multi-hour 1 Hz run, on the main looper. Single writer (the
+        // GPS callback, always under the session lock) + lock-free main-thread readers is
+        // safe by construction: every published prefix is frozen, and each grow
+        // allocates a NEW array so already-published snapshots keep their own backing.
+        // Readers NEVER touch these two fields, only the published [TrackSnapshot].
+        private var pointArr: Array<GpsPoint?> = arrayOfNulls(INITIAL_TRACK_CAP)
+        private var pointCount = 0
 
-    fun reset(): Unit = synchronized(this) {
-        // Bump the session token FIRST so a location result already queued on the main
-        // looper (from the service that is about to receive ACTION_STOP) observes a
-        // newer generation and refuses to record into this now-cleared session, instead
-        // of resurrecting a ghost run + sidecar after the clear/reset below.
-        generation++
-        // Fresh backing array so any snapshot still held by a departing collector
-        // keeps its own frozen storage (a new run can never overwrite it).
-        pointArr = arrayOfNulls(INITIAL_TRACK_CAP)
-        pointCount = 0
-        points.value = TrackSnapshot(pointArr, 0)
-        hasPoints.value = false
-        tracking.value = false
-        locating.value = false
-        lastFix.value = null
-        armed.value = false
-        resumeAwaitingLocation.value = false
-        locationFailed.value = false
-        lastFixElapsedMs.value = 0L
-        paused.value = false
-        saving.value = false
-        distanceKm.value = 0.0
-        elapsedSec.value = 0L
-        movingMs = 0L
-        lastElapsedMs = 0L
-        segmentStarts.clear()
-        pendingBreak = false
-        // Drop the pace accumulator (keep [bucketMin], the user's chosen slice size
-        // persists across runs).
-        completedBuckets.clear()
-        bucketCurSec = 0.0
-        bucketCurKm = 0.0
-        paceBucketsFlow.value = emptyList()
-        rollingPace.clear()
-        currentPaceMinPerKm.value = Double.NaN
-        // The guide and its plan belong to the run being torn down.
-        plannedRun.value = null
-        stepMachine = null
-        stepProgress.value = null
+        val points = MutableStateFlow<List<GpsPoint>>(TrackSnapshot(pointArr, 0))
+        val hasPoints = MutableStateFlow(false)
+        val tracking = MutableStateFlow(false)
+        val locating = MutableStateFlow(false)
+        val lastFix = MutableStateFlow<GpsPoint?>(null)
+        val armed = MutableStateFlow(false)
+        val locationFailed = MutableStateFlow(false)
+        val resumeAwaitingLocation = MutableStateFlow(false)
+        val lastFixElapsedMs = MutableStateFlow(0L)
+
+        // @Volatile for the recorder's main-thread read; written only under reset()'s lock.
+        @Volatile
+        var generation: Long = 0L
+            private set
+
+        val paused = MutableStateFlow(false)
+        val saving = MutableStateFlow(false)
+        val distanceKm = MutableStateFlow(0.0)
+        val elapsedSec = MutableStateFlow(0L)
+
+        // Monotonic bookkeeping (ms, elapsedRealtime timebase). [movingMs] accumulates the
+        // per-leg dt of MOVING legs only (the live moving-time clock behind [elapsedSec]);
+        // [lastElapsedMs] is the most recent fix's monotonic stamp, the base for each
+        // per-leg dt (segment-gap + speed jitter/stop-floor checks). Both monotonic, so
+        // neither depends on wall-clock timestamps that an NTP step could move.
+        private var movingMs: Long = 0L
+        private var lastElapsedMs: Long = 0L
+
+        // The pace-slice accumulator ([completedBuckets] + the open
+        // [bucketCurSec]/[bucketCurKm] tail), fed one leg at a time in [add];
+        // [rebuildPaceBuckets] replays the stored track through the SAME [feedPaceLeg].
+        val paceBucketsFlow = MutableStateFlow<List<PaceBucket>>(emptyList())
+        // The bucket size (minutes) the accumulator is currently built for. Changed
+        // only via [setPaceBucketMinutes], which rebuilds from the backing store, so
+        // the accumulator is always consistent with this size.
+        private var bucketMin = DEFAULT_PACE_BUCKET_MINUTES
+        private val completedBuckets = ArrayList<PaceBucket>()
+        private var bucketCurSec = 0.0
+        private var bucketCurKm = 0.0
+
+        val currentPaceMinPerKm = MutableStateFlow(Double.NaN)
+        private val rollingPace = RollingPace()
+
+        val plannedRun = MutableStateFlow<PrescriptionView?>(null)
+
+        // [reset] clears the guide from the save's IO thread after the service
+        // stopped, hence @Volatile on [stepMachine].
+        val stepProgress = MutableStateFlow<StepProgress?>(null)
+        @Volatile private var stepMachine: RunStepMachine? = null
+
+        fun startSteps(nowMs: Long) {
+            if (stepMachine != null) return
+            val steps = plannedRun.value?.run_structure?.let { buildRunSteps(it) }.orEmpty()
+            if (steps.isEmpty()) return
+            val m = RunStepMachine(steps, nowMs, distanceKm.value * 1000.0)
+            stepMachine = m
+            stepProgress.value = m.progress()
+        }
+
+        fun tickSteps(nowMs: Long): Boolean {
+            val m = stepMachine ?: return false
+            val changed = m.advance(nowMs, distanceKm.value * 1000.0, paused.value)
+            stepProgress.value = m.progress()
+            return changed
+        }
+
+        fun skipStep(nowMs: Long) {
+            val m = stepMachine ?: return
+            m.skip(nowMs, distanceKm.value * 1000.0, paused.value)
+            stepProgress.value = m.progress()
+        }
+
+        // Indices into `points` that begin a new recording segment: the first fix after
+        // a pause or a long fix gap. The leg into such a fix is a pause bridge (the
+        // runner may have relocated), so it counts neither live nor in the saved run.
+        // Index 0 has no preceding leg and is never stored. Accessed under the lock.
+        private val segmentStarts = HashSet<Int>()
+
+        // Set when the run pauses: the next accepted fix opens a new segment, so its
+        // bridge leg back to the last pre-pause fix is dropped. Cleared by [add].
+        @Volatile private var pendingBreak = false
+
+        fun setPaused(p: Boolean) {
+            if (p) pendingBreak = true
+            paused.value = p
+        }
+
+        /** True when a fix arriving [dtMs] (monotonic) after [prev] opens a new segment:
+         *  a pause boundary or a fix gap longer than [MAX_FIX_GAP_SEC]. [add] drops a
+         *  fix with dtMs < 0 before this check. */
+        private fun isBoundary(prev: GpsPoint?, dtMs: Long): Boolean {
+            if (prev == null) return false
+            if (pendingBreak) return true
+            return dtMs > MAX_FIX_GAP_SEC * 1000L
+        }
+
+        // Locked so the read-modify-write of points + distance is atomic.
+        fun add(p: GpsPoint, fixElapsedRealtimeNanos: Long): Boolean = synchronized(this) {
+            val last = if (pointCount > 0) pointArr[pointCount - 1] else null
+            val fixMs = fixElapsedRealtimeNanos / 1_000_000
+            val dtMs = fixMs - lastElapsedMs
+            // A fix older than the previous one (dt < 0) is dropped rather than appended
+            // out of order, which would split a leg or drag the line backwards. The first
+            // fix is exempt: its dt is the boot offset (lastElapsedMs starts at 0).
+            if (last != null && dtMs < 0L) return false
+            if (isBoundary(last, dtMs)) {
+                // New segment: the bridge leg adds no distance, moving time or pace
+                // slice, and the current-pace window restarts.
+                segmentStarts.add(pointCount)
+                rollingPace.clear()
+            } else if (last != null && dtMs > 0L) {
+                // The live figures apply the saved run's moving-leg rule; the core also
+                // drops fixes under 2.5 m apart (`qc_track`), so the saved distance can
+                // differ slightly. The Finish review shows the core's own figures.
+                val legKm = movingLegKm(segmentKm(last, p), dtMs / 1000.0)
+                if (legKm != null) {
+                    movingMs += dtMs
+                    distanceKm.value += legKm
+                    rollingPace.add(dtMs, legKm * 1000.0)
+                    feedPaceLeg(legKm, dtMs / 1000.0)
+                } else {
+                    // Standing still: the time stays in the current-pace window with no
+                    // distance, so "Pace now" decays to [EmptyValuePlaceholder].
+                    rollingPace.add(dtMs, 0.0)
+                }
+            }
+            lastElapsedMs = fixMs
+            elapsedSec.value = (movingMs / 1000L).coerceAtLeast(0L)
+            currentPaceMinPerKm.value = rollingPace.paceMinPerKm()
+            pendingBreak = false
+            appendPoint(p)
+            emitPaceBuckets()
+            return true
+        }
+
+        /** Append one accepted fix to the growable backing store and publish a fresh
+         *  O(1) [TrackSnapshot]. Amortised O(1): the array doubles on overflow (total
+         *  O(n) over the run), and a grow allocates a NEW array so any already-published
+         *  snapshot keeps its own frozen backing (lock-free reader safety). */
+        private fun appendPoint(p: GpsPoint) {
+            if (pointCount == pointArr.size) {
+                pointArr = pointArr.copyOf(pointArr.size * 2)
+            }
+            pointArr[pointCount] = p
+            pointCount++
+            points.value = TrackSnapshot(pointArr, pointCount)
+            hasPoints.value = true
+        }
+
+        /** Fold one moving leg ([legKm], already capped by [movingLegKm], over [legSec])
+         *  into the pace-slice accumulator, splitting it by time across a slice edge.
+         *  Standing-still and pause-bridge legs never reach here. */
+        private fun feedPaceLeg(legKm: Double, legSec: Double) {
+            val n = bucketMin.coerceAtLeast(1)
+            val bucketSec = n * 60.0
+            var restSec = legSec
+            var restKm = legKm
+            while (bucketCurSec + restSec >= bucketSec) {
+                val take = bucketSec - bucketCurSec
+                val frac = if (restSec > 0.0) take / restSec else 0.0
+                val kmChunk = restKm * frac
+                bucketCurKm += kmChunk
+                completedBuckets.add(PaceBucket(paceMinPerKm = n / bucketCurKm, minutes = n.toDouble(), complete = true))
+                restSec -= take
+                restKm -= kmChunk
+                bucketCurSec = 0.0
+                bucketCurKm = 0.0
+            }
+            bucketCurSec += restSec
+            bucketCurKm += restKm
+        }
+
+        /** Publish the current accumulator: the completed slices plus, if the open slice
+         *  holds any moving time, an in-progress partial tail. A fresh list each call is
+         *  the publication barrier that hands the GPS-thread accumulator safely to the
+         *  main-thread observer. */
+        private fun emitPaceBuckets() {
+            val out = ArrayList<PaceBucket>(completedBuckets.size + 1)
+            out.addAll(completedBuckets)
+            if (bucketCurSec > 0.0) {
+                val minutes = bucketCurSec / 60.0
+                out.add(PaceBucket(paceMinPerKm = minutes / bucketCurKm, minutes = minutes, complete = false))
+            }
+            paceBucketsFlow.value = out
+        }
+
+        /** Rebuild the pace accumulator (and republish [paceBucketsFlow]) for the
+         *  current [bucketMin] from the whole backing store, one O(n) pass, used when
+         *  the user changes the bucket size mid-run ([setPaceBucketMinutes]) or a run is
+         *  recovered ([restore]). Pause-bridge legs are skipped exactly as [add] skips
+         *  them. */
+        private fun rebuildPaceBuckets() {
+            completedBuckets.clear()
+            bucketCurSec = 0.0
+            bucketCurKm = 0.0
+            for (i in 1 until pointCount) {
+                if (segmentStarts.contains(i)) continue
+                val a = pointArr[i - 1]!!
+                val b = pointArr[i]!!
+                // The stored fixes carry only wall-clock observedAt, so the leg dt comes
+                // from that rather than the monotonic clock the live path uses.
+                val dtSec = (b.observedAt - a.observedAt).toDouble()
+                movingLegKm(segmentKm(a, b), dtSec)?.let { feedPaceLeg(it, dtSec) }
+            }
+            emitPaceBuckets()
+        }
+
+        fun setPaceBucketMinutes(minutes: Int): Unit = synchronized(this) {
+            val n = minutes.coerceAtLeast(1)
+            if (n == bucketMin) return
+            bucketMin = n
+            rebuildPaceBuckets()
+        }
+
+        fun isSegmentStart(p: GpsPoint): Boolean = synchronized(this) {
+            pointCount > 0 && pointArr[pointCount - 1] == p && segmentStarts.contains(pointCount - 1)
+        }
+
+        fun restore(recovered: List<GpsPoint>, recordedStarts: Collection<Int>): Unit = synchronized(this) {
+            segmentStarts.clear()
+            // The splice from the last recovered fix to the first live fix is a segment
+            // boundary: the app may have been dead for hours while the runner moved, yet
+            // the monotonic gap [add] measures is only seconds, so [isBoundary]'s gap rule
+            // would not fire.
+            pendingBreak = true
+            // Refill the append-only backing store from the recovered fixes (a FRESH
+            // array so any snapshot published before recovery keeps its own backing).
+            pointArr = arrayOfNulls(maxOf(INITIAL_TRACK_CAP, recovered.size))
+            pointCount = 0
+            for (pt in recovered) pointArr[pointCount++] = pt
+            val recorded = recordedStarts as? Set<Int> ?: recordedStarts.toHashSet()
+            var dist = 0.0
+            var movingSec = 0.0
+            for (i in 1 until recovered.size) {
+                val dtSec = (recovered[i].observedAt - recovered[i - 1].observedAt).toDouble()
+                if (i in recorded || dtSec > MAX_FIX_GAP_SEC) {
+                    segmentStarts.add(i)
+                } else {
+                    val legKm = movingLegKm(segmentKm(recovered[i - 1], recovered[i]), dtSec)
+                    if (legKm != null) {
+                        movingSec += dtSec
+                        dist += legKm
+                    }
+                }
+            }
+            points.value = TrackSnapshot(pointArr, pointCount)
+            hasPoints.value = pointCount > 0
+            distanceKm.value = dist
+            // Recovered fixes carry only wall-clock stamps (the crash sidecar has no
+            // monotonic timebase), so seed the monotonic MOVING clock ONCE from the sum of
+            // the recovered run's accepted-leg dt (its moving-time span, matching the live
+            // clock) and let subsequent live fixes advance it monotonically from here: a
+            // clock step after recovery still can't move it.
+            movingMs = (movingSec * 1000.0).toLong().coerceAtLeast(0L)
+            lastElapsedMs = AppClock.monotonicMillis()
+            elapsedSec.value = (movingMs / 1000L).coerceAtLeast(0L)
+            // The resume splice opens a new segment, so no recovered leg is "now".
+            rollingPace.clear()
+            currentPaceMinPerKm.value = Double.NaN
+            paused.value = false
+            tracking.value = true
+            // A recovered run is already recording, never armed: force the arm flag off so
+            // a crash while merely armed can't leave the resumed screen stuck armed.
+            armed.value = false
+            lastFixElapsedMs.value = 0L
+            // Rebuild the pace accumulator for the recovered track (same one O(n) pass
+            // as a bucket-size change) so the live sheet's slices resume correctly.
+            rebuildPaceBuckets()
+        }
+
+        fun decimatedTrackForCore(maxPoints: Int = TRACK_DECIMATION_CAP): List<GpsPoint> = synchronized(this) {
+            val full = points.value
+            return decimationKeep(full.size, maxPoints, segmentStarts).map { full[it] }
+        }
+
+        fun decimatedSegmentStarts(maxPoints: Int = TRACK_DECIMATION_CAP): List<Int> = synchronized(this) {
+            remapStarts(decimationKeep(points.value.size, maxPoints, segmentStarts), segmentStarts)
+        }
+
+        fun trackEventForCore(entryId: Long, workoutType: WorkoutType?, sessionRpe: Int?): Event.LogRunTrack = synchronized(this) {
+            Event.LogRunTrack(
+                points = decimatedTrackForCore(),
+                hrPctMax = 0.0,
+                observedAt = points.value.lastOrNull()?.observedAt ?: AppClock.nowSec(),
+                entryId = entryId,
+                workoutType = workoutType,
+                segmentStarts = decimatedSegmentStarts(),
+                sessionRpe = sessionRpe,
+            )
+        }
+
+        fun reset(): Unit = synchronized(this) {
+            // Bump the session token FIRST so a location result already queued on the main
+            // looper (from the service that is about to receive ACTION_STOP) observes a
+            // newer generation and refuses to record into this now-cleared session, instead
+            // of resurrecting a ghost run + sidecar after the clear/reset below.
+            generation++
+            // Fresh backing array so any snapshot still held by a departing collector
+            // keeps its own frozen storage (a new run can never overwrite it).
+            pointArr = arrayOfNulls(INITIAL_TRACK_CAP)
+            pointCount = 0
+            points.value = TrackSnapshot(pointArr, 0)
+            hasPoints.value = false
+            tracking.value = false
+            locating.value = false
+            lastFix.value = null
+            armed.value = false
+            resumeAwaitingLocation.value = false
+            locationFailed.value = false
+            lastFixElapsedMs.value = 0L
+            paused.value = false
+            saving.value = false
+            distanceKm.value = 0.0
+            elapsedSec.value = 0L
+            movingMs = 0L
+            lastElapsedMs = 0L
+            segmentStarts.clear()
+            pendingBreak = false
+            // Drop the pace accumulator (keep [bucketMin], the user's chosen slice size
+            // persists across runs).
+            completedBuckets.clear()
+            bucketCurSec = 0.0
+            bucketCurKm = 0.0
+            paceBucketsFlow.value = emptyList()
+            rollingPace.clear()
+            currentPaceMinPerKm.value = Double.NaN
+            // The guide and its plan belong to the run being torn down.
+            plannedRun.value = null
+            stepMachine = null
+            stepProgress.value = null
+        }
     }
 
     /**
-     * Immutable O(1) view over the append-only [pointArr] prefix `[0, len)`. Slots in
+     * Immutable O(1) view over the append-only backing prefix `[0, len)`. Slots in
      * that prefix never change once published (reset/restore swap in a fresh array),
      * so the view needs no copy or lock. [equals] short-cuts on the same backing and
      * length, keeping StateFlow's per-fix dedup O(1); otherwise it compares

@@ -54,7 +54,8 @@
                  the app doesn't offer itself for photos, PDFs, etc.; providers often
                  label these files octet-stream or generic XML, which is why those
                  are included. The format is still decided by CONTENT sniff in
-                 RunImport (non-run files are rejected with a plain message). -->
+                 RunImport (non-run files are rejected with a plain message). Both
+                 filters list RunFileType.IMPORT_MIME_TYPES (AppIdentifiersTest). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -101,15 +102,25 @@
             android:name=".RestEndReceiver"
             android:exported="false" />
 
-        <!-- The daily session reminder (SessionReminder): its alarm, and boot, app
-             update, time zone and clock changes, after which the alarm is set again.
-             The system sends these to a non-exported receiver. -->
+        <!-- The daily session reminder (SessionReminder): its alarm, and boot and app
+             update, after which the alarm is set again. The system sends these to a
+             non-exported receiver. -->
         <receiver
             android:name=".SessionReminderReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Clock and time zone changes (exempt from the implicit broadcast limits),
+             handed to every feature (TimeChangeReceiver: the reminder's alarm, the
+             widget's and the tile's day). -->
+        <receiver
+            android:name=".TimeChangeReceiver"
+            android:exported="false">
+            <intent-filter>
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.TIME_SET" />
             </intent-filter>
@@ -133,8 +144,7 @@
         </service>
 
         <!-- Home screen widget (widget/TodayWidget.kt). Exported for the widget host's
-             broadcasts; the time and time zone changes (exempt from the implicit
-             broadcast limits) mark a stored day stale, the locale change re-renders. -->
+             broadcasts; the locale change re-renders. -->
         <receiver
             android:name=".widget.TodayWidgetReceiver"
             android:exported="true"
@@ -143,8 +153,6 @@
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <intent-filter>
-                <action android:name="android.intent.action.TIME_SET" />
-                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.LOCALE_CHANGED" />
             </intent-filter>
             <meta-data

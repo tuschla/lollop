@@ -43,8 +43,8 @@ interface CoreBridge {
     fun compactLog(lines: Array<String>): String?
 
     /** Replace the core with an empty one, as a fresh process starts; false where
-     *  the bridge can't (Android's JNI exports: a data import restarts the process
-     *  there instead, [DurableCore.resetForReboot]). */
+     *  the bridge can't. Android's device build never calls it (a data import
+     *  restarts the process, [DurableCore.resetForReboot]); its host build can. */
     fun reset(): Boolean = false
 }
 
@@ -52,7 +52,7 @@ interface CoreBridge {
  * The one thread every view()-producing core call runs on ([CoreEngine.send],
  * the boot restore, the view read-back). ONE OS thread on purpose, not
  * `Dispatchers.IO` or `limitedParallelism(1)`, which may hop threads: the core's
- * derived-view memos (RUN_VIEW_CACHE, QC_TRACK_CACHE, the list caches) are
+ * derived-view memos (the `shared::memo` registry: run cards, QC'd tracks, the list caches) are
  * thread_local in Rust, so every thread hop lands on cold caches and redoes the
  * full O(history) rebuild. Top-level rather than an engine member: callers
  * evaluate it on the main thread, and touching the Android engine ([Core]) runs
@@ -73,7 +73,7 @@ interface CoreEngine {
     fun sendAll(events: List<Event>): SendResult
 }
 
-/** The platform's core engine: Android's JNI [Core]; on iOS the [BridgeCore] the
- *  app installs at startup. Read on [CoreDispatcher] (the Android engine loads its
- *  library on first touch). */
-internal expect fun platformCoreEngine(): DurableCore
+/** The platform's core engine, which [AppRuntime.engine] runs on: Android's JNI
+ *  [Core]; on iOS the [BridgeCore] the app's start installs (null before it).
+ *  Read on [CoreDispatcher] (the Android engine loads its library on first touch). */
+internal expect fun platformCoreEngine(): DurableCore?

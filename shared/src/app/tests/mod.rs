@@ -16,16 +16,16 @@ use crate::app::format::{
 use crate::app::guidance::build_guidance;
 use crate::app::lift_audit::to_lift_view;
 use crate::app::logged_days::{DeloadDays, lift_deload_days};
-use crate::app::model::{LoggedRun, LoggedSet};
+use crate::app::model::{LoggedRun, LoggedSet, RaceQuery};
 use crate::app::plan_views::{
-    PLAN_SYNTH_BUILDS, apply_adjustments_to_session, apply_last_sets, flatten_prescription,
-    plan_session_title, program_name, refresh_item_statuses,
+    apply_adjustments_to_session, apply_last_sets, flatten_prescription, plan_session_title,
+    program_name, refresh_item_statuses,
 };
 use crate::app::profile_age::whole_years_between;
 use crate::app::readiness::return_step_on;
 use crate::app::reviews::{MessageCtx, feedback_message, target_rir};
-use crate::app::run_metrics::{MAX_LOAD_DAYS, QC_TRACK_CACHE, RunFacts, run_content_key};
-use crate::app::run_views::{RUN_VIEW_BUILDS, RUN_VIEW_CACHE, split_verdict_view, to_run_view};
+use crate::app::run_metrics::{MAX_LOAD_DAYS, RunFacts};
+use crate::app::run_views::{split_verdict_view, to_run_view};
 use crate::app::set_index::{NameFacts, SetIndex};
 use crate::app::view_types::{
     BasisRx, EvidenceTagView, HeadlineKind, ItemSetView, ItemStatus, PaceVariability,
@@ -34,19 +34,21 @@ use crate::app::view_types::{
 use crate::autoreg::SignalGroup;
 use crate::autoreg::tests::input;
 use crate::day::DAY_SEC;
+use crate::event::{ActivityKind, Decouple, EntryKind, IntervalExec, LiftExec, SessionReview};
 use crate::evidence::{ClaimId, EvidenceGrade, claims};
 use crate::feedback::{self, FeedbackCategory, TrendDirection};
 use crate::gps::GpsPoint;
 use crate::hybrid::ConcurrentGoal;
 use crate::individualization::{Environment, ProgressionCadence};
+use crate::memo::MemoId;
 use crate::plates::{LB_PER_KG, plates_per_side, round_load_grid};
 use crate::profile::test_support::base_profile;
 use crate::profile::{CalisEquipment, Profile, RecentRace, ResistanceModality};
 use crate::running::{self, GoalDistance};
 use crate::schema::{
-    HealthScreen, LiftIntensity, LiftSessionType, MesoPhase, Prescription, ReadinessSignal,
-    RunIntensity, RunSessionType, RunVolume, SafetyTier, Session, SessionType, ThreeZone, VdotBand,
-    WorkoutType,
+    AdjustmentKind, DeloadTrigger, HealthScreen, LiftIntensity, LiftSessionType, MesoPhase,
+    PainRegion, Prescription, ReadinessSignal, Recommended, RunIntensity, RunSessionType,
+    RunVolume, Rx, RxBasis, SafetyTier, Session, SessionType, ThreeZone, VdotBand, WorkoutType,
 };
 use crate::strength::{self, LiftGoal};
 use crate::{hypertrophy, load};

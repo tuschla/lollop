@@ -115,9 +115,9 @@ internal class RunRecorder(private val host: RecorderHost) {
 
     // Armed: Start was tapped before a lock. The stream is acquiring GPS (like a
     // locate) but flips to recording AUTOMATICALLY at the first fix that clears
-    // [armTrigger]'s gates. `armed` mirrors RunSession.armed for the surface copy;
-    // both are cleared the instant recording begins ([beginRecording]) or on any
-    // teardown ([clearArmState]).
+    // [armTrigger]'s gates. The recorder owns [RunSession.armed]; this stream's
+    // `armed` is the surface copy's. Both are cleared the instant recording begins
+    // ([beginRecording]) or on any teardown ([clearArmState]).
     var armed = false
         private set
     private var armTrigger: ArmTrigger? = null
@@ -154,13 +154,13 @@ internal class RunRecorder(private val host: RecorderHost) {
      * Start a locate preview ([record] false), a recording ([record] true: the
      * crash-resume start), or an armed preview ([arming]) that begins recording at the
      * first fix clearing [ArmTrigger]'s gates. Every failure goes through
-     * [unwindLocationFailure], which also clears the shell's optimistic armed flag. An
-     * arm reaching a live recording only re-asserts the surface, so it can't demote
+     * [unwindLocationFailure], which also clears the tap's armed flag ([armRequested]).
+     * An arm reaching a live recording only re-asserts the surface, so it can't demote
      * the run and merge two runs in one sidecar.
      */
     fun start(record: Boolean, arming: Boolean = false, requirePrecise: Boolean = false, requireMoving: Boolean = false) {
         if (arming && recording) {
-            RunSession.armed.value = false
+            RunSession.setArmed(false)
             host.reassertSurface()
             return
         }
@@ -174,7 +174,7 @@ internal class RunRecorder(private val host: RecorderHost) {
         if (arming) {
             armTrigger = ArmTrigger(requirePrecise = requirePrecise, requireMoving = requireMoving)
             armed = true
-            RunSession.armed.value = true
+            RunSession.setArmed(true)
         } else {
             clearArmState()
         }
@@ -182,9 +182,7 @@ internal class RunRecorder(private val host: RecorderHost) {
             unwindLocationFailure()
             return
         }
-        RunSession.locating.value = true
-        // Only recording flips `tracking`; a locate keeps Start on screen.
-        RunSession.tracking.value = record
+        RunSession.streamStarted(recording = record)
         // A direct recording start (crash-resume) watches for signal loss too.
         if (record) armSignalWatchdog()
     }
@@ -233,20 +231,14 @@ internal class RunRecorder(private val host: RecorderHost) {
         // fix (recording, armed, or locate-only). Uses the fix's OWN monotonic stamp,
         // the SAME timebase [isFreshLock] ages against: a ~10 s-old batched fix must
         // not read "fresh lock" for ~20 s, as the delivery time would have made it.
-        RunSession.lastFix.value = point
-        RunSession.lastFixElapsedMs.value = fix.monoNanos / 1_000_000
+        RunSession.previewFix(point, fix.monoNanos / 1_000_000)
         if (recording) {
             // A fix arrived: any signal-loss episode is over; push the watchdog out.
             onSignalFix()
             // Paused: drop the fix so the paused span records no route; the stream
             // stays up. [RunSession.setPaused] already marked the boundary.
             if (RunSession.paused.value) return
-            if (RunSession.add(point, fix.monoNanos)) {
-                // Persist to the crash-durable sidecar the instant the fix is accepted, so
-                // a kill mid-run is recoverable (off the main thread). A fix RunSession
-                // dropped as non-monotonic is not mirrored to the sidecar.
-                ActiveRunStore.append(point)
-            }
+            record(point, fix.monoNanos)
             // Refresh the surface so a glance at the lock screen confirms GPS is
             // still capturing; the host re-posts only when what it shows changed.
             host.refresh()
@@ -277,11 +269,9 @@ internal class RunRecorder(private val host: RecorderHost) {
     private fun beginRecording(seed: List<Pair<GpsPoint, Long>>) {
         clearArmState()
         recording = true
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         host.openSidecar()
-        for ((pt, nanos) in seed) {
-            if (RunSession.add(pt, nanos)) ActiveRunStore.append(pt)
-        }
+        for ((pt, nanos) in seed) record(pt, nanos)
         // A planned, structured run starts its step guide with the recording (the
         // run-up seed counts as already covered, so the first step starts here).
         RunSession.startSteps(host.nowMs())
@@ -293,6 +283,13 @@ internal class RunRecorder(private val host: RecorderHost) {
         // confirm it with a cue that works screen-off.
         host.cue(RecorderCue.RecordingStarted)
         armSignalWatchdog()
+    }
+
+    /** Feed [point] into the session and, once it is accepted, into the crash-durable
+     *  sidecar (off the main thread), so a kill mid-run is recoverable. A fix the
+     *  session dropped as non-monotonic is not mirrored. */
+    private fun record(point: GpsPoint, nanos: Long) {
+        if (RunSession.add(point, nanos)) ActiveRunStore.append(point, segmentStart = RunSession.isSegmentStart(point))
     }
 
     /** Stop the stream and clear every engine-state flag. Marks [stopped] first, so a
@@ -315,7 +312,7 @@ internal class RunRecorder(private val host: RecorderHost) {
     private fun unwindLocationFailure(failed: Boolean = true) {
         if (stopped) return
         haltStream()
-        if (failed) RunSession.locationFailed.value = true
+        if (failed) RunSession.markLocationFailed()
         host.finished(userStop = false)
     }
 
@@ -325,7 +322,7 @@ internal class RunRecorder(private val host: RecorderHost) {
     private fun clearArmState() {
         armed = false
         armTrigger = null
-        RunSession.armed.value = false
+        RunSession.setArmed(false)
     }
 
     /** (Re)schedule the signal-loss check for [SIGNAL_LOSS_MS] after the latest
@@ -412,12 +409,22 @@ internal class RunRecorder(private val host: RecorderHost) {
         host.releaseCues()
     }
 
-    private companion object {
+    companion object {
+        /** The runner tapped an armed Start: the session shows armed from this frame,
+         *  before the platform's recorder starts (Android starts its service
+         *  asynchronously). That recorder's [start] confirms it; a failed start clears it. */
+        fun armRequested() = RunSession.setArmed(true)
+
+        /** The runner's stop cannot reach a recorder (Android: no service runs and none
+         *  may be started from the background): the session shows the stopped state
+         *  [haltStream] would leave, so "Finding GPS…" never latches with no engine. */
+        fun stopUndelivered() = RunSession.markStopped()
+
         // Small margin past the loss deadline so the watchdog never fires a hair early
         // and has to re-arm.
-        const val SIGNAL_CHECK_SLACK_MS = 250L
+        private const val SIGNAL_CHECK_SLACK_MS = 250L
 
         // The guided-run step tick.
-        const val STEP_TICK_MS = 1000L
+        private const val STEP_TICK_MS = 1000L
     }
 }

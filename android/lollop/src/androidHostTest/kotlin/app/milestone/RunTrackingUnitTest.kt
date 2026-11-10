@@ -1,6 +1,12 @@
 package app.milestone
 
 import app.milestone.resources.Res
+import app.milestone.resources.track_notif_armed_text
+import app.milestone.resources.track_notif_locate_text
+import app.milestone.resources.track_notif_progress
+import app.milestone.resources.track_notif_recording_hint
+import app.milestone.resources.track_notif_signal_lost
+import app.milestone.resources.track_state_paused
 import app.milestone.resources.track_gates_caption_both
 import app.milestone.resources.track_gates_caption_moving
 import app.milestone.resources.track_gates_caption_none
@@ -20,7 +26,7 @@ import org.junit.Test
  */
 class RunTrackingUnitTest {
 
-    @Before fun isolate() = RunSession.reset()
+    @Before fun isolate() = AppRuntime.resetForTest(clock = PlainJvmClock)
     @After fun cleanup() = RunSession.reset()
 
     @Test
@@ -138,9 +144,9 @@ class RunTrackingUnitTest {
     fun resetClearsArmedAndLastFixElapsed() {
         // The armed-start flows are part of the session's reset contract: a new run
         // must never inherit a stale armed flag or fix stamp.
-        RunSession.armed.value = true
-        RunSession.lastFixElapsedMs.value = 12_345L
-        RunSession.saving.value = true
+        RunRecorder.armRequested()
+        RunSession.previewFix(GpsPoint(52.52, 13.405, 0, 5.0), 12_345L)
+        RunSession.claimSaving()
         RunSession.reset()
         assertFalse("armed cleared on reset", RunSession.armed.value)
         assertEquals("last-fix stamp cleared on reset", 0L, RunSession.lastFixElapsedMs.value)
@@ -183,7 +189,7 @@ class RunTrackingUnitTest {
     fun resetClearsPausedState() {
         // The notification Pause/Resume actions and the in-app Pause button share the
         // one RunSession.paused flag; a new run must never inherit a stale paused state.
-        RunSession.paused.value = true
+        RunSession.setPaused(true)
         RunSession.reset()
         assertFalse("paused cleared on reset", RunSession.paused.value)
     }
@@ -194,6 +200,8 @@ class RunTrackingUnitTest {
         // fails here against the actual R.string constants (plain ints on the JVM
         // test classpath). A paused recording selects the paused title; armed/locate
         // ignore the paused flag.
+        fun trackingNotifTitleRes(recording: Boolean, armed: Boolean, paused: Boolean) =
+            androidStringId(runSurfacePhase(recording, armed, paused, signalLost = false).titleRes.key)
         assertEquals(
             R.string.track_notif_recording_title,
             trackingNotifTitleRes(recording = true, armed = false, paused = false),
@@ -219,52 +227,52 @@ class RunTrackingUnitTest {
         // "Moving …" line without the pace (track_notif_progress with the progress as
         // its arg): the title "Run paused" and the chip say the pause, the line does not
         // repeat it; a lost signal while recording shows the signal-lost line;
-        // armed/locate pin their fixed resources. Asserting the real R.string ids pins
+        // armed/locate pin their fixed resources. Asserting the real resources pins
         // the wiring itself, not just the branch logic.
         val progress = "2:00 · 1.00 km"
         val pace = "5:45 /km"
         fun spec(recording: Boolean, armed: Boolean, paused: Boolean, signalLost: Boolean = false, progress: String? = "2:00 · 1.00 km", paceNow: String? = pace) =
-            trackingNotifContentSpec(recording, armed, paused, signalLost, progress, paceNow)
+            runSurfaceLine(runSurfacePhase(recording, armed, paused, signalLost), progress, paceNow)
         assertEquals(
-            NotifContentSpec.Progress(progress, pace),
+            RunSurfaceLine.Progress(progress, pace),
             spec(recording = true, armed = false, paused = false),
         )
         // No current pace yet (standing still / fresh segment): progress without pace.
         assertEquals(
-            NotifContentSpec.Progress(progress, null),
+            RunSurfaceLine.Progress(progress, null),
             spec(recording = true, armed = false, paused = false, paceNow = null),
         )
         assertEquals(
-            NotifContentSpec.PausedProgress(R.string.track_notif_progress, progress),
+            RunSurfaceLine.PausedProgress(Res.string.track_notif_progress, progress),
             spec(recording = true, armed = false, paused = true),
         )
         // A lost GPS signal while actively recording replaces the progress line, so the
         // lock screen shows it; a pause outranks it (nothing is expected to record).
         assertEquals(
-            NotifContentSpec.Literal(R.string.track_notif_signal_lost),
+            RunSurfaceLine.Literal(Res.string.track_notif_signal_lost),
             spec(recording = true, armed = false, paused = false, signalLost = true),
         )
         assertEquals(
-            NotifContentSpec.PausedProgress(R.string.track_notif_progress, progress),
+            RunSurfaceLine.PausedProgress(Res.string.track_notif_progress, progress),
             spec(recording = true, armed = false, paused = true, signalLost = true),
         )
         // Paused / signal loss only fold while recording; the armed/locate copy is fixed.
         assertEquals(
-            NotifContentSpec.Literal(R.string.track_notif_armed_text),
+            RunSurfaceLine.Literal(Res.string.track_notif_armed_text),
             spec(recording = false, armed = true, paused = true, signalLost = true),
         )
         assertEquals(
-            NotifContentSpec.Literal(R.string.track_notif_locate_text),
+            RunSurfaceLine.Literal(Res.string.track_notif_locate_text),
             spec(recording = false, armed = false, paused = true, signalLost = true),
         )
         // Null progress (no two-fix track yet) falls back to a state-appropriate
         // literal instead of an empty/absent progress line.
         assertEquals(
-            NotifContentSpec.Literal(R.string.track_state_paused),
+            RunSurfaceLine.Literal(Res.string.track_state_paused),
             spec(recording = true, armed = false, paused = true, progress = null),
         )
         assertEquals(
-            NotifContentSpec.Literal(R.string.track_notif_recording_hint),
+            RunSurfaceLine.Literal(Res.string.track_notif_recording_hint),
             spec(recording = true, armed = false, paused = false, progress = null),
         )
     }
@@ -333,7 +341,7 @@ class RunTrackingUnitTest {
         // A recovered run is already recording, never armed: restore() must clear the
         // arm flag even if a crash left it set.
         RunSession.reset()
-        RunSession.armed.value = true
+        RunRecorder.armRequested()
         val pts = listOf(
             GpsPoint(52.5200, 13.4050, 0, 5.0),
             GpsPoint(52.5203, 13.4050, 10, 5.0),
@@ -876,7 +884,7 @@ class RunTrackingUnitTest {
         // A failed location start latches so the screen stops re-launching the
         // service into the same failure; leaving the tracker must not carry the latch
         // into the next session.
-        RunSession.locationFailed.value = true
+        RunSession.markLocationFailed()
         RunSession.reset()
         assertFalse(RunSession.locationFailed.value)
     }

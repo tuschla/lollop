@@ -5,8 +5,7 @@ use crate::app::format::{fmt_mi_of_km, fmt_rounded, fmt_secs_min, round_tenths};
 use crate::app::view_types::{
     EvidenceTagView, PlanIntensity, PrescriptionView, RunAmount, RunStructureView, RunWalkStepView,
 };
-use crate::evidence::claims;
-use crate::schema::{Prescription, Recommended, RunIntensity, RunVolume, ThreeZone, VdotBand};
+use crate::schema::{RunIntensity, RunVolume, Rx, RxBasis, ThreeZone, VdotBand};
 
 /// Render a prescribed run distance: whole km as "8 km", a sub-km step as one
 /// decimal ("6.5 km", "4.3 km"), matching the plan's 0.5 km / 0.1 km
@@ -101,7 +100,7 @@ fn volume_label(v: RunVolume, metres: bool) -> String {
 /// Flatten a `Prescription::Run` arm into its `PrescriptionView`.
 pub(super) fn flatten_run_prescription(
     r: &crate::schema::RunPrescription,
-    rx: &Recommended<Prescription>,
+    rx: &Rx,
 ) -> PrescriptionView {
     let vol = volume_label(r.volume, false);
     // An interval/repetition run carries per-rep structure; surface
@@ -146,7 +145,7 @@ pub(super) fn flatten_run_prescription(
         safety_reason,
         safety_reason_mi,
         evidence: EvidenceTagView::of(rx),
-        why: why_from(run_basis(r, rx), rx),
+        why: why_from(run_basis(rx), rx),
         run_structure: run_structure_view(r),
         face_lead: head.clone(),
         run_head: head,
@@ -157,66 +156,63 @@ pub(super) fn flatten_run_prescription(
     }
 }
 
-/// The why? basis of a run whose claim states a rule other than its claim
-/// statement. A long run re-pointed to RUN-SPIKE-001 / RUN-START-001
-/// (plan/run.rs) is set by the 30-day-longest-run ceiling rather than the
-/// weekly share. State the basis honestly (HARD RULE 2) instead of the generic
-/// claim statement, no invented numbers, only what the KB entries state.
-fn run_basis(r: &crate::schema::RunPrescription, rx: &Recommended<Prescription>) -> Option<String> {
+/// The why? basis of a run whose numbers were set by a rule other than its
+/// workout's own. A long run held by the 30-day-longest-run ceiling rather
+/// than the weekly share states that rule honestly (HARD RULE 2) instead of
+/// the generic claim statement, no invented numbers, only what the KB entries
+/// state.
+fn run_basis(rx: &Rx) -> Option<String> {
     let spike_pct = crate::running::SPIKE_FRAC * 100.0;
     let window_days = crate::running::SPIKE_WINDOW_DAYS;
-    match rx.claim_id() {
-        claims::RUN_SPIKE_001 => Some(format!(
+    match rx.kind() {
+        RxBasis::SpikeCeiling => Some(format!(
             "Distance stays within {spike_pct:.0}% of your longest run in the last \
              {window_days} days. It can be a bigger share of your week than usual \
              until your weekly distance catches up."
         )),
-        claims::RUN_START_001 => Some(format!(
+        RxBasis::StatedCeiling => Some(format!(
             "The distance stays within {spike_pct:.0}% of the longest run you entered for \
              the last month. Once a logged run goes further, or that answer is more than \
              {window_days} days old, the plan follows your logged runs."
         )),
-        claims::RUN_LONGRUN_TARGET_001 => Some(format!(
+        RxBasis::LongRunTarget => Some(format!(
             "The long run has reached the most your goal distance needs, or about {:.0} \
              minutes at most. Extra distance goes into the rest of your week.",
             crate::running::LONG_RUN_MAX_MIN
         )),
-        claims::RUN_TAPER_001 => Some(
+        RxBasis::Taper => Some(
             "Taper week before your race: total distance drops while your hard sessions \
              keep their effort, so you arrive fresh."
                 .to_string(),
         ),
         // The anchoring run is now older than the 30-day window, so its
         // credit is tapering (DETRAIN-001) rather than dropping off a cliff.
-        claims::DETRAIN_001 => Some(
+        RxBasis::Detrained => Some(
             "Distance stays near your recent long run, then steps down as that run gets older, \
              since endurance fades slowly after a couple of weeks. Log a new long run to reset it."
                 .to_string(),
         ),
-        // The long run was set to the week's average run (RUN-LONGRUN-001's
-        // low-mileage guardrail), above the share the claim statement leads
-        // with: state the rule that set it.
-        claims::RUN_LONGRUN_001 if r.long_run_avg_floor => Some(
+        RxBasis::AverageRun => Some(
             "With only a few run days, 25–30% of the week would be shorter than your other \
              runs, so the long run is set to this week's average run. It never goes past \
              twice your average daily run."
                 .to_string(),
         ),
-        _ => None,
+        RxBasis::Workout
+        | RxBasis::StrengthDeload
+        | RxBasis::HypertrophyDeload
+        | RxBasis::Maintenance => None,
     }
 }
 
 /// A spike-capped run's safety line, in km and in miles: "Capped at 8 km: at
 /// most N% over your longest recent run" for a continuous distance, else
-/// "Kept short and easy: …". Both empty for any other claim.
-fn run_safety_reasons(
-    r: &crate::schema::RunPrescription,
-    rx: &Recommended<Prescription>,
-) -> (String, String) {
+/// "Kept short and easy: …". Both empty for any other basis.
+fn run_safety_reasons(r: &crate::schema::RunPrescription, rx: &Rx) -> (String, String) {
     let spike_pct = crate::running::SPIKE_FRAC * 100.0;
-    let longest = match rx.claim_id() {
-        claims::RUN_SPIKE_001 => Some("your longest recent run"),
-        claims::RUN_START_001 => Some("the longest recent run you entered"),
+    let longest = match rx.kind() {
+        RxBasis::SpikeCeiling => Some("your longest recent run"),
+        RxBasis::StatedCeiling => Some("the longest recent run you entered"),
         _ => None,
     };
     match (longest, r.volume) {

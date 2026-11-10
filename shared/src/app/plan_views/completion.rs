@@ -18,7 +18,7 @@ use crate::app::view_types::{
     ItemSetView, ItemStatus, PrescriptionView, SessionPlanView, SessionStatus,
 };
 use crate::plates::{load_grid_step_kg, round_load_grid};
-use crate::schema::{Adjustment, Prescription, Recommended, Session, SessionType};
+use crate::schema::{AdjustmentCall, AdjustmentKind, Prescription, Rx, Session, SessionType};
 
 /// How one logged set counts toward a plan item.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -372,7 +372,7 @@ const LIGHTER_CREDIT_SHARE: f64 = 0.5;
 /// The share of a run item's prescribed volume its attributed km/min cover,
 /// judged against the run as shown that day. A non-run prescription covers
 /// nothing; a zero-volume run is always covered.
-fn run_item_share(rx: &Recommended<Prescription>, km: f64, min: f64, vol_frac: f64) -> f64 {
+fn run_item_share(rx: &Rx, km: f64, min: f64, vol_frac: f64) -> f64 {
     let Prescription::Run(r) = &rx.value else {
         return 0.0;
     };
@@ -441,11 +441,11 @@ pub(super) struct FlattenCtx<'a> {
 pub(super) struct DayJudge<'r> {
     pub(super) day: i64,
     pub(super) fold: AdjustFold,
-    pub(super) recs: &'r [Recommended<Adjustment>],
+    pub(super) recs: &'r [AdjustmentCall],
 }
 
 impl<'r> DayJudge<'r> {
-    pub(super) fn new(day: i64, recs: &'r [Recommended<Adjustment>]) -> Self {
+    pub(super) fn new(day: i64, recs: &'r [AdjustmentCall]) -> Self {
         Self {
             day,
             fold: fold_completion_adjustments(recs),
@@ -456,10 +456,11 @@ impl<'r> DayJudge<'r> {
 
 /// Whether a localized pain report in `recs` stops this item: the region rule
 /// `annotate_adjustments` applies (safety-038 "stop that exercise").
-fn pain_stopped(it: &PrescriptionView, recs: &[Recommended<Adjustment>]) -> bool {
-    recs.iter().any(|r| match &r.value {
-        Adjustment::StopItems { location } => crate::autoreg::pain_region(location)
-            .is_some_and(|region| !crate::autoreg::item_spared_by_pain(region, &it.exercise)),
+fn pain_stopped(it: &PrescriptionView, recs: &[AdjustmentCall]) -> bool {
+    recs.iter().any(|r| match r.kind() {
+        AdjustmentKind::PainScoped(region) => {
+            !crate::autoreg::item_spared_by_pain(region, &it.exercise)
+        }
         _ => false,
     })
 }
@@ -536,7 +537,7 @@ fn item_status(it: &PrescriptionView, pain: bool) -> ItemStatus {
 /// re-judges `done`/`sets_done` after this re-runs it.
 pub(in crate::app) fn refresh_item_statuses(
     items: &mut [PrescriptionView],
-    recs: &[Recommended<Adjustment>],
+    recs: &[AdjustmentCall],
 ) {
     for it in items.iter_mut() {
         let pain = matches!(it.status, ItemStatus::SkippedPain | ItemStatus::StoppedPain)
@@ -749,12 +750,7 @@ pub(super) fn flatten_session(
 /// they clear [`RUN_DONE_SHARE`] of the volume shown that day, done lighter
 /// from [`LIGHTER_CREDIT_SHARE`] of it (under a head cold, any run: the shown
 /// run is the short easy one).
-fn judge_run_item(
-    it: &mut PrescriptionView,
-    rx: &Recommended<Prescription>,
-    judge: &DayJudge,
-    ctx: &FlattenCtx,
-) {
+fn judge_run_item(it: &mut PrescriptionView, rx: &Rx, judge: &DayJudge, ctx: &FlattenCtx) {
     let facts = ctx.run_facts;
     let mut km = 0.0;
     let mut min = 0.0;

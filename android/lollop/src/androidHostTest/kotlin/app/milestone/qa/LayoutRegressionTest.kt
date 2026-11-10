@@ -180,7 +180,6 @@ class LayoutRegressionTest : UiProbeTest() {
         for ((w, h) in listOf(800 to 360, 891 to 411)) for (scale in listOf(1f, 1.5f, 2f)) {
             QaHarness.teardown()
             QaHarness.reset(ctx)
-            resetSettings()
             RuntimeEnvironment.setQualifiers("w${w}dp-h${h}dp-land-xxhdpi")
             RuntimeEnvironment.setFontScale(scale)
             QaHarness.seedLog(ctx, illnessAndPain())

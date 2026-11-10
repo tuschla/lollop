@@ -1358,7 +1358,16 @@ pub fn hr_zone_recalc_due(weeks_since_recalc: u8) -> Recommended<bool> {
 // ---------------------------------------------------------------------------
 
 /// A training goal by target race distance (running-024 goal table).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    crate::sanitize::Sanitize,
+)]
 pub enum GoalDistance {
     General,
     C25k,

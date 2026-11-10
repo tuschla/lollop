@@ -25,11 +25,12 @@ import androidx.compose.ui.platform.AccessibilityManager
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
@@ -59,20 +60,21 @@ internal data class UiMessage(
  * inside it is the only one the user can see while it is open.
  */
 internal object UiMessages {
-    private val channel = Channel<UiMessage>(capacity = Channel.BUFFERED)
+    private class State {
+        val channel = Channel<UiMessage>(capacity = Channel.BUFFERED)
+        val messages = channel.receiveAsFlow()
+        val hosts = mutableStateListOf<Any>()
+    }
+
+    private val state by ProcessLocal { State() }
 
     fun post(message: UiMessage) {
-        channel.trySend(message)
+        state.channel.trySend(message).onFailure { PlatformLog.w("UiMessages", "message dropped: ${message.text}", it) }
     }
 
-    internal val messages = channel.receiveAsFlow()
+    internal val messages: Flow<UiMessage> get() = state.messages
 
-    internal val hosts = mutableStateListOf<Any>()
-
-    /** Drops queued messages; for a fresh process-scoped state between QA scenarios. */
-    fun clear() {
-        while (channel.tryReceive().isSuccess) { }
-    }
+    internal val hosts: MutableList<Any> get() = state.hosts
 }
 
 /**
@@ -81,8 +83,8 @@ internal object UiMessages {
  * History opens the run's sheet and [consume]s it.
  */
 internal object HistoryFocus {
-    private val state = MutableStateFlow<Pair<Long, Long>?>(null)
-    val pending: StateFlow<Pair<Long, Long>?> = state.asStateFlow()
+    private val state by ProcessLocal { MutableStateFlow<Pair<Long, Long>?>(null) }
+    val pending: StateFlow<Pair<Long, Long>?> get() = state
 
     fun request(entryId: Long, observedAt: Long) {
         state.value = entryId to observedAt

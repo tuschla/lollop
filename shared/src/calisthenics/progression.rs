@@ -26,7 +26,8 @@ pub(crate) trait RungSet {
 /// chose this rung for a ladder — at setup (their starting rung) or via the
 /// plan item's Easier / Harder choice. Replayed with the logged sets, in time
 /// order, by [`build_anchors`].
-#[derive(Clone, Copy, Debug, PartialEq)]
+// `Serialize`: the plan-cache fingerprint (`memo::fingerprint`) only.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub(crate) struct CalisPlacement {
     pub(crate) ladder: LadderId,
     pub(crate) rung: u8,
@@ -236,7 +237,7 @@ fn judge_rung<S: RungSet>(
 /// [`super::STRAIGHT_ARM_ACCLIMATION_DAYS`]. An unstarted clock (no dated
 /// session at the rung yet) never counts as acclimated.
 fn acclimated<S: RungSet>(state: &State<S>) -> bool {
-    if state.since_ts <= 0 {
+    if is_undated(state.since_ts) {
         return false;
     }
     let newest = state
@@ -464,7 +465,7 @@ fn replay_ladder<'s, S: RungSet>(
             .filter(|s| !(timed && s.hold_sec().is_none()))
             .collect();
         let r_ts = at_r.first().map_or(first_ts, |s| s.observed_at());
-        let dated = first_ts > 0;
+        let dated = !is_undated(first_ts);
         let cur = match st.as_mut() {
             Some(cur) => cur,
             None => {
@@ -515,7 +516,7 @@ fn replay_ladder<'s, S: RungSet>(
                     // tendon acclimation window after a break.
                     cur.since_ts = r_ts;
                 }
-                if cur.since_ts <= 0 {
+                if is_undated(cur.since_ts) {
                     // First dated session after an undated placement.
                     cur.since_ts = r_ts;
                 }

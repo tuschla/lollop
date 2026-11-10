@@ -4,15 +4,14 @@ use crate::app::plan_views::calis_views::flatten_calisthenics_prescription;
 use crate::app::plan_views::flatten_lift::flatten_lift_prescription;
 use crate::app::plan_views::flatten_run::flatten_run_prescription;
 use crate::app::view_types::PrescriptionView;
-use crate::evidence::claims;
 use crate::schema::{
-    DupDay, LiftSessionType, Prescription, Recommended, RunSessionType, Session, SessionType,
+    DupDay, LiftSessionType, Prescription, RunSessionType, Rx, RxBasis, Session, SessionType,
 };
 
 /// Flatten one graded `Prescription` into a shell-facing `PrescriptionView`,
 /// resolving the load from the anchor when the intensity is %1RM.
 pub(in crate::app) fn flatten_prescription(
-    rx: &Recommended<Prescription>,
+    rx: &Rx,
     anchors: &crate::plan::Anchors,
     bodyweight_kg: Option<f64>,
     weight_lb: bool,
@@ -56,9 +55,7 @@ fn day_title(st: SessionType, dup_day: Option<DupDay>) -> &'static str {
 /// The session's human title ([`day_title`]), marking a lift deload day as
 /// part of a lighter week ("Heavy day (lighter week)") so a deload is never
 /// titled like the full session. A lift session is a deload day when every
-/// lift/calisthenics item carries a deload rule (strength STR-DELOAD-VOL-001,
-/// hypertrophy HYP-DELOAD-RX-001), the claims `apply_deload_week` grades
-/// them with.
+/// lift/calisthenics item carries a deload dose.
 pub(in crate::app) fn plan_session_title(s: &Session) -> String {
     let title = day_title(s.session_type, s.dup_day);
     let mut lifts = s
@@ -70,8 +67,8 @@ pub(in crate::app) fn plan_session_title(s: &Session) -> String {
         && lifts.peek().is_some()
         && lifts.all(|rx| {
             matches!(
-                rx.claim_id(),
-                claims::STR_DELOAD_VOL_001 | claims::HYP_DELOAD_RX_001
+                rx.kind(),
+                RxBasis::StrengthDeload | RxBasis::HypertrophyDeload
             )
         });
     if deload {

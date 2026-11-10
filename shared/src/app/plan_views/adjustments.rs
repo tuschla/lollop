@@ -2,12 +2,12 @@
 //! items.
 
 use crate::app::evidence_views::{
-    RETURN_CHECK_STOP, RETURN_DOSE_EFFORT_PCT, RETURN_DOSE_MIN, deload_cut_clauses, reps_word,
-    return_check_headline, to_view, why_from,
+    CallCtx, RETURN_CHECK_STOP, RETURN_DOSE_EFFORT_PCT, RETURN_DOSE_MIN, deload_cut_clauses,
+    lift_work_logged, reps_word, return_check_headline, to_view_in, why_from,
 };
 use crate::app::format::fmt_weight;
 use crate::app::logged_days::LoggedDays;
-use crate::app::model::{Model, SessionReview, profile_for_day};
+use crate::app::model::{Model, profile_for_day};
 use crate::app::plan_views::adjust_fold::{
     LiftDowngrade, ONE_LEVEL_LOAD_FRAC, head_cold, lift_downgrade, reduce_percent_intensity,
     safety_easy,
@@ -21,16 +21,18 @@ use crate::app::plan_views::item_render::{
     with_reps_left,
 };
 use crate::app::readiness::readiness_picture;
-use crate::app::review_deloads::{RECOVERY_WEEK_CLAIM, review_deloads};
+use crate::app::review_deloads::review_deloads;
 use crate::app::view_types::{
-    AdjustmentView, EvidenceTagView, PlanIntensity, PrescriptionView, RunAmount, SessionPlanView,
-    SessionStatus,
+    EvidenceTagView, PlanIntensity, PrescriptionView, RunAmount, SessionPlanView, SessionStatus,
 };
 use crate::day::{is_undated, local_day};
+use crate::event::SessionReview;
 use crate::evidence::{ClaimId, claims};
 use crate::plates::load_grid_step_kg;
 use crate::profile::Profile;
-use crate::schema::{Adjustment, ReadinessSignal, Recommended};
+use crate::schema::{
+    Adjustment, AdjustmentCall, AdjustmentKind, DeloadTrigger, PainRegion, ReadinessSignal,
+};
 
 /// The claim behind the head-cold run cap: one short easy run of 10–20 min at
 /// 60–70 % of usual effort, or rest (IOC 2022 exercise-challenge dose).
@@ -42,38 +44,31 @@ const EASY_DAY_RIR: u8 = 3;
 
 /// Whether a non-safety `DowngradeSession` eases runs: a within-set velocity
 /// loss is a lifting signal (autoreg-010), so runs stay as planned.
-fn downgrade_eases_runs(r: &Recommended<Adjustment>) -> bool {
-    r.claim_id() != claims::AUTOREG_VL_001
+fn downgrade_eases_runs(r: &AdjustmentCall) -> bool {
+    r.kind() != AdjustmentKind::VelocityLoss
 }
 
 /// The run-side evidence for a hold's easy run (ready-upd-001 "run items: easy
 /// (unchanged autoreg-028)"): the hold itself cites the lifting-only claim, so a
 /// run eased by it re-points to the trigger's own endurance rule.
-fn run_side_rec(r: &Recommended<Adjustment>, trigger: ReadinessSignal) -> Recommended<Adjustment> {
-    let claim = match trigger {
-        ReadinessSignal::HrvLnRmssd => claims::HRV_001,
-        ReadinessSignal::RestingHr => claims::AUTOREG_RHR_DOWN_001,
-        ReadinessSignal::WellnessZ => claims::WELLNESS_001,
-        _ => return r.clone(),
-    };
-    Recommended::new(r.value.clone(), claim)
+fn run_side_rec(r: &AdjustmentCall) -> AdjustmentCall {
+    match r.kind() {
+        AdjustmentKind::HrvHold => r.cited_to(claims::HRV_001),
+        AdjustmentKind::RhrHold => r.cited_to(claims::AUTOREG_RHR_DOWN_001),
+        AdjustmentKind::WellnessHold => r.cited_to(claims::WELLNESS_001),
+        _ => r.clone(),
+    }
 }
 
 /// Whether a deload also defers hard running: the overtraining recovery week
 /// (HYB-DELOAD-001; running-034's down week) and the failed-key-session volume
-/// deload (autoreg-036 "reduce weekly volume; defer hard work", the only
-/// load-neutral AUTOREG-DELOAD-001 deload). Their quality runs become easy.
-fn deload_defers_hard_running(r: &Recommended<Adjustment>) -> bool {
-    match (r.claim_id(), &r.value) {
-        (RECOVERY_WEEK_CLAIM, _) => true,
-        (
-            claims::AUTOREG_DELOAD_001,
-            Adjustment::Deload {
-                load_reduction_pct, ..
-            },
-        ) => *load_reduction_pct <= 0.0,
-        _ => false,
-    }
+/// deload (autoreg-036 "reduce weekly volume; defer hard work"). Their quality
+/// runs become easy.
+fn deload_defers_hard_running(r: &AdjustmentCall) -> bool {
+    matches!(
+        r.kind(),
+        AdjustmentKind::WeeklyDeload(DeloadTrigger::RecoveryWeek | DeloadTrigger::FailedSessions)
+    )
 }
 
 /// One weekly check-in's recommendations with the local-day span each can
@@ -83,7 +78,7 @@ fn deload_defers_hard_running(r: &Recommended<Adjustment>) -> bool {
 pub(super) struct ReviewWindow {
     start: Option<i64>,
     current_until: i64,
-    recs: Vec<Recommended<Adjustment>>,
+    recs: Vec<AdjustmentCall>,
 }
 
 /// Every weekly check-in's recommendations with their windows, built once per
@@ -127,11 +122,7 @@ pub(super) fn review_windows(model: &Model, today: i64, offset: i64) -> Vec<Revi
 ///
 /// An undated review has no start: its recommendations apply on any day up to
 /// the end of their window (the lenient fallback).
-fn review_recs_active_on(
-    windows: &[ReviewWindow],
-    day: i64,
-    today: i64,
-) -> Vec<Recommended<Adjustment>> {
+fn review_recs_active_on(windows: &[ReviewWindow], day: i64, today: i64) -> Vec<AdjustmentCall> {
     let mut out = Vec::new();
     for w in windows {
         if w.start.is_some_and(|s| s > day) {
@@ -157,7 +148,7 @@ fn review_recs_active_on(
 /// from the shared pipeline as it stood that day (a signal removed on a later
 /// day still shaped it; only an undated `ClearReadiness` or legacy undated
 /// remove, which cannot say when, drops it from past days too).
-pub(super) struct PastReadiness(Vec<(i64, Vec<Recommended<Adjustment>>)>);
+pub(super) struct PastReadiness(Vec<(i64, Vec<AdjustmentCall>)>);
 
 impl PastReadiness {
     /// Every local day in `[week_monday, today)`, each judged with the profile
@@ -185,7 +176,7 @@ impl PastReadiness {
         )
     }
 
-    fn on(&self, day: i64) -> &[Recommended<Adjustment>] {
+    fn on(&self, day: i64) -> &[AdjustmentCall] {
         self.0
             .iter()
             .find(|(d, _)| *d == day)
@@ -201,9 +192,9 @@ pub(super) fn completion_recs_for_day<'a>(
     day: i64,
     today: i64,
     past: &PastReadiness,
-    today_recs: &'a [Recommended<Adjustment>],
+    today_recs: &'a [AdjustmentCall],
     windows: &[ReviewWindow],
-) -> std::borrow::Cow<'a, [Recommended<Adjustment>]> {
+) -> std::borrow::Cow<'a, [AdjustmentCall]> {
     if day >= today {
         return std::borrow::Cow::Borrowed(today_recs);
     }
@@ -249,14 +240,14 @@ fn cap_rpe_intensity(intensity: &mut PlanIntensity, d: u8) -> Option<i32> {
 #[cfg(test)]
 pub(in crate::app) fn apply_adjustments_to_session(
     ns: &mut SessionPlanView,
-    recommended: &[Recommended<Adjustment>],
+    recommended: &[AdjustmentCall],
     weight_lb: bool,
 ) {
     let fold = fold_completion_adjustments(recommended);
     for it in ns.items.iter_mut() {
         fold_item_numbers(it, fold, weight_lb);
     }
-    annotate_and_rejudge(ns, recommended, weight_lb);
+    annotate_and_rejudge(ns, recommended, None, weight_lb);
     for it in ns.items.iter_mut() {
         restate_basis(it, weight_lb);
     }
@@ -266,10 +257,11 @@ pub(in crate::app) fn apply_adjustments_to_session(
 /// re-judged against the same adjustments.
 pub(super) fn annotate_and_rejudge(
     ns: &mut SessionPlanView,
-    recommended: &[Recommended<Adjustment>],
+    recommended: &[AdjustmentCall],
+    today: Option<&CallCtx>,
     weight_lb: bool,
 ) {
-    annotate_adjustments(ns, recommended, weight_lb);
+    annotate_adjustments(ns, recommended, today, weight_lb);
     refresh_item_statuses(&mut ns.items, recommended);
 }
 
@@ -282,52 +274,63 @@ pub(super) fn annotate_and_rejudge(
 /// items already carry the numeric fold of `recommended` ([`fold_item_numbers`],
 /// applied by [`flatten_session`]); this annotates each affected item, applies
 /// the RPE cap and the easy/pain-free rewrites, re-judges completion and marks
-/// the session adjusted.
+/// the session adjusted. `today` carries today's call wording when `ns` is
+/// today's session.
 pub(super) fn annotate_adjustments(
     ns: &mut SessionPlanView,
-    recommended: &[Recommended<Adjustment>],
+    recommended: &[AdjustmentCall],
+    today: Option<&CallCtx>,
     weight_lb: bool,
 ) {
     let effort = EffortPass::apply(&mut ns.items, recommended, weight_lb);
-    let mut applied: Option<AdjustmentView> = None;
+    let mut applied: Option<&AdjustmentCall> = None;
     // Items stopped by a localized pain report: nothing to do today.
     let mut stopped = vec![false; ns.items.len()];
     for r in recommended {
-        let changed = match &r.value {
-            Adjustment::ReduceLoadPct(p) => note_load_cut(&mut ns.items, *p, weight_lb),
-            Adjustment::Deload {
-                volume_reduction_pct,
-                load_reduction_pct,
-                ..
-            } => note_deload(
+        let changed = match (&r.value, r.kind()) {
+            (Adjustment::ReduceLoadPct(p), _) => note_load_cut(&mut ns.items, *p, weight_lb),
+            (
+                Adjustment::Deload {
+                    volume_reduction_pct,
+                    load_reduction_pct,
+                    ..
+                },
+                _,
+            ) => note_deload(
                 &mut ns.items,
                 r,
                 (*volume_reduction_pct, *load_reduction_pct),
                 weight_lb,
             ),
-            Adjustment::CapRpe(_) => note_rpe_cap(&mut ns.items, &effort.eased),
-            Adjustment::CapTopEnd { trigger } => {
+            (Adjustment::CapRpe(_), _) => note_rpe_cap(&mut ns.items, &effort.eased),
+            (Adjustment::CapTopEnd { trigger }, _) => {
                 apply_progression_hold(&mut ns.items, r, *trigger, &effort)
             }
-            Adjustment::DowngradeSession if !safety_easy(r) => {
+            (Adjustment::DowngradeSession, _) if !safety_easy(r) => {
                 apply_one_level_downgrade(&mut ns.items, r, &effort, weight_lb)
             }
-            Adjustment::DowngradeSession => apply_safety_easy_day(&mut ns.items, r, weight_lb),
-            Adjustment::ReduceVolumePct(p) => note_volume_cut(&mut ns.items, *p),
-            Adjustment::StopItems { location } => {
-                apply_pain_stop(&mut ns.items, r, location, &effort.clamped, &mut stopped)
+            (Adjustment::DowngradeSession, _) => apply_safety_easy_day(&mut ns.items, r, weight_lb),
+            (Adjustment::ReduceVolumePct(p), _) => note_volume_cut(&mut ns.items, *p),
+            (Adjustment::StopItems { location }, AdjustmentKind::PainScoped(region)) => {
+                apply_pain_stop(
+                    &mut ns.items,
+                    r,
+                    (location, region),
+                    &effort.clamped,
+                    &mut stopped,
+                )
             }
-            Adjustment::ReturnCheck => {
+            (Adjustment::ReturnCheck, _) => {
                 // ready-upd-003 (IOC 2022): the first session after a fever or
                 // chest illness is a short, easy self-test, not the planned work.
                 let logged = ns.items.iter().any(PrescriptionView::has_work);
                 ns.items = vec![return_check_item(r, logged)];
                 stopped = vec![false];
-                applied = Some(to_view(r));
+                applied = Some(r);
                 break;
             }
-            Adjustment::ModifyAndMonitor { location } => {
-                apply_modify_and_monitor(&mut ns.items, r, location, &effort, weight_lb)
+            (Adjustment::ModifyAndMonitor { location }, AdjustmentKind::TendonModify(region)) => {
+                apply_modify_and_monitor(&mut ns.items, r, (location, region), &effort, weight_lb)
             }
             // Item-scoped performance cuts are applied by
             // [`apply_first_set_autoreg`] (they need the item's logged sets);
@@ -335,9 +338,7 @@ pub(super) fn annotate_adjustments(
             _ => false,
         };
         if changed && applied.is_none() {
-            let mut v = to_view(r);
-            name_modified_exercises(&mut v.summary, r, &ns.items);
-            applied = Some(v);
+            applied = Some(r);
         }
     }
     // Re-judge completion after the fold so the mirrored strip row and the hero
@@ -350,7 +351,19 @@ pub(super) fn annotate_adjustments(
             it.done = it.sets_done >= it.sets.max(1) || it.ended_early;
         }
     }
-    if let Some(adj) = applied {
+    if let Some(r) = applied {
+        let ctx = match today {
+            Some(t) => CallCtx {
+                first_set_logged: lift_work_logged(&ns.items),
+                items: &ns.items,
+                ..*t
+            },
+            None => CallCtx {
+                items: &ns.items,
+                ..CallCtx::default()
+            },
+        };
+        let adj = to_view_in(r, &ctx);
         ns.status = SessionStatus::Adjusted;
         ns.adjustment = Some(adj);
     }
@@ -371,7 +384,7 @@ struct EffortPass {
 impl EffortPass {
     fn apply(
         items: &mut [PrescriptionView],
-        recommended: &[Recommended<Adjustment>],
+        recommended: &[AdjustmentCall],
         weight_lb: bool,
     ) -> Self {
         let hold_cap = recommended.iter().map(lift_effort_hold).max().unwrap_or(0);
@@ -507,7 +520,7 @@ fn note_load_cut(items: &mut [PrescriptionView], pct: f32, weight_lb: bool) -> b
 /// run goes easy at its cut volume.
 fn note_deload(
     items: &mut [PrescriptionView],
-    r: &Recommended<Adjustment>,
+    r: &AdjustmentCall,
     (volume_reduction_pct, load_reduction_pct): (f32, f32),
     weight_lb: bool,
 ) -> bool {
@@ -554,11 +567,11 @@ fn note_rpe_cap(items: &mut [PrescriptionView], eased: &[u8]) -> bool {
 /// run-side rule rather than the lifting-only hold claim.
 fn apply_progression_hold(
     items: &mut [PrescriptionView],
-    r: &Recommended<Adjustment>,
+    r: &AdjustmentCall,
     trigger: ReadinessSignal,
     effort: &EffortPass,
 ) -> bool {
-    let run_rec = run_side_rec(r, trigger);
+    let run_rec = run_side_rec(r);
     let mut any_changed = false;
     for (i, it) in items.iter_mut().enumerate() {
         if it.is_run() {
@@ -580,7 +593,7 @@ fn apply_progression_hold(
 /// and velocity loss only hold lifts; decoupling leaves them alone.
 fn apply_one_level_downgrade(
     items: &mut [PrescriptionView],
-    r: &Recommended<Adjustment>,
+    r: &AdjustmentCall,
     effort: &EffortPass,
     weight_lb: bool,
 ) -> bool {
@@ -627,12 +640,12 @@ fn apply_one_level_downgrade(
 /// reserve.
 fn apply_safety_easy_day(
     items: &mut [PrescriptionView],
-    r: &Recommended<Adjustment>,
+    r: &AdjustmentCall,
     weight_lb: bool,
 ) -> bool {
-    let note = match r.claim_id() {
-        claims::RETURN_HOLD_001 => "first session back: keep it easy",
-        claims::ILLNESS_NECK_001 => "head cold: light, half the sets",
+    let note = match r.kind() {
+        AdjustmentKind::ReturnHold => "first session back: keep it easy",
+        AdjustmentKind::HeadCold => "head cold: light, half the sets",
         _ => "easy today: protect the sore tendon",
     };
     for it in items.iter_mut() {
@@ -667,19 +680,15 @@ fn note_volume_cut(items: &mut [PrescriptionView], pct: f32) -> bool {
 }
 
 /// `StopItems` (safety-038 "STOP that exercise"): only the movements that load
-/// the painful part stop, marked in `stopped`; the rest goes ahead (no load is
-/// ever auto-added while pain is active, autoreg-044). An unrecognised location
-/// changes nothing.
+/// the painful region stop, marked in `stopped`; the rest goes ahead (no load
+/// is ever auto-added while pain is active, autoreg-044).
 fn apply_pain_stop(
     items: &mut [PrescriptionView],
-    r: &Recommended<Adjustment>,
-    location: &str,
+    r: &AdjustmentCall,
+    (location, region): (&str, PainRegion),
     clamped: &[bool],
     stopped: &mut [bool],
 ) -> bool {
-    let Some(region) = crate::autoreg::pain_region(location) else {
-        return false;
-    };
     let mut any_changed = false;
     for (idx, it) in items.iter_mut().enumerate() {
         if crate::autoreg::item_spared_by_pain(region, &it.exercise) {
@@ -707,12 +716,11 @@ fn apply_pain_stop(
 /// No fabricated % (the KB states none for this response).
 fn apply_modify_and_monitor(
     items: &mut [PrescriptionView],
-    r: &Recommended<Adjustment>,
-    location: &str,
+    r: &AdjustmentCall,
+    (location, region): (&str, Option<PainRegion>),
     effort: &EffortPass,
     weight_lb: bool,
 ) -> bool {
-    let region = crate::autoreg::pain_region(location);
     let note = if location.is_empty() {
         "eased for tendon pain".to_string()
     } else {
@@ -739,16 +747,15 @@ fn apply_modify_and_monitor(
 
 /// Whether `r` is a tendon modify-and-monitor call scoped to a body region
 /// (it eases only the lifts that load it, the rest are held).
-fn scoped_modify(r: &Recommended<Adjustment>) -> bool {
-    matches!(&r.value, Adjustment::ModifyAndMonitor { location }
-        if crate::autoreg::pain_region(location).is_some())
+fn scoped_modify(r: &AdjustmentCall) -> bool {
+    matches!(r.kind(), AdjustmentKind::TendonModify(Some(_)))
 }
 
 /// The extra reps in reserve one readiness call holds every lift to: a
 /// progression hold (ready-upd-001), a non-safety downgrade that touches
 /// lifts, or a scoped tendon modify (for the lifts it spares) adds one;
 /// anything else none.
-fn lift_effort_hold(r: &Recommended<Adjustment>) -> u8 {
+fn lift_effort_hold(r: &AdjustmentCall) -> u8 {
     match &r.value {
         Adjustment::CapTopEnd { .. } => 1,
         Adjustment::DowngradeSession
@@ -763,7 +770,7 @@ fn lift_effort_hold(r: &Recommended<Adjustment>) -> u8 {
 
 /// The session-wide extra reserve today's readiness calls put on a lift: the
 /// deepest single call, never their sum.
-pub(super) fn session_effort_cap(recs: &[Recommended<Adjustment>]) -> u8 {
+pub(super) fn session_effort_cap(recs: &[AdjustmentCall]) -> u8 {
     recs.iter()
         .map(|r| match r.value {
             Adjustment::CapRpe(d) => d,
@@ -777,44 +784,13 @@ pub(super) fn session_effort_cap(recs: &[Recommended<Adjustment>]) -> u8 {
 /// progression hold (ready-upd-001), an HRV / bar-speed hold downgrade, or a
 /// localized pain stop or scoped tendon modify for the lifts it spares
 /// (autoreg-044).
-fn holds_load(r: &Recommended<Adjustment>) -> bool {
+fn holds_load(r: &AdjustmentCall) -> bool {
     match &r.value {
         Adjustment::CapTopEnd { .. } | Adjustment::StopItems { .. } => true,
         Adjustment::ModifyAndMonitor { .. } => scoped_modify(r),
         Adjustment::DowngradeSession => !safety_easy(r) && lift_downgrade(r) == LiftDowngrade::Hold,
         _ => false,
     }
-}
-
-/// Append the lifts a tendon modify-and-monitor call `r` eases today to its
-/// call ("… Today: Back squat and Deadlift."), so the card names what to
-/// change. `items` is today's session; any other call is left alone.
-pub(in crate::app) fn name_modified_exercises(
-    summary: &mut String,
-    r: &Recommended<Adjustment>,
-    items: &[PrescriptionView],
-) {
-    let Adjustment::ModifyAndMonitor { location } = &r.value else {
-        return;
-    };
-    let region = crate::autoreg::pain_region(location);
-    let names: Vec<&str> = items
-        .iter()
-        .filter(|it| !it.is_run())
-        .filter(|it| {
-            region.is_none_or(|reg| !crate::autoreg::item_spared_by_pain(reg, &it.exercise))
-        })
-        .map(|it| it.exercise.as_str())
-        .collect();
-    let list = match names.as_slice() {
-        [] => return,
-        [one] => (*one).to_string(),
-        [init @ .., last] => format!("{} and {last}", init.join(", ")),
-    };
-    if summary.contains(&format!(" Today: {list}.")) {
-        return;
-    }
-    summary.push_str(&format!(" Today: {list}."));
 }
 
 /// A held lift's note: no weight added, and how much earlier to stop.
@@ -932,7 +908,7 @@ fn clear_anchored_on(it: &mut PrescriptionView) {
 
 /// Render one plan item as stopped for a localized pain report:
 /// no load, nothing to log, the evidence re-pointed to the pain rule.
-fn stop_item_for_pain(it: &mut PrescriptionView, location: &str, r: &Recommended<Adjustment>) {
+fn stop_item_for_pain(it: &mut PrescriptionView, location: &str, r: &AdjustmentCall) {
     it.load_kg = None;
     it.intensity = PlanIntensity::Prose;
     it.intensity_label = "Skip today, or swap for a movement that doesn't hurt".into();
@@ -955,7 +931,7 @@ fn stop_item_for_pain(it: &mut PrescriptionView, location: &str, r: &Recommended
 /// The one-item post-illness return check (ready-upd-003, ILLNESS-RTT-001):
 /// [`RETURN_DOSE_MIN`] minutes at [`RETURN_DOSE_EFFORT_PCT`] of usual effort,
 /// with the stop list. `done` once anything was logged today.
-fn return_check_item(r: &Recommended<Adjustment>, done: bool) -> PrescriptionView {
+fn return_check_item(r: &AdjustmentCall, done: bool) -> PrescriptionView {
     let (pct_lo, pct_hi) = RETURN_DOSE_EFFORT_PCT;
     let summary = return_check_headline();
     PrescriptionView {
@@ -979,7 +955,7 @@ fn return_check_item(r: &Recommended<Adjustment>, done: bool) -> PrescriptionVie
 /// planned distance, reps and tracker structure are dropped, never shown. Done
 /// once any run is logged on its day.
 fn cap_run_for_head_cold(it: &mut PrescriptionView) {
-    let r = Recommended::new(Adjustment::DowngradeSession, HEAD_COLD_RUN_CLAIM);
+    let r = AdjustmentKind::HeadCold.call(Adjustment::DowngradeSession, HEAD_COLD_RUN_CLAIM);
     clear_run_reps(it);
     it.run_volume = Some(RunAmount::MinutesRange(
         RETURN_DOSE_MIN.0,

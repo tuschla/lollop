@@ -638,7 +638,10 @@ internal fun holdResolutionEvents(
     today: Long,
     nowSec: Long,
 ): List<Event> {
-    val signal = runCatching { ReadinessSignal.valueOf(resolution.signal) }.getOrNull() ?: return emptyList()
+    val signal = ReadinessSignal.entries.firstOrNull { it.name == resolution.signal } ?: run {
+        PlatformLog.w("SafetyBanner", "unknown hold signal \"${resolution.signal}\", nothing to resolve")
+        return emptyList()
+    }
     return buildList {
         add(Event.ResolveHold(signal, nowSec))
         if (resolution.ends_profile_illness && profile != null) {

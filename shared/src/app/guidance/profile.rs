@@ -7,13 +7,13 @@ use crate::app::guidance::rows::{
 };
 use crate::app::guidance::running::build_running_guidance;
 use crate::app::guidance::strength::build_strength_guidance;
-use crate::app::memo::LastMemo;
 use crate::app::view_types::GuidanceView;
 use crate::evidence::claims;
 use crate::hybrid;
 use crate::individualization::{self, Environment};
+use crate::memo::{MemoId, fingerprint, memoized};
 use crate::profile::{PlanProfile, Profile};
-use crate::schema::{Adjustment, Recommended};
+use crate::schema::{AdjustmentCall, AdjustmentKind, Recommended, ScreenGate};
 
 /// The weekly running volume the guidance rows should reason about, and how it
 /// was determined: the LARGER of the stated profile figure and the MEASURED
@@ -43,48 +43,25 @@ pub(in crate::app) fn build_guidance(p: &Profile) -> Vec<GuidanceView> {
     build_guidance_measured(p, weekly_km, basis, None)
 }
 
-/// Memo key of [`build_guidance_measured`]: `(profile, weekly_km bits, basis,
-/// hold)`.
-type GuidanceKey = (Profile, u64, WeeklyBasis, Option<Recommended<Adjustment>>);
-
-thread_local! {
-    /// `build_guidance_measured_uncached` is a pure function of
-    /// `(profile, weekly_km bits, weekly_basis, hold)`, and rebuilding the
-    /// whole evidence-cited guidance list (every strength/running/hybrid rule)
-    /// on every event is wasted work. The inputs change only when the profile,
-    /// measured mileage or today's hold changes. Output is identical to the
-    /// uncached rebuild.
-    static GUIDANCE_CACHE: std::cell::RefCell<LastMemo<GuidanceKey, Vec<GuidanceView>>> =
-        const { std::cell::RefCell::new(LastMemo::new()) };
-}
-
-/// Memoized wrapper over [`build_guidance_measured_uncached`], keyed on
-/// `(profile, weekly_km bits, basis, hold)`.
+/// [`build_guidance_measured_uncached`], memoized ([`MemoId::Guidance`]) on
+/// the profile, weekly volume, basis and hold: rebuilding the whole
+/// evidence-cited guidance list (every strength/running/hybrid rule) on every
+/// event is wasted work, and the inputs change only when the profile, measured
+/// mileage or today's hold changes.
 pub(in crate::app) fn build_guidance_measured(
     p: &Profile,
     weekly_km: f64,
     weekly_basis: WeeklyBasis,
-    hold: Option<&Recommended<Adjustment>>,
+    hold: Option<&AdjustmentCall>,
 ) -> Vec<GuidanceView> {
-    let key_km = weekly_km.to_bits();
-    let hit = GUIDANCE_CACHE.with(|c| {
-        c.borrow()
-            .get_if(|(cp, ck, cb, ch)| {
-                cp == p && *ck == key_km && *cb == weekly_basis && ch.as_ref() == hold
-            })
-            .cloned()
-    });
-    if let Some(rows) = hit {
-        return rows;
-    }
-    let rows = build_guidance_measured_uncached(p, weekly_km, weekly_basis, hold);
-    GUIDANCE_CACHE.with(|c| {
-        c.borrow_mut().set(
-            (p.clone(), key_km, weekly_basis, hold.cloned()),
-            rows.clone(),
-        );
-    });
-    rows
+    let key = (
+        fingerprint(&(p, weekly_km, hold.map(|h| &h.value))),
+        weekly_basis,
+        hold.map(|h| (h.claim_id(), h.kind())),
+    );
+    memoized(MemoId::Guidance, &key, || {
+        build_guidance_measured_uncached(p, weekly_km, weekly_basis, hold)
+    })
 }
 
 /// The uncached guidance builder behind [`build_guidance_measured`]. As
@@ -95,7 +72,7 @@ fn build_guidance_measured_uncached(
     p: &Profile,
     weekly_km: f64,
     weekly_basis: WeeklyBasis,
-    hold: Option<&Recommended<Adjustment>>,
+    hold: Option<&AdjustmentCall>,
 ) -> Vec<GuidanceView> {
     let mut rows = Vec::new();
 
@@ -185,13 +162,15 @@ fn build_safety_guidance(
     // reason is written to sit under Today's hold banner, so where the banner
     // carries the "why" the standalone row restates it first.
     for gate in individualization::onboarding_gates(&p.health) {
-        let lead = match gate.claim_id() {
-            claims::ILLNESS_NECK_001 => "You marked yourself ill. ",
-            claims::SAFE_CVD_001 => "One of your health answers needs a doctor's OK first. ",
-            claims::SAFE_PEDS_001 => {
+        let lead = match gate.kind() {
+            AdjustmentKind::Screen(ScreenGate::AcuteIllness) => "You marked yourself ill. ",
+            AdjustmentKind::Screen(ScreenGate::Parq) => {
+                "One of your health answers needs a doctor's OK first. "
+            }
+            AdjustmentKind::Screen(ScreenGate::Youth) => {
                 "You're under 18, so lollop won't build a plan: strength training at your age needs a coach who can watch your technique. You can still log and track. "
             }
-            claims::SAFE_PREG_001 => {
+            AdjustmentKind::Screen(ScreenGate::Pregnancy) => {
                 "You're pregnant, so lollop won't plan or increase your training. "
             }
             _ => "",

@@ -1,5 +1,4 @@
 use crate::app::format::{fmt_mss, is_ratio_base_km, round_tenths, whole_seconds};
-use crate::app::memo::{Memo, RUN_MEMO_CAP, VIEW_LIST_CACHE_CAP, memoized};
 use crate::app::model::LoggedRun;
 use crate::app::run_metrics::{QcTrack, RunFacts, run_started_at};
 use crate::app::view_types::{
@@ -8,6 +7,7 @@ use crate::app::view_types::{
 };
 use crate::feedback::FeedbackCategory;
 use crate::gps::GpsPoint;
+use crate::memo::{MemoId, fingerprint, memoized};
 use crate::schema::ThreeZone;
 use crate::{feedback, gps, load, running};
 
@@ -38,51 +38,16 @@ pub(in crate::app) fn run_split_views(
         .collect()
 }
 
-thread_local! {
-    /// The finished per-run card keyed by the run's content fingerprint: the
-    /// derivation (QC'd splits per km and per mile, variability index, copy) is
-    /// a pure function of the run, which is immutable once written; an amend
-    /// changes the key and misses.
-    pub(in crate::app) static RUN_VIEW_CACHE: std::cell::RefCell<Memo<u64, RunResultView>> =
-        std::cell::RefCell::new(Memo::new(RUN_MEMO_CAP));
-}
-
-thread_local! {
-    /// Test-only counter of UNCACHED run-view builds, thread-local so a laziness
-    /// test measures a race-free delta around two `view()` calls (see the
-    /// run-view laziness test). Not compiled into shipping builds.
-    #[cfg(test)]
-    pub(in crate::app) static RUN_VIEW_BUILDS: std::cell::Cell<u64> =
-        const { std::cell::Cell::new(0) };
-}
-
-/// Cheap content fingerprint of the logged runs: length plus each run's
-/// [`run_content_key`] (which already covers every field the derived view uses).
-pub(in crate::app) fn runs_fingerprint(keys: &[u64]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    keys.len().hash(&mut h);
-    for k in keys {
-        k.hash(&mut h);
-    }
-    h.finish()
-}
-
-thread_local! {
-    /// The finished ordered runs list keyed by [`runs_fingerprint`], so an
-    /// event that touches no run skips the sort and per-run lookups.
-    static RUNS_VIEWS_CACHE: std::cell::RefCell<Memo<u64, Vec<RunResultView>>> =
-        std::cell::RefCell::new(Memo::new(VIEW_LIST_CACHE_CAP));
-}
-
-/// The ordered runs list for the ViewModel, memoized, in [`RunFacts::chrono`]
-/// order: chronological, tie-broken by `entry_id` (shell epoch-MILLIS log id)
+/// The ordered runs list for the ViewModel, memoized ([`MemoId::RunViews`]) on
+/// the run keys so an event that touches no run skips the sort and per-run
+/// lookups, in [`RunFacts::chrono`] order: chronological, tie-broken by
+/// `entry_id` (shell epoch-MILLIS log id)
 /// so same-second runs keep a deterministic order across an `AmendRun`
 /// remove+push (the amended run carries its original `entry_id` to the Vec
 /// tail). Legacy rows (`entry_id == 0`) keep insertion order; a backdated run
 /// slots into its true position.
 pub(in crate::app) fn run_views(runs: &[LoggedRun], facts: &RunFacts) -> Vec<RunResultView> {
-    memoized(&RUNS_VIEWS_CACHE, runs_fingerprint(&facts.keys), || {
+    memoized(MemoId::RunViews, &fingerprint(&facts.keys), || {
         facts
             .chrono
             .iter()
@@ -91,11 +56,13 @@ pub(in crate::app) fn run_views(runs: &[LoggedRun], facts: &RunFacts) -> Vec<Run
     })
 }
 
-/// One run's card, memoized on its content key: the derivation runs once per
-/// distinct run rather than on every `view()`. `qc` is the run's QC'd track
-/// (`None` for a hand-entered run).
+/// One run's card, memoized on its content key ([`MemoId::RunCard`]): the
+/// derivation (QC'd splits per km and per mile, variability index, copy) runs
+/// once per distinct run rather than on every `view()`; an amend changes the
+/// key and misses. `qc` is the run's QC'd track (`None` for a hand-entered
+/// run).
 pub(in crate::app) fn to_run_view(r: &LoggedRun, key: u64, qc: Option<&QcTrack>) -> RunResultView {
-    memoized(&RUN_VIEW_CACHE, key, || to_run_view_uncached(r, qc))
+    memoized(MemoId::RunCard, &key, || to_run_view_uncached(r, qc))
 }
 
 /// Physiological ceiling for an echoed/classified average %HRmax; the core
@@ -110,8 +77,6 @@ const MAX_HR_PCT_MAX: f64 = 100.0;
 /// derives its baseline at view() time from `model.runs` (see
 /// [`latest_run_spike`]).
 fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
-    #[cfg(test)]
-    RUN_VIEW_BUILDS.with(|c| c.set(c.get() + 1));
     // The feedback gate's baseline rule (`is_ratio_base_km`): a base under it
     // is no earlier run, so card and gate always give one spike verdict.
     let has_baseline = is_ratio_base_km(r.longest_recent_km);
@@ -120,9 +85,8 @@ fn to_run_view_uncached(r: &LoggedRun, qc: Option<&QcTrack>) -> RunResultView {
     } else {
         0.0
     };
-    // A negative figure is no reading, like the 0 sentinel. `+ 0.0`: `clamp`
-    // keeps a wire -0.0, which would ride the view as "hr_pct_max":-0.0.
-    let hr_pct_max = r.hr_pct_max.clamp(0.0, MAX_HR_PCT_MAX) + 0.0;
+    // A negative figure is no reading, like the 0 sentinel.
+    let hr_pct_max = r.hr_pct_max.clamp(0.0, MAX_HR_PCT_MAX);
     // A GPS track derives its own distance/duration; a manual run uses scalars.
     let gps = qc.is_some();
     // File 07 QC gates ran BEFORE any derivation (accuracy, implausible speed,

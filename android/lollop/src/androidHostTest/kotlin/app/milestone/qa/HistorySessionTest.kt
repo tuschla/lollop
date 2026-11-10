@@ -54,8 +54,8 @@ class HistorySessionTest {
 
     @After
     fun tearDown() {
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
         QaHarness.teardown()
+        QaHarness.freshProcess()
     }
 
     @Test

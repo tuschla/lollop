@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 use crate::app::format::{capitalize_first, fmt_mss, fmt_secs_min, round_tenths};
 use crate::app::model::{Model, profile_for_day};
 use crate::app::view_types::{EvidenceTagView, PrescriptionView, RunTargetView};
-use crate::evidence::{ClaimId, claims};
+use crate::evidence::claims;
 use crate::profile::Profile;
 use crate::schema::{
     Prescription, Recommended, RunIntensity, RunSessionType, Session, SessionType, ThreeZone,
@@ -181,10 +181,9 @@ impl TargetBand {
 /// (running-014 states only ceilings).
 pub(super) fn band_for(
     kind: Option<RunSessionType>,
-    claim: ClaimId,
     intensity: &RunIntensity,
 ) -> Option<TargetBand> {
-    if claim == claims::RUN_STRIDES_001 || kind == Some(RunSessionType::Strides) {
+    if kind == Some(RunSessionType::Strides) {
         return Some(TargetBand::Strides);
     }
     if kind == Some(RunSessionType::Hills) {
@@ -506,7 +505,7 @@ pub(super) fn apply_run_targets(
         let Prescription::Run(r) = &rx.value else {
             continue;
         };
-        let Some(band) = band_for(kind, rx.claim_id(), &r.intensity) else {
+        let Some(band) = band_for(kind, &r.intensity) else {
             continue;
         };
         let t = resolve_target(band, &r.intensity, anchors.run_vdot, hr);

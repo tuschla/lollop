@@ -330,3 +330,22 @@ fn infinite_gps_accuracy_fails_the_accuracy_gate() {
     assert!(stored[1] > crate::gps::MAX_GPS_ACCURACY_M, "{stored:?}");
     assert_eq!(stored[2], 0.0, "NaN reads as no accuracy reported");
 }
+
+#[test]
+fn a_wire_negative_zero_is_echoed_as_zero() {
+    // Every wire float goes through one rule (`crate::sanitize`), which turns
+    // -0.0 into 0.0. The calculator echo used to clamp without it, so a
+    // "-0.0" age came back to the shell's form as "-0.0".
+    let app = Engine;
+    let mut model = Model::default();
+    app.update(
+        Event::ComputeHrZones {
+            age_years: -0.0,
+            resting_hr_bpm: Some(-0.0),
+        },
+        &mut model,
+    )
+    .expect_only_render();
+    let json = serde_json::to_string(&app.view(&model).hr_zone_input).unwrap();
+    assert_eq!(json, r#"{"age_years":0.0,"resting_hr_bpm":0.0}"#);
+}

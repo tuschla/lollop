@@ -174,12 +174,12 @@ fn headline_ignores_a_neutral_review_verdict_and_keeps_the_prescription() {
     .expect_only_render();
 
     let vm = app.view(&model);
-    let hold = vm
-        .review_adjustments
-        .iter()
-        .find(|a| a.summary.contains("hold planned weights"))
-        .expect("the neutral VBT hold row still renders in the review");
-    assert!(hold.neutral, "the hold verdict is marked neutral");
+    assert!(
+        vm.review_adjustments
+            .iter()
+            .any(|a| a.summary.contains("hold planned weights")),
+        "the neutral VBT hold row still renders in the review"
+    );
     assert_eq!(
         vm.today_headline.kind,
         HeadlineKind::Prescription,
@@ -205,12 +205,12 @@ fn a_sound_aerobic_base_verdict_does_not_headline() {
     )
     .expect_only_render();
     let vm = app.view(&model);
-    let sound = vm
-        .review_adjustments
-        .iter()
-        .find(|a| a.summary.contains("heart rate stayed steady at this pace"))
-        .expect("the sound-base verdict renders in the review");
-    assert!(sound.neutral, "the sound-base verdict is marked neutral");
+    assert!(
+        vm.review_adjustments
+            .iter()
+            .any(|a| a.summary.contains("heart rate stayed steady at this pace")),
+        "the sound-base verdict renders in the review"
+    );
     assert_ne!(
         vm.today_headline.kind,
         HeadlineKind::Adjustment,

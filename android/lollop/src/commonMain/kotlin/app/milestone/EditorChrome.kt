@@ -343,7 +343,7 @@ fun ObservedAtRow(
 ) {
     // Device 12/24-hour preference (needs a Context) drives both the chip's rendered
     // time and the Material 3 time picker below, so the input and the label always agree.
-    val use24h = is24HourClock()
+    val use24h = is24HourClock(currentPlatformContext())
     var showDate by rememberSaveable { mutableStateOf(false) }
     var showTime by rememberSaveable { mutableStateOf(false) }
     var pendingDayUtcMillis by rememberSaveable { mutableStateOf<Long?>(null) }

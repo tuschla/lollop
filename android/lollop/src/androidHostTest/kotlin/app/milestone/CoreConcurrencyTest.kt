@@ -60,8 +60,8 @@ class CoreConcurrencyTest {
 
     @After
     fun tearDown() {
-        Core.faultForTest = null
         QaHarness.teardown()
+        QaHarness.freshProcess(engine = null)
     }
 
     // ── Harness ────────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ class CoreConcurrencyTest {
     }
 
     private fun sendOk(e: Event, who: String): SendResult {
-        val r = Core.send(e)
+        val r = AppRuntime.engine.send(e)
         check(r.accepted && r.persisted && !r.stale) {
             "$who: ${e::class.simpleName} accepted=${r.accepted} persisted=${r.persisted} stale=${r.stale}"
         }
@@ -93,7 +93,7 @@ class CoreConcurrencyTest {
     /** The view a brand-new thread reads: every Rust thread-local view memo is cold. */
     private fun coldView(): ViewModel {
         val out = AtomicReference<Any?>(null)
-        thread(name = "cold-view") { out.set(runCatching { Core.currentView() }.getOrElse { it }) }
+        thread(name = "cold-view") { out.set(runCatching { AppRuntime.engine.currentView() }.getOrElse { it }) }
             .join(STALL_SEC * 1000)
         return when (val v = out.get()) {
             is ViewModel -> v
@@ -243,7 +243,7 @@ class CoreConcurrencyTest {
                         }
                         9 -> {
                             // A data export / boot compaction reading the log while it grows.
-                            val read = EventLog.read(logFile).lines
+                            val read = EventLog.read(logFile, Core).lines
                             assertWholeLines(read, "t$t export read")
                             val dropped = checkNotNull(Core.compaction(read)) { "t$t: no compaction verdict" }.dropped
                             assertTrue("t$t: compaction drops lines it was not given: $dropped", dropped.all { it in read.indices })
@@ -353,14 +353,16 @@ class CoreConcurrencyTest {
      *  persisted, and every later view (on any thread) is the full model. */
     @Test
     fun aPanicResetMidStressRebuildsFromTheLogAndLosesNothingElse() {
-        boot(listOf(QaHarness.strengthProfile(), Event.GeneratePlan(todayEpochDay() - 7)))
         val nativeUpdate = Core::class.java.getDeclaredMethod("update", ByteArray::class.java).apply { isAccessible = true }
         val nativeView = Core::class.java.getDeclaredMethod("view").apply { isAccessible = true }
+        val nativeCompact = Core::class.java.getDeclaredMethod("compactLog", Array<String>::class.java).apply { isAccessible = true }
         val resets = AtomicInteger()
-        Core.faultForTest = object : CoreFault {
+        // Core's natives; while [poisoning], a poisoned event resets the native core
+        // as ffi.rs catch_panic(reset = true) does, and compaction is off.
+        var poisoning = false
+        val bridge = object : CoreBridge {
             override fun update(event: ByteArray): ByteArray? {
-                if (POISON in String(event, Charsets.UTF_8)) {
-                    // What ffi.rs catch_panic(reset = true) does: a fresh, empty bridge.
+                if (poisoning && POISON in String(event, Charsets.UTF_8)) {
                     Core.resetForTest()
                     resets.incrementAndGet()
                     return """{"error":{"kind":"panic_reset","context":"update","message":"injected"}}""".toByteArray()
@@ -369,7 +371,20 @@ class CoreConcurrencyTest {
             }
 
             override fun view(): ByteArray? = nativeView.invoke(Core) as ByteArray?
+            override fun parseFit(bytes: ByteArray): String? = null
+            override fun exportGpx(entryId: Long, observedAt: Long): String? = null
+            override fun trackFigures(event: ByteArray): String? = null
+            override fun compactLog(lines: Array<String>): String? =
+                if (poisoning) null else nativeCompact.invoke(Core, lines) as String?
+
+            override fun reset(): Boolean {
+                Core.resetForTest()
+                return true
+            }
         }
+        QaHarness.freshProcess(BridgeCore(bridge))
+        boot(listOf(QaHarness.strengthProfile(), Event.GeneratePlan(todayEpochDay() - 7)))
+        poisoning = true
         val accepted = ConcurrentHashMap.newKeySet<Long>()
         runWorkers(6) { t ->
             repeat(25) { i ->
@@ -377,7 +392,7 @@ class CoreConcurrencyTest {
                 if (t == 0 && i % 5 == 4) {
                     // Entries accepted before this send are in the durable log the reset replays.
                     val before = HashSet(accepted)
-                    val r = Core.send(Event.LogSet(POISON, 50.0, 5, 8.0, observedAt = stamp))
+                    val r = AppRuntime.engine.send(Event.LogSet(POISON, 50.0, 5, 8.0, observedAt = stamp))
                     assertFalse("t0: the poisoned event was reported saved", r.accepted)
                     val shown = r.view.lifts.map { it.entry_id }.toSet()
                     assertTrue("t0: the view after the reset lost ${before - shown}", shown.containsAll(before))
@@ -389,9 +404,9 @@ class CoreConcurrencyTest {
                 }
             }
         }
-        Core.faultForTest = null
+        poisoning = false
         assertEquals("injected resets", 5, resets.get())
-        val live = Core.currentView()
+        val live = AppRuntime.engine.currentView()
         val ids = live.lifts.groupingBy { it.entry_id }.eachCount()
         assertEquals("every accepted set once, nothing else", accepted.associateWith { 1 }, ids)
         assertTrue("the poisoned event reached the log", QaHarness.logLines(ctx).none { POISON in it })
@@ -437,7 +452,7 @@ class CoreConcurrencyTest {
 
     // ── 5. Widget, tile and reminder reads racing the snapshot writes ────────────
 
-    /** [WidgetSync] writes the snapshot of each published view (app scope), the
+    /** [app.milestone.widget.WidgetSurfaces] writes the snapshot of each published view (app scope), the
      *  midnight / zone receiver marks it stale, and the tile and the session reminder
      *  read it from their own threads. Once a snapshot exists every read returns one
      *  that was written (never a torn or missing file), and nothing deadlocks. */

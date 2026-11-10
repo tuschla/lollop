@@ -68,11 +68,11 @@ class ImportExportRoundtripTest {
     fun tearDown() {
         QaHarness.teardown()
         RunSession.reset()
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
+        QaHarness.freshProcess()
     }
 
     private fun logLines(): List<String> =
-        File(ctx.filesDir, "event-log.ndjson").takeIf { it.exists() }?.readLines()?.filter { it.isNotBlank() }.orEmpty()
+        File(ctx.filesDir, AppFileNames.EVENT_LOG).takeIf { it.exists() }?.readLines()?.filter { it.isNotBlank() }.orEmpty()
 
     // ── The core without the UI (GPX round trips, import planning) ──────────────
 
@@ -611,12 +611,12 @@ class ImportExportRoundtripTest {
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile(), QaHarness.loggedSquat(QaHarness.daysAgoAtMidday(1))))
         rule.launchApp()
         val logBefore = logLines()
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         try {
             val lines = listOf(QaHarness.calisthenicsProfile().toJson().toString())
             assertEquals(DataImportResult.RunInProgress, onAppScope { replaceEventLog(ctx, lines) })
         } finally {
-            RunSession.tracking.value = false
+            RunSession.markStopped()
         }
         assertEquals(logBefore, logLines())
         // And the core still persists: a later entry lands in the same log.

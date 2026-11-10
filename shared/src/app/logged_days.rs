@@ -221,8 +221,7 @@ pub(super) fn build_plan_weeks(model: &Model, days: &LoggedDays) -> Option<PlanW
     let profile = model.profile()?;
     let active = model.plan_request.map(|r| r.start_epoch_day);
     let today = model
-        .today_epoch_day
-        .or(active)
+        .today_or_plan_start()
         .or_else(|| model.past_plans.last().map(|&(_, end)| end))?;
     let through_monday = monday_of(today).saturating_add(7);
     let records = active.map_or_else(Vec::new, |start| {

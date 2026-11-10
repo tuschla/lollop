@@ -17,6 +17,7 @@ import app.milestone.resources.main_export_ok
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.InputStream
+import java.io.OutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,7 +31,7 @@ internal actual suspend fun shareGpx(ctx: Context, gpx: String, runStartEpochSec
     // to the caller's (main) dispatcher.
     val uri = withContext(Dispatchers.IO) { writeGpxToCache(ctx, gpx, runStartEpochSec) }
     val send = Intent(Intent.ACTION_SEND).apply {
-        type = "application/gpx+xml"
+        type = RunFileType.Gpx.mimeTypes.first()
         putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
@@ -63,7 +64,7 @@ internal actual fun rememberDataExport(onExported: () -> Unit): () -> Unit {
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/x-ndjson"),
     ) { uri ->
-        if (uri != null) EventDispatcher.scope.launch {
+        if (uri != null) AppRuntime.scope.launch {
             val ok = exportDataTo(app, uri)
             if (ok) exported()
             showNotice(app, app.resources.getString(if (ok) Res.string.main_export_ok else Res.string.main_export_failed), long = true)
@@ -78,20 +79,24 @@ suspend fun exportDataTo(ctx: Context, uri: Uri): Boolean {
     val lines = readDataExport(ctx) ?: return false
     return withContext(Dispatchers.IO) {
         runCatching {
-            val out = try {
-                ctx.contentResolver.openOutputStream(uri, "wt")
-            } catch (e: IllegalArgumentException) {
-                // Some document providers reject the "wt" truncate mode; retry with "w".
-                ctx.contentResolver.openOutputStream(uri, "w")
-            } catch (e: FileNotFoundException) {
-                ctx.contentResolver.openOutputStream(uri, "w")
-            } ?: return@runCatching false
+            val out = openForOverwrite(ctx, uri) ?: return@runCatching false
             out.bufferedWriter().use { w ->
                 lines.forEach { w.append(it); w.append('\n') }
             }
             true
-        }.getOrDefault(false)
+        }.onFailure { PlatformLog.e("Export", "couldn't write the data export", it) }.getOrDefault(false)
     }
+}
+
+/** Open the document [uri] to be written from its start. Some document providers
+ *  reject the "wt" (write + truncate) mode, throwing IllegalArgumentException or
+ *  FileNotFoundException, so those get plain "w". */
+private fun openForOverwrite(ctx: Context, uri: Uri): OutputStream? = try {
+    ctx.contentResolver.openOutputStream(uri, "wt")
+} catch (e: IllegalArgumentException) {
+    ctx.contentResolver.openOutputStream(uri, "w")
+} catch (e: FileNotFoundException) {
+    ctx.contentResolver.openOutputStream(uri, "w")
 }
 
 @Composable
@@ -113,7 +118,7 @@ suspend fun readImportCandidate(ctx: Context, uri: Uri): ImportCheck = withConte
         if (declared > MAX_IMPORT_BYTES) return@runCatching ImportCheck.Invalid
         ctx.contentResolver.openInputStream(uri)?.use { streamValidateImport(it, MAX_IMPORT_BYTES) }
             ?: ImportCheck.Invalid
-    }.getOrDefault(ImportCheck.Invalid)
+    }.onFailure { PlatformLog.w("Export", "picked backup unreadable", it) }.getOrDefault(ImportCheck.Invalid)
 }
 
 /** [streamValidateImport] over an [InputStream]. */

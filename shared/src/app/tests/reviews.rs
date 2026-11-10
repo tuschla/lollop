@@ -476,10 +476,6 @@ fn vbt_increase_row_is_neutral_under_hrv_downgrade() {
         .iter()
         .find(|a| a.summary.contains("raise working weights"))
         .expect("the VBT increase row renders");
-    assert!(
-        inc.neutral,
-        "an increase must be neutral while a downgrade is active"
-    );
     assert_ne!(
         vm.today_headline.summary, inc.summary,
         "a neutral increase must not headline over the downgrade"

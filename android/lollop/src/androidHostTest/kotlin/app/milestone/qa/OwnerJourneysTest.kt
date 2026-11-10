@@ -33,6 +33,7 @@ import app.milestone.LiftGoal
 import app.milestone.ProgressionCadence
 import app.milestone.R
 import androidx.compose.ui.unit.dp
+import app.milestone.TestClock
 import app.milestone.todayEpochDay
 import kotlin.math.abs
 import kotlinx.serialization.json.boolean
@@ -147,7 +148,7 @@ class OwnerJourneysTest {
         assertEquals("one illness action: $labels", 1, labels.size)
 
         // The user recovers later in the day, not in the second they reported it.
-        AppClock.offsetMillis += 3 * 3_600_000L
+        TestClock.offsetMillis += 3 * 3_600_000L
         rule.tapResolveAndConfirm(labels.single())
 
         rule.assertTextCountEventually(doNotTrain, 0)
@@ -173,7 +174,7 @@ class OwnerJourneysTest {
         assertEquals(1, rule.onAllNodes(hasText(labels.single()) and hasClickAction()).fetchSemanticsNodes().size)
 
         // The user recovers later in the day, not in the second they reported it.
-        AppClock.offsetMillis += 3 * 3_600_000L
+        TestClock.offsetMillis += 3 * 3_600_000L
         rule.tapResolveAndConfirm(labels.single())
 
         rule.assertTextCountEventually(doNotTrain, 0)

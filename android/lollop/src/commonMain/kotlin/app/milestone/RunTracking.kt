@@ -117,13 +117,15 @@ fun RunTrackingScreen(
 
     // FINE only: GPS tracking is unusable on a coarse-only grant.
     var hasPermission by remember { mutableStateOf(tracker.hasLocationPermission(ctx)) }
-    var notifGranted by remember { mutableStateOf(tracker.canPostNotifications(ctx)) }
+    // Null where a run has no foreground service: nothing to grant, nothing to nudge.
+    val grants = tracker.serviceGrants
+    var notifGranted by remember { mutableStateOf(grants?.canPostNotifications(ctx) ?: true) }
     var locationOn by remember { mutableStateOf(tracker.isLocationEnabled(ctx)) }
     // Battery-optimization exemption: a non-exempt app can be Dozed/frozen on a long
     // background run, silently starving the location stream. Tracked so the tracker
     // can nudge the user to allow it; re-sampled on ON_RESUME so the caption clears
     // itself the moment the exemption is granted.
-    var batteryUnrestricted by remember { mutableStateOf(tracker.isBatteryUnrestricted(ctx)) }
+    var batteryUnrestricted by remember { mutableStateOf(grants?.isBatteryUnrestricted(ctx) ?: true) }
     val setupPrefs = remember { ctx.setupStore() }
     // Whether the system location prompt was ever shown, persisted: after a permanent
     // denial shouldShowRequestPermissionRationale is false exactly as before the first
@@ -142,19 +144,17 @@ fun RunTrackingScreen(
     }
     // Notifications are asked once, at Start, after location is granted.
     var notifAsked by rememberSaveable { mutableStateOf(false) }
-    val prompts = tracker.rememberPermissionPrompts(
-        onLocationResult = { granted ->
-            hasPermission = granted
-            permaDenied = !hasPermission && tracker.locationPromptBlocked(ctx)
-            locationOn = tracker.isLocationEnabled(ctx)
-        },
-        onNotificationResult = { notifGranted = tracker.canPostNotifications(ctx) },
-    )
+    val requestLocation = tracker.rememberLocationPrompt { granted ->
+        hasPermission = granted
+        permaDenied = !hasPermission && tracker.locationPromptBlocked(ctx)
+        locationOn = tracker.isLocationEnabled(ctx)
+    }
+    val requestNotifications = grants?.rememberNotificationPrompt { notifGranted = grants.canPostNotifications(ctx) }
 
     fun requestPermissions() {
         permAsked = true
         setupPrefs.edit { putBoolean(KEY_LOCATION_ASKED, true) }
-        prompts.requestLocation()
+        requestLocation()
     }
 
     // Asked at the moment of Start, once location is granted, never up front: the
@@ -162,7 +162,7 @@ fun RunTrackingScreen(
     fun requestNotificationsOnce() {
         if (notifGranted || notifAsked) return
         notifAsked = true
-        prompts.requestNotifications()
+        requestNotifications?.invoke()
     }
 
     val tracking by RunSession.tracking.collectAsStateWithLifecycle()
@@ -197,7 +197,7 @@ fun RunTrackingScreen(
     // Profile "Show route maps" toggle: when off, no MapView is drawn (no OSM tile
     // egress); GPS recording is unaffected.
     val showRouteMaps by AppSettings.showRouteMaps.collectAsStateWithLifecycle()
-    // Optional, stackable start gates, persisted in the [SETUP_PREFS] store (default
+    // Optional, stackable start gates, persisted in the [setupStore] (default
     // off). The UI holds the toggles so both the gate chips and the armed pill/control
     // text stay consistent with what the just-tapped Start requested.
     var preciseGate by remember { mutableStateOf(setupPrefs.getBoolean(KEY_START_PRECISE, false)) }
@@ -261,13 +261,13 @@ fun RunTrackingScreen(
                 Lifecycle.Event.ON_RESUME -> {
                     map.resume()
                     hasPermission = tracker.hasLocationPermission(ctx)
-                    notifGranted = tracker.canPostNotifications(ctx)
+                    notifGranted = grants?.canPostNotifications(ctx) ?: true
                     locationOn = tracker.isLocationEnabled(ctx)
                     // Re-sample after returning from the battery-optimization dialog /
                     // settings so the guidance caption disappears once exempted.
-                    batteryUnrestricted = tracker.isBatteryUnrestricted(ctx)
+                    batteryUnrestricted = grants?.isBatteryUnrestricted(ctx) ?: true
                     // Back from settings (or the app switcher): one fresh locate attempt.
-                    RunSession.locationFailed.value = false
+                    RunSession.clearLocationFailed()
                 }
                 Lifecycle.Event.ON_PAUSE -> map.pause()
                 Lifecycle.Event.ON_START -> appForeground = true
@@ -336,7 +336,7 @@ fun RunTrackingScreen(
         }
     }
     LaunchedEffect(tracking) {
-        if (tracking) RunSession.resumeAwaitingLocation.value = false
+        if (tracking) RunSession.clearResumeAwaitingLocation()
     }
 
     LaunchedEffect(map) { map.followPreviewFix { follow } }
@@ -358,15 +358,15 @@ fun RunTrackingScreen(
         if (RunSession.points.value.isNotEmpty()) return // never arm over an unsaved capture
         locationOn = tracker.isLocationEnabled(ctx)
         // A user Start is a fresh attempt even after a failed locate preview.
-        RunSession.locationFailed.value = false
+        RunSession.clearLocationFailed()
         // Armed start: Start is tappable before a lock. Recording begins automatically
         // at the first fix clearing the chosen gates; the SIDECAR is opened by the
         // service's beginRecording() at that first real fix (NOT here), so a crash while
         // merely armed leaves no sidecar and no false recovery prompt. Clear any stale
-        // pause and optimistically publish `armed` so the control row flips instantly.
-        RunSession.plannedRun.value = if (followPlan) planItem else null
+        // pause and publish `armed` now so the control row flips instantly.
+        RunSession.followPlan(if (followPlan) planItem else null)
         RunSession.setPaused(false)
-        RunSession.armed.value = true
+        RunRecorder.armRequested()
         tracker.arm(ctx, preciseGate, movingGate)
         requestNotificationsOnce()
     }
@@ -405,7 +405,7 @@ fun RunTrackingScreen(
     // copy can go stale across a rotation. [ownsSaving]: stopAndLog already holds the
     // [claimSaving] claim and hands it over.
     fun logCaptured(ownsSaving: Boolean = false, sessionRpe: Int? = finishRpe, workoutType: WorkoutType? = finishType) {
-        if (!claimSaving(RunSession.saving, ownsSaving)) return
+        if (!RunSession.claimSaving(ownsSaving)) return
         // Committed to leaving: RunSession.reset() lands before onFinish, and the
         // locate-restart effect must not start a LOCATE service in that gap.
         exiting = true
@@ -439,7 +439,7 @@ fun RunTrackingScreen(
                             // INTERVAL verdict on its own.
                             val event = RunSession.trackEventForCore(entryId, workoutType, sessionRpe)
                             runObservedAt = event.observedAt
-                            val result = platformCoreEngine().send(event)
+                            val result = AppRuntime.engine.send(event)
                             // A rejected/panicked send, or one accepted in memory whose
                             // log append failed (disk full), must not silently drop the
                             // captured run: throw so the critical section's onFailure
@@ -471,7 +471,7 @@ fun RunTrackingScreen(
                 onFailure = {
                     // Keep the captured run and its sidecar: the fixes stay in
                     // RunSession.points, so `unsavedCapture` re-shows Save/Discard.
-                    RunSession.saving.value = false
+                    RunSession.releaseSaving()
                     exiting = false
                     showNotice(ctx, saveFailedText)
                 },
@@ -482,7 +482,7 @@ fun RunTrackingScreen(
     fun stopAndLog(sessionRpe: Int?, workoutType: WorkoutType?) {
         // Claims [RunSession.saving] (see [claimSaving]) and hands it to
         // logCaptured(ownsSaving = true); every early exit below releases it.
-        if (!claimSaving(RunSession.saving)) return
+        if (!RunSession.claimSaving()) return
         // Committing to end the session: suppress the locate-restart effect so the
         // service doesn't re-acquire while we finish.
         exiting = true
@@ -498,7 +498,7 @@ fun RunTrackingScreen(
                 if (stopConfirmed == null) {
                     // The engine may still be registered, so the track may be
                     // incomplete: keep the fixes, release the claim, save nothing.
-                    RunSession.saving.value = false
+                    RunSession.releaseSaving()
                     showNotice(ctx, saveFailedText)
                     return@launch
                 }
@@ -516,12 +516,13 @@ fun RunTrackingScreen(
             } catch (e: CancellationException) {
                 // A rotation cancelled the stop-confirm wait: nothing was persisted, so
                 // release the claim (else Save/Discard stay disabled) and re-throw.
-                RunSession.saving.value = false
+                RunSession.releaseSaving()
                 throw e
             } catch (e: Exception) {
+                PlatformLog.w("RunSave", "run stop before saving failed, fixes kept", e)
                 // Stop/snapshot failed before logging: keep the fixes, so
                 // `unsavedCapture` shows Save/Discard rather than Start.
-                RunSession.saving.value = false
+                RunSession.releaseSaving()
                 showNotice(ctx, saveFailedText)
             }
         }
@@ -715,7 +716,7 @@ fun RunTrackingScreen(
                         InlineNotice(
                             stringResource(Res.string.track_battery_caption),
                             actionLabel = stringResource(Res.string.track_battery_allow),
-                            onAction = { tracker.requestBatteryUnrestricted(ctx) },
+                            onAction = { grants?.requestBatteryUnrestricted(ctx) },
                         )
                     }
                     // Live stat readouts (MOVING · DISTANCE · PACE NOW, then Avg + last
@@ -744,7 +745,7 @@ fun RunTrackingScreen(
                                 item = item,
                                 progress = stepProgress,
                                 unit = unit,
-                                onSkip = { RunSession.skipStep(monotonicMillis()) },
+                                onSkip = { RunSession.skipStep(AppClock.monotonicMillis()) },
                             )
                         }
                     }
@@ -756,7 +757,7 @@ fun RunTrackingScreen(
                         InlineNotice(
                             stringResource(Res.string.track_location_failed_caption),
                             actionLabel = stringResource(Res.string.track_btn_try_again),
-                            onAction = { RunSession.locationFailed.value = false },
+                            onAction = { RunSession.clearLocationFailed() },
                         )
                     }
                     // Only once a run is armed or recording: notifications are asked at
@@ -765,7 +766,7 @@ fun RunTrackingScreen(
                         InlineNotice(
                             stringResource(Res.string.track_notifications_off_caption),
                             actionLabel = stringResource(Res.string.track_open_settings),
-                            onAction = { tracker.openNotificationSettings(ctx) },
+                            onAction = { grants?.openNotificationSettings(ctx) },
                         )
                     }
                     // Today's plan + optional start gates, ONLY in the locate-preview
@@ -892,7 +893,7 @@ private fun ColumnScope.DragHandle() {
     )
 }
 
-/** [KeyValueStore] keys (the [SETUP_PREFS] store, [KEY_PLAN_CLEARED] idiom) for
+/** [KeyValueStore] keys (the [setupStore], [KEY_PLAN_CLEARED] idiom) for
  *  the two optional, stackable start gates, both default false. */
 private const val KEY_START_PRECISE = "run_start_precise"
 private const val KEY_START_MOVING = "run_start_moving"

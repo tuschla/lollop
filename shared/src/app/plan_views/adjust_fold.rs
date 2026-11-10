@@ -4,8 +4,7 @@
 
 use crate::app::plan_views::item_render::{resync_intensity, round_load_or_drop, set_run_summary};
 use crate::app::view_types::{PlanIntensity, PrescriptionView};
-use crate::evidence::claims;
-use crate::schema::{Adjustment, Recommended};
+use crate::schema::{Adjustment, AdjustmentCall, AdjustmentKind, PainRegion};
 
 /// The completion-relevant adjustments in force on a day, composed into a single
 /// fold: the deepest volume and load cuts (stacked deloads take the max, they
@@ -20,7 +19,7 @@ pub(super) struct AdjustFold {
     pub(super) load_dropped: bool,
     /// A tendon modify-and-monitor day scoped to a body region: only the lifts
     /// that load it lose the load bar.
-    pub(super) pain_modify: Option<crate::autoreg::PainRegion>,
+    pub(super) pain_modify: Option<PainRegion>,
     /// A head cold caps every run at one short easy run (ILLNESS-COLD-RUN-001),
     /// so any run logged on the day completes the run item.
     pub(super) short_easy_run: bool,
@@ -38,8 +37,8 @@ impl AdjustFold {
 }
 
 /// Whether `r` is the above-neck (head cold) easy-session call.
-pub(super) fn head_cold(r: &Recommended<Adjustment>) -> bool {
-    r.claim_id() == claims::ILLNESS_NECK_001
+pub(super) fn head_cold(r: &AdjustmentCall) -> bool {
+    r.kind() == AdjustmentKind::HeadCold
 }
 
 /// One level of a readiness downgrade on a lift (autoreg-030 "one level",
@@ -51,10 +50,10 @@ pub(super) const ONE_LEVEL_LOAD_FRAC: f64 = 0.05;
 /// the first session back after a hold, a head cold): lifts lose the heavy load
 /// and run at ≥ `adjustments::EASY_DAY_RIR` reps in reserve. Every other
 /// downgrade is the readiness "one level" with the numbers kept.
-pub(super) fn safety_easy(r: &Recommended<Adjustment>) -> bool {
+pub(super) fn safety_easy(r: &AdjustmentCall) -> bool {
     matches!(
-        r.claim_id(),
-        claims::SAFE_TENDON_001 | claims::RETURN_HOLD_001 | claims::ILLNESS_NECK_001
+        r.kind(),
+        AdjustmentKind::TendonReduce | AdjustmentKind::ReturnHold | AdjustmentKind::HeadCold
     )
 }
 
@@ -72,16 +71,16 @@ pub(super) enum LiftDowngrade {
     Unchanged,
 }
 
-pub(super) fn lift_downgrade(r: &Recommended<Adjustment>) -> LiftDowngrade {
-    match r.claim_id() {
-        claims::HRV_001 | claims::AUTOREG_VL_001 => LiftDowngrade::Hold,
-        claims::RUN_DECOUPLE_001 => LiftDowngrade::Unchanged,
+pub(super) fn lift_downgrade(r: &AdjustmentCall) -> LiftDowngrade {
+    match r.kind() {
+        AdjustmentKind::HrvLower | AdjustmentKind::VelocityLoss => LiftDowngrade::Hold,
+        AdjustmentKind::Decoupling => LiftDowngrade::Unchanged,
         _ => LiftDowngrade::OneLevel,
     }
 }
 
 /// Compose the adjustments in force on a day into their [`AdjustFold`].
-pub(super) fn fold_completion_adjustments(recs: &[Recommended<Adjustment>]) -> AdjustFold {
+pub(super) fn fold_completion_adjustments(recs: &[AdjustmentCall]) -> AdjustFold {
     let mut f = AdjustFold::default();
     for r in recs {
         match &r.value {
@@ -108,12 +107,10 @@ pub(super) fn fold_completion_adjustments(recs: &[Recommended<Adjustment>]) -> A
                     f.load_frac = f.load_frac.max(ONE_LEVEL_LOAD_FRAC);
                 }
             }
-            Adjustment::ModifyAndMonitor { location } => {
-                match crate::autoreg::pain_region(location) {
-                    Some(region) => f.pain_modify = Some(region),
-                    None => f.load_dropped = true,
-                }
-            }
+            Adjustment::ModifyAndMonitor { .. } => match r.kind() {
+                AdjustmentKind::TendonModify(Some(region)) => f.pain_modify = Some(region),
+                _ => f.load_dropped = true,
+            },
             Adjustment::DowngradeSession | Adjustment::ReturnCheck => {
                 f.load_dropped = true;
                 if head_cold(r) {

@@ -3,7 +3,6 @@
 use crate::app::format::{
     fmt_clock, monday_of, race_distance_label, race_distance_title, round_tenths, whole_seconds,
 };
-use crate::app::memo::{Memo, RUN_MEMO_CAP, memoized};
 use crate::app::model::{LoggedRun, Model};
 use crate::app::run_metrics::{QcTrack, RunFacts};
 use crate::app::view_types::{
@@ -11,6 +10,7 @@ use crate::app::view_types::{
 };
 use crate::day::{is_undated, local_day};
 use crate::evidence::claims;
+use crate::memo::{MemoId, memoized};
 use crate::running::GoalDistance;
 use crate::schema::Recommended;
 use crate::{gps, load, running};
@@ -41,14 +41,6 @@ const WHOLE_RUN_MATCH: (f64, f64) = (0.995, 1.03);
 
 /// One run's best effort per standard distance, in seconds.
 type RunBests = [Option<f64>; BEST_EFFORT_DISTANCES.len()];
-
-thread_local! {
-    /// Per-run best efforts keyed by the run's content fingerprint: a GPS
-    /// window scan is O(points) per distance, and a run is immutable once
-    /// written.
-    pub(super) static BEST_EFFORT_CACHE: std::cell::RefCell<Memo<u64, RunBests>> =
-        std::cell::RefCell::new(Memo::new(RUN_MEMO_CAP));
-}
 
 /// Fastest time (seconds) to cover `target_m` over contiguous moving legs
 /// (`(seconds, metres)`, [`gps::moving_legs`]). The window start is
@@ -93,10 +85,11 @@ pub(in crate::app) fn fastest_window_sec(legs: &[(f64, f64)], target_m: f64) -> 
     best
 }
 
-/// One run's best effort per standard distance, memoized by content key.
+/// One run's best effort per standard distance, memoized by content key
+/// ([`MemoId::RunBestEfforts`]): a GPS window scan is O(points) per distance.
 /// `qc` is the run's QC'd track (`None` for a hand-entered run).
 fn run_best_efforts(r: &LoggedRun, key: u64, qc: Option<&QcTrack>) -> RunBests {
-    memoized(&BEST_EFFORT_CACHE, key, || {
+    memoized(MemoId::RunBestEfforts, &key, || {
         let mut out: RunBests = [None; BEST_EFFORT_DISTANCES.len()];
         match qc {
             None => {

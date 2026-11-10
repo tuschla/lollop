@@ -236,11 +236,12 @@ fn run_view_derivation_is_memoized_and_gpx_built_once() {
     // via `has_gpx` and the document is built ON DEMAND.
     let run = probe_run(918_273);
 
-    let before = RUN_VIEW_BUILDS.with(|c| c.get());
+    let builds = || crate::memo::stats(MemoId::RunCard).builds;
+    let before = builds();
     let first = run_card(&run);
-    let after_first = RUN_VIEW_BUILDS.with(|c| c.get());
+    let after_first = builds();
     let second = run_card(&run);
-    let after_second = RUN_VIEW_BUILDS.with(|c| c.get());
+    let after_second = builds();
 
     assert_eq!(after_first - before, 1, "the first derivation builds once");
     assert_eq!(
@@ -262,48 +263,49 @@ fn run_view_derivation_is_memoized_and_gpx_built_once() {
     // A content change (an amend) must MISS the cache and rebuild.
     let mut amended = run.clone();
     amended.longest_recent_km = 99.0;
-    let before_amend = RUN_VIEW_BUILDS.with(|c| c.get());
+    let before_amend = builds();
     let _ = run_card(&amended);
     assert_eq!(
-        RUN_VIEW_BUILDS.with(|c| c.get()) - before_amend,
+        builds() - before_amend,
         1,
         "a changed fingerprint recomputes"
     );
 }
 
 #[test]
-fn prune_run_memos_drops_deleted_run_keeps_live() {
-    // A deleted run's per-run memo entries (RUN_VIEW_CACHE + QC_TRACK_CACHE)
-    // must be evicted by the per-view() prune while the live run's stay warm.
-    let live_run = probe_run(700_001);
-    let deleted_run = probe_run(700_002);
-    let _ = run_card(&live_run);
-    let _ = run_card(&deleted_run);
-    let live_key = run_content_key(&live_run);
-    let deleted_key = run_content_key(&deleted_run);
-    assert!(
-        RUN_VIEW_CACHE.with(|c| c.borrow().contains(&deleted_key)),
-        "both runs are warm before the prune"
-    );
+fn retain_runs_trims_every_per_run_memo_to_the_live_runs() {
+    // A deleted run's entries in every per-run memo must be evicted by the
+    // per-view() trim while the live run's stay warm.
+    let model = Model {
+        runs: vec![probe_run(700_001), probe_run(700_002)],
+        ..Model::default()
+    };
+    let facts = RunFacts::new(&model.runs);
+    for (i, r) in model.runs.iter().enumerate() {
+        let _ = to_run_view(r, facts.keys[i], facts.qc[i].as_deref());
+    }
+    let _ = build_run_progress(&model, &facts, 0.0);
+    let (live_key, deleted_key) = (facts.keys[0], facts.keys[1]);
+    let per_run = || MemoId::ALL.into_iter().filter(|m| m.per_run());
+    for m in per_run() {
+        assert!(
+            crate::memo::holds_run(m, live_key) && crate::memo::holds_run(m, deleted_key),
+            "{m:?} holds both runs before the trim"
+        );
+    }
 
-    prune_run_memos(&[live_key]);
+    crate::memo::retain_runs(&[live_key]);
 
-    assert!(
-        RUN_VIEW_CACHE.with(|c| c.borrow().contains(&live_key)),
-        "the live run's view memo survives"
-    );
-    assert!(
-        QC_TRACK_CACHE.with(|c| c.borrow().contains(&live_key)),
-        "the live run's QC memo survives"
-    );
-    assert!(
-        !RUN_VIEW_CACHE.with(|c| c.borrow().contains(&deleted_key)),
-        "the deleted run's view memo is pruned"
-    );
-    assert!(
-        !QC_TRACK_CACHE.with(|c| c.borrow().contains(&deleted_key)),
-        "the deleted run's QC memo is pruned"
-    );
+    for m in per_run() {
+        assert!(
+            crate::memo::holds_run(m, live_key),
+            "{m:?} keeps the live run"
+        );
+        assert!(
+            !crate::memo::holds_run(m, deleted_key),
+            "{m:?} drops the deleted run"
+        );
+    }
 }
 
 #[test]
@@ -355,9 +357,9 @@ fn refresh_gpx_registry_evicts_key_when_run_loses_its_track() {
 
 #[test]
 fn view_list_cache_shrinks_but_still_serves_a_hit() {
-    // The bounded VIEW_LIST_CACHE_CAP must not cost correctness: a
-    // repeated view() on an unchanged model must
-    // return identical lift/run lists (the second serves cache hits).
+    // The list memos' small cap (`MemoId::LiftViews` / `RunViews`) must not
+    // cost correctness: a repeated view() on an unchanged model must return
+    // identical lift/run lists (the second serves cache hits).
     let app = Engine;
     let mut model = Model::default();
     app.update(log_set_id("Back Squat", 100.0, 1, 1_000), &mut model)

@@ -32,6 +32,7 @@ import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.LiftResultView
 import app.milestone.R
+import app.milestone.TestClock
 import app.milestone.repsLeftText
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
@@ -85,7 +86,7 @@ class GymFloorFlowTest {
 
     /** The lifter rests before the next set (also clears the double-tap guard). */
     private fun rest(sec: Long = 90) {
-        AppClock.offsetMillis += sec * 1000L
+        TestClock.offsetMillis += sec * 1000L
     }
 
     private fun todaysSets(exercise: String): List<LiftResultView> =
@@ -443,14 +444,14 @@ class GymFloorFlowTest {
     @Test
     fun crossingMidnightMovesTheLogButtonsWithTheDay() {
         // Monday 23:50: today's session is actionable.
-        AppClock.offsetMillis += (13 * 60 + 50) * 60_000L
+        TestClock.offsetMillis += (13 * 60 + 50) * 60_000L
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         val logFirstSet = strPrefix(R.string.plan_log_set_n_of_n, 1)
         rule.onAllNodesWithText(str(R.string.main_todays_session).uppercase(Locale.US)).assertCountEquals(1)
         assertTrue(rule.onAllNodesWithText(logFirstSet, substring = true).fetchSemanticsNodes().isNotEmpty())
         // 00:10 Tuesday (a rest day); the app comes back to the foreground.
-        AppClock.offsetMillis += 20 * 60_000L
+        TestClock.offsetMillis += 20 * 60_000L
         lastScenario!!.moveToState(Lifecycle.State.STARTED)
         lastScenario!!.moveToState(Lifecycle.State.RESUMED)
         rule.assertTextCountEventually(str(R.string.main_rest_day_next_overline).uppercase(Locale.US), 1)

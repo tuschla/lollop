@@ -294,7 +294,7 @@ fn splits_sum_to_moving_time_and_distance_on_random_tracks() {
     let mut worst_m = 0.0f64;
     for _ in 0..2000 {
         let (pts, starts) = random_track(&mut rng);
-        let qc = crate::gps::qc_track(&crate::app::ingest::sanitize_track(pts), &starts);
+        let qc = crate::gps::qc_track(&crate::sanitize::Sanitize::sanitized(pts), &starts);
         let moving_s = crate::gps::moving_duration_min(&qc) * 60.0;
         let dist_m = crate::gps::track_distance_km(&qc.track, &qc.seg_starts) * 1000.0;
         for unit in [running::KM_M, running::MILE_M] {
@@ -351,7 +351,7 @@ fn qc_is_idempotent_so_undo_of_a_route_restores_its_figures() {
     let mut rng = XorShift(0x0DD0_1DE0_9999_0001);
     for i in 0..2000 {
         let (pts, starts) = random_track(&mut rng);
-        let once = crate::gps::qc_track(&crate::app::ingest::sanitize_track(pts), &starts);
+        let once = crate::gps::qc_track(&crate::sanitize::Sanitize::sanitized(pts), &starts);
         let twice = crate::gps::qc_track(&once.track, &once.seg_starts);
         assert_eq!(
             once.track, twice.track,

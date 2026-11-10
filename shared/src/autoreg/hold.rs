@@ -3,7 +3,7 @@
 use super::pain::pain_hold_active;
 use super::rules::{illness_downgrade, illness_stop};
 use crate::evidence::claims;
-use crate::schema::{Adjustment, ReadinessInput, ReadinessSignal, Recommended};
+use crate::schema::{Adjustment, AdjustmentCall, AdjustmentKind, ReadinessInput, ReadinessSignal};
 
 /// Which hold just ended, deciding the first session back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,13 +126,13 @@ pub fn last_hold_resolution(timeline: &[TimedInput]) -> Option<(ReturnKind, i64)
 /// after fever / below-neck illness the session becomes the IOC return check
 /// (ILLNESS-RTT-001); after a head cold or a pain stop it runs easy
 /// (RETURN-HOLD-001: lifts ≥3 reps in reserve, runs easy).
-pub fn return_adjustment(kind: ReturnKind) -> Recommended<Adjustment> {
+pub fn return_adjustment(kind: ReturnKind) -> AdjustmentCall {
     match kind {
         ReturnKind::AfterFever => {
-            Recommended::new(Adjustment::ReturnCheck, claims::ILLNESS_RTT_001)
+            AdjustmentKind::ReturnCheck.call(Adjustment::ReturnCheck, claims::ILLNESS_RTT_001)
         }
         ReturnKind::AfterIllness | ReturnKind::AfterPain => {
-            Recommended::new(Adjustment::DowngradeSession, claims::RETURN_HOLD_001)
+            AdjustmentKind::ReturnHold.call(Adjustment::DowngradeSession, claims::RETURN_HOLD_001)
         }
     }
 }

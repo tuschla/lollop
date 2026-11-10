@@ -62,7 +62,7 @@ class CoreEngineTest {
 
     private fun boot(bridge: CoreBridge = RustCoreBridge): BridgeCore {
         lollop_reset()
-        return BridgeCore(bridge).also { it.restoreFrom(LogPath(path)) }
+        return BridgeCore(bridge).also { it.restoreFrom(AppPath(path)) }
     }
 
     private fun set(id: Long) = Event.LogSet("Back Squat", 100.0, 5, 8.0, observedAt = 1_725_904_800, entryId = id)

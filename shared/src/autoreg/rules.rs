@@ -7,7 +7,8 @@ use super::pain::{PainGate, active_pain_responses, pain_blocks_progression, pain
 use super::perf::{MovementPerf, e1rm_gate, perf_adjustments};
 use crate::evidence::claims;
 use crate::schema::{
-    Adjustment, IllnessSeverity, ReadinessInput, ReadinessSignal, Recommended, SafetyTier,
+    Adjustment, AdjustmentCall, AdjustmentKind, IllnessSeverity, ReadinessInput, ReadinessSignal,
+    Recommended, SafetyTier,
 };
 use crate::strength::{self, LiftGoal};
 
@@ -41,18 +42,18 @@ const HEAD_COLD_VOLUME_CUT_PCT: f32 = 50.0;
 /// becomes one short easy run, ILLNESS-COLD-RUN-001 applied plan-side) with
 /// lifting volume halved (autoreg-045 "cut intensity/duration ~50%"). Empty
 /// when no illness report is active.
-pub fn illness_plan_recs(inputs: &[ReadinessInput]) -> Vec<Recommended<Adjustment>> {
+pub fn illness_plan_recs(inputs: &[ReadinessInput]) -> Vec<AdjustmentCall> {
     if illness_stop(inputs) {
-        vec![Recommended::new(Adjustment::Stop, claims::ILLNESS_NECK_001)]
+        vec![AdjustmentKind::IllnessStop.call(Adjustment::Stop, claims::ILLNESS_NECK_001)]
     } else if illness_downgrade(inputs) {
         // The volume cut carries the full head-cold call ("short and easy only,
         // or rest"), so it leads: the headline takes the first of equals.
         vec![
-            Recommended::new(
+            AdjustmentKind::HeadCold.call(
                 Adjustment::ReduceVolumePct(HEAD_COLD_VOLUME_CUT_PCT),
                 claims::ILLNESS_NECK_001,
             ),
-            Recommended::new(Adjustment::DowngradeSession, claims::ILLNESS_NECK_001),
+            AdjustmentKind::HeadCold.call(Adjustment::DowngradeSession, claims::ILLNESS_NECK_001),
         ]
     } else {
         Vec::new()
@@ -154,8 +155,8 @@ fn bone_stress_defer(inputs: &[ReadinessInput]) -> bool {
 /// Bone-stress-injury referral (safety-040): stop impact, urgent evaluation.
 /// One constructor for the readiness signal and the weekly check-in answer, so
 /// both channels defer with the same copy.
-pub fn bone_stress_referral() -> Recommended<Adjustment> {
-    Recommended::new(
+pub fn bone_stress_referral() -> AdjustmentCall {
+    AdjustmentKind::BoneStressReferral.call(
         Adjustment::Defer {
             reason: "Signs of a bone stress injury: training is paused. See a doctor as soon as you can, and don't run or jump until they clear you.".into(),
         },
@@ -166,8 +167,8 @@ pub fn bone_stress_referral() -> Recommended<Adjustment> {
 /// RED-S / low-energy-availability referral (safety-049, whose signal list
 /// includes compulsive exercise): reduce stress and defer. Shared by the
 /// readiness signal and the weekly screen.
-pub fn reds_referral() -> Recommended<Adjustment> {
-    Recommended::new(
+pub fn reds_referral() -> AdjustmentCall {
+    AdjustmentKind::RedsReferral.call(
         Adjustment::Defer {
             reason: "Signs of under-eating (RED-S): training is paused. See a doctor, a registered dietitian or a mental-health professional.".into(),
         },
@@ -177,16 +178,19 @@ pub fn reds_referral() -> Recommended<Adjustment> {
 
 /// The dominant medical-referral deferral, if any red flag is present.
 /// Deterministic priority: cardiovascular (acute) > bone stress > RED-S.
-/// Returns the `Recommended<Adjustment::Defer>` cited to its safety claim.
-fn medical_referral(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
+/// Returns the deferral cited to its safety claim.
+fn medical_referral(inputs: &[ReadinessInput]) -> Option<AdjustmentCall> {
     if cardiac_defer(inputs) {
-        Some(Recommended::new(
-            Adjustment::Defer {
-                reason: "A heart warning sign. Stop and get a doctor's OK before you train again."
-                    .into(),
-            },
-            claims::SAFE_CVD_001,
-        ))
+        Some(
+            AdjustmentKind::CardiacReferral.call(
+                Adjustment::Defer {
+                    reason:
+                        "A heart warning sign. Stop and get a doctor's OK before you train again."
+                            .into(),
+                },
+                claims::SAFE_CVD_001,
+            ),
+        )
     } else if bone_stress_defer(inputs) {
         Some(bone_stress_referral())
     } else if reds_defer(inputs) {
@@ -250,18 +254,18 @@ fn rpe_delta_adjustment(delta: f64) -> Option<Adjustment> {
 
 /// RPE-based load adjustment from a raw (advanced-entry) first work-set RPE vs.
 /// target signal, session-wide. `value` is the signed RPE delta (actual − target).
-pub(super) fn rpe_load_adjust(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
+pub(super) fn rpe_load_adjust(inputs: &[ReadinessInput]) -> Option<AdjustmentCall> {
     let delta = latest(inputs, ReadinessSignal::Rpe)?;
-    rpe_delta_adjustment(delta).map(|a| Recommended::new(a, claims::AUTOREG_RIR_001))
+    rpe_delta_adjustment(delta).map(|a| AdjustmentKind::RpeLoad.call(a, claims::AUTOREG_RIR_001))
 }
 
 /// The same autoreg-001/002/004/005 bands applied to ONE plan item from its
 /// logged first work set: the change is scoped to that item's
 /// remaining sets ("reduce load for remaining sets"), never the whole session.
 /// `delta` = logged RPE − the item's target RPE. AUTOREG-RIR-001 (Strong).
-pub fn first_set_rpe_adjust(exercise: &str, delta: f64) -> Option<Recommended<Adjustment>> {
+pub fn first_set_rpe_adjust(exercise: &str, delta: f64) -> Option<AdjustmentCall> {
     rpe_delta_adjustment(delta).map(|a| {
-        Recommended::new(
+        AdjustmentKind::FirstSet.call(
             Adjustment::ForItem {
                 exercise: exercise.to_string(),
                 adjustment: Box::new(a),
@@ -274,8 +278,8 @@ pub fn first_set_rpe_adjust(exercise: &str, delta: f64) -> Option<Recommended<Ad
 /// autoreg-013 (Helms 2018, the RPE stop): a later work set of ONE plan item
 /// that reached failure (no reps left, or missed reps) before the planned set
 /// count → stop or cut that item's remaining sets. AUTOREG-RIR-001.
-pub fn failed_set_stop(exercise: &str) -> Recommended<Adjustment> {
-    Recommended::new(
+pub fn failed_set_stop(exercise: &str) -> AdjustmentCall {
+    AdjustmentKind::FailedSet.call(
         Adjustment::ForItem {
             exercise: exercise.to_string(),
             adjustment: Box::new(Adjustment::DowngradeSession),
@@ -300,13 +304,12 @@ pub(super) fn vl_threshold_pct(lift_goal: Option<LiftGoal>) -> f64 {
 pub(super) fn vl_stop(
     inputs: &[ReadinessInput],
     lift_goal: Option<LiftGoal>,
-) -> Option<Recommended<Adjustment>> {
+) -> Option<AdjustmentCall> {
     let vl = latest(inputs, ReadinessSignal::VelocityLoss)?;
     if vl >= vl_threshold_pct(lift_goal) {
-        Some(Recommended::new(
-            Adjustment::DowngradeSession,
-            claims::AUTOREG_VL_001,
-        ))
+        Some(
+            AdjustmentKind::VelocityLoss.call(Adjustment::DowngradeSession, claims::AUTOREG_VL_001),
+        )
     } else {
         None
     }
@@ -323,15 +326,15 @@ pub(crate) const HRV_ESCALATE_STREAK: u8 = 3;
 /// suppressed week HOLDS progression (`CapTopEnd`: runs easy, lifts at the
 /// planned load one rep further from failure, AUTOREG-HRV-LIFT-001); only a
 /// ≥3-day suppression streak lowers the session (`DowngradeSession`, HRV-001).
-pub(super) fn hrv_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
+pub(super) fn hrv_downgrade(inputs: &[ReadinessInput]) -> Option<AdjustmentCall> {
     let i = latest_input(inputs, ReadinessSignal::HrvLnRmssd)?;
     if i.value >= HRV_SWC_LOWER_Z {
         return None;
     }
     Some(if i.streak >= HRV_ESCALATE_STREAK {
-        Recommended::new(Adjustment::DowngradeSession, claims::HRV_001)
+        AdjustmentKind::HrvLower.call(Adjustment::DowngradeSession, claims::HRV_001)
     } else {
-        Recommended::new(
+        AdjustmentKind::HrvHold.call(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::HrvLnRmssd,
             },
@@ -363,8 +366,7 @@ pub(super) fn dated_today(i: &ReadinessInput, ctx: &RuleContext) -> bool {
 
 /// The subjective-wellness verdict (autoreg-030; §5 conflict table;
 /// ready-upd-001 and ready-upd-007). The one predicate the rule
-/// ([`wellness_downgrade_in`]), the tier ([`wellness_multiday`]) and the
-/// readiness label share.
+/// ([`wellness_downgrade_in`]) and the readiness label share.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WellnessVerdict {
     Normal,
@@ -400,14 +402,13 @@ pub(super) fn wellness_verdict(input: &ReadinessInput, ctx: &RuleContext) -> Wel
 pub(super) fn wellness_downgrade_in(
     inputs: &[ReadinessInput],
     ctx: &RuleContext,
-) -> Option<Recommended<Adjustment>> {
+) -> Option<AdjustmentCall> {
     let input = latest_input(inputs, ReadinessSignal::WellnessZ)?;
     match wellness_verdict(input, ctx) {
-        WellnessVerdict::Lower => Some(Recommended::new(
-            Adjustment::DowngradeSession,
-            claims::WELLNESS_001,
-        )),
-        WellnessVerdict::Hold => Some(Recommended::new(
+        WellnessVerdict::Lower => Some(
+            AdjustmentKind::WellnessLower.call(Adjustment::DowngradeSession, claims::WELLNESS_001),
+        ),
+        WellnessVerdict::Hold => Some(AdjustmentKind::WellnessHold.call(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::WellnessZ,
             },
@@ -423,22 +424,15 @@ fn wellness_lower(input: &ReadinessInput) -> bool {
     input.value <= WELLNESS_MULTIDAY_Z && input.streak >= WELLNESS_MULTIDAY_STREAK
 }
 
-/// §5 tier-4 condition: only this raises `SafetyTier::SubjectiveMultiDay`; the
-/// ≥2-day intensity downgrade ([`wellness_downgrade_in`]) does not raise that
-/// tier.
-fn wellness_multiday(inputs: &[ReadinessInput]) -> bool {
-    latest_input(inputs, ReadinessSignal::WellnessZ).is_some_and(wellness_lower)
-}
-
 /// Wellness soreness-item verdict (autoreg-030 second clause): a soreness item
 /// ≥6 on the 7-point scale. Localized soreness modifies, it does not stop or
 /// lower systemic intensity (§5 conflict table: "high localized soreness →
 /// train; modify the sore muscle's eccentric work; keep systemic intensity"),
 /// so lifts stop one rep earlier at the planned load and runs are untouched.
-pub(super) fn soreness_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
+pub(super) fn soreness_downgrade(inputs: &[ReadinessInput]) -> Option<AdjustmentCall> {
     let v = latest(inputs, ReadinessSignal::Soreness)?;
     if v >= SORENESS_HIGH {
-        Some(Recommended::new(
+        Some(AdjustmentKind::Soreness.call(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::Soreness,
             },
@@ -457,18 +451,18 @@ pub(super) fn soreness_downgrade(inputs: &[ReadinessInput]) -> Option<Recommende
 pub(super) fn rhr_downgrade_in(
     inputs: &[ReadinessInput],
     ctx: &RuleContext,
-) -> Option<Recommended<Adjustment>> {
+) -> Option<AdjustmentCall> {
     match rhr_verdict(inputs, ctx) {
-        RhrVerdict::Hold => Some(Recommended::new(
+        RhrVerdict::Hold => Some(AdjustmentKind::RhrHold.call(
             Adjustment::CapTopEnd {
                 trigger: ReadinessSignal::RestingHr,
             },
             claims::AUTOREG_HRV_LIFT_001,
         )),
-        RhrVerdict::Spike => Some(Recommended::new(
-            Adjustment::DowngradeSession,
-            claims::AUTOREG_RHR_NOISE_001,
-        )),
+        RhrVerdict::Spike => Some(
+            AdjustmentKind::RhrSpike
+                .call(Adjustment::DowngradeSession, claims::AUTOREG_RHR_NOISE_001),
+        ),
         RhrVerdict::Normal | RhrVerdict::Rest => None,
     }
 }
@@ -511,7 +505,7 @@ pub(super) const DECOUPLING_MIN_EFFORT_MIN: f64 = 20.0;
 /// over 20 min. The downgrade fires only when duration is KNOWN valid; an
 /// observation whose `effort_min` is at/under the floor OR `None` (duration
 /// untracked, the wire default) is discarded, never acted on.
-pub(super) fn decoupling_downgrade(inputs: &[ReadinessInput]) -> Option<Recommended<Adjustment>> {
+pub(super) fn decoupling_downgrade(inputs: &[ReadinessInput]) -> Option<AdjustmentCall> {
     let input = latest_input(inputs, ReadinessSignal::AerobicDecoupling)?;
     if !input
         .effort_min
@@ -520,10 +514,9 @@ pub(super) fn decoupling_downgrade(inputs: &[ReadinessInput]) -> Option<Recommen
         return None;
     }
     if crate::load::decoupling_high(input.value) {
-        Some(Recommended::new(
-            Adjustment::DowngradeSession,
-            claims::RUN_DECOUPLE_001,
-        ))
+        Some(
+            AdjustmentKind::Decoupling.call(Adjustment::DowngradeSession, claims::RUN_DECOUPLE_001),
+        )
     } else {
         None
     }
@@ -547,7 +540,7 @@ pub struct RuleContext<'a> {
 
 /// Whether a set of recommendations signals an objective decline (a deload or
 /// a load cut, item-scoped or not): §5 tier 3 and the autoreg-044 strip.
-fn perf_decline(recs: &[Recommended<Adjustment>]) -> bool {
+fn perf_decline(recs: &[AdjustmentCall]) -> bool {
     recs.iter().any(|r| {
         matches!(
             r.value.base(),
@@ -556,58 +549,84 @@ fn perf_decline(recs: &[Recommended<Adjustment>]) -> bool {
     })
 }
 
-/// Highest safety tier triggered by the inputs (File 06 §5 ladder), checked
-/// highest-first: the first hit wins.
-///
-/// Pain outranks Illness, which outranks all objective/subjective/HRV tiers.
-/// Returns `None` when no safety condition fires. autoreg-041/043/046.
-/// `lift_goal` selects the velocity-loss threshold (autoreg-010).
-pub fn resolve_safety_in(
-    inputs: &[ReadinessInput],
-    ctx: &RuleContext,
-    lift_goal: Option<LiftGoal>,
-) -> Option<SafetyTier> {
-    // Tier 0, medical red flags: defer to a professional, overrides all
-    // training adjustments including pain (File 08 §5 safety-040/043/049).
-    if medical_referral(inputs).is_some() {
-        return Some(SafetyTier::MedicalReferral);
+impl AdjustmentKind {
+    /// The File 06 §5 ladder rung of the rule (File 08 §5 for referrals):
+    /// medical referral > pain > illness > objective performance > subjective
+    /// multi-day > HRV trend > single-day markers.
+    pub fn tier(self) -> SafetyTier {
+        use AdjustmentKind as K;
+        match self {
+            K::Screen(_)
+            | K::CardiacReferral
+            | K::BoneStressReferral
+            | K::RedsReferral
+            | K::OvertrainingReferral
+            | K::NforReferral => SafetyTier::MedicalReferral,
+            // Any characterized non-DOMS pain sits at the Pain tier, even when
+            // its response is a scoped stop or a modify/reduce (autoreg-043).
+            K::PainStop
+            | K::PainDefer
+            | K::PainScoped(_)
+            | K::TendonReduce
+            | K::TendonModify(_) => SafetyTier::Pain,
+            // The corroborated resting-HR rest day blocks training like the
+            // illness stop (ready-upd-002).
+            K::IllnessStop | K::HeadCold | K::ReturnCheck | K::ReturnHold | K::RhrRest => {
+                SafetyTier::Illness
+            }
+            K::RpeLoad
+            | K::FirstSet
+            | K::FailedSet
+            | K::E1rm
+            | K::E1rmDeload
+            | K::VelocityLoss
+            | K::Decoupling
+            | K::WeeklyDeload(_) => SafetyTier::ObjectivePerformance,
+            K::WellnessLower => SafetyTier::SubjectiveMultiDay,
+            K::HrvLower | K::HrvHold => SafetyTier::HrvTrend,
+            K::WellnessHold | K::Soreness | K::RhrHold | K::RhrSpike => SafetyTier::SingleDayMarker,
+        }
     }
-    // Tier 1, pain overrides everything else (autoreg-043; File 08 Table 4.1).
-    // Any characterized non-DOMS pain (structural, scoped structural, tendon,
-    // other) sits at the Pain tier even when its response is a scoped stop or a
-    // modify/reduce; DOMS is normal training discomfort and raises no tier.
-    if pain_blocks_progression(inputs) {
-        return Some(SafetyTier::Pain);
+
+    /// Whether the rule raises the day's safety tier. A low check-in or
+    /// soreness hold is a single-day subjective call (§5 tier 4 needs ≥3 days
+    /// of z ≤ −1, autoreg-030), and the session RPE and decoupling calls are
+    /// not the tier-3 e1RM / velocity-loss decline: they rank on the ladder
+    /// but leave the day's tier alone.
+    fn raises_day_tier(self) -> bool {
+        !matches!(
+            self,
+            AdjustmentKind::WellnessHold
+                | AdjustmentKind::Soreness
+                | AdjustmentKind::RpeLoad
+                | AdjustmentKind::Decoupling
+        )
     }
-    // Tier 2, illness / fever gates regardless of readiness (autoreg-045/046),
-    // plus the corroborated resting-HR rest day (stop level on ≥2 mornings or
-    // with symptoms, ready-upd-002): it blocks training like the illness stop.
-    let rhr = rhr_verdict(inputs, ctx);
-    if illness_active(inputs) || rhr == RhrVerdict::Rest {
-        return Some(SafetyTier::Illness);
+}
+
+impl AdjustmentCall {
+    /// The call's rung for ranking: a deferral ranks as a medical referral
+    /// whatever raised it, and a load increase is off the ladder.
+    pub fn tier(&self) -> Option<SafetyTier> {
+        match self.value.base() {
+            Adjustment::Defer { .. } => Some(SafetyTier::MedicalReferral),
+            Adjustment::IncreaseLoadPct(_) => None,
+            _ => Some(self.kind().tier()),
+        }
     }
-    // Tier 3, objective within-session performance (e1RM drop / velocity loss).
-    // A load *increase* signals high readiness, never a safety concern, only
-    // reductions/deloads raise the tier.
-    if perf_decline(&e1rm_gate(inputs))
-        || vl_stop(inputs, lift_goal).is_some()
-        || perf_decline(&perf_adjustments(ctx.perf))
-    {
-        return Some(SafetyTier::ObjectivePerformance);
-    }
-    // Tier 4, persistent multi-day subjective suppression: ≥3 days of
-    // wellness z ≤ −1 (§5 tier-4 definition). A single-day z ≤ −1.5
-    // (autoreg-030) does NOT raise this tier.
-    if wellness_multiday(inputs) {
-        return Some(SafetyTier::SubjectiveMultiDay);
-    }
-    // Tier 5, HRV rolling baseline (autoreg-028).
-    if hrv_downgrade(inputs).is_some() {
-        return Some(SafetyTier::HrvTrend);
-    }
-    // Tier 6, resting-HR markers: a corroborated ≥2-day elevation or a single
-    // stop-level morning without symptoms (likely noise, ready-upd-002).
-    matches!(rhr, RhrVerdict::Hold | RhrVerdict::Spike).then_some(SafetyTier::SingleDayMarker)
+}
+
+/// Highest safety tier the day's calls raise (File 06 §5 ladder;
+/// autoreg-041/043/046). `None` when no safety condition fires. A load
+/// increase signals high readiness, never a safety concern.
+pub fn safety_tier_of(calls: &[AdjustmentCall]) -> Option<SafetyTier> {
+    calls
+        .iter()
+        .filter(|r| {
+            r.kind().raises_day_tier() && !matches!(r.value.base(), Adjustment::IncreaseLoadPct(_))
+        })
+        .map(|r| r.kind().tier())
+        .max()
 }
 
 /// Whether auto load-adds are withheld today (autoreg-044 / autoreg-029): any
@@ -655,7 +674,7 @@ pub fn adjustments_in(
     ctx: &RuleContext,
     lift_goal: Option<LiftGoal>,
     high_load_block: bool,
-) -> Vec<Recommended<Adjustment>> {
+) -> Vec<AdjustmentCall> {
     // Medical referral (File 08) > pain (autoreg-043 / Table 4.1) >
     // illness/fever (autoreg-046) > corroborated RHR (ready-upd-002).
     if let Some(defer) = medical_referral(inputs) {
@@ -675,10 +694,7 @@ pub fn adjustments_in(
     }
     if rhr_verdict(inputs, ctx) == RhrVerdict::Rest {
         let mut out = pain_recs;
-        out.push(Recommended::new(
-            Adjustment::RestDay,
-            claims::AUTOREG_RHR_NOISE_001,
-        ));
+        out.push(AdjustmentKind::RhrRest.call(Adjustment::RestDay, claims::AUTOREG_RHR_NOISE_001));
         return out;
     }
 

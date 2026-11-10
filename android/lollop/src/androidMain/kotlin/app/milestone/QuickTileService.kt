@@ -7,15 +7,12 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import android.util.Log
-import androidx.core.content.edit
-import app.milestone.widget.WidgetMidnight
-import app.milestone.widget.WidgetSnapshot
+import app.milestone.widget.AndroidWidgets
+import app.milestone.widget.MidnightTick
+import app.milestone.widget.TileFace
 import app.milestone.widget.WidgetSnapshotStore
-import app.milestone.widget.TodayWidget
-import androidx.glance.appwidget.updateAll
-import kotlinx.coroutines.flow.withIndex
-import kotlinx.coroutines.launch
+import app.milestone.widget.tileFace
+import app.milestone.widget.tileSubtitle
 
 /** The tile's icon for this face (`ic_stat_mark` names the tile in the picker). */
 internal val TileFace.icon: Int
@@ -32,10 +29,9 @@ internal val TileFace.icon: Int
  *
  * An active tile (manifest meta-data `ACTIVE_TILE`): System UI redraws it only
  * when the app asks ([requestTileRefresh]) or on a tap, so the app asks whenever
- * the face can change: a run starts or stops ([RecordingWatch]), the day snapshot is
- * written or marked stale ([WidgetSnapshotStore.write]), and the day changes
- * (local midnight, clock or time zone change in
- * [app.milestone.widget.TodayWidgetReceiver]).
+ * the face can change ([AndroidWidgets]): a run starts or stops, the day snapshot
+ * is written or marked stale, the day changes (local midnight, clock or time zone
+ * change) and the language changes.
  *
  * A tap opens the app ([openIntent]); it never starts [RunTrackingService] itself,
  * since a location foreground service may not start from the background. "Start
@@ -44,12 +40,14 @@ internal val TileFace.icon: Int
  * so the face is redrawn.
  */
 class QuickTileService : TileService() {
+    override fun onCreate() {
+        super.onCreate()
+        AppRuntime.start(this)
+    }
 
     override fun onTileAdded() {
         super.onTileAdded()
-        setAdded(this, true)
-        // The face rolls over at local midnight like the widget's.
-        WidgetMidnight.schedule(this)
+        MidnightTick.setTilePlaced(this, true)
         // Draw now (a listening request from here can be ignored), or System UI
         // shows the manifest label until the next trigger.
         draw()
@@ -57,23 +55,21 @@ class QuickTileService : TileService() {
 
     override fun onTileRemoved() {
         super.onTileRemoved()
-        setAdded(this, false)
-        if (!WidgetMidnight.hasWidgets(this)) WidgetMidnight.cancel(this)
+        MidnightTick.setTilePlaced(this, false)
     }
 
     override fun onStartListening() {
         super.onStartListening()
         draw()
-        // Cleared app data forgets onTileAdded; a tile System UI draws is on the panel.
-        if (!isAdded(this)) setAdded(this, true)
-        // A reboot clears alarms; re-arm the midnight tick (replaces any earlier one).
-        WidgetMidnight.schedule(this)
+        // A tile System UI draws is on the panel, though cleared app data forgets
+        // onTileAdded; this also sets the midnight tick again after a reboot.
+        MidnightTick.setTilePlaced(this, true)
     }
 
     private fun draw() {
         val tile = qsTile ?: return
         val snapshot = WidgetSnapshotStore.today(this)
-        val face = faceFor(snapshot)
+        val face = tileFace(snapshot, RunSession.tracking.value)
         val label = resources.getString(face.label)
         val subtitle = tileSubtitle(snapshot, latinDigitResources())
         tile.label = label
@@ -112,23 +108,9 @@ class QuickTileService : TileService() {
     }
 
     companion object {
-        private const val PREFS = "quick_tile"
-        private const val KEY_ADDED = "added"
-
-        /** The face for the current state: a recording run first (no file read), then the snapshot. */
+        /** The face for the current state. */
         internal fun currentFace(context: Context): TileFace =
-            if (RunSession.tracking.value) TileFace.Recording else tileFace(WidgetSnapshotStore.today(context))
-
-        private fun faceFor(today: WidgetSnapshot?): TileFace =
-            if (RunSession.tracking.value) TileFace.Recording else tileFace(today)
-
-        /** Whether the tile is on the user's Quick Settings panel (it then needs the midnight tick). */
-        internal fun isAdded(context: Context): Boolean =
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ADDED, false)
-
-        private fun setAdded(context: Context, added: Boolean) {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean(KEY_ADDED, added) }
-        }
+            tileFace(WidgetSnapshotStore.today(context), RunSession.tracking.value)
     }
 }
 
@@ -143,36 +125,6 @@ internal fun requestTileRefresh(ctx: Context) {
     try {
         TileService.requestListeningState(app, ComponentName(app, QuickTileService::class.java))
     } catch (e: RuntimeException) {
-        Log.w("QuickTile", "tile refresh not requested", e)
-    }
-}
-
-/**
- * Follows [RunSession.tracking], whoever changes it: redraws the tile and a placed
- * widget on every change ([TileFace.Recording]) and takes a shown run reminder down
- * when a run starts recording ([SessionReminder.onRecording]). Process-scoped,
- * started from MainActivity and [RunTrackingService]; a later call only replaces
- * the context (Robolectric gives each test a new Application under the same
- * collector).
- */
-internal object RecordingWatch {
-    @Volatile private var started = false
-    @Volatile private var app: Context? = null
-
-    fun start(context: Context) {
-        app = context.applicationContext
-        if (started) return
-        started = true
-        EventDispatcher.scope.launch {
-            RunSession.tracking.withIndex().collect { (i, recording) ->
-                val app = app ?: return@collect
-                if (i > 0) {
-                    requestTileRefresh(app)
-                    runCatching { if (WidgetMidnight.hasWidgets(app)) TodayWidget().updateAll(app) }
-                        .onFailure { Log.w("QuickTile", "widget not updated", it) }
-                }
-                if (recording) SessionReminder.onRecording(app)
-            }
-        }
+        PlatformLog.w("QuickTile", "tile refresh not requested", e)
     }
 }

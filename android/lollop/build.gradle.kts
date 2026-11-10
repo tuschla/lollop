@@ -41,11 +41,9 @@ kotlin {
         }
 
         withHostTest {
-            // The monotonic-clock run tracking calls android.os.SystemClock in
-            // RunSession.restore(); in plain JVM unit tests (no Robolectric) those
-            // framework stubs throw unless unmocked calls return defaults. The
-            // distance/segment assertions don't depend on the clock value, so a 0
-            // default is fine and keeps the suite runnable on the JVM.
+            // Plain-JVM tests (no Robolectric) reach android.util.Log through
+            // PlatformLog when the code under test logs a failure; the framework
+            // stubs throw unless unmocked calls return defaults.
             isReturnDefaultValues = true
             // Robolectric (the offline UI tests) needs the merged Android
             // resources + manifest to inflate the real theme, strings, and the

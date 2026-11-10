@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::plan::run::{
-    DayCtx, LongRunBind, RunWeekPlan, RunWeekRequest, cap_km_to_spike, effective_weekly_km,
-    long_run_decision, run_week_plan, run_week_sessions,
+    DayCtx, LongRunBind, RunProgramme, RunWeekPlan, RunWeekRequest, cap_km_to_spike,
+    effective_weekly_km, long_run_decision, run_week_plan, run_week_sessions,
 };
 use crate::profile::Profile;
 use crate::running::{self, daily_avg_run_km, is_quality_session};
@@ -975,6 +975,38 @@ fn sub_1km_baseline_tempo_becomes_an_easy_duration() {
     assert_eq!(claim_of(tempo), claims::RUN_SPIKE_001);
 }
 
+/// A spike ceiling with no honest distance (a 0.05 km stated longest run)
+/// turns every quality slot into an easy run under RUN-SPIKE-001, race pace
+/// included. A marathoner's race-pace slot that the 90-min easy-run ceiling
+/// left without a block size used to stay cited as RUN-RACEPACE-001, with the
+/// warm-up and cool-down it no longer has still counted in the week.
+#[test]
+fn every_quality_slot_without_a_distance_cites_the_spike_rule() {
+    let mut p = runner(GoalDistance::Marathon, 4, 40.0);
+    p.stated_longest_recent_km = Some(0.05);
+    let mut race_pace = 0;
+    for w in 0..8 {
+        let anchors = Anchors {
+            run_vdot: Some(crate::load::vdot(10_000.0, 40.0 * 60.0)),
+            week_start_epoch_day: Some(MON0 + 7 * i64::from(w)),
+            plan_start_epoch_day: Some(MON0),
+            ..Default::default()
+        };
+        let prog = synthesize(&PlanProfile::new(&p), &anchors, w).expect("a run plan");
+        let quality = prog
+            .mesocycle
+            .sessions
+            .iter()
+            .filter(|s| matches!(s.session_type, SessionType::Run(k) if is_quality_session(k)));
+        for s in quality {
+            race_pace += usize::from(kind_of(s) == RunSessionType::RacePace);
+            assert_eq!(claim_of(s), claims::RUN_SPIKE_001, "week {w}: {s:?}");
+            assert_eq!(run_of(s).warmup_min, None, "week {w}: {s:?}");
+        }
+    }
+    assert!(race_pace > 0, "a race-pace slot is scheduled");
+}
+
 // ── Long-run share and goal targets ───────────────────────────────
 
 #[test]
@@ -1519,7 +1551,7 @@ fn c25k_week_nine_is_30_min_continuous() {
 fn c25k_week_five_runs_follow_the_nhs_bouts_in_order() {
     let p = runner(GoalDistance::C25k, 3, 15.0);
     let (plan, sessions) = week(&p, &Anchors::default(), 4);
-    assert_eq!(plan.c25k_week, Some(5));
+    assert_eq!(plan.programme, RunProgramme::C25k { week: 5 });
     let bouts: Vec<Vec<(u16, u16)>> = sessions
         .iter()
         .map(|s| {

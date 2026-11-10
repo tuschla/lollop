@@ -380,6 +380,32 @@ fn a_stale_run_outside_the_window_does_not_raise_the_long_run() {
 }
 
 #[test]
+fn an_undated_run_does_not_raise_the_long_run() {
+    // An undated legacy run (`observed_at` 0, `crate::day::is_undated`) has no
+    // day to age from, so it never anchors the long run or the weekly volume,
+    // whatever the plan's epoch day.
+    let app = Engine;
+    let mut model = Model::default();
+    app.update(Event::SetProfile(running_profile()), &mut model)
+        .expect_only_render();
+    app.update(logrun(21.0, 0), &mut model).expect_only_render();
+    app.update(
+        Event::GeneratePlan {
+            start_epoch_day: MON,
+        },
+        &mut model,
+    )
+    .expect_only_render();
+    set_today(&app, &mut model, MON);
+
+    let summary = planned_long_run_summary(&app, &model);
+    assert!(
+        summary.starts_with("5 km"),
+        "an undated run must not raise the long run, got {summary:?}"
+    );
+}
+
+#[test]
 fn a_log_less_running_plan_is_unchanged_by_the_run_anchors() {
     // Regression: with no logged runs the long run is the pre-anchor value.
     let app = Engine;
@@ -614,7 +640,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
     use crate::schema::RunPrescription;
     let anchors = crate::plan::Anchors::default();
 
-    let interval = Recommended::new(
+    let interval = RxBasis::Workout.rx(
         Prescription::Run(RunPrescription::new(
             RunVolume::DurationMin(16),
             RunIntensity::Vdot(VdotBand::Interval),
@@ -637,7 +663,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
 
     // A continuous ceiling-only %HRmax run: rep fields empty, band rendered
     // as a ceiling.
-    let cont = Recommended::new(
+    let cont = RxBasis::Workout.rx(
         Prescription::Run(RunPrescription::new(
             RunVolume::DistanceKm(10.0),
             RunIntensity::HrPercentMax {
@@ -659,7 +685,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
 
     // A two-sided %HRmax band (Tempo 88–92) renders as a range, not a floor
     // masquerading as a ceiling.
-    let tempo = Recommended::new(
+    let tempo = RxBasis::Workout.rx(
         Prescription::Run(RunPrescription::new(
             RunVolume::DurationMin(30),
             RunIntensity::HrPercentMax {
@@ -676,7 +702,7 @@ fn flatten_surfaces_interval_rep_structure_and_hr_band_ceiling() {
 
     // A Recovery band carries both its %HRmax ceiling and the Karvonen %HRR
     // ceiling: the stricter reading is surfaced too.
-    let recovery = Recommended::new(
+    let recovery = RxBasis::Workout.rx(
         Prescription::Run(RunPrescription::new(
             RunVolume::DurationMin(30),
             RunIntensity::HrPercentMax {

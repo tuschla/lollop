@@ -56,9 +56,12 @@ android/ (the Gradle build of the app, both platforms)
                  LollopSurfaces (the Swift host of the widgets and activities);
                  iosTest runs the engine on the real core
 iosApp/ (the iOS app: XcodeGen spec, SwiftUI host, extension, Info.plists, assets)
-  ├─ project.yml            targets `lollop` (bundle id app.milestone.lollop; a build
-  │                         phase runs :lollop-ios:embedAndSignAppleFrameworkForXcode),
-  │                         `LollopWidgets` (the extension, app.milestone.lollop.widgets,
+  ├─ project.yml            the identifiers once (LOLLOP_BUNDLE_ID app.milestone.lollop,
+  │                         LOLLOP_APP_GROUP group.app.milestone.lollop; the
+  │                         entitlements and Info.plists reference them); targets
+  │                         `lollop` (a build phase runs
+  │                         :lollop-ios:embedAndSignAppleFrameworkForXcode),
+  │                         `LollopWidgets` (the extension, <bundle id>.widgets,
   │                         embedded in PlugIns/) and `LollopWidgetsTests`
   ├─ iosApp/LollopIosApp.swift  @main SwiftUI app showing MainViewController()
   ├─ iosApp/Surfaces.swift  writes the widget payload, runs the Live Activities
@@ -81,8 +84,17 @@ log at boot (`restore`, with compaction and torn-tail repair in `EventLog`),
 rebuilds the core after a `panic_reset`, and keeps the last good view when a
 view fails. Android's engine is `object Core : DurableCore` with the JNI
 natives; iOS's is a `BridgeCore` over `android/core-bridge`'s `NativeCore`, which
-`LollopApp.start()` installs (`installCoreEngine`). The event queue sends to
+`LollopApp.start()` installs (`startIosApp`). The event queue sends to
 it on `CoreDispatcher` (one dedicated thread, `newSingleThreadContext`).
+
+`AppRuntime` (commonMain) is the app's process: its coroutine scope, the engine,
+the clock (`AppClock`), the boot ledger and every singleton's process state
+(`ProcessLocal`). `AppRuntime.start(ctx)` runs once per process: it loads
+`AppSettings` and starts each `AppFeature` (the common ones and
+`platformFeatures()`: on iOS the notifications delegate and reminders, and the
+widget sync). Android calls it from every component the system may start the
+process for; iOS from `LollopApp.start()`. Host tests start each scenario from
+`AppRuntime.resetForTest()`.
 
 `:lollop` doesn't depend on the cinterop module. Its commonMain declares
 `CoreBridge` with the same calls as `android/core-bridge`'s, and `:lollop-ios`
@@ -94,14 +106,14 @@ The other seams (`expect` in commonMain, actual per platform):
 | Seam | Android | iOS |
 |---|---|---|
 | `PlatformLog` | `android.util.Log` | `NSLog` |
-| `wallClockMillis`, `monotonicMillis` | `System.currentTimeMillis`, `SystemClock.elapsedRealtime` | `NSDate`, `clock_gettime_nsec_np(CLOCK_MONOTONIC)` (counts during sleep) |
+| `wallClockMillis`, `deviceMonotonicMillis` (read through `AppClock`) | `System.currentTimeMillis`, `SystemClock.elapsedRealtime` | `NSDate`, `clock_gettime_nsec_np(CLOCK_MONOTONIC)` (counts during sleep) |
 | `formatFixed` (`%.Nf`) | `String.format(Locale.US, …)` | `halfUpFixed`, a Kotlin port of Java's half-up rounding of the shortest digits, held to `String.format` by the host tests |
 | `appLocale`, `localizedDayFormatter`, `weekdayName`, `formatMediumDate`, `relativeDayLabel` | java.time + ICU best patterns, ICU `RelativeDateTimeFormatter` | `NSDateFormatter` (`dateFormatFromTemplate`, Gregorian, UTC wall clock), `NSRelativeDateTimeFormatter`; app locale = first English preferred language, else English + device region, `@numbers=latn` |
 | `is24HourClock` | `DateFormat.is24HourFormat` | the locale's `j` hour pattern has no `a` |
 | `KeyValueStore`, `PlatformContext` | `SharedPreferences`, `Context` | `NSUserDefaults(suiteName)`, one process-wide context |
 | `toRadians` | `Math.toRadians` | multiply by π/180 |
-| `platformCoreEngine` | `Core` | the `BridgeCore` `installCoreEngine` made |
-| `LogPath`, `LogFiles` (event log files) | `java.io.File`: `appendText`, a buffered read, `FileOutputStream` + `fd.sync()`, `renameTo` | POSIX `open`/`read`/`write`/`rename`; the rewrite is flushed with `fcntl(F_FULLFSYNC)` (plain `fsync` leaves it in the drive cache on Apple hardware), `fsync` where that's unsupported |
+| `platformCoreEngine` (read through `AppRuntime.engine`) | `Core` | the `BridgeCore` `startIosApp` made |
+| `AppPath`, `AppFiles` (the app's files) | `java.io.File`: `appendText`, a buffered read, `FileOutputStream` + `fd.sync()`, `renameTo` | POSIX `open`/`read`/`write`/`rename`; the rewrite is flushed with `fcntl(F_FULLFSYNC)` (plain `fsync` leaves it in the drive cache on Apple hardware), `fsync` where that's unsupported |
 | `eventLogPath`, `isDebuggable` | `filesDir/event-log.ndjson`, `FLAG_DEBUGGABLE` | `Application Support/event-log.ndjson`, `Platform.isDebugBinary` |
 | `PlatformResources`, `getString` / `getQuantityString` / `getStringArray` (`Res` handles outside composition) | `android.content.res.Resources`, read through the `R` id of the same name (generated map) | CMP resources read synchronously in the system resource environment |
 | `platformOkLabel` | `android.R.string.ok` | the app's "OK" |
@@ -224,9 +236,10 @@ The Xcode project is generated from `iosApp/project.yml` and not committed. Its
 build phase runs `./gradlew :lollop-ios:embedAndSignAppleFrameworkForXcode`,
 which builds `Lollop.framework` for the configuration and SDK Xcode is building
 (Debug/Release, device/simulator) and copies it into the app. The Swift host
-(`iosApp/iosApp/LollopIosApp.swift`) shows `MainViewController()`, which installs
-the core engine (`LollopApp.start()`) and composes the app's root
-(`LollopIosRoot()`, which restores the event log and sends SetToday), and hands
+(`iosApp/iosApp/LollopIosApp.swift`) starts the app once at launch
+(`LollopApp.start()`: the core engine and `AppRuntime.start`), then shows
+`MainViewController()`, which composes the app's root (`LollopIosRoot()`, which
+restores the event log and sends SetToday), and hands
 URLs the app is opened with (a GPX, TCX or FIT file from Files or the share
 sheet) to `openUrl` (`LollopIosOpen`). Before that it hands the widgets and
 activities to `Surfaces.swift` (`LollopSurfaces.install`). The icon, launch logo
@@ -331,8 +344,10 @@ hands it; the text and the decisions come from the same common Kotlin as
 Android's (`widgetSnapshotOf`, `widgetFace`, `tileFace`, `tileSubtitle`,
 `countdownText`, the notification strings).
 
-- **Data**: `IosWidgetSync` (iosMain, IosSurfaces.kt) turns every published
-  model, distance unit, theme, dark mode and recording change into a payload:
+- **Data**: the common `WidgetSurfaces` feature hands every change of the
+  widget inputs (published model, distance unit, theme, dark mode, recording,
+  time zone or clock change) to `IosWidgetSurface` (iosMain,
+  widget/IosWidgetSurface.kt), which turns it into a payload:
   the common `WidgetSnapshot` JSON, the widget faces for its day and for any
   other day ("Open lollop to update"), the control's faces, "N more items" per
   count, and the theme's colours light and dark. `Surfaces.swift` writes it to
@@ -368,7 +383,7 @@ Apple offers no other API (extensions).
 |---|---|
 | JNI core, `Core.kt` on the `core-jni` thread | `BridgeCore` over `android/core-bridge`'s `NativeCore`, installed by `LollopApp.start()`, on one dedicated thread |
 | Event log `filesDir/event-log.ndjson`, replay on boot, compaction (`EventLog.kt`, `DurableCore.restore`) | Done: the same NDJSON file in Application Support through the same commonMain code, so an exported log can be imported on either platform |
-| Crash-safe active run file (`ActiveRunStore.kt`) | Done: the same commonMain store and NDJSON format in Application Support, over the `LogFiles` seam (POSIX) |
+| Crash-safe active run file (`ActiveRunStore.kt`) | Done: the same commonMain store and NDJSON format in Application Support, over the `AppFiles` seam (POSIX) |
 | GPS run tracking, foreground service with a location type (`RunTrackingService.kt`) | Done: `RunTracker.ios.kt`, a `CLLocationManager` (best accuracy, fitness activity, no distance filter, no auto-pause, `allowsBackgroundLocationUpdates` with the blue indicator) feeding the common `RunRecorder` (the same fix QC, armed start, pause, signal-loss watchdog and step ticker as Android's service) and the sidecar file; When In Use plus a one-off precise-location prompt; a run resumes after a relaunch from the sidecar. Its frames go to the run's Live Activity (`RunActivity`). |
 | Live Update notifications for run and rest (`LiveUpdates.kt`, promoted notifications) | Done: Live Activities with the Dynamic Island (see above) |
 | Rest-done alert, exact alarm (`RestAlarm.kt`) | Done: a time-interval local notification (`UNTimeIntervalNotificationTrigger`) and the in-app countdown; no exact-alarm notice. AlarmKit (iOS 26) would sound in silent mode. |

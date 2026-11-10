@@ -55,7 +55,7 @@ class LiveRunNotificationTest {
 
     @After
     fun tearDown() {
-        RunSession.paused.value = false
+        RunSession.setPaused(false)
         RunSession.reset()
     }
 
@@ -112,6 +112,8 @@ class LiveRunNotificationTest {
 
     @Test
     fun chipTextFollowsTheStateAndFitsTheChip() {
+        fun trackingChipRes(recording: Boolean, armed: Boolean, paused: Boolean, signalLost: Boolean) =
+            runSurfacePhase(recording, armed, paused, signalLost).chipRes?.let { androidStringId(it.key) }
         assertEquals(R.string.live_chip_paused, trackingChipRes(recording = true, armed = false, paused = true, signalLost = true))
         assertEquals(R.string.live_chip_no_gps, trackingChipRes(recording = true, armed = false, paused = false, signalLost = true))
         assertNull("recording shows the moving time", trackingChipRes(recording = true, armed = false, paused = false, signalLost = false))
@@ -159,7 +161,7 @@ class LiveRunNotificationTest {
     @Test
     @Config(sdk = [34])
     fun belowAndroid16NoLiveUpdatesNoticeIsShown() {
-        assertFalse(liveUpdatesTurnedOff(ctx))
+        assertFalse(AndroidLiveUpdates.isOff(ctx))
         assertEquals(Settings.ACTION_APP_NOTIFICATION_SETTINGS, promotedNotificationSettingsIntent(ctx).action)
     }
 
@@ -170,21 +172,21 @@ class LiveRunNotificationTest {
         val start = Intent(ctx, RunTrackingService::class.java).setAction("app.milestone.action.START")
         val controller = Robolectric.buildService(RunTrackingService::class.java, start).create().startCommand(0, 1)
         val nm = shadowOf(ctx.getSystemService(NotificationManager::class.java))
-        fun posted(): Notification = nm.getNotification(RunTrackingService.NOTIF_ID)
+        fun posted(): Notification = nm.getNotification(AndroidIds.RUN_NOTIFICATION)
 
         val first = shadowOf(controller.get()).lastForegroundNotification
         assertPromotableLiveUpdate(first)
         assertEquals("recording starts at zero moving time", "0:00", first.shortCriticalText)
 
         // An in-app pause re-posts with the paused chip (the throttled path still works).
-        RunSession.paused.value = true
+        RunSession.setPaused(true)
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(ctx.getString(R.string.live_chip_paused), posted().shortCriticalText)
 
         // The user swipes it away: the system fires its delete intent at the service.
         val dismissed = shadowOf(posted().deleteIntent).savedIntent
         controller.withIntent(dismissed).startCommand(0, 2)
-        RunSession.paused.value = false
+        RunSession.setPaused(false)
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals("no re-post after dismissal", ctx.getString(R.string.live_chip_paused), posted().shortCriticalText)
 

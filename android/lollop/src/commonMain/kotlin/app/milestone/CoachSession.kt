@@ -78,6 +78,10 @@ internal class CoachSession(
     var showTracker by showTrackerState
     var showResumePrompt by showResumePromptState
     var lastPain by lastPainState
+
+    /** The interrupted run's fixes boot read for the resume offer, so Resume reuses
+     *  them instead of re-reading the file; null once consumed. */
+    var recoveredRun: RecoveredTrack? = null
 }
 
 @Composable
@@ -188,17 +192,17 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
     // (rotation) queues after it, skips the probe and the one-time block, and resends
     // SetToday only when the day or offset changed since the last send. A reboot
     // ([requestReboot], iOS after a data import) runs it again as a fresh process would.
-    val generation by bootGeneration.collectAsState()
+    val generation by AppRuntime.bootGeneration.collectAsState()
     LaunchedEffect(generation) {
         // A reboot replaces the shown model: the loading state until it hydrates.
-        if (generation > 0 && !EventDispatcher.bootHandled) session.loaded = false
+        if (generation > 0 && !AppRuntime.bootHandled) session.loaded = false
         var fresh = false
         val vm = EventDispatcher.exclusive {
             // First touch of the engine on its own thread: Android's loads the native
             // library in its initializer, which must not run on the UI thread.
-            val engine = withContext(CoreDispatcher) { platformCoreEngine() }
-            val beforeRestore = takeBeforeRestore()
-            bootTurn(engine, setupStore, EventDispatcher, restore = {
+            val engine = withContext(CoreDispatcher) { AppRuntime.engine }
+            val beforeRestore = AppRuntime.takeBeforeRestore()
+            bootTurn(engine, setupStore, AppRuntime, restore = {
                 beforeRestore?.invoke()
                 engine.restore(ctx)
             })?.also { fresh = it.fresh }?.view
@@ -212,8 +216,8 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
         session.model = vm
         // Once per process: a re-run must not recompute showSetup (mid-setup answers)
         // or re-offer run recovery.
-        if (!EventDispatcher.bootHandled) {
-            EventDispatcher.bootHandled = true
+        if (!AppRuntime.bootHandled) {
+            AppRuntime.bootHandled = true
             // A new process restored with the tracker flag set records nothing (the
             // service is NOT_STICKY): leave it so the resume prompt is the way back.
             if (!RunSession.tracking.value && !RunSession.armed.value && !RunSession.locating.value) {
@@ -234,7 +238,7 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
                 val recovered = withContext(Dispatchers.IO) { tracker.recoverInterruptedRun(ctx) }
                 if (resumable(recovered, wallClockMillis() / 1000)) {
                     // Ask; Resume reuses these fixes instead of re-reading the file.
-                    EventDispatcher.recoveredSidecar = recovered
+                    session.recoveredRun = recovered
                     session.showResumePrompt = true
                 } else {
                     // Under 2 fixes, or a dead run that must not become a multi-hour run.
@@ -256,9 +260,9 @@ private fun rememberCoachSession(openRequest: OpenRequests): CoachSession {
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
                     val now = todayEpochDay() to utcOffsetSec()
-                    val last = EventDispatcher.lastToday
+                    val last = AppRuntime.lastToday
                     if (last != null && last != now) {
-                        EventDispatcher.lastToday = now
+                        AppRuntime.lastToday = now
                         session.dispatch(Event.SetToday(now.first, now.second))
                     }
                 }
@@ -300,15 +304,13 @@ internal fun ResumeRunDialog(session: CoachSession) {
             TextButton(onClick = {
                 session.showResumePrompt = false
                 if (liveRun()) {
-                    EventDispatcher.recoveredSidecar = null
+                    session.recoveredRun = null
                     return@TextButton
                 }
                 scope.launch {
-                    // Reuse the sidecar fixes read once at boot instead of re-reading
-                    // the file off disk here.
-                    val recovered = EventDispatcher.recoveredSidecar
+                    val recovered = session.recoveredRun
                         ?: withContext(Dispatchers.IO) { tracker.recoverInterruptedRun(ctx) }
-                    EventDispatcher.recoveredSidecar = null
+                    session.recoveredRun = null
                     if (recovered.size >= 2) {
                         RunSession.restore(recovered)
                         if (tracker.hasLocationPermission(ctx)) {
@@ -318,8 +320,7 @@ internal fun ResumeRunDialog(session: CoachSession) {
                             // start now would only fail the location service and strand the
                             // run. Hold it as a capture; the tracker asks for location and
                             // restarts recording once it is granted.
-                            RunSession.tracking.value = false
-                            RunSession.resumeAwaitingLocation.value = true
+                            RunSession.awaitLocationForResume()
                         }
                         session.showTracker = true
                     } else {
@@ -331,7 +332,7 @@ internal fun ResumeRunDialog(session: CoachSession) {
         dismissButton = {
             TextButton(onClick = {
                 session.showResumePrompt = false
-                EventDispatcher.recoveredSidecar = null
+                session.recoveredRun = null
                 if (!liveRun()) tracker.discardInterruptedRun()
             }) { Text(stringResource(Res.string.main_discard), color = DangerText) }
         },

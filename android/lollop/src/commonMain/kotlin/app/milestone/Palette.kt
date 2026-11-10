@@ -198,11 +198,17 @@ internal val PaperDarkPalette = Palette(
  * Persisted by [name]; [Paper] is the default (AppSettings pins it, with the system
  * accent, on a fresh install).
  */
-enum class AppTheme(val dark: Palette, val light: Palette) {
+enum class AppTheme(
+    val dark: Palette,
+    val light: Palette,
+    /** Picking the theme turns the system (wallpaper) accent on: Paper's ink accent
+     *  is a blank slate for it, the tinted grounds clash with one. */
+    val takesSystemAccent: Boolean = false,
+) {
     Rose(RosePalette, RoseLightPalette),
     Meadow(MeadowPalette, MeadowLightPalette),
     Iris(IrisPalette, IrisLightPalette),
-    Paper(PaperDarkPalette, PaperLightPalette);
+    Paper(PaperDarkPalette, PaperLightPalette, takesSystemAccent = true);
 
     companion object {
         /** Theme names older builds persisted → the theme that took each one's

@@ -7,13 +7,13 @@ use std::rc::Rc;
 use crate::app::anchors::{build_run_anchors, lift_anchors_now};
 use crate::app::calis_anchors::build_calisthenics_anchors;
 use crate::app::logged_days::LoggedDays;
-use crate::app::model::{Model, sets_fingerprint};
+use crate::app::model::Model;
 use crate::app::run_metrics::RunFacts;
 use crate::app::set_index::{SetIndex, set_index};
 
 pub(super) struct ViewCtx<'m> {
     pub(super) model: &'m Model,
-    /// [`sets_fingerprint`] of `model.sets`.
+    /// [`crate::memo::fingerprint`] of `model.sets`.
     pub(super) sets_fp: u64,
     /// Name-derived facts of `model.sets`.
     pub(super) set_index: Rc<SetIndex>,
@@ -30,7 +30,7 @@ pub(super) struct ViewCtx<'m> {
 
 impl<'m> ViewCtx<'m> {
     pub(super) fn new(model: &'m Model) -> Self {
-        let sets_fp = sets_fingerprint(&model.sets);
+        let sets_fp = crate::memo::fingerprint(&model.sets);
         let runs = RunFacts::new(&model.runs);
         let days = LoggedDays::new(model, &runs);
         Self {

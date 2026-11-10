@@ -118,7 +118,7 @@ internal fun RunFinishPanel(
     // so the review shows exactly what History then lists.
     val points by RunSession.points.collectAsStateWithLifecycle()
     val figures = remember(points) {
-        platformCoreEngine().savedFigures(RunSession.trackEventForCore(entryId = 0L, workoutType = null, sessionRpe = null))
+        AppRuntime.engine.savedFigures(RunSession.trackEventForCore(entryId = 0L, workoutType = null, sessionRpe = null))
     }
     val km = figures?.distance_km ?: 0.0
     val elapsedSec = figures?.let { (it.duration_min * 60.0).roundOrZero() } ?: 0L

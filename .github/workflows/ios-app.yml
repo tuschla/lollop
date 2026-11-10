@@ -73,18 +73,28 @@ jobs:
           test -d "$app/Frameworks/Lollop.framework"
           test -x "$appex/LollopWidgets"
           plutil -lint "$app/Info.plist" "$appex/Info.plist"
+          # The identifiers as iosApp/project.yml set them, read back from the build.
+          bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+          group=$(/usr/libexec/PlistBuddy -c 'Print :LollopAppGroup' "$app/Info.plist")
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$appex/Info.plist")" = com.apple.widgetkit-extension
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$appex/Info.plist")" = app.milestone.lollop.widgets
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$appex/Info.plist")" = "$bundle.widgets"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LollopAppGroup' "$appex/Info.plist")" = "$group"
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSSupportsLiveActivities' "$app/Info.plist")" = true
           # Ad-hoc signatures that carry the App Group entitlement, inside out:
           # SideStore reads an app's groups from the signed binaries and registers
           # them for the Apple Account; an unsigned binary has none, and the widget
-          # could not read the app's payload.
+          # could not read the app's payload. The entitlements files name the group
+          # $(LOLLOP_APP_GROUP), which Xcode fills in when it signs; this build is
+          # unsigned, so fill it in here.
+          mkdir -p build/entitlements
+          for e in lollop LollopWidgets; do
+            sed "s/\$(LOLLOP_APP_GROUP)/$group/" "iosApp/Entitlements/$e.entitlements" > "build/entitlements/$e.entitlements"
+          done
           for f in "$app"/Frameworks/*.framework; do codesign --force --sign - --timestamp=none "$f"; done
-          codesign --force --sign - --timestamp=none --entitlements iosApp/Entitlements/LollopWidgets.entitlements "$appex"
-          codesign --force --sign - --timestamp=none --entitlements iosApp/Entitlements/lollop.entitlements "$app"
+          codesign --force --sign - --timestamp=none --entitlements build/entitlements/LollopWidgets.entitlements "$appex"
+          codesign --force --sign - --timestamp=none --entitlements build/entitlements/lollop.entitlements "$app"
           for b in "$appex" "$app"; do
-            codesign -d --entitlements - "$b" 2>/dev/null | grep -q group.app.milestone.lollop || { echo "::error::$b has no App Group entitlement"; exit 1; }
+            codesign -d --entitlements - "$b" 2>/dev/null | grep -qF "$group" || { echo "::error::$b has no App Group entitlement"; exit 1; }
           done
           mkdir -p build/ipa/Payload
           cp -R "$app" build/ipa/Payload/
@@ -174,7 +184,8 @@ jobs:
         # aborts the process, which leaves a crash report.
         run: |
           xcrun simctl bootstatus "$SIMULATOR_UDID" -b
-          xcrun simctl install "$SIMULATOR_UDID" build/ios-sim/Build/Products/Debug-iphonesimulator/lollop.app
+          app=build/ios-sim/Build/Products/Debug-iphonesimulator/lollop.app
+          xcrun simctl install "$SIMULATOR_UDID" "$app"
           out="$PWD/build/smoke"
           mkdir -p "$out"
           xcrun simctl spawn "$SIMULATOR_UDID" log stream --level info --style compact \
@@ -182,7 +193,7 @@ jobs:
           trap "kill $! 2>/dev/null || true" EXIT
           touch "$out/.launched"
           launched=$(xcrun simctl launch --stdout="$out/stdout.txt" --stderr="$out/stderr.txt" \
-            "$SIMULATOR_UDID" app.milestone.lollop)
+            "$SIMULATOR_UDID" "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")")
           echo "$launched"
           pid=${launched##*: }
           sleep 30
@@ -206,9 +217,12 @@ jobs:
         # it decodes, describes today, and every family draws it.
         run: |
           out="$PWD/build/smoke"
-          group=$(xcrun simctl get_app_container "$SIMULATOR_UDID" app.milestone.lollop group.app.milestone.lollop)
-          test -s "$group/widget-today.json" || { echo "::error::no widget payload in $group"; ls -la "$group"; exit 1; }
-          cp "$group/widget-today.json" "$out/"
+          app=build/ios-sim/Build/Products/Debug-iphonesimulator/lollop.app
+          bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+          group=$(/usr/libexec/PlistBuddy -c 'Print :LollopAppGroup' "$app/Info.plist")
+          container=$(xcrun simctl get_app_container "$SIMULATOR_UDID" "$bundle" "$group")
+          test -s "$container/widget-today.json" || { echo "::error::no widget payload in $container"; ls -la "$container"; exit 1; }
+          cp "$container/widget-today.json" "$out/"
           python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["snapshot"]["kind"], "|", d["face"]["title"], "|", d["control"]["label"])' "$out/widget-today.json"
           mkdir -p "$out/widget-renders"
           TEST_RUNNER_LOLLOP_WIDGET_PAYLOAD="$out/widget-today.json" TEST_RUNNER_LOLLOP_RENDER_DIR="$out/widget-renders" \

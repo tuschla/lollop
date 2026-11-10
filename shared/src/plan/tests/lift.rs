@@ -1245,7 +1245,8 @@ fn renamed_catalog_rows_read_like_their_old_labels() {
     // sparing), and logged history under the old label stays the same lift.
     // Ingest stores an old-label set under the new name, so the rules must
     // read both alike.
-    use crate::autoreg::{PainRegion, item_spared_by_pain};
+    use crate::autoreg::item_spared_by_pain;
+    use crate::schema::PainRegion;
     let calis = crate::exercise::CALIS_LEGACY_NAMES;
     for &(old, new) in crate::exercise::LEGACY_NAMES.iter().chain(calis) {
         assert!(same_movement(old, new), "{old} ≡ {new}");

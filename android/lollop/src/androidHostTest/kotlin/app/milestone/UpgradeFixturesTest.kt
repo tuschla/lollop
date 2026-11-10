@@ -206,16 +206,16 @@ class UpgradeFixturesTest {
     fun anOldInterruptedRunSidecarRecoversEveryIntactFix() {
         val firstFix = 20725L * 86_400 + 7 * 3600 - 7200
         for ((v, starts) in listOf("203ab56" to emptyList(), "4728546" to listOf(25))) {
-            QaHarness.resetActiveRunStore(ctx)
-            File(ctx.filesDir, "active-run.ndjson").writeBytes(fixture("upgrade/$v.active-run.ndjson"))
-            assertTrue("$v: the sidecar marks a run in progress", ActiveRunStore.hasActiveRun(ctx))
-            val track = ActiveRunStore.recover(ctx)
+            ActiveRunStore.start(ctx)
+            File(ctx.filesDir, AppFileNames.ACTIVE_RUN).writeBytes(fixture("upgrade/$v.active-run.ndjson"))
+            assertTrue("$v: the sidecar marks a run in progress", ActiveRunStore.hasActiveRun())
+            val track = ActiveRunStore.recover()
             // 40 fixes; the torn last line (killed mid-append) is not one.
             assertEquals("$v: fixes", 40, track.size)
             assertEquals("$v: segment starts", starts, track.segmentStarts)
             assertEquals("$v: first fix", firstFix, track.first().observedAt)
             assertEquals("$v: last fix", firstFix + 24 * 5 + 120 + 14 * 5, track.last().observedAt)
-            File(ctx.filesDir, "active-run.ndjson").delete()
+            File(ctx.filesDir, AppFileNames.ACTIVE_RUN).delete()
         }
     }
 }

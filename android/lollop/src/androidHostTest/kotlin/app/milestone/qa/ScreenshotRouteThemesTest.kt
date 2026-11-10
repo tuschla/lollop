@@ -50,8 +50,7 @@ class ScreenshotRouteThemesTest(private val theme: AppTheme, private val mode: D
     @After
     fun tearDown() {
         QaHarness.teardown()
-        AppSettings.showRouteMaps.value = true
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
+        QaHarness.freshProcess()
     }
 
     private fun waitFor(matcher: SemanticsMatcher) {

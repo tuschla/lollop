@@ -6,62 +6,60 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
-import androidx.glance.appwidget.updateAll
+import app.milestone.AndroidIds
 import app.milestone.AppClock
-import app.milestone.QuickTileService
+import app.milestone.PlatformLog
+import app.milestone.keyValueStore
+import app.milestone.nextLocalMidnightMillis
 import app.milestone.requestTileRefresh
-import java.time.Instant
-import java.time.ZoneId
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * The widget's receiver. Besides Glance's own updates it handles the day
- * changing under a stored snapshot: the local-midnight tick ([ACTION_MIDNIGHT])
- * and a clock change mark a snapshot from another day stale; a time zone change
- * marks it stale outright. Either way the widget then reads "Open lollop to
- * update" until the app publishes a model for the new day; after a zone change
- * within the day [WidgetSync] rewrites it at once while the app process holds a
- * model. A clock change within the same day (network time corrects the clock by
- * seconds) leaves the snapshot alone.
- * Each of these, and a locale change, also redraws the Quick Settings tile
- * ([requestTileRefresh]), whose face depends on the day and the language; the
- * midnight tick runs while a widget or the tile is placed.
+ * The widget's receiver. Besides Glance's own updates it gets the local-midnight
+ * tick ([ACTION_MIDNIGHT], [AndroidWidgets.onMidnight]), which marks a snapshot
+ * from the day that ended stale, and the locale change, which redraws the Quick
+ * Settings tile ([requestTileRefresh]), whose face depends on the language. Both
+ * redraw the widget. Clock and time zone changes reach the widget through the
+ * app's time-change receiver (app.milestone.TimeChangeReceiver).
  */
 class TodayWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = TodayWidget()
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         super.onUpdate(context, appWidgetManager, appWidgetIds)
-        WidgetMidnight.schedule(context)
+        MidnightTick.update(context, widgetPlaced = true)
     }
 
     override fun onDisabled(context: Context) {
         super.onDisabled(context)
-        if (!QuickTileService.isAdded(context)) WidgetMidnight.cancel(context)
+        MidnightTick.update(context, widgetPlaced = false)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        val force = when (intent.action) {
-            Intent.ACTION_TIMEZONE_CHANGED -> true
-            ACTION_MIDNIGHT, Intent.ACTION_TIME_CHANGED -> false
-            Intent.ACTION_LOCALE_CHANGED -> null
+        val midnight = when (intent.action) {
+            ACTION_MIDNIGHT -> true
+            Intent.ACTION_LOCALE_CHANGED -> false
             else -> return super.onReceive(context, intent)
         }
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                if (force != null) WidgetSnapshotStore.markStale(context, force = force)
-                requestTileRefresh(context)
-                val widgets = WidgetMidnight.hasWidgets(context)
-                if (widgets || QuickTileService.isAdded(context)) WidgetMidnight.schedule(context)
-                if (widgets) TodayWidget().updateAll(context)
-            } catch (t: Throwable) {
-                Log.w("TodayWidget", "day change not applied", t)
+                if (midnight) {
+                    AndroidWidgets.onMidnight(context)
+                } else {
+                    requestTileRefresh(context)
+                    MidnightTick.update(context)
+                }
+                AndroidWidgets.redraw(context)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                PlatformLog.w("TodayWidget", "day change not applied", e)
             } finally {
                 pending.finish()
             }
@@ -74,35 +72,51 @@ class TodayWidgetReceiver : GlanceAppWidgetReceiver() {
     }
 }
 
-/** The local-midnight alarm that rolls the widget over to "Open lollop to update". */
-internal object WidgetMidnight {
-    private const val REQUEST_CODE = 0x57440001
+/**
+ * The local-midnight alarm that rolls the widget and the Quick Settings tile over
+ * to the new day ([TodayWidgetReceiver.ACTION_MIDNIGHT]). It is set while a widget
+ * or the tile is placed, and only then: [update] decides from both.
+ */
+internal object MidnightTick {
+    private const val TILE_PREFS = "quick_tile"
+    private const val KEY_TILE_PLACED = "added"
 
-    fun hasWidgets(ctx: Context): Boolean =
+    fun widgetPlaced(ctx: Context): Boolean =
         AppWidgetManager.getInstance(ctx)
             ?.getAppWidgetIds(ComponentName(ctx, TodayWidgetReceiver::class.java))
             ?.isNotEmpty() == true
 
+    /** Whether the tile is on the user's Quick Settings panel. */
+    fun tilePlaced(ctx: Context): Boolean = ctx.keyValueStore(TILE_PREFS).getBoolean(KEY_TILE_PLACED, false)
+
+    /** The tile was put on the panel ([placed]) or taken off it; then [update]. */
+    fun setTilePlaced(ctx: Context, placed: Boolean) {
+        val prefs = ctx.keyValueStore(TILE_PREFS)
+        if (prefs.getBoolean(KEY_TILE_PLACED, false) != placed) prefs.edit { putBoolean(KEY_TILE_PLACED, placed) }
+        update(ctx)
+    }
+
+    /** Set the tick for the next local midnight while a widget ([widgetPlaced]) or
+     *  the tile is placed (replacing any earlier one: a reboot clears alarms), else
+     *  cancel it. */
+    fun update(ctx: Context, widgetPlaced: Boolean = widgetPlaced(ctx)) {
+        if (widgetPlaced || tilePlaced(ctx)) schedule(ctx) else cancel(ctx)
+    }
+
     private fun pendingIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
         ctx,
-        REQUEST_CODE,
+        AndroidIds.MIDNIGHT_ALARM_REQUEST,
         Intent(ctx, TodayWidgetReceiver::class.java).setAction(TodayWidgetReceiver.ACTION_MIDNIGHT),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    /** The next local midnight after [nowMillis] in [zone], in epoch millis. */
-    fun nextMidnightMillis(nowMillis: Long, zone: ZoneId = ZoneId.systemDefault()): Long =
-        Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate().plusDays(1)
-            .atStartOfDay(zone).toInstant().toEpochMilli()
-
     /**
      * Inexact and non-waking (RTC): it never needs the exact-alarm permission, and
      * a sleeping phone shows no widget, so the tick lands when the screen comes on.
-     * Replaces any earlier one (same PendingIntent).
      */
-    fun schedule(ctx: Context) {
+    private fun schedule(ctx: Context) {
         val alarms = ctx.getSystemService(AlarmManager::class.java) ?: return
-        alarms.set(AlarmManager.RTC, nextMidnightMillis(AppClock.nowMillis()), pendingIntent(ctx))
+        alarms.set(AlarmManager.RTC, nextLocalMidnightMillis(AppClock.nowMillis()), pendingIntent(ctx))
     }
 
     fun cancel(ctx: Context) {

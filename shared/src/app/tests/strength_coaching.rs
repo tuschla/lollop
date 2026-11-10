@@ -224,6 +224,68 @@ fn missed_target_cuts_next_load_5pct_unless_off_day() {
 }
 
 #[test]
+fn a_past_day_keeps_the_off_day_of_the_review_in_force_that_day() {
+    // AUTOREG-E1RM-GATE-001: Monday's squat lands >5 % under its baseline
+    // and Monday's review marks it an off day, so Tuesday's and Wednesday's
+    // plans keep the load. A later, ordinary review (Wednesday) must not
+    // re-judge those past days: each reads the review in force on it.
+    let start = POS_MON;
+    let today = start + 4;
+    let review = |bad_day: bool, day: i64| {
+        Event::SubmitReview(SessionReview {
+            bad_day,
+            observed_at: day * DAY_SEC + 18 * 3_600,
+            ..SessionReview::default()
+        })
+    };
+    let model_with = |reviews: &[Event]| {
+        let history = [
+            log_set("Back Squat", 100.0, 5, 8.0, (start - 14) * DAY_SEC + 3_600),
+            log_set("Back Squat", 100.0, 5, 8.0, (start - 7) * DAY_SEC + 3_600),
+            log_set("Back Squat", 100.0, 5, 10.0, start * DAY_SEC + 3_600),
+        ];
+        let (app, mut model) = planned_on(strength_profile(), history, start);
+        for ev in reviews {
+            app.update(ev.clone(), &mut model).expect_only_render();
+        }
+        set_today(&app, &mut model, today);
+        model
+    };
+    // Monday..Wednesday: prescribed through Wednesday's own morning, before
+    // the ordinary review was submitted.
+    let past_loads = |model: &Model| {
+        Engine
+            .view(model)
+            .week_plan
+            .into_iter()
+            .filter(|s| (start..=start + 2).contains(&s.epoch_day))
+            .map(|s| {
+                let loads: Vec<(String, Option<f64>)> = s
+                    .items
+                    .into_iter()
+                    .map(|i| (i.exercise, i.load_kg))
+                    .collect();
+                (s.epoch_day, loads)
+            })
+            .collect::<Vec<_>>()
+    };
+    let no_review = past_loads(&model_with(&[]));
+    let off_day = past_loads(&model_with(&[review(true, start)]));
+    assert_ne!(
+        no_review, off_day,
+        "the off day keeps a past day's squat load"
+    );
+    let later_review = past_loads(&model_with(&[
+        review(true, start),
+        review(false, start + 2),
+    ]));
+    assert_eq!(
+        later_review, off_day,
+        "a later review never re-judges a past day's off day"
+    );
+}
+
+#[test]
 fn a_light_lift_drop_at_the_same_load_is_cut() {
     // 45 kg × 3 at RPE 9.5 after 45 kg × 5 at RPE 8: the same bar weight, the
     // e1RM falls 55.5 → 50.25 kg (−9.5 %), past AUTOREG-E1RM-GATE-001's 5 %
@@ -360,8 +422,8 @@ fn planned_deload_sets_never_score_as_a_readiness_e1rm_drop() {
     );
 }
 
-fn pct_rx(pct: f32, reps: u8, velocity: Option<u8>) -> Recommended<Prescription> {
-    Recommended::new(
+fn pct_rx(pct: f32, reps: u8, velocity: Option<u8>) -> Rx {
+    RxBasis::Workout.rx(
         Prescription::Lift(LiftPrescription {
             exercise: "Back Squat".into(),
             sets: 4,
@@ -499,7 +561,7 @@ fn rir_item_carries_last_set_and_a_suggested_load() {
 /// set: one 60 kg × 8 @ RPE 7 row logged `age_days` before day 100.
 fn rir_row_item(anchors: &crate::plan::Anchors, age_days: i64, reps: u8) -> PrescriptionView {
     let today = 100;
-    let rx = Recommended::new(
+    let rx = RxBasis::Workout.rx(
         Prescription::Lift(LiftPrescription {
             exercise: "Row".into(),
             sets: 3,
@@ -652,8 +714,8 @@ fn warm_up_sets_do_not_silence_the_prilepin_audit() {
 
 #[test]
 fn a_deload_lift_day_is_titled_as_the_lighter_version() {
-    let rx = |claim: ClaimId| {
-        Recommended::new(
+    let rx = |basis: RxBasis, claim: ClaimId| {
+        basis.rx(
             Prescription::Lift(LiftPrescription {
                 exercise: "Back Squat".into(),
                 sets: 3,
@@ -667,18 +729,21 @@ fn a_deload_lift_day_is_titled_as_the_lighter_version() {
             claim,
         )
     };
-    let session = |claim: ClaimId| crate::schema::Session {
+    let session = |basis: RxBasis, claim: ClaimId| crate::schema::Session {
         session_type: SessionType::Lift(LiftSessionType::MaxEffort),
         day: 0,
-        prescriptions: vec![rx(claim)],
+        prescriptions: vec![rx(basis, claim)],
         dup_day: None,
     };
     assert_eq!(
-        plan_session_title(&session(claims::STR_DELOAD_VOL_001)),
+        plan_session_title(&session(
+            RxBasis::StrengthDeload,
+            claims::STR_DELOAD_VOL_001
+        )),
         "Heavy day (lighter week)"
     );
     assert_eq!(
-        plan_session_title(&session(claims::STR_DUP_001)),
+        plan_session_title(&session(RxBasis::Workout, claims::STR_DUP_001)),
         "Heavy day"
     );
 }
@@ -832,7 +897,7 @@ fn declared_layoff_derates_the_lift_load_not_the_logged_best() {
         reps_max: None,
         load_kg: None,
     });
-    let rx = Recommended::new(pres, claims::STR_INTENT_001);
+    let rx = RxBasis::Workout.rx(pres, claims::STR_INTENT_001);
     let anchors_full = crate::plan::Anchors {
         lift: crate::plan::LiftAnchors {
             e1rm: vec![("Back Squat".into(), 100.0)],
@@ -1025,7 +1090,7 @@ fn long_layoff_drops_the_anchor_and_represcribes_as_novice() {
         reps_max: None,
         load_kg: None,
     });
-    let rx = Recommended::new(pres, claims::STR_INTENT_001);
+    let rx = RxBasis::Workout.rx(pres, claims::STR_INTENT_001);
     let anchors = crate::plan::Anchors {
         lift: anchors,
         ..Default::default()

@@ -380,7 +380,7 @@ fn pain_label(verdict: PainVerdict) -> Label {
         PainVerdict::StructuralDefer => {
             ("see a doctor or physio first", claims::SAFE_PAIN_STRUCT_001)
         }
-        PainVerdict::StructuralScoped => (
+        PainVerdict::StructuralScoped(_) => (
             "skip the exercises that load it",
             claims::SAFE_PAIN_STRUCT_001,
         ),

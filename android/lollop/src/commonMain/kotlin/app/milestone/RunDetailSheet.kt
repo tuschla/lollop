@@ -67,7 +67,7 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 internal fun runStartCaption(startedAt: Long): String {
     if (startedAt <= 0L) return ""
-    val clock = if (is24HourClock()) "Hm" else "hm"
+    val clock = if (is24HourClock(currentPlatformContext())) "Hm" else "hm"
     val at = Instant.fromEpochSeconds(startedAt).toLocalDateTime(TimeZone.currentSystemDefault())
     return stringResource(Res.string.run_start_caption, localizedDayFormatter("EEEdMMM").format(at), localizedDayFormatter(clock).format(at))
 }
@@ -85,7 +85,7 @@ internal data class RunRoute(
 
 /** Fetches a run's GPX document for [rememberRunRoute] (off the main thread). A var
  *  only so a JVM test can hold the fetch and see what the sheets do while it loads. */
-internal var runGpxFetch: (entryId: Long, observedAt: Long) -> String? = { id, at -> platformCoreEngine().runGpx(id, at) }
+internal var runGpxFetch: (entryId: Long, observedAt: Long) -> String? = { id, at -> AppRuntime.engine.runGpx(id, at) }
 
 /**
  * The run's GPX, fetched ON DEMAND (off the main thread) for the one run being
@@ -338,7 +338,7 @@ private fun RunActions(run: RunResultView, route: RunRoute?, onTrim: () -> Unit,
                     testTag = "run-export",
                     onClick = {
                         scope.launch {
-                            val g = route?.gpx ?: withContext(Dispatchers.IO) { platformCoreEngine().runGpx(run.entry_id, run.observed_at) }
+                            val g = route?.gpx ?: withContext(Dispatchers.IO) { AppRuntime.engine.runGpx(run.entry_id, run.observed_at) }
                             if (!g.isNullOrBlank()) {
                                 shareGpx(ctx, g, run.started_at)
                             } else {

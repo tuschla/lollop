@@ -33,14 +33,17 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # it non-optional for device builds. Both tables name the same crate/version; on
 # an android build the target entry wins and the feature is irrelevant.
 jni = { version = "0.22", default-features = false, optional = true }
+# `#[derive(Sanitize)]` / `#[derive(ReviewParts)]` for the wire input types.
+shared-derive = { path = "derive" }
 
 [features]
 # `#[effect(typegen)]` in app/mod.rs emits shell-codegen type registration gated on
 # this feature. The Android JSON FFI shell never needs it, so keep it
 # off by default; enable with `--features typegen` when generating shell types.
 typegen = ["crux_core/typegen"]
-# The platform-neutral bridge API (`shared::ffi`) on a non-Android host. Android
-# builds get it through the target cfg; `jni-host` and `c-abi` enable it.
+# The platform-neutral bridge API (`shared::ffi`) on a non-Android host;
+# `build.rs` turns it, or an Android target, into `cfg(ffi_surface)`.
+# `jni-host` and `c-abi` enable it.
 ffi = []
 # Compile the `Java_app_milestone_Core_*` JNI exports (shared/src/ffi.rs) on a
 # NON-Android host so `cargo build -p shared --features jni-host` yields a

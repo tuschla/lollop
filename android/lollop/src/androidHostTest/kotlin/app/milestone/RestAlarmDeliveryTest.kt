@@ -64,7 +64,7 @@ class RestAlarmDeliveryTest {
         assertTrue(op.isBroadcastIntent)
         assertTrue("immutable", op.flags and PendingIntent.FLAG_IMMUTABLE != 0)
         assertEquals(RestEndReceiver::class.java.name, op.savedIntent.component?.className)
-        assertEquals(RestAlarm.ACTION_REST_END, op.savedIntent.action)
+        assertEquals(RestAlarmPlatform.ACTION_REST_END, op.savedIntent.action)
     }
 
     @Test
@@ -114,8 +114,7 @@ class RestAlarmDeliveryTest {
         assertEquals(resting, title(posted()))
         val fired = restEndBroadcast(app)
 
-        RestAlarm.resetProcessState()
-        AppSettings.restAlert.value = true
+        AppRuntime.resetForTest(clock = TestClock)
         deliver(fired)
 
         val n = posted()!!
@@ -156,14 +155,14 @@ class RestAlarmDeliveryTest {
     fun theCountdownsTimeoutAtTheRestEndLeavesTheDoneAlert() {
         ShadowAlarmManager.setCanScheduleExactAlarms(true)
         RestAlarm.schedule(app, 90, "Back squat")
-        assertEquals(resting, title(shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID)))
+        assertEquals(resting, title(shadowOf(nm).getNotification(AndroidIds.REST_COUNTDOWN_NOTIFICATION)))
         fireRestEnd(app)
-        assertNull("the countdown is taken down explicitly", shadowOf(nm).getNotification(RestAlarm.COUNTDOWN_NOTIF_ID))
+        assertNull("the countdown is taken down explicitly", shadowOf(nm).getNotification(AndroidIds.REST_COUNTDOWN_NOTIFICATION))
 
         // The countdown's setTimeoutAfter fires: the system cancels its id.
-        nm.cancel(RestAlarm.COUNTDOWN_NOTIF_ID)
+        nm.cancel(AndroidIds.REST_COUNTDOWN_NOTIFICATION)
 
-        assertEquals(restDone, title(shadowOf(nm).getNotification(RestAlarm.DONE_NOTIF_ID)))
+        assertEquals(restDone, title(shadowOf(nm).getNotification(AndroidIds.REST_DONE_NOTIFICATION)))
         assertEquals(1, shadowOf(nm).allNotifications.size)
         // A new rest or cancel still clears the alert.
         RestAlarm.cancel(app)
@@ -188,7 +187,7 @@ class RestAlarmDeliveryTest {
         ShadowAlarmManager.setCanScheduleExactAlarms(true)
         RestAlarm.schedule(app, 90, "Back squat")
         val first = restEndBroadcast(app)
-        AppClock.offsetMillis += 5_000L
+        TestClock.offsetMillis += 5_000L
         try {
             val before = SystemClock.elapsedRealtime()
             RestAlarm.schedule(app, 60, "Back squat")
@@ -199,14 +198,14 @@ class RestAlarmDeliveryTest {
             fireRestEnd(app)
             assertEquals(restDone, title(posted()))
         } finally {
-            AppClock.offsetMillis -= 5_000L
+            TestClock.offsetMillis -= 5_000L
         }
     }
 
     @Test
     fun anotherBroadcastIsIgnored() {
         RestAlarm.schedule(app, 90, "Back squat")
-        deliver(Intent(app, RestEndReceiver::class.java).putExtra(RestAlarm.EXTRA_REST_START, RestAlarm.running.value!!.startMillis))
+        deliver(Intent(app, RestEndReceiver::class.java).putExtra(RestAlarmPlatform.EXTRA_REST_START, RestAlarm.running.value!!.startMillis))
         assertEquals(resting, title(posted()))
     }
 
@@ -222,7 +221,7 @@ class RestAlarmDeliveryTest {
         RestAlarm.schedule(app, 90, "Back squat")
         assertFalse("not again", RestAlarm.exactAlarmPrompt.value)
         // Nor in a later process.
-        RestAlarm.resetProcessState()
+        AppRuntime.resetForTest(clock = TestClock)
         RestAlarm.schedule(app, 90, "Back squat")
         assertFalse("not after a restart", RestAlarm.exactAlarmPrompt.value)
         assertEquals("the alarm is still set, inexact", ShadowAlarmManager.WINDOW_HEURISTIC, alarm().windowLengthMs)

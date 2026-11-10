@@ -32,6 +32,7 @@ import app.milestone.OpenDest
 import app.milestone.R
 import app.milestone.RunSession
 import app.milestone.RunTrackingService
+import app.milestone.TestClock
 import app.milestone.openIntent
 import app.milestone.spokenDuration
 import app.milestone.spokenRunDistance
@@ -83,8 +84,7 @@ class RunFixGuardsTest {
         ProcessDeath.teardown()
         RunSession.reset()
         QaHarness.clearSidecar(ctx)
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
-        AppSettings.showRouteMaps.value = true
+        QaHarness.freshProcess()
     }
 
     private val model get() = checkNotNull(EventDispatcher.model.value)
@@ -104,8 +104,7 @@ class RunFixGuardsTest {
         rule.waitForNode(hasText(str(R.string.track_btn_stop)), 30_000)
         // The live counters disagree with the saved figures (a live leg the QC
         // drops, a stop the live floor missed): the review must not show them.
-        RunSession.distanceKm.value = 9.99
-        RunSession.elapsedSec.value = 4_321L
+        RunSession.overrideLiveFiguresForTest(distanceKm = 9.99, elapsedSec = 4_321L)
         rule.onNodeWithText(str(R.string.track_btn_stop)).performClick()
         rule.waitForNode(hasText(str(R.string.track_finish_title)))
         val core = "${spokenRunDistance(ctx.resources, 0.6, DistanceUnit.Km)} · ${spokenDuration(ctx.resources, 200)} moving"
@@ -132,7 +131,7 @@ class RunFixGuardsTest {
     @Test
     fun aRecoveredRunResumedFromTheBootPromptKeepsItsPause() {
         // The resume gate ages the sidecar against the wall clock, so run on it.
-        AppClock.offsetMillis = 0
+        TestClock.offsetMillis = 0
         QaHarness.seedLog(ctx, listOf(QaHarness.strengthProfile()))
         rule.launchApp()
         // 3 m/s, paused at fix 100 for 20 s (under the fix-gap rule) while the
@@ -141,15 +140,15 @@ class RunFixGuardsTest {
         val pts = (0 until 200).map { i ->
             if (i < 100) fix(3.0 * i, t0 + i) else fix(3.0 * i + 30.0, t0 + i + 19)
         }
-        ActiveRunStore.begin(ctx)
+        ActiveRunStore.begin()
         pts.forEachIndexed { i, p ->
             if (i == 100) {
                 RunSession.setPaused(true)
                 RunSession.setPaused(false)
             }
-            if (RunSession.add(p, (5_000L + (p.observedAt - t0) * 1000L) * 1_000_000L)) ActiveRunStore.append(p)
+            if (RunSession.add(p, (5_000L + (p.observedAt - t0) * 1000L) * 1_000_000L)) ActiveRunStore.append(p, RunSession.isSegmentStart(p))
         }
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         assertEquals(listOf(100), RunSession.decimatedSegmentStarts(Int.MAX_VALUE))
         val liveKm = RunSession.distanceKm.value
 

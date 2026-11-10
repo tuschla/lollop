@@ -90,7 +90,7 @@ internal object RunImport {
                 ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
                     if (c.moveToFirst() && !c.isNull(0)) c.getString(0) else null
                 }
-            }.getOrNull()
+            }.onFailure { PlatformLog.w("lollop", "import file name not readable from its provider", it) }.getOrNull()
             return fromProvider?.takeIf { it.isNotBlank() }
                 ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
                 ?: ctx.getString(R.string.import_unnamed_file)

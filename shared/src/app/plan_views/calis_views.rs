@@ -9,7 +9,7 @@ use crate::app::view_ctx::ViewCtx;
 use crate::app::view_types::{
     CalisItemView, CalisLadderView, CalisRungView, EvidenceTagView, PlanIntensity, PrescriptionView,
 };
-use crate::schema::{Prescription, Recommended};
+use crate::schema::Rx;
 
 /// The face cue for a row done with no bar or rings (CAL-EQUIP-001).
 const TABLE_ROW_CUE: &str = "use a sturdy table edge";
@@ -21,7 +21,7 @@ const TABLE_ROW_CUE: &str = "use a sturdy table edge";
 /// rungs surface no number (CAL-LOAD-INFERRED-001).
 pub(super) fn flatten_calisthenics_prescription(
     c: &crate::schema::CalisthenicsPrescription,
-    rx: &Recommended<Prescription>,
+    rx: &Rx,
     anchors: &crate::plan::Anchors,
     bodyweight_kg: Option<f64>,
     weight_lb: bool,

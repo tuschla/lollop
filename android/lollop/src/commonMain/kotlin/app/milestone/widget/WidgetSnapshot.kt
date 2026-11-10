@@ -73,10 +73,10 @@ internal data class WidgetNext(val epochDay: Long, val title: String)
 
 /**
  * Everything the home screen widget and the Quick Settings tile show, written by
- * the app on every published model ([WidgetSync]) so neither surface boots the
+ * the app on every published model ([WidgetSurfaces]) so neither surface boots the
  * Rust core. [epochDay] is the local day it describes: a reader whose today is a
  * different day treats it as missing ([WidgetSnapshotStore.today]), and [stale] is
- * set at midnight, on a clock or a time zone change ([TodayWidgetReceiver]) until
+ * set at midnight, on a clock or a time zone change (Android's `AndroidWidgets.dayChanged`) until
  * the app writes one for the new day (or, after a zone change within the day,
  * for the same day in the new zone).
  */

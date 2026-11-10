@@ -174,8 +174,7 @@ pub unsafe extern "C" fn lollop_bytes_free(bytes: LollopBytes) {
 
 /// Replace the core with an empty one (`Core::default()`), as a fresh process
 /// starts. The iOS app calls it before replaying an imported event log in
-/// process (Android restarts its process instead); the bridge tests call it so
-/// each starts clean.
+/// process (Android restarts its process instead).
 #[unsafe(no_mangle)]
 pub extern "C" fn lollop_reset() {
     ffi::reset_bridge();

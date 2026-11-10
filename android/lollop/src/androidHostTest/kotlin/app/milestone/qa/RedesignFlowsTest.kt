@@ -30,10 +30,13 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.AppClock
+import app.milestone.AppFileNames
 import app.milestone.Event
 import app.milestone.EventDispatcher
 import app.milestone.R
 import app.milestone.ReadinessSignal
+import app.milestone.TestClock
+import app.milestone.TestSink
 import app.milestone.setupPrefs
 import java.io.File
 import java.util.Locale
@@ -118,12 +121,12 @@ class RedesignFlowsTest {
 
     /** Relaunch the app over the SAME durable log with the clock moved to [epochDay]. */
     private fun relaunchOn(epochDay: Long) {
-        val log = File(ctx.filesDir, "event-log.ndjson").readText()
+        val log = File(ctx.filesDir, AppFileNames.EVENT_LOG).readText()
         val today = app.milestone.todayEpochDay()
         QaHarness.teardown()
         QaHarness.reset(ctx)
-        File(ctx.filesDir, "event-log.ndjson").writeText(log)
-        AppClock.offsetMillis += (epochDay - today) * 86_400_000L
+        File(ctx.filesDir, AppFileNames.EVENT_LOG).writeText(log)
+        TestClock.offsetMillis += (epochDay - today) * 86_400_000L
         rule.launchApp()
     }
 
@@ -314,11 +317,11 @@ class RedesignFlowsTest {
      *  never on the log alone, before it looks for the card's "Delete report". */
     @Test
     fun painReport_deleteFlow_waitsForTheModel_whenTheViewLagsTheLog() {
-        val real = EventDispatcher.sender
+        val real = TestSink.sender
         // Each pain report's view is held back this long after its log append.
         val lagMs = 2_000L
         try {
-            EventDispatcher.sender = { e ->
+            TestSink.sender = { e ->
                 real(e).also {
                     if (e is Event.SubmitReadiness) {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Thread.sleep(lagMs) }
@@ -327,7 +330,7 @@ class RedesignFlowsTest {
             }
             reportPainThenDeleteAndUndo()
         } finally {
-            EventDispatcher.sender = real
+            TestSink.sender = real
         }
     }
 

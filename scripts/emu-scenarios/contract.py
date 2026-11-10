@@ -25,20 +25,20 @@ ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 
 # shell name: (file, Kotlin const name)
 CONSTS = {
-    "EVENT_LOG_FILE": (f"{COMMON}/KeyValueStore.kt", "EVENT_LOG_NAME"),
-    "ACTIVE_RUN_FILE": (f"{COMMON}/ActiveRunStore.kt", "FILE"),
-    "SNAPSHOT_FILE": (f"{KT}/widget/WidgetSnapshotStore.kt", "FILE_NAME"),
+    "EVENT_LOG_FILE": (f"{COMMON}/AppFileNames.kt", "EVENT_LOG"),
+    "ACTIVE_RUN_FILE": (f"{COMMON}/AppFileNames.kt", "ACTIVE_RUN"),
+    "SNAPSHOT_FILE": (f"{COMMON}/AppFileNames.kt", "WIDGET_SNAPSHOT"),
     "ACTION_OPEN": (f"{KT}/OpenIntents.android.kt", "ACTION_OPEN"),
     "EXTRA_DEST": (f"{KT}/OpenIntents.android.kt", "EXTRA_DEST"),
     "ACTION_REMINDER": (f"{KT}/SessionReminder.android.kt", "ACTION_FIRE"),
     "ACTION_REST_END": (f"{KT}/RestAlarm.android.kt", "ACTION_REST_END"),
-    "RUN_NOTIF_ID": (f"{KT}/RunTrackingService.kt", "NOTIF_ID"),
-    "REST_NOTIF_ID": (f"{KT}/RestAlarm.android.kt", "COUNTDOWN_NOTIF_ID"),
-    "REST_DONE_NOTIF_ID": (f"{KT}/RestAlarm.android.kt", "DONE_NOTIF_ID"),
+    "RUN_NOTIF_ID": (f"{KT}/AndroidIds.kt", "RUN_NOTIFICATION"),
+    "REST_NOTIF_ID": (f"{KT}/AndroidIds.kt", "REST_COUNTDOWN_NOTIFICATION"),
+    "REST_DONE_NOTIF_ID": (f"{KT}/AndroidIds.kt", "REST_DONE_NOTIFICATION"),
     "REST_DONE_CHANNEL": (f"{KT}/RestAlarm.android.kt", "CHANNEL_DONE"),
-    "REMINDER_NOTIF_ID": (f"{KT}/SessionReminder.android.kt", "NOTIF_ID"),
+    "REMINDER_NOTIF_ID": (f"{KT}/AndroidIds.kt", "REMINDER_NOTIFICATION"),
     "REMINDER_CHANNEL": (f"{KT}/SessionReminder.android.kt", "CHANNEL"),
-    "REMINDER_PREFS": (f"{KT}/SessionReminder.android.kt", "PREFS"),
+    "REMINDER_PREFS": (f"{COMMON}/AppFileNames.kt", "REMINDER_STORE"),
     "REMINDED_DAYS_KEY": (f"{KT}/SessionReminder.android.kt", "KEY_REMINDED_DAYS"),
     "STEP_BAR_UNITS": (f"{KT}/RunTrackingService.kt", "STEP_BAR_UNITS"),
 }

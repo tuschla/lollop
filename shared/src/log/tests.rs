@@ -1,6 +1,7 @@
 use super::*;
-use crate::app::{Engine, Model, SessionReview};
+use crate::app::{Engine, Model};
 use crate::day::DAY_SEC;
+use crate::event::{ActivityKind, SessionReview};
 use crate::profile::Profile;
 use crate::profile::test_support::base_profile;
 use crate::running::GoalDistance;
@@ -361,6 +362,36 @@ fn unmatched_remove_readiness_is_dropped_alone() {
     assert_replay_equivalent(before_submit);
 }
 
+fn pain_of(kind: crate::schema::PainKind, observed_at: i64) -> Event {
+    Event::SubmitReadiness(ReadinessInput {
+        signal: ReadinessSignal::Pain,
+        value: 1.0,
+        observed_at,
+        streak: 0,
+        pain: Some(crate::schema::PainDetail {
+            kind,
+            severity: None,
+            trend: crate::schema::PainTrend::Stable,
+            persists: false,
+            location: None,
+        }),
+        effort_min: None,
+    })
+}
+
+#[test]
+fn an_undated_pain_undo_compacts_against_the_report_it_removes() {
+    // `update` undoes the worst active pain report (the one the verdict
+    // reads), not the newest: the sharp joint pain goes, the later DOMS stays.
+    // Compaction used to pair the undo with the newest report, so the
+    // compacted log replayed the sharp pain's training stop.
+    let sharp = pain_of(crate::schema::PainKind::SharpJoint, 100);
+    let doms = pain_of(crate::schema::PainKind::Doms, 200);
+    let events = vec![sharp, doms.clone(), remove(ReadinessSignal::Pain)];
+    assert_eq!(compact_event_log(events.clone()), vec![doms]);
+    assert_replay_equivalent(events);
+}
+
 #[test]
 fn replay_equivalence_preserves_run_spike_baseline() {
     // A run's card spike baseline is derived from the runs around it;
@@ -661,7 +692,7 @@ fn run_id(distance_km: f64, id: u64, observed_at: i64) -> Event {
 
 fn del_set(id: u64) -> Event {
     Event::DeleteEntry {
-        kind: crate::app::EntryKind::Set,
+        kind: EntryKind::Set,
         entry_id: id,
         observed_at_fallback: 0,
     }
@@ -669,7 +700,7 @@ fn del_set(id: u64) -> Event {
 
 fn del_run(id: u64) -> Event {
     Event::DeleteEntry {
-        kind: crate::app::EntryKind::Run,
+        kind: EntryKind::Run,
         entry_id: id,
         observed_at_fallback: 0,
     }
@@ -714,7 +745,7 @@ fn delete_skips_an_invalid_phantom_log_and_cancels_the_real_row() {
         entry_id: 0,
     };
     let delete = Event::DeleteEntry {
-        kind: crate::app::EntryKind::Set,
+        kind: EntryKind::Set,
         entry_id: 0,
         observed_at_fallback: 100,
     };
@@ -814,7 +845,7 @@ fn legacy_row_without_id_is_matched_on_observed_at() {
     let events = vec![
         set_id("Old", 0, 5 * DAY_SEC),
         Event::DeleteEntry {
-            kind: crate::app::EntryKind::Set,
+            kind: EntryKind::Set,
             entry_id: 0,
             observed_at_fallback: 5 * DAY_SEC,
         },
@@ -1144,7 +1175,7 @@ fn rule3_walk_assumes_legacy_rows_are_never_redated() {
         legacy_set(DAY_SEC, 100.0),
         legacy_amend(2 * DAY_SEC, DAY_SEC, 110.0), // re-date DAY_SEC → 2*DAY_SEC
         Event::DeleteEntry {
-            kind: crate::app::EntryKind::Set,
+            kind: EntryKind::Set,
             entry_id: 0,
             observed_at_fallback: 2 * DAY_SEC, // delete the re-dated (current) row
         },
@@ -1178,7 +1209,7 @@ fn delete_and_amend_interleaved_with_everything_replay_equivalent() {
 
 fn act(minutes: f64, id: u64, observed_at: i64) -> Event {
     Event::LogActivity {
-        kind: crate::app::ActivityKind::Sport,
+        kind: ActivityKind::Sport,
         minutes,
         vigorous: true,
         strengthening: false,
@@ -1189,7 +1220,7 @@ fn act(minutes: f64, id: u64, observed_at: i64) -> Event {
 
 fn del_act(id: u64, observed_at_fallback: i64) -> Event {
     Event::DeleteEntry {
-        kind: crate::app::EntryKind::Activity,
+        kind: EntryKind::Activity,
         entry_id: id,
         observed_at_fallback,
     }
@@ -1197,7 +1228,7 @@ fn del_act(id: u64, observed_at_fallback: i64) -> Event {
 
 #[test]
 fn activities_form_their_own_family() {
-    let family = |e: &Event| LineFacts::of(e).family();
+    let family = |e: &Event| LineFacts::of(e.clone()).family();
     assert_eq!(family(&act(30.0, 1, 0)), Some((Family::Activities, false)));
     assert_eq!(
         family(&Event::ClearActivities),

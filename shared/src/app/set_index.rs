@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::app::memo::LastMemo;
 use crate::app::model::LoggedSet;
+use crate::memo::{MemoId, memoized};
 
 /// What a set's exercise NAME says about it, resolved once per distinct name.
 #[derive(Clone, Copy, Debug)]
@@ -93,25 +93,9 @@ impl SetIndex {
     }
 }
 
-thread_local! {
-    /// The [`SetIndex`] of the last set log seen, keyed by its
-    /// [`sets_fingerprint`]: consecutive views share the set history, so only
-    /// a log/amend/delete re-classifies it.
-    static SET_INDEX_CACHE: std::cell::RefCell<LastMemo<u64, Rc<SetIndex>>> =
-        const { std::cell::RefCell::new(LastMemo::new()) };
-    /// Test-only: [`SetIndex`] builds by [`set_index`] (cache misses).
-    #[cfg(test)]
-    pub(super) static SET_INDEX_BUILDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
-/// The memoized [`SetIndex`] of `sets`, whose fingerprint is `sets_fp`.
+/// The [`SetIndex`] of `sets`, whose fingerprint is `sets_fp`, memoized
+/// ([`MemoId::SetIndex`]): consecutive views share the set history, so only a
+/// log/amend/delete re-classifies it.
 pub(super) fn set_index(sets: &[LoggedSet], sets_fp: u64) -> Rc<SetIndex> {
-    let hit = SET_INDEX_CACHE.with(|c| c.borrow().get_if(|k| *k == sets_fp).cloned());
-    hit.unwrap_or_else(|| {
-        #[cfg(test)]
-        SET_INDEX_BUILDS.with(|c| c.set(c.get() + 1));
-        let idx = Rc::new(SetIndex::new(sets));
-        SET_INDEX_CACHE.with(|c| c.borrow_mut().set(sets_fp, idx.clone()));
-        idx
-    })
+    memoized(MemoId::SetIndex, &sets_fp, || Rc::new(SetIndex::new(sets)))
 }

@@ -1,11 +1,14 @@
 package app.milestone
 
+import app.milestone.widget.IosWidgetPayload
+import app.milestone.widget.TileFace
 import app.milestone.widget.WidgetDayKind
 import app.milestone.widget.WidgetItem
 import app.milestone.widget.WidgetItemKind
 import app.milestone.widget.WidgetSnapshot
 import app.milestone.widget.WidgetWeekDay
 import app.milestone.widget.WidgetWeekMark
+import app.milestone.widget.iosWidgetPayload
 import app.milestone.widget.widgetFace
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -112,9 +115,9 @@ class IosSurfacesTest {
 
     @Test
     fun theRunActivityShowsTheNotificationsTextAndFigures() {
-        fun live(phase: RunActivityPhase, hasTrack: Boolean = true, pace: Double = 5.75) =
-            runLiveOf(RunActivityState(phase, movingSec = 1421, distanceKm = 4.12, paceMinPerKm = pace, miles = false, hasTrack = hasTrack), res)
-        val recording = live(RunActivityPhase.Recording)
+        fun live(phase: RunSurfacePhase, hasTrack: Boolean = true, pace: Double = 5.75) =
+            runLiveOf(RunSurfaceState(phase, movingSec = 1421, distanceKm = 4.12, paceMinPerKm = pace, miles = false, hasTrack = hasTrack), res)
+        val recording = live(RunSurfacePhase.Recording)
         assertEquals("recording", recording.phase)
         assertEquals("23:41", recording.time)
         assertEquals("23:41", recording.chip)
@@ -124,30 +127,30 @@ class IosSurfacesTest {
         assertTrue(recording.canPause)
         assertFalse(recording.paused)
         // No pace yet: the figures without one.
-        assertNull(live(RunActivityPhase.Recording, pace = Double.NaN).pace)
+        assertNull(live(RunSurfacePhase.Recording, pace = Double.NaN).pace)
         // Before the track has two fixes: Android's hint line instead of the figures.
-        val first = live(RunActivityPhase.Recording, hasTrack = false)
+        val first = live(RunSurfacePhase.Recording, hasTrack = false)
         assertNull(first.distance)
         assertNotNull(first.text)
         // Paused: the figures without the pace, the chip says it.
-        val paused = live(RunActivityPhase.Paused)
+        val paused = live(RunSurfacePhase.Paused)
         assertTrue(paused.paused)
         assertEquals("4.12 km", paused.distance)
         assertNull(paused.pace)
         assertTrue(paused.chip != paused.time)
         // Signal lost: the warning line, no figures.
-        val lost = live(RunActivityPhase.SignalLost)
+        val lost = live(RunSurfacePhase.SignalLost)
         assertNull(lost.distance)
         assertNotNull(lost.text)
         // Before recording: no Pause/Resume.
-        for (phase in listOf(RunActivityPhase.Locating, RunActivityPhase.Armed)) {
+        for (phase in listOf(RunSurfacePhase.Locating, RunSurfacePhase.Armed)) {
             val l = live(phase)
             assertFalse(l.canPause, phase.name)
             assertNotNull(l.text, phase.name)
             assertTrue(l.chip.length <= 7, "chip ${l.chip}")
         }
         // Miles.
-        val mi = runLiveOf(RunActivityState(RunActivityPhase.Recording, 600, 1.609344, 6.0, miles = true), res)
+        val mi = runLiveOf(RunSurfaceState(RunSurfacePhase.Recording, 600, 1.609344, 6.0, miles = true), res)
         assertEquals("1.00 mi", mi.distance)
     }
 

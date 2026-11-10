@@ -6,13 +6,13 @@ use crate::app::guidance::{push_guidance, push_guidance_mi};
 use crate::app::lift_audit::set_intensity_pct;
 use crate::app::logged_days::plan_week_index;
 use crate::app::model::Model;
-use crate::app::readiness::end_of_local_today_sec;
 use crate::app::run_metrics::RunFacts;
 use crate::app::view_ctx::ViewCtx;
 use crate::app::view_types::{GuidanceView, SessionPlanView};
 use crate::day::{DAY_SEC, is_undated, local_day};
 use crate::evidence::claims;
 use crate::profile::PlanProfile;
+use crate::sanitize::sum0;
 use crate::schema::{Recommended, SessionType, WorkoutType};
 use crate::{hybrid, individualization, running};
 
@@ -32,20 +32,21 @@ struct DatedRun {
     hard: running::HardRunKind,
 }
 
-/// Dated ([`is_undated`] false) runs at or before `cutoff`, with their realised
-/// distance, moving duration, start and avg-HR zone, chronological
+/// Runs [`Model::up_to_today`] admits (dated, not future-dated), with their
+/// realised distance, moving duration, start and avg-HR zone, chronological
 /// ([`RunFacts::chrono`]): the report's float sums are rounded for display, so
 /// summing in storage order would let an Undo or amend (the row moves to the
 /// tail) change a shown figure. QC-filtered for GPS tracks. A run counts in the
 /// local week it STARTED (`started_at`), like plan completion and the progress
 /// chart, so a Sunday 23:40 run ending after midnight is never this week in one
 /// view and last week in another.
-fn dated_runs(model: &Model, facts: &RunFacts, cutoff: Option<i64>) -> Vec<DatedRun> {
+fn dated_runs(model: &Model, facts: &RunFacts) -> Vec<DatedRun> {
+    let so_far = model.up_to_today();
     facts
         .chrono
         .iter()
         .map(|&i| (&model.runs[i], i))
-        .filter(|(r, _)| !is_undated(r.observed_at) && cutoff.is_none_or(|c| r.observed_at <= c))
+        .filter(|(r, _)| so_far.admits(r.observed_at))
         .map(|(r, i)| DatedRun {
             idx: i,
             observed_at: r.observed_at,
@@ -92,13 +93,6 @@ fn is_hard_logged_run(
         .is_some_and(|slow| r.km > 0.0 && r.minutes > 0.0 && r.minutes * 60.0 / r.km <= slow)
 }
 
-/// A float sum as the report prints it: an empty (or all -0.0) `f64` sum is
-/// -0.0, which would print "-0.0 km" / "-0%", so `+ 0.0` turns it into 0.0.
-/// Every summed figure the report shows goes through it.
-fn sum0(it: impl Iterator<Item = f64>) -> f64 {
-    it.sum::<f64>() + 0.0
-}
-
 /// Sum of the realised km of `runs` that started in local week `w`, in log order.
 fn week_km(runs: &[DatedRun], offset: i64, w: i64) -> f64 {
     sum0(
@@ -135,8 +129,7 @@ impl WeekRuns {
         let offset = model.today_utc_offset_sec;
         // Anchor "this week" on the most recent NON-future logged week, so a
         // mis-imported 2030 run can't hijack the weekly guidance until it's deleted.
-        let cutoff = end_of_local_today_sec(model);
-        let runs = dated_runs(model, &cx.runs, cutoff);
+        let runs = dated_runs(model, &cx.runs);
         let cur_week = runs
             .iter()
             .map(|r| local_week(r.started_at, offset))

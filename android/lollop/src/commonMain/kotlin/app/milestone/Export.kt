@@ -89,7 +89,7 @@ internal suspend fun readDataExport(ctx: PlatformContext): List<String>? = runCa
     var read = emptyList<String>()
     EventDispatcher.exclusive {
         read = withContext(Dispatchers.IO) {
-            val log = EventLog.read(ctx.eventLogPath()).lines
+            val log = EventLog.read(ctx.eventLogPath(), AppRuntime.engine).lines
             val planRemoved = ctx.setupStore().getBoolean(KEY_PLAN_CLEARED, false)
             if (planRemoved && lastPlanEvent(log) == null) log + CLEAR_PLAN_LINE else log
         }
@@ -201,7 +201,7 @@ internal fun summarizeImport(lines: List<String>, zone: TimeZone): ImportSummary
     var entries = 0
     var first: Long? = null
     var last: Long? = null
-    for (line in EventLog.compact(lines)) {
+    for (line in EventLog.compact(lines, AppRuntime.engine)) {
         val variant = EventLog.variantOf(line) ?: continue
         if (variant !in importEntryVariants) continue
         entries++
@@ -240,7 +240,7 @@ internal suspend fun replaceEventLog(ctx: PlatformContext, lines: List<String>):
     return try {
         EventDispatcher.exclusive {
             withContext(CoreDispatcher + NonCancellable) {
-                val engine = platformCoreEngine()
+                val engine = AppRuntime.engine
                 val previous = engine.detachLog()
                 try {
                     swapLogFile(ctx.eventLogPath(), lines)
@@ -269,33 +269,37 @@ internal expect fun Throwable.isFatalToVm(): Boolean
 
 /** Atomically replace the event log [log] with [lines] (tmp + fsync + rename), so a
  *  crash mid-write can never leave a half-written log. The lines are STREAMED to
- *  the temporary ([LogFiles.writeLinesSynced]): a 5-year backup (~49 MiB) joined
+ *  the temporary ([AppFiles.writeLinesSynced]): a 5-year backup (~49 MiB) joined
  *  into one string OOM-killed the app at a 192 MB heap. Throws when the log could
  *  not be replaced (an OutOfMemoryError included); the temporary is then deleted
  *  and the original is still in place (or set aside as `.bak`, which the next
  *  boot's [EventLog.load] restores). */
-internal fun swapLogFile(log: LogPath, lines: List<String>) {
-    val tmp = LogFiles.sibling(log, ".import")
+internal fun swapLogFile(log: AppPath, lines: List<String>) {
+    val tmp = AppFiles.sibling(log, AppFileNames.IMPORT_SUFFIX)
     try {
-        LogFiles.writeLinesSynced(tmp, lines)
-        if (LogFiles.rename(tmp, log)) return
-        // Some filesystems refuse an atomic rename over an existing file. Move the live
-        // log aside to a .bak before overwriting so a crash mid-swap can restore it,
-        // rather than deleting it outright (a delete then a failed rename would lose the
-        // log). The .bak is excluded from backup via res/xml/backup_rules.xml.
-        val bak = LogFiles.sibling(log, ".bak")
-        LogFiles.delete(bak)
-        val moved = LogFiles.rename(log, bak)
-        if (LogFiles.rename(tmp, log)) {
-            if (moved) LogFiles.delete(bak)
-            return
-        }
-        if (moved) LogFiles.rename(bak, log)
-        error("couldn't replace the event log")
+        AppFiles.writeLinesSynced(tmp, lines)
+        if (!AppFiles.rename(tmp, log) && !renameOverViaBackup(tmp, log)) error("couldn't replace the event log")
     } finally {
         // A no-op once renamed into place; otherwise no partial temporary survives.
-        LogFiles.delete(tmp)
+        AppFiles.delete(tmp)
     }
+}
+
+/** Rename [tmp] over [log] where the rename over it failed: some filesystems refuse
+ *  an atomic rename over an existing file. The live log is moved aside to a `.bak`
+ *  (excluded from backup via res/xml/backup_rules.xml), not deleted, so a crash
+ *  mid-swap can restore it; a delete then a failed rename would lose the log.
+ *  False, with the log back in place, when [tmp] still can't take its name. */
+private fun renameOverViaBackup(tmp: AppPath, log: AppPath): Boolean {
+    val bak = AppFiles.sibling(log, AppFileNames.BAK_SUFFIX)
+    AppFiles.delete(bak)
+    val moved = AppFiles.rename(log, bak)
+    if (AppFiles.rename(tmp, log)) {
+        if (moved) AppFiles.delete(bak)
+        return true
+    }
+    if (moved) AppFiles.rename(bak, log)
+    return false
 }
 
 /** Boot into the replaced log after [replaceEventLog] (with [KEY_RESTORED_ENTRIES]

@@ -1,6 +1,5 @@
 package app.milestone
 
-import androidx.compose.runtime.Composable
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -15,12 +14,23 @@ import kotlinx.datetime.LocalDateTime
 expect class PlatformLocale
 
 /**
- * The app's language with Latin digits. The app ships English only, so this is
- * the first English locale in the device's list ("15 Jul" for en-GB), else
- * English with the primary locale's region (en-DE on a German phone), with the
- * `latn` numbering system ("٣" never appears in a date).
+ * The app's language with Latin digits ([appLocaleOf]'s rule over the device's
+ * locales). File names and exported data keep their fixed ISO patterns.
  */
 internal expect fun appLocale(): PlatformLocale
+
+/**
+ * The app-locale rule, for both platforms: the app ships English only, so this is
+ * the first English locale in the device's [preferred] list ("15 Jul" for en-GB),
+ * else [english] (English with the device's region: en-DE on a German phone),
+ * then [withLatinDigits] (the `latn` numbering system: "٣" never appears in a date).
+ */
+internal inline fun <L, P> appLocaleOf(
+    preferred: List<L>,
+    language: (L) -> String?,
+    english: () -> L,
+    withLatinDigits: (L) -> P,
+): P = withLatinDigits(preferred.firstOrNull { language(it) == "en" } ?: english())
 
 /** The device's primary locale (distance and weight unit defaults read its region). */
 internal expect fun deviceLocale(): PlatformLocale
@@ -83,8 +93,7 @@ internal expect fun formatMediumDate(date: LocalDate, locale: PlatformLocale = a
 internal expect fun relativeDayLabel(dayDelta: Long, locale: PlatformLocale = appLocale()): String
 
 /** Whether the device shows the time of day on a 24-hour clock. */
-@Composable
-internal expect fun is24HourClock(): Boolean
+internal expect fun is24HourClock(ctx: PlatformContext): Boolean
 
 /**
  * Combine a DatePicker day (UTC-midnight millis: its Y/M/D are the *picked*

@@ -2,12 +2,11 @@ package app.milestone
 
 import app.milestone.core.rustCore
 
-/** The iOS app's entry point. [MainViewController] calls `start()` before the
- *  UI composes, so the engine is installed before anything touches the core. */
+/** The iOS app's entry point: the Swift host calls [start] once at launch, before
+ *  the UI and the surfaces. */
 object LollopApp {
-    /** Install the core engine over the Rust core's C ABI. A second call keeps
-     *  the engine already installed. */
-    fun start() = installCoreEngine(RustCoreBridge)
+    /** Start the app over the Rust core's C ABI ([startIosApp]). */
+    fun start() = startIosApp(RustCoreBridge)
 }
 
 /** [CoreBridge] over `android/core-bridge`'s C ABI binding ([rustCore], `NativeCore`):

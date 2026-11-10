@@ -329,16 +329,27 @@ internal data class AppliedCue(val kg: Double, val atSec: Long)
  *  by today's date and the exercise, so only today's loop reads them; read on the
  *  main thread only. */
 internal object AppliedCueLoads {
-    private val byItem = HashMap<String, AppliedCue>()
+    /** Today's cues by exercise ([nameKey]); [dayStartSec] is the day they are for. */
+    private class Today(var dayStartSec: Long, val byExercise: HashMap<String, AppliedCue> = HashMap())
 
-    private fun key(item: PrescriptionView): String =
-        "${localDayStartSec(AppClock.nowSec())}|${nameKey(item.exercise)}"
+    private val today by ProcessLocal { Today(Long.MIN_VALUE) }
 
-    fun record(item: PrescriptionView, kg: Double) {
-        byItem[key(item)] = AppliedCue(kg, AppClock.nowSec())
+    /** Today's cues, the earlier day's dropped once the day changed. */
+    private fun current(): HashMap<String, AppliedCue> {
+        val t = today
+        val day = localDayStartSec(AppClock.nowSec())
+        if (t.dayStartSec != day) {
+            t.dayStartSec = day
+            t.byExercise.clear()
+        }
+        return t.byExercise
     }
 
-    fun forItem(item: PrescriptionView): AppliedCue? = byItem[key(item)]
+    fun record(item: PrescriptionView, kg: Double) {
+        current()[nameKey(item.exercise)] = AppliedCue(kg, AppClock.nowSec())
+    }
+
+    fun forItem(item: PrescriptionView): AppliedCue? = current()[nameKey(item.exercise)]
 }
 
 /** Build a NEW-entry seed from a coach prescription. The weight prefers a cue

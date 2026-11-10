@@ -10,9 +10,11 @@ import android.os.Looper
 import android.service.quicksettings.TileService
 import androidx.test.core.app.ApplicationProvider
 import app.milestone.qa.QaHarness
+import app.milestone.widget.AndroidWidgets
+import app.milestone.widget.MidnightTick
+import app.milestone.widget.TileFace
 import app.milestone.widget.TodayWidgetReceiver
 import app.milestone.widget.WidgetDayKind
-import app.milestone.widget.WidgetMidnight
 import app.milestone.widget.WidgetSnapshotStore
 import java.io.File
 import java.lang.reflect.Proxy
@@ -43,8 +45,10 @@ class QuickTileRefreshTest {
 
     @Before
     fun setUp() {
+        // A new process: the features' collectors bind this test's Application.
+        AppRuntime.resetForTest(clock = TestClock)
         RunSession.reset()
-        File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
         val statusBar = checkNotNull(ctx.getSystemService(StatusBarManager::class.java))
         val iface = Class.forName("com.android.internal.statusbar.IStatusBarService")
         val fake = Proxy.newProxyInstance(iface.classLoader, arrayOf(iface)) { _, method, args ->
@@ -64,7 +68,7 @@ class QuickTileRefreshTest {
     @After
     fun tearDown() {
         RunSession.reset()
-        File(ctx.filesDir, WidgetSnapshotStore.FILE_NAME).delete()
+        File(ctx.filesDir, AppFileNames.WIDGET_SNAPSHOT).delete()
     }
 
     private fun taken(): List<ComponentName> = synchronized(requests) { requests.toList().also { requests.clear() } }
@@ -83,23 +87,23 @@ class QuickTileRefreshTest {
 
     @Test
     fun snapshotWriteAndStaleMarkRequestARedraw() {
-        WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Run))
+        AndroidWidgets.store(ctx, daySnapshot(WidgetDayKind.Run))
         assertEquals(listOf(tile), taken())
         // The same snapshot again writes nothing and asks nothing.
-        WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Run))
+        AndroidWidgets.store(ctx, daySnapshot(WidgetDayKind.Run))
         assertEquals(emptyList<ComponentName>(), taken())
-        WidgetSnapshotStore.markStale(ctx, force = true)
+        AndroidWidgets.dayChanged(ctx, force = true)
         assertEquals(listOf(tile), taken())
     }
 
     @Test
     fun runStartAndStopRequestARedraw() {
-        RecordingWatch.start(ctx)
+        AppRuntime.start(ctx)
         shadowOf(Looper.getMainLooper()).idle()
         taken()
-        RunSession.tracking.value = true
+        RunSession.recordingStarted()
         assertEquals(listOf(tile), awaitRequests())
-        RunSession.tracking.value = false
+        RunSession.markStopped()
         assertEquals(listOf(tile), awaitRequests())
     }
 
@@ -114,7 +118,9 @@ class QuickTileRefreshTest {
             Intent.ACTION_TIMEZONE_CHANGED,
             Intent.ACTION_LOCALE_CHANGED,
         )) {
-            ctx.sendBroadcast(Intent(action).setClass(ctx, TodayWidgetReceiver::class.java))
+            // Clock and zone changes reach the widget through the app's time-change receiver.
+            val receiver = if (action == Intent.ACTION_TIME_CHANGED || action == Intent.ACTION_TIMEZONE_CHANGED) TimeChangeReceiver::class.java else TodayWidgetReceiver::class.java
+            ctx.sendBroadcast(Intent(action).setClass(ctx, receiver))
             val got = awaitRequests()
             assertTrue("$action: $got", got.isNotEmpty() && got.all { it == tile })
         }
@@ -127,19 +133,19 @@ class QuickTileRefreshTest {
         WidgetSnapshotStore.write(ctx, daySnapshot(WidgetDayKind.Lift))
         val service = Robolectric.buildService(QuickTileService::class.java).create().get()
         service.onTileAdded()
-        assertTrue(QuickTileService.isAdded(ctx))
+        assertTrue(MidnightTick.tilePlaced(ctx))
         // A new tile is drawn at once, not left on the manifest label.
         assertEquals(ctx.getString(R.string.tile_log_set), service.qsTile.label.toString())
         assertNotNull(alarms.nextScheduledAlarm)
         service.onTileRemoved()
-        assertEquals(false, QuickTileService.isAdded(ctx))
+        assertEquals(false, MidnightTick.tilePlaced(ctx))
         assertNull(alarms.nextScheduledAlarm)
         // After cleared app data (the flag gone), the next draw restores it and the tick.
         service.onStartListening()
-        assertTrue(QuickTileService.isAdded(ctx))
+        assertTrue(MidnightTick.tilePlaced(ctx))
         assertNotNull(alarms.nextScheduledAlarm)
         // A reboot clears alarms but not the flag: the next draw re-arms the tick.
-        WidgetMidnight.cancel(ctx)
+        MidnightTick.cancel(ctx)
         assertNull(alarms.nextScheduledAlarm)
         service.onStartListening()
         assertNotNull(alarms.nextScheduledAlarm)

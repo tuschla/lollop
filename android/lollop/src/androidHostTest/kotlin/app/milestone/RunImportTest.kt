@@ -189,14 +189,14 @@ class RunImportTest {
 
     @Test
     fun theTooShortReasonReadsInTheDisplayUnit() {
-        AppSettings.distanceUnitOverride.value = DistanceUnitOverride.Mi
+        AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.Mi)
         try {
             assertEquals(
                 "too short for a run, under 0.3 mi or 3 minutes",
                 importFailureReason(ctx.resources, RunImportFailure("Activity.fit", ImportFailure.TooShort)),
             )
         } finally {
-            AppSettings.distanceUnitOverride.value = DistanceUnitOverride.System
+            AppSettings.setDistanceUnitOverride(ctx, DistanceUnitOverride.System)
         }
     }
 
